@@ -19,6 +19,7 @@ from silica.prompts import SYSTEM_PROMPT
 # Import tools to trigger registration via @tool decorator
 import silica.tools.atomic  # noqa: F401
 import silica.tools.composed  # noqa: F401
+import silica.tools.wrapped  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

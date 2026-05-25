@@ -77,7 +77,7 @@ class InjectorFSM:
         logger.info("Executing Injector phase: %s", self.state.name)
         
         if self.state == InjectorState.RECON:
-            res = silica_recon.fn(self.inbox_file)
+            res = silica_recon(self.inbox_file)
             if "error" in res:
                 raise RuntimeError(f"Recon failed: {res['error']}")
             self.context["recon"] = res
@@ -85,10 +85,10 @@ class InjectorFSM:
             
         elif self.state == InjectorState.PAYLOAD:
             with tempfile.NamedTemporaryFile('w', delete=False, suffix='.json') as f:
-                json.dump(self.context["recon"], f)
+                json.dump([self.context["recon"]], f)
                 recon_path = f.name
                 
-            res = silica_payload.fn(recon_path, max_concepts=7)
+            res = silica_payload(recon_path, max_concepts=7)
             if "error" in res:
                 raise RuntimeError(f"Payload failed: {res['error']}")
                 
@@ -104,9 +104,12 @@ class InjectorFSM:
             dummy_ops = {
                 "updates": [
                     {
-                        "operation": "create",
-                        "name": "Concept From Inbox",
-                        "content": "Simulated distilled content from inbox."
+                        "op": "write",
+                        "heading": "Concept From Inbox",
+                        "source_basename": os.path.basename(self.inbox_file),
+                        "path": f"{self.target_dir}/Concept From Inbox.md",
+                        "snippet": "Simulated distilled content from inbox.",
+                        "hub": self.hub or "Test Hub"
                     }
                 ]
             }
@@ -117,7 +120,7 @@ class InjectorFSM:
             self.state = InjectorState.SANITIZE
             
         elif self.state == InjectorState.SANITIZE:
-            res = silica_sanitize.fn(self.context["distiller_output_path"])
+            res = silica_sanitize(self.context["distiller_output_path"])
             if "error" in res:
                 raise RuntimeError(f"Sanitize failed: {res['error']}")
                 
@@ -130,8 +133,19 @@ class InjectorFSM:
                 json.dump(self.context["sanitized"]["parsed"], f)
                 ops_path = f.name
                 
+            payload_paths = []
+            if "chunks" in self.context["payload"]:
+                for idx, chunk in enumerate(self.context["payload"]["chunks"]):
+                    with tempfile.NamedTemporaryFile('w', delete=False, suffix=f'_{idx}.json') as f:
+                        json.dump(chunk, f)
+                        payload_paths.append(f.name)
+            elif "payload" in self.context["payload"]:
+                with tempfile.NamedTemporaryFile('w', delete=False, suffix='.json') as f:
+                    json.dump(self.context["payload"]["payload"], f)
+                    payload_paths.append(f.name)
+                    
             self.context["ops_path"] = ops_path
-            res = silica_validate_ops.fn(ops_path, target_dir=self.target_dir)
+            res = silica_validate_ops(ops_path, payload_paths=payload_paths, target_dir=self.target_dir)
             
             if "error" in res:
                 raise RuntimeError(f"Validate failed: {res['error']}")
@@ -145,7 +159,7 @@ class InjectorFSM:
                 self.state = InjectorState.SNAPSHOT
                 
         elif self.state == InjectorState.SNAPSHOT:
-            res = silica_snapshot.fn(self.context["ops_path"])
+            res = silica_snapshot(self.context["ops_path"])
             if "error" in res:
                 # If snapshot fails, we shouldn't write. Proceed to error without writing.
                 raise RuntimeError(res["error"])
@@ -154,7 +168,7 @@ class InjectorFSM:
             self.state = InjectorState.WRITE
             
         elif self.state == InjectorState.WRITE:
-            res = silica_bulk_write.fn(self.context["ops_path"])
+            res = silica_bulk_write(self.context["ops_path"])
             if "error" in res:
                 raise RuntimeError(f"Write failed: {res['error']}")
                 
@@ -171,7 +185,7 @@ class InjectorFSM:
                 
             touched = {op["name"] for op in ops if op.get("name")}
             for note in touched:
-                res = silica_lint.fn(note)
+                res = silica_lint(note)
                 if not res["success"]:
                     self.context["abort_reason"] = f"Lint failed for {note}: {res['errors']}"
                     self.state = InjectorState.ROLLBACK
@@ -184,7 +198,7 @@ class InjectorFSM:
             base_name = os.path.basename(self.inbox_file)
             target = f"{done_dir}/{base_name}"
             
-            res = silica_move.fn(self.inbox_file, target)
+            res = silica_move(self.inbox_file, target)
             if "error" in res:
                 # Cleanup failed, but pipeline succeeded.
                 self.context["cleanup_warning"] = res["error"]

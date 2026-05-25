@@ -110,6 +110,10 @@ class ObsidianFSBackend:
             
         name = ref if isinstance(ref, str) else ref.name
         
+        # Strip .md if passed in string
+        if name.endswith(".md"):
+            name = name[:-3]
+        
         # Look up in index
         if name in self._notes:
             return self.vault_path / self._notes[name].path
