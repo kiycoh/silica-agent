@@ -67,21 +67,45 @@ class ObsidianFSBackend:
         self._links.clear()
         self._backlinks.clear()
 
+        from silica.config import CONFIG
+        inbox_norm = os.path.normcase(CONFIG.inbox_dir.replace("\\", "/").strip("/")) if CONFIG.inbox_dir else None
+
         # Find all markdown files
-        for root, _, files in os.walk(self.vault_path):
+        for root, dirs, files in os.walk(self.vault_path):
+            # Relativize root
+            rel_path = Path(root).relative_to(self.vault_path).as_posix()
+
             # Skip hidden folders
-            if any(p.startswith(".") for p in Path(root).relative_to(self.vault_path).parts):
-                continue
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+
+            # Skip inbox directory if configured
+            if inbox_norm:
+                new_dirs = []
+                for d in dirs:
+                    sub_rel_path = (Path(rel_path) / d).as_posix().strip(".")
+                    sub_rel_norm = os.path.normcase(sub_rel_path.replace("\\", "/").strip("/"))
+                    if sub_rel_norm == inbox_norm or sub_rel_norm.startswith(inbox_norm + "/"):
+                        logger.debug("Skipping indexing for inbox directory: %s", sub_rel_path)
+                    else:
+                        new_dirs.append(d)
+                dirs[:] = new_dirs
                 
             for file in files:
                 if not file.endswith(".md"):
                     continue
                 
                 path = Path(root) / file
-                rel_path = path.relative_to(self.vault_path).as_posix()
+                rel_path_file = path.relative_to(self.vault_path).as_posix()
+
+                # Double safety check: skip if rel_path_file is in inbox
+                if inbox_norm:
+                    rel_path_norm = os.path.normcase(rel_path_file.replace("\\", "/").strip("/"))
+                    if rel_path_norm == inbox_norm or rel_path_norm.startswith(inbox_norm + "/"):
+                        continue
+                
                 name = file[:-3]
                 
-                ref = NoteRef(name=name, path=rel_path)
+                ref = NoteRef(name=name, path=rel_path_file)
                 self._notes[name] = ref
                 
                 try:
@@ -95,7 +119,7 @@ class ObsidianFSBackend:
                         self._backlinks[target].add(name)
                         
                 except Exception as e:
-                    logger.warning("Failed to index %s: %s", rel_path, e)
+                    logger.warning("Failed to index %s: %s", rel_path_file, e)
 
         self._needs_reindex = False
         self._last_index_time = time.time()
@@ -106,6 +130,9 @@ class ObsidianFSBackend:
         self._ensure_index()
         
         if isinstance(ref, NoteRef) and ref.path:
+            p = Path(ref.path)
+            if p.is_absolute():
+                return p
             return self.vault_path / ref.path
             
         name = ref if isinstance(ref, str) else ref.name
@@ -117,6 +144,14 @@ class ObsidianFSBackend:
         # Look up in index
         if name in self._notes:
             return self.vault_path / self._notes[name].path
+            
+        # Check if the name/ref is actually a path pointing directly to an existing file
+        p = Path(name + ".md")
+        if p.exists():
+            return p.resolve()
+        p = Path(name)
+        if p.exists():
+            return p.resolve()
             
         # Fallback for new files not yet in index
         return self.vault_path / f"{name}.md"
@@ -168,8 +203,14 @@ class ObsidianFSBackend:
         content = path.read_text(encoding="utf-8")
         name = ref if isinstance(ref, str) else ref.name
         
+        try:
+            rel_path = path.relative_to(self.vault_path).as_posix()
+        except ValueError:
+            # Fallback for external files outside the vault
+            rel_path = path.resolve().as_posix()
+            
         return NoteContent(
-            ref=NoteRef(name=name, path=path.relative_to(self.vault_path).as_posix()),
+            ref=NoteRef(name=name, path=rel_path),
             content=content,
             size=len(content)
         )

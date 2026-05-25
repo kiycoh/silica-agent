@@ -101,12 +101,28 @@ class ObsidianCLIBackend:
 
     def search_names(self, query: str) -> list[NoteRef]:
         """Search vault note names matching query."""
+        import os
+        from silica.config import CONFIG
+        inbox_norm = os.path.normcase(CONFIG.inbox_dir.replace("\\", "/").strip("/")) if CONFIG.inbox_dir else None
+
         query = query.lower()
         files = self.list_files()
-        return [f for f in files if query in f.name.lower()]
+        results = []
+        for f in files:
+            if inbox_norm and f.path:
+                f_path_norm = os.path.normcase(f.path.replace("\\", "/").strip("/"))
+                if f_path_norm == inbox_norm or f_path_norm.startswith(inbox_norm + "/"):
+                    continue
+            if query in f.name.lower():
+                results.append(f)
+        return results
 
     def search_context(self, query: str) -> list[Hit]:
         """Search vault content with line-level context snippets."""
+        import os
+        from silica.config import CONFIG
+        inbox_norm = os.path.normcase(CONFIG.inbox_dir.replace("\\", "/").strip("/")) if CONFIG.inbox_dir else None
+
         data = self._run_json("search:context", f"query={query}")
         results = []
         if isinstance(data, list):
@@ -114,6 +130,12 @@ class ObsidianCLIBackend:
                 if isinstance(item, dict):
                     name = item.get("name", item.get("file", "")) or ""
                     path = item.get("path", item.get("file", "")) or ""
+
+                    if inbox_norm and path:
+                        path_norm = os.path.normcase(str(path).replace("\\", "/").strip("/"))
+                        if path_norm == inbox_norm or path_norm.startswith(inbox_norm + "/"):
+                            continue
+
                     ref = NoteRef(name=str(name), path=str(path))
                     # Handle matches within the item
                     matches = item.get("matches", [item])
@@ -376,6 +398,10 @@ class ObsidianCLIBackend:
 
     def list_files(self, folder: str = "") -> list[NoteRef]:
         """List all markdown files, optionally filtered by folder."""
+        import os
+        from silica.config import CONFIG
+        inbox_norm = os.path.normcase(CONFIG.inbox_dir.replace("\\", "/").strip("/")) if CONFIG.inbox_dir else None
+
         args = ["files", "ext=md"]
         if folder:
             args.append(f"path={folder}")
@@ -384,6 +410,10 @@ class ObsidianCLIBackend:
         for line in raw.splitlines():
             line = line.strip()
             if line:
+                if inbox_norm:
+                    line_norm = os.path.normcase(line.replace("\\", "/").strip("/"))
+                    if line_norm == inbox_norm or line_norm.startswith(inbox_norm + "/"):
+                        continue
                 name = line.rsplit("/", 1)[-1].removesuffix(".md")
                 results.append(NoteRef(name=name, path=line))
         return results

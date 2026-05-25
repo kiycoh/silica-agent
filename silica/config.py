@@ -52,15 +52,38 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_BACKEND", "cli")
     )
 
+    # Inbox folder inside the vault — used to archive and blacklist staging files.
+    inbox_dir: str = field(
+        default_factory=lambda: os.getenv("SILICA_INBOX_DIR", "Inbox")
+    )
+
     # Maximum context tokens before the agent warns.
     max_context_tokens: int = field(
         default_factory=lambda: int(os.getenv("SILICA_MAX_CONTEXT", "60000"))
     )
 
-    # Verbose / debug mode active
-    verbose: bool = field(
+    # Tool progress display level (REPL-runtime, ciclabile con /verbose)
+    # off     — silenzio totale, solo risposta finale
+    # new     — mostra il nome del tool solo quando cambia
+    # all     — ogni tool call con preview degli args (default)
+    # verbose — args completi, risultato troncato, durata
+    from typing import Literal
+    tool_progress: Literal["off", "new", "all", "verbose"] = field(
+        default_factory=lambda: os.getenv("SILICA_TOOL_PROGRESS", "all")  # type: ignore
+    )
+
+    # Debug logging su stderr (--verbose / -v flag CLI, non ciclabile)
+    debug_logging: bool = field(
         default_factory=lambda: os.getenv("SILICA_VERBOSE", "False").lower() in ("true", "1", "t")
     )
+
+    @property
+    def verbose(self) -> bool:
+        return self.debug_logging
+
+    @verbose.setter
+    def verbose(self, v: bool) -> None:
+        self.debug_logging = v
 
 
 CONFIG = SilicaConfig()

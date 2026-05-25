@@ -14,12 +14,16 @@ This is the 'while True' from SILICA.md §8.1:
 Everything else (streaming, TUI, context compression) is ergonomics
 around this nucleus. Build this first, then ergonomics.
 """
-from __future__ import annotations
-
+from typing import Callable
+import time
 import logging
 
-import time
-
+from silica.agent.events import (
+    ToolProgressEvent,
+    ToolStartEvent,
+    ToolCompleteEvent,
+    ToolErrorEvent,
+)
 from silica.agent.llm import call_llm
 from silica.config import CONFIG
 from silica.tools import TOOLS
@@ -27,7 +31,14 @@ from silica.tools import TOOLS
 logger = logging.getLogger(__name__)
 
 
-def run_agent(messages: list[dict], model: str) -> str:
+ToolProgressCallback = Callable[[ToolProgressEvent], None] | None
+
+
+def run_agent(
+    messages: list[dict],
+    model: str,
+    tool_progress_callback: ToolProgressCallback = None,
+) -> str:
     """Execute the agentic loop until the model produces a text response.
 
     The loop calls the LLM, dispatches any tool calls, appends results,
@@ -36,6 +47,7 @@ def run_agent(messages: list[dict], model: str) -> str:
     Args:
         messages: mutable conversation history (modified in-place)
         model: litellm model string
+        tool_progress_callback: callback for tool progress events
 
     Returns:
         The model's final text response
@@ -45,6 +57,15 @@ def run_agent(messages: list[dict], model: str) -> str:
 
     iteration = 0
     max_iterations = 50  # Hard safety cap
+
+    def _emit(event: ToolProgressEvent) -> None:
+        """Best-effort event emission — swallows all consumer exceptions."""
+        if tool_progress_callback is None:
+            return
+        try:
+            tool_progress_callback(event)
+        except Exception as exc:
+            logger.debug("tool_progress_callback error (swallowed): %s", exc)
 
     while iteration < max_iterations:
         iteration += 1
@@ -61,26 +82,50 @@ def run_agent(messages: list[dict], model: str) -> str:
         for tc in resp.tool_calls:
             logger.info("Tool call: %s(%s)", tc.name, tc.args)
 
-            start_time = time.perf_counter()
             if tc.name not in TOOLS:
                 result = f'{{"error": "Unknown tool: {tc.name}"}}'
-            else:
-                if CONFIG.verbose:
-                    logger.info("[DEBUG Tool Input]: Running tool '%s' with args: %s", tc.name, tc.args)
-                result = TOOLS[tc.name].run(**tc.args)
-
-            duration = time.perf_counter() - start_time
-            if CONFIG.verbose:
-                res_str = str(result)
-                truncated_result = res_str
-                if len(res_str) > 1000:
-                    truncated_result = res_str[:1000] + "... (truncated to 1000 chars)"
-                logger.info(
-                    "[DEBUG Tool Output]: Tool '%s' executed in %.4fs | Result: %s",
-                    tc.name,
-                    duration,
-                    truncated_result,
+                _emit(
+                    ToolErrorEvent(
+                        name=tc.name,
+                        call_id=tc.id,
+                        error=f"Unknown tool: {tc.name}",
+                        iteration=iteration,
+                    )
                 )
+            else:
+                _emit(
+                    ToolStartEvent(
+                        name=tc.name,
+                        args=tc.args,
+                        call_id=tc.id,
+                        iteration=iteration,
+                    )
+                )
+                start_time = time.perf_counter()
+                try:
+                    result = TOOLS[tc.name].run(**tc.args)
+                    duration = time.perf_counter() - start_time
+                    _emit(
+                        ToolCompleteEvent(
+                            name=tc.name,
+                            args=tc.args,
+                            call_id=tc.id,
+                            result=result,
+                            duration_s=duration,
+                            iteration=iteration,
+                        )
+                    )
+                except Exception as e:
+                    duration = time.perf_counter() - start_time
+                    _emit(
+                        ToolErrorEvent(
+                            name=tc.name,
+                            call_id=tc.id,
+                            error=str(e),
+                            iteration=iteration,
+                        )
+                    )
+                    raise
 
             messages.append(
                 {

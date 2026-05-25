@@ -30,20 +30,19 @@ BANNER = """\
 ╰─────────────────────────────────────────╯\033[0m"""
 
 
-def _setup_logging(verbose: bool = False) -> None:
+def _setup_logging(debug: bool = False) -> None:
     """Configure logging for the CLI session."""
-    CONFIG.verbose = verbose
-    level = logging.DEBUG if verbose else logging.WARNING
+    CONFIG.debug_logging = debug
+    level = logging.DEBUG if debug else logging.WARNING
     logging.basicConfig(
         level=level,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         datefmt="%H:%M:%S",
     )
-    # Quiet down noisy libraries unless verbose is requested
-    lib_level = logging.DEBUG if verbose else logging.WARNING
-    logging.getLogger("httpx").setLevel(lib_level)
-    logging.getLogger("litellm").setLevel(lib_level)
-    logging.getLogger("openai").setLevel(lib_level)
+    # Quiet down noisy libraries unless debug logging is requested
+    logging.getLogger("httpx").setLevel(level)
+    logging.getLogger("litellm").setLevel(level)
+    logging.getLogger("openai").setLevel(level)
 
 
 def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
@@ -78,14 +77,16 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
         print("  /model   — mostra il modello LLM attuale")
         print("  /tools   — elenca i tool registrati")
         print("  /clear   — resetta la conversazione")
-        print("  /verbose — attiva logging dettagliato")
+        print(f"  /verbose — cicla tool progress: off → new → all → verbose  (attuale: {CONFIG.tool_progress})")
         print("  /help    — mostra questo messaggio")
         return True
 
     if cmd == "/verbose":
-        CONFIG.verbose = True
-        _setup_logging(verbose=True)
-        print("  Logging verbose attivato.")
+        modes = ("off", "new", "all", "verbose")
+        current = CONFIG.tool_progress
+        next_mode = modes[(modes.index(current) + 1) % len(modes)]
+        CONFIG.tool_progress = next_mode
+        print(f"  Tool progress: \033[1m{next_mode}\033[0m")
         return True
 
     print(f"  Comando sconosciuto: {cmd}. Usa /help per la lista.")
@@ -94,8 +95,8 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
 
 def main():
     """Entry point for the `silica` CLI command."""
-    verbose = "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.verbose
-    _setup_logging(verbose=verbose)
+    debug_mode = "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging
+    _setup_logging(debug=debug_mode)
 
     print(BANNER)
     print(f"  Modello: \033[1m{CONFIG.model}\033[0m")
@@ -105,6 +106,9 @@ def main():
 
     session = PromptSession(history=InMemoryHistory())
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    from silica.agent.progress import make_progress_callback
+    callback = make_progress_callback()
 
     while True:
         try:
@@ -129,7 +133,7 @@ def main():
         messages.append({"role": "user", "content": user_input})
 
         try:
-            answer = run_agent(messages, model=CONFIG.model)
+            answer = run_agent(messages, model=CONFIG.model, tool_progress_callback=callback)
             if answer:
                 print(f"\n{answer}\n")
             messages.append({"role": "assistant", "content": answer or ""})

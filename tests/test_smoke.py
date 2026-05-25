@@ -43,18 +43,18 @@ def test_driver_base_types():
 
 
 def test_verbose_config_and_logging():
-    """Setting CONFIG.verbose to True enables debug logging levels and updates setup."""
+    """Setting CONFIG.debug_logging to True enables debug logging levels and updates setup."""
     import logging
     from silica.config import CONFIG
     from silica.cli import _setup_logging
     
     # Save original state
-    orig_verbose = CONFIG.verbose
+    orig_debug = CONFIG.debug_logging
     
     try:
-        # Enable verbose
-        _setup_logging(verbose=True)
-        assert CONFIG.verbose is True
+        # Enable debug logging
+        _setup_logging(debug=True)
+        assert CONFIG.debug_logging is True
         
         # Verify logger level gets set appropriately
         assert logging.getLogger("httpx").level == logging.DEBUG
@@ -62,16 +62,17 @@ def test_verbose_config_and_logging():
         assert logging.getLogger("openai").level == logging.DEBUG
         
         # Reset logging
-        _setup_logging(verbose=False)
-        assert CONFIG.verbose is False
+        _setup_logging(debug=False)
+        assert CONFIG.debug_logging is False
         assert logging.getLogger("httpx").level == logging.WARNING
         assert logging.getLogger("litellm").level == logging.WARNING
         assert logging.getLogger("openai").level == logging.WARNING
         
     finally:
         # Restore original state
-        CONFIG.verbose = orig_verbose
-        _setup_logging(verbose=orig_verbose)
+        CONFIG.debug_logging = orig_debug
+        _setup_logging(debug=orig_debug)
+
 
 
 def test_verbose_fsm_logging(caplog):
@@ -106,4 +107,69 @@ def test_verbose_fsm_logging(caplog):
     finally:
         CONFIG.verbose = orig_verbose
         logger.setLevel(orig_level)
+
+
+def test_inbox_blacklisting_and_external_reads(tmp_path):
+    """Verify that files inside inbox_dir are blacklisted from indexing and search, and that external files can be read."""
+    import os
+    from silica.config import CONFIG
+    from silica.driver.fs_backend import ObsidianFSBackend
+    
+    # Set up directories
+    vault_dir = tmp_path / "vault"
+    vault_dir.mkdir()
+    
+    inbox_dir = vault_dir / "Inbox"
+    inbox_dir.mkdir()
+    
+    notes_dir = vault_dir / "notes"
+    notes_dir.mkdir()
+    
+    # Write notes
+    (notes_dir / "note1.md").write_text("Hello from Note 1", encoding="utf-8")
+    (inbox_dir / "meeting_notes.md").write_text("Hello from Inbox Note", encoding="utf-8")
+    
+    # Save original config
+    orig_inbox = CONFIG.inbox_dir
+    orig_backend = CONFIG.backend
+    orig_vault = CONFIG.vault_path
+    
+    CONFIG.inbox_dir = "Inbox"
+    CONFIG.backend = "fs"
+    CONFIG.vault_path = str(vault_dir)
+    
+    try:
+        backend = ObsidianFSBackend(vault_path=str(vault_dir))
+        backend._ensure_index()
+        
+        # 1. Check that notes in Inbox are not indexed
+        assert "note1" in backend._notes
+        assert "meeting_notes" not in backend._notes
+        
+        # 2. Check list_files
+        listed = [ref.name for ref in backend.list_files()]
+        assert "note1" in listed
+        assert "meeting_notes" not in listed
+        
+        # 3. Check search_names
+        searched_names = [ref.name for ref in backend.search_names("notes")]
+        assert "meeting_notes" not in searched_names
+        
+        # 4. Check search_context
+        hits = backend.search_context("Inbox")
+        assert len(hits) == 0
+        
+        # 5. Check reading an external file outside the vault
+        external_file = tmp_path / "external_inbox.md"
+        external_file.write_text("External file content", encoding="utf-8")
+        
+        nc = backend.read_note(str(external_file))
+        assert nc.content == "External file content"
+        assert nc.ref.path == str(external_file.resolve())
+        
+    finally:
+        CONFIG.inbox_dir = orig_inbox
+        CONFIG.backend = orig_backend
+        CONFIG.vault_path = orig_vault
+
 

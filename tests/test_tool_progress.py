@@ -1,0 +1,159 @@
+from unittest.mock import patch, MagicMock
+import pytest
+from silica.config import CONFIG
+from silica.cli import _handle_slash_command
+from silica.agent.progress import make_progress_callback, _redact, _cap
+from silica.agent.events import ToolStartEvent, ToolCompleteEvent, ToolErrorEvent
+from silica.agent.loop import run_agent
+from silica.agent.llm import LLMResponse, ToolCall
+from silica.tools import TOOLS
+
+def test_verbose_slash_command_cycle():
+    orig_mode = CONFIG.tool_progress
+    try:
+        CONFIG.tool_progress = "off"
+        messages = []
+        
+        # off -> new
+        _handle_slash_command("/verbose", messages)
+        assert CONFIG.tool_progress == "new"
+        
+        # new -> all
+        _handle_slash_command("/verbose", messages)
+        assert CONFIG.tool_progress == "all"
+        
+        # all -> verbose
+        _handle_slash_command("/verbose", messages)
+        assert CONFIG.tool_progress == "verbose"
+        
+        # verbose -> off
+        _handle_slash_command("/verbose", messages)
+        assert CONFIG.tool_progress == "off"
+    finally:
+        CONFIG.tool_progress = orig_mode
+
+
+def test_callback_noop_when_off(capsys):
+    orig_mode = CONFIG.tool_progress
+    CONFIG.tool_progress = "off"
+    
+    try:
+        cb = make_progress_callback()
+        event = ToolStartEvent(name="test_tool", args={}, call_id="1", iteration=1)
+        cb(event)
+        
+        captured = capsys.readouterr()
+        assert captured.out == ""
+    finally:
+        CONFIG.tool_progress = orig_mode
+
+
+def test_redact_patterns():
+    # Test credentials redaction
+    assert "api_key=[REDACTED]" in _redact('api_key = "abc-123"')
+    assert "token=[REDACTED]" in _redact('token:123')
+    assert "secret=[REDACTED]" in _redact('"secret" : "password"')
+    
+    # Fail-closed test
+    assert _redact(None) is None
+
+
+def test_cap_behavior():
+    # Text with many lines
+    long_lines = "\n".join(f"line {i}" for i in range(20))
+    capped_lines = _cap(long_lines, max_lines=5)
+    assert "omesse" in capped_lines
+    assert capped_lines.count("\n") <= 6
+    
+    # Text with many characters
+    long_chars = "a" * 1000
+    capped_chars = _cap(long_chars, max_chars=100)
+    assert "omessi" in capped_chars
+    assert len(capped_chars) <= 150
+
+
+@patch("silica.agent.loop.call_llm")
+def test_agent_loop_swallows_callback_exceptions(mock_call_llm):
+    response1 = LLMResponse(
+        text=None,
+        tool_calls=[ToolCall(id="tc1", name="silica_read_note", args={"name": "test_note"})],
+        assistant_message={"role": "assistant", "tool_calls": []},
+        usage={}
+    )
+    response2 = LLMResponse(
+        text="Final answer",
+        tool_calls=[],
+        assistant_message={"role": "assistant", "content": "Final answer"},
+        usage={}
+    )
+    mock_call_llm.side_effect = [response1, response2]
+    
+    with patch.dict(TOOLS, {"silica_read_note": MagicMock()}):
+        TOOLS["silica_read_note"].run.return_value = "note content"
+        
+        def bad_callback(event):
+            raise ValueError("bad callback")
+            
+        messages = [{"role": "user", "content": "hello"}]
+        
+        ans = run_agent(messages, model="test_model", tool_progress_callback=bad_callback)
+        assert ans == "Final answer"
+
+
+def test_tool_error_event_always_emitted(capsys):
+    orig_mode = CONFIG.tool_progress
+    CONFIG.tool_progress = "off"
+    
+    try:
+        cb = make_progress_callback()
+        event = ToolErrorEvent(name="error_tool", call_id="1", error="Some error", iteration=1)
+        cb(event)
+        
+        captured = capsys.readouterr()
+        assert "error_tool" in captured.out
+        assert "Some error" in captured.out
+    finally:
+        CONFIG.tool_progress = orig_mode
+
+
+def test_callback_modes_output(capsys):
+    orig_mode = CONFIG.tool_progress
+    cb = make_progress_callback()
+    
+    try:
+        # Test "new" mode
+        CONFIG.tool_progress = "new"
+        cb(ToolStartEvent(name="toolA", args={"x": 1}, call_id="1", iteration=1))
+        captured = capsys.readouterr()
+        assert "toolA" in captured.out
+        
+        # Same tool consecutive call should be skipped in "new" mode
+        cb(ToolStartEvent(name="toolA", args={"x": 2}, call_id="2", iteration=2))
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        
+        # Different tool should print
+        cb(ToolStartEvent(name="toolB", args={"x": 1}, call_id="3", iteration=3))
+        captured = capsys.readouterr()
+        assert "toolB" in captured.out
+        
+        # Test "all" mode
+        CONFIG.tool_progress = "all"
+        cb(ToolStartEvent(name="toolA", args={"x": 1}, call_id="4", iteration=4))
+        captured = capsys.readouterr()
+        assert "toolA" in captured.out
+        assert "x" in captured.out
+        
+        # Test "verbose" mode
+        CONFIG.tool_progress = "verbose"
+        cb(ToolStartEvent(name="toolA", args={"x": 1}, call_id="5", iteration=5))
+        captured = capsys.readouterr()
+        assert "args:" in captured.out
+        
+        cb(ToolCompleteEvent(name="toolA", args={"x": 1}, call_id="5", result="some result", duration_s=1.23, iteration=5))
+        captured = capsys.readouterr()
+        assert "result:" in captured.out
+        assert "some result" in captured.out
+        
+    finally:
+        CONFIG.tool_progress = orig_mode
