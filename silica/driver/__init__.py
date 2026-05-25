@@ -1,8 +1,9 @@
 """Obsidian Driver package — exposes the global DRIVER instance.
 
-The backend is selected at import time based on SILICA_BACKEND env var:
+The backend is selected at import time based on CONFIG.backend (from config.py),
+which reads the SILICA_BACKEND environment variable:
   - "cli" (default): ObsidianCLIBackend — wraps the official Obsidian CLI
-  - "fs": (future) filesystem backend for headless/oracle mode
+  - "fs": ObsidianFSBackend — direct filesystem access for headless/oracle mode
 
 Usage:
     from silica.driver import DRIVER
@@ -11,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import threading
 
 from silica.driver.base import (  # noqa: F401 — re-export domain types
     GraphSnapshot,
@@ -42,15 +44,19 @@ def _create_driver() -> ObsidianDriver:
         raise ValueError(f"Unknown backend: {CONFIG.backend!r}")
 
 
-# Lazy initialization — created on first access
+# Lazy initialization — created on first access, protected by lock for thread safety
 _driver: ObsidianDriver | None = None
+_driver_lock = threading.Lock()
 
 
 def get_driver() -> ObsidianDriver:
-    """Get the global driver instance (lazy-initialized)."""
+    """Get the global driver instance (lazy-initialized, thread-safe)."""
     global _driver
     if _driver is None:
-        _driver = _create_driver()
+        with _driver_lock:
+            # Double-checked locking: recheck after acquiring lock
+            if _driver is None:
+                _driver = _create_driver()
     return _driver
 
 

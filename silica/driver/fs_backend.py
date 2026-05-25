@@ -271,10 +271,27 @@ class ObsidianFSBackend:
         """Create a new note at the given vault-relative path."""
         full_path = self.vault_path / path
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         full_path.write_text(content, encoding="utf-8")
         self._needs_reindex = True
-        
+
+        name = path.rsplit("/", 1)[-1].removesuffix(".md")
+        return NoteRef(name=name, path=path)
+
+    def overwrite(self, path: str, content: str) -> NoteRef:
+        """Overwrite an existing note in-place.
+
+        The FS backend does this as a direct write — history is not tracked
+        in FS mode, so overwrite and patch rollback via versions is a no-op
+        (see restore()). For write-op rollback, created_paths is used instead.
+        """
+        full_path = self.vault_path / path
+        if not full_path.exists():
+            raise RuntimeError(f"Cannot overwrite non-existent file: {path}")
+
+        full_path.write_text(content, encoding="utf-8")
+        self._needs_reindex = True
+
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
         return NoteRef(name=name, path=path)
 
@@ -356,11 +373,33 @@ class ObsidianFSBackend:
     # ------------------------------------------------------------------
 
     def snapshot_versions(self, refs: list[NoteRef]) -> Txn:
-        """Snapshot current versions for later rollback."""
-        logger.warning("snapshot_versions is a no-op in FS backend")
+        """Snapshot current versions for later rollback.
+
+        The FS backend does not track version history, so `versions` is always
+        empty. Rollback of patch ops is a no-op in FS mode. Rollback of write
+        ops works via `created_paths` (delete the created notes).
+        """
         txn_id = f"txn_fs_{int(time.time())}"
         return Txn(id=txn_id, refs=refs, versions={})
 
     def restore(self, txn: Txn) -> None:
-        """Rollback to a previous snapshot."""
-        logger.warning("restore is a no-op in FS backend")
+        """Rollback a transaction.
+
+        - versions: no-op in FS backend (no history tracking).
+        - created_paths: deletes newly-created notes to undo write ops.
+        """
+        if txn.versions:
+            logger.warning(
+                "FS backend cannot restore note history (versions). "
+                "Patch rollback is a no-op. Consider using the CLI backend for full rollback support."
+            )
+
+        for path in txn.created_paths:
+            try:
+                full_path = self.vault_path / path
+                if full_path.exists():
+                    full_path.unlink()
+                    logger.info("Rolled back created note: %s", path)
+                    self._needs_reindex = True
+            except Exception as e:
+                logger.error("Failed to delete created note %s during rollback: %s", path, e)

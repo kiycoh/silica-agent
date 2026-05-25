@@ -148,13 +148,18 @@ class ValidateOpsArgs(BaseModel):
 
 @tool(ValidateOpsArgs, cls="composed")
 def silica_validate_ops(ops_json_path: str, payload_paths: list[str] = None, target_dir: str = "") -> dict[str, Any]:
-    """Gate pre-scrittura: controlla validità strutturale e applica threshold rigetti (10%)."""
+    """Gate pre-scrittura: controlla validità strutturale e applica threshold rigetti (10%).
+
+    C4: After validation, OVERWRITES ops_json_path with the coerced + deduped
+    validated ops. Snapshot and bulk_write MUST read from the same ops_json_path
+    after this call — never from a pre-validation snapshot.
+    """
     import json
     from silica.kernel.validate import validate_operations
-    
+
     if payload_paths is None:
         payload_paths = []
-        
+
     try:
         with open(ops_json_path, 'r', encoding='utf-8') as f:
             ops_data = json.load(f)
@@ -163,7 +168,7 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] = None, tar
                 ops = [ops]
     except Exception as e:
         return {"error": f"Failed to load operations: {e}"}
-        
+
     payloads = []
     for path in payload_paths:
         try:
@@ -171,21 +176,34 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] = None, tar
                 payloads.append(json.load(f))
         except Exception as e:
             return {"error": f"Failed to load payload {path}: {e}"}
-            
+
     validated_ops, rejected_ops = validate_operations(ops, payloads, target_dir)
-    
+
     total = len(ops)
     rejected_count = len(rejected_ops)
-    rejection_rate = rejected_count / total if total > 0 else 0.0
-    
+    # C4 denominator: skip ops excluded from rejection rate
+    actionable = sum(1 for o in ops if o.get("op") != "skip")
+    rejection_rate = rejected_count / actionable if actionable > 0 else 0.0
+
+    success = rejection_rate <= 0.1
+
+    # C4: Overwrite ops_json_path with validated (coerced + deduped) ops.
+    # SNAPSHOT and WRITE read this same file — single source of truth.
+    if success:
+        try:
+            with open(ops_json_path, 'w', encoding='utf-8') as f:
+                json.dump(validated_ops, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            return {"error": f"Failed to persist validated ops: {e}"}
+
     return {
-        "success": rejection_rate <= 0.1,  # threshold rigetti 10%
+        "success": success,
         "total": total,
         "validated_count": len(validated_ops),
         "rejected_count": rejected_count,
         "rejection_rate": rejection_rate,
         "validated_ops": validated_ops,
-        "rejected_ops": rejected_ops
+        "rejected_ops": rejected_ops,
     }
 
 
@@ -216,19 +234,21 @@ def silica_bulk_write(ops_json_path: str) -> dict[str, Any]:
 
 class LintArgs(BaseModel):
     note_name: str = Field(description="Nome della nota da lintare")
+    op_type: str = Field(default="", description="Op type (write/patch/overwrite) for conditional checks")
+    hub: str = Field(default="", description="Hub note name for wikilink validation")
 
 @tool(LintArgs, cls="composed")
-def silica_lint(note_name: str) -> dict[str, Any]:
+def silica_lint(note_name: str, op_type: str = "", hub: str = "") -> dict[str, Any]:
     """Gate post-scrittura: esegue l'OFM linter per trovare regressioni strutturali."""
     from silica.kernel.linter import validate_note
-    
-    errors, warnings = validate_note(note_name, hub=None)
-    
+
+    errors, warnings = validate_note(note_name, hub=hub or None, op_type=op_type or None)
+
     return {
         "success": len(errors) == 0,
         "note": note_name,
         "errors": errors,
-        "warnings": warnings
+        "warnings": warnings,
     }
 
 

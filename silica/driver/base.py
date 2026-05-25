@@ -71,10 +71,16 @@ class GraphSnapshot:
 
 @dataclass
 class Txn:
-    """Transaction handle for snapshot/rollback."""
+    """Transaction handle for snapshot/rollback.
+
+    Two rollback strategies:
+      - versions: existing notes snapshotted before patch → restore via history:restore
+      - created_paths: new notes created during write ops → rollback by deleting them
+    """
     id: str
     refs: list[NoteRef] = field(default_factory=list)
-    versions: dict[str, int] = field(default_factory=dict)  # path -> version number
+    versions: dict[str, int] = field(default_factory=dict)   # path -> version number (for patch rollback)
+    created_paths: list[str] = field(default_factory=list)   # paths created by write ops (for write rollback)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +146,17 @@ class ObsidianDriver(Protocol):
     # -- write (graph-safe) ------------------------------------------------
 
     def create(self, path: str, content: str) -> NoteRef:
-        """Create a new note. Path is relative to vault root."""
+        """Create a new note. Path is relative to vault root. Raises if file exists."""
+        ...
+
+    def overwrite(self, path: str, content: str) -> NoteRef:
+        """Overwrite an existing note in-place, preserving history.
+
+        Unlike delete+create, this MUST NOT destroy Obsidian's version history
+        or break block-references. Use for patch and overwrite op types.
+        The CLI backend uses `obsidian create path=... overwrite=true`.
+        The FS backend writes the file directly.
+        """
         ...
 
     def append(self, ref: NoteRef | str, content: str) -> None:

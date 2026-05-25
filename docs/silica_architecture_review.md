@@ -24,13 +24,132 @@ L'architettura è **eccellente nella sua concezione**. I cinque strati (L0–L4)
 > [!TIP]
 > **Confermato**: L'Obsidian CLI 1.12.7 è installata e funzionante sul sistema. Tutti i comandi necessari (`read`, `create`, `append`, `search`, `search:context`, `backlinks`, `links`, `orphans`, `unresolved`, `move`, `delete`, `properties`, `property:set`, `outline`, `history:restore`, `sync:restore`, `eval`, `base:query`, `files`) sono disponibili.
 
-### 2.2 L1 — Kernel meccanico
+### Step 2.2 — Router hardcoded + gate
 
-| Aspetto | Valutazione |
-|---------|-------------|
-| **Decisione** | Funzioni pure, zero LLM, golden-testabili |
-| **Forza** | Massima testabilità. Il codice Hermes (`ofm.py`, `frontmatter.py`, `templates.py`, `linter.py`) è già calibrato su golden notes |
-| **Rischio** | Nessuno significativo — è la parte più solida |
+**Obiettivo**: L'Injector come FSM hardcoded con DELEGATE reale, worker semantico isolato per costruzione, gate ≥10% e rollback transazionale — strutturato per migrare a YAML (S3.3) senza riscrittura.
+
+> Decisione di design cristallizzata (candidata ADR-007): **il worker semantico è una completion single-shot bounded, non un loop agentico nidificato.** Hermes instanzia un `AIAgent` figlio con il suo `run_conversation`; Silica no. Il distiller è una trasformazione pura (concetti → JSON di ops) e `prep_delegation` ha già inlinato il payload by-pointer, quindi il worker non ha bisogno di tool. Conseguenza: l'intero problema di isolamento del toolset evapora (toolset vuoto per costruzione) e il non-determinismo LLM resta confinato in una singola chiamata — esattamente il "input → structured output bounded" del §3 L3.
+
+I deliverable sono suddivisi in 6 work-item ordinati per dipendenza.
+
+---
+
+#### S2.2.1 — Refactor FSM: tabella di transizione + policy d'errore esplicita
+
+**Obiettivo**: Separare action-logic da transition-logic. Eliminare il bug latente del `try/except` che fa rollback solo da `WRITE`/`LINT`, e preparare il terreno per il recipe-engine di S3.3.
+
+**Deliverable**:
+- `silica/router/orchestrator.py`:
+  - `_HANDLERS: dict[InjectorState, Callable]` — un handler per stato, ognuno ritorna il prossimo stato (niente più `self.state = ...` sparsi nei rami).
+  - `_ON_ERROR: dict[InjectorState, InjectorState]` — policy d'errore dichiarativa:
+    - `RECON, PAYLOAD, DELEGATE, SANITIZE, VALIDATE, SNAPSHOT` → `ERROR` (pre-write: niente da annullare).
+    - `WRITE, LINT` → `ROLLBACK` (post-snapshot: stato del vault mutato).
+  - `run()` consulta `_ON_ERROR[self.state]` invece di hardcodare la condizione `state in (WRITE, LINT)`.
+
+**Criterio di accettazione**: La mappa `_ON_ERROR` è l'unica fonte di verità per le transizioni d'errore. Un'eccezione iniettata in ogni stato instrada al target dichiarato. Aggiungere un nuovo gate (es. graph-diff a S3.2) richiede solo una entry nella mappa, zero modifiche al `run()`.
+
+---
+
+#### S2.2.2 — DELEGATE reale: worker distiller single-shot + wiring di `delegate.py`
+
+**Obiettivo**: Rimpiazzare i `dummy_ops` hardcoded con l'invocazione reale del distiller, riusando lo stesso code-path che a S3.1 scalerà al fan-out.
+
+**Deliverable**:
+- `silica/workers/distiller.py`:
+  - `run_distiller(task: dict) -> dict` — costruisce `messages = [{system: protocollo_verbatim}, {user: "leggi il payload a <pointer>, emetti JSON di ops"}]`, chiama `call_llm(model, messages, tools=None)` (single-shot, **no tool**), ritorna `{"status": "ok"|"failed", "raw": <testo>, "diagnostics": {...}}`.
+  - Il protocollo è renderizzato verbatim + payload-by-pointer + checksum SHA-256 (pattern `prep_delegation` vendorizzato concettualmente da Hermes).
+- `silica/router/orchestrator.py` — handler `DELEGATE`:
+  - costruisce **tutti** i task sul main thread (deterministico, pre-fan-out — lezione Hermes "build on main thread, then run in thread");
+  - chiama `delegate(tasks, run_distiller, max_workers)`; nel walking skeleton `len(tasks)==1`;
+  - raccoglie i `raw` dei batch `status=="ok"` nel file che SANITIZE consumerà.
+
+**Criterio di accettazione**: Con un payload reale a 1 batch, DELEGATE produce un output distillato vero (non più simulato) che attraversa SANITIZE → VALIDATE. I `dummy_ops` sono rimossi dal codebase.
+
+---
+
+#### S2.2.3 — Garanzia di isolamento del worker (read-only per costruzione)
+
+**Obiettivo**: Rendere l'invariante "il worker non tocca mai il vault" (charter L2) **strutturale**, non a livello di prompt. Adattamento del pattern `DELEGATE_BLOCKED_TOOLS` / `_strip_blocked_tools` di Hermes (doc1 §3b).
+
+**Deliverable**:
+- Variante single-shot (default walking skeleton): il worker ha `tools=None` → nessun tool raggiungibile per costruzione. Nessuna blocklist necessaria.
+- Hook per la variante futura "read-only bounded loop" (escape hatch, *solo se* il distiller dovrà leggere contesto extra dal vault):
+  - `silica/workers/__init__.py` — `WORKER_BLOCKED_CLASSES = frozenset({"composed", "wrapped"})` e un `build_worker_toolset()` che filtra il registry lasciando solo gli atomici read-only, escludendo esplicitamente `silica_run_injector`, `silica_bulk_write`, `silica_move`, `silica_delete`, `silica_snapshot`.
+
+**Criterio di accettazione**: Un test asserisce che il toolset esposto al worker **non contiene** alcun tool di mutazione né `silica_run_injector`. Tentare di costruire un worker con un tool di classe `wrapped`/`composed` solleva o lo strip-pa. (Per la variante single-shot, il test verifica `tools is None`.)
+
+---
+
+#### S2.2.4 — Timeout per worker + status strutturato + gate consapevole dei fallimenti
+
+**Obiettivo**: Un distiller appeso non deve deadlockare l'intero inject. Adattamento del timeout-via-executor-dedicato di Hermes (doc1 §7a), versione leggera.
+
+**Deliverable**:
+- `silica/agent/delegate.py`:
+  - sostituire `ex.map(run_one, tasks)` con `submit` + `future.result(timeout=worker_timeout)`;
+  - timeout/eccezione → `{"status": "timeout"|"failed", "raw": None, "diagnostics": {...}}` invece di propagare;
+  - mantenere l'hard-stop esistente `len(tasks) > 10 → raise`;
+  - flag di interrupt cooperativo (`threading.Event`) controllato tra i batch → Ctrl-C durante l'inject esce pulito.
+- `silica/router/orchestrator.py`:
+  - DELEGATE conta i batch non-`ok` come concetti rigettati;
+  - VALIDATE include questi rigetti nel rejection-rate → se ≥10%, abort conservativo;
+  - Ctrl-C con snapshot già preso → transizione a `ROLLBACK`.
+
+**Criterio di accettazione**: Un worker mockato che dorme oltre `worker_timeout` non blocca l'inject: ritorna `status="timeout"`, viene contato come rigetto, e se i suoi concetti superano il 10% il gate spara. Ctrl-C a metà inject lascia il vault in stato consistente (rollback se post-snapshot).
+
+---
+
+#### S2.2.5 — Ciclo di vita del `Txn` pulito (eliminare `_txn_obj`)
+
+**Obiettivo**: Rimuovere l'astrazione leaky del `_txn_obj` infilato nel dict del tool e il dead-stub `silica_restore`.
+
+**Deliverable**:
+- `silica/router/orchestrator.py` — l'handler SNAPSHOT chiama `DRIVER.snapshot_versions(refs)` direttamente e tiene il `Txn` tipato in `self.context["txn"]` (il rollback è interno al router, non un'azione dell'agente).
+- `silica/tools/wrapped.py` — rimuovere `silica_restore` dal registry agent-facing (o, se serve esporlo, introdurre un `TxnStore` keyed by `txn_id` e implementarlo davvero). `silica_snapshot` non ritorna più `_txn_obj`.
+
+**Criterio di accettazione**: Nessun oggetto `Txn` transita attraverso un payload di tool. Il rollback funziona col `Txn` tenuto dalla FSM. `grep _txn_obj` non trova occorrenze. L'agente non può chiamare un `silica_restore` morto.
+
+---
+
+#### S2.2.6 — Hook minimo di idempotenza (ledger `done/`)
+
+**Obiettivo**: Cablare la responsabilità L3 "ledger di idempotenza" (charter §3) al minimo indispensabile, ereditando il pattern `done/` di Hermes (review §9). Ledger SQLite completo rinviato a fase successiva, ma l'hook esiste ora.
+
+**Deliverable**:
+- `silica/router/orchestrator.py` — pre-RECON: se `done/<basename>` esiste già (o l'hash SHA-256 dell'inbox è già registrato), short-circuit a `DONE` con `final_status="already_ingested"`.
+- Punto di estensione documentato (`# TODO S3+: sostituire con ledger sqlite3`) per il ledger transazionale completo.
+
+**Criterio di accettazione**: Re-eseguire `silica_run_injector` sullo stesso inbox già processato non rilancia la pipeline né crea duplicati: ritorna `already_ingested`.
+
+---
+
+#### Criterio di accettazione aggregato per S2.2 (sostituisce quello originale)
+
+L'orchestrator esegue le 10 fasi in sequenza con **un distiller reale** (non simulato). Specificamente:
+1. Un concetto reale entra: recon → payload → **distill (single-shot)** → sanitize → validate → snapshot → write → lint → cleanup.
+2. Il gate ≥10% spara su input cattivo → abort + rollback → stato del vault ripristinato.
+3. Un worker appeso/timeout **non deadlocka** ed è contato come rigetto.
+4. Un test prova che il worker è **read-only per costruzione** (non può raggiungere alcun tool di mutazione).
+5. Nessun `Txn` viaggia dentro un payload di tool; `silica_restore` morto rimosso.
+6. Re-run idempotente sullo stesso inbox → `already_ingested`.
+
+---
+
+#### Mappa Hermes → S2.2 (cosa è stato preso, adattato, rifiutato)
+
+| Pattern Hermes | Esito in Silica | Work-item |
+|---|---|---|
+| `DELEGATE_BLOCKED_TOOLS` / `_strip_blocked_tools` (doc1 §3b) | **Adattato** → toolset vuoto per il worker single-shot; blocklist solo per l'escape-hatch read-only | S2.2.3 |
+| Timeout via executor dedicato + `status="timeout"` (doc1 §7a) | **Adattato** → future-per-task con timeout, status strutturato | S2.2.4 |
+| "Build child on main thread, then run in thread" (doc1 §2a/2b) | **Adattato** → task renderizzati pre-fan-out | S2.2.2 |
+| Result entry strutturato per child (doc1 §10) | **Adattato** → `{status, raw, diagnostics}` per batch alimenta merge + gate | S2.2.2 / S2.2.4 |
+| Interrupt cooperativo, no thread-kill (doc1 §5c) | **Adattato** (leggero) → `threading.Event`, Ctrl-C → rollback pulito | S2.2.4 |
+| `AIAgent` figlio con `run_conversation` nidificato | **Rifiutato/Divergenza** → worker single-shot bounded | S2.2.2 |
+| Nested orchestration, `max_spawn_depth`, ruoli orchestrator/leaf (doc2 §3) | **Rifiutato** → fan-out a 1 livello, depth ≡ 1 | — |
+| Credential pool lease (doc1 §9) | **Rifiutato** → un solo provider/modello | — |
+| Heartbeat, `_active_subagents`, eventi `subagent.*`, RPC pause/kill (doc2 §1) | **Rifiutato** → REPL single-shot, no UI live | — |
+
+> Rationale del rifiuto: §2.5 e ADR-006 del review impongono di non anticipare complessità. La machinery multi-agente live di Hermes risolve problemi (UI in tempo reale, nesting, rotazione chiavi) che Silica non ha. Importarla sarebbe l'over-engineering che il piano vieta esplicitamente.
 
 ### 2.3 L2 — Worker semantici
 

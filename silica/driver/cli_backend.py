@@ -229,12 +229,24 @@ class ObsidianCLIBackend:
 
     def create(self, path: str, content: str) -> NoteRef:
         """Create a new note at the given vault-relative path."""
-        # Escape content for CLI (replace newlines with literal \n)
         escaped = content.replace("\\", "\\\\").replace("\n", "\\n")
         self._run_cli("create", f"path={path}", f"content={escaped}")
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
         ref = NoteRef(name=name, path=path)
-        self._wait_for_settle(ref)
+        self._wait_for_create(ref)
+        return ref
+
+    def overwrite(self, path: str, content: str) -> NoteRef:
+        """Overwrite an existing note in-place, preserving Obsidian version history.
+
+        Uses `obsidian create ... overwrite=true` which keeps the file's block-refs
+        and history intact — unlike delete+create which destroys both.
+        """
+        escaped = content.replace("\\", "\\\\").replace("\n", "\\n")
+        self._run_cli("create", f"path={path}", f"content={escaped}", "overwrite=true")
+        name = path.rsplit("/", 1)[-1].removesuffix(".md")
+        ref = NoteRef(name=name, path=path)
+        self._wait_for_create(ref)
         return ref
 
     def append(self, ref: NoteRef | str, content: str) -> None:
@@ -251,10 +263,12 @@ class ObsidianCLIBackend:
             f"value={value}",
             f"type={type_}",
         )
+        self._wait_for_prop(ref, name, str(value))
 
     def move(self, ref: NoteRef | str, to: str) -> None:
         """Move/rename a note. Obsidian updates all wikilinks (graph-safe)."""
         self._run_cli("move", self._ref_arg(ref), f"to={to}")
+        self._wait_for_move(ref, to)
 
     def delete(self, ref: NoteRef | str) -> None:
         """Delete a note from the vault."""
@@ -303,7 +317,13 @@ class ObsidianCLIBackend:
         return Txn(id=txn_id, refs=refs, versions=versions)
 
     def restore(self, txn: Txn) -> None:
-        """Rollback to a previous snapshot via history:restore."""
+        """Rollback to a previous snapshot via history:restore.
+
+        Handles two rollback strategies:
+          - versions: patch ops → restore existing notes to a prior version
+          - created_paths: write ops → delete newly-created notes
+        """
+        # 1. Restore patched notes to their pre-write version
         for ref in txn.refs:
             key = ref.path or ref.name
             version = txn.versions.get(key)
@@ -318,28 +338,84 @@ class ObsidianCLIBackend:
                 except RuntimeError as e:
                     logger.error("Failed to restore %s: %s", key, e)
 
+        # 2. Delete notes that were newly created (write ops)
+        for path in txn.created_paths:
+            try:
+                self._run_cli("delete", f"path={path}")
+                logger.info("Rolled back created note: %s", path)
+            except RuntimeError as e:
+                logger.error("Failed to delete created note %s during rollback: %s", path, e)
+
     # ------------------------------------------------------------------
-    # Freshness contract
+    # Freshness contract — per-operation postconditions (B5)
     # ------------------------------------------------------------------
 
-    def _wait_for_settle(self, ref: NoteRef, timeout: float = _SETTLE_TIMEOUT) -> None:
-        """Poll until Obsidian's cache reflects a recent write.
+    def _wait_for_create(self, ref: NoteRef, timeout: float = _SETTLE_TIMEOUT) -> None:
+        """Poll until Obsidian's cache reflects a newly-created note.
 
-        From SILICA.md §3 L0 freshness contract:
-          After a create/set_prop/move, the Driver guarantees that the next
-          read reflects the mutation. If the cache updates asynchronously,
-          the backend MUST wait/poll until settled.
+        Postcondition: read(ref) succeeds.
         """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             try:
                 self._run_cli("read", self._ref_arg(ref), check=False)
-                return  # File is readable — cache has settled
+                return
             except RuntimeError:
                 time.sleep(_SETTLE_POLL_INTERVAL)
 
         logger.warning(
-            "Settle timeout for %s after %.1fs — cache may be stale",
+            "Settle timeout (create) for %s after %.1fs — cache may be stale",
             ref.name,
             timeout,
         )
+
+    def _wait_for_prop(self, ref: NoteRef | str, prop_name: str, expected_value: str,
+                       timeout: float = _SETTLE_TIMEOUT) -> None:
+        """Poll until a frontmatter property reflects the expected value.
+
+        Postcondition: props_of(ref)[prop_name] == expected_value
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                props = self.props_of(ref)
+                if str(props.get(prop_name, "")) == expected_value:
+                    return
+            except RuntimeError:
+                pass
+            time.sleep(_SETTLE_POLL_INTERVAL)
+
+        logger.warning(
+            "Settle timeout (set_prop '%s') for %s after %.1fs — cache may be stale",
+            prop_name,
+            ref if isinstance(ref, str) else ref.name,
+            timeout,
+        )
+
+    def _wait_for_move(self, original_ref: NoteRef | str, to_path: str,
+                       timeout: float = _SETTLE_TIMEOUT) -> None:
+        """Poll until a move is reflected: destination readable, source gone.
+
+        Postcondition: read(to) succeeds AND read(original_ref) raises.
+        """
+        to_name = to_path.rsplit("/", 1)[-1].removesuffix(".md")
+        to_ref = NoteRef(name=to_name, path=to_path)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                self._run_cli("read", self._ref_arg(to_ref), check=False)
+                # Destination is readable — move has propagated
+                return
+            except RuntimeError:
+                pass
+            time.sleep(_SETTLE_POLL_INTERVAL)
+
+        logger.warning(
+            "Settle timeout (move to '%s') after %.1fs — cache may be stale",
+            to_path,
+            timeout,
+        )
+
+    # Legacy alias kept for any remaining internal callers
+    def _wait_for_settle(self, ref: NoteRef, timeout: float = _SETTLE_TIMEOUT) -> None:
+        self._wait_for_create(ref, timeout=timeout)
