@@ -72,15 +72,15 @@ def check_graph_regression(
         errors.append(f"New unresolved links introduced: {', '.join(detail_links)}")
         
     # 3. No broken pre-existing backlinks check
-    for name, pre_count in pre.backlink_counts.items():
-        norm_name = name.lower()
-        post_count = 0
-        for p_name, p_count in post.backlink_counts.items():
-            if p_name.lower() == norm_name:
-                post_count = p_count
-                break
+    pre_lower = {k.lower(): (k, v) for k, v in pre.backlink_counts.items()}
+    post_lower = {k.lower(): v for k, v in post.backlink_counts.items()}
+    shared_keys = set(pre_lower.keys()) & set(post_lower.keys())
+    
+    for norm_name in sorted(shared_keys):
+        orig_name, pre_count = pre_lower[norm_name]
+        post_count = post_lower[norm_name]
         if post_count < pre_count:
-            errors.append(f"Broken backlinks detected for '{name}': decreased from {pre_count} to {post_count}")
+            errors.append(f"Broken backlinks detected for '{orig_name}': decreased from {pre_count} to {post_count}")
             
     success = len(errors) == 0
     return success, errors

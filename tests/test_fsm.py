@@ -192,3 +192,66 @@ def test_fsm_recipe_transition_sequence():
     assert fsm.state == InjectorState.DONE
 
 
+@patch("silica.router.orchestrator.silica_recon")
+@patch("silica.router.orchestrator.silica_payload")
+@patch("silica.agent.delegate.delegate")
+@patch("silica.router.orchestrator.silica_sanitize")
+@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.DRIVER")
+@patch("silica.tools.wrapped.silica_snapshot")
+@patch("silica.router.orchestrator.silica_bulk_write")
+@patch("silica.router.orchestrator.silica_lint")
+@patch("silica.tools.wrapped.silica_cleanup")
+def test_fsm_recipe_end_to_end_flow(
+    mock_cleanup, mock_lint, mock_write, mock_snapshot, mock_driver,
+    mock_validate, mock_sanitize, mock_delegate, mock_payload, mock_recon
+):
+    # Setup mocks
+    mock_recon.return_value = {"success": True}
+    mock_payload.return_value = {"payload": {"chunk_id": 0}}
+    mock_delegate.return_value = [{"updates": []}]
+    mock_sanitize.return_value = {"parsed": []}
+    mock_validate.return_value = {"success": True, "rejection_rate": 0.0}
+    mock_snapshot.return_value = {"txn_id": "txn_123", "inverses": []}
+    mock_write.return_value = {"success": True}
+    mock_lint.return_value = {"success": True}
+    mock_cleanup.return_value = {"success": True}
+
+    # Setup graph mocks
+    pre_graph = MagicMock()
+    post_graph = MagicMock()
+    mock_driver.graph_snapshot.return_value = post_graph
+
+    # Initialize FSM (loads actual injector.yaml recipe)
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    
+    # Track states visited
+    states_visited = []
+    original_step = fsm.step
+    def step_wrapper():
+        states_visited.append(fsm.state)
+        original_step()
+    fsm.step = step_wrapper
+
+    with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])):
+        res = fsm.run()
+
+    # Check that it reached DONE state
+    assert fsm.state == InjectorState.DONE
+    assert res.get("final_status") == "Success"
+
+    # Verify the sequence of states visited exactly matches the injector.yaml phases
+    expected_sequence = [
+        InjectorState.RECON,
+        InjectorState.PAYLOAD,
+        InjectorState.DELEGATE,
+        InjectorState.SANITIZE,
+        InjectorState.VALIDATE,
+        InjectorState.SNAPSHOT,
+        InjectorState.WRITE,
+        InjectorState.LINT,
+        InjectorState.CLEANUP,
+    ]
+    assert states_visited == expected_sequence
+
+

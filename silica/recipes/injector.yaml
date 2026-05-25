@@ -1,4 +1,4 @@
-# L4 Injector recipe — placeholder for Step 3.3
+# L4 Injector recipe configuration
 # See SILICA.md §4 L4 for the full specification
 name: injector
 inputs: [inbox, target, hub]
