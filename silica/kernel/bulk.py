@@ -1,28 +1,39 @@
 from silica.driver import DRIVER
 from silica.kernel import templates
+from silica.kernel.ops import Op, OpType, FailedOp, BulkResult
 
-def execute_operations(ops: list) -> dict:
+def execute_operations(ops: list[Op]) -> BulkResult:
     results = []
+    failed_ops = []
     success_count = 0
     
     for idx, op in enumerate(ops):
-        op_type = op.get("op")
-        path = op.get("path")
+        op_type = op.op
+        path = op.touched_ref()
         
+        if op_type == OpType.skip:
+            results.append({"index": idx, "op": "skip", "success": True})
+            success_count += 1
+            continue
+            
         if not path:
-            results.append({"index": idx, "success": False, "error": "Missing 'path' parameter"})
+            err_msg = "Missing 'path' parameter"
+            failed_ops.append(FailedOp(index=idx, path="", op=op_type.value, error=err_msg))
+            results.append({"index": idx, "success": False, "error": err_msg})
             continue
             
         try:
-            if op_type == "write":
-                heading = op.get("heading")
-                snippet = op.get("snippet", "")
-                hub = op.get("hub")
-                tags = op.get("tags")
-                related = op.get("related")
+            if op_type == OpType.write:
+                heading = op.heading
+                snippet = op.snippet or ""
+                hub = op.hub
+                tags = op.tags
+                related = op.related
                 
                 if not heading or not hub:
-                    results.append({"index": idx, "path": path, "success": False, "error": "Missing 'heading' or 'hub' parameter for write operation"})
+                    err_msg = "Missing 'heading' or 'hub' parameter for write operation"
+                    failed_ops.append(FailedOp(index=idx, path=path, op=op_type.value, error=err_msg))
+                    results.append({"index": idx, "path": path, "success": False, "error": err_msg})
                     continue
                     
                 content = templates.template_spoke(
@@ -33,27 +44,29 @@ def execute_operations(ops: list) -> dict:
                     related=related
                 )
                 
-                # We use DRIVER.create
                 DRIVER.create(path, content)
                 success_count += 1
                 results.append({"index": idx, "path": path, "op": "write", "success": True})
                 
-            elif op_type == "patch":
-                heading = op.get("heading")
-                snippet = op.get("snippet")
-                source_basename = op.get("source_basename")
-                hub = op.get("hub")
+            elif op_type == OpType.patch:
+                heading = op.heading
+                snippet = op.snippet
+                source_basename = op.source_basename
+                hub = op.hub
 
                 if not heading or not snippet or not source_basename:
-                    results.append({"index": idx, "path": path, "success": False, "error": "Missing 'heading', 'snippet', or 'source_basename' for patch operation"})
+                    err_msg = "Missing 'heading', 'snippet', or 'source_basename' for patch operation"
+                    failed_ops.append(FailedOp(index=idx, path=path, op=op_type.value, error=err_msg))
+                    results.append({"index": idx, "path": path, "success": False, "error": err_msg})
                     continue
 
-                # Read existing content
                 try:
                     nc = DRIVER.read_note(path)
                     existing_content = nc.content
                 except RuntimeError as e:
-                    results.append({"index": idx, "path": path, "success": False, "error": f"Cannot patch; {e}"})
+                    err_msg = f"Cannot patch; {e}"
+                    failed_ops.append(FailedOp(index=idx, path=path, op=op_type.value, error=err_msg))
+                    results.append({"index": idx, "path": path, "success": False, "error": err_msg})
                     continue
 
                 new_content = templates.patch_snippet(
@@ -64,39 +77,40 @@ def execute_operations(ops: list) -> dict:
                     existing_content=existing_content
                 )
 
-                # Use overwrite() to preserve Obsidian's version history and block-refs.
-                # delete+create is forbidden here: it destroys history (breaks rollback)
-                # and severs block-references silently.
                 DRIVER.overwrite(path, new_content)
                 success_count += 1
                 results.append({"index": idx, "path": path, "op": "patch", "success": True})
                 
-            elif op_type == "overwrite":
-                content = op.get("content")
+            elif op_type == OpType.overwrite:
+                content = op.content
                 if content is None:
-                    results.append({"index": idx, "path": path, "success": False, "error": "Missing 'content' for overwrite operation"})
+                    err_msg = "Missing 'content' for overwrite operation"
+                    failed_ops.append(FailedOp(index=idx, path=path, op=op_type.value, error=err_msg))
+                    results.append({"index": idx, "path": path, "success": False, "error": err_msg})
                     continue
-                # Use overwrite() to preserve version history and block-refs
                 DRIVER.overwrite(path, content)
                 success_count += 1
                 results.append({"index": idx, "path": path, "op": "overwrite", "success": True})
                 
-            elif op_type == "delete":
+            elif op_type == OpType.delete:
                 DRIVER.delete(path)
                 success_count += 1
                 results.append({"index": idx, "path": path, "op": "delete", "success": True})
                 
             else:
-                results.append({"index": idx, "path": path, "success": False, "error": f"Unknown operation type: {op_type}"})
+                err_msg = f"Unknown operation type: {op_type}"
+                failed_ops.append(FailedOp(index=idx, path=path, op=op_type.value, error=err_msg))
+                results.append({"index": idx, "path": path, "success": False, "error": err_msg})
                 
         except Exception as e:
+            failed_ops.append(FailedOp(index=idx, path=path, op=op_type.value, error=str(e)))
             results.append({"index": idx, "path": path, "success": False, "error": str(e)})
 
-    failed_count = len(ops) - success_count
-    return {
-        "success": failed_count == 0,
-        "total_operations": len(ops),
-        "successful_operations": success_count,
-        "failed_operations": failed_count,  # explicit count for WRITE state check (B4)
-        "results": results
-    }
+    ok = len(failed_ops) == 0
+    return BulkResult(
+        ok=ok,
+        failed=failed_ops,
+        results=results,
+        total=len(ops),
+        successful=success_count
+    )

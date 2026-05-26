@@ -1,13 +1,21 @@
 import os
 import logging
+from pydantic import BaseModel
 from silica.driver import DRIVER
+from silica.kernel.ops import Op, OpType
 
 logger = logging.getLogger(__name__)
 
 
-def validate_operations(ops: list, payloads: list, target_dir: str) -> tuple[list, list]:
+class Rejection(BaseModel):
+    op: Op
+    reason: str
+
+
+def validate_operations(ops: list[Op] | list[dict], payloads: list, target_dir: str) -> tuple[list[Op], list[Rejection]]:
     """Validates operations against payloads and target_dir using DRIVER."""
-    
+    from silica.kernel.ops_io import parse_ops
+    ops = parse_ops(ops)
     valid_concepts: dict[str, set[str]] = {}
     expected_collision_paths: dict[tuple[str, str], str | None] = {}
     inbox_folders = set()
@@ -51,31 +59,25 @@ def validate_operations(ops: list, payloads: list, target_dir: str) -> tuple[lis
 
     # 1. Coerce write <-> patch and enforce default hub fallback
     for op in ops:
-        op_type = op.get("op")
-        path = op.get("path")
-        source_basename = op.get("source_basename")
-        heading = op.get("heading")
-        
         # Ensure a default hub is present if missing/empty
-        if not op.get("hub") and target_dir:
-            op["hub"] = os.path.basename(target_dir.rstrip("/\\"))
+        if not op.hub and target_dir:
+            op.hub = os.path.basename(target_dir.rstrip("/\\"))
             
-        if op_type == "write" and path and path_exists(path):
-            op["op"] = "patch"
-        elif op_type == "patch" and path and not path_exists(path):
+        if op.op == OpType.write and op.path and path_exists(op.path):
+            op.op = OpType.patch
+        elif op.op == OpType.patch and op.path and not path_exists(op.path):
             if has_payloads:
-                expected_path = expected_collision_paths.get((source_basename, heading))
-                if not expected_path or os.path.abspath(path) == os.path.abspath(expected_path):
-                    op["op"] = "write"
+                expected_path = expected_collision_paths.get((op.source_basename, op.heading))
+                if not expected_path or os.path.abspath(op.path) == os.path.abspath(expected_path):
+                    op.op = OpType.write
             else:
-                op["op"] = "write"
+                op.op = OpType.write
 
     # 2. Global deduplication
-    path_groups: dict[str, list[dict]] = {}
+    path_groups: dict[str, list[Op]] = {}
     for op in ops:
-        op_type = op.get("op")
-        path = op.get("path")
-        if op_type in ("write", "patch", "overwrite") and path:
+        path = op.touched_ref()
+        if path:
             norm_path = os.path.abspath(path)
             if norm_path not in path_groups:
                 path_groups[norm_path] = []
@@ -83,61 +85,57 @@ def validate_operations(ops: list, payloads: list, target_dir: str) -> tuple[lis
 
     for norm_path, group in path_groups.items():
         if len(group) > 1:
-            richest_op = max(group, key=lambda o: len(o.get("snippet", o.get("content", ""))))
-            has_write = any(o.get("op") in ("write", "overwrite") for o in group)
+            richest_op = max(group, key=lambda o: len(o.snippet or o.content or ""))
+            has_write = any(o.op in (OpType.write, OpType.overwrite) for o in group)
             for op in group:
                 if op is not richest_op:
-                    op["op"] = "skip"
-                    op["reason"] = f"Duplicate operation to the same path '{op.get('path')}'"
+                    op.op = OpType.skip
+                    op.reason = f"Duplicate operation to the same path '{op.path}'"
             if has_write:
                 # If there's an overwrite in the group, richest_op becomes overwrite
-                if any(o.get("op") == "overwrite" for o in group):
-                    richest_op["op"] = "overwrite"
+                if any(o.op == OpType.overwrite for o in group):
+                    richest_op.op = OpType.overwrite
                 else:
-                    richest_op["op"] = "write"
+                    richest_op.op = OpType.write
 
     validated_ops = []
     rejected_ops = []
     
     target_dir_abs = os.path.abspath(target_dir) if target_dir else ""
 
-    for idx, op in enumerate(ops):
-        heading = op.get("heading")
-        op_type = op.get("op")
-        source_basename = op.get("source_basename")
-        path = op.get("path")
-        
-        if not op_type:
-            rejected_ops.append({"op": op, "reason": "Missing 'op' field"})
-            continue
+    for op in ops:
+        heading = op.heading
+        op_type = op.op
+        source_basename = op.source_basename
+        path = op.path
 
         if has_payloads:
             if not heading:
-                rejected_ops.append({"op": op, "reason": "Missing 'heading' field"})
+                rejected_ops.append(Rejection(op=op, reason="Missing 'heading' field"))
                 continue
             if not source_basename:
-                rejected_ops.append({"op": op, "reason": "Missing 'source_basename' field"})
+                rejected_ops.append(Rejection(op=op, reason="Missing 'source_basename' field"))
                 continue
             if source_basename not in valid_concepts:
-                rejected_ops.append({"op": op, "reason": f"Unknown source_basename '{source_basename}'"})
+                rejected_ops.append(Rejection(op=op, reason=f"Unknown source_basename '{source_basename}'"))
                 continue
             if heading not in valid_concepts[source_basename]:
-                rejected_ops.append({"op": op, "reason": f"Heading '{heading}' not present in payload concepts"})
+                rejected_ops.append(Rejection(op=op, reason=f"Heading '{heading}' not present in payload concepts"))
                 continue
 
         if path:
             path_abs = os.path.abspath(path)
             forbidden = any(path_abs.startswith(folder) for folder in inbox_folders)
             if "/0 Inbox/" in path or "/0 inbox/" in path.lower() or forbidden:
-                rejected_ops.append({"op": op, "reason": f"Target path '{path}' contains forbidden inbox segment"})
+                rejected_ops.append(Rejection(op=op, reason=f"Target path '{path}' contains forbidden inbox segment"))
                 continue
 
-        if op_type == "skip":
+        if op_type == OpType.skip:
             continue
             
-        elif op_type == "patch":
+        elif op_type == OpType.patch:
             if not path:
-                rejected_ops.append({"op": op, "reason": "Missing 'path' field for patch operation"})
+                rejected_ops.append(Rejection(op=op, reason="Missing 'path' field for patch operation"))
                 continue
                 
             path_abs = os.path.abspath(path)
@@ -145,60 +143,60 @@ def validate_operations(ops: list, payloads: list, target_dir: str) -> tuple[lis
                 expected_path = expected_collision_paths.get((source_basename, heading))
                 if expected_path:
                     if path_abs != os.path.abspath(expected_path):
-                        rejected_ops.append({"op": op, "reason": f"Path '{path}' does not match expected collision '{expected_path}'"})
+                        rejected_ops.append(Rejection(op=op, reason=f"Path '{path}' does not match expected collision '{expected_path}'"))
                         continue
                 else:
                     if target_dir_abs and not path_abs.startswith(target_dir_abs):
-                        rejected_ops.append({"op": op, "reason": f"Coerced patch path '{path}' not in target folder"})
+                        rejected_ops.append(Rejection(op=op, reason=f"Coerced patch path '{path}' not in target folder"))
                         continue
 
             if not path_exists(path):
-                rejected_ops.append({"op": op, "reason": f"Collision path '{path}' does not exist in vault"})
+                rejected_ops.append(Rejection(op=op, reason=f"Collision path '{path}' does not exist in vault"))
                 continue
 
             validated_ops.append(op)
 
-        elif op_type == "write":
+        elif op_type == OpType.write:
             if not path:
-                rejected_ops.append({"op": op, "reason": "Missing 'path' field for write operation"})
+                rejected_ops.append(Rejection(op=op, reason="Missing 'path' field for write operation"))
                 continue
                 
             path_abs = os.path.abspath(path)
             if target_dir_abs and not path_abs.startswith(target_dir_abs):
-                rejected_ops.append({"op": op, "reason": f"Path '{path}' not in target folder"})
+                rejected_ops.append(Rejection(op=op, reason=f"Path '{path}' not in target folder"))
                 continue
 
             if path_exists(path):
-                rejected_ops.append({"op": op, "reason": f"Target path '{path}' already exists (should be patch/overwrite)"})
+                rejected_ops.append(Rejection(op=op, reason=f"Target path '{path}' already exists (should be patch/overwrite)"))
                 continue
 
             validated_ops.append(op)
 
-        elif op_type == "overwrite":
+        elif op_type == OpType.overwrite:
             if not path:
-                rejected_ops.append({"op": op, "reason": "Missing 'path' field for overwrite operation"})
+                rejected_ops.append(Rejection(op=op, reason="Missing 'path' field for overwrite operation"))
                 continue
             
             path_abs = os.path.abspath(path)
             if target_dir_abs and not path_abs.startswith(target_dir_abs):
-                rejected_ops.append({"op": op, "reason": f"Path '{path}' not in target folder"})
+                rejected_ops.append(Rejection(op=op, reason=f"Path '{path}' not in target folder"))
                 continue
 
             if not path_exists(path):
                 # If target note doesn't exist, overwrite degrades to write gracefully
-                op["op"] = "write"
+                op.op = OpType.write
             
             validated_ops.append(op)
 
         else:
-            rejected_ops.append({"op": op, "reason": f"Unknown operation type '{op_type}'"})
+            rejected_ops.append(Rejection(op=op, reason=f"Unknown operation type '{op_type}'"))
 
     # 3. Auto-create missing Hub notes
     hubs_to_check = set()
     for op in validated_ops:
-        op_type = op.get("op")
-        if op_type in ("write", "patch", "overwrite"):
-            hub = op.get("hub")
+        op_type = op.op
+        if op_type in (OpType.write, OpType.patch, OpType.overwrite):
+            hub = op.hub
             if hub:
                 clean_hub = hub.strip("[]")
                 if clean_hub:
@@ -211,24 +209,24 @@ def validate_operations(ops: list, payloads: list, target_dir: str) -> tuple[lis
             hub_path = os.path.join(target_dir, hub_filename).replace("\\", "/")
             
             already_creating = any(
-                (o.get("op") == "write" and o.get("heading") == hub) or
-                (o.get("path") and os.path.abspath(o.get("path")) == os.path.abspath(hub_path))
+                (o.op == OpType.write and o.heading == hub) or
+                (o.path and os.path.abspath(o.path) == os.path.abspath(hub_path))
                 for o in validated_ops
             )
             
             if not already_creating:
                 source_basename = "auto_generated"
                 if validated_ops:
-                    source_basename = validated_ops[0].get("source_basename", "auto_generated")
+                    source_basename = validated_ops[0].source_basename or "auto_generated"
                 
-                hub_op = {
-                    "op": "write",
-                    "heading": hub,
-                    "path": hub_path,
-                    "snippet": f"Hub generato automaticamente dalla pipeline Injector.",
-                    "hub": hub,
-                    "source_basename": source_basename
-                }
+                hub_op = Op(
+                    op=OpType.write,
+                    heading=hub,
+                    path=hub_path,
+                    snippet=f"Hub generato automaticamente dalla pipeline Injector.",
+                    hub=hub,
+                    source_basename=source_basename
+                )
                 hub_ops.append(hub_op)
                 logger.info("Validation: l'hub '%s' non esiste. Iniettata operazione di creazione in %s", hub, hub_path)
 

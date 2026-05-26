@@ -38,6 +38,8 @@ from silica.tools.composed import (
     silica_validate_ops,
 )
 from silica.tools.wrapped import silica_move, build_txn
+from silica.kernel.ops import OpType
+from silica.kernel.ops_io import load_ops
 
 logger = logging.getLogger(__name__)
 
@@ -391,25 +393,55 @@ class InjectorFSM:
         
         self.context["snapshot"] = res
         self.context["txn_id"] = res["txn_id"]
-
         try:
-            with open(self.context["ops_path"], "r", encoding="utf-8") as f:
-                ops_data = json.load(f)
-            ops = ops_data if isinstance(ops_data, list) else ops_data.get("updates", [])
-            self._txn = build_txn(ops)
+            from silica.driver.base import NoteRef, Txn
+            from silica.kernel.ops import InverseOp
+            inv = [InverseOp(**d) for d in res["inverses"]]
+            
+            # Reconstruct refs for Txn from inverses
+            refs = []
+            for d in res["inverses"]:
+                if d.get("kind") == "restore_version":
+                    path = d.get("path")
+                    name = path.rsplit("/", 1)[-1].removesuffix(".md")
+                    refs.append(NoteRef(name=name, path=path))
+                    
+            self._txn = Txn(
+                id=res["txn_id"],
+                refs=refs,
+                versions=res.get("versions", {}),
+                created_paths=res.get("created_paths", []),
+                inverses=inv
+            )
         except Exception as e:
             raise RuntimeError(f"SNAPSHOT rebuild failed: {e}")
 
         # S3.2: Take pre-write graph snapshot incrementally
         try:
-            from silica.driver.base import NoteRef
+            ops = load_ops(self.context["ops_path"])
             touched_refs = []
+            snapshot_domain = set()
+            
             for op in ops:
-                path = op.get("path")
+                path = op.touched_ref()
                 if path:
-                    name = path.rsplit("/", 1)[-1].removesuffix(".md")
-                    touched_refs.append(NoteRef(name=name, path=path))
-            self._pre_graph = DRIVER.graph_snapshot(touched_refs)
+                    name = os.path.splitext(os.path.basename(path))[0]
+                    ref = NoteRef(name=name, path=path)
+                    touched_refs.append(ref)
+                    snapshot_domain.add(ref)
+                    
+                    # For mutating ops on existing files (patch/overwrite/delete),
+                    # capture their current outgoing targets to see if they become orphans
+                    if op.op in (OpType.patch, OpType.overwrite, OpType.delete):
+                        try:
+                            for target_ref in DRIVER.links(ref):
+                                snapshot_domain.add(target_ref)
+                        except Exception as ex:
+                            logger.warning("Failed to fetch pre-write links for %s: %s", path, ex)
+                            
+            snapshot_domain_list = list(snapshot_domain)
+            self.context["snapshot_domain"] = [{"name": r.name, "path": r.path} for r in snapshot_domain_list]
+            self._pre_graph = DRIVER.graph_snapshot(snapshot_domain_list)
         except Exception as e:
             logger.error("Failed to take pre-write graph snapshot: %s", e)
             raise RuntimeError(f"Pre-write graph snapshot failed: {e}")
@@ -434,16 +466,14 @@ class InjectorFSM:
 
     def _handle_lint(self) -> None:
         try:
-            with open(self.context["ops_path"], "r", encoding="utf-8") as f:
-                ops_raw = json.load(f)
-            ops = ops_raw if isinstance(ops_raw, list) else ops_raw.get("updates", [])
+            ops = load_ops(self.context["ops_path"])
         except Exception as e:
             raise RuntimeError(f"LINT: failed to read ops: {e}")
 
         touched = [
-            (op["path"], op.get("op"), op.get("hub"))
+            (op.touched_ref(), op.op.value if op.op else "", op.hub or "")
             for op in ops
-            if op.get("path") and op.get("op") not in ("delete", "skip")
+            if op.touched_ref() and op.op not in (OpType.delete, OpType.skip)
         ]
 
         for path, op_type, hub in touched:
@@ -473,13 +503,19 @@ class InjectorFSM:
                 return
             try:
                 from silica.driver.base import NoteRef
-                touched_refs = []
-                for op in ops:
-                    path = op.get("path")
-                    if path:
-                        name = path.rsplit("/", 1)[-1].removesuffix(".md")
-                        touched_refs.append(NoteRef(name=name, path=path))
-                post_graph = DRIVER.graph_snapshot(touched_refs)
+                snapshot_domain_dicts = self.context.get("snapshot_domain", [])
+                if snapshot_domain_dicts:
+                    snapshot_domain = [NoteRef(**d) for d in snapshot_domain_dicts]
+                else:
+                    # Fallback to touched refs if snapshot_domain is missing
+                    snapshot_domain = []
+                    for op in ops:
+                        path = op.touched_ref()
+                        if path:
+                            name = os.path.splitext(os.path.basename(path))[0]
+                            snapshot_domain.append(NoteRef(name=name, path=path))
+                
+                post_graph = DRIVER.graph_snapshot(snapshot_domain)
                 from silica.kernel.graph_diff import check_graph_regression
                 
                 created_paths = self._txn.created_paths if self._txn else []
@@ -555,18 +591,16 @@ class InjectorFSM:
             ledger = get_ledger()
             txn_id = self.context.get("txn_id", "unknown")
 
-            with open(self.context["ops_path"], "r", encoding="utf-8") as f:
-                ops_raw = json.load(f)
-            ops = ops_raw if isinstance(ops_raw, list) else ops_raw.get("updates", [])
+            ops = load_ops(self.context["ops_path"])
 
             for op in ops:
-                if op.get("op") == "skip":
+                if op.op == OpType.skip:
                     continue
                 ledger.record(
                     txn_id=txn_id,
-                    source_basename=op.get("source_basename", ""),
-                    path=op.get("path"),
-                    op=op.get("op", ""),
+                    source_basename=op.source_basename or "",
+                    path=op.touched_ref(),
+                    op=op.op.value if op.op else "",
                     status=status,
                 )
         except Exception as e:

@@ -20,6 +20,8 @@ from silica.tools.composed import (
     silica_validate_ops,
 )
 from silica.tools.wrapped import build_txn
+from silica.kernel.ops import Op, OpType
+from silica.kernel.ops_io import load_ops, dump_ops, parse_ops
 from silica.kernel.ledger import get_ledger
 from silica.kernel import frontmatter, ofm, templates
 
@@ -118,7 +120,10 @@ class RefinerFSM:
         fd, path = tempfile.mkstemp(suffix=suffix)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(content, f, ensure_ascii=False)
+                if isinstance(content, list) and len(content) > 0 and hasattr(content[0], "model_dump"):
+                    json.dump([item.model_dump() for item in content], f, ensure_ascii=False)
+                else:
+                    json.dump(content, f, ensure_ascii=False)
         except Exception:
             os.close(fd)
             raise
@@ -287,7 +292,8 @@ class RefinerFSM:
                             "heading": s["title"],
                             "snippet": s["content"],
                             "content": spoke_content,
-                            "hub": hub
+                            "hub": hub,
+                            "source_basename": basename
                         })
                     
                     hub_fm = {
@@ -301,6 +307,8 @@ class RefinerFSM:
                     det_ops.append({
                         "op": "overwrite",
                         "path": path,
+                        "heading": hub,
+                        "source_basename": basename,
                         "content": frontmatter.dump(hub_fm, index_body),
                         "hub": hub
                     })
@@ -312,6 +320,8 @@ class RefinerFSM:
                         det_ops.append({
                             "op": "overwrite",
                             "path": path,
+                            "heading": os.path.splitext(basename)[0],
+                            "source_basename": basename,
                             "content": new_content,
                             "hub": self.hub_override or os.path.splitext(basename)[0]
                         })
@@ -324,6 +334,8 @@ class RefinerFSM:
                         det_ops.append({
                             "op": "overwrite",
                             "path": path,
+                            "heading": os.path.splitext(basename)[0],
+                            "source_basename": basename,
                             "content": new_content,
                             "hub": self.hub_override or os.path.splitext(basename)[0]
                         })
@@ -415,6 +427,8 @@ class RefinerFSM:
             enrich_ops.append({
                 "op": "overwrite",
                 "path": r["path"],
+                "heading": os.path.splitext(os.path.basename(r["path"]))[0],
+                "source_basename": os.path.basename(r["path"]),
                 "content": r["content"],
                 "hub": self.hub_override or os.path.splitext(os.path.basename(r["path"]))[0]
             })
@@ -465,21 +479,54 @@ class RefinerFSM:
         self.context["txn_id"] = res["txn_id"]
 
         try:
-            with open(self.context["ops_path"], "r", encoding="utf-8") as f:
-                ops_data = json.load(f)
-            self._txn = build_txn(ops_data)
+            from silica.driver.base import NoteRef, Txn
+            from silica.kernel.ops import InverseOp
+            inv = [InverseOp(**d) for d in res["inverses"]]
+            
+            # Reconstruct refs for Txn from inverses
+            refs = []
+            for d in res["inverses"]:
+                if d.get("kind") == "restore_version":
+                    path = d.get("path")
+                    name = path.rsplit("/", 1)[-1].removesuffix(".md")
+                    refs.append(NoteRef(name=name, path=path))
+                    
+            self._txn = Txn(
+                id=res["txn_id"],
+                refs=refs,
+                versions=res.get("versions", {}),
+                created_paths=res.get("created_paths", []),
+                inverses=inv
+            )
         except Exception as e:
             raise RuntimeError(f"SNAPSHOT rebuild failed: {e}")
 
         # Graph-diff check
         try:
+            ops_data = load_ops(self.context["ops_path"])
             touched_refs = []
+            snapshot_domain = set()
+            
             for op in ops_data:
-                path = op.get("path")
+                path = op.touched_ref()
                 if path:
                     name = os.path.splitext(os.path.basename(path))[0]
-                    touched_refs.append(NoteRef(name=name, path=path))
-            self._pre_graph = DRIVER.graph_snapshot(touched_refs)
+                    ref = NoteRef(name=name, path=path)
+                    touched_refs.append(ref)
+                    snapshot_domain.add(ref)
+                    
+                    # For mutating ops on existing files (patch/overwrite/delete),
+                    # capture their current outgoing targets to see if they become orphans
+                    if op.op in (OpType.patch, OpType.overwrite, OpType.delete):
+                        try:
+                            for target_ref in DRIVER.links(ref):
+                                snapshot_domain.add(target_ref)
+                        except Exception as ex:
+                            logger.warning("Failed to fetch pre-write links for %s: %s", path, ex)
+                            
+            snapshot_domain_list = list(snapshot_domain)
+            self.context["snapshot_domain"] = [{"name": r.name, "path": r.path} for r in snapshot_domain_list]
+            self._pre_graph = DRIVER.graph_snapshot(snapshot_domain_list)
         except Exception as e:
             logger.error("Failed to take pre-write graph snapshot: %s", e)
             raise RuntimeError(f"Pre-write graph snapshot failed: {e}")
@@ -502,15 +549,14 @@ class RefinerFSM:
 
     def _handle_lint(self) -> None:
         try:
-            with open(self.context["ops_path"], "r", encoding="utf-8") as f:
-                ops = json.load(f)
+            ops = load_ops(self.context["ops_path"])
         except Exception as e:
             raise RuntimeError(f"LINT: failed to read ops: {e}")
 
         touched = [
-            (op["path"], op.get("op"), op.get("hub"))
+            (op.touched_ref(), op.op.value if op.op else "", op.hub or "")
             for op in ops
-            if op.get("path") and op.get("op") not in ("delete", "skip")
+            if op.touched_ref() and op.op not in (OpType.delete, OpType.skip)
         ]
 
         for path, op_type, hub in touched:
@@ -530,13 +576,19 @@ class RefinerFSM:
                 self.state = RefinerState.ROLLBACK
                 return
             try:
-                touched_refs = []
-                for op in ops:
-                    path = op.get("path")
-                    if path:
-                        name = os.path.splitext(os.path.basename(path))[0]
-                        touched_refs.append(NoteRef(name=name, path=path))
-                post_graph = DRIVER.graph_snapshot(touched_refs)
+                snapshot_domain_dicts = self.context.get("snapshot_domain", [])
+                if snapshot_domain_dicts:
+                    snapshot_domain = [NoteRef(**d) for d in snapshot_domain_dicts]
+                else:
+                    # Fallback to touched refs if snapshot_domain is missing
+                    snapshot_domain = []
+                    for op in ops:
+                        path = op.touched_ref()
+                        if path:
+                            name = os.path.splitext(os.path.basename(path))[0]
+                            snapshot_domain.append(NoteRef(name=name, path=path))
+                
+                post_graph = DRIVER.graph_snapshot(snapshot_domain)
                 from silica.kernel.graph_diff import check_graph_regression
                 
                 created_paths = self._txn.created_paths if self._txn else []
@@ -591,16 +643,16 @@ class RefinerFSM:
     def _write_ledger(self, status: str) -> None:
         try:
             txn_id = self.context.get("txn_id", "unknown")
-            ops = self.context["ops"]
+            ops = parse_ops(self.context["ops"])
 
             for op in ops:
-                if op.get("op") == "skip":
+                if op.op == OpType.skip:
                     continue
                 get_ledger().record(
                     txn_id=txn_id,
-                    source_basename=os.path.basename(op.get("path", "")),
-                    path=op.get("path"),
-                    op=op.get("op", ""),
+                    source_basename=op.source_basename or os.path.basename(op.touched_ref() or ""),
+                    path=op.touched_ref(),
+                    op=op.op.value if op.op else "",
                     status=status,
                 )
         except Exception as e:

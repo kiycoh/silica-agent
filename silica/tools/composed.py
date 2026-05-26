@@ -13,6 +13,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
+from silica.kernel.ops import OpType
+from silica.kernel.ops_io import load_ops, dump_ops, parse_ops
 from silica.tools import tool
 
 
@@ -172,14 +174,7 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] | None = No
         payload_paths = []
 
     try:
-        with open(ops_json_path, 'r', encoding='utf-8') as f:
-            ops_data = json.load(f)
-            if isinstance(ops_data, dict) and "updates" in ops_data:
-                ops = ops_data["updates"]
-            elif isinstance(ops_data, list):
-                ops = ops_data
-            else:
-                ops = [ops_data]
+        ops = load_ops(ops_json_path)
     except Exception as e:
         return {"error": f"Failed to load operations: {e}"}
 
@@ -196,7 +191,7 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] | None = No
     total = len(ops)
     rejected_count = len(rejected_ops)
     # C4 denominator: skip ops excluded from rejection rate
-    actionable = sum(1 for o in ops if o.get("op") != "skip")
+    actionable = sum(1 for o in ops if o.op != OpType.skip)
     rejection_rate = rejected_count / actionable if actionable > 0 else 0.0
 
     success = rejection_rate <= 0.1
@@ -205,8 +200,7 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] | None = No
     # SNAPSHOT and WRITE read this same file — single source of truth.
     if success:
         try:
-            with open(ops_json_path, 'w', encoding='utf-8') as f:
-                json.dump(validated_ops, f, ensure_ascii=False, indent=2)
+            dump_ops(ops_json_path, validated_ops)
         except Exception as e:
             return {"error": f"Failed to persist validated ops: {e}"}
 
@@ -216,8 +210,8 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] | None = No
         "validated_count": len(validated_ops),
         "rejected_count": rejected_count,
         "rejection_rate": rejection_rate,
-        "validated_ops": validated_ops,
-        "rejected_ops": rejected_ops,
+        "validated_ops": [o.model_dump() for o in validated_ops],
+        "rejected_ops": [r.model_dump() for r in rejected_ops],
     }
 
 
@@ -227,23 +221,15 @@ class BulkWriteArgs(BaseModel):
 @tool(BulkWriteArgs, cls="composed")
 def silica_bulk_write(ops_json_path: str) -> dict[str, Any]:
     """Applica in batch write/patch/overwrite/delete nel vault."""
-    import json
     from silica.kernel.bulk import execute_operations
     
     try:
-        with open(ops_json_path, 'r', encoding='utf-8') as f:
-            ops_data = json.load(f)
-            # If the JSON is directly a list, or it's wrapped in a dict with "updates"
-            if isinstance(ops_data, dict) and "updates" in ops_data:
-                ops = ops_data["updates"]
-            elif isinstance(ops_data, list):
-                ops = ops_data
-            else:
-                ops = [ops_data]
+        ops = load_ops(ops_json_path)
     except Exception as e:
         return {"error": f"Failed to load operations: {e}"}
         
-    return execute_operations(ops)
+    res = execute_operations(ops)
+    return res.model_dump()
 
 
 class LintArgs(BaseModel):

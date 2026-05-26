@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class OpType(str, Enum):
@@ -33,6 +33,13 @@ class Op(BaseModel):
     related: list[str] | None = None
     reason: str | None = None           # skip reason / rejection note
 
+    @model_validator(mode="after")
+    def validate_path_required(self) -> Op:
+        if self.op in (OpType.write, OpType.patch, OpType.overwrite, OpType.delete):
+            if not self.path:
+                raise ValueError(f"path required for op '{self.op.value}'")
+        return self
+
     def touched_ref(self) -> str | None:
         """The vault path touched by this op.
 
@@ -43,6 +50,27 @@ class Op(BaseModel):
         if self.op in (OpType.write, OpType.patch, OpType.overwrite, OpType.delete):
             return self.path
         return None
+
+    def __getitem__(self, item: str) -> Any:
+        try:
+            val = getattr(self, item)
+            if isinstance(val, Enum):
+                return val.value
+            return val
+        except AttributeError:
+            raise KeyError(item)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        setattr(self, key, value)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        try:
+            val = getattr(self, item)
+            if isinstance(val, Enum):
+                return val.value
+            return val
+        except AttributeError:
+            return default
 
 
 # ---------------------------------------------------------------------------
@@ -60,3 +88,50 @@ class InverseOp(BaseModel):
     path: str
     version: int | None = None            # for restore_version
     prior_content: str | None = None      # for recreate_deleted
+
+
+class FailedOp(BaseModel):
+    index: int
+    path: str
+    op: str | None = None
+    error: str
+
+    def __getitem__(self, item: str) -> Any:
+        try:
+            return getattr(self, item)
+        except AttributeError:
+            raise KeyError(item)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        return getattr(self, item, default)
+
+
+class BulkResult(BaseModel):
+    ok: bool
+    failed: list[FailedOp]
+    results: list[dict]
+    total: int
+    successful: int
+
+    @property
+    def success(self) -> bool:
+        return self.ok
+
+    def model_dump(self, *args, **kwargs) -> dict[str, Any]:
+        d = super().model_dump(*args, **kwargs)
+        d["success"] = self.ok
+        return d
+
+    def __getitem__(self, item: str) -> Any:
+        if item == "success":
+            return self.ok
+        try:
+            return getattr(self, item)
+        except AttributeError:
+            raise KeyError(item)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        if item == "success":
+            return self.ok
+        return getattr(self, item, default)
+

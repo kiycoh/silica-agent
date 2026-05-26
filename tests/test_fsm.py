@@ -393,4 +393,61 @@ def test_fsm_short_circuit_no_ops(mock_validate):
     assert fsm.context["final_status"] == "no_ops"
 
 
+@patch("silica.router.orchestrator.silica_recon")
+@patch("silica.router.orchestrator.silica_payload")
+@patch("silica.agent.delegate.delegate")
+@patch("silica.router.orchestrator.silica_sanitize")
+@patch("silica.router.orchestrator.silica_validate_ops")
+@patch("silica.router.orchestrator.DRIVER")
+@patch("silica.tools.wrapped.silica_snapshot")
+@patch("silica.tools.wrapped.silica_restore")
+@patch("silica.tools.wrapped.silica_cleanup")
+def test_fsm_create_settle_timeout_rollback(
+    mock_cleanup, mock_restore, mock_snapshot, mock_driver,
+    mock_validate, mock_sanitize, mock_delegate, mock_payload, mock_recon
+):
+    from silica.driver.base import SettleTimeout
+    
+    mock_recon.return_value = {"success": True}
+    mock_payload.return_value = {"payload": {"chunk_id": 0}}
+    mock_delegate.return_value = [{"updates": []}]
+    mock_sanitize.return_value = {"parsed": [{"op": "write", "path": "test.md", "heading": "Test", "hub": "Hub", "source_basename": "test_fsm_settle.md"}]}
+    
+    import json
+    def side_effect_validate(ops_json_path, **kwargs):
+        with open(ops_json_path, 'w', encoding='utf-8') as f:
+            json.dump([{"op": "write", "path": "test.md", "heading": "Test", "hub": "Hub", "source_basename": "test_fsm_settle.md"}], f)
+        return {
+            "success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0,
+        }
+    mock_validate.side_effect = side_effect_validate
+    
+    mock_snapshot.return_value = {
+        "txn_id": "txn_123",
+        "inverses": [{"kind": "delete_created", "path": "test.md"}]
+    }
+    mock_restore.return_value = {"success": True}
+    
+    pre_graph = MagicMock()
+    mock_driver.graph_snapshot.return_value = pre_graph
+    
+    fsm = InjectorFSM("Inbox/test_fsm_settle.md", "TargetDir")
+    
+    # We patch silica.kernel.bulk.DRIVER.create to raise SettleTimeout
+    with patch("silica.kernel.bulk.DRIVER.create", side_effect=SettleTimeout("Settle timeout mock error")):
+        with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])):
+            res = fsm.run()
+        
+    assert fsm.state == InjectorState.ERROR
+    assert "Rolled Back" in res.get("final_status")
+    assert "Settle timeout mock error" in res.get("final_status")
+    
+    # Check that cleanup is not called (inbox not moved)
+    mock_cleanup.assert_not_called()
+    # Check that restore (rollback) was called
+    mock_restore.assert_called_once()
+
+
+
+
 

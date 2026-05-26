@@ -37,18 +37,38 @@ def test_parity_search_names(backends):
     assert fs_names == cli_names
 
 
+def is_markdown_target(target: str) -> bool:
+    return not target.lower().endswith(
+        ('.png', '.jpg', '.jpeg', '.pdf', '.webp', '.svg', '.gif', '.mp4', '.zip', '.html', '.css', '.js')
+    )
+
+
+def normalize_name(name: str) -> str:
+    name = unicodedata.normalize('NFC', name).lower()
+    name = name.replace('"', '').replace("'", "").replace("’", "").replace("`", "")
+    name = name.rstrip('\\').strip()
+    return name
+
+
+# Explicit allow-list for differences in Obsidian's internal indexer logic
+# that cannot be reconciled purely through string normalization.
+KNOWN_PARITY_DIVERGENCES = set()
+
+
 def test_parity_orphans(backends):
     cli, fs = backends
     cli_res = cli.orphans()
     fs_res = fs.orphans()
     
-    cli_names = {unicodedata.normalize('NFC', r.name) for r in cli_res if r.path.endswith('.md')}
-    fs_names = {unicodedata.normalize('NFC', r.name) for r in fs_res if r.path.endswith('.md')}
+    cli_names = {normalize_name(r.name) for r in cli_res if r.path.endswith('.md')}
+    fs_names = {normalize_name(r.name) for r in fs_res if r.path.endswith('.md')}
     
-    # Allow minor divergence due to aliases/code blocks
-    intersection = fs_names & cli_names
-    overlap = len(intersection) / max(len(fs_names), len(cli_names))
-    assert overlap > 0.8, f"Overlap too low: {overlap}"
+    cli_names -= KNOWN_PARITY_DIVERGENCES
+    fs_names -= KNOWN_PARITY_DIVERGENCES
+    
+    diff_fs_cli = fs_names - cli_names
+    diff_cli_fs = cli_names - fs_names
+    assert fs_names == cli_names, f"Orphans mismatch!\nFS but not CLI: {diff_fs_cli}\nCLI but not FS: {diff_cli_fs}"
 
 
 def test_parity_unresolved(backends):
@@ -56,12 +76,15 @@ def test_parity_unresolved(backends):
     cli_res = cli.unresolved()
     fs_res = fs.unresolved()
     
-    cli_targets = {unicodedata.normalize('NFC', r.target) for r in cli_res if not r.target.endswith(('.png', '.jpg', '.pdf'))}
-    fs_targets = {unicodedata.normalize('NFC', r.target) for r in fs_res if not r.target.endswith(('.png', '.jpg', '.pdf'))}
+    cli_targets = {normalize_name(r.target) for r in cli_res if is_markdown_target(r.target)}
+    fs_targets = {normalize_name(r.target) for r in fs_res if is_markdown_target(r.target)}
     
-    intersection = fs_targets & cli_targets
-    overlap = len(intersection) / max(len(fs_targets), len(cli_targets))
-    assert overlap > 0.8, f"Overlap too low: {overlap}"
+    cli_targets -= KNOWN_PARITY_DIVERGENCES
+    fs_targets -= KNOWN_PARITY_DIVERGENCES
+    
+    diff_fs_cli = fs_targets - cli_targets
+    diff_cli_fs = cli_targets - fs_targets
+    assert fs_targets == cli_targets, f"Unresolved links mismatch!\nFS but not CLI: {diff_fs_cli}\nCLI but not FS: {diff_cli_fs}"
 
 
 def test_parity_read_note(backends):
@@ -89,16 +112,18 @@ def test_parity_links_and_backlinks(backends):
     test_ref = None
     for ref in files:
         if cli.links(ref):
-            test_ref = ref
-            break
+            has_md_links = any(is_markdown_target(r.path or r.name) for r in cli.links(ref))
+            if has_md_links:
+                test_ref = ref
+                break
             
     if not test_ref:
         test_ref = files[0]
         
-    cli_links = {r.name for r in cli.links(test_ref)}
-    fs_links = {r.name for r in fs.links(test_ref)}
+    cli_links = {normalize_name(r.name) for r in cli.links(test_ref) if is_markdown_target(r.path or r.name)}
+    fs_links = {normalize_name(r.name) for r in fs.links(test_ref) if is_markdown_target(r.path or r.name)}
     assert fs_links == cli_links
     
-    cli_backlinks = {r.name for r in cli.backlinks(test_ref)}
-    fs_backlinks = {r.name for r in fs.backlinks(test_ref)}
+    cli_backlinks = {normalize_name(r.name) for r in cli.backlinks(test_ref) if r.path.endswith('.md')}
+    fs_backlinks = {normalize_name(r.name) for r in fs.backlinks(test_ref) if r.path.endswith('.md')}
     assert fs_backlinks == cli_backlinks

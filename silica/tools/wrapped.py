@@ -26,7 +26,8 @@ from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
 from silica.driver.base import NoteRef, Txn
-from silica.kernel.ops import InverseOp, InverseOpKind, OpType
+from silica.kernel.ops import InverseOp, InverseOpKind, OpType, Op
+from silica.kernel.ops_io import parse_ops, load_ops
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)
@@ -75,29 +76,44 @@ def silica_delete(ref: str, confirm: bool = False) -> dict[str, Any]:
 # build_txn — internal helper (not a tool)
 # ---------------------------------------------------------------------------
 
-def build_txn(ops_data: list[dict]) -> Txn:
+def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
     """Build a Txn with InverseOp entries before WRITE executes.
 
     Rollback strategies (C3):
       write   → delete_created(path)     — note didn't exist; undo = delete
       patch / overwrite → restore_version(path, N) — note existed; undo = history:restore
     """
+    ops = parse_ops(ops_data)
     patch_refs: list[NoteRef] = []
     inverses: list[InverseOp] = []
 
-    for op in ops_data:
-        op_type = op.get("op")
-        path = op.get("path")
-        if not path or op_type in (OpType.skip, OpType.delete, "skip", "delete"):
+    for op in ops:
+        op_type = op.op
+        path = op.touched_ref()
+        if not path or op_type == OpType.skip:
             continue
 
-        if op_type in (OpType.write, "write"):
+        if op_type == OpType.write:
             # New note — rollback = delete it
             inverses.append(InverseOp(kind=InverseOpKind.delete_created, path=path))
-        elif op_type in (OpType.patch, OpType.overwrite, "patch", "overwrite"):
+        elif op_type in (OpType.patch, OpType.overwrite):
             # Existing note — snapshot its version for rollback
             name = path.rsplit("/", 1)[-1].removesuffix(".md")
             patch_refs.append(NoteRef(name=name, path=path))
+        elif op_type == OpType.delete:
+            # Recreate deleted note — rollback = recreate with prior content
+            name = path.rsplit("/", 1)[-1].removesuffix(".md")
+            ref = NoteRef(name=name, path=path)
+            try:
+                nc = DRIVER.read_note(ref)
+                prior_content = nc.content
+            except Exception:
+                prior_content = None
+            inverses.append(InverseOp(
+                kind=InverseOpKind.recreate_deleted,
+                path=path,
+                prior_content=prior_content
+            ))
 
     # Snapshot patch targets via DRIVER (gets version numbers)
     base_txn = DRIVER.snapshot_versions(patch_refs)
@@ -147,16 +163,7 @@ def silica_snapshot(ops_json_path: str) -> dict[str, Any]:
     The tool result is JSON-serialisable (no _txn_obj leak per addendum note).
     """
     try:
-        with open(ops_json_path, "r", encoding="utf-8") as f:
-            ops_data = json.load(f)
-
-        ops: list[dict]
-        if isinstance(ops_data, dict) and "updates" in ops_data:
-            ops = ops_data["updates"]
-        elif isinstance(ops_data, list):
-            ops = ops_data
-        else:
-            ops = [ops_data]
+        ops = load_ops(ops_json_path)
     except Exception as e:
         return {"error": f"Failed to load operations for snapshot: {e}"}
 
@@ -165,16 +172,13 @@ def silica_snapshot(ops_json_path: str) -> dict[str, Any]:
     except Exception as e:
         return {"error": f"Snapshot failed: {e}"}
 
-    # Serialise InverseOps — no Python objects leak through the tool boundary
-    inverses_json = [inv.model_dump() for inv in getattr(txn, "inverses", [])]
-
     return {
         "success": True,
         "txn_id": txn.id,
         "refs": [r.name for r in txn.refs],
         "versions": txn.versions,
         "created_paths": txn.created_paths,
-        "inverses": inverses_json,
+        "inverses": txn.inverses_serialized,
         # _txn_obj intentionally absent — orchestrator calls build_txn() directly
     }
 

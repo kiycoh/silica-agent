@@ -143,8 +143,8 @@ def test_inbox_blacklisting_and_external_reads(tmp_path):
         backend._ensure_index()
         
         # 1. Check that notes in Inbox are not indexed
-        assert "note1" in backend._notes
-        assert "meeting_notes" not in backend._notes
+        assert any(ref.name == "note1" for ref in backend._notes.values())
+        assert not any(ref.name == "meeting_notes" for ref in backend._notes.values())
         
         # 2. Check list_files
         listed = [ref.name for ref in backend.list_files()]

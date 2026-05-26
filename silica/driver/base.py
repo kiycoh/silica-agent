@@ -16,8 +16,12 @@ from typing import Any, Protocol, runtime_checkable
 
 
 # ---------------------------------------------------------------------------
-# Domain types — the vocabulary of the Driver interface
+# Domain types & Exceptions
 # ---------------------------------------------------------------------------
+
+class SettleTimeout(RuntimeError):
+    """Raised when a write operation fails to settle within the timeout."""
+
 
 @dataclass(frozen=True)
 class NoteRef:
@@ -85,6 +89,22 @@ class Txn:
     versions: dict[str, int] = field(default_factory=dict)   # path -> version number
     created_paths: list[str] = field(default_factory=list)   # paths created by write ops
     inverses: list = field(default_factory=list)              # list[InverseOp] — real field, not dynamic attr
+
+    @property
+    def inverses_serialized(self) -> list[dict]:
+        """Return a JSON-serializable list of dicts representing the inverse operations."""
+        serialized = []
+        for inv in self.inverses:
+            if hasattr(inv, "model_dump"):
+                serialized.append(inv.model_dump())
+            elif isinstance(inv, dict):
+                serialized.append(inv)
+            else:
+                try:
+                    serialized.append(dict(inv))
+                except Exception:
+                    pass
+        return serialized
 
 
 # ---------------------------------------------------------------------------

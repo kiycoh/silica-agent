@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import time
 from typing import Any
+from silica.kernel.wikilink import extract_links
 
 from silica.driver.base import (
     GraphSnapshot,
@@ -27,6 +29,7 @@ from silica.driver.base import (
     Link,
     NoteContent,
     NoteRef,
+    SettleTimeout,
     Txn,
 )
 
@@ -46,6 +49,60 @@ class ObsidianCLIBackend:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _resolve_path(self, ref: NoteRef | str) -> str:
+        """Resolve a NoteRef or name to a vault-relative path."""
+        if isinstance(ref, NoteRef):
+            if ref.path:
+                return ref.path
+            name = ref.name
+        else:
+            name = ref
+            
+        if name.endswith(".md"):
+            return name
+            
+        # Match against list_files
+        for f in self.list_files():
+            if f.name.lower() == name.lower():
+                return f.path
+                
+        # Default fallback
+        return f"{name}.md"
+
+    def _write_large_content(self, path: str, content: str, append_mode: bool = False) -> None:
+        """Write large content to a file inside Obsidian using a temporary file and eval."""
+        import tempfile
+        import os
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            js_temp_path = temp_path.replace("\\", "\\\\").replace("'", "\\'")
+            js_dest_path = path.replace("\\", "\\\\").replace("'", "\\'")
+            if append_mode:
+                js_code = (
+                    f"(async () => {{"
+                    f"  const fs = require('fs');"
+                    f"  const data = fs.readFileSync('{js_temp_path}', 'utf8');"
+                    f"  await app.vault.adapter.append('{js_dest_path}', data);"
+                    f"}})()"
+                )
+            else:
+                js_code = (
+                    f"(async () => {{"
+                    f"  const fs = require('fs');"
+                    f"  const data = fs.readFileSync('{js_temp_path}', 'utf8');"
+                    f"  await app.vault.adapter.write('{js_dest_path}', data);"
+                    f"}})()"
+                )
+            self._run_cli("eval", f"code={js_code}")
+        finally:
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
 
     def _run_cli(self, *args: str, check: bool = True) -> str:
         """Execute an obsidian CLI command and return stdout.
@@ -361,11 +418,16 @@ class ObsidianCLIBackend:
 
     def create(self, path: str, content: str) -> NoteRef:
         """Create a new note at the given vault-relative path."""
-        escaped = content.replace("\\", "\\\\").replace("\n", "\\n")
-        self._run_cli("create", f"path={path}", f"content={escaped}")
+        if len(content) > 30000:
+            self._write_large_content(path, content, append_mode=False)
+        else:
+            escaped = content.replace("\\", "\\\\").replace("\n", "\\n")
+            self._run_cli("create", f"path={path}", f"content={escaped}")
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
         ref = NoteRef(name=name, path=path)
-        self._wait_for_create(ref)
+        self._wait_for_content_reflects(ref, content)
+        expected_targets = extract_links(content)
+        self._wait_for_links_indexed(ref, expected_targets)
         return ref
 
     def overwrite(self, path: str, content: str) -> NoteRef:
@@ -374,8 +436,11 @@ class ObsidianCLIBackend:
         Uses `obsidian create ... overwrite=true` which keeps the file's block-refs
         and history intact — unlike delete+create which destroys both.
         """
-        escaped = content.replace("\\", "\\\\").replace("\n", "\\n")
-        self._run_cli("create", f"path={path}", f"content={escaped}", "overwrite=true")
+        if len(content) > 30000:
+            self._write_large_content(path, content, append_mode=False)
+        else:
+            escaped = content.replace("\\", "\\\\").replace("\n", "\\n")
+            self._run_cli("create", f"path={path}", f"content={escaped}", "overwrite=true")
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
         ref = NoteRef(name=name, path=path)
         # C2: verify content reflects the write, not just readability
@@ -384,8 +449,12 @@ class ObsidianCLIBackend:
 
     def append(self, ref: NoteRef | str, content: str) -> None:
         """Append content to an existing note."""
-        escaped = content.replace("\\", "\\\\").replace("\n", "\\n")
-        self._run_cli("append", self._ref_arg(ref), f"content={escaped}")
+        if len(content) > 30000:
+            path = self._resolve_path(ref)
+            self._write_large_content(path, content, append_mode=True)
+        else:
+            escaped = content.replace("\\", "\\\\").replace("\n", "\\n")
+            self._run_cli("append", self._ref_arg(ref), f"content={escaped}")
         # C2: verify content was appended
         self._wait_for_content_contains(ref, content)
 
@@ -530,10 +599,28 @@ class ObsidianCLIBackend:
             except RuntimeError:
                 time.sleep(_SETTLE_POLL_INTERVAL)
 
-        logger.warning(
-            "Settle timeout (create) for %s after %.1fs — cache may be stale",
-            ref.name,
-            timeout,
+        raise SettleTimeout(
+            f"Settle timeout (create) for {ref.name} after {timeout:.1f}s — cache may be stale"
+        )
+
+    def _wait_for_links_indexed(self, ref: NoteRef, expected_targets: list[str], timeout: float = _SETTLE_TIMEOUT) -> None:
+        """Poll until outgoing links of ref contain all expected_targets."""
+        if not expected_targets:
+            return
+        expected_set = set(expected_targets)
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                current_links = {link_ref.name for link_ref in self.links(ref)}
+                if expected_set.issubset(current_links):
+                    return
+            except Exception:
+                pass
+            time.sleep(_SETTLE_POLL_INTERVAL)
+
+        raise SettleTimeout(
+            f"Settle timeout (links indexing) for {ref.name} after {timeout:.1f}s. "
+            f"Expected: {expected_set}, Indexed: {current_links if 'current_links' in locals() else None}"
         )
 
     def _wait_for_content_reflects(self, ref: NoteRef, expected_content: str,
@@ -555,10 +642,8 @@ class ObsidianCLIBackend:
                 pass
             time.sleep(_SETTLE_POLL_INTERVAL)
 
-        logger.warning(
-            "Settle timeout (overwrite content) for %s after %.1fs — cache may be stale",
-            ref.name,
-            timeout,
+        raise SettleTimeout(
+            f"Settle timeout (overwrite content) for {ref.name} after {timeout:.1f}s — cache may be stale"
         )
 
     def _wait_for_content_contains(self, ref: NoteRef | str, fragment: str,
@@ -568,6 +653,7 @@ class ObsidianCLIBackend:
         Postcondition (C2 / append): appended content is visible in the note.
         """
         deadline = time.monotonic() + timeout
+        name = ref if isinstance(ref, str) else ref.name
         while time.monotonic() < deadline:
             try:
                 nc = self.read_note(ref)
@@ -577,10 +663,8 @@ class ObsidianCLIBackend:
                 pass
             time.sleep(_SETTLE_POLL_INTERVAL)
 
-        logger.warning(
-            "Settle timeout (append) for %s after %.1fs — cache may be stale",
-            ref if isinstance(ref, str) else ref.name,
-            timeout,
+        raise SettleTimeout(
+            f"Settle timeout (append) for {name} after {timeout:.1f}s — cache may be stale"
         )
 
     def _wait_for_gone(self, ref: NoteRef | str, timeout: float = _SETTLE_TIMEOUT) -> None:
@@ -589,6 +673,7 @@ class ObsidianCLIBackend:
         Postcondition (C2 / delete): note is no longer readable.
         """
         deadline = time.monotonic() + timeout
+        name = ref if isinstance(ref, str) else ref.name
         while time.monotonic() < deadline:
             try:
                 self._run_cli("read", self._ref_arg(ref), check=False)
@@ -596,10 +681,8 @@ class ObsidianCLIBackend:
             except RuntimeError:
                 return  # Gone — postcondition satisfied
 
-        logger.warning(
-            "Settle timeout (delete) for %s after %.1fs — note may still be cached",
-            ref if isinstance(ref, str) else ref.name,
-            timeout,
+        raise SettleTimeout(
+            f"Settle timeout (delete) for {name} after {timeout:.1f}s — note may still be cached"
         )
 
     def _wait_for_prop(self, ref: NoteRef | str, prop_name: str, expected_value: str,
@@ -609,6 +692,7 @@ class ObsidianCLIBackend:
         Postcondition (C2 / set_prop): props_of(ref)[prop_name] == expected_value
         """
         deadline = time.monotonic() + timeout
+        name = ref if isinstance(ref, str) else ref.name
         while time.monotonic() < deadline:
             try:
                 props = self.props_of(ref)
@@ -618,16 +702,14 @@ class ObsidianCLIBackend:
                 pass
             time.sleep(_SETTLE_POLL_INTERVAL)
 
-        logger.warning(
-            "Settle timeout (set_prop '%s') for %s after %.1fs — cache may be stale",
-            prop_name,
-            ref if isinstance(ref, str) else ref.name,
-            timeout,
+        raise SettleTimeout(
+            f"Settle timeout (set_prop '{prop_name}') for {name} after {timeout:.1f}s — cache may be stale"
         )
 
     def _wait_for_move(self, original_ref: NoteRef | str, to_path: str,
                        timeout: float = _SETTLE_TIMEOUT) -> None:
-        """Poll until a move is reflected: destination readable AND source gone.
+        """Poll until a move is reflected: destination readable AND source gone,
+        and its backlink cache has updated.
 
         Postcondition (C2 / move): read(to) succeeds AND read(original_ref) raises.
         Both halves are required — checking only the destination allows a
@@ -650,13 +732,13 @@ class ObsidianCLIBackend:
             except RuntimeError:
                 src_gone = True
             if dest_ok and src_gone:
-                return
+                # Also verify that the backlink cache has updated
+                if not self.backlinks(original_ref):
+                    return
             time.sleep(_SETTLE_POLL_INTERVAL)
 
-        logger.warning(
-            "Settle timeout (move to '%s') after %.1fs — cache may be stale",
-            to_path,
-            timeout,
+        raise SettleTimeout(
+            f"Settle timeout (move to '{to_path}') after {timeout:.1f}s — cache may be stale"
         )
 
     # Legacy alias kept for any remaining internal callers
