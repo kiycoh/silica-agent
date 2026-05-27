@@ -17,6 +17,7 @@ S2.3 change: ledger.py integrated (CLEANUP writes 'committed', ROLLBACK marks 'r
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import tempfile
@@ -170,8 +171,18 @@ class InjectorFSM:
     def run(self) -> dict[str, Any]:
         """Execute the pipeline end-to-end."""
         from silica.kernel.ledger import get_ledger
-        basename = os.path.basename(self.inbox_file)
-        if get_ledger().is_committed(basename):
+        # Compute stable identity: vault-relative path, no .md, lowercase
+        source_canonical = self._source_canonical()
+        # Hash the inbox file content for content-aware skip (C2.2)
+        try:
+            content_bytes = open(self.inbox_file, "rb").read()
+            content_hash = hashlib.sha256(content_bytes).hexdigest()
+        except OSError:
+            content_hash = ""
+        self.context["source_canonical"] = source_canonical
+        self.context["source_content_hash"] = content_hash
+
+        if get_ledger().is_committed(source_canonical, content_hash=content_hash):
             self.context["final_status"] = "already_ingested"
             return self.context
 
@@ -258,6 +269,20 @@ class InjectorFSM:
             raise RuntimeError(f"Recon failed: {res['error']}")
         self.context["recon"] = res
         self._transition_success()
+
+    def _source_canonical(self) -> str:
+        """Vault-relative canonical path for the inbox file (no .md, lowercase)."""
+        vault_path = getattr(CONFIG, "vault_path", None) or ""
+        inbox = self.inbox_file
+        if vault_path:
+            try:
+                from pathlib import Path as _P
+                rel = _P(inbox).relative_to(_P(vault_path)).as_posix()
+                return rel.removesuffix(".md").lower()
+            except ValueError:
+                pass
+        # Fallback: basename without extension
+        return os.path.splitext(os.path.basename(inbox))[0].lower()
 
     def _handle_payload(self) -> None:
         recon_path = self._make_tmp([self.context["recon"]])
@@ -594,6 +619,8 @@ class InjectorFSM:
             from silica.kernel.ledger import get_ledger
             ledger = get_ledger()
             txn_id = self.context.get("txn_id", "unknown")
+            source_canonical = self.context.get("source_canonical", "")
+            content_hash = self.context.get("source_content_hash")
 
             ops = load_ops(self.context["ops_path"])
 
@@ -602,10 +629,11 @@ class InjectorFSM:
                     continue
                 ledger.record(
                     txn_id=txn_id,
-                    source_basename=op.source_basename or "",
+                    source_canonical=source_canonical,
                     path=op.touched_ref(),
                     op=op.op.value if op.op else "",
                     status=status,
+                    content_hash=content_hash,
                 )
         except Exception as e:
             logger.warning("Failed to write ledger: %s", e)

@@ -444,74 +444,52 @@ class ObsidianCLIBackend:
                 backlink_counts=backlink_counts,
             )
 
-        # Incremental snapshot
+        # Incremental snapshot — path-keyed, reads from in-memory graph (C1.2/C1.3)
+        self._ensure_graph()
+
+        # Build 1-hop neighborhood using paths (not names)
         neighborhood: set[str] = set()
-        name_to_ref: dict[str, NoteRef] = {}
-
         for ref in refs:
-            name = ref.name
-            neighborhood.add(name)
-            name_to_ref[name] = ref
+            if not ref.path:
+                continue
+            neighborhood.add(ref.path)
+            if ref.path in self._graph:
+                for t in self._graph.successors(ref.path):
+                    neighborhood.add(t)
+                for s in self._graph.predecessors(ref.path):
+                    neighborhood.add(s)
+            # Unresolved outgoing: source path is in _unresolved_links
+            for s, _t in self._unresolved_links:
+                if s == ref.path:
+                    neighborhood.add(s)
 
-            # Add outgoing links
-            try:
-                out = self.links(ref)
-                for target in out:
-                    neighborhood.add(target.name)
-                    name_to_ref[target.name] = target
-            except Exception:
-                pass
-
-            # Add incoming backlinks
-            try:
-                inc = self.backlinks(ref)
-                for source in inc:
-                    neighborhood.add(source.name)
-                    name_to_ref[source.name] = source
-            except Exception:
-                pass
-
-        link_counts = {}
-        backlink_counts = {}
+        link_counts: dict[str, int] = {}
+        backlink_counts: dict[str, int] = {}
         orphans: list[NoteRef] = []
         unresolved: list[Link] = []
 
-        existence_cache: dict[str, bool] = {}
-        def note_exists(n: str) -> bool:
-            if n in existence_cache:
-                return existence_cache[n]
-            r = name_to_ref.get(n, NoteRef(name=n))
-            try:
-                self._run_cli("read", self._ref_arg(r))
-                exists = True
-            except Exception:
-                exists = False
-            existence_cache[n] = exists
-            return exists
-
-        for name in neighborhood:
-            ref = name_to_ref.get(name, NoteRef(name=name))
-            if not note_exists(name):
-                link_counts[name] = 0
-                backlink_counts[name] = 0
+        for path in neighborhood:
+            ref = self._notes.get(path)
+            if not ref:
                 continue
+            # Canonical key: path without .md extension (mirrors full-vault branch)
+            key = path.removesuffix(".md")
 
-            try:
-                out = self.links(ref)
-                link_counts[name] = len(out)
-                for target in out:
-                    if not note_exists(target.name):
-                        unresolved.append(Link(source=ref, target=target.name))
-            except Exception:
-                link_counts[name] = 0
+            resolved_out = self._graph.out_degree(path) if path in self._graph else 0
+            unresolved_out = sum(1 for s, t in self._unresolved_links if s == path)
+            link_counts[key] = resolved_out + unresolved_out
 
-            try:
-                inc = self.backlinks(ref)
-                backlink_counts[name] = len(inc)
-                if len(inc) == 0:
-                    orphans.append(ref)
-            except Exception:
-                backlink_counts[name] = 0
+            in_deg = self._graph.in_degree(path) if path in self._graph else 0
+            backlink_counts[key] = in_deg
+            if in_deg == 0:
+                orphans.append(ref)
+
+        # Capture unresolved links for neighborhood paths
+        for s, t in self._unresolved_links:
+            if s in neighborhood and s in self._notes:
+                unresolved.append(
+                    Link(source=self._node_ref(s), target=t.removesuffix(".md"))
+                )
 
         return GraphSnapshot(
             orphans=orphans,
@@ -519,6 +497,7 @@ class ObsidianCLIBackend:
             link_counts=link_counts,
             backlink_counts=backlink_counts,
         )
+
 
     # ------------------------------------------------------------------
     # Write (graph-safe)
@@ -539,7 +518,19 @@ class ObsidianCLIBackend:
         self._wait_for_links_indexed(ref, expected_targets)
         return ref
 
+    def _load_graph_from_obsidian(self):  # pragma: no cover — Spike S1 placeholder
+        """Bulk-read graph state from Obsidian metadataCache.resolvedLinks via CDP.
+
+        Deferred pending Spike S1 feasibility study. When implemented, replaces
+        the per-note links() calls in _ensure_graph() with a single CDP eval:
+            app.metadataCache.resolvedLinks + unresolvedLinks
+        """
+        raise NotImplementedError(
+            "Spike S1 pending: bulk resolvedLinks read via CDP bridge"
+        )
+
     def overwrite(self, path: str, content: str) -> NoteRef:
+
         """Overwrite an existing note in-place, preserving Obsidian version history.
 
         Uses `obsidian create ... overwrite=true` which keeps the file's block-refs

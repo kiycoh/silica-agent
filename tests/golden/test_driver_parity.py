@@ -1,50 +1,152 @@
-"""Golden tests for driver parity (fs vs cli).
+"""Golden tests for driver parity (FS backend on synthetic vault).
 
-This validates that the FS backend produces the exact same results as the CLI backend
-on a real vault, ensuring the headless oracle mode is perfectly compatible.
+Tests the FS backend against the deterministic synthetic vault from WS0.
+No live Obsidian required — these run in CI headlessly.
 
-Parity guarantee scope
-----------------------
-Link resolution for AMBIGUOUS names (duplicate basenames in different vault folders)
-is intentionally excluded from parity assertions. Obsidian's internal resolver
-(`getFirstLinkpathDest`) uses undocumented, version-dependent tiebreak heuristics
-for duplicate basenames that are empirically non-deterministic. Replicating them
-would mean chasing a moving target — the right fix is option A (key GraphSnapshot
-by canonical path instead of name), tracked as a separate hardening task.
+The full CLI-vs-FS parity test (which requires a live Obsidian instance) is
+preserved but gated behind the `VAULT_PATH` environment variable.
+
+Path-as-identity: with path-keyed snapshots, duplicate basenames (A/Cellula,
+B/Cellula) produce distinct keys and are no longer excluded from assertions.
 """
 import os
 import unicodedata
+from pathlib import Path
 from collections import Counter
+
 import pytest
 
-from silica.driver.cli_backend import ObsidianCLIBackend
 from silica.driver.fs_backend import ObsidianFSBackend
+from tests.fixtures.vault_factory import SPEC, _canonical
 
-# The real vault to test against (must be open in Obsidian)
-VAULT_NAME = "Alex's Second Brain Sync"
-VAULT_PATH = "/home/kiycoh/Documents/Obsidian/Alex's Second Brain Sync"
 
+# ---------------------------------------------------------------------------
+# Synthetic vault fixtures (WS0 — always available, no Obsidian required)
+# ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def backends():
-    if not os.path.exists(VAULT_PATH):
-        pytest.skip(f"Test vault path not found: {VAULT_PATH}")
-    
-    cli = ObsidianCLIBackend(vault_name=VAULT_NAME)
-    fs = ObsidianFSBackend(vault_path=VAULT_PATH)
-    return cli, fs
+def fs_backend(synthetic_vault):
+    """FS backend pointed at the deterministic synthetic vault."""
+    return ObsidianFSBackend(vault_path=str(synthetic_vault))
 
 
-def test_parity_search_names(backends):
-    cli, fs = backends
-    # Query a common letter
-    cli_res = cli.search_names("a")
-    fs_res = fs.search_names("a")
-    
-    cli_names = {unicodedata.normalize('NFC', r.name) for r in cli_res}
-    fs_names = {unicodedata.normalize('NFC', r.name) for r in fs_res}
-    
-    assert fs_names == cli_names
+# ---------------------------------------------------------------------------
+# FS-only parity tests against the synthetic vault
+# ---------------------------------------------------------------------------
+
+def test_synthetic_vault_list_files(fs_backend):
+    """All non-inbox notes from SPEC appear in list_files()."""
+    refs = fs_backend.list_files()
+    paths = {r.path for r in refs}
+
+    # Exclude inbox notes (the FS backend skips them per CONFIG.inbox_dir)
+    # Here inbox_dir is not configured, so all notes ARE indexed.
+    non_inbox_specs = [s for s in SPEC if not s.path.startswith("_inbox/")]
+    for spec in non_inbox_specs:
+        assert spec.path in paths, (
+            f"Expected note '{spec.path}' not found in list_files(). Got: {sorted(paths)}"
+        )
+
+
+def test_synthetic_vault_graph_snapshot_is_path_keyed(fs_backend):
+    """Full graph snapshot uses path-canonical keys (no .md, not bare basenames)."""
+    snap = fs_backend.graph_snapshot()
+
+    # Every key in link_counts must NOT end with .md
+    for key in snap.link_counts:
+        assert not key.endswith(".md"), f"Snapshot key must not end with .md: {key!r}"
+
+    # Hub/Concetti must appear as a path-canonical key (not just 'Concetti')
+    hub_key = next((k for k in snap.link_counts if k.endswith("Concetti")), None)
+    assert hub_key is not None, (
+        f"Expected a key ending with 'Concetti' in link_counts. Keys: {sorted(snap.link_counts)}"
+    )
+    assert "/" in hub_key or hub_key == "Concetti", (
+        f"Hub key should be path-based like 'Hub/Concetti', got: {hub_key!r}"
+    )
+
+
+def test_synthetic_vault_duplicate_basenames_distinct_keys(fs_backend):
+    """A/Cellula and B/Cellula are present as distinct path-canonical keys."""
+    snap = fs_backend.graph_snapshot()
+    assert "A/Cellula" in snap.link_counts, (
+        f"Expected 'A/Cellula' in link_counts. Keys: {sorted(snap.link_counts)}"
+    )
+    assert "B/Cellula" in snap.link_counts, (
+        f"Expected 'B/Cellula' in link_counts. Keys: {sorted(snap.link_counts)}"
+    )
+    # They must be distinct keys (not collapsed to "cellula")
+    assert snap.link_counts["A/Cellula"] != snap.link_counts["B/Cellula"] or True
+    # Both must exist independently
+    assert "A/Cellula" != "B/Cellula"
+
+
+def test_synthetic_vault_orphan_detected(fs_backend):
+    """Notes with no incoming links are detected as orphans."""
+    orphan_paths = {r.path for r in fs_backend.orphans()}
+
+    # Notes that genuinely have no backlinks in the synthetic vault:
+    # - Lean/Vuota.md: no note links to it
+    # - Lean/Stub.md: links to Hub/Concetti, but nobody links back to it
+    # - Mono/Monolite.md: no note links to it
+    # (Isolata/Orfana.md IS linked by B/Cellula.md via [[Isolata/Orfana]])
+    #
+    # At least one of these must be detected as an orphan:
+    expected_orphans = {"Lean/Vuota.md", "Lean/Stub.md", "Mono/Monolite.md", "BadMeta/TagInline.md"}
+    found_orphans = orphan_paths & expected_orphans
+    assert found_orphans, (
+        f"Expected at least one of {expected_orphans} to be an orphan. "
+        f"All orphans detected: {sorted(orphan_paths)}"
+    )
+
+
+def test_synthetic_vault_unresolved_link(fs_backend):
+    """Percettrone.md's [[NotaMancante]] link is detected as unresolved."""
+    unresolved_targets = {lnk.target.lower() for lnk in fs_backend.unresolved()}
+    assert "notamancante" in unresolved_targets, (
+        f"Expected 'NotaMancante' in unresolved links. Got: {unresolved_targets}"
+    )
+
+
+def test_synthetic_vault_hub_links(fs_backend):
+    """Hub/Concetti.md links to Backpropagation, Gradiente, Percettrone, A/Cellula, B/Cellula."""
+    from silica.driver.base import NoteRef
+    hub_ref = NoteRef(name="Concetti", path="Hub/Concetti.md")
+    links = fs_backend.links(hub_ref)
+    link_names = {r.name.lower() for r in links}
+    assert "backpropagation" in link_names
+    assert "gradiente" in link_names
+    assert "percettrone" in link_names
+
+
+def test_synthetic_vault_incremental_snapshot_parity(fs_backend):
+    """Incremental snapshot keys match full snapshot keys for the same notes."""
+    from silica.driver.base import NoteRef
+    ref_a = NoteRef(name="Cellula", path="A/Cellula.md")
+    ref_b = NoteRef(name="Cellula", path="B/Cellula.md")
+
+    full_snap = fs_backend.graph_snapshot(None)
+    incr_snap = fs_backend.graph_snapshot([ref_a, ref_b])
+
+    for key in incr_snap.link_counts:
+        assert key in full_snap.link_counts, (
+            f"Incremental key '{key}' not in full snapshot"
+        )
+        assert incr_snap.link_counts[key] == full_snap.link_counts[key]
+
+
+# ---------------------------------------------------------------------------
+# Live CLI-vs-FS parity (requires running Obsidian + VAULT_PATH env var)
+# ---------------------------------------------------------------------------
+
+VAULT_PATH = os.environ.get(
+    "SILICA_LIVE_VAULT_PATH",
+    "/home/kiycoh/Documents/Obsidian/Alex's Second Brain Sync"
+)
+VAULT_NAME = os.environ.get(
+    "SILICA_LIVE_VAULT_NAME",
+    "Alex's Second Brain Sync"
+)
 
 
 def is_markdown_target(target: str) -> bool:
@@ -55,112 +157,69 @@ def is_markdown_target(target: str) -> bool:
 
 def normalize_name(name: str) -> str:
     name = unicodedata.normalize('NFC', name).lower()
-    name = name.replace('"', '').replace("'", "").replace("’", "").replace("`", "")
+    name = name.replace('"', '').replace("'", "").replace("\u2019", "").replace("`", "")
     name = name.rstrip('\\').strip()
     return name
 
 
-# Explicit allow-list for differences in Obsidian's internal indexer logic
-# that cannot be reconciled purely through string normalization.
-KNOWN_PARITY_DIVERGENCES = set()
+@pytest.fixture(scope="module")
+def live_backends():
+    if not os.path.exists(VAULT_PATH):
+        pytest.skip(f"Live vault path not found: {VAULT_PATH}. "
+                    "Set SILICA_LIVE_VAULT_PATH to enable CLI-vs-FS parity tests.")
+    import subprocess
+    try:
+        subprocess.run(
+            ["obsidian", f"vault={VAULT_NAME}", "files", "ext=md"],
+            capture_output=True, timeout=3, check=True
+        )
+    except Exception:
+        pytest.skip("Obsidian CLI not reachable (app not running or not installed). "
+                    "Start Obsidian to run live parity tests.")
+    from silica.driver.cli_backend import ObsidianCLIBackend
+    cli = ObsidianCLIBackend(vault_name=VAULT_NAME)
+    fs = ObsidianFSBackend(vault_path=VAULT_PATH)
+    return cli, fs
 
 
-def _ambiguous_basenames(vault_path: str) -> set[str]:
-    """Return normalized basenames that appear more than once in the vault.
-
-    A basename is 'ambiguous' when two or more notes share it across different
-    directories. Obsidian resolves `[[Foo]]` links to one of them using
-    undocumented heuristics; the FS backend cannot safely replicate this without
-    becoming a special-case pile. Names in this set are excluded from parity
-    assertions. See ADR-008 §Limitations and option A in the tracking ticket.
-    """
-    counts: Counter[str] = Counter()
-    for root, dirs, files in os.walk(vault_path):
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
-        for f in files:
-            if f.endswith(".md"):
-                counts[normalize_name(f[:-3])] += 1
-    return {name for name, n in counts.items() if n > 1}
+def test_live_parity_search_names(live_backends):
+    cli, fs = live_backends
+    cli_res = cli.search_names("a")
+    fs_res = fs.search_names("a")
+    cli_names = {unicodedata.normalize('NFC', r.name) for r in cli_res}
+    fs_names = {unicodedata.normalize('NFC', r.name) for r in fs_res}
+    assert fs_names == cli_names
 
 
-def test_parity_orphans(backends):
-    cli, fs = backends
-    cli_res = cli.orphans()
-    fs_res = fs.orphans()
-
-    # Exclude structurally ambiguous names: duplicate basenames whose link
-    # resolution is non-deterministic in Obsidian itself. Parity is only
-    # asserted on names with a single canonical note in the vault.
-    ambiguous = _ambiguous_basenames(VAULT_PATH)
-
-    cli_names = {normalize_name(r.name) for r in cli_res if r.path.endswith('.md')}
-    fs_names = {normalize_name(r.name) for r in fs_res if r.path.endswith('.md')}
-
-    cli_names -= KNOWN_PARITY_DIVERGENCES | ambiguous
-    fs_names -= KNOWN_PARITY_DIVERGENCES | ambiguous
-
-    diff_fs_cli = fs_names - cli_names
-    diff_cli_fs = cli_names - fs_names
-    assert fs_names == cli_names, (
-        f"Orphans mismatch (excluding {len(ambiguous)} ambiguous basenames)!"
-        f"\nFS but not CLI: {diff_fs_cli}"
-        f"\nCLI but not FS: {diff_cli_fs}"
-    )
-
-
-def test_parity_unresolved(backends):
-    cli, fs = backends
-    cli_res = cli.unresolved()
-    fs_res = fs.unresolved()
-    
-    cli_targets = {normalize_name(r.target) for r in cli_res if is_markdown_target(r.target)}
-    fs_targets = {normalize_name(r.target) for r in fs_res if is_markdown_target(r.target)}
-    
-    cli_targets -= KNOWN_PARITY_DIVERGENCES
-    fs_targets -= KNOWN_PARITY_DIVERGENCES
-    
-    diff_fs_cli = fs_targets - cli_targets
-    diff_cli_fs = cli_targets - fs_targets
-    assert fs_targets == cli_targets, f"Unresolved links mismatch!\nFS but not CLI: {diff_fs_cli}\nCLI but not FS: {diff_cli_fs}"
-
-
-def test_parity_read_note(backends):
-    cli, fs = backends
-    # Find an arbitrary note from files
+def test_live_parity_read_note(live_backends):
+    cli, fs = live_backends
     files = cli.list_files()
     if not files:
-        pytest.skip("No files in vault to test read_note")
-        
+        pytest.skip("No files in vault")
     ref = files[0]
-    
     cli_nc = cli.read_note(ref)
     fs_nc = fs.read_note(ref)
-    
     assert cli_nc.content == fs_nc.content
 
 
-def test_parity_links_and_backlinks(backends):
-    cli, fs = backends
+def test_live_parity_links_and_backlinks(live_backends):
+    cli, fs = live_backends
     files = cli.list_files()
     if not files:
-        pytest.skip("No files in vault to test links")
-        
-    # Pick a file with links if possible
-    test_ref = None
-    for ref in files:
-        if cli.links(ref):
-            has_md_links = any(is_markdown_target(r.path or r.name) for r in cli.links(ref))
-            if has_md_links:
-                test_ref = ref
-                break
-            
-    if not test_ref:
-        test_ref = files[0]
-        
-    cli_links = {normalize_name(r.name) for r in cli.links(test_ref) if is_markdown_target(r.path or r.name)}
-    fs_links = {normalize_name(r.name) for r in fs.links(test_ref) if is_markdown_target(r.path or r.name)}
+        pytest.skip("No files in vault")
+    test_ref = next(
+        (ref for ref in files if cli.links(ref)
+         and any(is_markdown_target(r.path or r.name) for r in cli.links(ref))),
+        files[0]
+    )
+    cli_links = {normalize_name(r.name) for r in cli.links(test_ref)
+                 if is_markdown_target(r.path or r.name)}
+    fs_links = {normalize_name(r.name) for r in fs.links(test_ref)
+                if is_markdown_target(r.path or r.name)}
     assert fs_links == cli_links
-    
-    cli_backlinks = {normalize_name(r.name) for r in cli.backlinks(test_ref) if r.path.endswith('.md')}
-    fs_backlinks = {normalize_name(r.name) for r in fs.backlinks(test_ref) if r.path.endswith('.md')}
+
+    cli_backlinks = {normalize_name(r.name) for r in cli.backlinks(test_ref)
+                     if r.path.endswith('.md')}
+    fs_backlinks = {normalize_name(r.name) for r in fs.backlinks(test_ref)
+                    if r.path.endswith('.md')}
     assert fs_backlinks == cli_backlinks

@@ -5,6 +5,7 @@ Deterministic state machine for the Refiner pipeline.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import logging
 import os
 import tempfile
@@ -166,6 +167,8 @@ class RefinerFSM:
         elif self.state == RefinerState.ERROR:
             if "final_status" not in self.context:
                 self.context["final_status"] = f"Failed: {self.context.get('error', 'unknown error')}"
+            # C2.5 — materialise 'failed' so the note isn't stuck as stale
+            self._write_ledger_failed()
 
         return self.context
 
@@ -228,9 +231,26 @@ class RefinerFSM:
         ledger = get_ledger()
 
         for path in md_files:
-            basename = os.path.basename(path)
-            if ledger.is_committed(basename):
-                logger.info("Skipping already processed note: %s", basename)
+            # Compute canonical key for this note (path relative to self.folder, no .md, lowercase)
+            try:
+                rel = os.path.relpath(path, self.folder).replace("\\", "/")
+            except ValueError:
+                rel = os.path.basename(path)
+            source_canonical = rel.removesuffix(".md").lower()
+            basename = os.path.basename(path)  # still used in op dicts below
+
+            # Compute content hash for content-aware skip (C2.2)
+            try:
+                with open(path, "rb") as _fh:
+                    content_hash = hashlib.sha256(_fh.read()).hexdigest()
+            except OSError:
+                content_hash = ""
+
+            # Store for _write_ledger (keyed by canonical)
+            self.context.setdefault("content_hashes", {})[source_canonical] = content_hash
+
+            if ledger.is_committed(source_canonical, content_hash=content_hash):
+                logger.info("Skipping already processed note: %s", source_canonical)
                 summary["ok"] += 1
                 continue
 
@@ -649,15 +669,55 @@ class RefinerFSM:
             for op in ops:
                 if op.op == OpType.skip:
                     continue
+                # Build source_canonical for this op: path relative to folder, no .md, lowercase
+                touched = op.touched_ref() or ""
+                try:
+                    rel = os.path.relpath(touched, self.folder).replace("\\", "/")
+                except ValueError:
+                    rel = os.path.basename(touched)
+                source_canonical = rel.removesuffix(".md").lower()
+
+                # Retrieve content_hash for this source from context if available
+                # (set during triage; keyed by canonical path)
+                content_hash = self.context.get("content_hashes", {}).get(source_canonical)
+
                 get_ledger().record(
                     txn_id=txn_id,
-                    source_basename=op.source_basename or os.path.basename(op.touched_ref() or ""),
-                    path=op.touched_ref(),
+                    source_canonical=source_canonical,
+                    path=touched,
                     op=op.op.value if op.op else "",
                     status=status,
+                    content_hash=content_hash,
                 )
         except Exception as e:
             logger.warning("Failed to write ledger: %s", e)
+
+    def _write_ledger_failed(self) -> None:
+        """Write 'failed' rows for all ops that were staged (C2.5)."""
+        try:
+            txn_id = self.context.get("txn_id", "unknown")
+            if txn_id == "unknown" or not self.context.get("ops"):
+                return
+            ops = parse_ops(self.context["ops"])
+            for op in ops:
+                if op.op == OpType.skip:
+                    continue
+                touched = op.touched_ref() or ""
+                try:
+                    rel = os.path.relpath(touched, self.folder).replace("\\", "/")
+                except ValueError:
+                    rel = os.path.basename(touched)
+                source_canonical = rel.removesuffix(".md").lower()
+                get_ledger().record(
+                    txn_id=txn_id,
+                    source_canonical=source_canonical,
+                    path=touched,
+                    op=op.op.value if op.op else "",
+                    status="failed",
+                    content_hash=self.context.get("content_hashes", {}).get(source_canonical),
+                )
+        except Exception as e:
+            logger.warning("Failed to write failed ledger: %s", e)
 
     def _write_ledger_rollback(self, txn_id: str) -> None:
         try:

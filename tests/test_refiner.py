@@ -8,12 +8,14 @@ import silica.config
 import silica.driver
 
 @pytest.fixture(autouse=True)
-def clean_ledger():
-    # Make sure database is clean before each test
-    ledger = get_ledger()
-    with ledger._conn:
-        ledger._conn.execute("DELETE FROM ops")
+def clean_ledger(tmp_path):
+    """Reset the global ledger singleton to a fresh temp DB before each test."""
+    import silica.kernel.ledger as _ledger_mod
+    fresh = _ledger_mod.Ledger(tmp_path / "test_ledger.db")
+    old = _ledger_mod._ledger
+    _ledger_mod._ledger = fresh
     yield
+    _ledger_mod._ledger = old
 
 @patch("silica.agent.llm.call_llm")
 def test_refiner_full_flow(mock_call_llm, tmp_path):
@@ -72,11 +74,24 @@ def test_refiner_full_flow(mock_call_llm, tmp_path):
         assert summary["reformat"] == 1
         assert len(res["ops"]) > 0
 
-        # Verify ledger has records for the operations
+        # Verify ledger has committed records (keyed by path-canonical, not basename)
         ledger = get_ledger()
-        assert ledger.is_committed("monolith.md")
-        assert ledger.is_committed("lean.md")
-        assert ledger.is_committed("reformat.md")
+        committed_canonicals = {
+            row[0]
+            for row in ledger._conn.execute(
+                "SELECT source_canonical FROM ops WHERE status='committed'"
+            ).fetchall()
+        }
+        # Canonical keys are folder-relative, lowercase, no .md
+        assert any(c.endswith("monolith") for c in committed_canonicals), (
+            f"No committed row for 'monolith' found. Committed: {committed_canonicals}"
+        )
+        assert any(c.endswith("lean") for c in committed_canonicals), (
+            f"No committed row for 'lean' found. Committed: {committed_canonicals}"
+        )
+        assert any(c.endswith("reformat") for c in committed_canonicals), (
+            f"No committed row for 'reformat' found. Committed: {committed_canonicals}"
+        )
 
 @patch("silica.agent.llm.call_llm")
 def test_refiner_rollback_on_lint_failure(mock_call_llm, tmp_path):
@@ -117,6 +132,14 @@ def test_refiner_rollback_on_lint_failure(mock_call_llm, tmp_path):
         assert "Rolled Back" in res.get("final_status", "")
         mock_restore.assert_called_once_with(txn_id="test_txn_456", inverses=[{"kind": "restore_version", "path": str(reformat_path), "version": 1}])
         
-        # Verify ledger does NOT mark it committed
+        # Verify ledger does NOT mark reformat.md as committed
         ledger = get_ledger()
-        assert not ledger.is_committed("reformat.md")
+        committed_canonicals = {
+            row[0]
+            for row in ledger._conn.execute(
+                "SELECT source_canonical FROM ops WHERE status='committed'"
+            ).fetchall()
+        }
+        assert not any(c.endswith("reformat") for c in committed_canonicals), (
+            f"'reformat' should not be committed after rollback. Committed: {committed_canonicals}"
+        )

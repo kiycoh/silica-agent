@@ -1,0 +1,6 @@
+---
+tags:
+- lean
+---
+
+# Vuota

@@ -338,7 +338,13 @@ def test_fsm_already_ingested():
         # Should short-circuit pre-RECON
         assert fsm.state == InjectorState.INIT
         assert res.get("final_status") == "already_ingested"
-        mock_ledger.is_committed.assert_called_once_with("already_processed.md")
+        # The mock is called with (source_canonical, content_hash=...) — canonical drops .md, lowercased
+        call_args = mock_ledger.is_committed.call_args
+        assert call_args[0][0] == "already_processed", (
+            f"Expected canonical key 'already_processed', got {call_args[0][0]!r}"
+        )
+        # content_hash kwarg must be present (may be empty str if file not found)
+        assert "content_hash" in call_args[1]
 
 
 @patch("silica.agent.llm.call_llm")
