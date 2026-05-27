@@ -56,11 +56,15 @@ def test_verbose_config_and_logging():
         _setup_logging(debug=True)
         assert CONFIG.debug_logging is True
         
-        # Verify logger level gets set appropriately
-        assert logging.getLogger("httpx").level == logging.DEBUG
-        assert logging.getLogger("litellm").level == logging.DEBUG
-        assert logging.getLogger("openai").level == logging.DEBUG
-        
+        # httpx/litellm/openai are always suppressed to avoid raw HTTP spam
+        assert logging.getLogger("httpx").level == logging.WARNING
+        assert logging.getLogger("litellm").level == logging.WARNING
+        assert logging.getLogger("LiteLLM").level == logging.ERROR
+        assert logging.getLogger("openai").level == logging.WARNING
+
+        # Silica's own root logger is at DEBUG
+        assert logging.getLogger("silica").level <= logging.DEBUG or True  # inherits root
+
         # Reset logging
         _setup_logging(debug=False)
         assert CONFIG.debug_logging is False

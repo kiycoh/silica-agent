@@ -64,13 +64,8 @@ def call_llm(
         LLMResponse with either text or tool_calls populated
     """
     if CONFIG.verbose:
-        litellm.suppress_debug_info = False
-        logger.info(
-            "[DEBUG LLM Request]: Model: %s | Messages count: %d | Enabled Tools: %s",
-            model,
-            len(messages),
-            [t["function"]["name"] for t in tools] if tools else [],
-        )
+        tool_count = len(tools) if tools else 0
+        logger.info("LLM call: model=%s | msg=%d | tools=%d", model, len(messages), tool_count)
 
     kwargs: dict = {
         "model": model,
@@ -134,12 +129,12 @@ def call_llm(
             reasoning = "\n".join(b.get("thinking", "") for b in blocks if isinstance(b, dict))
 
     if CONFIG.verbose:
+        text_preview = (message.content or "")[:80].replace("\n", " ")
         logger.info(
-            "[DEBUG LLM Response]: Text: %s | Tool Calls: %s | Usage: %s | Reasoning: %s",
-            message.content,
-            [(tc.name, tc.args) for tc in parsed_calls],
-            dict(response.usage) if response.usage else {},
-            reasoning,
+            "LLM resp: finish=%s | tool_calls=%d | text=%r",
+            finish_reason,
+            len(parsed_calls),
+            text_preview + ("…" if len(message.content or "") > 80 else ""),
         )
 
     return LLMResponse(

@@ -26,6 +26,8 @@ from silica.agent.events import (
     ToolErrorEvent,
     ReasoningEvent,
     RenderEvent,
+    ThinkingStartEvent,
+    ThinkingEndEvent,
 )
 from silica.agent.llm import call_llm
 from silica.config import CONFIG
@@ -99,7 +101,11 @@ def run_agent(
         iteration += 1
         logger.debug("Agent loop iteration %d", iteration)
 
-        resp = call_llm(model, messages, tools=schemas)
+        _emit(ThinkingStartEvent(iteration=iteration))
+        try:
+            resp = call_llm(model, messages, tools=schemas)
+        finally:
+            _emit(ThinkingEndEvent(iteration=iteration))
         messages.append(resp.assistant_message)
 
         if resp.reasoning:

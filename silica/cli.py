@@ -47,11 +47,11 @@ def _setup_logging(debug: bool = False) -> None:
     root.addHandler(handler)
     root.setLevel(level)
 
-    # Quiet down noisy libraries unless debug logging is requested
-    logging.getLogger("httpx").setLevel(level)
-    logging.getLogger("litellm").setLevel(level)
-    logging.getLogger("LiteLLM").setLevel(logging.ERROR if level == logging.WARNING else level)
-    logging.getLogger("openai").setLevel(level)
+    # LiteLLM/httpx/openai are always silenced — their DEBUG is raw HTTP/request dumps
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("litellm").setLevel(logging.WARNING)
+    logging.getLogger("LiteLLM").setLevel(logging.ERROR)
+    logging.getLogger("openai").setLevel(logging.WARNING)
 
 
 def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:

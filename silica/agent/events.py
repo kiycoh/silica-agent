@@ -32,5 +32,13 @@ class ReasoningEvent:
     text: str
     iteration: int
 
-RenderEvent = ToolProgressEvent | ReasoningEvent
+@dataclass(slots=True)
+class ThinkingStartEvent:
+    iteration: int
+
+@dataclass(slots=True)
+class ThinkingEndEvent:
+    iteration: int
+
+RenderEvent = ToolProgressEvent | ReasoningEvent | ThinkingStartEvent | ThinkingEndEvent
 

@@ -37,8 +37,14 @@ FRIENDLY_TEMPLATES = {
     "CLI stderr: %s": 
         "Errore standard CLI: {0}",
 
+    # LLM call summary (compact)
+    "LLM call: model=%s | msg=%d | tools=%d":
+        "Chiamata LLM → {0}  [{1} msg, {2} tool]",
+    "LLM resp: finish=%s | tool_calls=%d | text=%r":
+        "Risposta LLM → finish={0}  {1} tool_call(s)  testo={2}",
+
     # Info messages
-    "Refiner phase: %s": 
+    "Refiner phase: %s":
         "Fase di raffinamento: {0}",
     "Skipping already processed note: %s": 
         "Nota già elaborata precedentemente, salto: {0}",
