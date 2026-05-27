@@ -632,33 +632,27 @@ class ObsidianCLIBackend:
     def snapshot_versions(self, refs: list[NoteRef]) -> Txn:
         """Snapshot current versions for later rollback via history:restore.
 
-        Uses format=json to get real version identifiers from Obsidian history.
-        Falls back to line-count heuristic only if JSON parsing fails.
+        Parses the plain-text history output directly — the Obsidian CLI's
+        `history` command does not honour `format=json`.  The table format is:
+          <filename>
+          1    <datetime>    <size>   ← most recent, position 1
+          2    <datetime>    <size>
+        The first numeric token on the first data line gives the current
+        position (always 1).  Stored only as a best-effort hint; the primary
+        rollback path now uses prior_content captured by build_txn.
         """
         versions: dict[str, int] = {}
         for ref in refs:
+            key = ref.path or ref.name
             try:
-                data = self._run_json("history", self._ref_arg(ref))
-                if isinstance(data, list) and data:
-                    # history format=json returns [{"version": N, ...}, ...] newest-first
-                    # We want the current (latest) version number to restore to.
-                    first = data[0]
-                    if isinstance(first, dict) and "version" in first:
-                        versions[ref.path or ref.name] = int(first["version"])
-                    else:
-                        # Fallback: use list index 1-based (latest = len)
-                        versions[ref.path or ref.name] = len(data)
-                elif isinstance(data, dict) and "version" in data:
-                    versions[ref.path or ref.name] = int(data["version"])
-            except Exception:
-                # Try plain-text fallback
-                try:
-                    raw = self._run_cli("history", self._ref_arg(ref))
-                    count = sum(1 for line in raw.splitlines() if line.strip())
-                    if count > 0:
-                        versions[ref.path or ref.name] = count
-                except RuntimeError:
-                    logger.warning("No history available for %s", ref.name)
+                raw = self._run_cli("history", self._ref_arg(ref))
+                for line in raw.splitlines():
+                    parts = line.strip().split()
+                    if parts and parts[0].isdigit():
+                        versions[key] = int(parts[0])
+                        break  # first numeric line = most recent entry
+            except Exception as e:
+                logger.warning("No history available for %s: %s", ref.name, e)
 
         txn_id = f"txn_{int(time.time())}"
         return Txn(id=txn_id, refs=refs, versions=versions)

@@ -105,7 +105,7 @@ def test_verbose_fsm_logging(caplog):
         
         with caplog.at_level(logging.DEBUG):
             fsm._make_tmp({"test": "data"})
-            assert any("Created temporary staging file" in rec.message for rec in caplog.records)
+            assert any("Created staging file" in rec.message for rec in caplog.records)
             
         shutil.rmtree(tmp_dir)
     finally:

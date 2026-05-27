@@ -20,7 +20,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import tempfile
+import time
 from enum import Enum, auto
 from typing import Any, TYPE_CHECKING
 import orjson
@@ -40,7 +40,7 @@ from silica.tools.composed import (
 )
 from silica.kernel.ops import OpType
 from silica.kernel.ops_io import load_ops
-from silica.kernel.paths import to_vault_relative
+from silica.kernel.paths import to_vault_relative, silica_tmp_dir
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,7 @@ class InjectorState(Enum):
     VALIDATE = auto()      # Phase 2.3 (Gate) — C4: overwrites ops_path
     SNAPSHOT = auto()      # Phase 2.5 — C3: builds InverseOp Txn
     WRITE = auto()         # Phase 3
+    HUB_UPDATE = auto()    # Phase 3.5 — patch Hub note with MOC links
     LINT = auto()          # Phase 4 (Gate)
     CLEANUP = auto()       # Phase 5 — C5: only from DONE
     ROLLBACK = auto()      # On gate fail — C3: apply inverses
@@ -112,6 +113,7 @@ class InjectorFSM:
                     { "id": "validate",     "kind": "gate",       "tool": "silica_validate_ops", "abort_code": 2 },
                     { "id": "snapshot",     "kind": "txn",        "tool": "silica_snapshot" },
                     { "id": "write",        "kind": "mechanical", "tool": "silica_bulk_write" },
+                    { "id": "hub_update",   "kind": "mechanical", "tool": "silica_hub_update" },
                     { "id": "lint",         "kind": "gate",       "tool": "silica_lint" },
                     { "id": "cleanup",      "kind": "mechanical", "tool": "silica_cleanup", "on_success_only": True },
                     { "id": "rollback",     "kind": "txn",        "tool": "silica_restore", "on_gate_fail": True }
@@ -127,6 +129,7 @@ class InjectorFSM:
             InjectorState.VALIDATE: self._handle_validate,
             InjectorState.SNAPSHOT: self._handle_snapshot,
             InjectorState.WRITE: self._handle_write,
+            InjectorState.HUB_UPDATE: self._handle_hub_update,
             InjectorState.LINT: self._handle_lint,
             InjectorState.CLEANUP: self._handle_cleanup,
             InjectorState.ROLLBACK: self._handle_rollback,
@@ -140,6 +143,7 @@ class InjectorFSM:
             InjectorState.VALIDATE: InjectorState.ERROR,
             InjectorState.SNAPSHOT: InjectorState.ERROR,
             InjectorState.WRITE: InjectorState.ROLLBACK,
+            InjectorState.HUB_UPDATE: InjectorState.ROLLBACK,
             InjectorState.LINT: InjectorState.ROLLBACK,
         }
 
@@ -164,21 +168,19 @@ class InjectorFSM:
         return {}
 
     def _make_tmp(self, content: Any, suffix: str = ".json") -> str:
-        """Write content as JSON to a temp file and track for cleanup."""
-        fd, path = tempfile.mkstemp(suffix=suffix)
-        try:
-            with os.fdopen(fd, "wb") as f:
-                if isinstance(content, list) and len(content) > 0 and hasattr(content[0], "model_dump"):
-                    f.write(orjson.dumps([item.model_dump() for item in content], option=orjson.OPT_INDENT_2))
-                elif hasattr(content, "model_dump"):
-                    f.write(orjson.dumps(content.model_dump(), option=orjson.OPT_INDENT_2))
-                else:
-                    f.write(orjson.dumps(content, option=orjson.OPT_INDENT_2))
-        except Exception:
-            os.close(fd)
-            raise
+        """Write content as JSON to ~/.silica/tmp/ and track for cleanup."""
+        import uuid
+        tmp_dir = silica_tmp_dir()
+        path = str(tmp_dir / f"{uuid.uuid4().hex}{suffix}")
+        with open(path, "wb") as f:
+            if isinstance(content, list) and len(content) > 0 and hasattr(content[0], "model_dump"):
+                f.write(orjson.dumps([item.model_dump() for item in content], option=orjson.OPT_INDENT_2))
+            elif hasattr(content, "model_dump"):
+                f.write(orjson.dumps(content.model_dump(), option=orjson.OPT_INDENT_2))
+            else:
+                f.write(orjson.dumps(content, option=orjson.OPT_INDENT_2))
         self._tmp_files.append(path)
-        logger.debug("Created temporary staging file at: %s", path)
+        logger.debug("Created staging file: %s", path)
         return path
 
     def _cleanup_tmp(self) -> None:
@@ -250,6 +252,7 @@ class InjectorFSM:
             "validate": InjectorState.VALIDATE,
             "snapshot": InjectorState.SNAPSHOT,
             "write": InjectorState.WRITE,
+            "hub_update": InjectorState.HUB_UPDATE,
             "lint": InjectorState.LINT,
             "cleanup": InjectorState.CLEANUP,
             "rollback": InjectorState.ROLLBACK,
@@ -301,6 +304,26 @@ class InjectorFSM:
         if "error" in res:
             raise RuntimeError(f"Recon failed: {res['error']}")
         self.context["recon"] = res
+
+        # Surface any deferred ops from a previous run of this source file.
+        content_hash = self.context.get("source_content_hash", "")
+        if content_hash:
+            from silica.kernel.deferred import get_deferred_store
+            bundle = get_deferred_store().get(content_hash)
+            if bundle:
+                rejected_count = len(bundle.get("rejected_ops", []))
+                logger.info(
+                    "RECON: %d deferred op(s) from a previous run of '%s' are waiting. "
+                    "Call silica_deferred_retry('%s') to attempt them.",
+                    rejected_count,
+                    self.inbox_file,
+                    content_hash[:8],
+                )
+                self.context["deferred"] = {
+                    "content_hash": content_hash,
+                    "rejected_count": rejected_count,
+                }
+
         self._transition_success()
 
     def _source_canonical(self) -> str:
@@ -427,14 +450,55 @@ class InjectorFSM:
             self.state = InjectorState.CLEANUP
             return
 
-        if not res["success"] or res.get("rejection_rate", 0) >= max_rate:
-            self.context["abort_reason"] = (
-                f"Rejection rate {res.get('rejection_rate', 0):.1%} >= {max_rate:.1%}"
+        # Persist rejected ops to the deferred store so the model can retry them
+        # later without re-running the expensive RECON → DELEGATE cycle.
+        rejected_raw = res.get("rejected_ops", [])
+        if rejected_raw:
+            content_hash = self.context.get("source_content_hash", "")
+            if content_hash:
+                from silica.kernel.deferred import get_deferred_store
+                deferred_ops = [
+                    r.get("op", r) if isinstance(r, dict) and "op" in r else r
+                    for r in rejected_raw
+                ]
+                rejection_reasons = {
+                    (r.get("op", {}).get("path") or r.get("op", {}).get("heading") or "?"): r.get("reason", "")
+                    for r in rejected_raw if isinstance(r, dict)
+                }
+                get_deferred_store().put(
+                    content_hash=content_hash,
+                    source_path=self.inbox_file,
+                    target_dir=self.target_dir,
+                    hub=self.hub,
+                    rejected_ops=deferred_ops,
+                    rejection_reasons=rejection_reasons,
+                )
+                logger.warning(
+                    "VALIDATE: %d op(s) rejected and saved to deferred store (hash=%s…). "
+                    "Use silica_deferred_retry to attempt them later.",
+                    len(rejected_raw),
+                    content_hash[:8],
+                )
+
+        rejection_rate = res.get("rejection_rate", 0)
+        if rejection_rate >= max_rate:
+            logger.warning(
+                "VALIDATE: rejection rate %.1f%% exceeds threshold %.1f%% — continuing with %d validated op(s).",
+                rejection_rate * 100,
+                max_rate * 100,
+                res.get("validated_count", 0),
             )
-            self.state = InjectorState.ERROR
-        else:
+
+        # Abort only when no validated ops remain — partial success is fine.
+        if res.get("validated_count", 0) == 0:
+            self.context["abort_reason"] = "All ops rejected — nothing to write"
+            self.context["final_status"] = "no_ops"
             self.context["ops_path"] = ops_path
-            self._transition_success()
+            self.state = InjectorState.CLEANUP
+            return
+
+        self.context["ops_path"] = ops_path
+        self._transition_success()
 
     def _handle_snapshot(self) -> None:
         from silica.tools.wrapped import silica_snapshot
@@ -513,6 +577,114 @@ class InjectorFSM:
             )
 
         self.context["write"] = res
+        self._transition_success()
+
+    def _handle_hub_update(self) -> None:
+        """Append MOC links to the Hub note for all newly written notes."""
+        if not self.hub:
+            logger.info("HUB_UPDATE: no hub configured, skipping")
+            self._transition_success()
+            return
+
+        try:
+            ops = load_ops(self.context["ops_path"])
+        except Exception as e:
+            raise RuntimeError(f"HUB_UPDATE: failed to read ops: {e}")
+
+        hub_name = self.hub.strip("[]")
+        hub_name_lower = hub_name.lower()
+
+        # Collect write ops for new notes, excluding the hub auto-creation itself
+        new_notes: list[tuple[str, str]] = []
+        for op in ops:
+            if op.op != OpType.write:
+                continue
+            path = op.touched_ref()
+            if not path:
+                continue
+            note_name = os.path.splitext(os.path.basename(path))[0]
+            if note_name.lower() == hub_name_lower:
+                continue
+            snippet = (op.snippet or "").strip()
+            desc = snippet.split("\n")[0][:120] if snippet else ""
+            new_notes.append((note_name, desc))
+
+        if not new_notes:
+            logger.info("HUB_UPDATE: no new notes to link, skipping")
+            self._transition_success()
+            return
+
+        hub_path = f"{self.target_dir}/{hub_name}.md".replace("//", "/")
+        from silica.driver.base import NoteRef
+        hub_ref = NoteRef(name=hub_name, path=hub_path)
+
+        try:
+            hub_note = DRIVER.read_note(hub_ref)
+        except Exception as e:
+            logger.warning("HUB_UPDATE: hub '%s' not readable: %s — skipping", hub_path, e)
+            self._transition_success()
+            return
+
+        # If hub pre-existed (not created in this txn), register a content-based
+        # rollback inverse using the content we just read — more reliable than
+        # history:restore whose version positions shift after each new write.
+        hub_path_norm = hub_path.replace("\\", "/")
+        hub_is_new = self._txn is not None and any(
+            p.replace("\\", "/") == hub_path_norm
+            for p in (self._txn.created_paths or [])
+        )
+        if not hub_is_new and self._txn is not None:
+            from silica.kernel.ops import InverseOp, InverseOpKind
+            hub_inverse = InverseOp(
+                kind=InverseOpKind.restore_version,
+                path=hub_path,
+                prior_content=hub_note.content,
+            )
+            self._txn.inverses.append(hub_inverse)
+            if "snapshot" in self.context and "inverses" in self.context["snapshot"]:
+                self.context["snapshot"]["inverses"].append(hub_inverse.model_dump())
+
+        # Build MOC block and merge with existing content.
+        # Use overwrite (not append) to avoid the create→append settle race:
+        # append's _wait_for_content_contains must find the full fragment
+        # within 2 s, which fails when the note was just created in WRITE.
+        # overwrite's settle check (first 120 chars) is satisfied more quickly.
+        source_name = os.path.splitext(os.path.basename(self.inbox_file))[0]
+        lines = [f"\n## From: {source_name}\n"]
+        for note_name, desc in new_notes:
+            if desc:
+                lines.append(f"- [[{note_name}]] — {desc}")
+            else:
+                lines.append(f"- [[{note_name}]]")
+        moc_block = "\n".join(lines) + "\n"
+        new_hub_content = hub_note.content.rstrip() + "\n" + moc_block
+
+        try:
+            DRIVER.overwrite(hub_path, new_hub_content)
+            # The overwrite settle check only verifies the first 120 chars, which
+            # for a long pre-existing hub equals the unchanged prefix — it would
+            # pass immediately before the MOC block is flushed.  Explicitly wait
+            # until the unique section header is readable.
+            unique_marker = f"## From: {source_name}"
+            _deadline = time.monotonic() + 5.0
+            while time.monotonic() < _deadline:
+                try:
+                    if unique_marker in DRIVER.read_note(hub_ref).content:
+                        break
+                except Exception:
+                    pass
+                time.sleep(0.15)
+            else:
+                logger.warning("HUB_UPDATE: MOC block settle timeout for hub '%s' — graph may lag", hub_path)
+            logger.info("HUB_UPDATE: updated hub '%s' with %d links", hub_path, len(new_notes))
+        except Exception as e:
+            raise RuntimeError(f"HUB_UPDATE: failed to update hub '{hub_path}': {e}")
+
+        # Extend snapshot_domain so LINT's graph regression check covers the hub's new links
+        existing_paths = {d["path"] for d in self.context.get("snapshot_domain", [])}
+        if hub_path not in existing_paths:
+            self.context.setdefault("snapshot_domain", []).append({"name": hub_name, "path": hub_path})
+
         self._transition_success()
 
     def _handle_lint(self) -> None:

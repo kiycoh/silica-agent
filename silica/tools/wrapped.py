@@ -78,11 +78,16 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
     """Build a Txn with InverseOp entries before WRITE executes.
 
     Rollback strategies (C3):
-      write   → delete_created(path)     — note didn't exist; undo = delete
-      patch / overwrite → restore_version(path, N) — note existed; undo = history:restore
+      write   → delete_created(path)         — note didn't exist; undo = delete
+      patch / overwrite → restore_version(path, prior_content=<full body>)
+                          — note existed; undo = overwrite with saved content.
+                          prior_content is the primary rollback path; version is
+                          kept as a best-effort hint for backends that support it.
+      delete  → recreate_deleted(path, prior_content=<full body>)
     """
     ops = parse_ops(ops_data)
     patch_refs: list[NoteRef] = []
+    prior_contents: dict[str, str | None] = {}
     inverses: list[InverseOp] = []
 
     for op in ops:
@@ -92,14 +97,21 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
             continue
 
         if op_type == OpType.write:
-            # New note — rollback = delete it
             inverses.append(InverseOp(kind=InverseOpKind.delete_created, path=path))
         elif op_type in (OpType.patch, OpType.overwrite):
-            # Existing note — snapshot its version for rollback
             name = path.rsplit("/", 1)[-1].removesuffix(".md")
-            patch_refs.append(NoteRef(name=name, path=path))
+            ref = NoteRef(name=name, path=path)
+            patch_refs.append(ref)
+            # Read current content now (before WRITE) for content-based rollback.
+            # This is more reliable than history:restore whose version numbering
+            # shifts after each new write (position 1 becomes position 2, etc.).
+            try:
+                nc = DRIVER.read_note(ref)
+                prior_contents[path] = nc.content
+            except Exception as e:
+                logger.warning("build_txn: could not read prior content for %s: %s", path, e)
+                prior_contents[path] = None
         elif op_type == OpType.delete:
-            # Recreate deleted note — rollback = recreate with prior content
             name = path.rsplit("/", 1)[-1].removesuffix(".md")
             ref = NoteRef(name=name, path=path)
             try:
@@ -113,10 +125,10 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
                 prior_content=prior_content
             ))
 
-    # Snapshot patch targets via DRIVER (gets version numbers)
+    # Snapshot versions as a best-effort hint (used by backends that support
+    # history:restore; the primary rollback path is prior_content above).
     base_txn = DRIVER.snapshot_versions(patch_refs)
 
-    # Inject restore_version inverses from the version snapshot
     for ref in patch_refs:
         key = ref.path or ref.name
         version = base_txn.versions.get(key)
@@ -124,10 +136,9 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
             kind=InverseOpKind.restore_version,
             path=ref.path,
             version=version,
+            prior_content=prior_contents.get(ref.path or ref.name),
         ))
 
-    # Override the Txn to carry InverseOp list
-    # (created_paths kept for FS-backend compatibility, derived from inverses)
     created_paths = [
         inv.path for inv in inverses
         if inv.kind == InverseOpKind.delete_created
@@ -220,10 +231,15 @@ def silica_restore(txn_id: str, inverses: list[dict]) -> dict[str, Any]:
                         raise
 
             elif inv.kind == InverseOpKind.restore_version:
-                if inv.version is not None:
+                if inv.prior_content is not None:
+                    # Primary path: overwrite with captured content (reliable across
+                    # backends; avoids Obsidian history position ambiguity).
+                    DRIVER.overwrite(path, inv.prior_content)
+                    applied.append(f"restored_content:{path}")
+                elif inv.version is not None:
+                    # Fallback: history:restore (only if prior_content unavailable)
                     name = path.rsplit("/", 1)[-1].removesuffix(".md")
                     ref = NoteRef(name=name, path=path)
-                    # Use the DRIVER's restore mechanism directly
                     DRIVER.restore(Txn(
                         id=txn_id,
                         refs=[ref],
@@ -232,7 +248,7 @@ def silica_restore(txn_id: str, inverses: list[dict]) -> dict[str, Any]:
                     ))
                     applied.append(f"restored_version:{path}@{inv.version}")
                 else:
-                    logger.warning("restore_version with no version number for %s — skipped", path)
+                    logger.warning("restore_version: no prior_content or version for %s — skipped", path)
 
             elif inv.kind == InverseOpKind.recreate_deleted:
                 if inv.prior_content is not None:

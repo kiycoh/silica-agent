@@ -45,14 +45,23 @@ def check_graph_regression(
       (success, list_of_errors)
     """
     errors = []
-    
+
     # 1. Unplanned orphans check
     norm_pre_orphans = {normalize_ref(ref) for ref in pre.orphans}
     norm_post_orphans = {normalize_ref(ref) for ref in post.orphans}
     norm_created = {normalize_path(p) for p in created_paths}
-    
+
+    # Notes we actually observed in the pre-snapshot neighborhood.
+    # The incremental snapshot domain can grow between pre and post: new notes
+    # bring their resolved link targets into the post-snapshot neighborhood even
+    # though those targets were invisible at pre-snapshot time.  A pre-existing
+    # orphan pulled in this way would appear as a false "new orphan" because it
+    # was never in norm_pre_orphans.  We only flag regressions for notes we
+    # have a concrete pre-write baseline for.
+    norm_pre_observed = {normalize_path(k) for k in pre.link_counts}
+
     new_orphans = norm_post_orphans - norm_pre_orphans
-    unplanned_orphans = new_orphans - norm_created
+    unplanned_orphans = (new_orphans & norm_pre_observed) - norm_created
     
     if unplanned_orphans:
         # Find the original NoteRefs for reporting

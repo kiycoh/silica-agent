@@ -184,6 +184,7 @@ def test_fsm_multi_chunk_loop(
         InjectorState.VALIDATE,
         InjectorState.SNAPSHOT,
         InjectorState.WRITE,
+        InjectorState.HUB_UPDATE,
         InjectorState.LINT,
         InjectorState.CLEANUP,
         # Second chunk cycle
@@ -192,6 +193,7 @@ def test_fsm_multi_chunk_loop(
         InjectorState.VALIDATE,
         InjectorState.SNAPSHOT,
         InjectorState.WRITE,
+        InjectorState.HUB_UPDATE,
         InjectorState.LINT,
         InjectorState.CLEANUP,
     ]
@@ -224,13 +226,18 @@ def test_fsm_recipe_configuration():
 
 
 @patch("silica.router.orchestrator.silica_validate_ops")
-def test_fsm_gate_rejection(mock_validate):
-    # Setup mock validation with high rejection rate to trigger gate abort
+def test_fsm_gate_all_rejected_gives_no_ops(mock_validate):
+    # When ALL ops are rejected (validated_count=0), VALIDATE must go to CLEANUP
+    # with final_status="no_ops" — not ERROR.  Rejected ops are saved to the
+    # deferred store; the pipeline does not abort with an error.
     mock_validate.return_value = {
-        "success": False,
-        "rejection_rate": 0.15,
-        "total": 10,
+        "success": True,
+        "rejection_rate": 1.0,
+        "total": 2,
+        "validated_count": 0,
         "rejected_count": 2,
+        "rejected_ops": [],
+        "validated_ops": [],
     }
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
@@ -240,9 +247,35 @@ def test_fsm_gate_rejection(mock_validate):
 
     fsm.step()
 
-    # Verify transition to ERROR because rejection rate 15% >= 10%
-    assert fsm.state == InjectorState.ERROR
-    assert "Rejection rate 15.0% >= 10.0%" in fsm.context["abort_reason"]
+    assert fsm.state == InjectorState.CLEANUP
+    assert fsm.context.get("final_status") == "no_ops"
+
+
+@patch("silica.router.orchestrator.silica_validate_ops")
+def test_fsm_gate_partial_rejection_continues(mock_validate):
+    # When some ops pass and some are rejected, VALIDATE must continue the
+    # pipeline (SNAPSHOT) and log a warning — it does NOT abort.
+    mock_validate.return_value = {
+        "success": True,
+        "rejection_rate": 0.44,   # > 10% but partial
+        "total": 9,
+        "validated_count": 5,
+        "rejected_count": 4,
+        "rejected_ops": [],       # empty so deferred store is not called
+        "validated_ops": [],
+    }
+
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    fsm.context["payload"] = {"payload": {"chunk_id": 0}}
+    fsm.context["sanitized"] = {"parsed": []}
+    fsm.context["source_content_hash"] = ""  # no deferred store call
+    fsm.state = InjectorState.VALIDATE
+
+    fsm.step()
+
+    # Pipeline advances past VALIDATE (to SNAPSHOT)
+    assert fsm.state == InjectorState.SNAPSHOT
+    assert "abort_reason" not in fsm.context
 
 
 @patch("silica.router.orchestrator.silica_lint")
@@ -321,10 +354,13 @@ def test_fsm_recipe_transition_sequence():
     
     fsm._transition_success()
     assert fsm.state == InjectorState.WRITE
-    
+
+    fsm._transition_success()
+    assert fsm.state == InjectorState.HUB_UPDATE
+
     fsm._transition_success()
     assert fsm.state == InjectorState.LINT
-    
+
     fsm._transition_success()
     assert fsm.state == InjectorState.CLEANUP
     
@@ -389,6 +425,7 @@ def test_fsm_recipe_end_to_end_flow(
         InjectorState.VALIDATE,
         InjectorState.SNAPSHOT,
         InjectorState.WRITE,
+        InjectorState.HUB_UPDATE,
         InjectorState.LINT,
         InjectorState.CLEANUP,
     ]

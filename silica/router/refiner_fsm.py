@@ -8,7 +8,6 @@ import datetime
 import hashlib
 import logging
 import os
-import tempfile
 from enum import Enum, auto
 from typing import Any
 import orjson
@@ -23,6 +22,7 @@ from silica.tools.composed import (
 from silica.kernel.ops import OpType
 from silica.kernel.ops_io import load_ops, parse_ops
 from silica.kernel.ledger import get_ledger
+from silica.kernel.paths import silica_tmp_dir
 from silica.kernel import frontmatter, ofm, templates
 
 logger = logging.getLogger(__name__)
@@ -117,18 +117,16 @@ class RefinerFSM:
         return {}
 
     def _make_tmp(self, content: Any, suffix: str = ".json") -> str:
-        fd, path = tempfile.mkstemp(suffix=suffix)
-        try:
-            with os.fdopen(fd, "wb") as f:
-                if isinstance(content, list) and len(content) > 0 and hasattr(content[0], "model_dump"):
-                    f.write(orjson.dumps([item.model_dump() for item in content], option=orjson.OPT_INDENT_2))
-                elif hasattr(content, "model_dump"):
-                    f.write(orjson.dumps(content.model_dump(), option=orjson.OPT_INDENT_2))
-                else:
-                    f.write(orjson.dumps(content, option=orjson.OPT_INDENT_2))
-        except Exception:
-            os.close(fd)
-            raise
+        """Write content as JSON to ~/.silica/tmp/ and track for cleanup."""
+        import uuid
+        path = str(silica_tmp_dir() / f"{uuid.uuid4().hex}{suffix}")
+        with open(path, "wb") as f:
+            if isinstance(content, list) and len(content) > 0 and hasattr(content[0], "model_dump"):
+                f.write(orjson.dumps([item.model_dump() for item in content], option=orjson.OPT_INDENT_2))
+            elif hasattr(content, "model_dump"):
+                f.write(orjson.dumps(content.model_dump(), option=orjson.OPT_INDENT_2))
+            else:
+                f.write(orjson.dumps(content, option=orjson.OPT_INDENT_2))
         self._tmp_files.append(path)
         return path
 

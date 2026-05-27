@@ -137,6 +137,34 @@ def silica_exists(path: str) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Deferred Op Store
+# ---------------------------------------------------------------------------
+
+@tool(EmptyArgs, cls="atomic")
+def silica_deferred_list() -> list:
+    """List all pending deferred op bundles (concepts rejected by the validator in previous runs).
+
+    Returns summary rows — use silica_deferred_retry(content_hash) to attempt
+    writing them, or silica_deferred_flush(content_hash) to discard them.
+    """
+    from silica.kernel.deferred import get_deferred_store
+    return get_deferred_store().list_all()
+
+
+class DeferredFlushArgs(BaseModel):
+    content_hash: str = Field(description="Content hash of the deferred bundle to permanently discard")
+
+@tool(DeferredFlushArgs, cls="atomic")
+def silica_deferred_flush(content_hash: str) -> dict:
+    """Discard a deferred op bundle — marks those rejected ops as permanently skipped."""
+    from silica.kernel.deferred import get_deferred_store
+    removed = get_deferred_store().remove(content_hash)
+    if removed:
+        return {"removed": True, "content_hash": content_hash}
+    return {"removed": False, "error": f"No deferred bundle found for {content_hash[:8]}…"}
+
+
 @tool(EmptyArgs, cls="atomic")
 def silica_inbox_ls() -> list:
     """Lists all files in the Inbox folder (inbox_dir)."""

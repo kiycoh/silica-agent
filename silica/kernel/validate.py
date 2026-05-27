@@ -49,13 +49,16 @@ def validate_operations(ops: list[Op] | list[dict], payloads: list, target_dir: 
                     else:
                         expected_collision_paths[(source_basename, name)] = None
 
-    # Helper to check existence via DRIVER
+    _existence_cache: dict[str, bool] = {}
     def path_exists(p: str) -> bool:
-        try:
-            DRIVER.read_note(p)
-            return True
-        except RuntimeError:
-            return False
+        norm = os.path.abspath(p)
+        if norm not in _existence_cache:
+            try:
+                DRIVER.read_note(p)
+                _existence_cache[norm] = True
+            except RuntimeError:
+                _existence_cache[norm] = False
+        return _existence_cache[norm]
 
     # 1. Coerce write <-> patch and enforce default hub fallback
     if not hub and target_dir:

@@ -1,4 +1,4 @@
-"""Path canonicalization for vault notes.
+"""Path canonicalization for vault notes and Silica runtime directories.
 
 The CLI backend resolves notes by their vault-relative POSIX path. Any code
 path that accepts a user- or agent-supplied note path MUST canonicalize it
@@ -14,6 +14,25 @@ from __future__ import annotations
 from pathlib import Path
 
 from silica.config import CONFIG
+
+# ---------------------------------------------------------------------------
+# Silica runtime directory helpers
+# ---------------------------------------------------------------------------
+
+_SILICA_HOME = Path.home() / ".silica"
+
+
+def silica_tmp_dir() -> Path:
+    """Return the pipeline staging directory (~/.silica/tmp/), creating it if needed.
+
+    All FSM temporary files (ops JSON, payload chunks, distiller output) live
+    here instead of the system temp directory so they survive the pipeline run
+    and are inspectable for debugging.  The FSM removes them on successful
+    completion via _cleanup_tmp().
+    """
+    d = _SILICA_HOME / "tmp"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def to_vault_relative(path: str, *, ensure_md: bool = True) -> str:

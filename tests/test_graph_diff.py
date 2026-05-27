@@ -34,20 +34,58 @@ def test_graph_diff_planned_orphans_allowed():
 
 
 def test_graph_diff_unplanned_orphans_rejected():
-    # If an existing note becomes an orphan, it is rejected
-    pre = GraphSnapshot(orphans=[], unresolved=[])
+    # A note that WAS observed in the pre-snapshot (link_counts has an entry)
+    # becomes a new orphan in the post-snapshot — its last incoming link was
+    # removed by the write.  This IS a genuine regression.
+    pre = GraphSnapshot(
+        orphans=[],
+        unresolved=[],
+        link_counts={"notes/ExistingNote": 0},      # observed, 0 outgoing links
+        backlink_counts={"notes/ExistingNote": 1},  # had 1 incoming link (not orphan)
+    )
     post = GraphSnapshot(
         orphans=[
             NoteRef(name="ExistingNote", path="notes/ExistingNote.md")
         ],
-        unresolved=[]
+        unresolved=[],
+        link_counts={"notes/ExistingNote": 0},
+        backlink_counts={"notes/ExistingNote": 0},
     )
-    
+
     # ExistingNote was NOT created by this transaction
     success, errors = check_graph_regression(pre, post, created_paths=[])
     assert not success
-    assert len(errors) == 1
-    assert "Unplanned orphans introduced: notes/ExistingNote.md" in errors[0]
+    # Rule 1 (orphan) + Rule 3 (broken backlinks) both fire for a note that
+    # loses its last incoming link, so there may be more than one error.
+    assert any("Unplanned orphans introduced: notes/ExistingNote.md" in e for e in errors)
+
+
+def test_graph_diff_pre_existing_orphan_outside_domain_not_flagged():
+    # A note that was already an orphan in the vault but was NOT in the
+    # pre-snapshot domain (link_counts has no entry for it) appears in the
+    # post-snapshot because a newly-created note links to it — expanding the
+    # 1-hop neighborhood.  The regression gate must NOT fire: we have no
+    # pre-write baseline, so we cannot call it a new regression.
+    # This is the exact scenario that was triggering false rollbacks on
+    # pre-existing notes like Deep Learning/Learning Rate.md.
+    pre = GraphSnapshot(
+        orphans=[],
+        unresolved=[],
+        link_counts={},
+        backlink_counts={},
+    )
+    post = GraphSnapshot(
+        orphans=[
+            NoteRef(name="ExistingOrphan", path="notes/ExistingOrphan.md")
+        ],
+        unresolved=[],
+        link_counts={"notes/ExistingOrphan": 0},
+        backlink_counts={"notes/ExistingOrphan": 0},
+    )
+
+    success, errors = check_graph_regression(pre, post, created_paths=[])
+    assert success, f"Pre-existing orphan outside pre-domain must not be flagged: {errors}"
+    assert not errors
 
 
 def test_graph_diff_new_unresolved_links_rejected():

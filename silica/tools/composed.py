@@ -194,18 +194,16 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] | None = No
     actionable = sum(1 for o in ops if o.op != OpType.skip)
     rejection_rate = rejected_count / actionable if actionable > 0 else 0.0
 
-    success = rejection_rate <= 0.1
-
-    # C4: Overwrite ops_json_path with validated (coerced + deduped) ops.
-    # SNAPSHOT and WRITE read this same file — single source of truth.
-    if success:
-        try:
-            dump_ops(ops_json_path, validated_ops)
-        except Exception as e:
-            return {"error": f"Failed to persist validated ops: {e}"}
+    # C4: Always overwrite ops_json_path with validated (coerced + deduped) ops —
+    # even when rejection_rate exceeds the old 10% threshold.  Policy (abort vs.
+    # continue) is the FSM's responsibility; the tool is a pure filter.
+    try:
+        dump_ops(ops_json_path, validated_ops)
+    except Exception as e:
+        return {"error": f"Failed to persist validated ops: {e}"}
 
     return {
-        "success": success,
+        "success": True,
         "total": total,
         "validated_count": len(validated_ops),
         "rejected_count": rejected_count,
@@ -261,8 +259,104 @@ class RunInjectorArgs(BaseModel):
 def silica_run_injector(inbox_file: str, target_dir: str, hub: str = "") -> dict[str, Any]:
     """Single action for the agent: executes the entire Injector pipeline (10 phases) deterministically with acceptance gates and rollback in case of failure."""
     from silica.router.orchestrator import InjectorFSM
-    
+
     fsm = InjectorFSM(inbox_file=inbox_file, target_dir=target_dir, hub=hub or None)
     return fsm.run()
+
+
+# ---------------------------------------------------------------------------
+# silica_deferred_retry
+# ---------------------------------------------------------------------------
+
+class DeferredRetryArgs(BaseModel):
+    content_hash: str = Field(description="Content hash of the deferred bundle to retry (from silica_deferred_list)")
+
+@tool(DeferredRetryArgs, cls="composed")
+def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
+    """Retry writing a deferred op bundle: re-validates against the current vault,
+    snapshots, writes the ops that now pass, and updates the bundle.
+
+    - Ops that pass validation are written immediately.
+    - Ops that still fail remain in the deferred store.
+    - If the bundle is fully cleared, it is removed from the deferred store.
+    """
+    import os
+    from silica.kernel.deferred import get_deferred_store
+    from silica.kernel.validate import validate_operations
+    from silica.kernel.ops_io import parse_ops, dump_ops
+    from silica.tools.wrapped import build_txn
+    from silica.kernel.bulk import execute_operations
+
+    store = get_deferred_store()
+    bundle = store.get(content_hash)
+    if not bundle:
+        return {"error": f"No deferred bundle found for hash {content_hash[:8]}…"}
+
+    rejected_raw = bundle.get("rejected_ops", [])
+    target_dir = bundle.get("target_dir", "")
+    hub = bundle.get("hub")
+
+    try:
+        ops = parse_ops(rejected_raw)
+    except Exception as e:
+        return {"error": f"Failed to parse deferred ops: {e}"}
+
+    validated, still_rejected = validate_operations(ops, [], target_dir, hub=hub)
+
+    if not validated:
+        return {
+            "success": False,
+            "message": "All deferred ops still rejected by the validator",
+            "rejected": [
+                {"path": r.op.path, "heading": r.op.heading, "reason": r.reason}
+                for r in still_rejected
+            ],
+            "still_deferred": len(still_rejected),
+        }
+
+    import uuid
+    from silica.kernel.paths import silica_tmp_dir
+    tmp_path = str(silica_tmp_dir() / f"{uuid.uuid4().hex}.json")
+    try:
+        dump_ops(tmp_path, validated)
+
+        # Snapshot before writing for rollback safety
+        txn = build_txn(validated)
+
+        result = execute_operations(validated)
+        write_ok = not result.errors
+        if not write_ok:
+            from silica.tools.wrapped import silica_restore
+            silica_restore(txn_id=txn.id, inverses=[i.model_dump() for i in txn.inverses])
+            return {"error": f"Deferred retry write failed: {result.errors}"}
+    except Exception as e:
+        return {"error": f"Deferred retry failed: {e}"}
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+    # Update or clear the deferred store
+    if still_rejected:
+        store.put(
+            content_hash=content_hash,
+            source_path=bundle.get("source_path", ""),
+            target_dir=target_dir,
+            hub=hub,
+            rejected_ops=[r.op.model_dump() for r in still_rejected],
+            rejection_reasons={
+                (r.op.path or r.op.heading or "?"): r.reason for r in still_rejected
+            },
+        )
+    else:
+        store.remove(content_hash)
+
+    return {
+        "success": True,
+        "written": len(validated),
+        "still_deferred": len(still_rejected),
+        "bundle_cleared": len(still_rejected) == 0,
+    }
 
 
