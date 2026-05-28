@@ -54,6 +54,7 @@ def _setup_logging(debug: bool = False) -> None:
     logging.getLogger("litellm").setLevel(logging.WARNING)
     logging.getLogger("LiteLLM").setLevel(logging.ERROR)
     logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("markdown_it").setLevel(logging.WARNING)
 
 
 def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
