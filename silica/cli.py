@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import sys
 
+from rich.markdown import Markdown
+
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
 from silica.prompts import SYSTEM_PROMPT
@@ -62,27 +64,27 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
         return False  # Signal to exit
 
     if cmd == "/model":
-        print(f"  Current model: \033[1m{CONFIG.model}\033[0m")
+        CONSOLE.print(f"  Current model: [bold]{CONFIG.model}[/]")
         return True
 
     if cmd == "/tools":
         from silica.tools import TOOLS
         if not TOOLS:
-            print("  No tools registered.")
+            CONSOLE.print("  No tools registered.")
         else:
-            print(f"  \033[1m{len(TOOLS)} registered tools:\033[0m")
+            CONSOLE.print(f"  [bold]{len(TOOLS)} registered tools:[/]")
             for name, t in sorted(TOOLS.items()):
-                print(f"    [{t.cls}] {name}")
+                CONSOLE.print(f"    [dim]\\[{t.cls}][/] {name}")
         return True
 
     if cmd == "/help":
-        print("  /exit    — exit silica")
-        print("  /model   — show current LLM model")
-        print("  /tools   — list registered tools")
-        print("  /clear   — reset conversation history")
-        print(f"  /verbose — cycle tool progress: off → new → all → verbose  (current: {CONFIG.tool_progress})")
-        print("  /thinking — toggle reasoning block display")
-        print("  /help    — show this help message")
+        CONSOLE.print("  [bold cyan]/exit[/]     — exit silica")
+        CONSOLE.print("  [bold cyan]/model[/]    — show current LLM model")
+        CONSOLE.print("  [bold cyan]/tools[/]    — list registered tools")
+        CONSOLE.print("  [bold cyan]/clear[/]    — reset conversation history")
+        CONSOLE.print(f"  [bold cyan]/verbose[/]  — cycle tool progress: off → new → all → verbose  [dim](current: {CONFIG.tool_progress})[/]")
+        CONSOLE.print("  [bold cyan]/thinking[/] — toggle reasoning block display")
+        CONSOLE.print("  [bold cyan]/help[/]     — show this help message")
         return True
 
     if cmd == "/thinking":
@@ -97,18 +99,18 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
         current = CONFIG.tool_progress
         next_mode = modes[(modes.index(current) + 1) % len(modes)]
         CONFIG.tool_progress = next_mode
-        print(f"  Tool progress: \033[1m{next_mode}\033[0m")
-        
+        CONSOLE.print(f"  Tool progress: [bold]{next_mode}[/]")
+
         if next_mode == "verbose":
             _setup_logging(debug=True)
-            print("  System log level: \033[1mDEBUG\033[0m")
+            CONSOLE.print("  System log level: [bold]DEBUG[/]")
         else:
             _setup_logging(debug=False)
-            print("  System log level: \033[1mWARNING\033[0m")
-            
+            CONSOLE.print("  System log level: [bold]WARNING[/]")
+
         return True
 
-    print(f"  Unknown command: {cmd}. Use /help to see options.")
+    CONSOLE.print(f"  Unknown command: {cmd}. Use [bold cyan]/help[/] to see options.")
     return True
 
 
@@ -168,13 +170,15 @@ def main():
         try:
             answer = run_agent(messages, model=CONFIG.model, tool_progress_callback=callback)
             if answer:
-                print(f"\n{answer}\n")
+                CONSOLE.rule(style="dim")
+                CONSOLE.print(Markdown(answer))
+                CONSOLE.print()
             messages.append({"role": "assistant", "content": answer or ""})
         except KeyboardInterrupt:
-            print("\n  (interrupted)")
+            CONSOLE.print("\n  [dim](interrupted)[/]")
         except Exception as e:
             logger.exception("Agent error")
-            print(f"\n  \033[1;31mError: {e}\033[0m\n")
+            CONSOLE.print(f"\n  [bold red]Error:[/] {e}\n")
 
 
 if __name__ == "__main__":

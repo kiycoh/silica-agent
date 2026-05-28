@@ -25,6 +25,9 @@ _MAX_RESULT_CHARS = 600
 _MAX_RESULT_LINES = 12
 _MAX_ARGS_PREVIEW_CHARS = 120
 _REASONING_MAX_LINES = 20
+_COMPACT_VAL_CHARS = 60
+_RESULT_HEAD_LINES = 3
+_RESULT_LINE_CHARS = 120
 
 _REDACT_PATTERNS = [
     re.compile(r'(api_?key|token|secret|password|auth|bearer)\s*[=:]\s*\S+', re.I),
@@ -71,6 +74,38 @@ def _args_preview(args: dict) -> str:
         return s
     except Exception:
         return "{…}"
+
+
+def _compact_args(args: dict) -> str:
+    """Format args as space-separated key=val pairs with long values truncated."""
+    parts = []
+    for k, v in args.items():
+        if isinstance(v, str):
+            val = v if len(v) <= _COMPACT_VAL_CHARS else v[:_COMPACT_VAL_CHARS] + "…"
+        elif isinstance(v, (list, dict)):
+            try:
+                s = json.dumps(v, ensure_ascii=False)
+            except Exception:
+                s = str(v)
+            val = s if len(s) <= _COMPACT_VAL_CHARS else s[:_COMPACT_VAL_CHARS] + "…"
+        else:
+            val = str(v)
+        parts.append(f"{k}={val}")
+    return "  ".join(parts)
+
+
+def _head_result(text: str) -> str:
+    """Return first N lines of a result, each line length-capped, with overflow count."""
+    lines = text.splitlines()
+    extra = max(0, len(lines) - _RESULT_HEAD_LINES)
+    shown = [
+        ln if len(ln) <= _RESULT_LINE_CHARS else ln[:_RESULT_LINE_CHARS] + "…"
+        for ln in lines[:_RESULT_HEAD_LINES]
+    ]
+    result = "\n".join(shown)
+    if extra:
+        result += f"\n(+{extra} more lines)"
+    return result
 
 
 class _ProgressRenderer:
@@ -146,14 +181,10 @@ class _ProgressRenderer:
                 CONSOLE.print(f"  [cyan]→ [bold]{escape(event.name)}[/bold]({escape(preview)})[/]")
 
             elif mode == "verbose":
-                try:
-                    args_json = json.dumps(event.args, indent=2, ensure_ascii=False)
-                except Exception:
-                    args_json = str(event.args)
-                redacted = _redact(args_json)
+                compact = _compact_args(event.args)
+                redacted = _redact(compact)
                 if redacted is not None:
-                    CONSOLE.print(f"  [cyan]→ [bold]{escape(event.name)}[/bold][/]")
-                    CONSOLE.print(f"  [dim]args: {escape(_cap(redacted, max_lines=6))}[/]")
+                    CONSOLE.print(f"  [cyan]→ [bold]{escape(event.name)}[/bold][/]  [dim]{escape(redacted)}[/]")
                 else:
                     CONSOLE.print(f"  [cyan]→ [bold]{escape(event.name)}[/bold] [dim][redacted args][/][/]")
 
@@ -165,9 +196,10 @@ class _ProgressRenderer:
             elif mode == "verbose":
                 redacted = _redact(event.result)
                 if redacted is not None:
-                    capped = _cap(redacted)
+                    head = _head_result(redacted.strip())
                     CONSOLE.print(f"  [green]✓ [bold]{escape(event.name)}[/bold][/] [dim]({dur})[/]")
-                    CONSOLE.print(f"  [dim]result: {escape(capped)}[/]")
+                    if head:
+                        CONSOLE.print(f"  [dim]{escape(head)}[/]")
                 else:
                     CONSOLE.print(
                         f"  [green]✓ [bold]{escape(event.name)}[/bold][/]"
