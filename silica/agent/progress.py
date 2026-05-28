@@ -7,6 +7,7 @@ from rich.spinner import Spinner
 from rich.panel import Panel
 from rich.text import Text
 from rich.markup import escape
+from rich.console import Group
 from silica.agent.events import (
     ToolStartEvent,
     ToolCompleteEvent,
@@ -108,13 +109,80 @@ def _head_result(text: str) -> str:
     return result
 
 
+def _synthetic_tool_desc(name: str, args: dict) -> str:
+    # Human-readable synthetic description
+    if name == "silica_search" or name == "silica_search_context":
+        return f"Searching notes for [bold]\"{escape(args.get('query', ''))}\"[/bold]"
+    elif name == "silica_read_note":
+        return f"Reading note [bold]\"{escape(args.get('name', ''))}\"[/bold]"
+    elif name == "silica_props":
+        return f"Reading properties of [bold]\"{escape(args.get('name', ''))}\"[/bold]"
+    elif name == "silica_outline":
+        return f"Reading outline of [bold]\"{escape(args.get('name', ''))}\"[/bold]"
+    elif name == "silica_links":
+        return f"Reading links of [bold]\"{escape(args.get('name', ''))}\"[/bold]"
+    elif name == "silica_backlinks":
+        return f"Reading backlinks of [bold]\"{escape(args.get('name', ''))}\"[/bold]"
+    elif name == "silica_orphans":
+        return "Listing orphan notes"
+    elif name == "silica_unresolved":
+        return "Listing unresolved links"
+    elif name == "silica_files":
+        folder = args.get("folder", "")
+        folder_str = f" in [bold]\"{escape(folder)}\"[/bold]" if folder else ""
+        return f"Listing files{folder_str}"
+    elif name == "silica_exists":
+        return f"Checking if [bold]\"{escape(args.get('path', ''))}\"[/bold] exists"
+    elif name == "silica_deferred_list":
+        return "Listing deferred operations"
+    elif name == "silica_deferred_flush":
+        return "Flushing deferred operations"
+    elif name == "silica_inbox_ls":
+        return "Listing inbox files"
+    elif name == "silica_recon":
+        return f"Reconciling [bold]\"{escape(args.get('inbox_file', ''))}\"[/bold]"
+    elif name == "silica_payload":
+        return f"Building concept payload from [bold]\"{escape(args.get('recon_report_path', ''))}\"[/bold]"
+    elif name == "silica_sanitize":
+        return f"Sanitizing distiller output at [bold]\"{escape(args.get('distiller_output_path', ''))}\"[/bold]"
+    elif name == "silica_validate_ops":
+        return f"Validating operations in [bold]\"{escape(args.get('ops_json_path', ''))}\"[/bold]"
+    elif name == "silica_bulk_write":
+        return f"Executing bulk write using [bold]\"{escape(args.get('ops_json_path', ''))}\"[/bold]"
+    elif name == "silica_lint":
+        return f"Linting note [bold]\"{escape(args.get('note_name', ''))}\"[/bold]"
+    elif name == "silica_run_injector":
+        return f"Running injector on [bold]\"{escape(args.get('inbox_file', ''))}\"[/bold]"
+    elif name == "silica_deferred_retry":
+        return "Retrying deferred operations"
+    elif name == "silica_move":
+        ref = args.get("ref", "")
+        to = args.get("to", "")
+        return f"Moving [bold]\"{escape(ref)}\"[/bold] to [bold]\"{escape(to)}\"[/bold]"
+    elif name == "silica_delete":
+        return f"Deleting [bold]\"{escape(args.get('ref', ''))}\"[/bold]"
+    elif name == "silica_snapshot":
+        return f"Taking snapshot to [bold]\"{escape(args.get('ops_json_path', ''))}\"[/bold]"
+    elif name == "silica_restore":
+        return f"Restoring transaction [bold]\"{escape(args.get('txn_id', ''))}\"[/bold]"
+    elif name == "silica_cleanup":
+        return f"Cleaning up [bold]\"{escape(args.get('inbox_file', ''))}\"[/bold]"
+        
+    # Fallback
+    clean_name = name.removeprefix("silica_").replace("_", " ")
+    return f"Executing {clean_name}"
+
+
 class _ProgressRenderer:
     def __init__(self) -> None:
         self._live: Live | None = None
         self._last_tool_name: str = ""
+        self._active_tools: dict[str, dict] = {}
 
     def _start_spinner(self) -> None:
         if self._live is not None:
+            return
+        if not CONSOLE.is_terminal:
             return
         spinner = Spinner("dots", text="  thinking…", style="dim cyan")
         self._live = Live(
@@ -129,6 +197,36 @@ class _ProgressRenderer:
         if self._live is not None:
             self._live.stop()
             self._live = None
+
+    def _update_live(self) -> None:
+        mode = CONFIG.tool_progress
+        if mode == "off" or not CONSOLE.is_terminal:
+            return
+
+        if not self._active_tools:
+            if self._live:
+                self._live.update(Spinner("dots", text="  thinking…", style="dim cyan"))
+            return
+
+        renderables = []
+        for cid, tinfo in self._active_tools.items():
+            name = tinfo["name"]
+            args = tinfo["args"]
+            desc = _synthetic_tool_desc(name, args)
+            
+            tool_spinner = Spinner("dots", text=f"  [cyan]Running[/] {desc}…", style="cyan")
+            renderables.append(tool_spinner)
+
+        if self._live:
+            self._live.update(Group(*renderables))
+        else:
+            self._live = Live(
+                Group(*renderables),
+                console=CONSOLE,
+                refresh_per_second=12,
+                transient=True,
+            )
+            self._live.start()
 
     def __call__(self, event: RenderEvent) -> None:
         try:
@@ -151,60 +249,70 @@ class _ProgressRenderer:
         if isinstance(event, ReasoningEvent):
             self._stop_spinner()
             if CONFIG.show_thinking or mode == "verbose" or CONFIG.verbose:
-                body = Text(_head_cap(event.text).strip(), style="dim")
-                CONSOLE.print(Panel(
-                    body,
-                    title="[dim]✦ thinking[/]",
-                    title_align="left",
-                    border_style="dim cyan",
-                    padding=(0, 1),
-                ))
+                body = _head_cap(event.text).strip()
+                indented = "\n".join(f"  [#6366f1]│[/] [dim]{line}[/]" for line in body.splitlines())
+                CONSOLE.print(f"  [#22d3ee]✦ thinking[/]\n{indented}\n")
             return
 
         if isinstance(event, ToolErrorEvent):
             self._stop_spinner()
-            CONSOLE.print(f"  [bold red]✗ {escape(event.name)}[/]: [red]{escape(event.error)}[/]")
+            CONSOLE.print(f"  [red]✗[/] [bold]{escape(event.name)}[/]: [red]{escape(event.error)}[/]")
+            self._active_tools.pop(event.call_id, None)
+            self._update_live()
             return
 
         if mode == "off":
             return
 
         if isinstance(event, ToolStartEvent):
-            if mode == "new":
-                if event.name == self._last_tool_name:
-                    return
-                self._last_tool_name = event.name
-                CONSOLE.print(f"  [dim]⚙ {escape(event.name)}[/]")
-
-            elif mode == "all":
-                preview = _args_preview(event.args)
-                CONSOLE.print(f"  [cyan]→ [bold]{escape(event.name)}[/bold]({escape(preview)})[/]")
-
-            elif mode == "verbose":
-                compact = _compact_args(event.args)
-                redacted = _redact(compact)
-                if redacted is not None:
-                    CONSOLE.print(f"  [cyan]→ [bold]{escape(event.name)}[/bold][/]  [dim]{escape(redacted)}[/]")
-                else:
-                    CONSOLE.print(f"  [cyan]→ [bold]{escape(event.name)}[/bold] [dim][redacted args][/][/]")
+            if CONSOLE.is_terminal:
+                self._active_tools[event.call_id] = {"name": event.name, "args": event.args}
+                self._update_live()
+            else:
+                # Non-interactive fallback: print immediately
+                desc = _synthetic_tool_desc(event.name, event.args)
+                if mode == "new":
+                    if event.name == self._last_tool_name:
+                        return
+                    self._last_tool_name = event.name
+                    CONSOLE.print(f"  [dim]⚙[/] {desc}")
+                elif mode == "all":
+                    CONSOLE.print(f"  [cyan]→[/] {desc}")
+                elif mode == "verbose":
+                    CONSOLE.print(f"  [cyan]→[/] {desc}")
 
         elif isinstance(event, ToolCompleteEvent):
             dur = f"{event.duration_s:.3f}s"
-            if mode in ("new", "all"):
-                CONSOLE.print(f"  [green]✓ {escape(event.name)}[/] [dim]({dur})[/]")
-
-            elif mode == "verbose":
-                redacted = _redact(event.result)
-                if redacted is not None:
-                    head = _head_result(redacted.strip())
-                    CONSOLE.print(f"  [green]✓ [bold]{escape(event.name)}[/bold][/] [dim]({dur})[/]")
-                    if head:
-                        CONSOLE.print(f"  [dim]{escape(head)}[/]")
-                else:
-                    CONSOLE.print(
-                        f"  [green]✓ [bold]{escape(event.name)}[/bold][/]"
-                        f" [dim]({dur}) [result redacted][/]"
-                    )
+            if CONSOLE.is_terminal:
+                self._stop_spinner()
+                desc = _synthetic_tool_desc(event.name, event.args)
+                
+                CONSOLE.print(f"  [green]✓[/] {desc} [dim]({dur})[/]")
+                if mode == "verbose":
+                    redacted = _redact(event.result)
+                    if redacted is not None:
+                        head = _head_result(redacted.strip())
+                        if head:
+                            CONSOLE.print(f"    [dim]{escape(head)}[/]")
+                    else:
+                        CONSOLE.print(f"    [dim][result redacted][/]")
+                
+                self._active_tools.pop(event.call_id, None)
+                self._update_live()
+            else:
+                # Non-interactive fallback
+                desc = _synthetic_tool_desc(event.name, event.args)
+                if mode in ("new", "all"):
+                    CONSOLE.print(f"  [green]✓[/] {desc} [dim]({dur})[/]")
+                elif mode == "verbose":
+                    redacted = _redact(event.result)
+                    if redacted is not None:
+                        head = _head_result(redacted.strip())
+                        CONSOLE.print(f"  [green]✓[/] {desc} [dim]({dur})[/]")
+                        if head:
+                            CONSOLE.print(f"  [dim]{escape(head)}[/]")
+                    else:
+                        CONSOLE.print(f"  [green]✓[/] {desc} [dim]({dur}) [result redacted][/]")
 
 
 def make_progress_callback() -> _ProgressRenderer:

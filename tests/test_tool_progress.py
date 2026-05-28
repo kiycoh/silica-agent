@@ -123,36 +123,39 @@ def test_callback_modes_output(capsys):
     try:
         # Test "new" mode
         CONFIG.tool_progress = "new"
-        cb(ToolStartEvent(name="toolA", args={"x": 1}, call_id="1", iteration=1))
+        cb(ToolStartEvent(name="silica_read_note", args={"name": "noteA"}, call_id="1", iteration=1))
         captured = capsys.readouterr()
-        assert "toolA" in captured.out
+        assert "Reading note" in captured.out
+        assert "noteA" in captured.out
         
         # Same tool consecutive call should be skipped in "new" mode
-        cb(ToolStartEvent(name="toolA", args={"x": 2}, call_id="2", iteration=2))
+        cb(ToolStartEvent(name="silica_read_note", args={"name": "noteB"}, call_id="2", iteration=2))
         captured = capsys.readouterr()
         assert captured.out == ""
         
         # Different tool should print
-        cb(ToolStartEvent(name="toolB", args={"x": 1}, call_id="3", iteration=3))
+        cb(ToolStartEvent(name="silica_search", args={"query": "searchQ"}, call_id="3", iteration=3))
         captured = capsys.readouterr()
-        assert "toolB" in captured.out
+        assert "Searching notes" in captured.out
+        assert "searchQ" in captured.out
         
         # Test "all" mode
         CONFIG.tool_progress = "all"
-        cb(ToolStartEvent(name="toolA", args={"x": 1}, call_id="4", iteration=4))
+        cb(ToolStartEvent(name="silica_read_note", args={"name": "noteA"}, call_id="4", iteration=4))
         captured = capsys.readouterr()
-        assert "toolA" in captured.out
-        assert "x" in captured.out
+        assert "Reading note" in captured.out
+        assert "noteA" in captured.out
         
         # Test "verbose" mode
         CONFIG.tool_progress = "verbose"
-        cb(ToolStartEvent(name="toolA", args={"x": 1}, call_id="5", iteration=5))
+        cb(ToolStartEvent(name="silica_read_note", args={"name": "noteA"}, call_id="5", iteration=5))
         captured = capsys.readouterr()
-        assert "args:" in captured.out
+        assert "Reading note" in captured.out
+        assert "noteA" in captured.out
         
-        cb(ToolCompleteEvent(name="toolA", args={"x": 1}, call_id="5", result="some result", duration_s=1.23, iteration=5))
+        cb(ToolCompleteEvent(name="silica_read_note", args={"name": "noteA"}, call_id="5", result="some result", duration_s=1.23, iteration=5))
         captured = capsys.readouterr()
-        assert "result:" in captured.out
+        assert "Reading note" in captured.out
         assert "some result" in captured.out
         
     finally:
@@ -231,9 +234,11 @@ def test_llm_captures_reasoning(mock_completion):
     messages = [{"role": "user", "content": "hello"}]
     res = call_llm(model="test_model", messages=messages)
     
-    assert res.reasoning == "Thinking hard..."
+    assert res.reasoning == "Thinking..."
     assert res.text == "My answer"
-    assert res.assistant_message == {"role": "assistant", "content": "My answer"}
+    assert res.assistant_message["role"] == "assistant"
+    assert res.assistant_message["content"] == "My answer"
+    assert res.assistant_message["reasoning_content"] == "Deliberating..."
 
     mock_message2 = MagicMock()
     mock_message2.content = "Answer with blocks"
@@ -252,7 +257,9 @@ def test_llm_captures_reasoning(mock_completion):
     
     res2 = call_llm(model="test_model", messages=messages)
     assert res2.reasoning == "Block reasoning"
-    assert res2.assistant_message == {"role": "assistant", "content": "Answer with blocks"}
+    assert res2.assistant_message["role"] == "assistant"
+    assert res2.assistant_message["content"] == "Answer with blocks"
+    assert res2.assistant_message["thinking_blocks"] == [{"thinking": "Block reasoning"}]
 
 
 @patch("litellm.completion")

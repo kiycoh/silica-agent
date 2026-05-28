@@ -170,7 +170,7 @@ def main():
         try:
             answer = run_agent(messages, model=CONFIG.model, tool_progress_callback=callback)
             if answer:
-                CONSOLE.rule(style="dim")
+                CONSOLE.print()
                 CONSOLE.print(Markdown(answer))
                 CONSOLE.print()
             messages.append({"role": "assistant", "content": answer or ""})

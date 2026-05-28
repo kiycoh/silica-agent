@@ -21,8 +21,14 @@ def _history_path() -> Path:
 
 def bottom_toolbar() -> HTML:
     vault = CONFIG.vault_name or "—"
-    think = "on" if CONFIG.show_thinking else "off"
-    return HTML(f" <b>{CONFIG.model}</b>  vault:{vault}  progress:{CONFIG.tool_progress}  thinking:{think} ")
+    think = "thinking:on" if CONFIG.show_thinking else "thinking:off"
+    progress = f"progress:{CONFIG.tool_progress}"
+    return HTML(
+        f" <ansicyan><b>{CONFIG.model}</b></ansicyan>  "
+        f"vault:<b>{vault}</b>  "
+        f"{progress}  "
+        f"<b>{think}</b> "
+    )
 
 
 def build_session() -> PromptSession:
@@ -34,4 +40,6 @@ def build_session() -> PromptSession:
 
 
 def prompt_text() -> HTML:
+    if CONFIG.vault_name:
+        return HTML(f"<ansicyan><b>silica</b></ansicyan> <ansigray>[{CONFIG.vault_name}]</ansigray> › ")
     return HTML("<ansicyan><b>silica</b></ansicyan> › ")

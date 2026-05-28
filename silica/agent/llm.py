@@ -110,10 +110,27 @@ def call_llm(
     message = choice.message
     finish_reason = getattr(choice, "finish_reason", None)
 
+    # Extract reasoning
+    reasoning = getattr(message, "reasoning_content", None)
+    if not isinstance(reasoning, str):
+        reasoning = getattr(message, "reasoning", None)
+    if not isinstance(reasoning, str) and isinstance(message, dict):
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
+    if not isinstance(reasoning, str):
+        reasoning = None
+
+    blocks = getattr(message, "thinking_blocks", None)
+    if not reasoning and isinstance(blocks, list):
+        reasoning = "\n".join(b.get("thinking", "") for b in blocks if isinstance(b, dict))
+
     # Build the assistant message dict for conversation history
     assistant_msg: dict = {"role": "assistant"}
     if message.content:
         assistant_msg["content"] = message.content
+    if reasoning:
+        assistant_msg["reasoning_content"] = reasoning
+    if isinstance(blocks, list):
+        assistant_msg["thinking_blocks"] = blocks
 
     # Parse tool calls and build sanitized history
     parsed_calls: list[ToolCall] = []
@@ -142,12 +159,6 @@ def call_llm(
             })
             
         assistant_msg["tool_calls"] = assistant_msg_tool_calls
-
-    reasoning = getattr(message, "reasoning_content", None)
-    if not reasoning:
-        blocks = getattr(message, "thinking_blocks", None)
-        if blocks:
-            reasoning = "\n".join(b.get("thinking", "") for b in blocks if isinstance(b, dict))
 
     if CONFIG.verbose:
         text_preview = (message.content or "")[:80].replace("\n", " ")
