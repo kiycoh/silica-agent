@@ -23,7 +23,6 @@ import os
 import time
 from enum import Enum, auto
 from typing import Any, TYPE_CHECKING
-import orjson
 
 if TYPE_CHECKING:
     from silica.driver.base import Txn, GraphSnapshot
@@ -40,7 +39,8 @@ from silica.tools.composed import (
 )
 from silica.kernel.ops import OpType
 from silica.kernel.ops_io import load_ops
-from silica.kernel.paths import to_vault_relative, silica_tmp_dir
+from silica.kernel.paths import to_vault_relative
+from silica.router.base_fsm import BaseFSM
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class InjectorState(Enum):
     ERROR = auto()
 
 
-class InjectorFSM:
+class InjectorFSM(BaseFSM[InjectorState]):
     """Deterministic state machine for the Injector pipeline (S2.3 complete)."""
 
     def __init__(self, inbox_file: str, target_dir: str, hub: str | None = None):
@@ -132,6 +132,27 @@ class InjectorFSM:
                 ]
             }
 
+        # BaseFSM contract
+        self._phase_label = "Injector"
+        self._done_state = InjectorState.DONE
+        self._error_state = InjectorState.ERROR
+        self._rollback_state = InjectorState.ROLLBACK
+        self._phase_to_state: dict[str, InjectorState] = {
+            "recon":      InjectorState.RECON,
+            "payload":    InjectorState.PAYLOAD,
+            "collision":  InjectorState.COLLISION,
+            "distill":    InjectorState.DELEGATE,
+            "sanitize":   InjectorState.SANITIZE,
+            "validate":   InjectorState.VALIDATE,
+            "snapshot":   InjectorState.SNAPSHOT,
+            "write":      InjectorState.WRITE,
+            "hub_update": InjectorState.HUB_UPDATE,
+            "autolink":   InjectorState.AUTOLINK,
+            "lint":       InjectorState.LINT,
+            "cleanup":    InjectorState.CLEANUP,
+            "rollback":   InjectorState.ROLLBACK,
+        }
+
         # S2.2.1: Handlers mapping and error policy
         self._HANDLERS = {
             InjectorState.RECON: self._handle_recon,
@@ -194,39 +215,6 @@ class InjectorFSM:
             else:
                 self._chunks = [res]
 
-    def _get_recipe_gate(self, name: str, default: Any) -> Any:
-        return self._recipe.get("gates", {}).get(name, default)
-
-    def _get_recipe_phase(self, phase_id: str) -> dict:
-        for phase in self._recipe.get("phases", []):
-            if phase.get("id") == phase_id:
-                return phase
-        return {}
-
-    def _make_tmp(self, content: Any, suffix: str = ".json") -> str:
-        """Write content as JSON to ~/.silica/tmp/ and track for cleanup."""
-        import uuid
-        tmp_dir = silica_tmp_dir()
-        path = str(tmp_dir / f"{uuid.uuid4().hex}{suffix}")
-        with open(path, "wb") as f:
-            if isinstance(content, list) and len(content) > 0 and hasattr(content[0], "model_dump"):
-                f.write(orjson.dumps([item.model_dump() for item in content], option=orjson.OPT_INDENT_2))
-            elif hasattr(content, "model_dump"):
-                f.write(orjson.dumps(content.model_dump(), option=orjson.OPT_INDENT_2))
-            else:
-                f.write(orjson.dumps(content, option=orjson.OPT_INDENT_2))
-        self._tmp_files.append(path)
-        logger.debug("Created staging file: %s", path)
-        return path
-
-    def _cleanup_tmp(self) -> None:
-        for path in self._tmp_files:
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
-        self._tmp_files.clear()
-
     def _progress_note(
         self,
         task_id: str,
@@ -268,9 +256,7 @@ class InjectorFSM:
     def run(self) -> dict[str, Any]:
         """Execute the pipeline end-to-end."""
         from silica.kernel.ledger import get_ledger
-        # Compute stable identity: vault-relative path, no .md, lowercase
         source_canonical = self._source_canonical()
-        # Hash the inbox file content for content-aware skip (C2.2)
         try:
             content_bytes = open(self.inbox_file, "rb").read()
             content_hash = hashlib.sha256(content_bytes).hexdigest()
@@ -284,80 +270,13 @@ class InjectorFSM:
             return self.context
 
         self.state = InjectorState.RECON
+        return self._run_loop()
 
-        try:
-            while self.state not in (InjectorState.DONE, InjectorState.ERROR):
-                try:
-                    logger.debug("FSM Transition: %s -> executing handler", self.state.name)
-                    self.step()
-                except Exception as e:
-                    logger.error("FSM Error in state %s: %s", self.state, e)
-                    self.context["error"] = str(e)
-                    
-                    next_state = self._ON_ERROR.get(self.state, InjectorState.ERROR)
-                    if next_state == InjectorState.ROLLBACK and self._txn:
-                        self.context["abort_reason"] = str(e)
-                        self.state = InjectorState.ROLLBACK
-                    else:
-                        self.state = InjectorState.ERROR
-        finally:
-            self._cleanup_tmp()
+    def _on_sequence_end(self) -> None:
+        self._eval_loop_or_done()
 
-        return self.context
-
-    def step(self) -> None:
-        """Execute the current state and transition."""
-        logger.info("Injector phase: %s", self.state.name)
-        handler = self._HANDLERS.get(self.state)
-        if handler:
-            handler()
-        else:
-            raise RuntimeError(f"No handler defined for state {self.state}")
-
-    def _transition_success(self) -> None:
-        """Advance to the next state according to the recipe phases sequence."""
-        phases = self._recipe.get("phases", [])
-        
-        PHASE_TO_STATE = {
-            "recon": InjectorState.RECON,
-            "payload": InjectorState.PAYLOAD,
-            "collision": InjectorState.COLLISION,
-            "distill": InjectorState.DELEGATE,
-            "sanitize": InjectorState.SANITIZE,
-            "validate": InjectorState.VALIDATE,
-            "snapshot": InjectorState.SNAPSHOT,
-            "write": InjectorState.WRITE,
-            "hub_update": InjectorState.HUB_UPDATE,
-            "autolink": InjectorState.AUTOLINK,
-            "lint": InjectorState.LINT,
-            "cleanup": InjectorState.CLEANUP,
-            "rollback": InjectorState.ROLLBACK,
-        }
-
-        # Normal sequential flow excludes cleanup and rollback from direct transition
-        sequence = [p["id"] for p in phases if not p.get("on_gate_fail") and p.get("id") != "rollback" and p.get("id") != "cleanup"]
-        
-        current_phase_id = None
-        for k, v in PHASE_TO_STATE.items():
-            if v == self.state:
-                current_phase_id = k
-                break
-                
-        if current_phase_id in sequence:
-            idx = sequence.index(current_phase_id)
-            if idx + 1 < len(sequence):
-                next_phase_id = sequence[idx + 1]
-                self.state = PHASE_TO_STATE[next_phase_id]
-            else:
-                # After the sequence, go to cleanup if defined, else DONE/LOOP
-                if "cleanup" in [p["id"] for p in phases]:
-                    self.state = InjectorState.CLEANUP
-                else:
-                    self._eval_loop_or_done()
-        elif self.state == InjectorState.CLEANUP:
-            self._eval_loop_or_done()
-        elif self.state == InjectorState.ROLLBACK:
-            self.state = InjectorState.ERROR
+    def _on_cleanup_done(self) -> None:
+        self._eval_loop_or_done()
 
     def _eval_loop_or_done(self) -> None:
         """Check if there are more chunks to process or if the queue is empty."""
