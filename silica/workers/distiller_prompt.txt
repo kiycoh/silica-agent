@@ -14,7 +14,7 @@ Read a pre-distilled JSON payload, compare inbox-extracted excerpts against exis
 Your output will be rejected by the post-distillation validator if it violates any of the following constraints:
 1. **Targeting Inbox Files**: You MUST NOT write or patch to any path containing `/0 Inbox/` or pointing to the inbox directory.
 2. **Invalid Paths for Patch**: Every `path` for a `patch` operation MUST equal the corresponding `vault_collision.path` from the payload. Do not invent vault paths.
-3. **Invalid Paths for Write**: Every `path` for a `write` operation MUST be `{TARGET}/<heading>.md`.
+3. **Invalid Paths for Write**: Every `path` for a `write` operation MUST be `{TARGET}/<title_or_heading>.md`, where `<title_or_heading>` is the optional `title` field (if provided) or the `heading` otherwise.
 4. **Incorrect Hub**: Every `hub` field for a `write` operation MUST be exactly `"{HUB_NAME}"`. For other operations, set it to null or omit it.
 5. **Heading Hallucinations**: Every `heading` in your output MUST match a concept name listed in the payload batch. Do not invent concept names.
 6. **Wrong Source Attribution**: Every operation must specify `source_basename` = the filename (basename) of the `inbox_file` from the batch containing that concept.
@@ -66,11 +66,18 @@ The `action_hint` field is the Router's mechanical guess based on collision tier
 - Use bold for key terms when natural. Use Obsidian callout syntax (> [!TIP], > [!NOTE], > [!WARNING]) only when it materially aids the reader.
 - **Modular Atomicity**: if a single payload concept actually bundles multiple distinct sub-concepts (e.g. an inbox section titled "Reti Neurali" that defines both "Perceptron" and "Backpropagation" with separate formulas), split it into multiple update entries — one per atomic concept — with op `write` for each sub-concept that lacks its own vault note.
 - **Content Preservation**: do not silently drop information from inbox_excerpt. If it doesn't fit one concept's update, route it to a separate update.
+- **Note Title Elegance**: when a concept heading is structurally compound — i.e. it contains a broad contextual prefix followed by the actual concept (patterns like "Contesto: Concetto", "Introduzione ai Sistemi: MCU", "Lezione N — Argomento: Sottoconcetto") — set the optional `title` field to the focused, atomic concept name (e.g. `"title": "MCU"` or `"title": "Microcontrollori (MCU)"`). The `heading` MUST still match the payload concept name exactly (traceability anchor); `title` is only the clean filename stem. The `path` MUST then use `title`: `{TARGET}/<title>.md`. Omit `title` entirely when the heading is already atomic and self-contained.
+
+## JSON Output Encoding Rules (CRITICAL — violations cause immediate rejection)
+- **Wikilinks**: NEVER include the `.md` extension inside `[[...]]`. Write `[[Note Title]]` not `[[Note Title.md]]` or `[[path/to/Note.md]]`. The `related` array and all body text follow the same rule.
+- **Backslash escaping in code**: When a `snippet` or `content` field contains source code with backslash escape sequences (e.g. Python `b'\n'`, `'\t'`, `'\x41'`, regex `r'\d+'`), you MUST double-escape the backslash in the JSON string so the sequence is preserved as-is in the output file. Write `b'\\n'` in JSON to produce `b'\n'` in the file. Failing to do so inserts a literal newline character into the code, which corrupts the block and fails the line-count linter gate.
+- **No self-referential links**: the `snippet` or `content` of a note for concept X must NOT contain `[[X]]` (a link back to itself). Self-links are meaningless in Obsidian's graph and will be stripped by the autolink gate anyway.
+- **Tag limit**: include at most **3 tags** per note. If the inbox excerpt suggests more, keep the 3 most specific/relevant ones and discard the rest.
 
 ## Anti-Hallucination Guardrails
 - Every `heading` in your output MUST appear in the input payload. Do not invent concept names.
 - Every `path` for a `patch` operation MUST equal the corresponding `vault_collision.path` from the payload. Do not invent vault paths.
-- Every `path` for a `write` operation MUST be `{TARGET}/<heading>.md`. Preserve spaces and case in the heading (Obsidian permits both); strip only path-illegal characters (`/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`).
+- Every `path` for a `write` operation MUST be `{TARGET}/<title_or_heading>.md`, where `title_or_heading` is `title` (if present) or `heading`. Preserve spaces and case; strip only path-illegal characters (`/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`). The `title` field, if used, MUST be semantically derived from the `heading` — never invented from scratch.
 - Every `hub` field in a `write` operation MUST match the hub name `"{HUB_NAME}"`.
 - Every distilled fact MUST be traceable to inbox_excerpt content. Do not insert outside knowledge, plausible-sounding definitions, or web-recalled examples.
 - If inbox_excerpt is empty or uninformative for a concept, emit a `skip` with `"reason": "empty or uninformative excerpt"`. Do not fabricate content to fill it.
@@ -102,7 +109,7 @@ Respond with ONLY the JSON object below. No prose preamble. No markdown fences (
           }
         },
         {
-          "name": "Adam Optimizer",
+          "name": "Algoritmi di Ottimizzazione: Adam Optimizer",
           "action_hint": "create",
           "inbox_excerpt": "Adam is an optimization algorithm. Parameters: beta1=0.9, beta2=0.999.",
           "vault_collision": null
@@ -134,7 +141,8 @@ Respond with ONLY the JSON object below. No prose preamble. No markdown fences (
       "snippet": "- Definizione formale: la backpropagation calcola il gradiente della funzione di perdita rispetto ai pesi tramite la regola della catena applicata ricorsivamente dallo strato di output verso l'input.\n- Formula del gradiente per il peso $w_{ij}^{(l)}$: $\\frac{\\partial \\mathcal{L}}{\\partial w_{ij}^{(l)}} = \\delta_j^{(l)} \\cdot a_i^{(l-1)}$"
     },
     {
-      "heading": "Adam Optimizer",
+      "heading": "Algoritmi di Ottimizzazione: Adam Optimizer",
+      "title": "Adam Optimizer",
       "op": "write",
       "path": "{TARGET}/Adam Optimizer.md",
       "source_basename": "Lezione 04.md",

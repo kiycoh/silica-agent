@@ -16,7 +16,10 @@
 - [🏗️ Layered Architecture (L0–L4)](#%EF%B8%8F-layered-architecture-l0l4)
 - [🔍 The Dual-Consumer Paradigm](#-the-dual-consumer-paradigm)
 - [📜 The Golden Rules of Curation](#-the-golden-rules-of-curation)
+- [⚙️ Configuration](#%EF%B8%8F-configuration)
 - [🚀 Quick Start](#-quick-start)
+  - [CLI Slash Commands](#cli-slash-commands)
+  - [Obsidian-Native Composed Tools](#obsidian-native-composed-tools)
 - [📂 Directory Structure](#-directory-structure)
 - [⚖️ License](#%EF%B8%8F-license)
 
@@ -69,17 +72,32 @@ Silica does not just edit text; it protects the graph.
     *   *Unplanned Orphans:* Rejects if new orphan notes are created (unless explicitly created by the current batch).
     *   *New Unresolved Links:* Rejects if new unresolved links are introduced from pre-existing notes (excluding intentional forward references between newly written notes).
     *   *No Broken Backlinks:* Rejects if incoming link counts decrease for pre-existing notes.
+*   **Prospective Link Validation:** During validation, Silica verifies that patch or overwrite operations do not introduce unresolved wikilinks that cannot be found either in the current vault or inside the current batch's write operations.
 *   **Robust Transaction Rollbacks:** Before applying edits, Silica builds a transaction log. If any gate fails, the system executes an immediate, atomic rollback using captured `InverseOp` records containing the exact prior note content to revert changes reliably.
-*   **The Golden Fallback Oracle:** The dual-backend system includes a live `cli` backend (bridged directly to Electron's live cache for graph-safe updates) and an `fs` backend (direct disk interaction). The `fs` backend serves as a "golden reference" against which the live CLI is continuously validated to prevent regression.
+*   **The Golden Fallback Oracle:** The dual-backend system includes a live `cli` backend (bridged directly to Electron's live cache for graph-safe updates) and an `fs` backend (direct disk interaction). The `fs` backend serves as a "golden reference" against which the live CLI is continuously validated.
 
 ### 3. Safety-Hardened Wrapped Tools
 Instead of relying on prompt instructions (e.g., *"never delete notes"*), Silica hardcodes invariants into the tool execution layer itself. For example, `silica_move` natively handles internal links redirection so that links never break, and `silica_delete` enforces strict anti-deletion policies.
 
 ### 4. Convergence & Loop Guards
-To prevent conversational agent runs from spinning into infinite loops, the agentic loop implements a strict convergence guard. It aborts the execution run if any tool call with identical arguments fails 3 times consecutively, and injects helpful warning context at 2 consecutive failures.
+To prevent conversational agent runs from spinning into infinite loops, the agentic loop implements a strict convergence guard. It aborts the execution run and marks the active task as `blocked` in the execution ledger if any tool call with identical arguments fails 3 times consecutively.
 
-### 5. Deferred Operations Staging
-Operations that fail validation or gates are not discarded. They are preserved in a local content-hashed deferred store. Users can list or retry these operations later using `silica_deferred_retry` without repeating the full expensive pipeline cycles.
+### 5. Semantic Deduplication & Collision Routing
+During ingestion, Silica utilizes cosine similarity of note embeddings (with $\tau_{\text{high}}$ and $\tau_{\text{low}}$ thresholds) to automatically route concepts:
+*   *Strong Duplicate ($\ge \tau_{\text{high}}$):* Automatically routes as a `patch` operation on the existing note.
+*   *Ambiguous/Borderline ($\tau_{\text{low}} < \text{score} < \tau_{\text{high}}$):* Saved to a content-hashed **Deferred Store** to prevent cluttering the vault.
+*   *Clearly New ($\le \tau_{\text{low}}$):* Promoted to a new concept write operation.
+
+### 6. Deterministic Wikilink Injection (Autolinking)
+Silica implements a state-of-the-art autolinker that scans touched notes and wraps the first occurrence of existing vault titles with wikilinks `[[Title]]`. It ensures graph safety by only linking existing titles, respects strict markdown skip regions (yaml frontmatter, code blocks, math, headings, comments), prevents self-linking, and sorts targets longest-first to prevent shadowing.
+
+### 7. Interactive Graph Visualization
+Silica includes a built-in graph exporter that generates a fully interactive, offline-capable `vis.js` visualization of your knowledge graph. It runs Louvain community detection algorithms on resolved edges to cluster notes into thematic modules/clusters.
+
+### 8. Progress Tracking & Execution Resumption
+Every FSM run writes a `TaskLedger` (immutable plan) and updates a `ProgressLedger` (mutable run-state) under `~/.silica/runs/<run_id>/`. This enables:
+*   *Content-addressed Idempotency:* Skipping expensive LLM distillation steps if a chunk has already been successfully processed.
+*   *Digest Summaries:* Injecting compact, token-efficient summaries of execution progress into the LLM context.
 
 ---
 
@@ -90,9 +108,9 @@ Silica is organized into five decoupled layers, mapping directly from low-level 
 | Layer | Component | Description |
 | :--- | :--- | :--- |
 | **L4** | **Recipes** | Declarative YAML files (e.g., `injector.yaml`, `refiner.yaml`) defining the routing stages of curation pipelines. |
-| **L3** | **Router / Orchestrator** | Deterministic Finite State Machine that drives recipes, validates gates, and manages snapshot/rollback cycles. |
+| **L3** | **Router / Orchestrator** | Deterministic Finite State Machine that drives recipes, validates gates, and manages snapshot/rollback cycles. Backed by `ProgressLedger` execution state trackers. |
 | **L2** | **Worker Semantics** | Stateless, LLM-based sub-agents (e.g., *Distiller*, *Merger*) that execute complex Chain-of-Thought tasks and return structured JSON operations. |
-| **L1** | **Mechanical Kernel** | Pure, deterministic Python logic for parsing frontmatter, calculating partitions, running linters, and scoring validation rates. No LLMs here. |
+| **L1** | **Mechanical Kernel** | Pure, deterministic Python logic for parsing frontmatter, calculating partitions, running linters, wikilink injection (autolink), candidate generation (EmbedStore), and graph export. No LLMs here. |
 | **L0** | **Obsidian Driver** | The unified, domain-specific I/O protocol. Houses the primary `cli` adapter (bridges the live Obsidian desktop app via a CDP interface) and the `fs` fallback database. |
 
 ---
@@ -124,6 +142,25 @@ Every operation applied by Silica adheres to the following system-wide rules:
 
 ---
 
+## ⚙️ Configuration
+
+Silica is configured via environment variables or a `.env` file loaded at startup:
+
+| Environment Variable | Config Field | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `SILICA_PROVIDER` | `provider` | `lmstudio` | Chat LLM provider name (`lmstudio`, `openai`, `openrouter`, etc.) |
+| `SILICA_MODEL` | `model` | `""` | Chat LLM model name |
+| `SILICA_EMBEDDING_MODEL` | `embedding_model` | `qwen3-embedding-8b` | Embedding model name |
+| `SILICA_EMBEDDING_BASE_URL` | `embedding_base_url` | `http://localhost:1234/v1` | Base URL for embedding API endpoint |
+| `SILICA_EMBEDDING_API_KEY` | `embedding_api_key` | `lm-studio` | API key for embedding endpoint |
+| `SILICA_SIM_THRESHOLD_HIGH` | `sim_threshold_high` | `0.85` | Cosine similarity threshold for strong duplicates (routes to patch) |
+| `SILICA_SIM_THRESHOLD_LOW` | `sim_threshold_low` | `0.65` | Cosine similarity threshold for new concepts (routes to write) |
+| `SILICA_BANNER_STYLE` | `banner_style` | `wordmark` | CLI startup banner style (`wordmark`, `minimal`) |
+| `SILICA_BANNER_FONT` | `banner_font` | `slant` | ASCII font for the wordmark style |
+| `SILICA_DEBUG_LOGGING` | `debug_logging` | `False` | Enable verbose debugging logs |
+
+---
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -150,8 +187,19 @@ Start the interactive conversational REPL session:
 uv run silica
 ```
 
-#### CLI Slash Commands
+For background pipeline runs (e.g., executing the injector recipe):
+
+```bash
+# Example command executing the ingestion pipeline directly
+uv run python -m silica.router.orchestrator --recipe injector --inbox ./inbox
+```
+
+---
+
+### CLI Slash Commands
+
 When inside the conversational REPL, the following slash commands are available:
+
 *   `/clear` — Clears the terminal screen, resets the model message history back to the system prompt, and initializes a clean interactive session.
 *   `/verbose` — Cycles through tool progress display levels: `off` → `new` → `all` → `verbose`. The `verbose` mode activates system `DEBUG` logging with a customized, human-friendly formatting wrapper.
 *   `/thinking` — Toggles the rendering of the LLM's reasoning and thought blocks.
@@ -160,12 +208,26 @@ When inside the conversational REPL, the following slash commands are available:
 *   `/help` — Displays the slash command help menu.
 *   `/exit` or `/quit` — Exists the conversational session.
 
-For background pipeline runs (e.g., executing the injector recipe):
+---
 
-```bash
-# Example command executing the ingestion pipeline directly
-uv run python -m silica.router.orchestrator --recipe injector --inbox ./inbox
-```
+### Obsidian-Native Composed Tools
+
+Silica exposes composed mechanical workflows as system tools that can be executed directly by the conversational agent or in automated scripts:
+
+*   **`silica_recon`**: Mechanical extraction of concepts from an inbox file and collision analysis against existing vault notes.
+*   **`silica_payload`**: Pre-extracts snippets from the vault to build structured context payloads for LLM workers.
+*   **`silica_sanitize`**: Cleans, parses, and normalizes operations returned by workers (e.g. strips `.md` from wikilinks).
+*   **`silica_validate_ops`**: Pre-write gate validating path slugification, tags, and prospective link resolution.
+*   **`silica_bulk_write`**: Batches write/patch/overwrite/delete note operations into the vault.
+*   **`silica_lint`**: Post-write gate executing the OFM linter to find structural formatting or graph regressions.
+*   **`silica_run_injector`**: FSM entry-point executing the full Injector pipeline end-to-end with transaction rollback.
+*   **`silica_autolink`**: Automatically scans note bodies to link existing vault titles while avoiding skip zones.
+*   **`silica_embed_refresh`**: Incrementally populates or refreshes the vault embedding index at `~/.silica/index/embeddings.json`.
+*   **`silica_semantic_search`**: Queries the embedding store to locate semantically similar vault concepts.
+*   **`silica_similar`**: Helper to query similarity matching for arbitrary text blocks or paragraphs.
+*   **`silica_graph_export`**: Exports the note graph using Louvain community detection to a self-contained vis.js HTML dashboard.
+*   **`silica_ledger_digest`**: Generates a compact summary of a run's plan and execution status.
+*   **`silica_deferred_retry`**: Re-evaluates and retries applying deferred operation bundles from the Deferred Store.
 
 ---
 
@@ -181,7 +243,8 @@ silica-agent/
 │   ├── cli.py                  # TUI / REPL CLI entry point
 │   ├── agent/                  # Agent loop, LLM call abstractions, & delegate worker pool
 │   ├── driver/                 # L0: Obsidian I/O driver (CDP CLI & FS backends)
-│   ├── kernel/                 # L1: Pure mechanical modules (linter, parser, graph diff)
+│   ├── kernel/                 # L1: Pure mechanical modules (linter, parser, graph diff, autolink, embed, graph_export)
+│   ├── planner/                # L3: Execution state tracking (TaskLedger & ProgressLedger)
 │   ├── router/                 # L3: FSM recipe orchestrator
 │   ├── recipes/                # L4: YAML-defined pipeline flows
 │   ├── tools/                  # Atomic, composed, and wrapped vault tools
