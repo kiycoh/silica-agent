@@ -237,3 +237,33 @@ def test_build_title_index_sorted():
 
     index = build_title_index(refs)
     assert index == sorted(index)
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for structural bugs (reported post Phase 4)
+# ---------------------------------------------------------------------------
+
+def test_autolink_no_self_link():
+    """A note must never wikilink to itself (self_title excluded)."""
+    body = "DDS è un middleware. Il Data Distribution Service è usato in ROS."
+    new_body, added = autolink(body, ["DDS", "ROS"], self_title="DDS")
+    assert "[[DDS]]" not in new_body, "self-link must not be emitted"
+    assert "[[ROS]]" in new_body, "other titles must still be linked"
+    assert "DDS" not in added
+    assert "ROS" in added
+
+
+def test_autolink_self_link_case_insensitive():
+    """Self-title exclusion is case-insensitive."""
+    body = "HAL layers abstract the hardware. See also Linux."
+    new_body, added = autolink(body, ["HAL", "Linux"], self_title="hal")
+    assert "[[HAL]]" not in new_body
+    assert "[[Linux]]" in new_body
+
+
+def test_autolink_self_link_not_excluded_when_none():
+    """When self_title is None (default), no exclusion is applied."""
+    body = "PWM controls duty cycle."
+    new_body, added = autolink(body, ["PWM"])
+    # Without self_title, the title IS linked (previous behavior preserved)
+    assert "[[PWM]]" in new_body

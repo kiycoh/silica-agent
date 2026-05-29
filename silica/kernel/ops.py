@@ -27,6 +27,7 @@ class Op(BaseModel):
     heading: str                        # concept name; provenance key in payload
     source_basename: str                # inbox filename (basename) this op derives from
     path: str | None = None             # vault-relative path; required for write/patch/overwrite/delete
+    title: str | None = None            # clean note filename stem when heading is structurally compound
     snippet: str = ""                   # distilled body (write / patch)
     hub: str | None = None              # [[Hub]] link required for write ops
     content: str | None = None          # full body (overwrite only)

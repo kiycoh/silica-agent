@@ -133,19 +133,25 @@ class SanitizeArgs(BaseModel):
 @tool(SanitizeArgs, cls="composed")
 def silica_sanitize(distiller_output_path: str) -> dict[str, Any]:
     """Validates and sanitizes the JSON returned by Distiller workers."""
-    from silica.kernel.sanitize import parse_json
-    
+    from silica.kernel.sanitize import parse_json, normalize_ops
+
     try:
         with open(distiller_output_path, 'r', encoding='utf-8') as f:
             raw_content = f.read()
     except Exception as e:
         return {"error": f"Failed to read distiller output: {e}"}
-        
+
     try:
         parsed_obj, was_clean = parse_json(raw_content, strict=False)
     except Exception as e:
         return {"error": f"JSON Parse Error: {e}"}
-        
+
+    # Normalize op content: strip .md from wikilinks, etc.
+    if isinstance(parsed_obj, list):
+        parsed_obj = normalize_ops(parsed_obj)
+    elif isinstance(parsed_obj, dict) and "updates" in parsed_obj:
+        parsed_obj["updates"] = normalize_ops(parsed_obj["updates"])
+
     return {
         "success": True,
         "parsed": parsed_obj,
@@ -343,7 +349,9 @@ def silica_autolink(note_path: str, use_candidates: bool = True) -> dict[str, An
         except Exception:
             pass  # Fall back to full title_index scan
 
-    new_body, added = autolink(body, title_index, candidates=candidates)
+    import os as _os
+    note_title = _os.path.splitext(_os.path.basename(note_path))[0]
+    new_body, added = autolink(body, title_index, candidates=candidates, self_title=note_title)
 
     if not added:
         return {"note": note_path, "added": 0, "links": []}

@@ -92,6 +92,7 @@ def autolink(
     body: str,
     title_index: Sequence[str],
     candidates: Sequence[str] | None = None,
+    self_title: str | None = None,
 ) -> tuple[str, list[str]]:
     """Wrap the first occurrence of each vault title in `body` with a wikilink.
 
@@ -100,6 +101,9 @@ def autolink(
         title_index: All vault titles that may be linked (pre-disambiguated).
         candidates:  Optional prioritized subset from embeddings.  If given,
                      only titles in candidates∩title_index are processed.
+        self_title:  The title/basename of the note being processed.  When
+                     provided, this title is excluded from linking — a note must
+                     never contain a wikilink to itself.
 
     Returns:
         (new_body, added_links) — modified body and list of linked titles.
@@ -108,6 +112,7 @@ def autolink(
         - Never modifies text inside skip regions.
         - Only links titles that already exist in `title_index` (graph-safe).
         - At most one wikilink per title per call (first occurrence only).
+        - Never creates a self-referential wikilink (self_title excluded).
         - Idempotent: running twice produces the same result.
     """
     if not body or not title_index:
@@ -121,6 +126,11 @@ def autolink(
         work_titles = [title_set[t.lower()] for t in work_titles]
     else:
         work_titles = list(title_index)
+
+    # Exclude the note's own title to prevent self-referential wikilinks
+    if self_title:
+        _self_lower = self_title.lower()
+        work_titles = [t for t in work_titles if t.lower() != _self_lower]
 
     if not work_titles:
         return body, []

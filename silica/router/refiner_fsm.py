@@ -591,8 +591,9 @@ class RefinerFSM:
                 total_added = 0
                 for path in touched_paths:
                     try:
+                        note_title = os.path.splitext(os.path.basename(path))[0]
                         nc = DRIVER.read_note(path)
-                        new_body, added = autolink(nc.content or "", title_index)
+                        new_body, added = autolink(nc.content or "", title_index, self_title=note_title)
                         if added:
                             DRIVER.overwrite(path, new_body)
                             total_added += len(added)

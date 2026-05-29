@@ -19,8 +19,18 @@ def validate_operations(ops: list[Op] | list[dict], payloads: list, target_dir: 
     from silica.kernel.ops_io import parse_ops
     ops = parse_ops(ops)
 
-    # Sanitize filesystem-illegal characters (e.g. ':') from path filenames
+    # Sanitize filesystem-illegal characters (e.g. ':') from path filenames.
+    # When a write op carries a `title` field, rebuild the path from title so
+    # the note is filed under the clean concept name rather than the heading.
     for op in ops:
+        if op.op == OpType.write and op.title and op.path and target_dir:
+            clean_title = slugify(op.title)
+            if clean_title:
+                new_path = f"{target_dir.rstrip('/')}/{clean_title}.md"
+                if new_path != op.path:
+                    logger.debug("validate: title-derived path '%s' → '%s'", op.path, new_path)
+                    op.path = new_path
+
         if op.path:
             folder, filename = os.path.split(op.path)
             name, ext = os.path.splitext(filename)
