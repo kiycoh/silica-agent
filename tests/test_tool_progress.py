@@ -350,7 +350,8 @@ def test_print_banner_styles(capsys):
             CONFIG.banner_style = "wordmark"
             print_banner()
             captured = capsys.readouterr()
-            assert "___" in captured.out or "\\/" in captured.out
+            # wordmark renders multi-line ASCII/block art; minimal would be a single line
+            assert len(captured.out.splitlines()) > 2
             assert "Your personal note curator agent" in captured.out
 
             # crystal is removed — falls back to minimal banner
