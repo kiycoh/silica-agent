@@ -103,8 +103,11 @@ class SilicaConfig:
 
     # Font pyfiglet del banner di avvio
     banner_font: str = field(
-        default_factory=lambda: os.getenv("SILICA_BANNER_FONT", "slant")
+        default_factory=lambda: os.getenv("SILICA_BANNER_FONT", "ansi_shadow")
     )
+
+    # Runtime session state — updated by cli.py after each agent turn
+    context_tokens: int = 0
 
     # Stile del banner di avvio (wordmark, minimal)
     banner_style: Literal["wordmark", "minimal"] = field(
