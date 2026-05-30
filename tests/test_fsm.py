@@ -132,11 +132,13 @@ def test_fsm_delegate_single_chunk(mock_run_distiller):
 @patch("silica.router.orchestrator.silica_bulk_write")
 @patch("silica.router.orchestrator.silica_lint")
 @patch("silica.tools.wrapped.silica_cleanup")
+@patch("silica.kernel.embed.EmbedStore")
 def test_fsm_multi_chunk_loop(
-    mock_cleanup, mock_lint, mock_write, mock_snapshot, mock_driver,
+    mock_embed_store, mock_cleanup, mock_lint, mock_write, mock_snapshot, mock_driver,
     mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
 ):
     # Setup mock payload with 2 chunks
+    mock_embed_store.return_value.__len__ = lambda _: 0  # empty index → COLLISION skips early
     mock_recon.return_value = {"success": True}
     mock_payload.return_value = {
         "chunks": [
@@ -179,6 +181,7 @@ def test_fsm_multi_chunk_loop(
     expected_sequence = [
         # First chunk cycle
         InjectorState.RECON,
+        InjectorState.CROSSDEDUP, # Phase 1.5 (best-effort, single file → skip)
         InjectorState.PAYLOAD,
         InjectorState.SALIENCE,   # Phase 2.05 (best-effort, embedder unavailable → skip)
         InjectorState.COLLISION,  # Phase 5 (best-effort, no index → skip)
@@ -362,6 +365,9 @@ def test_fsm_recipe_transition_sequence():
     # Verify sequential progression
     fsm.state = InjectorState.RECON
     fsm._transition_success()
+    assert fsm.state == InjectorState.CROSSDEDUP  # Phase 1.5
+
+    fsm._transition_success()
     assert fsm.state == InjectorState.PAYLOAD
 
     fsm._transition_success()
@@ -452,6 +458,7 @@ def test_fsm_recipe_end_to_end_flow(
     # Verify the sequence of states visited exactly matches the injector.yaml phases
     expected_sequence = [
         InjectorState.RECON,
+        InjectorState.CROSSDEDUP, # Phase 1.5 (best-effort, single file → skip)
         InjectorState.PAYLOAD,
         InjectorState.SALIENCE,   # Phase 2.05 (best-effort, embedder unavailable → skip)
         InjectorState.COLLISION,  # Phase 5 (best-effort, empty index → skip)
@@ -740,6 +747,105 @@ def test_fsm_create_settle_timeout_rollback(
     mock_restore.assert_called_once()
 
 
+# ---------------------------------------------------------------------------
+# CROSSDEDUP tests
+# ---------------------------------------------------------------------------
+
+def _make_fsm_at_crossdedup(recon_list: list[dict]) -> InjectorFSM:
+    """Helper: build an FSM positioned at CROSSDEDUP with pre-populated recon."""
+    fsm = InjectorFSM("Inbox/a.md", "TargetDir", inbox_files=["Inbox/a.md", "Inbox/b.md"])
+    fsm.state = InjectorState.CROSSDEDUP
+    fsm.context["recon"] = recon_list
+    return fsm
 
 
+def test_crossdedup_skips_single_file():
+    """Single-file runs skip CROSSDEDUP immediately."""
+    fsm = InjectorFSM("Inbox/a.md", "TargetDir")
+    fsm.state = InjectorState.CROSSDEDUP
+    fsm.context["recon"] = [{"file": "Inbox/a.md", "new_concepts": ["PIL"], "collisions": []}]
+    fsm.step()
+    assert fsm.state == InjectorState.PAYLOAD
+    assert fsm.context["recon"][0]["new_concepts"] == ["PIL"]
+
+
+def test_crossdedup_removes_cross_file_near_duplicate():
+    """A concept that appears in two files with cosine ≥ τ_high is removed from the second file."""
+    recon = [
+        {"file": "Inbox/a.md", "new_concepts": ["PIL"],           "collisions": []},
+        {"file": "Inbox/b.md", "new_concepts": ["Prodotto Interno Lordo"], "collisions": []},
+    ]
+    fsm = _make_fsm_at_crossdedup(recon)
+
+    # vec[0] ≈ vec[1] → high cosine
+    similar_vec = [1.0, 0.0, 0.0]
+    mock_embedder = MagicMock()
+    mock_embedder.embed.return_value = [similar_vec, similar_vec]
+
+    with patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.router.orchestrator.CONFIG") as mock_cfg:
+        mock_cfg.sim_threshold_high = 0.85
+        fsm.step()
+
+    assert fsm.state == InjectorState.PAYLOAD
+    assert fsm.context["recon"][0]["new_concepts"] == ["PIL"]        # winner kept
+    assert fsm.context["recon"][1]["new_concepts"] == []             # loser removed
+    assert fsm.context["crossdedup_merged"] == 1
+
+
+def test_crossdedup_keeps_distinct_concepts():
+    """Concepts that are semantically different are left untouched in both files."""
+    recon = [
+        {"file": "Inbox/a.md", "new_concepts": ["PIL"],            "collisions": []},
+        {"file": "Inbox/b.md", "new_concepts": ["Entropia"],       "collisions": []},
+    ]
+    fsm = _make_fsm_at_crossdedup(recon)
+
+    mock_embedder = MagicMock()
+    mock_embedder.embed.return_value = [[1.0, 0.0], [0.0, 1.0]]  # orthogonal → cosine 0.0
+
+    with patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.router.orchestrator.CONFIG") as mock_cfg:
+        mock_cfg.sim_threshold_high = 0.85
+        fsm.step()
+
+    assert fsm.state == InjectorState.PAYLOAD
+    assert fsm.context["recon"][0]["new_concepts"] == ["PIL"]
+    assert fsm.context["recon"][1]["new_concepts"] == ["Entropia"]
+    assert "crossdedup_merged" not in fsm.context
+
+
+def test_crossdedup_skips_when_embedder_unavailable():
+    """Best-effort: if get_embedder raises, CROSSDEDUP passes through unchanged."""
+    recon = [
+        {"file": "Inbox/a.md", "new_concepts": ["PIL"],     "collisions": []},
+        {"file": "Inbox/b.md", "new_concepts": ["PIL"],     "collisions": []},
+    ]
+    fsm = _make_fsm_at_crossdedup(recon)
+
+    with patch("silica.agent.providers.get_embedder", side_effect=RuntimeError("no key")):
+        fsm.step()
+
+    assert fsm.state == InjectorState.PAYLOAD
+    assert fsm.context["recon"][1]["new_concepts"] == ["PIL"]  # untouched
+
+
+def test_crossdedup_skips_when_embed_call_fails():
+    """Best-effort: if embedder.embed raises, CROSSDEDUP passes through unchanged."""
+    recon = [
+        {"file": "Inbox/a.md", "new_concepts": ["PIL"],     "collisions": []},
+        {"file": "Inbox/b.md", "new_concepts": ["PIL"],     "collisions": []},
+    ]
+    fsm = _make_fsm_at_crossdedup(recon)
+
+    mock_embedder = MagicMock()
+    mock_embedder.embed.side_effect = RuntimeError("rate limit")
+
+    with patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.router.orchestrator.CONFIG") as mock_cfg:
+        mock_cfg.sim_threshold_high = 0.85
+        fsm.step()
+
+    assert fsm.state == InjectorState.PAYLOAD
+    assert fsm.context["recon"][1]["new_concepts"] == ["PIL"]  # untouched
 

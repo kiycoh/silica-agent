@@ -7,6 +7,7 @@ gates:
   graph_regression: forbid_new_orphans
 phases:
   - { id: recon,        kind: mechanical, tool: silica_recon }
+  - { id: crossdedup,   kind: mechanical, best_effort: true }
   - { id: payload,      kind: mechanical, tool: silica_payload, partition_if_over: 7 }
   - { id: salience,     kind: mechanical, best_effort: true }
   - { id: collision,    kind: mechanical, best_effort: true }

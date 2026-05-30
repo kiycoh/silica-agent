@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 class InjectorState(Enum):
     INIT = auto()
     RECON = auto()         # Phase 1
+    CROSSDEDUP = auto()    # Phase 1.5 — cross-file concept deduplication
     PAYLOAD = auto()       # Phase 2.0
     SALIENCE = auto()      # Phase 2.05 — thematic salience gate (drop off-theme concepts)
     COLLISION = auto()     # Phase 5 — dedup routing: high-sim→patch, borderline→defer, low→write
@@ -151,6 +152,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 },
                 "phases": [
                     { "id": "recon",        "kind": "mechanical", "tool": "silica_recon" },
+                    { "id": "crossdedup",   "kind": "mechanical", "best_effort": True },
                     { "id": "payload",      "kind": "mechanical", "tool": "silica_payload", "partition_if_over": 200 },
                     { "id": "collision",    "kind": "mechanical", "best_effort": True },
                     { "id": "distill",      "kind": "semantic",   "worker": "distiller", "fanout": True, "max_workers": 7 },
@@ -172,6 +174,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._rollback_state = InjectorState.ROLLBACK
         self._phase_to_state: dict[str, InjectorState] = {
             "recon":      InjectorState.RECON,
+            "crossdedup": InjectorState.CROSSDEDUP,
             "payload":    InjectorState.PAYLOAD,
             "salience":   InjectorState.SALIENCE,
             "collision":  InjectorState.COLLISION,
@@ -190,6 +193,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # S2.2.1: Handlers mapping and error policy
         self._HANDLERS = {
             InjectorState.RECON: self._handle_recon,
+            InjectorState.CROSSDEDUP: self._handle_crossdedup,
             InjectorState.PAYLOAD: self._handle_payload,
             InjectorState.SALIENCE: self._handle_salience,
             InjectorState.COLLISION: self._handle_collision,
@@ -208,6 +212,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._ON_ERROR = {
             # Setup phases: abort the whole run on failure
             InjectorState.RECON: InjectorState.ERROR,
+            InjectorState.CROSSDEDUP: InjectorState.ERROR,
             InjectorState.PAYLOAD: InjectorState.ERROR,
             # Per-chunk phases: contain failure at chunk level via rollback
             InjectorState.DELEGATE: InjectorState.ROLLBACK,
@@ -431,6 +436,89 @@ class InjectorFSM(BaseFSM[InjectorState]):
             self.context["deferred"] = deferred_notices[0] if len(deferred_notices) == 1 else deferred_notices
 
         self._progress_note("recon", "recon", "done")
+        self._transition_success()
+
+    def _handle_crossdedup(self) -> None:
+        """Cross-file concept deduplication — Phase 1.5.
+
+        Embeds concept names extracted by RECON across all inbox files.
+        Near-duplicate concepts from different files (cosine ≥ τ_high) are
+        merged: the first-file occurrence is kept, the duplicate is removed.
+        Best-effort: silently skips when the embedder is unavailable or
+        fewer than two inbox files are present.
+        """
+        recon_list: list[dict] = self.context.get("recon", [])
+
+        if len(recon_list) < 2:
+            self._transition_success()
+            return
+
+        # Collect (file_index, concept_name) for all new_concepts across files
+        all_concepts: list[tuple[int, str]] = [
+            (fi, name)
+            for fi, rec in enumerate(recon_list)
+            for name in rec.get("new_concepts", [])
+        ]
+
+        if len(all_concepts) < 2:
+            self._transition_success()
+            return
+
+        try:
+            from silica.agent.providers import get_embedder
+            from silica.kernel.embed import _cosine
+            embedder = get_embedder(CONFIG)
+        except Exception as _e:
+            logger.warning("CROSSDEDUP: embedder unavailable (%s) — skipping", _e)
+            self._transition_success()
+            return
+
+        texts = [name for _, name in all_concepts]
+        try:
+            vecs = embedder.embed(texts)
+        except Exception as _e:
+            logger.warning("CROSSDEDUP: embed call failed (%s) — skipping", _e)
+            self._transition_success()
+            return
+
+        τ_high = getattr(CONFIG, "sim_threshold_high", 0.85)
+
+        # Greedy O(n²) clustering: mark cross-file near-duplicates for removal.
+        # The first occurrence (lowest file index) is always the winner.
+        losers: set[int] = set()
+        for i in range(len(all_concepts)):
+            if i in losers:
+                continue
+            fi, name_i = all_concepts[i]
+            for j in range(i + 1, len(all_concepts)):
+                if j in losers:
+                    continue
+                fj, name_j = all_concepts[j]
+                if fi == fj:
+                    continue
+                if _cosine(vecs[i], vecs[j]) >= τ_high:
+                    losers.add(j)
+                    logger.info(
+                        "CROSSDEDUP: '%s' (file %d) merged into '%s' (file %d, score=%.3f)",
+                        name_j, fj, name_i, fi, _cosine(vecs[i], vecs[j]),
+                    )
+
+        if not losers:
+            self._transition_success()
+            return
+
+        for idx in losers:
+            fi, name = all_concepts[idx]
+            nc = recon_list[fi].get("new_concepts", [])
+            if name in nc:
+                nc.remove(name)
+
+        self.context["recon"] = recon_list
+        self.context["crossdedup_merged"] = len(losers)
+        logger.info(
+            "CROSSDEDUP: %d duplicate concept(s) removed across %d files",
+            len(losers), len(recon_list),
+        )
         self._transition_success()
 
     def _source_canonical_for(self, inbox_file: str) -> str:

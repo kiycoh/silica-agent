@@ -118,7 +118,10 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         result = TOOLS["silica_embed_refresh"].run(folder=folder, force=force)
         try:
             parsed = json.loads(result)
-            CONSOLE.print(f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / {parsed.get('total_notes', '?')} notes")
+            if "error" in parsed:
+                CONSOLE.print(f"  [red]Error:[/] {parsed['error']}")
+            else:
+                CONSOLE.print(f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / {parsed.get('total_notes', '?')} notes")
             if parsed.get("read_errors"):
                 CONSOLE.print(f"  [yellow]Read errors:[/] {parsed['read_errors']}")
         except Exception:

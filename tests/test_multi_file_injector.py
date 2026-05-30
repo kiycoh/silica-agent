@@ -114,7 +114,8 @@ class TestT1MultiFileInit:
         fsm._file_canonicals = ["inbox/a", "inbox/b"]
         fsm._file_content_hashes = ["", ""]
         fsm.state = InjectorState.RECON
-        fsm.step()  # RECON → PAYLOAD
+        fsm.step()  # RECON → CROSSDEDUP
+        fsm.step()  # CROSSDEDUP → PAYLOAD
         fsm.step()  # PAYLOAD → SALIENCE
 
         task_ids = [t.id for t in fsm.progress.tasks]
