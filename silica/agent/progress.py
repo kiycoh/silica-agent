@@ -427,5 +427,15 @@ class _ProgressRenderer:
                         CONSOLE.print(f"  [tool.ok]✓[/] {desc} [dim]({dur}) [result redacted][/]")
 
 
+    def close(self) -> None:
+        """Unconditionally stop the live display and deregister the pipeline hook.
+
+        Called on KeyboardInterrupt / uncaught exceptions so the terminal is
+        always restored before the next prompt is printed.
+        """
+        _set_pipeline_hook(None)
+        self._stop_spinner()
+
+
 def make_progress_callback() -> _ProgressRenderer:
     return _ProgressRenderer()

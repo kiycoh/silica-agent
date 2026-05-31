@@ -21,6 +21,7 @@ import subprocess
 import time
 from typing import Any
 import networkx as nx
+from silica.config import CONFIG
 from silica.kernel.wikilink import extract_links
 
 from silica.driver.base import (
@@ -37,8 +38,16 @@ from silica.driver.base import (
 logger = logging.getLogger(__name__)
 
 # Settle polling config
-_SETTLE_POLL_INTERVAL = 0.1  # seconds
-_SETTLE_TIMEOUT = 2.0  # seconds
+_SETTLE_POLL_INTERVAL = 0.1   # seconds
+_SETTLE_TIMEOUT = 2.0         # seconds — outer deadline for cache convergence polls
+
+# Hard limit per individual subprocess call to the Obsidian CDP bridge.
+# Configurable via SILICA_OBSIDIAN_CLI_TIMEOUT (default 8 s).
+# 8 s >> normal CDP latency (< 1 s) but prevents single stalled calls from
+# accumulating into 88-second hangs inside the settle poll loops.
+def _cli_timeout() -> float:
+    """Read the current CLI timeout from CONFIG at call time (supports runtime changes)."""
+    return float(getattr(CONFIG, "obsidian_cli_timeout", 8.0))
 
 
 class ObsidianCLIBackend:
@@ -162,13 +171,14 @@ class ObsidianCLIBackend:
             cmd.append(f"vault={self._vault_name}")
         cmd.extend(args)
 
-        logger.debug("CLI exec: %s", " ".join(cmd))
+        timeout = _cli_timeout()
+        logger.debug("CLI exec: %s  (timeout=%.1fs)", " ".join(cmd), timeout)
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=timeout,
                 check=check,
             )
             if result.stderr:
@@ -610,10 +620,10 @@ class ObsidianCLIBackend:
         which causes _ensure_graph() to fall back to per-note queries.
         """
         js_code = (
-            "JSON.stringify({{"
+            "JSON.stringify({"
             "resolved: app.metadataCache.resolvedLinks,"
             "unresolved: app.metadataCache.unresolvedLinks"
-            "}})"
+            "})"
         )
         raw = self._run_cli("eval", f"code={js_code}")
         # The Obsidian CLI prefixes eval return values with "=> "

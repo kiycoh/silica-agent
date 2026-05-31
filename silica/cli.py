@@ -37,6 +37,7 @@ def _update_context_tokens(messages: list[dict]) -> None:
 
 def _setup_logging(debug: bool = False) -> None:
     """Configure logging for the CLI session."""
+    import threading
     CONFIG.debug_logging = debug
     level = logging.DEBUG if debug else logging.WARNING
 
@@ -56,6 +57,20 @@ def _setup_logging(debug: bool = False) -> None:
             show_time=False,
         )
         handler.setFormatter(HumanFriendlyFormatter())
+        # Rich's Live display is driven from the main thread; worker threads logging
+        # through RichHandler concurrently corrupt the terminal render state.
+        # Restrict RichHandler to the main thread only.
+        main_thread = threading.main_thread()
+        handler.addFilter(lambda r: threading.current_thread() is main_thread)
+
+        # Worker-thread records get a plain stderr fallback so they aren't silently dropped.
+        bg_handler = logging.StreamHandler(sys.stderr)
+        bg_handler.setFormatter(logging.Formatter(
+            fmt="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%H:%M:%S",
+        ))
+        bg_handler.addFilter(lambda r: threading.current_thread() is not main_thread)
+        root.addHandler(bg_handler)
     else:
         handler = logging.StreamHandler(sys.stderr)
         handler.setFormatter(
@@ -201,6 +216,24 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             CONSOLE.print(f"  Undone: [bold]{note_path}[/]  [dim]({remaining} undo step(s) remaining)[/]")
         except Exception as exc:
             CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+        return True
+
+    if cmd in ("/dedup", "/refine"):
+        folder = next((p for p in parts[1:] if not p.startswith("-")), "")
+        tool_name = "silica_dedup" if cmd == "/dedup" else "silica_refine"
+        label = "Dedup" if cmd == "/dedup" else "Refine"
+        CONSOLE.print(f"  {label} on [bold]{folder or '(vault)'}[/] — sub-agents on the worker model…")
+        result = TOOLS[tool_name].run(folder=folder)
+        try:
+            parsed = json.loads(result)
+            if "error" in parsed:
+                CONSOLE.print(f"  [yellow]{parsed['error']}[/]")
+            else:
+                scope = parsed.get("pairs_found", parsed.get("notes", parsed.get("items", 0)))
+                noun = "pair(s)" if cmd == "/dedup" else "note(s)"
+                CONSOLE.print(f"  Processed [bold]{scope}[/] {noun} — outcomes: {parsed.get('summary', {})}")
+        except Exception:
+            CONSOLE.print(result)
         return True
 
     return False
@@ -448,8 +481,10 @@ def main():
             messages.append({"role": "assistant", "content": answer or ""})
             _update_context_tokens(messages)
         except KeyboardInterrupt:
+            callback.close()
             CONSOLE.print("\n  [dim](interrupted)[/]")
         except Exception as e:
+            callback.close()
             logger.exception("Agent error")
             CONSOLE.print(f"\n  [bold red]Error:[/] {e}\n")
 

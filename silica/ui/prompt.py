@@ -14,6 +14,7 @@ SLASH_COMMANDS = [
     "/exit", "/model", "/tools", "/clear", "/verbose", "/thinking", "/help",
     "/report", "/inject",
     "/status", "/embed", "/graph", "/find", "/undo",
+    "/dedup", "/refine",
 ]
 
 _METER_WIDTH = 10

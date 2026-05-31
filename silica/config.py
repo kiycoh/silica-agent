@@ -57,6 +57,39 @@ class SilicaConfig:
     def provider(self, val: str) -> None:
         self._provider = val
 
+    # --- Sub-agent worker model (leashed sub-agents run on a separate, smaller model) ---
+    # The router (agent loop) uses `model`/`provider` above; sub-agents (dedup, refiner)
+    # use these worker_* fields so they can run concurrently on a small local model.
+    worker_model: str = field(
+        default_factory=lambda: os.getenv("SILICA_WORKER_MODEL", "qwen/qwen3.5-9b")
+    )
+    # Worker provider preset name; falls back to "lmstudio" when unset.
+    worker_provider: str = field(
+        default_factory=lambda: os.getenv("SILICA_WORKER_PROVIDER", "lmstudio")
+    )
+    # Explicit endpoint overrides for the worker model (default → local LM Studio).
+    worker_base_url: str = field(
+        default_factory=lambda: os.getenv("SILICA_WORKER_BASE_URL", "http://localhost:1234/v1")
+    )
+    worker_api_key: str = field(
+        default_factory=lambda: os.getenv("SILICA_WORKER_API_KEY", "lm-studio")
+    )
+
+    # Leash caps — bound how far a sub-agent can move before the framework reins it in.
+    subagent_max_turns: int = field(
+        default_factory=lambda: int(os.getenv("SILICA_SUBAGENT_MAX_TURNS", "6"))
+    )
+    subagent_timeout_s: float = field(
+        default_factory=lambda: float(os.getenv("SILICA_SUBAGENT_TIMEOUT_S", "120"))
+    )
+    subagent_max_concurrent: int = field(
+        default_factory=lambda: int(os.getenv("SILICA_SUBAGENT_MAX_CONCURRENT", "3"))
+    )
+    # Master switch: when False, silica_inject runs the legacy single-FSM path.
+    subagents_enabled: bool = field(
+        default_factory=lambda: os.getenv("SILICA_SUBAGENTS_ENABLED", "True").lower() in ("true", "1", "t")
+    )
+
     # Vault path — used by the fs backend and for context.
     vault_path: str = field(
         default_factory=lambda: os.getenv("SILICA_VAULT", "")
@@ -162,6 +195,15 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_VLM_MODEL", "")
     )
 
+    # Hard timeout (seconds) for each individual Obsidian CLI subprocess call.
+    # The CDP bridge should respond in < 1 s normally; 8 s gives headroom for
+    # slow machines and large notes without allowing 88-second hangs.
+    # Override via SILICA_OBSIDIAN_CLI_TIMEOUT if you hit false-positive timeouts.
+    obsidian_cli_timeout: float = field(
+        default_factory=lambda: float(os.getenv("SILICA_OBSIDIAN_CLI_TIMEOUT", "8"))
+    )
+
+
     @property
     def verbose(self) -> bool:
         return self.debug_logging
@@ -169,6 +211,7 @@ class SilicaConfig:
     @verbose.setter
     def verbose(self, v: bool) -> None:
         self.debug_logging = v
+
 
 
 CONFIG = SilicaConfig()

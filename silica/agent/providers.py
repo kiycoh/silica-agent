@@ -235,22 +235,41 @@ def get_embedder(config: Any) -> OpenAIEmbedder:
     )
 
 
-def get_provider(config: Any) -> Provider:
-    provider_name = getattr(config, "provider", "lmstudio")
-    model_name = getattr(config, "model", "")
-    
+def get_provider(config: Any, role: str = "router") -> Provider:
+    """Return an LLM provider for the given role.
+
+    role="router" (default) → uses config.provider / config.model (the main model).
+    role="worker"            → uses config.worker_provider / config.worker_model so
+                               leashed sub-agents can run on a separate small model.
+
+    When the worker role specifies explicit endpoint overrides (worker_base_url /
+    worker_api_key) those win over the preset, so a worker can point at a different
+    LM Studio instance/port than the router.
+    """
+    if role == "worker":
+        provider_name = getattr(config, "worker_provider", "lmstudio") or "lmstudio"
+        model_name = getattr(config, "worker_model", "") or ""
+    else:
+        provider_name = getattr(config, "provider", "lmstudio")
+        model_name = getattr(config, "model", "")
+
     preset = PROVIDER_PRESETS.get(provider_name)
     if not preset:
         preset = PROVIDER_PRESETS["lmstudio"]
-        
+
     base_url = preset["base_url"]
     api_key = preset.get("api_key", "lm-studio")
     if "api_key_env" in preset:
         api_key = os.getenv(preset["api_key_env"], "dummy-key")
-        
+
+    # Worker role: explicit endpoint overrides take precedence over the preset.
+    if role == "worker":
+        base_url = getattr(config, "worker_base_url", "") or base_url
+        api_key = getattr(config, "worker_api_key", "") or api_key
+
     if provider_name == "openrouter" and model_name.startswith("openrouter/"):
         model_name = model_name.removeprefix("openrouter/")
     elif provider_name == "lmstudio" and model_name.startswith("lmstudio/"):
         model_name = model_name.removeprefix("lmstudio/")
-        
+
     return OpenAICompatibleProvider(base_url=base_url, api_key=api_key, model=model_name)
