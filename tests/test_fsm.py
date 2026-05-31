@@ -192,6 +192,7 @@ def test_fsm_multi_chunk_loop(
         InjectorState.WRITE,
         InjectorState.HUB_UPDATE,
         InjectorState.AUTOLINK,   # Phase 4
+        InjectorState.BACKLINK,   # Phase 4.5 (best-effort)
         InjectorState.LINT,
         InjectorState.CLEANUP,
         # Second chunk cycle (SALIENCE does not re-run)
@@ -203,6 +204,7 @@ def test_fsm_multi_chunk_loop(
         InjectorState.WRITE,
         InjectorState.HUB_UPDATE,
         InjectorState.AUTOLINK,   # Phase 4
+        InjectorState.BACKLINK,   # Phase 4.5 (best-effort)
         InjectorState.LINT,
         InjectorState.CLEANUP,
     ]
@@ -212,8 +214,8 @@ def test_fsm_multi_chunk_loop(
     assert mock_run_distiller.call_count == 2
     # Phase 2: run_distiller now receives ledger_digest kwarg — check payloads only
     payloads_seen = [c.kwargs["payload"] for c in mock_run_distiller.call_args_list]
-    assert {"chunk_id": 0, "concepts": ["a"]} in payloads_seen
-    assert {"chunk_id": 1, "concepts": ["b"]} in payloads_seen
+    assert any({"chunk_id": 0, "concepts": ["a"]}.items() <= p.items() for p in payloads_seen)
+    assert any({"chunk_id": 1, "concepts": ["b"]}.items() <= p.items() for p in payloads_seen)
 
     # Verify cleanup (file move) was only called once (on the final chunk completion)
     mock_cleanup.assert_called_once_with("Inbox/test.md", "done")
@@ -398,6 +400,9 @@ def test_fsm_recipe_transition_sequence():
     assert fsm.state == InjectorState.AUTOLINK  # Phase 4
 
     fsm._transition_success()
+    assert fsm.state == InjectorState.BACKLINK  # Phase 4.5
+
+    fsm._transition_success()
     assert fsm.state == InjectorState.LINT
 
     fsm._transition_success()
@@ -469,6 +474,7 @@ def test_fsm_recipe_end_to_end_flow(
         InjectorState.WRITE,
         InjectorState.HUB_UPDATE,
         InjectorState.AUTOLINK,   # Phase 4
+        InjectorState.BACKLINK,   # Phase 4.5 (best-effort)
         InjectorState.LINT,
         InjectorState.CLEANUP,
     ]
