@@ -16,12 +16,17 @@ STOPWORDS = {
     "parte", "testo", "esame", "contenuti", "libri", "unipa", "anno", "corso", "appunti",
     "lezione", "capitolo", "studio", "domande", "risposte", "esercizio", "esercizi", "tema", "temi",
     "prof", "professore", "docente", "università", "universita", "sito", "web", "link", "online",
-    "slide", "slides", "presentazione", "pagine", "pagina", "riferimenti", "argomenti", "riassunto"
+    "slide", "slides", "presentazione", "pagine", "pagina", "riferimenti", "argomenti", "riassunto",
+    # Course-metadata structural headings (not content concepts)
+    "didattico", "didattica", "didattici", "didattiche",
+    "materiale didattico", "materiale di studio", "materiale del corso",
+    "obiettivi", "prerequisiti", "modalità", "valutazione", "calendario",
 }
 
 NOISE_PATTERNS = [re.compile(p, re.IGNORECASE) for p in [
     r'^(Capitolo|Lezione|Esercizio)\b[:\s]',
-    r'^(Riassunto|Argomenti|Riferimenti)\s*$',
+    r'^(Riassunto|Argomenti|Riferimenti|Obiettivi|Prerequisiti|Calendario)\s*$',
+    r'^Materiale\b',  # "Materiale Didattico", "Materiale di Studio", etc.
     r'\((continua|segue)\)\s*$',
     r'^q\s',
     r'^[A-Z]{2,6}:\s',

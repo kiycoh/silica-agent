@@ -26,16 +26,21 @@ def build_substrate(
     k: int = 6,
     tau: float = 0.0,
     exclude: set[str] | None = None,
+    cleared_parents: list[dict] | None = None,
 ) -> str | None:
     """Return a formatted candidate list for the distiller context, or None.
 
     Args:
-        chunk:           The current chunk dict (schema_version + batches).
-        manifest_titles: Titles already injected in this run (from RunManifest).
-                         Excluded from results to avoid re-proposing known notes.
-        k:               Maximum number of candidates to surface.
-        tau:             Minimum cosine score threshold (0.0 = no filter).
-        exclude:         Additional path stems to exclude from results.
+        chunk:            The current chunk dict (schema_version + batches).
+        manifest_titles:  Titles already injected in this run (from RunManifest).
+                          Excluded from results to avoid re-proposing known notes.
+        k:                Maximum number of candidates to surface.
+        tau:              Minimum cosine score threshold (0.0 = no filter).
+        exclude:          Additional path stems to exclude from results.
+        cleared_parents:  Forward-reference hints from validate: parent notes that
+                          were referenced but don't exist yet in the vault.  These
+                          are likely to be created in the current or next run and
+                          should be used for wikilinks rather than new notes.
 
     Returns:
         Formatted string for the '## Related Notes (candidates)' section,
@@ -110,6 +115,28 @@ def build_substrate(
 
             flag = " [graph-far]" if graph_far else ""
             lines.append(f"- [[{name}]] (score={score:.3f}){flag}")
+
+        # Append forward-reference hints: parent notes cleared by validate because
+        # they don't exist yet.  High probability of appearing in future injections —
+        # the distiller should use [[name]] links to them rather than creating duplicates.
+        if cleared_parents:
+            seen: set[str] = set()
+            fwd_lines: list[str] = []
+            for cp in cleared_parents:
+                name = cp.get("cleared_parent", "")
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+                ref = cp.get("note_heading") or cp.get("note_path", "")
+                fwd_lines.append(
+                    f"- [[{name}]] ← forward-reference (not yet in vault; "
+                    f"referenced as parent by '{ref}'; likely created in a future injection)"
+                )
+            if fwd_lines:
+                if lines:
+                    lines.append("")
+                lines.append("## Forward-reference parents (create wikilinks, not new notes)")
+                lines.extend(fwd_lines)
 
         return "\n".join(lines) if lines else None
 

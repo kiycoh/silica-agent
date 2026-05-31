@@ -28,6 +28,7 @@ def _execute_write(op: Op, path: str) -> dict:
         heading=heading,
         snippet=snippet,
         hub=hub,
+        title=op.title,
         tags=op.tags,
         related=op.related,
         parent=op.parent,

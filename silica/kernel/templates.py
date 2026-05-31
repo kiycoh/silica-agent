@@ -14,9 +14,10 @@ def slugify(s: str) -> str:
     return s.strip().replace('  ', ' ')  # keep spaces, Obsidian likes them
 
 
-def template_spoke(heading: str, snippet: str, hub: str, tags: list[str] | None = None, related: list[str] | None = None, parent: str | None = None) -> str:
+def template_spoke(heading: str, snippet: str, hub: str, title: str | None = None, tags: list[str] | None = None, related: list[str] | None = None, parent: str | None = None) -> str:
     today = datetime.date.today().strftime("%Y, %m, %d")
     body = snippet.strip() or "(da espandere)"
+    h1 = title or heading  # title wins: filename and H1 stay in sync
 
     # parent note link — specific parent overrides hub when provided
     if parent:
@@ -62,7 +63,7 @@ AI: true
 
     return f"""{frontmatter}
 
-# {heading}
+# {h1}
 
 {body}
 """

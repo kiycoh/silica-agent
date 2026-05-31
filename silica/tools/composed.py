@@ -204,7 +204,10 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] | None = No
         except Exception as e:
             return {"error": f"Failed to load payload {path}: {e}"}
 
-    validated_ops, rejected_ops = validate_operations(ops, payloads, target_dir, hub=hub)
+    cleared_parents: list[dict] = []
+    validated_ops, rejected_ops = validate_operations(
+        ops, payloads, target_dir, hub=hub, cleared_parents_out=cleared_parents
+    )
 
     total = len(ops)
     rejected_count = len(rejected_ops)
@@ -228,6 +231,7 @@ def silica_validate_ops(ops_json_path: str, payload_paths: list[str] | None = No
         "rejection_rate": rejection_rate,
         "validated_ops": [o.model_dump() for o in validated_ops],
         "rejected_ops": [r.model_dump() for r in rejected_ops],
+        "cleared_parents": cleared_parents,
     }
 
 
