@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import time
 from enum import Enum, auto
 from typing import Any, TYPE_CHECKING
@@ -78,6 +79,40 @@ def _inject_graph_ctx(chunk: dict, vault_ctx: dict) -> dict:
             enriched_concepts.append({**concept, "graph_context": graph_context})
         enriched_batches.append({**batch, "concepts": enriched_concepts})
     return {**chunk, "batches": enriched_batches}
+
+
+# Italian function-word markers used for language detection in MOC headings.
+_ITALIAN_MARKERS_RE = re.compile(
+    r'\b(della|dello|degli|delle|del|dal|nel|sul|per|con|una|questo|questa|sono|hanno|viene|vengono)\b',
+    re.IGNORECASE,
+)
+
+
+def _moc_prefix(sample: str) -> str:
+    """Return 'Da' (Italian) or 'From' (English) based on marker density in sample."""
+    return "Da" if len(_ITALIAN_MARKERS_RE.findall(sample)) >= 3 else "From"
+
+
+def _moc_heading(source_name: str, sample: str) -> str:
+    """Language-aware MOC section heading: '## Da: {name}' or '## From: {name}'."""
+    return f"## {_moc_prefix(sample)}: {source_name}"
+
+
+def _merge_moc_section(content: str, heading: str, note_lines: list[str]) -> str:
+    """Append note_lines to an existing MOC section or create a new one.
+
+    When the same source file produces multiple chunks, each chunk calls
+    HUB_UPDATE.  Rather than duplicating the heading, new links are appended
+    inside the existing section.
+    """
+    if heading + "\n" in content or heading + "\r\n" in content:
+        # Append new links just before the next same-level heading or end of file.
+        pattern = re.compile(re.escape(heading) + r'(.*?)(?=\n##\s|\Z)', re.DOTALL)
+        def _append(m: re.Match) -> str:
+            return m.group(0).rstrip() + "\n" + "\n".join(note_lines) + "\n"
+        return pattern.sub(_append, content, count=1)
+    moc_block = f"\n{heading}\n\n" + "\n".join(note_lines) + "\n"
+    return content.rstrip() + "\n" + moc_block
 
 
 class InjectorState(Enum):
@@ -341,6 +376,13 @@ class InjectorFSM(BaseFSM[InjectorState]):
             self.progress.save()
         except Exception as _e:
             logger.debug("progress shadow error (suppressed): %s", _e)
+
+        # Emit phase event to TUI (no-op if no hook is registered)
+        try:
+            from silica.agent.progress import emit_pipeline_phase
+            emit_pipeline_phase(capability_name, status)
+        except Exception:
+            pass
 
     @property
     def _chunk_ctx(self) -> dict:
@@ -1030,12 +1072,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         # Build per-chunk substrate: semantically close vault notes that are not
         # yet directly linked to run notes — candidates for `parent` and wikilinks.
+        # Also surface any cleared parent forward-references from earlier chunks.
         substrate: str | None = None
         try:
             from silica.kernel.run_substrate import build_substrate
             substrate = build_substrate(
                 enriched_chunk,
                 manifest_titles=self.manifest.titles(),
+                cleared_parents=self.context.get("run_cleared_parents"),
             )
         except Exception as _sub_e:
             logger.debug("DELEGATE: substrate build failed (non-fatal): %s", _sub_e)
@@ -1087,6 +1131,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
         collision_ops = self.context.get(f"chunk_{idx}_collision_ops", [])
         if collision_ops:
             ops_raw = list(collision_ops) + list(ops_raw)
+
+        # Cohesion pass: inject sibling cross-references into write ops' related[]
+        # before validation so the links land in the written frontmatter.
+        # Scope: same-chunk siblings only (cross-chunk handled by AUTOLINK/BACKLINK).
+        from silica.kernel.cohesion import cohesion_pass
+        ops_raw = cohesion_pass(ops_raw)
 
         ops_path = self._make_tmp(ops_raw)
 
@@ -1167,6 +1217,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
                     len(rejected_raw),
                     content_hash[:8],
                 )
+
+        # Accumulate cleared parent references across chunks.
+        # These are prospective links (parent notes not yet in vault) that the
+        # distiller can anticipate in subsequent chunks or future runs.
+        cleared = res.get("cleared_parents", [])
+        if cleared:
+            self.context.setdefault("run_cleared_parents", []).extend(cleared)
+            logger.debug("VALIDATE: %d parent reference(s) cleared to hub fallback (tracked as forward refs)", len(cleared))
 
         rejection_rate = res.get("rejection_rate", 0)
         if rejection_rate >= max_rate:
@@ -1339,23 +1397,73 @@ class InjectorFSM(BaseFSM[InjectorState]):
         if "error" in res:
             self._progress_note(self._chunk_task_id("write"), "write", "failed", error=res["error"])
             raise RuntimeError(f"Write failed: {res['error']}")
-        if not res.get("success", False):
-            failed = res.get("failed_operations", "?")
-            total = res.get("total_operations", "?")
-            raise RuntimeError(
-                f"Write partially failed: {failed}/{total} operations failed. "
-                f"Results: {res.get('results', [])}"
-            )
+
+        _failed_idx: set[int] = {fo["index"] for fo in res.get("failed", [])}
+
+        if _failed_idx:
+            if res.get("successful", 0) == 0:
+                # All ops failed — trigger full rollback for this chunk.
+                self._progress_note(
+                    self._chunk_task_id("write"), "write", "failed",
+                    error=f"All {len(_failed_idx)}/{res.get('total', '?')} write ops failed",
+                )
+                raise RuntimeError(
+                    f"Write fully failed: {len(_failed_idx)}/{res.get('total', '?')} operations failed."
+                )
+            # Partial failure: some ops committed, some failed (e.g. settle timeout).
+            # Defer the failed ops so they can be retried once the vault index is stable,
+            # and continue the pipeline with the committed notes.
+            try:
+                _all_ops = load_ops(self._chunk_ctx["ops_path"])
+                _deferred = [
+                    _all_ops[i].model_dump()
+                    for i in sorted(_failed_idx)
+                    if i < len(_all_ops)
+                ]
+                _errors = {
+                    fo.get("path", str(fo["index"])): fo["error"]
+                    for fo in res.get("failed", [])
+                }
+                if _deferred:
+                    content_hash = self.context.get("source_content_hash", "")
+                    if content_hash:
+                        from silica.kernel.deferred import get_deferred_store
+                        _dstore = get_deferred_store()
+                        _existing = _dstore.get(content_hash)
+                        _dstore.put(
+                            content_hash=content_hash,
+                            source_path=self.inbox_file,
+                            target_dir=self.target_dir,
+                            hub=self.hub,
+                            rejected_ops=list((_existing or {}).get("rejected_ops", [])) + _deferred,
+                            rejection_reasons={**(_existing or {}).get("rejection_reasons", {}), **_errors},
+                        )
+                        logger.warning(
+                            "WRITE: %d op(s) failed during settle — deferred (hash=%s…). "
+                            "Continuing with %d committed op(s).",
+                            len(_deferred), content_hash[:8], res.get("successful", 0),
+                        )
+                    else:
+                        logger.warning(
+                            "WRITE: %d op(s) failed during settle (no content_hash, deferred store skipped).",
+                            len(_deferred),
+                        )
+            except Exception as _de:
+                logger.debug("WRITE: deferred save failed (non-fatal): %s", _de)
+            self.context["has_partial_failure"] = True
 
         self.context["write"] = res
 
         # Register written notes in the RunManifest and refresh embedding index
         # incrementally so later chunks can use these notes as autolink candidates.
+        # Ops that failed to settle (_failed_idx) are skipped — they were deferred above.
         try:
             from silica.planner.progress import RunManifestEntry
             vault_ctx = self.context.get("vault_graph_ctx", {})
             ops_written = load_ops(self._chunk_ctx["ops_path"])
-            for op in ops_written:
+            for _wi, op in enumerate(ops_written):
+                if _wi in _failed_idx:
+                    continue
                 path = op.touched_ref()
                 if op.op not in (OpType.write, OpType.patch) or not path:
                     continue
@@ -1378,7 +1486,9 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 from silica.kernel.embed import EmbedStore, refresh_note
                 embedder = get_embedder(CONFIG)
                 store = EmbedStore()
-                for op in ops_written:
+                for _wi, op in enumerate(ops_written):
+                    if _wi in _failed_idx:
+                        continue
                     path = op.touched_ref()
                     if op.op not in (OpType.write, OpType.patch) or not path:
                         continue
@@ -1492,32 +1602,38 @@ class InjectorFSM(BaseFSM[InjectorState]):
                         note_name, _note_cluster, hub_name, _hub_cluster,
                     )
 
-        # Build MOC block and merge with existing content.
-        # Use overwrite (not append) to avoid the create→append settle race:
-        # append's _wait_for_content_contains must find the full fragment
-        # within 2 s, which fails when the note was just created in WRITE.
-        # overwrite's settle check (first 120 chars) is satisfied more quickly.
-        source_name = os.path.splitext(os.path.basename(self.inbox_file))[0]
-        lines = [f"\n## From: {source_name}\n"]
-        for note_name, desc in new_notes:
-            if desc:
-                lines.append(f"- [[{note_name}]] — {desc}")
-            else:
-                lines.append(f"- [[{note_name}]]")
-        moc_block = "\n".join(lines) + "\n"
-        new_hub_content = hub_note.content.rstrip() + "\n" + moc_block
+        # Derive the actual source file for this chunk (self.inbox_file is always
+        # the first file and never updates in multi-file runs — use the flat index map).
+        _fi, _ci = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (0, 0))
+        _source_file = (
+            self._file_chunks[_fi]["source_file"]
+            if self._file_chunks and _fi < len(self._file_chunks)
+            else self.inbox_file
+        )
+        source_name = os.path.splitext(os.path.basename(_source_file))[0]
+
+        # Language-aware heading: "## Da: {name}" (Italian) or "## From: {name}" (English).
+        # Sample the hub content + first snippet to detect language.
+        _lang_sample = hub_note.content + " ".join(d for _, d in new_notes[:3])
+        moc_heading = _moc_heading(source_name, _lang_sample)
+
+        # Build note link lines.
+        note_lines = [
+            f"- [[{n}]] — {d}" if d else f"- [[{n}]]"
+            for n, d in new_notes
+        ]
+
+        # Merge: append to existing section if present (same file, multiple chunks),
+        # otherwise create a new section.  Use overwrite to avoid the settle race.
+        new_hub_content = _merge_moc_section(hub_note.content, moc_heading, note_lines)
 
         try:
             DRIVER.overwrite(hub_path, new_hub_content)
-            # The overwrite settle check only verifies the first 120 chars, which
-            # for a long pre-existing hub equals the unchanged prefix — it would
-            # pass immediately before the MOC block is flushed.  Explicitly wait
-            # until the unique section header is readable.
-            unique_marker = f"## From: {source_name}"
+            # Explicitly wait until the section header is readable.
             _deadline = time.monotonic() + 5.0
             while time.monotonic() < _deadline:
                 try:
-                    if unique_marker in DRIVER.read_note(hub_ref).content:
+                    if moc_heading in DRIVER.read_note(hub_ref).content:
                         break
                 except Exception:
                     pass
@@ -1553,11 +1669,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
                         self._txn.inverses.append(p_inverse)
                         if "snapshot" in self.context and "inverses" in self.context["snapshot"]:
                             self.context["snapshot"]["inverses"].append(p_inverse.model_dump())
-                    # Build and write parent MOC block
-                    p_lines = [f"\n## From: {source_name} (spoke notes)\n"]
-                    for n_name, n_desc in p_new_notes:
-                        p_lines.append(f"- [[{n_name}]] — {n_desc}" if n_desc else f"- [[{n_name}]]")
-                    new_p_content = p_note.content.rstrip() + "\n" + "\n".join(p_lines) + "\n"
+                    # Build and write parent MOC block (same language-aware heading,
+                    # same deduplication logic as the hub section above).
+                    p_heading = _moc_heading(source_name, p_note.content)
+                    p_note_lines = [
+                        f"- [[{n}]] — {d}" if d else f"- [[{n}]]"
+                        for n, d in p_new_notes
+                    ]
+                    new_p_content = _merge_moc_section(p_note.content, p_heading, p_note_lines)
                     DRIVER.overwrite(parent_path, new_p_content)
                     existing_paths = {d["path"] for d in self._chunk_ctx.get("snapshot_domain", [])}
                     if parent_path not in existing_paths:
@@ -1816,10 +1935,18 @@ class InjectorFSM(BaseFSM[InjectorState]):
                     )
 
                 if not success:
-                    self._chunk_ctx["abort_reason"] = f"Graph regression gate failed: {'; '.join(errors)}"
-                    self._progress_note(self._chunk_task_id("lint"), "lint", "failed", error=self._chunk_ctx["abort_reason"])
-                    self.state = InjectorState.ROLLBACK
-                    return
+                    orphan_errors = [e for e in errors if e.startswith("Unplanned orphans")]
+                    blocking_errors = [e for e in errors if not e.startswith("Unplanned orphans")]
+                    if orphan_errors:
+                        logger.warning(
+                            "[Graph Regression Gate]: Orphan warning (non-blocking): %s",
+                            "; ".join(orphan_errors),
+                        )
+                    if blocking_errors:
+                        self._chunk_ctx["abort_reason"] = f"Graph regression gate failed: {'; '.join(blocking_errors)}"
+                        self._progress_note(self._chunk_task_id("lint"), "lint", "failed", error=self._chunk_ctx["abort_reason"])
+                        self.state = InjectorState.ROLLBACK
+                        return
             except Exception as e:
                 logger.error("Failed to perform graph-diff check: %s", e)
                 self._chunk_ctx["abort_reason"] = f"Graph regression gate error during check: {e}"

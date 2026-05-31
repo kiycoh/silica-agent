@@ -311,52 +311,73 @@ def test_fsm_gate_partial_rejection_continues(mock_validate):
 @patch("silica.router.orchestrator.DRIVER")
 @patch("silica.tools.wrapped.silica_restore")
 @patch("builtins.open")
-def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver, mock_lint):
-    # Setup mock file reading for ops_path
+def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_driver, mock_lint):
+    """Orphan-only regression errors must emit a WARNING and not trigger ROLLBACK."""
     mock_open.return_value.__enter__.return_value.read.return_value = '[]'
-    
-    # Lint passes
     mock_lint.return_value = {"success": True}
-    
-    # Pre-graph exists
+
     pre_graph = MagicMock()
     post_graph = MagicMock()
     mock_driver.graph_snapshot.return_value = post_graph
-    
+
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
+    fsm._pre_graph = pre_graph
+    fsm._txn = MagicMock()
+    fsm._txn.created_paths = ["notes/NoteA.md"]
+    fsm.context.setdefault("chunk", {})["snapshot"] = {
+        "txn_id": "txn_123",
+        "inverses": [],
+    }
+
+    fsm.state = InjectorState.LINT
+
+    orphan_error = "Unplanned orphans introduced: done/lezione_1.md"
+    with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(False, [orphan_error])) as mock_check:
+        fsm.step()
+        mock_check.assert_called_once_with(pre_graph, post_graph, ["notes/NoteA.md"])
+        # Orphan-only: pipeline must NOT roll back
+        assert fsm.state != InjectorState.ROLLBACK, "Orphan-only errors must not trigger ROLLBACK"
+
+
+@patch("silica.router.orchestrator.silica_lint")
+@patch("silica.router.orchestrator.DRIVER")
+@patch("silica.tools.wrapped.silica_restore")
+@patch("builtins.open")
+def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver, mock_lint):
+    """Blocking regression errors (broken backlinks, unresolved links) still trigger ROLLBACK."""
+    mock_open.return_value.__enter__.return_value.read.return_value = '[]'
+    mock_lint.return_value = {"success": True}
+
+    pre_graph = MagicMock()
+    post_graph = MagicMock()
+    mock_driver.graph_snapshot.return_value = post_graph
+
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
     fsm._pre_graph = pre_graph
     fsm._txn = MagicMock()
     fsm._txn.created_paths = ["notes/NoteA.md"]
 
-    # Setup snapshot data for rollback inverse application
     inverses = [{"op": "delete", "path": "notes/NoteA.md"}]
     fsm.context.setdefault("chunk", {})["snapshot"] = {
         "txn_id": "txn_123",
-        "inverses": inverses
+        "inverses": inverses,
     }
-    
+
     fsm.state = InjectorState.LINT
-    
-    # Mock the regression check to fail
-    with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(False, ["New orphans detected"])) as mock_check:
+
+    blocking_error = "Broken backlinks detected for 'NoteA': decreased from 2 to 0"
+    with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(False, [blocking_error])) as mock_check:
         fsm.step()
-        
-        # Verify check_graph_regression was called with pre_graph, post_graph, and created_paths
         mock_check.assert_called_once_with(pre_graph, post_graph, ["notes/NoteA.md"])
-        
-        # Verify transition to ROLLBACK on gate rejection
         assert fsm.state == InjectorState.ROLLBACK
-        assert "Graph regression gate failed: New orphans detected" in fsm.context["chunk"]["abort_reason"]
-        
-    # Now run the ROLLBACK step
+        assert "Graph regression gate failed: Broken backlinks" in fsm.context["chunk"]["abort_reason"]
+
     mock_restore.return_value = {"success": True}
     fsm.step()
-    
-    # Verify restore was called with the correct parameters
     mock_restore.assert_called_once_with(txn_id="txn_123", inverses=inverses)
 
-    # Chunk-level containment: single-chunk run concludes as partial (not ERROR)
     assert fsm.state == InjectorState.DONE
     assert fsm.context["final_status"] == "partial"
 
@@ -854,4 +875,97 @@ def test_crossdedup_skips_when_embed_call_fails():
 
     assert fsm.state == InjectorState.PAYLOAD
     assert fsm.context["recon"][1]["new_concepts"] == ["PIL"]  # untouched
+
+
+# ---------------------------------------------------------------------------
+# WRITE partial-failure containment (Fase A)
+# ---------------------------------------------------------------------------
+
+@patch("silica.router.orchestrator.silica_bulk_write")
+@patch("silica.kernel.deferred.get_deferred_store")
+def test_handle_write_partial_failure_defers_and_continues(
+    mock_get_store, mock_bulk_write, tmp_path
+):
+    """Partial write failure: committed ops survive, failed ops land in deferred store,
+    FSM continues to HUB_UPDATE (no rollback), has_partial_failure is set."""
+    import json
+    from silica.kernel.deferred import DeferredStore
+
+    ops_data = [
+        {"op": "write", "path": "TargetDir/A.md", "heading": "A", "hub": "TargetDir",
+         "source_basename": "test.md", "snippet": "a"},
+        {"op": "write", "path": "TargetDir/B.md", "heading": "B", "hub": "TargetDir",
+         "source_basename": "test.md", "snippet": "b"},
+    ]
+    ops_file = tmp_path / "ops.json"
+    ops_file.write_text(json.dumps(ops_data))
+
+    # Op A committed, op B failed (e.g. settle timeout on link indexing)
+    mock_bulk_write.return_value = {
+        "ok": False, "success": False, "successful": 1, "total": 2,
+        "failed": [{"index": 1, "path": "TargetDir/B.md", "op": "write", "error": "Settle timeout"}],
+        "results": [
+            {"index": 0, "path": "TargetDir/A.md", "op": "write", "success": True},
+            {"index": 1, "path": "TargetDir/B.md", "success": False, "error": "Settle timeout"},
+        ],
+    }
+
+    deferred_store = DeferredStore(tmp_path / "deferred")
+    mock_get_store.return_value = deferred_store
+
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    fsm.state = InjectorState.WRITE
+    fsm.context["source_content_hash"] = "abc123hash"
+    fsm.context["chunk"] = {
+        "ops_path": str(ops_file),
+        "txn_id": "txn_test",
+        "snapshot": {"txn_id": "txn_test", "inverses": []},
+    }
+
+    fsm.step()
+
+    # FSM advances to HUB_UPDATE — no rollback
+    assert fsm.state == InjectorState.HUB_UPDATE
+    assert fsm.context.get("has_partial_failure") is True
+
+    # Op B deferred under the source content hash
+    bundle = deferred_store.get("abc123hash")
+    assert bundle is not None
+    assert len(bundle["rejected_ops"]) == 1
+    assert bundle["rejected_ops"][0]["heading"] == "B"
+    assert "Settle timeout" in bundle["rejection_reasons"].get("TargetDir/B.md", "")
+
+
+@patch("silica.router.orchestrator.silica_bulk_write")
+def test_handle_write_all_fail_triggers_rollback(mock_bulk_write, tmp_path):
+    """When ALL ops fail, _handle_write raises → FSM routes to ROLLBACK (not deferred)."""
+    import json
+
+    ops_data = [
+        {"op": "write", "path": "TargetDir/A.md", "heading": "A", "hub": "TargetDir",
+         "source_basename": "test.md", "snippet": "a"},
+    ]
+    ops_file = tmp_path / "ops.json"
+    ops_file.write_text(json.dumps(ops_data))
+
+    mock_bulk_write.return_value = {
+        "ok": False, "success": False, "successful": 0, "total": 1,
+        "failed": [{"index": 0, "path": "TargetDir/A.md", "op": "write", "error": "fatal"}],
+        "results": [{"index": 0, "success": False, "error": "fatal"}],
+    }
+
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    fsm.state = InjectorState.WRITE
+    fsm.context["source_content_hash"] = "xyz"
+    fsm.context["chunk"] = {
+        "ops_path": str(ops_file),
+        "txn_id": "txn_x",
+        "snapshot": {"txn_id": "txn_x", "inverses": []},
+    }
+
+    # Full failure: _handle_write raises, which _run_loop routes to ROLLBACK.
+    # step() doesn't have the loop's error handler, so we assert the raise directly.
+    import pytest as _pytest
+    with _pytest.raises(RuntimeError, match="Write fully failed"):
+        fsm.step()
 

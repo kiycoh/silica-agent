@@ -628,11 +628,19 @@ class RefinerFSM(BaseFSM[RefinerState]):
                 created_paths = self._txn.created_paths if self._txn else []
                 success, errors = check_graph_regression(self._pre_graph, post_graph, created_paths)
                 if not success:
-                    self.context["abort_reason"] = (
-                        f"Graph regression gate failed: {'; '.join(errors)}"
-                    )
-                    self.state = RefinerState.ROLLBACK
-                    return
+                    orphan_errors = [e for e in errors if e.startswith("Unplanned orphans")]
+                    blocking_errors = [e for e in errors if not e.startswith("Unplanned orphans")]
+                    if orphan_errors:
+                        logger.warning(
+                            "[Graph Regression Gate]: Orphan warning (non-blocking): %s",
+                            "; ".join(orphan_errors),
+                        )
+                    if blocking_errors:
+                        self.context["abort_reason"] = (
+                            f"Graph regression gate failed: {'; '.join(blocking_errors)}"
+                        )
+                        self.state = RefinerState.ROLLBACK
+                        return
             except Exception as e:
                 logger.error("Failed to perform graph-diff check: %s", e)
                 self.context["abort_reason"] = f"Graph regression gate error: {e}"
