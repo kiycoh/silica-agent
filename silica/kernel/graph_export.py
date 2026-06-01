@@ -15,7 +15,6 @@ import json
 import logging
 import urllib.request
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 

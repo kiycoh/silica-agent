@@ -1,5 +1,4 @@
 import logging
-from typing import Any
 
 # Italian translations/explanations mapping for standard log messages
 FRIENDLY_TEMPLATES = {

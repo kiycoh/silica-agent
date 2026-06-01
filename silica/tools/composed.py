@@ -575,7 +575,7 @@ def silica_embed_refresh(folder: str = "", force: bool = False) -> dict[str, Any
     """
     from silica.agent.providers import get_embedder
     from silica.config import CONFIG
-    from silica.kernel.embed import EmbedStore, build_index
+    from silica.kernel.embed import build_index
 
     try:
         all_refs = DRIVER.list_files(folder or None)
@@ -681,7 +681,6 @@ def silica_vault_report(
       propose  — reversible but borderline; agent asks before executing
       escalate — IssueCards requiring human judgment (create/rename/delete)
     """
-    import os
     import orjson
     from pathlib import Path
 
