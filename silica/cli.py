@@ -218,10 +218,11 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
         return True
 
-    if cmd in ("/dedup", "/refine"):
-        folder = next((p for p in parts[1:] if not p.startswith("-")), "")
-        tool_name = "silica_dedup" if cmd == "/dedup" else "silica_refine"
-        label = "Dedup" if cmd == "/dedup" else "Refine"
+    if cmd == "/dedup":
+        positional = [p for p in parts[1:] if not p.startswith("-")]
+        folder = " ".join(positional)
+        tool_name = "silica_dedup"
+        label = "Dedup"
         CONSOLE.print(f"  {label} on [bold]{folder or '(vault)'}[/] — sub-agents on the worker model…")
         result = TOOLS[tool_name].run(folder=folder)
         try:
@@ -322,6 +323,66 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             f"call `silica_ledger_next` repeatedly, execute each capability with its payload, "
             f"call `silica_ledger_update` after each one, and stop when the plan returns done."
         )
+
+    if cmd in ("/refine", "/enrich"):
+        args = parts[1:]
+        folder = next((p for p in args if not p.startswith("-")), "")
+
+        from silica.driver import DRIVER
+        from silica.planner.progress import ProgressLedger, TaskLedger
+        from silica.planner.analyst_plan import CheckpointSpec
+        from pathlib import Path
+        import orjson
+
+        refs = DRIVER.list_files(folder=folder)
+        paths = [r.path for r in refs if r.path.startswith(folder) or r.path == folder]
+        if not paths:
+            return f"Error: no files found in '{folder}'."
+
+        progress = ProgressLedger.new(mode="analyst", inputs={"scope": folder or "vault"})
+        run_id = progress.run_id
+        run_dir = Path.home() / ".silica" / "runs" / run_id
+        payloads_dir = run_dir / "payloads"
+        payloads_dir.mkdir(parents=True, exist_ok=True)
+
+        chunks = []
+        cur_chunk = []
+        cur_size = 0
+        for p in paths:
+            s = len(json.dumps(p))
+            if cur_size + s > 4000 and cur_chunk:
+                chunks.append(cur_chunk)
+                cur_chunk = [p]
+                cur_size = s
+            else:
+                cur_chunk.append(p)
+                cur_size += s
+        if cur_chunk:
+            chunks.append(cur_chunk)
+
+        cap = "silica_refine_batch" if cmd == "/refine" else "silica_enrich_batch"
+
+        for i, chunk in enumerate(chunks):
+            task = progress.add_task(cap)
+            payload = {"note_paths": chunk, "_reason": f"Batch {i+1} of {len(chunks)}"}
+            payload_path = str(payloads_dir / f"{task.id}.json")
+            Path(payload_path).write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
+            task.input_ref = payload_path
+
+        progress.save()
+
+        tl = TaskLedger.new(
+            run_id=run_id,
+            user_request=f"{cmd.strip('/')} {folder or 'vault'}",
+            checkpoints=[CheckpointSpec(id="remediate", kind="gate", objective=cap)],
+            facts=[]
+        )
+        try:
+            tl.save()
+        except Exception:
+            pass
+
+        return f"A ledger for {cmd} has been created with {len(chunks)} chunk(s) across {len(paths)} note(s). Use `silica_ledger_next` to execute them."
 
     return None
 

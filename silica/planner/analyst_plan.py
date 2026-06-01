@@ -208,7 +208,30 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
                 priority=2,
             ))
 
-    # 3. Oversized clusters → propose a read-only audit
+    # 3. Refiner & Enricher (from OFM triage) → propose
+    if getattr(report, "lean_notes", []):
+        lean_chunks = _chunk_groups({1: report.lean_notes})
+        for chunk in lean_chunks:
+            propose.append(TaskCandidate(
+                capability_name="silica_enrich_batch",
+                payload={"note_paths": chunk},
+                reason=f"Identified {len(chunk)} lean or empty note(s) → propose semantic enrichment",
+                tier="propose",
+                priority=3,
+            ))
+            
+    if getattr(report, "reformat_notes", []):
+        ref_chunks = _chunk_groups({1: report.reformat_notes})
+        for chunk in ref_chunks:
+            propose.append(TaskCandidate(
+                capability_name="silica_refine_batch",
+                payload={"note_paths": chunk},
+                reason=f"Identified {len(chunk)} note(s) with missing or invalid tags → propose stylistic refinement",
+                tier="propose",
+                priority=3,
+            ))
+
+    # 4. Oversized clusters → propose a read-only audit
     for c in report.clusters:
         if c.size > _CLUSTER_SIZE_THRESHOLD and c.hub:
             propose.append(TaskCandidate(
@@ -219,10 +242,10 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
                     f"— audit hub '{c.hub}' to decide if refactoring is needed"
                 ),
                 tier="propose",
-                priority=3,
+                priority=4,
             ))
 
-    # 4. Recurring dangling wikilinks → escalate (create vs rename is irreversible)
+    # 5. Recurring dangling wikilinks → escalate (create vs rename is irreversible)
     for d in report.dangling:
         if d["refs"] >= _DANGLING_REFS_THRESHOLD:
             escalate.append(TaskCandidate(
@@ -233,7 +256,7 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
                     f"— decide: create note, rename existing, or ignore"
                 ),
                 tier="escalate",
-                priority=4,
+                priority=5,
             ))
 
     # §3.2-bis safety check: strip any irreversible capability that leaked into auto

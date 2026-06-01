@@ -79,6 +79,8 @@ class VaultReport:
     clusters: list[ClusterStat]
     missing_links: list[MissingLink] = field(default_factory=list)
     duplicate_pairs: list[DuplicatePair] = field(default_factory=list)
+    lean_notes: list[str] = field(default_factory=list)
+    reformat_notes: list[str] = field(default_factory=list)
     pagerank_map: dict[str, float] = field(default_factory=dict)  # all nodes: vault-relative path (no .md) → pagerank
 
 
@@ -137,6 +139,30 @@ def compute_report(
     out_deg: dict[str, int] = dict(G_dir.out_degree())
     in_deg: dict[str, int] = dict(G_dir.in_degree())
     deg: dict[str, int] = {n: out_deg.get(n, 0) + in_deg.get(n, 0) for n in real_ids}
+
+    # Triage for stylistic refinement and enrichment
+    lean_notes: list[str] = []
+    reformat_notes: list[str] = []
+    try:
+        from silica.kernel import ofm, frontmatter
+        from silica.driver import DRIVER
+        
+        for nid in real_ids:
+            try:
+                nc = DRIVER.read_note(nid)
+                if not nc.content:
+                    continue
+                data, _, body = frontmatter.split(nc.content)
+                is_empty = len(body.strip()) == 0
+                is_lean = ofm.is_lean(body)
+                if is_empty or is_lean:
+                    lean_notes.append(nid)
+                elif data is None or frontmatter.lint_tags(data):
+                    reformat_notes.append(nid)
+            except Exception:
+                pass
+    except Exception as exc:
+        logger.warning("graph_report: triage failed — %s", exc)
 
     # PageRank (deterministic)
     try:
@@ -247,32 +273,38 @@ def compute_report(
     # ------------------------------------------------------------------
     n_links = sum(1 for e in edges if e.get("type") == "EXTRACTED")
     n_unresolved = sum(1 for e in edges if e.get("type") == "AMBIGUOUS")
-    totals = {
-        "notes": len(real_ids),
-        "links": n_links,
-        "unresolved": n_unresolved,
-        "orphans": len(orphans),
-        "clusters": len(clusters),
-    }
-
+    
+    # Initialize report shell to allow recursive calculation of totals if needed
     report = VaultReport(
         generated_at=_now(),
         scope=folder,
-        totals=totals,
+        totals={}, # Placeholder
         god_nodes=god_nodes,
         bridges=bridges,
         orphans=orphans,
         dangling=dangling,
         clusters=clusters,
         pagerank_map={nid: round(pr.get(nid, 0.0), 5) for nid in real_ids},
+        lean_notes=lean_notes,
+        reformat_notes=reformat_notes,
     )
 
-    # ------------------------------------------------------------------
-    # Optional: missing links via embeddings
-    # ------------------------------------------------------------------
     if with_embeddings:
         report.missing_links = _compute_missing_links(report, G_und, tau=0.82, k=top_k)
         report.duplicate_pairs = _compute_duplicate_pairs(report)
+
+    totals = {
+        "notes": len(real_ids),
+        "links": n_links,
+        "dangling_links": len(dangling),
+        "missing_links": len(report.missing_links),
+        "duplicate_pairs": len(report.duplicate_pairs),
+        "lean_notes": len(lean_notes),
+        "reformat_notes": len(reformat_notes),
+        "orphans": len(orphans),
+        "clusters": len(clusters),
+    }
+    report.totals = totals
 
     return report
 
@@ -289,6 +321,9 @@ def _empty_report(scope: str = "") -> VaultReport:
         clusters=[],
         missing_links=[],
         duplicate_pairs=[],
+        lean_notes=[],
+        reformat_notes=[],
+        pagerank_map={},
     )
 
 
@@ -414,29 +449,29 @@ def _compute_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
 _MEMBERS_CAP = 25  # max members shown per cluster in markdown
 
 
-def to_markdown(report: VaultReport, title: str = "Silica Vault Report") -> str:
+def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
     """Render a VaultReport as OFM-friendly markdown."""
     lines: list[str] = []
     lines.append(f"# {title}")
-    lines.append(f"_Generated: {report.generated_at}_")
-    if report.scope:
-        lines.append(f"_Scope: `{report.scope}`_")
+    lines.append(f"_Generated: {r.generated_at}_")
+    if r.scope:
+        lines.append(f"_Scope: `{r.scope}`_")
     lines.append("")
 
     # Totals
     lines.append("## Totals")
     lines.append("| Metric | Count |")
     lines.append("|---|---|")
-    for k, v in report.totals.items():
+    for k, v in r.totals.items():
         lines.append(f"| {k.capitalize()} | {v} |")
     lines.append("")
 
     # God nodes
     lines.append("## God Nodes (High-Degree Hubs)")
-    if report.god_nodes:
+    if r.god_nodes:
         lines.append("| Note | Cluster | Degree | In | Out | PageRank |")
         lines.append("|---|---|---|---|---|---|")
-        for n in report.god_nodes:
+        for n in r.god_nodes:
             lines.append(f"| [[{n.label}]] | {n.cluster} | {n.degree} | {n.in_degree} | {n.out_degree} | {n.pagerank} |")
     else:
         lines.append("_No connected notes found._")
@@ -444,10 +479,10 @@ def to_markdown(report: VaultReport, title: str = "Silica Vault Report") -> str:
 
     # Surprising bridges
     lines.append("## Surprising Cross-Cluster Connections")
-    if report.bridges:
+    if r.bridges:
         lines.append("| Source | Target | Clusters | Surprise |")
         lines.append("|---|---|---|---|")
-        for b in report.bridges:
+        for b in r.bridges:
             src_label = b.source.rsplit("/", 1)[-1].removesuffix(".md")
             tgt_label = b.target.rsplit("/", 1)[-1].removesuffix(".md")
             lines.append(f"| [[{src_label}]] | [[{tgt_label}]] | {b.source_cluster}↔{b.target_cluster} | {b.weight} |")
@@ -457,8 +492,8 @@ def to_markdown(report: VaultReport, title: str = "Silica Vault Report") -> str:
 
     # Clusters
     lines.append("## Clusters")
-    if report.clusters:
-        for c in report.clusters:
+    if r.clusters:
+        for c in r.clusters:
             hub_label = c.hub.rsplit("/", 1)[-1].removesuffix(".md") if c.hub else "—"
             lines.append(f"### Cluster {c.cluster_id} (size={c.size}, cohesion={c.cohesion})")
             lines.append(f"**Hub:** [[{hub_label}]]")
@@ -476,8 +511,8 @@ def to_markdown(report: VaultReport, title: str = "Silica Vault Report") -> str:
 
     # Orphans
     lines.append("## Orphans (No Incoming Links)")
-    if report.orphans:
-        for o in report.orphans:
+    if r.orphans:
+        for o in r.orphans:
             label = o.rsplit("/", 1)[-1].removesuffix(".md")
             lines.append(f"- [[{label}]]")
     else:
@@ -486,36 +521,41 @@ def to_markdown(report: VaultReport, title: str = "Silica Vault Report") -> str:
 
     # Dangling links
     lines.append("## Dangling Links (Unresolved Wikilinks)")
-    if report.dangling:
+    if r.dangling:
         lines.append("| Target | References |")
         lines.append("|---|---|")
-        for d in report.dangling:
+        for d in r.dangling:
             lines.append(f"| `{d['target']}` | {d['refs']} |")
     else:
         lines.append("_No unresolved wikilinks._")
     lines.append("")
 
     # Missing links (proposed)
-    if report.missing_links:
+    if r.missing_links:
         lines.append("## Proposed Missing Links _(embedding candidates — not authoritative)_")
         lines.append("| Source | Target | Cosine |")
         lines.append("|---|---|---|")
-        for ml in report.missing_links:
+        for ml in r.missing_links:
             src_label = ml.source.rsplit("/", 1)[-1].removesuffix(".md")
             tgt_label = ml.target.rsplit("/", 1)[-1].removesuffix(".md")
             lines.append(f"| [[{src_label}]] | [[{tgt_label}]] | {ml.cosine} |")
         lines.append("")
 
     # Duplicate pairs (proposed)
-    if report.duplicate_pairs:
-        lines.append("## Proposed Deduplication Pairs _(borderline similarity)_")
-        lines.append("| Source | Target | Cosine |")
-        lines.append("|---|---|---|")
-        for dp in report.duplicate_pairs:
-            src_label = dp.source.rsplit("/", 1)[-1].removesuffix(".md")
-            tgt_label = dp.target.rsplit("/", 1)[-1].removesuffix(".md")
-            lines.append(f"| [[{src_label}]] | [[{tgt_label}]] | {dp.score} |")
-        lines.append("")
+    if r.duplicate_pairs:
+        lines.append(f"\n### Borderline Duplicates ({len(r.duplicate_pairs)})")
+        for dp in r.duplicate_pairs:
+            lines.append(f"- [[{dp.source}]] vs [[{dp.target}]] (score: {dp.score:.3f})")
+
+    if r.lean_notes:
+        lines.append(f"\n### Lean Notes (Enrichment Candidates) ({len(r.lean_notes)})")
+        for n in r.lean_notes:
+            lines.append(f"- [[{n}]]")
+
+    if r.reformat_notes:
+        lines.append(f"\n### Reformat Notes (Stylistic Refinement) ({len(r.reformat_notes)})")
+        for n in r.reformat_notes:
+            lines.append(f"- [[{n}]]")
 
     return "\n".join(lines)
 
