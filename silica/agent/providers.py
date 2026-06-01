@@ -247,8 +247,12 @@ def get_provider(config: Any, role: str = "router") -> Provider:
     LM Studio instance/port than the router.
     """
     if role == "worker":
-        provider_name = getattr(config, "worker_provider", "lmstudio") or "lmstudio"
-        model_name = getattr(config, "worker_model", "") or ""
+        provider_name = getattr(config, "worker_provider", None)
+        model_name = getattr(config, "worker_model", None)
+        if not provider_name or not model_name:
+            provider_name = getattr(config, "provider", "lmstudio")
+            model_name = getattr(config, "model", "")
+            role = "router"
     else:
         provider_name = getattr(config, "provider", "lmstudio")
         model_name = getattr(config, "model", "")
@@ -264,8 +268,8 @@ def get_provider(config: Any, role: str = "router") -> Provider:
 
     # Worker role: explicit endpoint overrides take precedence over the preset.
     if role == "worker":
-        base_url = getattr(config, "worker_base_url", "") or base_url
-        api_key = getattr(config, "worker_api_key", "") or api_key
+        base_url = getattr(config, "worker_base_url", None) or base_url
+        api_key = getattr(config, "worker_api_key", None) or api_key
 
     if provider_name == "openrouter" and model_name.startswith("openrouter/"):
         model_name = model_name.removeprefix("openrouter/")
