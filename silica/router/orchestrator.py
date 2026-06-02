@@ -1012,7 +1012,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         # Persist borderline concepts in the deferred store
         if deferred_concepts:
-            content_hash = self.context.get("source_content_hash", "")
+            content_hash = self._current_content_hash
             if content_hash:
                 try:
                     from silica.kernel.deferred import get_deferred_store
@@ -1275,7 +1275,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # later without re-running the expensive RECON → DELEGATE cycle.
         rejected_raw = res.get("rejected_ops", [])
         if rejected_raw:
-            content_hash = self.context.get("source_content_hash", "")
+            content_hash = self._current_content_hash
             if content_hash:
                 from silica.kernel.deferred import get_deferred_store
                 deferred_ops = [
@@ -1516,7 +1516,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
                     for fo in res.get("failed", [])
                 }
                 if _deferred:
-                    content_hash = self.context.get("source_content_hash", "")
+                    content_hash = self._current_content_hash
                     if content_hash:
                         from silica.kernel.deferred import get_deferred_store
                         _dstore = get_deferred_store()
@@ -2248,6 +2248,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
         if self._file_chunks and fi < len(self._file_chunks):
             return self._file_chunks[fi]["source_file"]
         return self.inbox_file
+
+    @property
+    def _current_content_hash(self) -> str:
+        """Content hash for the inbox file of the current chunk."""
+        fi, _ = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (0, 0))
+        if self._file_content_hashes and fi < len(self._file_content_hashes):
+            return self._file_content_hashes[fi]
+        return self.context.get("source_content_hash", "")
 
     # ------------------------------------------------------------------
     # Ledger helpers (C5)
