@@ -209,3 +209,32 @@ def test_streaming_path_collects_usage():
     assert resp.usage.get("prompt_tokens") == 10, f"Expected 10, got: {resp.usage}"
     assert resp.usage.get("completion_tokens") == 5
     assert resp.usage.get("total_tokens") == 15
+    # Confirm stream_options was passed to request usage data
+    call_kwargs = mock_client.chat.completions.create.call_args
+    assert call_kwargs.kwargs.get("stream_options") == {"include_usage": True}, \
+        f"stream_options not passed: {call_kwargs}"
+
+
+def test_streaming_path_usage_empty_when_no_usage_chunk():
+    """When no streaming chunk carries usage, resp.usage must be {} (not raise)."""
+    from unittest.mock import MagicMock
+    from silica.agent.providers import OpenAICompatibleProvider
+
+    mock_chunk = MagicMock()
+    mock_chunk.choices = [MagicMock()]
+    mock_chunk.choices[0].delta.content = "hi"
+    mock_chunk.choices[0].delta.tool_calls = None
+    mock_chunk.choices[0].finish_reason = "stop"
+    mock_chunk.usage = None  # no usage on any chunk
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = iter([mock_chunk])
+
+    provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
+    provider.client = mock_client
+    provider.model = "test-model"
+    provider.timeout = 30
+    provider.max_tokens = 1000
+
+    resp = provider.call_llm([{"role": "user", "content": "hi"}])
+    assert resp.usage == {}, f"Expected empty usage dict, got: {resp.usage}"

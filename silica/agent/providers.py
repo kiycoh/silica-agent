@@ -118,7 +118,10 @@ class OpenAICompatibleProvider:
 
             # Non-structured path: stream so the httpx read-timeout acts as a
             # per-chunk inactivity watchdog rather than a total-body deadline.
-            stream = self.client.chat.completions.create(**kwargs, stream=True)
+            # stream_options is ignored by providers that don't support it.
+            stream = self.client.chat.completions.create(
+                **kwargs, stream=True, stream_options={"include_usage": True}
+            )
             content_chunks: list[str] = []
             tc_acc: dict[int, dict[str, Any]] = {}
             finish_reason: str | None = None
