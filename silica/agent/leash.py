@@ -105,11 +105,20 @@ class Leash:
         norm = _norm_path(path)
         if not norm:
             return False
-        # forbidden_paths may be bare names or full vault-relative paths;
-        # match on full norm OR basename so bare names work correctly.
-        norm_base = _norm_path(os.path.basename(path or ""))
         forbidden_norms = {_norm_path(p) for p in self.forbidden_paths}
-        if norm in forbidden_norms or norm_base in forbidden_norms:
+        if norm in forbidden_norms:
+            return False
+        # Bare-name forbidden entries (no "/" or "\") may be matched by the
+        # incoming path's basename — e.g. hub="Concepts" blocks "notes/Concepts.md".
+        # Only apply basename expansion for bare entries to avoid false positives
+        # where a note named "Foo.md" is blocked by hub="Foo" even when the hub
+        # is actually a different full path like "other/Foo".
+        bare_forbidden = {
+            _norm_path(p)
+            for p in self.forbidden_paths
+            if "/" not in p and "\\" not in p
+        }
+        if bare_forbidden and _norm_path(os.path.basename(path or "")) in bare_forbidden:
             return False
         return bool(self.target_predicate(path or ""))
 

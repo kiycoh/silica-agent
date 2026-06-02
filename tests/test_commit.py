@@ -74,6 +74,6 @@ def test_delete_op_path_is_leased():
         delete_op = Op(op=OpType.delete, heading="Foo", source_basename="inbox.md", path="notes/Foo.md")
         commit_ops([delete_op], target_dir="notes")
 
-    assert any("Foo" in p for p in leased_paths), (
-        f"Delete op path 'notes/Foo.md' was not leased; leased paths: {leased_paths}"
+    assert "notes/Foo.md" in leased_paths, (
+        f"Delete op path 'notes/Foo.md' was not leased; got: {leased_paths}"
     )
