@@ -1667,8 +1667,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 prior_content=hub_note.content,
             )
             self._txn.inverses.append(hub_inverse)
-            if "snapshot" in self.context and "inverses" in self.context["snapshot"]:
-                self.context["snapshot"]["inverses"].append(hub_inverse.model_dump())
+            if "snapshot" in self._chunk_ctx and "inverses" in self._chunk_ctx["snapshot"]:
+                self._chunk_ctx["snapshot"]["inverses"].append(hub_inverse.model_dump())
 
         # Cross-cluster integrity check: warn when new notes land in a different
         # cluster from the hub.  This is informational only — the MOC link is
@@ -1751,8 +1751,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
                             prior_content=p_note.content,
                         )
                         self._txn.inverses.append(p_inverse)
-                        if "snapshot" in self.context and "inverses" in self.context["snapshot"]:
-                            self.context["snapshot"]["inverses"].append(p_inverse.model_dump())
+                        if "snapshot" in self._chunk_ctx and "inverses" in self._chunk_ctx["snapshot"]:
+                            self._chunk_ctx["snapshot"]["inverses"].append(p_inverse.model_dump())
                     # Build and write parent MOC block (same language-aware heading,
                     # same deduplication logic as the hub section above).
                     p_heading = _moc_heading(source_name, p_note.content)
@@ -1950,8 +1950,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
                             prior_content=prior_contents[path_modified],
                         )
                         self._txn.inverses.append(inverse)
-                        if "snapshot" in self.context and "inverses" in self.context["snapshot"]:
-                            self.context["snapshot"]["inverses"].append(inverse.model_dump())
+                        if "snapshot" in self._chunk_ctx and "inverses" in self._chunk_ctx["snapshot"]:
+                            self._chunk_ctx["snapshot"]["inverses"].append(inverse.model_dump())
 
             total_links = sum(len(v) for v in added_map.values())
             logger.info(

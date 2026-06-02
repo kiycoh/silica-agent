@@ -969,3 +969,53 @@ def test_handle_write_all_fail_triggers_rollback(mock_bulk_write, tmp_path):
     with _pytest.raises(RuntimeError, match="Write fully failed"):
         fsm.step()
 
+
+def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
+    """After HUB_UPDATE, the hub rollback inverse must land in _chunk_ctx['snapshot']['inverses']."""
+    import json, os
+    from unittest.mock import patch, MagicMock
+    from silica.router.orchestrator import InjectorFSM
+
+    ops_path = str(tmp_path / "ops.json")
+    with open(ops_path, "w") as f:
+        json.dump([{
+            "op": "write", "path": "TargetDir/Note.md",
+            "heading": "Note", "source_basename": "test.md",
+            "content": "# Note\n", "snippet": "Note snippet",
+            "hub": None, "parent": None,
+        }], f)
+
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir", hub="Hub")
+    # _chunk_ctx is a property returning self.context.setdefault("chunk", {}),
+    # so seed the per-chunk state via context["chunk"] directly.
+    fsm.context["chunk"] = {
+        "ops_path": ops_path,
+        "snapshot": {"txn_id": "txn-001", "inverses": [], "created_paths": []},
+        "snapshot_domain": [],
+    }
+    fsm._current_chunk_idx = 0
+    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
+    fsm._file_chunks = [{"source_file": "Inbox/test.md", "chunks": [{}]}]
+
+    mock_hub_note = MagicMock()
+    mock_hub_note.content = "# Hub\n\nExisting content\n"
+
+    from silica.driver.base import Txn
+    fsm._txn = Txn(id="txn-001", created_paths=[], inverses=[])
+
+    with patch("silica.router.orchestrator.DRIVER") as mock_driver, \
+         patch("silica.router.orchestrator.time") as mock_time:
+        mock_driver.read_note.return_value = mock_hub_note
+        mock_driver.overwrite.return_value = None
+        mock_time.monotonic.side_effect = [0.0, 10.0]
+        mock_time.sleep.return_value = None
+        fsm._handle_hub_update()
+
+    chunk_snap_inverses = fsm._chunk_ctx["snapshot"]["inverses"]
+    assert any(
+        inv.get("path", "").endswith("Hub.md") for inv in chunk_snap_inverses
+    ), f"Hub inverse missing from _chunk_ctx['snapshot']['inverses']; got: {chunk_snap_inverses}"
+    # Also confirm it did NOT land in the wrong place
+    assert "snapshot" not in fsm.context or "inverses" not in fsm.context.get("snapshot", {}), \
+        "Hub inverse was written to stale context['snapshot'] instead of _chunk_ctx['snapshot']"
+
