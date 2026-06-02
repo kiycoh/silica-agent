@@ -59,8 +59,8 @@ class OpenAICompatibleProvider:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+            
+        kwargs["max_tokens"] = max_tokens if max_tokens is not None else int(os.getenv("MAX_TOKENS", "8192"))
 
         import time
 
@@ -122,6 +122,7 @@ class OpenAICompatibleProvider:
             content_chunks: list[str] = []
             tc_acc: dict[int, dict[str, Any]] = {}
             finish_reason: str | None = None
+            usage_dict: dict[str, int] = {}
 
             for chunk in stream:
                 if not chunk.choices:
@@ -147,6 +148,13 @@ class OpenAICompatibleProvider:
                                 tc_acc[_i]["function"]["name"] += _tc.function.name
                             if _tc.function.arguments:
                                 tc_acc[_i]["function"]["arguments"] += _tc.function.arguments
+                if getattr(chunk, "usage", None) is not None:
+                    u = chunk.usage
+                    usage_dict = {
+                        "prompt_tokens": getattr(u, "prompt_tokens", 0),
+                        "completion_tokens": getattr(u, "completion_tokens", 0),
+                        "total_tokens": getattr(u, "total_tokens", 0),
+                    }
 
             content = "".join(content_chunks) or None
             tool_calls_list = [tc_acc[k] for k in sorted(tc_acc)]
@@ -171,7 +179,7 @@ class OpenAICompatibleProvider:
                 text=content,
                 tool_calls=parsed_calls,
                 assistant_message=assistant_msg,
-                usage={},
+                usage=usage_dict,
                 finish_reason=finish_reason,
             )
 

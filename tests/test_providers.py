@@ -172,3 +172,40 @@ class TestProviders(unittest.TestCase):
         self.assertEqual(mock_client.chat.completions.create.call_count, 3)
         self.assertEqual(response.text, "Success after retries")
         self.assertEqual(mock_sleep.call_count, 2)
+
+
+def test_streaming_path_collects_usage():
+    """Non-structured streaming must return real token counts from the final usage chunk."""
+    from unittest.mock import MagicMock, patch
+    from silica.agent.providers import OpenAICompatibleProvider
+
+    # Simulate: first chunk has content, second (final) chunk has usage
+    mock_chunk_content = MagicMock()
+    mock_chunk_content.choices = [MagicMock()]
+    mock_chunk_content.choices[0].delta.content = "hello"
+    mock_chunk_content.choices[0].delta.tool_calls = None
+    mock_chunk_content.choices[0].finish_reason = None
+    mock_chunk_content.usage = None
+
+    mock_chunk_usage = MagicMock()
+    mock_chunk_usage.choices = [MagicMock()]
+    mock_chunk_usage.choices[0].delta.content = None
+    mock_chunk_usage.choices[0].delta.tool_calls = None
+    mock_chunk_usage.choices[0].finish_reason = "stop"
+    mock_chunk_usage.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
+
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = iter([mock_chunk_content, mock_chunk_usage])
+
+    provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
+    provider.client = mock_client
+    provider.model = "test-model"
+    provider.timeout = 30
+    provider.max_tokens = 1000
+
+    resp = provider.call_llm([{"role": "user", "content": "hi"}])
+
+    assert resp.text == "hello"
+    assert resp.usage.get("prompt_tokens") == 10, f"Expected 10, got: {resp.usage}"
+    assert resp.usage.get("completion_tokens") == 5
+    assert resp.usage.get("total_tokens") == 15
