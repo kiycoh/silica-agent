@@ -33,6 +33,13 @@ logger = logging.getLogger(__name__)
 _PROMPT_DIR = Path(__file__).resolve().parent.parent / "workers"
 
 
+def _feedback(item: WorkItem, phase: str, detail: str = "") -> None:
+    """Publish a WorkFeedbackEvent to the global bus (best-effort)."""
+    from silica.agent.bus import BUS
+    from silica.agent.events import WorkFeedbackEvent
+    BUS.publish("work/feedback", WorkFeedbackEvent(item.id, item.kind, phase, detail))
+
+
 class DedupDecision(BaseModel):
     is_duplicate: bool
     rationale: str = ""
@@ -117,13 +124,17 @@ class LeashedSubAgent:
         candidate_path = item.target_path
         budget = 8000
 
-        # Read the existing (larger) note — read-only.
+        _feedback(item, "reading")
         try:
             from silica.driver import DRIVER
             candidate_body = DRIVER.read_note(candidate_path).content or ""
         except Exception as e:
             return {"status": "skipped", "reason": f"candidate unreadable: {e}"}
 
+        if item.cancel_token.is_set():
+            return {"status": "cancelled"}
+
+        _feedback(item, "calling_llm")
         decision = self._decide_dedup(
             concept=ctx.get("concept", ""),
             excerpt=ctx.get("excerpt", ""),
@@ -141,7 +152,10 @@ class LeashedSubAgent:
                 "rationale": decision.rationale,
             }
 
-        # Build the single append-only patch and commit it under the dedup leash.
+        if item.cancel_token.is_set():
+            return {"status": "cancelled"}
+
+        _feedback(item, "committing")
         hub = ctx.get("hub")
         inbox_file = ctx.get("inbox_file", "")
         op = Op(
@@ -167,6 +181,8 @@ class LeashedSubAgent:
 
     def _run_refine(self, item: WorkItem) -> dict[str, Any]:
         target_path = item.target_path
+
+        _feedback(item, "reading")
         try:
             from silica.driver import DRIVER
             original = DRIVER.read_note(target_path).content or ""
@@ -176,10 +192,18 @@ class LeashedSubAgent:
         if not original.strip():
             return {"status": "skipped", "reason": "empty note"}
 
+        if item.cancel_token.is_set():
+            return {"status": "cancelled"}
+
+        _feedback(item, "calling_llm")
         refined = self._refine_note(target_path, original)
         if not refined.content.strip():
             return {"status": "no_change", "reason": "refiner produced no content"}
 
+        if item.cancel_token.is_set():
+            return {"status": "cancelled"}
+
+        _feedback(item, "committing")
         hub = item.context.get("hub")
         op = Op(
             op=OpType.overwrite,
@@ -205,17 +229,27 @@ class LeashedSubAgent:
 
     def _run_enrich(self, item: WorkItem) -> dict[str, Any]:
         target_path = item.target_path
+
+        _feedback(item, "reading")
         try:
             from silica.driver import DRIVER
             original = DRIVER.read_note(target_path).content or ""
         except Exception as e:
             return {"status": "skipped", "reason": f"target unreadable: {e}"}
 
+        if item.cancel_token.is_set():
+            return {"status": "cancelled"}
+
+        _feedback(item, "calling_llm")
         hub = item.context.get("hub") or os.path.splitext(os.path.basename(target_path))[0]
         enriched = self._enrich_note(target_path, original, hub)
         if not enriched.content.strip():
             return {"status": "no_change", "reason": "enricher produced no content"}
 
+        if item.cancel_token.is_set():
+            return {"status": "cancelled"}
+
+        _feedback(item, "committing")
         op = Op(
             op=OpType.overwrite,
             heading=os.path.splitext(os.path.basename(target_path))[0],
@@ -244,12 +278,17 @@ class LeashedSubAgent:
         if not candidates:
             return {"status": "no_candidates"}
 
+        _feedback(item, "reading")
         try:
             from silica.driver import DRIVER
             body = DRIVER.read_note(target).content or ""
         except Exception as e:
             return {"status": "skipped", "reason": f"orphan unreadable: {e}"}
 
+        if item.cancel_token.is_set():
+            return {"status": "cancelled"}
+
+        _feedback(item, "calling_llm")
         decision = self._decide_links(target, body[:8000], candidates)
         # Only keep links that were actually offered as candidates — never let the
         # model invent a target (which would just create another dangling link).
@@ -258,6 +297,10 @@ class LeashedSubAgent:
         if not valid:
             return {"status": "no_link", "rationale": decision.rationale}
 
+        if item.cancel_token.is_set():
+            return {"status": "cancelled"}
+
+        _feedback(item, "committing")
         snippet = "## Related\n\n" + "\n".join(f"- [[{n}]]" for n in valid) + "\n"
         hub = item.context.get("hub")
         op = Op(
