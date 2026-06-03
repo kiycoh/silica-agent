@@ -38,7 +38,10 @@ from silica.agent.events import (
     LLMStreamEvent,
 )
 from silica.agent.llm import call_llm
-from silica.tools import TOOLS
+from silica.agent.concurrency import worker_slot
+from silica.agent.constraints import AgentConstraints
+from silica.tools import TOOLS, Tool
+from contextlib import nullcontext
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +90,7 @@ def run_agent(
     tool_progress_callback: ToolProgressCallback = None,
     progress: "ProgressLedger | None" = None,
     cancel_token: "threading.Event | None" = None,
+    constraints: "AgentConstraints | None" = None,
 ) -> str:
     """Execute the agentic loop until the model produces a text response.
 
@@ -101,11 +105,27 @@ def run_agent(
     Returns:
         The model's final text response
     """
+    # Effective tool registry: full global, or the constrained subset.
+    if constraints is not None:
+        allowed: dict[str, "Tool"] = {
+            name: TOOLS[name] for name in constraints.tools if name in TOOLS
+        }
+    else:
+        allowed = TOOLS
+
     # Collect tool schemas for the LLM
-    schemas = [t.json_schema() for t in TOOLS.values()] if TOOLS else None
+    schemas = [t.json_schema() for t in allowed.values()] if allowed else None
+
+    effective_model = (
+        constraints.model if (constraints is not None and constraints.model) else model
+    )
 
     iteration = 0
-    max_iterations = 20  # Hard safety cap lowered from 50
+    max_iterations = (
+        constraints.max_iterations
+        if (constraints is not None and constraints.max_iterations is not None)
+        else 20
+    )  # Hard safety cap lowered from 50
 
     # Track consecutive failures for the same (tool_name, args) pair
     # Key: (tool_name, args_json_string)
@@ -135,13 +155,15 @@ def run_agent(
             # Run the (synchronous, potentially slow) LLM call on a daemon thread
             # so KeyboardInterrupt on the main thread propagates on the first Ctrl+C
             # instead of being trapped inside a C-level network recv().
-            with _cf.ThreadPoolExecutor(max_workers=1) as _llm_pool:
-                _future = _llm_pool.submit(call_llm, model, messages, tools=schemas)
-                try:
-                    resp = _future.result()
-                except KeyboardInterrupt:
-                    _future.cancel()
-                    raise
+            slot = worker_slot() if constraints is not None else nullcontext()
+            with slot:
+                with _cf.ThreadPoolExecutor(max_workers=1) as _llm_pool:
+                    _future = _llm_pool.submit(call_llm, effective_model, messages, tools=schemas)
+                    try:
+                        resp = _future.result()
+                    except KeyboardInterrupt:
+                        _future.cancel()
+                        raise
         finally:
             _emit(ThinkingEndEvent(iteration=iteration))
         messages.append(resp.assistant_message)
@@ -162,14 +184,14 @@ def run_agent(
             tool_key = (tc.name, args_str)
 
             failed = False
-            if tc.name not in TOOLS:
+            if tc.name not in allowed:
                 failed = True
-                result = f'{{"error": "Unknown tool: {tc.name}"}}'
+                result = f'{{"error": "Unknown or forbidden tool: {tc.name}"}}'
                 _emit(
                     ToolErrorEvent(
                         name=tc.name,
                         call_id=tc.id,
-                        error=f"Unknown tool: {tc.name}",
+                        error=f"Unknown or forbidden tool: {tc.name}",
                         iteration=iteration,
                     )
                 )
@@ -184,7 +206,7 @@ def run_agent(
                 )
                 start_time = time.perf_counter()
                 try:
-                    result = TOOLS[tc.name].run(**tc.args)
+                    result = allowed[tc.name].run(**tc.args)
                     duration = time.perf_counter() - start_time
                     _emit(
                         ToolCompleteEvent(
