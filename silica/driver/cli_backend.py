@@ -528,7 +528,7 @@ class ObsidianCLIBackend:
             in_deg = self._graph.in_degree(path) if path in self._graph else 0
             backlink_counts[key] = in_deg
             if in_deg == 0:
-                orphans.append(ref)
+                orphans.append(self._node_ref(path))
 
         # Capture unresolved links for neighborhood paths
         for s, t in self._unresolved_links:

@@ -229,6 +229,59 @@ _PHASE_LABELS: dict[str, str] = {
 }
 
 
+_PHASE_ORDER: list[str] = list(_PHASE_LABELS.values())
+_MICRO_PHASE_ORDER: tuple[str, ...] = ("reading", "calling_llm", "committing")
+
+
+def _stage_track(pipeline_phases: list[dict], console_width: int) -> "Text":
+    """Compact horizontal stage track for the injector panel.
+
+    Shows a ±3 window around the running phase. Each phase is rendered as:
+      done    → dim  "✓ label"
+      running → bold #22d3ee "◉ label"
+      failed  → bold red "✗ label"
+      pending → dim  "· label"
+    Leading/trailing "…" indicate clipped phases.
+    """
+    status_map: dict[str, str] = {e["phase"]: e["status"] for e in pipeline_phases}
+
+    running_idx = next(
+        (i for i, p in enumerate(_PHASE_ORDER) if status_map.get(p) == "running"),
+        None,
+    )
+    if running_idx is None:
+        done_indices = [
+            i for i, p in enumerate(_PHASE_ORDER)
+            if status_map.get(p) in ("done", "failed")
+        ]
+        center = done_indices[-1] if done_indices else 0
+    else:
+        center = running_idx
+
+    start = max(0, center - 3)
+    end = min(len(_PHASE_ORDER), center + 4)
+
+    t = Text()
+    if start > 0:
+        t.append("… ", style="dim")
+    for i in range(start, end):
+        phase = _PHASE_ORDER[i]
+        st = status_map.get(phase, "pending")
+        if st == "done":
+            t.append(f"✓ {phase}", style="dim")
+        elif st == "running":
+            t.append(f"◉ {phase}", style="bold #22d3ee")
+        elif st == "failed":
+            t.append(f"✗ {phase}", style="bold red")
+        else:
+            t.append(f"· {phase}", style="dim")
+        if i < end - 1:
+            t.append("  ")
+    if end < len(_PHASE_ORDER):
+        t.append("  …", style="dim")
+    return t
+
+
 class _ProgressRenderer:
     def __init__(self) -> None:
         self._live: Live | None = None
@@ -248,6 +301,8 @@ class _ProgressRenderer:
         # Register as batch hook so emit_batch_event reaches this renderer
         global _batch_run_hook
         _batch_run_hook = self.__call__
+        from silica.agent.bus import BUS
+        BUS.subscribe("work/feedback", self._on_work_feedback)
 
     def _start_spinner(self) -> None:
         if self._live is not None:
@@ -296,6 +351,15 @@ class _ProgressRenderer:
                 self._inject_progress.update(self._inject_task_id, advance=1)
         self._update_live()
 
+    def _on_work_feedback(self, event) -> None:
+        """Called from BUS when a sub-agent publishes a WorkFeedbackEvent."""
+        if self._batch is None:
+            return
+        if event.kind != self._batch["kind"]:
+            return
+        self._batch["micro_phase"] = event.phase
+        self._update_batch_panel()
+
     def _update_live(self) -> None:
         if self._batch is not None:
             return  # Batch panel managed by _update_batch_panel
@@ -315,29 +379,13 @@ class _ProgressRenderer:
             desc = _synthetic_tool_desc(name, args)
 
             if name == "silica_run_injector" and (self._pipeline_phases or self._inject_progress is not None):
-                # Injector: panel with progress bar and phase list
-                phase_lines: list[str] = []
-                for entry in self._pipeline_phases:
-                    p_label = entry["phase"]
-                    p_status = entry["status"]
-                    p_elapsed = entry["elapsed"]
-                    if p_status == "running":
-                        phase_lines.append(f"    [dim]⠿[/] [cyan]{p_label}[/]…")
-                    elif p_status == "done":
-                        dur_str = f"  [dim]{p_elapsed:.1f}s[/]" if p_elapsed is not None else ""
-                        phase_lines.append(f"    [tool.ok]✓[/] [dim]{p_label}[/]{dur_str}")
-                    elif p_status == "failed":
-                        phase_lines.append(f"    [tool.err]✗[/] [dim red]{p_label}[/]")
                 running = next((e for e in self._pipeline_phases if e["status"] == "running"), None)
                 phase_name = running["phase"] if running else "…"
                 spinner_line = Spinner("dots", text=f"  [dim]⠿[/] [cyan]{escape(phase_name)}[/]…", style="dim")
                 title = f"[bold]injector[/] [dim]·[/] {escape(self._inject_inbox_label)}"
-                parts: list = [spinner_line]
+                parts: list = [spinner_line, _stage_track(self._pipeline_phases, CONSOLE.width)]
                 if self._inject_progress is not None:
                     parts.append(self._inject_progress)
-                if phase_lines:
-                    parts.append(Text(""))
-                    parts.append(Text.from_markup("\n".join(phase_lines)))
                 renderables.append(Panel(Group(*parts), title=title, border_style="dim cyan"))
             else:
                 tool_spinner = Spinner("dots", text=f"  [cyan]Running[/] {desc}…", style="cyan")
@@ -367,8 +415,21 @@ class _ProgressRenderer:
             style="dim",
         )
         title = f"[bold]{escape(batch['kind'])}[/] [dim]·[/] {escape(batch['label'])}"
+        micro = batch.get("micro_phase", "")
+        if micro:
+            micro_parts = []
+            for mp in _MICRO_PHASE_ORDER:
+                display = mp.replace("_", " ")
+                if mp == micro:
+                    micro_parts.append(f"[bold #22d3ee]◉ {display}[/]")
+                else:
+                    micro_parts.append(f"[dim]· {display}[/]")
+            micro_text = Text.from_markup("   ".join(micro_parts))
+            panel_content = Group(spinner_line, batch["progress_obj"], micro_text)
+        else:
+            panel_content = Group(spinner_line, batch["progress_obj"])
         panel = Panel(
-            Group(spinner_line, batch["progress_obj"]),
+            panel_content,
             title=title,
             border_style="dim cyan",
         )
@@ -481,6 +542,7 @@ class _ProgressRenderer:
                 "progress_obj": progress_obj,
                 "task_id": task_id,
                 "current_label": "",
+                "micro_phase": "",
             }
             self._update_batch_panel()
             return
@@ -541,6 +603,7 @@ class _ProgressRenderer:
                         extra = f" +{len(note_paths) - 1}" if len(note_paths) > 1 else ""
                         self._batch["current_label"] = f"{name0}{extra}"
                     self._batch["done"] = min(self._batch["done"] + 1, self._batch["total"])
+                    self._batch["micro_phase"] = ""
                     self._update_batch_panel()
                 return
             # Suppress all other tool completions during batch
@@ -616,6 +679,8 @@ class _ProgressRenderer:
         global _batch_run_hook
         _batch_run_hook = None
         _set_pipeline_hook(None)
+        from silica.agent.bus import BUS
+        BUS.unsubscribe("work/feedback", self._on_work_feedback)
         if self._batch is not None:
             batch = self._batch
             self._batch = None

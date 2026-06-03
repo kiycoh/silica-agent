@@ -411,6 +411,48 @@ class InjectorFSM(BaseFSM[InjectorState]):
         shutil.copy2(ops_path, kb_path)
         return kb_path
 
+    def _defer_ops(
+        self,
+        rejected_ops: list[dict],
+        rejection_reasons: dict[str, str],
+        *,
+        phase: str,
+    ) -> bool:
+        """Persist rejected/failed ops to the deferred store, merging with any
+        bundle already saved under this source file's content hash.
+
+        Every defer site (COLLISION, VALIDATE, WRITE) funnels through here so
+        the bundle's merge semantics live in exactly one place: because all
+        phases of all chunks of one file share the same content_hash, a later
+        phase (or a later chunk) must NOT clobber ops an earlier one deferred —
+        they accumulate. Returns True iff a bundle was written.
+        """
+        if not rejected_ops:
+            return False
+        content_hash = self._current_content_hash
+        if not content_hash:
+            logger.warning(
+                "%s: %d op(s) to defer but no content_hash — deferred store skipped.",
+                phase, len(rejected_ops),
+            )
+            return False
+        try:
+            from silica.kernel.deferred import get_deferred_store
+            store = get_deferred_store()
+            existing = store.get(content_hash) or {}
+            store.put(
+                content_hash=content_hash,
+                source_path=self._current_source_file,
+                target_dir=self.target_dir,
+                hub=self.hub,
+                rejected_ops=list(existing.get("rejected_ops", [])) + rejected_ops,
+                rejection_reasons={**existing.get("rejection_reasons", {}), **rejection_reasons},
+            )
+            return True
+        except Exception as _de:
+            logger.warning("%s: failed to save deferred ops: %s", phase, _de)
+            return False
+
     def run(self) -> dict[str, Any]:
         """Execute the pipeline end-to-end (single or multi-file)."""
         from silica.kernel.ledger import get_ledger
@@ -1012,34 +1054,25 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         # Persist borderline concepts in the deferred store
         if deferred_concepts:
-            content_hash = self._current_content_hash
-            if content_hash:
-                try:
-                    from silica.kernel.deferred import get_deferred_store
-                    deferred_op_dicts = [
-                        {
-                            "op": "skip",
-                            "heading": (d["concept"].get("name", "") if isinstance(d["concept"], dict) else str(d["concept"])),
-                            "source_basename": os.path.basename(d["inbox_file"]),
-                            "reason": f"collision_deferred score={d['score']:.3f} candidate={d['top_match'].get('name','?')}",
-                            "path": None,
-                        }
-                        for d in deferred_concepts
-                    ]
-                    get_deferred_store().put(
-                        content_hash=content_hash,
-                        source_path=self._current_source_file,
-                        target_dir=self.target_dir,
-                        hub=self.hub,
-                        rejected_ops=deferred_op_dicts,
-                        rejection_reasons={
-                            (d["concept"].get("name", str(i)) if isinstance(d["concept"], dict) else str(i)):
-                            f"borderline_similarity score={d['score']:.3f}"
-                            for i, d in enumerate(deferred_concepts)
-                        },
-                    )
-                except Exception as _de:
-                    logger.warning("COLLISION: failed to save deferred concepts: %s", _de)
+            deferred_op_dicts = [
+                {
+                    "op": "skip",
+                    "heading": (d["concept"].get("name", "") if isinstance(d["concept"], dict) else str(d["concept"])),
+                    "source_basename": os.path.basename(d["inbox_file"]),
+                    "reason": f"collision_deferred score={d['score']:.3f} candidate={d['top_match'].get('name','?')}",
+                    "path": None,
+                }
+                for d in deferred_concepts
+            ]
+            self._defer_ops(
+                deferred_op_dicts,
+                {
+                    (d["concept"].get("name", str(i)) if isinstance(d["concept"], dict) else str(i)):
+                    f"borderline_similarity score={d['score']:.3f}"
+                    for i, d in enumerate(deferred_concepts)
+                },
+                phase="COLLISION",
+            )
 
         # Producer: hand each borderline pair to the leashed dedup sub-agent so it
         # can run concurrently while the Injector keeps writing its other batches.
@@ -1275,30 +1308,20 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # later without re-running the expensive RECON → DELEGATE cycle.
         rejected_raw = res.get("rejected_ops", [])
         if rejected_raw:
-            content_hash = self._current_content_hash
-            if content_hash:
-                from silica.kernel.deferred import get_deferred_store
-                deferred_ops = [
-                    r.get("op", r) if isinstance(r, dict) and "op" in r else r
-                    for r in rejected_raw
-                ]
-                rejection_reasons = {
-                    (r.get("op", {}).get("path") or r.get("op", {}).get("heading") or "?"): r.get("reason", "")
-                    for r in rejected_raw if isinstance(r, dict)
-                }
-                get_deferred_store().put(
-                    content_hash=content_hash,
-                    source_path=self._current_source_file,
-                    target_dir=self.target_dir,
-                    hub=self.hub,
-                    rejected_ops=deferred_ops,
-                    rejection_reasons=rejection_reasons,
-                )
+            deferred_ops = [
+                r.get("op", r) if isinstance(r, dict) and "op" in r else r
+                for r in rejected_raw
+            ]
+            rejection_reasons = {
+                (r.get("op", {}).get("path") or r.get("op", {}).get("heading") or "?"): r.get("reason", "")
+                for r in rejected_raw if isinstance(r, dict)
+            }
+            if self._defer_ops(deferred_ops, rejection_reasons, phase="VALIDATE"):
                 logger.warning(
                     "VALIDATE: %d op(s) rejected and saved to deferred store (hash=%s…). "
                     "Use silica_deferred_retry to attempt them later.",
                     len(rejected_raw),
-                    content_hash[:8],
+                    self._current_content_hash[:8],
                 )
 
         # Accumulate cleared parent references across chunks.
@@ -1515,30 +1538,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
                     fo.get("path", str(fo["index"])): fo["error"]
                     for fo in res.get("failed", [])
                 }
-                if _deferred:
-                    content_hash = self._current_content_hash
-                    if content_hash:
-                        from silica.kernel.deferred import get_deferred_store
-                        _dstore = get_deferred_store()
-                        _existing = _dstore.get(content_hash)
-                        _dstore.put(
-                            content_hash=content_hash,
-                            source_path=self._current_source_file,
-                            target_dir=self.target_dir,
-                            hub=self.hub,
-                            rejected_ops=list((_existing or {}).get("rejected_ops", [])) + _deferred,
-                            rejection_reasons={**(_existing or {}).get("rejection_reasons", {}), **_errors},
-                        )
-                        logger.warning(
-                            "WRITE: %d op(s) failed during settle — deferred (hash=%s…). "
-                            "Continuing with %d committed op(s).",
-                            len(_deferred), content_hash[:8], res.get("successful", 0),
-                        )
-                    else:
-                        logger.warning(
-                            "WRITE: %d op(s) failed during settle (no content_hash, deferred store skipped).",
-                            len(_deferred),
-                        )
+                if self._defer_ops(_deferred, _errors, phase="WRITE"):
+                    logger.warning(
+                        "WRITE: %d op(s) failed during settle — deferred (hash=%s…). "
+                        "Continuing with %d committed op(s).",
+                        len(_deferred), self._current_content_hash[:8], res.get("successful", 0),
+                    )
             except Exception as _de:
                 logger.debug("WRITE: deferred save failed (non-fatal): %s", _de)
             self.context["has_partial_failure"] = True
@@ -1675,8 +1680,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 prior_content=hub_note.content,
             )
             self._txn.inverses.append(hub_inverse)
-            if "snapshot" in self._chunk_ctx and "inverses" in self._chunk_ctx["snapshot"]:
-                self._chunk_ctx["snapshot"]["inverses"].append(hub_inverse.model_dump())
 
         # Cross-cluster integrity check: warn when new notes land in a different
         # cluster from the hub.  This is informational only — the MOC link is
@@ -1759,8 +1762,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
                             prior_content=p_note.content,
                         )
                         self._txn.inverses.append(p_inverse)
-                        if "snapshot" in self._chunk_ctx and "inverses" in self._chunk_ctx["snapshot"]:
-                            self._chunk_ctx["snapshot"]["inverses"].append(p_inverse.model_dump())
                     # Build and write parent MOC block (same language-aware heading,
                     # same deduplication logic as the hub section above).
                     p_heading = _moc_heading(source_name, p_note.content)
@@ -1958,8 +1959,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
                             prior_content=prior_contents[path_modified],
                         )
                         self._txn.inverses.append(inverse)
-                        if "snapshot" in self._chunk_ctx and "inverses" in self._chunk_ctx["snapshot"]:
-                            self._chunk_ctx["snapshot"]["inverses"].append(inverse.model_dump())
 
             total_links = sum(len(v) for v in added_map.values())
             logger.info(
@@ -2133,8 +2132,16 @@ class InjectorFSM(BaseFSM[InjectorState]):
     def _handle_rollback(self) -> None:
         self._progress_note("rollback", "rollback", "running")
         snapshot_res = self._chunk_ctx.get("snapshot", {})
-        inverses = snapshot_res.get("inverses", [])
-        txn_id = snapshot_res.get("txn_id")
+        # self._txn.inverses is the single source of truth for rollback (C3 /
+        # ADR-009): SNAPSHOT seeds it and every phase that mutates a pre-existing
+        # note appends to it. Fall back to the persisted snapshot dict only when
+        # no live transaction exists (defensive — both share the per-chunk lifetime).
+        if self._txn is not None:
+            txn_id = self._txn.id
+            inverses = self._txn.inverses_serialized
+        else:
+            txn_id = snapshot_res.get("txn_id")
+            inverses = snapshot_res.get("inverses", [])
 
         if txn_id and inverses:
             from silica.tools.wrapped import silica_restore

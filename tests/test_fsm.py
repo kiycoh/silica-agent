@@ -356,10 +356,11 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
     fsm._pre_graph = pre_graph
-    fsm._txn = MagicMock()
-    fsm._txn.created_paths = ["notes/NoteA.md"]
 
+    # self._txn is the single source of truth for rollback inverses (C3).
     inverses = [{"op": "delete", "path": "notes/NoteA.md"}]
+    from silica.driver.base import Txn
+    fsm._txn = Txn(id="txn_123", created_paths=["notes/NoteA.md"], inverses=inverses)
     fsm.context.setdefault("chunk", {})["snapshot"] = {
         "txn_id": "txn_123",
         "inverses": inverses,
@@ -971,7 +972,8 @@ def test_handle_write_all_fail_triggers_rollback(mock_bulk_write, tmp_path):
 
 
 def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
-    """After HUB_UPDATE, the hub rollback inverse must land in _chunk_ctx['snapshot']['inverses']."""
+    """After HUB_UPDATE, the hub rollback inverse must land in the txn's authoritative
+    inverses list (the single source of truth read by ROLLBACK) — not in a stale dict."""
     import json, os
     from unittest.mock import patch, MagicMock
     from silica.router.orchestrator import InjectorFSM
@@ -1011,13 +1013,17 @@ def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
         mock_time.sleep.return_value = None
         fsm._handle_hub_update()
 
-    chunk_snap_inverses = fsm._chunk_ctx["snapshot"]["inverses"]
+    txn_inverses = fsm._txn.inverses_serialized
     assert any(
-        inv.get("path", "").endswith("Hub.md") for inv in chunk_snap_inverses
-    ), f"Hub inverse missing from _chunk_ctx['snapshot']['inverses']; got: {chunk_snap_inverses}"
-    # Also confirm it did NOT land in the wrong place
+        inv.get("path", "").endswith("Hub.md") for inv in txn_inverses
+    ), f"Hub inverse missing from txn.inverses; got: {txn_inverses}"
+    # The dual-write to _chunk_ctx['snapshot']['inverses'] is gone — the txn is
+    # now the single source of truth, so the snapshot dict stays as SNAPSHOT left it.
+    assert fsm._chunk_ctx["snapshot"]["inverses"] == [], \
+        "Hub inverse must not be dual-written into _chunk_ctx['snapshot']['inverses']"
+    # Also confirm it did NOT land in stale context['snapshot'].
     assert "snapshot" not in fsm.context or "inverses" not in fsm.context.get("snapshot", {}), \
-        "Hub inverse was written to stale context['snapshot'] instead of _chunk_ctx['snapshot']"
+        "Hub inverse was written to stale context['snapshot']"
 
 
 def test_refiner_default_recipe_includes_backlink():

@@ -460,6 +460,7 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
 
     total_added = 0
     processed = 0
+    write_errors: list[str] = []
 
     import os as _os
     for path in paths:
@@ -486,13 +487,16 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
 
         if added:
             try:
-                DRIVER.update_note(path, new_body)
+                DRIVER.overwrite(path, new_body)
                 total_added += len(added)
                 processed += 1
-            except Exception:
-                pass
+            except Exception as e:
+                write_errors.append(f"{path}: {e}")
 
-    return {"notes_processed": processed, "total_links_added": total_added}
+    result = {"notes_processed": processed, "total_links_added": total_added}
+    if write_errors:
+        result["write_errors"] = write_errors
+    return result
 
 
 class BacklinkArgs(BaseModel):

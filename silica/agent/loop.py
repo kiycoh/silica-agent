@@ -70,10 +70,9 @@ def _is_tool_failure(result: Any) -> bool:
                 return True
         except Exception:
             pass
-        # Fallback keyword checks
-        lower_res = result.lower()
-        if "error" in lower_res or "exception" in lower_res or "failed" in lower_res:
-            return True
+        # A non-JSON / non-error-keyed string result is a successful tool
+        # output, not a failure. Substring-sniffing for "error"/"failed" here
+        # misclassifies legitimate content (grep hits, "0 errors" reports).
     elif isinstance(result, dict) and "error" in result:
         return True
     return False
