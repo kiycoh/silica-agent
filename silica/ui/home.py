@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from rich import box
 from rich.console import Group
 from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
 from silica.config import CONFIG
-from silica.ui.banner import banner_group, print_banner
+from silica.ui.banner import banner_group, banner_height, print_banner
 from silica.ui.console import CONSOLE
 
 _MIN_SIDE_BY_SIDE_WIDTH = 100
@@ -26,29 +25,46 @@ def _model_vault_line(model_slug: str, vault: str) -> Text:
 
 
 def print_home() -> None:
-    """Banner + model/vault + pinned commands + footer. Shown at launch and after /clear."""
+    """Banner + model/vault + commands overview. Shown at launch and after /clear."""
     from silica.ui.commands import COMMANDS
     from silica.ui.style import command_table
 
     vault = CONFIG.vault_name or "—"
     model_slug = CONFIG.model.rsplit("/", 1)[-1]
     pinned = [c for c in COMMANDS if c.home_pin]
+    help_cmd = next(c for c in COMMANDS if c.name == "/help")
+    exit_cmd = next(c for c in COMMANDS if c.name == "/exit")
+    all_cmds = pinned + [help_cmd, exit_cmd]
 
     bg = banner_group()
 
     if bg is not None and CONSOLE.width >= _MIN_SIDE_BY_SIDE_WIDTH:
-        left = Group(bg, Text(""), _model_vault_line(model_slug, vault))
+        left_height = banner_height()
+        right_height = 1 + 1 + 1 + len(pinned) + 2  # model/vault + blank + heading + pinned + /help + /exit
+        sep_height = max(left_height, right_height)
+
+        if sep_height < 2:
+            sep_lines: list = [Text("│", style="dim")]
+        else:
+            sep_lines = (
+                [Text("╷", style="dim")]
+                + [Text("│", style="dim")] * (sep_height - 2)
+                + [Text("╵", style="dim")]
+            )
+        separator = Group(*sep_lines)
 
         right = Group(
-            Text("Overview", style="bold"),
+            _model_vault_line(model_slug, vault),
             Text(""),
-            command_table(pinned, show_summary=False),
+            Text("Commands overview", style="bold"),
+            command_table(all_cmds, show_summary=False),
         )
 
-        outer = Table(show_header=False, box=box.ROUNDED, padding=(0, 1), pad_edge=True, border_style="dim")
+        outer = Table(show_header=False, box=None, show_edge=False, pad_edge=False, padding=(0, 1))
         outer.add_column(no_wrap=False)
         outer.add_column(no_wrap=False)
-        outer.add_row(left, Padding(right, (0, 0, 0, 6)))
+        outer.add_column(no_wrap=False)
+        outer.add_row(bg, separator, right)
 
         CONSOLE.print(outer)
     else:
@@ -56,13 +72,7 @@ def print_home() -> None:
         CONSOLE.print()
         CONSOLE.print(_model_vault_line(model_slug, vault))
         CONSOLE.print()
-        CONSOLE.print("  [bold]Overview[/]")
+        CONSOLE.print("  [bold]Commands overview[/]")
         CONSOLE.print()
-        CONSOLE.print(Padding(command_table(pinned, show_summary=False), (0, 0, 0, 4)))
+        CONSOLE.print(Padding(command_table(all_cmds, show_summary=False), (0, 0, 0, 4)))
         CONSOLE.print()
-
-    CONSOLE.print()
-    CONSOLE.rule(style="dim", characters="▀▄")
-    CONSOLE.print()
-    CONSOLE.print("  [dim]/  commands   ·   /help  all   ·   /exit  quit[/]")
-    CONSOLE.print()

@@ -23,8 +23,8 @@ def _gradient(n: int, c0: tuple[int, int, int] = BRAND_CYAN, c1: tuple[int, int,
     return out  # cyan → indigo
 
 
-def banner_group() -> RichGroup | None:
-    """Banner art + caption as a renderable Group, or None if font unavailable or terminal too narrow."""
+def _compute_art() -> list[str] | None:
+    """Return art lines if banner would render, else None."""
     if CONFIG.banner_style != "wordmark":
         return None
     try:
@@ -38,9 +38,23 @@ def banner_group() -> RichGroup | None:
         return None
     if CONSOLE.width < max(len(ln) for ln in art) + 2:
         return None
+    return art
+
+
+def banner_group() -> RichGroup | None:
+    """Banner art + caption as a renderable Group, or None if font unavailable or terminal too narrow."""
+    art = _compute_art()
+    if art is None:
+        return None
     items: list = [Text(line, style=f"bold {color}") for line, color in zip(art, _gradient(len(art)))]
     items.append(Text.from_markup(_CAPTION))
     return RichGroup(*items)
+
+
+def banner_height() -> int:
+    """Number of art lines banner_group() would render, or 0 if it would return None."""
+    art = _compute_art()
+    return len(art) if art is not None else 0
 
 
 def print_banner() -> None:

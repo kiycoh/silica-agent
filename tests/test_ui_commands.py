@@ -147,20 +147,19 @@ def test_print_home_contains_pinned_commands_and_footer():
         assert name not in output, f"Non-pinned content command {name} should not appear in print_home()"
 
 
-def test_render_help_has_block_rule_dividers():
+def test_render_help_has_no_block_rule_dividers():
     con, buf = _make_console()
     with patch("silica.ui.console.CONSOLE", con):
         render_help()
     output = buf.getvalue()
-    # ▀▄ tiled rule should appear between sections
-    assert "▀▄" in output
+    assert "▀▄" not in output
 
 
-def test_print_home_has_block_rule_divider():
+def test_print_home_has_no_block_rule_divider():
     con, buf = _make_console()
     with patch("silica.ui.home.print_banner"), \
          patch("silica.ui.home.CONSOLE", con), \
          patch("silica.ui.console.CONSOLE", con):
         print_home()
     output = buf.getvalue()
-    assert "▀▄" in output
+    assert "▀▄" not in output

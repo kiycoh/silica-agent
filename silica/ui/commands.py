@@ -154,13 +154,11 @@ def render_help() -> None:
     CONSOLE.print(f"  [bold {GROUP_STYLE['workflow']}]Workflow[/]  [dim]· agent-directed[/]")
     CONSOLE.print(Padding(command_table(workflow, name_style=f"bold {GROUP_STYLE['workflow']}"), (0, 0, 0, 4)))
     CONSOLE.print()
-    CONSOLE.rule(style="dim", characters="▀▄")
     CONSOLE.print()
 
     CONSOLE.print(f"  [bold {GROUP_STYLE['direct']}]Diretti[/]  [dim]· immediati, senza LLM[/]")
     CONSOLE.print(Padding(command_table(direct, name_style=f"bold {GROUP_STYLE['direct']}"), (0, 0, 0, 4)))
     CONSOLE.print()
-    CONSOLE.rule(style="dim", characters="▀▄")
     CONSOLE.print()
 
     sys_line = "  ·  ".join(c.name for c in system)
