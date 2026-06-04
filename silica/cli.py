@@ -82,8 +82,9 @@ def _setup_logging(debug: bool = False) -> None:
     root.addHandler(handler)
     root.setLevel(level)
 
-    # LiteLLM/httpx/openai are always silenced — their DEBUG is raw HTTP/request dumps
+    # LiteLLM/httpx/openai/httpcore are always silenced — their DEBUG is raw HTTP/request dumps
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("litellm").setLevel(logging.WARNING)
     logging.getLogger("LiteLLM").setLevel(logging.ERROR)
     logging.getLogger("openai").setLevel(logging.WARNING)
@@ -216,6 +217,20 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             CONSOLE.print(f"  Undone: [bold]{note_path}[/]  [dim]({remaining} undo step(s) remaining)[/]")
         except Exception as exc:
             CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+        return True
+
+    if cmd == "/revert":
+        from silica.kernel.undo_journal import get_undo_journal, revert_run
+        parts_split = raw_input.strip().split(maxsplit=1)
+        run_id = parts_split[1].strip() if len(parts_split) > 1 else get_undo_journal().last_active_run()
+        if not run_id:
+            CONSOLE.print("  Niente da annullare: nessuna iniezione registrata.")
+            return True
+        res = revert_run(run_id)
+        CONSOLE.print(
+            f"  Revert {run_id[:8]}…: {len(res['reverted'])} ripristinate, "
+            f"{len(res['skipped'])} saltate (modificate), {len(res['errors'])} errori."
+        )
         return True
 
     if cmd == "/dedup":

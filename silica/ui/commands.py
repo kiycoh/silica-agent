@@ -68,6 +68,12 @@ COMMANDS: tuple[Command, ...] = (
         summary="annulla l'ultima patch su una nota",
     ),
     Command(
+        name="/revert",
+        group="direct",
+        usage="[run-id]",
+        summary="annulla un'intera iniezione (per-run, LIFO)",
+    ),
+    Command(
         name="/dedup",
         group="direct",
         usage="[folder]",

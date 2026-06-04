@@ -170,6 +170,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.context: dict[str, Any] = {}
         self._tmp_files: list[str] = []
         self._txn: Txn | None = None  # holds the live Txn object for ROLLBACK
+        self._undo_run_id: str | None = None          # journal run for this inject
+        self._run_inverses: list[tuple[str, "InverseOp", str | None]] = []  # (path, inverse, post_hash)
         self._pre_graph: GraphSnapshot | None = None  # S3.2 pre-write graph snapshot
 
         # Optional producer channel to the leashed sub-agent pool.  Set by the
@@ -457,6 +459,9 @@ class InjectorFSM(BaseFSM[InjectorState]):
         """Execute the pipeline end-to-end (single or multi-file)."""
         from silica.kernel.ledger import get_ledger
         ledger = get_ledger()
+
+        from silica.kernel.undo_journal import get_undo_journal
+        self._undo_run_id = get_undo_journal().start_run(source=self.inbox_file)
 
         # Compute per-file canonicals and content hashes; track committed status
         self._file_canonicals = []
@@ -1496,73 +1501,63 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._transition_success()
 
     def _handle_write(self) -> None:
-        idx = self._current_chunk_idx
+        from silica.kernel.atomic_write import bulk_write_atomic
         self._progress_note(self._chunk_task_id("write"), "write", "running")
-        res = silica_bulk_write(self._chunk_ctx["ops_path"])
 
-        if "error" in res:
-            self._progress_note(self._chunk_task_id("write"), "write", "failed", error=res["error"])
-            raise RuntimeError(f"Write failed: {res['error']}")
+        ops = load_ops(self._chunk_ctx["ops_path"])
+        result = bulk_write_atomic(ops, hub=self.hub, lint=True)
 
-        _failed_idx: set[int] = {fo["index"] for fo in res.get("failed", [])}
-        # Stems of planned-but-unwritten notes — exposed to the regression gate so
-        # forward refs to these targets are not treated as new ghost links.
-        _deferred_stems: frozenset[str] = frozenset()
+        # Accumulate surviving notes' inverses for the undo journal (recorded at
+        # CLEANUP after autolink finalises content → correct version-guard hashes).
+        for r in result.committed:
+            for inv in r.inverses:
+                self._run_inverses.append((r.path, inv, None))
 
-        if _failed_idx:
-            if res.get("successful", 0) == 0:
-                # All ops failed — trigger full rollback for this chunk.
-                self._progress_note(
-                    self._chunk_task_id("write"), "write", "failed",
-                    error=f"All {len(_failed_idx)}/{res.get('total', '?')} write ops failed",
-                )
-                raise RuntimeError(
-                    f"Write fully failed: {len(_failed_idx)}/{res.get('total', '?')} operations failed."
-                )
-            # Partial failure: some ops committed, some failed (e.g. settle timeout).
-            # Defer the failed ops so they can be retried once the vault index is stable,
-            # and continue the pipeline with the committed notes.
+        if result.failed:
             try:
-                _all_ops = load_ops(self._chunk_ctx["ops_path"])
-                _deferred_stems = frozenset(
-                    os.path.splitext(os.path.basename(_all_ops[i].path or ""))[0].lower()
-                    for i in _failed_idx
-                    if i < len(_all_ops) and _all_ops[i].path
-                )
                 _deferred = [
-                    _all_ops[i].model_dump()
-                    for i in sorted(_failed_idx)
-                    if i < len(_all_ops)
+                    next(o for o in ops if o.touched_ref() == r.path).model_dump()
+                    for r in result.failed
                 ]
-                _errors = {
-                    fo.get("path", str(fo["index"])): fo["error"]
-                    for fo in res.get("failed", [])
-                }
-                if self._defer_ops(_deferred, _errors, phase="WRITE"):
-                    logger.warning(
-                        "WRITE: %d op(s) failed during settle — deferred (hash=%s…). "
-                        "Continuing with %d committed op(s).",
-                        len(_deferred), self._current_content_hash[:8], res.get("successful", 0),
-                    )
+                _errors = {r.path: (r.error or "lint/write failed") for r in result.failed}
+                self._defer_ops(_deferred, _errors, phase="WRITE")
+                logger.warning(
+                    "WRITE: %d op(s) failed lint/write — deferred. "
+                    "Continuing with %d committed op(s).",
+                    len(result.failed), len(result.committed),
+                )
             except Exception as _de:
                 logger.debug("WRITE: deferred save failed (non-fatal): %s", _de)
             self.context["has_partial_failure"] = True
 
-        self._chunk_ctx["deferred_stems"] = list(_deferred_stems)
-        self.context["write"] = res
+        if not result.committed and result.failed:
+            self._progress_note(self._chunk_task_id("write"), "write", "failed",
+                                error=f"all {len(result.failed)} ops failed lint/write")
 
-        # Register written notes in the RunManifest and refresh embedding index
-        # incrementally so later chunks can use these notes as autolink candidates.
-        # Ops that failed to settle (_failed_idx) are skipped — they were deferred above.
+        # Synthesise the legacy `write` result shape that downstream code reads.
+        self.context["write"] = {
+            "success": True,
+            "successful": len(result.committed),
+            "failed": [{"path": r.path, "error": r.error} for r in result.failed],
+            "total": result.total,
+        }
+
+        committed_paths = {r.path for r in result.committed}
+        _deferred_stems: frozenset[str] = frozenset(
+            os.path.splitext(os.path.basename(r.path))[0].lower()
+            for r in result.failed if r.path
+        )
+        self._chunk_ctx["deferred_stems"] = list(_deferred_stems)
+
+        # Register committed notes in the RunManifest and refresh embedding index.
         try:
             from silica.planner.progress import RunManifestEntry
             vault_ctx = self.context.get("vault_graph_ctx", {})
-            ops_written = load_ops(self._chunk_ctx["ops_path"])
-            for _wi, op in enumerate(ops_written):
-                if _wi in _failed_idx:
-                    continue
+            for op in ops:
                 path = op.touched_ref()
                 if op.op not in (OpType.write, OpType.patch) or not path:
+                    continue
+                if path not in committed_paths:
                     continue
                 stem = os.path.splitext(os.path.basename(path))[0]
                 path_key = path.removesuffix(".md")
@@ -1583,11 +1578,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 from silica.kernel.embed import EmbedStore, refresh_note
                 embedder = get_embedder(CONFIG)
                 store = EmbedStore()
-                for _wi, op in enumerate(ops_written):
-                    if _wi in _failed_idx:
-                        continue
+                for op in ops:
                     path = op.touched_ref()
                     if op.op not in (OpType.write, OpType.patch) or not path:
+                        continue
+                    if path not in committed_paths:
                         continue
                     stem = os.path.splitext(os.path.basename(path))[0]
                     idx_path = path.removesuffix(".md")
@@ -2126,6 +2121,21 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 self.context["final_status"] = "partial"
             else:
                 self.context["final_status"] = "Success"
+
+        # Persist this run's inverses for /revert, with final content hash.
+        if self._undo_run_id and self._run_inverses:
+            import hashlib
+            from silica.kernel.undo_journal import get_undo_journal
+            journal = get_undo_journal()
+            for path, inv, _ in self._run_inverses:
+                try:
+                    post = DRIVER.read_note(path).content
+                    post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
+                except Exception:
+                    post_hash = None
+                journal.record(self._undo_run_id, inv, post_hash)
+            self._run_inverses.clear()
+
         self._progress_note(self._chunk_task_id("cleanup"), "cleanup", "done")
         self._transition_success()
 

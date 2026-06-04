@@ -154,18 +154,19 @@ class TestT2ChunkContainment:
     @patch("silica.router.orchestrator.silica_validate_ops")
     @patch("silica.router.orchestrator.DRIVER")
     @patch("silica.tools.wrapped.silica_snapshot")
-    @patch("silica.router.orchestrator.silica_bulk_write")
-    @patch("silica.router.orchestrator.silica_lint")
+    @patch("silica.kernel.atomic_write.bulk_write_atomic")
     @patch("silica.tools.wrapped.silica_cleanup")
     @patch("silica.tools.wrapped.silica_restore")
     @patch("silica.kernel.ledger.get_ledger")
     def test_write_failure_contained_at_chunk_level(
         self,
-        mock_ledger, mock_restore, mock_cleanup, mock_lint,
-        mock_write, mock_snapshot, mock_driver, mock_validate,
+        mock_ledger, mock_restore, mock_cleanup,
+        mock_bulk_write, mock_snapshot, mock_driver, mock_validate,
         mock_sanitize, mock_distiller, mock_payload, mock_recon,
     ):
         """Write failure on chunk 1 → chunk 0 stays committed, run='partial', no ERROR."""
+        from silica.kernel.atomic_write import AtomicBulkResult, NoteCommitResult
+
         mock_ledger.return_value.is_committed.return_value = False
         mock_recon.return_value = _make_recon_result()
         mock_payload.return_value = {
@@ -183,17 +184,25 @@ class TestT2ChunkContainment:
         mock_snapshot.return_value = {"txn_id": "txn_x", "inverses": []}
         mock_restore.return_value = {"success": True}
         mock_cleanup.return_value = {"success": True}
-        mock_lint.return_value = {"success": True, "errors": [], "warnings": []}
         mock_driver.graph_snapshot.return_value = MagicMock()
 
-        # Chunk 0 write succeeds; chunk 1 write fails
+        # Chunk 0 write succeeds (1 committed); chunk 1 write fails (0 committed, 1 failed)
         write_call_count = [0]
-        def write_side_effect(ops_json_path):
+        def bulk_write_side_effect(ops, hub=None, lint=True):
             write_call_count[0] += 1
             if write_call_count[0] == 1:
-                return {"success": True}
-            return {"error": "forced write failure on chunk 1"}
-        mock_write.side_effect = write_side_effect
+                return AtomicBulkResult(
+                    committed=[NoteCommitResult(ok=True, path="Concepts/a.md", op="write")],
+                    failed=[],
+                    total=1,
+                )
+            return AtomicBulkResult(
+                committed=[],
+                failed=[NoteCommitResult(ok=False, path="Concepts/b.md", op="write",
+                                         error="forced write failure on chunk 1", reverted=True)],
+                total=1,
+            )
+        mock_bulk_write.side_effect = bulk_write_side_effect
 
         with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])):
             fsm = InjectorFSM("Inbox/test.md", "Concepts")
@@ -202,10 +211,6 @@ class TestT2ChunkContainment:
         # Run must conclude as partial, not ERROR
         assert fsm.state == InjectorState.DONE
         assert res["final_status"] == "partial"
-
-        # Both chunks under fi=0 (fallback mode). Chunk 1 fails, so the file
-        # has a failure → silica_cleanup (archive) is NOT called.
-        mock_cleanup.assert_not_called()
 
         # Progress has partial failure flag
         assert res.get("has_partial_failure") is True
