@@ -59,8 +59,8 @@ class OpenAICompatibleProvider:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-        if max_tokens is not None:
-            kwargs["max_tokens"] = max_tokens
+            
+        kwargs["max_tokens"] = max_tokens if max_tokens is not None else int(os.getenv("MAX_TOKENS", "8192"))
 
         import time
 
@@ -118,10 +118,14 @@ class OpenAICompatibleProvider:
 
             # Non-structured path: stream so the httpx read-timeout acts as a
             # per-chunk inactivity watchdog rather than a total-body deadline.
-            stream = self.client.chat.completions.create(**kwargs, stream=True)
+            # stream_options is ignored by providers that don't support it.
+            stream = self.client.chat.completions.create(
+                **kwargs, stream=True, stream_options={"include_usage": True}
+            )
             content_chunks: list[str] = []
             tc_acc: dict[int, dict[str, Any]] = {}
             finish_reason: str | None = None
+            usage_dict: dict[str, int] = {}
 
             for chunk in stream:
                 if not chunk.choices:
@@ -147,6 +151,13 @@ class OpenAICompatibleProvider:
                                 tc_acc[_i]["function"]["name"] += _tc.function.name
                             if _tc.function.arguments:
                                 tc_acc[_i]["function"]["arguments"] += _tc.function.arguments
+                if getattr(chunk, "usage", None) is not None:
+                    u = chunk.usage
+                    usage_dict = {
+                        "prompt_tokens": getattr(u, "prompt_tokens", 0),
+                        "completion_tokens": getattr(u, "completion_tokens", 0),
+                        "total_tokens": getattr(u, "total_tokens", 0),
+                    }
 
             content = "".join(content_chunks) or None
             tool_calls_list = [tc_acc[k] for k in sorted(tc_acc)]
@@ -171,7 +182,7 @@ class OpenAICompatibleProvider:
                 text=content,
                 tool_calls=parsed_calls,
                 assistant_message=assistant_msg,
-                usage={},
+                usage=usage_dict,
                 finish_reason=finish_reason,
             )
 
@@ -247,8 +258,12 @@ def get_provider(config: Any, role: str = "router") -> Provider:
     LM Studio instance/port than the router.
     """
     if role == "worker":
-        provider_name = getattr(config, "worker_provider", "lmstudio") or "lmstudio"
-        model_name = getattr(config, "worker_model", "") or ""
+        provider_name = getattr(config, "worker_provider", None)
+        model_name = getattr(config, "worker_model", None)
+        if not provider_name or not model_name:
+            provider_name = getattr(config, "provider", "lmstudio")
+            model_name = getattr(config, "model", "")
+            role = "router"
     else:
         provider_name = getattr(config, "provider", "lmstudio")
         model_name = getattr(config, "model", "")
@@ -264,8 +279,8 @@ def get_provider(config: Any, role: str = "router") -> Provider:
 
     # Worker role: explicit endpoint overrides take precedence over the preset.
     if role == "worker":
-        base_url = getattr(config, "worker_base_url", "") or base_url
-        api_key = getattr(config, "worker_api_key", "") or api_key
+        base_url = getattr(config, "worker_base_url", None) or base_url
+        api_key = getattr(config, "worker_api_key", None) or api_key
 
     if provider_name == "openrouter" and model_name.startswith("openrouter/"):
         model_name = model_name.removeprefix("openrouter/")

@@ -155,6 +155,14 @@ class ObsidianDriver(Protocol):
         """Incoming links to a note."""
         ...
 
+    def mentions_of(self, title: str) -> list[str]:
+        """Vault-relative paths of notes whose body mentions `title`.
+
+        Backed by an inverted text index built during graph indexing — used by
+        the backlink/refiner passes. Both backends implement this.
+        """
+        ...
+
     def orphans(self) -> list[NoteRef]:
         """Notes with no incoming links."""
         ...
@@ -214,7 +222,12 @@ class ObsidianDriver(Protocol):
         ...
 
     def base_query(self, base: str, view: str) -> list[dict]:
-        """Query an Obsidian Base (DB on frontmatter)."""
+        """Query an Obsidian Base (DB on frontmatter).
+
+        CAPABILITY GAP: CLI-backend only. The FS backend has no Bases engine
+        and returns [] (logged). Callers must treat an empty result as
+        "unavailable on this backend", not "no matches".
+        """
         ...
 
     # -- graph data (in-process, avoids O(N) subprocess calls) -------------
@@ -234,5 +247,14 @@ class ObsidianDriver(Protocol):
         ...
 
     def restore(self, txn: Txn) -> None:
-        """Rollback to a previous snapshot via history/sync restore."""
+        """Rollback a transaction.
+
+        CAPABILITY GAP: rollback completeness is backend-dependent.
+          - created_paths (undo write ops): honored by both backends.
+          - versions (undo patch ops via history): CLI-backend only; the FS
+            backend has no version history and no-ops these (logged).
+        Prefer content-based rollback (InverseOp.restore_version with
+        prior_content, applied via silica_restore) for backend-agnostic undo;
+        this version-based path is a fallback only.
+        """
         ...

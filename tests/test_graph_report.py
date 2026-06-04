@@ -88,7 +88,7 @@ def test_totals(report):
     t = report.totals
     assert t["notes"] == 6
     assert t["links"] == 5        # 5 EXTRACTED edges
-    assert t["unresolved"] == 1   # 1 AMBIGUOUS edge
+    assert t["dangling_links"] == 1   # 1 AMBIGUOUS edge
     assert t["orphans"] >= 1      # F has no incoming links; D has 1 (from C)
 
 

@@ -101,3 +101,19 @@ AI: true
         return existing_content.rstrip() + "\n" + patch_text
 
     return patch_text
+
+
+def provenance_header(heading: str, source_basename: str) -> str:
+    """The exact header line patch_snippet emits for a (heading, source) block.
+
+    Single source of truth so the patch executor can detect an already-injected
+    block and stay idempotent on re-injection.
+    """
+    return f"## Note aggiuntive — {heading} (da {source_basename})"
+
+
+def block_present(existing_content: str | None, heading: str, source_basename: str) -> bool:
+    """True if a provenance block for (heading, source_basename) is already present."""
+    if not existing_content:
+        return False
+    return provenance_header(heading, source_basename) in existing_content

@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -98,7 +97,7 @@ def run_distiller(
     logger.info("Calling Distiller LLM (payload checksum %s)", checksum[:12])
 
     try:
-        provider = get_provider(CONFIG)
+        provider = get_provider(CONFIG, role="worker")
         response = provider.call_llm(
             messages=[{"role": "user", "content": user_message}],
             tools=None,

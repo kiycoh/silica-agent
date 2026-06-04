@@ -170,6 +170,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.context: dict[str, Any] = {}
         self._tmp_files: list[str] = []
         self._txn: Txn | None = None  # holds the live Txn object for ROLLBACK
+        self._undo_run_id: str | None = None          # journal run for this inject
+        self._run_inverses: list[tuple[str, "InverseOp", str | None]] = []  # (path, inverse, post_hash)
         self._pre_graph: GraphSnapshot | None = None  # S3.2 pre-write graph snapshot
 
         # Optional producer channel to the leashed sub-agent pool.  Set by the
@@ -184,6 +186,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Per-file content info — populated by run() before _run_loop starts
         self._file_canonicals: list[str] = []
         self._file_content_hashes: list[str] = []
+        self._committed_file_indices: set[int] = set()  # indices of already-committed files
 
         # Iterative chunk processing state fields
         self._chunks: list[dict] = []
@@ -373,7 +376,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
     ) -> None:
         """Shadow: record FSM progress in ProgressLedger; never affects FSM control flow."""
         try:
-            from silica.planner.progress import TaskStatus
             if not any(t.id == task_id for t in self.progress.tasks):
                 self.progress.add_task(capability_name, task_id=task_id)
             if status == "done":
@@ -411,10 +413,55 @@ class InjectorFSM(BaseFSM[InjectorState]):
         shutil.copy2(ops_path, kb_path)
         return kb_path
 
+    def _defer_ops(
+        self,
+        rejected_ops: list[dict],
+        rejection_reasons: dict[str, str],
+        *,
+        phase: str,
+    ) -> bool:
+        """Persist rejected/failed ops to the deferred store, merging with any
+        bundle already saved under this source file's content hash.
+
+        Every defer site (COLLISION, VALIDATE, WRITE) funnels through here so
+        the bundle's merge semantics live in exactly one place: because all
+        phases of all chunks of one file share the same content_hash, a later
+        phase (or a later chunk) must NOT clobber ops an earlier one deferred —
+        they accumulate. Returns True iff a bundle was written.
+        """
+        if not rejected_ops:
+            return False
+        content_hash = self._current_content_hash
+        if not content_hash:
+            logger.warning(
+                "%s: %d op(s) to defer but no content_hash — deferred store skipped.",
+                phase, len(rejected_ops),
+            )
+            return False
+        try:
+            from silica.kernel.deferred import get_deferred_store
+            store = get_deferred_store()
+            existing = store.get(content_hash) or {}
+            store.put(
+                content_hash=content_hash,
+                source_path=self._current_source_file,
+                target_dir=self.target_dir,
+                hub=self.hub,
+                rejected_ops=list(existing.get("rejected_ops", [])) + rejected_ops,
+                rejection_reasons={**existing.get("rejection_reasons", {}), **rejection_reasons},
+            )
+            return True
+        except Exception as _de:
+            logger.warning("%s: failed to save deferred ops: %s", phase, _de)
+            return False
+
     def run(self) -> dict[str, Any]:
         """Execute the pipeline end-to-end (single or multi-file)."""
         from silica.kernel.ledger import get_ledger
         ledger = get_ledger()
+
+        from silica.kernel.undo_journal import get_undo_journal
+        self._undo_run_id = get_undo_journal().start_run(source=self.inbox_file)
 
         # Compute per-file canonicals and content hashes; track committed status
         self._file_canonicals = []
@@ -431,6 +478,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
             self._file_content_hashes.append(content_hash)
             if not ledger.is_committed(canonical, content_hash=content_hash):
                 all_committed = False
+
+        # Build set of already-committed file indices so chunk-advance logic can skip them
+        self._committed_file_indices = {
+            i for i, (canonical, h) in enumerate(zip(self._file_canonicals, self._file_content_hashes))
+            if ledger.is_committed(canonical, content_hash=h)
+        }
 
         # Compat keys for first file (used by single-file code paths and RECON)
         self.context["source_canonical"] = self._file_canonicals[0] if self._file_canonicals else ""
@@ -476,8 +529,9 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._txn = None
         self._pre_graph = None
         self._get_chunks_from_context_if_empty()
-        if self._current_chunk_idx + 1 < len(self._chunks):
-            self._current_chunk_idx += 1
+        next_idx = self._next_uncommitted_chunk_idx(self._current_chunk_idx + 1)
+        if next_idx < len(self._chunks):
+            self._current_chunk_idx = next_idx
             logger.info(f"✔ Batch completed successfully. Advancing to batch {self._current_chunk_idx + 1}")
             # Restart per-chunk loop from COLLISION (Phase 5) if present, else DELEGATE
             has_collision = any(
@@ -1005,34 +1059,25 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         # Persist borderline concepts in the deferred store
         if deferred_concepts:
-            content_hash = self.context.get("source_content_hash", "")
-            if content_hash:
-                try:
-                    from silica.kernel.deferred import get_deferred_store
-                    deferred_op_dicts = [
-                        {
-                            "op": "skip",
-                            "heading": (d["concept"].get("name", "") if isinstance(d["concept"], dict) else str(d["concept"])),
-                            "source_basename": os.path.basename(d["inbox_file"]),
-                            "reason": f"collision_deferred score={d['score']:.3f} candidate={d['top_match'].get('name','?')}",
-                            "path": None,
-                        }
-                        for d in deferred_concepts
-                    ]
-                    get_deferred_store().put(
-                        content_hash=content_hash,
-                        source_path=self.inbox_file,
-                        target_dir=self.target_dir,
-                        hub=self.hub,
-                        rejected_ops=deferred_op_dicts,
-                        rejection_reasons={
-                            (d["concept"].get("name", str(i)) if isinstance(d["concept"], dict) else str(i)):
-                            f"borderline_similarity score={d['score']:.3f}"
-                            for i, d in enumerate(deferred_concepts)
-                        },
-                    )
-                except Exception as _de:
-                    logger.warning("COLLISION: failed to save deferred concepts: %s", _de)
+            deferred_op_dicts = [
+                {
+                    "op": "skip",
+                    "heading": (d["concept"].get("name", "") if isinstance(d["concept"], dict) else str(d["concept"])),
+                    "source_basename": os.path.basename(d["inbox_file"]),
+                    "reason": f"collision_deferred score={d['score']:.3f} candidate={d['top_match'].get('name','?')}",
+                    "path": None,
+                }
+                for d in deferred_concepts
+            ]
+            self._defer_ops(
+                deferred_op_dicts,
+                {
+                    (d["concept"].get("name", str(i)) if isinstance(d["concept"], dict) else str(i)):
+                    f"borderline_similarity score={d['score']:.3f}"
+                    for i, d in enumerate(deferred_concepts)
+                },
+                phase="COLLISION",
+            )
 
         # Producer: hand each borderline pair to the leashed dedup sub-agent so it
         # can run concurrently while the Injector keeps writing its other batches.
@@ -1268,30 +1313,20 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # later without re-running the expensive RECON → DELEGATE cycle.
         rejected_raw = res.get("rejected_ops", [])
         if rejected_raw:
-            content_hash = self.context.get("source_content_hash", "")
-            if content_hash:
-                from silica.kernel.deferred import get_deferred_store
-                deferred_ops = [
-                    r.get("op", r) if isinstance(r, dict) and "op" in r else r
-                    for r in rejected_raw
-                ]
-                rejection_reasons = {
-                    (r.get("op", {}).get("path") or r.get("op", {}).get("heading") or "?"): r.get("reason", "")
-                    for r in rejected_raw if isinstance(r, dict)
-                }
-                get_deferred_store().put(
-                    content_hash=content_hash,
-                    source_path=self.inbox_file,
-                    target_dir=self.target_dir,
-                    hub=self.hub,
-                    rejected_ops=deferred_ops,
-                    rejection_reasons=rejection_reasons,
-                )
+            deferred_ops = [
+                r.get("op", r) if isinstance(r, dict) and "op" in r else r
+                for r in rejected_raw
+            ]
+            rejection_reasons = {
+                (r.get("op", {}).get("path") or r.get("op", {}).get("heading") or "?"): r.get("reason", "")
+                for r in rejected_raw if isinstance(r, dict)
+            }
+            if self._defer_ops(deferred_ops, rejection_reasons, phase="VALIDATE"):
                 logger.warning(
                     "VALIDATE: %d op(s) rejected and saved to deferred store (hash=%s…). "
                     "Use silica_deferred_retry to attempt them later.",
                     len(rejected_raw),
-                    content_hash[:8],
+                    self._current_content_hash[:8],
                 )
 
         # Accumulate cleared parent references across chunks.
@@ -1466,91 +1501,63 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._transition_success()
 
     def _handle_write(self) -> None:
-        idx = self._current_chunk_idx
+        from silica.kernel.atomic_write import bulk_write_atomic
         self._progress_note(self._chunk_task_id("write"), "write", "running")
-        res = silica_bulk_write(self._chunk_ctx["ops_path"])
 
-        if "error" in res:
-            self._progress_note(self._chunk_task_id("write"), "write", "failed", error=res["error"])
-            raise RuntimeError(f"Write failed: {res['error']}")
+        ops = load_ops(self._chunk_ctx["ops_path"])
+        result = bulk_write_atomic(ops, hub=self.hub, lint=True)
 
-        _failed_idx: set[int] = {fo["index"] for fo in res.get("failed", [])}
-        # Stems of planned-but-unwritten notes — exposed to the regression gate so
-        # forward refs to these targets are not treated as new ghost links.
-        _deferred_stems: frozenset[str] = frozenset()
+        # Accumulate surviving notes' inverses for the undo journal (recorded at
+        # CLEANUP after autolink finalises content → correct version-guard hashes).
+        for r in result.committed:
+            for inv in r.inverses:
+                self._run_inverses.append((r.path, inv, None))
 
-        if _failed_idx:
-            if res.get("successful", 0) == 0:
-                # All ops failed — trigger full rollback for this chunk.
-                self._progress_note(
-                    self._chunk_task_id("write"), "write", "failed",
-                    error=f"All {len(_failed_idx)}/{res.get('total', '?')} write ops failed",
-                )
-                raise RuntimeError(
-                    f"Write fully failed: {len(_failed_idx)}/{res.get('total', '?')} operations failed."
-                )
-            # Partial failure: some ops committed, some failed (e.g. settle timeout).
-            # Defer the failed ops so they can be retried once the vault index is stable,
-            # and continue the pipeline with the committed notes.
+        if result.failed:
             try:
-                _all_ops = load_ops(self._chunk_ctx["ops_path"])
-                _deferred_stems = frozenset(
-                    os.path.splitext(os.path.basename(_all_ops[i].path or ""))[0].lower()
-                    for i in _failed_idx
-                    if i < len(_all_ops) and _all_ops[i].path
-                )
                 _deferred = [
-                    _all_ops[i].model_dump()
-                    for i in sorted(_failed_idx)
-                    if i < len(_all_ops)
+                    next(o for o in ops if o.touched_ref() == r.path).model_dump()
+                    for r in result.failed
                 ]
-                _errors = {
-                    fo.get("path", str(fo["index"])): fo["error"]
-                    for fo in res.get("failed", [])
-                }
-                if _deferred:
-                    content_hash = self.context.get("source_content_hash", "")
-                    if content_hash:
-                        from silica.kernel.deferred import get_deferred_store
-                        _dstore = get_deferred_store()
-                        _existing = _dstore.get(content_hash)
-                        _dstore.put(
-                            content_hash=content_hash,
-                            source_path=self.inbox_file,
-                            target_dir=self.target_dir,
-                            hub=self.hub,
-                            rejected_ops=list((_existing or {}).get("rejected_ops", [])) + _deferred,
-                            rejection_reasons={**(_existing or {}).get("rejection_reasons", {}), **_errors},
-                        )
-                        logger.warning(
-                            "WRITE: %d op(s) failed during settle — deferred (hash=%s…). "
-                            "Continuing with %d committed op(s).",
-                            len(_deferred), content_hash[:8], res.get("successful", 0),
-                        )
-                    else:
-                        logger.warning(
-                            "WRITE: %d op(s) failed during settle (no content_hash, deferred store skipped).",
-                            len(_deferred),
-                        )
+                _errors = {r.path: (r.error or "lint/write failed") for r in result.failed}
+                self._defer_ops(_deferred, _errors, phase="WRITE")
+                logger.warning(
+                    "WRITE: %d op(s) failed lint/write — deferred. "
+                    "Continuing with %d committed op(s).",
+                    len(result.failed), len(result.committed),
+                )
             except Exception as _de:
                 logger.debug("WRITE: deferred save failed (non-fatal): %s", _de)
             self.context["has_partial_failure"] = True
 
-        self._chunk_ctx["deferred_stems"] = list(_deferred_stems)
-        self.context["write"] = res
+        if not result.committed and result.failed:
+            self._progress_note(self._chunk_task_id("write"), "write", "failed",
+                                error=f"all {len(result.failed)} ops failed lint/write")
 
-        # Register written notes in the RunManifest and refresh embedding index
-        # incrementally so later chunks can use these notes as autolink candidates.
-        # Ops that failed to settle (_failed_idx) are skipped — they were deferred above.
+        # Synthesise the legacy `write` result shape that downstream code reads.
+        self.context["write"] = {
+            "success": True,
+            "successful": len(result.committed),
+            "failed": [{"path": r.path, "error": r.error} for r in result.failed],
+            "total": result.total,
+        }
+
+        committed_paths = {r.path for r in result.committed}
+        _deferred_stems: frozenset[str] = frozenset(
+            os.path.splitext(os.path.basename(r.path))[0].lower()
+            for r in result.failed if r.path
+        )
+        self._chunk_ctx["deferred_stems"] = list(_deferred_stems)
+
+        # Register committed notes in the RunManifest and refresh embedding index.
         try:
             from silica.planner.progress import RunManifestEntry
             vault_ctx = self.context.get("vault_graph_ctx", {})
-            ops_written = load_ops(self._chunk_ctx["ops_path"])
-            for _wi, op in enumerate(ops_written):
-                if _wi in _failed_idx:
-                    continue
+            for op in ops:
                 path = op.touched_ref()
                 if op.op not in (OpType.write, OpType.patch) or not path:
+                    continue
+                if path not in committed_paths:
                     continue
                 stem = os.path.splitext(os.path.basename(path))[0]
                 path_key = path.removesuffix(".md")
@@ -1571,11 +1578,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 from silica.kernel.embed import EmbedStore, refresh_note
                 embedder = get_embedder(CONFIG)
                 store = EmbedStore()
-                for _wi, op in enumerate(ops_written):
-                    if _wi in _failed_idx:
-                        continue
+                for op in ops:
                     path = op.touched_ref()
                     if op.op not in (OpType.write, OpType.patch) or not path:
+                        continue
+                    if path not in committed_paths:
                         continue
                     stem = os.path.splitext(os.path.basename(path))[0]
                     idx_path = path.removesuffix(".md")
@@ -1668,8 +1675,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 prior_content=hub_note.content,
             )
             self._txn.inverses.append(hub_inverse)
-            if "snapshot" in self.context and "inverses" in self.context["snapshot"]:
-                self.context["snapshot"]["inverses"].append(hub_inverse.model_dump())
 
         # Cross-cluster integrity check: warn when new notes land in a different
         # cluster from the hub.  This is informational only — the MOC link is
@@ -1752,8 +1757,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
                             prior_content=p_note.content,
                         )
                         self._txn.inverses.append(p_inverse)
-                        if "snapshot" in self.context and "inverses" in self.context["snapshot"]:
-                            self.context["snapshot"]["inverses"].append(p_inverse.model_dump())
                     # Build and write parent MOC block (same language-aware heading,
                     # same deduplication logic as the hub section above).
                     p_heading = _moc_heading(source_name, p_note.content)
@@ -1892,16 +1895,30 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
             neighbourhood: list[str] = []
             seen_norm: set[str] = set()
-            for title in new_titles:
-                try:
-                    for hit in DRIVER.search_context(title):
-                        p = hit.ref.path or hit.ref.name
-                        norm = os.path.abspath(p)
-                        if norm not in seen_norm and norm not in touched_paths_abs:
-                            seen_norm.add(norm)
-                            neighbourhood.append(p)
-                except Exception as _se:
-                    logger.debug("BACKLINK: search_context for '%s': %s", title, _se)
+
+            # Use the O(1) inverted text index if available; fall back to search_context.
+            if hasattr(DRIVER, "mentions_of"):
+                for title in new_titles:
+                    try:
+                        for path in DRIVER.mentions_of(title):
+                            norm = os.path.abspath(path)
+                            if norm not in seen_norm and norm not in touched_paths_abs:
+                                seen_norm.add(norm)
+                                neighbourhood.append(path)
+                    except Exception as _me:
+                        logger.debug("BACKLINK: mentions_of for '%s' failed: %s", title, _me)
+            else:
+                for title in new_titles:
+                    try:
+                        for hit in DRIVER.search_context(title):
+                            p = hit.ref.path or hit.ref.name
+                            norm = os.path.abspath(p)
+                            if norm not in seen_norm and norm not in touched_paths_abs:
+                                seen_norm.add(norm)
+                                neighbourhood.append(p)
+                    except Exception as _se:
+                        logger.debug("BACKLINK: search_context for '%s': %s", title, _se)
+
 
             if not neighbourhood:
                 self._progress_note(self._chunk_task_id("backlink"), "backlink", "done")
@@ -1921,7 +1938,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
             added_map = backlink_pass(new_titles, title_index=title_index, neighbourhood=neighbourhood)
 
             if added_map and self._txn is not None:
-                from silica.driver.base import NoteRef
                 from silica.kernel.ops import InverseOp, InverseOpKind
                 existing_snapshot_paths = {d["path"] for d in self._chunk_ctx.get("snapshot_domain", [])}
                 for path_modified in added_map:
@@ -1938,8 +1954,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
                             prior_content=prior_contents[path_modified],
                         )
                         self._txn.inverses.append(inverse)
-                        if "snapshot" in self.context and "inverses" in self.context["snapshot"]:
-                            self.context["snapshot"]["inverses"].append(inverse.model_dump())
 
             total_links = sum(len(v) for v in added_map.values())
             logger.info(
@@ -2107,14 +2121,37 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 self.context["final_status"] = "partial"
             else:
                 self.context["final_status"] = "Success"
+
+        # Persist this run's inverses for /revert, with final content hash.
+        if self._undo_run_id and self._run_inverses:
+            import hashlib
+            from silica.kernel.undo_journal import get_undo_journal
+            journal = get_undo_journal()
+            for path, inv, _ in self._run_inverses:
+                try:
+                    post = DRIVER.read_note(path).content
+                    post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
+                except Exception:
+                    post_hash = None
+                journal.record(self._undo_run_id, inv, post_hash)
+            self._run_inverses.clear()
+
         self._progress_note(self._chunk_task_id("cleanup"), "cleanup", "done")
         self._transition_success()
 
     def _handle_rollback(self) -> None:
         self._progress_note("rollback", "rollback", "running")
         snapshot_res = self._chunk_ctx.get("snapshot", {})
-        inverses = snapshot_res.get("inverses", [])
-        txn_id = snapshot_res.get("txn_id")
+        # self._txn.inverses is the single source of truth for rollback (C3 /
+        # ADR-009): SNAPSHOT seeds it and every phase that mutates a pre-existing
+        # note appends to it. Fall back to the persisted snapshot dict only when
+        # no live transaction exists (defensive — both share the per-chunk lifetime).
+        if self._txn is not None:
+            txn_id = self._txn.id
+            inverses = self._txn.inverses_serialized
+        else:
+            txn_id = snapshot_res.get("txn_id")
+            inverses = snapshot_res.get("inverses", [])
 
         if txn_id and inverses:
             from silica.tools.wrapped import silica_restore
@@ -2188,10 +2225,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Record that at least one chunk failed (used by cleanup to set "partial")
         self.context["has_partial_failure"] = True
 
-        # Advance to next chunk, or conclude the run as partial
+        # Advance to next uncommitted chunk, or conclude the run as partial
         self._get_chunks_from_context_if_empty()
-        if self._current_chunk_idx + 1 < len(self._chunks):
-            self._current_chunk_idx += 1
+        next_idx = self._next_uncommitted_chunk_idx(self._current_chunk_idx + 1)
+        if next_idx < len(self._chunks):
+            self._current_chunk_idx = next_idx
             logger.info(
                 "Chunk f%d_c%d failed — advancing to chunk %d of %d.",
                 fi, ci, self._current_chunk_idx + 1, len(self._chunks),
@@ -2203,10 +2241,38 @@ class InjectorFSM(BaseFSM[InjectorState]):
             self.state = InjectorState.COLLISION if has_collision else InjectorState.DELEGATE
         else:
             logger.info(
-                "Chunk f%d_c%d failed (last chunk). Run concludes with partial success.", fi, ci
+                "Chunk f%d_c%d failed (last uncommitted chunk). Run concludes with partial success.", fi, ci
             )
             self.context["final_status"] = "partial"
             self.state = InjectorState.DONE
+
+    def _next_uncommitted_chunk_idx(self, start: int) -> int:
+        """Return the first chunk index >= start whose file is not already committed."""
+        idx = start
+        committed = getattr(self, "_committed_file_indices", set())
+        while idx < len(self._chunks):
+            fi, _ = self._chunk_flat_to_fi_ci.get(idx, (0, 0))
+            if fi not in committed:
+                return idx
+            logger.info("Skipping already-committed file %d chunk %d", fi, idx)
+            idx += 1
+        return idx
+
+    @property
+    def _current_source_file(self) -> str:
+        """Vault-relative path of the inbox file for the current chunk."""
+        fi, _ = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (0, 0))
+        if self._file_chunks and fi < len(self._file_chunks):
+            return self._file_chunks[fi]["source_file"]
+        return self.inbox_file
+
+    @property
+    def _current_content_hash(self) -> str:
+        """Content hash for the inbox file of the current chunk."""
+        fi, _ = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (0, 0))
+        if self._file_content_hashes and fi < len(self._file_content_hashes):
+            return self._file_content_hashes[fi]
+        return self.context.get("source_content_hash", "")
 
     # ------------------------------------------------------------------
     # Ledger helpers (C5)

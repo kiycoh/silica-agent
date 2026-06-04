@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 
 # Quiet down Bedrock/SageMaker missing botocore warnings during import
@@ -70,7 +71,7 @@ def call_llm(
     kwargs: dict = {
         "model": model,
         "messages": messages,
-        "max_tokens": max_tokens if max_tokens is not None else 8192,
+        "max_tokens": max_tokens if max_tokens is not None else int(os.getenv("MAX_TOKENS", "8192")),
     }
     if tools:
         kwargs["tools"] = tools
@@ -81,28 +82,27 @@ def call_llm(
     kwargs["timeout"] = 120.0
 
     import time
+    _TRANSIENT = (
+        litellm.Timeout,
+        litellm.APIConnectionError,
+        litellm.RateLimitError,
+        litellm.ServiceUnavailableError,
+        litellm.BadGatewayError,
+    )
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
         try:
             response = litellm.completion(**kwargs)
             break
-        except Exception as e:
-            err_str = str(e).lower()
-            is_transient = any(
-                term in err_str
-                for term in ("timeout", "connect", "connection", "rate_limit", "429", "502", "503", "504")
-            )
-            if is_transient and attempt < max_attempts:
+        except _TRANSIENT as e:
+            if attempt < max_attempts:
                 logger.warning(
-                    "LiteLLM call transient error (attempt %d/%d): %s. Retrying in %ds...",
-                    attempt,
-                    max_attempts,
-                    e,
-                    2 ** attempt,
+                    "LiteLLM transient error (attempt %d/%d): %s. Retrying in %ds...",
+                    attempt, max_attempts, e, 2 ** attempt,
                 )
                 time.sleep(2 ** attempt)
                 continue
-            logger.error("LiteLLM call failed (attempt %d/%d): %s", attempt, max_attempts, e)
+            logger.error("LiteLLM call failed after %d attempts: %s", max_attempts, e)
             raise
 
     choice = response.choices[0]

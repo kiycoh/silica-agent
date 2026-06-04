@@ -142,3 +142,55 @@ def test_no_info_loss_guard_direct():
             path="N.md", content="[[A]] kept content here")
     assert guard(op, "[[A]] kept content here") is None
     assert "dropped wikilink" in guard(op, "[[A]] [[B]] original longer text here")
+
+
+def test_orphan_leash_blocks_hub_by_bare_name():
+    """Hub protection must work even when hub is a bare name without folder prefix.
+
+    This tests dedup_leash because its target_predicate matches the hub path
+    (both resolve to the same note), so only forbidden_paths can block it.
+    The bare hub name 'Concepts' must match the vault-relative 'notes/Concepts.md'.
+    """
+    # dedup_leash: target IS notes/Concepts.md, hub is bare name 'Concepts'
+    leash = dedup_leash("notes/Concepts.md", hub="Concepts")
+    hub_op = _op(OpType.patch, "notes/Concepts.md", snippet="some addition")
+    kept, rejected = leash.enforce([hub_op], read_note=lambda p: "# Concepts\n")
+    assert len(kept) == 0, "Op targeting hub must be rejected even when hub is a bare name"
+    assert len(rejected) == 1
+
+
+def test_bare_hub_does_not_block_collateral_note():
+    """A bare hub name must NOT block a different note that merely shares the same stem.
+
+    Scenario: hub="Foo", target="notes/Bar.md".  An op on "notes/Bar.md" is the
+    legitimate repair target — it must pass hub protection even though its directory
+    also contains notes whose basename could match other bare forbidden entries.
+    The fix: basename expansion is only applied to bare forbidden entries so that
+    "notes/Bar.md" is not spuriously blocked because _norm_path(basename) != "foo".
+    """
+    # dedup_leash with target=notes/Bar.md, hub bare name "Foo"
+    leash = dedup_leash("notes/Bar.md", hub="Foo")
+
+    # Op on the actual target (notes/Bar.md) must be allowed — "Bar" != "Foo"
+    target_op = _op(OpType.patch, "notes/Bar.md", snippet="[[SomeLink]]")
+    kept, rejected = leash.enforce([target_op], read_note=lambda p: "# Bar\n")
+    assert len(kept) == 1, (
+        "notes/Bar.md must NOT be blocked by hub='Foo'; "
+        f"rejected: {[r['reason'] for r in rejected]}"
+    )
+    assert len(rejected) == 0
+
+    # Op on the actual hub note (notes/Foo.md) must still be blocked
+    hub_op = _op(OpType.patch, "notes/Foo.md", snippet="[[SomeLink]]")
+    kept2, rejected2 = leash.enforce([hub_op], read_note=lambda p: "# Foo\n")
+    assert len(kept2) == 0, "notes/Foo.md must be blocked because it matches bare hub 'Foo'"
+    assert len(rejected2) == 1
+
+
+def test_orphan_leash_allows_repair_when_no_hub():
+    """When hub=None, orphan repair must not be blocked."""
+    leash = orphan_leash("notes/Orphan.md", hub=None)
+    patch_op = _op(OpType.patch, "notes/Orphan.md", snippet="[[SomeLink]]")
+    kept, rejected = leash.enforce([patch_op], read_note=lambda p: "# Orphan\n")
+    assert len(kept) == 1
+    assert len(rejected) == 0

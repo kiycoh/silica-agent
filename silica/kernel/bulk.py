@@ -54,6 +54,11 @@ def _execute_patch(op: Op, path: str) -> dict:
         # Preserve the historical message so callers/tests can match on it.
         raise ValueError(f"Cannot patch; {e}") from e
 
+    # Idempotent re-injection: if this exact provenance block already exists,
+    # skip the append (deterministic, no LLM). Re-running the same source is a no-op.
+    if templates.block_present(nc.content, heading, source_basename):
+        return {"path": path, "op": "patch", "success": True, "skipped": "duplicate"}
+
     new_content = templates.patch_snippet(
         heading=heading,
         snippet=snippet,

@@ -18,6 +18,7 @@ proposes; the leash disposes.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Callable
@@ -101,10 +102,23 @@ class Leash:
     context_budget_chars: int = 8000
 
     def allows_path(self, path: str | None) -> bool:
-        key = _norm_path(path)
-        if not key:
+        norm = _norm_path(path)
+        if not norm:
             return False
-        if key in {_norm_path(p) for p in self.forbidden_paths}:
+        forbidden_norms = {_norm_path(p) for p in self.forbidden_paths}
+        if norm in forbidden_norms:
+            return False
+        # Bare-name forbidden entries (no "/" or "\") may be matched by the
+        # incoming path's basename — e.g. hub="Concepts" blocks "notes/Concepts.md".
+        # Only apply basename expansion for bare entries to avoid false positives
+        # where a note named "Foo.md" is blocked by hub="Foo" even when the hub
+        # is actually a different full path like "other/Foo".
+        bare_forbidden = {
+            _norm_path(p)
+            for p in self.forbidden_paths
+            if "/" not in p and "\\" not in p
+        }
+        if bare_forbidden and _norm_path(os.path.basename(path or "")) in bare_forbidden:
             return False
         return bool(self.target_predicate(path or ""))
 

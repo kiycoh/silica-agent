@@ -1,4 +1,7 @@
 """Tests for the WarningLedger (silica/planner/warnings.py)."""
+import json
+import threading
+
 from silica.planner.warnings import WarningLedger
 
 
@@ -29,3 +32,22 @@ def test_persistence(tmp_path):
     wl = WarningLedger(run_dir=tmp_path)
     wl.add("A.md", "orphan", "detail")
     assert (tmp_path / "warnings.json").exists()
+
+
+def test_persist_is_atomic_under_concurrent_add(tmp_path):
+    """Concurrent add() calls must not lose entries from warnings.json."""
+    ledger = WarningLedger(run_dir=tmp_path)
+    barrier = threading.Barrier(2)
+
+    def add_many(paths):
+        barrier.wait()
+        for p in paths:
+            ledger.add(p, kind="orphan")
+
+    t1 = threading.Thread(target=add_many, args=(["a.md", "b.md", "c.md"],))
+    t2 = threading.Thread(target=add_many, args=(["d.md", "e.md", "f.md"],))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    saved = json.loads((tmp_path / "warnings.json").read_bytes())
+    assert len(saved) == 6, f"Expected 6 warnings, got {len(saved)}"

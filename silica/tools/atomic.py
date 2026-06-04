@@ -346,7 +346,7 @@ def silica_ledger_next(run_id: str) -> dict:
     """
     import orjson
     from pathlib import Path
-    from silica.planner.progress import ProgressLedger, _RUNS_DIR
+    from silica.planner.progress import ProgressLedger
 
     try:
         progress = ProgressLedger.load(run_id)

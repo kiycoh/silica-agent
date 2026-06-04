@@ -23,6 +23,10 @@ from silica.config import CONFIG
 logger = logging.getLogger(__name__)
 
 
+def _log_work_event(event: Any) -> None:
+    logger.debug("work event: %s", event)
+
+
 class Coordinator:
     def __init__(
         self,
@@ -52,11 +56,13 @@ class Coordinator:
 
         from silica.planner.workqueue import WorkQueue
         from silica.planner.warnings import WarningLedger
+        from silica.agent.bus import BUS
 
         run_dir = getattr(self.fsm.progress, "run_dir", None)
         wq = WorkQueue(run_dir=run_dir)
         self.fsm.work_queue = wq
         self.fsm.warning_ledger = WarningLedger(run_dir=run_dir)
+        BUS.subscribe("work/*", _log_work_event)
 
         max_workers = max(1, int(getattr(self.config, "subagent_max_concurrent", 3)))
         pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="subagent")
@@ -178,21 +184,27 @@ class Coordinator:
     def _consume(self, wq: Any) -> None:
         """One consumer thread: claim → handle → complete until the queue closes.
 
-        Checks ``self._stop`` on every iteration so an interrupt (BaseException
-        in the producer) causes workers to exit after their current item rather
-        than blocking in ``wq.claim()`` until the queue drains.
+        Blocks at OS level on ``wq.claim()`` — no polling.  The sentinel
+        injected by ``wq.close()`` cascades through all consumers so they
+        all wake and exit cleanly.  ``_stop`` is checked after each item so
+        a producer crash causes pending items to be marked cancelled rather
+        than dispatched to the sub-agent.
         """
         from silica.agent.subagent import LeashedSubAgent
+        from silica.agent.bus import BUS
+        from silica.agent.events import WorkCancelledEvent
+
         agent = LeashedSubAgent(self.config)
         while True:
-            if self._stop.is_set():
-                return
-            item = wq.claim(timeout=0.25)
+            item = wq.claim()           # blocks; no timeout, no polling
             if item is None:
-                if wq.closed:
-                    return
+                return                  # sentinel received — queue fully drained
+            if self._stop.is_set() or item.cancel_token.is_set():
+                wq.complete(item, "cancelled")
+                BUS.publish(
+                    "work/cancelled",
+                    WorkCancelledEvent(item.id, item.kind, "pre_handle"),
+                )
                 continue
-            if self._stop.is_set():
-                return
             res = agent.handle(item)
             wq.complete(item, res.get("status", "done"), res)

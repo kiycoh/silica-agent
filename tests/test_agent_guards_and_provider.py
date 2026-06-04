@@ -108,11 +108,14 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         self.assertTrue(_is_tool_failure({"error": "something"}))
         self.assertFalse(_is_tool_failure({"success": True}))
 
-        # String representation
+        # String representation: only a structured {"error": ...} payload is a
+        # failure. Plain prose is a successful tool output even when it happens
+        # to contain words like "error"/"failed" (e.g. grep hits, "0 errors"
+        # reports) — substring-sniffing those is a false positive.
         self.assertTrue(_is_tool_failure('{"error": "bad stuff"}'))
-        self.assertTrue(_is_tool_failure('An error occurred'))
-        self.assertTrue(_is_tool_failure('Failed to read file'))
-        self.assertTrue(_is_tool_failure('Exception raised'))
+        self.assertFalse(_is_tool_failure('An error occurred'))
+        self.assertFalse(_is_tool_failure('Failed to read file'))
+        self.assertFalse(_is_tool_failure('Exception raised'))
         self.assertFalse(_is_tool_failure('All systems operational'))
 
     @patch("silica.agent.loop.call_llm")

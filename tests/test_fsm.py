@@ -356,10 +356,11 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
     fsm._pre_graph = pre_graph
-    fsm._txn = MagicMock()
-    fsm._txn.created_paths = ["notes/NoteA.md"]
 
+    # self._txn is the single source of truth for rollback inverses (C3).
     inverses = [{"op": "delete", "path": "notes/NoteA.md"}]
+    from silica.driver.base import Txn
+    fsm._txn = Txn(id="txn_123", created_paths=["notes/NoteA.md"], inverses=inverses)
     fsm.context.setdefault("chunk", {})["snapshot"] = {
         "txn_id": "txn_123",
         "inverses": inverses,
@@ -878,18 +879,20 @@ def test_crossdedup_skips_when_embed_call_fails():
 
 
 # ---------------------------------------------------------------------------
-# WRITE partial-failure containment (Fase A)
+# WRITE partial-failure containment (Fase A → B)
 # ---------------------------------------------------------------------------
 
-@patch("silica.router.orchestrator.silica_bulk_write")
 @patch("silica.kernel.deferred.get_deferred_store")
+@patch("silica.kernel.atomic_write.commit_note_atomic")
 def test_handle_write_partial_failure_defers_and_continues(
-    mock_get_store, mock_bulk_write, tmp_path
+    mock_commit, mock_get_store, tmp_path
 ):
     """Partial write failure: committed ops survive, failed ops land in deferred store,
     FSM continues to HUB_UPDATE (no rollback), has_partial_failure is set."""
     import json
+    from silica.kernel.atomic_write import NoteCommitResult
     from silica.kernel.deferred import DeferredStore
+    from silica.kernel.ops import InverseOp, InverseOpKind
 
     ops_data = [
         {"op": "write", "path": "TargetDir/A.md", "heading": "A", "hub": "TargetDir",
@@ -900,15 +903,15 @@ def test_handle_write_partial_failure_defers_and_continues(
     ops_file = tmp_path / "ops.json"
     ops_file.write_text(json.dumps(ops_data))
 
-    # Op A committed, op B failed (e.g. settle timeout on link indexing)
-    mock_bulk_write.return_value = {
-        "ok": False, "success": False, "successful": 1, "total": 2,
-        "failed": [{"index": 1, "path": "TargetDir/B.md", "op": "write", "error": "Settle timeout"}],
-        "results": [
-            {"index": 0, "path": "TargetDir/A.md", "op": "write", "success": True},
-            {"index": 1, "path": "TargetDir/B.md", "success": False, "error": "Settle timeout"},
-        ],
-    }
+    # Op A committed, op B failed (lint failure)
+    def commit_side_effect(op, hub=None, lint=True):
+        if "A.md" in (op.path or ""):
+            inv = InverseOp(kind=InverseOpKind.delete_created, path=op.path or "")
+            return NoteCommitResult(ok=True, path=op.path or "", op=op.op.value,
+                                    inverses=[inv])
+        return NoteCommitResult(ok=False, path=op.path or "", op=op.op.value,
+                                error="Settle timeout", reverted=True)
+    mock_commit.side_effect = commit_side_effect
 
     deferred_store = DeferredStore(tmp_path / "deferred")
     mock_get_store.return_value = deferred_store
@@ -931,15 +934,21 @@ def test_handle_write_partial_failure_defers_and_continues(
     # Op B deferred under the source content hash
     bundle = deferred_store.get("abc123hash")
     assert bundle is not None
-    assert len(bundle["rejected_ops"]) == 1
-    assert bundle["rejected_ops"][0]["heading"] == "B"
+    failed_paths = {o.get("path") for o in bundle["rejected_ops"]}
+    assert "TargetDir/B.md" in failed_paths
     assert "Settle timeout" in bundle["rejection_reasons"].get("TargetDir/B.md", "")
 
 
-@patch("silica.router.orchestrator.silica_bulk_write")
-def test_handle_write_all_fail_triggers_rollback(mock_bulk_write, tmp_path):
-    """When ALL ops fail, _handle_write raises → FSM routes to ROLLBACK (not deferred)."""
+@patch("silica.kernel.atomic_write.commit_note_atomic")
+def test_handle_write_all_fail_defers_and_continues(mock_commit, tmp_path):
+    """When ALL ops fail lint/write, they are deferred and FSM continues (no rollback).
+
+    This is the new per-note atomic behavior: bulk_write_atomic never raises;
+    every failure is self-reverted and deferred. The FSM advances to HUB_UPDATE
+    with has_partial_failure set.
+    """
     import json
+    from silica.kernel.atomic_write import NoteCommitResult
 
     ops_data = [
         {"op": "write", "path": "TargetDir/A.md", "heading": "A", "hub": "TargetDir",
@@ -948,11 +957,10 @@ def test_handle_write_all_fail_triggers_rollback(mock_bulk_write, tmp_path):
     ops_file = tmp_path / "ops.json"
     ops_file.write_text(json.dumps(ops_data))
 
-    mock_bulk_write.return_value = {
-        "ok": False, "success": False, "successful": 0, "total": 1,
-        "failed": [{"index": 0, "path": "TargetDir/A.md", "op": "write", "error": "fatal"}],
-        "results": [{"index": 0, "success": False, "error": "fatal"}],
-    }
+    mock_commit.return_value = NoteCommitResult(
+        ok=False, path="TargetDir/A.md", op="write",
+        error="fatal lint failure", reverted=True,
+    )
 
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm.state = InjectorState.WRITE
@@ -963,9 +971,100 @@ def test_handle_write_all_fail_triggers_rollback(mock_bulk_write, tmp_path):
         "snapshot": {"txn_id": "txn_x", "inverses": []},
     }
 
-    # Full failure: _handle_write raises, which _run_loop routes to ROLLBACK.
-    # step() doesn't have the loop's error handler, so we assert the raise directly.
-    import pytest as _pytest
-    with _pytest.raises(RuntimeError, match="Write fully failed"):
-        fsm.step()
+    # All-fail: _handle_write defers and continues (no raise, no rollback).
+    fsm.step()
+
+    assert fsm.state == InjectorState.HUB_UPDATE
+    assert fsm.context.get("has_partial_failure") is True
+    write_ctx = fsm.context.get("write", {})
+    assert write_ctx.get("successful") == 0
+    assert len(write_ctx.get("failed", [])) == 1
+
+
+def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
+    """After HUB_UPDATE, the hub rollback inverse must land in the txn's authoritative
+    inverses list (the single source of truth read by ROLLBACK) — not in a stale dict."""
+    import json, os
+    from unittest.mock import patch, MagicMock
+    from silica.router.orchestrator import InjectorFSM
+
+    ops_path = str(tmp_path / "ops.json")
+    with open(ops_path, "w") as f:
+        json.dump([{
+            "op": "write", "path": "TargetDir/Note.md",
+            "heading": "Note", "source_basename": "test.md",
+            "content": "# Note\n", "snippet": "Note snippet",
+            "hub": None, "parent": None,
+        }], f)
+
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir", hub="Hub")
+    # _chunk_ctx is a property returning self.context.setdefault("chunk", {}),
+    # so seed the per-chunk state via context["chunk"] directly.
+    fsm.context["chunk"] = {
+        "ops_path": ops_path,
+        "snapshot": {"txn_id": "txn-001", "inverses": [], "created_paths": []},
+        "snapshot_domain": [],
+    }
+    fsm._current_chunk_idx = 0
+    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
+    fsm._file_chunks = [{"source_file": "Inbox/test.md", "chunks": [{}]}]
+
+    mock_hub_note = MagicMock()
+    mock_hub_note.content = "# Hub\n\nExisting content\n"
+
+    from silica.driver.base import Txn
+    fsm._txn = Txn(id="txn-001", created_paths=[], inverses=[])
+
+    with patch("silica.router.orchestrator.DRIVER") as mock_driver, \
+         patch("silica.router.orchestrator.time") as mock_time:
+        mock_driver.read_note.return_value = mock_hub_note
+        mock_driver.overwrite.return_value = None
+        mock_time.monotonic.side_effect = [0.0, 10.0]
+        mock_time.sleep.return_value = None
+        fsm._handle_hub_update()
+
+    txn_inverses = fsm._txn.inverses_serialized
+    assert any(
+        inv.get("path", "").endswith("Hub.md") for inv in txn_inverses
+    ), f"Hub inverse missing from txn.inverses; got: {txn_inverses}"
+    # The dual-write to _chunk_ctx['snapshot']['inverses'] is gone — the txn is
+    # now the single source of truth, so the snapshot dict stays as SNAPSHOT left it.
+    assert fsm._chunk_ctx["snapshot"]["inverses"] == [], \
+        "Hub inverse must not be dual-written into _chunk_ctx['snapshot']['inverses']"
+    # Also confirm it did NOT land in stale context['snapshot'].
+    assert "snapshot" not in fsm.context or "inverses" not in fsm.context.get("snapshot", {}), \
+        "Hub inverse was written to stale context['snapshot']"
+
+
+def test_refiner_default_recipe_includes_backlink():
+    """RefinerFSM default recipe (loaded from YAML) includes backlink after write and before lint."""
+    from silica.router.refiner_fsm import RefinerFSM
+    from unittest.mock import patch
+
+    with patch("silica.router.refiner_fsm.DRIVER"):
+        fsm = RefinerFSM(folder="Concepts")
+
+    phase_ids = [p["id"] for p in fsm._recipe.get("phases", [])]
+    assert "backlink" in phase_ids, (
+        f"'backlink' phase missing from RefinerFSM default recipe. Got: {phase_ids}"
+    )
+    assert phase_ids.index("backlink") > phase_ids.index("write"), \
+        "'backlink' must appear after 'write'"
+    assert phase_ids.index("backlink") < phase_ids.index("lint"), \
+        "'backlink' must appear before 'lint'"
+
+
+def test_refiner_python_fallback_recipe_includes_autolink_and_backlink():
+    """RefinerFSM Python fallback recipe (used when YAML load fails) includes autolink + backlink."""
+    from silica.router.refiner_fsm import RefinerFSM
+    from unittest.mock import patch
+
+    with patch("silica.router.refiner_fsm.DRIVER"), \
+         patch("silica.router.recipe_parser.load_recipe", side_effect=FileNotFoundError("no yaml")):
+        fsm = RefinerFSM(folder="Concepts")
+
+    phase_ids = [p["id"] for p in fsm._recipe.get("phases", [])]
+    assert "autolink" in phase_ids, f"'autolink' missing from fallback recipe: {phase_ids}"
+    assert "backlink" in phase_ids, f"'backlink' missing from fallback recipe: {phase_ids}"
+    assert phase_ids.index("autolink") < phase_ids.index("backlink") < phase_ids.index("lint")
 

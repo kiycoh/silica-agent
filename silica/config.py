@@ -60,20 +60,21 @@ class SilicaConfig:
     # --- Sub-agent worker model (leashed sub-agents run on a separate, smaller model) ---
     # The router (agent loop) uses `model`/`provider` above; sub-agents (dedup, refiner)
     # use these worker_* fields so they can run concurrently on a small local model.
-    worker_model: str = field(
-        default_factory=lambda: os.getenv("SILICA_WORKER_MODEL", "qwen/qwen3.5-9b")
+    worker_model: str | None = field(
+        default_factory=lambda: os.getenv("SILICA_WORKER_MODEL", None)
     )
     # Worker provider preset name; falls back to "lmstudio" when unset.
-    worker_provider: str = field(
-        default_factory=lambda: os.getenv("SILICA_WORKER_PROVIDER", "lmstudio")
+    worker_provider: str | None = field(
+        default_factory=lambda: os.getenv("SILICA_WORKER_PROVIDER", None)
     )
     # Explicit endpoint overrides for the worker model (default → local LM Studio).
-    worker_base_url: str = field(
-        default_factory=lambda: os.getenv("SILICA_WORKER_BASE_URL", "http://localhost:1234/v1")
+    worker_base_url: str | None = field(
+        default_factory=lambda: os.getenv("SILICA_WORKER_BASE_URL", None)
     )
-    worker_api_key: str = field(
-        default_factory=lambda: os.getenv("SILICA_WORKER_API_KEY", "lm-studio")
+    worker_api_key: str | None = field(
+        default_factory=lambda: os.getenv("SILICA_WORKER_API_KEY", None)
     )
+
 
     # Leash caps — bound how far a sub-agent can move before the framework reins it in.
     subagent_max_turns: int = field(
@@ -84,6 +85,12 @@ class SilicaConfig:
     )
     subagent_max_concurrent: int = field(
         default_factory=lambda: int(os.getenv("SILICA_SUBAGENT_MAX_CONCURRENT", "3"))
+    )
+    # Global ceiling on concurrent worker-model LLM calls (the one true
+    # concurrency budget; see ADR-0004). Sized to the worker backend
+    # (API rate limit or local GPU slots).
+    worker_max_concurrent: int = field(
+        default_factory=lambda: int(os.getenv("SILICA_WORKER_MAX_CONCURRENT", "4"))
     )
     # Master switch: when False, silica_inject runs the legacy single-FSM path.
     subagents_enabled: bool = field(
@@ -136,7 +143,7 @@ class SilicaConfig:
 
     # Font pyfiglet del banner di avvio
     banner_font: str = field(
-        default_factory=lambda: os.getenv("SILICA_BANNER_FONT", "ansi_shadow")
+        default_factory=lambda: os.getenv("SILICA_BANNER_FONT", "tarty1")
     )
 
     # Runtime session state — updated by cli.py after each agent turn
@@ -172,6 +179,22 @@ class SilicaConfig:
     )
     sim_threshold_low: float = field(
         default_factory=lambda: float(os.getenv("SILICA_SIM_THRESHOLD_LOW", "0.65"))
+    )
+
+    # Number of candidates to retrieve per note during dedup scan.
+    # Higher values increase recall at negligible BLAS cost (search is a single
+    # matrix-vector product). k=1 misses borderline secondary matches when the
+    # primary match lands above τ_high and is discarded.
+    dedup_scan_k: int = field(
+        default_factory=lambda: int(os.getenv("SILICA_DEDUP_SCAN_K", "5"))
+    )
+
+    # Minimum title-only cosine similarity to promote a pair into the dedup
+    # borderline window, regardless of the full-note score.
+    # Set higher than sim_threshold_low (0.65) to avoid spurious matches between
+    # generically related titles (e.g. "Python" / "Python async").
+    sim_title_threshold: float = field(
+        default_factory=lambda: float(os.getenv("SILICA_SIM_TITLE_THRESHOLD", "0.80"))
     )
 
     # Salience gate (Phase 2.05): concept kept only if cosine(concept, doc_centroid) >= threshold
