@@ -13,6 +13,20 @@ def _fresh_bus(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bus_mod, "BUS", bus_mod.EventBus())
 
 
+@pytest.fixture(autouse=True)
+def _isolate_cooccurrence_index(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect the default co-occurrence index to a per-test tmp path.
+
+    The post-write freshness hook refreshes the co-occurrence index with no
+    embedder gate (it is the embedder-free stable leg), so any test that drives
+    the write handler would otherwise write the user's real
+    ~/.silica/index/cooccurrence.json. Tests that need a store pass an explicit
+    path; this only redirects the default.
+    """
+    import silica.kernel.cooccurrence as cooc_mod
+    monkeypatch.setattr(cooc_mod, "_INDEX_PATH", tmp_path / "cooccurrence_index.json")
+
+
 @pytest.fixture(scope="session")
 def synthetic_vault() -> Path:
     """Return the path to the synthetic test vault, building it if needed.
