@@ -579,6 +579,21 @@ class ObsidianFSBackend:
             self._patch_index(rel_path, content)
         return NoteRef(name=name, path=rel_path)
 
+    def autolink_note(self, path: str, candidates: list[str] | None = None) -> list[str]:
+        """FS backend: pure-Python kernel autolink + direct overwrite."""
+        import os
+        from silica.kernel.autolink import autolink, build_title_index
+        nc = self.read_note(path)
+        body = nc.content or ""
+        if not body.strip():
+            return []
+        title_index = build_title_index(self.list_files())
+        self_title = os.path.splitext(os.path.basename(path))[0]
+        new_body, added = autolink(body, title_index, candidates=candidates, self_title=self_title)
+        if added:
+            self.overwrite(path, new_body)
+        return added
+
     def append(self, ref: NoteRef | str, content: str) -> None:
         """Append content to an existing note."""
         path = self._resolve_path(ref)

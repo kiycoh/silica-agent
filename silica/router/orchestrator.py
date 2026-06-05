@@ -1848,7 +1848,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._progress_note(self._chunk_task_id("autolink"), "autolink", "running")
 
         try:
-            from silica.kernel.autolink import autolink, build_title_index
+            from silica.kernel.autolink import build_title_index
 
             ops = load_ops(self._chunk_ctx["ops_path"])
             touched_paths = [
@@ -1889,12 +1889,10 @@ class InjectorFSM(BaseFSM[InjectorState]):
                     else:
                         candidates = None
 
-                    nc = DRIVER.read_note(path)
-                    new_body, added = autolink(
-                        nc.content or "", title_index, candidates=candidates, self_title=note_title
+                    added = DRIVER.autolink_note(
+                        path, candidates=candidates if candidates is not None else title_index
                     )
                     if added:
-                        DRIVER.overwrite(path, new_body)
                         total_added += len(added)
                         logger.info("AUTOLINK: %s — added %d link(s): %s", path, len(added), added)
                 except Exception as _ae:

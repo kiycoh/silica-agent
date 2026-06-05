@@ -503,7 +503,7 @@ class RefinerFSM(BaseFSM[RefinerState]):
             return
 
         try:
-            from silica.kernel.autolink import autolink, build_title_index
+            from silica.kernel.autolink import build_title_index
             from silica.kernel.ops_io import load_ops
             from silica.kernel.ops import OpType
 
@@ -520,12 +520,8 @@ class RefinerFSM(BaseFSM[RefinerState]):
                 total_added = 0
                 for path in touched_paths:
                     try:
-                        note_title = os.path.splitext(os.path.basename(path))[0]
-                        nc = DRIVER.read_note(path)
-                        new_body, added = autolink(nc.content or "", title_index, self_title=note_title)
-                        if added:
-                            DRIVER.overwrite(path, new_body)
-                            total_added += len(added)
+                        added = DRIVER.autolink_note(path, candidates=title_index)
+                        total_added += len(added)
                     except Exception as _ae:
                         logger.debug("AUTOLINK: skipped '%s' (non-fatal): %s", path, _ae)
                 logger.info("AUTOLINK: finished — %d link(s) added", total_added)
