@@ -146,6 +146,12 @@ def test_print_home_contains_pinned_commands_and_footer():
     for name in non_pinned_content:
         assert name not in output, f"Non-pinned content command {name} should not appear in print_home()"
 
+    from silica.config import CONFIG
+    worker_model = CONFIG.worker_model or CONFIG.model
+    worker_slug = worker_model.rsplit("/", 1)[-1]
+    assert worker_slug in output
+    assert "◇" in output
+
 
 def test_render_help_has_no_block_rule_dividers():
     con, buf = _make_console()

@@ -12,11 +12,14 @@ from silica.ui.console import CONSOLE
 _MIN_SIDE_BY_SIDE_WIDTH = 100
 
 
-def _model_vault_line(model_slug: str, vault: str) -> Text:
+def _model_vault_line(model_slug: str, worker_slug: str, vault: str) -> Text:
     from silica.ui.style import GLYPHS
     t = Text("  ")
     t.append(GLYPHS["model"], style="dim")
     t.append(f" {model_slug}", style="bold")
+    t.append("  ·  ", style="dim")
+    t.append(GLYPHS["worker"], style="dim")
+    t.append(f" {worker_slug}", style="bold")
     t.append("  ·  ", style="dim")
     t.append(GLYPHS["vault"], style="dim")
     t.append(f" vault: ", style="")
@@ -31,6 +34,8 @@ def print_home() -> None:
 
     vault = CONFIG.vault_name or "—"
     model_slug = CONFIG.model.rsplit("/", 1)[-1]
+    worker_model = CONFIG.worker_model or CONFIG.model
+    worker_slug = worker_model.rsplit("/", 1)[-1]
     pinned = [c for c in COMMANDS if c.home_pin]
     help_cmd = next(c for c in COMMANDS if c.name == "/help")
     exit_cmd = next(c for c in COMMANDS if c.name == "/exit")
@@ -54,7 +59,7 @@ def print_home() -> None:
         separator = Group(*sep_lines)
 
         right = Group(
-            _model_vault_line(model_slug, vault),
+            _model_vault_line(model_slug, worker_slug, vault),
             Text(""),
             Text("Commands overview", style="bold"),
             command_table(all_cmds, show_summary=False),
@@ -70,7 +75,7 @@ def print_home() -> None:
     else:
         print_banner()
         CONSOLE.print()
-        CONSOLE.print(_model_vault_line(model_slug, vault))
+        CONSOLE.print(_model_vault_line(model_slug, worker_slug, vault))
         CONSOLE.print()
         CONSOLE.print("  [bold]Commands overview[/]")
         CONSOLE.print()

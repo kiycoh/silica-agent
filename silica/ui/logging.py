@@ -23,6 +23,8 @@ FRIENDLY_TEMPLATES = {
         "Indexing complete: {0} notes found and loaded",
     "CLI exec: %s":
         "Executing CLI command: {0}",
+    "CLI exec: %s  (timeout=%.1fs)":
+        "Executing CLI command: {0} (timeout={1}s)",
     "CLI stderr: %s":
         "CLI standard error: {0}",
 
@@ -163,5 +165,12 @@ class HumanFriendlyFormatter(logging.Formatter):
 
         if not friendly_message:
             friendly_message = message
+
+        lines = friendly_message.split("\n")
+        if len(lines) > 15:
+            head = lines[:5]
+            tail = lines[-5:]
+            hidden = len(lines) - 10
+            friendly_message = "\n".join(head + [f"  [dim]... ({hidden} lines truncated) ...[/dim]"] + tail)
 
         return f"  [muted][{time_str}][/muted] {icon} {friendly_message}"

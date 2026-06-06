@@ -10,6 +10,7 @@ GLYPHS: dict[str, str] = {
     "bullet": "·",
     "arrow": "→",
     "model": "◆",
+    "worker": "◇",
     "vault": "⬡",
 }
 
