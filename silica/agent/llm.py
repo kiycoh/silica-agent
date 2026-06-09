@@ -52,6 +52,7 @@ def call_llm(
     messages: list[dict],
     tools: list[dict] | None = None,
     max_tokens: int | None = None,
+    response_format=None,
 ) -> LLMResponse:
     """Call the LLM with function-calling support.
 
@@ -76,6 +77,8 @@ def call_llm(
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
+    if response_format is not None:
+        kwargs["response_format"] = response_format
     if model.startswith("openrouter/") and (CONFIG.show_thinking or CONFIG.verbose):
         kwargs["include_reasoning"] = True
 
