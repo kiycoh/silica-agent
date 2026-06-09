@@ -50,7 +50,7 @@ Silica is designed for:
 
 ## Architecture
 
-Silica is structured in a five-layer stack (L0 to L4) from low-level application drivers to high-level declarative workflows. The architecture coordinates two execution paradigms over a shared core toolset.
+Silica is structured in a five-layer stack (L0 to L4) from low-level application drivers to high-level declarative workflows. The architecture coordinates two execution paradigms over a shared core toolset. For a deep-dive breakdown, flow diagrams, and codebase directory topology, see [docs/silica_architecture.md](docs/silica_architecture.md).
 
 ### System Layers (L0–L4)
 
