@@ -96,6 +96,7 @@ The `action_hint` field is the Router's mechanical guess based on collision tier
 - Every `hub` field in a `write` operation MUST match the hub name `"{HUB_NAME}"`.
 - Every distilled fact MUST be traceable to inbox_excerpt content. Do not insert outside knowledge, plausible-sounding definitions, or web-recalled examples.
 - If inbox_excerpt is empty or uninformative for a concept, emit a `skip` with `"reason": "empty or uninformative excerpt"`. Do not fabricate content to fill it.
+- **Strictly Skip Noise/Typos**: If a concept name or its excerpt is a typo, OCR error, or semantic noise (e.g. "ALLORR", "ATEI"), you MUST NOT generate a write/patch note explaining the typo or stating that it is excluded. Instead, emit `"op": "skip"` with an appropriate `"reason"`. Do NOT write "meta-notes" or justification notes to disk.
 
 ## Coverage Guardrail
 Process EVERY concept in EVERY batch in the payload. Silent omission is a failure mode. Concepts you decide to skip MUST appear in the output with an explicit `"op": "skip"`, the correct `"source_basename"`, and a brief `"reason"` field — that way the Router can audit your coverage downstream.
