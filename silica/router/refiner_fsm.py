@@ -493,6 +493,26 @@ class RefinerFSM(BaseFSM[RefinerState]):
             )
 
         self.context["write"] = res
+
+        # Git safety net (SILICA_GIT_COMMIT=auto): snapshot the write batch.
+        try:
+            from silica.config import CONFIG
+            from silica.router.orchestrator import _commit_docs_for_ops
+            ops = load_ops(self.context["ops_path"])
+            # All write/patch ops are safe to commit: the partial-failure
+            # guard above raised before reaching this point if any op failed.
+            committed_paths = {
+                ref
+                for op in ops
+                if op.op in (OpType.write, OpType.patch) and (ref := op.touched_ref())
+            }
+            _commit_docs_for_ops(
+                ops, committed_paths,
+                vault=CONFIG.vault_path, git_commit=CONFIG.git_commit,
+            )
+        except Exception as _ge:
+            logger.debug("WRITE: git auto-commit skipped (%s)", _ge)
+
         self._transition_success()
 
     def _handle_autolink(self) -> None:
