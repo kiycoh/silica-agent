@@ -23,6 +23,7 @@ from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
 import silica.tools.atomic  # noqa: F401
 import silica.tools.composed  # noqa: F401
 import silica.tools.wrapped  # noqa: F401
+import silica.tools.codedocs_tool  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
