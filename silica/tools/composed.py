@@ -331,6 +331,37 @@ def silica_patch_note(
     return {**result, "note": name, "path": path, "checkpoint_depth": checkpoint_depth}
 
 
+class WriteNoteArgs(BaseModel):
+    path: str = Field(description="Vault-relative path for the new note (e.g. 'Computer Science/Computer Vision.md')")
+    content: str = Field(description="Full markdown content including YAML frontmatter")
+
+@tool(WriteNoteArgs, cls="composed")
+def silica_write_note(path: str, content: str) -> dict[str, Any]:
+    """Create a new note in the vault with arbitrary content — fast path for
+    single-note creation, no temp-file + bulk_write round-trip.
+
+    Fails if the note already exists. Use silica_patch_note to append to an
+    existing note, or the FSM pipeline (silica_run_injector) for multi-note
+    atomic batches with SNAPSHOT/ROLLBACK guarantees.
+
+    Undo: a checkpoint is pushed so the creation can be reverted via /undo.
+    """
+    from silica.kernel.checkpoints import get_checkpoint_store
+
+    try:
+        ref = DRIVER.create(path, content)
+    except Exception as e:
+        return {"error": f"Failed to create note '{path}': {e}"}
+
+    checkpoint_depth = None
+    try:
+        checkpoint_depth = get_checkpoint_store().push(path, "", content)
+    except Exception:
+        pass
+
+    return {"op": "write", "success": True, "path": ref.path or path, "checkpoint_depth": checkpoint_depth}
+
+
 class LintArgs(BaseModel):
     note_name: str = Field(description="Name of the note to lint")
     op_type: str = Field(default="", description="Operation type (write/patch/overwrite) for conditional checks")
