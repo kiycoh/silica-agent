@@ -41,3 +41,47 @@ def test_head_ref_returns_sha_after_commit(tmp_path):
     _commit(tmp_path, "f.py", "x=1\n", "init")
     ref = gitstate.head_ref(tmp_path)
     assert isinstance(ref, str) and len(ref) == 40
+
+
+def test_is_ignored_batch(tmp_path):
+    _init_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    (tmp_path / "keep.md").write_text("a", encoding="utf-8")
+    (tmp_path / "drop.log").write_text("b", encoding="utf-8")
+    ignored = gitstate.is_ignored(tmp_path, [Path("keep.md"), Path("drop.log")])
+    assert ignored == {Path("drop.log")}
+
+
+def test_is_ignored_empty_without_git(tmp_path):
+    # not a repo → nothing reported ignored, no raise
+    assert gitstate.is_ignored(tmp_path, [Path("x.md")]) == set()
+
+
+def test_log_for_path_latest_commit(tmp_path):
+    _init_repo(tmp_path)
+    _commit(tmp_path, "src/m.py", "v1\n", "add m")
+    commits = gitstate.log_for_path(tmp_path, "src/m.py", limit=1)
+    assert len(commits) == 1
+    assert commits[0].sha == gitstate.head_ref(tmp_path)
+    assert commits[0].subject == "add m"
+    assert commits[0].committed_at  # ISO string, non-empty
+
+
+def test_log_for_path_follows_rename(tmp_path):
+    _init_repo(tmp_path)
+    _commit(tmp_path, "old.py", "v1\n", "add old")
+    subprocess.run(["git", "mv", "old.py", "new.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "rename"], cwd=tmp_path, check=True)
+    commits = gitstate.log_for_path(tmp_path, "new.py", limit=10)
+    assert len(commits) == 2  # follow tracks across the rename
+
+
+def test_commits_since_lists_intervening(tmp_path):
+    _init_repo(tmp_path)
+    _commit(tmp_path, "src/m.py", "v1\n", "c1")
+    base = gitstate.head_ref(tmp_path)
+    _commit(tmp_path, "src/m.py", "v2\n", "c2")
+    _commit(tmp_path, "src/m.py", "v3\n", "c3")
+    commits = gitstate.commits_since(tmp_path, base, "src/m.py")
+    subjects = [c.subject for c in commits]
+    assert subjects == ["c3", "c2"]  # newest-first, base excluded
