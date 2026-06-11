@@ -56,7 +56,7 @@ def test_cli_autolink_note_empty_candidates_short_circuits():
 
 
 def test_silica_autolink_tool_routes_to_driver(monkeypatch):
-    import silica.tools.composed as composed
+    import silica.tools.graph as composed
     calls = []
 
     class FakeDriver:
