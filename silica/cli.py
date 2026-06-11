@@ -361,12 +361,12 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         parts_split = raw_input.strip().split(maxsplit=1)
         run_id = parts_split[1].strip() if len(parts_split) > 1 else get_undo_journal().last_active_run()
         if not run_id:
-            CONSOLE.print("  Niente da annullare: nessuna iniezione registrata.")
+            CONSOLE.print("  Nothing to undo — no runs recorded in this session.")
             return True
         res = revert_run(run_id)
         CONSOLE.print(
-            f"  Revert {run_id[:8]}…: {len(res['reverted'])} ripristinate, "
-            f"{len(res['skipped'])} saltate (modificate), {len(res['errors'])} errori."
+            f"  Revert {run_id[:8]}…: {len(res['reverted'])} reverted, "
+            f"{len(res['skipped'])} skipped (modified), {len(res['errors'])} errors."
         )
         return True
 
@@ -572,6 +572,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         scope = ""
         taxonomy_file = ""
         apply_now = False
+        merge = False
+        move_uncat = False
 
         i = 0
         while i < len(args):
@@ -582,12 +584,17 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 taxonomy_file = arg[len("--file="):]
             elif arg in ("--apply",):
                 apply_now = True
+            elif arg in ("--merge",):
+                merge = True
+            elif arg in ("--move-uncategorized",):
+                move_uncat = True
             elif not arg.startswith("-"):
                 intent_parts.append(arg)
             i += 1
 
         # Re-join intent (handles both quoted and unquoted multi-word)
         intent = " ".join(intent_parts).strip('"\'')
+        run_extra = ", move_uncategorized=true" if move_uncat else ""
 
         if taxonomy_file:
             # Skip taxonomy generation — use existing file
@@ -596,7 +603,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             msg = (
                 f"Run the vault organizer using the existing taxonomy file {json.dumps(taxonomy_file)}.\n"
                 f"Call `silica_run_organizer` with taxonomy_path={json.dumps(taxonomy_file)}{scope_str}, "
-                f"dry_run={dry}.\n"
+                f"dry_run={dry}{run_extra}.\n"
             )
             if not apply_now:
                 msg += (
@@ -605,15 +612,16 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 )
         elif intent:
             scope_str = f", scope={json.dumps(scope)}" if scope else ""
+            merge_str = ", merge=true" if merge else ""
             dry_note = (
-                "Then call `silica_run_organizer` with dry_run=true to preview the moves. "
+                f"Then call `silica_run_organizer` with dry_run=true{run_extra} to preview the moves. "
                 "Show the plan to the user and ask for confirmation before executing."
             ) if not apply_now else (
-                "Then call `silica_run_organizer` with dry_run=false to execute the moves."
+                f"Then call `silica_run_organizer` with dry_run=false{run_extra} to execute the moves."
             )
             msg = (
                 f"Organize the vault based on the user's intent: {json.dumps(intent)}.\n"
-                f"Step 1: Call `silica_generate_taxonomy` with user_intent={json.dumps(intent)}{scope_str}.\n"
+                f"Step 1: Call `silica_generate_taxonomy` with user_intent={json.dumps(intent)}{scope_str}{merge_str}.\n"
                 f"Step 2: Show the generated taxonomy to the user and ask if it looks correct.\n"
                 f"Step 3: {dry_note}"
             )

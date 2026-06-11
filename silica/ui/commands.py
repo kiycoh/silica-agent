@@ -38,10 +38,11 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/organize",
         group="workflow",
-        usage='"<intent>" [--scope=FOLDER] [--file=taxonomy.yaml] [--apply]',
+        usage='"<intent>" [--scope=FOLDER] [--file=taxonomy.yaml] [--merge] [--move-uncategorized] [--apply]',
         summary="classify and reorganize vault notes according to a taxonomy",
         examples=(
             '/organize "put AI notes in Concepts/AI, cooking notes in Life"',
+            '/organize "archive Acme docs under Clients/Acme" --merge',
             "/organize --file=_silica/taxonomy.yaml --apply",
             "/organize --scope=Inbox",
         ),
@@ -192,7 +193,7 @@ def render_help() -> None:
     from silica.ui.style import GROUP_STYLE, command_table
 
     CONSOLE.print()
-    CONSOLE.print("  [bold]Comandi silica[/]")
+    CONSOLE.print("  [bold]silica commands[/]")
     CONSOLE.print()
 
     workflow = [c for c in COMMANDS if c.group == "workflow"]
@@ -204,12 +205,12 @@ def render_help() -> None:
     CONSOLE.print()
     CONSOLE.print()
 
-    CONSOLE.print(f"  [bold {GROUP_STYLE['direct']}]Diretti[/]  [dim]· immediati, senza LLM[/]")
+    CONSOLE.print(f"  [bold {GROUP_STYLE['direct']}]Direct[/]  [dim]· immediate, no LLM[/]")
     CONSOLE.print(Padding(command_table(direct, name_style=f"bold {GROUP_STYLE['direct']}"), (0, 0, 0, 4)))
     CONSOLE.print()
     CONSOLE.print()
 
     sys_line = "  ·  ".join(c.name for c in system)
-    CONSOLE.print(f"  [bold {GROUP_STYLE['system']}]Sistema[/]")
+    CONSOLE.print(f"  [bold {GROUP_STYLE['system']}]System[/]")
     CONSOLE.print(f"    [dim]{sys_line}[/]")
     CONSOLE.print()

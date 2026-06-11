@@ -117,8 +117,8 @@ def test_render_help_contains_all_group_headers_and_commands():
     output = buf.getvalue()
 
     assert "Workflow" in output
-    assert "Diretti" in output
-    assert "Sistema" in output
+    assert "Direct" in output
+    assert "System" in output
     for cmd in COMMANDS:
         assert cmd.name in output, f"{cmd.name} missing from render_help() output"
 

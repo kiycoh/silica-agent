@@ -14,7 +14,7 @@ class ToolCompleteEvent:
     name: str
     args: dict[str, Any]
     call_id: str
-    result: str          # già stringa, come da Tool.run()
+    result: str          # always a string, as returned by Tool.run()
     duration_s: float
     iteration: int
 
