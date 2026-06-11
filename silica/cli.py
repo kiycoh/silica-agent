@@ -24,6 +24,7 @@ import silica.tools.atomic  # noqa: F401
 import silica.tools.composed  # noqa: F401
 import silica.tools.wrapped  # noqa: F401
 import silica.tools.codedocs_tool  # noqa: F401
+import silica.tools.delegate_tool  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +292,29 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         CONSOLE.print("  Run [bold]/document <path>[/] to regenerate, or edit and re-badge.")
         return True
 
+    if cmd == "/plans":
+        from pathlib import Path
+
+        from rich.markup import escape
+
+        from silica.kernel import plans as plans_mod
+        if not CONFIG.vault_path:
+            CONSOLE.print("  No vault configured; /plans needs a docs/silica vault.")
+            return True
+        vault = Path(CONFIG.vault_path)
+        counts = plans_mod.status_counts(vault)
+        if not counts:
+            CONSOLE.print("  No plans found under plans/.")
+            return True
+        summary = ", ".join(f"[bold]{n}[/] {s}" for s, n in sorted(counts.items()))
+        CONSOLE.print(f"  Plans: {summary}")
+        for note_path, data in plans_mod.iter_plan_notes(vault):
+            status = str(data.get("status") or "?").strip()
+            # escape() keeps the literal [status] bracket from being parsed as
+            # rich markup (otherwise [todo] is swallowed as an unknown tag).
+            CONSOLE.print(f"    {escape(f'[{status}] {note_path.stem}')}")
+        return True
+
     if cmd == "/document":
         positional = [p for p in parts[1:] if not p.startswith("-")]
         target = " ".join(positional)
@@ -525,7 +549,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
         progress.save()
 
-        from silica.agent.progress import emit_batch_event
+        from silica.ui.renderer import emit_batch_event
         from silica.agent.events import BatchRunStartEvent
         emit_batch_event(BatchRunStartEvent(run_id=run_id, kind=cmd.strip("/"), label=folder or "vault", total=len(chunks)))
 
@@ -670,7 +694,7 @@ def main():
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     _update_context_tokens(messages)
 
-    from silica.agent.progress import make_progress_callback
+    from silica.ui.renderer import make_progress_callback
     callback = make_progress_callback()
 
     while True:

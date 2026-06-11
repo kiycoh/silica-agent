@@ -2,7 +2,7 @@ from unittest.mock import patch, MagicMock, PropertyMock
 import pytest
 from silica.config import CONFIG
 from silica.cli import _handle_slash_command
-from silica.agent.progress import make_progress_callback, _redact, _cap
+from silica.ui.renderer import make_progress_callback, _redact, _cap
 from silica.agent.events import ToolStartEvent, ToolCompleteEvent, ToolErrorEvent
 from silica.agent.loop import run_agent
 from silica.agent.llm import LLMResponse, ToolCall
@@ -164,7 +164,7 @@ def test_callback_modes_output(capsys):
 
 def test_reasoning_event_renders_when_enabled(capsys):
     from silica.agent.events import ReasoningEvent
-    from silica.agent.progress import make_progress_callback
+    from silica.ui.renderer import make_progress_callback
     orig_thinking = CONFIG.show_thinking
     orig_tool_progress = CONFIG.tool_progress
     orig_verbose = CONFIG.verbose
@@ -334,7 +334,7 @@ def test_thinking_slash_toggle():
 
 
 def test_stage_track_centers_on_running_phase():
-    from silica.agent.progress import _stage_track
+    from silica.ui.renderer import _stage_track
     phases = [
         {"phase": "recon",      "status": "done",    "elapsed": 1.0},
         {"phase": "cross-dedup","status": "done",    "elapsed": 0.5},
@@ -356,7 +356,7 @@ def test_stage_track_centers_on_running_phase():
 
 
 def test_stage_track_empty_shows_pending_from_start():
-    from silica.agent.progress import _stage_track
+    from silica.ui.renderer import _stage_track
     track = _stage_track([], console_width=120)
     plain = track.plain
     # No running phase → center=0, window starts at 0, no leading ellipsis
@@ -366,7 +366,7 @@ def test_stage_track_empty_shows_pending_from_start():
 
 
 def test_stage_track_failed_phase_shown():
-    from silica.agent.progress import _stage_track
+    from silica.ui.renderer import _stage_track
     phases = [
         {"phase": "recon",      "status": "done",   "elapsed": 1.0},
         {"phase": "cross-dedup","status": "failed",  "elapsed": 0.2},
@@ -390,7 +390,7 @@ def _make_mock_batch(kind: str = "refine") -> dict:
 def test_batch_micro_phase_tracked_from_work_feedback():
     import silica.agent.bus as bus_mod
     from silica.agent.events import WorkFeedbackEvent
-    from silica.agent.progress import make_progress_callback
+    from silica.ui.renderer import make_progress_callback
 
     orig_bus = bus_mod.BUS
     bus_mod.BUS = bus_mod.EventBus()
@@ -410,7 +410,7 @@ def test_batch_micro_phase_tracked_from_work_feedback():
 def test_batch_micro_phase_ignored_for_wrong_kind():
     import silica.agent.bus as bus_mod
     from silica.agent.events import WorkFeedbackEvent
-    from silica.agent.progress import make_progress_callback
+    from silica.ui.renderer import make_progress_callback
 
     orig_bus = bus_mod.BUS
     bus_mod.BUS = bus_mod.EventBus()
@@ -431,7 +431,7 @@ def test_batch_micro_phase_resets_on_ledger_next_complete():
     import json
     import silica.agent.bus as bus_mod
     from silica.agent.events import WorkFeedbackEvent, ToolCompleteEvent
-    from silica.agent.progress import make_progress_callback
+    from silica.ui.renderer import make_progress_callback
 
     orig_bus = bus_mod.BUS
     orig_mode = CONFIG.tool_progress

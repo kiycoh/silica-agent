@@ -172,7 +172,7 @@ def test_interrupt_mid_drain_stops_workers_and_renderer():
     3. Leave the renderer in a closeable state (Live == None after close()).
     """
     import threading
-    from silica.agent.progress import make_progress_callback
+    from silica.ui.renderer import make_progress_callback
 
     cfg = SilicaConfig()
     cfg.subagents_enabled = True
