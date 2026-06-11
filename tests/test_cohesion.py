@@ -1,8 +1,24 @@
 """Tests for the cohesion_pass sibling-linking step."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from silica.kernel.cohesion import cohesion_pass, _content_tokens
+
+_EXAMPLE_OVERLAYS = (
+    Path(__file__).resolve().parent.parent / "examples" / "overlays"
+)
+
+
+@pytest.fixture
+def it_overlay():
+    """Load the Italian-academic example overlay."""
+    path = _EXAMPLE_OVERLAYS / "it-academic.yaml"
+    if not path.exists():
+        pytest.skip(f"examples overlay not found: {path}")
+    from silica.kernel.overlay import load_overlay
+    return load_overlay(path)
 
 
 # ---------------------------------------------------------------------------
@@ -22,16 +38,48 @@ def test_tokens_empty_string():
     assert _content_tokens("") == frozenset()
 
 
-def test_tokens_only_stopwords():
-    assert _content_tokens("di e in con su") == frozenset()
+def test_tokens_only_stopwords(it_overlay):
+    """Italian function words are filtered by the it-academic overlay."""
+    assert _content_tokens("di e in con su", overlay=it_overlay) == frozenset()
 
 
 def test_tokens_min_length():
     # Single-character words are excluded (< 2 chars)
-    tokens = _content_tokens("IA e ML")
+    tokens = _content_tokens("IA e DL")
     assert "e" not in tokens
     assert "ia" in tokens
-    assert "ml" in tokens
+    assert "dl" in tokens
+
+
+def test_tokens_default_overlay_filters_english_structural():
+    """DEFAULT overlay filters 'introduction' and 'the' but keeps a domain word."""
+    tokens = _content_tokens("Introduction to Backpropagation")
+    assert "introduction" not in tokens
+    assert "the" not in tokens
+    assert "backpropagation" in tokens
+
+
+def test_tokens_it_overlay_filters_italian_function_and_structural(it_overlay):
+    """it-academic overlay filters 'sistemi' and 'di' but keeps domain word 'reti'."""
+    tokens = _content_tokens("Sistemi di Reti", overlay=it_overlay)
+    assert "sistemi" not in tokens
+    assert "di" not in tokens
+    assert "reti" in tokens
+
+
+def test_tokens_roman_numerals_filtered_regardless_of_overlay():
+    """Roman numeral prefixes are filtered by _STRUCTURAL_TOKENS independent of overlay."""
+    from silica.kernel.overlay import DEFAULT_OVERLAY
+    tokens_default = _content_tokens("III Chapter Backpropagation", overlay=DEFAULT_OVERLAY)
+    assert "iii" not in tokens_default
+    assert "backpropagation" in tokens_default
+
+    if (_EXAMPLE_OVERLAYS / "it-academic.yaml").exists():
+        from silica.kernel.overlay import load_overlay
+        it_ov = load_overlay(_EXAMPLE_OVERLAYS / "it-academic.yaml")
+        tokens_it = _content_tokens("IV Reti Neurali", overlay=it_ov)
+        assert "iv" not in tokens_it
+        assert "reti" in tokens_it
 
 
 # ---------------------------------------------------------------------------
