@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from rich.console import Group
 from rich.padding import Padding
 from rich.table import Table
@@ -32,7 +34,7 @@ def print_home() -> None:
     from silica.ui.commands import COMMANDS
     from silica.ui.style import command_table
 
-    vault = CONFIG.vault_name or "—"
+    vault = Path(CONFIG.vault_path).name if CONFIG.vault_path else (CONFIG.vault_name or "—")
     model_slug = (CONFIG.model or "(not configured)").rsplit("/", 1)[-1]
     worker_model = CONFIG.worker_model or CONFIG.model or "(not configured)"
     worker_slug = worker_model.rsplit("/", 1)[-1]

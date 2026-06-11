@@ -60,6 +60,15 @@ def get_driver() -> ObsidianDriver:
     return _driver
 
 
+def reset_driver() -> None:
+    """Drop the cached driver so the next get_driver() rebuilds against the
+    current CONFIG.vault_path / CONFIG.backend. Used by the runtime /vault
+    switch."""
+    global _driver
+    with _driver_lock:
+        _driver = None
+
+
 # For convenience: DRIVER can be imported directly
 # But since it's lazy, access via get_driver() in hot paths
 class _DriverProxy:

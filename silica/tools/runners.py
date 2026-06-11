@@ -308,7 +308,7 @@ class GenerateTaxonomyArgs(BaseModel):
         default="",
         description=(
             "Vault-relative path where the taxonomy YAML should be written. "
-            "Defaults to '_silica/taxonomy.yaml' inside the configured vault."
+            "Defaults to 'taxonomy.yaml' inside the configured vault."
         ),
     )
     merge: bool = Field(
@@ -327,7 +327,7 @@ def silica_generate_taxonomy(
 
     Uses the LLM to translate the user's description into a structured
     FolderRule list, validates it with Pydantic, and writes it to disk
-    at _silica/taxonomy.yaml (or the specified path).
+    at taxonomy.yaml (or the specified path).
 
     With merge=True the existing taxonomy (if any) is treated as standing
     directives: the LLM preserves its rules and only adds/updates what the
@@ -449,7 +449,7 @@ def silica_generate_taxonomy(
 class RunOrganizerArgs(BaseModel):
     taxonomy_path: str = Field(
         default="",
-        description="Path to the taxonomy YAML file. Defaults to '_silica/taxonomy.yaml' in the vault.",
+        description="Path to the taxonomy YAML file. Defaults to 'taxonomy.yaml' in the vault.",
     )
     scope: str = Field(
         default="",
@@ -507,7 +507,7 @@ def silica_run_organizer(
         return {
             "error": (
                 "Taxonomy has no rules. Run silica_generate_taxonomy first or "
-                "create _silica/taxonomy.yaml manually."
+                "create taxonomy.yaml manually."
             )
         }
 

@@ -11,6 +11,12 @@ from prompt_toolkit.formatted_text import HTML
 from silica.config import CONFIG
 from silica.ui.commands import command_names, COMMANDS
 
+
+def _vault_display() -> str:
+    if CONFIG.vault_path:
+        return Path(CONFIG.vault_path).name
+    return CONFIG.vault_name or "—"
+
 SLASH_COMMANDS = list(command_names())
 
 _METER_WIDTH = 10
@@ -34,7 +40,7 @@ def _context_meter() -> str:
 
 
 def bottom_toolbar() -> HTML:
-    vault = CONFIG.vault_name or "—"
+    vault = _vault_display()
     think = "thinking:on" if CONFIG.show_thinking else "thinking:off"
     progress = f"progress:{CONFIG.tool_progress}"
     meter = _context_meter()
@@ -82,6 +88,7 @@ def build_session() -> PromptSession:
 
 
 def prompt_text() -> HTML:
-    if CONFIG.vault_name:
-        return HTML(f"<ansicyan><b>silica</b></ansicyan> <ansigray>[{CONFIG.vault_name}]</ansigray> › ")
+    vault = _vault_display()
+    if vault != "—":
+        return HTML(f"<ansicyan><b>silica</b></ansicyan> <ansigray>[{vault}]</ansigray> › ")
     return HTML("<ansicyan><b>silica</b></ansicyan> › ")
