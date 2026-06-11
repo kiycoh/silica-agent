@@ -8,7 +8,7 @@ version = "0.2.1"
 description = "Obsidian-native agentic CLI — vault curation with quality gates"
 readme = "SILICA.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 dependencies = [
   "litellm",
   "pydantic>=2.0",
