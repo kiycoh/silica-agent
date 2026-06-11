@@ -6,7 +6,7 @@ each binding a vault folder to a set of themes/keywords/concepts.
 The LLM generates this file from a natural-language prompt; the kernel
 validates and applies it deterministically via Pydantic.
 
-Default path: {vault_path}/_silica/taxonomy.yaml
+Default path: {vault_path}/taxonomy.yaml (legacy fallback: {vault_path}/_silica/taxonomy.yaml)
 """
 from __future__ import annotations
 
@@ -160,16 +160,20 @@ class Taxonomy(BaseModel):
 # Default taxonomy path helper
 # ---------------------------------------------------------------------------
 
-_DEFAULT_TAXONOMY_REL = "_silica/taxonomy.yaml"
+_DEFAULT_TAXONOMY_REL = "taxonomy.yaml"
+_LEGACY_TAXONOMY_REL = "_silica/taxonomy.yaml"
 
 
 def default_taxonomy_path() -> Path:
-    """Return the default taxonomy path inside the configured vault."""
+    """Default taxonomy path: vault root, with legacy _silica/ fallback when
+    only the old location exists."""
     from silica.config import CONFIG
-    vault = getattr(CONFIG, "vault_path", "") or ""
-    if vault:
-        return Path(vault) / _DEFAULT_TAXONOMY_REL
-    return Path.cwd() / _DEFAULT_TAXONOMY_REL
+    base = Path(getattr(CONFIG, "vault_path", "") or Path.cwd())
+    new = base / _DEFAULT_TAXONOMY_REL
+    legacy = base / _LEGACY_TAXONOMY_REL
+    if not new.exists() and legacy.exists():
+        return legacy
+    return new
 
 
 def load_taxonomy(path: str | Path | None = None) -> Taxonomy:

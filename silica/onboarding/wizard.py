@@ -59,10 +59,10 @@ def _run_wizard_inner(
 
     CONSOLE.print("\n  [bold]silica init[/] — interactive setup\n")
 
-    # 1. Vault — repo mode (docs/silica/) when inside a git repo, else explicit path.
+    # 1. Vault — repo mode (.silica/) when inside a git repo, else explicit path.
     use_repo_mode = False
     if repo_root is not None:
-        repo_vault = Path(repo_root) / "docs" / "silica"
+        repo_vault = Path(repo_root) / ".silica"
         state = "exists" if repo_vault.is_dir() else "will be created"
         answer = _ask(
             input_fn,

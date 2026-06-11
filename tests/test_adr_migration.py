@@ -11,7 +11,7 @@ def test_migrate_moves_adrs_and_leaves_tombstone(tmp_path):
 
     moved = migrate_adr_namespace(tmp_path)
 
-    new = tmp_path / "docs" / "silica" / "adr"
+    new = tmp_path / ".silica" / "adr"
     assert (new / "0006-curation.md").is_file()
     assert (new / "0009-zero-trust.md").is_file()
     assert sorted(moved) == ["adr/0006-curation.md", "adr/0009-zero-trust.md"]
@@ -29,7 +29,7 @@ def test_migrate_never_overwrites_existing_destination(tmp_path):
     old = tmp_path / "docs" / "adr"
     old.mkdir(parents=True)
     (old / "0006-curation.md").write_text("# new source\n", encoding="utf-8")
-    new = tmp_path / "docs" / "silica" / "adr"
+    new = tmp_path / ".silica" / "adr"
     new.mkdir(parents=True)
     (new / "0006-curation.md").write_text("# existing dest\n", encoding="utf-8")
 

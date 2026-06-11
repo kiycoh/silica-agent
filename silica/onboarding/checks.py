@@ -84,11 +84,11 @@ def check_vault(config: SilicaConfig) -> CheckResult:
             )
         return CheckResult("vault", "ok", vault)
     root = gitstate.find_repo_root(Path.cwd())
-    if root is not None and (Path(root) / "docs" / "silica").is_dir():
-        return CheckResult("vault", "ok", f"repo mode → {Path(root) / 'docs' / 'silica'}")
+    if root is not None and (Path(root) / ".silica").is_dir():
+        return CheckResult("vault", "ok", f"repo mode → {Path(root) / '.silica'}")
     return CheckResult(
         "vault", "warn",
-        "SILICA_VAULT not set and no docs/silica/ in this repo",
+        "SILICA_VAULT not set and no .silica/ in this repo",
         "run `silica init`",
     )
 

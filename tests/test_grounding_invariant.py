@@ -24,7 +24,7 @@ def _commit(root: Path, rel: str, text: str, msg: str) -> str:
 def test_grounded_concept_note_is_stale_tracked(tmp_path):
     _init_repo(tmp_path)
     ref0 = _commit(tmp_path, "silica/auth.py", "v1\n", "c1")
-    vault = tmp_path / "docs" / "silica"
+    vault = tmp_path / ".silica"
     concept = vault / "concepts"
     concept.mkdir(parents=True)
     (concept / "Auth.md").write_text(

@@ -97,7 +97,7 @@ class TestRunWizard:
     def test_repo_mode_skips_vault_key(self, monkeypatch, tmp_path):
         import silica.onboarding.wizard as wizard
 
-        (tmp_path / "docs" / "silica").mkdir(parents=True)
+        (tmp_path / ".silica").mkdir(parents=True)
         env_path = tmp_path / ".env"
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)

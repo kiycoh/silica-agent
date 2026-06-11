@@ -8,16 +8,16 @@ def _init_repo(path: Path) -> None:
     subprocess.run(["git", "init", "-q"], cwd=path, check=True)
 
 
-def test_repo_mode_picks_docs_silica_when_present(tmp_path):
+def test_repo_mode_picks_dot_silica_when_present(tmp_path):
     _init_repo(tmp_path)
-    (tmp_path / "docs" / "silica").mkdir(parents=True)
+    (tmp_path / ".silica").mkdir(parents=True)
     result = resolve_repo_mode_vault(cwd=tmp_path, vault_env="", docs_exists_ok=True)
-    assert Path(result).resolve() == (tmp_path / "docs" / "silica").resolve()
+    assert Path(result).resolve() == (tmp_path / ".silica").resolve()
 
 
 def test_repo_mode_skipped_when_vault_env_set(tmp_path):
     _init_repo(tmp_path)
-    (tmp_path / "docs" / "silica").mkdir(parents=True)
+    (tmp_path / ".silica").mkdir(parents=True)
     result = resolve_repo_mode_vault(cwd=tmp_path, vault_env="/explicit/vault", docs_exists_ok=True)
     assert result is None
 

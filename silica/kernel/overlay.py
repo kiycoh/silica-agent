@@ -3,7 +3,7 @@
 ADR-0005: domain knowledge lives in overlays, not in kernel conditionals.
 The default overlay is English-generic. Per-domain overlays are YAML files
 that extend or replace it; the active overlay for a vault lives at
-  <vault>/_silica/overlay.yaml
+  <vault>/overlay.yaml  (legacy fallback: <vault>/_silica/overlay.yaml)
 
 See also: examples/overlays/it-academic.yaml for an Italian-academic overlay.
 """
@@ -160,7 +160,8 @@ def load_overlay(path: Path) -> DomainOverlay:
 # get_active_overlay — vault-scoped, cached
 # ---------------------------------------------------------------------------
 
-_OVERLAY_REL = "_silica/overlay.yaml"
+_OVERLAY_REL = "overlay.yaml"
+_LEGACY_OVERLAY_REL = "_silica/overlay.yaml"
 _cached_overlay: DomainOverlay | None = None
 
 
@@ -174,8 +175,9 @@ def get_active_overlay() -> DomainOverlay:
     """Return the active overlay for the current vault, loading and caching it once.
 
     Resolution order:
-      1. ``<vault>/_silica/overlay.yaml`` (if vault_path is set and file exists)
-      2. DEFAULT_OVERLAY
+      1. ``<vault>/overlay.yaml`` (if vault_path is set and file exists)
+      2. Legacy ``<vault>/_silica/overlay.yaml`` (if vault_path is set and file exists)
+      3. DEFAULT_OVERLAY
 
     Call ``reset_overlay_cache()`` to force a reload (e.g. after config change or in tests).
     """
@@ -185,9 +187,13 @@ def get_active_overlay() -> DomainOverlay:
 
     from silica.config import CONFIG
     vault = getattr(CONFIG, "vault_path", "") or ""
-    overlay_path = Path(vault) / _OVERLAY_REL if vault else None
+    overlay_path = None
+    if vault:
+        new = Path(vault) / _OVERLAY_REL
+        legacy = Path(vault) / _LEGACY_OVERLAY_REL
+        overlay_path = new if new.exists() else (legacy if legacy.exists() else None)
 
-    if overlay_path and overlay_path.exists():
+    if overlay_path is not None:
         _cached_overlay = load_overlay(overlay_path)
     else:
         _cached_overlay = DEFAULT_OVERLAY

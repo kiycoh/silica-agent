@@ -160,7 +160,7 @@ CLAUDE.md
 /memory
 
 # Vault data (personal)
-_silica/
+.silica/
 
 # DB
 ruvector.db
