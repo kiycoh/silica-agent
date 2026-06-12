@@ -102,10 +102,20 @@ class TestCheckVault:
         assert r.status == "warn"
         assert "Inbox" in r.detail
 
-    def test_unset_no_repo_warns_with_init_hint(self, monkeypatch):
+    def test_unset_no_repo_fs_backend_fails(self, monkeypatch):
+        """fs + no vault_path and no repo → fail with actionable hint."""
         import silica.onboarding.checks as checks
         monkeypatch.setattr(checks.gitstate, "find_repo_root", lambda p: None)
-        r = checks.check_vault(_cfg(vault_path=""))
+        r = checks.check_vault(_cfg(vault_path="", backend="fs"))
+        assert r.status == "fail"
+        assert "SILICA_VAULT" in r.hint
+        assert "silica init" in r.hint
+
+    def test_unset_no_repo_cli_backend_warns(self, monkeypatch):
+        """cli + no vault_path and no repo → warn (cli can operate via vault_name)."""
+        import silica.onboarding.checks as checks
+        monkeypatch.setattr(checks.gitstate, "find_repo_root", lambda p: None)
+        r = checks.check_vault(_cfg(vault_path="", backend="cli"))
         assert r.status == "warn"
         assert "silica init" in r.hint
 
@@ -136,9 +146,25 @@ class TestCheckVault:
 
 
 class TestCheckObsidianBackend:
-    def test_fs_backend_ok_headless(self):
-        from silica.onboarding.checks import check_obsidian_backend
-        r = check_obsidian_backend(_cfg(backend="fs"))
+    def test_fs_backend_ok_with_vault_path(self):
+        """fs + explicit vault_path → ok, filesystem-native."""
+        import silica.onboarding.checks as checks
+        r = checks.check_obsidian_backend(_cfg(backend="fs", vault_path="/some/vault"))
+        assert r.status == "ok"
+        assert "filesystem-native" in r.detail
+        assert "headless" in r.detail
+
+    def test_fs_backend_ok_no_vault(self):
+        """fs + no vault_path → still ok (vault config is check_vault's concern)."""
+        import silica.onboarding.checks as checks
+        r = checks.check_obsidian_backend(_cfg(backend="fs", vault_path=""))
+        assert r.status == "ok"
+        assert "filesystem-native" in r.detail
+
+    def test_fs_backend_ok_unconditional(self):
+        """fs backend always returns ok regardless of vault/repo state."""
+        import silica.onboarding.checks as checks
+        r = checks.check_obsidian_backend(_cfg(backend="fs"))
         assert r.status == "ok"
         assert "headless" in r.detail
 

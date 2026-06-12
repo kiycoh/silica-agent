@@ -2,8 +2,10 @@
 
 The backend is selected at import time based on CONFIG.backend (from config.py),
 which reads the SILICA_BACKEND environment variable:
-  - "cli" (default): ObsidianCLIBackend — wraps the official Obsidian CLI
-  - "fs": ObsidianFSBackend — direct filesystem access for headless/oracle mode
+  - "fs" (default): ObsidianFSBackend — direct filesystem access, headless, no Obsidian required
+  - "cli": ObsidianCLIBackend — wraps the official Obsidian CLI (adds version-history
+    rollback for patch ops, live metadata-cache reads, and user link-format preference
+    in autolink; requires the Obsidian desktop app to be running)
 
 Usage:
     from silica.driver import DRIVER

@@ -86,6 +86,12 @@ def check_vault(config: SilicaConfig) -> CheckResult:
     root = gitstate.find_repo_root(Path.cwd())
     if root is not None and (Path(root) / ".silica").is_dir():
         return CheckResult("vault", "ok", f"repo mode → {Path(root) / '.silica'}")
+    if config.backend == "fs":
+        return CheckResult(
+            "vault", "fail",
+            "SILICA_VAULT not set and no .silica/ in this repo",
+            "set SILICA_VAULT=/path/to/vault in .env, or run `silica init`",
+        )
     return CheckResult(
         "vault", "warn",
         "SILICA_VAULT not set and no .silica/ in this repo",
@@ -94,11 +100,14 @@ def check_vault(config: SilicaConfig) -> CheckResult:
 
 
 def check_obsidian_backend(config: SilicaConfig) -> CheckResult:
-    if config.backend != "cli":
+    if config.backend == "fs":
+        # fs is the default: filesystem-native, no Obsidian required.
+        # Vault configuration is check_vault's responsibility — report ok here.
         return CheckResult(
             "obsidian backend", "ok",
-            f"backend={config.backend} (headless — Obsidian not required)",
+            "filesystem-native (headless — Obsidian not required)",
         )
+    # backend == "cli": Obsidian desktop is an opt-in enhancement.
     if shutil.which("obsidian") is None:
         return CheckResult(
             "obsidian backend", "fail",

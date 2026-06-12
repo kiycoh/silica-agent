@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 from pathlib import Path
 from typing import Callable
 
@@ -81,14 +80,15 @@ def _run_wizard_inner(
                 break
             CONSOLE.print("  [red]Not a directory — try again.[/]")
 
-    # 2. Backend — suggest cli only when the obsidian binary is present.
-    default_backend = "cli" if shutil.which("obsidian") else "fs"
+    # 2. Backend — fs is the default (filesystem-native, headless, no Obsidian required).
+    # cli is an opt-in enhancement: adds version-history rollback, live metadata-cache
+    # reads, and user link-format preference in autolink (requires Obsidian desktop).
     backend = ""
     while backend not in ("cli", "fs"):
         backend = _ask(
             input_fn,
-            "Backend — cli (Obsidian desktop, graph-safe) or fs (headless)",
-            default_backend,
+            "Backend — fs (default, headless) or cli (Obsidian desktop, adds rollback + live cache)",
+            "fs",
         )
     updates["SILICA_BACKEND"] = backend
 

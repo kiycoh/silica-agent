@@ -53,14 +53,13 @@ class TestRunWizard:
         env_path.write_text("# keep me\nFOO=bar\n")
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
-        monkeypatch.setattr(wizard.shutil, "which", lambda name: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         # os.environ.update inside the wizard must not leak into the test env
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
             str(vault),    # vault path (no repo detected)
-            "",            # backend → default fs (obsidian not on PATH)
+            "",            # backend → default fs
             "",            # provider → default lmstudio
             "test-model",  # model id
             "skip",        # embeddings → skip
@@ -86,7 +85,6 @@ class TestRunWizard:
         env_path = tmp_path / ".env"
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
-        monkeypatch.setattr(wizard.shutil, "which", lambda name: None)
 
         answers = [str(vault), "", "", "test-model", "skip", "n"]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -101,7 +99,6 @@ class TestRunWizard:
         env_path = tmp_path / ".env"
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
-        monkeypatch.setattr(wizard.shutil, "which", lambda name: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
@@ -123,7 +120,6 @@ class TestRunWizard:
 
         env_path = tmp_path / ".env"
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
-        monkeypatch.setattr(wizard.shutil, "which", lambda name: None)
 
         vault = tmp_path / "vault"
         vault.mkdir()

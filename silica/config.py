@@ -105,9 +105,10 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_VAULT_NAME", "")
     )
 
-    # Driver backend: "cli" (default, requires Obsidian desktop) or "fs" (headless).
+    # Driver backend: "fs" (default, filesystem-native, headless) or "cli" (Obsidian
+    # desktop via CDP — adds version-history rollback and live metadata-cache reads).
     backend: str = field(
-        default_factory=lambda: os.getenv("SILICA_BACKEND", "cli")
+        default_factory=lambda: os.getenv("SILICA_BACKEND", "fs")
     )
 
     # Inbox folder inside the vault — used to archive and blacklist staging files.
