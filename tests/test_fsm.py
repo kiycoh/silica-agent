@@ -1,6 +1,6 @@
 from unittest.mock import patch, MagicMock, call
 from silica.router.orchestrator import InjectorFSM, InjectorState
-from silica.tools.registry import TOOLS
+from silica.tools import TOOLS
 
 def test_injector_fsm_initialization():
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
@@ -604,6 +604,8 @@ def test_collision_low_similarity_keeps_for_distillation():
     assert concepts_left[0]["name"] == "Quantum Entanglement"
 
 
+
+
 def test_collision_borderline_deferred():
     """τ_low < score < τ_high → concept deferred, removed from chunk, deferred store called."""
     fsm = _make_fsm_at_collision([{"name": "Backprop", "excerpt": "Backpropagation intro."}])
@@ -723,7 +725,7 @@ def test_worker_read_only(mock_get_provider, mock_call_llm):
     assert kwargs.get("tools") is None
 
     # Test 2: Verify that build_worker_toolset excludes all mutation / wrapped / composed tools
-    from silica.workers import build_worker_toolset, WORKER_BLOCKED_CLASSES, BLOCKED_TOOL_NAMES
+    from silica.capabilities.runtime import build_worker_toolset, WORKER_BLOCKED_CLASSES, BLOCKED_TOOL_NAMES
     
     worker_tools = build_worker_toolset()
     

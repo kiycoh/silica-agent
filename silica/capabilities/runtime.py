@@ -13,9 +13,36 @@ from typing import Any
 from silica.agent.loop import run_agent
 from silica.agent.constraints import AgentConstraints
 from silica.agent.events import ToolCompleteEvent
-from silica.workers.profile import WorkerProfile, WorkerTask, WorkerResult, PROFILES
+from silica.capabilities.profile import WorkerProfile, WorkerTask, WorkerResult, PROFILES
+from silica.tools import TOOLS, Tool
 
 logger = logging.getLogger(__name__)
+
+WORKER_BLOCKED_CLASSES = frozenset({"composed", "wrapped"})
+BLOCKED_TOOL_NAMES = frozenset({
+    "silica_run_injector",
+    "silica_bulk_write",
+    "silica_move",
+    "silica_delete",
+    "silica_snapshot",
+    "silica_restore",
+    "silica_cleanup",
+})
+
+
+def build_worker_toolset() -> dict[str, Tool]:
+    """Filters the global tool registry to return only read-only atomic tools.
+
+    Excludes composed and wrapped classes, and explicitly blocks mutation tools.
+    """
+    allowed_tools = {}
+    for name, tool in TOOLS.items():
+        if tool.cls in WORKER_BLOCKED_CLASSES:
+            continue
+        if name in BLOCKED_TOOL_NAMES:
+            continue
+        allowed_tools[name] = tool
+    return allowed_tools
 
 
 def _render_goal(task: WorkerTask) -> str:

@@ -29,7 +29,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "mypy>=1.10"]
+dev = ["pytest>=8.0", "mypy>=1.10", "import-linter>=2.0"]
 
 [project.scripts]
 silica = "silica.cli:main"
@@ -39,6 +39,48 @@ include = ["silica", "silica.*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.importlinter]
+root_packages = ["silica"]
+
+[[tool.importlinter.contracts]]
+name = "capabilities (procedural memory) does not import the decision cycle"
+type = "forbidden"
+source_modules = ["silica.capabilities"]
+forbidden_modules = ["silica.router"]
+# Direct imports only: the transitive path via agent.commit -> tools.composed
+# -> tools.runners -> router predates this contract and is a separate finding.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "capabilities internals are private — consumers go through the package root"
+type = "forbidden"
+source_modules = [
+  "silica.agent",
+  "silica.router",
+  "silica.tools",
+  "silica.kernel",
+  "silica.planner",
+  "silica.driver",
+  "silica.sources",
+  "silica.ui",
+  "silica.onboarding",
+  "silica.cli",
+  "silica.config",
+]
+forbidden_modules = [
+  "silica.capabilities._base",
+  "silica.capabilities.dedup",
+  "silica.capabilities.enrich",
+  "silica.capabilities.orphan",
+  "silica.capabilities.refine",
+  "silica.capabilities.profile",
+  "silica.capabilities.profiles_builtin",
+  "silica.capabilities.runtime",
+]
+# Direct imports only: reaching internals through the package root is the
+# sanctioned path (the root re-exports the seam).
+allow_indirect_imports = true
 
 [tool.mypy]
 python_version = "3.11"
