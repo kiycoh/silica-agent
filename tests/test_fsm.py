@@ -837,16 +837,28 @@ def test_worker_read_only(mock_get_provider, mock_call_llm):
     _, kwargs = mock_call_llm.call_args
     assert kwargs.get("tools") is None
 
-    # Test 2: Verify that build_worker_toolset excludes all mutation / wrapped / composed tools
-    from silica.capabilities.runtime import build_worker_toolset, WORKER_BLOCKED_CLASSES, BLOCKED_TOOL_NAMES
-    
-    worker_tools = build_worker_toolset()
-    
-    for name, tool in worker_tools.items():
-        assert tool.cls not in WORKER_BLOCKED_CLASSES
-        assert name not in BLOCKED_TOOL_NAMES
-        # Ensure only atomic read-only operations are returned
-        assert tool.cls == "atomic"
+    # Test 2: Verify that every builtin worker profile allowlists only atomic
+    # read-only tools (the profile.tools tuple is the single enforcement seam:
+    # AgentConstraints receives it verbatim in run_worker).
+    from silica.capabilities.profile import PROFILES
+    import silica.tools.atomic  # noqa: F401 — populates TOOLS via @tool decorators
+    from silica.tools import TOOLS
+
+    mutation_tools = {
+        "silica_run_injector",
+        "silica_bulk_write",
+        "silica_move",
+        "silica_delete",
+        "silica_snapshot",
+        "silica_restore",
+        "silica_cleanup",
+    }
+    assert PROFILES, "expected builtin worker profiles to be registered"
+    for profile_name, profile in PROFILES.items():
+        for name in profile.tools:
+            assert name in TOOLS, f"profile '{profile_name}' lists unknown tool '{name}'"
+            assert TOOLS[name].cls == "atomic", f"profile '{profile_name}' exposes non-atomic tool '{name}'"
+            assert name not in mutation_tools, f"profile '{profile_name}' exposes mutation tool '{name}'"
 
 
 @patch("silica.router.orchestrator.silica_validate_ops")
