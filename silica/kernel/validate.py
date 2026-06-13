@@ -271,6 +271,11 @@ def validate_operations(
             if not path_exists(path):
                 # If target note doesn't exist, overwrite degrades to write gracefully
                 op.op = OpType.write
+            elif op.base_content is None:
+                # Snapshot the current note so the write path can 3-way-detect
+                # a concurrent edit (charter UC6); the refiner snapshots at
+                # triage time, every other producer relies on this choke point.
+                op.base_content = DRIVER.read_note(path).content
 
             _resolve_parent(op, cleared_parents_out)
             validated_ops.append(op)
