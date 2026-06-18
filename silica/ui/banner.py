@@ -4,11 +4,11 @@ from art import text2art
 from rich.console import Group as RichGroup
 from rich.text import Text
 
+from silica import __version__ as _VERSION
 from silica.config import CONFIG
 from silica.ui.console import CONSOLE
 from silica.ui.theme import BRAND_CYAN, BRAND_INDIGO
 
-_VERSION = "0.2.1"
 _CAPTION = f"  [dim]v{_VERSION} · Your personal note curator agent[/]"
 
 
