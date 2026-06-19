@@ -26,6 +26,7 @@ def build_substrate(
     tau: float = 0.0,
     exclude: set[str] | None = None,
     cleared_parents: list[dict] | None = None,
+    hub_names: list[str] | None = None,
 ) -> str | None:
     """Return a formatted candidate list for the distiller context, or None.
 
@@ -105,9 +106,7 @@ def build_substrate(
             embed_store=store,
             cooccur_store=cooccur_store,
             k=k,
-        )
-        if not related:
-            return None
+        ) or []
 
         manifest_lower = {t.lower() for t in manifest_titles}
 
@@ -162,7 +161,32 @@ def build_substrate(
                 lines.append("## Forward-reference parents (create wikilinks, not new notes)")
                 lines.extend(fwd_lines)
 
-        return "\n".join(lines) if lines else None
+        # Vault vocabulary (spec 2026-06-12): existing terminology so the
+        # distiller reuses terms instead of coining synonyms. Independent of
+        # the related-notes leg: its failure only drops this section.
+        vocab_lines: list[str] = []
+        try:
+            vocab_store = cooccur_store or CooccurStore(lang=CONFIG.cooccurrence_lang)
+            stems = vocab_store.top_stems(20) if len(vocab_store) else []
+            if stems or hub_names:
+                vocab_lines.append("## Vault vocabulary")
+                vocab_lines.append(
+                    "Preferred existing terms (reuse these instead of coining synonyms):"
+                )
+                if stems:
+                    vocab_lines.append(", ".join(stems)[:600])  # hard token-budget cap
+                if hub_names:
+                    vocab_lines.append("Hub notes: " + ", ".join(sorted(set(hub_names))))
+        except Exception as _voc_e:
+            logger.debug("build_substrate: vocabulary failed (non-fatal): %s", _voc_e)
+            vocab_lines = []
+
+        sections: list[str] = []
+        if lines:
+            sections.append("\n".join(lines))
+        if vocab_lines:
+            sections.append("\n".join(vocab_lines))
+        return "\n\n".join(sections) if sections else None
 
     except Exception as _e:
         logger.debug("build_substrate: failed (non-fatal): %s", _e)

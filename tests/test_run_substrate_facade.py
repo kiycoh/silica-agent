@@ -68,3 +68,88 @@ def test_substrate_excludes_manifest_titles(tmp_path, monkeypatch):
     out = build_substrate(_chunk(), manifest_titles=["Near"])
     # "Near" was already injected this run -> must not be re-proposed
     assert out is None or "Near" not in out
+
+
+def test_substrate_includes_vault_vocabulary(tmp_path, monkeypatch):
+    monkeypatch.setattr(embed_mod, "_index_path", lambda: tmp_path / "emb.json")
+    es = EmbedStore()
+    es.upsert("Concepts/Near", "Near", [1.0, 0.0])
+    es.save()
+
+    cs = CooccurStore(lang="english")  # default path isolated by conftest
+    cs.upsert_note(
+        "Concepts/Near", build_contribution("Near", "neural network model trains fast")
+    )
+    cs.save()
+
+    monkeypatch.setattr(providers, "get_embedder", lambda *a, **k: _FakeEmbedder([1.0, 0.0]))
+
+    out = build_substrate(_chunk(), manifest_titles=[], hub_names=["Machine Learning"])
+
+    assert out is not None
+    assert "## Vault vocabulary" in out
+    assert "Hub notes: Machine Learning" in out
+    # Related-notes section still present alongside vocabulary.
+    assert "[[Near]]" in out
+
+
+def test_vocabulary_alone_when_no_related(tmp_path, monkeypatch):
+    # Empty embed index and a cooccur index that matches nothing in the chunk:
+    # related-notes may be empty, but vocabulary should still surface.
+    monkeypatch.setattr(embed_mod, "_index_path", lambda: tmp_path / "emb.json")
+    EmbedStore().save()
+
+    cs = CooccurStore(lang="english")
+    cs.upsert_note("Other/Topic", build_contribution("Topic", "astronomy telescopes optics"))
+    cs.save()
+
+    monkeypatch.setattr(
+        providers, "get_embedder",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")),
+    )
+
+    out = build_substrate(_chunk("completely unrelated"), manifest_titles=[])
+
+    assert out is not None and "## Vault vocabulary" in out
+
+
+def test_vocabulary_respects_token_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(embed_mod, "_index_path", lambda: tmp_path / "emb.json")
+    EmbedStore().save()
+
+    cs = CooccurStore(lang="english")
+    cs.upsert_note("a.md", build_contribution("a", "alpha beta gamma"))
+    cs.save()
+    # Force an oversized stem list through the class, regardless of content.
+    monkeypatch.setattr(
+        CooccurStore, "top_stems",
+        lambda self, n=20: [f"very-long-stem-label-{i:04d}" for i in range(200)],
+    )
+
+    monkeypatch.setattr(
+        providers, "get_embedder",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")),
+    )
+
+    out = build_substrate(_chunk(), manifest_titles=[])
+
+    assert out is not None and "## Vault vocabulary" in out
+    stems_line = next(
+        l for l in out.splitlines() if l.startswith("very-long-stem-label")
+    )
+    assert len(stems_line) <= 600  # hard cap from the implementation
+
+
+def test_no_vocabulary_with_empty_cooccur_index(tmp_path, monkeypatch):
+    monkeypatch.setattr(embed_mod, "_index_path", lambda: tmp_path / "emb.json")
+    es = EmbedStore()
+    es.upsert("Concepts/Near", "Near", [1.0, 0.0])
+    es.save()
+    # conftest isolates the cooccur index; do not populate it.
+
+    monkeypatch.setattr(providers, "get_embedder", lambda *a, **k: _FakeEmbedder([1.0, 0.0]))
+
+    out = build_substrate(_chunk(), manifest_titles=[])
+
+    assert out is not None
+    assert "## Vault vocabulary" not in out  # omitted, related-notes intact
