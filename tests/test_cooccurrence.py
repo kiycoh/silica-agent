@@ -312,3 +312,33 @@ def test_build_index_threads_concepts_by_path(tmp_path):
     nodes = store.note_nodes("Notes/A")
     assert st("quantum") in nodes
     assert st("entanglement") in nodes
+
+
+def test_top_stems_orders_by_total_weight(tmp_path):
+    store = CooccurStore(path=tmp_path / "cooccur.json")
+    store.upsert_note(
+        "a.md",
+        build_contribution("a", "neural networks learn. neural networks generalize. neural networks overfit."),
+    )
+    store.upsert_note(
+        "b.md",
+        build_contribution("b", "backpropagation tunes neural networks slowly."),
+    )
+
+    stems = store.top_stems(5)
+
+    assert 0 < len(stems) <= 5
+    # 'neural'/'network' dominate by accumulated weight across both notes.
+    joined = " ".join(s.lower() for s in stems[:2])
+    assert "neural" in joined or "network" in joined
+
+
+def test_top_stems_respects_n(tmp_path):
+    store = CooccurStore(path=tmp_path / "cooccur.json")
+    store.upsert_note("a.md", build_contribution("a", "alpha beta gamma delta epsilon zeta"))
+    assert len(store.top_stems(2)) == 2
+
+
+def test_top_stems_empty_store(tmp_path):
+    store = CooccurStore(path=tmp_path / "cooccur.json")
+    assert store.top_stems(10) == []

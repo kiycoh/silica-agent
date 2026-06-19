@@ -236,6 +236,22 @@ class CooccurStore:
             for stem, meta in contrib.get("nodes", {}).items()
         }
 
+    def top_stems(self, n: int = 20) -> list[str]:
+        """Top-n stem nodes by total weight across all notes, as display labels.
+
+        Pure aggregation over stored contributions (embedder-free) — backs the
+        '## Vault vocabulary' substrate section.
+        """
+        totals: dict[str, float] = {}
+        for path in self.paths():
+            for stem, weight in self.note_nodes(path).items():
+                totals[stem] = totals.get(stem, 0.0) + weight
+        if not totals:
+            return []
+        _, labels = self._aggregate()
+        ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)[:n]
+        return [labels.get(stem, stem) for stem, _ in ranked]
+
     # --- aggregation (lazy, scope=None cached) ---
     def _aggregate(self, scope: str | None = None) -> tuple[dict[str, dict[str, float]], dict[str, str]]:
         """Build undirected adjacency {stem: {neighbor: weight}} + label map.

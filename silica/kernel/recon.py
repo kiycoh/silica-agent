@@ -41,42 +41,8 @@ def is_concept(s: str, overlay: DomainOverlay | None = None) -> bool:
     return not any(p.search(s) for p in overlay.noise_patterns)
 
 
-def from_headings(content: str) -> set:
-    return {m.group(1) for m in re.finditer(r'^#{1,4}\s+(.+?)\s*$', content, re.MULTILINE)}
-
-
-def from_bold(content: str) -> set:
-    return {m.group(1) for m in re.finditer(r'\*\*(.+?)\*\*', content)}
-
-
 def _strip_frontmatter(content: str) -> str:
     return _FRONTMATTER_RE.sub('', content, count=1)
-
-
-def from_acronyms(content: str) -> set:
-    return set(re.findall(r'\b[A-Z]{2,6}\b', content))
-
-
-def extract_concepts(content: str, overlay: DomainOverlay | None = None) -> set:
-    """Extract candidate concepts from note *content* (headings, bold, acronyms).
-
-    The overlay is resolved once (see ``is_concept`` for the None contract)
-    and applied to every candidate.
-    """
-    if overlay is None:
-        overlay = get_active_overlay()
-    body = _strip_frontmatter(content)
-    raw = from_headings(body) | from_bold(body) | from_acronyms(body)
-    return dedupe({c for c in (normalize(r) for r in raw) if is_concept(c, overlay=overlay)})
-
-
-def dedupe(concepts: set) -> set:
-    chosen: dict[str, str] = {}
-    for c in concepts:
-        key = c.lower()
-        if key not in chosen or len(c) > len(chosen[key]):
-            chosen[key] = c
-    return set(chosen.values())
 
 
 def is_title_match(c: str, stem: str) -> bool:

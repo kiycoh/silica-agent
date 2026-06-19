@@ -1,14 +1,17 @@
-"""Tests for silica.kernel.recon — concept extraction via DomainOverlay seam."""
+"""Tests for silica.kernel.recon — concept filtering via the DomainOverlay seam.
+
+Concept *extraction* now lives in silica.kernel.keyphrase (YAKE); recon keeps the
+overlay-driven *filter* (`is_concept`) applied to every candidate, plus the
+collision-ranking helpers. These tests guard the domain knowledge in the overlays
+(which headings/words are noise) against the live filter.
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+from silica.kernel.overlay import DEFAULT_OVERLAY
 
 _EXAMPLE_OVERLAYS = (
     Path(__file__).resolve().parent.parent / "examples" / "overlays"
@@ -26,112 +29,43 @@ def it_overlay():
 
 
 # ---------------------------------------------------------------------------
-# extract_concepts — DEFAULT overlay (no vault overlay file)
+# is_concept — noise rejected (default overlay)
 # ---------------------------------------------------------------------------
 
-class TestExtractConceptsDefault:
-    def test_heading_concept_kept(self):
-        """A real content heading survives with the default overlay."""
-        from silica.kernel.recon import extract_concepts
-        content = "# Backpropagation\n\nSome explanation."
-        result = extract_concepts(content)
-        assert "Backpropagation" in result
-
-    def test_bold_concept_kept(self):
-        """A bold concept phrase survives with the default overlay."""
-        from silica.kernel.recon import extract_concepts
-        content = "The algorithm uses **Gradient Descent** to minimise loss."
-        result = extract_concepts(content)
-        assert "Gradient Descent" in result
-
-    def test_structural_heading_filtered(self):
-        """'Chapter 3: Introduction' is filtered by noise pattern and stopword.
-
-        The heading matches the noise pattern ^(Chapter|Lesson|Exercise)\\b[:\\s]
-        and the word "chapter" is also a stopword.
-        """
-        from silica.kernel.recon import extract_concepts
-        content = "# Chapter 3: Introduction\n\nContent here."
-        result = extract_concepts(content)
-        assert not any("Chapter" in c for c in result)
-
-    def test_summary_heading_filtered(self):
-        """'Summary' as a bare heading is filtered as structural noise."""
-        from silica.kernel.recon import extract_concepts
-        content = "# Summary\n\nKey points."
-        result = extract_concepts(content)
-        assert "Summary" not in result
-
-    def test_stopword_only_candidate_filtered(self):
-        """'the' in a heading (after normalization) is dropped as a stopword."""
-        from silica.kernel.recon import extract_concepts
-        content = "# the\n"
-        result = extract_concepts(content)
-        assert "the" not in result
-
-    def test_trailing_colon_filtered(self):
-        """Heading ending with a colon is filtered as structural noise."""
-        from silica.kernel.recon import extract_concepts
-        content = "# Resources:\n\nSee links."
-        result = extract_concepts(content)
-        assert "Resources:" not in result
-
-    def test_question_candidate_filtered(self):
-        """Heading ending in '?' is filtered."""
-        from silica.kernel.recon import extract_concepts
-        content = "# What is recursion?\n"
-        result = extract_concepts(content)
-        assert not any("?" in c for c in result)
-
-    def test_acronym_extracted(self):
-        """Acronyms like PID are extracted via from_acronyms."""
-        from silica.kernel.recon import extract_concepts
-        content = "The PID controller regulates output."
-        result = extract_concepts(content)
-        assert "PID" in result
-
-    def test_frontmatter_stripped(self):
-        """Concepts inside YAML front matter are not extracted."""
-        from silica.kernel.recon import extract_concepts
-        content = "---\ntitle: SecretConcept\ntags: [hidden]\n---\n# Visible\n"
-        result = extract_concepts(content)
-        assert "SecretConcept" not in result
-        assert "Visible" in result
+class TestIsConceptFiltersNoise:
+    @pytest.mark.parametrize("phrase", [
+        "Chapter 3: Introduction",   # noise pattern ^(Chapter|Lesson|Exercise)\b[:\s]
+        "Summary",                   # structural-noise word
+        "the",                       # stopword
+        "Resources:",                # trailing colon
+        "What is recursion?",        # question
+        "AI",                        # below MIN_LEN
+        "NB: important",             # ^[A-Z]{2,6}:\s noise prefix
+    ])
+    def test_rejected(self, phrase):
+        from silica.kernel.recon import is_concept
+        assert not is_concept(phrase, overlay=DEFAULT_OVERLAY)
 
 
 # ---------------------------------------------------------------------------
-# extract_concepts — Italian-academic overlay passed explicitly
+# is_concept — real concepts kept
 # ---------------------------------------------------------------------------
 
-class TestExtractConceptsItalianOverlay:
-    def test_capitolo_heading_filtered(self, it_overlay):
-        """'Capitolo 3: Reti Neurali' is filtered by the Italian noise pattern."""
-        from silica.kernel.recon import extract_concepts
-        content = "# Capitolo 3: Reti Neurali\n"
-        result = extract_concepts(content, overlay=it_overlay)
-        # The heading string itself is noisy; neither the full string nor "Capitolo" should survive
-        assert not any("Capitolo" in c for c in result)
+class TestIsConceptKeepsConcepts:
+    @pytest.mark.parametrize("phrase", ["Backpropagation", "Gradient Descent", "PID"])
+    def test_kept_default(self, phrase):
+        from silica.kernel.recon import is_concept
+        assert is_concept(phrase, overlay=DEFAULT_OVERLAY)
 
-    def test_unipa_is_stopword(self, it_overlay):
-        """'unipa' is a stopword in the Italian overlay and must be filtered."""
-        from silica.kernel.recon import extract_concepts
-        content = "# unipa\n"
-        result = extract_concepts(content, overlay=it_overlay)
-        assert "unipa" not in result
+    def test_italian_overlay_filters_noise(self, it_overlay):
+        from silica.kernel.recon import is_concept
+        assert not is_concept("Capitolo 3: Reti Neurali", overlay=it_overlay)
+        assert not is_concept("unipa", overlay=it_overlay)  # vault stopword
 
-    def test_reti_neurali_bold_survives(self, it_overlay):
-        """**Reti Neurali** as a bold concept survives the Italian overlay."""
-        from silica.kernel.recon import extract_concepts
-        content = "L'approccio delle **Reti Neurali** è fondamentale."
-        result = extract_concepts(content, overlay=it_overlay)
-        assert "Reti Neurali" in result
-
-    def test_italian_overlay_still_keeps_english_content(self, it_overlay):
-        """The Italian overlay extends default, so English concepts still survive."""
-        from silica.kernel.recon import extract_concepts
-        content = "# Backpropagation\n"
-        result = extract_concepts(content, overlay=it_overlay)
-        assert "Backpropagation" in result
+    def test_italian_overlay_keeps_concepts(self, it_overlay):
+        from silica.kernel.recon import is_concept
+        assert is_concept("Reti Neurali", overlay=it_overlay)
+        assert is_concept("Backpropagation", overlay=it_overlay)  # extends default
 
 
 # ---------------------------------------------------------------------------
@@ -141,17 +75,14 @@ class TestExtractConceptsItalianOverlay:
 class TestIsConceptOverlayArg:
     def test_explicit_overlay_used_over_active(self):
         """is_concept uses an explicitly passed overlay, not get_active_overlay."""
-        from silica.kernel.overlay import DomainOverlay, DEFAULT_OVERLAY
+        from silica.kernel.overlay import DomainOverlay
         import re
-        # Build a minimal overlay that rejects "Backpropagation" via a noise pattern
         block_bp = DomainOverlay(
             stopwords=frozenset(),
             noise_patterns=(re.compile(r"^Backpropagation$", re.IGNORECASE),),
         )
         from silica.kernel.recon import is_concept
-        # With the blocking overlay it should be rejected
         assert not is_concept("Backpropagation", overlay=block_bp)
-        # With default overlay it should pass
         assert is_concept("Backpropagation", overlay=DEFAULT_OVERLAY)
 
     def test_explicit_stopword_overlay(self):
@@ -174,30 +105,3 @@ class TestIsConceptOverlayArg:
         monkeypatch.setattr("silica.kernel.recon.get_active_overlay", lambda: sentinel)
         from silica.kernel.recon import is_concept
         assert not is_concept("sentinel_word")
-
-
-# ---------------------------------------------------------------------------
-# Acronym path — from_acronyms with default overlay
-# ---------------------------------------------------------------------------
-
-class TestAcronymPathDefault:
-    def test_pid_extracted(self):
-        from silica.kernel.recon import extract_concepts
-        content = "The PID algorithm maintains stability."
-        assert "PID" in extract_concepts(content)
-
-    def test_short_acronym_too_short_filtered(self):
-        """Two-character uppercase word: from_acronyms catches >=2 chars but MIN_LEN=3 filters it."""
-        from silica.kernel.recon import extract_concepts
-        content = "Use AI now."
-        # "AI" is 2 chars; MIN_LEN=3, so it must be filtered by is_concept
-        result = extract_concepts(content)
-        assert "AI" not in result
-
-    def test_noise_prefixed_acronym_filtered(self):
-        """Uppercase prefix like 'NB: something' is a noise pattern, not a concept."""
-        from silica.kernel.recon import extract_concepts
-        content = "# NB: important\n"
-        result = extract_concepts(content)
-        # "NB: important" matches '^[A-Z]{2,6}:\s' noise pattern
-        assert not any("NB:" in c for c in result)
