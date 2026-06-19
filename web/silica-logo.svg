@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" role="img" aria-label="Silica">
+  <defs>
+    <linearGradient id="silica" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+  <!-- swap stroke/fill to "currentColor" for a monochrome, recolor-safe variant -->
+  <g fill="none" stroke="url(#silica)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M92 28 L24 48 L60 100 Z"/>
+    <path d="M63 58 L92 28"/>
+    <path d="M63 58 L24 48"/>
+    <path d="M63 58 L60 100"/>
+  </g>
+  <g fill="url(#silica)">
+    <circle cx="92" cy="28" r="7"/>
+    <circle cx="24" cy="48" r="7"/>
+    <circle cx="60" cy="100" r="7"/>
+    <circle cx="63" cy="58" r="7"/>
+  </g>
+</svg>

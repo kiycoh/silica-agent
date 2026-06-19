@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Silica">
+  <defs>
+    <linearGradient id="sf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="5" fill="#0B0D12"/>
+  <!-- small-optimized: heavier strokes + bigger nodes so K4 survives at 16px -->
+  <g fill="none" stroke="url(#sf)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M24 8 L8 14 L16 25 Z"/>
+    <path d="M16.5 15.5 L24 8"/>
+    <path d="M16.5 15.5 L8 14"/>
+    <path d="M16.5 15.5 L16 25"/>
+  </g>
+  <g fill="url(#sf)">
+    <circle cx="24" cy="8" r="2.4"/>
+    <circle cx="8" cy="14" r="2.4"/>
+    <circle cx="16" cy="25" r="2.4"/>
+    <circle cx="16.5" cy="15.5" r="2.6"/>
+  </g>
+</svg>

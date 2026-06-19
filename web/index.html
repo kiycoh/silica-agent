@@ -9,7 +9,7 @@
     content="Silica turns a messy pile of Markdown notes into a knowledge base you can navigate: atomic notes, resolved wikilinks, a graph that never breaks. Plain Markdown, on your disk.">
   <meta name="theme-color" content="#0B0D12">
   <meta name="color-scheme" content="dark">
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/silica-favicon.svg" type="image/svg+xml">
   <meta property="og:title" content="Silica — amorphous in, coherent out">
   <meta property="og:description"
     content="Drop in a messy clipping; get back atomic notes wired with wikilinks. Filesystem-native curation for Markdown vaults — plain files, on your disk.">
@@ -93,15 +93,7 @@
 
     :focus-visible {
       outline: 2px solid var(--cyan);
-      outline-offset: 3px;
-      border-radius: 2px
-    }
-
-    .grad {
-      background: var(--grad);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent
+      outline-offset: 3px
     }
 
     /* ---------- nav ---------- */
@@ -109,8 +101,7 @@
       position: sticky;
       top: 0;
       z-index: 10;
-      backdrop-filter: blur(8px);
-      background: color-mix(in srgb, var(--void) 78%, transparent);
+      background: var(--void);
       border-bottom: 1px solid var(--line);
     }
 
@@ -122,13 +113,22 @@
     }
 
     .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+    }
+
+    .brand-mark {
+      height: 22px;
+      width: 22px;
+      display: block;
+    }
+
+    .brand-text {
       font-weight: 700;
       letter-spacing: 0.42em;
       font-size: 0.82rem;
-      background: var(--grad);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent
+      color: var(--frost);
     }
 
     .nav-links {
@@ -152,7 +152,7 @@
       color: var(--cyan);
       border: 1px solid var(--line-2);
       padding: 0.36rem 0.8rem;
-      border-radius: 2px;
+      border-radius: 0;
     }
 
     .nav-links .pill:hover {
@@ -227,8 +227,8 @@
       position: relative;
       min-width: 0;
       border: 1px solid var(--line);
-      border-radius: 4px;
-      background: linear-gradient(180deg, var(--slate), var(--void));
+      border-radius: 0;
+      background: var(--slate);
       padding: 2.1rem 1rem 1.2rem;
     }
 
@@ -305,10 +305,7 @@
       font-family: var(--term);
       font-size: 1.6rem;
       line-height: 1;
-      background: var(--grad);
-      -webkit-background-clip: text;
-      background-clip: text;
-      color: transparent;
+      color: var(--cyan);
     }
 
     .xform .arrow small {
@@ -391,7 +388,7 @@
       align-items: center;
       gap: 0.6rem;
       border: 1px solid var(--line-2);
-      border-radius: 3px;
+      border-radius: 0;
       background: var(--slate);
       padding: 0.7rem 0.9rem;
       font-family: var(--term);
@@ -418,7 +415,7 @@
       color: var(--void);
       background: var(--cyan);
       border: 1px solid var(--cyan);
-      border-radius: 3px;
+      border-radius: 0;
       padding: 0.7rem 1.2rem;
       cursor: pointer;
       white-space: nowrap;
@@ -493,7 +490,7 @@
       gap: 1px;
       background: var(--line);
       border: 1px solid var(--line);
-      border-radius: 4px;
+      border-radius: 0;
       overflow: hidden
     }
 
@@ -601,8 +598,8 @@
     /* ---------- install ---------- */
     .install {
       border: 1px solid var(--line-2);
-      border-radius: 4px;
-      background: linear-gradient(180deg, var(--slate), var(--void));
+      border-radius: 0;
+      background: var(--slate);
       padding: clamp(1.2rem, 4vw, 2rem);
     }
 
@@ -688,7 +685,10 @@
 
   <header class="nav">
     <div class="wrap">
-      <span class="brand">SILICA</span>
+      <span class="brand">
+        <img class="brand-mark" src="/silica-logo.svg" alt="" width="22" height="22">
+        <span class="brand-text">SILICA</span>
+      </span>
       <nav class="nav-links" aria-label="primary">
         <a href="#run">the run</a>
         <a href="#trust">why</a>
@@ -737,9 +737,9 @@ your reviews at growing intervals. https://…</pre>
 
       <div class="cmd">
         <div class="cmd-line" id="quick-install"><span class="pr">$</span>
-          <code>git clone …/silica-agent &amp;&amp; uv pip install -e . &amp;&amp; silica init</code>
+          <code>git clone https://github.com/kiycoh/silica-agent &amp;&amp; cd silica-agent &amp;&amp; uv pip install -e . &amp;&amp; uv run silica init</code>
         </div>
-        <button class="btn" data-copy="#install-block">copy install</button>
+        <button class="btn" data-copy="#quick-install">copy install</button>
         <a class="btn ghost" href="https://github.com/kiycoh/silica-agent" rel="noopener">source</a>
       </div>
     </section>
