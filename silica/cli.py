@@ -39,6 +39,24 @@ def _update_context_tokens(messages: list[dict]) -> None:
         CONFIG.context_tokens = sum(len(m.get("content") or "") for m in messages) // 4
 
 
+def _inject_vault_map(messages: list[dict]) -> None:
+    """Appende la mappa del vault come messaggio system (best-effort).
+
+    CoALA recall: carica il self-model del corpus in working memory a inizio
+    sessione cosi' l'agente non ri-scopre il vault via tool. La mappa e' uno
+    snapshot d'avvio; le scritture della sessione vivono gia' in working memory.
+    # ponytail: ricalcolata 1x per sessione; nessuno storage/refresh.
+    """
+    try:
+        from silica.kernel.vault_map import build_vault_map
+
+        vault_map = build_vault_map()
+        if vault_map:
+            messages.append({"role": "system", "content": vault_map})
+    except Exception as exc:
+        logger.debug("vault map injection skipped: %s", exc)
+
+
 def _setup_logging(debug: bool = False) -> None:
     """Configure logging for the CLI session."""
     import threading
@@ -612,10 +630,14 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             f"Run a structural vault audit {scope_desc}.{embed_note}\n"
             f"Call `silica_vault_report` with "
             f"folder={json.dumps(folder)}, top_k={top_k}, "
-            f"with_embeddings={'true' if with_embeddings else 'false'}, seed_ledger=true. "
-            f"Then follow the steering loop exactly as described in your instructions: "
-            f"call `silica_ledger_next` repeatedly, execute each capability with its payload, "
-            f"call `silica_ledger_update` after each one, and stop when the plan returns done."
+            f"with_embeddings={'true' if with_embeddings else 'false'}, seed_ledger=true.\n"
+            f"Then STOP. Write a short, human-readable brief in chat from the returned `digest` "
+            f"(totals, top hubs, and how many fixes are available: auto / propose / issues), and "
+            f"point the user to the GRAPH_REPORT.md that was written.\n"
+            f"Do NOT run the steering loop, do NOT call `silica_ledger_next`, and do NOT apply any "
+            f"autolinks, corrections, renames, or deletions. Instead, ask the user whether they want "
+            f"to apply the changes. Only if they explicitly say yes, resume the run (`run_id`) and "
+            f"follow the steering loop."
         )
 
     if cmd in ("/refine", "/enrich"):
@@ -842,6 +864,7 @@ def main():
 
     session = build_session()
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    _inject_vault_map(messages)
     _update_context_tokens(messages)
 
     from silica.ui.renderer import make_progress_callback
@@ -863,11 +886,13 @@ def main():
             continue
 
         # Expand workflow shortcuts (/report, /ingest etc.) into agent-directed messages
+        is_directive = False
         expanded = _expand_workflow_shortcut(user_input)
         if expanded is not None:
             if not expanded:
                 continue  # shortcut fully handled inline (e.g. /ingest of code files)
             user_input = expanded
+            is_directive = True
 
         # Handle slash commands
         if user_input.startswith("/"):
@@ -877,6 +902,7 @@ def main():
                 print_home()
                 messages.clear()
                 messages.append({"role": "system", "content": SYSTEM_PROMPT})
+                _inject_vault_map(messages)
                 _update_context_tokens(messages)
                 session = build_session()
                 continue
@@ -893,8 +919,13 @@ def main():
             CONSOLE.print(_NO_MODEL_HINT)
             continue
 
-        # Normal user message → agentic loop
-        messages.append({"role": "user", "content": user_input})
+        # Normal user message → agentic loop. CLI-expanded shortcuts carry an
+        # `origin` so the wire boundary (and our own bookkeeping) can tell a
+        # harness directive apart from a human turn.
+        msg: dict = {"role": "user", "content": user_input}
+        if is_directive:
+            msg["origin"] = "cli"
+        messages.append(msg)
 
         try:
             answer = run_agent(messages, model=CONFIG.model, tool_progress_callback=callback)
