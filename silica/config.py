@@ -204,9 +204,10 @@ class SilicaConfig:
     )
 
     # Language for the co-occurrence graph stemmer + stopwords (kernel/cooccurrence.py).
-    # Default English; "italian" and ~25 Snowball languages are supported.
+    # "auto" (default) detects the vault language from its own text at build time
+    # and freezes it into the index; set an explicit Snowball language to override.
     cooccurrence_lang: str = field(
-        default_factory=lambda: os.getenv("SILICA_COOCCURRENCE_LANG", "english")
+        default_factory=lambda: os.getenv("SILICA_COOCCURRENCE_LANG", "auto")
     )
 
     # Salience gate (Phase 2.05): concept kept only if cosine(concept, doc_centroid) >= threshold

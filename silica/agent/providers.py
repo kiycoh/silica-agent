@@ -24,6 +24,28 @@ PROVIDER_PRESETS = {
 }
 
 
+SILICA_CLI_OPEN = "<silica-cli>"
+SILICA_CLI_CLOSE = "</silica-cli>"
+
+
+def _to_wire(msg: dict) -> dict:
+    """Strip internal provenance and render the CLI marker for the wire.
+
+    `origin` is an internal-only field; the OpenAI message object rejects
+    unknown fields, so it must never reach the SDK. When ``origin == "cli"``
+    the content is wrapped in <silica-cli> markers so the model can tell a
+    harness directive apart from a human turn. Messages without ``origin``
+    (the common case) are returned unchanged.
+    """
+    if "origin" not in msg:
+        return msg
+    origin = msg["origin"]
+    wire = {k: v for k, v in msg.items() if k != "origin"}
+    if origin == "cli" and wire.get("content"):
+        wire["content"] = f"{SILICA_CLI_OPEN}{wire['content']}{SILICA_CLI_CLOSE}"
+    return wire
+
+
 @runtime_checkable
 class Provider(Protocol):
     def call_llm(
@@ -54,7 +76,7 @@ class OpenAICompatibleProvider:
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": self.model,
-            "messages": messages,
+            "messages": [_to_wire(m) for m in messages],
         }
         if tools:
             kwargs["tools"] = tools
