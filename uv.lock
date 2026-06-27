@@ -2370,6 +2370,7 @@ name = "silica"
 source = { editable = "." }
 dependencies = [
     { name = "art" },
+    { name = "httpx" },
     { name = "litellm" },
     { name = "markdown-it-py" },
     { name = "networkx" },
@@ -2402,6 +2403,7 @@ pdf = [
 [package.metadata]
 requires-dist = [
     { name = "art" },
+    { name = "httpx" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "litellm" },
     { name = "markdown-it-py" },

@@ -27,7 +27,7 @@ def _make_console() -> tuple[Console, io.StringIO]:
 def _dispatched_from_source() -> set[str]:
     """Extract slash command strings from cli.py dispatch functions."""
     src = (Path(__file__).parent.parent / "silica" / "cli.py").read_text()
-    found = set(re.findall(r'"(/\w+)"', src))
+    found = set(re.findall(r'"(/[\w-]+)"', src))
     # Remove aliases that are intentionally not in COMMANDS
     found.discard("/quit")
     found.discard("/q")

@@ -27,6 +27,7 @@ import silica.tools.composed  # noqa: F401
 import silica.tools.wrapped  # noqa: F401
 import silica.tools.codedocs_tool  # noqa: F401
 import silica.tools.delegate_tool  # noqa: F401
+import silica.sources.web_research  # noqa: F401  (registers the web_search tool)
 
 logger = logging.getLogger(__name__)
 
@@ -602,6 +603,34 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 CONSOLE.print(f"  Converted {f} → [bold]{convert(f, dest_dir=target_dir)}[/]")
             except ValueError as e:
                 CONSOLE.print(f"  [yellow]Skipped {f}: {e}[/]")
+        return ""  # fully handled inline — sentinel: nothing for the agent
+
+    if cmd == "/web-search":
+        from silica.sources.web_research import web_research, _DEFAULT_MAX_SEARCHES
+        from silica.ui.renderer import make_progress_callback
+        args = parts[1:]
+        max_searches = _DEFAULT_MAX_SEARCHES
+        positional = []
+        for arg in args:
+            if arg.startswith("--max-searches="):
+                try:
+                    max_searches = int(arg[len("--max-searches="):])
+                except ValueError:
+                    pass
+            elif not arg.startswith("-"):
+                positional.append(arg)
+        concept = " ".join(positional).strip()
+        if not concept:
+            return 'Error: /web-search requires a concept. Usage: /web-search "<concept>" [--max-searches=N]'
+
+        try:
+            note_rel = web_research(
+                concept, max_searches=max_searches,
+                tool_progress_callback=make_progress_callback(),
+            )
+            CONSOLE.print(f"  Findings → [bold]{note_rel}[/]  (review, then /ingest to bring it in)")
+        except Exception as e:  # missing key, no findings, convergence guard, network
+            CONSOLE.print(f"  [yellow]web-search failed: {e}[/]")
         return ""  # fully handled inline — sentinel: nothing for the agent
 
     if cmd == "/report":

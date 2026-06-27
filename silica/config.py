@@ -123,6 +123,13 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_PDF_PROVIDER", "pymupdf4llm")
     )
 
+    # Tavily API key for /web-search. Empty → /web-search errors clearly and
+    # writes no note. The only new config this feature adds.
+    tavily_api_key: str = field(
+        default_factory=lambda: os.getenv("SILICA_TAVILY_API_KEY", "")
+        or os.getenv("TAVILY_API_KEY", "")
+    )
+
     # Maximum context tokens before the agent warns.
     max_context_tokens: int = field(
         default_factory=lambda: int(os.getenv("SILICA_MAX_CONTEXT", "60000"))

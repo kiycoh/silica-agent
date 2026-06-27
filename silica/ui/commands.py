@@ -50,6 +50,16 @@ COMMANDS: tuple[Command, ...] = (
         ),
     ),
     Command(
+        name="/web-search",
+        group="direct",
+        usage='"<concept>" [--max-searches=N]',
+        summary="research a concept on the web → cited findings note in the Inbox (then /ingest)",
+        examples=(
+            '/web-search "retrieval-augmented generation"',
+            '/web-search "graph neural networks" --max-searches=6',
+        ),
+    ),
+    Command(
         name="/organize",
         group="workflow",
         usage='"<intent>" [--scope=FOLDER] [--file=taxonomy.yaml] [--merge] [--move-uncategorized] [--apply]',

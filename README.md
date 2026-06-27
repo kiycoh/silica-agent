@@ -207,6 +207,7 @@ Run the ingestion pipeline from inside the REPL:
 | :--- | :--- | :--- |
 | `/status` | `[run_id]` | Progress digest of the last run |
 | `/convert` | `<file...> [--target=DIR]` | Transcode a non-`.md` file (PDF) into a markdown note in the inbox |
+| `/web-search` | `"<concept>" [--max-searches=N]` | Research a concept on the web → cited findings note in the Inbox (then `/ingest`) |
 | `/embed` | `[folder] [--force]` | Build/update the embedding index |
 | `/cooccur` | `[folder] [--force]` | Build/update the co-occurrence index (no embedder needed) |
 | `/graph` | `[out.html] [folder]` | Export the knowledge graph |

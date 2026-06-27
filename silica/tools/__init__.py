@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class Tool:
     """Metadata and executor for a single registered tool."""
 
-    __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "summarize")
+    __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "summarize", "sensitive")
 
     def __init__(
         self,
@@ -36,6 +36,7 @@ class Tool:
         cls: str,
         collapse: str = "lazy",
         summarize: Callable[[dict], str] | None = None,
+        sensitive: bool = False,
     ):
         self.fn = fn
         self.name = name
@@ -44,6 +45,10 @@ class Tool:
         self.cls = cls  # "atomic" | "composed" | "wrapped"
         self.collapse = collapse  # "lazy" | "eager" | "never"
         self.summarize = summarize
+        # ponytail: classified once at definition; the default toolset filters
+        # on this so a sensitive tool can never leak into the main agent by
+        # mere registration. New sensitive tools are covered automatically.
+        self.sensitive = sensitive
 
     def json_schema(self) -> dict:
         """Return the OpenAI-compatible function schema for this tool."""
@@ -95,6 +100,7 @@ def tool(
     cls: str = "atomic",
     collapse: str = "lazy",
     summarize: Callable[[dict], str] | None = None,
+    sensitive: bool = False,
 ):
     """Decorator that registers a function as a Silica tool.
 
@@ -113,7 +119,7 @@ def tool(
         tool_desc = fn.__doc__ or ""
         TOOLS[tool_name] = Tool(
             fn, tool_name, tool_desc.strip(), params_model, cls,
-            collapse=collapse, summarize=summarize,
+            collapse=collapse, summarize=summarize, sensitive=sensitive,
         )
         logger.debug("Registered tool: %s (class=%s, collapse=%s)", tool_name, cls, collapse)
         return fn
