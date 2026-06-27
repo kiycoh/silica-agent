@@ -441,6 +441,78 @@ class ObsidianCLIBackend:
                             results.append(Hit(ref=ref, snippet=str(match)))
         return results
 
+    def search_context_batch(self, queries: list[str]) -> dict[str, list[Hit]]:
+        """Batch of search_context: ONE CDP eval for all queries (vs one per query).
+
+        Modelled on _build_mention_index: read each vault file once via cachedRead,
+        test every query in the JS runtime, return {query: [matches]}. Cost is a
+        single search_context (one Promise.all over all files), not N -- this was
+        recon's hot path (a dense lecture = ~40-50 full-vault rescans, in sequence).
+        """
+        import os
+        from silica.config import CONFIG
+        if not queries:
+            return {}
+        inbox_norm = (
+            os.path.normcase(CONFIG.inbox_dir.replace("\\", "/").strip("/"))
+            if CONFIG.inbox_dir else None
+        )
+
+        queries_json = json.dumps(queries)
+        js_code = (
+            "(async () => {\n"
+            f"  const queries = {queries_json};\n"
+            "  const files = app.vault.getMarkdownFiles();\n"
+            "  const out = {};\n"
+            "  for (const q of queries) out[q] = [];\n"
+            "  await Promise.all(files.map(async (file) => {\n"
+            "    try {\n"
+            # ponytail: cachedRead = Obsidian's in-memory cache (no disk I/O); a
+            # file written this run may lag. Recon searches the rest of the vault,
+            # not its own fresh write, so the staleness is harmless here.
+            "      const lines = (await app.vault.cachedRead(file)).split('\\n');\n"
+            "      const lower = lines.map(l => l.toLowerCase());\n"
+            "      for (const q of queries) {\n"
+            "        const ql = q.toLowerCase();\n"
+            "        for (let i = 0; i < lower.length; i++) {\n"
+            "          if (lower[i].includes(ql)) {\n"
+            "            out[q].push({ path: file.path, name: file.basename,\n"
+            "                          line: i + 1, content: lines[i].trim() });\n"
+            "          }\n"
+            "        }\n"
+            "      }\n"
+            "    } catch (e) {}\n"
+            "  }));\n"
+            "  return JSON.stringify(out);\n"
+            "})()"
+        )
+        # ponytail: one eval ships only the matching lines for THIS note's concepts
+        # (few each), not whole bodies. If a vault ever overflows the CDP bridge,
+        # chunk `queries` into sub-batches (e.g. 25) and merge the dicts.
+        data = self._eval(js_code, default={})
+
+        out: dict[str, list[Hit]] = {q: [] for q in queries}
+        if isinstance(data, dict):
+            for query, matches in data.items():
+                if not isinstance(matches, list):
+                    continue
+                hits: list[Hit] = []
+                for m in matches:
+                    if not isinstance(m, dict):
+                        continue
+                    path = m.get("path", "") or ""
+                    if inbox_norm and path:
+                        path_norm = os.path.normcase(str(path).replace("\\", "/").strip("/"))
+                        if path_norm == inbox_norm or path_norm.startswith(inbox_norm + "/"):
+                            continue
+                    hits.append(Hit(
+                        ref=NoteRef(name=str(m.get("name", "")), path=str(path)),
+                        line=m.get("line", 0),
+                        snippet=str(m.get("content", "")),
+                    ))
+                out[query] = hits
+        return out
+
     def read_note(self, ref: NoteRef | str) -> NoteContent:
         """Read a note's full content by name or ref."""
         content = self._run_cli("read", self._ref_arg(ref))

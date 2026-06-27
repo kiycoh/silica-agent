@@ -83,9 +83,9 @@ def silica_recon(inbox_file: str, limit: int = 0) -> dict[str, Any]:
     collisions = []
     new_concepts = []
     
+    batch = DRIVER.search_context_batch(concepts)   # one eval instead of N
     for c in concepts:
-        # Search the vault for the concept
-        hits = DRIVER.search_context(c)
+        hits = batch.get(c, [])
         if not hits:
             new_concepts.append(c)
             continue

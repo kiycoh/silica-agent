@@ -133,6 +133,15 @@ class ObsidianDriver(Protocol):
         """Search vault content with line-level context snippets."""
         ...
 
+    def search_context_batch(self, queries: list[str]) -> dict[str, list[Hit]]:
+        """Like search_context, but for many queries in one call.
+
+        Key = query, value = the Hits (ref + line + snippet) the corresponding
+        single search_context call would return. Additive: single-query callers
+        stay on search_context.
+        """
+        ...
+
     def read_note(self, ref: NoteRef | str) -> NoteContent:
         """Read a note's full content by name or ref."""
         ...

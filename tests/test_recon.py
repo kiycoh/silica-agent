@@ -88,6 +88,31 @@ class _FakeDriver:
     def search_context(self, query):
         return []
 
+    def search_context_batch(self, queries):
+        return {q: [] for q in queries}
+
+
+class _BatchSpyDriver:
+    """Driver stub: batch returns one external hit per query; counts call types."""
+    def __init__(self, body: str):
+        self._body = body
+        self.batch_calls = 0
+        self.single_calls = 0
+
+    def read_note(self, ref):
+        from silica.driver.base import NoteContent, NoteRef
+        return NoteContent(ref=NoteRef(name="note", path="inbox/note.md"), content=self._body)
+
+    def search_context(self, query):
+        self.single_calls += 1
+        return []
+
+    def search_context_batch(self, queries):
+        self.batch_calls += 1
+        from silica.driver.base import Hit, NoteRef
+        ref = NoteRef(name="Other", path="vault/Other.md")
+        return {q: [Hit(ref=ref, line=1, snippet=q)] for q in queries}
+
 
 # Heading is 4 words → YAKE (n=3) can't produce it → _seed_structural prepends it,
 # so the corroborated concept survives the MIN_CONCEPTS=1 cutoff. Body is long
@@ -131,6 +156,23 @@ class TestReconDeferral:
         assert res["deferred_concepts"] == []    # nothing held back
         admitted = set(res["new_concepts"]) | {c["name"] for c in res["collisions"]}
         assert _STRUCTURAL in admitted     # uncorroborated concepts still admitted
+
+
+class TestReconBatch:
+    def test_recon_uses_batch_search_once(self, monkeypatch):
+        """Hot path issues ONE batch call (N->1) and never per-concept search."""
+        import silica.tools.pipeline as pipe
+        from silica.config import CONFIG
+        monkeypatch.setattr(CONFIG, "defer_uncorroborated_concepts", False, raising=False)
+        drv = _BatchSpyDriver(_RECON_BODY)
+        monkeypatch.setattr(pipe, "DRIVER", drv)
+
+        res = pipe.silica_recon("inbox/note.md")
+
+        assert drv.batch_calls == 1            # one eval for all concepts
+        assert drv.single_calls == 0           # no per-concept rescan anymore
+        assert res["new_concepts"] == []       # every concept collided
+        assert res["collisions"]               # collisions reported from batch hits
 
 
 class TestIsConceptOverlayArg:

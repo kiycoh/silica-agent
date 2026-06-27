@@ -367,6 +367,13 @@ class ObsidianFSBackend:
                 
         return results
 
+    def search_context_batch(self, queries: list[str]) -> dict[str, list[Hit]]:
+        """Batch of search_context. The FS backend reads from an in-memory index,
+        so a plain loop is fine — the per-query rescan is only costly on the CLI
+        backend (one CDP eval per query). Contract is symmetric to search_context.
+        """
+        return {q: self.search_context(q) for q in queries}
+
     def read_note(self, ref: NoteRef | str) -> NoteContent:
         """Read a note's full content by name or ref."""
         path = self._resolve_path(ref)
