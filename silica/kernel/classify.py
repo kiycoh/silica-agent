@@ -311,7 +311,7 @@ def _llm_arbitrate(
 
     assignments = parsed.get("assignments") if isinstance(parsed, dict) else None
     if not isinstance(assignments, list):
-        logger.warning("LLM arbiter returned non-list: %r — falling back", parsed)
+        logger.warning("LLM arbiter response missing 'assignments' list: %r — falling back", parsed)
         return {note_path: taxonomy.uncategorized for note_path, _s, _r in ambiguous}
 
     valid_folders = {r.folder for r in taxonomy.rules} | {taxonomy.uncategorized}

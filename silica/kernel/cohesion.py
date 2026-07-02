@@ -12,10 +12,10 @@ sibling linking is out of scope here; the AUTOLINK+BACKLINK phases handle
 that via the vault title index after all chunks are written.
 
 No-free-lunch trade-off: token matching may produce false positives when two
-unrelated concepts share a generic discriminating word (e.g. "Reti Neurali" and
-"Reti Bayesiane" both contain "reti" — but in context they ARE siblings). The
-`related` field is advisory in Obsidian, so over-linking is preferable to
-under-linking for note discovery.
+unrelated concepts share a generic discriminating word (e.g. "Neural Networks"
+and "Bayesian Networks" both contain "networks" — but in context they ARE
+siblings). The `related` field is advisory in Obsidian, so over-linking is
+preferable to under-linking for note discovery.
 
 CONFIG: language-specific stopwords (function words, structural-academic terms) come
 from the active DomainOverlay (``silica.kernel.overlay.get_active_overlay()`` or

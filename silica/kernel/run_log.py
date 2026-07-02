@@ -25,8 +25,8 @@ DEFAULT_LOG_FILENAME = "log.md"
 
 
 def format_ingest_event(source_basename: str, new: int, patch: int, deferred: int) -> str:
-    """`ingest \\`file.md\\` → 7 nuove, 3 patch, 2 deferred` — the ingest event shape."""
-    return f"ingest `{source_basename}` → {new} nuove, {patch} patch, {deferred} deferred"
+    """`ingest \\`file.md\\` → 7 new, 3 patch, 2 deferred` — the ingest event shape."""
+    return f"ingest `{source_basename}` → {new} new, {patch} patch, {deferred} deferred"
 
 
 _CURATE_ORDER = ("dedup", "refine", "orphan", "autolink")

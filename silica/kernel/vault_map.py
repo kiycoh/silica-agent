@@ -1,11 +1,11 @@
-"""Vault map — self-model semantico compatto del corpus per il recall a inizio sessione.
+"""Vault map — a compact semantic self-model of the corpus for recall at session start.
 
-CoALA: consolida l'indice di co-occorrenza persistente + la struttura delle
-cartelle in un blocco Markdown breve, iniettato in working memory all'avvio,
-così l'agente parte orientato invece di ri-scoprire il vault via tool.
+CoALA: consolidates the persistent co-occurrence index + the folder structure
+into a short Markdown block, injected into working memory at startup, so the
+agent starts oriented instead of rediscovering the vault via tools.
 
-Deterministico, zero LLM. Best-effort: ogni sotto-blocco che fallisce viene
-omesso; vault o indice cooccur vuoto → None (il chiamante non inietta nulla).
+Deterministic, zero LLM. Best-effort: any sub-block that fails is omitted;
+an empty vault or cooccur index → None (the caller injects nothing).
 """
 from __future__ import annotations
 
@@ -38,21 +38,21 @@ def build_vault_map(
             return None
 
         lines: list[str] = [
-            "## Vault map  (orientamento auto-generato; "
-            "puo' non riflettere le scritture di questa sessione)"
+            "## Vault map  (auto-generated orientation; "
+            "may not reflect this session's writes)"
         ]
 
-        # Un solo giro di vault: refs alimenta sia il blocco cartelle sia lo
-        # scan contested (una sola list_files, non due).
+        # A single vault pass: refs feeds both the folders block and the
+        # contested scan (one list_files call, not two).
         refs: list = []
         try:
             from silica.driver import DRIVER
 
             refs = DRIVER.list_files()
         except Exception as e:  # best-effort
-            logger.debug("build_vault_map: list_files fallito: %s", e)
+            logger.debug("build_vault_map: list_files failed: %s", e)
 
-        # Conteggio note + cartelle principali
+        # Note count + top folders
         try:
             if refs:
                 folder_counts: Counter[str] = Counter(
@@ -60,20 +60,20 @@ def build_vault_map(
                     for r in refs
                     if getattr(r, "path", "")
                 )
-                lines.append(f"- Note: {len(refs)} in {len(folder_counts)} cartelle")
+                lines.append(f"- Notes: {len(refs)} in {len(folder_counts)} folders")
                 top = folder_counts.most_common(max_folders)
                 if top:
                     lines.append(
-                        "- Cartelle principali: "
+                        "- Top folders: "
                         + ", ".join(f"{f} ({c})" for f, c in top)
                     )
         except Exception as e:  # best-effort
-            logger.debug("build_vault_map: blocco cartelle saltato: %s", e)
+            logger.debug("build_vault_map: folders block skipped: %s", e)
 
-        # Note contestate (spec-hermes-coherence §1 residuo): frontmatter
-        # `contested: true`, stesso pattern di scan di graph_report/compute.py
-        # ma via props_of (frontmatter-only, niente body) — embedder-free,
-        # kernel-only. Nessuna riga se N == 0.
+        # Contested notes (spec-hermes-coherence §1 leftover): frontmatter
+        # `contested: true`, same scan pattern as graph_report/compute.py
+        # but via props_of (frontmatter-only, no body) — embedder-free,
+        # kernel-only. No line emitted if N == 0.
         try:
             from silica.driver import DRIVER
 
@@ -92,13 +92,13 @@ def build_vault_map(
                 extra = len(contested_names) - max_contested
                 if extra > 0:
                     shown += f" … +{extra}"
-                lines.append(f"⚠ {len(contested_names)} note contestate: {shown}")
+                lines.append(f"⚠ {len(contested_names)} contested notes: {shown}")
         except Exception as e:  # best-effort
-            logger.debug("build_vault_map: blocco contested saltato: %s", e)
+            logger.debug("build_vault_map: contested block skipped: %s", e)
 
-        # Cluster principali (Louvain sul grafo concetti; ogni community e'
-        # etichettata dai suoi stem a peso maggiore — community_labels NON va
-        # usato qui: vuole community di path di note, non di stem).
+        # Top clusters (Louvain over the concept graph; each community is
+        # labelled by its highest-weight stems — community_labels must NOT be
+        # used here: it wants communities of note paths, not of stems).
         try:
             from networkx.algorithms.community import louvain_communities
 
@@ -118,20 +118,20 @@ def build_vault_map(
                         cluster_labels.append(label)
                 if cluster_labels:
                     lines.append(
-                        "- Cluster principali: " + ", ".join(cluster_labels)
+                        "- Top clusters: " + ", ".join(cluster_labels)
                     )
-        except Exception as e:  # networkx assente o grafo vuoto → salta
-            logger.debug("build_vault_map: blocco cluster saltato: %s", e)
+        except Exception as e:  # networkx missing or empty graph → skip
+            logger.debug("build_vault_map: cluster block skipped: %s", e)
 
-        # Vocabolario centrale
+        # Core vocabulary
         try:
             stems = store.top_stems(max_vocab)
             if stems:
-                lines.append("- Vocabolario centrale: " + ", ".join(stems))
+                lines.append("- Core vocabulary: " + ", ".join(stems))
         except Exception as e:
-            logger.debug("build_vault_map: blocco vocabolario saltato: %s", e)
+            logger.debug("build_vault_map: vocabulary block skipped: %s", e)
 
-        # Note hub — proxy: note che toccano piu' concetti distinti
+        # Hub notes — proxy: notes that touch the most distinct concepts
         try:
             ranked = sorted(
                 store.paths(),
@@ -141,28 +141,28 @@ def build_vault_map(
             hub_names = [p.rsplit("/", 1)[-1].removesuffix(".md") for p in ranked]
             if hub_names:
                 lines.append(
-                    "- Note hub: " + ", ".join(f"[[{h}]]" for h in hub_names)
+                    "- Hub notes: " + ", ".join(f"[[{h}]]" for h in hub_names)
                 )
         except Exception as e:
-            logger.debug("build_vault_map: blocco hub saltato: %s", e)
+            logger.debug("build_vault_map: hub block skipped: %s", e)
 
-        # Coda del log.md — l'agente vede cosa e' successo di recente senza
-        # dover aprire il JSON dei run (Task 2: journal umano append-only).
+        # Tail of log.md — the agent sees what happened recently without
+        # having to open the run JSON (Task 2: human-readable append-only journal).
         try:
             from silica.kernel.run_log import tail_log
 
             recent = tail_log(log_tail)
             if recent:
-                lines.append("- Log recente:")
+                lines.append("- Recent log:")
                 lines.extend(f"  {ln}" for ln in recent)
         except Exception as e:
-            logger.debug("build_vault_map: blocco log saltato: %s", e)
+            logger.debug("build_vault_map: log block skipped: %s", e)
 
-        # Solo l'header → niente di utile: comportati come vault vuoto.
+        # Only the header → nothing useful: behave like an empty vault.
         if len(lines) == 1:
             return None
         return "\n".join(lines)
 
-    except Exception as e:  # ponytail: la mappa non deve mai rompere la sessione
-        logger.debug("build_vault_map: fallito (non-fatale): %s", e)
+    except Exception as e:  # ponytail: the map must never break the session
+        logger.debug("build_vault_map: failed (non-fatal): %s", e)
         return None

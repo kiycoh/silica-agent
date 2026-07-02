@@ -41,12 +41,12 @@ def _update_context_tokens(messages: list[dict]) -> None:
 
 
 def _inject_vault_map(messages: list[dict]) -> None:
-    """Appende la mappa del vault come messaggio system (best-effort).
+    """Appends the vault map as a system message (best-effort).
 
-    CoALA recall: carica il self-model del corpus in working memory a inizio
-    sessione cosi' l'agente non ri-scopre il vault via tool. La mappa e' uno
-    snapshot d'avvio; le scritture della sessione vivono gia' in working memory.
-    # ponytail: ricalcolata 1x per sessione; nessuno storage/refresh.
+    CoALA recall: loads the corpus self-model into working memory at session
+    start so the agent doesn't rediscover the vault via tools. The map is a
+    startup snapshot; this session's writes already live in working memory.
+    # ponytail: recomputed once per session; no storage/refresh.
     """
     try:
         from silica.kernel.vault_map import build_vault_map
@@ -640,8 +640,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 modified, prior_notes = check_reingest(_Path(mf).name, incoming_sha)
                 if modified:
                     CONSOLE.print(
-                        f"  [yellow]re-ingest di fonte modificata: {prior_notes} note "
-                        f"derivate dalla versione precedente[/]"
+                        f"  [yellow]re-ingest of a modified source: {prior_notes} note(s) "
+                        f"derived from the previous version[/]"
                     )
             except Exception as exc:
                 logger.debug("/ingest: re-ingest provenance check skipped for %s (non-fatal): %s", mf, exc)

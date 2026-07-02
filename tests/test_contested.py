@@ -192,7 +192,7 @@ def test_run_dedup_contradicts_end_to_end(tmp_vault):
     assert res["status"] == "committed", res
     content = tmp_vault.read(path)
     assert contested_refs(content) == ["fonte: appunti-cardiologia-2026.md"]
-    assert "> [!warning] Contraddizione — da appunti-cardiologia-2026.md" in content
+    assert "> [!warning] Contradiction — from appunti-cardiologia-2026.md" in content
     assert "50mg/die" in content
     assert "5mg/die" in content  # original claim never touched
 

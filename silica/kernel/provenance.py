@@ -7,8 +7,8 @@ and read by graph_report (source drift section) and /ingest (re-ingest of a
 modified source warning).
 
 Storage: `<vault_path>/provenance.json` — a JSON array of records:
-    {"source": "lezione-03.md", "sha256": "…", "run_id": "…",
-     "date": "2026-07-02", "notes": ["Concepts/Nota A", "Concepts/Nota B"]}
+    {"source": "lecture-03.md", "sha256": "…", "run_id": "…",
+     "date": "2026-07-02", "notes": ["Concepts/Note A", "Concepts/Note B"]}
 `notes` entries are vault-relative note paths without the `.md` extension
 (RunManifestEntry.path, which strips it) — NOT the same form as graph_report
 node ids, which carry `.md` (driver index keys). Callers that intersect the

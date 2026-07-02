@@ -146,7 +146,7 @@ def test_ingest_reingest_of_modified_source_warns(repo_vault, capsys):
     assert msg is not None and "silica_run_injector" in msg
 
     out = capsys.readouterr().out
-    assert "re-ingest di fonte modificata" in out
+    assert "re-ingest of a modified source" in out
     assert "2 note" in out
 
 
@@ -164,7 +164,7 @@ def test_ingest_same_sha_no_warning(repo_vault, capsys):
     assert msg is not None
 
     out = capsys.readouterr().out
-    assert "re-ingest di fonte modificata" not in out
+    assert "re-ingest of a modified source" not in out
 
 
 def test_ingest_no_prior_provenance_no_warning(repo_vault, capsys):
@@ -177,7 +177,7 @@ def test_ingest_no_prior_provenance_no_warning(repo_vault, capsys):
     assert msg is not None
 
     out = capsys.readouterr().out
-    assert "re-ingest di fonte modificata" not in out
+    assert "re-ingest of a modified source" not in out
 
 
 def test_ingest_missing_target_errors_before_reingest_warning(repo_vault, capsys):
@@ -195,4 +195,4 @@ def test_ingest_missing_target_errors_before_reingest_warning(repo_vault, capsys
 
     assert msg is not None and msg.startswith("Error:") and "--target" in msg
     out = capsys.readouterr().out
-    assert "re-ingest di fonte modificata" not in out
+    assert "re-ingest of a modified source" not in out

@@ -44,8 +44,8 @@ def contested_callout(claim: str, source_basename: str) -> str:
     """The warning callout recording a conflicting claim, with provenance."""
     quoted = "\n".join(f"> {line}".rstrip() for line in claim.strip().splitlines())
     return (
-        f"> [!warning] Contraddizione — da {source_basename}\n"
+        f"> [!warning] Contradiction — from {source_basename}\n"
         f"{quoted}\n"
         f">\n"
-        f"> In conflitto con questa nota. Non risolto."
+        f"> Conflicts with this note. Unresolved."
     )

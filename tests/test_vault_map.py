@@ -26,7 +26,7 @@ def test_populated_store_yields_map(tmp_path):
     # almeno un termine di dominio emerge nella riga vocabolario
     assert "embed" in out.lower() or "vector" in out.lower()
     # il blocco cluster produce una riga (regressione: non deve marcire in silenzio)
-    assert "Cluster principali:" in out
+    assert "Top clusters:" in out
 
 
 def test_inject_appends_system_message(monkeypatch):
@@ -90,7 +90,7 @@ def test_log_tail_appears_when_log_exists(tmp_vault, tmp_path):
 
     store = _populated_store(tmp_path)
     append_log_line(
-        "ingest `a.md` → 1 nuove, 0 patch, 0 deferred",
+        "ingest `a.md` → 1 new, 0 patch, 0 deferred",
         "runidabc1234",
         vault_path=CONFIG.vault_path,
     )
@@ -98,7 +98,7 @@ def test_log_tail_appears_when_log_exists(tmp_vault, tmp_path):
     out = build_vault_map(store=store)
 
     assert out is not None
-    assert "Log recente" in out
+    assert "Recent log" in out
     assert "a.md" in out
 
 
@@ -108,7 +108,7 @@ def test_log_tail_absent_when_no_log_file(tmp_vault, tmp_path):
     out = build_vault_map(store=store)
 
     assert out is not None
-    assert "Log recente" not in out
+    assert "Recent log" not in out
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +127,7 @@ def test_contested_line_present_when_notes_contested(tmp_vault, tmp_path):
     out = build_vault_map(store=store)
 
     assert out is not None
-    assert "⚠ 1 note contestate" in out
+    assert "⚠ 1 contested notes" in out
     assert "[[Contested1]]" in out
 
 
@@ -139,4 +139,4 @@ def test_contested_line_absent_when_no_contested_notes(tmp_vault, tmp_path):
     out = build_vault_map(store=store)
 
     assert out is not None
-    assert "note contestate" not in out
+    assert "contested notes" not in out

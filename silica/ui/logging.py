@@ -20,7 +20,7 @@ class LiveAwareStreamHandler(logging.StreamHandler):
         pass  # always dynamic — ignore the value StreamHandler.__init__ assigns
 
 
-# Italian translations/explanations mapping for standard log messages
+# Human-friendly rewording of standard log messages
 FRIENDLY_TEMPLATES = {
     # Debug messages
     "Registered tool: %s (class=%s)":

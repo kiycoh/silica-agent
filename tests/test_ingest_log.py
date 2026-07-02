@@ -45,7 +45,7 @@ def test_writes_projected_new_and_patch_counts(tmp_vault):
     finalize._log_ingest_completion(fsm, 0, "Inbox/lezione-03.md")
 
     content = (Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME).read_text(encoding="utf-8")
-    assert "ingest `lezione-03.md` → 2 nuove, 1 patch, 0 deferred" in content
+    assert "ingest `lezione-03.md` → 2 new, 1 patch, 0 deferred" in content
     assert "run deadbeef" in content
 
 
@@ -68,7 +68,7 @@ def test_includes_deferred_count_from_deferred_store(tmp_vault, monkeypatch, tmp
     finalize._log_ingest_completion(fsm, 0, "Inbox/lezione-03.md")
 
     content = (Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME).read_text(encoding="utf-8")
-    assert "→ 0 nuove, 0 patch, 2 deferred" in content
+    assert "→ 0 new, 0 patch, 2 deferred" in content
 
 
 def test_two_ingests_two_lines_in_order(tmp_vault):
@@ -105,8 +105,8 @@ def test_multi_file_same_run_id_logs_one_line_per_file(tmp_vault):
     log_file = Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME
     lines = [l for l in log_file.read_text(encoding="utf-8").splitlines() if l.strip()]
     assert len(lines) == 2
-    assert "ingest `one.md` → 1 nuove, 0 patch, 0 deferred" in lines[0]
-    assert "ingest `two.md` → 1 nuove, 1 patch, 0 deferred" in lines[1]
+    assert "ingest `one.md` → 1 new, 0 patch, 0 deferred" in lines[0]
+    assert "ingest `two.md` → 1 new, 1 patch, 0 deferred" in lines[1]
 
     # Resume of the same run: both files re-enter CLEANUP → still two lines.
     finalize._log_ingest_completion(fsm, 0, "Inbox/one.md")

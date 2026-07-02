@@ -128,21 +128,21 @@ class SilicaConfig:
         default_factory=lambda: int(os.getenv("SILICA_MAX_CONTEXT", "60000"))
     )
 
-    # Tool progress display level (REPL-runtime, ciclabile con /verbose)
-    # off     — silenzio totale, solo risposta finale
-    # new     — mostra il nome del tool solo quando cambia
-    # all     — ogni tool call con preview degli args (default)
-    # verbose — args completi, risultato troncato, durata
+    # Tool progress display level (REPL-runtime, cycled with /verbose)
+    # off     — total silence, only the final response
+    # new     — shows the tool name only when it changes
+    # all     — every tool call with an args preview (default)
+    # verbose — full args, truncated result, duration
     tool_progress: Literal["off", "new", "all", "verbose"] = field(
         default_factory=lambda: os.getenv("SILICA_TOOL_PROGRESS", "all")  # type: ignore
     )
 
-    # Debug logging su stderr (--verbose / -v flag CLI, non ciclabile)
+    # Debug logging to stderr (--verbose / -v CLI flag, not cycled)
     debug_logging: bool = field(
         default_factory=lambda: os.getenv("SILICA_VERBOSE", "False").lower() in ("true", "1", "t")
     )
 
-    # Mostra i blocchi di reasoning del modello (toggle a runtime con /thinking)
+    # Shows the model's reasoning blocks (runtime toggle with /thinking)
     show_thinking: bool = field(
         default_factory=lambda: os.getenv("SILICA_SHOW_THINKING", "True").lower() in ("true", "1", "t")
     )
@@ -150,7 +150,7 @@ class SilicaConfig:
     # Runtime session state — updated by cli.py after each agent turn
     context_tokens: int = 0
 
-    # Stile del banner di avvio (wordmark, minimal)
+    # Startup banner style (wordmark, minimal)
     banner_style: Literal["wordmark", "minimal"] = field(
         default_factory=lambda: os.getenv("SILICA_BANNER_STYLE", "wordmark")  # type: ignore
     )

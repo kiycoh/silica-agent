@@ -192,7 +192,7 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
     if r.source_drift:
         add("## Source Drift (Notes From a Superseded Source Version)")
         for d in r.source_drift[:_LIST_CAP]:
-            add(f"- [[{_short(d.note)}]] — derivate da versione superata di {d.source}")
+            add(f"- [[{_short(d.note)}]] — derived from a superseded version of {d.source}")
         if len(r.source_drift) > _LIST_CAP:
             add(f"- _… +{len(r.source_drift) - _LIST_CAP} more (see GRAPH_REPORT.json)_")
         add("")

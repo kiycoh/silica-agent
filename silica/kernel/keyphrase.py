@@ -38,7 +38,7 @@ MIN_CONCEPTS = 1          # a note may map to a single concept — no forced pad
 MAX_CONCEPTS = 40
 YAKE_POOL = 100           # candidates YAKE proposes (also the rerank pool)
 
-# Rerank knobs (Fase 2 — tune via the eval).
+# Rerank knobs (Phase 2 — tune via the eval).
 MMR_LAMBDA = 0.6          # relevance vs diversity in MMR; lower = more diverse
 STRUCT_BOOST = 0.3        # relevance bonus for a concept present in markup
 
