@@ -103,6 +103,46 @@ forbidden_modules = ["silica.router", "silica.capabilities"]
 # the AUDIT-COALA WATCH list); this contract codifies only what is true today.
 allow_indirect_imports = true
 
+[[tool.importlinter.contracts]]
+name = "capability workers are peers — they never import each other (P9)"
+type = "independence"
+modules = [
+  "silica.capabilities.dedup",
+  "silica.capabilities.enrich",
+  "silica.capabilities.orphan",
+  "silica.capabilities.refine",
+]
+# profile/runtime/_base sono infrastruttura condivisa, non peer: fuori lista.
+ignore_imports = [
+  # il control shell (subagent runner) importa il registry dei worker per
+  # dispatciarli: e' l'attivazione decisa dal coordinator (P9), non un peer import.
+  "silica.agent.subagent -> silica.capabilities",
+]
+
+[[tool.importlinter.contracts]]
+name = "graph structure is deterministic — structural modules never import agent (P2/DKB)"
+type = "forbidden"
+source_modules = [
+  "silica.kernel.cooccurrence",
+  "silica.kernel.keyphrase",
+  "silica.kernel.wikilink",
+  "silica.kernel.graph_diff",
+  "silica.kernel.autolink",
+  "silica.kernel.graph_report.compute",
+  "silica.kernel.graph_report.cooccur_delta",
+  "silica.kernel.graph_report.models",
+  "silica.kernel.graph_report.render",
+]
+forbidden_modules = ["silica.agent"]
+# embed_signals e run_substrate NON sono in lista: importano get_embedder
+# (overlay di embedding, lecito). classify/prep_delegation chiamano LLM ma
+# non costruiscono struttura del grafo — fuori scope di questo contratto.
+ignore_imports = [
+  # embed_signals e' overlay di embedding (lecito, escluso dai source_modules);
+  # compute lo importa per assemblare il report, non per costruire struttura.
+  "silica.kernel.graph_report.embed_signals -> silica.agent.providers",
+]
+
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = false

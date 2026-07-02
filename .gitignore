@@ -161,9 +161,11 @@ Thumbs.db
 CLAUDE.md
 /.claude
 /memory
+.superpowers
 
 # Vault data (personal)
 .silica/
+.import_linter_cache/
 
 # DB
 ruvector.db
