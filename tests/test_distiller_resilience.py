@@ -156,8 +156,9 @@ class TestRunDistillerSalvage:
 # ---------------------------------------------------------------------------
 
 class TestRunDistillerDynamicBudget:
+    @patch("silica.agent.providers.model_limits", return_value=(0, 0))
     @patch("silica.agent.providers.get_provider")
-    def test_passes_headroom_above_old_ceiling(self, mock_get_provider, monkeypatch):
+    def test_passes_headroom_above_old_ceiling(self, mock_get_provider, _limits, monkeypatch):
         monkeypatch.setenv("MODEL_CONTEXT_WINDOW", "262144")
         monkeypatch.delenv("DISTILLER_MAX_TOKENS", raising=False)
         mock_provider = MagicMock()
@@ -172,6 +173,58 @@ class TestRunDistillerDynamicBudget:
         # No longer artificially pinned at the old 32768; uses real headroom.
         assert sent > 32768
         assert sent <= 262144
+
+    @patch("silica.agent.providers.model_limits", return_value=(100_000, 8_000))
+    @patch("silica.agent.providers.get_provider")
+    def test_window_and_output_cap_from_provider(self, mock_get_provider, _limits, monkeypatch):
+        monkeypatch.delenv("MODEL_CONTEXT_WINDOW", raising=False)
+        monkeypatch.delenv("DISTILLER_MAX_TOKENS", raising=False)
+        mock_provider = MagicMock()
+        mock_get_provider.return_value = mock_provider
+        mock_provider.call_llm.return_value = LLMResponse(
+            text=json.dumps({"updates": []})
+        )
+
+        run_distiller(payload={"schema_version": 1, "batches": []}, target="t")
+
+        sent = mock_provider.call_llm.call_args.kwargs["max_tokens"]
+        # Provider reports (window=100k, max_out=8k): the output cap must win,
+        # otherwise a model like OpenRouter qwen3-8b (131k ctx, 8k out) 400s.
+        assert sent == 8_000
+
+    @patch("silica.agent.providers.model_limits", return_value=(0, 0))
+    @patch("silica.agent.providers.get_provider")
+    def test_provider_unknown_falls_back_to_default_window(self, mock_get_provider, _limits, monkeypatch):
+        monkeypatch.delenv("MODEL_CONTEXT_WINDOW", raising=False)
+        monkeypatch.delenv("DISTILLER_MAX_TOKENS", raising=False)
+        mock_provider = MagicMock()
+        mock_get_provider.return_value = mock_provider
+        mock_provider.call_llm.return_value = LLMResponse(
+            text=json.dumps({"updates": []})
+        )
+
+        run_distiller(payload={"schema_version": 1, "batches": []}, target="t")
+
+        sent = mock_provider.call_llm.call_args.kwargs["max_tokens"]
+        assert sent > 32768
+        assert sent <= 262144
+
+    @patch("silica.agent.providers.model_limits", return_value=(999_999, 999_999))
+    @patch("silica.agent.providers.get_provider")
+    def test_env_overrides_skip_provider_lookup(self, mock_get_provider, mock_limits, monkeypatch):
+        monkeypatch.setenv("MODEL_CONTEXT_WINDOW", "50000")
+        monkeypatch.setenv("DISTILLER_MAX_TOKENS", "5000")
+        mock_provider = MagicMock()
+        mock_get_provider.return_value = mock_provider
+        mock_provider.call_llm.return_value = LLMResponse(
+            text=json.dumps({"updates": []})
+        )
+
+        run_distiller(payload={"schema_version": 1, "batches": []}, target="t")
+
+        sent = mock_provider.call_llm.call_args.kwargs["max_tokens"]
+        assert sent == 5000
+        mock_limits.assert_not_called()
 
     @patch("silica.agent.providers.get_provider")
     def test_explicit_ceiling_is_respected(self, mock_get_provider, monkeypatch):

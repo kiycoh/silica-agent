@@ -232,11 +232,23 @@ def run_distiller(
     logger.info("Calling Distiller LLM (payload checksum %s)", checksum[:12])
 
     # #2: size the output budget to the real prompt + model context window
-    # instead of a fixed ceiling. DISTILLER_MAX_TOKENS, when set, is treated as
-    # an optional hard cap; unset/0 means "use all available headroom".
-    context_window = int(os.getenv("MODEL_CONTEXT_WINDOW", "262144"))
-    safety_margin = int(os.getenv("DISTILLER_TOKEN_SAFETY_MARGIN", "2048"))
+    # instead of a fixed ceiling. Window and output cap come from the live
+    # provider (LM Studio /api/v0/models, OpenRouter /api/v1/models);
+    # MODEL_CONTEXT_WINDOW / DISTILLER_MAX_TOKENS stay as explicit operator
+    # overrides, 262144 as the last-resort default when the provider is
+    # unreachable or the model unmapped.
+    context_window = int(os.getenv("MODEL_CONTEXT_WINDOW", "0"))
     ceiling = int(os.getenv("DISTILLER_MAX_TOKENS", "0"))
+    if not context_window or not ceiling:
+        from silica.agent.providers import model_limits
+        # Same worker→router fallback as get_provider(role="worker").
+        w_provider, w_model = CONFIG.worker_provider, CONFIG.worker_model
+        if not w_provider or not w_model:
+            w_provider, w_model = CONFIG.provider, CONFIG.model
+        window, out_cap = model_limits(w_provider, w_model)
+        context_window = context_window or window or 262144
+        ceiling = ceiling or out_cap
+    safety_margin = int(os.getenv("DISTILLER_TOKEN_SAFETY_MARGIN", "2048"))
     max_tokens = compute_distiller_max_tokens(
         user_message,
         context_window=context_window,

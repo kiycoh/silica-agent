@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shlex
 import sys
 from typing import NamedTuple
@@ -882,7 +883,17 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
         return False  # Signal to exit
 
     if cmd == "/model":
-        CONSOLE.print(f"  Current model: [bold]{CONFIG.model or '(not configured)'}[/]")
+        if not CONFIG.model:
+            CONSOLE.print("  Current model: [bold](not configured)[/]")
+            return True
+        from silica.agent.providers import model_limits
+        window, out_cap = model_limits(CONFIG.provider, CONFIG.model)
+        extra = ""
+        if window:
+            extra = f"  [dim]ctx {window:,}[/]"
+            if out_cap:
+                extra += f" [dim]· max out {out_cap:,}[/]"
+        CONSOLE.print(f"  Current model: [bold]{CONFIG.model}[/]{extra}")
         return True
 
     if cmd == "/tools":
@@ -937,6 +948,22 @@ def _model_configured() -> bool:
     return bool(CONFIG.model.strip())
 
 
+def _resolve_context_budget() -> None:
+    """Size the REPL context meter to the live model's window.
+
+    SILICA_MAX_CONTEXT, when set, is an explicit operator pin and wins;
+    otherwise ask the provider (LM Studio reports the loaded window, OpenRouter
+    the model's context_length) and fall back to the static default when
+    unreachable.
+    """
+    if os.getenv("SILICA_MAX_CONTEXT") or not _model_configured():
+        return
+    from silica.agent.providers import model_limits
+    window, _ = model_limits(CONFIG.provider, CONFIG.model)
+    if window:
+        CONFIG.max_context_tokens = window
+
+
 def _dispatch_subcommand(args: list[str]) -> int | None:
     """Handle `silica doctor` / `silica init`.
 
@@ -964,6 +991,7 @@ def main():
     _activate_repo_mode()
     from silica.kernel.vault_manifest import apply_manifest_to_config
     apply_manifest_to_config()
+    _resolve_context_budget()
     debug_mode = "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging
     _setup_logging(debug=debug_mode)
 

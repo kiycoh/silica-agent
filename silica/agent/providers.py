@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import lru_cache
 from typing import Any
 import httpx
 import openai
@@ -26,6 +27,40 @@ PROVIDER_PRESETS = {
 
 SILICA_CLI_OPEN = "<silica-cli>"
 SILICA_CLI_CLOSE = "</silica-cli>"
+
+
+# ponytail: cached per process — reload the model in LM Studio with a different
+# window and silica needs a restart to see it; TTL cache if that ever bites.
+@lru_cache(maxsize=None)
+def model_limits(provider: str, model: str) -> tuple[int, int]:
+    """(context_window, max_output_tokens) as reported by the live provider.
+
+    lmstudio   → GET {base}/api/v0/models: `loaded_context_length` (the window
+                 the model is loaded with RIGHT NOW, often below its max) with
+                 `max_context_length` as fallback. No output cap.
+    openrouter → GET /api/v1/models: `context_length` plus the top provider's
+                 `max_completion_tokens` (often far below the window — e.g.
+                 qwen3-8b: 131k ctx, 8k out).
+
+    (0, 0) means unknown/unreachable: callers keep their static defaults.
+    """
+    try:
+        if provider == "lmstudio":
+            base = PROVIDER_PRESETS["lmstudio"]["base_url"].removesuffix("/v1")
+            data = httpx.get(f"{base}/api/v0/models", timeout=5.0).json()["data"]
+            wanted = model.removeprefix("lmstudio/")
+            entry = next(m for m in data if m["id"] == wanted)
+            window = entry.get("loaded_context_length") or entry.get("max_context_length") or 0
+            return int(window), 0
+        if provider == "openrouter":
+            data = httpx.get("https://openrouter.ai/api/v1/models", timeout=5.0).json()["data"]
+            wanted = model.removeprefix("openrouter/")
+            entry = next(m for m in data if m["id"] == wanted)
+            out_cap = (entry.get("top_provider") or {}).get("max_completion_tokens") or 0
+            return int(entry.get("context_length") or 0), int(out_cap)
+    except Exception as e:
+        logger.debug("model_limits(%s, %s) unavailable: %s", provider, model, e)
+    return (0, 0)
 
 
 def _to_wire(msg: dict) -> dict:
