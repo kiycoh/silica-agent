@@ -5,12 +5,12 @@ import logging
 import time
 from typing import Callable
 from rich.live import Live
+from rich.padding import Padding
 from rich.spinner import Spinner
 from rich.text import Text
 from rich.markup import escape
 from rich.console import Group
-from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, BarColumn, MofNCompleteColumn, TimeElapsedColumn
+from rich.progress import Progress, BarColumn, MofNCompleteColumn, TimeElapsedColumn
 from silica.agent.events import (
     ToolStartEvent,
     ToolCompleteEvent,
@@ -24,6 +24,7 @@ from silica.agent.events import (
 )
 from silica.config import CONFIG
 from silica.ui.console import CONSOLE
+from silica.ui.style import GLYPHS
 
 logger = logging.getLogger(__name__)
 
@@ -81,9 +82,7 @@ def emit_batch_event(event: RenderEvent) -> None:
 
 _MAX_RESULT_CHARS = 600
 _MAX_RESULT_LINES = 12
-_MAX_ARGS_PREVIEW_CHARS = 120
 _REASONING_MAX_LINES = 20
-_COMPACT_VAL_CHARS = 60
 _RESULT_HEAD_LINES = 3
 _RESULT_LINE_CHARS = 120
 
@@ -124,32 +123,14 @@ def _head_cap(text: str, max_lines: int = _REASONING_MAX_LINES) -> str:
     return "\n".join(lines[:max_lines]) + f"\n[… +{extra} lines]"
 
 
-def _args_preview(args: dict) -> str:
-    try:
-        s = json.dumps(args, ensure_ascii=False)
-        if len(s) > _MAX_ARGS_PREVIEW_CHARS:
-            return s[:_MAX_ARGS_PREVIEW_CHARS] + "…"
-        return s
-    except Exception:
-        return "{…}"
-
-
-def _compact_args(args: dict) -> str:
-    """Format args as space-separated key=val pairs with long values truncated."""
-    parts = []
-    for k, v in args.items():
-        if isinstance(v, str):
-            val = v if len(v) <= _COMPACT_VAL_CHARS else v[:_COMPACT_VAL_CHARS] + "…"
-        elif isinstance(v, (list, dict)):
-            try:
-                s = json.dumps(v, ensure_ascii=False)
-            except Exception:
-                s = str(v)
-            val = s if len(s) <= _COMPACT_VAL_CHARS else s[:_COMPACT_VAL_CHARS] + "…"
-        else:
-            val = str(v)
-        parts.append(f"{k}={val}")
-    return "  ".join(parts)
+def _fmt_dur(seconds: float) -> str:
+    """Human duration: omitted under 0.1s, one decimal under a minute, 1m04s beyond."""
+    if seconds < 0.1:
+        return ""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m, s = divmod(int(seconds), 60)
+    return f"{m}m{s:02d}s"
 
 
 def _head_result(text: str) -> str:
@@ -166,68 +147,52 @@ def _head_result(text: str) -> str:
     return result
 
 
+# tool → (verb, arg key shown as the bold target). Command-form grammar: `verb "target"`.
+_TOOL_DESC: dict[str, tuple[str, str | None]] = {
+    "silica_search": ("search", "query"),
+    "silica_search_context": ("search", "query"),
+    "silica_read_note": ("read", "name"),
+    "silica_props": ("props", "name"),
+    "silica_outline": ("outline", "name"),
+    "silica_links": ("links", "name"),
+    "silica_backlinks": ("backlinks", "name"),
+    "silica_orphans": ("orphans", None),
+    "silica_unresolved": ("unresolved links", None),
+    "silica_files": ("list files", "folder"),
+    "silica_exists": ("exists", "path"),
+    "silica_deferred_list": ("deferred list", None),
+    "silica_deferred_flush": ("deferred flush", None),
+    "silica_deferred_retry": ("deferred retry", None),
+    "silica_inbox_ls": ("inbox", None),
+    "silica_recon": ("recon", "inbox_file"),
+    "silica_payload": ("payload", "recon_report_path"),
+    "silica_sanitize": ("sanitize", "distiller_output_path"),
+    "silica_validate_ops": ("validate", "ops_json_path"),
+    "silica_bulk_write": ("bulk write", "ops_json_path"),
+    "silica_lint": ("lint", "note_name"),
+    "silica_run_injector": ("injector", "inbox_file"),
+    "silica_delete": ("delete", "ref"),
+    "silica_snapshot": ("snapshot", "ops_json_path"),
+    "silica_restore": ("restore", "txn_id"),
+    "silica_cleanup": ("cleanup", "inbox_file"),
+}
+
+
+def _tool_verb(name: str) -> str:
+    verb, _ = _TOOL_DESC.get(name, (name.removeprefix("silica_").replace("_", " "), None))
+    return verb
+
+
 def _synthetic_tool_desc(name: str, args: dict) -> str:
-    # Human-readable synthetic description
-    if name == "silica_search" or name == "silica_search_context":
-        return f"Searching notes for [bold]\"{escape(args.get('query', ''))}\"[/bold]"
-    elif name == "silica_read_note":
-        return f"Reading note [bold]\"{escape(args.get('name', ''))}\"[/bold]"
-    elif name == "silica_props":
-        return f"Reading properties of [bold]\"{escape(args.get('name', ''))}\"[/bold]"
-    elif name == "silica_outline":
-        return f"Reading outline of [bold]\"{escape(args.get('name', ''))}\"[/bold]"
-    elif name == "silica_links":
-        return f"Reading links of [bold]\"{escape(args.get('name', ''))}\"[/bold]"
-    elif name == "silica_backlinks":
-        return f"Reading backlinks of [bold]\"{escape(args.get('name', ''))}\"[/bold]"
-    elif name == "silica_orphans":
-        return "Listing orphan notes"
-    elif name == "silica_unresolved":
-        return "Listing unresolved links"
-    elif name == "silica_files":
-        folder = args.get("folder", "")
-        folder_str = f" in [bold]\"{escape(folder)}\"[/bold]" if folder else ""
-        return f"Listing files{folder_str}"
-    elif name == "silica_exists":
-        return f"Checking if [bold]\"{escape(args.get('path', ''))}\"[/bold] exists"
-    elif name == "silica_deferred_list":
-        return "Listing deferred operations"
-    elif name == "silica_deferred_flush":
-        return "Flushing deferred operations"
-    elif name == "silica_inbox_ls":
-        return "Listing inbox files"
-    elif name == "silica_recon":
-        return f"Reconciling [bold]\"{escape(args.get('inbox_file', ''))}\"[/bold]"
-    elif name == "silica_payload":
-        return f"Building concept payload from [bold]\"{escape(args.get('recon_report_path', ''))}\"[/bold]"
-    elif name == "silica_sanitize":
-        return f"Sanitizing distiller output at [bold]\"{escape(args.get('distiller_output_path', ''))}\"[/bold]"
-    elif name == "silica_validate_ops":
-        return f"Validating operations in [bold]\"{escape(args.get('ops_json_path', ''))}\"[/bold]"
-    elif name == "silica_bulk_write":
-        return f"Executing bulk write using [bold]\"{escape(args.get('ops_json_path', ''))}\"[/bold]"
-    elif name == "silica_lint":
-        return f"Linting note [bold]\"{escape(args.get('note_name', ''))}\"[/bold]"
-    elif name == "silica_run_injector":
-        return f"Running injector on [bold]\"{escape(args.get('inbox_file', ''))}\"[/bold]"
-    elif name == "silica_deferred_retry":
-        return "Retrying deferred operations"
-    elif name == "silica_move":
-        ref = args.get("ref", "")
-        to = args.get("to", "")
-        return f"Moving [bold]\"{escape(ref)}\"[/bold] to [bold]\"{escape(to)}\"[/bold]"
-    elif name == "silica_delete":
-        return f"Deleting [bold]\"{escape(args.get('ref', ''))}\"[/bold]"
-    elif name == "silica_snapshot":
-        return f"Taking snapshot to [bold]\"{escape(args.get('ops_json_path', ''))}\"[/bold]"
-    elif name == "silica_restore":
-        return f"Restoring transaction [bold]\"{escape(args.get('txn_id', ''))}\"[/bold]"
-    elif name == "silica_cleanup":
-        return f"Cleaning up [bold]\"{escape(args.get('inbox_file', ''))}\"[/bold]"
-        
-    # Fallback
-    clean_name = name.removeprefix("silica_").replace("_", " ")
-    return f"Executing {clean_name}"
+    """Compact command-form description; the target argument is the only bold element."""
+    if name == "silica_move":
+        ref, to = args.get("ref", ""), args.get("to", "")
+        return f'move [bold]"{escape(str(ref))}"[/bold] {GLYPHS["arrow"]} [bold]"{escape(str(to))}"[/bold]'
+    verb, key = _TOOL_DESC.get(name, (name.removeprefix("silica_").replace("_", " "), None))
+    val = args.get(key, "") if key else ""
+    if val:
+        return f'{verb} [bold]"{escape(str(val))}"[/bold]'
+    return verb
 
 
 _PHASE_LABELS: dict[str, str] = {
@@ -315,7 +280,6 @@ class _ProgressRenderer:
         self._active_tools: dict[str, dict] = {}
         # Pipeline phase tracking (populated when silica_run_injector is active)
         self._injector_call_id: str | None = None
-        self._injector_desc: str = ""
         self._pipeline_phases: list[dict] = []   # ordered: {phase, status, elapsed}
         self._phase_start_times: dict[str, float] = {}
         # Inject progress bar (tracks files processed / total)
@@ -325,11 +289,32 @@ class _ProgressRenderer:
         self._inject_task_id = None
         # Batch run progress (refine/enrich)
         self._batch: dict | None = None
+        # Pending ✓ line — consecutive completions of the same tool collapse into one
+        # aggregated line (`✓ read ×4 · 1.2s`), flushed before any other output.
+        self._ok_run: dict | None = None
+        # Streamed answer preview shown in the transient live region while the
+        # final LLM response is being generated.
+        self._stream_buf: str = ""
         # Register as batch hook so emit_batch_event reaches this renderer
         global _batch_run_hook
         _batch_run_hook = self.__call__
         from silica.agent.bus import BUS
         BUS.subscribe("work/feedback", self._on_work_feedback)
+
+    def _flush_ok_run(self) -> None:
+        """Print (and clear) the buffered ✓ line, aggregated when count > 1."""
+        run, self._ok_run = self._ok_run, None
+        if run is None:
+            return
+        dur = _fmt_dur(run["dur"])
+        dur_str = f" [dim]{dur}[/]" if dur else ""
+        if run["count"] > 1:
+            CONSOLE.print(
+                f"  [tool.ok]{GLYPHS['ok']}[/] {_tool_verb(run['name'])}"
+                f" [dim]×{run['count']}[/]{dur_str}"
+            )
+        else:
+            CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {run['desc']}{dur_str}")
 
     def _start_spinner(self) -> None:
         if self._live is not None:
@@ -345,9 +330,27 @@ class _ProgressRenderer:
         )
         self._live.start()
 
+    _STREAM_TAIL_LINES = 6
+
+    def _update_stream_live(self) -> None:
+        """Render the tail of the streaming answer in the transient live region."""
+        if self._batch is not None or not self._stream_buf:
+            return
+        tail = self._stream_buf.splitlines()[-self._STREAM_TAIL_LINES:]
+        # Each line clipped, not wrapped: the region height must stay bounded so
+        # the Live never tears (same invariant as the stage track).
+        body = Text("\n".join(tail), style="dim", no_wrap=True, overflow="ellipsis")
+        header = Spinner("dots", text=" [role.assistant]silica[/] [dim]·[/]", style="brand.cyan")
+        group = Group(header, Padding(body, (0, 0, 0, 2)))
+        if self._live is not None:
+            self._live.update(group)
+        else:
+            self._live = Live(group, console=CONSOLE, refresh_per_second=12, transient=True)
+            self._live.start()
+
     def _stop_spinner(self) -> None:
         if self._batch is not None:
-            return  # Batch Live is managed by _update_batch_panel / _finalize_batch
+            return  # Batch Live is managed by _update_batch_live / _finalize_batch
         if self._live is not None:
             self._live.stop()
             self._live = None
@@ -399,11 +402,11 @@ class _ProgressRenderer:
         if event.kind != self._batch["kind"]:
             return
         self._batch["micro_phase"] = event.phase
-        self._update_batch_panel()
+        self._update_batch_live()
 
     def _update_live(self) -> None:
         if self._batch is not None:
-            return  # Batch panel managed by _update_batch_panel
+            return  # Batch block managed by _update_batch_live
         mode = CONFIG.tool_progress
         if mode == "off" or not CONSOLE.is_terminal:
             return
@@ -420,17 +423,19 @@ class _ProgressRenderer:
             desc = _synthetic_tool_desc(name, args)
 
             if name == "silica_run_injector" and (self._pipeline_phases or self._inject_progress is not None):
-                running = next((e for e in self._pipeline_phases if e["status"] == "running"), None)
-                phase_name = running["phase"] if running else "…"
-                spinner_line = Spinner("dots", text=f"  [dim]⠿[/] [cyan]{escape(phase_name)}[/]…", style="dim")
-                title = f"[bold]injector[/] [dim]·[/] {escape(self._inject_inbox_label)}"
-                parts: list = [spinner_line, _stage_track(self._pipeline_phases, CONSOLE.width)]
+                # Flat block, no borders: spinner header + indented stage track (+ file bar).
+                # The running phase is already marked ◉ in the track — no separate phase line.
+                header = Spinner(
+                    "dots",
+                    text=f" [bold]injector[/] [dim]·[/] {escape(self._inject_inbox_label)}",
+                    style="brand.cyan",
+                )
+                parts: list = [header, Padding(_stage_track(self._pipeline_phases, CONSOLE.width), (0, 0, 0, 2))]
                 if self._inject_progress is not None:
-                    parts.append(self._inject_progress)
-                renderables.append(Panel(Group(*parts), title=title, border_style="dim cyan"))
+                    parts.append(Padding(self._inject_progress, (0, 0, 0, 2)))
+                renderables.append(Group(*parts))
             else:
-                tool_spinner = Spinner("dots", text=f"  [cyan]Running[/] {desc}…", style="cyan")
-                renderables.append(tool_spinner)
+                renderables.append(Spinner("dots", text=f"  {desc}…", style="cyan"))
 
         if self._live:
             self._live.update(Group(*renderables))
@@ -443,42 +448,37 @@ class _ProgressRenderer:
             )
             self._live.start()
 
-    def _update_batch_panel(self) -> None:
+    def _update_batch_live(self) -> None:
         if self._batch is None or not CONSOLE.is_terminal:
             return
         batch = self._batch
         batch["progress_obj"].update(batch["task_id"], completed=batch["done"])
         cur = batch["current_label"]
-        cur_str = f"  [dim]({escape(cur)})[/]" if cur else ""
-        spinner_line = Spinner(
+        cur_str = f" [dim]· {escape(cur)}[/]" if cur else ""
+        # Flat block, no borders: spinner header + indented bar (+ micro-phase track).
+        # done/total lives in the bar's MofN column — not repeated in the header.
+        header = Spinner(
             "dots",
-            text=f"  [dim]⠿[/] Batch {batch['done']}/{batch['total']}{cur_str}",
-            style="dim",
+            text=f" [bold]{escape(batch['kind'])}[/] [dim]·[/] {escape(batch['label'])}{cur_str}",
+            style="brand.cyan",
         )
-        title = f"[bold]{escape(batch['kind'])}[/] [dim]·[/] {escape(batch['label'])}"
+        parts: list = [header, Padding(batch["progress_obj"], (0, 0, 0, 2))]
         micro = batch.get("micro_phase", "")
         if micro:
             micro_parts = []
             for mp in _MICRO_PHASE_ORDER:
                 display = mp.replace("_", " ")
                 if mp == micro:
-                    micro_parts.append(f"[bold #22d3ee]◉ {display}[/]")
+                    micro_parts.append(f"[bold brand.cyan]{GLYPHS['active']} {display}[/]")
                 else:
-                    micro_parts.append(f"[dim]· {display}[/]")
-            micro_text = Text.from_markup("   ".join(micro_parts))
-            panel_content = Group(spinner_line, batch["progress_obj"], micro_text)
-        else:
-            panel_content = Group(spinner_line, batch["progress_obj"])
-        panel = Panel(
-            panel_content,
-            title=title,
-            border_style="dim cyan",
-        )
+                    micro_parts.append(f"[dim]{GLYPHS['pending']} {display}[/]")
+            parts.append(Padding(Text.from_markup("   ".join(micro_parts)), (0, 0, 0, 2)))
+        group = Group(*parts)
         if self._live is None:
-            self._live = Live(panel, console=CONSOLE, refresh_per_second=12, transient=True)
+            self._live = Live(group, console=CONSOLE, refresh_per_second=12, transient=True)
             self._live.start()
         else:
-            self._live.update(panel)
+            self._live.update(group)
 
     def _finalize_batch(self) -> None:
         batch = self._batch
@@ -515,25 +515,35 @@ class _ProgressRenderer:
     def _dispatch(self, event: RenderEvent) -> None:
         mode = CONFIG.tool_progress
 
+        # Any output other than a further completion breaks a ✓-aggregation run.
+        # ToolStartEvent is exempt: interactively it only redraws the live region.
+        if not isinstance(event, (ToolStartEvent, ToolCompleteEvent)):
+            self._flush_ok_run()
+
         if isinstance(event, ThinkingStartEvent):
+            self._stream_buf = ""
             if mode != "off":
                 self._start_spinner()
             return
 
         if isinstance(event, ThinkingEndEvent):
+            # The transient preview vanishes here; cli.py prints the final
+            # formatted answer once — streaming never double-renders.
+            self._stream_buf = ""
             self._stop_spinner()
             return
 
         if isinstance(event, LLMStreamEvent):
             if not CONSOLE.is_terminal:
                 return
-            import sys
-            if event.chunk_type == "reasoning":
+            if event.chunk_type == "reset":
+                self._stream_buf = ""
+            elif event.chunk_type == "reasoning":
                 if CONFIG.show_thinking or mode == "verbose" or CONFIG.verbose:
-                    sys.stdout.write(f"\033[2m{event.content}\033[0m")
+                    self._stream_buf += event.content
             elif event.chunk_type == "text":
-                sys.stdout.write(event.content)
-            sys.stdout.flush()
+                self._stream_buf += event.content
+            self._update_stream_live()
             return
 
         if isinstance(event, ReasoningEvent):
@@ -541,7 +551,7 @@ class _ProgressRenderer:
             if CONFIG.show_thinking or mode == "verbose" or CONFIG.verbose:
                 body = _head_cap(event.text).strip()
                 indented = "\n".join(f"  [reasoning.gutter]│[/] [dim]{line}[/]" for line in body.splitlines())
-                CONSOLE.print(f"  [reasoning]✦ thinking[/]\n{indented}\n")
+                CONSOLE.print(f"  [reasoning]{GLYPHS['think']} thinking[/]\n{indented}\n")
             return
 
         if isinstance(event, ToolErrorEvent):
@@ -564,8 +574,7 @@ class _ProgressRenderer:
                 return
             self._stop_spinner()
             progress_obj = Progress(
-                SpinnerColumn(),
-                BarColumn(),
+                BarColumn(bar_width=24, style="dim", complete_style="brand.cyan", finished_style="brand.cyan"),
                 MofNCompleteColumn(),
                 TimeElapsedColumn(),
                 auto_refresh=False,
@@ -586,7 +595,7 @@ class _ProgressRenderer:
                 "current_label": "",
                 "micro_phase": "",
             }
-            self._update_batch_panel()
+            self._update_batch_live()
             return
 
         if isinstance(event, ToolStartEvent):
@@ -603,23 +612,23 @@ class _ProgressRenderer:
                         files = [single, *files]
                     self._inject_file_count = max(1, len(files))
                     self._inject_inbox_label = str(files[0] if files else "?")
-                    self._injector_desc = _synthetic_tool_desc(event.name, event.args)
                     self._pipeline_phases = []
                     self._phase_start_times = {}
                     _set_pipeline_hook(self._on_pipeline_phase)
                     _set_run_progress_hook(self._on_run_progress)
-                    self._inject_progress = Progress(
-                        SpinnerColumn(),
-                        BarColumn(),
-                        MofNCompleteColumn(),
-                        TimeElapsedColumn(),
-                        auto_refresh=False,
-                    )
-                    self._inject_task_id = self._inject_progress.add_task("", total=self._inject_file_count)
-                    # Do NOT start() it: Progress.start() spins up its own Live on the
-                    # global console, which double-renders the bar (an orphan above the
-                    # panel on small consoles). We embed it as a renderable in self._live,
-                    # which drives the rendering.
+                    # File bar only when there is more than one file — a 0/1→1/1 bar is noise.
+                    if self._inject_file_count > 1:
+                        self._inject_progress = Progress(
+                            BarColumn(bar_width=24, style="dim", complete_style="brand.cyan", finished_style="brand.cyan"),
+                            MofNCompleteColumn(),
+                            TimeElapsedColumn(),
+                            auto_refresh=False,
+                        )
+                        self._inject_task_id = self._inject_progress.add_task("", total=self._inject_file_count)
+                        # Do NOT start() it: Progress.start() spins up its own Live on the
+                        # global console, which double-renders the bar (an orphan above the
+                        # live block on small consoles). We embed it as a renderable in
+                        # self._live, which drives the rendering.
                 self._update_live()
             else:
                 # Non-interactive fallback: print immediately
@@ -628,7 +637,7 @@ class _ProgressRenderer:
                     if event.name == self._last_tool_name:
                         return
                     self._last_tool_name = event.name
-                    CONSOLE.print(f"  [dim]⚙[/] {desc}")
+                    CONSOLE.print(f"  [dim]{GLYPHS['gear']}[/] {desc}")
                 elif mode == "all":
                     CONSOLE.print(f"  [cyan]→[/] {desc}")
                 elif mode == "verbose":
@@ -652,19 +661,19 @@ class _ProgressRenderer:
                         self._batch["current_label"] = f"{name0}{extra}"
                     self._batch["done"] = min(self._batch["done"] + 1, self._batch["total"])
                     self._batch["micro_phase"] = ""
-                    self._update_batch_panel()
+                    self._update_batch_live()
                 return
             # Suppress all other tool completions during batch
             if self._batch is not None:
                 return
 
-            dur = f"{event.duration_s:.3f}s"
             if CONSOLE.is_terminal:
                 self._stop_spinner()
                 desc = _synthetic_tool_desc(event.name, event.args)
 
                 if event.name == "silica_run_injector" and self._injector_call_id == event.call_id:
                     # Deregister hooks; print compact single-line summary
+                    self._flush_ok_run()
                     _set_pipeline_hook(None)
                     _set_run_progress_hook(None)
                     self._injector_call_id = None
@@ -674,7 +683,7 @@ class _ProgressRenderer:
                         self._inject_task_id = None
                     failed_phases = [e for e in self._pipeline_phases if e["status"] == "failed"]
                     lbl = escape(self._inject_inbox_label)
-                    inject_dur = f"{event.duration_s:.1f}s"
+                    inject_dur = _fmt_dur(event.duration_s) or "0s"
                     # Brief numeric yield from the run result (files always; notes/links if any).
                     try:
                         _data = json.loads(event.result) if isinstance(event.result, str) else {}
@@ -700,33 +709,53 @@ class _ProgressRenderer:
                     self._pipeline_phases = []
                     self._inject_inbox_label = ""
                     self._inject_file_count = 0
+                elif mode == "verbose":
+                    # Verbose prints per-call result heads — aggregation would hide them.
+                    self._flush_ok_run()
+                    dur = _fmt_dur(event.duration_s)
+                    dur_str = f" [dim]{dur}[/]" if dur else ""
+                    CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
+                    redacted = _redact(event.result)
+                    if redacted is not None:
+                        head = _head_result(redacted.strip())
+                        if head:
+                            CONSOLE.print(f"    [dim]{escape(head)}[/]")
+                    else:
+                        CONSOLE.print("    [dim][result redacted][/]")
                 else:
-                    CONSOLE.print(f"  [tool.ok]✓[/] {desc} [dim]({dur})[/]")
-                    if mode == "verbose":
-                        redacted = _redact(event.result)
-                        if redacted is not None:
-                            head = _head_result(redacted.strip())
-                            if head:
-                                CONSOLE.print(f"    [dim]{escape(head)}[/]")
-                        else:
-                            CONSOLE.print("    [dim][result redacted][/]")
+                    # Buffer the ✓ line: consecutive completions of the same tool
+                    # collapse into one aggregated line at flush time.
+                    run = self._ok_run
+                    if run is not None and run["name"] == event.name:
+                        run["count"] += 1
+                        run["dur"] += event.duration_s
+                    else:
+                        self._flush_ok_run()
+                        self._ok_run = {
+                            "name": event.name,
+                            "desc": desc,
+                            "count": 1,
+                            "dur": event.duration_s,
+                        }
 
                 self._active_tools.pop(event.call_id, None)
                 self._update_live()
             else:
                 # Non-interactive fallback
                 desc = _synthetic_tool_desc(event.name, event.args)
+                dur = _fmt_dur(event.duration_s)
+                dur_str = f" [dim]{dur}[/]" if dur else ""
                 if mode in ("new", "all"):
-                    CONSOLE.print(f"  [tool.ok]✓[/] {desc} [dim]({dur})[/]")
+                    CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
                 elif mode == "verbose":
                     redacted = _redact(event.result)
                     if redacted is not None:
                         head = _head_result(redacted.strip())
-                        CONSOLE.print(f"  [tool.ok]✓[/] {desc} [dim]({dur})[/]")
+                        CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str}")
                         if head:
                             CONSOLE.print(f"  [dim]{escape(head)}[/]")
                     else:
-                        CONSOLE.print(f"  [tool.ok]✓[/] {desc} [dim]({dur}) [result redacted][/]")
+                        CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {desc}{dur_str} [dim][result redacted][/]")
 
 
     def close(self) -> None:
@@ -737,6 +766,8 @@ class _ProgressRenderer:
         """
         global _batch_run_hook
         _batch_run_hook = None
+        self._flush_ok_run()
+        self._stream_buf = ""
         _set_pipeline_hook(None)
         _set_run_progress_hook(None)
         from silica.agent.bus import BUS

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from rich.markdown import Heading, Markdown
 from rich.markup import escape
 from rich.table import Table
+from rich.text import Text
 
+# Single glyph vocabulary for the whole TUI — everything single-width, no emoji
+# (double-width glyphs tear column alignment).
 GLYPHS: dict[str, str] = {
     "ok": "✓",
     "err": "✗",
@@ -12,7 +16,29 @@ GLYPHS: dict[str, str] = {
     "model": "◆",
     "worker": "◇",
     "vault": "⬡",
+    "active": "◉",
+    "pending": "·",
+    "warn": "⚠",
+    "info": "ℹ",
+    "gear": "⚙",
+    "think": "✦",
 }
+
+
+class _FlatHeading(Heading):
+    """Left-aligned heading: no h1 box, no centering — flat gutter language."""
+
+    def __rich_console__(self, console, options):
+        text = self.text
+        text.justify = "left"
+        yield Text("")
+        yield text
+
+
+class FlatMarkdown(Markdown):
+    """Markdown whose headings render flat (styles come from theme markdown.h*)."""
+
+    elements = {**Markdown.elements, "heading_open": _FlatHeading}
 
 GROUP_STYLE: dict[str, str] = {
     "workflow": "#22d3ee",  # BRAND_CYAN — works in both markup and Table column style

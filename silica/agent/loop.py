@@ -147,6 +147,18 @@ def run_agent(
         if topic is not None:
             _bus_mod.BUS.publish(topic, event)
 
+    def _stream_delta(chunk_type: str, content: str) -> None:
+        # Called from the LLM worker thread; `iteration` reads the current loop pass.
+        _emit(LLMStreamEvent(chunk_type=chunk_type, content=content, iteration=iteration))
+
+    # Streaming is a TUI ergonomic: only the interactive main loop gets it —
+    # constrained (worker/batch) runs stay on the plain non-streaming call.
+    # The kwarg is only passed when active, so call_llm test doubles with the
+    # bare signature keep working.
+    _llm_kwargs: dict = {"tools": None}
+    if tool_progress_callback is not None and constraints is None:
+        _llm_kwargs["on_delta"] = _stream_delta
+
     while iteration < max_iterations:
         if cancel_token is not None and cancel_token.is_set():
             logger.info("Agent loop cancelled at iteration %d", iteration)
@@ -162,7 +174,8 @@ def run_agent(
             slot = worker_slot() if constraints is not None else nullcontext()
             with slot:
                 with _cf.ThreadPoolExecutor(max_workers=1) as _llm_pool:
-                    _future = _llm_pool.submit(call_llm, effective_model, messages, tools=schemas)
+                    _llm_kwargs["tools"] = schemas
+                    _future = _llm_pool.submit(call_llm, effective_model, messages, **_llm_kwargs)
                     try:
                         resp = _future.result()
                     except KeyboardInterrupt:

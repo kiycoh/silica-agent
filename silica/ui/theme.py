@@ -14,6 +14,11 @@ SILICA_THEME = Theme(
         "role.assistant": "bold #22d3ee",
         "tool.ok": "green",
         "tool.err": "red",
+        "warn": "#f59e0b",
         "muted": "dim",
+        # Flat headings (see style.FlatMarkdown): color carries the hierarchy, no box/underline.
+        "markdown.h1": "bold #22d3ee",
+        "markdown.h2": "bold #22d3ee",
+        "markdown.h3": "bold",
     }
 )

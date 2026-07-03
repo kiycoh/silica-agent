@@ -7,6 +7,7 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import Completer, Completion, FuzzyCompleter
 from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.styles import Style
 
 from silica.config import CONFIG
 from silica.ui.commands import command_names, COMMANDS
@@ -35,18 +36,19 @@ def _context_meter() -> str:
     ratio = min(1.0, max(0.0, CONFIG.context_tokens / CONFIG.max_context_tokens))
     filled = round(ratio * _METER_WIDTH)
     bar = "█" * filled + "░" * (_METER_WIDTH - filled)
+    color = "ansicyan" if ratio < 0.7 else ("ansiyellow" if ratio < 0.9 else "ansired")
     pct = round(ratio * 100)
-    return f" <ansicyan>{bar}</ansicyan> <ansigray>{pct}%</ansigray> "
+    return f" <{color}>{bar}</{color}> <ansigray>{pct}%</ansigray> "
 
 
 def bottom_toolbar() -> HTML:
-    vault = _vault_display()
+    # Vault lives in the prompt line — not repeated here. Model shown as slug.
+    model_slug = (CONFIG.model or "—").rsplit("/", 1)[-1]
     think = "thinking:on" if CONFIG.show_thinking else "thinking:off"
     progress = f"progress:{CONFIG.tool_progress}"
     meter = _context_meter()
     return HTML(
-        f" <ansicyan><b>{CONFIG.model}</b></ansicyan>  "
-        f"vault:<b>{vault}</b>  "
+        f" <ansicyan><b>{model_slug}</b></ansicyan>  "
         f"{progress}  "
         f"<b>{think}</b>"
         f"{meter}"
@@ -84,6 +86,9 @@ def build_session() -> PromptSession:
         history=FileHistory(str(_history_path())),
         auto_suggest=AutoSuggestFromHistory(),
         completer=FuzzyCompleter(SlashCommandCompleter()),
+        # Kill the default reverse-video strip — the toolbar renders flat on the
+        # terminal background, colors come from the HTML fragments themselves.
+        style=Style.from_dict({"bottom-toolbar": "noreverse"}),
     )
 
 

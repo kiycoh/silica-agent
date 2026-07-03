@@ -13,7 +13,7 @@ import shlex
 import sys
 from typing import NamedTuple
 
-from rich.markdown import Markdown
+from silica.ui.style import FlatMarkdown
 
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
@@ -84,7 +84,7 @@ def _setup_logging(debug: bool = False) -> None:
     handler: logging.Handler
     if debug:
         from rich.logging import RichHandler
-        from silica.ui.logging import HumanFriendlyFormatter
+        from silica.ui.logging import HumanFriendlyFormatter, LiveAwareStreamHandler
         handler = RichHandler(
             console=CONSOLE,
             markup=True,
@@ -99,8 +99,10 @@ def _setup_logging(debug: bool = False) -> None:
         main_thread = threading.main_thread()
         handler.addFilter(lambda r: threading.current_thread() is main_thread)
 
-        # Worker-thread records get a plain stderr fallback so they aren't silently dropped.
-        bg_handler = logging.StreamHandler(sys.stderr)
+        # Worker-thread records fall back to a live-aware stderr handler: resolving
+        # sys.stderr at emit time follows rich.Live's redirect, so they print above
+        # an active live region instead of tearing it (stale-frame duplication).
+        bg_handler = LiveAwareStreamHandler()
         bg_handler.setFormatter(logging.Formatter(
             fmt="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
             datefmt="%H:%M:%S",
@@ -296,7 +298,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         try:
             parsed = json.loads(result)
             digest = parsed.get("digest", result)
-            CONSOLE.print(Markdown(str(digest)))
+            CONSOLE.print(FlatMarkdown(str(digest)))
         except Exception:
             CONSOLE.print(result)
         return True
@@ -1063,7 +1065,7 @@ def main():
             if answer:
                 CONSOLE.print()
                 CONSOLE.print("[role.assistant]⏺ silica[/]")
-                CONSOLE.print(Markdown(answer))
+                CONSOLE.print(FlatMarkdown(answer))
                 CONSOLE.print()
             messages.append({"role": "assistant", "content": answer or ""})
             _update_context_tokens(messages)

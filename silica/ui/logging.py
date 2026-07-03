@@ -1,6 +1,8 @@
 import logging
 import sys
 
+from silica.ui.style import GLYPHS
+
 
 class LiveAwareStreamHandler(logging.StreamHandler):
     """StreamHandler that resolves ``sys.stderr`` at emit time instead of caching it.
@@ -147,15 +149,15 @@ class HumanFriendlyFormatter(logging.Formatter):
 
         level = record.levelno
         if level == logging.DEBUG:
-            icon = "[muted]⚙[/muted]"
+            icon = f"[muted]{GLYPHS['gear']}[/muted]"
         elif level == logging.INFO:
-            icon = "[tool.ok]ℹ[/tool.ok]"
+            icon = f"[tool.ok]{GLYPHS['info']}[/tool.ok]"
         elif level == logging.WARNING:
-            icon = "[yellow]⚠️[/yellow]"
+            icon = f"[warn]{GLYPHS['warn']}[/warn]"
         elif level >= logging.ERROR:
-            icon = "[tool.err]❌[/tool.err]"
+            icon = f"[tool.err]{GLYPHS['err']}[/tool.err]"
         else:
-            icon = "•"
+            icon = GLYPHS["bullet"]
 
         try:
             message = record.getMessage()

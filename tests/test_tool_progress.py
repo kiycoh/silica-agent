@@ -129,37 +129,37 @@ def test_callback_modes_output(capsys, monkeypatch):
         CONFIG.tool_progress = "new"
         cb(ToolStartEvent(name="silica_read_note", args={"name": "noteA"}, call_id="1", iteration=1))
         captured = capsys.readouterr()
-        assert "Reading note" in captured.out
+        assert "read" in captured.out
         assert "noteA" in captured.out
-        
+
         # Same tool consecutive call should be skipped in "new" mode
         cb(ToolStartEvent(name="silica_read_note", args={"name": "noteB"}, call_id="2", iteration=2))
         captured = capsys.readouterr()
         assert captured.out == ""
-        
+
         # Different tool should print
         cb(ToolStartEvent(name="silica_search", args={"query": "searchQ"}, call_id="3", iteration=3))
         captured = capsys.readouterr()
-        assert "Searching notes" in captured.out
+        assert "search" in captured.out
         assert "searchQ" in captured.out
-        
+
         # Test "all" mode
         CONFIG.tool_progress = "all"
         cb(ToolStartEvent(name="silica_read_note", args={"name": "noteA"}, call_id="4", iteration=4))
         captured = capsys.readouterr()
-        assert "Reading note" in captured.out
+        assert "read" in captured.out
         assert "noteA" in captured.out
-        
+
         # Test "verbose" mode
         CONFIG.tool_progress = "verbose"
         cb(ToolStartEvent(name="silica_read_note", args={"name": "noteA"}, call_id="5", iteration=5))
         captured = capsys.readouterr()
-        assert "Reading note" in captured.out
+        assert "read" in captured.out
         assert "noteA" in captured.out
-        
+
         cb(ToolCompleteEvent(name="silica_read_note", args={"name": "noteA"}, call_id="5", result="some result", duration_s=1.23, iteration=5))
         captured = capsys.readouterr()
-        assert "Reading note" in captured.out
+        assert "read" in captured.out
         assert "some result" in captured.out
         
     finally:
@@ -369,13 +369,13 @@ def test_stage_track_empty_shows_pending_from_start():
     assert "· cross-dedup" in plain
 
 
-def test_injector_panel_height_constant_across_widths():
-    """Regression: the injector panel (Panel > Group > stage track) must keep the same
-    height on a narrow vs wide console. A wrapping track grew the panel between frames
-    and tore the Live region on a small / non-fullscreen terminal."""
+def test_injector_block_height_constant_across_widths():
+    """Regression: the injector live block (spinner header + indented stage track) must
+    keep the same height on a narrow vs wide console. A wrapping track grew the block
+    between frames and tore the Live region on a small / non-fullscreen terminal."""
     import io
     from rich.console import Console, Group
-    from rich.panel import Panel
+    from rich.padding import Padding
     from rich.text import Text
     from silica.ui.renderer import _stage_track
     phases = [
@@ -384,15 +384,16 @@ def test_injector_panel_height_constant_across_widths():
         {"phase": "collision", "status": "running", "elapsed": None},
     ]
 
-    def panel_height(width: int) -> int:
+    def block_height(width: int) -> int:
         buf = io.StringIO()
         c = Console(file=buf, width=width)
-        c.print(Panel(Group(Text("  spinner…"), _stage_track(phases, width)),
-                      title="injector · some/long/inbox/path/with a long file name.md"))
+        header = Text(" injector · some/long/inbox/path/with a long file name.md",
+                      no_wrap=True, overflow="ellipsis")
+        c.print(Group(header, Padding(_stage_track(phases, width), (0, 0, 0, 2))))
         return len(buf.getvalue().rstrip("\n").split("\n"))
 
-    heights = {w: panel_height(w) for w in (30, 50, 80, 120)}
-    assert len(set(heights.values())) == 1, f"panel height varies with width: {heights}"
+    heights = {w: block_height(w) for w in (30, 50, 80, 120)}
+    assert len(set(heights.values())) == 1, f"block height varies with width: {heights}"
 
 
 def test_stage_track_failed_phase_shown():
@@ -534,9 +535,30 @@ def test_injector_progress_not_given_its_own_live():
         with patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True), \
              patch.object(cb, "_update_live", lambda: None):  # isolate: no real outer Live
             cb(ToolStartEvent(name="silica_run_injector",
-                              args={"inbox_files": ["a.md"]}, call_id="1", iteration=1))
+                              args={"inbox_files": ["a.md", "b.md"]}, call_id="1", iteration=1))
         assert cb._inject_progress is not None
         assert cb._inject_progress.live.is_started is False
+    finally:
+        cb.close()
+        CONFIG.tool_progress = orig_mode
+
+
+def test_injector_single_file_has_no_bar():
+    """A 0/1→1/1 bar is noise: the file bar only appears for multi-file runs."""
+    from unittest.mock import patch, PropertyMock
+    from rich.console import Console
+    from silica.agent.events import ToolStartEvent
+    from silica.ui.renderer import make_progress_callback
+
+    orig_mode = CONFIG.tool_progress
+    cb = make_progress_callback()
+    try:
+        CONFIG.tool_progress = "all"
+        with patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True), \
+             patch.object(cb, "_update_live", lambda: None):
+            cb(ToolStartEvent(name="silica_run_injector",
+                              args={"inbox_files": ["a.md"]}, call_id="1", iteration=1))
+        assert cb._inject_progress is None
     finally:
         cb.close()
         CONFIG.tool_progress = orig_mode
@@ -674,8 +696,7 @@ def test_injector_summary_shows_yield(capsys):
 
 def test_print_banner_styles(capsys):
     from silica.ui.banner import print_banner
-    from rich.console import Console, ConsoleDimensions
-    
+
     orig_show = CONFIG.show_banner
     try:
         # Banner off → plain one-liner
@@ -685,14 +706,14 @@ def test_print_banner_styles(capsys):
         assert "silica" in captured.out
         assert "Your personal note curator agent" in captured.out
 
-        # Banner on with a large terminal → multi-line wordmark art
-        with patch.object(Console, "width", new_callable=PropertyMock, return_value=100), \
-             patch.object(Console, "size", new_callable=PropertyMock, return_value=ConsoleDimensions(100, 40)):
-            CONFIG.show_banner = True
-            print_banner()
-            captured = capsys.readouterr()
-            assert len(captured.out.splitlines()) > 2
-            assert "Your personal note curator agent" in captured.out
+        # Banner on → hand-drawn line-art wordmark (3 rows) + caption
+        CONFIG.show_banner = True
+        print_banner()
+        captured = capsys.readouterr()
+        assert "╭─╴" in captured.out  # bespoke rounded line-art, not a figlet font
+        assert "Your personal note curator agent" in captured.out
+        # wordmark (3 rows) + caption, plus the mascot above it — not the 1-line fallback.
+        assert len([ln for ln in captured.out.splitlines() if ln.strip()]) >= 4
     finally:
         CONFIG.show_banner = orig_show
 

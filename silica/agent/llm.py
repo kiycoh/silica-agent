@@ -12,6 +12,7 @@ import os
 import random
 import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 # Quiet down Bedrock/SageMaker missing botocore warnings during import
 logging.getLogger("LiteLLM").setLevel(logging.ERROR)
@@ -77,6 +78,7 @@ def call_llm(
     tools: list[dict] | None = None,
     max_tokens: int | None = None,
     response_format=None,
+    on_delta: Callable[[str, str], None] | None = None,
 ) -> LLMResponse:
     """Call the LLM with function-calling support.
 
@@ -85,6 +87,10 @@ def call_llm(
         messages: conversation history in OpenAI format
         tools: list of tool JSON schemas (OpenAI function format)
         max_tokens: optional maximum tokens to generate
+        on_delta: optional (chunk_type, content) sink; when given the call streams,
+            emitting "reasoning"/"text" deltas as they arrive (plus a "reset" at the
+            start of each attempt, so a mid-stream retry can clear any preview).
+            The final LLMResponse is identical to the non-streaming path.
 
     Returns:
         LLMResponse with either text or tool_calls populated
@@ -115,7 +121,31 @@ def call_llm(
         litellm.ServiceUnavailableError,
         litellm.BadGatewayError,
     )
-    response = retry_transient(lambda: litellm.completion(**kwargs), _TRANSIENT)
+    if on_delta is None:
+        response = retry_transient(lambda: litellm.completion(**kwargs), _TRANSIENT)
+    else:
+        def _stream_once():
+            on_delta("reset", "")
+            chunks = []
+            for chunk in litellm.completion(**kwargs, stream=True):
+                chunks.append(chunk)
+                try:
+                    delta = chunk.choices[0].delta
+                except (IndexError, AttributeError):
+                    continue  # usage-only / malformed trailing chunk
+                r = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
+                if isinstance(r, str) and r:
+                    on_delta("reasoning", r)
+                c = getattr(delta, "content", None)
+                if isinstance(c, str) and c:
+                    on_delta("text", c)
+            # Reassemble the canonical response (content, tool_calls, usage) so
+            # everything below is identical to the non-streaming path.
+            return litellm.stream_chunk_builder(chunks, messages=messages)
+
+        response = retry_transient(_stream_once, _TRANSIENT)
+        if response is None:
+            raise RuntimeError(f"LLM stream from {model} produced no chunks")
 
     choice = response.choices[0]
     message = choice.message

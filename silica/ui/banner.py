@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from rich.console import Group as RichGroup
+from pathlib import Path
+
+from rich.padding import Padding
+from rich.table import Table
 from rich.text import Text
 
 from silica import __version__ as _VERSION
@@ -8,16 +11,18 @@ from silica.config import CONFIG
 from silica.ui.console import CONSOLE
 from silica.ui.theme import BRAND_CYAN, BRAND_INDIGO
 
-_CAPTION = f"  [dim]v{_VERSION} · Your personal note curator agent[/]"
+_CAPTION = f"v{_VERSION.split('+')[0]} · Your personal note curator agent"
 
-# Pre-rendered art.text2art("SILICA", font="tarty1") — hardcoded to drop the dep.
-_ART = """\
-░██████╗██╗██╗░░░░░██╗░█████╗░░█████╗░
-██╔════╝██║██║░░░░░██║██╔══██╗██╔══██╗
-╚█████╗░██║██║░░░░░██║██║░░╚═╝███████║
-░╚═══██╗██║██║░░░░░██║██║░░██╗██╔══██║
-██████╔╝██║███████╗██║╚█████╔╝██║░░██║
-╚═════╝░╚═╝╚══════╝╚═╝░╚════╝░╚═╝░░╚═╝""".split("\n")
+# ponytail: read the mascot from disk so it stays editable; add when it ships, inline it.
+_MASCOT_PATH = Path(__file__).resolve().parents[2] / "docs" / "assets" / "sili_compressed.txt"
+
+# Hand-drawn wordmark — thin rounded line-art, deliberately not a figlet font
+# (generator fonts like ANSI Shadow are everywhere; bespoke glyphs are not).
+_ART = (
+    "╭─╴ ╷ ╷   ╷ ╭─╴ ╭─╮",
+    "╰─╮ │ │   │ │   ├─┤",
+    "╶─╯ ╵ ╰─╴ ╵ ╰─╴ ╵ ╵",
+)
 
 
 def _gradient(n: int, c0: tuple[int, int, int] = BRAND_CYAN, c1: tuple[int, int, int] = BRAND_INDIGO) -> list[str]:
@@ -31,34 +36,46 @@ def _gradient(n: int, c0: tuple[int, int, int] = BRAND_CYAN, c1: tuple[int, int,
     return out  # cyan → indigo
 
 
-def _compute_art() -> list[str] | None:
-    """Return art lines if banner would render, else None."""
-    if not CONFIG.show_banner:
-        return None
-    if CONSOLE.width < max(len(ln) for ln in _ART) + 2:
-        return None
-    return _ART
+def _painted(lines: tuple[str, ...] | list[str]) -> Text:
+    """Shared theme: a multi-line Text with a per-column cyan→indigo gradient.
+
+    Same column → same color, so the hue sweeps horizontally, not line by line.
+    """
+    colors = _gradient(max(len(ln) for ln in lines))
+    t = Text()
+    for i, line in enumerate(lines):
+        if i:
+            t.append("\n")
+        for ch, color in zip(line, colors):
+            t.append(ch, style=f"bold {color}")
+    return t
 
 
-def banner_group() -> RichGroup | None:
-    """Banner art + caption as a renderable Group, or None if font unavailable or terminal too narrow."""
-    art = _compute_art()
-    if art is None:
-        return None
-    items: list = [Text(line, style=f"bold {color}") for line, color in zip(art, _gradient(len(art)))]
-    items.append(Text.from_markup(_CAPTION))
-    return RichGroup(*items)
-
-
-def banner_height() -> int:
-    """Number of art lines banner_group() would render, or 0 if it would return None."""
-    art = _compute_art()
-    return len(art) if art is not None else 0
+def _mascot_lines() -> list[str]:
+    """Mascot rows from sili_compressed.txt (blank edge lines trimmed); [] if missing."""
+    try:
+        rows = _MASCOT_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    while rows and not rows[0].strip():
+        rows.pop(0)
+    while rows and not rows[-1].strip():
+        rows.pop()
+    return rows
 
 
 def print_banner() -> None:
-    bg = banner_group()
-    if bg is not None:
-        CONSOLE.print(bg)
+    if not CONFIG.show_banner:
+        CONSOLE.print(f"  [bold cyan]silica[/] [dim]{_CAPTION}[/]")
         return
-    CONSOLE.print(f"  [bold cyan]silica[/] [dim]v{_VERSION} · Your personal note curator agent[/]")
+    wordmark = _painted(_ART)
+    wordmark.append("\n")
+    wordmark.append(_CAPTION, style="dim")  # caption rides under the wordmark, right column
+    mascot = _mascot_lines()
+    mascot_w = max((len(ln) for ln in mascot), default=0)
+    if mascot and CONSOLE.width >= mascot_w + 3 + len(_CAPTION):
+        grid = Table.grid(padding=(0, 3))  # logo left column, wordmark right column
+        grid.add_row(_painted(mascot), wordmark)
+        CONSOLE.print(Padding(grid, (0, 0, 0, 2)))
+    else:
+        CONSOLE.print(Padding(wordmark, (0, 0, 0, 2)))

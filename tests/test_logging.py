@@ -44,7 +44,8 @@ def test_human_friendly_formatter_mapped_warning():
         exc_info=None
     )
     formatted = formatter.format(record)
-    assert "⚠️" in formatted
+    assert "⚠" in formatted
+    assert "⚠️" not in formatted  # single-width glyph, no emoji variation selector
     assert "Failed to index note my_note.md: Permission Denied" in formatted
 
 def test_human_friendly_formatter_mapped_error():
@@ -59,7 +60,7 @@ def test_human_friendly_formatter_mapped_error():
         exc_info=None
     )
     formatted = formatter.format(record)
-    assert "❌" in formatted
+    assert "✗" in formatted
     assert "Annulling changes (rollback) failed: Connection timed out" in formatted
 
 def test_human_friendly_formatter_unmapped_fallback():
@@ -126,3 +127,34 @@ def test_human_friendly_formatter_bad_args_graceful_fallback():
     # It should fallback gracefully to the standard %-formatted message or original message
     assert "⚙" in formatted
     assert "test_tool" in formatted
+
+
+def test_no_root_handler_caches_real_stderr(monkeypatch):
+    """Every stderr handler on root must resolve sys.stderr at emit time.
+
+    A handler caching the real stream (plain StreamHandler(sys.stderr)) writes raw
+    under an active rich.Live and tears the render — stale frames pile up in
+    scrollback as duplicated text.
+    """
+    import io
+    import sys
+    from silica.cli import _setup_logging
+    from silica.config import CONFIG
+    from silica.ui.logging import LiveAwareStreamHandler
+
+    orig_debug = CONFIG.debug_logging
+    try:
+        for debug in (True, False):
+            _setup_logging(debug=debug)
+            root = logging.getLogger()
+            # No plain StreamHandler holding a cached stream on root
+            assert not [h for h in root.handlers if type(h) is logging.StreamHandler]
+            # Live-aware handlers follow a sys.stderr swap (rich.Live's redirect)
+            proxy = io.StringIO()
+            monkeypatch.setattr(sys, "stderr", proxy)
+            live_aware = [h for h in root.handlers if isinstance(h, LiveAwareStreamHandler)]
+            assert live_aware
+            assert all(h.stream is proxy for h in live_aware)
+            monkeypatch.undo()
+    finally:
+        _setup_logging(debug=orig_debug)
