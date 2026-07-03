@@ -812,6 +812,10 @@ class ObsidianCLIBackend(GraphIndexMixin):
     def create(self, path: str, content: str) -> NoteRef:
         """Create a new note at the given vault-relative path."""
         self._reject_hidden(path)
+        # Parity with fs_backend.create's mkdir(parents=True): app.vault.create
+        # (and the adapter.write fallback) both fail if the parent folder is
+        # missing, silently deferring every note of an /ingest into a new dir.
+        self._ensure_dest_dir(path)
         if len(content) > 30000:
             self._write_large_content(path, content, append_mode=False)
         else:
@@ -1069,15 +1073,18 @@ class ObsidianCLIBackend(GraphIndexMixin):
         return self._base_path
 
     def _ensure_dest_dir(self, to: str) -> None:
-        """mkdir -p the destination's parent before a move.
+        """mkdir -p the destination's parent before a move or create.
 
-        Obsidian's move is Node `fs.rename`, which (unlike fs_backend.move's
-        Path.mkdir) won't create a not-yet-existing target subfolder — the move
-        would otherwise fail ENOENT. Best-effort: skip if the FS root is unknown.
+        Obsidian's move is Node `fs.rename` and create is `app.vault.create`;
+        neither (unlike the fs_backend's Path.mkdir) creates a not-yet-existing
+        target subfolder — the op would otherwise fail ENOENT / "Folder does
+        not exist". Best-effort: skip if the FS root is unknown.
         """
         parent = os.path.dirname(to.replace("\\", "/").strip("/"))
+        if not parent:
+            return  # root-level path — skip the basePath eval round-trip
         base = self._vault_base_path()
-        if parent and base:
+        if base:
             os.makedirs(os.path.join(base, *parent.split("/")), exist_ok=True)
 
     def move(self, ref: NoteRef | str, to: str) -> None:
