@@ -117,16 +117,27 @@ def silica_unresolved() -> list:
 class ListFilesArgs(BaseModel):
     folder: str = Field(default="", description="Optional folder path to filter results")
 
-@tool(ListFilesArgs, cls="atomic")
-def silica_files(folder: str = "") -> list:
-    """Lists all markdown files in the vault, optionally filtered by folder.
+# ponytail: flat cap defends the context window (a 1000-note vault ≈ 20k tokens
+# uncapped); no paging — narrowing by folder covers the real use cases.
+_FILES_CAP = 200
 
-    Returns full name+path for every match. For a bare count ("how many
-    notes?"), read the '## Vault map' block already in context — don't call
-    this and re-count its rows.
+
+@tool(ListFilesArgs, cls="atomic")
+def silica_files(folder: str = "") -> dict:
+    """Lists markdown files in the vault, optionally filtered by folder.
+
+    Returns {"total": N, "files": [{name, path}, ...]}. The listing is capped
+    at 200 entries: when "truncated" is true, narrow with folder= instead of
+    re-calling. For a bare count ("how many notes?") use the returned "total"
+    — or the '## Vault map' block already in context, without any call.
     """
     refs = DRIVER.list_files(folder)
-    return [{"name": r.name, "path": r.path} for r in refs]
+    files = [{"name": r.name, "path": r.path} for r in refs]
+    result: dict = {"total": len(files), "files": files[:_FILES_CAP]}
+    if len(files) > _FILES_CAP:
+        result["truncated"] = True
+        result["hint"] = "Listing capped at 200 entries; pass folder= to narrow."
+    return result
 
 
 class ExistsArgs(BaseModel):
