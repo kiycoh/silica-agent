@@ -50,18 +50,17 @@ def test_writes_projected_new_and_patch_counts(tmp_vault):
 
 
 def test_includes_deferred_count_from_deferred_store(tmp_vault, monkeypatch, tmp_path):
-    import silica.kernel.deferred as deferred_mod
     from silica.config import CONFIG
+    from silica.kernel.deferred import get_deferred_store
 
-    store = DeferredStore(path=tmp_path / "deferred")
-    store.put(
+    # conftest isolates the default store; populate it through the public seam.
+    get_deferred_store().put(
         content_hash="hash0",
         source_path="Inbox/lezione-03.md",
         target_dir="Dir",
         hub=None,
         rejected_ops=[{"op": "write", "path": "Dir/X.md"}, {"op": "write", "path": "Dir/Y.md"}],
     )
-    monkeypatch.setattr(deferred_mod, "_store", store)
 
     fsm = _fake_fsm([], run_id="cafef00dabcd", content_hashes=["hash0"])
 

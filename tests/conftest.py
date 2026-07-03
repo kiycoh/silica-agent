@@ -62,6 +62,24 @@ def _isolate_cluster_ctx_cache(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 @pytest.fixture(autouse=True)
+def _isolate_deferred_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect the deferred review queue to a per-test tmp path.
+
+    The pipeline defers ops through get_deferred_store() with no explicit path;
+    before this fixture existed, every FSM test that hit a defer path wrote its
+    fixtures into the developer's real global store (the 221 «lint failed:
+    ['e']» bundles). Also points the legacy migration source at an empty tmp
+    dir so the one-shot adoption never reads the real ~/.silica/deferred.
+    """
+    import silica.kernel.deferred as deferred_mod
+    monkeypatch.setattr(deferred_mod, "_store_dir", lambda: tmp_path / "deferred_store")
+    monkeypatch.setattr(deferred_mod, "_LEGACY_DEFERRED_DIR", tmp_path / "deferred_legacy")
+    deferred_mod._stores.clear()
+    yield
+    deferred_mod._stores.clear()
+
+
+@pytest.fixture(autouse=True)
 def _clear_store_singletons() -> None:
     """Reset the cached store singletons (Fix 3 seam) around every test.
 

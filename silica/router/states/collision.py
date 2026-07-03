@@ -50,6 +50,29 @@ def _names_agree(concept: str, note_name: str) -> bool:
     return bool(nc) and nc in {norm(a) for a in acronyms if a.strip()}
 
 
+def _deferred_op_dict(fsm: "InjectorFSM", d: dict, reason_prefix: str) -> dict:
+    """Full, re-materializable op for a borderline concept (never a stub).
+
+    The bundle in the deferred store is the only durable copy of the concept:
+    it must carry the excerpt (snippet) and a real write path, so a retry — or
+    the dedup verdict routing — can act on it without re-ingesting the source.
+    """
+    from silica.kernel.templates import slugify
+
+    concept = d["concept"]
+    name = concept.get("name", "") if isinstance(concept, dict) else str(concept)
+    excerpt = concept.get("excerpt", "") if isinstance(concept, dict) else ""
+    return {
+        "op": "write",
+        "heading": name,
+        "source_basename": os.path.basename(d["inbox_file"]),
+        "path": f"{fsm.target_dir}/{slugify(name) or name}.md",
+        "snippet": excerpt,
+        "hub": fsm.hub,
+        "reason": f"{reason_prefix} score={d['score']:.3f} candidate={d['top_match'].get('name', '?')}",
+    }
+
+
 def _embedder_free_near_dups(
     chunk: dict, corpus: dict[str, str], *, threshold: float = 0.6
 ) -> list[dict]:
@@ -127,16 +150,7 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
             )
     fsm._chunks[idx] = {"schema_version": chunk.get("schema_version", 1), "batches": new_batches}
 
-    deferred_op_dicts = [
-        {
-            "op": "skip",
-            "heading": (d["concept"].get("name", "") if isinstance(d["concept"], dict) else str(d["concept"])),
-            "source_basename": os.path.basename(d["inbox_file"]),
-            "reason": f"minhash_near_dup score={d['score']:.3f} candidate={d['top_match'].get('name','?')}",
-            "path": None,
-        }
-        for d in deferred
-    ]
+    deferred_op_dicts = [_deferred_op_dict(fsm, d, "minhash_near_dup") for d in deferred]
     fsm._defer_ops(
         deferred_op_dicts,
         {
@@ -375,14 +389,7 @@ def handle_collision(fsm: "InjectorFSM") -> None:
     # Persist borderline concepts in the deferred store
     if deferred_concepts:
         deferred_op_dicts = [
-            {
-                "op": "skip",
-                "heading": (d["concept"].get("name", "") if isinstance(d["concept"], dict) else str(d["concept"])),
-                "source_basename": os.path.basename(d["inbox_file"]),
-                "reason": f"collision_deferred score={d['score']:.3f} candidate={d['top_match'].get('name','?')}",
-                "path": None,
-            }
-            for d in deferred_concepts
+            _deferred_op_dict(fsm, d, "collision_deferred") for d in deferred_concepts
         ]
         fsm._defer_ops(
             deferred_op_dicts,
@@ -420,6 +427,10 @@ def handle_collision(fsm: "InjectorFSM") -> None:
                         "score": d.get("score"),
                         "inbox_file": d.get("inbox_file", fsm.inbox_file),
                         "hub": fsm.hub,
+                        # C2 verdict routing: lets the dedup capability clean up
+                        # (or author the distinct spoke from) the twin bundle.
+                        "content_hash": fsm._current_content_hash,
+                        "target_dir": fsm.target_dir,
                     },
                     reason=f"borderline_similarity score={d.get('score', 0):.3f}",
                 ))

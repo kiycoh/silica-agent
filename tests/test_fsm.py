@@ -765,6 +765,49 @@ def test_collision_borderline_deferred():
     assert len(put_kwargs["rejected_ops"]) == 1
 
 
+def test_collision_borderline_defers_rematerializable_op_and_tags_workitem():
+    """C2: the deferred bundle carries the full op — excerpt as snippet, a real
+    write path, candidate+score in the reason — never an op='skip'/path=None
+    stub; and the dedup WorkItem carries content_hash + target_dir so the
+    verdict routing can clean up (or author from) the twin bundle."""
+    from silica.kernel.workqueue import WorkQueue
+
+    fsm = _make_fsm_at_collision([{"name": "Backprop", "excerpt": "Backpropagation intro."}])
+    fsm.work_queue = WorkQueue()
+
+    mock_store = MagicMock()
+    mock_store.__len__ = lambda _: 5
+    mock_store.cosine_top_k.return_value = [{"path": "DL/Gradient Descent.md", "name": "Gradient Descent", "score": 0.75}]
+
+    mock_embedder = MagicMock()
+    mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
+
+    mock_deferred = MagicMock()
+    mock_deferred.get.return_value = None
+
+    with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
+         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
+         patch("silica.kernel.deferred.get_deferred_store", return_value=mock_deferred):
+        mock_cfg.sim_threshold_high = 0.85
+        mock_cfg.sim_threshold_low = 0.65
+
+        fsm.step()
+
+    put_kwargs = mock_deferred.put.call_args[1]
+    op = put_kwargs["rejected_ops"][0]
+    assert op["op"] == "write"
+    assert op["path"] == "TargetDir/Backprop.md"
+    assert op["snippet"] == "Backpropagation intro."
+    assert "Gradient Descent" in op["reason"] and "0.75" in op["reason"]
+
+    items = fsm.work_queue.items()
+    assert len(items) == 1
+    ctx = items[0].context
+    assert ctx["content_hash"] == "abc123"
+    assert ctx["target_dir"] == "TargetDir"
+
+
 def test_collision_cooccur_only_candidate_is_never_routed():
     """A facade candidate the embed leg did not propose (embed_score=None) has
     no cosine to threshold against — the concept must flow to distillation."""

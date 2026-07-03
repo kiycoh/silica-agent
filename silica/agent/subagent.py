@@ -119,6 +119,25 @@ class BoundedSubAgent:
         self._capabilities = capabilities if capabilities is not None else CAPABILITIES
 
     def handle(self, item: WorkItem) -> dict[str, Any]:
+        res = self._run_one(item)
+        # A capability may propose ONE follow-up (e.g. dedup's mechanical spoke
+        # → refine, ADR-0001). Dispatching here keeps capabilities peers (P9)
+        # and works on both consume() paths even after the run queue closed.
+        # One hop only: a follow-up's own follow-up is never dispatched.
+        followup = res.get("followup") if isinstance(res, dict) else None
+        if isinstance(followup, dict) and followup.get("kind") in self._capabilities:
+            fu_item = WorkItem(
+                kind=followup["kind"],
+                target_path=followup.get("target_path", item.target_path),
+                context=followup.get("context", {}) or {},
+                reason=f"followup:{item.kind}",
+                cancel_token=item.cancel_token,
+            )
+            fu_res = self._run_one(fu_item)
+            res["followup"] = {**followup, "status": fu_res.get("status", "done")}
+        return res
+
+    def _run_one(self, item: WorkItem) -> dict[str, Any]:
         run = self._capabilities.get(item.kind)
         if run is None:
             return {"status": "skipped", "reason": f"no capability for kind '{item.kind}'"}

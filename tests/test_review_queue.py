@@ -49,12 +49,11 @@ def test_queue_depth_decreases_after_remove(store):
 
 def test_digest_includes_queue_depth_when_nonzero(tmp_path, monkeypatch):
     import silica.kernel.progress as prog_mod
-    import silica.kernel.deferred as deferred_mod
+    from silica.kernel.deferred import get_deferred_store
 
     prog_mod._RUNS_DIR = tmp_path
-    store = DeferredStore(path=tmp_path / "deferred")
-    store.put("h1", "inbox/a.md", "Dir", None, [{"op": "write"}])
-    monkeypatch.setattr(deferred_mod, "_store", store)
+    # conftest isolates the default store; populate it through the public seam.
+    get_deferred_store().put("h1", "inbox/a.md", "Dir", None, [{"op": "write"}])
 
     from silica.kernel.progress import ProgressLedger
     p = ProgressLedger.new(mode="inject", inputs={})
@@ -64,11 +63,8 @@ def test_digest_includes_queue_depth_when_nonzero(tmp_path, monkeypatch):
 
 def test_digest_omits_queue_line_when_empty(tmp_path, monkeypatch):
     import silica.kernel.progress as prog_mod
-    import silica.kernel.deferred as deferred_mod
 
     prog_mod._RUNS_DIR = tmp_path
-    store = DeferredStore(path=tmp_path / "deferred")
-    monkeypatch.setattr(deferred_mod, "_store", store)
 
     from silica.kernel.progress import ProgressLedger
     p = ProgressLedger.new(mode="inject", inputs={})
@@ -90,3 +86,62 @@ def test_review_command_is_direct_group():
     from silica.ui.commands import COMMANDS
     cmd = next(c for c in COMMANDS if c.name == "/review")
     assert cmd.group == "direct"
+
+
+# ---------------------------------------------------------------------------
+# C2 — per-vault keying (spec-nlp-deepening §C2.1)
+# ---------------------------------------------------------------------------
+
+def test_deferred_store_keyed_per_vault(tmp_path, monkeypatch):
+    """Two vaults → two independent queues; switching back finds the bundle again."""
+    import silica.kernel.deferred as deferred_mod
+    import silica.kernel.paths as paths_mod
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
+    # Undo the conftest isolation stub: this test exercises real vault keying.
+    monkeypatch.setattr(
+        deferred_mod, "_store_dir", lambda: paths_mod.index_dir() / "deferred"
+    )
+    monkeypatch.setattr(deferred_mod, "_LEGACY_DEFERRED_DIR", tmp_path / "no_legacy")
+    deferred_mod._stores.clear()
+
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "vault_a"))
+    deferred_mod.get_deferred_store().put(
+        "h1", "inbox/a.md", "Dir", None, [{"op": "write", "heading": "A"}]
+    )
+
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "vault_b"))
+    assert deferred_mod.get_deferred_store().get("h1") is None
+
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "vault_a"))
+    assert deferred_mod.get_deferred_store().get("h1") is not None
+
+
+def test_legacy_global_store_adopted_once(tmp_path, monkeypatch):
+    """First load drains ~/.silica/deferred: real bundles adopted into the active
+    vault's queue, test-fixture pollution («lint failed: ['e']») flushed."""
+    import orjson
+    import silica.kernel.deferred as deferred_mod
+
+    legacy = tmp_path / "legacy_global"
+    legacy.mkdir()
+    (legacy / "realhash.json").write_bytes(orjson.dumps({
+        "content_hash": "realhash", "source_path": "inbox/lez.md",
+        "target_dir": "Dir", "hub": None, "timestamp": 1.0,
+        "rejected_ops": [{"op": "write", "heading": "GPU", "path": "Dir/GPU.md"}],
+        "rejection_reasons": {"Dir/GPU.md": "too generic"},
+    }))
+    (legacy / "junkhash.json").write_bytes(orjson.dumps({
+        "content_hash": "junkhash", "source_path": "inbox/x.md",
+        "target_dir": "Dir", "hub": None, "timestamp": 1.0,
+        "rejected_ops": [{"op": "patch", "heading": "Bad", "path": "Bad.md"}],
+        "rejection_reasons": {"Bad.md": "lint failed: ['e']"},
+    }))
+    monkeypatch.setattr(deferred_mod, "_LEGACY_DEFERRED_DIR", legacy)
+    deferred_mod._stores.clear()
+
+    store = deferred_mod.get_deferred_store()
+    assert store.get("realhash") is not None, "real bundle must be adopted"
+    assert store.get("junkhash") is None, "fixture pollution must be flushed"
+    assert list(legacy.glob("*.json")) == [], "migration is one-shot: source drained"

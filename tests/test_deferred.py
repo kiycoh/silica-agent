@@ -139,9 +139,7 @@ def test_defer_ops_accumulates_across_phases(tmp_path, monkeypatch):
     import silica.kernel.deferred as deferred_mod
     from silica.router.orchestrator import InjectorFSM
 
-    # Point the module-global store at a temp dir so we don't touch ~/.silica.
-    monkeypatch.setattr(deferred_mod, "_store", DeferredStore(path=tmp_path / "deferred"))
-
+    # conftest's _isolate_deferred_store already points the default store at tmp.
     fsm = InjectorFSM("Inbox/lez.md", "TargetDir", hub="Hub")
     fsm.context["source_content_hash"] = "shared-hash"
 
@@ -169,7 +167,6 @@ def test_defer_ops_skips_without_content_hash(tmp_path, monkeypatch):
     import silica.kernel.deferred as deferred_mod
     from silica.router.orchestrator import InjectorFSM
 
-    monkeypatch.setattr(deferred_mod, "_store", DeferredStore(path=tmp_path / "deferred"))
     fsm = InjectorFSM("Inbox/lez.md", "TargetDir")
     # No source_content_hash set and no per-file hashes → empty hash.
     assert fsm._defer_ops([{"op": "skip", "heading": "X"}], {}, phase="VALIDATE") is False

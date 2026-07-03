@@ -205,6 +205,24 @@ def dedup_bounds(larger_path: str, *, hub: str | None = None) -> CapabilityBound
     )
 
 
+def dedup_spoke_bounds(spoke_path: str, *, hub: str | None = None) -> CapabilityBounds:
+    """Spoke bounds for a dedup `distinct` verdict: create exactly ONE new note.
+
+    The judge that ruled a borderline pipeline concept distinct also authored
+    its spoke (C2 verdict routing); the only permitted action is a `write` of
+    `spoke_path` — the path the framework derived from the title, never one the
+    model picked — and the hub is never touchable.
+    """
+    spoke_key = _norm_path(spoke_path)
+    forbidden = frozenset({hub} if hub else set())
+    return CapabilityBounds(
+        name="dedup_spoke",
+        allowed_ops=frozenset({OpType.write}),
+        target_predicate=lambda p: _norm_path(p) == spoke_key,
+        forbidden_paths=forbidden,
+    )
+
+
 def refiner_bounds(
     target_path: str,
     *,

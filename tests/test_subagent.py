@@ -155,6 +155,175 @@ def test_dedup_contradicts_without_claim_is_no_merge():
     commit.assert_not_called()
 
 
+def _seed_twin_bundle(content_hash: str = "hash1"):
+    """Seed the (conftest-isolated) deferred store with the borderline bundle
+    COLLISION would have written for _item()'s concept plus one sibling op."""
+    from silica.kernel.deferred import get_deferred_store
+
+    store = get_deferred_store()
+    store.put(
+        content_hash, "Inbox/ml.md", "Concepts", "Concepts",
+        [
+            {"op": "write", "heading": "Discesa del gradiente",
+             "path": "Concepts/Discesa del gradiente.md",
+             "snippet": "Variante mini-batch con momentum.",
+             "reason": "collision_deferred score=0.780 candidate=Gradient Descent"},
+            {"op": "write", "heading": "Altra cosa",
+             "path": "Concepts/Altra cosa.md", "snippet": "corpo",
+             "reason": "collision_deferred score=0.700 candidate=X"},
+        ],
+        {"Discesa del gradiente": "borderline_similarity score=0.780",
+         "Altra cosa": "borderline_similarity score=0.700"},
+    )
+    return store
+
+
+def _item_with_hash(content_hash: str = "hash1"):
+    item = _item()
+    item.context["content_hash"] = content_hash
+    item.context["target_dir"] = "Concepts"
+    return item
+
+
+def test_dedup_duplicate_commit_cleans_twin_bundle():
+    """C2 verdict routing: a committed merge removes the concept's op from the
+    deferred twin bundle; sibling ops survive."""
+    store = _seed_twin_bundle()
+    decision = DedupDecision(verdict="duplicate", rationale="same", addition="### New\ninfo.")
+
+    with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="body")), \
+         patch("silica.capabilities.dedup._decide_dedup", return_value=decision), \
+         patch("silica.capabilities.dedup.commit_ops", return_value={"status": "committed", "committed": 1}):
+        res = run_dedup(_item_with_hash(), CONFIG)
+
+    assert res["status"] == "committed"
+    bundle = store.get("hash1")
+    headings = [o["heading"] for o in bundle["rejected_ops"]]
+    assert headings == ["Altra cosa"]
+
+
+def test_dedup_failed_commit_keeps_twin_bundle():
+    """Bundle cleaned only on verified commit: a rolled-back merge must leave
+    the deferred op in place — the op degrades, it is never lost."""
+    store = _seed_twin_bundle()
+    decision = DedupDecision(verdict="duplicate", rationale="same", addition="### New\ninfo.")
+
+    with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="body")), \
+         patch("silica.capabilities.dedup._decide_dedup", return_value=decision), \
+         patch("silica.capabilities.dedup.commit_ops", return_value={"status": "rolled_back", "committed": 0}):
+        run_dedup(_item_with_hash(), CONFIG)
+
+    headings = {o["heading"] for o in store.get("hash1")["rejected_ops"]}
+    assert "Discesa del gradiente" in headings
+
+
+def test_dedup_distinct_authors_wikilinked_spoke():
+    """C2 fork (giudice+autore): pipeline distinct — the verdict call also
+    authored the spoke; it is committed as ONE write op under write-only
+    bounds, wikilinked to the candidate, and the twin bundle is cleaned."""
+    store = _seed_twin_bundle()
+    decision = DedupDecision(
+        verdict="distinct", rationale="related but distinct",
+        title="Discesa del gradiente",
+        body="La variante mini-batch aggiorna i pesi per sottoinsiemi.\n\nVedi [[Gradient Descent]].",
+    )
+
+    with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="body")), \
+         patch("silica.capabilities.dedup._decide_dedup", return_value=decision), \
+         patch("silica.capabilities.dedup.commit_ops", return_value={"status": "committed", "committed": 1}) as commit:
+        res = run_dedup(_item_with_hash(), CONFIG)
+
+    assert res["status"] == "committed"
+    assert res["verdict"] == "distinct"
+    ops_arg = commit.call_args.args[0]
+    assert len(ops_arg) == 1
+    op = ops_arg[0]
+    assert op.op == OpType.write
+    assert op.path == "Concepts/Discesa del gradiente.md"
+    assert "[[Gradient Descent]]" in op.snippet
+    bounds = commit.call_args.kwargs["bounds"]
+    assert OpType.write in bounds.allowed_ops
+    assert OpType.patch not in bounds.allowed_ops and OpType.overwrite not in bounds.allowed_ops
+    headings = [o["heading"] for o in store.get("hash1")["rejected_ops"]]
+    assert headings == ["Altra cosa"], "twin bundle op must be routed away"
+
+
+def test_dedup_distinct_authoring_failure_falls_back_mechanical():
+    """Authoring failed (no title/body) → the excerpt lands verbatim with a
+    provenance block and the candidate wikilink, a refine follow-up is
+    proposed, and the bundle is cleaned — the op degrades, it is never lost."""
+    store = _seed_twin_bundle()
+    decision = DedupDecision(verdict="distinct", rationale="related")  # nothing authored
+
+    with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="body")), \
+         patch("silica.capabilities.dedup._decide_dedup", return_value=decision), \
+         patch("silica.capabilities.dedup.commit_ops", return_value={"status": "committed", "committed": 1}) as commit:
+        res = run_dedup(_item_with_hash(), CONFIG)
+
+    assert res["status"] == "committed"
+    op = commit.call_args.args[0][0]
+    assert op.op == OpType.write
+    assert "Variante mini-batch con momentum." in op.snippet  # excerpt verbatim
+    assert "(da ml.md)" in op.snippet                          # provenance
+    assert "[[Gradient Descent]]" in op.snippet                # born linked
+    assert res["followup"]["kind"] == "refine"                 # ADR-0001 deferred refine
+    assert res["followup"]["target_path"] == op.path
+    headings = [o["heading"] for o in store.get("hash1")["rejected_ops"]]
+    assert headings == ["Altra cosa"]
+
+
+def test_dedup_distinct_failed_spoke_commit_keeps_bundle_and_skips_refine():
+    """A rolled-back spoke write must leave the parked op in the bundle and
+    propose no follow-up refine."""
+    store = _seed_twin_bundle()
+    decision = DedupDecision(verdict="distinct", rationale="related")
+
+    with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="body")), \
+         patch("silica.capabilities.dedup._decide_dedup", return_value=decision), \
+         patch("silica.capabilities.dedup.commit_ops", return_value={"status": "rolled_back", "committed": 0}):
+        res = run_dedup(_item_with_hash(), CONFIG)
+
+    assert "followup" not in res
+    headings = {o["heading"] for o in store.get("hash1")["rejected_ops"]}
+    assert "Discesa del gradiente" in headings
+
+
+def test_handle_dispatches_followup_through_registry():
+    """The engine — not the capability — runs a proposed follow-up (P9: workers
+    are peers), and only one hop deep: a follow-up's follow-up is ignored."""
+    seen = []
+
+    def primary(item, config):
+        return {"status": "committed",
+                "followup": {"kind": "polish", "target_path": "Dir/Spoke.md",
+                             "context": {"hub": "H"}}}
+
+    def polish(item, config):
+        seen.append(item)
+        return {"status": "committed",
+                "followup": {"kind": "polish", "target_path": "loop.md"}}
+
+    agent = BoundedSubAgent(CONFIG, capabilities={"primary": primary, "polish": polish})
+    res = agent.handle(WorkItem(kind="primary", target_path="X.md"))
+
+    assert len(seen) == 1, "exactly one follow-up hop"
+    assert seen[0].target_path == "Dir/Spoke.md"
+    assert seen[0].context == {"hub": "H"}
+    assert res["followup"]["status"] == "committed"
+
+
+def test_dedup_distinct_without_target_dir_stays_no_merge():
+    """Ad-hoc /dedup pairs (two existing notes, no target_dir in context) keep
+    today's contract: distinct → no write, no spoke."""
+    decision = DedupDecision(verdict="distinct", rationale="different topics")
+    with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="body")), \
+         patch("silica.capabilities.dedup._decide_dedup", return_value=decision), \
+         patch("silica.capabilities.dedup.commit_ops") as commit:
+        res = run_dedup(_item(), CONFIG)
+    assert res["status"] == "no_merge"
+    commit.assert_not_called()
+
+
 def _decide_with_raw(raw_text: str):
     """Run _decide_dedup with a provider whose response is `raw_text`."""
     from silica.capabilities.dedup import _decide_dedup
@@ -176,6 +345,15 @@ def test_decide_dedup_unparseable_defaults_to_distinct():
 def test_decide_dedup_unknown_verdict_defaults_to_distinct():
     decision = _decide_with_raw('{"verdict": "maybe", "rationale": "", "addition": "x"}')
     assert decision.verdict == "distinct"
+
+
+def test_decide_dedup_parses_authored_spoke_fields():
+    decision = _decide_with_raw(
+        '{"verdict": "distinct", "rationale": "r", "addition": "", '
+        '"title": "Spoke", "body": "corpo [[X]]"}'
+    )
+    assert decision.title == "Spoke"
+    assert decision.body == "corpo [[X]]"
 
 
 def test_decide_dedup_parses_contradicts():
