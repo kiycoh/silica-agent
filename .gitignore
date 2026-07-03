@@ -154,7 +154,10 @@ graph.html
 Thumbs.db
 
 # Documentation
-/docs
+/docs/*
+!/docs/assets/
+/docs/assets/*
+!/docs/assets/sili_no_bg.png
 
 # Agents
 /.agents

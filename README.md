@@ -5,7 +5,11 @@
 [![License: AGPL 3.0](https://img.shields.io/badge/License-AGPL_v3-4d8af0.svg)](https://opensource.org/licenses/AGPL-3.0)
 [![Powered by UV](https://img.shields.io/badge/package--manager-uv-6366f1.svg)](https://github.com/astral-sh/uv)
 
-> **Silica** is a conversational CLI agent and automated curation engine that operates **filesystem-native** — no Obsidian installation required. It manages logs, links notes, and structures concepts directly on your markdown vault while preserving integrity through strict quality gates. The Obsidian desktop app is supported as an optional enhancement (adds version-history rollback and live metadata-cache reads).
+<p align="center">
+  <img src="docs/assets/sili_no_bg.png" alt="Silica Mascot Sili" width="250" />
+</p>
+
+> **Silica** is a CLI-based agent designed for automated curation, organization and **safe** knowledge management. Local-first and open-source. Supports Obsidian.
 
 ---
 
@@ -29,46 +33,14 @@
 
 ## System Overview
 
-Silica is a CLI-based deterministic agentic orchestrator that can manage Obsidian vaults, codebases (wip) and any other directory. 
+Silica is a CLI-based deterministic agent orchestrator that can manage Obsidian vaults, codebases (wip) and any other directory. 
 
-- Silica is ***local-first*** (LM Studio, Ollama wip), open-router is also supported.
-- **Silica aims to prevent the risk of vault corruption and structural chaos** by using safety-hardened tools and rollbacks.
+- Silica is ***local-first*** (LM Studio, Ollama), OpenRouter is also supported.
+- **Silica prevents the risk of vault corruption and structural cluttering** by using safety-hardened tools and rollbacks.
 - Silica maintains and updates **a vault index separate from your files.**
-- Silica is not a free-loop agent orchestrator orchestrator.
+- Silica is not a free-form agent orchestrator.
 
 ---
-
-## Target Audience
-
-Silica is designed for:
-* **Knowledge Management Practitioners:** Users who leverage Obsidian as a semantic network and need automated assistance sorting daily inputs.
-* **Safety-First Automators:** Users requiring automated vault operations (metadata alignment, tag normalization, link resolution) with guaranteed non-regression.
-* **AI Curation Engineers:** Developers exploring LLM-based structured workflows where markdown compliance and graph schema validation are mandatory.
-
-> [!NOTE]
-> ### Key Technical Differentiators
-> * **Graph Validation Gates:** Intercepts write operations to ensure no broken backlinks, unresolved links, or unplanned orphan notes are introduced.
-> * **Transactional Rollbacks:** Captures prior states to execute atomicity-preserving rollbacks (`InverseOp`) if post-write validation fails.
-> * **Dual-Backend Access:** Default `fs` backend operates directly on the markdown filesystem (headless, no Obsidian required). The optional `cli` backend connects to Obsidian's Chrome DevTools Protocol (CDP) for live cache synchronization and version-history rollback.
-> * **Semantic Deduplication:** Uses cosine similarity of embeddings ($\tau_{\text{high}}$ / $\tau_{\text{low}}$) to automatically route new concepts, patch existing notes, or redirect borderline collisions to a deferred queue.
-> * **Deterministic Autolinking:** Identifies vault note title mentions in newly written text and wraps them in wikilinks (`[[Title]]`), bypassing code blocks, frontmatter, and mathematical formulas.
-> * **Execution Ledgers:** Logs step completion state in a progress ledger, enabling resume-on-failure and content-addressed step caching.
-
----
-
-## Architecture
-
-Silica is structured in a five-layer stack (L0 to L4) from low-level application drivers to high-level declarative workflows. The architecture coordinates two execution paradigms over a shared core toolset; the diagrams below are the architecture reference.
-
-### System Layers (L0–L4)
-
-| Layer | Component | Technical Role |
-| :--- | :--- | :--- |
-| **L4** | **Recipes** | Declarative YAML specifications (e.g., `injector.yaml`) defining stages of the pipeline. |
-| **L3** | **Orchestrator** | Deterministic Finite State Machine (FSM) executing recipes, handling state transitions, and tracking progress. |
-| **L2** | **Semantic Workers** | Stateless LLM workers (e.g., *Distiller*, *Merger*) executing cognitive reasoning to generate structured JSON patch/write operations. |
-| **L1** | **Mechanical Kernel** | Deterministic libraries for parsing frontmatter, resolving wikilinks, generating embeddings, and validating graph diffs. |
-| **L0** | **Obsidian Driver** | I/O interface exposing both a CDP-based adapter for the live desktop application and a filesystem fallback. |
 
 ### Execution Models
 
@@ -76,51 +48,6 @@ The underlying toolset is accessed via two distinct execution flows depending on
 
 * **Conversational Agent (REPL):** A high-autonomy LLM loop designed for interactive note discovery and ad-hoc operations. Runs step-by-step reasoning but is bound by mechanical invariants embedded directly inside the Python tools.
 * **Deterministic Pipelines (FSM):** Zero-autonomy state machines executing fixed recipes (e.g., importing/injecting new materials). Applies strict validation gates (orphan checks, unresolved link checks, backlink counts) and automatically executes rollbacks if gates fail.
-
-### System Topology
-
-```mermaid
-graph TD
-    User([User Request]) --> Router{Silica Router}
-    Router -->|Conversational Loop| REPL[LLM Agent REPL]
-    Router -->|Deterministic Run| FSM[Pipeline Orchestrator FSM]
-    
-    REPL -->|Call Tool| Toolset[Vault Toolset]
-    FSM -->|Step Execution| Toolset
-    
-    Toolset -->|L0 Driver| Driver{Obsidian Driver}
-    Driver -->|fs backend / Default| RawFiles[Filesystem Vault]
-    Driver -->|cli backend / Optional CDP| LiveApp[Live Obsidian Electron App]
-```
-
-### Pipeline Execution Flow
-
-```mermaid
-graph LR
-    A[Recon] --> B[Payload]
-    B --> C[Distill<br/>Single-Shot LLM]
-    C --> D[Sanitize]
-    D --> E[Validate Gates]
-    E -->|Pass| F[Snapshot Vault]
-    E -->|Fail| Z[Abort & Alert]
-    F --> G[Write Ops]
-    G --> H[Lint & Graph Diff]
-    H -->|Pass| I[Cleanup Inbox]
-    H -->|Regression Detected| Y[Rollback to Snapshot]
-```
-
-### I/O Driver Architecture
-
-```mermaid
-graph TD
-    API[Silica Tools] --> Interface[Driver Protocol]
-    Interface --> FS[FS Backend <br> Default]
-    Interface --> CLI[CLI Backend <br> Optional / Obsidian]
-    
-    CLI -.->|Reads Live Cache & Updates| Obsidian[Obsidian Desktop App]
-    FS -.->|Direct Disk Access| Filesystem[Markdown Files]
-    Obsidian --- Filesystem
-```
 
 ---
 
@@ -157,7 +84,7 @@ Configure the agent via environment variables (e.g., in a `.env` file):
 | `SILICA_WORKER_MAX_CONCURRENT` | `4` | Global ceiling on concurrent worker-model LLM calls |
 | `SILICA_TAVILY_API_KEY` | *(none)* | API key for Tavily search (enables `/web-search` command) |
 | `SILICA_PDF_PROVIDER` | `pymupdf4llm` | PDF-to-Markdown converter: `pymupdf4llm` or `mineru` (OCR tool) |
-| `SILICA_MAX_CONTEXT` | `60000` | Token limit budget before REPL context-bloat warning |
+| `SILICA_MAX_CONTEXT` | *(auto)* | REPL context meter budget — pin explicitly, or auto-detected from the provider (LM Studio loaded window / OpenRouter context_length; fallback `60000`) |
 | `SILICA_SHOW_THINKING` | `True` | Toggle printing of LLM thinking/reasoning blocks |
 | `SILICA_TOOL_PROGRESS` | `all` | CLI tool display level: `off`, `new`, `all`, or `verbose` |
 | `SILICA_SHOW_BANNER` | `True` | Startup banner art (`True` → wordmark, `False` → plain one-liner) |
@@ -245,15 +172,6 @@ Run the ingestion pipeline from inside the REPL:
 
 
 **System:** `/help` · `/model` · `/tools` · `/clear` · `/verbose` · `/thinking` · `/vault` `[path]` (show or switch the active vault for this session) · `/exit`
-
-### System Tools
-* **`silica_run_injector`**: Runs the end-to-end ingestion pipeline with transaction rollbacks.
-* **`silica_recon` / `silica_payload` / `silica_sanitize`**: Pipeline stages for ingestion, payload extraction, and response normalization.
-* **`silica_validate_ops` / `silica_bulk_write` / `silica_lint`**: Validation, atomic batch writes, and post-write regression checks.
-* **`silica_autolink`**: Automatically inserts wikilinks for matching note titles.
-* **`silica_embed_refresh` / `silica_semantic_search`**: Updates and queries the vault's vector database.
-* **`silica_graph_export`**: Visualizes the vault network using Louvain modularity clustering.
-
 ---
 
 ## Performance, Quirks & Features
