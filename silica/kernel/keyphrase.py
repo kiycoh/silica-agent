@@ -24,8 +24,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from silica.kernel import language
 from silica.kernel.embed import _cosine, document_theme_vector
-from silica.kernel.overlay import DomainOverlay, _SNOWBALL_TO_ISO, overlay_for_lang
+from silica.kernel.overlay import DomainOverlay, overlay_for_lang
 from silica.kernel.recon import _strip_frontmatter, _strip_math, is_concept, normalize
 
 # Cutoff knobs (calibration — tune on a real paper + lecture via the eval).
@@ -57,7 +58,9 @@ class ConceptCandidate:
 def _yake_leg(text: str, overlay: DomainOverlay, lang: str) -> list[ConceptCandidate] | None:
     """YAKE-ranked candidates (best-first), filtered through the overlay.
 
-    Abstains (None) if YAKE is unimportable or yields nothing. YAKE returns
+    Abstains (None) if YAKE is unimportable, its constructor rejects `lang`
+    (e.g. a future yake release raising on an unsupported/unknown language —
+    the pin is unbounded above), or extraction yields nothing. YAKE returns
     (phrase, cost) ascending (lower cost = more relevant), already deduplicated.
     """
     try:
@@ -65,8 +68,11 @@ def _yake_leg(text: str, overlay: DomainOverlay, lang: str) -> list[ConceptCandi
     except ImportError:
         return None
 
-    iso = _SNOWBALL_TO_ISO.get(lang.lower(), lang.lower()[:2] or "en")
-    kw = yake.KeywordExtractor(lan=iso, n=3, top=YAKE_POOL, dedupLim=0.9)
+    iso = language.SNOWBALL_TO_ISO.get(lang.lower(), lang.lower()[:2] or "en")
+    try:
+        kw = yake.KeywordExtractor(lan=iso, n=3, top=YAKE_POOL, dedupLim=0.9)
+    except Exception:
+        return None
     if overlay.stopwords:
         # Augment YAKE's built-in language stopwords (don't replace them): passing
         # stopwords= to the constructor overrides the built-in list entirely, which
@@ -225,10 +231,9 @@ def extract_keyphrases(
     `silica_recon` already handles as an empty report.
     """
     body = _strip_math(_strip_frontmatter(content))  # transient: note keeps its LaTeX
-    from silica.kernel.cooccurrence import _resolve_lang
-    lang = _resolve_lang(lang, body)  # "auto" -> concrete Snowball lang via detect_lang
+    lang = language.resolve(lang, body)  # "auto" -> concrete Snowball lang via language.detect
     if overlay is None:
-        overlay = overlay_for_lang(lang)  # lang already resolved by _resolve_lang
+        overlay = overlay_for_lang(lang)  # lang already resolved by language.resolve above
     pool = _seed_structural(body, overlay, _yake_leg(body, overlay, lang) or [])
     if not pool:
         return []

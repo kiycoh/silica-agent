@@ -156,6 +156,119 @@ def check_embeddings(config: SilicaConfig) -> CheckResult:
     )
 
 
+_LANG_SAMPLE_MAX_FILES = 30
+_LANG_SAMPLE_PER_FILE_CHARS = 150
+_LANG_SAMPLE_TOTAL_CHARS = 4000
+
+
+def sample_vault_text(vault: str) -> str:
+    """Deterministic, cheap sample of a vault's prose for language detection.
+
+    Up to `_LANG_SAMPLE_MAX_FILES` `.md` files (sorted rglob — deterministic
+    across runs/platforms), the first `_LANG_SAMPLE_PER_FILE_CHARS` characters
+    of each, concatenated and capped at `_LANG_SAMPLE_TOTAL_CHARS`. The
+    per-file cap is kept small (well under total/max_files) so the budget is
+    actually SPREAD across the file cap rather than exhausted by the first
+    handful of alphabetically-sorted files — a minority-language head (e.g.
+    a lone "AAA notes.md") must not drown out the vault's real majority
+    language, which only shows up once later files get sampled too. Returns
+    "" when the vault has no readable `.md` files. Degrades on any
+    filesystem error instead of raising — matches this module's
+    pure-diagnostic contract.
+
+    Single seam for this sampling logic: both `check_language` (doctor) and
+    the `/vault` info block in cli.py go through `detect_vault_language`
+    below, which calls this — no duplicated sampling.
+    """
+    try:
+        files = sorted(Path(vault).rglob("*.md"))[:_LANG_SAMPLE_MAX_FILES]
+    except Exception:
+        return ""
+    parts: list[str] = []
+    total = 0
+    for f in files:
+        if total >= _LANG_SAMPLE_TOTAL_CHARS:
+            break
+        try:
+            chunk = f.read_text(encoding="utf-8", errors="ignore")[:_LANG_SAMPLE_PER_FILE_CHARS]
+        except Exception:
+            continue
+        parts.append(chunk)
+        total += len(chunk)
+    return "".join(parts)[:_LANG_SAMPLE_TOTAL_CHARS]
+
+
+def detect_vault_language(vault: str) -> str | None:
+    """Cheap, deterministic dominant-language detection for `vault`.
+
+    None when there is nothing to sample (no `.md` files, or all unreadable)
+    — callers treat that as "no notes yet". Never raises.
+    """
+    if not vault:
+        return None
+    sample = sample_vault_text(vault)
+    if not sample.strip():
+        return None
+    from silica.kernel import language
+
+    return language.detect(sample)
+
+
+def frozen_store_language(vault: str) -> str | None:
+    """Read `vault`'s persisted cooccurrence store's frozen `lang` field, if
+    a store exists on disk for THIS vault.
+
+    Thin pass-through to `kernel.cooccurrence.frozen_lang` — this module
+    owns no on-disk store schema knowledge; the store's own module does.
+    Resolved from the `vault` argument, never from the global CONFIG
+    singleton, so a caller comparing a specific (possibly non-active) vault
+    never cross-checks a different vault's store. None when no store file
+    exists yet, or on any read/parse error (degrade, never raise — inherited
+    from the accessor this delegates to).
+
+    Direct leg import — allowlisted in tests/test_relatedness_boundary.py:
+    metadata-only read via the public accessor, no store construction.
+    """
+    from silica.kernel.cooccurrence import frozen_lang
+
+    return frozen_lang(vault)
+
+
+def check_language(config: SilicaConfig) -> CheckResult:
+    """Detected dominant vault language vs. the cooccurrence store's frozen
+    language. A divergence is the signature of the historic bug that froze
+    stores to "english" on non-English vaults — this is how existing users
+    discover a store needs a `/cooccur` rebuild.
+
+    Both halves are resolved from `config.vault_path` — never from the
+    global CONFIG singleton — so a caller that just reconfigured (e.g. the
+    init wizard building a fresh `SilicaConfig()` right after a vault
+    switch) never compares the newly-chosen vault's detected language
+    against a *different*, still-active vault's frozen store.
+    """
+    vault = config.vault_path.strip()
+    if not vault:
+        return CheckResult("language", "ok", "no vault — skipped")
+
+    detected = detect_vault_language(vault)
+    if detected is None:
+        return CheckResult("language", "ok", "no notes yet")
+
+    store_lang = frozen_store_language(vault)
+    if store_lang is None:
+        return CheckResult(
+            "language", "ok",
+            f"detected={detected}, no store frozen yet",
+        )
+    if store_lang == detected:
+        return CheckResult("language", "ok", f"detected={detected}, store={store_lang}")
+    return CheckResult(
+        "language", "warn",
+        f"detected={detected}, store frozen={store_lang} — mismatch",
+        "run `/cooccur --force` to rebuild the co-occurrence store in the detected language",
+    )
+
+
 def check_manifest(config: SilicaConfig) -> CheckResult:
     from silica.kernel.vault_manifest import MANIFEST_REL, load_manifest
     from silica.sources.registry import ALL_ADAPTERS
@@ -187,6 +300,7 @@ def run_checks(config: SilicaConfig) -> list[CheckResult]:
         check_chat_endpoint(config),
         check_vault(config),
         check_manifest(config),
+        check_language(config),
         check_obsidian_backend(config),
         check_embeddings(config),
     ]

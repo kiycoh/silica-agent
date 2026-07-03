@@ -103,7 +103,7 @@ def _stems_from_body(body: str, lang: str) -> dict[str, int]:
     """Tokenize a note body into {stem: count} (same pipeline as the cooccur index)."""
     from silica.kernel.cooccurrence import tokenize
     return dict(Counter(
-        stem for sentence in tokenize(body, lang=lang) for stem, _surface in sentence
+        stem for sentence in tokenize(body, stem_lang=lang) for stem, _surface in sentence
     ))
 
 
@@ -239,7 +239,7 @@ def _score_note_against_rules(
         if rule.themes:
             rule_stems: set[str] = set()
             for theme in rule.themes:
-                for sentence in tokenize(theme, lang=lang):
+                for sentence in tokenize(theme, stem_lang=lang, stopword_lang=lang):
                     rule_stems.update(stem for stem, _s in sentence)
 
             overlap = sum(count for stem, count in concept_stems.items() if stem in rule_stems)

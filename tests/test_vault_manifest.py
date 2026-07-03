@@ -61,6 +61,37 @@ def test_get_active_manifest_caches_until_reset(tmp_path, monkeypatch):
     assert get_active_manifest().sources == ("prose", "code")
 
 
+def test_apply_manifest_defaults_to_auto_without_manifest(tmp_path, monkeypatch):
+    """Regression: vault with no vault.yaml at all must land on the config-level
+    "auto" default (per-store detection), not the dead "english" fallback."""
+    monkeypatch.delenv("SILICA_COOCCURRENCE_LANG", raising=False)
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    monkeypatch.setattr(CONFIG, "cooccurrence_lang", "english")
+    apply_manifest_to_config()
+    assert CONFIG.cooccurrence_lang == "auto"
+
+
+def test_apply_manifest_defaults_to_auto_when_manifest_omits_field(tmp_path, monkeypatch):
+    """Regression: vault.yaml present but without `cooccurrence_lang:` must also
+    land on "auto", not "english"."""
+    (tmp_path / "vault.yaml").write_text("sources: [prose]\n", encoding="utf-8")
+    monkeypatch.delenv("SILICA_COOCCURRENCE_LANG", raising=False)
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    monkeypatch.setattr(CONFIG, "cooccurrence_lang", "english")
+    apply_manifest_to_config()
+    assert CONFIG.cooccurrence_lang == "auto"
+
+
+def test_apply_manifest_env_var_wins_over_auto_default(tmp_path, monkeypatch):
+    """Env var precedence must survive the bug fix: it still wins even when the
+    manifest declares nothing."""
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    monkeypatch.setattr(CONFIG, "cooccurrence_lang", "french")
+    monkeypatch.setenv("SILICA_COOCCURRENCE_LANG", "french")
+    apply_manifest_to_config()
+    assert CONFIG.cooccurrence_lang == "french"
+
+
 def test_apply_manifest_env_wins(tmp_path, monkeypatch):
     (tmp_path / "vault.yaml").write_text(
         "overlay: codebase\ncooccurrence_lang: italian\n", encoding="utf-8"
@@ -100,7 +131,7 @@ def test_apply_manifest_clears_overlay_on_switch_to_plain_vault(tmp_path, monkey
     reset_manifest_cache()
     apply_manifest_to_config()
     assert CONFIG.domain is None          # not leaked from vault a
-    assert CONFIG.cooccurrence_lang == "english"
+    assert CONFIG.cooccurrence_lang == "auto"  # not leaked from vault a; "auto" is the real default
 
 
 def test_ingest_gating_sources_prose_only(tmp_path, monkeypatch, capsys):

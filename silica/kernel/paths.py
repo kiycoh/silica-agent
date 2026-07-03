@@ -36,17 +36,31 @@ def silica_tmp_dir() -> Path:
     return d
 
 
+def index_dir_for(vault: str) -> Path:
+    """Per-vault index namespace for an explicit `vault` path, independent of
+    the global CONFIG singleton. Same digest scheme as `index_dir()` — the
+    two agree whenever `vault == CONFIG.vault_path`.
+
+    Callers that need to resolve a *specific* vault's on-disk index (e.g. a
+    diagnostic comparing a passed-in config's vault against whatever vault
+    the live global CONFIG currently points at) MUST use this rather than
+    `index_dir()`, which only ever resolves the global singleton and would
+    silently compare the wrong vault's state.
+    """
+    base = _SILICA_HOME / "index"
+    vault = (vault or "").strip()
+    if not vault:
+        return base
+    digest = hashlib.sha1(str(Path(vault).resolve()).encode("utf-8")).hexdigest()[:12]
+    return base / digest
+
+
 def index_dir() -> Path:
     """Per-vault index namespace: ~/.silica/index/<digest12>/ keyed by the
     resolved vault path; legacy global ~/.silica/index/ when no vault is
     configured. Per-vault state follows the vault (ADR-0014), so /vault
     switch no longer serves another vault's entries."""
-    base = _SILICA_HOME / "index"
-    vault = (getattr(CONFIG, "vault_path", "") or "").strip()
-    if not vault:
-        return base
-    digest = hashlib.sha1(str(Path(vault).resolve()).encode("utf-8")).hexdigest()[:12]
-    return base / digest
+    return index_dir_for(getattr(CONFIG, "vault_path", "") or "")
 
 
 def to_vault_relative(path: str, *, ensure_md: bool = True) -> str:

@@ -273,6 +273,20 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         if CONFIG.vault_path:
             count = len(list(Path(CONFIG.vault_path).rglob("*.md")))
             CONSOLE.print(f"  Notes:   {count}")
+            from silica.onboarding.checks import detect_vault_language, frozen_store_language
+
+            detected = detect_vault_language(CONFIG.vault_path)
+            if detected:
+                store_lang = frozen_store_language(CONFIG.vault_path)
+                if store_lang and store_lang != detected:
+                    CONSOLE.print(
+                        f"  Language: {detected} (store frozen: {store_lang} "
+                        "⚠ — run /cooccur --force to rebuild)"
+                    )
+                elif store_lang:
+                    CONSOLE.print(f"  Language: {detected} (store: {store_lang})")
+                else:
+                    CONSOLE.print(f"  Language: {detected}")
         return True
 
     if cmd == "/status":

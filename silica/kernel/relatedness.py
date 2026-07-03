@@ -181,7 +181,7 @@ def _seed_from_text(text: str, lang: str) -> dict[str, float]:
     from silica.kernel.cooccurrence import tokenize
 
     seeds: dict[str, float] = {}
-    for sentence in tokenize(text, lang=lang):
+    for sentence in tokenize(text, stem_lang=lang):
         for stem, _surface in sentence:
             seeds[stem] = seeds.get(stem, 0.0) + 1.0
     return seeds

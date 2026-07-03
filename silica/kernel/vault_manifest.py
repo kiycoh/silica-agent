@@ -29,15 +29,19 @@ class VaultConventions:
 
     Consumed by `prep_delegation.render_prompt` ({LANGUAGE}/{MAX_TAGS}
     placeholders) and `ofm.ofm_lint` (LIMITS/CALLOUT_TYPES resolution).
-    Defaults equal today's hardcoded values, so a vault without a
-    `conventions:` block behaves bit-identically to before this existed.
+    max_tags/extra_callouts/max_lines/max_chars default to today's hardcoded
+    values, so a vault without a `conventions:` block behaves bit-identically
+    to before this existed for those fields.
+
+    `language: None` (the default) means "follow the source document's
+    language" — resolved per-note downstream via `kernel.language.detect`.
+    A declared non-empty string means "force/translate everything into this
+    language" — an explicit declaration is translation intent.
     """
 
-    language: str = "Italian"
+    language: str | None = None
     max_tags: int = 3
     extra_callouts: tuple[str, ...] = ()
-    max_lines: int = 400
-    max_chars: int = 20000
 
 
 DEFAULT_CONVENTIONS = VaultConventions()
@@ -70,9 +74,14 @@ def _parse_conventions(raw: dict) -> VaultConventions:
         logger.warning("vault.yaml: `conventions` must be a mapping — using defaults")
         return DEFAULT_CONVENTIONS
 
+    # Absent/malformed (non-string, empty or whitespace-only) -> None ("follow
+    # the source"). A declared non-blank string passes through unchanged
+    # (translation intent) — {LANGUAGE} must always get a concrete name.
     language = conv_raw.get("language")
-    if not (isinstance(language, str) and language):
-        language = DEFAULT_CONVENTIONS.language
+    if isinstance(language, str) and language.strip():
+        language = language.strip()
+    else:
+        language = None
 
     max_tags = conv_raw.get("max_tags")
     if not (isinstance(max_tags, int) and not isinstance(max_tags, bool) and max_tags > 0):
@@ -84,20 +93,10 @@ def _parse_conventions(raw: dict) -> VaultConventions:
     else:
         extra_callouts = DEFAULT_CONVENTIONS.extra_callouts
 
-    max_lines = conv_raw.get("max_lines")
-    if not (isinstance(max_lines, int) and not isinstance(max_lines, bool) and max_lines > 0):
-        max_lines = DEFAULT_CONVENTIONS.max_lines
-
-    max_chars = conv_raw.get("max_chars")
-    if not (isinstance(max_chars, int) and not isinstance(max_chars, bool) and max_chars > 0):
-        max_chars = DEFAULT_CONVENTIONS.max_chars
-
     return VaultConventions(
         language=language,
         max_tags=max_tags,
         extra_callouts=extra_callouts,
-        max_lines=max_lines,
-        max_chars=max_chars,
     )
 
 
@@ -164,5 +163,8 @@ def apply_manifest_to_config() -> None:
     if os.getenv("SILICA_DOMAIN") is None:
         CONFIG.domain = m.overlay
     if os.getenv("SILICA_COOCCURRENCE_LANG") is None:
-        # "english" mirrors the config-level default for this field
-        CONFIG.cooccurrence_lang = m.cooccurrence_lang or "english"
+        # "auto" mirrors the config-level default for this field (per-store
+        # detection, frozen at build — see kernel/cooccurrence.py). A vault
+        # without a declared cooccurrence_lang must NOT be silently pinned to
+        # english.
+        CONFIG.cooccurrence_lang = m.cooccurrence_lang or "auto"

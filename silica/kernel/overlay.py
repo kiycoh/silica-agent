@@ -14,17 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
-from stop_words import StopWordError, get_stop_words
 
-
-# Snowball-style language names ("italian") -> ISO codes ("it"). Shared by the
-# YAKE candidate generator (keyphrase.py) and the function-word fallback below.
-_SNOWBALL_TO_ISO: dict[str, str] = {
-    "arabic": "ar", "danish": "da", "dutch": "nl", "english": "en",
-    "finnish": "fi", "french": "fr", "german": "de", "hungarian": "hu",
-    "italian": "it", "norwegian": "no", "portuguese": "pt", "romanian": "ro",
-    "russian": "ru", "spanish": "es", "swedish": "sv",
-}
+from silica.kernel import language
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +34,7 @@ class DomainOverlay:
 # Default (English-generic) overlay
 # ---------------------------------------------------------------------------
 
-_ENGLISH_FUNCTION_WORDS: frozenset[str] = frozenset(get_stop_words('en'))
+_ENGLISH_FUNCTION_WORDS: frozenset[str] = language.stopwords_for("english")
 
 _ENGLISH_STRUCTURAL_TERMS: frozenset[str] = frozenset({
     # headings
@@ -222,17 +213,15 @@ def language_overlay(lang: str) -> DomainOverlay:
     """DEFAULT structurals/noise plus the target language's function words.
 
     Base-level fallback for a language with no bundled overlay. Returns
-    DEFAULT_OVERLAY unchanged when ``lang`` has no stop_words list.
+    DEFAULT_OVERLAY unchanged when ``lang`` is unknown, or its stopword list
+    is empty (package missing/broken and no bundled fallback for `lang` —
+    language.stopwords_for() degrades to that empty set rather than raising).
     """
-    iso = _SNOWBALL_TO_ISO.get(lang.lower())
-    if iso is None:
-        return DEFAULT_OVERLAY
-    try:
-        words = get_stop_words(iso)
-    except StopWordError:
+    words = language.stopwords_for(lang.lower())
+    if not words:
         return DEFAULT_OVERLAY
     return DomainOverlay(
-        stopwords=DEFAULT_OVERLAY.stopwords | frozenset(words),
+        stopwords=DEFAULT_OVERLAY.stopwords | words,
         noise_patterns=DEFAULT_OVERLAY.noise_patterns,
     )
 

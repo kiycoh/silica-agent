@@ -35,7 +35,9 @@ _BUNDLED_OVERLAYS = Path(__file__).resolve().parent.parent.parent / "silica" / "
 
 def _stems(phrase: str, lang: str) -> frozenset[str]:
     """Content stems of *phrase* (stopwords / short tokens dropped by tokenize)."""
-    return frozenset(stem for sent in tokenize(phrase, lang=lang) for stem, _surface in sent)
+    return frozenset(
+        stem for sent in tokenize(phrase, stem_lang=lang, stopword_lang=lang) for stem, _surface in sent
+    )
 
 
 def concept_recalled(gold: str, extracted: list[str], lang: str) -> bool:

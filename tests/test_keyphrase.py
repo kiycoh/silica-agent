@@ -185,6 +185,42 @@ def test_structural_phrase_beyond_yake_ngram_enters_pool():
 
 
 # ---------------------------------------------------------------------------
+# YAKE constructor abstention: a language yake.KeywordExtractor rejects must
+# abstain (None), not crash extract_keyphrases. The pinned yake==0.7.3 never
+# actually raises for a bad/unknown language string (it degrades to its
+# no-lang stopword list instead — verified by direct experiment), so there is
+# no real string today that reaches this branch; the pin (yake>=0.7.3, no
+# upper bound) leaves that free to change. This simulates the failure at the
+# yake.KeywordExtractor boundary itself (a real, unmocked third-party call
+# site for _yake_leg) rather than mocking any silica code.
+# ---------------------------------------------------------------------------
+
+def test_yake_leg_abstains_when_yake_constructor_raises(monkeypatch):
+    import yake
+    from silica.kernel.keyphrase import _yake_leg
+    from silica.kernel.overlay import DEFAULT_OVERLAY
+
+    def _boom(*_args, **_kwargs):
+        raise ValueError("unsupported language")
+
+    monkeypatch.setattr(yake, "KeywordExtractor", _boom)
+    assert _yake_leg("some ordinary english text about graphs", DEFAULT_OVERLAY, "english") is None
+
+
+def test_yake_leg_norwegian_does_not_raise():
+    """Side effect of the norwegian -> nb root-fix (language.py): a real,
+    unmocked _yake_leg("norwegian") call must not raise."""
+    from silica.kernel.keyphrase import _yake_leg
+    from silica.kernel.overlay import DEFAULT_OVERLAY
+
+    result = _yake_leg(
+        "dette er en test av norsk tekst med flere ord i teksten for gradientnedstigning",
+        DEFAULT_OVERLAY, "norwegian",
+    )
+    assert result is None or isinstance(result, list)
+
+
+# ---------------------------------------------------------------------------
 # Corroboration tier: structural markup is a *second axis*, not only a boost.
 # EXTRACTED <=> structurally corroborated (embedder-free); else INFERRED.
 # ---------------------------------------------------------------------------

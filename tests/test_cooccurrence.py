@@ -22,7 +22,10 @@ def test_split_sentences_breaks_on_terminators():
 
 def test_tokenize_lowercases_and_drops_short_and_stopwords_english():
     # "the" is a stopword, "a" and "is" too; "of" stopword; "ai" is < 3 chars
-    sents = tokenize("The cat is on a mat", lang="english")
+    # stopword_lang pinned explicitly: the assertion depends on the English
+    # stopword set specifically, not on whatever language.detect() picks for
+    # this tiny sample.
+    sents = tokenize("The cat is on a mat", stem_lang="english", stopword_lang="english")
     # one sentence, stopwords/short removed, remaining stemmed (cat, mat)
     stems = [stem for sent in sents for (stem, _surface) in sent]
     assert "cat" in stems
@@ -36,7 +39,7 @@ def snow_stem_it(word: str) -> str:
 
 
 def test_tokenize_collapses_italian_inflections():
-    sents = tokenize("La rete e le reti neurali", lang="italian")
+    sents = tokenize("La rete e le reti neurali", stem_lang="italian", stopword_lang="italian")
     stems = [stem for sent in sents for (stem, _surface) in sent]
     # rete and reti must collapse to the same stem
     assert stems.count(snow_stem_it("rete")) >= 1
@@ -45,9 +48,29 @@ def test_tokenize_collapses_italian_inflections():
 
 
 def test_tokenize_keeps_surface_form():
-    sents = tokenize("Neural networks", lang="english")
+    sents = tokenize("Neural networks", stem_lang="english", stopword_lang="english")
     surfaces = [surface for sent in sents for (_stem, surface) in sent]
     assert "neural" in surfaces  # surface is lowercased original token
+
+
+def test_tokenize_stopword_lang_explicit_overrides_detection():
+    # "della" is an Italian stopword; pinning stopword_lang="italian" filters
+    # it even though stem_lang is "english" (store's frozen stemmer).
+    sents = tokenize("della rete", stem_lang="english", stopword_lang="italian")
+    stems = [stem for sent in sents for (stem, _surface) in sent]
+    assert "della" not in stems
+
+
+def test_tokenize_stopword_lang_none_detects_from_text():
+    # stopword_lang=None (default) -> language.detect(text); Italian function
+    # words get dropped even when stem_lang is frozen to "english".
+    sents = tokenize(
+        "La rete della azienda migliora molto il lavoro del team.",
+        stem_lang="english",
+    )
+    stems = [stem for sent in sents for (stem, _surface) in sent]
+    assert "della" not in stems
+    assert "il" not in stems
 
 
 from silica.kernel.cooccurrence import build_contribution
@@ -229,6 +252,41 @@ def test_build_index_bulk(tmp_path):
     assert idx.exists()
 
 
+def test_build_index_mixed_vault_per_note_stopwords_uniform_stemming(tmp_path):
+    # One Italian note + one English note land in the SAME store. Stemming
+    # must be uniform at store.lang (one stemmer per store — node keys are
+    # stemmed tokens, a per-note stemmer would split cross-language shared
+    # terms), but stopword filtering is per-note: neither "della" (Italian)
+    # nor "the" (English) may survive as a node, regardless of which
+    # language the store's dominant-language freeze picks.
+    idx = tmp_path / "cooc.json"
+    store = CooccurStore(path=idx, lang="auto")
+    notes = [
+        ("it/nota.md", "Nota",
+         "La rete neurale della azienda migliora la produttivita del team. "
+         "Gli algoritmi della rete sono ottimizzati per la performance."),
+        ("en/note.md", "Note",
+         "The network architecture of the company improves the productivity "
+         "of the team. The algorithms of the network are optimized for the "
+         "performance."),
+    ]
+    build_index(notes, store=store, lang="auto")
+
+    # freeze behavior unchanged: store.lang is resolved once, never "auto"
+    assert store.lang in ("english", "italian")
+
+    it_labels = {meta["label"] for meta in store._notes["it/nota"]["nodes"].values()}
+    en_labels = {meta["label"] for meta in store._notes["en/note"]["nodes"].values()}
+    assert "della" not in it_labels
+    assert "the" not in en_labels
+
+    # stemming uniform at store.lang: the Italian note's words are stemmed
+    # with the SAME stemmer as the frozen store language, not its own.
+    import snowballstemmer
+    frozen_stem = snowballstemmer.stemmer(store.lang).stemWord("rete")
+    assert frozen_stem in store.note_nodes("it/nota.md")
+
+
 def test_refresh_note_replaces_contribution_no_inflation(tmp_path):
     idx = tmp_path / "cooc.json"
     store = CooccurStore(path=idx, lang="english")
@@ -365,3 +423,79 @@ def test_top_stems_respects_n(tmp_path):
 def test_top_stems_empty_store(tmp_path):
     store = CooccurStore(path=tmp_path / "cooccur.json")
     assert store.top_stems(10) == []
+
+
+# ---------------------------------------------------------------------------
+# Finding 1 (final multilingua review): incremental refresh must not
+# re-freeze store.lang when the caller passes the "auto" sentinel (the
+# write-hook default post-Task-5). store.lang is frozen at FIRST build; an
+# "auto" request on an already-populated store must stick to the frozen
+# language, never re-detect from a single (possibly foreign-language) batch.
+# "company"/"productivity"/"improves" are unambiguous probes: the English
+# Snowball stemmer changes them ("compani"/"product"/"improv"), the Italian
+# one leaves them unchanged.
+# ---------------------------------------------------------------------------
+
+def test_refresh_note_auto_lang_sticky_to_frozen_store(tmp_path):
+    idx = tmp_path / "cooc.json"
+    store = CooccurStore(path=idx, lang="italian")
+    store.upsert_note(
+        "it/nota.md",
+        build_contribution("Nota", "La rete della azienda migliora la produttivita", lang="italian"),
+    )
+    store.save()
+
+    refresh_note(
+        "en/note.md", "Note",
+        "The company improves productivity for the whole team.",
+        store=store, lang="auto",
+    )
+
+    assert store.lang == "italian"
+    # node key uses the FROZEN (italian) stemmer, not english's "compani"
+    assert "company" in store.note_nodes("en/note.md")
+    assert "compani" not in store.note_nodes("en/note.md")
+
+
+def test_build_index_write_hook_shape_force_true_sticky_to_frozen_store(tmp_path):
+    # THE mainline shape (Round 2): the post-write freshness hook
+    # (orchestrator._refresh_cooccurrence_for_ops) calls build_index with
+    # force=True — there force means "replace this note's prior contribution,
+    # never inflate" (replacement semantics), NOT "rebuild the store". It must
+    # NOT re-detect the frozen language; only an explicit refreeze=True may.
+    idx = tmp_path / "cooc.json"
+    store = CooccurStore(path=idx, lang="italian")
+    store.upsert_note(
+        "it/nota.md",
+        build_contribution("Nota", "La rete della azienda migliora la produttivita", lang="italian"),
+    )
+    store.save()
+
+    build_index(
+        [("en/note.md", "Note", "The company improves productivity for the whole team.")],
+        store=store, lang="auto", force=True,
+    )
+
+    assert store.lang == "italian"
+    assert "company" in store.note_nodes("en/note.md")
+    assert "compani" not in store.note_nodes("en/note.md")
+
+
+def test_build_index_refreeze_true_redetects_auto_lang(tmp_path):
+    # The deliberate-rebuild shape (/cooccur --force → silica_cooccurrence_refresh
+    # force=True → refreeze=True): the doctor remedy for a wrong-frozen store.
+    idx = tmp_path / "cooc.json"
+    store = CooccurStore(path=idx, lang="english")
+    store.upsert_note(
+        "en/old.md",
+        build_contribution("Old", "The company improves productivity.", lang="english"),
+    )
+    store.save()
+
+    italian_notes = [
+        ("it/a.md", "A", "La rete neurale della azienda migliora la produttivita del team."),
+        ("it/b.md", "B", "Gli algoritmi della rete sono ottimizzati per la performance."),
+    ]
+    build_index(italian_notes, store=store, lang="auto", force=True, refreeze=True)
+
+    assert store.lang == "italian"

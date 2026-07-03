@@ -18,16 +18,18 @@ siblings). The `related` field is advisory in Obsidian, so over-linking is
 preferable to under-linking for note discovery.
 
 CONFIG: language-specific stopwords (function words, structural-academic terms) come
-from the active DomainOverlay (``silica.kernel.overlay.get_active_overlay()`` or
-the overlay passed explicitly). English-generic stopwords live in DEFAULT_OVERLAY;
-Italian academic stopwords live in silica/overlays/italian.yaml.
+from the DomainOverlay passed explicitly, or — when ``overlay`` is ``None`` — from
+per-note language detection (``silica.kernel.language.detect`` +
+``silica.kernel.overlay.overlay_for_lang``). English-generic stopwords live in
+DEFAULT_OVERLAY; Italian academic stopwords live in silica/overlays/italian.yaml.
 """
 from __future__ import annotations
 
 import re
 from typing import Any
 
-from silica.kernel.overlay import DomainOverlay, get_active_overlay
+from silica.kernel import language
+from silica.kernel.overlay import DomainOverlay, overlay_for_lang
 
 # Language-neutral tokens that have no discriminating power in any domain.
 # Deliberately narrow: only roman numerals used as chapter/section prefixes.
@@ -47,17 +49,18 @@ def _display_name(op: dict[str, Any]) -> str:
 def _content_tokens(name: str, overlay: DomainOverlay | None = None) -> frozenset[str]:
     """Lowercase alphabetic tokens ≥ 2 chars, filtered by overlay stopwords and structural tokens.
 
-    CONFIG: language-specific stopwords come from ``overlay`` (or the active overlay when
-    ``None``).  Language-neutral roman-numeral structural tokens are always filtered via
-    ``_STRUCTURAL_TOKENS`` regardless of overlay.
+    CONFIG: language-specific stopwords come from ``overlay`` (or, when ``None``, from
+    ``overlay_for_lang(language.detect(name))`` — the name is the only text this function
+    has to detect a language from).  Language-neutral roman-numeral structural tokens are
+    always filtered via ``_STRUCTURAL_TOKENS`` regardless of overlay.
 
     Args:
         name:    The display name to tokenise.
         overlay: DomainOverlay to use for stopword filtering.  ``None`` resolves to
-                 ``get_active_overlay()``.
+                 ``overlay_for_lang(language.detect(name))``.
     """
     if overlay is None:
-        overlay = get_active_overlay()
+        overlay = overlay_for_lang(language.detect(name))
     stopwords = overlay.stopwords | _STRUCTURAL_TOKENS
     words = re.findall(r"[A-Za-zÀ-ÿ]{2,}", name.lower())
     return frozenset(w for w in words if w not in stopwords)
@@ -70,21 +73,23 @@ def cohesion_pass(ops_raw: list[dict[str, Any]], overlay: DomainOverlay | None =
     discriminating content token. Skips, patches, and overwrites are passed
     through untouched.
 
-    CONFIG: stopword filtering uses ``overlay`` (or the active overlay when ``None``).
-    The active overlay is resolved ONCE on entry and threaded into all ``_content_tokens``
-    calls — the distill.py call site passes no overlay argument and is not affected.
+    CONFIG: stopword filtering uses ``overlay`` when given explicitly — resolved ONCE
+    on entry and threaded into all ``_content_tokens`` calls, exactly as before. When
+    ``overlay`` is ``None`` (the distill.py call site's default), resolution is
+    PER-OP instead: each write op's body text (``op["snippet"]``, falling back to its
+    display name when the snippet is empty) is language-detected and mapped to
+    ``overlay_for_lang()``, so a vault with no ``overlay.yaml`` still gets
+    language-appropriate stopword filtering per note rather than one vault-global
+    (English) overlay for every op.
 
     Returns a new list (shallow-copied dicts for write ops that gain siblings;
     originals reused for all others).
 
     Args:
         ops_raw: List of raw operation dicts from the distiller.
-        overlay: DomainOverlay to use for stopword filtering.  ``None`` resolves to
-                 ``get_active_overlay()``.
+        overlay: DomainOverlay to use for stopword filtering. ``None`` resolves
+                 per-op via ``overlay_for_lang(language.detect(body_text))``.
     """
-    if overlay is None:
-        overlay = get_active_overlay()
-
     write_indices = [
         i for i, op in enumerate(ops_raw)
         if op.get("op") == "write"
@@ -93,11 +98,22 @@ def cohesion_pass(ops_raw: list[dict[str, Any]], overlay: DomainOverlay | None =
     if len(write_indices) < 2:
         return ops_raw
 
-    # Token sets keyed by list index — resolve overlay once, thread it down
-    tokens: dict[int, frozenset[str]] = {
-        i: _content_tokens(_display_name(ops_raw[i]), overlay=overlay)
-        for i in write_indices
-    }
+    tokens: dict[int, frozenset[str]]
+    if overlay is not None:
+        # Explicit overlay: resolve once, thread it down — unchanged behavior.
+        tokens = {
+            i: _content_tokens(_display_name(ops_raw[i]), overlay=overlay)
+            for i in write_indices
+        }
+    else:
+        # overlay=None: resolve per-op from each write op's body language.
+        tokens = {}
+        for i in write_indices:
+            op = ops_raw[i]
+            name = _display_name(op)
+            body_text = op.get("snippet") or name
+            per_op_overlay = overlay_for_lang(language.detect(body_text))
+            tokens[i] = _content_tokens(name, overlay=per_op_overlay)
 
     # Pairwise: find which indices have a sibling
     siblings: dict[int, set[int]] = {i: set() for i in write_indices}

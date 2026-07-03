@@ -194,6 +194,105 @@ def test_title_preferred_over_heading_for_injection():
     assert "II Framework PEAS Sensors" not in result[0]["related"]
 
 
+def test_no_siblings_from_shared_italian_function_word_no_vault_overlay():
+    """The bug this task fixes: on a vault with no overlay.yaml (active/default
+    overlay is English), two Italian write ops whose display names share ONLY
+    the Italian function word "cosa" must NOT be linked as siblings — per-op
+    body-language detection must route each op through the Italian overlay,
+    which filters "cosa" as a stopword, leaving no shared content token.
+
+    Fails on pre-fix code because overlay=None resolved once via
+    get_active_overlay() (English DEFAULT_OVERLAY, which does not filter
+    "cosa"), so the two ops shared "cosa" as a false discriminating token.
+
+    Verified directly: "cosa" in silica.kernel.language.stopwords_for("italian")
+    is True, and "cosa" in stop_words.get_stop_words("en") is False — so the
+    fixture only proves the intended thing if the body-language routing
+    actually happens.
+    """
+    ops = [
+        {
+            "op": "write",
+            "heading": "Cosa Cambia nei Sistemi Distribuiti",
+            "title": "Cosa Cambia nei Sistemi Distribuiti",
+            "path": "Notes/Cosa Cambia nei Sistemi Distribuiti.md",
+            "source_basename": "src.md",
+            "hub": "Hub",
+            "snippet": (
+                "Questo capitolo spiega cosa cambia quando un sistema informatico "
+                "viene distribuito su piu macchine e come vengono gestiti i guasti "
+                "della rete."
+            ),
+        },
+        {
+            "op": "write",
+            "heading": "Cosa Serve per gli Algoritmi Genetici",
+            "title": "Cosa Serve per gli Algoritmi Genetici",
+            "path": "Notes/Cosa Serve per gli Algoritmi Genetici.md",
+            "source_basename": "src.md",
+            "hub": "Hub",
+            "snippet": (
+                "Questo capitolo spiega cosa serve per progettare un algoritmo "
+                "genetico e come funziona la selezione naturale simulata al "
+                "computer."
+            ),
+        },
+    ]
+    result = cohesion_pass(ops)
+    assert result[0].get("related") is None
+    assert result[1].get("related") is None
+
+
+def test_overlay_file_wins_over_detected_body_language(tmp_vault):
+    """A vault overlay.yaml is resolution order 1 (overlay_for_lang) — when present,
+    overlay=None must use it regardless of what language the op body detects as.
+
+    extends_default: false replaces the default stopword set entirely with just
+    {"reti", "neurali"}. Neither DEFAULT_OVERLAY nor the bundled Italian overlay
+    filters those two words, so the two ops below would be (wrongly) linked as
+    siblings via "reti"/"neurali" under either — only honoring the vault file
+    produces the correct "no siblings" outcome.
+    """
+    tmp_vault.note(
+        "overlay.yaml",
+        content=(
+            "extends_default: false\n"
+            "stopwords:\n"
+            "  - reti\n"
+            "  - neurali\n"
+        ),
+    )
+    ops = [
+        {
+            "op": "write",
+            "heading": "Reti Neurali Convoluzionali",
+            "title": "Reti Neurali Convoluzionali",
+            "path": "Notes/Reti Neurali Convoluzionali.md",
+            "source_basename": "src.md",
+            "hub": "Hub",
+            "snippet": (
+                "Questo capitolo descrive come funzionano le reti neurali "
+                "convoluzionali applicate al riconoscimento delle immagini."
+            ),
+        },
+        {
+            "op": "write",
+            "heading": "Reti Neurali Ricorrenti",
+            "title": "Reti Neurali Ricorrenti",
+            "path": "Notes/Reti Neurali Ricorrenti.md",
+            "source_basename": "src.md",
+            "hub": "Hub",
+            "snippet": (
+                "Questo capitolo descrive come funzionano le reti neurali "
+                "ricorrenti applicate alla elaborazione del linguaggio."
+            ),
+        },
+    ]
+    result = cohesion_pass(ops)
+    assert result[0].get("related") is None
+    assert result[1].get("related") is None
+
+
 def test_mixed_write_and_patch_only_writes_receive_siblings():
     ops = [
         _write_op("PEAS Sensors"),

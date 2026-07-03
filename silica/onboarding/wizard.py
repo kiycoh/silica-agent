@@ -14,6 +14,19 @@ from silica.ui.console import CONSOLE
 
 _KEY_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
+_LANG_PROMPT = (
+    "Force a language for distilled notes? "
+    "[Enter = no, follow the source language]"
+)
+# Bare language names only: letters and spaces. Rejects punctuation (a colon
+# above all — see _ask_language) that would corrupt the raw YAML the answer
+# is embedded into.
+_LANG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z ]*$")
+# YAML 1.1 boolean literals: they'd pass the letters-only regex above but
+# parse as `True`/`False`, which `_parse_conventions` folds to None — the
+# user would believe they forced a language but silently didn't.
+_LANG_ANSWER_REJECT = {"y", "n", "yes", "no", "true", "false", "on", "off"}
+
 
 def merge_env(existing: str, updates: dict[str, str]) -> str:
     """Update KEY=VALUE lines in place, preserve every other line untouched,
@@ -50,6 +63,32 @@ def _ask(
     return raw or default
 
 
+def _ask_language(input_fn: Callable[[str], str]) -> str:
+    """Ask the "force a language" question and return an answer safe to embed
+    raw into vault.yaml: either a plausible bare language name or "" (no
+    language forced — same as Enter).
+
+    Both call sites below splice the answer directly into unquoted YAML.
+    Left unvalidated: "yes"/"no"/"true" etc. parse as YAML booleans that
+    `_parse_conventions` folds to None (the user believes they forced a
+    language but silently didn't), and any other stray punctuation — a colon
+    above all — can break the surrounding YAML, degrading the WHOLE manifest
+    (in repo mode this silently drops sources/overlay too). Anything that
+    isn't a bare name is treated as no answer rather than risking either
+    failure mode.
+    """
+    raw = _ask(input_fn, _LANG_PROMPT).strip()
+    if not raw:
+        return ""
+    if not _LANG_NAME_RE.match(raw) or raw.lower() in _LANG_ANSWER_REJECT:
+        CONSOLE.print(
+            f"  [yellow]'{raw}' doesn't look like a language name — skipping "
+            "(no language forced; distiller follows the source language).[/]"
+        )
+        return ""
+    return raw
+
+
 def _run_wizard_inner(
     input_fn: Callable[[str], str],
     env_path: Path,
@@ -76,9 +115,11 @@ def _run_wizard_inner(
             if not manifest.exists():
                 # Declared capabilities (ADR-0014): repo-mode vault wants the
                 # codebase overlay and the code source active.
-                manifest.write_text(
-                    "sources: [prose, code]\noverlay: codebase\n", encoding="utf-8"
-                )
+                lang_answer = _ask_language(input_fn)
+                content = "sources: [prose, code]\noverlay: codebase\n"
+                if lang_answer:
+                    content += f"conventions:\n  language: {lang_answer}\n"
+                manifest.write_text(content, encoding="utf-8")
     if not use_repo_mode:
         while True:
             path = _ask(input_fn, "Vault path (existing directory)")
@@ -87,6 +128,20 @@ def _run_wizard_inner(
                 updates["SILICA_VAULT"] = str(resolved)
                 break
             CONSOLE.print("  [red]Not a directory — try again.[/]")
+        # The design's language question is unscoped to repo mode ("init asks
+        # whether to force a language"): an explicit-path vault with no
+        # vault.yaml yet must be asked too. Unlike repo mode there is no other
+        # content due to be written for this vault, so Enter writes nothing —
+        # a vault.yaml wouldn't otherwise exist, and conventions is the only
+        # thing this question could ever put in it. An existing manifest is
+        # never touched, and the question is skipped entirely in that case.
+        manifest = resolved / MANIFEST_REL
+        if not manifest.exists():
+            lang_answer = _ask_language(input_fn)
+            if lang_answer:
+                manifest.write_text(
+                    f"conventions:\n  language: {lang_answer}\n", encoding="utf-8"
+                )
 
     # 2. Backend — fs is the default (filesystem-native, headless, no Obsidian required).
     # cli is an opt-in enhancement: adds version-history rollback, live metadata-cache

@@ -359,7 +359,15 @@ def silica_cooccurrence_refresh(folder: str = "", force: bool = False) -> dict[s
         return {"error": "No notes found to index", "read_errors": errors}
 
     try:
-        store = build_index(notes, lang=CONFIG.cooccurrence_lang, force=force)
+        # refreeze rides on force: `/cooccur --force` is the deliberate rebuild
+        # (and the doctor remedy for a wrong-frozen store language) — it
+        # re-processes every note, so re-detecting store.lang here is safe.
+        # A plain incremental /cooccur skips already-indexed notes and must NOT
+        # refreeze: flipping the language without re-stemming existing
+        # contributions would mix stemmers across node keys.
+        store = build_index(
+            notes, lang=CONFIG.cooccurrence_lang, force=force, refreeze=force,
+        )
     except Exception as e:
         return {"error": f"Index build failed: {e}", "read_errors": errors}
 

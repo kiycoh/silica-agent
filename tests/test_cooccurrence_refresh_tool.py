@@ -97,6 +97,40 @@ def test_cli_cooccur_command_routes_to_tool():
     assert received.get("force") is True
 
 
+def test_force_rebuild_refreezes_wrong_frozen_language(tmp_path, monkeypatch):
+    """Round 2: /cooccur --force is the doctor remedy for a wrong-frozen store.
+    The tool must thread refreeze into build_index so a deliberate force
+    rebuild re-detects the store language (the sticky freeze that protects the
+    write hook must NOT block the user-facing rebuild)."""
+    vault_dir = tmp_path / "vault_it"
+    (vault_dir / "Note").mkdir(parents=True)
+    (vault_dir / "Note" / "Rete.md").write_text(
+        "# Rete\n\nLa rete neurale della azienda migliora la produttivita del team.\n",
+        encoding="utf-8",
+    )
+    (vault_dir / "Note" / "Algoritmi.md").write_text(
+        "# Algoritmi\n\nGli algoritmi della rete sono ottimizzati per la performance.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
+    monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
+    monkeypatch.setattr("silica.config.CONFIG.cooccurrence_lang", "auto")
+    monkeypatch.setattr("silica.driver._driver", None)
+
+    # Historic-bug state: the store is populated and frozen "english" on an
+    # Italian vault (via the same singleton the tool will use).
+    from silica.kernel.cooccurrence import build_contribution, get_cooccur_store
+    store = get_cooccur_store(lang="english")
+    store.lang = "english"
+    store.upsert_note("Note/Old", build_contribution("Old", "old english note", lang="english"))
+    store.save()
+
+    from silica.tools.composed import silica_cooccurrence_refresh
+    res = silica_cooccurrence_refresh(force=True)
+    assert "error" not in res
+    assert store.lang == "italian"
+
+
 def test_refresh_empty_vault_returns_error(tmp_path, monkeypatch):
     vault_dir = tmp_path / "empty_vault"
     vault_dir.mkdir()

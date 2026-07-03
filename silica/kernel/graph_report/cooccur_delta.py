@@ -152,7 +152,7 @@ def _compute_cooccur_delta(
     Gc = store.to_networkx(scope=scope)
     titled_stems: set[str] = set()
     for label in node_label.values():
-        for sentence in tokenize(label, lang=store.lang):
+        for sentence in tokenize(label, stem_lang=store.lang, stopword_lang=store.lang):
             titled_stems.update(stem for stem, _surface in sentence)
 
     hubs: list[MissingHub] = []

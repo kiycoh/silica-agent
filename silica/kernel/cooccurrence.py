@@ -18,6 +18,8 @@ from typing import Any
 
 import orjson
 
+from silica.kernel import language
+
 # --- algorithm constants -------------------------------------
 NARRATIVE_WEIGHT = 3
 LANDSCAPE_WEIGHT = 3
@@ -34,30 +36,40 @@ def _index_path() -> Path:
 
     return paths.index_dir() / "cooccurrence.json"
 
-# Compact function-word stopword sets. Filtered at BUILD time (not promoted to
-# nodes); raw text is never mutated. Italian set seeds from a function-word core.
-_STOPWORDS: dict[str, set[str]] = {
-    "english": {
-        "the", "a", "an", "and", "or", "but", "if", "of", "to", "in", "on",
-        "at", "by", "for", "with", "as", "is", "are", "was", "were", "be",
-        "been", "being", "it", "its", "this", "that", "these", "those", "he",
-        "she", "they", "we", "you", "his", "her", "their", "our", "your",
-        "from", "into", "than", "then", "so", "not", "no", "do", "does", "did",
-        "has", "have", "had", "can", "could", "would", "should", "will", "shall",
-        "may", "might", "must", "about", "which", "who", "whom", "what", "when",
-        "where", "how", "why", "all", "any", "some", "such", "more", "most",
-    },
-    "italian": {
-        "di", "da", "in", "con", "su", "per", "tra", "fra", "a", "e", "o", "ma",
-        "se", "anche", "come", "il", "lo", "la", "i", "gli", "le", "un", "uno",
-        "una", "del", "dello", "della", "dei", "degli", "delle", "al", "allo",
-        "alla", "ai", "agli", "alle", "dal", "dalla", "nel", "nella", "sul",
-        "sulla", "che", "chi", "cui", "non", "ne", "ci", "vi", "si", "ho", "hai",
-        "ha", "abbiamo", "hanno", "sono", "sei", "siamo", "siete", "era", "essere",
-        "questo", "questa", "questi", "queste", "quello", "quella", "suo", "sua",
-        "loro", "nostro", "vostro", "mio", "tuo",
-    },
-}
+
+def _index_path_for(vault: str) -> Path:
+    """Store path for an explicit `vault`, independent of the global CONFIG
+    singleton. Backs `frozen_lang` below — a diagnostic comparing a
+    *specific* vault's detected language against *that same vault's* frozen
+    store must not silently fall back to whatever vault CONFIG currently
+    points at (that would be a false cross-vault mismatch on a vault switch
+    or a fresh `SilicaConfig()`). Tests monkeypatch this directly."""
+    from silica.kernel import paths
+
+    return paths.index_dir_for(vault) / "cooccurrence.json"
+
+
+def frozen_lang(vault: str) -> str | None:
+    """Public, read-only accessor: the `lang` field frozen into `vault`'s
+    persisted co-occurrence store, if one exists on disk.
+
+    This is the only supported way for code outside this module to learn a
+    store's frozen language — it owns the on-disk schema (the `lang` key
+    inside the store's orjson document) so callers never hand-parse it.
+    Never instantiates/builds/mutates a `CooccurStore` (a pure diagnostic
+    read, not part of the store's mutation API). `None` when no store file
+    exists yet for this vault, or on any read/parse error (degrade, never
+    raise).
+    """
+    try:
+        path = _index_path_for(vault)
+        if not path.is_file():
+            return None
+        data = orjson.loads(path.read_bytes())
+        lang = data.get("lang")
+        return lang if isinstance(lang, str) and lang else None
+    except Exception:
+        return None
 
 _SENTENCE_SPLIT = re.compile(r"[.!?;\n]+")
 _TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ]+")
@@ -82,42 +94,33 @@ def _split_sentences(text: str) -> list[str]:
     return [s.strip() for s in _SENTENCE_SPLIT.split(text) if s.strip()]
 
 
-def detect_lang(text: str) -> str:
-    """Pick the language whose function-word set best matches `text`.
-
-    Deterministic and offline: counts stopword hits per known _STOPWORDS set and
-    returns the argmax, defaulting to 'english' on a tie or no signal. Only
-    languages with a stopword set are detectable — the function-words of e.g.
-    Italian vs English are distinctive enough to nail it on any real prose.
-    Adding a stopword set (a new language) auto-extends detection.
-    # ponytail: stopword-ratio classifier; swap for a langdetect dep only if a
-    # vault mixes many close languages and this starts misfiring.
-    """
-    words = [w.lower() for w in _TOKEN_RE.findall(text)]
-    if not words:
-        return "english"
-    # max keeps the first max — _STOPWORDS is english-first, so ties → english
-    return max(_STOPWORDS, key=lambda lang: sum(1 for w in words if w in _STOPWORDS[lang]))
+# Thin re-export: detect_lang is public API of this module, though the
+# implementation now lives in language.py (silica/kernel/language.py). No
+# external callers today (verified by grep), but the name stays live.
+detect_lang = language.detect
 
 
-def _resolve_lang(lang: str, sample: str) -> str:
-    """Resolve the 'auto' sentinel to a concrete Snowball language via detection.
-
-    'auto' must never reach tokenize()/_get_stemmer() — Snowball has no 'auto'
-    stemmer. Callers freeze the result into the store so detection runs once.
-    """
-    return detect_lang(sample) if lang == "auto" else lang
-
-
-def tokenize(text: str, lang: str = "english") -> list[list[tuple[str, str]]]:
+def tokenize(
+    text: str,
+    stem_lang: str = "english",
+    stopword_lang: str | None = None,
+) -> list[list[tuple[str, str]]]:
     """Return sentences, each a list of (stem, surface) token pairs.
 
     Pipeline per sentence: extract word tokens → lowercase → drop stopwords and
     tokens shorter than MIN_TOKEN_LEN → stem (Snowball). The window never
     crosses a sentence boundary.
+
+    `stem_lang` is the STORE's frozen stemming language — one stemmer per
+    store, since node keys are stemmed tokens and a per-note stemmer would
+    split cross-language shared terms. `stopword_lang` is per-NOTE: leave it
+    at the default `None` to detect it from `text` via `language.detect`, or
+    pass an explicit language to pin it deterministically (e.g. matching a
+    short label against store node keys, where detection on a 2-4 word
+    sample is noise).
     """
-    stopwords = _STOPWORDS.get(lang, set())
-    stemmer = _get_stemmer(lang)
+    stopwords = language.stopwords_for(stopword_lang or language.detect(text))
+    stemmer = _get_stemmer(stem_lang)
     out: list[list[tuple[str, str]]] = []
     for sentence in _split_sentences(text):
         toks: list[tuple[str, str]] = []
@@ -161,10 +164,10 @@ def build_contribution(
     contribution byte-identical to a body-only build (graceful degradation).
     """
     from silica.kernel import frontmatter
-    from silica.kernel.media import preprocess_text
+    from silica.kernel.media import strip_images
 
     _data, _fm, body_only = frontmatter.split(body) if body else (None, "", "")
-    text = f"{name}\n\n{preprocess_text(body_only)}"
+    text = f"{name}\n\n{strip_images(body_only)}"
     if concepts:
         concept_sentences = ". ".join(c.strip() for c in concepts if c and c.strip())
         if concept_sentences:
@@ -173,7 +176,7 @@ def build_contribution(
     node_surface_counts: dict[str, dict[str, int]] = {}
     edge_acc: dict[tuple[str, str], float] = {}
 
-    for sentence in tokenize(text, lang=lang):
+    for sentence in tokenize(text, stem_lang=lang):
         stems = [stem for (stem, _s) in sentence]
         for i, (stem, surface) in enumerate(sentence):
             node_surface_counts.setdefault(stem, {})
@@ -467,6 +470,7 @@ def build_index(
     store: CooccurStore | None = None,
     lang: str | None = None,
     force: bool = False,
+    refreeze: bool = False,
     concepts_by_path: dict[str, list[str]] | None = None,
     save: bool = True,
 ) -> CooccurStore:
@@ -476,12 +480,32 @@ def build_index(
     `force`. Returns the store. ``save=False`` (Fix A) defers persistence to a
     single end-of-run flush.
 
+    `force` and `refreeze` are DIFFERENT axes. `force` is per-note replacement
+    semantics ("re-process notes already present, replacing their prior
+    contribution — never inflate"); the post-write freshness hook uses it for
+    every incremental batch, so it must never touch the frozen language.
+    `refreeze` is the store-level language axis: only a deliberate rebuild
+    (/cooccur --force, the doctor remedy for a wrong-frozen store) passes
+    refreeze=True to re-detect `store.lang` from the batch sample.
+
     `concepts_by_path` (#9): optional map of note path -> LLM-extracted concept
     phrases, forwarded into build_contribution to reinforce those concepts.
     """
     if store is None:
         store = get_cooccur_store(lang=lang or "english")
-    use_lang = _resolve_lang(lang or store.lang, "\n".join(b for _p, _n, b in notes[:50]))
+    requested = lang or store.lang
+    # Sticky freeze: store.lang is frozen at FIRST build. An "auto" request
+    # against an already-populated store with a concrete frozen language must
+    # NOT re-detect from just this (incremental, possibly foreign-language)
+    # batch — that would flip the stemmer under already-stemmed node keys
+    # (cross-language node-splitting). Re-detection is reserved for: the
+    # first build (store has no notes yet) and explicit `refreeze=True`
+    # rebuilds. NOT keyed on `force`: the write hook passes force=True with
+    # replacement (not rebuild) intent on every batch.
+    if requested == "auto" and not refreeze and store.paths() and store.lang != "auto":
+        use_lang = store.lang
+    else:
+        use_lang = language.resolve(requested, "\n".join(b for _p, _n, b in notes[:50]))
     store.lang = use_lang  # freeze resolved language (no 'auto' persisted)
     cmap = concepts_by_path or {}
     for path, name, body in notes:
@@ -511,7 +535,14 @@ def refresh_note(
     """
     if store is None:
         store = get_cooccur_store(lang=lang or "english")
-    use_lang = _resolve_lang(lang or store.lang, body)
+    requested = lang or store.lang
+    # Sticky freeze — see build_index's matching comment. refresh_note has no
+    # `force`; it is always incremental (a single note), so re-detection is
+    # reserved for the first build (store has no notes yet).
+    if requested == "auto" and store.paths() and store.lang != "auto":
+        use_lang = store.lang
+    else:
+        use_lang = language.resolve(requested, body)
     store.lang = use_lang  # freeze resolved language (no 'auto' persisted)
     store.upsert_note(path, build_contribution(name, body, lang=use_lang))
     store.save()

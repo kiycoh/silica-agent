@@ -251,8 +251,173 @@ def test_check_manifest_unknown_source_warns(tmp_path):
     assert res.status == "warn" and "zotero" in res.detail
 
 
+class TestCheckLanguage:
+    def _seed_italian_notes(self, tmp_path):
+        (tmp_path / "n1.md").write_text(
+            "Questo è un appunto scritto in italiano con molte parole comuni "
+            "come il, la, di, che, per, con, sono, questo, quella.",
+            encoding="utf-8",
+        )
+        (tmp_path / "n2.md").write_text(
+            "Un altro appunto: la nota descrive come e perché il sistema funziona, "
+            "con esempi e osservazioni sulla struttura.",
+            encoding="utf-8",
+        )
+
+    def _store_with_lang(self, index_path, lang):
+        from silica.kernel.cooccurrence import CooccurStore
+
+        store = CooccurStore(path=index_path, lang=lang)
+        store.upsert_note("n1", {"nodes": {}, "edges": []})
+        store.save()
+
+    def test_no_vault_is_ok(self):
+        from silica.onboarding.checks import check_language
+        r = check_language(_cfg(vault_path=""))
+        assert r.status == "ok"
+        assert "no vault" in r.detail
+
+    def test_no_notes_is_ok(self, tmp_path):
+        from silica.onboarding.checks import check_language
+        r = check_language(_cfg(vault_path=str(tmp_path)))
+        assert r.status == "ok"
+        assert "no notes" in r.detail
+
+    def test_no_store_is_ok_and_names_detected_language(self, tmp_path, monkeypatch):
+        import silica.kernel.cooccurrence as cooc_mod
+        from silica.onboarding.checks import check_language
+
+        self._seed_italian_notes(tmp_path)
+        monkeypatch.setattr(cooc_mod, "_index_path_for", lambda vault: tmp_path / "no_such_store.json")
+
+        r = check_language(_cfg(vault_path=str(tmp_path)))
+        assert r.status == "ok"
+        assert "italian" in r.detail
+        assert "no store" in r.detail
+
+    def test_matching_store_is_ok(self, tmp_path, monkeypatch):
+        import silica.kernel.cooccurrence as cooc_mod
+        from silica.onboarding.checks import check_language
+
+        self._seed_italian_notes(tmp_path)
+        index_path = tmp_path / "cooc.json"
+        monkeypatch.setattr(cooc_mod, "_index_path_for", lambda vault: index_path)
+        self._store_with_lang(index_path, "italian")
+
+        r = check_language(_cfg(vault_path=str(tmp_path)))
+        assert r.status == "ok"
+        assert "detected=italian" in r.detail
+        assert "store=italian" in r.detail
+
+    def test_mismatched_store_warns_and_suggests_cooccur(self, tmp_path, monkeypatch):
+        import silica.kernel.cooccurrence as cooc_mod
+        from silica.onboarding.checks import check_language
+
+        self._seed_italian_notes(tmp_path)
+        index_path = tmp_path / "cooc.json"
+        monkeypatch.setattr(cooc_mod, "_index_path_for", lambda vault: index_path)
+        self._store_with_lang(index_path, "english")
+
+        r = check_language(_cfg(vault_path=str(tmp_path)))
+        assert r.status == "warn"
+        assert "italian" in r.detail and "english" in r.detail
+        assert "/cooccur" in r.hint
+
+    def test_corrupt_store_degrades_to_ok_no_traceback(self, tmp_path, monkeypatch):
+        import silica.kernel.cooccurrence as cooc_mod
+        from silica.onboarding.checks import check_language
+
+        self._seed_italian_notes(tmp_path)
+        index_path = tmp_path / "cooc.json"
+        index_path.write_text("not json", encoding="utf-8")
+        monkeypatch.setattr(cooc_mod, "_index_path_for", lambda vault: index_path)
+
+        r = check_language(_cfg(vault_path=str(tmp_path)))
+        assert r.status == "ok"
+        assert "italian" in r.detail
+
+    def test_does_not_cross_check_a_different_vaults_frozen_store(self, tmp_path, monkeypatch):
+        """Regression for the split-source-of-truth bug: check_language(config) must
+        resolve BOTH halves from config.vault_path, never from the global CONFIG
+        singleton. Simulates the wizard's step 6 (`run_checks(SilicaConfig())` right
+        after a vault switch): global CONFIG still points at an OLD vault with a
+        store frozen "english"; the freshly-built `config` passed in points at a
+        DIFFERENT, brand-new Italian vault with no store of its own yet. The old
+        vault's frozen store must never leak into this vault's verdict.
+        """
+        import silica.kernel.cooccurrence as cooc_mod
+        from silica.config import CONFIG
+        from silica.onboarding.checks import check_language
+
+        old_vault = tmp_path / "old_vault"
+        old_vault.mkdir()
+        old_index_path = tmp_path / "old_cooc.json"
+        no_store_path = tmp_path / "no_such_store_for_new_vault.json"
+        monkeypatch.setattr(
+            cooc_mod, "_index_path_for",
+            lambda vault: old_index_path if vault == str(old_vault) else no_store_path,
+        )
+        self._store_with_lang(old_index_path, "english")
+        monkeypatch.setattr(CONFIG, "vault_path", str(old_vault))
+
+        new_vault = tmp_path / "new_vault"
+        new_vault.mkdir()
+        self._seed_italian_notes(new_vault)
+
+        r = check_language(_cfg(vault_path=str(new_vault)))
+        # Must NOT report a mismatch by comparing against old_vault's "english"
+        # store — new_vault has no store of its own, so this is the "no store
+        # frozen yet" ok state, not a false warn.
+        assert r.status == "ok"
+        assert "italian" in r.detail
+        assert "english" not in r.detail
+
+
+class TestSampleVaultTextSpread:
+    """Finding 2 (final multilingua review): the char budget must be spread
+    across up to _LANG_SAMPLE_MAX_FILES files, not exhausted by the first
+    handful of alphabetically-sorted ones — otherwise an alphabetical head of
+    minority-language files (e.g. "AAA api notes.md") mis-reports the vault's
+    dominant language.
+    """
+
+    @staticmethod
+    def _gen(words: list[str], n: int, seed: int) -> str:
+        import random
+        rng = random.Random(seed)
+        return " ".join(rng.choice(words) for _ in range(n))
+
+    def test_alphabetical_head_minority_does_not_dominate_detection(self, tmp_path):
+        from silica.onboarding.checks import detect_vault_language
+
+        en_words = [
+            "the", "company", "report", "market", "update", "system", "project",
+            "team", "review", "plan", "with", "for", "and", "that", "this",
+            "from", "have", "will", "not", "are",
+        ]
+        it_words = [
+            "della", "azienda", "progetto", "sistema", "squadra", "relazione",
+            "mercato", "aggiornamento", "con", "per", "che", "questo", "dal",
+            "hanno", "sono", "del", "alla", "nella", "sulla", "non",
+        ]
+        # 4 English files sort first alphabetically, each long enough to fully
+        # consume the OLD per-file cap (1000 chars) on their own.
+        for i in range(4):
+            (tmp_path / f"a{i}_notes.md").write_text(
+                self._gen(en_words, 300, seed=i), encoding="utf-8",
+            )
+        # A larger population of Italian notes sorting after them — the
+        # actual majority of the vault.
+        for i in range(10):
+            (tmp_path / f"z_nota_{i}.md").write_text(
+                self._gen(it_words, 300, seed=100 + i), encoding="utf-8",
+            )
+
+        assert detect_vault_language(str(tmp_path)) == "italian"
+
+
 class TestAggregation:
-    def test_run_checks_returns_all_six(self, monkeypatch, tmp_path):
+    def test_run_checks_returns_all_seven(self, monkeypatch, tmp_path):
         import silica.onboarding.checks as checks
 
         def boom(url, timeout):
@@ -263,7 +428,7 @@ class TestAggregation:
         results = checks.run_checks(_cfg(vault_path=str(tmp_path)))
         assert [r.name for r in results] == [
             "chat model", "chat endpoint", "vault", "vault manifest",
-            "obsidian backend", "embeddings",
+            "language", "obsidian backend", "embeddings",
         ]
 
     def test_has_failures(self):

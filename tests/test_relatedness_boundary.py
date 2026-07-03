@@ -21,7 +21,13 @@ SILICA_ROOT = Path(__file__).resolve().parent.parent / "silica"
 
 _LEG_IMPORT_RE = re.compile(
     r"from silica\.kernel\.(embed|cooccurrence) import|"
-    r"import silica\.kernel\.(embed|cooccurrence)\b"
+    r"import silica\.kernel\.(embed|cooccurrence)\b|"
+    # `from silica.kernel import cooccurrence` (any name position, aliased or
+    # not) is functionally the same direct leg import — without this
+    # alternative it slipped past the regex, defeating the test's documented
+    # purpose of forcing an explicit facade-or-allowlist decision. `\b` keeps
+    # non-leg names like `embed_signals` from matching.
+    r"from silica\.kernel import [^\n]*\b(embed|cooccurrence)\b"
 )
 
 # The legs themselves are out of scope — they ARE the implementation.
@@ -47,6 +53,7 @@ ALLOWED = {
     "tools/graph.py":               "index refresh tools + raw semantic search by design",
     "tools/runners.py":             "pairwise cosine dedup windows (silica_dedup)",
     "tools/curate.py":              "constructs stores to inject into the facade (orphan candidates)",
+    "onboarding/checks.py":         "metadata-only read via the public frozen_lang accessor (doctor language check), no store construction, not relatedness ranking",
 }
 
 

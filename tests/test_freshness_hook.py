@@ -117,6 +117,33 @@ def test_op_concepts_flow_into_contribution(tmp_path):
     assert _en("entanglement") in nodes
 
 
+def test_auto_lang_hook_never_reflips_frozen_store_language(tmp_path):
+    """Round 2 mainline pin: the hook passes force=True (replacement semantics
+    for a note's contribution) and lang="auto" (CONFIG default). That exact
+    shape must NOT re-freeze store.lang from the batch — a single English note
+    landing on an Italian-frozen store keeps store.lang="italian" and gets
+    stemmed with the frozen Italian stemmer (uniform node keys)."""
+    from silica.kernel.cooccurrence import build_contribution
+
+    store = CooccurStore(path=tmp_path / "c.json", lang="italian")
+    store.upsert_note(
+        "it/nota.md",
+        build_contribution("Nota", "La rete della azienda migliora la produttivita", lang="italian"),
+    )
+    store.save()
+
+    n = _refresh_cooccurrence_for_ops(
+        [_write_op("en/note.md")], {"en/note.md"},
+        read_body=lambda p: "The company improves productivity for the whole team.",
+        lang="auto", store=store,
+    )
+    assert n == 1
+    assert store.lang == "italian"
+    # Italian stemmer leaves "company" unchanged; English would give "compani".
+    assert "company" in store.note_nodes("en/note")
+    assert "compani" not in store.note_nodes("en/note")
+
+
 def test_helper_is_embedder_free():
     """The freshness helper is the stable leg: it must not pull in the embedder
     or provider stack, so it refreshes even when LM Studio is down."""

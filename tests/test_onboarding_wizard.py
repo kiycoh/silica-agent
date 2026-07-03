@@ -59,6 +59,7 @@ class TestRunWizard:
 
         answers = [
             str(vault),    # vault path (no repo detected)
+            "",            # force language? → Enter, follow source
             "",            # backend → default fs
             "",            # provider → default lmstudio
             "test-model",  # model id
@@ -86,7 +87,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
 
-        answers = [str(vault), "", "", "test-model", "skip", "n"]
+        answers = [str(vault), "", "", "", "test-model", "skip", "n"]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 1
@@ -104,6 +105,7 @@ class TestRunWizard:
 
         answers = [
             "",            # repo mode? → default y
+            "",            # force language? → Enter, follow source
             "",            # backend → fs
             "",            # provider → lmstudio
             "test-model",  # model
@@ -126,6 +128,7 @@ class TestRunWizard:
 
         answers = [
             "",            # repo mode? → default y
+            "",            # force language? → Enter, follow source
             "",            # backend → fs
             "",            # provider → lmstudio
             "test-model",  # model
@@ -139,6 +142,64 @@ class TestRunWizard:
         assert manifest.is_file()
         text = manifest.read_text(encoding="utf-8")
         assert "sources:" in text and "code" in text and "overlay: codebase" in text
+        assert "conventions" not in text and "language" not in text
+
+    def test_repo_mode_writes_forced_language_into_manifest(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = [
+            "",            # repo mode? → default y
+            "Italian",     # force language? → explicit answer
+            "",            # backend → fs
+            "",            # provider → lmstudio
+            "test-model",  # model
+            "skip",        # embeddings
+            "",            # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        manifest = tmp_path / ".silica" / "vault.yaml"
+        text = manifest.read_text(encoding="utf-8")
+        assert "conventions:\n  language: Italian" in text
+
+    def test_forced_language_roundtrips_through_load_manifest(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+        from silica.kernel.vault_manifest import load_manifest
+
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = ["", "Italian", "", "", "test-model", "skip", ""]
+        wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        manifest = load_manifest(str(tmp_path / ".silica"))
+        assert manifest.conventions.language == "Italian"
+
+    def test_enter_leaves_language_none_after_load_manifest(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+        from silica.kernel.vault_manifest import load_manifest
+
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = ["", "", "", "", "test-model", "skip", ""]
+        wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        manifest = load_manifest(str(tmp_path / ".silica"))
+        assert manifest.conventions.language is None
 
     def test_repo_mode_preserves_existing_manifest(self, monkeypatch, tmp_path):
         import silica.onboarding.wizard as wizard
@@ -170,6 +231,155 @@ class TestRunWizard:
 
         assert rc == 1
         assert not env_path.exists()
+
+    def test_non_repo_mode_writes_forced_language_into_manifest(self, monkeypatch, tmp_path):
+        """The design's language question is unscoped to repo mode: an explicit-path
+        vault with no vault.yaml yet must also be asked, and an explicit answer writes
+        a minimal manifest containing ONLY the conventions block (no sources/overlay —
+        unlike repo mode, nothing else was due to be written for this vault)."""
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = [
+            str(vault),    # vault path (no repo detected)
+            "Italian",     # force language? → explicit answer
+            "",            # backend → fs
+            "",            # provider → lmstudio
+            "test-model",  # model
+            "skip",        # embeddings
+            "",            # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        manifest = vault / "vault.yaml"
+        assert manifest.is_file()
+        assert manifest.read_text(encoding="utf-8") == "conventions:\n  language: Italian\n"
+
+    def test_non_repo_mode_enter_writes_no_manifest(self, monkeypatch, tmp_path):
+        """Enter on the language question must write nothing at all — no
+        vault.yaml — mirroring repo mode's 'no conventions block' behavior for
+        the case where nothing else was due to be written for this vault."""
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = [
+            str(vault),    # vault path (no repo detected)
+            "",            # force language? → Enter, follow source
+            "",            # backend → fs
+            "",            # provider → lmstudio
+            "test-model",  # model
+            "skip",        # embeddings
+            "",            # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        assert not (vault / "vault.yaml").exists()
+
+    def test_repo_mode_yes_like_language_answer_not_written_as_bool(self, monkeypatch, tmp_path):
+        """Finding 5 (final multilingua review): an unvalidated "yes" answer to the
+        language question parses as a YAML boolean, which `_parse_conventions`
+        folds to None — the user believes they forced a language but silently
+        didn't. "yes" must be rejected and treated like Enter (no language forced)."""
+        import silica.onboarding.wizard as wizard
+
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = [
+            "",            # repo mode? → default y
+            "yes",         # force language? → looks like consent, not a language
+            "",            # backend → fs
+            "",            # provider → lmstudio
+            "test-model",  # model
+            "skip",        # embeddings
+            "",            # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        manifest = tmp_path / ".silica" / "vault.yaml"
+        text = manifest.read_text(encoding="utf-8")
+        assert "language" not in text
+
+    def test_repo_mode_colon_language_answer_does_not_corrupt_manifest(self, monkeypatch, tmp_path):
+        """Finding 5: a colon-containing free-text answer, embedded raw into YAML,
+        breaks the whole manifest (repo mode's sources/overlay would silently
+        degrade to defaults on next load). The answer must be validated before
+        it ever reaches the file."""
+        import silica.onboarding.wizard as wizard
+        from silica.kernel.vault_manifest import load_manifest
+
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: tmp_path)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = [
+            "",                   # repo mode? → default y
+            "English: British",  # force language? → colon would corrupt raw YAML
+            "",                   # backend → fs
+            "",                   # provider → lmstudio
+            "test-model",         # model
+            "skip",               # embeddings
+            "",                   # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        manifest = load_manifest(str(tmp_path / ".silica"))
+        # sources/overlay are written unconditionally in repo mode — an invalid
+        # language answer must never degrade the whole manifest to defaults.
+        assert "code" in manifest.sources
+        assert manifest.overlay == "codebase"
+
+    def test_non_repo_mode_preserves_existing_manifest_no_question_asked(self, monkeypatch, tmp_path):
+        """An existing vault.yaml must never be touched — and the question must not
+        even be asked (proven by NOT including an extra scripted answer for it; the
+        wizard would abort on EOF if it asked and this test would fail rc != 0)."""
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        (vault / "vault.yaml").write_text("sources: [prose]\n", encoding="utf-8")
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = [
+            str(vault),    # vault path (no repo detected)
+            # NO language answer — vault.yaml already exists, must not be asked
+            "",            # backend → fs
+            "",            # provider → lmstudio
+            "test-model",  # model
+            "skip",        # embeddings
+            "",            # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        assert (vault / "vault.yaml").read_text(encoding="utf-8") == "sources: [prose]\n"
 
 
 class TestAskSecret:

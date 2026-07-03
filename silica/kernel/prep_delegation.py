@@ -27,14 +27,22 @@ def _load_prompt() -> str:
     return _PROMPT_PATH.read_text(encoding="utf-8")
 
 
-def render_prompt(target: str, hub: str | None = None) -> str:
+def render_prompt(target: str, hub: str | None = None, source_text: str = "") -> str:
     """Render the distiller prompt with TARGET/LANGUAGE/MAX_TAGS substitution.
 
-    LANGUAGE and MAX_TAGS come from the active vault's `conventions:` block
+    MAX_TAGS comes from the active vault's `conventions:` block
     (silica/kernel/vault_manifest.py) — single source shared with
     `ofm.ofm_lint`'s max-tags check. A vault without a manifest gets today's
-    defaults (Italian / 3), so this is bit-identical when unconfigured.
+    default (3), so this is bit-identical when unconfigured.
+
+    LANGUAGE follows the source: `conventions.language` unset (None) means
+    "follow the source document's language" — detected from `source_text`
+    (capped to 4000 chars, enough signal without scanning whole PDFs). A
+    declared `conventions.language` is translation intent and always wins,
+    regardless of the source. The {LANGUAGE} placeholder always receives a
+    concrete language name ("Italian", "English", ...), never None.
     """
+    from silica.kernel import language
     from silica.kernel.vault_manifest import get_active_manifest
 
     body = _load_prompt()
@@ -42,9 +50,33 @@ def render_prompt(target: str, hub: str | None = None) -> str:
     if hub:
         body = body.replace("{HUB_NAME}", hub)
     conventions = get_active_manifest().conventions
-    body = body.replace("{LANGUAGE}", conventions.language)
+    lang_name = conventions.language or language.display_name(
+        language.detect(source_text[:4000])
+    )
+    body = body.replace("{LANGUAGE}", lang_name)
     body = body.replace("{MAX_TAGS}", str(conventions.max_tags))
     return body
+
+
+def _payload_sample_text(payload: dict, limit: int = 4000) -> str:
+    """Concatenate inbox excerpts from the payload as a source-language sample.
+
+    Used only when `conventions.language` is unset — detecting the dominant
+    language of the batch's own inbox content is cheap and enough signal for
+    the {LANGUAGE} placeholder; capped early so we never build a huge string
+    for a single detect() call.
+    """
+    parts: list[str] = []
+    total = 0
+    for batch in payload.get("batches", []):
+        for concept in batch.get("concepts", []):
+            excerpt = concept.get("inbox_excerpt") if isinstance(concept, dict) else None
+            if excerpt:
+                parts.append(excerpt)
+                total += len(excerpt)
+                if total >= limit:
+                    return "\n".join(parts)[:limit]
+    return "\n".join(parts)
 
 
 def payload_checksum(payload_json: str) -> str:
@@ -169,7 +201,7 @@ def run_distiller(
     from silica.kernel.ops import DistillerOutput
     from silica.kernel.sanitize import parse_json
 
-    prompt_text = render_prompt(target=target, hub=hub)
+    prompt_text = render_prompt(target=target, hub=hub, source_text=_payload_sample_text(payload))
     payload_json = json.dumps(payload, ensure_ascii=False, indent=2)
     checksum = payload_checksum(payload_json)
 
