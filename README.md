@@ -29,7 +29,12 @@
 
 ## System Overview
 
-Silica manages personal knowledge bases (Obsidian vaults) using agentic LLMs. It addresses the risk of vault corruption and structural chaos by using safety-hardened tools, strict validation gates, and transaction rollbacks. Silica maintains its own vault index over plain Markdown files to resolve links, query metadata, and audit the vault graph — and can optionally attach to the Obsidian desktop app's live cache (cli backend) for the same operations.
+Silica is a CLI-based deterministic agentic orchestrator that can manage Obsidian vaults, codebases (wip) and any other directory. 
+
+- Silica is ***local-first*** (LM Studio, Ollama wip), open-router is also supported.
+- **Silica aims to prevent the risk of vault corruption and structural chaos** by using safety-hardened tools and rollbacks.
+- Silica maintains and updates **a vault index separate from your files.**
+- Silica is not a free-loop agent orchestrator orchestrator.
 
 ---
 
@@ -136,18 +141,35 @@ Configure the agent via environment variables (e.g., in a `.env` file):
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `SILICA_MODEL` | *(none — set via `silica init`)* | Chat LLM model identifier |
-| `SILICA_PROVIDER` | derived from model prefix, else `lmstudio` | Chat provider preset: `lmstudio` or `openrouter` |
-| `OPENROUTER_API_KEY` | *(none)* | Required when the provider is `openrouter` |
-| `SILICA_VAULT` | *(unset — repo mode: `.silica/` of the current git repo)* | Vault path for the `fs` backend and context |
-| `SILICA_BACKEND` | `fs` | `fs` (default, headless filesystem) or `cli` (live Obsidian desktop via CDP — adds rollback + live cache) |
-| `SILICA_EMBEDDING_MODEL` | `qwen3-embedding-4b` | Embedding model identifier |
-| `SILICA_EMBEDDING_BASE_URL` | `http://localhost:1234/v1` | Embedding API endpoint |
-| `SILICA_EMBEDDING_API_KEY` | `lm-studio` | Embedding API key |
-| `SILICA_SIM_THRESHOLD_HIGH` | `0.85` | Similarity threshold for merging/patching notes |
-| `SILICA_SIM_THRESHOLD_LOW` | `0.65` | Similarity threshold for creating new notes |
-| `SILICA_BANNER_STYLE` | `wordmark` | CLI banner format (`wordmark`, `minimal`) |
-| `SILICA_VERBOSE` | `False` | Enables verbose debug outputs |
+| `SILICA_MODEL` | *(none — set via `silica init`)* | Chat LLM model identifier (e.g., loaded in LM Studio or from OpenRouter) |
+| `SILICA_PROVIDER` | `derived` *(set via `silica init`)* | Chat provider preset: `lmstudio` or `openrouter` |
+| `OPENROUTER_API_KEY` | *(none — set via `silica init`)* | Required when the provider is `openrouter` |
+| `SILICA_VAULT` | *(unset — set via `silica init`)* | Vault path for the filesystem backend (or repo mode: `.silica/` in git root) |
+| `SILICA_BACKEND` | `fs` *(set via `silica init`)* | `fs` (headless filesystem) or `cli` (live Obsidian desktop via CDP — adds rollback + live cache) |
+| `SILICA_INBOX_DIR` | `Inbox` | Name of the inbox folder inside the vault for staging files |
+| `SILICA_EMBEDDING_MODEL` | `qwen3-embedding-4b` *(set via `silica init`)* | Embedding model identifier used for semantic tasks |
+| `SILICA_EMBEDDING_BASE_URL` | `http://localhost:1234/v1` *(set via `silica init`)* | Embedding API endpoint |
+| `SILICA_EMBEDDING_API_KEY` | `lm-studio` *(set via `silica init`)* | Embedding API key |
+| `SILICA_WORKER_MODEL` | *(none)* | Sub-agent worker model (e.g., small local model for dedup / refinement) |
+| `SILICA_WORKER_PROVIDER` | `lmstudio` | Provider preset for the sub-agent worker model |
+| `SILICA_WORKER_API_KEY` | *(none)* | API key for the worker model |
+| `SILICA_SUBAGENT_MAX_CONCURRENT` | `3` | Maximum concurrent sub-agent execution threads |
+| `SILICA_WORKER_MAX_CONCURRENT` | `4` | Global ceiling on concurrent worker-model LLM calls |
+| `SILICA_TAVILY_API_KEY` | *(none)* | API key for Tavily search (enables `/web-search` command) |
+| `SILICA_PDF_PROVIDER` | `pymupdf4llm` | PDF-to-Markdown converter: `pymupdf4llm` or `mineru` (OCR tool) |
+| `SILICA_MAX_CONTEXT` | `60000` | Token limit budget before REPL context-bloat warning |
+| `SILICA_SHOW_THINKING` | `True` | Toggle printing of LLM thinking/reasoning blocks |
+| `SILICA_TOOL_PROGRESS` | `all` | CLI tool display level: `off`, `new`, `all`, or `verbose` |
+| `SILICA_SHOW_BANNER` | `True` | Startup banner art (`True` → wordmark, `False` → plain one-liner) |
+| `SILICA_SIM_THRESHOLD_HIGH` | `0.85` | Cosine similarity threshold for merging/patching notes |
+| `SILICA_SIM_THRESHOLD_LOW` | `0.65` | Cosine similarity threshold for creating new notes |
+| `SILICA_SIM_TITLE_THRESHOLD` | `0.80` | Title similarity threshold for dedup promotion |
+| `SILICA_DEDUP_SCAN_K` | `5` | Candidate notes retrieved per note during dedup scans |
+| `SILICA_COOCCURRENCE_LANG` | `auto` | Language for co-occurrence graph (`auto` detects language) |
+| `SILICA_SIM_THRESHOLD_THEME` | `0.35` | Minimum cosine similarity to vault theme for salience |
+| `SILICA_GIT_COMMIT` | `off` | Git commit safety net for vault writes (`off`, `auto`) |
+| `SILICA_OBSIDIAN_CLI_TIMEOUT` | `8.0` | Timeout in seconds for Obsidian desktop app CDP calls |
+| `SILICA_VERBOSE` | `False` | Enables verbose debug outputs to stderr |
 
 ---
 
@@ -196,7 +218,7 @@ Run the ingestion pipeline from inside the REPL:
 
 | Command | Usage | Description |
 | :--- | :--- | :--- |
-| `/report` | `[folder] [--top-k=N] [--embeddings]` | Structural audit of the vault → steering loop |
+| `/report` | `[folder] [--top-k=N] [--embeddings]` | Structural audit of the vault (hubs, bridges, orphans). Pauses for confirmation. |
 | `/ingest` | `<file...> [--target=DIR] [--hub=H]` | Bring files in: notes via Injector FSM, code as skeleton stubs |
 | `/organize` | `"<intent>" [--scope=FOLDER] [--file=taxonomy.yaml] [--merge] [--move-uncategorized] [--apply]` | Classify and reorganize vault notes according to a taxonomy |
 
@@ -234,45 +256,16 @@ Run the ingestion pipeline from inside the REPL:
 
 ---
 
-## Directory Structure
+## Performance, Quirks & Features
 
-```
-silica-agent/
-├── pyproject.toml              # Dependencies & entry points
-├── silica/
-│   ├── cli.py                  # CLI / REPL interface entry point
-│   ├── onboarding/             # `silica init` wizard + `silica doctor` checks
-│   ├── agent/                  # LLM integration and REPL agent loop
-│   ├── driver/                 # L0: Obsidian bridge and filesystem driver
-│   ├── kernel/                 # L1: Deterministic parsers, linters, and autolinkers
-│   ├── planner/                # L3: Task and progress trackers
-│   ├── router/                 # L3: FSM recipe runner
-│   ├── recipes/                # L4: YAML pipeline blueprints
-│   ├── tools/                  # Registered composed tools
-│   ├── ui/                     # Console rendering and command registry
-│   └── workers/                # L2: Cognitive prompts and workers
-└── tests/                      # Testing suite
-```
+Here are some of the noteworthy performance traits and architectural behaviors of Silica:
 
----
+* **Token-Efficient Vault Auditing (`/report`)**: Computes community detection clusters (using Louvain modularity), detects god-nodes (high-degree hubs), structural bridges (inter-community connectors), and orphans. It is capable of auditing and building a full structural remediation plan for a vault of **1,000+ markdown files in under 10 seconds**.
+* **Parallel Worker Sub-Agents**: Cognitive-heavy, long-running batch operations like semantic deduplication (`/dedup`) and detail refinement (`/refine` or `/enrich`) are offloaded to leashed sub-agents. These run concurrently (up to `SILICA_SUBAGENT_MAX_CONCURRENT`) on a separate worker model (e.g., a small local model like `SILICA_WORKER_MODEL`), keeping the main model's context window clean and free.
+* **Embedder-Free Concept Modeling**: If an embedding model is offline or unconfigured, Silica's concept matching degrades gracefully. It utilizes a deterministic, local co-occurrence concept graph (`/cooccur`) to query relatedness and label communities in `/graph` exports without making network calls or LLM API queries.
+* **Strict Zero-Trust Staging**: Web search queries (`/web-search`) write findings exclusively into the inbox directory (`Inbox/`). External web-content is never injected directly into the active knowledge vault without explicit human staging and FSM ingestion review.
+* **Git Safety Net**: If `SILICA_GIT_COMMIT=auto` is enabled, Silica automatically commits touched paths to Git after each successful write batch, creating a history checkpoint alongside the interactive `/undo` and `/revert` features.
 
-## Engineering Decisions and Trade-offs
-
-We maintain a set of structural patterns and trade-offs documented as Architecture Decision Records (ADRs):
-
-> [!NOTE]
-> **ADR-001: Filesystem-Native Default (Obsidian as Optional Enhancement)**
-> The default backend (`SILICA_BACKEND=fs`) operates directly on the markdown filesystem — no Obsidian installation required, and fully graph-safe. The optional `cli` backend connects to Obsidian's Chrome DevTools Protocol (CDP) for version-history rollback on patch ops and live metadata-cache reads. Set `SILICA_BACKEND=cli` (and ensure the Obsidian desktop app is running) to opt in.
-
-> [!NOTE]
-> **ADR-002: Hardcoded Code Invariants (vs. System Prompts)**
-> Safety parameters (e.g., delete prevention, link verification) are hardcoded inside the Python codebase rather than relying on LLM instructions. This eliminates risk from LLM hallucinations.
-
-> [!CAUTION]
-> **ADR-007: Isolated LLM Workers**
-> Cognitive workers receive static content payloads and output structured JSON operations. They cannot query or modify the filesystem directly, preventing runaway API loops.
-
----
 
 ## License
 

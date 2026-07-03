@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Silica Architecture Animation</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;700&family=Outfit:wght@400;600;800&display=swap');
+
+    :root {
+      --bg-color: #050811;
+      --panel-bg: rgba(13, 20, 38, 0.85);
+      --border-color: rgba(99, 102, 241, 0.2);
+      --text-main: #f1f5f9;
+      --text-muted: #64748b;
+      
+      /* Brand colors matching TUI banner */
+      --color-cyan: #22d3ee;     /* BRAND_CYAN */
+      --color-indigo: #6366f1;   /* BRAND_INDIGO */
+      
+      /* Function mappings */
+      --color-fsm: var(--color-cyan);
+      --color-llm: var(--color-indigo);
+      --color-shared: #3b82f6;   /* Intermediate blue */
+      --color-verify: #10b981;   /* Emerald */
+      --color-gate: #ef4444;     /* Red */
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      width: 960px;
+      height: 410px;
+      background-color: var(--bg-color);
+      font-family: 'Outfit', sans-serif;
+      color: var(--text-main);
+      overflow: hidden;
+      position: relative;
+      border: 2px solid #1e1b4b;
+    }
+
+    /* Grid Background */
+    .grid-bg {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+      background-size: 15px 15px;
+      z-index: 1;
+    }
+
+    /* Radial Glow */
+    .radial-glow {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 600px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.05) 0%, transparent 70%);
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* Header */
+    .header {
+      position: absolute;
+      top: 10px;
+      left: 20px;
+      right: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+
+    .title-group h1 {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, var(--color-cyan) 0%, var(--color-indigo) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .title-group h1 span {
+      color: var(--color-indigo);
+      -webkit-text-fill-color: initial;
+      font-weight: 400;
+      font-size: 14px;
+      letter-spacing: 1.5px;
+      margin-left: 4px;
+    }
+
+    .title-group p {
+      font-size: 9px;
+      color: var(--text-muted);
+      font-family: 'Martian Mono', monospace;
+      margin-top: 1px;
+    }
+
+    .status-badge {
+      background: rgba(34, 211, 238, 0.1);
+      border: 1px solid rgba(34, 211, 238, 0.2);
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 9px;
+      font-family: 'Martian Mono', monospace;
+      color: var(--color-cyan);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .status-badge::before {
+      content: '';
+      display: inline-block;
+      width: 5px;
+      height: 5px;
+      background-color: var(--color-cyan);
+      border-radius: 50%;
+      box-shadow: 0 0 6px var(--color-cyan);
+      animation: pulse 1.5s infinite;
+    }
+
+    /* Layout Containers */
+    .canvas {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+    }
+
+    .node {
+      position: absolute;
+      background: var(--panel-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 10px 14px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+      z-index: 5;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(8px);
+    }
+
+    .node-header {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    /* Nodes Positions */
+    #node-ingress {
+      top: 55px;
+      left: 20px;
+      width: 220px;
+      height: 65px;
+      border-color: rgba(34, 211, 238, 0.15);
+    }
+
+    #node-fsm {
+      top: 130px;
+      left: 20px;
+      width: 220px;
+      height: 260px;
+      border-color: rgba(34, 211, 238, 0.3);
+    }
+
+    #node-llm {
+      top: 55px;
+      right: 20px;
+      width: 240px;
+      height: 110px;
+      border-color: rgba(99, 102, 241, 0.3);
+    }
+
+    #node-shared {
+      top: 130px;
+      left: 260px;
+      width: 420px;
+      height: 260px;
+      border-color: rgba(99, 102, 241, 0.2);
+    }
+
+    #node-driver {
+      top: 280px;
+      right: 20px;
+      width: 240px;
+      height: 110px;
+      border-color: rgba(16, 185, 129, 0.25);
+    }
+
+    /* Ingress File / Payload Item */
+    .file-item {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px dashed rgba(255, 255, 255, 0.08);
+      border-radius: 5px;
+      padding: 4px 8px;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 4px;
+    }
+
+    .file-icon {
+      color: var(--color-cyan);
+      margin-right: 4px;
+    }
+
+    /* FSM Phases list */
+    .phase-list {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 4px;
+    }
+
+    .phase-item {
+      font-size: 10px;
+      font-family: 'Martian Mono', monospace;
+      padding: 3px 6px;
+      border-radius: 4px;
+      background: rgba(255,255,255,0.01);
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s ease;
+    }
+
+    .phase-item.active {
+      background: rgba(34, 211, 238, 0.08);
+      border-color: rgba(34, 211, 238, 0.25);
+      color: var(--color-cyan);
+      box-shadow: 0 0 6px rgba(34, 211, 238, 0.12);
+      font-weight: bold;
+    }
+
+    .phase-item.done {
+      color: var(--color-verify);
+      background: rgba(16, 185, 129, 0.03);
+    }
+
+    /* LLM Worker Box */
+    .worker-box {
+      background: rgba(99, 102, 241, 0.04);
+      border: 1px solid rgba(99, 102, 241, 0.08);
+      border-radius: 6px;
+      padding: 6px;
+      margin-top: 4px;
+      font-size: 11px;
+    }
+
+    .worker-name {
+      font-weight: 700;
+      color: var(--color-llm);
+      margin-bottom: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .worker-desc {
+      font-size: 9px;
+      color: var(--text-muted);
+      line-height: 1.2;
+    }
+
+    /* Shared passive space stores */
+    .store-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      height: calc(100% - 20px);
+      padding-top: 2px;
+    }
+
+    .store-item {
+      background: rgba(99, 102, 241, 0.01);
+      border: 1px solid rgba(99, 102, 241, 0.08);
+      border-radius: 6px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: all 0.3s ease;
+    }
+
+    .store-item.highlight {
+      background: rgba(99, 102, 241, 0.06);
+      border-color: var(--color-indigo);
+      box-shadow: 0 0 8px rgba(99, 102, 241, 0.12);
+    }
+
+    .store-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .store-desc {
+      font-size: 9px;
+      color: var(--text-muted);
+      line-height: 1.2;
+      margin-top: 2px;
+    }
+
+    .store-status {
+      font-family: 'Martian Mono', monospace;
+      font-size: 8px;
+      color: var(--color-indigo);
+      margin-top: 4px;
+      align-self: flex-start;
+      background: rgba(99, 102, 241, 0.06);
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+
+    /* Driver Box */
+    .driver-box {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-top: 4px;
+    }
+
+    .driver-btn {
+      font-family: 'Martian Mono', monospace;
+      font-size: 10px;
+      background: rgba(16, 185, 129, 0.04);
+      border: 1px solid rgba(16, 185, 129, 0.12);
+      padding: 5px;
+      border-radius: 5px;
+      text-align: center;
+      color: var(--color-verify);
+      transition: all 0.2s ease;
+    }
+    
+    .driver-btn.active {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: var(--color-verify);
+      box-shadow: 0 0 6px rgba(16, 185, 129, 0.15);
+      font-weight: bold;
+    }
+
+    /* SVG Connections overlay */
+    .svg-connections {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    .connection-line {
+      stroke: rgba(99, 102, 241, 0.1);
+      stroke-width: 1.5;
+      fill: none;
+      stroke-dasharray: 4 3;
+    }
+
+    .connection-pulse {
+      stroke: var(--color-cyan);
+      stroke-width: 2.5;
+      fill: none;
+      stroke-linecap: round;
+      stroke-dasharray: 30 120;
+      stroke-dashoffset: 150;
+      animation: pulsePath 3s linear infinite;
+      opacity: 0;
+    }
+
+    .connection-pulse.active-cyan {
+      stroke: var(--color-cyan);
+      opacity: 1;
+    }
+
+    .connection-pulse.active-indigo {
+      stroke: var(--color-indigo);
+      opacity: 1;
+    }
+
+    .connection-pulse.active-green {
+      stroke: var(--color-verify);
+      opacity: 1;
+    }
+
+    /* Keyframe Animations */
+    @keyframes pulse {
+      0% { opacity: 0.4; }
+      50% { opacity: 1; }
+      100% { opacity: 0.4; }
+    }
+
+    @keyframes pulsePath {
+      0% { stroke-dashoffset: 150; }
+      100% { stroke-dashoffset: 0; }
+    }
+
+    /* Simulation Log Console */
+    .console-panel {
+      position: absolute;
+      top: 55px;
+      left: 260px;
+      width: 420px;
+      height: 65px;
+      background: rgba(13, 20, 38, 0.9);
+      border: 1px solid rgba(34, 211, 238, 0.15);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-family: 'Martian Mono', monospace;
+      font-size: 9px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      z-index: 6;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    }
+
+    .console-log {
+      color: #38bdf8;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      margin-bottom: 1px;
+      font-weight: bold;
+    }
+
+    .console-sub {
+      color: var(--text-muted);
+    }
+
+    /* Gate Overlay Indicator */
+    .gate-indicator {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(15, 23, 42, 0.95);
+      border: 1.5px solid var(--border-color);
+      border-radius: 15px;
+      padding: 4px 15px;
+      font-family: 'Martian Mono', monospace;
+      font-size: 10px;
+      font-weight: bold;
+      color: var(--text-main);
+      z-index: 100;
+      opacity: 0;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 6px 16px rgba(0,0,0,0.6);
+    }
+
+    .gate-indicator.active-pass {
+      opacity: 1;
+      border-color: var(--color-verify);
+      color: var(--color-verify);
+      background: rgba(16, 185, 129, 0.15);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+    }
+
+    .gate-indicator.active-fail {
+      opacity: 1;
+      border-color: var(--color-gate);
+      color: var(--color-gate);
+      background: rgba(239, 68, 68, 0.15);
+      box-shadow: 0 0 12px rgba(239, 68, 68, 0.25);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="grid-bg"></div>
+  <div class="radial-glow"></div>
+
+  <div class="header">
+    <div class="title-group">
+      <h1>SILICA <span>CURATOR PIPELINE</span></h1>
+      <p>L3 Orchestrator FSM & Stateless LLM Workers Interaction</p>
+    </div>
+    <div class="status-badge" id="fsm-global-status">IDLE</div>
+  </div>
+
+  <!-- SVG lines for connection flows -->
+  <svg class="svg-connections">
+    <!-- Ingress to FSM -->
+    <path id="line-ingress-fsm" class="connection-line" d="M 130 120 L 130 130" />
+    <path id="pulse-ingress-fsm" class="connection-pulse" d="M 130 120 L 130 130" />
+
+    <!-- FSM to Shared space (Querying Index) -->
+    <path id="line-fsm-shared" class="connection-line" d="M 240 260 L 260 260" />
+    <path id="pulse-fsm-shared" class="connection-pulse" d="M 240 260 L 260 260" />
+
+    <!-- FSM to LLM Distiller -->
+    <path id="line-fsm-llm" class="connection-line" d="M 240 180 L 700 115" />
+    <path id="pulse-fsm-llm" class="connection-pulse" d="M 240 180 L 700 115" />
+
+    <!-- LLM Distiller to FSM (JSON result) -->
+    <path id="line-llm-fsm" class="connection-line" d="M 700 125 L 240 195" />
+    <path id="pulse-llm-fsm" class="connection-pulse" d="M 700 125 L 240 195" />
+
+    <!-- FSM to Driver (Commit writes) -->
+    <path id="line-fsm-driver" class="connection-line" d="M 240 350 L 700 335" />
+    <path id="pulse-fsm-driver" class="connection-pulse" d="M 240 350 L 700 335" />
+
+    <!-- Driver to Vault (Write/Read-back verification) -->
+    <path id="line-driver-vault" class="connection-line" d="M 700 330 L 680 330" />
+    <path id="pulse-driver-vault" class="connection-pulse" d="M 700 330 L 680 330" />
+    
+    <path id="line-vault-driver" class="connection-line" d="M 680 345 L 700 345" />
+    <path id="pulse-vault-driver" class="connection-pulse" d="M 680 345 L 700 345" />
+  </svg>
+
+  <div class="canvas">
+    
+    <!-- INGRESS -->
+    <div class="node" id="node-ingress">
+      <div class="node-header">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        Web Ingress / Inbox
+      </div>
+      <div class="file-item" id="inbox-file">
+        <span style="display:flex; align-items:center;">
+          <span class="file-icon">📄</span>
+          inbox_draft.md
+        </span>
+        <span style="font-size: 8px; opacity:0.6;" id="inbox-status">PENDING</span>
+      </div>
+    </div>
+
+    <!-- FSM ORCHESTRATOR -->
+    <div class="node" id="node-fsm">
+      <div class="node-header" style="color: var(--color-fsm);">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+        Deterministic FSM
+      </div>
+      <div class="phase-list">
+        <div class="phase-item" id="phase-recon"><span>1. RECON</span> <span class="phase-indicator"></span></div>
+        <div class="phase-item" id="phase-payload"><span>2. PAYLOAD</span> <span class="phase-indicator"></span></div>
+        <div class="phase-item" id="phase-collision"><span>3. COLLISION</span> <span class="phase-indicator"></span></div>
+        <div class="phase-item" id="phase-delegate"><span>4. DELEGATE</span> <span class="phase-indicator"></span></div>
+        <div class="phase-item" id="phase-validate"><span>5. VALIDATE (GATE)</span> <span class="phase-indicator"></span></div>
+        <div class="phase-item" id="phase-write"><span>6. WRITE (L0)</span> <span class="phase-indicator"></span></div>
+        <div class="phase-item" id="phase-verify"><span>7. POST-WRITE GATE</span> <span class="phase-indicator"></span></div>
+        <div class="phase-item" id="phase-autolink"><span>8. AUTOLINK</span> <span class="phase-indicator"></span></div>
+      </div>
+    </div>
+
+    <!-- SHARED PASSIVE SPACE (BLACKBOARD) -->
+    <div class="node" id="node-shared">
+      <div class="node-header" style="color: var(--color-indigo);">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path></svg>
+        Shared Passive Space (DKB)
+      </div>
+      <div class="store-grid">
+        <div class="store-item" id="store-cooccur">
+          <div class="store-title">🤝 Co-occurrence</div>
+          <div class="store-desc">Stems & weights. Self-contained links.</div>
+          <div class="store-status" id="status-cooccur">Ready</div>
+        </div>
+        <div class="store-item" id="store-embed">
+          <div class="store-title">🧬 Embeddings</div>
+          <div class="store-desc">Semantic overlay. Vector indexes.</div>
+          <div class="store-status" id="status-embed">Ready</div>
+        </div>
+        <div class="store-item" id="store-journal">
+          <div class="store-title">📓 Undo Journal</div>
+          <div class="store-desc">Inverse transactions. Safe rollbacks.</div>
+          <div class="store-status" id="status-journal">Inactive</div>
+        </div>
+        <div class="store-item" id="store-vault">
+          <div class="store-title">📂 Vault Notes</div>
+          <div class="store-desc">Atomic notes (human-first truth).</div>
+          <div class="store-status" id="status-vault">142 Notes</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATELESS LLM WORKER -->
+    <div class="node" id="node-llm">
+      <div class="node-header" style="color: var(--color-llm);">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        Stateless LLM Workers
+      </div>
+      <div class="worker-box" id="worker-distiller">
+        <div class="worker-name">
+          <span>🧠 Distiller</span>
+          <span style="font-size: 7px; background:rgba(99, 102, 241, 0.2); padding: 0.5px 3px; border-radius:2px;">L2</span>
+        </div>
+        <div class="worker-desc">Converts raw text chunks to JSON proposals. Cannot write to disk.</div>
+      </div>
+    </div>
+
+    <!-- DRIVER -->
+    <div class="node" id="node-driver">
+      <div class="node-header" style="color: var(--color-verify);">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect></svg>
+        Obsidian Driver (L0)
+      </div>
+      <div class="driver-box">
+        <div class="driver-btn" id="driver-fs">FS Backend (Headless)</div>
+        <div class="driver-btn" id="driver-cli">CDP Backend (Live App)</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Simulation Console -->
+  <div class="console-panel">
+    <div class="console-log" id="console-action">Waiting...</div>
+    <div class="console-sub" id="console-detail">Silica engine inactive.</div>
+  </div>
+
+  <!-- Safety Gate Alert Overlay -->
+  <div class="gate-indicator" id="gate-overlay">
+    <span id="gate-icon">🛡️</span>
+    <span id="gate-text">VALIDATION ACTIVE</span>
+  </div>
+
+  <script>
+    // Elements references
+    const phases = {
+      recon: document.getElementById('phase-recon'),
+      payload: document.getElementById('phase-payload'),
+      collision: document.getElementById('phase-collision'),
+      delegate: document.getElementById('phase-delegate'),
+      validate: document.getElementById('phase-validate'),
+      write: document.getElementById('phase-write'),
+      verify: document.getElementById('phase-verify'),
+      autolink: document.getElementById('phase-autolink')
+    };
+
+    const pulses = {
+      ingressFsm: document.getElementById('pulse-ingress-fsm'),
+      fsmShared: document.getElementById('pulse-fsm-shared'),
+      fsmLlm: document.getElementById('pulse-fsm-llm'),
+      llmFsm: document.getElementById('pulse-llm-fsm'),
+      fsmDriver: document.getElementById('pulse-fsm-driver'),
+      driverVault: document.getElementById('pulse-driver-vault'),
+      vaultDriver: document.getElementById('pulse-vault-driver')
+    };
+
+    const stores = {
+      cooccur: document.getElementById('store-cooccur'),
+      embed: document.getElementById('store-embed'),
+      journal: document.getElementById('store-journal'),
+      vault: document.getElementById('store-vault')
+    };
+
+    const consoleAction = document.getElementById('console-action');
+    const consoleDetail = document.getElementById('console-detail');
+    const fsmGlobalStatus = document.getElementById('fsm-global-status');
+    const gateOverlay = document.getElementById('gate-overlay');
+    const gateText = document.getElementById('gate-text');
+    const inboxStatus = document.getElementById('inbox-status');
+    const driverFs = document.getElementById('driver-fs');
+    const driverCli = document.getElementById('driver-cli');
+
+    // Reset everything
+    function resetAll() {
+      // Clear phase classes
+      Object.values(phases).forEach(el => {
+        el.className = 'phase-item';
+      });
+      // Clear pulse classes
+      Object.values(pulses).forEach(el => {
+        el.className = 'connection-pulse';
+      });
+      // Clear store highlights
+      Object.values(stores).forEach(el => {
+        el.classList.remove('highlight');
+      });
+      document.getElementById('status-journal').textContent = 'Inactive';
+      document.getElementById('status-vault').textContent = '142 Notes';
+      inboxStatus.textContent = 'PENDING';
+      inboxStatus.style.color = 'var(--text-muted)';
+      driverFs.className = 'driver-btn';
+      driverCli.className = 'driver-btn';
+      gateOverlay.className = 'gate-indicator';
+      fsmGlobalStatus.textContent = 'IDLE';
+      fsmGlobalStatus.style.color = 'var(--color-cyan)';
+      fsmGlobalStatus.style.background = 'rgba(34, 211, 238, 0.1)';
+      fsmGlobalStatus.style.borderColor = 'rgba(34, 211, 238, 0.2)';
+    }
+
+    // Animation timeline helper
+    function delay(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // Main animation loop
+    async function startAnimationLoop() {
+      while (true) {
+        resetAll();
+        await delay(1000);
+
+        // 1. INGRESS & RECON
+        fsmGlobalStatus.textContent = 'STARTING RUN';
+        fsmGlobalStatus.style.color = 'var(--color-cyan)';
+        consoleAction.textContent = '>>> Initializing run...';
+        consoleDetail.textContent = 'Loading notes from Inbox.';
+        
+        pulses.ingressFsm.classList.add('active-cyan');
+        phases.recon.classList.add('active');
+        await delay(1500);
+
+        // 2. PAYLOAD
+        phases.recon.classList.remove('active');
+        phases.recon.classList.add('done');
+        phases.payload.classList.add('active');
+        consoleAction.textContent = '>>> Phase 2: PAYLOAD';
+        consoleDetail.textContent = 'Splitting notes into atomic chunks.';
+        await delay(1500);
+
+        // 3. COLLISION CHECK (Query Index)
+        phases.payload.classList.remove('active');
+        phases.payload.classList.add('done');
+        phases.collision.classList.add('active');
+        consoleAction.textContent = '>>> Phase 3: COLLISION CHECK';
+        consoleDetail.textContent = 'Comparing semantic similarity with DKB (indexes).';
+        
+        pulses.fsmShared.classList.add('active-indigo');
+        stores.embed.classList.add('highlight');
+        stores.cooccur.classList.add('highlight');
+        await delay(1800);
+
+        // Stop query animation
+        pulses.fsmShared.classList.remove('active-indigo');
+        stores.embed.classList.remove('highlight');
+        stores.cooccur.classList.remove('highlight');
+
+        // 4. DELEGATE (Stateless LLM Distiller Worker)
+        phases.collision.classList.remove('active');
+        phases.collision.classList.add('done');
+        phases.delegate.classList.add('active');
+        consoleAction.textContent = '>>> Phase 4: DELEGATE TO WORKER';
+        consoleDetail.textContent = 'Requesting structured JSON from LLM Distiller (L2).';
+        
+        pulses.fsmLlm.classList.add('active-indigo');
+        await delay(1200);
+        pulses.fsmLlm.classList.remove('active-indigo');
+        
+        // Distiller thinking
+        consoleDetail.textContent = 'LLM Distiller is processing JSON schema...';
+        document.getElementById('worker-distiller').style.background = 'rgba(99, 102, 241, 0.15)';
+        await delay(1500);
+        document.getElementById('worker-distiller').style.background = 'rgba(99, 102, 241, 0.05)';
+
+        // Return JSON to FSM
+        pulses.llmFsm.classList.add('active-indigo');
+        await delay(1200);
+        pulses.llmFsm.classList.remove('active-indigo');
+
+        // 5. VALIDATE GATES (Safety Gate)
+        phases.delegate.classList.remove('active');
+        phases.delegate.classList.add('done');
+        phases.validate.classList.add('active');
+        consoleAction.textContent = '>>> Phase 5: VALIDATE (GATES)';
+        consoleDetail.textContent = 'Checking for broken links, orphans, and exceptions.';
+        
+        // Show validation gate overlay
+        gateOverlay.classList.add('active-pass');
+        gateText.textContent = 'GATE PASS: 0 BROKEN LINKS';
+        await delay(1500);
+        gateOverlay.classList.remove('active-pass');
+
+        // 6. WRITE (L0) & SNAPSHOT
+        phases.validate.classList.remove('active');
+        phases.validate.classList.add('done');
+        phases.write.classList.add('active');
+        consoleAction.textContent = '>>> Phase 6: BULK WRITE';
+        consoleDetail.textContent = 'Opening undo journal and committing via Driver.';
+        
+        driverFs.classList.add('active');
+        stores.journal.classList.add('highlight');
+        document.getElementById('status-journal').textContent = 'Active (ID: 7a91)';
+        
+        // FSM to Driver pulse
+        pulses.fsmDriver.classList.add('active-cyan');
+        await delay(1500);
+        pulses.fsmDriver.classList.remove('active-cyan');
+
+        // Driver writes to Vault Notes
+        pulses.driverVault.classList.add('active-green');
+        stores.vault.classList.add('highlight');
+        await delay(1500);
+        pulses.driverVault.classList.remove('active-green');
+
+        // 7. POST-WRITE VERIFY (Falsifiable Gate)
+        phases.write.classList.remove('active');
+        phases.write.classList.add('done');
+        phases.verify.classList.add('active');
+        consoleAction.textContent = '>>> Phase 7: POST-WRITE VERIFY';
+        consoleDetail.textContent = 'Environmental read-back from driver to verify exact match.';
+        
+        // Read-back pulse: Vault -> Driver
+        pulses.vaultDriver.classList.add('active-cyan');
+        await delay(1200);
+        pulses.vaultDriver.classList.remove('active-cyan');
+
+        // Verify result overlay
+        gateOverlay.classList.add('active-pass');
+        gateText.textContent = 'POST-WRITE VERIFY: OK (VERBATIM MATCH)';
+        await delay(1500);
+        gateOverlay.classList.remove('active-pass');
+
+        // 8. AUTOLINK
+        phases.verify.classList.remove('active');
+        phases.verify.classList.add('done');
+        phases.autolink.classList.add('active');
+        consoleAction.textContent = '>>> Phase 8: AUTOLINKING';
+        consoleDetail.textContent = 'Automatically resolving wikilinks [[Note]] in Vault.';
+        
+        stores.vault.classList.add('highlight');
+        document.getElementById('status-vault').textContent = '143 Notes (+1)';
+        await delay(1500);
+        
+        // DONE
+        phases.autolink.classList.remove('active');
+        phases.autolink.classList.add('done');
+        fsmGlobalStatus.textContent = 'COMPLETED';
+        fsmGlobalStatus.style.color = 'var(--color-verify)';
+        fsmGlobalStatus.style.background = 'rgba(16, 185, 129, 0.1)';
+        fsmGlobalStatus.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+        
+        consoleAction.textContent = '✔ Run completed successfully!';
+        consoleDetail.textContent = 'All changes have been committed and verified in Vault.';
+        inboxStatus.textContent = 'COMPLETED';
+        inboxStatus.style.color = 'var(--color-verify)';
+        
+        await delay(3000); // Hold success state before looping
+      }
+    }
+
+    // Start on load
+    window.onload = startAnimationLoop;
+  </script>
+</body>
+</html>
