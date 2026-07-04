@@ -17,9 +17,19 @@ TOP_K_HITS = 3
 _FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
 LEADING_GARBAGE = re.compile(r'^[\W_]+')
 
+# Leading IT/EN articles (and articulated prepositions) that YAKE/markup
+# candidates drag along («della matrice Hessiana») — name hygiene only, the
+# rest of the string is untouched (C3.4).
+_LEADING_ARTICLE = re.compile(
+    r"^(?:il|lo|la|i|gli|le|un|uno|una|del|dello|della|dei|degli|delle|"
+    r"al|alla|nel|nella|the|an?)\s+|^(?:l|dell|un)'",
+    re.IGNORECASE,
+)
+
 
 def normalize(s: str) -> str:
     s = LEADING_GARBAGE.sub('', s)
+    s = _LEADING_ARTICLE.sub('', s)
     return re.sub(r'\s+', ' ', s).rstrip()
 
 

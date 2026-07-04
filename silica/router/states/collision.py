@@ -32,16 +32,18 @@ def _names_agree(concept: str, note_name: str) -> bool:
     demotion only costs an extra distillation pass; a wrong auto-patch pollutes the
     vault, so the gate is deliberately strict.
 
-    Agreement holds when either name normalizes to the other (same slug) or the
-    concept equals the note's acronym — its parenthetical token (e.g. "(GPT)") or
-    the head token before the first parenthesis.
+    Agreement holds when the names share the same title identity (title_key —
+    casefold, suffix/punctuation fold, plural-fold; C3) or the concept equals
+    the note's acronym — its parenthetical token (e.g. "(GPT)") or the head
+    token before the first parenthesis.
     """
     import re
-    from silica.kernel.templates import slugify
+    from silica.kernel.title import title_key
 
     if not concept.strip() or not note_name.strip():
         return False
-    if slugify(concept) == slugify(note_name):
+    key = title_key(concept)
+    if key and key == title_key(note_name):
         return True
     norm = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())
     acronyms = set(re.findall(r"\(([^)]*)\)", note_name))   # parenthetical contents

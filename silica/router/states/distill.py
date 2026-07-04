@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import hashlib
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,48 @@ if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
 
 logger = logging.getLogger(__name__)
+
+# Emitted by the C3 title gate in validate_operations (band 2).
+_NEAR_TITLE_RE = re.compile(r"near_title candidate='([^']*)' path='([^']*)'")
+
+
+def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list) -> None:
+    """Fuzzy-band title rejections become live dedup WorkItems (C3 reuses C2).
+
+    The op is already parked in the deferred bundle by _defer_ops; this hands
+    the same pair to the dedup judge so the verdict is routed in-run — retry
+    stays the exception. Best-effort: no queue (ad-hoc validate) → no-op.
+    """
+    wq = getattr(fsm, "work_queue", None)
+    if wq is None:
+        return
+    from silica.kernel.workqueue import WorkItem
+
+    for r in rejected_raw:
+        if not isinstance(r, dict):
+            continue
+        m = _NEAR_TITLE_RE.search(r.get("reason", "") or "")
+        if not m:
+            continue
+        op = r.get("op", {}) or {}
+        try:
+            wq.enqueue(WorkItem(
+                kind="dedup",
+                target_path=m.group(2),
+                context={
+                    "concept": op.get("heading", ""),
+                    "excerpt": op.get("snippet", ""),
+                    "candidate": m.group(1),
+                    "score": 0.0,
+                    "inbox_file": fsm.inbox_file,
+                    "hub": fsm.hub,
+                    "content_hash": fsm._current_content_hash,
+                    "target_dir": fsm.target_dir,
+                },
+                reason=r.get("reason", "near_title"),
+            ))
+        except Exception as _qe:
+            logger.debug("VALIDATE: failed to enqueue near_title dedup item: %s", _qe)
 
 
 def _inject_graph_ctx(chunk: dict, vault_ctx: dict) -> dict:
@@ -254,6 +297,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
                 len(rejected_raw),
                 fsm._current_content_hash[:8],
             )
+        _enqueue_near_title_dedups(fsm, rejected_raw)
 
     # Accumulate cleared parent references across chunks.
     # These are prospective links (parent notes not yet in vault) that the

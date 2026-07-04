@@ -118,6 +118,31 @@ def validate_operations(
                 else:
                     richest_op.op = OpType.write
 
+    # C3 title-identity gate: existing note titles in target_dir, keyed by
+    # title_key, built lazily once per call. Empty on any driver failure —
+    # the gate abstains, never blocks the pipeline.
+    _title_gate_cache: dict[str, tuple[str, str]] | None = None  # key -> (title, path)
+
+    def _target_dir_titles() -> dict[str, tuple[str, str]]:
+        nonlocal _title_gate_cache
+        if _title_gate_cache is not None:
+            return _title_gate_cache
+        from silica.kernel.title import title_key
+        out: dict[str, tuple[str, str]] = {}
+        try:
+            norm_dir = (target_dir or "").replace("\\", "/").strip("/")
+            for ref in DRIVER.search_names(""):
+                ref_dir = os.path.dirname((ref.path or "").replace("\\", "/")).strip("/")
+                if ref_dir != norm_dir:
+                    continue
+                key = title_key(ref.name)
+                if key:
+                    out[key] = (ref.name, ref.path)
+        except Exception as e:
+            logger.debug("validate: title gate enumeration failed (abstaining): %s", e)
+        _title_gate_cache = out
+        return out
+
     # 2. Coerce write <-> patch and enforce default hub fallback
     if not hub and target_dir:
         hub = os.path.basename(target_dir.rstrip("/\\"))
@@ -127,9 +152,24 @@ def validate_operations(
             continue
         if op.op in (OpType.write, OpType.patch, OpType.overwrite) and hub:
             op.hub = hub
-            
+
         if op.op == OpType.write and op.path and path_exists(op.path):
             op.op = OpType.patch
+        elif op.op == OpType.write and op.path:
+            # C3 gate, band 1: a title key-equal to an existing note in the
+            # target folder is the SAME note under a cosmetic variant
+            # («Machine Learning (9 CFU)») — mechanical coercion to patch,
+            # extending the exact-path coercion above.
+            from silica.kernel.title import title_key
+            stem = os.path.splitext(os.path.basename(op.path))[0]
+            match = _target_dir_titles().get(title_key(stem))
+            if match is not None:
+                logger.info(
+                    "validate: title '%s' key-equal to existing '%s' — coercing write→patch",
+                    stem, match[0],
+                )
+                op.op = OpType.patch
+                op.path = match[1] if match[1].endswith(".md") else f"{match[1]}.md"
         elif op.op == OpType.patch and op.path and not path_exists(op.path):
             if has_payloads:
                 expected_path = expected_collision_paths.get((op.source_basename, op.heading))
@@ -253,6 +293,26 @@ def validate_operations(
 
             if path_exists(path):
                 rejected_ops.append(Rejection(op=op, reason=f"Target path '{path}' already exists (should be patch/overwrite)"))
+                continue
+
+            # C3 gate, band 2: fuzzy-near an existing title (Descriptor vs
+            # Description) → defer to the review queue so the dedup judge
+            # decides — never a hard block, never a silent fourth duplicate.
+            from silica.kernel.title import near_titles
+            stem = os.path.splitext(os.path.basename(path))[0]
+            near = near_titles(stem, [t for (t, _p) in _target_dir_titles().values()])
+            if near:
+                cand_title, ratio = near[0]
+                cand_path = next(
+                    (p for (t, p) in _target_dir_titles().values() if t == cand_title), ""
+                )
+                rejected_ops.append(Rejection(
+                    op=op,
+                    reason=(
+                        f"near_title candidate='{cand_title}' path='{cand_path}' "
+                        f"ratio={ratio:.2f} — deferred for dedup review"
+                    ),
+                ))
                 continue
 
             _resolve_parent(op, cleared_parents_out)
