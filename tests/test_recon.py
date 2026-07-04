@@ -180,13 +180,14 @@ class TestIsConceptOverlayArg:
 
 
 # ---------------------------------------------------------------------------
-# _strip_math — LaTeX scrubbed from the extraction body (notes stay intact)
+# strip_math (migrated to the kernel/text seam, C1) — LaTeX scrubbed from the
+# extraction body (notes stay intact)
 # ---------------------------------------------------------------------------
 
 class TestStripMath:
     def test_strips_display_and_inline_spans(self):
-        from silica.kernel.recon import _strip_math
-        out = _strip_math(
+        from silica.kernel.text import strip_math
+        out = strip_math(
             r"prosa $$\sum_{i} x_i$$ poi $\mathbb{R}$ e \[ \int f \] e \( \alpha \) fine"
         )
         for junk in ("sum", "mathbb", "int", "alpha"):
@@ -194,15 +195,15 @@ class TestStripMath:
         assert "prosa" in out and "fine" in out
 
     def test_strips_residual_commands_outside_spans(self):
-        from silica.kernel.recon import _strip_math
-        out = _strip_math(r"il vettore \mathbf{w} ha norma \leq uno")
+        from silica.kernel.text import strip_math
+        out = strip_math(r"il vettore \mathbf{w} ha norma \leq uno")
         for junk in ("mathbf", "leq"):
             assert junk not in out
         assert "vettore" in out and "norma" in out and "uno" in out
 
     def test_leaves_prose_untouched_and_is_pure(self):
-        from silica.kernel.recon import _strip_math
+        from silica.kernel.text import strip_math
         src = "La rete neurale calcola il gradiente."
-        out = _strip_math(src)
+        out = strip_math(src)
         assert out == src                      # no math -> content unchanged
         assert src == "La rete neurale calcola il gradiente."  # input not mutated

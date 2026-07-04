@@ -25,7 +25,6 @@ DEFAULT_OVERLAY; Italian academic stopwords live in silica/overlays/italian.yaml
 """
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from silica.kernel import language
@@ -59,10 +58,20 @@ def _content_tokens(name: str, overlay: DomainOverlay | None = None) -> frozense
         overlay: DomainOverlay to use for stopword filtering.  ``None`` resolves to
                  ``overlay_for_lang(language.detect(name))``.
     """
+    from silica.kernel.text import tokens
+
+    lang = language.detect(name)
     if overlay is None:
-        overlay = overlay_for_lang(language.detect(name))
+        overlay = overlay_for_lang(lang)
     stopwords = overlay.stopwords | _STRUCTURAL_TOKENS
-    words = re.findall(r"[A-Za-zÀ-ÿ]{2,}", name.lower())
+    # Word extraction through the kernel/text seam (C1); the overlay/structural
+    # filter is cohesion policy and stays here. min_len=2: display names carry
+    # meaningful 2-char tokens (acronyms) that body tokenization drops.
+    words = (
+        s
+        for sent in tokens(name, lang=lang, stem=False, min_len=2, stopword_lang=lang)
+        for (_t, s) in sent
+    )
     return frozenset(w for w in words if w not in stopwords)
 
 

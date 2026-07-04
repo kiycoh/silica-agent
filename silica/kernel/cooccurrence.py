@@ -71,29 +71,6 @@ def frozen_lang(vault: str) -> str | None:
     except Exception:
         return None
 
-_SENTENCE_SPLIT = re.compile(r"[.!?;\n]+")
-_TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ]+")
-
-# Cache stemmers per language (snowballstemmer objects are reusable).
-_STEMMERS: dict[str, Any] = {}
-
-
-def _get_stemmer(lang: str) -> Any:
-    # 'auto' is a config sentinel resolved at build time; if it ever reaches here
-    # (an unbuilt/empty store) Snowball would KeyError — fall back to english.
-    if lang == "auto":
-        lang = "english"
-    if lang not in _STEMMERS:
-        import snowballstemmer
-        _STEMMERS[lang] = snowballstemmer.stemmer(lang)
-    return _STEMMERS[lang]
-
-
-def _split_sentences(text: str) -> list[str]:
-    """Split on sentence terminators and newlines; drop empties/whitespace."""
-    return [s.strip() for s in _SENTENCE_SPLIT.split(text) if s.strip()]
-
-
 # Thin re-export: detect_lang is public API of this module, though the
 # implementation now lives in language.py (silica/kernel/language.py). No
 # external callers today (verified by grep), but the name stays live.
@@ -105,33 +82,19 @@ def tokenize(
     stem_lang: str = "english",
     stopword_lang: str | None = None,
 ) -> list[list[tuple[str, str]]]:
-    """Return sentences, each a list of (stem, surface) token pairs.
-
-    Pipeline per sentence: extract word tokens → lowercase → drop stopwords and
-    tokens shorter than MIN_TOKEN_LEN → stem (Snowball). The window never
-    crosses a sentence boundary.
+    """Sentences of (stem, surface) pairs — thin delegate to the kernel/text
+    seam (C1), kept as public API of this module.
 
     `stem_lang` is the STORE's frozen stemming language — one stemmer per
     store, since node keys are stemmed tokens and a per-note stemmer would
-    split cross-language shared terms. `stopword_lang` is per-NOTE: leave it
-    at the default `None` to detect it from `text` via `language.detect`, or
-    pass an explicit language to pin it deterministically (e.g. matching a
-    short label against store node keys, where detection on a 2-4 word
-    sample is noise).
+    split cross-language shared terms. `stopword_lang` is per-NOTE: `None`
+    detects it from `text`; pass an explicit language to pin it (e.g.
+    matching a short label against store node keys, where detection on a
+    2-4 word sample is noise).
     """
-    stopwords = language.stopwords_for(stopword_lang or language.detect(text))
-    stemmer = _get_stemmer(stem_lang)
-    out: list[list[tuple[str, str]]] = []
-    for sentence in _split_sentences(text):
-        toks: list[tuple[str, str]] = []
-        for raw in _TOKEN_RE.findall(sentence):
-            surface = raw.lower()
-            if len(surface) < MIN_TOKEN_LEN or surface in stopwords:
-                continue
-            toks.append((stemmer.stemWord(surface), surface))
-        if toks:
-            out.append(toks)
-    return out
+    from silica.kernel import text as text_seam
+
+    return text_seam.tokens(text, lang=stem_lang, stopword_lang=stopword_lang)
 
 
 def cooccur_key(path: str) -> str:
@@ -163,11 +126,11 @@ def build_contribution(
     LLM-validated concepts above rule-based body noise. `None`/`[]` leaves the
     contribution byte-identical to a body-only build (graceful degradation).
     """
-    from silica.kernel import frontmatter
-    from silica.kernel.media import strip_images
+    from silica.kernel.text import clean_body
 
-    _data, _fm, body_only = frontmatter.split(body) if body else (None, "", "")
-    text = f"{name}\n\n{strip_images(body_only)}"
+    # fences=False: identifiers in code blocks ARE the graph signal of code
+    # notes (C1 fork ⚑). Math and images never become nodes.
+    text = f"{name}\n\n{clean_body(body, fences=False)}"
     if concepts:
         concept_sentences = ". ".join(c.strip() for c in concepts if c and c.strip())
         if concept_sentences:
@@ -452,7 +415,8 @@ class CooccurStore:
         concept = concept.strip()
         if not concept:
             return []
-        stem = _get_stemmer(self.lang).stemWord(concept.lower())
+        from silica.kernel.text import stem_word
+        stem = stem_word(concept.lower(), lang=self.lang)  # 'auto' falls back inside the seam
         adj, labels = self._aggregate(scope=scope)
         nbrs = adj.get(stem)
         if not nbrs:

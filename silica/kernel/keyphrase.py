@@ -27,7 +27,8 @@ from dataclasses import dataclass, field
 from silica.kernel import language
 from silica.kernel.embed import _cosine, document_theme_vector
 from silica.kernel.overlay import DomainOverlay, overlay_for_lang
-from silica.kernel.recon import _strip_frontmatter, _strip_math, is_concept, normalize
+from silica.kernel.recon import is_concept, normalize
+from silica.kernel.text import clean_body
 
 # Cutoff knobs (calibration — tune on a real paper + lecture via the eval).
 # Tuned on the eval (3 real docs). Concept density varies wildly across genres
@@ -230,7 +231,9 @@ def extract_keyphrases(
     is used (degraded fallback). Returns [] only when both legs abstain, which
     `silica_recon` already handles as an empty report.
     """
-    body = _strip_math(_strip_frontmatter(content))  # transient: note keeps its LaTeX
+    # Transient: the note keeps its LaTeX/images/fences on disk. fences=True is
+    # the C1 fork ⚑ — YAKE must never rank code identifiers as concepts.
+    body = clean_body(content, fences=True)
     lang = language.resolve(lang, body)  # "auto" -> concrete Snowball lang via language.detect
     if overlay is None:
         overlay = overlay_for_lang(lang)  # lang already resolved by language.resolve above

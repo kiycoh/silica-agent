@@ -102,8 +102,11 @@ def _read_body(note_path: str) -> str | None:
 def _stems_from_body(body: str, lang: str) -> dict[str, int]:
     """Tokenize a note body into {stem: count} (same pipeline as the cooccur index)."""
     from silica.kernel.cooccurrence import tokenize
+    from silica.kernel.text import clean_body
     return dict(Counter(
-        stem for sentence in tokenize(body, stem_lang=lang) for stem, _surface in sentence
+        stem
+        for sentence in tokenize(clean_body(body, fences=False), stem_lang=lang)
+        for stem, _surface in sentence
     ))
 
 

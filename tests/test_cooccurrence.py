@@ -12,12 +12,14 @@ def test_config_has_cooccurrence_lang_default_auto():
     assert cfg.cooccurrence_lang == "auto"
 
 
-from silica.kernel.cooccurrence import tokenize, _split_sentences
+from silica.kernel.cooccurrence import tokenize
 
 
-def test_split_sentences_breaks_on_terminators():
-    text = "Prima frase. Seconda frase! Terza?\nQuarta"
-    assert _split_sentences(text) == ["Prima frase", "Seconda frase", "Terza", "Quarta"]
+def test_tokenize_breaks_sentences_on_terminators():
+    text = "Prima frase. Seconda frase! Terza?\nQuarta frase"
+    sents = tokenize(text, stem_lang="italian", stopword_lang="italian")
+    assert len(sents) == 4
+    assert [s for (_t, s) in sents[0]] == ["prima", "frase"]
 
 
 def test_tokenize_lowercases_and_drops_short_and_stopwords_english():
@@ -104,6 +106,22 @@ def test_build_contribution_no_edge_across_sentence_boundary():
     st = __import__("snowballstemmer").stemmer("english").stemWord
     # beta (end of sentence 1) must NOT link to gamma (start of sentence 2)
     assert _edge_weight(c, st("beta"), st("gamma")) == 0
+
+
+def test_build_contribution_math_never_becomes_nodes():
+    """C1: LaTeX must be stripped before tokenization — `frac`/`nabla` were
+    real nodes in the vault graph before the kernel/text seam."""
+    c = build_contribution(
+        "Gradiente",
+        "La discesa $\\nabla f = \\frac{a}{b}$ converge sempre verso il minimo.\n\n"
+        "$$E = \\sum_i \\epsilon_i$$\n\nChiude con \\alpha residuo.",
+        lang="italian",
+    )
+    for stem in c["nodes"]:
+        assert not stem.startswith(("frac", "nabla", "sum", "epsilon", "alpha")), (
+            f"math token leaked into the graph: {stem!r}"
+        )
+    assert any(s.startswith("convergere"[:7]) or s.startswith("converg") for s in c["nodes"])
 
 
 def test_build_contribution_nodes_have_label_and_count():

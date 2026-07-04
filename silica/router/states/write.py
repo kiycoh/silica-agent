@@ -24,16 +24,14 @@ logger = logging.getLogger(__name__)
 from silica.kernel.ops import OpType
 
 
-# Italian function-word markers used for language detection in MOC headings.
-_ITALIAN_MARKERS_RE = re.compile(
-    r'\b(della|dello|degli|delle|del|dal|nel|sul|per|con|una|questo|questa|sono|hanno|viene|vengono)\b',
-    re.IGNORECASE,
-)
-
-
 def _moc_prefix(sample: str) -> str:
-    """Return 'Da' (Italian) or 'From' (English) based on marker density in sample."""
-    return "Da" if len(_ITALIAN_MARKERS_RE.findall(sample)) >= 3 else "From"
+    """Return 'Da' (Italian) or 'From' (English/other) for the MOC heading.
+
+    Routes through kernel/language (C1) — the private Italian marker regex
+    this replaces missed prose outside its hardcoded word list.
+    """
+    from silica.kernel.language import detect
+    return "Da" if detect(sample) == "italian" else "From"
 
 
 def _moc_heading(source_name: str, sample: str) -> str:

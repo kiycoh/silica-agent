@@ -284,6 +284,21 @@ def test_extract_keyphrases_rerank_end_to_end():
     assert with_emb != no_emb  # reranking actually changed the order
 
 
+def test_code_fences_never_surface_as_concepts():
+    """C1 fork ⚑: keyphrase strips code fences — YAKE must not rank identifiers."""
+    from silica.kernel.keyphrase import extract_keyphrases
+    from silica.kernel.overlay import DEFAULT_OVERLAY
+
+    body = (
+        "The knowledge graph stores memory. Planning over the graph memory "
+        "improves planning quality. A knowledge graph is a memory structure.\n\n"
+        + "```python\ntrainstepalpha = trainstepalpha + 1\nprint(trainstepalpha)\n```\n" * 3
+    )
+    cands = extract_keyphrases(body, overlay=DEFAULT_OVERLAY, lang="english")
+    assert cands, "prose concepts must survive"
+    assert not any("trainstepalpha" in c.phrase.lower() for c in cands)
+
+
 def test_latex_body_yields_no_math_token_concepts():
     """LaTeX commands in the body never surface as concepts (stripped pre-YAKE)."""
     from silica.kernel.keyphrase import extract_keyphrases
