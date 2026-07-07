@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.graph_export import render_html
+from silica.ui.web.graph_view import render_html
 
 
 # ---------------------------------------------------------------------------

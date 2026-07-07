@@ -47,7 +47,7 @@ def silica_graph_export(output_path: str = "graph.html", folder: str = "", title
     unresolved wikilinks. The output opens directly in any browser.
     Visualization only — for an actionable structural audit use silica_vault_report.
     """
-    from silica.kernel.graph_export import export_graph
+    from silica.ui.web.graph_view import export_graph
 
     # Best-effort: refresh the co-occurrence index so clusters get named labels
     # (incremental — skips already-indexed notes). Naming degrades to "Cluster N"

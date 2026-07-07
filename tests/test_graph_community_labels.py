@@ -16,8 +16,8 @@ from silica.kernel.graph_export import (
     COMMUNITY_COLORS,
     Community,
     detect_communities,
-    render_html,
 )
+from silica.ui.web.graph_view import render_html
 
 
 # ---------------------------------------------------------------------------

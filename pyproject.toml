@@ -54,6 +54,9 @@ testpaths = ["tests"]
 
 [tool.importlinter]
 root_packages = ["silica"]
+# Required so the "graph data stays offline" contract can forbid the external
+# `httpx` module (see that contract below).
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "capabilities (procedural memory) does not import the decision cycle"
@@ -146,6 +149,15 @@ ignore_imports = [
   # compute lo importa per assemblare il report, non per costruire struttura.
   "silica.kernel.graph_report.embed_signals -> silica.agent.providers",
 ]
+
+[[tool.importlinter.contracts]]
+name = "graph data stays offline — the kernel viewer split leaves no network dep"
+type = "forbidden"
+source_modules = ["silica.kernel.graph_export"]
+forbidden_modules = ["httpx"]
+# The viewer (render_html/export_graph) moved to silica.ui.web.graph_view and
+# now inlines a *vendored* JS bundle; the CDN fetch (httpx) is gone. This freezes
+# that: the deterministic data module must never re-acquire a network dependency.
 
 [tool.mypy]
 python_version = "3.11"
