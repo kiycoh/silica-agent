@@ -115,7 +115,8 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
     @patch("openai.OpenAI")
     def test_distiller_path_honors_openrouter_provider(self, mock_openai_cls):
         # The distiller uses the openai SDK directly; the provider pin must
-        # reach it too (not only the litellm call_llm path).
+        # reach it too (not only the litellm call_llm path). The distiller
+        # passes its own pin explicitly via openrouter_provider=.
         from silica.config import CONFIG
         mock_client = MagicMock()
         mock_openai_cls.return_value = mock_client
@@ -123,21 +124,41 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         chunk.choices = [MagicMock(finish_reason="stop", delta=MagicMock(content="ok", tool_calls=None))]
         mock_client.chat.completions.create.return_value = [chunk]
 
-        with patch.object(CONFIG, "openrouter_provider", "DigitalOcean"):
-            prov = OpenAICompatibleProvider(
-                base_url="https://openrouter.ai/api/v1", api_key="k", model="xiaomi/mimo-v2.5")
-            prov.call_llm(messages=[])
+        prov = OpenAICompatibleProvider(
+            base_url="https://openrouter.ai/api/v1", api_key="k", model="xiaomi/mimo-v2.5")
+        prov.call_llm(messages=[], openrouter_provider="DigitalOcean")
         self.assertEqual(
             mock_client.chat.completions.create.call_args[1].get("extra_body"),
             {"provider": {"order": ["DigitalOcean"], "allow_fallbacks": False}},
         )
 
+        # No explicit override: falls back to CONFIG.openrouter_provider.
+        mock_client.chat.completions.create.reset_mock()
+        with patch.object(CONFIG, "openrouter_provider", "Together"):
+            prov = OpenAICompatibleProvider(
+                base_url="https://openrouter.ai/api/v1", api_key="k", model="m")
+            prov.call_llm(messages=[])
+        self.assertEqual(
+            mock_client.chat.completions.create.call_args[1].get("extra_body"),
+            {"provider": {"order": ["Together"], "allow_fallbacks": False}},
+        )
+
         # Local (non-openrouter) base_url: never injected.
         mock_client.chat.completions.create.reset_mock()
-        with patch.object(CONFIG, "openrouter_provider", "DigitalOcean"):
-            prov = OpenAICompatibleProvider(base_url="http://localhost:1234/v1", api_key="k", model="m")
-            prov.call_llm(messages=[])
+        prov = OpenAICompatibleProvider(base_url="http://localhost:1234/v1", api_key="k", model="m")
+        prov.call_llm(messages=[], openrouter_provider="DigitalOcean")
         self.assertNotIn("extra_body", mock_client.chat.completions.create.call_args[1])
+
+    def test_distiller_provider_config_falls_back_to_general_pin(self):
+        # OPENROUTER_PROVIDER_DISTILLER wins when set; otherwise inherits
+        # OPENROUTER_PROVIDER so a single pin still covers the distiller.
+        import os
+        with patch.dict(os.environ, {"OPENROUTER_PROVIDER": "General",
+                                     "OPENROUTER_PROVIDER_DISTILLER": "Special"}):
+            self.assertEqual(SilicaConfig().openrouter_provider_distiller, "Special")
+        with patch.dict(os.environ, {"OPENROUTER_PROVIDER": "General"}, clear=False):
+            os.environ.pop("OPENROUTER_PROVIDER_DISTILLER", None)
+            self.assertEqual(SilicaConfig().openrouter_provider_distiller, "General")
 
     @patch("silica.agent.providers.get_provider")
     def test_run_distiller_accepts_complete_output_at_length_limit(self, mock_get_provider):

@@ -268,6 +268,7 @@ def run_distiller(
             tools=None,
             response_schema=DistillerOutput,
             max_tokens=max_tokens,
+            openrouter_provider=CONFIG.openrouter_provider_distiller,
         )
     except Exception as e:
         logger.warning("Distiller provider call failed, falling back to litellm: %s", e)
@@ -278,6 +279,7 @@ def run_distiller(
             tools=None,
             max_tokens=max_tokens,
             response_format=DistillerOutput,
+            openrouter_provider=CONFIG.openrouter_provider_distiller,
         )
 
     raw_output = response.text or ""

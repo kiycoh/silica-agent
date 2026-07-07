@@ -48,6 +48,15 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("OPENROUTER_PROVIDER", "")
     )
 
+    # Distiller-only upstream-provider pin. Lets the constrained-decoding path
+    # (kernel.prep_delegation.run_distiller) route to a different OpenRouter
+    # provider than the interactive loop and the other workers. Falls back to
+    # OPENROUTER_PROVIDER when unset, so a single pin still covers everything.
+    openrouter_provider_distiller: str = field(
+        default_factory=lambda: os.getenv("OPENROUTER_PROVIDER_DISTILLER")
+        or os.getenv("OPENROUTER_PROVIDER", "")
+    )
+
     @property
     def provider(self) -> str:
         if self._provider is not None:
