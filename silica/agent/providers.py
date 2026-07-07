@@ -97,6 +97,7 @@ class OpenAICompatibleProvider:
         tools: list[dict] | None = None,
         response_schema: type[BaseModel] | None = None,
         max_tokens: int | None = None,
+        openrouter_provider: str | None = None,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -108,7 +109,7 @@ class OpenAICompatibleProvider:
             
         kwargs["max_tokens"] = max_tokens if max_tokens is not None else int(os.getenv("MAX_TOKENS", "256000"))
 
-        if "openrouter.ai" in self.base_url and (rt := openrouter_routing()):
+        if "openrouter.ai" in self.base_url and (rt := openrouter_routing(openrouter_provider)):
             kwargs["extra_body"] = rt
 
         def _execute_call() -> LLMResponse:

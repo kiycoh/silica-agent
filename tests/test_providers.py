@@ -199,6 +199,7 @@ def test_streaming_path_collects_usage():
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.client = mock_client
     provider.model = "test-model"
+    provider.base_url = "http://dummy"
     provider.timeout = 30
     provider.max_tokens = 1000
 
@@ -232,6 +233,7 @@ def test_streaming_path_usage_empty_when_no_usage_chunk():
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider.client = mock_client
     provider.model = "test-model"
+    provider.base_url = "http://dummy"
     provider.timeout = 30
     provider.max_tokens = 1000
 
