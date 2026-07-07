@@ -158,6 +158,7 @@ Thumbs.db
 !/docs/assets/
 /docs/assets/*
 !/docs/assets/sili_no_bg.png
+!/docs/assets/architecture.svg
 
 # Agents
 /.agents
@@ -177,3 +178,4 @@ agentdb.rvf
 # Locks
 *.rvf.lock
 CONTEXT.md
+obsidian-silica/PROTOCOL.md

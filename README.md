@@ -30,6 +30,10 @@
 
 ## Overview
 
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="Silica Architectural Schematic" width="880" />
+</p>
+
 Silica is a CLI-based deterministic agent orchestrator that can manage Obsidian vaults, codebases (wip), images (wip), .pdf/.docx/.txt documents (wip) by having context of their relations (cooccurrence, hyperlinks, graph).
 
 - Silica is ***local-first*** (LM Studio, Ollama), OpenRouter is also supported.
