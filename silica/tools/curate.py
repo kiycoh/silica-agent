@@ -92,11 +92,85 @@ def _orphan_workitems(plan: CurationPlan) -> list[WorkItem]:
 
 
 def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
+    """Turn dedup pairs into merge WorkItems, collapsing duplicate *families*.
+
+    Pairwise dedup leaves one survivor per local top-1 hub: a family {A,B,C,D,E}
+    whose top-1 edges are A→B, C→B, D→E, F→E collapses to TWO notes, not one.
+    So confirmed pairs (score ≥ τ_high) are union-found into connected components
+    and each component funnels into its single largest note.
+
+    Transitive closure is applied ONLY to confirmed pairs — chaining borderline
+    (< τ_high) links would merge distant notes — so borderline pairs stay per-pair.
+    Safety: every item still passes the ternary judge, and curate items carry no
+    `target_dir`, so a "distinct" verdict is a no-op. Union-find proposes the
+    merge target; the judge disposes. A false union costs a judge call, never a bad
+    merge.
+    """
+    from silica.config import CONFIG
+
+    tau_high = getattr(CONFIG, "sim_threshold_high", 0.85)
+    pairs = list(plan.by_kind("dedup"))
+
+    _body_cache: dict[str, str] = {}
+    def body(p: str) -> str:
+        if p not in _body_cache:
+            _body_cache[p] = _read_body(p)
+        return _body_cache[p]
+    stem = lambda p: p.removesuffix(".md").rsplit("/", 1)[-1]
+
+    # Union-find over confirmed pairs only.
+    parent: dict[str, str] = {}
+    node_score: dict[str, float] = {}
+    def find(x: str) -> str:
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    def union(a: str, b: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+    for it in pairs:
+        if it.score >= tau_high:
+            union(it.target, it.partner)
+            for n in (it.target, it.partner):
+                node_score[n] = max(node_score.get(n, 0.0), it.score)
+
+    components: dict[str, set[str]] = {}
+    for node in list(parent):
+        components.setdefault(find(node), set()).add(node)
+
     items: list[WorkItem] = []
-    for it in plan.by_kind("dedup"):
+    # 1. Each confirmed component → collapse every member into its largest note.
+    for members in components.values():
+        canonical = max(members, key=lambda p: len(body(p)))
+        for m in members:
+            if m == canonical:
+                continue
+            sc = node_score.get(m, tau_high)
+            items.append(WorkItem(
+                kind="dedup",
+                target_path=canonical,
+                context={
+                    "concept": stem(m),
+                    "excerpt": body(m)[:4000],
+                    "candidate": stem(canonical),
+                    "score": sc,
+                    "inbox_file": m,
+                },
+                reason=f"curate dedup family → {stem(canonical)} (score={sc:.3f})",
+            ))
+
+    # 2. Borderline pairs — historical per-pair behaviour (larger note is target),
+    #    skipping any pair already absorbed by a shared confirmed component.
+    for it in pairs:
+        if it.score >= tau_high:
+            continue
         source, target = it.target, it.partner
-        body_s, body_t = _read_body(source), _read_body(target)
-        # The larger note is the merge target; the smaller supplies new info.
+        if source in parent and target in parent and find(source) == find(target):
+            continue
+        body_s, body_t = body(source), body(target)
         if len(body_t) >= len(body_s):
             larger, smaller, smaller_body = target, source, body_s
         else:
@@ -105,9 +179,9 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
             kind="dedup",
             target_path=larger,
             context={
-                "concept": smaller.removesuffix(".md").rsplit("/", 1)[-1],
+                "concept": stem(smaller),
                 "excerpt": smaller_body[:4000],
-                "candidate": larger.removesuffix(".md").rsplit("/", 1)[-1],
+                "candidate": stem(larger),
                 "score": it.score,
                 "inbox_file": smaller,
             },

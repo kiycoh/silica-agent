@@ -23,6 +23,29 @@ def _plan(*items: CurationItem) -> CurationPlan:
     return CurationPlan(items=list(items))
 
 
+def test_dedup_workitems_collapses_confirmed_family_to_largest(monkeypatch):
+    """A confirmed duplicate FAMILY (A-B-C chain) collapses to its single largest
+    note, not one survivor per local top-1 hub. Borderline pairs stay per-pair."""
+    bodies = {"A": "a" * 10, "B": "b" * 100, "C": "c" * 50, "D": "d" * 30, "E": "e" * 20}
+    monkeypatch.setattr(curate, "_read_body", lambda p: bodies.get(p, ""))
+    monkeypatch.setattr("silica.config.CONFIG.sim_threshold_high", 0.85, raising=False)
+
+    plan = _plan(
+        CurationItem(kind="dedup", target="A", partner="B", score=0.90),  # confirmed
+        CurationItem(kind="dedup", target="B", partner="C", score=0.90),  # confirmed, chains
+        CurationItem(kind="dedup", target="D", partner="E", score=0.70),  # borderline
+    )
+    items = curate._dedup_workitems(plan)
+    routed = {(w.target_path, w.context["concept"]) for w in items}
+
+    # A and C both merge INTO B (the largest of the confirmed component) — one survivor.
+    assert ("B", "A") in routed and ("B", "C") in routed
+    assert all(w.target_path == "B" for w in items if w.context["concept"] in ("A", "C"))
+    # Borderline D-E untouched by the closure: larger (D) is the target.
+    assert ("D", "E") in routed
+    assert len(items) == 3
+
+
 def _report(**overrides) -> VaultReport:
     base = dict(
         generated_at="2026-07-02T00:00:00Z",
