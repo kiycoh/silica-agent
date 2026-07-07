@@ -108,6 +108,31 @@ def test_no_cancel_token_runs_normally():
     assert result == "hello"
 
 
+def test_interrupt_does_not_join_inflight_llm_call():
+    """Ctrl+C during an in-flight LLM call must return control WITHOUT waiting on
+    the (uncancellable, sync) worker. Regression guard: a `with ThreadPoolExecutor`
+    would call shutdown(wait=True) in __exit__ and re-block the loop after the KI."""
+    import concurrent.futures as cf
+
+    shutdown_waits: list[bool] = []
+
+    class SpyExecutor(cf.ThreadPoolExecutor):
+        def shutdown(self, wait=True, **kwargs):  # record intent, never actually block
+            shutdown_waits.append(wait)
+            return super().shutdown(wait=False)
+
+    def fake_call_llm(*a, **k):
+        raise KeyboardInterrupt  # surfaces from _future.result() like a real Ctrl+C
+
+    with patch("silica.agent.loop._cf.ThreadPoolExecutor", SpyExecutor), \
+         patch("silica.agent.loop.call_llm", fake_call_llm):
+        with pytest.raises(KeyboardInterrupt):
+            run_agent(messages=[{"role": "user", "content": "hi"}], model="test")
+
+    assert shutdown_waits, "LLM pool was never shut down"
+    assert all(w is False for w in shutdown_waits), f"blocking shutdown used: {shutdown_waits}"
+
+
 def test_bus_receives_events_during_run():
     """run_agent publishes agent/* events to BUS even with no callback."""
     import silica.agent.bus as bus_mod

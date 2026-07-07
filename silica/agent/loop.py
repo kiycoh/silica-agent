@@ -169,19 +169,25 @@ def run_agent(
 
         _emit(ThinkingStartEvent(iteration=iteration))
         try:
-            # Run the (synchronous, potentially slow) LLM call on a daemon thread
-            # so KeyboardInterrupt on the main thread propagates on the first Ctrl+C
-            # instead of being trapped inside a C-level network recv().
+            # Run the (synchronous, potentially slow) LLM call on a worker thread
+            # so a Ctrl+C on the main thread raises KeyboardInterrupt out of
+            # _future.result() instead of being trapped in a C-level network recv().
+            # NOT a `with` block: Executor.__exit__ does shutdown(wait=True), which
+            # would re-join the in-flight call right after the Ctrl+C and make the
+            # interrupt feel ignored. shutdown(wait=False) in finally returns control
+            # immediately; the orphaned worker finishes its (uncancellable, sync
+            # litellm) HTTP request in the background and dies.
+            # ponytail: sync litellm can't abort the in-flight request — best we can
+            # do is stop waiting on it. A true mid-call abort would need async httpx.
             slot = worker_slot() if constraints is not None else nullcontext()
             with slot:
-                with _cf.ThreadPoolExecutor(max_workers=1) as _llm_pool:
-                    _llm_kwargs["tools"] = schemas
-                    _future = _llm_pool.submit(call_llm, effective_model, messages, **_llm_kwargs)
-                    try:
-                        resp = _future.result()
-                    except KeyboardInterrupt:
-                        _future.cancel()
-                        raise
+                _llm_pool = _cf.ThreadPoolExecutor(max_workers=1)
+                _llm_kwargs["tools"] = schemas
+                _future = _llm_pool.submit(call_llm, effective_model, messages, **_llm_kwargs)
+                try:
+                    resp = _future.result()
+                finally:
+                    _llm_pool.shutdown(wait=False)
         finally:
             _emit(ThinkingEndEvent(iteration=iteration))
         messages.append(resp.assistant_message)
