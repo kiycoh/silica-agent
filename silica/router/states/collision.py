@@ -52,6 +52,39 @@ def _names_agree(concept: str, note_name: str) -> bool:
     return bool(nc) and nc in {norm(a) for a in acronyms if a.strip()}
 
 
+def route_concept(
+    score: float,
+    *,
+    names_agree: bool,
+    is_hub: bool,
+    tau_high: float,
+    tau_low: float,
+) -> str:
+    """Pure COLLISION routing decision for one scored candidate — the single
+    source of truth shared by the live FSM and the coherence eval harness.
+
+    Returns:
+      "patch" — mechanical merge into the existing note (fast path, no judge).
+                Only when the names genuinely agree; the caller still confirms
+                the node exists in the graph and falls back to "keep" otherwise.
+      "defer" — hand to the ternary dedup judge (which reads both bodies). Covers
+                the borderline band AND high-cosine pairs whose names DISAGREE: a
+                surface-name duplicate ("SVDD" vs "Support Vector Data Description")
+                and a domain collision ("MEMORY" vs "RAM (Random Access Memory)")
+                are indistinguishable from names+cosine alone, so neither is
+                decided mechanically — the judge decides. (This is fix #1: the old
+                gate demoted high-cosine name-mismatches to a silent new note,
+                starving the judge of exactly the pairs it exists to resolve.)
+      "keep"  — below τ_low: not close enough to route; normal distillation.
+    """
+    tau_eff = tau_high - (0.08 if is_hub else 0.0)
+    if score >= tau_eff:
+        return "patch" if names_agree else "defer"
+    if score > tau_low:
+        return "defer"
+    return "keep"
+
+
 def _deferred_op_dict(fsm: "InjectorFSM", d: dict, reason_prefix: str) -> dict:
     """Full, re-materializable op for a borderline concept (never a stub).
 
@@ -177,9 +210,11 @@ def handle_collision(fsm: "InjectorFSM") -> None:
     thresholds below apply to the candidate's cosine (embed_score), and a
     candidate the embed leg did not propose is never auto-routed.
 
-    For each concept in the current chunk:
-    - score ≥ τ_high  → pre-route as a 'patch' op on the existing note
-                        (graph check: note must exist in vault)
+    For each concept in the current chunk (see route_concept for the decision):
+    - score ≥ τ_high & names agree → pre-route as a 'patch' op (graph check)
+    - score ≥ τ_high & names disagree → defer to the dedup judge (fix #1: a
+                        surface-name duplicate vs a domain collision can't be
+                        told apart mechanically, so the judge decides)
     - τ_low < score < τ_high → defer (borderline, ambiguous)
     - score ≤ τ_low   → keep for normal distillation (new write)
 
@@ -333,18 +368,13 @@ def handle_collision(fsm: "InjectorFSM") -> None:
             _is_hub = _vault_ctx.get(_match_key, {}).get("is_hub", False)
             τ_eff = τ_high - (0.08 if _is_hub else 0.0)
 
-            if score >= τ_eff and not _names_agree(concept_text, top["name"]):
-                # High cosine but the names disagree — a domain collision (shared
-                # word, different concept). Don't bypass the distiller mechanically;
-                # demote to normal distillation so it can judge from the excerpts.
-                logger.info(
-                    "COLLISION: '%s' ~ '%s' (score=%.3f) but names disagree — "
-                    "demoting to distiller (no mechanical patch)",
-                    concept_text, existing_path, score,
-                )
-                kept.append(concept)
+            names_agree = _names_agree(concept_text, top["name"])
+            decision = route_concept(
+                score, names_agree=names_agree,
+                is_hub=_is_hub, tau_high=τ_high, tau_low=τ_low,
+            )
 
-            elif score >= τ_eff:
+            if decision == "patch":
                 try:
                     orch.DRIVER.read_note(existing_path)
                     # Graph confirms node exists — safe to patch
@@ -370,10 +400,15 @@ def handle_collision(fsm: "InjectorFSM") -> None:
                     )
                     kept.append(concept)
 
-            elif score > τ_low:
+            elif decision == "defer":
+                # Borderline band OR high-cosine with disagreeing names (fix #1):
+                # the ternary judge reads both bodies and decides duplicate /
+                # distinct / contradicts — never a mechanical patch, never a
+                # silent new note.
                 logger.info(
-                    "COLLISION: '%s' → deferred (score=%.3f in borderline zone)",
-                    concept_text, score,
+                    "COLLISION: '%s' ~ '%s' → dedup judge (score=%.3f, names %s)",
+                    concept_text, existing_path, score,
+                    "agree" if names_agree else "disagree",
                 )
                 deferred_concepts.append({
                     "concept": concept,
@@ -382,7 +417,7 @@ def handle_collision(fsm: "InjectorFSM") -> None:
                     "score": score,
                 })
 
-            else:
+            else:  # "keep" — below τ_low, normal distillation
                 kept.append(concept)
 
         if kept:
