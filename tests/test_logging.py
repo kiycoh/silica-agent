@@ -180,6 +180,34 @@ def test_ansi_formatter_emits_ansi_on_a_terminal(monkeypatch):
     assert "Restored file note.md to version 2" in plain
 
 
+def test_ansi_formatter_applies_repr_highlighting(monkeypatch):
+    """Worker records get ReprHighlighter colouring like RichHandler gives the
+    main thread — numbers/strings/attribs coloured, not just the muted chrome.
+
+    (The bug being guarded: highlight=False on the throwaway Console left worker
+    lines visually plain next to highlighted main-thread ones.)
+    """
+    class _FakeConsole:
+        is_terminal = True
+        color_system = "truecolor"
+        width = 200
+
+    monkeypatch.setattr("silica.ui.logging.CONSOLE", _FakeConsole())
+    record = logging.LogRecord(
+        name="silica.tools.cli_backend",
+        level=logging.DEBUG,
+        pathname="cli_backend.py",
+        lineno=1,
+        msg="CLI exec: %s  (timeout=%.1fs)",
+        args=("obsidian read 'path=note.md'", 3.0),
+        exc_info=None,
+    )
+    out = AnsiHumanFriendlyFormatter().format(record)
+    # ReprHighlighter colours the quoted string green (32) and numbers cyan (36);
+    # without it only the dim timestamp/icon spans exist.
+    assert "\x1b[32m" in out and "\x1b[1;36m" in out
+
+
 def test_no_root_handler_caches_real_stderr(monkeypatch):
     """Every stderr handler on root must resolve sys.stderr at emit time.
 

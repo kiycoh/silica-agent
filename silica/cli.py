@@ -142,16 +142,14 @@ def _setup_logging(debug: bool = False) -> None:
         bg_handler.addFilter(lambda r: threading.current_thread() is not main_thread)
         root.addHandler(bg_handler)
     else:
-        from silica.ui.logging import LiveAwareStreamHandler
+        from silica.ui.logging import AnsiHumanFriendlyFormatter, LiveAwareStreamHandler
         # Live-aware: follows rich.Live's stderr redirect so warnings during the
         # injector/batch live region print above it instead of tearing the panel.
+        # Same human-friendly ANSI seam as debug mode's worker handler, so
+        # warnings/errors (incl. worker threads like dedup) render coloured instead
+        # of raw dumps. Level stays WARNING here — only warn/error surface.
         handler = LiveAwareStreamHandler()
-        handler.setFormatter(
-            logging.Formatter(
-                fmt="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-                datefmt="%H:%M:%S",
-            )
-        )
+        handler.setFormatter(AnsiHumanFriendlyFormatter())
     root.addHandler(handler)
     root.setLevel(level)
 

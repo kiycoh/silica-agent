@@ -219,7 +219,8 @@ class AnsiHumanFriendlyFormatter(HumanFriendlyFormatter):
         Console(
             file=buf,
             theme=SILICA_THEME,
-            highlight=False,
+            # highlight stays on: RichHandler applies its ReprHighlighter to
+            # main-thread records, so worker records get the same treatment here.
             force_terminal=CONSOLE.is_terminal,
             color_system=CONSOLE.color_system,
             width=CONSOLE.width,
