@@ -1,9 +1,9 @@
-"""ObsidianWSBackend read path — driven against a Python stub WS server.
+"""ObsidianWSBackend read + write paths — driven against a Python stub WS server.
 
 The stub is the machine-checkable contract the TS plugin must satisfy: it
-speaks PROTOCOL.md's read RPCs, but its answers are sourced from the FS backend
+speaks PROTOCOL.md's RPCs, but its answers are sourced from the FS backend
 over the synthetic vault, so it is a faithful oracle. A WS backend consuming it
-must therefore match the FS backend read-for-read — that's the parity test.
+must therefore match the FS backend op-for-op — that's the parity test.
 
 Topology here is the inverse of production (unit 5: Python hosts, plugin dials);
 the RPC channel is symmetric, so backend-as-client is the simplest unit-3 seam.
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import threading
 
 import pytest
@@ -91,8 +92,14 @@ class StubPluginServer:
         fs = self._fs
         if method == "read":
             path = params["path"]
-            nc = fs.read_note(NoteRef(name=path.rsplit("/", 1)[-1].removesuffix(".md"), path=path))
-            return {"path": path, "content": nc.content, "size": nc.size}
+            full = fs.vault_path / path
+            if not full.exists():
+                raise RuntimeError(f"read: file not found: {path}")
+            # newline="" = byte-faithful, like the plugin's vault.cachedRead;
+            # fs.read_note would normalize CRLF via universal-newlines read_text.
+            with full.open(encoding="utf-8", newline="") as fh:
+                content = fh.read()
+            return {"path": path, "content": content, "size": len(content)}
         if method == "list_files":
             return [{"name": r.name, "path": r.path} for r in fs.list_files(params.get("folder", ""))]
         if method == "props_of":
@@ -115,7 +122,35 @@ class StubPluginServer:
         if method == "mention_index":
             wanted = {t.lower() for t in params["titles"]}
             return {tl: sorted(paths) for tl, paths in fs._mention_index.items() if tl in wanted}
+        if method == "create":
+            path = params["path"]
+            if (fs.vault_path / path).exists():  # vault.create errors on existing files
+                raise RuntimeError(f"create: path already exists: {path}")
+            ref = fs.create(path, params["content"])
+            return {"name": ref.name, "path": ref.path}
+        if method == "overwrite":
+            fs.overwrite(params["path"], params["content"])
+            return {"ok": True}
+        if method == "append":
+            fs.append(self._ref(params["path"]), params["content"])
+            return {"ok": True}
+        if method == "set_prop":
+            fs.set_prop(self._ref(params["path"]), params["name"], params["value"],
+                        params.get("type", "text"))
+            return {"ok": True}
+        if method == "move":
+            fs.move(self._ref(params["path"]), params["to"])
+            return {"ok": True}
+        if method == "delete":
+            fs.delete(self._ref(params["path"]))
+            return {"ok": True}
+        if method == "autolink_note":
+            return fs.autolink_note(params["path"], params.get("candidates"))
         raise RuntimeError(f"unknown method: {method}")
+
+    @staticmethod
+    def _ref(path: str) -> NoteRef:
+        return NoteRef(name=path.rsplit("/", 1)[-1].removesuffix(".md"), path=path)
 
     def _grouped_search(self, query: str) -> list[dict]:
         by_path: dict[str, dict] = {}
@@ -232,24 +267,139 @@ def test_mentions_of_matches_fs(ws_backend, fs):
 
 
 # ---------------------------------------------------------------------------
-# Write path — deferred to unit 4; must fail loudly, not silently no-op or dial.
+# Write path — each write is one RPC; the reply IS the settle (PROTOCOL §2.4).
+# Function-scoped stub over a private vault copy: writes never touch the
+# module-scoped read fixtures above.
 # ---------------------------------------------------------------------------
 
-def test_write_methods_raise_not_implemented_without_touching_the_socket():
+@pytest.fixture
+def write_stub(synthetic_vault, tmp_path):
+    vault = tmp_path / "vault"
+    shutil.copytree(synthetic_vault, vault)
+    srv = StubPluginServer(vault)
+    yield srv
+    srv.stop()
+
+
+@pytest.fixture
+def wbe(write_stub):
     from silica.driver.ws_backend import ObsidianWSBackend
 
-    be = ObsidianWSBackend(url="ws://127.0.0.1:1", token="")  # dead port: must not dial
-    writes = [
-        lambda: be.create("A.md", "x"),
-        lambda: be.overwrite("A.md", "x"),
-        lambda: be.append("A.md", "x"),
-        lambda: be.set_prop("A.md", "k", "v"),
-        lambda: be.move("A.md", "B.md"),
-        lambda: be.delete("A.md"),
-        lambda: be.autolink_note("A.md"),
-        lambda: be.snapshot_versions([]),
-        lambda: be.restore(None),
-    ]
-    for call in writes:
-        with pytest.raises(NotImplementedError):
-            call()
+    be = ObsidianWSBackend(url=write_stub.url, token=write_stub.token)
+    yield be
+    be.close()
+
+
+def test_create_lands_verbatim_and_returns_ref(wbe, write_stub):
+    body = "# New\n\nFresh note body.\n"
+    ref = wbe.create("Concepts/NewNote.md", body)
+    assert (ref.name, ref.path) == ("NewNote", "Concepts/NewNote.md")
+    on_disk = (write_stub._fs.vault_path / "Concepts/NewNote.md").read_text(encoding="utf-8")
+    assert on_disk == body
+    assert wbe.read_note(ref).content == body
+
+
+def test_create_on_existing_path_raises(wbe):
+    # match= keeps NotImplementedError (a RuntimeError subclass) from passing this
+    with pytest.raises(RuntimeError, match="already exists"):
+        wbe.create("Hub/Concepts.md", "clobber")
+
+
+@pytest.mark.parametrize("body", [
+    pytest.param("line one\r\nline two\r\n", id="crlf"),
+    pytest.param("\\begin{align}\n\\nabla f = \\sum_i x_i\n\\end{align}\n", id="latex"),
+    # No 30 KB special case exists: JSON framing carries any size in one write.
+    pytest.param("x" * 1_000_000, id="1mb"),
+])
+def test_create_round_trips_hostile_bodies_verbatim(wbe, body):
+    ref = wbe.create("Stress/Body.md", body)
+    assert wbe.read_note(ref).content == body
+
+
+def test_overwrite_replaces_content_in_place(wbe):
+    new = "# Gradient\n\nRewritten body.\n"
+    ref = wbe.overwrite("Concepts/Gradient.md", new)
+    assert ref.path == "Concepts/Gradient.md"
+    assert wbe.read_note(ref).content == new
+
+
+def test_overwrite_of_missing_note_raises(wbe):
+    with pytest.raises(RuntimeError, match="non-existent"):
+        wbe.overwrite("Nope/Missing.md", "x")
+
+
+def test_append_adds_fragment_and_patches_graph(wbe):
+    empty = NoteRef(name="Empty", path="Lean/Empty.md")
+    perceptron = NoteRef(name="Perceptron", path="Concepts/Perceptron.md")
+    before_backlinks = {r.path for r in wbe.backlinks(perceptron)}  # primes the graph
+    before = wbe.read_note(empty).content
+    wbe.append(empty, "\nSee [[Perceptron]].\n")
+    assert wbe.read_note(empty).content == before + "\nSee [[Perceptron]].\n"
+    assert {r.path for r in wbe.backlinks(perceptron)} == before_backlinks | {"Lean/Empty.md"}
+
+
+def test_set_prop_visible_via_props_of(wbe):
+    ref = NoteRef(name="Gradient", path="Concepts/Gradient.md")
+    wbe.set_prop(ref, "status", "reviewed")
+    assert wbe.props_of(ref)["status"] == "reviewed"
+
+
+def test_create_patches_graph_for_name_and_path_links(wbe):
+    hub = NoteRef(name="Concepts", path="Hub/Concepts.md")
+    gradient = NoteRef(name="Gradient", path="Concepts/Gradient.md")
+    hub_before = {r.path for r in wbe.backlinks(hub)}  # primes the graph
+    gradient_before = {r.path for r in wbe.backlinks(gradient)}
+    ref = wbe.create("Concepts/Fresh.md", "Path link [[Hub/Concepts]] and name link [[Gradient]].\n")
+    assert {r.path for r in wbe.backlinks(hub)} == hub_before | {"Concepts/Fresh.md"}
+    assert {r.path for r in wbe.backlinks(gradient)} == gradient_before | {"Concepts/Fresh.md"}
+    assert {r.path for r in wbe.links(ref)} == {"Hub/Concepts.md", "Concepts/Gradient.md"}
+
+
+def test_move_rewrites_referrers_and_reindexes(wbe):
+    src = NoteRef(name="Gradient", path="Concepts/Gradient.md")
+    referrers = {"Hub/Concepts.md", "Concepts/Backpropagation.md"}
+    assert {r.path for r in wbe.backlinks(src)} == referrers  # primes the graph
+    original = wbe.read_note(src).content
+    wbe.move(src, "Archive/Slope.md")
+    dest = NoteRef(name="Slope", path="Archive/Slope.md")
+    assert wbe.read_note(dest).content == original
+    with pytest.raises(RuntimeError):
+        wbe.read_note(NoteRef(name="Gradient", path="Concepts/Gradient.md"))
+    assert wbe.backlinks(src) == []
+    assert {r.path for r in wbe.backlinks(dest)} == referrers
+
+
+def test_delete_removes_note_from_vault_and_graph(wbe):
+    stub_note = NoteRef(name="Stub", path="Lean/Stub.md")
+    hub = NoteRef(name="Concepts", path="Hub/Concepts.md")
+    assert "Lean/Stub.md" in {r.path for r in wbe.backlinks(hub)}  # primes the graph
+    wbe.delete(stub_note)
+    assert "Lean/Stub.md" not in {r.path for r in wbe.backlinks(hub)}
+    with pytest.raises(RuntimeError):
+        wbe.read_note(stub_note)
+
+
+def test_delete_of_missing_note_raises(wbe):
+    with pytest.raises(RuntimeError, match="not found"):
+        wbe.delete(NoteRef(name="Ghost", path="Nope/Ghost.md"))
+
+
+def test_autolink_note_wraps_unlinked_mentions(wbe):
+    ref = wbe.create("Notes/Mention.md", "This note discusses Perceptron at length.\n")
+    added = wbe.autolink_note("Notes/Mention.md")
+    assert added == ["Perceptron"]
+    assert "[[Perceptron]]" in wbe.read_note(ref).content
+
+
+def test_snapshot_restore_round_trips_prior_content(wbe):
+    ref = NoteRef(name="Gradient", path="Concepts/Gradient.md")
+    original = wbe.read_note(ref).content
+    txn = wbe.snapshot_versions([ref])
+    assert txn.id
+    wbe.overwrite("Concepts/Gradient.md", "clobbered\n")
+    created = wbe.create("Tmp/Scratch.md", "scratch\n")
+    txn.created_paths.append(created.path)  # the caller (build_txn) records creations
+    wbe.restore(txn)
+    assert wbe.read_note(ref).content == original
+    with pytest.raises(RuntimeError):
+        wbe.read_note(created)

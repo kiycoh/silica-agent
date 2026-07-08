@@ -3,7 +3,8 @@
 Speaks PROTOCOL.md's `rpc`/`rpc_result` channel to the Obsidian plugin. Driver
 calls arrive on the sync agent worker thread, so the socket lives on a dedicated
 event-loop thread and `_rpc` marshals across via `run_coroutine_threadsafe` +
-`future.result(timeout)`. Read path only (unit 3); writes land in unit 4.
+`future.result(timeout)`. Each write is one RPC; the plugin holds the
+postcondition and its reply is the settle, so writes need no polling.
 
 Nothing from `cli_backend`'s CDP machinery is ported (no `_js_str`, no `_eval`,
 no subprocess, no settle waiters) — the plugin holds the postconditions and the
@@ -15,6 +16,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 from typing import Any
 
 import networkx as nx
@@ -28,7 +30,12 @@ from silica.driver.base import (
     Link,
     NoteContent,
     NoteRef,
+    Txn,
+    build_title_trie,
+    mentions_in,
 )
+from silica.kernel.ast import extract_links
+from silica.kernel.ops import InverseOp, InverseOpKind
 
 logger = logging.getLogger(__name__)
 
@@ -346,36 +353,149 @@ class ObsidianWSBackend(GraphIndexMixin):
         )
 
     # ------------------------------------------------------------------
-    # Write (graph-safe) + transactionality — unit 4
+    # Write (graph-safe) — one RPC each; the reply IS the settle (§2.4)
     # ------------------------------------------------------------------
-    # Present so the ObsidianDriver protocol is satisfied; each fails loudly
-    # (never a silent no-op) until the write RPCs land.
-
-    _NOT_YET = "write path not implemented yet (unit 4)"
 
     def create(self, path: str, content: str) -> NoteRef:
-        raise NotImplementedError(self._NOT_YET)
+        data = self._rpc("create", path=path, content=content)
+        ref = NoteRef(name=data["name"], path=data["path"])
+        self._patch_graph_add(ref.path, ref, content)
+        return ref
 
     def overwrite(self, path: str, content: str) -> NoteRef:
-        raise NotImplementedError(self._NOT_YET)
+        self._rpc("overwrite", path=path, content=content)
+        name = path.rsplit("/", 1)[-1].removesuffix(".md")
+        ref = NoteRef(name=name, path=path)
+        self._patch_graph_add(path, ref, content)
+        return ref
 
     def append(self, ref: NoteRef | str, content: str) -> None:
-        raise NotImplementedError(self._NOT_YET)
+        path = self._path_arg(ref)
+        self._rpc("append", path=path, content=content)
+        # Optimistic patch — add any new links introduced by the fragment.
+        if self._is_graph_built and path in self._graph:
+            self._add_link_edges(path, content)
 
     def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
-        raise NotImplementedError(self._NOT_YET)
+        self._rpc("set_prop", path=self._path_arg(ref), name=name, value=value, type=type_)
 
     def move(self, ref: NoteRef | str, to: str) -> None:
-        raise NotImplementedError(self._NOT_YET)
+        self._rpc("move", path=self._path_arg(ref), to=to)
+        # Obsidian rewrites incoming wikilinks on move; patching every referrer
+        # over the wire isn't worth it — reinvalidate, rebuild lazily on next read.
+        self._is_graph_built = False
 
     def delete(self, ref: NoteRef | str) -> None:
-        raise NotImplementedError(self._NOT_YET)
+        path = self._path_arg(ref)
+        self._rpc("delete", path=path)
+        self._patch_graph_remove(path)
 
     def autolink_note(self, path: str, candidates: list[str] | None = None) -> list[str]:
-        raise NotImplementedError(self._NOT_YET)
+        added = self._rpc("autolink_note", path=path, candidates=candidates) or []
+        if added:
+            self._is_graph_built = False  # body rewritten plugin-side; cheapest correct patch
+        return list(added)
 
-    def snapshot_versions(self, refs: list[NoteRef]) -> Any:
-        raise NotImplementedError(self._NOT_YET)
+    # ------------------------------------------------------------------
+    # In-memory index patching after writes (mirrors cli_backend)
+    # ------------------------------------------------------------------
 
-    def restore(self, txn: Any) -> None:
-        raise NotImplementedError(self._NOT_YET)
+    def _patch_graph_add(self, path: str, ref: NoteRef, content: str) -> None:
+        """Patch the index after create/overwrite so same-session reads stay correct.
+
+        No-op if the graph was never built (nothing cached to patch).
+        """
+        if not self._is_graph_built:
+            return
+        if path in self._graph:
+            self._graph.remove_edges_from(list(self._graph.out_edges(path)))
+        self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
+        self._notes[path] = ref
+        self._graph.add_node(path, ref=ref)
+        by_name = self._notes_by_name.setdefault(ref.name.lower(), [])
+        if ref not in by_name:
+            by_name.append(ref)
+        self._add_link_edges(path, content)
+        # Mention index: rescan this body against all known titles. Existing
+        # notes that mention the *new* title are not rescanned (same trade-off
+        # as cli_backend — the bulk build captured session-start state).
+        for paths_set in self._mention_index.values():
+            paths_set.discard(path)
+        trie = build_title_trie(self._notes_by_name)
+        for title_lower in mentions_in(content.lower(), trie):
+            self._mention_index.setdefault(title_lower, set()).add(path)
+
+    def _patch_graph_remove(self, path: str) -> None:
+        """Patch the index after a delete."""
+        if not self._is_graph_built:
+            return
+        if path in self._graph:
+            self._graph.remove_node(path)
+        self._notes.pop(path, None)
+        name_lower = path.rsplit("/", 1)[-1].removesuffix(".md").lower()
+        if name_lower in self._notes_by_name:
+            self._notes_by_name[name_lower] = [
+                r for r in self._notes_by_name[name_lower] if r.path != path
+            ]
+        self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
+        for paths_set in self._mention_index.values():
+            paths_set.discard(path)
+
+    def _add_link_edges(self, path: str, content: str) -> None:
+        for target in extract_links(content):
+            resolved = self._resolve_link(target)
+            if resolved is not None:
+                self._graph.add_edge(path, resolved.path)
+            else:
+                self._unresolved_links.add((path, target))
+
+    def _resolve_link(self, target: str) -> NoteRef | None:
+        """Resolve a wikilink target against the index — by path, else by name."""
+        t = target.removesuffix(".md")
+        if "/" in t:
+            exact = self._notes.get(t + ".md")
+            if exact is not None:
+                return exact
+            suffix = "/" + t.lower() + ".md"
+            matches = [r for p, r in self._notes.items() if p.lower().endswith(suffix)]
+            return min(matches, key=lambda r: (r.path.count("/"), r.path.lower())) if matches else None
+        matched = self._notes_by_name.get(t.lower(), [])
+        return matched[0] if matched else None
+
+    # ------------------------------------------------------------------
+    # Transactionality — content snapshots (no history over the bridge)
+    # ------------------------------------------------------------------
+
+    def snapshot_versions(self, refs: list[NoteRef]) -> Txn:
+        """Capture each ref's current body; restore() overwrites it back."""
+        inverses = []
+        for ref in refs:
+            path = ref.path or f"{ref.name}.md"
+            try:
+                content = self.read_note(ref).content
+            except Exception as e:
+                logger.warning("snapshot: could not read %s: %s", path, e)
+                continue
+            inverses.append(InverseOp(
+                kind=InverseOpKind.restore_version, path=path, prior_content=content,
+            ))
+        return Txn(id=f"txn_ws_{int(time.time())}", refs=refs, inverses=inverses)
+
+    def restore(self, txn: Txn) -> None:
+        """Rollback: overwrite snapshotted bodies back, delete created notes."""
+        if txn.versions:
+            logger.warning("WS backend has no note history; ignoring versions, "
+                           "restoring from captured content instead.")
+        for inv in txn.inverses:
+            kind = getattr(inv, "kind", None)
+            prior = getattr(inv, "prior_content", None)
+            if kind == InverseOpKind.restore_version and prior is not None:
+                self.overwrite(inv.path, prior)
+        for path in txn.created_paths:
+            try:
+                self.delete(path)
+            except RuntimeError as e:
+                if "not found" in str(e).lower():
+                    logger.info("restore: created note %s already absent", path)
+                else:
+                    raise
