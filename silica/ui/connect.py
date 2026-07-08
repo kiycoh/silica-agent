@@ -20,7 +20,6 @@ import secrets
 import shutil
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
 
 from silica.config import CONFIG
 
@@ -36,11 +35,12 @@ def _fallback_backend() -> str:
 
 
 def _origin_ok(origin: str) -> bool:
-    """Browsers set Origin; the plugin's native WebSocket does not. Any
-    non-loopback page is refused (loopback port ≠ same-origin protection)."""
-    if not origin:
-        return True
-    return urlsplit(origin).hostname in ("127.0.0.1", "localhost", "::1")
+    """Only two callers are legitimate: Obsidian's Electron renderer (its
+    WebSocket always sends `Origin: app://obsidian.md`) and native clients,
+    which send no Origin at all. Every web-page origin — loopback included —
+    is refused: any open browser tab can reach a loopback port, and the token
+    should not be the only gate."""
+    return origin in ("", "app://obsidian.md")
 
 
 async def _send(ws: Any, frame: dict) -> None:
@@ -56,6 +56,7 @@ class BridgeServer:
         self._server: Any = None
         self._backend: Any = None  # the attached ws driver, while a plugin is connected
         self._bridge_file: Path | None = None
+        self._chat_task: Any = None  # the in-flight turn (one at a time — _begin_turn gates)
 
     async def start(self) -> None:
         from websockets.asyncio.server import serve
@@ -79,11 +80,15 @@ class BridgeServer:
         """Discovery file the plugin reads to find port + token (mode 0600)."""
         path = Path(CONFIG.vault_path) / ".obsidian" / "silica-bridge.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({
+        payload = json.dumps({
             "port": self.port, "token": self.token,
             "pid": os.getpid(), "protocolVersion": PROTOCOL_VERSION,
-        }), encoding="utf-8")
-        path.chmod(0o600)
+        })
+        # Created 0600 from the first byte — the token is never briefly readable.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+        path.chmod(0o600)  # a stale file from a dead session may carry another mode
         return path
 
     # ------------------------------------------------------------------
@@ -110,11 +115,18 @@ class BridgeServer:
             self._uninstall(backend)
 
     async def _handshake(self, ws: Any) -> bool:
-        hello = json.loads(await ws.recv())
+        try:
+            hello = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+        except Exception:  # closed early, silent for 10s, or non-JSON — no one to greet
+            logger.warning("bridge: handshake refused (no valid hello)")
+            await ws.close()
+            return False
+        if not isinstance(hello, dict):
+            hello = {}
         origin = ws.request.headers.get("Origin", "") if ws.request is not None else ""
         if not _origin_ok(origin):
-            reason = "non-loopback origin refused"
-        elif hello.get("token") != self.token:
+            reason = f"origin refused: {origin}"
+        elif not secrets.compare_digest(str(hello.get("token", "")), self.token):
             reason = "bad token"
         elif hello.get("protocolVersion") != PROTOCOL_VERSION:
             reason = f"protocol mismatch: {hello.get('protocolVersion')!r}"
@@ -152,6 +164,11 @@ class BridgeServer:
     async def _route(self, ws: Any, frame: dict, backend: Any) -> None:
         from silica.ui.web import server as web
 
+        # ponytail: reaches across module seams into privates — web._begin_turn /
+        # web.current_cancel (the GUI's turn gate) and backend._on_frame (the ws
+        # driver's rpc demux). Deliberate for now: the bridge is the only second
+        # consumer, so promoting them to public API would be speculative. Promote
+        # to a shared public interface if a third caller needs the same gate/demux.
         kind = frame.get("type")
         if kind in ("rpc_result", "rpc_error"):
             backend._on_frame(frame)
@@ -161,7 +178,9 @@ class BridgeServer:
                 await _send(ws, {"type": "chat_error", "turnId": tid,
                                  "error": "a turn is already in progress"})
                 return
-            asyncio.create_task(self._chat_turn(ws, tid, text))
+            # Held on self — the event loop only weakly references tasks, and a
+            # bare create_task can be garbage-collected mid-turn.
+            self._chat_task = asyncio.create_task(self._chat_turn(ws, tid, text))
         elif kind == "chat_cancel":
             if web.current_cancel is not None:
                 web.current_cancel.set()

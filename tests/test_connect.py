@@ -22,6 +22,7 @@ import pytest
 pytest.importorskip("websockets")
 pytest.importorskip("fastapi")  # run_turn lives in the web server module
 from websockets.asyncio.client import connect  # noqa: E402
+from websockets.exceptions import ConnectionClosed  # noqa: E402
 
 from silica.agent.events import LLMStreamEvent  # noqa: E402
 from silica.config import CONFIG  # noqa: E402
@@ -102,13 +103,35 @@ def test_bad_token_gets_bye(bridge_env):
     _run(scenario)
 
 
-def test_browser_origin_refused(bridge_env):
+def test_obsidian_electron_origin_accepted(bridge_env):
     async def scenario(srv):
-        # Browsers set Origin; the plugin's native WebSocket does not.
-        ws, reply = await _dial(srv, origin="https://evil.example")
-        assert reply["type"] == "bye"
-        assert "origin" in reply["reason"].lower()
+        # Obsidian's Electron renderer always sends Origin: app://obsidian.md.
+        ws, welcome = await _dial(srv, origin="app://obsidian.md")
+        assert welcome["type"] == "welcome"
         await ws.close()
+
+    _run(scenario)
+
+
+def test_web_page_origins_refused(bridge_env):
+    async def scenario(srv):
+        # Every page origin is refused — loopback included: any open browser
+        # tab can reach a loopback port, so only Obsidian's renderer passes.
+        for origin in ("https://evil.example", "http://127.0.0.1:8000"):
+            ws, reply = await _dial(srv, origin=origin)
+            assert reply["type"] == "bye"
+            assert "origin" in reply["reason"].lower()
+            await ws.close()
+
+    _run(scenario)
+
+
+def test_garbage_hello_is_refused_quietly(bridge_env):
+    async def scenario(srv):
+        ws = await connect(f"ws://127.0.0.1:{srv.port}")
+        await ws.send("not json")
+        with pytest.raises(ConnectionClosed):  # server closes; no welcome, no crash
+            await asyncio.wait_for(ws.recv(), timeout=5)
 
     _run(scenario)
 
