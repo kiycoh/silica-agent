@@ -271,7 +271,7 @@ def _decide_dedup(
         messages=[{"role": "user", "content": user_message}],
         tools=None,
         response_schema=DedupDecision,
-        max_tokens=int(os.getenv("DEDUP_MAX_TOKENS", "1024")),
+        max_tokens=int(os.getenv("DEDUP_MAX_TOKENS", "2048")),
     )
     raw = response.text or ""
     try:

@@ -30,3 +30,6 @@ Exactly one verdict:
 
 Return STRICT JSON with exactly these keys:
   {"verdict": "duplicate" | "distinct" | "contradicts", "rationale": "<one sentence>", "addition": "<markdown or empty>"}
+
+"rationale" must state the concrete reason for the verdict — concise and
+direct, one sentence, no hedging, no restating the inputs.
