@@ -178,4 +178,6 @@ agentdb.rvf
 # Locks
 *.rvf.lock
 CONTEXT.md
-obsidian-silica/PROTOCOL.md
+
+# Generated report — line numbers drift; regenerate with /ponytail-debt
+PONYTAIL-DEBT.md
