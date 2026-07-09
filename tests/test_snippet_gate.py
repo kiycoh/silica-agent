@@ -82,3 +82,30 @@ def test_patch_ops_are_not_gated(tmp_vault):
     validated, rejected = validate_operations([op], [], "Corso")
     assert rejected == []
     assert any(o.heading == "Norma" for o in validated)
+
+
+def _payload(inbox_file, concepts):
+    return [{"batches": [{"inbox_file": inbox_file, "concepts": concepts}]}]
+
+
+def test_empty_snippet_with_empty_excerpt_is_skipped_not_rejected(tmp_vault):
+    """Concept only *mentioned* (empty inbox_excerpt) → forward-reference, not a
+    rejection. Skipping keeps a whole chunk of such stubs from driving the
+    rejection rate to 100% and aborting the run."""
+    payload = _payload("Inbox/lez.md", [{"name": "Machine translation", "inbox_excerpt": ""}])
+    validated, rejected = validate_operations(
+        [_write_op("Machine translation", "")], payload, "Corso",
+    )
+    assert validated == []
+    assert rejected == []  # neither written nor rejected — dropped as a forward-ref
+
+
+def test_empty_snippet_with_full_excerpt_still_rejected(tmp_vault):
+    """Regression 5d0a3350: the excerpt HAD content but the distiller dropped the
+    body → must reject so the expand arc retries, never silently skip."""
+    payload = _payload("Inbox/lez.md", [{"name": "Machine translation", "inbox_excerpt": "x" * 500}])
+    validated, rejected = validate_operations(
+        [_write_op("Machine translation", "")], payload, "Corso",
+    )
+    assert validated == []
+    assert len(rejected) == 1 and "too short" in rejected[0].reason

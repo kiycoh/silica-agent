@@ -62,6 +62,7 @@ def validate_operations(
 
     valid_concepts: dict[str, set[str]] = {}
     expected_collision_paths: dict[tuple[str, str], str | None] = {}
+    concept_excerpts: dict[tuple[str, str], str] = {}
     inbox_folders = set()
     has_payloads = bool(payloads)
 
@@ -86,7 +87,8 @@ def validate_operations(
                     if not name:
                         continue
                     valid_concepts[source_basename].add(name)
-                    
+                    concept_excerpts[(source_basename, name)] = c.get("inbox_excerpt", "") or ""
+
                     collision = c.get("vault_collision")
                     if collision and isinstance(collision, dict) and collision.get("path"):
                         expected_collision_paths[(source_basename, name)] = collision["path"]
@@ -327,6 +329,24 @@ def validate_operations(
                 continue
 
             body_len = len((op.snippet or "").strip())
+            if body_len == 0 and has_payloads:
+                # Distinguish two ways a write lands with an empty body:
+                #  (a) the source excerpt itself is empty — the concept was only
+                #      *mentioned*, never defined. Nothing to distill or expand;
+                #      deferring only churns (and a whole chunk of these drives the
+                #      rejection rate to 100% and aborts the run). Skip it as a
+                #      forward-reference — it stays linked from the notes that
+                #      mention it, to be authored when a later source defines it.
+                #  (b) the excerpt HAD content but the distiller dropped the body
+                #      (run 5d0a3350 regression) — that must still be rejected so
+                #      the expand arc retries it. Falls through below.
+                excerpt = concept_excerpts.get((source_basename, heading))
+                if excerpt is not None and not excerpt.strip():
+                    logger.info(
+                        "validate: write '%s' — empty source excerpt, skipped as a "
+                        "forward-reference (nothing to distill)", op.path,
+                    )
+                    continue
             if body_len < MIN_WRITE_SNIPPET_CHARS:
                 rejected_ops.append(Rejection(
                     op=op,
