@@ -32,6 +32,9 @@ import orjson
 # source by get_deferred_store(), never written to again.
 _LEGACY_DEFERRED_DIR = Path.home() / ".silica" / "deferred"
 
+# ponytail: fixed 30-day TTL, make it a vault.yaml knob if per-vault retention matters
+_DEFERRED_TTL_SECONDS = 30 * 24 * 3600
+
 
 def _store_dir() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
@@ -63,9 +66,27 @@ class DeferredStore:
     def __init__(self, path: Path | str | None = None):
         self._dir = Path(path) if path else _store_dir()
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._sweep_expired()
 
     def _bundle_path(self, content_hash: str) -> Path:
         return self._dir / f"{content_hash}.json"
+
+    def _sweep_expired(self) -> None:
+        """Unlink bundles past the TTL — opportunistic GC when the store opens.
+
+        Runs once per process per vault (the store is cached). A bundle holds
+        only regenerable LLM output keyed by source hash; once it ages out
+        nothing re-surfaces it, so deleting is safe — re-ingest the source to
+        regenerate. Bundles with no/zero timestamp are left alone, not guessed.
+        """
+        cutoff = time.time() - _DEFERRED_TTL_SECONDS
+        for p in self._dir.glob("*.json"):
+            try:
+                ts = orjson.loads(p.read_bytes()).get("timestamp", 0)
+                if ts and ts < cutoff:
+                    p.unlink()
+            except Exception:
+                continue
 
     def put(
         self,

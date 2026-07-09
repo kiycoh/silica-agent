@@ -56,6 +56,25 @@ def test_deferred_put_dedups_same_op(store):
     assert ops[0]["reason"] == "v2"
 
 
+def test_deferred_sweeps_expired_on_open(tmp_path):
+    """A bundle older than the TTL is unlinked when the store re-opens; a fresh
+    one (and one with no timestamp) survives."""
+    import orjson, time
+    from silica.kernel.deferred import DeferredStore, _DEFERRED_TTL_SECONDS
+
+    d = tmp_path / "deferred"
+    store = DeferredStore(path=d)
+    store.put("fresh", "inbox/a.md", "Dir", None, [{"op": "write"}])
+    # Backdate one bundle past the TTL; leave another with no timestamp.
+    (d / "old.json").write_bytes(orjson.dumps(
+        {"content_hash": "old", "timestamp": time.time() - _DEFERRED_TTL_SECONDS - 1}))
+    (d / "nots.json").write_bytes(orjson.dumps({"content_hash": "nots"}))
+
+    reopened = DeferredStore(path=d)  # sweep runs in __init__
+    hashes = {i["content_hash"] for i in reopened.list_all()}
+    assert hashes == {"fresh", "nots"}
+
+
 def test_deferred_list_all(store):
     store.put("hash1", "inbox/a.md", "Dir", None, [{"op": "write", "path": "Dir/A.md"}])
     store.put("hash2", "inbox/b.md", "Dir2", "Hub2", [{"op": "write"}, {"op": "patch"}])
@@ -156,15 +175,17 @@ def test_defer_ops_accumulates_across_phases(tmp_path, monkeypatch):
     fsm = InjectorFSM("Inbox/lez.md", "TargetDir", hub="Hub")
     fsm.context["source_content_hash"] = "shared-hash"
 
-    # COLLISION defers one op...
+    # COLLISION defers one op... (with a body: empty-payload ops are filtered out)
     assert fsm._defer_ops(
-        [{"op": "skip", "heading": "A", "source_basename": "lez.md", "path": None}],
+        [{"op": "write", "path": "TargetDir/A.md", "heading": "A",
+          "source_basename": "lez.md", "snippet": "body A"}],
         {"A": "borderline"},
         phase="COLLISION",
     )
     # ...then VALIDATE defers another for the SAME content hash.
     assert fsm._defer_ops(
-        [{"op": "write", "path": "TargetDir/B.md", "heading": "B", "source_basename": "lez.md"}],
+        [{"op": "write", "path": "TargetDir/B.md", "heading": "B",
+          "source_basename": "lez.md", "snippet": "body B"}],
         {"TargetDir/B.md": "too generic"},
         phase="VALIDATE",
     )
@@ -184,3 +205,17 @@ def test_defer_ops_skips_without_content_hash(tmp_path, monkeypatch):
     # No source_content_hash set and no per-file hashes → empty hash.
     assert fsm._defer_ops([{"op": "skip", "heading": "X"}], {}, phase="VALIDATE") is False
     assert deferred_mod.get_deferred_store().list_all() == []
+
+
+def test_empty_payload_ops_are_not_deferred():
+    """An op with no body re-fails identically on every verbatim retry — it must
+    never land in the deferred store (0fe49a8a bundle: 7/11 ops were dead weight)."""
+    from silica.router.orchestrator import InjectorFSM
+    r = InjectorFSM._retryable
+    assert not r({"op": "skip", "path": "x.md"})
+    assert not r({"op": "write", "path": "x.md", "snippet": ""})
+    assert not r({"op": "patch", "path": "x.md", "snippet": "  "})
+    assert not r({"op": "overwrite", "path": "x.md", "content": None})
+    assert r({"op": "write", "path": "x.md", "snippet": "real body"})
+    assert r({"op": "overwrite", "path": "x.md", "content": "real body"})
+    assert r({"op": "delete", "path": "x.md"})  # no body needed — retriable

@@ -466,6 +466,21 @@ class InjectorFSM(BaseFSM[InjectorState]):
         shutil.copy2(ops_path, kb_path)
         return kb_path
 
+    @staticmethod
+    def _retryable(op: dict) -> bool:
+        """Deferred retry replays ops verbatim — an op with no payload re-fails
+        identically forever, so it never earns a slot in the store. skip ops do
+        nothing on retry; write/patch with an empty snippet and overwrite with
+        empty content have nothing to write."""
+        t = op.get("op")
+        if t == "skip":
+            return False
+        if t in ("write", "patch") and not (op.get("snippet") or "").strip():
+            return False
+        if t == "overwrite" and not (op.get("content") or "").strip():
+            return False
+        return True
+
     def _defer_ops(
         self,
         rejected_ops: list[dict],
@@ -482,6 +497,13 @@ class InjectorFSM(BaseFSM[InjectorState]):
         phase (or a later chunk) must NOT clobber ops an earlier one deferred —
         they accumulate. Returns True iff a bundle was written.
         """
+        kept = [op for op in rejected_ops if not isinstance(op, dict) or self._retryable(op)]
+        if len(kept) < len(rejected_ops):
+            logger.info(
+                "%s: %d empty-payload op(s) not deferred (verbatim retry would re-fail)",
+                phase, len(rejected_ops) - len(kept),
+            )
+        rejected_ops = kept
         if not rejected_ops:
             return False
         content_hash = self._current_content_hash
