@@ -116,6 +116,31 @@ AI: true
     return patch_text
 
 
+_AI_KEY_RE = re.compile(r"^AI:\s", re.MULTILINE)
+
+
+def ensure_ai_flag(content: str) -> str:
+    """Stamp `AI: true` into an existing frontmatter block that lacks the field.
+
+    patch/overwrite touch user-authored notes that predate the `AI` convention;
+    the OFM lint (ofm.py) requires a boolean `AI` on the *whole* note, so a patch
+    to a legacy note would be reverted. Marking `AI: true` is honest provenance —
+    the agent is now contributing content. String-level (no YAML round-trip) so
+    the rest of the user's frontmatter is left byte-for-byte intact.
+
+    No-ops when there is no frontmatter (fresh writes carry it via template_spoke)
+    or the `AI` key already exists (never overwrites the user's own value).
+    """
+    if not content.startswith("---\n"):
+        return content
+    end_idx = content.find("\n---\n", 4)
+    if end_idx == -1:
+        return content  # unterminated frontmatter — leave for the lint to flag
+    if _AI_KEY_RE.search(content[4:end_idx]):
+        return content
+    return content[:end_idx] + "\nAI: true" + content[end_idx:]
+
+
 def provenance_header(heading: str, source_basename: str) -> str:
     """The exact header line patch_snippet emits for a (heading, source) block.
 

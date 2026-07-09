@@ -149,6 +149,7 @@ def _execute_patch(op: Op, path: str) -> dict:
     if op.contested_by:
         from silica.kernel.contested import mark_contested
         new_content = mark_contested(new_content, op.contested_by)
+    new_content = templates.ensure_ai_flag(new_content)
     DRIVER.overwrite(path, new_content)
     err = _verify_landed(op, path, new_content)
     if err:
@@ -176,6 +177,7 @@ def _execute_overwrite(op: Op, path: str) -> dict:
             current = None
         content, had_conflict = three_way_merge(op.base_content, current, content)
 
+    content = templates.ensure_ai_flag(content)
     DRIVER.overwrite(path, content)
     err = _verify_landed(op, path, content)
     if err:
