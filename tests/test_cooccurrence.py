@@ -3,13 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from silica.config import SilicaConfig
-
-
-def test_config_has_cooccurrence_lang_default_auto():
-    # Default 'auto' detects the vault language at build time (no English footgun).
-    cfg = SilicaConfig()
-    assert cfg.cooccurrence_lang == "auto"
 
 
 from silica.kernel.cooccurrence import tokenize

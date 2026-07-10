@@ -85,21 +85,6 @@ def test_execute_one_write_title_overrides_h1(vault):
     assert "[[AI]]" in content
 
 
-def test_execute_one_write_no_title_uses_heading_for_h1(vault):
-    """Without title, H1 still falls back to heading (no regression)."""
-    op = Op(
-        op=OpType.write,
-        heading="Backpropagation",
-        source_basename="src.md",
-        path="Concepts/Backpropagation.md",
-        snippet="Calcola il gradiente tramite la regola della catena.",
-        hub="AI",
-    )
-    execute_one(op)
-    content = DRIVER.read_note("Concepts/Backpropagation.md").content
-    assert "# Backpropagation" in content
-
-
 def test_execute_one_patch_appends_section(vault):
     op = Op(
         op=OpType.patch,

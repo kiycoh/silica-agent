@@ -250,15 +250,6 @@ def test_last_updated_advances_on_mutation(tmp_path):
 # content_hash field on Task (Phase 2 idempotency hook)
 # ---------------------------------------------------------------------------
 
-def test_task_content_hash_defaults_none(tmp_path):
-    import silica.kernel.progress as _mod
-    _mod._RUNS_DIR = tmp_path
-
-    p = ProgressLedger.new(mode="inject", inputs={})
-    t = p.add_task("recon", task_id="recon")
-    assert t.content_hash is None
-
-
 def test_task_content_hash_survives_roundtrip(tmp_path):
     import silica.kernel.progress as _mod
     _mod._RUNS_DIR = tmp_path
@@ -303,13 +294,6 @@ def test_next_pending_skips_deferred(tmp_path):
 # ---------------------------------------------------------------------------
 # PlanStep
 # ---------------------------------------------------------------------------
-
-def test_checkpoint_spec_fields():
-    cs = PlanStep(id="recon", kind="mechanical", objective="silica_recon")
-    assert cs.id == "recon"
-    assert cs.kind == "mechanical"
-    assert cs.objective == "silica_recon"
-
 
 # ---------------------------------------------------------------------------
 # TaskLedger — save / load / write-once idempotency

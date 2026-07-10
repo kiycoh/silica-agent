@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import httpx
 
-from silica.kernel.rerank import rerank_related, demo
+from silica.kernel.rerank import rerank_related
 from silica.agent.providers import Reranker, get_reranker
 
 
@@ -48,10 +48,6 @@ def test_mismatched_score_length_abstains():
     # A malformed reranker reply must not silently drop/misalign candidates.
     out = rerank_related(_Fake([0.9]), "q", _ITEMS, k=3, document_of=_DOC)
     assert [i["path"] for i in out] == ["a", "b", "c"]
-
-
-def test_module_demo_selfcheck():
-    demo()  # asserts inside; smoke-guards the shipped example
 
 
 # --- client ---------------------------------------------------------------

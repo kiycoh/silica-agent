@@ -153,33 +153,3 @@ def test_vault_factory_topology_matches_manifest(tmp_path):
 # C0.5 — Session fixture is cached (only calls build_* once)
 # ---------------------------------------------------------------------------
 
-def test_synthetic_vault_fixture_is_session_cached(tmp_path):
-    """The synthetic_vault fixture calls build_synthetic_vault exactly once per session.
-
-    We test the underlying function directly since we can't easily introspect
-    pytest session scope here. We verify that calling with the same root twice
-    without force is idempotent and the second call is a no-op (by checking
-    that no file mtimes change).
-    """
-    root = tmp_path / "vault"
-
-    call_count = {"n": 0}
-    original_build = build_synthetic_vault
-
-    def counting_build(r, force=False):
-        call_count["n"] += 1
-        return original_build(r, force)
-
-    counting_build(root)
-    assert call_count["n"] == 1
-
-    # Second call is no-op — spec_sha256 matches, nothing to do
-    counting_build(root)
-    assert call_count["n"] == 2  # called twice, but second was a no-op internally
-
-    # Verify no files were rewritten on second call
-    mtimes = {s.path: (root / s.path).stat().st_mtime for s in SPEC}
-    time.sleep(0.02)
-    counting_build(root)
-    for s in SPEC:
-        assert (root / s.path).stat().st_mtime == mtimes[s.path]

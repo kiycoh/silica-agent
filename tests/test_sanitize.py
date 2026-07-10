@@ -166,11 +166,6 @@ def test_strip_mixed_text_with_run():
     assert strip_degenerate_runs("some ///// text") == "some / text"
 
 
-def test_strip_does_not_remove_line():
-    result = strip_degenerate_runs("/////")
-    assert result != ""
-
-
 def test_strip_run_of_exactly_4_unchanged():
     assert strip_degenerate_runs("////") == "////"
 

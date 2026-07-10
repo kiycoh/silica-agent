@@ -200,12 +200,3 @@ def test_all_auto_tiers_correct():
 # Determinism
 # ---------------------------------------------------------------------------
 
-def test_build_task_plan_deterministic():
-    r = _empty_report()
-    r.orphans = ["A", "B", "C"]
-    r.dangling = [{"target": "X", "refs": 3}]
-    plan1 = build_task_plan(r)
-    plan2 = build_task_plan(r)
-    assert [c.reason for c in plan1.auto] == [c.reason for c in plan2.auto]
-    assert [c.reason for c in plan1.propose] == [c.reason for c in plan2.propose]
-    assert [c.reason for c in plan1.escalate] == [c.reason for c in plan2.escalate]

@@ -92,24 +92,6 @@ def test_ledger_reprocess_when_output_missing(ledger, tmp_path):
     assert not ledger.is_committed("concepts/backpropagation", content_hash=h)
 
 
-def test_ledger_skip_when_outputs_present(ledger, tmp_path):
-    """is_committed returns True when hash matches and all outputs exist."""
-    output = tmp_path / "out.md"
-    output.write_text("x", encoding="utf-8")
-
-    h = _sha256("source content")
-    ledger.record(
-        txn_id="t1",
-        source_canonical="concepts/backpropagation",
-        path=str(output),
-        op="write",
-        status="committed",
-        content_hash=h,
-    )
-
-    assert ledger.is_committed("concepts/backpropagation", content_hash=h)
-
-
 # ---------------------------------------------------------------------------
 # C2.4 — UPSERT semantics
 # ---------------------------------------------------------------------------

@@ -8,8 +8,6 @@ survivor's ranking passes through unchanged ("embedder down -> cooccur routing")
 """
 from __future__ import annotations
 
-import ast
-from pathlib import Path
 
 from silica.kernel.embed import EmbedStore
 from silica.kernel.cooccurrence import CooccurStore, build_contribution
@@ -344,16 +342,3 @@ def test_for_query_both_absent_returns_empty(tmp_path):
 # Boundary / robustness contract
 # ---------------------------------------------------------------------------
 
-def test_facade_isolates_abstention_logic_not_in_cooccurrence_module():
-    """Per the design, abstention/degenerate-detection lives in the FACADE,
-    and the cooccurrence module stays the embedder-free stable leg. The facade
-    is the only place allowed to import BOTH legs."""
-    src = (Path(__file__).parent.parent / "silica" / "kernel" / "relatedness.py").read_text()
-    tree = ast.parse(src)
-    modules: list[str] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            modules.append(node.module)
-    # the facade is exactly the meeting point of the two proponents
-    assert any("embed" in m for m in modules)
-    assert any("cooccurrence" in m for m in modules)

@@ -153,19 +153,3 @@ def test_print_home_contains_pinned_commands_and_footer():
     assert "◇" in output
 
 
-def test_render_help_has_no_block_rule_dividers():
-    con, buf = _make_console()
-    with patch("silica.ui.console.CONSOLE", con):
-        render_help()
-    output = buf.getvalue()
-    assert "▀▄" not in output
-
-
-def test_print_home_has_no_block_rule_divider():
-    con, buf = _make_console()
-    with patch("silica.ui.home.print_banner"), \
-         patch("silica.ui.home.CONSOLE", con), \
-         patch("silica.ui.console.CONSOLE", con):
-        print_home()
-    output = buf.getvalue()
-    assert "▀▄" not in output

@@ -108,13 +108,6 @@ class TestStripPreservation:
         raw = "The quick brown fox jumps over the lazy dog."
         assert strip_images(raw) == raw
 
-    def test_code_block_untouched(self):
-        raw = "```python\nprint('![[fake.jpg]]\n')\n```"
-        # The regex doesn't special-case code blocks — it removes any ![[...ext]]
-        # This is intentional: images inside code blocks are unusual; the
-        # current behaviour is documented and acceptable.
-        pass  # no assertion — just confirm it doesn't crash
-
     def test_hyperlink_not_image(self):
         """[text](url) without leading ! must not be stripped."""
         raw = "[See docs](https://example.com/docs)"

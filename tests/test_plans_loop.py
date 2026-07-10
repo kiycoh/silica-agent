@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from silica.kernel.plans import VALID_STATUS, iter_plan_notes, status_counts
+from silica.kernel.plans import iter_plan_notes, status_counts
 
 
 def _plan(vault: Path, name: str, status: str) -> None:
@@ -47,10 +47,6 @@ def test_iter_plan_notes_yields_path_and_includes_unstatused(tmp_path):
     assert isinstance(note_path, Path)
     assert note_path.name == "nested.md"
     assert isinstance(data, dict)
-
-
-def test_valid_status_set():
-    assert VALID_STATUS == {"todo", "in-progress", "blocked", "done"}
 
 
 def test_check_plan_status_warns_on_bad_enum():

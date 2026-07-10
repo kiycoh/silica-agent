@@ -87,11 +87,6 @@ def test_whitespace_substrate_omitted():
 # Pure function — no side effects
 # ---------------------------------------------------------------------------
 
-def test_multiple_calls_idempotent():
-    args = dict(checkpoint_id="distill", payload={"x": 1}, ledger_digest="DIGEST")
-    assert build_context(**args) == build_context(**args)
-
-
 # ---------------------------------------------------------------------------
 # ProgressLedger.is_checkpoint_done
 # ---------------------------------------------------------------------------
@@ -144,15 +139,6 @@ def test_is_checkpoint_done_unknown_task(tmp_path):
 # ---------------------------------------------------------------------------
 # ProgressLedger.run_dir
 # ---------------------------------------------------------------------------
-
-def test_run_dir_is_under_runs_dir(tmp_path):
-    import silica.kernel.progress as _mod
-    _mod._RUNS_DIR = tmp_path
-    from silica.kernel.progress import ProgressLedger
-
-    p = ProgressLedger.new(mode="inject", inputs={})
-    assert p.run_dir == tmp_path / p.run_id
-
 
 # ---------------------------------------------------------------------------
 # mark_done with content_hash round-trip

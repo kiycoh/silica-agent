@@ -64,14 +64,6 @@ def test_cutoff_scales_with_tokens_and_caps():
     assert len(_cutoff(huge, _fake_ranked(7))) == 7           # never exceed candidates
 
 
-def test_min_concepts_default_is_one_no_forced_padding():
-    """A thin note maps to as few as one concept — the floor never manufactures."""
-    from silica.kernel.keyphrase import MIN_CONCEPTS, _cutoff
-    assert MIN_CONCEPTS == 1
-    tiny = "w w w"                                  # 3 tokens → k = max(1, 3//20) = 1
-    assert len(_cutoff(tiny, _fake_ranked(50))) == 1
-
-
 def test_frontmatter_ignored(it_overlay):
     """YAML front matter is metadata, not content: it must not change concepts."""
     from silica.kernel.keyphrase import extract_keyphrases

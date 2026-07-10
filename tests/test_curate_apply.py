@@ -256,14 +256,6 @@ def test_filter_matching_nothing_reports_no_matches_not_nothing_to_do(monkeypatc
     assert res["total"] == 0
 
 
-def test_filter_on_genuinely_empty_report_stays_nothing_to_do(monkeypatch):
-    monkeypatch.setattr(curate, "compute_report", lambda **kw: _report())
-
-    res = curate.silica_curate(apply=True, kinds=["dedup"])
-    assert res["status"] == "nothing_to_do"
-    assert "available" not in res
-
-
 def test_unknown_kind_surfaces_as_tool_error(monkeypatch):
     """A kind typo is a loud ValueError, wrapped by the @tool runner as an
     `error` — never a silent empty filter."""

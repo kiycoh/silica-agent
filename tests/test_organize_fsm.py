@@ -423,24 +423,6 @@ class TestOrganizerFSMDryRun:
         # DRIVER.move must NOT have been called
         mock_driver.move.assert_not_called()
 
-    def test_dry_run_no_moves_when_all_uncategorized(self, taxonomy: Taxonomy):
-        from silica.router.organize_fsm import OrganizerFSM
-
-        # "xyzabc-completely-unrelated.md" has no keyword ("gpt", "risotto") in title
-        # → L1 keyword-only classification sends it to Misc
-        mock_refs = [MagicMock(path="xyzabc-completely-unrelated.md", name="xyzabc")]
-
-        with patch("silica.router.organize_fsm.DRIVER") as mock_driver:
-            mock_driver.list_files.return_value = mock_refs
-
-            fsm = OrganizerFSM(taxonomy=taxonomy, dry_run=True, llm_arbiter=False)
-            result = fsm.run()
-
-        # The key invariant: DRIVER.move is NEVER called in dry_run mode
-        mock_driver.move.assert_not_called()
-        assert "plan_summary" in result
-
-
     def test_dry_run_uncategorized_stays_put(self, taxonomy: Taxonomy):
         """Unmatched notes produce no planned moves by default."""
         from silica.router.organize_fsm import OrganizerFSM

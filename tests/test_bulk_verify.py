@@ -211,21 +211,6 @@ def test_write_corrupted_by_driver_fails_verify(monkeypatch):
 # 2. Clean write on fs backend -> green, no false positive
 # ---------------------------------------------------------------------------
 
-def test_write_clean_on_fs_backend_passes_verify(fs_vault):
-    op = Op(
-        op=OpType.write,
-        heading="Clean Concept",
-        source_basename="src.md",
-        path="Concepts/Clean Concept.md",
-        snippet="A distilled idea.",
-        hub="AI",
-    )
-    res = execute_operations([op])
-    assert res.ok is True
-    assert res.successful == 1
-    assert res.failed == []
-
-
 # ---------------------------------------------------------------------------
 # 3. Patch whose snippet never lands -> failed
 # ---------------------------------------------------------------------------

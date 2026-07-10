@@ -58,23 +58,6 @@ class TestFolderMove:
         (v / "B").mkdir()
         return v
 
-    def test_name_link_untouched(self, vault: Path) -> None:
-        b = _make_backend(vault)
-        b.move("A/Note.md", "B/Note.md")
-
-        content = (vault / "Ref_Name.md").read_text(encoding="utf-8")
-        # Name-based link must remain unchanged
-        assert "[[Note]]" in content
-
-    def test_path_link_rewritten(self, vault: Path) -> None:
-        b = _make_backend(vault)
-        b.move("A/Note.md", "B/Note.md")
-
-        content = (vault / "Ref_Path.md").read_text(encoding="utf-8")
-        # Path-based link must be updated to the new location
-        assert "[[B/Note]]" in content
-        # Old path-based link must be gone
-        assert "[[A/Note]]" not in content
         # Name-based link in the other referrer is untouched (checked separately)
 
     def test_name_link_untouched_while_path_link_rewritten(self, vault: Path) -> None:

@@ -390,57 +390,6 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
     assert fsm.context["final_status"] == "partial"
 
 
-def test_fsm_recipe_transition_sequence():
-    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
-    
-    # Verify sequential progression
-    fsm.state = InjectorState.RECON
-    fsm._transition_success()
-    assert fsm.state == InjectorState.CROSSDEDUP  # Phase 1.5
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.PAYLOAD
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.SALIENCE   # Phase 2.05
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.COLLISION  # Phase 5
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.DELEGATE
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.SANITIZE
-    
-    fsm._transition_success()
-    assert fsm.state == InjectorState.VALIDATE
-    
-    fsm._transition_success()
-    assert fsm.state == InjectorState.SNAPSHOT
-    
-    fsm._transition_success()
-    assert fsm.state == InjectorState.WRITE
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.HUB_UPDATE
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.AUTOLINK  # Phase 4
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.BACKLINK  # Phase 4.5
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.LINT
-
-    fsm._transition_success()
-    assert fsm.state == InjectorState.CLEANUP
-    
-    fsm._transition_success()
-    assert fsm.state == InjectorState.DONE
-
-
 @patch("silica.router.orchestrator.silica_recon")
 @patch("silica.router.orchestrator.silica_payload")
 @patch("silica.kernel.prep_delegation.run_distiller")

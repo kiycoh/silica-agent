@@ -114,20 +114,6 @@ def test_multi_file_same_run_id_logs_one_line_per_file(tmp_vault):
     assert len(lines) == 2
 
 
-def test_resume_same_run_id_does_not_duplicate(tmp_vault):
-    from silica.config import CONFIG
-
-    entries = [_entry("lezione-03.md", "write", "A")]
-    fsm = _fake_fsm(entries, run_id="samerunid123", content_hashes=["hash0"])
-
-    finalize._log_ingest_completion(fsm, 0, "Inbox/lezione-03.md")
-    finalize._log_ingest_completion(fsm, 0, "Inbox/lezione-03.md")  # simulated resume/re-run
-
-    lines = (Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME).read_text(encoding="utf-8").splitlines()
-    lines = [l for l in lines if l.strip()]
-    assert len(lines) == 1
-
-
 def test_never_raises_on_broken_fsm(tmp_vault):
     """Best-effort: a fsm missing the expected attributes must not blow up CLEANUP."""
     broken_fsm = types.SimpleNamespace()

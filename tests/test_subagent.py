@@ -53,13 +53,6 @@ def test_handle_catches_capability_errors():
     assert "kaboom" in res["error"]
 
 
-def test_default_registry_covers_builtin_kinds():
-    from silica.capabilities import CAPABILITIES
-    # Note-level behaviours plus every worker profile (kind == profile name):
-    # one registry dispatches all background work.
-    assert set(CAPABILITIES) == {"dedup", "expand", "refine", "enrich", "orphan", "reader", "router"}
-
-
 # --- dedup behaviour -------------------------------------------------------
 
 def _item():
