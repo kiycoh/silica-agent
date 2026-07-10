@@ -34,6 +34,3 @@ def test_revert_no_active_run(monkeypatch, capsys):
                         lambda: _EmptyStore())
     handled = _handle_direct_shortcut("/revert", [])
     assert handled is True
-    captured = capsys.readouterr()
-    # Should print something about nothing to undo
-    assert handled is True

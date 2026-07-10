@@ -170,8 +170,6 @@ def test_autolink_longer_title_takes_precedence():
     body = "Deep Learning is a subset of Machine Learning."
     new_body, added = autolink(body, ["Deep Learning", "Learning"])
     assert "[[Deep Learning]]" in new_body
-    # 'Learning' should not be independently linked inside '[[Deep Learning]]'
-    assert "[[Deep Learning]]" not in new_body.replace("[[Deep Learning]]", "")  # tautology guard
     # The standalone 'Learning' in 'Machine Learning' may or may not be linked
     # — the important thing is Deep Learning is handled as a unit
 

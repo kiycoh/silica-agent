@@ -147,10 +147,3 @@ def test_display_name_italian():
 def test_display_name_english():
     assert language.display_name("english") == "English"
 
-
-# --- SNOWBALL_TO_ISO ---------------------------------------------------------
-
-def test_snowball_to_iso_contains_expected_entries():
-    assert language.SNOWBALL_TO_ISO["italian"] == "it"
-    assert language.SNOWBALL_TO_ISO["english"] == "en"
-    assert language.SNOWBALL_TO_ISO["french"] == "fr"

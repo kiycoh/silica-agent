@@ -64,9 +64,6 @@ def test_verbose_config_and_logging():
         # asyncio DEBUG suppressed: litellm streaming spawns one loop per chunk
         assert logging.getLogger("asyncio").level == logging.WARNING
 
-        # Silica's own root logger is at DEBUG
-        assert logging.getLogger("silica").level <= logging.DEBUG or True  # inherits root
-
         # Reset logging
         _setup_logging(debug=False)
         assert CONFIG.debug_logging is False

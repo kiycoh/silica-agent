@@ -1,8 +1,5 @@
-import os
 import pytest
-from pathlib import Path
 from silica.driver.fs_backend import ObsidianFSBackend
-from silica.driver.base import NoteRef, Link
 
 @pytest.fixture
 def temp_vault(tmp_path):

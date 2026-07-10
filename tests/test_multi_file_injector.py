@@ -424,11 +424,6 @@ class TestT6DirectShortcuts:
         import silica.tools.composed  # noqa: F401
         import silica.tools.wrapped  # noqa: F401
 
-    def _run_direct(self, cmd: str) -> bool:
-        from silica.cli import _handle_direct_shortcut
-        with patch("silica.cli.CONSOLE"):
-            return _handle_direct_shortcut(cmd, [])
-
     def test_status_handled_directly(self):
         from silica.cli import _handle_direct_shortcut
         # Tool.run catches its own errors (missing run dir) and returns JSON error string

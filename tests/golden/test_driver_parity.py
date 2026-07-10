@@ -281,10 +281,6 @@ def test_synthetic_vault_duplicate_basenames_distinct_keys(fs_backend):
     assert "B/Cell" in snap.link_counts, (
         f"Expected 'B/Cell' in link_counts. Keys: {sorted(snap.link_counts)}"
     )
-    # They must be distinct keys (not collapsed to "cell")
-    assert snap.link_counts["A/Cell"] != snap.link_counts["B/Cell"] or True
-    # Both must exist independently
-    assert "A/Cell" != "B/Cell"
 
 
 def test_synthetic_vault_orphan_detected(fs_backend):

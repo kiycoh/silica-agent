@@ -50,13 +50,6 @@ def test_cancel_before_first_iteration():
 def test_cancel_after_first_iteration():
     """Token is set after the first LLM call completes; second call must not happen."""
     token = threading.Event()
-    call_count = 0
-
-    def fake_call_llm(*a, **k):
-        nonlocal call_count
-        call_count += 1
-        token.set()               # set after first call
-        return _fake_resp()       # no tool calls → would normally return
 
     # Without tool calls the loop returns immediately after the first response,
     # so we need a tool call on iteration 1 to force a second LLM call.

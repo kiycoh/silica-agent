@@ -214,11 +214,6 @@ class TestRenderHtmlCommunities:
         communities = [self._make_community(0, evil_label)]
         rendered = render_html([], [], communities=communities, lib_js="// x")
 
-        # The raw dangerous sequence must NOT appear anywhere in the rendered HTML
-        assert "</script>" not in rendered.split("COMM_LABELS")[1].split("</script>")[0] or \
-               rendered.count("</script>") == rendered.count("</script>"), \
-               "raw </script> found in COMM_LABELS region"
-
         # More direct: after COMM_LABELS the first '</script>' occurrence should be
         # the legitimate one that closes the <script> block, NOT embedded in the JSON
         comm_labels_region = rendered.split("COMM_LABELS =")[1].split(";")[0]

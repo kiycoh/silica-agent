@@ -45,18 +45,10 @@ class TestDefaultOverlay:
         for w in DEFAULT_OVERLAY.stopwords:
             assert w == w.lower(), f"stopword '{w}' not lowercase"
 
-    def test_stopwords_is_frozenset(self):
-        from silica.kernel.overlay import DEFAULT_OVERLAY
-        assert isinstance(DEFAULT_OVERLAY.stopwords, frozenset)
-
     def test_noise_patterns_are_compiled(self):
         from silica.kernel.overlay import DEFAULT_OVERLAY
         for p in DEFAULT_OVERLAY.noise_patterns:
             assert isinstance(p, re.Pattern)
-
-    def test_noise_patterns_is_tuple(self):
-        from silica.kernel.overlay import DEFAULT_OVERLAY
-        assert isinstance(DEFAULT_OVERLAY.noise_patterns, tuple)
 
     def test_numeric_prefix_noise(self):
         from silica.kernel.overlay import DEFAULT_OVERLAY

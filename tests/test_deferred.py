@@ -105,13 +105,6 @@ def test_deferred_list_empty(store):
 # VALIDATE gate: partial-write behaviour
 # ---------------------------------------------------------------------------
 
-def _make_ops_file(tmp_path, ops: list) -> str:
-    import orjson
-    p = tmp_path / "ops.json"
-    p.write_bytes(orjson.dumps(ops))
-    return str(p)
-
-
 def test_validate_returns_validated_and_rejected_lists(tmp_path):
     """validate_operations always returns (validated, rejected) lists — never raises."""
     from silica.kernel.ops import Op, OpType

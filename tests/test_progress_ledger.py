@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import pytest
-from pathlib import Path
 
 from silica.kernel.progress import (
     PlanStep,
@@ -11,21 +10,6 @@ from silica.kernel.progress import (
     Task,
     TaskLedger,
 )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _ledger(tmp_path: Path, mode: str = "inject") -> ProgressLedger:
-    """Return a fresh ProgressLedger whose save() target is tmp_path."""
-    import silica.kernel.progress as _mod
-    monkeypatched = _mod._RUNS_DIR
-    _mod._RUNS_DIR = tmp_path
-    try:
-        return ProgressLedger.new(mode=mode, inputs={"inbox": "test.md"})
-    finally:
-        _mod._RUNS_DIR = monkeypatched
 
 
 # ---------------------------------------------------------------------------
