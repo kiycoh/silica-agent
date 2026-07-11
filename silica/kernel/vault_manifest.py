@@ -62,7 +62,7 @@ def default_sources(vault: str | Path) -> tuple[str, ...]:
     out = ["prose"]
     try:
         if vault and gitstate.find_repo_root(Path(vault)) is not None:
-            out.append("code")
+            out += ["code", "notebook"]
     except Exception:
         pass
     return tuple(out)

@@ -14,11 +14,12 @@ from collections.abc import Sequence
 
 from silica.sources.base import SourceAdapter
 from silica.sources.code import CODE
+from silica.sources.notebook import NOTEBOOK
 from silica.sources.prose import PROSE
 
 logger = logging.getLogger(__name__)
 
-ALL_ADAPTERS: tuple[SourceAdapter, ...] = (PROSE, CODE)
+ALL_ADAPTERS: tuple[SourceAdapter, ...] = (PROSE, CODE, NOTEBOOK)
 
 
 def enabled_adapters(enabled: Sequence[str] | None = None) -> list[SourceAdapter]:

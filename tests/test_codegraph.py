@@ -144,3 +144,26 @@ def test_parse_error_file_present_never_aborts(tmp_path, monkeypatch):
     subprocess.run(["git", "commit", "-q", "-m", "c"], cwd=tmp_path, check=True)
     g = codegraph.build_codegraph(tmp_path)
     assert "bad.py" in g.files  # tree-sitter is error-tolerant: entry exists either way
+
+
+def test_notebook_is_a_file_node(tmp_path):
+    import json as _json
+    _init_repo(tmp_path)
+    _seed_mini_repo(tmp_path)
+    nb = _json.dumps({"nbformat": 4, "metadata": {"kernelspec": {"language": "python"}},
+                      "cells": [{"cell_type": "code",
+                                 "source": "from pkg.paths import norm\nimport pandas\n"}]})
+    (tmp_path / "analysis.ipynb").write_text(nb, encoding="utf-8")
+    g = codegraph.build_codegraph(tmp_path)
+    assert g.files["analysis.ipynb"]["imports"] == ["pkg/paths.py"]
+    assert g.files["analysis.ipynb"]["external"] == ["pandas"]
+    assert g.fan_in("pkg/paths.py") == 2  # embed.py + the notebook
+
+
+def test_malformed_notebook_gets_parse_error_entry(tmp_path):
+    _init_repo(tmp_path)
+    _seed_mini_repo(tmp_path)
+    (tmp_path / "bad.ipynb").write_text("{not json", encoding="utf-8")
+    g = codegraph.build_codegraph(tmp_path)  # build never aborts (spec §1)
+    assert g.files["bad.ipynb"]["parse_error"] is True
+    assert g.files["bad.ipynb"]["symbols"] == []

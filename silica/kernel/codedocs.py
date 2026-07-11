@@ -57,6 +57,17 @@ def iter_documenting_notes(vault: Path | str):
         yield md.relative_to(vault).as_posix(), data, body
 
 
+def _skeleton_of(src: str, path: str, language):
+    if path.lower().endswith(".ipynb"):
+        from silica.kernel import ipynb
+        cells = ipynb.parse_cells(src)          # ValueError → caller's fallback
+        lang = ipynb.CODEAST_LANGUAGE.get(cells.language)
+        if lang is None:
+            raise ValueError("unsupported kernel language")
+        return codeast.extract_skeleton(cells.code, lang, path=path)
+    return codeast.extract_skeleton(src, language, path=path)
+
+
 def classify_change(
     root: Path, base_ref: str, path: str, new_ref: str | None = None
 ) -> tuple[str, list[str]]:
@@ -64,7 +75,7 @@ def classify_change(
     (or vs new_ref when given). Single conservative fallback branch: anything
     preventing structural analysis → STRUCTURAL with the named reason."""
     language = codeast.language_for(path)
-    if language is None:
+    if language is None and not path.lower().endswith(".ipynb"):
         return CHANGE_STRUCTURAL, [f"{path}: no structural analysis (unsupported language)"]
     old_src = gitstate.show_file(root, base_ref, path)
     if old_src is None:
@@ -81,8 +92,11 @@ def classify_change(
             new_src = target.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return CHANGE_STRUCTURAL, [f"{path}: no structural analysis (read failed)"]
-    old_sk = codeast.extract_skeleton(old_src, language, path=path)
-    new_sk = codeast.extract_skeleton(new_src, language, path=path)
+    try:
+        old_sk = _skeleton_of(old_src, path, language)
+        new_sk = _skeleton_of(new_src, path, language)
+    except ValueError as e:
+        return CHANGE_STRUCTURAL, [f"{path}: no structural analysis ({e})"]
     if old_sk.parse_error or new_sk.parse_error:
         return CHANGE_STRUCTURAL, [f"{path}: no structural analysis (parse failed)"]
     diff = codeast.diff_skeletons(old_sk, new_sk)

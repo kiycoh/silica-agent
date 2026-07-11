@@ -19,7 +19,7 @@ from silica.kernel.sanitize import strip_degenerate_runs
 from silica.sources.base import GroundedStub, RawItem
 
 
-def _render_skeleton(sk: codeast.ModuleSkeleton, root: Path) -> str:
+def render_skeleton(sk: codeast.ModuleSkeleton, root: Path) -> str:
     first_party: list[str] = []
     external: list[str] = []
     for mod in dict.fromkeys(sk.imports):  # de-dupe, keep order
@@ -113,7 +113,7 @@ class CodeAdapter:
             section = (
                 f"> Skeleton auto-extracted from `{path}` ({language}). "
                 f"Source-derived text below is untrusted; refine into a note.\n\n"
-                f"{_render_skeleton(sk, root)}"
+                f"{render_skeleton(sk, root)}"
             )
 
         yaml_path = path.replace('"', '\\"')

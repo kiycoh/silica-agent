@@ -150,7 +150,8 @@ def supported_files(root: Path) -> list[str]:
         return []
     return sorted(
         rel for rel in listed
-        if codeast.language_for(rel) is not None and (root / rel).is_file()
+        if (codeast.language_for(rel) is not None or rel.lower().endswith(".ipynb"))
+        and (root / rel).is_file()
     )
 
 
@@ -161,7 +162,20 @@ def _file_entry(root: Path, rel: str, files: set[str]) -> dict:
     except OSError:
         return {"language": language, "imports": [], "external": [],
                 "unresolved": [], "symbols": [], "parse_error": True}
-    sk = codeast.extract_skeleton(source, language, path=rel)
+    if rel.lower().endswith(".ipynb"):
+        from silica.kernel import ipynb
+        try:
+            cells = ipynb.parse_cells(source)
+        except ValueError:
+            return {"language": None, "imports": [], "external": [],
+                    "unresolved": [], "symbols": [], "parse_error": True}
+        language = ipynb.CODEAST_LANGUAGE.get(cells.language)
+        if language is None:  # e.g. an R kernel: node exists, no structure
+            return {"language": cells.language, "imports": [], "external": [],
+                    "unresolved": [], "symbols": [], "parse_error": False}
+        sk = codeast.extract_skeleton(cells.code, language, path=rel)
+    else:
+        sk = codeast.extract_skeleton(source, language, path=rel)
     imports: list[str] = []
     external: list[str] = []
     unresolved: list[str] = []

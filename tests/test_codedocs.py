@@ -139,3 +139,21 @@ def test_note_verdict_aggregates_multi_path():
     assert level == CHANGE_STRUCTURAL          # 1 STRUCTURAL of N → structural
     assert details == ["b.py: + function f"]
     assert note_verdict([a])[0] == CHANGE_COSMETIC
+
+
+def test_notebook_staleness_classifies_like_code(tmp_path):
+    import json as _json
+    _init_repo(tmp_path)
+    def nb(src):
+        return _json.dumps({"nbformat": 4,
+                            "metadata": {"kernelspec": {"language": "python"}},
+                            "cells": [{"cell_type": "code", "source": src}]})
+    ref0 = _commit(tmp_path, "a.ipynb", nb("def f(x):\n    return x\n"), "c1")
+    vault = tmp_path / "docs"; vault.mkdir()
+    _write_note(vault, "a.md", ["a.ipynb"], ref0)
+    _commit(tmp_path, "a.ipynb", nb("def f(x):\n    return x + 1\n"), "c2")
+    stale = codedocs.stale_docs(vault, repo_root=tmp_path)
+    assert stale[0].change_level == codedocs.CHANGE_COSMETIC  # body-only cell edit
+    _commit(tmp_path, "a.ipynb", nb("def f(x, y):\n    return x\n"), "c3")
+    stale = codedocs.stale_docs(vault, repo_root=tmp_path)
+    assert stale[0].change_level == codedocs.CHANGE_STRUCTURAL
