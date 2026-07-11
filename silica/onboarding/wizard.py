@@ -180,7 +180,7 @@ def _run_wizard_inner(
         )
     updates["SILICA_PROVIDER"] = provider
     if provider == "openrouter":
-        model = _ask(input_fn, "Model id", "openrouter/openai/gpt-4o-mini")
+        model = _ask(input_fn, "Model id", "openrouter/anthropic/claude-sonnet-5")
         key = ""
         while not key:
             key = _ask(
