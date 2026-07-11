@@ -12,7 +12,8 @@ import pytest
 
 from silica.kernel import frontmatter
 from silica.kernel.cooccurrence import CooccurStore, build_contribution
-from tests.eval.golden import lint, probe_classify, probe_integrity, probe_links
+from silica.kernel.health import integrity_probe, lint
+from tests.eval.golden import probe_classify, probe_links
 
 
 def test_probe_links_masked_recall(synthetic_vault):
@@ -68,7 +69,7 @@ def test_probe_classify_taxonomy_and_counting(synthetic_vault, tmp_path):
 
 def test_probe_integrity_differential(synthetic_vault):
     # (a) every write-path transform leaves the clean fixture clean.
-    assert probe_integrity.run(synthetic_vault)["rate"] == 1.0
+    assert integrity_probe(synthetic_vault)["rate"] == 1.0
     # (b) an introduced violation is caught.
     assert lint.new_violations("fine", "fine\n```python\nx = 1") == {"unclosed-code-fence": 1}
     # (c) a pre-existing violation diffed against itself never counts.

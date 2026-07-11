@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""OFM well-formedness lint for the golden harness (probe_integrity only).
+"""OFM well-formedness lint for the integrity probe only.
+
+Distinct from ``kernel.linter`` (the post-write gate): this is the measuring
+instrument that defines the ``integrity.rate`` metric.
 
 Two uses:
   * absolute ``scan(text)`` — informational ground-truth counts on the human vault

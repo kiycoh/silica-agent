@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Unit tests for probe_fusion — masked-pair recovery through the full facade.
+"""Unit tests for the fusion probe (silica.kernel.health) + reranker A/B.
 
 Magnitudes are corpus properties; these pin the mechanics on synthetic vaults:
 cheap-tier recovery via the cooccur legs, clean embed abstention, and the test
@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 
 from silica.kernel.cooccurrence import CooccurStore, build_contribution
+from silica.kernel import health
 from tests.eval.golden import probe_fusion
 
 
@@ -55,7 +56,7 @@ class _FakeEmbedStore:
 
 def test_empty_store_is_zeros(tmp_path):
     st = CooccurStore(path=tmp_path / "idx" / "c.json", lang="english")
-    res = probe_fusion.run(tmp_path, st)
+    res = health.fusion_probe(tmp_path, st)
     assert res["pairs_evaluated"] == 0 and res["recall_at_10"] == 0.0
     assert res["legs"] == ""
 
@@ -67,7 +68,7 @@ def test_recovers_text_similar_pair_cheap_tier(tmp_path):
         "A": "quick sort compares array elements",
         "B": "quick sort swaps array elements",
     })
-    res = probe_fusion.run(tmp_path, st)
+    res = health.fusion_probe(tmp_path, st)
     assert res["pairs_evaluated"] == 1
     assert res["recall_at_10"] == 1.0
     assert res["mrr"] > 0.0
@@ -82,12 +83,12 @@ def test_embed_only_pair_needs_the_embed_leg(tmp_path):
     (tmp_path / "B.md").write_text("delta epsilon zeta")
     st = _store(tmp_path, {"A": "alpha beta gamma", "B": "delta epsilon zeta"})
 
-    cheap = probe_fusion.run(tmp_path, st)
+    cheap = health.fusion_probe(tmp_path, st)
     assert cheap["pairs_evaluated"] == 1
     assert cheap["recall_at_10"] == 0.0
 
     fake = _FakeEmbedStore({"A": [1.0, 0.0], "B": [0.9, 0.1]})
-    full = probe_fusion.run(tmp_path, st, embed_store=fake)
+    full = health.fusion_probe(tmp_path, st, embed_store=fake)
     assert full["recall_at_10"] == 1.0
     assert full["mrr"] == 1.0  # rank 1 from at least one direction
     assert full["legs"] == "embed+cooccur+edges"
@@ -162,6 +163,6 @@ def test_empty_embed_store_abstains_cleanly(tmp_path):
         "A": "quick sort compares array elements",
         "B": "quick sort swaps array elements",
     })
-    res = probe_fusion.run(tmp_path, st, embed_store=_FakeEmbedStore({}))
+    res = health.fusion_probe(tmp_path, st, embed_store=_FakeEmbedStore({}))
     assert res["recall_at_10"] == 1.0  # cooccur legs still carry the pair
     assert res["legs"] == "cooccur+edges"  # empty store counts as absent

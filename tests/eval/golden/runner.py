@@ -22,11 +22,13 @@ import json
 import os
 from pathlib import Path
 
+# Gated probes (fusion_probe, integrity_probe) live in kernel.health — shared
+# with the silica_health tool; iter_notes re-exported so probes keep one source.
+from silica.kernel.health import fusion_probe, integrity_probe, iter_notes  # noqa: F401
 from tests.eval.golden import (
     probe_classify,
     probe_correlate,
     probe_fusion,
-    probe_integrity,
     probe_links,
 )
 
@@ -43,18 +45,6 @@ _PRIMARIES = ("classify.agreement", "links.recall", "integrity.rate")
 
 def _today() -> str:
     return datetime.date.today().isoformat()
-
-
-def iter_notes(vault: Path) -> list[Path]:
-    """Sorted ``*.md`` under the vault, excluding dot-directories.
-
-    Single source of truth for both the digest and every probe, so the harness
-    can never measure a note set the digest didn't hash.
-    """
-    return sorted(
-        p for p in vault.rglob("*.md")
-        if not any(part.startswith(".") for part in p.relative_to(vault).parts)
-    )
 
 
 def resolve_vault(cli: str | None) -> Path:
@@ -142,7 +132,7 @@ def collect(vault: Path, *, tier: str = "cheap", verbose: bool = False) -> dict:
     metrics["links.links_evaluated"] = lk["links_evaluated"]
     metrics["links.notes_evaluated"] = lk["notes_evaluated"]
 
-    ig = probe_integrity.run(vault, verbose=verbose)
+    ig = integrity_probe(vault, verbose=verbose)
     metrics["integrity.rate"] = ig["rate"]
     metrics["integrity.notes"] = ig["notes"]
     metrics["integrity.vault_structural_violations"] = ig["vault_structural_violations"]
@@ -165,7 +155,7 @@ def collect(vault: Path, *, tier: str = "cheap", verbose: bool = False) -> dict:
 
     # FUSION: masked-pair recovery through the full relatedness facade — the
     # only end-to-end gate on RRF + leg wiring.
-    fz = probe_fusion.run(vault, store, embed_store=embed_store, verbose=verbose)
+    fz = fusion_probe(vault, store, embed_store=embed_store, verbose=verbose)
     metrics["fusion.recall_at_10"] = fz["recall_at_10"]
     metrics["fusion.mrr"] = fz["mrr"]
     metrics["fusion.pairs_evaluated"] = fz["pairs_evaluated"]

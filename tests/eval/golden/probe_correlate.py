@@ -22,12 +22,8 @@ edge is the product, not an error.
 """
 from __future__ import annotations
 
-import re
-
-from silica.kernel import frontmatter
-
-# (!?) embed marker, target, optional #anchor, optional |alias — targets only.
-_WIKILINK = re.compile(r"(!?)\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
+from silica.kernel.health import pair as _pair
+from silica.kernel.health import wikilink_graph as _wikilink_graph
 
 # Per-note expanded ranking depth — matches graph_report's _cooccur_ranking(k=10).
 EXPANDED_K = 10
@@ -41,41 +37,6 @@ _EMPTY = {
     "edges": 0,
     "edges_wikilinked_frac": 0.0,
 }
-
-
-def _pair(a: str, b: str) -> tuple[str, str]:
-    return (a, b) if a <= b else (b, a)
-
-
-def _wikilink_graph(vault, store) -> dict[str, set[str]]:
-    """Human body-wikilink adjacency {key: {keys}}, keyed by store paths.
-
-    Ambiguous basenames (one stem, several notes) are dropped — unresolvable,
-    the same ceiling probe_links accepts. Embeds (![[...]]) carry no prose link.
-    """
-    from tests.eval.golden.runner import iter_notes
-
-    keys = set(store.paths())
-    by_stem: dict[str, str | None] = {}
-    for k in keys:
-        stem = k.split("/")[-1]
-        by_stem[stem] = None if stem in by_stem else k
-
-    adj: dict[str, set[str]] = {}
-    for p in iter_notes(vault):
-        src = p.relative_to(vault).with_suffix("").as_posix()
-        if src not in keys:
-            continue
-        _data, _raw, body = frontmatter.split(p.read_text(encoding="utf-8"))
-        for m in _WIKILINK.finditer(body):
-            if m.group(1):  # embed — skip
-                continue
-            target = m.group(2).strip().replace("\\", "/").split("/")[-1]
-            dst = by_stem.get(target)
-            if dst and dst != src:
-                adj.setdefault(src, set()).add(dst)
-                adj.setdefault(dst, set()).add(src)
-    return adj
 
 
 def run(vault, store, *, verbose: bool = False) -> dict:
