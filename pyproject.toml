@@ -146,6 +146,7 @@ source_modules = [
   "silica.kernel.graph_report.cooccur_delta",
   "silica.kernel.graph_report.models",
   "silica.kernel.graph_report.render",
+  "silica.kernel.codegraph",
 ]
 forbidden_modules = ["silica.agent"]
 # embed_signals e run_substrate NON sono in lista: importano get_embedder
@@ -156,6 +157,15 @@ ignore_imports = [
   # compute lo importa per assemblare il report, non per costruire struttura.
   "silica.kernel.graph_report.embed_signals -> silica.agent.providers",
 ]
+
+[[tool.importlinter.contracts]]
+name = "structural is not semantic — codegraph never enters the fusion legs"
+type = "forbidden"
+source_modules = ["silica.kernel.relatedness", "silica.kernel.rerank"]
+forbidden_modules = ["silica.kernel.codegraph"]
+# Import edges are mechanical dependency, not semantic proximity: an import
+# hub (paths.py) would flood related_notes/RRF with structurally-adjacent,
+# semantically-empty neighbors (spec-code-lane, Principio ordinatore).
 
 [[tool.importlinter.contracts]]
 name = "graph data stays offline — the kernel viewer split leaves no network dep"

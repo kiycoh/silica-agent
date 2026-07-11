@@ -19,7 +19,13 @@ decision (autolink, coverage ordering, /impact).
 from __future__ import annotations
 
 import posixpath
+from dataclasses import dataclass, field as _field
 from pathlib import Path
+
+import orjson
+
+from silica.kernel import codeast, gitstate
+from silica.kernel import paths as _paths
 
 _TS_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 _TS_ALIAS_PREFIXES = ("@/", "~/")
@@ -111,3 +117,126 @@ def classify_import(
     if module.startswith(_TS_ALIAS_PREFIXES):
         return ("unresolved", module)  # alias-like: first-party, not external (spec §1)
     return ("external", module.split("/")[0])
+
+
+# ---------------------------------------------------------------------------
+# store — derived index at paths.index_dir()/codegraph.json
+# ---------------------------------------------------------------------------
+
+STORE_VERSION = 1
+
+
+def store_path() -> Path:
+    return _paths.index_dir() / "codegraph.json"
+
+
+@dataclass
+class CodeGraph:
+    head_ref: str
+    files: dict[str, dict] = _field(default_factory=dict)
+
+    def importers(self, path: str) -> list[str]:
+        return sorted(p for p, e in self.files.items() if path in e.get("imports", []))
+
+    def fan_in(self, path: str) -> int:
+        return sum(1 for e in self.files.values() if path in e.get("imports", []))
+
+
+def supported_files(root: Path) -> list[str]:
+    """Sorted repo-relative supported files, git-listed (tracked + untracked
+    non-ignored), existing on disk. Empty when git is unavailable."""
+    listed = gitstate.list_files(root)
+    if listed is None:
+        return []
+    return sorted(
+        rel for rel in listed
+        if codeast.language_for(rel) is not None and (root / rel).is_file()
+    )
+
+
+def _file_entry(root: Path, rel: str, files: set[str]) -> dict:
+    language = codeast.language_for(rel)
+    try:
+        source = (root / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return {"language": language, "imports": [], "external": [],
+                "unresolved": [], "symbols": [], "parse_error": True}
+    sk = codeast.extract_skeleton(source, language, path=rel)
+    imports: list[str] = []
+    external: list[str] = []
+    unresolved: list[str] = []
+    for mod in dict.fromkeys(sk.imports):
+        if not mod:
+            continue
+        kind, value = classify_import(mod, rel, files, language, root)
+        bucket = {"resolved": imports, "external": external, "unresolved": unresolved}[kind]
+        if value not in bucket:
+            bucket.append(value)
+    return {
+        "language": language,
+        "imports": imports,
+        "external": external,
+        "unresolved": unresolved,
+        "symbols": [
+            {"kind": s.kind, "name": s.name, "parent": s.parent,
+             "signature": s.signature, "doc": s.doc}
+            for s in sk.symbols
+        ],
+        "parse_error": sk.parse_error,
+    }
+
+
+def build_codegraph(root: Path) -> CodeGraph:
+    """Full rebuild — the only write path. The index is never repaired,
+    only recomputed (spec: Decisioni.2).
+    # ponytail: full rebuild (~ms/file); incremental per-file if a real repo makes it slow
+    """
+    current = supported_files(root)
+    files = set(current)
+    entries = {rel: _file_entry(root, rel, files) for rel in current}
+    return CodeGraph(head_ref=gitstate.head_ref(root) or "", files=entries)
+
+
+def _serialize(graph: CodeGraph) -> bytes:
+    # OPT_SORT_KEYS → byte-for-byte deterministic for the same repo state
+    # (symbols stay lists in document order; sorting only touches map keys).
+    return orjson.dumps(
+        {"version": STORE_VERSION, "head_ref": graph.head_ref, "files": graph.files},
+        option=orjson.OPT_SORT_KEYS,
+    )
+
+
+def _still_valid(data: dict, root: Path, current: list[str], sp: Path) -> bool:
+    """Validity key (spec §1): head_ref unchanged AND file set identical AND
+    no supported file newer than the store (mtime alone misses adds/deletes;
+    the set comparison catches them — same walk, same stat pass)."""
+    if data.get("head_ref", "") != (gitstate.head_ref(root) or ""):
+        return False
+    if set(data.get("files", {}).keys()) != set(current):
+        return False
+    try:
+        store_mtime = sp.stat().st_mtime
+        return all((root / rel).stat().st_mtime <= store_mtime for rel in current)
+    except OSError:
+        return False
+
+
+def load_codegraph(vault: Path | str) -> CodeGraph | None:
+    """Valid store, or transparent full rebuild + save. None when the vault
+    is not inside a git repo — the index is disabled and consumers report
+    "no repo", degrading soft (never an error in place of a poorer result)."""
+    root = gitstate.find_repo_root(Path(vault))
+    if root is None:
+        return None
+    sp = store_path()
+    current = supported_files(root)
+    if sp.exists():
+        try:
+            data = orjson.loads(sp.read_bytes())
+            if data.get("version") == STORE_VERSION and _still_valid(data, root, current, sp):
+                return CodeGraph(head_ref=data.get("head_ref", ""), files=data.get("files", {}))
+        except Exception:
+            _paths.quarantine(sp)  # corrupt derived store: aside for doctor, then rebuild
+    graph = build_codegraph(root)
+    _paths.atomic_write_bytes(sp, _serialize(graph))
+    return graph

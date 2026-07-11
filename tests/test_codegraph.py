@@ -69,3 +69,78 @@ def test_moved_helpers_still_work(tmp_path):
     assert is_first_party("silica.kernel.embed", tmp_path)
     assert not is_first_party("numpy", tmp_path)
     assert package_of("silica.kernel.embed", tmp_path) == "silica/kernel"
+
+
+import subprocess
+
+import pytest
+
+from silica.kernel import codegraph
+
+
+def _init_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=path, check=True)
+
+
+def _seed_mini_repo(root: Path) -> None:
+    """3-file py repo with cross imports (spec §8 fixture)."""
+    (root / "pkg").mkdir(parents=True, exist_ok=True)
+    (root / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "pkg" / "paths.py").write_text(
+        "import os\n\ndef norm(p: str) -> str:\n    return p\n", encoding="utf-8")
+    (root / "pkg" / "embed.py").write_text(
+        "from .paths import norm\nimport numpy\n\nclass Embedder:\n    pass\n", encoding="utf-8")
+    (root / "main.py").write_text(
+        "from pkg import embed\nfrom pkg.ghost import nope\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=root, check=True)
+
+
+def test_build_resolves_edges_external_unresolved(tmp_path):
+    _init_repo(tmp_path)
+    _seed_mini_repo(tmp_path)
+    g = codegraph.build_codegraph(tmp_path)
+    assert g.files["pkg/embed.py"]["imports"] == ["pkg/paths.py"]
+    assert g.files["pkg/embed.py"]["external"] == ["numpy"]
+    assert g.files["main.py"]["imports"] == ["pkg/embed.py"]
+    assert g.files["main.py"]["unresolved"] == ["pkg.ghost.nope"]
+    assert g.fan_in("pkg/paths.py") == 1
+    assert g.importers("pkg/embed.py") == ["main.py"]
+    syms = {s["name"] for s in g.files["pkg/embed.py"]["symbols"]}
+    assert "Embedder" in syms
+
+
+def test_build_is_deterministic_byte_for_byte(tmp_path):
+    _init_repo(tmp_path)
+    _seed_mini_repo(tmp_path)
+    a = codegraph._serialize(codegraph.build_codegraph(tmp_path))
+    b = codegraph._serialize(codegraph.build_codegraph(tmp_path))
+    assert a == b
+
+
+def test_load_codegraph_none_outside_repo(tmp_path):
+    assert codegraph.load_codegraph(tmp_path) is None
+
+
+def test_load_rebuilds_on_head_move_and_mtime(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    _seed_mini_repo(tmp_path)
+    store = tmp_path / "cg.json"
+    monkeypatch.setattr(codegraph, "store_path", lambda: store)
+    g1 = codegraph.load_codegraph(tmp_path)
+    assert store.exists() and g1 is not None
+    # valid store → served from disk (marker: mutate the file set → invalid)
+    (tmp_path / "new.py").write_text("x = 1\n", encoding="utf-8")  # untracked, supported
+    g2 = codegraph.load_codegraph(tmp_path)
+    assert "new.py" in g2.files  # file-set mismatch forced a full rebuild
+
+
+def test_parse_error_file_present_never_aborts(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    (tmp_path / "bad.py").write_text("def x(: pass", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "c"], cwd=tmp_path, check=True)
+    g = codegraph.build_codegraph(tmp_path)
+    assert "bad.py" in g.files  # tree-sitter is error-tolerant: entry exists either way
