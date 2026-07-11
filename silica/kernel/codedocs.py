@@ -16,8 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from silica.kernel import frontmatter, gitstate
+from silica.kernel import codeast, frontmatter, gitstate
 from silica.kernel.gitstate import CommitInfo
+
+CHANGE_COSMETIC = "cosmetic"
+CHANGE_STRUCTURAL = "structural"
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,8 @@ class StaleDoc:
     recorded_ref: str       # code_ref stored in the note
     current_ref: str        # newest commit sha for code_path
     intervening: list[CommitInfo] = field(default_factory=list)
+    change_level: str = CHANGE_STRUCTURAL   # conservative default (floor, not ceiling)
+    details: list[str] = field(default_factory=list)
 
 
 def _documents_of(data: dict) -> list[str]:
@@ -52,6 +57,49 @@ def iter_documenting_notes(vault: Path | str):
         yield md.relative_to(vault).as_posix(), data, body
 
 
+def classify_change(
+    root: Path, base_ref: str, path: str, new_ref: str | None = None
+) -> tuple[str, list[str]]:
+    """Per-path verdict: skeleton of `path` at base_ref vs the working tree
+    (or vs new_ref when given). Single conservative fallback branch: anything
+    preventing structural analysis → STRUCTURAL with the named reason."""
+    language = codeast.language_for(path)
+    if language is None:
+        return CHANGE_STRUCTURAL, [f"{path}: no structural analysis (unsupported language)"]
+    old_src = gitstate.show_file(root, base_ref, path)
+    if old_src is None:
+        return CHANGE_STRUCTURAL, [f"{path}: no structural analysis (ref {base_ref[:8]} unavailable)"]
+    if new_ref is not None:
+        new_src = gitstate.show_file(root, new_ref, path)
+        if new_src is None:
+            return CHANGE_STRUCTURAL, [f"{path}: deleted"]
+    else:
+        target = Path(root) / path
+        if not target.is_file():
+            return CHANGE_STRUCTURAL, [f"{path}: deleted"]
+        try:
+            new_src = target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return CHANGE_STRUCTURAL, [f"{path}: no structural analysis (read failed)"]
+    old_sk = codeast.extract_skeleton(old_src, language, path=path)
+    new_sk = codeast.extract_skeleton(new_src, language, path=path)
+    if old_sk.parse_error or new_sk.parse_error:
+        return CHANGE_STRUCTURAL, [f"{path}: no structural analysis (parse failed)"]
+    diff = codeast.diff_skeletons(old_sk, new_sk)
+    if not diff:
+        return CHANGE_COSMETIC, []
+    return CHANGE_STRUCTURAL, [f"{path}: {d}" for d in diff]
+
+
+def note_verdict(docs: list[StaleDoc]) -> tuple[str, list[str]]:
+    """Aggregate per-path verdicts for one note (spec §2): a single
+    STRUCTURAL path makes the note structural; details concatenate."""
+    level = (CHANGE_STRUCTURAL
+             if any(d.change_level == CHANGE_STRUCTURAL for d in docs)
+             else CHANGE_COSMETIC)
+    return level, [line for d in docs for line in d.details]
+
+
 def stale_docs(vault: Path | str, repo_root: Path | str | None = None) -> list[StaleDoc]:
     """Return one StaleDoc per (note, changed path). Empty when git is absent."""
     vault = Path(vault)
@@ -70,6 +118,7 @@ def stale_docs(vault: Path | str, repo_root: Path | str | None = None) -> list[S
                 continue  # path has no history → unknown, not stale
             current = latest[0].sha
             if current != recorded:
+                level, details = classify_change(root, recorded, code_path)
                 out.append(
                     StaleDoc(
                         note_path=note_path,
@@ -77,6 +126,8 @@ def stale_docs(vault: Path | str, repo_root: Path | str | None = None) -> list[S
                         recorded_ref=recorded,
                         current_ref=current,
                         intervening=gitstate.commits_since(root, recorded, code_path),
+                        change_level=level,
+                        details=details,
                     )
                 )
     return out

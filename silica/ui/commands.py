@@ -160,8 +160,8 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/stale",
         group="direct",
-        usage="",
-        summary="list notes whose documents: paths have new commits since code_ref",
+        usage="[--all]",
+        summary="list notes whose documents: sources changed structurally (--all includes cosmetic)",
     ),
     Command(
         name="/plans",

@@ -513,19 +513,36 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         if not vault:
             CONSOLE.print("  No vault configured; /stale needs a .silica vault in a git repo.")
             return True
+        show_all = "--all" in parts[1:]
         stale = codedocs.stale_docs(Path(vault))
-        if not stale:
-            CONSOLE.print("  No stale docs — every documents: note matches its code_ref.")
-            return True
-        CONSOLE.print(f"  [bold]Stale docs — {len(stale)} note/path pair(s):[/]")
+        by_note: dict[str, list] = {}
         for sd in stale:
-            n = len(sd.intervening)
-            CONSOLE.print(
-                f"  · [bold]{sd.note_path}[/] documents [bold]{sd.code_path}[/] "
-                f"— {n} new commit(s) since {sd.recorded_ref[:8]}"
-            )
-            for c in sd.intervening[:3]:
-                CONSOLE.print(f"      {c.sha[:8]}  {c.subject}")
+            by_note.setdefault(sd.note_path, []).append(sd)
+        shown = 0
+        for note_path, docs in sorted(by_note.items()):
+            level, details = codedocs.note_verdict(docs)
+            if level != codedocs.CHANGE_STRUCTURAL and not show_all:
+                continue
+            shown += 1
+            CONSOLE.print(f"  · [bold]{note_path}[/] — {level}")
+            for sd in docs:
+                n = len(sd.intervening)
+                CONSOLE.print(
+                    f"      documents [bold]{sd.code_path}[/] — {n} new commit(s) "
+                    f"since {sd.recorded_ref[:8]}"
+                )
+            for d in details[:6]:
+                CONSOLE.print(f"      {d}")
+        if not shown:
+            hidden = len(by_note)
+            if hidden and not show_all:
+                CONSOLE.print(
+                    f"  No structural staleness. {hidden} note(s) have cosmetic-only "
+                    "changes — use [bold]/stale --all[/] to list them."
+                )
+            else:
+                CONSOLE.print("  No stale docs — every documents: note matches its code_ref.")
+            return True
         CONSOLE.print("  Run [bold]/ingest <path>[/] to regenerate, or edit and re-badge.")
         return True
 

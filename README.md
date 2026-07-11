@@ -9,7 +9,7 @@
   <img src="docs/assets/sili_no_bg.png" alt="Silica Mascot Sili" width="250" />
 </p>
 
-> **Silica** is a deterministic agent orchestrator for human-readable knowledge vaults: a CLI tool for **safe** curation and organization. Local-first and open-source. Supports Obsidian.
+> **Silica** is an FSM-orchestrated agent for human-readable knowledge vaults, with a deterministic retrieval layer and safety-gated writes: a CLI tool for **safe** curation and organization. Local-first and open-source. Supports Obsidian.
 
 > ⚖️ **License - read this before modifying, distributing, or using this code.** Silica is licensed under **AGPL-3.0-or-later**, a *strong copyleft* license. If you copy any part of this code - even a single function - into your own project, **that entire project must be released under the AGPL-3.0** with complete source available to every user. Under §13 (the network clause) this applies **even if you only run it as a web service** and never distribute a binary. Closed-source or proprietary use of this code is not permitted. See [LICENSE](LICENSE).
 
@@ -56,10 +56,10 @@ You don't have to believe anything about the model. You only have to believe tha
   <img src="docs/assets/pipeline.svg" alt="Silica vault pipeline mapped onto a software engineering pipeline" width="880" />
 </p>
 
-Silica is a CLI-based deterministic agent orchestrator that manages Obsidian vaults, keeping context of how their pieces relate: co-occurrence, hyperlinks, graph. Codebases, images, and `.pdf`/`.docx`/`.txt` documents are in progress (see [Status](#status)).
+Silica is a CLI-based, FSM-orchestrated agent that manages Obsidian vaults, keeping context of how their pieces relate: co-occurrence, hyperlinks, graph. Codebases, images, and `.pdf`/`.docx`/`.txt` documents are in progress (see [Status](#status)).
 
 - Silica is ***local-first*** (LM Studio, Ollama); OpenRouter is also supported.
-- **Silica prevents vault corruption and structural clutter** through safety-hardened tools and layered rollback.
+- **Silica guards against vault corruption and structural clutter** through safety-hardened tools and layered rollback.
 - Silica maintains a vault index **separate from your files**.
 - Silica is **not** a free-form agent orchestrator: every write passes through a state machine.
 
@@ -201,7 +201,7 @@ The vault resolves like the REPL: `SILICA_VAULT` if set (add `-e SILICA_VAULT=/p
 | `/curate` | `[folder] [--apply]` | Curate the vault: plan autolink/orphan/dedup/refine work (dry-run; `--apply` executes) |
 | `/refine` | `[folder]` | Enrich and normalize notes (sub-agent) |
 | `/enrich` | `[folder]` | Enrich note semantics (sub-agent) |
-| `/stale` | | List notes whose `documents:` paths have new commits since `code_ref` |
+| `/stale [--all]` | | List notes whose `documents:` sources changed structurally since `code_ref` (`--all` includes cosmetic body-only changes) |
 | `/plans` | | List `plans/` notes grouped by `status:` |
 
 **System:** `/help` · `/model` · `/tools` · `/clear` · `/verbose` · `/thinking` · `/vault [path]` (show or switch the active vault for this session) · `/exit`

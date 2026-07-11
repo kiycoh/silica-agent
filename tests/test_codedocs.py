@@ -82,3 +82,60 @@ def test_stale_count_zero_without_git(tmp_path):
     vault.mkdir()
     (vault / "m.md").write_text("---\ndocuments:\n  - x.py\ncode_ref: abc\n---\n\nb\n", encoding="utf-8")
     assert codedocs.stale_count(vault) == 0  # not a repo → soft zero
+
+
+def test_body_only_change_is_cosmetic(tmp_path):
+    _init_repo(tmp_path)
+    ref0 = _commit(tmp_path, "src/m.py", "def hi(n: str) -> str:\n    return n\n", "c1")
+    vault = tmp_path / "docs"; vault.mkdir()
+    _write_note(vault, "m.md", ["src/m.py"], ref0)
+    _commit(tmp_path, "src/m.py", "def hi(n: str) -> str:\n    return n.upper()\n", "c2")
+    stale = codedocs.stale_docs(vault, repo_root=tmp_path)
+    assert len(stale) == 1
+    assert stale[0].change_level == codedocs.CHANGE_COSMETIC
+    assert stale[0].details == []
+
+
+def test_signature_change_is_structural_with_detail(tmp_path):
+    _init_repo(tmp_path)
+    ref0 = _commit(tmp_path, "src/m.py", "def hi(n: str) -> str:\n    return n\n", "c1")
+    vault = tmp_path / "docs"; vault.mkdir()
+    _write_note(vault, "m.md", ["src/m.py"], ref0)
+    _commit(tmp_path, "src/m.py", "def hi(n: str, loud: bool) -> str:\n    return n\n", "c2")
+    stale = codedocs.stale_docs(vault, repo_root=tmp_path)
+    assert stale[0].change_level == codedocs.CHANGE_STRUCTURAL
+    assert any("signature changed: hi" in d for d in stale[0].details)
+
+
+def test_unresolvable_ref_falls_back_conservative(tmp_path):
+    _init_repo(tmp_path)
+    _commit(tmp_path, "src/m.py", "v1\n", "c1")
+    vault = tmp_path / "docs"; vault.mkdir()
+    _write_note(vault, "m.md", ["src/m.py"], "f" * 40)  # unknown sha (hex→str, not YAML int 0)
+    _commit(tmp_path, "src/m.py", "v2\n", "c2")
+    stale = codedocs.stale_docs(vault, repo_root=tmp_path)
+    assert stale[0].change_level == codedocs.CHANGE_STRUCTURAL
+    assert any("no structural analysis" in d for d in stale[0].details)
+
+
+def test_deleted_path_is_structural(tmp_path):
+    import subprocess as sp
+    _init_repo(tmp_path)
+    ref0 = _commit(tmp_path, "src/m.py", "def hi(): ...\n", "c1")
+    vault = tmp_path / "docs"; vault.mkdir()
+    _write_note(vault, "m.md", ["src/m.py"], ref0)
+    sp.run(["git", "rm", "-q", "src/m.py"], cwd=tmp_path, check=True)
+    sp.run(["git", "commit", "-q", "-m", "rm"], cwd=tmp_path, check=True)
+    stale = codedocs.stale_docs(vault, repo_root=tmp_path)
+    assert stale[0].change_level == codedocs.CHANGE_STRUCTURAL
+    assert any("deleted" in d for d in stale[0].details)
+
+
+def test_note_verdict_aggregates_multi_path():
+    from silica.kernel.codedocs import CHANGE_COSMETIC, CHANGE_STRUCTURAL, StaleDoc, note_verdict
+    a = StaleDoc("n.md", "a.py", "r", "c", change_level=CHANGE_COSMETIC, details=[])
+    b = StaleDoc("n.md", "b.py", "r", "c", change_level=CHANGE_STRUCTURAL, details=["b.py: + function f"])
+    level, details = note_verdict([a, b])
+    assert level == CHANGE_STRUCTURAL          # 1 STRUCTURAL of N → structural
+    assert details == ["b.py: + function f"]
+    assert note_verdict([a])[0] == CHANGE_COSMETIC
