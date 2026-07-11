@@ -53,6 +53,8 @@ from silica.tools.graph import (  # noqa: F401
     silica_cooccurrence_refresh,
     silica_embed_refresh,
     silica_graph_export,
+    silica_health,
+    silica_related,
     silica_semantic_search,
     silica_similar,
     silica_vault_report,

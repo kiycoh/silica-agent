@@ -93,6 +93,15 @@ def silica_write_note(path: str, content: str) -> dict[str, Any]:
     """
     from silica.kernel.checkpoints import get_checkpoint_store
 
+    # The fs backend's create() overwrites silently — enforce the documented
+    # contract here, at the tool seam, so no backend can clobber an existing note.
+    try:
+        DRIVER.read_note(path)
+    except Exception:
+        pass  # missing note — the happy path
+    else:
+        return {"error": f"Note '{path}' already exists: use silica_patch_note to modify it."}
+
     try:
         ref = DRIVER.create(path, content)
     except Exception as e:

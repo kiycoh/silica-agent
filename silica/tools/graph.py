@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
 from silica.tools import tool
+from silica.tools.atomic import EmptyArgs
 
 logger = logging.getLogger(__name__)
 
@@ -331,9 +332,65 @@ def silica_similar(text: str, k: int = 5) -> dict[str, Any]:
     Same relatedness facade as silica_semantic_search (fused embeddings +
     co-occurrence, reranked), but framed for a longer text (a note body, a
     paragraph) rather than a short query — use it for "which notes resemble this
-    content". A down leg degrades to the survivor instead of failing.
+    content". A down leg degrades to the survivor instead of failing. When the text
+    IS an existing note, prefer silica_related (it takes the note directly and adds
+    the note-edges leg).
     """
     return {"text": text[:120], **_facade_search(text, k=k)}
+
+
+class RelatedArgs(BaseModel):
+    note: str = Field(description="Note name (wikilink-style) or vault-relative path to find related notes for")
+    k: int = Field(default=5, description="Number of results to return")
+
+@tool(RelatedArgs, cls="composed")
+def silica_related(note: str, k: int = 5) -> dict[str, Any]:
+    """Given an EXISTING note (by name or path), the notes most related to it.
+
+    Fuses three graph metrics over the whole vault — embeddings + co-occurrence +
+    direct note-edges (CORRELATE) — into one ranked shortlist with provenance, so
+    you get a bounded set of candidates instead of guessing. Use this when asked
+    "what's related/relevant to note X" INSTEAD of reading X and keyword-searching
+    from its words. For free-form text that is not a note, use silica_similar. Each
+    result carries `evidence` (embed:0.83, cooccur:w9, edge:0.57) naming which metric
+    proposed it; verify with silica_read_note before acting.
+    """
+    from silica.config import CONFIG
+    from silica.driver import DRIVER
+    from silica.kernel.cooccurrence import cooccur_key, get_cooccur_store
+    from silica.kernel.embed import get_store
+    from silica.kernel.relatedness import related_notes
+
+    # Resolve name-or-path to the canonical vault path (any backend), then reduce to
+    # the store keyspace via cooccur_key (strip .md, posix, CASE-PRESERVED). This is
+    # the single source of truth for both index keyspaces: it makes the query hit the
+    # stored vectors/nodes AND lets related_notes exclude the query itself (blocking
+    # a raw ".md" path would let the note resurface among its own results). Never
+    # _norm_path here — its lowercasing misses the case-preserving stored keys.
+    try:
+        query_path = DRIVER.read_note(note).ref.path
+    except Exception:
+        query_path = note  # unresolved: treat the input itself as a path
+    query_path = cooccur_key(query_path)
+
+    embed_store = get_store()
+    try:
+        cooccur_store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
+        if len(cooccur_store) == 0:
+            cooccur_store = None
+    except Exception:
+        cooccur_store = None
+    if len(embed_store) == 0 and cooccur_store is None:
+        return {"note": note, "error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
+
+    results = related_notes(query_path, embed_store=embed_store, cooccur_store=cooccur_store, k=k)
+    return {
+        "note": note,
+        "results": [
+            {"path": r.path, "name": r.name, "score": round(r.score, 4), "evidence": r.evidence}
+            for r in results
+        ],
+    }
 
 
 class EmbedRefreshArgs(BaseModel):
@@ -591,3 +648,44 @@ def silica_vault_report(
     result["issues"] = len(plan.escalate)
 
     return result
+
+
+@tool(EmptyArgs, cls="composed")
+def silica_health() -> dict[str, Any]:
+    """Retrieval + write-path health check — the golden harness's two GATED metrics, live.
+
+    Runs both gated probes against the current vault and its on-disk indexes:
+      fusion    — masked-wikilink recovery through the full relatedness facade:
+                  recall@10, mrr, embed_coverage, and which legs were live.
+                  Low recall or embed_coverage < 1.0 means related/semantic
+                  search is degraded — refresh with silica_embed_refresh /
+                  silica_cooccurrence_refresh and re-run.
+      integrity — differential lint across the 4 write-path transforms
+                  (frontmatter round-trip, autolink, fs write→read, sanitize);
+                  rate must be exactly 1.0 — anything less means the pipeline
+                  CORRUPTS note bodies and writes should stop.
+
+    Full-vault sweep (reads every note): a diagnostic to run on demand, not a
+    per-write gate. Numbers are regression trends, not absolute quality claims —
+    for a structural audit of the vault's content use silica_vault_report.
+    """
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.kernel.cooccurrence import get_cooccur_store
+    from silica.kernel.embed import get_store
+    from silica.kernel.health import fusion_probe, integrity_probe
+
+    vault = Path(getattr(CONFIG, "vault_path", "") or "").expanduser()
+    if not vault.is_dir():
+        return {"error": "No vault configured."}
+
+    try:
+        store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
+    except Exception as e:
+        store = None
+        fusion: dict[str, Any] = {"error": f"co-occurrence store unavailable ({e}) — run silica_cooccurrence_refresh"}
+    if store is not None:
+        fusion = fusion_probe(vault, store, embed_store=get_store())
+
+    return {"fusion": fusion, "integrity": integrity_probe(vault)}
