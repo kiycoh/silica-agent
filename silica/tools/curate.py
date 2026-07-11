@@ -54,16 +54,17 @@ def _orphan_candidates(path: str, k: int = 5) -> list[dict]:
     links among offered candidates, so an empty list makes it a safe no-op.
     """
     try:
-        from silica.agent.bounds import _norm_path
         from silica.config import CONFIG
-        from silica.kernel.cooccurrence import get_cooccur_store
+        from silica.kernel.cooccurrence import cooccur_key, get_cooccur_store
         from silica.kernel.embed import get_store
         from silica.kernel.relatedness import related_notes
 
         from silica.agent.providers import get_reranker
         from silica.kernel.rerank import note_document, rerank_related
 
-        key = _norm_path(path)
+        # cooccur_key (case-PRESERVED, .md-stripped) is the store keyspace; _norm_path
+        # would lowercase and miss the case-preserving stored keys -> empty results.
+        key = cooccur_key(path)
         reranker = get_reranker(CONFIG)
         pool = max(k, 20) if reranker else k
         results = related_notes(
