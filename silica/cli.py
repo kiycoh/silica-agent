@@ -863,7 +863,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 # No source claims this file type → try the converter fallback
                 # (PDF today). The CONVERTED .md is what the FSM re-reads.
                 try:
-                    md_files.append(convert(f, dest_dir=target_dir))
+                    md_files.extend(convert(f, dest_dir=target_dir))
                 except ValueError as e:
                     CONSOLE.print(f"  [yellow]Skipped {f}: {e}[/]")
                 continue
@@ -922,7 +922,10 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         from silica.sources.convert import convert
         for f in files:
             try:
-                CONSOLE.print(f"  Converted {f} → [bold]{convert(f, dest_dir=target_dir)}[/]")
+                paths = convert(f, dest_dir=target_dir)
+                CONSOLE.print(
+                    f"  Converted {f} → [bold]{len(paths)}[/] note(s): {', '.join(paths)}"
+                )
             except ValueError as e:
                 CONSOLE.print(f"  [yellow]Skipped {f}: {e}[/]")
         return ""  # fully handled inline — sentinel: nothing for the agent

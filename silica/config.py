@@ -142,11 +142,15 @@ class SilicaConfig:
     )
 
     # PDF→Markdown converter (ADR-0011 provider seam), all permissively licensed:
-    # "markitdown" (default, MIT, lightweight, text-only), "docling" (MIT, keeps
-    # figures/tables, heavy ML deps), or "mineru" (OCR/layout CLI, subprocess).
-    # Each is installed manually by the user; an unmet provider errors clearly.
+    # "mineru" (default, OCR/layout CLI, best fidelity, heaviest — downloads models
+    # on first run), "docling" (MIT, keeps figures/tables AND heading structure),
+    # or "opendataloader" (Apache-2.0, strong on complex tables and multi-column
+    # reading order, needs a JVM). Default preserves heading structure so book
+    # segmentation has headings to split on. mineru installs via the `silica[pdf]`
+    # extra; docling/opendataloader are installed manually. An unmet provider
+    # errors clearly.
     pdf_provider: str = field(
-        default_factory=lambda: os.getenv("SILICA_PDF_PROVIDER", "markitdown")
+        default_factory=lambda: os.getenv("SILICA_PDF_PROVIDER", "mineru")
     )
 
     # Tavily API key for /web-search. Empty → /web-search errors clearly and

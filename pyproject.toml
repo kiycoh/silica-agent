@@ -36,8 +36,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# PDF support is not an extra: the provider (markitdown / docling / mineru — all
-# permissively licensed) is installed manually. See SILICA_PDF_PROVIDER.
 # Opt-in localhost web GUI (`silica --gui`); python-multipart backs the drop-zone upload:
 gui = ["fastapi", "uvicorn", "python-multipart"]
 dev = ["pytest>=8.0", "mypy>=1.10", "import-linter>=2.0"]
@@ -46,6 +44,14 @@ connect = [
 ]
 # Opt-in stdio MCP server (`silica mcp`) — Silica as vault memory for MCP clients:
 mcp = ["mcp>=1.0"]
+# mineru is the default PDF→Markdown provider but pulls torch/transformers (and
+# downloads models on first run), so it is opt-in via this extra (`pip install
+# silica[pdf]`) to keep the base install lean. The [pipeline] extra matches the
+# CLI's `-b pipeline` backend. docling / opendataloader are installed manually if
+# chosen. See SILICA_PDF_PROVIDER.
+pdf = [
+    "mineru[pipeline]>=3.4.4",
+]
 
 [project.scripts]
 silica = "silica.cli:main"
@@ -184,7 +190,7 @@ ignore_missing_imports = false
 [[tool.mypy.overrides]]
 module = [
     "yaml", "yaml.*", "networkx", "networkx.*",
-    # Optional PDF providers, installed manually (see SILICA_PDF_PROVIDER):
-    "markitdown", "markitdown.*", "docling.*", "docling_core.*",
+    # PDF providers (mineru via the [pdf] extra; docling/opendataloader manual):
+    "docling.*", "docling_core.*", "opendataloader_pdf",
 ]
 ignore_missing_imports = true
