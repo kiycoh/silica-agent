@@ -17,8 +17,11 @@ etc. are methods, not properties. All internal helpers use that calling conventi
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
+
+_CALL_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 
 EXTENSION_MAP: dict[str, str] = {
     ".py": "python",
@@ -43,6 +46,12 @@ class Symbol:
 
 
 @dataclass(frozen=True)
+class Call:
+    name: str    # called name as written, dotted allowed ("x.f")
+    parent: str  # enclosing top-level symbol ("" at module level)
+
+
+@dataclass(frozen=True)
 class ModuleSkeleton:
     path: str                  # repo-relative source path
     language: str              # EXTENSION_MAP value
@@ -52,6 +61,9 @@ class ModuleSkeleton:
     module_doc: str = ""                                   # module-level docstring, whole
     module_comments: list[str] = field(default_factory=list)  # top-level comment blocks
     dunder_all: list[str] | None = None  # literal __all__, or None (absent / dynamic)
+    calls: list[Call] = field(default_factory=list)  # call sites, deduped by (name, parent)
+    import_aliases: dict[str, str] = field(default_factory=dict)  # alias -> real dotted name
+    has_main_guard: bool = False  # `if __name__ == "__main__"` present
 
 
 def language_for(path: str | Path) -> str | None:
@@ -73,17 +85,26 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
     imports: list[str] = []
     symbols: list[Symbol] = []
     root = tree.root_node()
-    extract = _py_extract if language == "python" else _ts_extract
-    for i in range(root.named_child_count()):
-        extract(root.named_child(i), src, imports, symbols)
     module_doc, module_comments, dunder_all = ("", [], None)
+    calls: list[Call] = []
+    aliases: dict[str, str] = {}
+    has_main_guard = False
     if language == "python":
+        for i in range(root.named_child_count()):
+            _py_extract(root.named_child(i), src, imports, symbols, aliases=aliases)
         module_doc, module_comments = _py_module_docs(root, src)
         dunder_all = _py_dunder_all(root, src)
-    # ponytail: TS doc/comment capture deferred; Python-first wiki
+        calls = _py_calls(root, src)
+        has_main_guard = _py_has_main_guard(root, src)
+    else:
+        # ponytail: TS doc/comment/call capture deferred with the rest of the TS lane
+        for i in range(root.named_child_count()):
+            _ts_extract(root.named_child(i), src, imports, symbols)
     return ModuleSkeleton(path=path, language=language, imports=imports,
                           symbols=symbols, module_doc=module_doc,
-                          module_comments=module_comments, dunder_all=dunder_all)
+                          module_comments=module_comments, dunder_all=dunder_all,
+                          calls=calls, import_aliases=aliases,
+                          has_main_guard=has_main_guard)
 
 
 # ---------------------------------------------------------------------------
@@ -210,16 +231,56 @@ def _py_dunder_all(root, src: bytes) -> list[str] | None:
     return None
 
 
+def _py_calls(root, src: bytes) -> list[Call]:
+    """Every call site's spelled name, tagged with its top-level container.
+    Only grammar-clean names (identifier / dotted attribute) are kept:
+    `f().g(...)` and subscripted receivers are skipped by the regex."""
+    out: dict[tuple[str, str], None] = {}
+
+    def walk(node, parent: str) -> None:
+        if node.kind() == "call":
+            fn = node.child_by_field_name("function")
+            if fn is not None:
+                text = _text(fn, src)
+                if _CALL_NAME.match(text):
+                    out[(text, parent)] = None
+        for i in range(node.named_child_count()):
+            walk(node.named_child(i), parent)
+
+    for i in range(root.named_child_count()):
+        node = root.named_child(i)
+        target = node
+        if node.kind() == "decorated_definition":
+            target = node.child_by_field_name("definition") or node
+        name = ""
+        if target.kind() in ("function_definition", "class_definition"):
+            n = target.child_by_field_name("name")
+            name = _text(n, src) if n is not None else ""
+        walk(node, name)
+    return [Call(name=k[0], parent=k[1]) for k in out]
+
+
+def _py_has_main_guard(root, src: bytes) -> bool:
+    for i in range(root.named_child_count()):
+        node = root.named_child(i)
+        if node.kind() == "if_statement":
+            cond = node.child_by_field_name("condition")
+            if cond is not None and "__name__" in _text(cond, src):
+                return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Python
 # ---------------------------------------------------------------------------
 
 def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
-                decorators: list[str] | None = None) -> None:
+                decorators: list[str] | None = None,
+                aliases: dict[str, str] | None = None) -> None:
     if node.kind() == "decorated_definition":
         inner = node.child_by_field_name("definition")
         if inner is not None:
-            _py_extract(inner, src, imports, symbols, _py_decorators(node, src))
+            _py_extract(inner, src, imports, symbols, _py_decorators(node, src), aliases)
         return
     if node.kind() == "import_statement":
         for i in range(node.named_child_count()):
@@ -228,14 +289,18 @@ def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
                 imports.append(_text(child, src))
             elif child.kind() == "aliased_import":
                 name = child.child_by_field_name("name")
+                alias = child.child_by_field_name("alias")
                 if name is not None:
                     imports.append(_text(name, src))
+                    if alias is not None and aliases is not None:
+                        aliases[_text(alias, src)] = _text(name, src)
         return
     if node.kind() == "import_from_statement":
         module = node.child_by_field_name("module_name")
         if module is None:
             return
         base = _text(module, src)
+        sep = "" if base.endswith(".") else "."
         names: list[str] = []
         mstart = module.start_byte()
         for i in range(node.named_child_count()):
@@ -246,10 +311,12 @@ def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
                 names.append(_text(child, src))
             elif child.kind() == "aliased_import":
                 name = child.child_by_field_name("name")
+                alias = child.child_by_field_name("alias")
                 if name is not None:
                     names.append(_text(name, src))
+                    if alias is not None and aliases is not None:
+                        aliases[_text(alias, src)] = f"{base}{sep}{_text(name, src)}"
         if names:
-            sep = "" if base.endswith(".") else "."
             imports.extend(f"{base}{sep}{n}" for n in names)
         else:
             imports.append(base)  # `from X import *` — bare module

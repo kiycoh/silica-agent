@@ -261,3 +261,50 @@ def test_dunder_all_literal_captured():
 def test_dunder_all_dynamic_is_none():
     sk = extract_skeleton("__all__ = [x for x in names]\n", "python", path="m.py")
     assert sk.dunder_all is None
+
+
+# ---------------------------------------------------------------------------
+# Task 3: call sites + import aliases + main guard
+# ---------------------------------------------------------------------------
+
+PY_CALLS = '''from pkg.util import helper
+from pkg import util
+import pkg.alias_target as at
+
+
+def main():
+    helper()
+    util.helper()
+    at.go()
+    _local()
+
+
+def _local():
+    pass
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+
+def test_calls_collected_with_parent():
+    sk = extract_skeleton(PY_CALLS, "python", path="pkg/app.py")
+    pairs = {(c.name, c.parent) for c in sk.calls}
+    assert ("helper", "main") in pairs
+    assert ("util.helper", "main") in pairs
+    assert ("at.go", "main") in pairs
+    assert ("_local", "main") in pairs
+    assert ("main", "") in pairs  # module-level call under the guard
+
+
+def test_import_aliases_and_main_guard():
+    sk = extract_skeleton(PY_CALLS, "python", path="pkg/app.py")
+    assert sk.import_aliases == {"at": "pkg.alias_target"}
+    assert sk.has_main_guard is True
+    assert extract_skeleton("x = 1\n", "python", path="m.py").has_main_guard is False
+
+
+def test_from_import_alias_recorded():
+    sk = extract_skeleton("from pkg.util import helper as h\n", "python", path="m.py")
+    assert sk.import_aliases == {"h": "pkg.util.helper"}
