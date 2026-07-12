@@ -239,7 +239,7 @@ def load_codegraph(vault: Path | str) -> CodeGraph | None:
     """Valid store, or transparent full rebuild + save. None when the vault
     is not inside a git repo — the index is disabled and consumers report
     "no repo", degrading soft (never an error in place of a poorer result)."""
-    root = gitstate.find_repo_root(Path(vault))
+    root = _paths.repo_root_for(vault)
     if root is None:
         return None
     sp = store_path()
@@ -298,7 +298,7 @@ def compute_impact(vault: Path | str, range_spec: str | None = None) -> list[Imp
     consumer reports "no repo"). Zero LLM; sorted (structural, fan-in desc)."""
     from silica.kernel import codedocs
 
-    root = gitstate.find_repo_root(Path(vault))
+    root = _paths.repo_root_for(vault)
     if root is None:
         return None
     changed = gitstate.changed_paths(root, range_spec) or []

@@ -297,6 +297,16 @@ def _activate_repo_mode() -> None:
     CONSOLE.print(f"  Vault: [bold]{home_vault}[/]")
 
 
+def _announce_code_lane() -> None:
+    """Eager repo-root resolution (ADR-0019): validate the vault⊂repo invariant
+    once at startup / vault switch and surface a violation loudly."""
+    from silica.kernel.paths import repo_root_warning
+
+    warn = repo_root_warning(CONFIG.vault_path)
+    if warn:
+        CONSOLE.print(f"  [yellow]⚠ {warn}[/]")
+
+
 def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
     """Execute read-only commands directly without an LLM round-trip.
 
@@ -345,6 +355,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             reset_manifest_cache()  # manifest is vault-scoped too
             apply_manifest_to_config()
             CONSOLE.print(f"  Vault → [bold]{resolved}[/] (backend: {CONFIG.backend})")
+            _announce_code_lane()
             # Surface the frozen-language drift here, not only in `/vault` info:
             # a switch is exactly when a wrong-frozen store (english on an IT
             # vault) would otherwise stay silent. Reuses the doctor's check.
@@ -1322,6 +1333,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     if args[:1] == ["connect"]:
         # Dispatch runs before main()'s setup (unlike --gui) — do it here.
         _activate_repo_mode()
+        _announce_code_lane()
         from silica.kernel.vault_manifest import apply_manifest_to_config
         apply_manifest_to_config()
         _resolve_context_budget()
@@ -1362,6 +1374,7 @@ def main():
     if code is not None:
         sys.exit(code)
     _activate_repo_mode()
+    _announce_code_lane()
     from silica.kernel.vault_manifest import apply_manifest_to_config
     apply_manifest_to_config()
     _resolve_context_budget()

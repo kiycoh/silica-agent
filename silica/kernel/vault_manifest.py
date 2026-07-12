@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from silica.kernel import gitstate
+from silica.kernel import paths
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ class VaultManifest:
 def default_sources(vault: str | Path) -> tuple[str, ...]:
     out = ["prose"]
     try:
-        if vault and gitstate.find_repo_root(Path(vault)) is not None:
+        if vault and paths.repo_root_for(vault) is not None:
             out += ["code", "notebook"]
     except Exception:
         pass

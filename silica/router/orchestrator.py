@@ -218,7 +218,9 @@ def _commit_docs_for_ops(
         return None
 
     try:
-        root = gitstate.find_repo_root(vault)
+        from silica.kernel.paths import repo_root_for
+
+        root = repo_root_for(vault)
         if root is None:
             return None
         n = len(abs_paths)

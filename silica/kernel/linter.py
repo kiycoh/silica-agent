@@ -80,8 +80,13 @@ def validate_note(path, hub, op_type=None):
             errors.append("Missing or invalid frontmatter")
         else:
             warnings += check_expires_at(data)
-            from silica.kernel import gitstate
-            warnings += check_documents_paths(data, repo_root=gitstate.find_repo_root(path))
+            # Notes live in the vault, so the vault's validated code-lane root
+            # (ADR-0019) is the right base — not a walk-up from the note file.
+            from silica.config import CONFIG
+            from silica.kernel.paths import repo_root_for
+            warnings += check_documents_paths(
+                data, repo_root=repo_root_for(getattr(CONFIG, "vault_path", "") or "")
+            )
             warnings += check_plan_status(data)
 
         # hub wikilink: required for spoke write/patch; NOT for hub-index/reformat/merge overwrites

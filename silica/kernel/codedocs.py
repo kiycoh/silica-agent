@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from silica.kernel import codeast, frontmatter, gitstate
+from silica.kernel import codeast, frontmatter, gitstate, paths
 from silica.kernel.gitstate import CommitInfo
 
 CHANGE_COSMETIC = "cosmetic"
@@ -120,7 +120,7 @@ def note_verdict(docs: list[StaleDoc]) -> tuple[str, list[str]]:
 def stale_docs(vault: Path | str, repo_root: Path | str | None = None) -> list[StaleDoc]:
     """Return one StaleDoc per (note, changed path). Empty when git is absent."""
     vault = Path(vault)
-    root = Path(repo_root) if repo_root else gitstate.find_repo_root(vault)
+    root = Path(repo_root) if repo_root else paths.repo_root_for(vault)
     if root is None:
         return []
 

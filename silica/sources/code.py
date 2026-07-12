@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from silica.config import CONFIG
-from silica.kernel import codeast, gitstate
+from silica.kernel import codeast, gitstate, paths
 from silica.kernel.codegraph import is_first_party, package_of
 from silica.kernel.sanitize import strip_degenerate_runs
 from silica.sources.base import GroundedStub, RawItem
@@ -70,9 +70,9 @@ class CodeAdapter:
         vault = (CONFIG.vault_path or "").strip()
         if not vault:
             raise ValueError("no vault configured")
-        root = gitstate.find_repo_root(Path(vault))
+        root = paths.repo_root_for(vault)
         if root is None:
-            raise ValueError("vault is not inside a git repo")
+            raise ValueError("no code-lane repo (vault is not inside its git repo)")
         try:
             src = (Path(root) / target).resolve()
             src.relative_to(Path(root).resolve())
