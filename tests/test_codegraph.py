@@ -179,3 +179,48 @@ def test_code_vocabulary_top_fan_in(tmp_path):
     assert "embed" in vocab and "Embedder" in vocab
     assert "__init__" not in vocab                      # noise stems excluded
     assert vocab == list(dict.fromkeys(vocab))          # deduped, stable order
+
+
+# ---------------------------------------------------------------------------
+# Task 4: store v2 — import-scoped call edges
+# ---------------------------------------------------------------------------
+
+from silica.kernel.codegraph import build_codegraph
+
+
+def _write(root, rel, text):
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+
+
+def test_call_edges_resolved_bare_dotted_alias(tmp_path):
+    _init_repo(tmp_path)
+    root = tmp_path
+    _write(root, "pkg/__init__.py", "")
+    _write(root, "pkg/util.py", "def helper():\n    pass\n")
+    _write(root, "pkg/alias_target.py", "def go():\n    pass\n")
+    _write(root, "pkg/app.py", (
+        "import os\n"
+        "from pkg.util import helper\n"
+        "from pkg import util\n"
+        "import pkg.alias_target as at\n\n"
+        "def main():\n"
+        "    helper()\n"
+        "    util.helper()\n"
+        "    at.go()\n"
+        "    os.path.join('a')\n"
+        "    local()\n\n"
+        "def local():\n    pass\n"
+    ))
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=root, check=True)
+    graph = build_codegraph(root)
+    edges = graph.files["pkg/app.py"]["calls"]
+    assert {"target": "pkg/util.py", "callee": "helper", "caller": "main"} in edges
+    assert {"target": "pkg/alias_target.py", "callee": "go", "caller": "main"} in edges
+    # bare helper() and util.helper() dedupe to one edge
+    assert len([e for e in edges if e["target"] == "pkg/util.py"]) == 1
+    # external (os.path.join) and local (local()) never become edges
+    assert all(e["target"].startswith("pkg/") for e in edges)
+    assert ("pkg/app.py", "pkg/util.py", "helper", "main") in graph.call_edges()

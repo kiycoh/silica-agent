@@ -11,10 +11,12 @@ peripheral and would flood the ranking (import-linter contract in pyproject).
 The store is derived: rebuildable, never repaired, never a source of truth.
 Refresh happens only on invocation (no watchers, per charter).
 
-Call edges are OUT of v1 — containment + imports are 100% deterministic,
-calls in dynamic languages are not. Future seam: a scope-stack heuristic
-emitting edges marked `approximate: true`, excluded from every automatic
-decision (autolink, coverage ordering, /impact).
+Import-scoped call edges (store v2) are recorded for the code-wiki digest:
+a call whose spelled name matches an imported first-party name is a
+near-certain usage edge, no scope resolution needed. They stay OUT of
+related_notes/RRF/autolink and every automatic decision (coverage ordering,
+/impact) — the wiki digest is their only consumer. Broader call resolution
+(scope-stack, receivers) remains a future seam.
 """
 from __future__ import annotations
 
@@ -123,7 +125,7 @@ def classify_import(
 # store — derived index at paths.index_dir()/codegraph.json
 # ---------------------------------------------------------------------------
 
-STORE_VERSION = 1
+STORE_VERSION = 2
 
 
 def store_path() -> Path:
@@ -141,6 +143,14 @@ class CodeGraph:
     def fan_in(self, path: str) -> int:
         return sum(1 for e in self.files.values() if path in e.get("imports", []))
 
+    def call_edges(self) -> list[tuple[str, str, str, str]]:
+        """Sorted (source_file, target_file, callee, caller) across the graph."""
+        out: list[tuple[str, str, str, str]] = []
+        for src_path, entry in self.files.items():
+            for e in entry.get("calls", []):
+                out.append((src_path, e["target"], e["callee"], e["caller"]))
+        return sorted(out)
+
 
 def supported_files(root: Path) -> list[str]:
     """Sorted repo-relative supported files, git-listed (tracked + untracked
@@ -155,24 +165,75 @@ def supported_files(root: Path) -> list[str]:
     )
 
 
+def _resolve_calls(sk, rel: str, files: set[str], root: Path) -> list[dict]:
+    """Import-scoped call edges: a call whose spelled name matches an imported
+    first-party name is a near-certain usage edge. No scope resolution, no MRO,
+    no receivers: only the subset of the call graph that needs no inference.
+    Local shadowing can produce rare false positives: accepted, these edges
+    ground LLM prose only and never enter automatic decisions (module docstring).
+    # ponytail: import-scoped only; scope-stack/receiver if flows read wrong
+    """
+    imports = [m for m in dict.fromkeys(sk.imports) if m]
+    edges: dict[tuple[str, str, str], None] = {}
+    for call in sk.calls:
+        name = call.name
+        head = name.split(".", 1)[0]
+        alias = sk.import_aliases.get(head)
+        if alias:
+            name = alias + name[len(head):]
+        target = callee = None
+        if "." in name:
+            for mod in sorted(imports, key=len, reverse=True):
+                if name == mod or name.startswith(mod + "."):
+                    kind, value = classify_import(mod, rel, files, "python", root)
+                    if kind == "resolved":
+                        target = value
+                        rest = name[len(mod):].lstrip(".")
+                        callee = rest or mod.rsplit(".", 1)[-1]
+                    break
+            else:
+                # `from pkg import mod; mod.f()` — head equals an import's last segment
+                dotted_head, _, dotted_rest = name.partition(".")
+                for mod in imports:
+                    if "." in mod and mod.rsplit(".", 1)[-1] == dotted_head:
+                        kind, value = classify_import(mod, rel, files, "python", root)
+                        if kind == "resolved":
+                            target, callee = value, dotted_rest
+                        break
+        else:
+            for mod in imports:
+                if "." in mod and mod.rsplit(".", 1)[-1] == name:
+                    kind, value = classify_import(mod, rel, files, "python", root)
+                    if kind == "resolved":
+                        target, callee = value, name
+                    break
+        if target and target != rel:
+            edges[(target, callee or "", call.parent)] = None
+    return [{"target": t, "callee": ce, "caller": ca} for (t, ce, ca) in sorted(edges)]
+
+
+_EMPTY_V2 = {"module_doc": "", "module_comments": [], "dunder_all": None,
+             "has_main_guard": False, "calls": []}
+
+
 def _file_entry(root: Path, rel: str, files: set[str]) -> dict:
     language = codeast.language_for(rel)
     try:
         source = (root / rel).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return {"language": language, "imports": [], "external": [],
-                "unresolved": [], "symbols": [], "parse_error": True}
+                "unresolved": [], "symbols": [], "parse_error": True, **_EMPTY_V2}
     if rel.lower().endswith(".ipynb"):
         from silica.kernel import ipynb
         try:
             cells = ipynb.parse_cells(source)
         except ValueError:
             return {"language": None, "imports": [], "external": [],
-                    "unresolved": [], "symbols": [], "parse_error": True}
+                    "unresolved": [], "symbols": [], "parse_error": True, **_EMPTY_V2}
         language = ipynb.CODEAST_LANGUAGE.get(cells.language)
         if language is None:  # e.g. an R kernel: node exists, no structure
             return {"language": cells.language, "imports": [], "external": [],
-                    "unresolved": [], "symbols": [], "parse_error": False}
+                    "unresolved": [], "symbols": [], "parse_error": False, **_EMPTY_V2}
         sk = codeast.extract_skeleton(cells.code, language, path=rel)
     else:
         sk = codeast.extract_skeleton(source, language, path=rel)
@@ -193,9 +254,16 @@ def _file_entry(root: Path, rel: str, files: set[str]) -> dict:
         "unresolved": unresolved,
         "symbols": [
             {"kind": s.kind, "name": s.name, "parent": s.parent,
-             "signature": s.signature, "doc": s.doc}
+             "signature": s.signature, "doc": s.doc, "doc_full": s.doc_full,
+             "decorators": s.decorators}
             for s in sk.symbols
         ],
+        "module_doc": sk.module_doc,
+        "module_comments": sk.module_comments,
+        "dunder_all": sk.dunder_all,
+        "has_main_guard": sk.has_main_guard,
+        # ponytail: TS call edges empty in v1, matches codeast TS deferral
+        "calls": _resolve_calls(sk, rel, files, root) if language == "python" else [],
         "parse_error": sk.parse_error,
     }
 
