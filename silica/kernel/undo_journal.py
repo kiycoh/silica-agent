@@ -53,6 +53,7 @@ class UndoJournalStore:
             CREATE TABLE IF NOT EXISTS runs (
                 run_id      TEXT PRIMARY KEY,
                 source      TEXT,
+                vault       TEXT,
                 started_at  REAL NOT NULL,
                 reverted_at REAL
             );
@@ -68,14 +69,20 @@ class UndoJournalStore:
             CREATE INDEX IF NOT EXISTS idx_inverses_run ON inverses(run_id);
             """
         )
+        # Migration: pre-scoping DBs lack `vault`. Legacy rows stay NULL, so a
+        # vault-filtered last_active_run() never surfaces them — foreign/stale
+        # runs from a deleted or reorganised vault retire themselves.
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(runs)")}
+        if "vault" not in cols:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN vault TEXT")
         self._conn.commit()
 
-    def start_run(self, source: str | None = None) -> str:
+    def start_run(self, source: str | None = None, vault: str | None = None) -> str:
         run_id = uuid.uuid4().hex
         with self._lock:
             self._conn.execute(
-                "INSERT INTO runs (run_id, source, started_at) VALUES (?, ?, ?)",
-                (run_id, source, time.time()),
+                "INSERT INTO runs (run_id, source, vault, started_at) VALUES (?, ?, ?, ?)",
+                (run_id, source, vault, time.time()),
             )
             self._conn.commit()
         return run_id
@@ -90,15 +97,24 @@ class UndoJournalStore:
             )
             self._conn.commit()
 
-    def last_active_run(self) -> str | None:
+    def last_active_run(self, vault: str | None = None) -> str | None:
+        """Most recent un-reverted run that has inverses.
+
+        When `vault` is given, only runs stamped with that vault are eligible —
+        so /revert never walks back into another vault's (or a deleted vault's)
+        history. `vault=None` keeps the unscoped behaviour (tests, legacy calls).
+        """
+        query = (
+            "SELECT r.run_id FROM runs r WHERE r.reverted_at IS NULL "
+            "AND EXISTS (SELECT 1 FROM inverses i WHERE i.run_id = r.run_id)"
+        )
+        params: list[str] = []
+        if vault is not None:
+            query += " AND r.vault = ?"
+            params.append(vault)
+        query += " ORDER BY r.started_at DESC, r.rowid DESC LIMIT 1"
         with self._lock:
-            row = self._conn.execute(
-                """
-                SELECT r.run_id FROM runs r WHERE r.reverted_at IS NULL
-                AND EXISTS (SELECT 1 FROM inverses i WHERE i.run_id = r.run_id)
-                ORDER BY r.started_at DESC, r.rowid DESC LIMIT 1
-                """
-            ).fetchone()
+            row = self._conn.execute(query, params).fetchone()
         return row["run_id"] if row else None
 
     def inverses_for(self, run_id: str) -> list[tuple[InverseOp, str | None]]:
@@ -157,6 +173,7 @@ def revert_run(run_id: str, *, store: UndoJournalStore | None = None) -> dict:
     entries = store.inverses_for(run_id)  # LIFO
     reverted: list[str] = []
     skipped: list[dict] = []
+    stale: list[dict] = []
     errors: list[dict] = []
 
     for inv, post_hash in entries:
@@ -166,15 +183,32 @@ def revert_run(run_id: str, *, store: UndoJournalStore | None = None) -> dict:
         except Exception:
             cur_hash = None  # note absent
 
+        # Stale (B): the target note no longer exists in this vault, so there is
+        # nothing to restore or delete — the journal describes a vault that was
+        # reorganised or replaced. Report it honestly instead of counting an
+        # empty overwrite as an error or an absent delete as a revert.
+        # (recreate_deleted is exempt: an absent note is its expected precondition.)
+        if cur_hash is None and inv.kind in (
+            InverseOpKind.restore_version, InverseOpKind.delete_created
+        ):
+            stale.append({"path": inv.path, "reason": "note absent (vault changed)"})
+            continue
+
         if post_hash is not None and cur_hash is not None and cur_hash != post_hash:
             skipped.append({"path": inv.path, "reason": "modified since inject"})
             continue
 
         try:
-            silica_restore(txn_id=run_id, inverses=[inv.model_dump()])
-            reverted.append(inv.path)
+            res = silica_restore(txn_id=run_id, inverses=[inv.model_dump()])
+            if res["errors"]:
+                # silica_restore swallows per-op failures into its return value;
+                # route them to errors instead of miscounting as reverted.
+                errors.append({"path": inv.path, "error": "; ".join(res["errors"])})
+            else:
+                reverted.append(inv.path)
         except Exception as e:
             errors.append({"path": inv.path, "error": str(e)})
 
     store.mark_reverted(run_id)
-    return {"run_id": run_id, "reverted": reverted, "skipped": skipped, "errors": errors}
+    return {"run_id": run_id, "reverted": reverted, "skipped": skipped,
+            "stale": stale, "errors": errors}

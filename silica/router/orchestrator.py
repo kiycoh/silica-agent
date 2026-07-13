@@ -582,7 +582,9 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         # Only open a journal run when the pipeline will actually execute writes.
         from silica.kernel.undo_journal import get_undo_journal
-        self._undo_run_id = get_undo_journal().start_run(source=self.inbox_file)
+        self._undo_run_id = get_undo_journal().start_run(
+            source=self.inbox_file, vault=getattr(CONFIG, "vault_path", None) or None
+        )
 
         # Fix A: repair any embed-index drift left by a prior hard crash before
         # this run reads the index (no-op/sub-ms when the index is in sync).

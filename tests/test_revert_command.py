@@ -9,7 +9,7 @@ def test_revert_is_registered():
 
 def test_revert_invokes_revert_run(monkeypatch):
     class _FakeStore:
-        def last_active_run(self):
+        def last_active_run(self, vault=None):
             return "RUN1abc"
 
     monkeypatch.setattr("silica.kernel.undo_journal.get_undo_journal",
@@ -27,7 +27,7 @@ def test_revert_invokes_revert_run(monkeypatch):
 
 def test_revert_no_active_run(monkeypatch, capsys):
     class _EmptyStore:
-        def last_active_run(self):
+        def last_active_run(self, vault=None):
             return None
 
     monkeypatch.setattr("silica.kernel.undo_journal.get_undo_journal",

@@ -100,3 +100,70 @@ def test_revert_restores_unmodified_notes_and_skips_modified(tmp_vault, tmp_path
     assert ada in result["reverted"]
     assert any(s["path"] == grace for s in result["skipped"])
     assert store.last_active_run() is None
+
+
+def test_revert_marks_absent_note_as_stale_not_reverted(tmp_vault, tmp_path):
+    """B: an inverse whose target note is gone (vault reorganised/replaced) is
+    'stale', not reverted and not an error — the honest 'nothing changed' signal."""
+    import os
+    live = tmp_vault.note("People/Ada.md", "PATCHED ada")
+    gone_restore = os.path.join(os.path.dirname(live), "Vanished.md")   # never materialised
+    gone_delete = os.path.join(os.path.dirname(live), "AlsoGone.md")    # never materialised
+
+    store = UndoJournalStore(tmp_path / "j.db")
+    run_id = store.start_run("inbox/meeting.md")
+    store.record(run_id, InverseOp(kind=InverseOpKind.restore_version, path=gone_restore,
+                                   prior_content="ORIGINAL vanished"), post_hash=None)
+    store.record(run_id, InverseOp(kind=InverseOpKind.delete_created, path=gone_delete),
+                 post_hash=None)
+    store.record(run_id, InverseOp(kind=InverseOpKind.restore_version, path=live,
+                                   prior_content="ORIGINAL ada"), post_hash=None)
+
+    result = revert_run(run_id, store=store)
+
+    assert live in result["reverted"]
+    stale_paths = {s["path"] for s in result["stale"]}
+    assert gone_restore in stale_paths and gone_delete in stale_paths
+    assert not result["errors"]                       # stale is not an error
+    assert gone_restore not in result["reverted"]     # nor a phantom revert
+
+
+def test_revert_routes_genuine_restore_failure_to_errors(tmp_vault, tmp_path):
+    """Fix #1 guard: a real per-op failure (silica_restore swallows the raise into
+    its return) on a present/eligible op still lands in errors, not reverted."""
+    # recreate_deleted with no prior_content is a genuine failure, and is exempt
+    # from the stale short-circuit (absent note is its expected precondition).
+    store = UndoJournalStore(tmp_path / "j.db")
+    run_id = store.start_run("inbox/meeting.md")
+    store.record(run_id, InverseOp(kind=InverseOpKind.recreate_deleted,
+                                   path="People/Ghost.md", prior_content=None), post_hash=None)
+
+    result = revert_run(run_id, store=store)
+
+    assert any(e["path"] == "People/Ghost.md" for e in result["errors"])
+    assert "People/Ghost.md" not in result["reverted"]
+
+
+def test_last_active_run_is_vault_scoped(tmp_path):
+    """C: /revert must not walk back into another (or a deleted) vault's history."""
+    store = UndoJournalStore(tmp_path / "j.db")
+    r_old = store.start_run("inbox/x.md", vault="/vaults/old")
+    store.record(r_old, _inv("a.md"), post_hash=None)
+    r_new = store.start_run("inbox/y.md", vault="/vaults/new")
+    store.record(r_new, _inv("b.md"), post_hash=None)
+
+    assert store.last_active_run(vault="/vaults/new") == r_new
+    assert store.last_active_run(vault="/vaults/old") == r_old
+    assert store.last_active_run(vault="/vaults/absent") is None
+    assert store.last_active_run() in (r_old, r_new)   # unscoped = legacy behaviour
+
+
+def test_legacy_null_vault_runs_are_retired_under_scoping(tmp_path):
+    """A pre-migration run (vault NULL) never surfaces for a vault-scoped revert —
+    exactly what stops the churn on the user's deleted-vault journal."""
+    store = UndoJournalStore(tmp_path / "j.db")
+    r_legacy = store.start_run("inbox/x.md")   # no vault -> NULL
+    store.record(r_legacy, _inv("a.md"), post_hash=None)
+
+    assert store.last_active_run(vault="/vaults/current") is None
+    assert store.last_active_run() == r_legacy   # still reachable unscoped

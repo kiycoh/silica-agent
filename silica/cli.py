@@ -727,15 +727,19 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
     if cmd == "/revert":
         from silica.kernel.undo_journal import get_undo_journal, revert_run
         parts_split = raw_input.strip().split(maxsplit=1)
-        run_id = parts_split[1].strip() if len(parts_split) > 1 else get_undo_journal().last_active_run()
+        vault = CONFIG.vault_path.strip() or None
+        run_id = parts_split[1].strip() if len(parts_split) > 1 else get_undo_journal().last_active_run(vault=vault)
         if not run_id:
-            CONSOLE.print("  Nothing to undo — no runs recorded in this session.")
+            CONSOLE.print("  Nothing to revert — no runs recorded for this vault.")
             return True
         res = revert_run(run_id)
-        CONSOLE.print(
+        stale = len(res.get("stale", []))
+        line = (
             f"  Revert {run_id[:8]}…: {len(res['reverted'])} reverted, "
-            f"{len(res['skipped'])} skipped (modified), {len(res['errors'])} errors."
+            f"{len(res['skipped'])} skipped (modified), "
+            f"{stale} stale (vault changed), {len(res['errors'])} errors."
         )
+        CONSOLE.print(line)
         return True
 
     if cmd == "/review":
