@@ -38,6 +38,7 @@ ALLOWED = {
     "kernel/relatedness.py":        "the facade itself",
     "kernel/correlate.py":          "owns note_edges computation; needs cooccur_key for keyspace normalization, not relatedness ranking",
     "kernel/run_substrate.py":      "constructs stores to inject into the facade",
+    "kernel/perception.py":         "constructs stores to inject into the facade (facade_retrieve, the shared fresh-query wiring)",
     "kernel/graph_report/embed_signals.py": "pairwise cosine (missing links, dup pairs)",
     "kernel/graph_report/cooccur_delta.py": "co-occurrence delta + cosine-band filter + store injection",
     "kernel/graph_export.py":       "cluster labels via CooccurStore.community_labels, not relatedness ranking",

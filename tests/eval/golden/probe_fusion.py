@@ -13,32 +13,40 @@ from __future__ import annotations
 from silica.kernel.health import K, eligible_pairs, wikilink_graph
 
 
-def _score_pairs(eligible: list[tuple[str, str]], topk: dict[str, list[str]]) -> tuple[float, float, set[tuple[str, str]]]:
-    """(recall, mrr, recovered-pair set) for one arm's per-endpoint top-k."""
-    hits = 0
-    rr_sum = 0.0
-    recovered: set[tuple[str, str]] = set()
+def _pair_ranks(eligible: list[tuple[str, str]],
+                topk: dict[str, list[str]]) -> dict[tuple[str, str], int | None]:
+    """Best 1-based rank of each pair in one arm's per-endpoint top-k (None=miss)."""
+    out: dict[tuple[str, str], int | None] = {}
     for a, b in eligible:
         ranks = []
         if b in topk[a]:
             ranks.append(topk[a].index(b) + 1)
         if a in topk[b]:
             ranks.append(topk[b].index(a) + 1)
-        if ranks:
-            hits += 1
-            rr_sum += 1.0 / min(ranks)
-            recovered.add((a, b))
+        out[(a, b)] = min(ranks) if ranks else None
+    return out
+
+
+def _score_pairs(eligible: list[tuple[str, str]], topk: dict[str, list[str]]) -> tuple[float, float, set[tuple[str, str]]]:
+    """(recall, mrr, recovered-pair set) for one arm's per-endpoint top-k."""
+    ranks = _pair_ranks(eligible, topk)
+    hit = [r for r in ranks.values() if r]
     n = len(eligible)
-    return round(hits / n, 4), round(rr_sum / n, 4), recovered
+    return (round(len(hit) / n, 4),
+            round(sum(1.0 / r for r in hit) / n, 4),
+            {p for p, r in ranks.items() if r})
 
 
 def run_rerank_ab(vault, store, *, embed_store=None, reranker=None,
-                  k: int = K, pool: int = 20, verbose: bool = False) -> dict:
+                  k: int = K, verbose: bool = False) -> dict:
     """A/B on the same masked pairs: the gated fused top-k (arm A) vs the
-    production rerank path (arm B: pool of `pool` → cross-encoder → top-k).
+    production rerank path (arm B: the SAME first-stage top-k, reordered by the
+    cross-encoder — reorder-only per the retrieval-gates spec, so recall@k is
+    invariant by construction and the A/B measures ORDERING: mrr and per-pair
+    rank wins/losses).
 
     Arm B mirrors the production call sites (coordinator/_orphan_candidates,
-    curate): pool = max(k, 20), query text = note_document(key).
+    curate): query text = note_document(key).
 
     ``empty_docs`` counts endpoints whose query text could not be read — for
     those, rerank_related no-ops on the empty query and arm B silently
@@ -71,22 +79,22 @@ def run_rerank_ab(vault, store, *, embed_store=None, reranker=None,
     rr_topk: dict[str, list[str]] = {}
     empty_docs = 0
     for i, key in enumerate(endpoints):
-        # Arm A re-derived at k (NOT pool[:k]): the facade's internal per-leg
-        # pool scales with k, so pool[:k] can order differently than the gated
-        # probe — the arms must differ only by the rerank pass.
-        base_topk[key] = [r.path for r in related_notes(
-            key, embed_store=es, cooccur_store=store, k=k)]
-        pool_results = related_notes(
-            key, embed_store=es, cooccur_store=store, k=max(k, pool))
+        # One first stage per endpoint: arm B reorders exactly arm A's top-k,
+        # so the arms differ only by the rerank pass (membership is shared).
+        results = related_notes(key, embed_store=es, cooccur_store=store, k=k)
+        base_topk[key] = [r.path for r in results]
         doc = note_document(key)
         if not doc:
             empty_docs += 1
-        rr_topk[key] = [r.path for r in rerank_related(reranker, doc, pool_results, k=k)]
+        rr_topk[key] = [r.path for r in rerank_related(reranker, doc, results, k=k)]
         if verbose and (i + 1) % 50 == 0:
             print(f"  {i + 1}/{len(endpoints)}")
 
-    base_recall, base_mrr, base_rec = _score_pairs(eligible, base_topk)
-    rr_recall, rr_mrr, rr_rec = _score_pairs(eligible, rr_topk)
+    base_recall, base_mrr, _ = _score_pairs(eligible, base_topk)
+    rr_recall, rr_mrr, _ = _score_pairs(eligible, rr_topk)
+    base_ranks = _pair_ranks(eligible, base_topk)
+    rr_ranks = _pair_ranks(eligible, rr_topk)
+    _worst = float("inf")
 
     res = {
         "pairs_evaluated": len(eligible),
@@ -94,8 +102,11 @@ def run_rerank_ab(vault, store, *, embed_store=None, reranker=None,
         "empty_docs": empty_docs,
         "base_recall": base_recall, "base_mrr": base_mrr,
         "rerank_recall": rr_recall, "rerank_mrr": rr_mrr,
-        "pairs_won": len(rr_rec - base_rec),
-        "pairs_lost": len(base_rec - rr_rec),
+        # Reorder-only makes recall invariant; wins/losses live in the ranks.
+        "pairs_won": sum(1 for p in eligible
+                         if (rr_ranks[p] or _worst) < (base_ranks[p] or _worst)),
+        "pairs_lost": sum(1 for p in eligible
+                          if (rr_ranks[p] or _worst) > (base_ranks[p] or _worst)),
     }
     if verbose:
         print(f"  fused    recall@{k} {base_recall:.1%}  mrr {base_mrr:.3f}")

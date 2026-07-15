@@ -147,6 +147,34 @@ def test_cooccur_ranking_abstains_when_query_absent(tmp_path):
     assert _cooccur_ranking(st, "UNKNOWN", k=5, exclude=set(), scope=None) is None
 
 
+def test_cooccur_gate_probe_receives_coverage_and_flatness(tmp_path, monkeypatch):
+    # Phase-0 calibration hook (retrieval-gates spec): per-query signals are
+    # emitted when the probe is set; the dormant gate must not fire.
+    from silica.kernel import relatedness
+
+    st = _cooc_store(tmp_path)
+    seen = []
+    monkeypatch.setattr(relatedness, "COOCCUR_GATE_PROBE", seen.append)
+    ranking = _cooccur_ranking(st, "A", k=5, exclude=set(), scope=None, expand=False)
+    assert ranking is not None
+    sig = seen[0]
+    # top hit B matches beta+gamma but not alpha -> partial IDF-mass coverage
+    assert 0.0 < sig["coverage"] < 1.0
+    assert sig["flatness"] >= 1.0
+    assert sig["fired"] is False
+
+
+def test_cooccur_gate_abstains_below_threshold(tmp_path, monkeypatch):
+    # Gate plumbing: with a frozen threshold above the fixture's coverage the
+    # leg must abstain via the existing None protocol.
+    from silica.kernel import relatedness
+
+    st = _cooc_store(tmp_path)
+    monkeypatch.setattr(relatedness, "_COOCCUR_MIN_CONFIDENCE", 0.99)
+    assert _cooccur_ranking(st, "A", k=5, exclude=set(), scope=None,
+                            expand=False) is None
+
+
 def test_cooccur_ranking_idf_beats_hub_over_rare_match(tmp_path):
     # 'hub' appears in every note (zero discriminating power); 'rare' is shared
     # by only the query and TWIN. IDF must rank the rare-sharing TWIN above a

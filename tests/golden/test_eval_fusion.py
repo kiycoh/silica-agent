@@ -117,9 +117,11 @@ class _FakeReranker:
         return [1.0 if self._favour in d else 0.0 for d in documents]
 
 
-def test_rerank_ab_promotes_counterpart_past_the_fused_cut(tmp_path):
-    # Embed ranks the decoy X above the true counterpart; with k=1 the fused
-    # arm misses. The reranker favours the counterpart's body text → arm B hits.
+def test_rerank_ab_reorders_within_the_fused_topk(tmp_path):
+    # Reorder-only (retrieval-gates spec 2a): membership belongs to the first
+    # stage, so recall@k is identical across arms by construction; the
+    # reranker's win is ORDERING — it promotes the true counterpart above the
+    # embed-favoured decoy inside top-k, visible in mrr and pairs_won.
     (tmp_path / "A.md").write_text("alpha alpha alpha\n[[B]]")
     (tmp_path / "B.md").write_text("epsilon epsilon epsilon")
     (tmp_path / "X.md").write_text("zeta zeta zeta")
@@ -132,12 +134,11 @@ def test_rerank_ab_promotes_counterpart_past_the_fused_cut(tmp_path):
     })
     res = probe_fusion.run_rerank_ab(
         tmp_path, st, embed_store=fake_embed,
-        reranker=_FakeReranker(favour="epsilon"), k=1, pool=3,
+        reranker=_FakeReranker(favour="epsilon"), k=2,
     )
     assert res["pairs_evaluated"] == 1
-    assert res["base_recall"] == 0.0      # X outranks B at k=1 in both directions...
-
-    assert res["rerank_recall"] == 1.0
+    assert res["base_recall"] == res["rerank_recall"] == 1.0  # membership invariant
+    assert res["rerank_mrr"] > res["base_mrr"]                # B promoted 2 -> 1
     assert res["pairs_won"] == 1 and res["pairs_lost"] == 0
     assert res["empty_docs"] == 0         # every synthetic note is readable
 

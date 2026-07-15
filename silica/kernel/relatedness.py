@@ -32,8 +32,9 @@ authoritative about vault structure.
 """
 from __future__ import annotations
 
+import statistics
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 from silica.kernel.cooccurrence import CooccurStore
 from silica.kernel.embed import EmbedStore
@@ -46,6 +47,14 @@ RRF_K = 60
 # A leg whose best candidate scores at or below this is treated as signal-free
 # (e.g. a zero query vector makes every cosine 0.0) and abstains.
 _NOISE_FLOOR = 1e-6
+
+# Cooccur confidence gate (retrieval-gates spec 2026-07-14). ponytail: dormant —
+# 0.0 never fires; phase-0 calibration picks the signal (coverage vs flatness)
+# and freezes the threshold, same discipline as _NOISE_FLOOR.
+_COOCCUR_MIN_CONFIDENCE = 0.0
+# Calibration hook: harnesses set it to capture per-query
+# {"coverage", "flatness", "fired"}; production leaves it None.
+COOCCUR_GATE_PROBE: Callable[[dict], None] | None = None
 
 # Neighbour edges are associative, not direct membership: discount their pull on
 # the query concept profile so notes literally sharing concepts still dominate.
@@ -260,8 +269,23 @@ def _rank_cooccur_from_profile(
             note_scores[path] = overlap
     if not note_scores:
         return None
-    ranked = sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))
-    return ranked[:k]
+    ranked = sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+    # Confidence signals (retrieval-gates spec): coverage measures the diagnosed
+    # cause (query/corpus vocabulary mismatch — IDF mass of profile stems the top
+    # hit actually matches), flatness the symptom (indiscriminate near-uniform
+    # scores). Values already in hand; no extra corpus pass.
+    total_mass = sum(w * idf.get(s, 0.0) for s, w in profile.items())
+    top_stems = set(cooccur_store.note_nodes(ranked[0][0]))
+    matched = sum(w * idf.get(s, 0.0) for s, w in profile.items() if s in top_stems)
+    coverage = (matched / total_mass) if total_mass > 0 else 0.0
+    scores = [s for _p, s in ranked]
+    flatness = scores[0] / statistics.median(scores)
+    fired = coverage < _COOCCUR_MIN_CONFIDENCE
+    if COOCCUR_GATE_PROBE:
+        COOCCUR_GATE_PROBE({"coverage": coverage, "flatness": flatness, "fired": fired})
+    if fired:
+        return None
+    return ranked
 
 
 def _cooccur_ranking(
