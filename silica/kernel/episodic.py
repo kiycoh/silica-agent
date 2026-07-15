@@ -128,6 +128,40 @@ def key_tokens(key: str) -> set[str]:
     return {t for s in segs for t in s.split("_") if len(t) > 1}
 
 
+def rare_token_components(keys: list[str], *,
+                          max_df: int | None = None) -> dict[str, str]:
+    """Connected components over shared key tokens: key -> root key.
+
+    With ``max_df``, a token forms edges only while its document frequency
+    over the (deduplicated) key set stays <= max_df; None means no filter
+    (the naive blob view kept for diagnostics). Pure function of the key
+    set: deterministic and order-independent."""
+    keys = sorted(set(keys))
+    toks = {k: key_tokens(k) for k in keys}
+    if max_df is not None:
+        df: dict[str, int] = {}
+        for ts in toks.values():
+            for t in ts:
+                df[t] = df.get(t, 0) + 1
+        toks = {k: {t for t in ts if df[t] <= max_df} for k, ts in toks.items()}
+    parent = {k: k for k in keys}
+
+    def find(k: str) -> str:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    owner: dict[str, str] = {}
+    for k in keys:
+        for t in toks[k]:
+            if t in owner:
+                parent[find(k)] = find(owner[t])
+            else:
+                owner[t] = k
+    return {k: find(k) for k in keys}
+
+
 # ponytail: _RARE_DF=3, probe-validated on the frozen corpus; revisit only
 # with a new probe sweep.
 _RARE_DF = 3
@@ -230,15 +264,9 @@ class EpisodicStore:
                         runs=[run_id])
             if head is not None:
                 fact.supersedes = head.id
-                fact.group = head.group  # the chain keeps its topic group
                 head.status = "superseded"
             self.facts.append(fact)
             heads[nkey] = fact
-            if head is None:
-                try:
-                    self.attach_group(fact, heads)
-                except Exception as e:  # grouping must never fail the ingest
-                    logger.debug("episodic attach skipped (%s)", e)
             created.append(fact)
         if embedder is not None and created:
             try:
@@ -247,41 +275,29 @@ class EpisodicStore:
                     fact.vec = list(vec)
             except Exception as e:
                 logger.debug("episodic capture: embedding skipped (%s)", e)
+        try:
+            self.regroup()
+        except Exception as e:  # grouping must never fail the ingest
+            logger.debug("episodic regroup skipped (%s)", e)
         self.save()
 
-    def attach_group(self, fact: Fact, heads: dict[str, Fact]) -> None:
-        """Layer C rare-token attachment for a fact starting a NEW chain
-        (spec 2026-07-15). Pairwise, never union: the fact joins the single
-        best candidate's group (most shared rare tokens, ties to most recent
-        last_seen), founding it when the candidate is ungrouped. Bridging two
-        existing groups is structurally impossible. ``heads`` holds the live
-        heads at this moment, the new fact included (it counts in df).
-        """
-        new_toks = key_tokens(fact.key)
-        if not new_toks:
-            return
-        toks = {h.id: key_tokens(h.key) for h in heads.values()}
-        df: dict[str, int] = {}
-        for ts in toks.values():
-            for t in ts:
-                df[t] = df.get(t, 0) + 1
-        rare = {t for t in new_toks if df[t] <= _RARE_DF}
-        if not rare:
-            return
-        scored = [(len(rare & toks[h.id]), h.last_seen, h.id, h)
-                  for h in heads.values() if h.id != fact.id]
-        if not scored:
-            return
-        score, _, _, cand = max(scored, key=lambda s: s[:3])
-        if score == 0:
-            return
-        gid = cand.group or cand.id
-        members = sum(1 for f in self.facts
-                      if f.status == "live" and f.group == gid) or 1
-        if members + 1 > _MAX_GROUP:
-            return
-        cand.group = gid
-        fact.group = gid
+    def regroup(self) -> None:
+        """Layer C rev 2: recompute topic groups over the whole live store.
+
+        Components over rare key tokens with FULL-store df (<= _RARE_DF), a
+        pure function of the live key set — deterministic, order-independent,
+        render-only. Components of 1 fact or more than _MAX_GROUP facts get
+        no group (blob backstop). Group id = oldest member fact's id."""
+        live = self.live_facts()
+        comp = rare_token_components([f.key for f in live], max_df=_RARE_DF)
+        members: dict[str, list[Fact]] = {}
+        for f in live:
+            members.setdefault(comp[f.key], []).append(f)
+        for group in members.values():
+            gid = (min(f.id for f in group)
+                   if 2 <= len(group) <= _MAX_GROUP else None)
+            for f in group:
+                f.group = gid
 
     # ------------------------------------------------------------------
     # TTL sweep
@@ -309,6 +325,10 @@ class EpisodicStore:
             expired_ids.update(self._chain_ids(head))
         if expired_ids:
             self.facts = [f for f in self.facts if f.id not in expired_ids]
+            try:
+                self.regroup()
+            except Exception as e:  # sweep must stay unkillable too
+                logger.debug("episodic regroup skipped (%s)", e)
             self.save()
         return removed
 

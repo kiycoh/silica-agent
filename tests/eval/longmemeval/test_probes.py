@@ -240,7 +240,7 @@ def test_best_group_tie_breaks_to_smallest(tmp_path, monkeypatch):
     assert r["best_group"] == "user.a.b" and r["best_size"] == 1
 
 
-def test_pairwise_probe_reports_product_attachment_groups(tmp_path, monkeypatch):
+def test_product_probe_reports_product_groups(tmp_path, monkeypatch):
     from tests.eval.longmemeval.runner import question_vault
 
     run_root = tmp_path / "run"
@@ -254,7 +254,7 @@ def test_pairwise_probe_reports_product_attachment_groups(tmp_path, monkeypatch)
     # Layer A alone cannot link the drifted pair...
     assert probe_question(inst, run_root, normalize=True)["best_coverage"] == 1
     # ...the product attachment rule can, and best_size stays honest.
-    r = probe_question(inst, run_root, pairwise=True)
+    r = probe_question(inst, run_root, product=True)
     assert r["best_coverage"] == 2
     assert r["best_size"] == 2       # the dog fact does not ride along
     assert r["groups"] == 1
@@ -286,21 +286,3 @@ def test_regroup_store_writes_groups_in_place_and_is_idempotent(tmp_path, monkey
     assert facts2 == facts
 
 
-def test_replay_matches_capture_time_grouping_across_supersession(tmp_path):
-    from silica.kernel.episodic import EpisodicStore
-    from tests.eval.longmemeval.probes import _replay_attachment
-
-    store = EpisodicStore(path=tmp_path / "episodic.json")
-    store.capture([{"key": "user.marathon.date", "text": "Oct 5"}],
-                  run_id="r1", seen="2026-01-01")
-    store.capture([{"key": "user.marathon.shoes", "text": "Nikes"}],
-                  run_id="r2", seen="2026-02-01")
-    # Founder superseded AFTER attracting a group-mate: replay must still
-    # reproduce capture-time membership, founder id included.
-    store.capture([{"key": "user.marathon.date", "text": "Nov 2"}],
-                  run_id="r3", seen="2026-06-01")
-    captured = {f.id: f.group for f in store.facts}
-    assert captured  # sanity: three facts, all grouped under f_0001
-
-    _replay_attachment(store)
-    assert {f.id: f.group for f in store.facts} == captured

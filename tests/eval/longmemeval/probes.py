@@ -46,33 +46,12 @@ def cluster_keys(keys: list[str], *, max_df: int | None = None) -> dict[str, str
     frozen corpus covers 15/17 gold sessions at cluster sizes 2-10). Returns
     key -> component display name (lexicographically first member key,
     `(+N)` suffix for the rest)."""
-    from silica.kernel.episodic import key_tokens
+    from silica.kernel.episodic import rare_token_components
 
-    toks = {k: key_tokens(k) for k in keys}
-    if max_df is not None:
-        df: dict[str, int] = defaultdict(int)
-        for ts in toks.values():
-            for t in ts:
-                df[t] += 1
-        toks = {k: {t for t in ts if df[t] <= max_df} for k, ts in toks.items()}
-    parent: dict[str, str] = {k: k for k in keys}
-
-    def find(k: str) -> str:
-        while parent[k] != k:
-            parent[k] = parent[parent[k]]
-            k = parent[k]
-        return k
-
-    owner: dict[str, str] = {}
-    for k in keys:
-        for t in toks[k]:
-            if t in owner:
-                parent[find(k)] = find(owner[t])
-            else:
-                owner[t] = k
+    comp = rare_token_components(keys, max_df=max_df)
     members: dict[str, list[str]] = defaultdict(list)
-    for k in keys:
-        members[find(k)].append(k)
+    for k, root in comp.items():
+        members[root].append(k)
     out: dict[str, str] = {}
     for group in members.values():
         first = min(group)
@@ -82,52 +61,14 @@ def cluster_keys(keys: list[str], *, max_df: int | None = None) -> dict[str, str
     return out
 
 
-def _replay_attachment(store) -> None:
-    """Recompute every fact's group by replaying the store's TRUE capture
-    history: id order (ids are assigned sequentially at capture), supersede
-    arrivals inherit and retire their predecessor, founding arrivals run the
-    product attachment rule against the store as of that moment. Residual
-    infidelity: reinforce events are invisible in a frozen store, so
-    last_seen tie-breaks use final values."""
-    from silica.kernel.episodic import EpisodicStore, normalize_key
-
-    replay = EpisodicStore(path=Path("/nonexistent/episodic.json"))
-    clones = {f.id: f.model_copy(update={"group": None, "status": "live"})
-              for f in store.facts}
-    heads: dict = {}
-    for fid in sorted(clones, key=lambda i: int(i.split("_")[1])):
-        c = clones[fid]
-        replay.facts.append(c)
-        nkey = normalize_key(c.key)
-        if c.supersedes and c.supersedes in clones:
-            c.group = clones[c.supersedes].group
-            clones[c.supersedes].status = "superseded"
-            heads[nkey] = c
-        else:
-            heads[nkey] = c
-            replay.attach_group(c, heads)
-    for f in store.facts:
-        f.group = clones[f.id].group
-
-
-def regroup_store(path: Path) -> None:
-    """Rewrite a frozen store's group fields in place (bench copies only):
-    the eval A/B migration tool, zero LLM."""
-    from silica.kernel.episodic import EpisodicStore
-
-    store = EpisodicStore(path=path)
-    _replay_attachment(store)
-    store.save()
-
-
-def pairwise_groups(facts: list[dict]) -> dict[str, str]:
-    """fact id -> group display name via the product attachment rule,
-    replayed over the store's full capture history."""
+def product_groups(live: list[dict]) -> dict[str, str]:
+    """fact id -> group display name via the PRODUCT regroup rule applied
+    directly to the live facts (a pure function of the live key set)."""
     from silica.kernel.episodic import EpisodicStore, Fact
 
     store = EpisodicStore(path=Path("/nonexistent/episodic.json"))
-    store.facts = [Fact.model_validate(f) for f in facts]
-    _replay_attachment(store)
+    store.facts = [Fact.model_validate(f) for f in live]
+    store.regroup()
     members: dict[str, list[str]] = defaultdict(list)
     for f in store.facts:
         if f.status == "live":
@@ -145,6 +86,16 @@ def pairwise_groups(facts: list[dict]) -> dict[str, str]:
     return names
 
 
+def regroup_store(path: Path) -> None:
+    """Stamp a frozen store's group fields in place with the product regroup
+    rule (bench copies only): the eval A/B migration tool, zero LLM."""
+    from silica.kernel.episodic import EpisodicStore
+
+    store = EpisodicStore(path=path)
+    store.regroup()
+    store.save()
+
+
 def _load_facts(vault: Path) -> list[dict]:
     from silica.kernel.paths import index_dir_for
 
@@ -160,14 +111,14 @@ def _load_live_facts(vault: Path) -> list[dict]:
 
 def probe_question(inst: dict, run_root: Path, *, normalize: bool = False,
                    cluster: bool = False, max_df: int | None = None,
-                   pairwise: bool = False) -> dict:
+                   product: bool = False) -> dict:
     """Probe one question's frozen store; returns a flat metrics dict.
 
     normalize=True groups keys in their canonical (Layer A) form — the
     store's effective key identity, since capture matches normalized.
     cluster=True groups by post-hoc token clustering instead (both types):
     the ceiling a mechanical clustering layer could reach on this store.
-    pairwise=True groups by the PRODUCT attachment rule replayed over the live facts (the Layer C acceptance view)."""
+    product=True groups by the PRODUCT regroup rule applied to the live facts."""
     from silica.kernel.episodic import normalize_key
     from tests.eval.longmemeval.runner import question_vault
 
@@ -180,8 +131,8 @@ def probe_question(inst: dict, run_root: Path, *, normalize: bool = False,
     covered = {g for f in live for g in f["runs"] if g in gold}
     gold_facts = [f for f in live if gold & set(f["runs"])]
 
-    if pairwise:
-        gmap = pairwise_groups(_load_facts(vault))
+    if product:
+        gmap = product_groups(live)
         group_of = lambda f: gmap[f["id"]]  # noqa: E731
     elif cluster:
         components = cluster_keys(sorted({f["key"] for f in live}),
@@ -222,9 +173,9 @@ def probe_question(inst: dict, run_root: Path, *, normalize: bool = False,
 
 def run_probes(data: list[dict], run_root: Path, *, normalize: bool = False,
                cluster: bool = False, max_df: int | None = None,
-               pairwise: bool = False) -> list[dict]:
+               product: bool = False) -> list[dict]:
     return [probe_question(q, run_root, normalize=normalize, cluster=cluster,
-                           max_df=max_df, pairwise=pairwise)
+                           max_df=max_df, product=product)
             for q in data if q["question_type"] in PROBED_TYPES]
 
 
@@ -252,8 +203,8 @@ def main() -> None:
                     help="group keys by post-hoc token clustering (ceiling view)")
     ap.add_argument("--max-df", type=int, default=None,
                     help="cluster only on tokens shared by <= K keys")
-    ap.add_argument("--pairwise", action="store_true",
-                    help="group by the product attachment rule (replayed)")
+    ap.add_argument("--product", action="store_true",
+                    help="group by the product regroup rule")
     ap.add_argument("--regroup", action="store_true",
                     help="rewrite group fields in place for EVERY question "
                          "store under --run-root (bench copies only)")
@@ -276,7 +227,7 @@ def main() -> None:
         return
     print(render(run_probes(data, run_root,
                             normalize=args.normalize, cluster=args.cluster,
-                            max_df=args.max_df, pairwise=args.pairwise)))
+                            max_df=args.max_df, product=args.product)))
 
 
 if __name__ == "__main__":

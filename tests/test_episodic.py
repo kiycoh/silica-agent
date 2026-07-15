@@ -444,105 +444,106 @@ def test_legacy_store_without_group_field_loads_as_ungrouped(tmp_path):
     assert f.group is None
 
 
-def test_attachment_founds_group_on_rare_token_match(tmp_path):
+def test_regroup_links_drifted_ku_pair_any_order(tmp_path):
+    for order in (0, 1):
+        d = tmp_path / str(order)
+        d.mkdir()
+        store = _store(d)
+        keys = ["user.fitness.tournament.date", "user.tennis_tournament_date"]
+        if order:
+            keys.reverse()
+        for i, k in enumerate(keys):
+            store.capture([{"key": k, "text": f"t{i}"}],
+                          run_id=f"r{i}", seen="2026-06-01")
+        a, b = store.live_facts()
+        # Order-independent: the pair groups either way, id = oldest member.
+        assert a.group == b.group == min(a.id, b.id)
+
+
+def test_regroup_dense_namespace_groups_at_df_three(tmp_path):
+    # Three sibling keys share topic tokens at df exactly 3: they group.
+    # (v1 incremental attachment starved here — the gate's 830ce83f miss.)
     store = _store(tmp_path)
-    store.capture([{"key": "user.fitness.tournament.date",
-                    "text": "Tournament on June 10"}],
-                  run_id="r1", seen="2026-06-01")
-    store.capture([{"key": "user.tennis_tournament_date",
-                    "text": "Tournament moved to July 2"}],
-                  run_id="r2", seen="2026-06-20")
-
-    a, b = store.live_facts()
-    assert a.group == a.id      # founder: group = own id (lazy legacy join)
-    assert b.group == a.id      # joiner shares it
-    # Round-trips through save/load.
-    assert {f.group for f in EpisodicStore(path=store.path).live_facts()} == {a.id}
-
-
-def test_attachment_ignores_tokens_past_rare_df(tmp_path):
-    store = _store(tmp_path)
-    for i, key in enumerate(["user.cooking.tips", "user.garden.tips",
-                             "user.travel.tips"]):
-        store.capture([{"key": key, "text": f"tip {i}"}],
-                      run_id=f"r{i}", seen=f"2026-06-0{i + 1}")
-    # Incremental df: the first three grouped while "tips" was still rare.
+    sibs = ["assistant.trip.chicago.loop.pros_cons",
+            "assistant.trip.chicago.lakeview.pros_cons",
+            "assistant.trip.chicago.logan_square.pros_cons"]
+    for i, k in enumerate(sibs):
+        store.capture([{"key": k, "text": f"s{i}"}],
+                      run_id=f"r{i}", seen="2026-06-01")
+    assert all(f.group for f in store.live_facts())
     assert len({f.group for f in store.live_facts()}) == 1
-    # The fourth arrival pushes df(tips) to 4 > _RARE_DF: it stays out.
-    store.capture([{"key": "user.laundry.tips", "text": "tip 3"}],
-                  run_id="r3", seen="2026-06-04")
-    last = next(f for f in store.live_facts() if f.key == "user.laundry.tips")
-    assert last.group is None
+    # A fourth sibling pushes every shared token past df 3: the whole topic
+    # ungroups — the measured K-starves tradeoff (probe ceiling 15/17).
+    store.capture([{"key": "assistant.trip.chicago.hyde_park.pros_cons",
+                    "text": "s3"}], run_id="r3", seen="2026-06-02")
+    assert all(f.group is None for f in store.live_facts())
 
 
-def test_attachment_never_unions_two_groups(tmp_path):
+def test_regroup_generic_token_does_not_glue(tmp_path):
     store = _store(tmp_path)
-    for key, seen in [("user.dog.vaccine", "2026-06-01"),
-                      ("user.dog.vet", "2026-06-02"),
-                      ("user.car.insurance", "2026-06-03"),
-                      ("user.car.plate", "2026-06-04")]:
-        store.capture([{"key": key, "text": key}], run_id="r1", seen=seen)
+    for i, k in enumerate(["user.marathon.training_tips",
+                           "user.marathon.race_date",
+                           "user.cooking.tips", "user.garden.tips",
+                           "user.travel.tips"]):
+        store.capture([{"key": k, "text": f"x{i}"}],
+                      run_id=f"r{i}", seen="2026-06-01")
     by_key = {f.key: f for f in store.live_facts()}
-    g_dog = by_key["user.dog.vaccine"].group
-    g_car = by_key["user.car.insurance"].group
-    assert g_dog and g_car and g_dog != g_car
-
-    # A bridge key shares one rare token with each group: it joins ONLY the
-    # best match (tie broken to most recent last_seen); groups stay distinct.
-    store.capture([{"key": "user.dog_car.trip", "text": "trip"}],
-                  run_id="r2", seen="2026-06-05")
-    bridge = next(f for f in store.live_facts() if f.key == "user.dog_car.trip")
-    assert bridge.group == g_car
-    assert {f.group for f in store.live_facts()
-            if f.key.startswith("user.dog.")} == {g_dog}
+    g = by_key["user.marathon.training_tips"].group
+    assert g and by_key["user.marathon.race_date"].group == g  # marathon df 2
+    # "tips" sits at df 4 > _RARE_DF: it forms no edges.
+    assert by_key["user.cooking.tips"].group is None
+    assert by_key["user.garden.tips"].group is None
+    assert by_key["user.travel.tips"].group is None
 
 
-def test_attachment_refuses_join_past_max_group(tmp_path, monkeypatch):
+def test_regroup_drops_blob_components(tmp_path, monkeypatch):
     from silica.kernel import episodic
 
     assert episodic._MAX_GROUP == 12   # pin the shipped backstop
     monkeypatch.setattr(episodic, "_MAX_GROUP", 3)
     store = _store(tmp_path)
-    # Chained rare tokens: each key shares one token with the previous.
-    for i, key in enumerate(["user.t1_t2.a", "user.t2_t3.b",
-                             "user.t3_t4.c", "user.t4_t5.d"]):
-        store.capture([{"key": key, "text": f"x{i}"}],
-                      run_id="r1", seen=f"2026-06-0{i + 1}")
-    facts = store.live_facts()
-    assert [f.group for f in facts[:3]] == [facts[0].id] * 3
-    assert facts[3].group is None      # 4th member refused at cap 3
+    # Chained rare tokens build ONE component of 4 facts: over the cap, dropped.
+    for i in range(4):
+        store.capture([{"key": f"user.t{i + 1}_t{i + 2}.item", "text": f"x{i}"}],
+                      run_id=f"r{i}", seen="2026-06-01")
+    assert all(f.group is None for f in store.live_facts())
 
 
-def test_exact_canonical_arrivals_keep_chain_group_and_skip_attachment(tmp_path):
+def test_regroup_keeps_pair_across_supersede(tmp_path):
     store = _store(tmp_path)
     store.capture([{"key": "user.fitness.tournament.date", "text": "June 10"}],
                   run_id="r1", seen="2026-06-01")
     store.capture([{"key": "user.tennis_tournament_date", "text": "July 2"}],
                   run_id="r2", seen="2026-06-10")
-    g = store.live_facts()[0].group
-    assert g is not None
-
-    # Supersede on the SAME canonical key: successor inherits the group.
     store.capture([{"key": "user.tennis_tournament_date", "text": "July 9"}],
                   run_id="r3", seen="2026-06-20")
-    heads = {f.key: f for f in store.live_facts()}
-    assert heads["user.tennis_tournament_date"].group == g
-    assert heads["user.tennis_tournament_date"].supersedes is not None
-
-    # Reinforce: nothing changes.
-    store.capture([{"key": "user.fitness.tournament.date", "text": "June 10"}],
-                  run_id="r4", seen="2026-06-25")
-    assert {f.group for f in store.live_facts()} == {g}
+    live = store.live_facts()
+    assert len(live) == 2
+    assert all(f.group for f in live)
+    assert len({f.group for f in live}) == 1
 
 
-def test_attachment_failure_never_fails_capture(tmp_path, monkeypatch):
+def test_sweep_regroups_survivors(tmp_path):
+    store = _store(tmp_path)
+    store.capture([{"key": "user.marathon.date", "text": "Oct 5"}],
+                  run_id="r1", seen="2026-01-01")
+    store.capture([{"key": "user.marathon.shoes", "text": "Nikes"}],
+                  run_id="r2", seen="2026-07-01")
+    assert all(f.group for f in store.live_facts())
+    assert store.sweep(now="2026-07-14", ttl_days=90) == 1
+    (survivor,) = store.live_facts()
+    assert survivor.group is None
+    # The regrouped state is persisted by sweep.
+    assert EpisodicStore(path=store.path).live_facts()[0].group is None
+
+
+def test_regroup_failure_never_fails_capture(tmp_path, monkeypatch):
     from silica.kernel import episodic
 
-    monkeypatch.setattr(episodic, "key_tokens",
-                        lambda key: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(episodic, "rare_token_components",
+                        lambda keys, **kw: (_ for _ in ()).throw(RuntimeError("boom")))
     store = _store(tmp_path)
-    store.capture([{"key": "user.a.b", "text": "x"},
-                   {"key": "user.a.c", "text": "y"}],
+    store.capture([{"key": "user.a.b", "text": "x"}],
                   run_id="r1", seen="2026-07-01")
-    assert len(store.live_facts()) == 2
-    assert all(f.group is None for f in store.live_facts())
+    assert len(store.live_facts()) == 1
+    assert store.live_facts()[0].group is None
