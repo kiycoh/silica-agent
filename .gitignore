@@ -181,6 +181,5 @@ PONYTAIL-DEBT.md
 # Golden harness per-run output (only baseline.json is committed)
 tests/eval/golden/metrics.json
 
-tests/eval
 # benchmark vaults + frozen corpora (never committed)
 bench/

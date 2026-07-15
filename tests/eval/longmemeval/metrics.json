@@ -1,0 +1,126 @@
+{
+  "generated_at": "2026-07-13",
+  "benchmark": "longmemeval",
+  "config": {
+    "answer_model": "openrouter/mistralai/mistral-small-2603",
+    "judge_model": "openrouter/mistralai/mistral-small-2603",
+    "retrieval": "facade-top5",
+    "embedder": true,
+    "reranker": "bge-reranker-v2-m3"
+  },
+  "metrics": {
+    "overall_accuracy": 0.6,
+    "answerable_n": 10,
+    "abstention_accuracy": null,
+    "abstention_n": 0,
+    "by_type": {
+      "temporal-reasoning": {
+        "n": 10,
+        "accuracy": 0.6
+      }
+    },
+    "session_recall_mean": 1.0
+  },
+  "questions": [
+    {
+      "question_id": "gpt4_2655b836",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": false,
+      "sessions": 3,
+      "retrieved": 3,
+      "session_recall": 1.0,
+      "response": "I do not have that information."
+    },
+    {
+      "question_id": "gpt4_2487a7cb",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": true,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "You first attended the **\"Data Analysis using Python\" webinar**."
+    },
+    {
+      "question_id": "gpt4_76048e76",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": false,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "I do not have that information."
+    },
+    {
+      "question_id": "gpt4_2312f94c",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": false,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "You received your Dell XPS 13 first, as mentioned in your initial message where you shared that you pre-ordered the laptop on January 28th and it arrived on February 25th after a delay. You mentioned getting the Samsung Galaxy S22 later in a subsequent message."
+    },
+    {
+      "question_id": "0bb5a684",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": true,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "The workshop on \"Effective Communication in the Workplace\" was attended on January 10th, and your team meeting was on January 17th. Therefore, you attended the workshop **7 days** before the team meeting."
+    },
+    {
+      "question_id": "08f4fc43",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": true,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "Based on the provided memory, the Sunday mass at St. Mary's Church was on January 2nd, and the Ash Wednesday service at the cathedral was on February 1st. The number of days between these two dates is **30 days**."
+    },
+    {
+      "question_id": "2c63a862",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": true,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "Based on the memory, you found a house you loved on March 1 (2022/03/01), and you started working with Rachel on February 15 (2022/02/15).\n\nSo, it took you 14 days to find a house you loved after starting to work with Rachel."
+    },
+    {
+      "question_id": "gpt4_385a5000",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": true,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "The marigold seeds were started first. You mentioned that they arrived on March 3rd and were already germinating, so they were planted before your tomatoes, which you started on February 20th."
+    },
+    {
+      "question_id": "2a1811e2",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": false,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "Based on the memory provided, I do not have the specific dates for when the Holi festival was celebrated or when the Sunday mass at St. Mary's Church took place. Therefore, I cannot calculate the number of days that had passed between these two events."
+    },
+    {
+      "question_id": "bbf86515",
+      "question_type": "temporal-reasoning",
+      "abstention": false,
+      "correct": true,
+      "sessions": 2,
+      "retrieved": 2,
+      "session_recall": 1.0,
+      "response": "You participated in the \"Turbocharged Tuesdays\" event on June 14th, 2023. \"Rack Fest\" was held on June 18th, 2023. Therefore, you participated in the \"Turbocharged Tuesdays\" event **4 days** before the \"Rack Fest\"."
+    }
+  ]
+}
