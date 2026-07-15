@@ -83,17 +83,31 @@ def cluster_keys(keys: list[str], *, max_df: int | None = None) -> dict[str, str
 
 
 def _replay_attachment(store) -> None:
-    """Recompute every live fact's group by replaying live facts in
-    first_seen order through the PRODUCT attachment rule. In memory only;
-    the caller persists."""
-    from silica.kernel.episodic import normalize_key
+    """Recompute every fact's group by replaying the store's TRUE capture
+    history: id order (ids are assigned sequentially at capture), supersede
+    arrivals inherit and retire their predecessor, founding arrivals run the
+    product attachment rule against the store as of that moment. Residual
+    infidelity: reinforce events are invisible in a frozen store, so
+    last_seen tie-breaks use final values."""
+    from silica.kernel.episodic import EpisodicStore, normalize_key
 
-    for f in store.facts:
-        f.group = None
+    replay = EpisodicStore(path=Path("/nonexistent/episodic.json"))
+    clones = {f.id: f.model_copy(update={"group": None, "status": "live"})
+              for f in store.facts}
     heads: dict = {}
-    for f in sorted(store.live_facts(), key=lambda fa: (fa.first_seen, fa.id)):
-        heads[normalize_key(f.key)] = f
-        store.attach_group(f, heads)
+    for fid in sorted(clones, key=lambda i: int(i.split("_")[1])):
+        c = clones[fid]
+        replay.facts.append(c)
+        nkey = normalize_key(c.key)
+        if c.supersedes and c.supersedes in clones:
+            c.group = clones[c.supersedes].group
+            clones[c.supersedes].status = "superseded"
+            heads[nkey] = c
+        else:
+            heads[nkey] = c
+            replay.attach_group(c, heads)
+    for f in store.facts:
+        f.group = clones[f.id].group
 
 
 def regroup_store(path: Path) -> None:
@@ -106,37 +120,42 @@ def regroup_store(path: Path) -> None:
     store.save()
 
 
-def pairwise_groups(live: list[dict]) -> dict[str, str]:
-    """fact id -> group display name, via the product attachment rule."""
+def pairwise_groups(facts: list[dict]) -> dict[str, str]:
+    """fact id -> group display name via the product attachment rule,
+    replayed over the store's full capture history."""
     from silica.kernel.episodic import EpisodicStore, Fact
 
     store = EpisodicStore(path=Path("/nonexistent/episodic.json"))
-    store.facts = [Fact.model_validate(f) for f in live]
+    store.facts = [Fact.model_validate(f) for f in facts]
     _replay_attachment(store)
     members: dict[str, list[str]] = defaultdict(list)
     for f in store.facts:
-        members[f.group or f.id].append(f.id)
+        if f.status == "live":
+            members[f.group or f.id].append(f.id)
     by_id = {f.id: f for f in store.facts}
     names: dict[str, str] = {}
     claimed: dict[str, str] = {}
     for gid, ids in members.items():
-        name = (by_id[gid].key if len(ids) == 1
-                else f"{by_id[gid].key} (+{len(ids) - 1})")
-        if claimed.setdefault(name, gid) != gid:   # duplicate founder keys
+        base = by_id[gid].key if gid in by_id else min(ids)
+        name = base if len(ids) == 1 else f"{base} (+{len(ids) - 1})"
+        if claimed.setdefault(name, gid) != gid:
             name = f"{name} #{gid}"
         for i in ids:
             names[i] = name
     return names
 
 
-def _load_live_facts(vault: Path) -> list[dict]:
+def _load_facts(vault: Path) -> list[dict]:
     from silica.kernel.paths import index_dir_for
 
     path = index_dir_for(str(vault)) / "episodic.json"
     if not path.is_file():
         return []
-    facts = json.loads(path.read_text(encoding="utf-8")).get("facts", [])
-    return [f for f in facts if f.get("status") == "live"]
+    return json.loads(path.read_text(encoding="utf-8")).get("facts", [])
+
+
+def _load_live_facts(vault: Path) -> list[dict]:
+    return [f for f in _load_facts(vault) if f.get("status") == "live"]
 
 
 def probe_question(inst: dict, run_root: Path, *, normalize: bool = False,
@@ -155,13 +174,14 @@ def probe_question(inst: dict, run_root: Path, *, normalize: bool = False,
     qid = inst["question_id"]
     qtype = inst["question_type"]
     gold = set(inst["answer_session_ids"])
-    live = _load_live_facts(question_vault(run_root, qid))
+    vault = question_vault(run_root, qid)
+    live = _load_live_facts(vault)
 
     covered = {g for f in live for g in f["runs"] if g in gold}
     gold_facts = [f for f in live if gold & set(f["runs"])]
 
     if pairwise:
-        gmap = pairwise_groups(live)
+        gmap = pairwise_groups(_load_facts(vault))
         group_of = lambda f: gmap[f["id"]]  # noqa: E731
     elif cluster:
         components = cluster_keys(sorted({f["key"] for f in live}),

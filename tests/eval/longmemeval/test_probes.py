@@ -284,3 +284,23 @@ def test_regroup_store_writes_groups_in_place_and_is_idempotent(tmp_path, monkey
     facts2 = {f["id"]: f for f in
               json.loads(p.read_text(encoding="utf-8"))["facts"]}
     assert facts2 == facts
+
+
+def test_replay_matches_capture_time_grouping_across_supersession(tmp_path):
+    from silica.kernel.episodic import EpisodicStore
+    from tests.eval.longmemeval.probes import _replay_attachment
+
+    store = EpisodicStore(path=tmp_path / "episodic.json")
+    store.capture([{"key": "user.marathon.date", "text": "Oct 5"}],
+                  run_id="r1", seen="2026-01-01")
+    store.capture([{"key": "user.marathon.shoes", "text": "Nikes"}],
+                  run_id="r2", seen="2026-02-01")
+    # Founder superseded AFTER attracting a group-mate: replay must still
+    # reproduce capture-time membership, founder id included.
+    store.capture([{"key": "user.marathon.date", "text": "Nov 2"}],
+                  run_id="r3", seen="2026-06-01")
+    captured = {f.id: f.group for f in store.facts}
+    assert captured  # sanity: three facts, all grouped under f_0001
+
+    _replay_attachment(store)
+    assert {f.id: f.group for f in store.facts} == captured
