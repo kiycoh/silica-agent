@@ -231,17 +231,19 @@ That's the whole idea. You don't have to believe anything about the model, only 
 | :--- | :--- |
 | `/nucleate <file...> [--target=DIR]` | Notes via the gate; code as skeletons |
 | `/organize "<intent>" [--apply]` | Classify and move notes to a taxonomy |
-| `/curate [--apply]` · `/dedup` · `/refine` | Plan / run autolink, dedup, enrichment |
+| `/curate [--apply]` · `/dedup` · `/refine` · `/enrich` | Plan / run autolink, dedup, enrichment |
 | `/web-search "<topic>"` | Cited web findings into the inbox |
 | `/convert <file>` | Transcode a PDF into a markdown draft |
+
+**Indexes:** `/embed` · `/cooccur` (embedder-free)
 
 **Visualize:** `/graph [out.html]` · `/map <note>`
 
 **Codebase:** `/wiki` · `/stale` · `/impact [<range>]`
 
-**Undo & inspect:** `/undo [note]` · `/revert [run]` · `/status` · `/review`
+**Undo & inspect:** `/undo [note]` · `/revert [run]` · `/status` · `/review` · `/plans` · `/contested`
 
-**System:** `/help` · `/model` · `/vault [path]` · `/settings [<key> <value>]` · `/clear` · `/exit`
+**System:** `/help` · `/model` · `/vault [path]` · `/settings [<key> <value>]` · `/tools` · `/verbose` · `/thinking` · `/clear` · `/exit`
 
 ---
 

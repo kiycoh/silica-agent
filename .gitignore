@@ -182,3 +182,5 @@ PONYTAIL-DEBT.md
 tests/eval/golden/metrics.json
 
 tests/eval
+# benchmark vaults + frozen corpora (never committed)
+bench/
