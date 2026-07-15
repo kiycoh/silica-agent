@@ -141,3 +141,100 @@ def test_normalize_merges_ku_full_key_variants(tmp_path, monkeypatch):
 
     assert probe_question(inst, run_root)["best_coverage"] == 1
     assert probe_question(inst, run_root, normalize=True)["best_coverage"] == 2
+
+
+def test_cluster_merges_keys_sharing_stemmed_tokens(tmp_path, monkeypatch):
+    from tests.eval.longmemeval.runner import question_vault
+
+    run_root = tmp_path / "run"
+    inst = _inst("q8", "multi-session", ["answer_s1", "answer_s2", "answer_s3"])
+    # No shared 2-seg prefix, but token chains connect all three:
+    # model/kit joins f1-f2, project joins f2-f3.
+    _write_store(question_vault(run_root, "q8"), [
+        _fact("f_0001", "model_kit.gifts", ["answer_s1"]),
+        _fact("f_0002", "model_kits.last_project", ["answer_s2"]),
+        _fact("f_0003", "user.current_project", ["answer_s3"]),
+    ], monkeypatch, tmp_path)
+
+    assert probe_question(inst, run_root, normalize=True)["best_coverage"] == 1
+    r = probe_question(inst, run_root, cluster=True)
+    assert r["groups"] == 1 and r["best_coverage"] == 3
+
+
+def test_cluster_keeps_unrelated_apart_and_counts_riders(tmp_path, monkeypatch):
+    from tests.eval.longmemeval.runner import question_vault
+
+    run_root = tmp_path / "run"
+    inst = _inst("q9", "knowledge-update", ["answer_s1", "answer_s2", "answer_s3"])
+    _write_store(question_vault(run_root, "q9"), [
+        _fact("f_0001", "user.dog.name", ["answer_s1"]),
+        _fact("f_0002", "user.dog.age", ["answer_s2"]),
+        _fact("f_0003", "user.dog.breed", ["other_session"]),  # non-gold rider
+        _fact("f_0004", "user.car.model", ["answer_s3"]),
+    ], monkeypatch, tmp_path)
+
+    r = probe_question(inst, run_root, cluster=True)
+    assert r["groups"] == 2            # dog cluster vs car cluster
+    assert r["best_coverage"] == 2     # dog cluster: s1 + s2
+    assert r["best_size"] == 3         # rider fact rides along — blob proxy
+
+
+def test_cluster_drops_entity_prefix_but_not_topic(tmp_path, monkeypatch):
+    from tests.eval.longmemeval.runner import question_vault
+
+    run_root = tmp_path / "run"
+    inst = _inst("q10", "multi-session", ["answer_s1", "answer_s2"])
+    # user./assistant. prefixes must not keep the same topic apart...
+    _write_store(question_vault(run_root, "q10"), [
+        _fact("f_0001", "user.laundry.schedule", ["answer_s1"]),
+        _fact("f_0002", "assistant.laundry.tips", ["answer_s2"]),
+        # ...and must not glue unrelated topics together either.
+        _fact("f_0003", "user.dog.name", ["answer_s1"]),
+    ], monkeypatch, tmp_path)
+
+    r = probe_question(inst, run_root, cluster=True)
+    assert r["groups"] == 2 and r["best_coverage"] == 2
+
+
+def test_run_probes_passes_cluster_through(tmp_path, monkeypatch):
+    import silica.kernel.paths as paths_mod
+
+    monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
+    rows = run_probes([_inst("q1", "multi-session", ["answer_s1"])],
+                      tmp_path / "run", cluster=True)
+    assert rows[0]["groups"] == 0
+
+
+def test_cluster_max_df_breaks_generic_token_glue(tmp_path, monkeypatch):
+    from tests.eval.longmemeval.runner import question_vault
+
+    run_root = tmp_path / "run"
+    inst = _inst("q11", "multi-session", ["answer_s1", "answer_s2"])
+    # "tips" (df=3) glues unrelated topics; "marathon" (df=2) is the real link.
+    _write_store(question_vault(run_root, "q11"), [
+        _fact("f_0001", "user.marathon.training_tips", ["answer_s1"]),
+        _fact("f_0002", "user.marathon.race_date", ["answer_s2"]),
+        _fact("f_0003", "user.cooking.tips", ["other_1"]),
+        _fact("f_0004", "user.garden.tips", ["other_2"]),
+    ], monkeypatch, tmp_path)
+
+    naive = probe_question(inst, run_root, cluster=True)
+    assert naive["best_coverage"] == 2 and naive["best_size"] == 4  # blob
+    r = probe_question(inst, run_root, cluster=True, max_df=2)
+    assert r["best_coverage"] == 2 and r["best_size"] == 2  # rare link kept
+
+
+def test_best_group_tie_breaks_to_smallest(tmp_path, monkeypatch):
+    from tests.eval.longmemeval.runner import question_vault
+
+    run_root = tmp_path / "run"
+    inst = _inst("q12", "knowledge-update", ["answer_s1"])
+    _write_store(question_vault(run_root, "q12"), [
+        _fact("f_0001", "user.a.b", ["answer_s1"]),
+        _fact("f_0002", "user.c.d", ["answer_s1"]),
+        _fact("f_0003", "user.c.d", ["other_session"]),
+    ], monkeypatch, tmp_path)
+
+    r = probe_question(inst, run_root)
+    # Both keys cover s1; the smaller group must win the report.
+    assert r["best_group"] == "user.a.b" and r["best_size"] == 1

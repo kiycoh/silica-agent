@@ -35,6 +35,64 @@ def key_prefix(key: str, n: int = 2) -> str:
     return ".".join(key.split(".")[:n])
 
 
+_ENTITY_PREFIXES = {"user", "assist"}  # canonical forms of user. / assistant.
+
+
+def key_tokens(key: str) -> set[str]:
+    """Stemmed tokens of a key, entity prefix dropped: the clustering alphabet."""
+    from silica.kernel.episodic import normalize_key
+
+    segs = normalize_key(key).split(".")
+    if len(segs) > 1 and segs[0] in _ENTITY_PREFIXES:
+        segs = segs[1:]
+    return {t for s in segs for t in s.split("_") if len(t) > 1}
+
+
+def cluster_keys(keys: list[str], *, max_df: int | None = None) -> dict[str, str]:
+    """Post-hoc key clustering: connected components over shared stemmed tokens.
+
+    Counterfactual view — what a mechanical clustering layer COULD merge that
+    prompt-side key discipline provably does not (2026-07-15: three prompt
+    exhortations, three misses). Transitive gluing is deliberate; best_size
+    in the probe row is the blob check. max_df=K keeps only tokens shared by
+    <= K keys (rare-token linkage; 2026-07-15 sweep: K=3 shatters the blob,
+    frozen corpus covers 15/17 gold sessions at cluster sizes 2-10). Returns
+    key -> component display name (lexicographically first member key,
+    `(+N)` suffix for the rest)."""
+    toks = {k: key_tokens(k) for k in keys}
+    if max_df is not None:
+        df: dict[str, int] = defaultdict(int)
+        for ts in toks.values():
+            for t in ts:
+                df[t] += 1
+        toks = {k: {t for t in ts if df[t] <= max_df} for k, ts in toks.items()}
+    parent: dict[str, str] = {k: k for k in keys}
+
+    def find(k: str) -> str:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    owner: dict[str, str] = {}
+    for k in keys:
+        for t in toks[k]:
+            if t in owner:
+                parent[find(k)] = find(owner[t])
+            else:
+                owner[t] = k
+    members: dict[str, list[str]] = defaultdict(list)
+    for k in keys:
+        members[find(k)].append(k)
+    out: dict[str, str] = {}
+    for group in members.values():
+        first = min(group)
+        name = first if len(group) == 1 else f"{first} (+{len(group) - 1})"
+        for k in group:
+            out[k] = name
+    return out
+
+
 def _load_live_facts(vault: Path) -> list[dict]:
     from silica.kernel.paths import index_dir_for
 
@@ -45,11 +103,14 @@ def _load_live_facts(vault: Path) -> list[dict]:
     return [f for f in facts if f.get("status") == "live"]
 
 
-def probe_question(inst: dict, run_root: Path, *, normalize: bool = False) -> dict:
+def probe_question(inst: dict, run_root: Path, *, normalize: bool = False,
+                   cluster: bool = False, max_df: int | None = None) -> dict:
     """Probe one question's frozen store; returns a flat metrics dict.
 
     normalize=True groups keys in their canonical (Layer A) form — the
-    store's effective key identity, since capture matches normalized."""
+    store's effective key identity, since capture matches normalized.
+    cluster=True groups by post-hoc token clustering instead (both types):
+    the ceiling a mechanical clustering layer could reach on this store."""
     from silica.kernel.episodic import normalize_key
     from tests.eval.longmemeval.runner import question_vault
 
@@ -61,15 +122,26 @@ def probe_question(inst: dict, run_root: Path, *, normalize: bool = False) -> di
     covered = {g for f in live for g in f["runs"] if g in gold}
     gold_facts = [f for f in live if gold & set(f["runs"])]
 
-    canon = normalize_key if normalize else (lambda k: k)
-    if qtype == "knowledge-update":
-        group_of = canon
+    if cluster:
+        components = cluster_keys(sorted({f["key"] for f in live}),
+                                  max_df=max_df)
+        group_of = components.__getitem__
     else:
-        group_of = lambda k: key_prefix(canon(k))  # noqa: E731
+        canon = normalize_key if normalize else (lambda k: k)
+        if qtype == "knowledge-update":
+            group_of = canon
+        else:
+            group_of = lambda k: key_prefix(canon(k))  # noqa: E731
     by_group: dict[str, set[str]] = defaultdict(set)
     for f in gold_facts:
         by_group[group_of(f["key"])] |= gold & set(f["runs"])
-    best_group, best_cov = max(by_group.items(), key=lambda kv: len(kv[1]),
+    sizes: dict[str, int] = defaultdict(int)
+    for f in live:
+        sizes[group_of(f["key"])] += 1
+    # Ties on coverage go to the SMALLEST group: the honest diagnostic when a
+    # tiny precise cluster and a blob cover the same gold sessions.
+    best_group, best_cov = max(by_group.items(),
+                               key=lambda kv: (len(kv[1]), -sizes[kv[0]]),
                                default=("-", set()))
     return {
         "question_id": qid,
@@ -80,14 +152,17 @@ def probe_question(inst: dict, run_root: Path, *, normalize: bool = False) -> di
         "groups": len(by_group),
         "best_group": best_group,
         "best_coverage": len(best_cov),
+        # Blob check: LIVE facts (gold or not) riding in the best group.
+        "best_size": sizes.get(best_group, 0),
         "group_coverage": {g: sorted(c) for g, c in
                            sorted(by_group.items(), key=lambda kv: -len(kv[1]))},
     }
 
 
-def run_probes(data: list[dict], run_root: Path, *,
-               normalize: bool = False) -> list[dict]:
-    return [probe_question(q, run_root, normalize=normalize)
+def run_probes(data: list[dict], run_root: Path, *, normalize: bool = False,
+               cluster: bool = False, max_df: int | None = None) -> list[dict]:
+    return [probe_question(q, run_root, normalize=normalize, cluster=cluster,
+                           max_df=max_df)
             for q in data if q["question_type"] in PROBED_TYPES]
 
 
@@ -98,7 +173,8 @@ def render(rows: list[dict]) -> str:
             f"{r['question_id']:<16} {r['question_type']:<18} "
             f"capture {r['captured_sessions']}/{r['gold_sessions']}  "
             f"groups {r['groups']:>2}  best '{r['best_group']}' "
-            f"covers {r['best_coverage']}/{r['gold_sessions']}")
+            f"covers {r['best_coverage']}/{r['gold_sessions']} "
+            f"(size {r['best_size']})")
         for g, cov in list(r["group_coverage"].items())[:8]:
             lines.append(f"    {g:<46} {len(cov)}")
     return "\n".join(lines)
@@ -110,10 +186,15 @@ def main() -> None:
     ap.add_argument("--run-root", required=True)
     ap.add_argument("--normalize", action="store_true",
                     help="group keys in canonical (Layer A) form")
+    ap.add_argument("--cluster", action="store_true",
+                    help="group keys by post-hoc token clustering (ceiling view)")
+    ap.add_argument("--max-df", type=int, default=None,
+                    help="cluster only on tokens shared by <= K keys")
     args = ap.parse_args()
     data = json.loads(Path(args.data).read_text(encoding="utf-8"))
     print(render(run_probes(data, Path(args.run_root).expanduser().resolve(),
-                            normalize=args.normalize)))
+                            normalize=args.normalize, cluster=args.cluster,
+                            max_df=args.max_df)))
 
 
 if __name__ == "__main__":
