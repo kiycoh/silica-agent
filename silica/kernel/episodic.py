@@ -113,6 +113,28 @@ def normalize_key(key: str) -> str:
     return ".".join(segs)
 
 
+def key_vocabulary(store: "EpisodicStore", *, cap: int = 60) -> list[str]:
+    """Raw keys of live heads, most recently seen first, capped.
+
+    Feeds the distiller's `## Episodic keys` context section so capture snaps
+    to the established vocabulary instead of coining synonym keys."""
+    heads = sorted(store.live_facts(), key=lambda f: f.last_seen, reverse=True)
+    return [f.key for f in heads[:cap]]
+
+
+def key_vocabulary_section(store: "EpisodicStore") -> str | None:
+    """`## Episodic keys` distiller-context section; None on an empty store."""
+    keys = key_vocabulary(store)
+    if not keys:
+        return None
+    return (
+        "## Episodic keys\n"
+        "Live ephemeral keys already in the store. When a fact concerns one "
+        "of these attributes, reuse that exact key instead of coining a new "
+        "one:\n" + ", ".join(keys)[:600]  # hard token-budget cap
+    )
+
+
 class EpisodicStore:
     """JSON-file-backed fact store. Facts are not notes; they nucleate INTO notes."""
 

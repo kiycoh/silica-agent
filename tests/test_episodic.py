@@ -384,3 +384,33 @@ def test_capture_matches_legacy_head_written_before_layer_a(tmp_path):
     live = store.live_facts()
     assert len(live) == 1
     assert live[0].supersedes == "f_0001"
+
+
+def test_key_vocabulary_lists_live_heads_by_recency_with_cap(tmp_path):
+    from silica.kernel.episodic import key_vocabulary
+
+    store = _store(tmp_path)
+    store.capture([{"key": "user.dog.name", "text": "Tom"}],
+                  run_id="r1", seen="2026-01-01")
+    store.capture([{"key": "user.car.model", "text": "Panda"}],
+                  run_id="r2", seen="2026-03-01")
+    # Supersede user.dog.name: only the head key surfaces, once.
+    store.capture([{"key": "user.dog.name", "text": "Rex"}],
+                  run_id="r3", seen="2026-04-01")
+
+    assert key_vocabulary(store) == ["user.dog.name", "user.car.model"]
+    assert key_vocabulary(store, cap=1) == ["user.dog.name"]
+
+
+def test_key_vocabulary_section_renders_or_abstains(tmp_path):
+    from silica.kernel.episodic import key_vocabulary_section
+
+    store = _store(tmp_path)
+    assert key_vocabulary_section(store) is None   # empty store: no section
+
+    store.capture([{"key": "user.car.model", "text": "Panda"}],
+                  run_id="r1", seen="2026-01-01")
+    section = key_vocabulary_section(store)
+    assert section is not None
+    assert section.startswith("## Episodic keys")
+    assert "user.car.model" in section
