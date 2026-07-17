@@ -616,6 +616,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
                     else:
                         self.state = self._error_state
         finally:
+            if getattr(self, "_prefetcher", None) is not None:
+                self._prefetcher.shutdown()
             self._cleanup_tmp()
             self._flush_indexes()
         return self.context

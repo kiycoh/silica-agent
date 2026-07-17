@@ -15,9 +15,13 @@ import logging
 import os
 import re
 import hashlib
+import json
+import time
+import typing
 from typing import TYPE_CHECKING
 
 from silica.router import orchestrator as orch
+from silica.kernel.prep_delegation import run_distiller
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -225,9 +229,98 @@ def _inject_graph_ctx(chunk: dict, vault_ctx: dict) -> dict:
     return {**chunk, "batches": enriched_batches}
 
 
-def handle_delegate(fsm: "InjectorFSM") -> None:
-    from silica.kernel.prep_delegation import run_distiller
+def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
+    """Snapshot the full run_distiller kwargs for chunk ``idx``.
 
+    Called at dispatch time: everything the prompt needs is captured here, so a
+    prefetched call is immune to later FSM mutation. steer_context is always
+    None — steer retries never go through the prefetcher.
+    """
+    chunk = fsm._chunks[idx]
+
+    ledger_digest: str | None = None
+    try:
+        ledger_digest = fsm.progress.digest(manifest=fsm.manifest)
+    except Exception:
+        pass
+
+    vault_ctx = fsm.context.get("vault_graph_ctx", {})
+    enriched_chunk = _inject_graph_ctx(chunk, vault_ctx) if vault_ctx else chunk
+
+    substrate: str | None = None
+    try:
+        from silica.kernel.run_substrate import build_substrate
+        substrate = build_substrate(
+            enriched_chunk,
+            manifest_titles=fsm.manifest.titles(),
+            cleared_parents=fsm.context.get("run_cleared_parents"),
+            hub_names=[
+                v["hub"].rsplit("/", 1)[-1] for v in vault_ctx.values()
+                if isinstance(v, dict) and v.get("is_hub") and v.get("hub")
+            ],
+        )
+    except Exception as _sub_e:
+        logger.debug("DELEGATE: substrate build failed (non-fatal): %s", _sub_e)
+
+    fi = fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]
+    return dict(
+        payload=enriched_chunk,
+        target=fsm.target_dir,
+        hub=fsm.hub,
+        ledger_digest=ledger_digest,
+        steer_context=None,
+        substrate=substrate,
+        session_date=_doc_date(fsm, idx) or fsm.progress.started_at[:10],
+        language=fsm.context.get(f"file_{fi}_language"),
+    )
+
+
+def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
+    """Dispatch distill calls for chunks [idx, idx+k) of the current file.
+
+    COLLISION for lookahead chunks runs here, early, on the main thread (the
+    pass is main-thread-only by design); only the run_distiller network call
+    goes to the pool. Spec: staleness ≤ k-1 chunks, window never crosses a
+    file boundary.
+    """
+    k = int(getattr(orch.CONFIG, "distill_concurrency", 1) or 1)
+    if k <= 1:
+        return
+    if getattr(fsm, "_prefetcher", None) is None:
+        from silica.router.prefetch import DistillPrefetcher
+        fsm._prefetcher = DistillPrefetcher(max_workers=k)
+
+    from silica.router.states.collision import collision_pass
+
+    fi_cur = fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]
+    for j in range(idx, min(idx + k, len(fsm._chunks))):
+        if fsm._chunk_flat_to_fi_ci.get(j, (fi_cur, 0))[0] != fi_cur:
+            break  # never cross a file boundary
+        if j in fsm._prefetcher:
+            continue
+        if j > idx and not fsm.context.get(f"chunk_{j}_collision_done"):
+            try:
+                collision_pass(fsm, j)
+                fsm.context[f"chunk_{j}_collision_done"] = True
+            except Exception as _ce:
+                logger.warning("prefetch: collision_pass(%d) failed (%s) — chunk stays sequential", j, _ce, exc_info=True)
+                continue
+        # Content-addressed idempotency: never dispatch a chunk a prior run
+        # already completed (same key derivation as handle_delegate).
+        j_hash = fsm.context.get(f"chunk_{j}_input_hash") or hashlib.sha256(
+            json.dumps(fsm._chunks[j], sort_keys=True).encode()
+        ).hexdigest()
+        try:
+            done = fsm.progress.is_checkpoint_done(fsm._chunk_task_id("validate", j), j_hash)
+        except Exception:
+            done = None
+        if done:
+            continue
+        kwargs = _distill_inputs(fsm, j)
+        fsm._prefetcher.submit(j, lambda kw=kwargs: run_distiller(**kw))
+
+
+def handle_delegate(fsm: "InjectorFSM") -> None:
     fsm._get_chunks_from_context_if_empty()
 
     if not fsm._chunks or fsm._current_chunk_idx >= len(fsm._chunks):
@@ -271,62 +364,40 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
             _json.dumps(current_chunk, sort_keys=True).encode()
         ).hexdigest()
 
+    _prefetch_ahead(fsm, idx)
+
     logger.info(f"--- DISTILLING BATCH {idx + 1}/{len(fsm._chunks)} ---")
     fsm._progress_note(fsm._chunk_task_id("distill"), "distill", "running")
-
-    # Assemble compact ledger digest for LLM context (Phase 2 rails).
-    # Include the RunManifest so the distiller knows what was injected in prior chunks.
-    ledger_digest: str | None = None
-    try:
-        ledger_digest = fsm.progress.digest(manifest=fsm.manifest)
-    except Exception:
-        pass
 
     # Phase 6: pass steering correction if VALIDATE sent us back here
     steer_context: str | None = fsm.context.get(f"chunk_{idx}_steer_context")
     if steer_context:
         logger.info("DELEGATE chunk %d: re-attempt with steering correction", idx)
 
-    # Enrich the payload with graph context (cluster/hub/is_hub) for concepts
-    # that have a vault_collision.  The distiller uses this to understand
-    # structural importance of the matched note.  Original chunk is not modified.
-    vault_ctx = fsm.context.get("vault_graph_ctx", {})
-    enriched_chunk = _inject_graph_ctx(current_chunk, vault_ctx) if vault_ctx else current_chunk
-
-    # Build per-chunk substrate: semantically close vault notes that are not
-    # yet directly linked to run notes — candidates for `parent` and wikilinks.
-    # Also surface any cleared parent forward-references from earlier chunks.
-    substrate: str | None = None
-    try:
-        from silica.kernel.run_substrate import build_substrate
-        substrate = build_substrate(
-            enriched_chunk,
-            manifest_titles=fsm.manifest.titles(),
-            cleared_parents=fsm.context.get("run_cleared_parents"),
-            hub_names=[
-                v["hub"].rsplit("/", 1)[-1] for v in vault_ctx.values()
-                if isinstance(v, dict) and v.get("is_hub") and v.get("hub")
-            ],
+    kwargs = _distill_inputs(fsm, idx)
+    if retry_payload is not None or steer_context:
+        # Steer retries always run inline with the retry payload + feedback;
+        # the prefetcher refuses re-submission of a popped idx by design.
+        kwargs["payload"] = (
+            _inject_graph_ctx(current_chunk, fsm.context.get("vault_graph_ctx", {}))
+            if fsm.context.get("vault_graph_ctx") else current_chunk
         )
-    except Exception as _sub_e:
-        logger.debug("DELEGATE: substrate build failed (non-fatal): %s", _sub_e)
+        kwargs["steer_context"] = steer_context
 
     try:
-        chunk_result = run_distiller(
-            payload=enriched_chunk,
-            target=fsm.target_dir,
-            hub=fsm.hub,
-            ledger_digest=ledger_digest,
-            steer_context=steer_context,
-            substrate=substrate,
-            # F2a: relative dates in fact values resolve against the source's
-            # own day — the doc's frontmatter `date:` when present, else the
-            # run's start date.
-            session_date=_doc_date(fsm, idx) or fsm.progress.started_at[:10],
-            language=fsm.context.get(
-                f"file_{fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]}_language"
-            ),
-        )
+        _t0 = time.monotonic()
+        fut = fsm._prefetcher.pop(idx) if getattr(fsm, "_prefetcher", None) else None
+        if fut is not None and kwargs["steer_context"] is None:
+            try:
+                chunk_result = fut.result()
+            except Exception as _pe:
+                logger.warning("DELEGATE: prefetched distill for chunk %d failed (%s) — retrying inline", idx, _pe, exc_info=True)
+                chunk_result = run_distiller(**kwargs)
+        else:
+            chunk_result = run_distiller(**kwargs)
+        # Wall-clock the chunk actually cost the run (wait time for prefetched
+        # calls) — the A/B report's per-chunk latency source.
+        fsm.context.setdefault("distill_secs", {})[idx] = round(time.monotonic() - _t0, 2)
         if "error" in chunk_result:
             fsm._progress_note(fsm._chunk_task_id("distill"), "distill", "failed", error=chunk_result["error"])
             raise RuntimeError(f"Distiller error on batch {idx}: {chunk_result['error']}")

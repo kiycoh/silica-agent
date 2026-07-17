@@ -213,7 +213,7 @@ def test_carry_ops_merge_into_next_validate_pass(mock_validate):
 # DELEGATE: retry payload consumption
 # ---------------------------------------------------------------------------
 
-@patch("silica.kernel.prep_delegation.run_distiller")
+@patch("silica.router.states.distill.run_distiller")
 def test_delegate_consumes_retry_payload_and_keeps_hash(mock_distiller):
     mock_distiller.return_value = {"updates": []}
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")

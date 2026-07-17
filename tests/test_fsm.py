@@ -101,7 +101,7 @@ def test_silica_run_injector_is_registered():
     tool = TOOLS["silica_run_injector"]
     assert tool.cls == "composed"
 
-@patch("silica.kernel.prep_delegation.run_distiller")
+@patch("silica.router.states.distill.run_distiller")
 def test_fsm_delegate_single_chunk(mock_run_distiller):
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     fsm._chunks = [
@@ -129,7 +129,7 @@ def test_fsm_delegate_single_chunk(mock_run_distiller):
         assert fsm.context["chunk"]["distiller_output_path"] == "temp_chunk_path.json"
 
 
-@patch("silica.kernel.prep_delegation.run_distiller")
+@patch("silica.router.states.distill.run_distiller")
 def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
     """A source doc with frontmatter `date:` anchors the distiller's
     relative-date resolution to the doc's own day, not the ingest day."""
@@ -161,7 +161,7 @@ def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
 
 @patch("silica.router.orchestrator.silica_recon")
 @patch("silica.router.orchestrator.silica_payload")
-@patch("silica.kernel.prep_delegation.run_distiller")
+@patch("silica.router.states.distill.run_distiller")
 @patch("silica.router.orchestrator.silica_sanitize")
 @patch("silica.router.orchestrator.silica_validate_ops")
 @patch("silica.router.orchestrator.DRIVER")
@@ -424,7 +424,7 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
 
 @patch("silica.router.orchestrator.silica_recon")
 @patch("silica.router.orchestrator.silica_payload")
-@patch("silica.kernel.prep_delegation.run_distiller")
+@patch("silica.router.states.distill.run_distiller")
 @patch("silica.router.orchestrator.silica_sanitize")
 @patch("silica.router.orchestrator.silica_validate_ops")
 @patch("silica.router.orchestrator.DRIVER")
@@ -964,7 +964,7 @@ def test_fsm_short_circuit_no_ops(mock_validate):
 
 @patch("silica.router.orchestrator.silica_recon")
 @patch("silica.router.orchestrator.silica_payload")
-@patch("silica.kernel.prep_delegation.run_distiller")
+@patch("silica.router.states.distill.run_distiller")
 @patch("silica.router.orchestrator.silica_sanitize")
 @patch("silica.router.orchestrator.silica_validate_ops")
 @patch("silica.router.orchestrator.DRIVER")
