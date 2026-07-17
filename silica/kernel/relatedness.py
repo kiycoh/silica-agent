@@ -49,8 +49,11 @@ RRF_K = 60
 _NOISE_FLOOR = 1e-6
 
 # Cooccur confidence gate (retrieval-gates spec 2026-07-14). ponytail: dormant —
-# 0.0 never fires; phase-0 calibration picks the signal (coverage vs flatness)
-# and freezes the threshold, same discipline as _NOISE_FLOOR.
+# 0.0 never fires. Phase-0 (2026-07-17, bench/phase0_gates.json) recorded the
+# no-fire reference only: vault coverage p10 0.259 / lme_s p10 0.432, so any
+# future threshold <=0.1 is home-turf-safe. The fire side (MuSiQue, vocabulary
+# mismatch) is no longer on disk; freeze only after a MuSiQue re-run, and shelve
+# the gate if that run shows no wide separation (spec abort criterion).
 _COOCCUR_MIN_CONFIDENCE = 0.0
 # Calibration hook: harnesses set it to capture per-query
 # {"coverage", "flatness", "fired"}; production leaves it None.

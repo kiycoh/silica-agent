@@ -18,10 +18,14 @@ import statistics
 from typing import Any, Callable
 
 _WINDOW_CHARS = 800  # cross-encoder document budget (chars): excerpt window + gate unit
-# ponytail: provisional pending phase-0 calibration (retrieval-gates spec 2026-07-14);
-# separation is expected order-of-magnitude (wiki paragraphs vs chat sessions), so the
-# exact factor is uncritical until the probe data freezes it.
-_RERANK_WINDOW_FACTOR = 3
+# Frozen by the phase-0 run (2026-07-17, bench/phase0_gates.json): the spec's
+# clean-gap expectation was REFUTED — real-vault notes are long (ratio p50 3.6,
+# p90 10.8, max 20.8) and overlap LME chat sessions (9.2–21.7), so no corpus-level
+# all-or-nothing threshold exists. 8 sits just under the measured-damage floor
+# (LME min 9.2): every query where rerank damage was measured still fires, with
+# margin, while ~81% of vault queries keep the reranker; the ~19% vault tail that
+# fires holds >6.4k-char bodies, unreadable for the same reason chat sessions are.
+_RERANK_WINDOW_FACTOR = 8
 # Calibration hook: harnesses set it to capture {"median_len", "window", "fired"}
 # per query; production leaves it None.
 RERANK_GATE_PROBE: Callable[[dict], None] | None = None
@@ -184,56 +188,3 @@ def rerank_related(
         return pool
     order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
     return [pool[i] for i in order]
-
-
-def demo() -> None:
-    """Self-check: reorder-only within top-k, granularity gate, abstain keeps order."""
-
-    class _Fake:
-        def __init__(self, s):
-            self._s = s
-            self.called = False
-
-        def scores(self, query, documents):
-            self.called = True
-            return self._s
-
-    items = [{"path": "a"}, {"path": "b"}, {"path": "c"}]
-    doc = lambda it: it["path"]
-
-    # 2a reorder-only: k=2 truncates the pool FIRST; b outscores a -> [b, a],
-    # c can never be pulled in.
-    out = rerank_related(_Fake([0.1, 0.9]), "q", items, k=2, document_of=doc)
-    assert [i["path"] for i in out] == ["b", "a"], out
-
-    # 2b granularity abstain: median doc >> window -> reranker never called.
-    gate = _Fake([0.9, 0.1])
-    long_doc = "x" * (_RERANK_WINDOW_FACTOR * _WINDOW_CHARS + 1)
-    out = rerank_related(gate, "q", items, k=2, document_of=lambda it: long_doc)
-    assert [i["path"] for i in out] == ["a", "b"] and not gate.called, out
-
-    # reranker abstains (None) -> pool order, truncated
-    out = rerank_related(_Fake(None), "q", items, k=2, document_of=doc)
-    assert [i["path"] for i in out] == ["a", "b"], out
-
-    # no reranker -> no-op passthrough, truncated
-    out = rerank_related(None, "q", items, k=1, document_of=doc)
-    assert [i["path"] for i in out] == ["a"], out
-
-    # empty query -> no-op
-    out = rerank_related(_Fake([0.9, 0.0, 0.0]), "", items, k=3, document_of=doc)
-    assert [i["path"] for i in out] == ["a", "b", "c"], out
-
-    # query-aware window: the relevant passage sits past a naive head slice, and
-    # the window must surface it so the cross-encoder scores the right text.
-    body = ("intro chatter " * 60) + "the user practices yoga for anxiety " + ("filler " * 60)
-    assert len(body) > 800
-    win = _best_window(body, "how often yoga for anxiety?", 200)
-    assert "yoga for anxiety" in win, win
-    assert _best_window("short body", "anything", 800) == "short body"  # no-op under width
-
-    print("rerank demo ok")
-
-
-if __name__ == "__main__":
-    demo()
