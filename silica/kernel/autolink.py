@@ -63,28 +63,35 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _HEADING_RE = re.compile(r"^#{1,6} .+$", re.MULTILINE)
 
 
-def _build_skip_mask(text: str) -> list[bool]:
+# Shared skip-region idiom (kernel/rename.py reuses it via build_skip_mask).
+# BASE = regions both callers protect; FULL adds regions only autolink skips
+# (it must not touch existing wikilinks/headings, rename wants to rewrite them).
+SKIP_PATTERNS_BASE = (
+    _FRONTMATTER_RE,
+    _FENCED_CODE_RE,
+    _INLINE_CODE_RE,
+    _DISPLAY_MATH_RE,
+    _INLINE_MATH_RE,
+)
+SKIP_PATTERNS_FULL = SKIP_PATTERNS_BASE + (
+    _WIKILINK_RE,
+    _HTML_COMMENT_RE,
+    _HEADING_RE,
+)
+
+
+def build_skip_mask(text: str, patterns=SKIP_PATTERNS_FULL) -> list[bool]:
     """Return a per-character boolean mask: True = inside a skip region."""
     mask = [False] * len(text)
-
-    def _mark(m: re.Match) -> None:
-        for i in range(m.start(), m.end()):
-            mask[i] = True
-
-    for pattern in (
-        _FRONTMATTER_RE,
-        _FENCED_CODE_RE,
-        _INLINE_CODE_RE,
-        _DISPLAY_MATH_RE,
-        _INLINE_MATH_RE,
-        _WIKILINK_RE,
-        _HTML_COMMENT_RE,
-        _HEADING_RE,
-    ):
+    for pattern in patterns:
         for m in pattern.finditer(text):
-            _mark(m)
-
+            for i in range(m.start(), m.end()):
+                mask[i] = True
     return mask
+
+
+def _build_skip_mask(text: str) -> list[bool]:
+    return build_skip_mask(text, SKIP_PATTERNS_FULL)
 
 
 # ---------------------------------------------------------------------------

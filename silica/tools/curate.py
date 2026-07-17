@@ -130,32 +130,25 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
         return _body_cache[p]
     stem = lambda p: p.removesuffix(".md").rsplit("/", 1)[-1]
 
-    # Union-find over confirmed pairs only.
-    parent: dict[str, str] = {}
+    # Connected components over confirmed pairs only (nx over a hand-rolled
+    # union-find — same result, one well-known call).
+    import networkx as nx
+
+    graph = nx.Graph()
     node_score: dict[str, float] = {}
-    def find(x: str) -> str:
-        parent.setdefault(x, x)
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-    def union(a: str, b: str) -> None:
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
     for it in pairs:
         if it.score >= tau_high:
-            union(it.target, it.partner)
+            graph.add_edge(it.target, it.partner)
             for n in (it.target, it.partner):
                 node_score[n] = max(node_score.get(n, 0.0), it.score)
 
-    components: dict[str, set[str]] = {}
-    for node in list(parent):
-        components.setdefault(find(node), set()).add(node)
+    components = [set(c) for c in nx.connected_components(graph)]
+    # node -> component-id, so the borderline pass below can ask "same component?"
+    comp_of: dict[str, int] = {n: i for i, c in enumerate(components) for n in c}
 
     items: list[WorkItem] = []
     # 1. Each confirmed component → collapse every member into its largest note.
-    for members in components.values():
+    for members in components:
         canonical = max(members, key=lambda p: len(body(p)))
         for m in members:
             if m == canonical:
@@ -180,7 +173,7 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
         if it.score >= tau_high:
             continue
         source, target = it.target, it.partner
-        if source in parent and target in parent and find(source) == find(target):
+        if comp_of.get(source, -1) == comp_of.get(target, -2):
             continue
         body_s, body_t = body(source), body(target)
         if len(body_t) >= len(body_s):

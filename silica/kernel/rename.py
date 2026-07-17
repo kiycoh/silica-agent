@@ -30,49 +30,16 @@ from urllib.parse import unquote, quote
 
 
 # ---------------------------------------------------------------------------
-# Skip-region mask (same idiom as autolink.py)
+# Skip-region mask — shared with autolink.py. rename uses the BASE pattern set
+# (no wikilink/heading entries): unlike autolink it *wants* to scan inside
+# wikilinks and headings to rewrite them.
 # ---------------------------------------------------------------------------
 
-# YAML frontmatter at the very top of the note (OFM convention)
-_FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
-
-# Fenced code blocks (``` or ~~~, any info string)
-_FENCED_CODE_RE = re.compile(r"(?:```|~~~)[^\n]*\n.*?(?:```|~~~)", re.DOTALL)
-
-# Inline code (`...`)
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
-
-# Display math ($$...$$) — must come before single-$ match
-_DISPLAY_MATH_RE = re.compile(r"\$\$.*?\$\$", re.DOTALL)
-
-# Inline math ($...$) — single-line only
-_INLINE_MATH_RE = re.compile(r"\$[^$\n]+\$")
+from silica.kernel.autolink import SKIP_PATTERNS_BASE, build_skip_mask
 
 
 def _build_skip_mask(text: str) -> list[bool]:
-    """Return a per-character boolean mask: True = inside a skip region.
-
-    Matches the contract from autolink._build_skip_mask but without the
-    existing-wikilink and HTML-comment entries (we *want* to scan inside
-    wikilinks for rewriting).
-    """
-    mask = [False] * len(text)
-
-    def _mark(m: re.Match) -> None:
-        for i in range(m.start(), m.end()):
-            mask[i] = True
-
-    for pattern in (
-        _FRONTMATTER_RE,
-        _FENCED_CODE_RE,
-        _INLINE_CODE_RE,
-        _DISPLAY_MATH_RE,
-        _INLINE_MATH_RE,
-    ):
-        for m in pattern.finditer(text):
-            _mark(m)
-
-    return mask
+    return build_skip_mask(text, SKIP_PATTERNS_BASE)
 
 
 def _span_is_clear(mask: list[bool], start: int, end: int) -> bool:

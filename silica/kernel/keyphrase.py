@@ -24,6 +24,7 @@ See docs/superpowers/specs/2026-06-19-concept-recon-design.md.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -45,7 +46,7 @@ from silica.kernel.text import clean_body
 TOKENS_PER_CONCEPT = 20
 MIN_CONCEPTS = 1          # a note may map to a single concept — no forced padding
 MAX_CONCEPTS = 40
-YAKE_POOL = 100           # candidates YAKE proposes (also the rerank pool)
+YAKE_POOL = int(os.getenv("SILICA_YAKE_POOL", "100"))  # candidates YAKE proposes (also the rerank pool); operator knob
 
 # Rerank knobs (Phase 2 — tune via the eval).
 MMR_LAMBDA = 0.6          # relevance vs diversity in MMR; lower = more diverse
