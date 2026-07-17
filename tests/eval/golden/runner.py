@@ -28,6 +28,7 @@ from silica.kernel.health import fusion_probe, integrity_probe, iter_notes  # no
 from tests.eval.golden import (
     probe_classify,
     probe_correlate,
+    probe_dedup,
     probe_fusion,
     probe_links,
 )
@@ -38,9 +39,28 @@ METRICS_PATH = Path(__file__).parent / "metrics.json"
 # Gate rules (single source — the pytest imports compare()).
 # fusion.recall_at_10 arms itself on the first freeze that records it
 # (compare() skips keys absent from the baseline).
-GATED_DROP_2PP = ("classify.agreement", "links.recall", "fusion.recall_at_10")   # Phase 2 appends dedup.*, neighbors.*
+GATED_DROP_2PP = ("classify.agreement", "links.recall", "fusion.recall_at_10")
+# Rates where HIGH is bad: a rise past tolerance fails (mirror image of DROP).
+# dedup.tp_leak_rate self-arms — compare() only reads keys present in both docs,
+# and the TP metric is recorded only when its labels resolve (pairs>0).
+GATED_RISE_2PP = ("dedup.fp_auto_merge_rate", "dedup.tp_leak_rate")
 GATED_EXACT_ONE = ("integrity.rate",)
 _PRIMARIES = ("classify.agreement", "links.recall", "integrity.rate")
+
+# Metrics that need the embed leg live. When the on-disk index is absent
+# (deleted to reclaim RAM — it is a rebuildable derived artifact), the embed
+# leg abstains and these become a different instrument, not a regression: the
+# gate SKIPs them instead of failing, so an offline run never reads as drift.
+_EMBED_DEPENDENT = ("fusion.recall_at_10", "dedup.fp_auto_merge_rate", "dedup.tp_leak_rate")
+
+
+def _embed_live(legs: str | None) -> bool:
+    return "embed" in (legs or "")
+
+
+def _nonembed_legs(legs: str | None) -> str:
+    """The leg set minus the embed leg — the part whose change is real drift."""
+    return (legs or "").replace("embed+", "").replace("embed", "")
 
 
 def _today() -> str:
@@ -162,8 +182,19 @@ def collect(vault: Path, *, tier: str = "cheap", verbose: bool = False) -> dict:
     metrics["fusion.embed_coverage"] = fz["embed_coverage"]
 
     if tier in ("embedder", "all"):
-        print("SKIP  dedup.*      — Phase 2 (embedder tier) not implemented")
-        print("SKIP  neighbors.*  — Phase 2 (embedder tier) not implemented")
+        if embed_store is not None and len(embed_store):
+            dd = probe_dedup.run(vault, store, embed_store=embed_store, verbose=verbose)
+            metrics["dedup.fp_auto_merge_rate"] = dd["fp_auto_merge_rate"]
+            metrics["dedup.fp_pairs_evaluated"] = dd["fp_pairs_evaluated"]
+            metrics["dedup.fp_patches"] = dd["fp_patches"]
+            metrics["dedup.route_defer"] = dd["route_defer"]
+            metrics["dedup.route_keep"] = dd["route_keep"]
+            metrics["dedup.tp_pairs_evaluated"] = dd["tp_pairs_evaluated"]
+            if "tp_leak_rate" in dd:
+                metrics["dedup.tp_leak_rate"] = dd["tp_leak_rate"]
+                metrics["dedup.tp_leaks"] = dd["tp_leaks"]
+        else:
+            print("SKIP  dedup.*      — embed index absent (offline)")
 
     # arbitrary single trend number — labeled as such, never gated
     metrics["coherence_index"] = round(sum(metrics[k] for k in _PRIMARIES) / len(_PRIMARIES), 4)
@@ -185,10 +216,18 @@ def compare(baseline: dict, doc: dict) -> list[str]:
     """The single gate rule (pytest imports this). Digest/config refusals happen
     BEFORE this, not here."""
     b, d = baseline["metrics"], doc["metrics"]
+    embed_live = _embed_live(doc["config"].get("relatedness_legs"))
     fails: list[str] = []
     for key in GATED_DROP_2PP:
+        if key in _EMBED_DEPENDENT and not embed_live:
+            continue  # embed index absent this run — SKIPped, not gated
         if key in b and key in d and d[key] < b[key] - 0.02:
             fails.append(f"{key}: {d[key]:.3f} < baseline {b[key]:.3f} − 2pp")
+    for key in GATED_RISE_2PP:
+        if key in _EMBED_DEPENDENT and not embed_live:
+            continue  # embed index absent this run — SKIPped, not gated
+        if key in b and key in d and d[key] > b[key] + 0.02:
+            fails.append(f"{key}: {d[key]:.3f} > baseline {b[key]:.3f} + 2pp")
     for key in GATED_EXACT_ONE:
         if key in d and d[key] != 1.0:
             fails.append(f"{key}: {d[key]:.3f} != 1.0 (any new violation fails)")
@@ -287,14 +326,29 @@ def main(argv=None) -> int:
         print_table(doc, baseline)
         print("\ncooccur mode changed — re-baseline deliberately with --freeze-baseline")
         return 1
-    # A 2-leg run vs a 3-leg baseline (or vice versa) is a different instrument,
-    # not a regression — refuse the comparison like digest/cooccur drift.
-    if baseline["config"].get("relatedness_legs") != doc["config"].get("relatedness_legs"):
+    # A change in the NON-embed legs (cooccur/edges) is a different instrument —
+    # refuse like digest/cooccur drift. But losing only the embed leg means the
+    # index file is absent (deleted to reclaim RAM); that is an offline run, not
+    # drift — SKIP the embed-dependent metrics and still gate the cheap tier.
+    base_legs = baseline["config"].get("relatedness_legs")
+    cur_legs = doc["config"].get("relatedness_legs")
+    if _nonembed_legs(base_legs) != _nonembed_legs(cur_legs):
         print_table(doc, baseline)
         print("\nrelatedness legs changed — re-baseline deliberately with --freeze-baseline")
         return 1
 
+    # Embedder-id drift: dedup/fusion cosines are not comparable across models.
+    # Only refuse when the embed leg is actually live this run (else the id is moot).
+    if _embed_live(cur_legs) and \
+            baseline["config"].get("embedding_model") != doc["config"].get("embedding_model"):
+        print_table(doc, baseline)
+        print("\nembedder model changed — re-baseline deliberately with --freeze-baseline")
+        return 1
+
     print_table(doc, baseline)
+    if _embed_live(base_legs) and not _embed_live(cur_legs):
+        print("\nSKIP  embed tier — index absent (offline); "
+              f"{', '.join(_EMBED_DEPENDENT)} not gated this run")
     fails = compare(baseline, doc)
     if fails:
         print("\nFAIL:")

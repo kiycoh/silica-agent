@@ -44,12 +44,15 @@ def test_golden_regression():
         pytest.fail("vault drifted — re-baseline deliberately with --freeze-baseline")
 
     try:
-        doc = runner.collect(vault, tier="cheap")
+        doc = runner.collect(vault, tier="all")
     finally:
         silica.driver._driver = None
 
     if doc["config"]["cooccur_store"] != baseline["config"]["cooccur_store"]:
         pytest.fail("cooccur mode changed — re-baseline deliberately with --freeze-baseline")
+    if runner._embed_live(doc["config"].get("relatedness_legs")) and \
+            doc["config"].get("embedding_model") != baseline["config"].get("embedding_model"):
+        pytest.fail("embedder model changed — re-baseline deliberately with --freeze-baseline")
 
     fails = runner.compare(baseline, doc)
     assert not fails, "gated metric regression:\n" + "\n".join(fails)

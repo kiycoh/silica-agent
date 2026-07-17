@@ -67,6 +67,35 @@ def test_probe_classify_taxonomy_and_counting(synthetic_vault, tmp_path):
     assert m["agreement"] == pytest.approx(round(agree, 4))
 
 
+def test_probe_dedup_skips_without_index(tmp_path):
+    """No embed index ⇒ empty result, never a crash — the runner SKIPs it."""
+    from silica.kernel.cooccurrence import CooccurStore
+    from tests.eval.golden import probe_dedup
+
+    out = probe_dedup.run(tmp_path, CooccurStore(path=tmp_path / "c.json"), embed_store=None)
+    assert out["fp_pairs_evaluated"] == 0
+    assert out["fp_auto_merge_rate"] == 0.0
+
+
+def test_probe_dedup_fp_counts_mechanical_merge(tmp_path):
+    """Two same-domain notes whose names fold to one key (Foo ⇄ Foo 1) at cos≈1
+    are auto-routed `patch` — the FP arm must count that as an auto-merge."""
+    from silica.kernel.cooccurrence import CooccurStore
+    from silica.kernel.embed import EmbedStore
+    from tests.eval.golden import probe_dedup
+
+    (tmp_path / "D").mkdir()
+    (tmp_path / "D" / "Foo.md").write_text("# Foo\nbody one", encoding="utf-8")
+    (tmp_path / "D" / "Foo 1.md").write_text("# Foo 1\nbody two", encoding="utf-8")
+    es = EmbedStore(path=tmp_path / "e.json")
+    es.upsert("D/Foo", "Foo", [1.0, 0.0, 0.0])
+    es.upsert("D/Foo 1", "Foo 1", [1.0, 0.002, 0.0])
+
+    out = probe_dedup.run(tmp_path, CooccurStore(path=tmp_path / "c.json"), embed_store=es)
+    assert out["fp_patches"] >= 1
+    assert out["fp_auto_merge_rate"] > 0.0
+
+
 def test_probe_integrity_differential(synthetic_vault):
     # (a) every write-path transform leaves the clean fixture clean.
     assert integrity_probe(synthetic_vault)["rate"] == 1.0
