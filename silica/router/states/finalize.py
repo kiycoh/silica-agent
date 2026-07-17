@@ -265,6 +265,16 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
                 fsm.context["cleanup_warning"] = res["error"]
             _log_nucleate_completion(fsm, fi, inbox_file_for_fi)
             _record_provenance(fsm, fi, inbox_file_for_fi)
+            # Title-index run cache: the archived source moved out of its
+            # indexed path — drop its ref so AUTOLINK can't link to a stale
+            # inbox title.
+            _cached_refs = getattr(fsm, "_run_title_refs", None)
+            if _cached_refs is not None:
+                _src_abs = os.path.abspath(inbox_file_for_fi)
+                _cached_refs[:] = [
+                    r for r in _cached_refs
+                    if not getattr(r, "path", None) or os.path.abspath(r.path) != _src_abs
+                ]
         else:
             logger.info(
                 "File %d (%s) had chunk failures — not archiving.",

@@ -348,6 +348,18 @@ def handle_write(fsm: "InjectorFSM") -> None:
         pass
     else:
         fsm._progress_note(fsm._chunk_task_id("write"), "write", "done")
+
+    # Title-index run cache (Tier 1): make this chunk's new notes visible to
+    # later chunks' AUTOLINK/BACKLINK without a fresh full-vault scan. Only
+    # append when the cache exists — first AUTOLINK builds it lazily.
+    _cached_refs = getattr(fsm, "_run_title_refs", None)
+    if _cached_refs is not None and fsm._txn is not None:
+        from silica.driver.base import NoteRef
+        _known = {os.path.abspath(r.path) for r in _cached_refs if getattr(r, "path", None)}
+        for _p in (fsm._txn.created_paths or []):
+            if os.path.abspath(_p) not in _known:
+                _stem = os.path.splitext(os.path.basename(_p))[0]
+                _cached_refs.append(NoteRef(name=_stem, path=_p))
     fsm._transition_success()
 
 

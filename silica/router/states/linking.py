@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import typing
 from typing import TYPE_CHECKING
 
 from silica.router import orchestrator as orch
@@ -24,6 +25,21 @@ logger = logging.getLogger(__name__)
 
 
 from silica.kernel.ops import OpType
+
+
+def _run_title_refs(fsm: "InjectorFSM") -> list[typing.Any]:
+    """One full-vault scan per run; WRITE appends this run's new notes.
+
+    The index itself (build_title_index) is recomputed from these refs per
+    use — it's pure CPU over ~10k strings (ms), while list_files() is the
+    per-chunk disk scan this cache removes. ponytail: no invalidation beyond
+    append/remove — the ingest path never renames vault notes mid-run.
+    """
+    refs = getattr(fsm, "_run_title_refs", None)
+    if refs is None:
+        refs = list(orch.DRIVER.list_files())
+        fsm._run_title_refs = refs
+    return refs
 
 
 def handle_autolink(fsm: "InjectorFSM") -> None:
@@ -51,7 +67,7 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
             fsm._transition_success()
             return
 
-        all_refs = orch.DRIVER.list_files()
+        all_refs = _run_title_refs(fsm)
         title_index = build_title_index(all_refs)
 
         # Build a reverse map: title (basename, no .md) → cluster_id for fast lookup
@@ -178,7 +194,7 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
             except Exception:
                 pass
 
-        all_refs = orch.DRIVER.list_files()
+        all_refs = _run_title_refs(fsm)
         title_index = build_title_index(all_refs)
         added_map = backlink_pass(new_titles, title_index=title_index, neighbourhood=neighbourhood)
 
