@@ -100,6 +100,14 @@ class SilicaConfig:
         default_factory=lambda: int(os.getenv("SILICA_WORKER_MAX_CONCURRENT", "4"))
     )
 
+    # Distiller prefetch width for /ingest (Tier 1 speed): how many chunk
+    # distillations may be in flight at once. 1 = fully sequential (today's
+    # behavior, bit-identical). Flip the default to 3 only after the
+    # frozen-corpus A/B gate passes (see docs spec 2026-07-18).
+    distill_concurrency: int = field(
+        default_factory=lambda: int(os.getenv("SILICA_DISTILL_CONCURRENCY", "1"))
+    )
+
     # Vault path — used by the fs backend and for context.
     vault_path: str = field(
         default_factory=lambda: os.getenv("SILICA_VAULT", "")
