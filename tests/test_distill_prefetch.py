@@ -156,3 +156,17 @@ def test_prefetch_ahead_skips_checkpoint_done_chunks():
     assert 0 in fsm._prefetcher and 1 in fsm._prefetcher
     assert 2 not in fsm._prefetcher  # already done in a prior run
     fsm._prefetcher.shutdown()
+
+
+def test_prefetch_ahead_skips_empty_chunks():
+    from silica.router.states import distill as d
+    fsm = _stub_fsm(n_chunks=3)
+    fsm._chunks[1] = {"schema_version": 1, "batches": []}
+    fsm.context["chunk_1_collision_done"] = True  # collision already emptied it
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+         patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
+         patch("silica.router.states.collision.collision_pass"):
+        d._prefetch_ahead(fsm, 0)
+    assert 0 in fsm._prefetcher and 2 in fsm._prefetcher
+    assert 1 not in fsm._prefetcher
+    fsm._prefetcher.shutdown()

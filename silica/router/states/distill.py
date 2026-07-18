@@ -229,6 +229,18 @@ def _inject_graph_ctx(chunk: dict, vault_ctx: dict) -> dict:
     return {**chunk, "batches": enriched_batches}
 
 
+def _chunk_concept_count(chunk: dict) -> int:
+    """Concepts remaining in a chunk (0 = nothing to distill).
+
+    Production chunks carry ``batches[].concepts`` (kernel/partition.py). A
+    chunk with no ``batches`` key but a top-level ``concepts`` list (legacy
+    shape) is counted directly so it is never misread as empty.
+    """
+    if "batches" not in chunk:
+        return len(chunk.get("concepts", []))
+    return sum(len(b.get("concepts", [])) for b in chunk.get("batches", []))
+
+
 def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
     """Snapshot the full run_distiller kwargs for chunk ``idx``.
 
@@ -305,6 +317,8 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
             except Exception as _ce:
                 logger.warning("prefetch: collision_pass(%d) failed (%s) — chunk stays sequential", j, _ce, exc_info=True)
                 continue
+        if _chunk_concept_count(fsm._chunks[j]) == 0:
+            continue  # emptied by collision/novelty; the inline guard finishes it free
         # Content-addressed idempotency: never dispatch a chunk a prior run
         # already completed (same key derivation as handle_delegate).
         j_hash = fsm.context.get(f"chunk_{j}_input_hash") or hashlib.sha256(
@@ -369,12 +383,16 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
     logger.info(f"--- DISTILLING BATCH {idx + 1}/{len(fsm._chunks)} ---")
     fsm._progress_note(fsm._chunk_task_id("distill"), "distill", "running")
 
-    # Phase 6: pass steering correction if VALIDATE sent us back here
+    # Phase 6: pass steering correction if VALIDATE sent us back here.
+    # Tier 2 cascade: the rejection IS the calibrated uncertainty signal, so
+    # every steer retry escalates to the escalation model.
     steer_context: str | None = fsm.context.get(f"chunk_{idx}_steer_context")
     if steer_context:
-        logger.info("DELEGATE chunk %d: re-attempt with steering correction", idx)
+        logger.info("DELEGATE chunk %d: re-attempt with steering correction (escalated)", idx)
+        fsm.context["escalations"] = fsm.context.get("escalations", 0) + 1
 
     kwargs = _distill_inputs(fsm, idx)
+    kwargs["escalate"] = bool(steer_context)
     if retry_payload is not None or steer_context:
         # Steer retries always run inline with the retry payload + feedback;
         # the prefetcher refuses re-submission of a popped idx by design.
@@ -386,15 +404,26 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
 
     try:
         _t0 = time.monotonic()
-        fut = fsm._prefetcher.pop(idx) if getattr(fsm, "_prefetcher", None) else None
-        if fut is not None and kwargs["steer_context"] is None:
-            try:
-                chunk_result = fut.result()
-            except Exception as _pe:
-                logger.warning("DELEGATE: prefetched distill for chunk %d failed (%s) — retrying inline", idx, _pe, exc_info=True)
-                chunk_result = run_distiller(**kwargs)
+        if _chunk_concept_count(current_chunk) == 0:
+            # Empty chunk: the novelty gate emptied the file, or COLLISION
+            # routed every concept away. Nothing to distill; synthesize an
+            # empty result so VALIDATE still merges collision ops and its
+            # no-actionable-ops path finishes the chunk. (Also fixes the
+            # latent waste: a COLLISION-emptied chunk used to burn a call.)
+            logger.info("DELEGATE chunk %d: zero concepts, skipping distiller call", idx)
+            if getattr(fsm, "_prefetcher", None):
+                fsm._prefetcher.pop(idx)  # discard any stale prefetched future
+            chunk_result = {"updates": []}
         else:
-            chunk_result = run_distiller(**kwargs)
+            fut = fsm._prefetcher.pop(idx) if getattr(fsm, "_prefetcher", None) else None
+            if fut is not None and kwargs["steer_context"] is None:
+                try:
+                    chunk_result = fut.result()
+                except Exception as _pe:
+                    logger.warning("DELEGATE: prefetched distill for chunk %d failed (%s) — retrying inline", idx, _pe, exc_info=True)
+                    chunk_result = run_distiller(**kwargs)
+            else:
+                chunk_result = run_distiller(**kwargs)
         # Wall-clock the chunk actually cost the run (wait time for prefetched
         # calls) — the A/B report's per-chunk latency source.
         fsm.context.setdefault("distill_secs", {})[idx] = round(time.monotonic() - _t0, 2)

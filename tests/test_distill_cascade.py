@@ -86,3 +86,73 @@ def test_escalated_limits_resolve_escalation_model():
          patch.object(CONFIG, "_distill_escalation_provider", "openrouter"):
         _gp, ml, _provider = _run(escalate=True)
     assert ml.call_args.args[1] == "openrouter/big/model"
+
+
+def _delegate_fsm(chunk, steer=None):
+    """Minimal FSM stand-in that survives handle_delegate end-to-end."""
+    fsm = SimpleNamespace()
+    fsm._get_chunks_from_context_if_empty = MagicMock()
+    fsm._chunks = [chunk]
+    fsm._current_chunk_idx = 0
+    fsm._current_file_idx = 0
+    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}
+    fsm._file_chunks = {}
+    fsm.inbox_file = "in.md"
+    fsm.target_dir = "Notes"
+    fsm.hub = "[[Hub]]"
+    fsm.context = {"file_0_language": "English"}
+    if steer:
+        fsm.context["chunk_0_steer_context"] = steer
+    fsm.manifest = MagicMock()
+    fsm.manifest.titles.return_value = []
+    fsm.progress = MagicMock()
+    fsm.progress.digest.return_value = "digest"
+    fsm.progress.started_at = "2026-07-18T00:00:00"
+    fsm.progress.is_checkpoint_done.return_value = None
+    fsm._chunk_task_id = lambda cap, idx=None: f"f0_c0_{cap}"
+    fsm._prefetcher = None
+    fsm._progress_note = MagicMock()
+    fsm._make_tmp = MagicMock(return_value="/tmp/distill.json")
+    fsm._chunk_ctx = {}
+    fsm._transition_success = MagicMock()
+    return fsm
+
+
+def _chunk_one_concept():
+    return {"schema_version": 1,
+            "batches": [{"inbox_file": "in.md", "concepts": [{"name": "c", "excerpt": "x"}]}]}
+
+
+def test_first_attempt_does_not_escalate():
+    from silica.router.states import distill as d
+    fsm = _delegate_fsm(_chunk_one_concept())
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 1), \
+         patch.object(d, "run_distiller", return_value={"updates": []}) as rd, \
+         patch("silica.kernel.episodic.capture_from_distill"):
+        d.handle_delegate(fsm)
+    assert rd.call_args.kwargs["escalate"] is False
+    assert "escalations" not in fsm.context
+
+
+def test_steer_retry_escalates_and_counts():
+    from silica.router.states import distill as d
+    fsm = _delegate_fsm(_chunk_one_concept(), steer="## Steering feedback\nfix op 1")
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 1), \
+         patch.object(d, "run_distiller", return_value={"updates": []}) as rd, \
+         patch("silica.kernel.episodic.capture_from_distill"):
+        d.handle_delegate(fsm)
+    assert rd.call_args.kwargs["escalate"] is True
+    assert rd.call_args.kwargs["steer_context"].startswith("## Steering")
+    assert fsm.context["escalations"] == 1
+
+
+def test_empty_chunk_skips_distiller_but_completes():
+    from silica.router.states import distill as d
+    fsm = _delegate_fsm({"schema_version": 1, "batches": []})
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 1), \
+         patch.object(d, "run_distiller") as rd, \
+         patch("silica.kernel.episodic.capture_from_distill"):
+        d.handle_delegate(fsm)
+    rd.assert_not_called()
+    fsm._make_tmp.assert_called_once_with({"updates": []})
+    fsm._transition_success.assert_called_once()
