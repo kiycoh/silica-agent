@@ -482,6 +482,20 @@ def _agent_aggregate(rows: list[dict]) -> dict | None:
     }
 
 
+def _compute_metrics(rows: list[dict]) -> dict:
+    """Shared metrics for both answer modes. Adds top-level error_n (errored
+    questions score correct=None, so aggregate() excludes them — error_n keeps
+    provider flakiness visible instead of silently shrinking the denominator)."""
+    m = aggregate(rows)
+    errs = sum(1 for r in rows if r.get("error"))
+    if errs:
+        m["error_n"] = errs
+    ag = _agent_aggregate(rows)
+    if ag:
+        m["agent"] = ag
+    return m
+
+
 # --- Run ---------------------------------------------------------------------
 
 def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
@@ -503,14 +517,12 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
     agent: dict | None = None
     ephemeral_hit: bool | None = None
     gold_in_ctx: bool | None = None
+    err: str | None = None
 
     if answer_mode == "agent":
         agent = answer_question_agent(model, qa["question"], now, speakers)
         response = agent["response"]
-        # A crashed loop answered nothing: that is neither a correct answer
-        # nor a chosen abstention — scored wrong, surfaced via error_n.
-        correct = False if agent["error"] else judge(
-            judge_model, qtype, qa["question"], gold, response, is_abs=is_abs)
+        err = agent["error"]
         rels = agent["notes_read"]
     else:
         from silica.kernel import perception
@@ -537,14 +549,32 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
                 ephemeral_hit = _ephemeral_hit(p.fact_chains, gold_sessions)
 
         if retrieval_only:
-            response, correct = "", None
+            response = ""
         else:
             context = p.render(facts_first=not facts_last, windowed=not flat_context)
             if not is_abs:
                 gold_in_ctx = _gold_in_context(gold, context)
-            response = answer_question(model, qa["question"], now, context, speakers)
+            # Per-question guard: one flaky provider response must become an
+            # error row, not kill the whole run (post-mortem: baseline died at
+            # 9/585 on a transient OpenRouter APIError). Same isolation the
+            # agent path already gives run_agent.
+            try:
+                response = answer_question(model, qa["question"], now, context, speakers)
+            except Exception as e:
+                response, err = "", f"{type(e).__name__}: {e}"
+
+    # Judge (both paths, remote LLM): guarded too, and a failed answer is never
+    # judged. An errored question scores None — excluded from accuracy, surfaced
+    # via metrics error_n — rather than counted wrong for provider flakiness.
+    if retrieval_only or err:
+        correct = None
+    else:
+        try:
             correct = judge(judge_model, qtype, qa["question"], gold, response,
                             is_abs=is_abs)
+        except Exception as e:
+            correct, err = None, f"{type(e).__name__}: {e}"
+
     retrieved_sessions: set[str] = set()
     if session_map is not None:
         for r in rels:
@@ -567,7 +597,7 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
         "tools_used": agent["tools_used"] if agent else None,
         "notes_read": agent["notes_read"] if agent else None,
         "budget_exhausted": agent["budget_exhausted"] if agent else None,
-        "error": agent["error"] if agent else None,
+        "error": err,
     }
 
 
@@ -629,12 +659,7 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
         "questions": rows,
     }
 
-    def _metrics(rs: list[dict]) -> dict:
-        m = aggregate(rs)
-        ag = _agent_aggregate(rs)
-        if ag:
-            m["agent"] = ag
-        return m
+    _metrics = _compute_metrics
 
     old_ttl = CONFIG.episodic_ttl_days
     if answer_mode == "agent":

@@ -300,3 +300,69 @@ def test_vault_digest_detects_mutation(tmp_path):
     assert d0 == runner._vault_digest(tmp_path)
     (tmp_path / "a.md").write_text("two", encoding="utf-8")
     assert runner._vault_digest(tmp_path) != d0
+
+
+def test_oneshot_answer_error_isolated_not_fatal(monkeypatch):
+    """One flaky provider response on the answer call must become an error row,
+    not kill the whole run (post-mortem: baseline died at 9/585 on a transient
+    OpenRouter APIError)."""
+    from silica.kernel import perception
+
+    monkeypatch.setattr(perception, "perceive",
+                        lambda *a, **kw: SimpleNamespace(
+                            blocks=[SimpleNamespace(path="sessions/s0000")],
+                            fact_chains=[], fact_hits=[], render=lambda **k: "ctx"))
+
+    def boom(*a, **kw):
+        raise RuntimeError("APIError: provider flaked")
+
+    monkeypatch.setattr(runner, "answer_question", boom)
+    row = runner.run_question(
+        {"question": "q?", "answer": "Ann", "evidence": ["D1:1"], "category": 4},
+        "conv-t_q0", {"sessions/s0000": {"session_id": "session_1"}},
+        model="stub", judge_model="stub", k=1, stuff=False,
+        use_embedder=False, use_rerank=False, retrieval_only=False,
+        distill=False, episodic_ttl=0, flat_context=False, facts_last=False,
+        windows=None, window_chars=None, now="2023-05-09", speakers=("Ann", "Bob"))
+    assert row["error"].startswith("RuntimeError")
+    assert row["correct"] is None       # excluded from accuracy, surfaced via error_n
+    assert row["response"] == ""
+
+
+def test_oneshot_judge_error_isolated_not_fatal(monkeypatch):
+    """A flaky judge call is guarded too (the agent path's judge was unguarded
+    before this fix)."""
+    from silica.kernel import perception
+
+    monkeypatch.setattr(perception, "perceive",
+                        lambda *a, **kw: SimpleNamespace(
+                            blocks=[SimpleNamespace(path="sessions/s0000")],
+                            fact_chains=[], fact_hits=[], render=lambda **k: "ctx"))
+    monkeypatch.setattr(runner, "answer_question", lambda *a, **kw: "Ann.")
+
+    def boom(*a, **kw):
+        raise RuntimeError("APIError: judge flaked")
+
+    monkeypatch.setattr(runner, "judge", boom)
+    row = runner.run_question(
+        {"question": "q?", "answer": "Ann", "evidence": ["D1:1"], "category": 4},
+        "conv-t_q0", {"sessions/s0000": {"session_id": "session_1"}},
+        model="stub", judge_model="stub", k=1, stuff=False,
+        use_embedder=False, use_rerank=False, retrieval_only=False,
+        distill=False, episodic_ttl=0, flat_context=False, facts_last=False,
+        windows=None, window_chars=None, now="2023-05-09", speakers=("Ann", "Bob"))
+    assert row["error"].startswith("RuntimeError")
+    assert row["correct"] is None
+    assert row["response"] == "Ann."     # the answer survived; only the judge failed
+
+
+def test_metrics_surfaces_error_count(monkeypatch):
+    rows = [
+        {"question_id": "a", "question_type": "single-hop", "abstention": False,
+         "correct": True, "session_recall": None, "error": None},
+        {"question_id": "b", "question_type": "single-hop", "abstention": False,
+         "correct": None, "session_recall": None, "error": "RuntimeError: x"},
+    ]
+    m = runner._compute_metrics(rows)
+    assert m["error_n"] == 1
+    assert m["overall_accuracy"] == 1.0   # the errored row is excluded, not counted wrong
