@@ -166,6 +166,42 @@ def test_distill_routes_sessions_through_distiller(tmp_path, monkeypatch):
     assert "My dog Zephyr turned three today." in blob  # session content did reach it
 
 
+def test_distill_ignores_bodies_on_skip_ops(tmp_path, monkeypatch):
+    # Contract says skip ops carry no body, but models attach meta-lines
+    # ("no durable facts to extract") anyway — those must never reach the
+    # session note, while write/patch bodies still do.
+    import silica.kernel.prep_delegation as prep
+
+    monkeypatch.setattr(prep, "run_distiller", lambda payload, target, **kw: {
+        "updates": [
+            {"op": "skip", "snippet": "Two friends exchange greetings; nothing durable."},
+            {"op": "write", "snippet": "Fact: the dog is Zephyr."},
+        ]})
+    vault = tmp_path / "v"
+    runner.bind_vault(vault)
+    runner.load_question_vault(vault, _instance(), distill=True)
+
+    note = (vault / "sessions" / "s0001.md").read_text(encoding="utf-8")
+    assert "Fact: the dog is Zephyr." in note
+    assert "Two friends exchange greetings" not in note
+
+
+def test_distill_all_skip_bodies_falls_back_to_verbatim(tmp_path, monkeypatch):
+    # When skip meta-lines are the ONLY bodies, dropping them must trigger
+    # the verbatim fallback, not write an empty/meta note.
+    import silica.kernel.prep_delegation as prep
+
+    monkeypatch.setattr(prep, "run_distiller", lambda payload, target, **kw: {
+        "updates": [{"op": "skip", "snippet": "Greetings only; skipping."}]})
+    vault = tmp_path / "v"
+    runner.bind_vault(vault)
+    runner.load_question_vault(vault, _instance(), distill=True)
+
+    note = (vault / "sessions" / "s0001.md").read_text(encoding="utf-8")
+    assert "My dog Zephyr turned three today." in note   # verbatim preserved
+    assert "Greetings only" not in note
+
+
 def test_distill_falls_back_to_verbatim_when_distiller_yields_nothing(tmp_path, monkeypatch):
     # A distiller error/empty output must not drop the session: keep it verbatim.
     import silica.kernel.prep_delegation as prep
@@ -580,8 +616,7 @@ def test_distill_passes_episodic_key_vocabulary(tmp_path, monkeypatch):
         return {"updates": []}
 
     monkeypatch.setattr(prep, "run_distiller", fake_distiller)
-    runner.distill_session("s1", "2026-01-02",
-                           [{"role": "user", "content": "hello"}])
+    runner.distill_session("s1", "2026-01-02", "User: hello")
     substrate = seen_kwargs.get("substrate") or ""
     assert "## Episodic keys" in substrate
     assert "user.car.model" in substrate

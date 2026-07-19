@@ -154,9 +154,11 @@ def _episodic_keys_substrate() -> str | None:
         return None
 
 
-def distill_session(session_id: str, date: str, turns: list[dict]) -> str:
-    """Distill one session's transcript into a knowledge-note body via the Silica
-    distiller — the mem0-comparable ingest (LLM-driven memory formation).
+def distill_session(session_id: str, date: str, excerpt: str) -> str:
+    """Distill one session's rendered transcript into a knowledge-note body via
+    the Silica distiller — the mem0-comparable ingest (LLM-driven memory
+    formation). ``excerpt`` is the already-rendered transcript, so adapters with
+    named speakers (LoCoMo) share this seam instead of forking it.
 
     Question-blind: the payload carries only this session's text; the eval
     question and gold answer are never passed. Runs per-session so one note stays
@@ -164,8 +166,6 @@ def distill_session(session_id: str, date: str, turns: list[dict]) -> str:
     verbatim transcript when the distiller errors or yields nothing, so one bad
     call never drops a session from the haystack."""
     from silica.kernel import prep_delegation
-
-    excerpt = render_session(turns)
     payload = {
         "schema_version": 1,
         "batches": [{"inbox_file": session_id,
@@ -183,7 +183,10 @@ def distill_session(session_id: str, date: str, turns: list[dict]) -> str:
     from silica.kernel.episodic import capture_from_distill
 
     capture_from_distill(result, run_id=session_id, seen=date)
-    bodies = [(u.get("snippet") or "").strip() for u in (result.get("updates") or [])]
+    # skip ops carry no body per contract; models attach meta-lines anyway —
+    # never let those become the session note.
+    bodies = [(u.get("snippet") or "").strip() for u in (result.get("updates") or [])
+              if u.get("op") != "skip"]
     # Meta-description guard (post-mortem 2026-07-14): a snippet that DESCRIBES
     # the conversation instead of carrying its facts is distill-loss — drop it;
     # with nothing left the verbatim fallback keeps every detail.
@@ -254,7 +257,8 @@ def load_question_vault(vault: Path, inst: dict, distill: bool = False,
         rel = _session_rel(i)
         sid = sids[i] if i < len(sids) else f"s{i}"
         date = dates[i] if i < len(dates) else ""
-        body = distill_session(sid, date, turns) if distill else render_session(turns)
+        excerpt = render_session(turns)
+        body = distill_session(sid, date, excerpt) if distill else excerpt
         _write_note(rel, _frontmatter_note(sid, date, body))
         index[rel.removesuffix(".md")] = {"session_id": sid, "date": date}
     return index
@@ -323,7 +327,9 @@ def judge(model: str, qtype: str, question: str, gold: str, response: str,
         f"Model Response: {response}\n\n"
         f"{closing} Answer yes or no only."
     )
-    resp = call_llm(model, [{"role": "user", "content": prompt}], max_tokens=8,
+    # 64, not 8: openrouter can route to a reasoning-enabled backend that burns
+    # the budget before emitting text — an empty reply would silently score "no".
+    resp = call_llm(model, [{"role": "user", "content": prompt}], max_tokens=64,
                     temperature=0.0)
     return "yes" in (resp.text or "").lower()
 
@@ -556,10 +562,12 @@ def main(argv=None) -> int:
     ap.add_argument("--reuse-vaults", action="store_true",
                     help="adopt existing question vaults as-is (frozen corpus: "
                          "skip re-distillation so A/Bs across runs are causal)")
-    ap.add_argument("--key-schema", action="store_true",
+    ap.add_argument("--key-schema", action=argparse.BooleanOptionalAction,
+                    default=True,
                     help="drop a default episodic_keys manifest into each fresh "
                          "question vault so capture enforces the key schema "
-                         "(ADR-0021 A/B lever)")
+                         "(ADR-0021; default ON — --no-key-schema for the "
+                         "legacy free-key arm)")
     ap.add_argument("--flat-context", action="store_true",
                     help="legacy perception: full note bodies, no rank/evidence "
                          "headers, no query-aware windowing")
