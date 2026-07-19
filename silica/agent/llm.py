@@ -131,6 +131,59 @@ class LLMResponse:
     finish_reason: str | None = None
 
 
+def _split_arg_objects(cid: str, name: str, arg_str: str) -> list[tuple[str, dict, str]]:
+    """Yield (id, args, wire_str) for one raw tool-call arguments string.
+
+    Normally one object in, one out. But some OpenAI-compatible backends can't
+    emit parallel tool_calls, so a model wanting N calls concatenates N JSON
+    objects into one blob (e.g. '{"name":"a"}{"name":"b"}'). Fan those back out
+    with distinct ids. Unsalvageable args degrade to {} as before.
+    """
+    s = (arg_str or "").strip()
+    if not s:
+        return [(cid, {}, "{}")]
+    try:
+        return [(cid, json.loads(s), s)]
+    except json.JSONDecodeError:
+        pass
+    dec, objs, i = json.JSONDecoder(), [], 0
+    while i < len(s):
+        try:
+            obj, end = dec.raw_decode(s, i)
+        except json.JSONDecodeError:
+            break
+        objs.append(obj)
+        i = end
+        while i < len(s) and s[i].isspace():
+            i += 1
+    if not objs:
+        logger.warning("Failed to parse tool args for %s: %s", name, arg_str)
+        return [(cid, {}, "{}")]
+    if len(objs) == 1:
+        return [(cid, objs[0], json.dumps(objs[0]))]
+    return [(f"{cid}_{k}", o, json.dumps(o)) for k, o in enumerate(objs)]
+
+
+def expand_tool_calls(
+    raw: list[tuple[str, str, str]],
+) -> tuple[list[ToolCall], list[dict]]:
+    """Parse (id, name, arguments) triples into ToolCalls + sanitized wire dicts.
+
+    Fans out concatenated-JSON blobs into separate calls (see _split_arg_objects)
+    so the agent loop dispatches each. Returned wire dicts always carry valid
+    JSON arguments, keeping the assistant/tool message pairing API-safe.
+    """
+    parsed: list[ToolCall] = []
+    wire: list[dict] = []
+    for cid, name, arg_str in raw:
+        for sub_id, obj, obj_str in _split_arg_objects(cid, name, arg_str):
+            parsed.append(ToolCall(id=sub_id, name=name, args=obj))
+            wire.append(
+                {"id": sub_id, "type": "function",
+                 "function": {"name": name, "arguments": obj_str}}
+            )
+    return parsed, wire
+
 
 def call_llm(
     model: str,
@@ -248,30 +301,8 @@ def call_llm(
     # Parse tool calls and build sanitized history
     parsed_calls: list[ToolCall] = []
     if message.tool_calls:
-        assistant_msg_tool_calls = []
-        for tc in message.tool_calls:
-            try:
-                args = json.loads(tc.function.arguments)
-                valid_args_str = tc.function.arguments
-            except json.JSONDecodeError:
-                args = {}
-                valid_args_str = "{}"  # Sanitize to prevent API rejection
-                logger.warning(
-                    "Failed to parse tool args for %s: %s",
-                    tc.function.name,
-                    tc.function.arguments,
-                )
-            
-            parsed_calls.append(
-                ToolCall(id=tc.id, name=tc.function.name, args=args)
-            )
-            assistant_msg_tool_calls.append({
-                "id": tc.id,
-                "type": "function",
-                "function": {"name": tc.function.name, "arguments": valid_args_str},
-            })
-            
-        assistant_msg["tool_calls"] = assistant_msg_tool_calls
+        raw = [(tc.id, tc.function.name, tc.function.arguments) for tc in message.tool_calls]
+        parsed_calls, assistant_msg["tool_calls"] = expand_tool_calls(raw)
 
     if CONFIG.verbose:
         text_preview = (message.content or "")[:80].replace("\n", " ")

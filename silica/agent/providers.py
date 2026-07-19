@@ -13,7 +13,7 @@ import openai
 import orjson
 from pydantic import BaseModel
 
-from silica.agent.llm import LLMResponse, ToolCall, openrouter_routing, retry_transient
+from silica.agent.llm import LLMResponse, expand_tool_calls, openrouter_routing, retry_transient
 
 logger = logging.getLogger(__name__)
 
@@ -183,24 +183,11 @@ class OpenAICompatibleProvider:
                     assistant_msg: dict[str, Any] = {"role": "assistant"}
                     if message.content:
                         assistant_msg["content"] = message.content
-                    if message.tool_calls:
-                        assistant_msg["tool_calls"] = [
-                            {
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                            }
-                            for tc in message.tool_calls
-                        ]
-                    
+
                     parsed_calls = []
                     if message.tool_calls:
-                        for tc in message.tool_calls:
-                            try:
-                                args = orjson.loads(tc.function.arguments)
-                            except Exception:
-                                args = {}
-                            parsed_calls.append(ToolCall(id=tc.id, name=tc.function.name, args=args))
+                        raw = [(tc.id, tc.function.name, tc.function.arguments) for tc in message.tool_calls]
+                        parsed_calls, assistant_msg["tool_calls"] = expand_tool_calls(raw)
                     
                     return LLMResponse(
                         text=content_str,
@@ -281,18 +268,11 @@ class OpenAICompatibleProvider:
             assistant_msg: dict[str, Any] = {"role": "assistant"}
             if content:
                 assistant_msg["content"] = content
-            if tool_calls_list:
-                assistant_msg["tool_calls"] = tool_calls_list
 
             parsed_calls = []
-            for _tc in tool_calls_list:
-                try:
-                    args = orjson.loads(_tc["function"]["arguments"])
-                except Exception:
-                    args = {}
-                parsed_calls.append(
-                    ToolCall(id=_tc["id"], name=_tc["function"]["name"], args=args)
-                )
+            if tool_calls_list:
+                raw = [(t["id"], t["function"]["name"], t["function"]["arguments"]) for t in tool_calls_list]
+                parsed_calls, assistant_msg["tool_calls"] = expand_tool_calls(raw)
 
             return LLMResponse(
                 text=content,
