@@ -16,8 +16,12 @@ Bundle schema:
   target_dir       — injection target folder
   hub              — hub note name (or null)
   timestamp        — epoch float
-  rejected_ops     — list[Op dict] (no Rejection wrapper — ready to re-parse)
-  rejection_reasons — {path_or_heading: reason}
+  rejected_ops     — list[Op dict] (no Rejection wrapper — ready to re-parse;
+                     each op is stamped with `rejection_reason` and
+                     `rejection_phase`, extra keys Op.model_validate ignores)
+  rejection_reasons — {path_or_heading: reason} (file-level; per-op stamps are
+                     the forensic source of truth — this dict clobbers on key
+                     collision across phases)
 """
 from __future__ import annotations
 
@@ -98,16 +102,39 @@ class DeferredStore:
         hub: str | None,
         rejected_ops: list[dict],
         rejection_reasons: dict[str, str] | None = None,
+        phase: str | None = None,
     ) -> None:
-        """Persist (or overwrite) a deferred bundle for this content hash."""
+        """Persist (or overwrite) a deferred bundle for this content hash.
+
+        Each dict op is stamped with its own `rejection_reason`, joined from
+        `rejection_reasons` by path then heading (every producer keys the dict
+        by one of the two; the freshest join wins on re-defer), and with
+        `rejection_phase` (set-once: the gate that first deferred it — merged
+        ops keep theirs). Op ignores extra keys, so stamps survive the retry
+        re-parse. Without the stamps, forensics must join ops against the
+        file-level dict, which clobbers on cross-phase key collisions, and
+        op-level `reason` is the distiller's own rationale, not the rejection.
+        """
+        reasons = rejection_reasons or {}
+
+        def _stamp(op: Any) -> Any:
+            if not isinstance(op, dict):
+                return op
+            reason = reasons.get(op.get("path") or "") or reasons.get(op.get("heading") or "")
+            if reason:
+                op = {**op, "rejection_reason": reason}
+            if phase and not op.get("rejection_phase"):
+                op = {**op, "rejection_phase": phase}
+            return op
+
         bundle: dict[str, Any] = {
             "content_hash": content_hash,
             "source_path": source_path,
             "target_dir": target_dir,
             "hub": hub,
             "timestamp": time.time(),
-            "rejected_ops": _dedup_ops(rejected_ops),
-            "rejection_reasons": rejection_reasons or {},
+            "rejected_ops": _dedup_ops([_stamp(o) for o in rejected_ops]),
+            "rejection_reasons": reasons,
         }
         atomic_write_bytes(
             self._bundle_path(content_hash),

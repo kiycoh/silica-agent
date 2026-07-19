@@ -32,6 +32,46 @@ def test_deferred_put_and_get(store):
     assert bundle["rejection_reasons"]["Agenti Autonomi/MCU.md"] == "too generic"
 
 
+def test_put_stamps_per_op_rejection_reason_and_phase(store):
+    """Each op self-describes why and where it was deferred — forensics must
+    not need the file-level dict join (path-keyed and heading-keyed alike)."""
+    original = {"op": "patch", "path": "Dir/A.md", "reason": "distiller rationale"}
+    store.put(
+        "h", "inbox/a.md", "Dir", None,
+        [original, {"op": "write", "heading": "Concept B"}],
+        rejection_reasons={
+            "Dir/A.md": "lint failed: X",
+            "Concept B": "borderline_similarity score=0.71",
+        },
+        phase="VALIDATE",
+    )
+    ops = store.get("h")["rejected_ops"]
+    assert ops[0]["rejection_reason"] == "lint failed: X"
+    assert ops[0]["reason"] == "distiller rationale"  # distiller rationale untouched
+    assert ops[1]["rejection_reason"] == "borderline_similarity score=0.71"
+    assert all(o["rejection_phase"] == "VALIDATE" for o in ops)
+    assert "rejection_reason" not in original  # caller's dict not mutated
+
+
+def test_merge_keeps_first_phase_and_refreshes_reason(store):
+    """_defer_ops merges existing + new: merged ops keep the gate that first
+    deferred them; a re-deferred op picks up the fresh rejection reason."""
+    store.put("h", "inbox/a.md", "Dir", None,
+              [{"op": "write", "path": "Dir/A.md"}],
+              rejection_reasons={"Dir/A.md": "borderline score=0.71"},
+              phase="COLLISION")
+    prev = store.get("h")
+    store.put("h", "inbox/a.md", "Dir", None,
+              prev["rejected_ops"] + [{"op": "write", "path": "Dir/B.md"}],
+              rejection_reasons={**prev["rejection_reasons"], "Dir/B.md": "lint failed"},
+              phase="WRITE")
+    ops = {o["path"]: o for o in store.get("h")["rejected_ops"]}
+    assert ops["Dir/A.md"]["rejection_phase"] == "COLLISION"
+    assert ops["Dir/A.md"]["rejection_reason"] == "borderline score=0.71"
+    assert ops["Dir/B.md"]["rejection_phase"] == "WRITE"
+    assert ops["Dir/B.md"]["rejection_reason"] == "lint failed"
+
+
 def test_deferred_get_missing(store):
     assert store.get("nonexistent") is None
 

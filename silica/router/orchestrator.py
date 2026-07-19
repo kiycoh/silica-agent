@@ -537,6 +537,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 hub=self.hub,
                 rejected_ops=list(existing.get("rejected_ops", [])) + rejected_ops,
                 rejection_reasons={**existing.get("rejection_reasons", {}), **rejection_reasons},
+                phase=phase,
             )
             return True
         except Exception as _de:
