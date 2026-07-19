@@ -69,16 +69,7 @@ The payload file referenced in your task context has shape:
 
 The excerpts are already extracted by the Router via the recon + distiller_payload mechanical stage. They are authoritative. Do not request additional excerpts.
 
-## Decision Rubric
-For every concept in every batch, decide exactly ONE action:
-
-- **patch** — vault_collision is not null AND inbox_excerpt contains facts (definitions, formulas, examples, code blocks, structural notes, tables) that are NOT present in vault_collision.excerpt. Extract only the missing facts. When `graph_context.is_hub` is true, the matched note is a structural anchor of its cluster — prefer `patch` even at lower confidence rather than creating a shadow note.
-- **write** — vault_collision is null (concept is new to the vault). Extract a complete, factually-dense definition plus supporting details for a new spoke note.
-- **skip** — vault_collision is not null AND already covers everything in inbox_excerpt, OR the concept is genuine semantic noise (generic acronym, slide marker, rhetorical fragment) with no substantive payload.
-- Every write/patch op MUST set `"linked_axis"` to exactly one of `main_thematic_axes`. If a concept does not substantively expand any axis (mere mention, unexpanded acronym, passive bibliographic reference), emit `"op": "skip"` with `"reason": "off-axis"`.
-
-The `action_hint` field is the Router's mechanical guess based on collision tiers. Treat it as a starting bias, NOT a binding constraint. You may overrule it based on the actual excerpt content — e.g. an `enrich`-hinted concept where the vault excerpt already contains all the inbox facts becomes a `skip`.
-
+{LENS_RUBRIC}
 ## Ephemeral Facts (episodic routing)
 Facts about the user or their immediate context that are personal, time-bound, or thematically inert (names, dates, preferences, current status) do not belong in notes. Emit them in a top-level `"ephemerals"` array as `{"key": ..., "text": ...}` where `key` is a canonical `entity.attribute` slug — lowercase, dot-separated, `user.` prefix for facts about the user (e.g. `user.dog.name`) — and `text` is the fact verbatim in the source language. Do not invent facts; omit the field entirely when there is nothing ephemeral.
 
@@ -88,26 +79,15 @@ Resolve dates: this session happened on **{SESSION_DATE}**. A relative time expr
 
 Keep keys STABLE across sessions: reuse the same `entity.attribute` slug for the same real-world attribute (e.g. always `user.car.model`, never a synonym key later) — supersede chains only link on identical keys.
 
+Key discipline — the key names the ATTRIBUTE, never the change or the event. Principle: an attribute is a stable slot whose VALUE changes over time; if the new fact answers the same question about the entity ("what does she aspire to?", "where does he work?"), it is the SAME key with new `text` — the store supersedes the old value automatically. Contrastive examples:
+- ✗ `elena.counseling.aspiration_reinforced` — wrong thinking: "she reaffirmed it, so it needs its own key". The reaffirmation is the new `text` of the same slot. ✓ Emit `elena.counseling.aspiration` again.
+- ✗ `user.job_update`, `sam.trip.new`, `user.diet.changed` — `_update`/`_new`/`_changed`/`_reinforced`/`_v2` suffixes are change markers, not attributes. ✓ `user.job`, `sam.trip`, `user.diet` with the updated text.
+- Use `_` ONLY to join the words of one concept (`support_group`, `start_date`), never to append a qualifier about how the fact evolved.
+
 When a `## Episodic keys` section is present in your context, it lists the live keys already in the store: if a fact concerns an attribute listed there, you MUST reuse that exact key rather than coining a variant (reuse `user.car.model` from the list instead of emitting `user.vehicle.model` or `user.cars.model`). Coin a new key only for attributes the list does not cover.
 
 {CAPTURE_RULES}
-## Content Quality Requirements
-- All distilled facts MUST be written in {LANGUAGE}. Match the register to the source: scholarly for academic material, plain factual prose for conversational or personal material. Never inflate the register beyond the source.
-- Preserve every formula, equation, code block, and numeric value verbatim from the inbox excerpt.
-- Use bold for key terms when natural. Use Obsidian callout syntax (> [!TIP], > [!NOTE], > [!WARNING]) only when it materially aids the reader.
-- **Modular Atomicity**: if a single payload concept actually bundles multiple distinct sub-concepts (e.g. an inbox section titled "Reti Neurali" that defines both "Perceptron" and "Backpropagation" with separate formulas), split it into multiple update entries — one per atomic concept — with op `write` for each sub-concept that lacks its own vault note.
-- **Content Preservation**: do not silently drop information from inbox_excerpt. If it doesn't fit one concept's update, route it to a separate update.
-- **Note Title Elegance**: `title` controls BOTH the filename and the H1 heading rendered inside the note. When set, `title` is what the reader sees. Use it whenever the raw `heading` would produce a poor display title. Two mandatory patterns:
-  1. **Structural compound headings** — a broad contextual prefix followed by the actual concept. Strip the prefix entirely; keep only the specific concept:
-     - `"II Framework PEAS Actuators"` → `"title": "PEAS Actuators"`
-     - `"Introduzione ai Sistemi: MCU"` → `"title": "Microcontrollori (MCU)"`
-     - `"Lezione 3 — Apprendimento Supervisionato: SVM"` → `"title": "SVM"`
-     - Pattern: anything matching `"(Chapter/Lezione/Framework/Sistema) N? [—:] Concept"` → keep only `Concept`.
-  2. **Categorical placeholder headings** — single all-caps words or generic category labels that describe the *section* in the inbox file, not the concept itself. If the inbox excerpt discusses a specific concept but the heading is a generic label (e.g. `"UTENTE"` for a section about user modelling, `"RETI"` for a section about neural networks, `"STRUTTURA"` for a section about data structures), you MUST set `title` to the specific concept actually discussed in `inbox_excerpt`. Derive it from the excerpt content, not from the heading.
-     - `"UTENTE"` with excerpt about modelli utente → `"title": "Modello Utente"`
-     - `"RETI"` with excerpt about reti neurali ricorrenti → `"title": "Reti Neurali Ricorrenti"`
-  The `heading` MUST still match the payload concept name exactly (traceability anchor). The `path` MUST use `title`: `{TARGET}/<title>.md`. Omit `title` entirely when the heading is already a precise, atomic concept name.
-
+{LENS_QUALITY}
 ## JSON Output Encoding Rules (CRITICAL — violations cause immediate rejection)
 - **Wikilinks**: NEVER include the `.md` extension inside `[[...]]`. Write `[[Note Title]]` not `[[Note Title.md]]` or `[[path/to/Note.md]]`. The `related` array and all body text follow the same rule.
 - **Vault vocabulary**: when a `## Vault vocabulary` section is present in your context, prefer those exact terms for note titles, headings and `concepts` keyphrases instead of coining synonyms — the vault already names these ideas.
@@ -160,102 +140,4 @@ Every `write`/`patch` op carries its body OUTSIDE the JSON. In the op, set `"sni
 
 Each `===SILICA-BODY N===` MUST be alone on its own line. The body text between markers is copied to the note as-is — do not JSON-escape anything in it. The wikilink rule (no `.md`), no-self-link rule, and {LANGUAGE}-prose requirement all still apply to body text.
 
-## Few-Shot Example
-
-### Example Input Payload:
-{
-  "schema_version": 1,
-  "batches": [
-    {
-      "inbox_file": "/abs/path/to/inbox/Lecture 04.md",
-      "concepts": [
-        {
-          "name": "Backpropagation",
-          "action_hint": "enrich",
-          "inbox_excerpt": "Backpropagation computes the gradient of the loss function. Formula: dL/dw = delta * a.",
-          "vault_collision": {
-            "path": "/abs/path/to/existing/Backpropagation.md",
-            "match_type": "title",
-            "total_hits": 1,
-            "excerpt": "Backpropagation is used in neural networks."
-          }
-        },
-        {
-          "name": "Optimization Algorithms: Adam Optimizer",
-          "action_hint": "create",
-          "inbox_excerpt": "Adam is an optimization algorithm. Parameters: beta1=0.9, beta2=0.999.",
-          "vault_collision": null
-        },
-        {
-          "name": "PIL",
-          "action_hint": "likely_skip",
-          "inbox_excerpt": "Use PIL to load images.",
-          "vault_collision": {
-            "path": "/abs/path/to/existing/PIL.md",
-            "match_type": "title",
-            "total_hits": 1,
-            "excerpt": "PIL is Python Imaging Library."
-          }
-        }
-      ]
-    }
-  ]
-}
-
-### Example Output (NO prose, NO markdown fences — JSON, then the Body Appendix):
-{
-  "main_thematic_axes": ["gradient-based optimization", "neural network training", "Python ML tooling"],
-  "updates": [
-    {
-      "heading": "Backpropagation",
-      "op": "patch",
-      "path": "/abs/path/to/existing/Backpropagation.md",
-      "source_basename": "Lecture 04.md",
-      "linked_axis": "neural network training",
-      "concepts": ["backpropagation", "loss gradient", "chain rule", "gradient descent"],
-      "snippet_ref": 1
-    },
-    {
-      "heading": "Optimization Algorithms: Adam Optimizer",
-      "title": "Adam Optimizer",
-      "op": "write",
-      "path": "{TARGET}/Adam Optimizer.md",
-      "source_basename": "Lecture 04.md",
-      "hub": "{HUB_NAME}",
-      "linked_axis": "gradient-based optimization",
-      "concepts": ["adam optimizer", "stochastic optimization", "adaptive momentum", "RMSProp", "AdaGrad"],
-      "snippet_ref": 2
-    },
-    {
-      "heading": "PIL",
-      "op": "skip",
-      "source_basename": "Lecture 04.md",
-      "reason": "off-axis — acronym mentioned in passing, no substantive content beyond what's already documented in the vault"
-    }
-  ]
-}
-===SILICA-BODY 1===
-- Formal definition: backpropagation computes the gradient of the loss function with respect to the weights via the chain rule, applied recursively from the output layer back to the input.
-- Gradient formula for weight $w_{ij}^{(l)}$: $\frac{\partial \mathcal{L}}{\partial w_{ij}^{(l)}} = \delta_j^{(l)} \cdot a_i^{(l-1)}$
-===SILICA-BODY 2===
-Adam (Adaptive Moment Estimation) is a stochastic optimization algorithm that combines the advantages of AdaGrad and RMSProp by maintaining moving averages of both the gradient (first moment) and its square (second moment).
-
-- Typical hyperparameters: $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$
-
-### Example with `parent` field (only when ## Related Notes lists a valid parent candidate):
-Suppose `## Related Notes (candidates)` contains:
-- [[Neural Networks]] (score=0.912) [graph-far]
-
-And the payload has concept "Backpropagation" with no vault collision.
-The distiller MAY emit:
-{
-  "heading": "Backpropagation",
-  "op": "write",
-  "path": "{TARGET}/Backpropagation.md",
-  "source_basename": "Lecture 04.md",
-  "hub": "{HUB_NAME}",
-  "parent": "Neural Networks",
-  "linked_axis": "neural network training",
-  "snippet_ref": 1
-}
-(with the body in `===SILICA-BODY 1===` as usual). `parent` MUST be a bare title from the candidates list. Omit it entirely if no candidate is a meaningful parent — the system falls back to hub automatically.
+{LENS_EXAMPLES}

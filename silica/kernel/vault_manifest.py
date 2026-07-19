@@ -55,6 +55,11 @@ class VaultConventions:
     # to before. This is where a vault declares spatial/format capture conventions
     # (F3), e.g. "Record every measurement in metric with the imperial in parens".
     capture_rules: str = ""
+    # Distill profile: named lens (rubric/quality/examples fragments) spliced
+    # into the distiller prompt contract. "" ⇒ "default", which renders
+    # bit-identically to the pre-split prompt. SILICA_DISTILL_PROFILE env
+    # overrides this for eval A/Bs.
+    distill_profile: str = ""
     wiki_dir: str = ""  # landing dir for /wiki notes; "" ⇒ vault root
     # Frontmatter templates (2026-07-17 spec): None ⇒ built-in template_spoke
     # layout — a vault with no config behaves bit-identically to before.
@@ -131,6 +136,9 @@ def _parse_conventions(raw: dict) -> VaultConventions:
     capture_rules = conv_raw.get("capture_rules")
     capture_rules = capture_rules.strip() if isinstance(capture_rules, str) else ""
 
+    distill_profile = conv_raw.get("distill_profile")
+    distill_profile = distill_profile.strip() if isinstance(distill_profile, str) else ""
+
     extra_callouts = conv_raw.get("extra_callouts")
     if isinstance(extra_callouts, list) and all(isinstance(c, str) for c in extra_callouts):
         extra_callouts = tuple(c.lower() for c in extra_callouts)
@@ -198,6 +206,7 @@ def _parse_conventions(raw: dict) -> VaultConventions:
         max_tags=max_tags,
         extra_callouts=extra_callouts,
         capture_rules=capture_rules,
+        distill_profile=distill_profile,
         wiki_dir=wiki_dir,
         default_template=default_template,
         templates_dir=templates_dir,

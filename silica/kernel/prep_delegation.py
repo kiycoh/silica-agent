@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "capabilities" / "prompts" / "distiller_prompt.txt"
 # Shared anti-slop fragment, appended to every body-writing prompt (refine/enrich too).
 _ANTI_SLOP_PATH = _PROMPT_PATH.parent / "_anti_slop.txt"
+# Distill profiles: the template is the fixed validator-aligned contract; the
+# {LENS_RUBRIC}/{LENS_QUALITY}/{LENS_EXAMPLES} placeholders are filled from
+# profiles/<name>/{rubric,quality,examples}.md. `default` reproduces the
+# pre-split prompt bit-identically.
+_PROFILES_DIR = _PROMPT_PATH.parent / "profiles"
+_LENS_FRAGMENTS = ("rubric", "quality", "examples")
 
 
 def _load_prompt() -> str:
@@ -33,9 +39,50 @@ def _load_prompt() -> str:
     return _PROMPT_PATH.read_text(encoding="utf-8")
 
 
+def _vault_profiles_dir() -> Path | None:
+    """<vault>/.silica/profiles/ for the active vault; None when unbound."""
+    from silica.config import CONFIG
+
+    vault = (getattr(CONFIG, "vault_path", "") or "").strip()
+    return Path(vault) / ".silica" / "profiles" if vault else None
+
+
+def _splice_lens(body: str, profile: str) -> str:
+    """Fill the {LENS_*} placeholders from the named profile's fragments.
+
+    Per-fragment search order: vault-local (<vault>/.silica/profiles/<name>/)
+    > bundled <name>/ > bundled default/. A profile may override only some
+    fragments, and a vault-local dir may shadow a bundled profile of the same
+    name fragment-by-fragment. Unknown profile ⇒ warn + default (soft,
+    matches vault.yaml parsing style).
+    """
+    # trust boundary: the name comes from vault.yaml/env and joins filesystem
+    # paths — separators or ".." must not escape the profile roots
+    if profile != "default" and (
+        not profile.strip() or "/" in profile or "\\" in profile or ".." in profile
+    ):
+        logger.warning("Invalid distill profile name %r — using default", profile)
+        profile = "default"
+    roots = [d for d in (_vault_profiles_dir(), _PROFILES_DIR) if d is not None]
+    if profile != "default" and not any((r / profile).is_dir() for r in roots):
+        logger.warning("Unknown distill profile %r — using default", profile)
+        profile = "default"
+    for frag in _LENS_FRAGMENTS:
+        candidates = [r / profile / f"{frag}.md" for r in roots]
+        candidates.append(_PROFILES_DIR / "default" / f"{frag}.md")
+        path = next(p for p in candidates if p.is_file())
+        body = body.replace("{LENS_" + frag.upper() + "}",
+                            path.read_text(encoding="utf-8"))
+    return body
+
+
 def render_prompt(target: str, hub: str | None = None, source_text: str = "",
                   session_date: str = "", language: str | None = None) -> str:
     """Render the distiller prompt with TARGET/LANGUAGE/MAX_TAGS substitution.
+
+    The prompt = fixed contract + profile lens (see `_splice_lens`). Profile
+    precedence: SILICA_DISTILL_PROFILE env > `conventions.distill_profile`
+    > "default".
 
     `session_date` (F2a): the date the SOURCE session/document happened — not
     necessarily today (eval passes simulated time; dated documents pass their
@@ -60,11 +107,13 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
     from silica.kernel import language as lang_mod
     from silica.kernel.vault_manifest import get_active_manifest
 
-    body = _load_prompt()
+    conventions = get_active_manifest().conventions
+    profile = (os.getenv("SILICA_DISTILL_PROFILE")
+               or conventions.distill_profile or "default")
+    body = _splice_lens(_load_prompt(), profile)
     body = body.replace("{TARGET}", target)
     if hub:
         body = body.replace("{HUB_NAME}", hub)
-    conventions = get_active_manifest().conventions
     # Cache-stable prefix: an explicit `language` (pinned once per file at
     # PAYLOAD) wins over per-call detection, so the rendered template is
     # byte-identical across all chunks and steer retries of a file.
