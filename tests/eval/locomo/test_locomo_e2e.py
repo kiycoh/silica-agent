@@ -366,3 +366,83 @@ def test_metrics_surfaces_error_count(monkeypatch):
     m = runner._compute_metrics(rows)
     assert m["error_n"] == 1
     assert m["overall_accuracy"] == 1.0   # the errored row is excluded, not counted wrong
+
+
+def _bind_small_vault(tmp_path, monkeypatch):
+    from silica.config import CONFIG
+    import silica.driver
+
+    vault = tmp_path / "v"
+    vault.mkdir()
+    monkeypatch.setattr(CONFIG, "vault_path", str(vault))
+    monkeypatch.setattr(CONFIG, "memory_vault", str(vault))
+    monkeypatch.setattr(CONFIG, "backend", "fs")
+    monkeypatch.setattr(silica.driver, "_driver", None)
+    from silica.driver import DRIVER
+    DRIVER.create("sessions/s1.md", '---\ndate: "2023-05-08"\n---\n\nAnn got a puppy.\n')
+    from silica.tools.graph import silica_cooccurrence_refresh
+    silica_cooccurrence_refresh(force=True)
+
+
+def _run_puppy_question(**overrides):
+    kw = dict(model="stub", judge_model="stub", k=5, stuff=False, use_embedder=False,
+              use_rerank=False, retrieval_only=False, distill=False, episodic_ttl=0,
+              flat_context=False, facts_last=False, windows=None, window_chars=None,
+              now="2023-05-08", speakers=("Ann", "Bob"), improve=True)
+    kw.update(overrides)
+    return runner.run_question(
+        {"question": "Who got a puppy?", "answer": "Ann",
+         "evidence": ["D1:1"], "category": 4},
+        "q1", {"sessions/s1": {"session_id": "session_1", "date": "2023-05-08"}}, **kw)
+
+
+def test_improve_bumps_recall_weights_on_correct_oneshot_answer(tmp_path, monkeypatch):
+    _bind_small_vault(tmp_path, monkeypatch)
+    from silica.kernel import recall_weights
+
+    monkeypatch.setattr(runner, "answer_question", lambda *a, **kw: "Ann.")
+    monkeypatch.setattr(runner, "judge", lambda *a, **kw: True)
+
+    row = _run_puppy_question()
+
+    assert row["correct"] is True
+    assert recall_weights.ranking() == [("sessions/s1", 1.0)]
+
+
+def test_improve_does_not_bump_on_incorrect_answer(tmp_path, monkeypatch):
+    _bind_small_vault(tmp_path, monkeypatch)
+    from silica.kernel import recall_weights
+
+    monkeypatch.setattr(runner, "answer_question", lambda *a, **kw: "wrong")
+    monkeypatch.setattr(runner, "judge", lambda *a, **kw: False)
+
+    row = _run_puppy_question()
+
+    assert row["correct"] is False
+    assert recall_weights.ranking() is None
+
+
+def test_improve_with_agent_mode_rejected_by_cli():
+    rc = runner.main(["--data", "nonexistent.json", "--run-root", "/tmp/nonexistent",
+                      "--answer", "agent", "--improve"])
+    assert rc == 2
+
+
+def test_improve_does_not_bump_with_stuff(tmp_path, monkeypatch):
+    """--stuff bypasses retrieval, so a correct answer must not dead-write a weight."""
+    _bind_small_vault(tmp_path, monkeypatch)
+    from silica.kernel import recall_weights
+
+    monkeypatch.setattr(runner, "answer_question", lambda *a, **kw: "Ann.")
+    monkeypatch.setattr(runner, "judge", lambda *a, **kw: True)
+
+    row = _run_puppy_question(stuff=True)
+
+    assert row["correct"] is True
+    assert recall_weights.ranking() is None
+
+
+def test_improve_with_stuff_rejected_by_cli():
+    rc = runner.main(["--data", "nonexistent.json", "--run-root", "/tmp/nonexistent",
+                      "--stuff", "--improve"])
+    assert rc == 2

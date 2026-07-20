@@ -46,6 +46,7 @@ import argparse
 import datetime
 import json
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -173,6 +174,36 @@ def load_conversation_vault(vault: Path, inst: dict, distill: bool = False,
 def _conv_now(index: dict[str, dict]) -> str:
     """'Today' for a conversation = its last session's date (ISO sorts)."""
     return max((e["date"] for e in index.values() if e.get("date")), default="")
+
+
+def build_timeline_seed(vault: Path) -> str:
+    """Chronological index over a vault's dated notes -> agent system seed.
+
+    Pure, LLM-free overlay for the distill+timeline experiment (spec
+    2026-07-20): read each note's ``date``/``session_id`` frontmatter, sort by
+    date ascending (NOT file order — filename order need not match dates), and
+    emit one line per note pointing at it by the identifier silica_read_note
+    resolves (its filename stem). Undated notes are EXCLUDED: a note with no
+    date has no place on a chronology, and 'end of list' would read as
+    most-recent — wrong. Returns "" when nothing is dated (seed suppressed)."""
+    from silica.kernel import frontmatter
+
+    rows = []
+    for f in sorted(vault.rglob("*.md")):
+        data, _raw, _body = frontmatter.split(f.read_text(encoding="utf-8"))
+        date = (data or {}).get("date")
+        if not date:
+            continue
+        label = (data or {}).get("session_id") or f.stem
+        rows.append((str(date), str(label), f.stem))
+    if not rows:
+        return ""
+    rows.sort(key=lambda r: (r[0], r[2]))   # date asc; stem tie-break for determinism
+    lines = ["## Timeline (session chronology)",
+             "Consult once to order events; read the linked note for detail.", ""]
+    for i, (date, label, stem) in enumerate(rows, 1):
+        lines.append(f"{i:2d}. {date}  -> {label:<11} ({stem}.md)")
+    return "\n".join(lines)
 
 
 # --- FSM ingest (e2e write path) --------------------------------------------
@@ -396,10 +427,14 @@ _ABSTAIN = "I do not have that information."
 
 
 def answer_question_agent(model: str, question: str, now: str,
-                          speakers: tuple[str, str]) -> dict:
+                          speakers: tuple[str, str],
+                          timeline_seed: str | None = None) -> dict:
     """One question through run_agent. Returns response + instrumentation:
     iterations, tools_used (sequence), notes_read (recall/read deliveries,
-    not search hits), budget_exhausted, error."""
+    not search hits), budget_exhausted, error.
+
+    ``timeline_seed`` (distill+timeline experiment): an extra system message
+    injected after the product vmap. None = bit-identical to the R baseline."""
     from silica.agent import loop as loop_mod
     from silica.agent.constraints import AgentConstraints
     from silica.agent.events import ToolCompleteEvent
@@ -411,6 +446,8 @@ def answer_question_agent(model: str, question: str, now: str,
     vmap = build_vault_map()   # the product's CoALA session-start seed
     if vmap:
         messages.append({"role": "system", "content": vmap})
+    if timeline_seed:
+        messages.append({"role": "system", "content": timeline_seed})
     messages.append({"role": "user", "content": question})
 
     events: list[ToolCompleteEvent] = []
@@ -507,7 +544,9 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
                  answer_mode: str = "oneshot",
                  session_map: dict[str, set[str]] | None = None,
                  run_sessions: dict[str, str] | None = None,
-                 n_sessions: int | None = None) -> dict:
+                 n_sessions: int | None = None,
+                 timeline_seed: str | None = None,
+                 improve: bool = False) -> dict:
     cat = qa.get("category")
     qtype = _CATEGORY.get(cat, f"cat-{cat}")
     is_abs = cat == _ADVERSARIAL
@@ -520,7 +559,8 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
     err: str | None = None
 
     if answer_mode == "agent":
-        agent = answer_question_agent(model, qa["question"], now, speakers)
+        agent = answer_question_agent(model, qa["question"], now, speakers,
+                                      timeline_seed=timeline_seed)
         response = agent["response"]
         err = agent["error"]
         rels = agent["notes_read"]
@@ -535,7 +575,8 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
         p = perception.perceive(qa["question"], now=now, k=k,
                                 use_embedder=use_embedder, use_rerank=use_rerank,
                                 episodic_ttl_days=episodic_ttl, with_facts=distill,
-                                paths=list(index.keys()) if stuff else None, **win_kw)
+                                paths=list(index.keys()) if stuff else None,
+                                use_recall_weights=improve, **win_kw)
         rels = [b.path for b in p.blocks]
 
         if distill and gold_sessions:
@@ -574,6 +615,16 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
                             is_abs=is_abs)
         except Exception as e:
             correct, err = None, f"{type(e).__name__}: {e}"
+
+    # Bump only when the weight can actually feed back into a later retrieval:
+    # oneshot (agent mode doesn't read recall_weights yet) and non-stuff (stuff
+    # bypasses retrieval, so a bumped weight would never be re-read). The CLI
+    # rejects both combos with --improve; this guard also protects a direct
+    # run()/run_question() caller that bypasses main().
+    if improve and correct and answer_mode == "oneshot" and not stuff:
+        from silica.kernel.recall_weights import bump
+
+        bump(rels)
 
     retrieved_sessions: set[str] = set()
     if session_map is not None:
@@ -614,6 +665,7 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
         window_chars: int | None = None, key_schema: bool = False,
         categories: set[int] | None = None, limit: int | None = None,
         ingest_mode: str = "distill", answer_mode: str = "oneshot",
+        timeline: bool = False, improve: bool = False,
         verbose: bool = False, out: Path | None = None) -> dict:
     from silica.config import CONFIG
     from silica.kernel import perception
@@ -635,6 +687,8 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
                    "categories": sorted(categories) if categories else "all",
                    "ingest_mode": ingest_mode,
                    "answer_mode": answer_mode,
+                   "timeline": timeline,
+                   "improve": improve,
                    "seen_override": "session-date" if ingest_mode == "fsm" else None,
                    "fsm": {},
                    "failed_conversations": [],
@@ -676,8 +730,9 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
                            windows=windows, window_chars=window_chars,
                            key_schema=key_schema, categories=categories,
                            limit=limit, ingest_mode=ingest_mode,
-                           answer_mode=answer_mode, verbose=verbose, out=out,
-                           planned=planned, metrics=_metrics)
+                           answer_mode=answer_mode, timeline=timeline,
+                           verbose=verbose, out=out,
+                           planned=planned, metrics=_metrics, improve=improve)
     finally:
         CONFIG.episodic_ttl_days = old_ttl
     doc.pop("partial", None)
@@ -689,8 +744,8 @@ def _run_conversations(data, rows, doc, *, run_root, model, judge_model, k,
                        stuff, use_embedder, use_rerank, retrieval_only,
                        distill, episodic_ttl, reuse, flat_context, facts_last,
                        windows, window_chars, key_schema, categories, limit,
-                       ingest_mode, answer_mode, verbose, out, planned,
-                       metrics) -> None:
+                       ingest_mode, answer_mode, timeline, verbose, out, planned,
+                       metrics, improve) -> None:
     for inst in data:
         if limit is not None and len(rows) >= limit:
             break
@@ -739,6 +794,11 @@ def _run_conversations(data, rows, doc, *, run_root, model, judge_model, k,
         if not stuff:
             build_indexes(embed=use_embedder, force=not fsm_reused)
         digest_before = _vault_digest(vault) if answer_mode == "agent" else None
+        # Timeline overlay: one deterministic seed per conversation from the
+        # already-bound vault, injected as an extra agent system message. The
+        # only variable that differs from the R baseline (--timeline off).
+        timeline_seed = (build_timeline_seed(vault)
+                         if timeline and answer_mode == "agent" else None)
         for qi, qa in qa_list:
             row = run_question(qa, f"{sample_id}_q{qi}", index, model=model,
                                judge_model=judge_model, k=k, stuff=stuff,
@@ -749,7 +809,8 @@ def _run_conversations(data, rows, doc, *, run_root, model, judge_model, k,
                                facts_last=facts_last, windows=windows,
                                window_chars=window_chars, now=now, speakers=speakers,
                                answer_mode=answer_mode, session_map=session_map,
-                               run_sessions=run_sessions, n_sessions=n_sessions)
+                               run_sessions=run_sessions, n_sessions=n_sessions,
+                               timeline_seed=timeline_seed, improve=improve)
             rows.append(row)
             if verbose:
                 mark = (f"sr={row['session_recall']}" if retrieval_only
@@ -799,6 +860,10 @@ def main(argv=None) -> int:
     ap.add_argument("--distill", action="store_true",
                     help="distill each session via the Silica distiller before "
                          "indexing (mem0-comparable LLM ingest; default is verbatim)")
+    ap.add_argument("--fsm-max-concepts", type=int, default=0,
+                    help="coarsen FSM concept extraction: cap salient keyphrases per "
+                         "session (0 = product default 40). YAKE-ranked, so the trivial "
+                         "tail drops first -> fewer, denser notes. --ingest fsm only.")
     ap.add_argument("--ingest", choices=("distill", "fsm"), default="distill",
                     help="write path: 'distill' = slice ingest (per --distill), "
                          "'fsm' = full product Coordinator per session "
@@ -806,6 +871,19 @@ def main(argv=None) -> int:
     ap.add_argument("--answer", choices=("oneshot", "agent"), default="oneshot",
                     help="read path: 'oneshot' = stuffed-context single call, "
                          "'agent' = product run_agent loop with read-only tools")
+    ap.add_argument("--timeline", action="store_true",
+                    help="inject a chronological index of the vault's dated "
+                         "notes as an extra agent system seed (--answer agent "
+                         "only; benchmark overlay, not a product feature)")
+    ap.add_argument("--improve", action="store_true",
+                    help="LoCoMo eval-only recall-outcome reweighting (phase 1 of "
+                         "the Cognee-parity `improve` probe): bump a note's weight "
+                         "when it contributed to a correctly judged answer, feed "
+                         "weights back into RRF as an extra leg on the next "
+                         "question in the same conversation. Oneshot only in "
+                         "phase 1 — agent mode's silica_recall tool call doesn't "
+                         "consume the weights yet — and incompatible with "
+                         "--stuff, which bypasses retrieval.")
     ap.add_argument("--conversations", default="",
                     help="comma-separated sample_ids to run "
                          "(pilot: conv-26,conv-47,conv-49)")
@@ -844,8 +922,27 @@ def main(argv=None) -> int:
     if args.ingest == "fsm" and (args.stuff or args.distill):
         print("--ingest fsm distills inside the FSM; drop --stuff/--distill")
         return 2
+    if args.fsm_max_concepts:
+        if args.ingest != "fsm":
+            print("--fsm-max-concepts only applies to --ingest fsm")
+            return 2
+        # Read at call time inside keyphrase._cutoff; set for the whole run so
+        # every session's nucleation coarsens identically. Freeze markers key on
+        # vault content, not this env, so mixing arms needs distinct --run-root.
+        os.environ["SILICA_MAX_CONCEPTS"] = str(args.fsm_max_concepts)
     if args.answer == "agent" and (args.stuff or args.retrieval_only):
         print("--answer agent retrieves via tools; drop --stuff/--retrieval-only")
+        return 2
+    if args.timeline and args.answer != "agent":
+        print("--timeline seeds the agent; pass --answer agent")
+        return 2
+    if args.improve and args.answer != "oneshot":
+        print("--improve is oneshot-only in phase 1 (agent-mode retrieval "
+              "doesn't read recall_weights yet)")
+        return 2
+    if args.improve and args.stuff:
+        print("--improve is incompatible with --stuff: --stuff bypasses "
+              "retrieval, so a bumped weight would never feed back")
         return 2
     if args.retrieval_only:
         args.stuff = False  # nothing to retrieve when every session is stuffed in
@@ -872,6 +969,7 @@ def main(argv=None) -> int:
                   window_chars=args.window_chars, key_schema=args.key_schema,
                   categories=categories, limit=args.limit,
                   ingest_mode=args.ingest, answer_mode=args.answer,
+                  timeline=args.timeline, improve=args.improve,
                   verbose=args.verbose, out=out)
     finally:
         import silica.driver
