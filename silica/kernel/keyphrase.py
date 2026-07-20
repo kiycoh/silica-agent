@@ -216,8 +216,15 @@ def _seed_structural(
 
 
 def _cutoff(content: str, ranked: list[ConceptCandidate]) -> list[ConceptCandidate]:
+    # Operator knobs, same idiom as YAKE_POOL. Read at call time (not import) so a
+    # harness A/B arm can coarsen extraction in-process without an import-timing
+    # race: lowering the cap keeps YAKE's top-ranked (most salient) concepts and
+    # drops the trivial tail (peripheral single-mention atoms), so fewer notes are
+    # nucleated. Defaults bit-identical to the module constants.
+    max_c = int(os.getenv("SILICA_MAX_CONCEPTS", str(MAX_CONCEPTS)))
+    per_tok = int(os.getenv("SILICA_TOKENS_PER_CONCEPT", str(TOKENS_PER_CONCEPT)))
     n_tok = len(content.split())
-    k = max(MIN_CONCEPTS, min(MAX_CONCEPTS, n_tok // TOKENS_PER_CONCEPT))
+    k = max(MIN_CONCEPTS, min(max_c, n_tok // max(1, per_tok)))
     return ranked[:min(k, len(ranked))]
 
 
@@ -270,3 +277,15 @@ if __name__ == "__main__":  # ponytail: self-check, no framework
     assert cands, "expected concepts from prose"
     assert len(cands) <= MAX_CONCEPTS  # lower bound not guaranteed: cutoff caps at available
     print(f"OK: {len(cands)} concepts; top={cands[0].phrase!r}")
+
+    # _cutoff env knobs: deterministic, YAKE-independent (stub the ranked list).
+    stub = [ConceptCandidate(phrase=f"c{i}", score=0.0, evidence=[]) for i in range(30)]
+    long_txt = "w " * 600  # 600 tokens -> default k = min(40, 600//20) = 30
+    assert len(_cutoff(long_txt, stub)) == 30, "default cutoff regressed"
+    os.environ["SILICA_MAX_CONCEPTS"] = "8"
+    assert len(_cutoff(long_txt, stub)) == 8, "SILICA_MAX_CONCEPTS not honored"
+    del os.environ["SILICA_MAX_CONCEPTS"]
+    os.environ["SILICA_TOKENS_PER_CONCEPT"] = "100"  # 600//100 = 6
+    assert len(_cutoff(long_txt, stub)) == 6, "SILICA_TOKENS_PER_CONCEPT not honored"
+    del os.environ["SILICA_TOKENS_PER_CONCEPT"]
+    print("OK: cutoff knobs 30 -> 8 (max) -> 6 (per-tok)")
