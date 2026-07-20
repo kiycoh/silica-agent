@@ -37,6 +37,7 @@ LEGS = {"kernel/embed.py", "kernel/cooccurrence.py"}
 ALLOWED = {
     "kernel/relatedness.py":        "the facade itself",
     "kernel/correlate.py":          "owns note_edges computation; needs cooccur_key for keyspace normalization, not relatedness ranking",
+    "kernel/recall_weights.py":     "constructs recall-outcome weight store to inject into the facade; needs cooccur_key for keyspace normalization",
     "kernel/run_substrate.py":      "constructs stores to inject into the facade",
     "kernel/perception.py":         "constructs stores to inject into the facade (facade_retrieve, the shared fresh-query wiring)",
     "kernel/graph_report/embed_signals.py": "pairwise cosine (missing links, dup pairs)",
