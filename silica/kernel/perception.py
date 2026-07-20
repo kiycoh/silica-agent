@@ -70,7 +70,7 @@ class Perception:
 
 
 def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
-                    use_rerank: bool = True):
+                    use_rerank: bool = True, use_recall_weights: bool = False):
     """Fused first-stage retrieval + cross-encoder rerank for a fresh text query.
 
     The single retrieval path shared by the chat tools
@@ -110,6 +110,12 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     if query_vec is None and cooccur_store is None and mem_cooccur is None:
         return None, None
 
+    recall_rank = None
+    if use_recall_weights:
+        from silica.kernel.recall_weights import ranking
+
+        recall_rank = ranking()
+
     results = related_notes_for_query(
         query_vec=query_vec,
         query_text=query,
@@ -118,6 +124,7 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
         memory_embed_store=mem_embed,
         memory_cooccur_store=mem_cooccur,
         k=k,
+        recall_rank=recall_rank,
     ) or []
     reranker = get_reranker(CONFIG) if use_rerank else None
     if reranker:
@@ -193,7 +200,8 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
              facts_k: int = FACTS_K,
              episodic_ttl_days: int | None = None, with_facts: bool = True,
              use_embedder: bool = True, use_rerank: bool = True,
-             paths: list[str] | None = None) -> Perception:
+             paths: list[str] | None = None,
+             use_recall_weights: bool = False) -> Perception:
     """Retrieve + assemble the answer-time context for `query`.
 
     ``paths`` skips retrieval and assembles the given notes in order (the eval
@@ -208,7 +216,8 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
         hits = [(p, "", "vault") for p in paths]
     else:
         results, query_vec = facade_retrieve(
-            query, k=k, use_embedder=use_embedder, use_rerank=use_rerank)
+            query, k=k, use_embedder=use_embedder, use_rerank=use_rerank,
+            use_recall_weights=use_recall_weights)
         hits = [(r.path, " ".join(r.evidence), getattr(r, "origin", "vault"))
                 for r in (results or [])]
 

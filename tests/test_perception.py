@@ -249,3 +249,31 @@ def test_silica_recall_tool_returns_context_and_paths(tmp_path, monkeypatch):
     assert "yoga class is on Tuesday" in out["context"]
     assert out["notes"] == ["sessions/a"]
     assert out["facts"] == 0
+
+
+def test_use_recall_weights_false_ignores_populated_store(tmp_path, monkeypatch):
+    """Default off: a populated recall_weights store must not change output."""
+    _bind(tmp_path / "v", monkeypatch)
+    _write("sessions/a.md", "2026-01-01", "short note about cooking pasta")
+    _write("sessions/b.md", "2026-02-02", "short note about hiking trails")
+    _index()
+    from silica.kernel import recall_weights
+    from silica.kernel.perception import perceive
+
+    recall_weights.bump(["sessions/b"])  # store populated, flag stays off
+    p = perceive("pasta", now="2026-05-01", k=2, use_embedder=False)
+    assert not any("recall:" in b.evidence for b in p.blocks)
+
+
+def test_use_recall_weights_true_resurfaces_bumped_note(tmp_path, monkeypatch):
+    _bind(tmp_path / "v", monkeypatch)
+    _write("sessions/a.md", "2026-01-01", "short note about cooking pasta")
+    _write("sessions/b.md", "2026-02-02", "short note about hiking trails")
+    _index()
+    from silica.kernel import recall_weights
+    from silica.kernel.perception import perceive
+
+    recall_weights.bump(["sessions/b"])
+    p = perceive("pasta", now="2026-05-01", k=2, use_embedder=False,
+                 use_recall_weights=True)
+    assert any(b.path == "sessions/b" and "recall:" in b.evidence for b in p.blocks)
