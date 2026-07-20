@@ -8,6 +8,7 @@ hack removed (no longer needed — this is a proper Python package now).
 """
 import datetime
 import logging
+import os
 import re
 
 from silica.kernel import frontmatter
@@ -340,6 +341,31 @@ def ensure_ai_flag(content: str) -> str:
 
 
 _LAST_MODIFIED_RE = re.compile(r"^last modified:.*$", re.MULTILINE)
+_AGENT_KEY_RE = re.compile(r"^agent:.*$", re.MULTILINE)
+
+
+def _stamp_agent(content: str) -> str:
+    """Set/refresh `agent: "<id>"` in the frontmatter head when SILICA_AGENT_ID
+    is set — provenance for a vault written by a fleet of agents.
+
+    Last-writer-wins, exactly like `last modified`: the field names who last
+    touched the note; git keeps the full authorship history. Unset env → the
+    field is never added and any existing one is left intact, so single-user
+    writes are byte-for-byte unchanged. The value is quoted and escaped so a
+    stray value can never break or inject YAML.
+    """
+    agent = os.environ.get("SILICA_AGENT_ID", "").strip()
+    if not agent or not content.startswith("---\n"):
+        return content
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return content
+    val = agent.splitlines()[0].replace("\\", "\\\\").replace('"', '\\"')
+    line = f'agent: "{val}"'
+    head = content[4:end]
+    if _AGENT_KEY_RE.search(head):
+        return "---\n" + _AGENT_KEY_RE.sub(line, head, count=1) + content[end:]
+    return content[:end] + "\n" + line + content[end:]
 
 
 def ensure_system_floor(content: str, prior: str | None = None) -> str:
@@ -354,11 +380,11 @@ def ensure_system_floor(content: str, prior: str | None = None) -> str:
     - no block anywhere: create the minimal one.
     """
     if content.startswith("---\n"):
-        return ensure_ai_flag(content)
+        return _stamp_agent(ensure_ai_flag(content))
     today = datetime.date.today().isoformat()
     pm = frontmatter.FM_RE.match(prior) if prior else None
     if pm is None:
-        return f"---\nAI: true\nlast modified: {today}\n---\n\n{content.lstrip(chr(10))}"
+        return _stamp_agent(f"---\nAI: true\nlast modified: {today}\n---\n\n{content.lstrip(chr(10))}")
     # Rebuild the prior block with canonical bare fences: FM_RE tolerates CRLF
     # and fence-line whitespace, but the splices below assume exactly
     # "---\n...\n---\n".
@@ -370,7 +396,7 @@ def ensure_system_floor(content: str, prior: str | None = None) -> str:
         head = _LAST_MODIFIED_RE.sub(f"last modified: {today}", head, count=1)
     else:
         head += f"\nlast modified: {today}"
-    return head + tail
+    return _stamp_agent(head + tail)
 
 
 def provenance_header(heading: str, source_basename: str) -> str:

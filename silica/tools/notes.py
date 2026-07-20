@@ -41,15 +41,13 @@ def silica_patch_note(
     """
     from silica.kernel.bulk import execute_one
     from silica.kernel.checkpoints import get_checkpoint_store
+    from silica.kernel.workqueue import path_lease
 
-    # Resolve the note and capture its pre-patch content for the undo floor.
+    # Resolve the note to its vault-relative path (read is idempotent).
     try:
-        nc = DRIVER.read_note(name)
+        path = DRIVER.read_note(name).ref.path or name
     except Exception as e:
         return {"error": f"Failed to read note '{name}': {e}"}
-
-    path = nc.ref.path or name
-    prior_content = nc.content
 
     op = Op(
         op=OpType.patch,
@@ -60,20 +58,28 @@ def silica_patch_note(
         hub=hub,
     )
 
-    try:
-        result = execute_one(op)
-    except Exception as e:
-        return {"error": f"Failed to patch '{name}': {e}"}
+    # Read prior content, patch and checkpoint all under the lease: the
+    # read-modify-write must not interleave with another writer on this note.
+    with path_lease(path):
+        try:
+            prior_content = DRIVER.read_note(path).content
+        except Exception as e:
+            return {"error": f"Failed to read note '{name}': {e}"}
 
-    # Record the resulting on-disk content as a restore point.
-    checkpoint_depth = None
-    try:
-        new_content = DRIVER.read_note(path).content
-        checkpoint_depth = get_checkpoint_store().push(path, prior_content, new_content)
-    except Exception:
-        # A patch that succeeded must not be reported as failed just because
-        # the undo bookkeeping hiccuped; undo is best-effort.
-        pass
+        try:
+            result = execute_one(op)
+        except Exception as e:
+            return {"error": f"Failed to patch '{name}': {e}"}
+
+        # Record the resulting on-disk content as a restore point.
+        checkpoint_depth = None
+        try:
+            new_content = DRIVER.read_note(path).content
+            checkpoint_depth = get_checkpoint_store().push(path, prior_content, new_content)
+        except Exception:
+            # A patch that succeeded must not be reported as failed just because
+            # the undo bookkeeping hiccuped; undo is best-effort.
+            pass
 
     return {**result, "note": name, "path": path, "checkpoint_depth": checkpoint_depth}
 
@@ -115,15 +121,7 @@ def silica_write_note(
 
     from silica.kernel import templates as tpl
     from silica.kernel.checkpoints import get_checkpoint_store
-
-    # The fs backend's create() overwrites silently — enforce the documented
-    # contract here, at the tool seam, so no backend can clobber an existing note.
-    try:
-        DRIVER.read_note(path)
-    except Exception:
-        pass  # missing note — the happy path
-    else:
-        return {"error": f"Note '{path}' already exists: use silica_patch_note to modify it."}
+    from silica.kernel.workqueue import path_lease
 
     if template == "none":
         content = body
@@ -142,15 +140,27 @@ def silica_write_note(
         content = tpl.render_note(source, fields)
     content = tpl.ensure_system_floor(content)
 
-    try:
-        ref = DRIVER.create(path, content)
-    except Exception as e:
-        return {"error": f"Failed to create note '{path}': {e}"}
+    # The existence check and the create must be atomic: the fs backend's
+    # create() overwrites silently, so two concurrent writers to the same new
+    # path would both pass the check and the second would clobber the first.
+    # The lease closes that window (and, cross-process, guards other agents).
+    with path_lease(path):
+        try:
+            DRIVER.read_note(path)
+        except Exception:
+            pass  # missing note — the happy path
+        else:
+            return {"error": f"Note '{path}' already exists: use silica_patch_note to modify it."}
 
-    checkpoint_depth = None
-    try:
-        checkpoint_depth = get_checkpoint_store().push(path, "", content)
-    except Exception:
-        pass
+        try:
+            ref = DRIVER.create(path, content)
+        except Exception as e:
+            return {"error": f"Failed to create note '{path}': {e}"}
+
+        checkpoint_depth = None
+        try:
+            checkpoint_depth = get_checkpoint_store().push(path, "", content)
+        except Exception:
+            pass
 
     return {"op": "write", "success": True, "path": ref.path or path, "checkpoint_depth": checkpoint_depth}

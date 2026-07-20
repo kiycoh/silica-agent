@@ -23,6 +23,9 @@ produced anywhere has a registered capability.
 """
 from __future__ import annotations
 
+import hashlib
+import logging
+import os
 import queue
 import threading
 from collections import Counter
@@ -34,8 +37,16 @@ from uuid import uuid4
 
 import orjson
 
+try:  # POSIX only; Windows falls back to the in-process lock alone.
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX
+    fcntl = None  # type: ignore[assignment]
+
+logger = logging.getLogger(__name__)
+
 # ---------------------------------------------------------------------------
-# Per-path advisory lease (shared across the Injector and the sub-agent pool)
+# Per-path advisory lease (shared across the Injector, the sub-agent pool, and
+# any *other process* pointed at the same vault — e.g. two MCP clients)
 # ---------------------------------------------------------------------------
 
 _LEASES: dict[str, threading.Lock] = {}
@@ -46,21 +57,61 @@ def _lease_key(path: str) -> str:
     return (path or "").replace("\\", "/").removesuffix(".md").lower()
 
 
+def _lock_file(key: str) -> Path | None:
+    """Vault-scoped lock file for `key`; None when fcntl is unavailable.
+
+    Lives under the per-vault index namespace so every process resolving the
+    same vault agrees on the same file; the filename is a hash of the key so
+    deep paths and separators never leak into the filesystem.
+    """
+    if fcntl is None:
+        return None
+    from silica.kernel.paths import index_dir
+
+    d = index_dir() / "locks"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / (hashlib.sha1(key.encode("utf-8")).hexdigest()[:16] + ".lock")
+
+
 @contextmanager
 def path_lease(path: str) -> Iterator[None]:
-    """Serialise writes to a single vault note across threads.
+    """Serialise writes to a single vault note across threads *and processes*.
+
+    Two layers: an in-process ``threading.Lock`` (fast path, and it makes the
+    OS lock contention-free between threads of one process) plus an advisory
+    ``flock`` on a vault-scoped lock file so separate processes writing the
+    same vault (two MCP clients, MCP + a running pipeline) cannot interleave.
 
     Advisory: only protects writers that opt in by acquiring the same lease.
-    The sub-agent commit path and any lease-aware bulk writer should wrap their
-    write in this context manager.
+    Lock-file bookkeeping is best-effort — if it fails we log and fall back to
+    in-process-only rather than break the write (the threading lock still holds
+    for same-process writers). ``commit_ops`` acquires multiple leases in sorted
+    order, so cross-process acquisition order is consistent and deadlock-free.
     """
     key = _lease_key(path)
     with _LEASES_GUARD:
         lock = _LEASES.setdefault(key, threading.Lock())
     lock.acquire()
+    fd: int | None = None
     try:
+        try:
+            lf = _lock_file(key)
+            if lf is not None:
+                fd = os.open(str(lf), os.O_CREAT | os.O_RDWR, 0o644)
+                fcntl.flock(fd, fcntl.LOCK_EX)
+        except OSError as e:
+            logger.warning("path_lease: cross-process lock unavailable for %s (%s); "
+                           "in-process lock only", key, e)
+            if fd is not None:
+                os.close(fd)
+                fd = None
         yield
     finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            finally:
+                os.close(fd)
         lock.release()
 
 
