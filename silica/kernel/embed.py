@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import heapq
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -342,7 +343,10 @@ class EmbedStore:
         paths = [p for p, v in vecs.items() if v]
         if not paths:
             return np.zeros((0, 0), dtype=np.float32), [], None
-        dim = len(vecs[paths[0]])
+        # Modal dimension, not the first note's: in a mixed-dim store (post model
+        # swap, A11) the first note may be a minority dim, which would drop the
+        # majority to 0.0 and, if the query matches the majority dim, zero the leg.
+        dim = Counter(len(vecs[p]) for p in paths).most_common(1)[0][0]
         kept = [p for p in paths if len(vecs[p]) == dim]
         mat = np.asarray([vecs[p] for p in kept], dtype=np.float32)
         norms = np.linalg.norm(mat, axis=1, keepdims=True)
@@ -370,20 +374,25 @@ class EmbedStore:
         exclude: set[str] | None,
     ) -> list[dict[str, Any]]:
         exclude = exclude or set()
-        # Every note defaults to 0.0 — matches _cosine's degenerate cases
-        # (zero query, zero vector, or dimension mismatch).
-        scores: dict[str, float] = {p: 0.0 for p in self._notes}
         q = np.asarray(query_vec, dtype=np.float32)
         q_norm = float(np.linalg.norm(q))
+        matrix: list[tuple[float, str]] = []
         if q_norm != 0.0 and mat is not None and mat.size and mat_dim == q.shape[0]:
             sims = mat @ (q / q_norm)
-            for path, sim in zip(mat_paths, sims.tolist()):
-                scores[path] = sim
-        results = [(s, p) for p, s in scores.items() if p not in exclude]
-        # heapq.nlargest(k, results) is documented-equivalent to
-        # sorted(results, reverse=True)[:k] — same top-k, same (score, path)
-        # desc tie-break — but O(N log k) instead of a full O(N log N) sort.
-        top = heapq.nlargest(k, results)
+            matrix = [(float(s), p) for p, s in zip(mat_paths, sims.tolist()) if p not in exclude]
+        # heapq.nlargest(k, ...) is documented-equivalent to sorted(reverse=True)[:k]:
+        # same top-k, same (score, path) desc tie-break, but O(N log k).
+        # Notes outside the matrix (missing field, off-dim, or dim mismatch) score
+        # exactly 0.0 — _cosine's degenerate cases. A 0.0/negative note can only enter
+        # the top-k when the matrix yields fewer than k strictly-positive hits, since any
+        # positive score outranks it. In that common case nlargest over the matrix alone
+        # is bit-identical; only otherwise do we pay the full-vault scan to place the
+        # off-matrix 0.0 rows correctly.
+        top = heapq.nlargest(k, matrix)
+        if len(top) < k or not top or top[-1][0] <= 0.0:
+            scored = {p: s for s, p in matrix}
+            results = [(scored.get(p, 0.0), p) for p in self._notes if p not in exclude]
+            top = heapq.nlargest(k, results)
         return [
             {"path": path, "name": self._notes[path]["name"], "score": round(float(score), 4)}
             for score, path in top
@@ -483,16 +492,22 @@ def _note_title_text(title: str, *, folder: str = "") -> str:
     return f"{prefix}{title}"
 
 
-def _embed_signature(name: str, body: str, *, folder: str = "") -> str:
+def _embed_signature(name: str, body: str, *, folder: str = "", model: str = "") -> str:
     """Stable hash of the exact text that determines a note's embedding.
 
     Signed over the truncated/image-stripped `_note_text` plus `_note_title_text`
     — not the raw body — so edits past the truncation point or inside stripped
     media syntax don't trigger a needless re-embed. build_index compares this
     against the stored hash to detect content changes on incremental refresh.
+
+    `model` (A11): the embedder identity is part of the basis, so a model swap
+    marks every content-unchanged note stale and re-embeds it. Without it,
+    unchanged notes keep old-dimension vectors while new notes get new-dimension
+    ones — a mixed-dimension store that can silently zero the whole embed leg.
     """
     import hashlib
-    basis = _note_text(name, body, folder=folder) + "\x00" + _note_title_text(name, folder=folder)
+    basis = (_note_text(name, body, folder=folder) + "\x00"
+             + _note_title_text(name, folder=folder) + "\x00" + model)
     return hashlib.sha1(basis.encode("utf-8", "ignore")).hexdigest()
 
 
@@ -528,6 +543,7 @@ def build_index(
     """
     if store is None:
         store = get_store()
+    _model = getattr(embedder, "model", "")
 
     def _stale(path: str, name: str, body: str) -> bool:
         # Re-embed when new, forced, or the embedded text changed since last
@@ -536,7 +552,7 @@ def build_index(
         if force or not store.has(path):
             return True
         folder = path.rsplit("/", 1)[0] if "/" in path else ""
-        return store.get_content_hash(path) != _embed_signature(name, body, folder=folder)
+        return store.get_content_hash(path) != _embed_signature(name, body, folder=folder, model=_model)
 
     to_embed = [(path, name, body) for path, name, body in notes if _stale(path, name, body)]
 
@@ -555,7 +571,7 @@ def build_index(
         title_vecs = vecs[1::2]  # odd positions
         for (path, name, body), fv, tv, f in zip(batch, full_vecs, title_vecs, folders):
             store.upsert(path, name, fv, title_vec=tv,
-                         content_hash=_embed_signature(name, body, folder=f))
+                         content_hash=_embed_signature(name, body, folder=f, model=_model))
 
     if save:
         store.save()
@@ -586,7 +602,7 @@ def refresh_note(
     title_text = _note_title_text(name, folder=_folder)
     vecs = embedder.embed([full_text, title_text])
     store.upsert(path, name, vecs[0], title_vec=vecs[1],
-                 content_hash=_embed_signature(name, body, folder=_folder))
+                 content_hash=_embed_signature(name, body, folder=_folder, model=getattr(embedder, "model", "")))
     if save:
         store.save()
     return store

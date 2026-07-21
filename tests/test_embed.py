@@ -163,6 +163,47 @@ def test_cosine_top_k_exclude(tmp_path):
     assert "other" in paths
 
 
+def test_build_matrix_uses_modal_dimension_not_first(tmp_path):
+    # A10: the first-inserted note is a MINORITY dimension. The majority must not
+    # be dropped, and a query in the majority dim must not zero the whole leg.
+    store = EmbedStore(path=tmp_path / "embeddings.json")
+    store.upsert("legacy", "Legacy", [0.1, 0.2, 0.3])  # minority dim=3, inserted first
+    store.upsert("hit",    "Hit",    [1.0, 0.0])        # majority dim=2
+    store.upsert("other",  "Other",  [0.6, 0.8])        # majority dim=2
+
+    scores = {r["path"]: r["score"] for r in store.cosine_top_k([1.0, 0.0], k=3)}
+    assert scores["hit"] > 0.9          # majority-dim note scored — leg not zeroed
+    assert scores.get("other", 0.0) > 0.0
+
+
+def test_cosine_top_k_pads_off_matrix_zero_rows_above_negatives(tmp_path):
+    # B13: the top-k fast path skips the full-vault scan only when the matrix has
+    # >= k strictly-positive hits. Here it does not, so an off-dimension note (0.0,
+    # off-matrix) must still be placed above a negative in-matrix hit.
+    store = EmbedStore(path=tmp_path / "embeddings.json")
+    store.upsert("pos", "Pos", [1.0, 0.0])          # sim +1.0, modal dim 2
+    store.upsert("neg", "Neg", [-1.0, 0.0])         # sim -1.0, modal dim 2
+    store.upsert("off", "Off", [0.1, 0.2, 0.3])     # off-dim → 0.0, off-matrix
+
+    results = store.cosine_top_k([1.0, 0.0], k=3)
+    assert [r["path"] for r in results] == ["pos", "off", "neg"]
+    assert results[1]["score"] == 0.0
+
+
+def test_model_swap_reembeds_unchanged_notes(tmp_path):
+    # A11: swapping the embedder model must re-embed content-unchanged notes,
+    # or the store ends up mixed-dimension (the A10 hazard).
+    idx = tmp_path / "idx.json"
+    notes = [("Concepts/A", "A", "body a"), ("Concepts/B", "B", "body b")]
+    build_index(_make_embedder(), notes, store=EmbedStore(idx))
+
+    e2 = _make_embedder()
+    e2.model = "other-model"
+    e2.embed.reset_mock()
+    build_index(e2, notes, store=EmbedStore(idx))
+    assert e2.embed.call_count > 0  # model changed → stale despite unchanged bodies
+
+
 def test_cosine_top_k_returns_score(tmp_path):
     store = EmbedStore(path=tmp_path / "embeddings.json")
     store.upsert("a", "A", [1.0, 0.0])
@@ -177,6 +218,7 @@ def test_cosine_top_k_returns_score(tmp_path):
 def _make_embedder(dim: int = 2):
     """Return a mock embedder that produces deterministic unit vectors."""
     embedder = MagicMock()
+    embedder.model = "test-model"  # real embedders expose a str .model (A11 signature)
     call_count = [0]
 
     def fake_embed(texts):
@@ -305,6 +347,7 @@ def test_build_index_stores_title_vecs(tmp_path):
         return vecs
 
     embedder_mock = MagicMock()
+    embedder_mock.model = "test-model"  # real embedders expose a str .model (A11 signature)
     embedder_mock.embed.side_effect = interleaved_embedder
 
     notes = [("Robotica/ROS", "ROS", "Robot Operating System")]
