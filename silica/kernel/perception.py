@@ -311,7 +311,8 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
              use_embedder: bool = True, use_rerank: bool = True,
              paths: list[str] | None = None,
              use_recall_weights: bool = False,
-             assemble: bool = False) -> Perception:
+             assemble: bool = False,
+             use_lexical: bool = False) -> Perception:
     """Retrieve + assemble the answer-time context for `query`.
 
     ``paths`` skips retrieval and assembles the given notes in order (the eval
@@ -323,6 +324,8 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     ``assemble`` (default off) folds each seed's 1-hop neighbours into a
     squashed, breadcrumbed block; no effect when ``paths`` is set (that
     bypasses retrieval).
+    ``use_lexical`` (default off) forwards to `facade_retrieve`'s lexical leg;
+    no effect when ``paths`` is set.
     """
     from silica.kernel.rerank import best_windows
 
@@ -332,7 +335,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     else:
         results, query_vec = facade_retrieve(
             query, k=k, use_embedder=use_embedder, use_rerank=use_rerank,
-            use_recall_weights=use_recall_weights)
+            use_recall_weights=use_recall_weights, use_lexical=use_lexical)
         hits = [(r.path, " ".join(r.evidence), getattr(r, "origin", "vault"))
                 for r in (results or [])]
 
