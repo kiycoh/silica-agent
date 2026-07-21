@@ -226,12 +226,15 @@ class CooccurStore:
         # lazy aggregated graph caches (scope=None only)
         self._adj: dict[str, dict[str, float]] | None = None
         self._labels: dict[str, str] | None = None
+        # per-path note_nodes() derived-dict cache (mirrors the _adj cache)
+        self._note_nodes_cache: dict[str, dict[str, int]] = {}
         self._load()
 
     # --- caches ---
     def _invalidate(self) -> None:
         self._adj = None
         self._labels = None
+        self._note_nodes_cache = {}
 
     # --- I/O ---
     def _load(self) -> None:
@@ -332,15 +335,24 @@ class CooccurStore:
 
         Public read access used by the relatedness facade to build the
         concept->notes inverted index (granularity reconciliation lives there,
-        not here).
+        not here). The derived dict is computed once per path and cached
+        (invalidated via `_invalidate()`, alongside `_adj`/`_labels`); each
+        call still returns a fresh copy so callers may mutate their result
+        without corrupting the cache.
         """
-        contrib = self._notes.get(cooccur_key(path))
-        if not contrib:
-            return {}
-        return {
-            stem: int(meta.get("count", 1))
-            for stem, meta in contrib.get("nodes", {}).items()
-        }
+        key = cooccur_key(path)
+        cached = self._note_nodes_cache.get(key)
+        if cached is None:
+            contrib = self._notes.get(key)
+            cached = (
+                {
+                    stem: int(meta.get("count", 1))
+                    for stem, meta in contrib.get("nodes", {}).items()
+                }
+                if contrib else {}
+            )
+            self._note_nodes_cache[key] = cached
+        return dict(cached)
 
     def top_stems(self, n: int = 20) -> list[str]:
         """Top-n stem nodes by total weight across all notes, as display labels.

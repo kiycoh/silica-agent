@@ -287,6 +287,58 @@ def test_note_nodes_missing_note_returns_empty(tmp_path):
     assert store.note_nodes("NOPE") == {}
 
 
+# ---------------------------------------------------------------------------
+# Task 3.2 (perf/hot-paths): note_nodes caches its derived {stem: count} dict
+# per path, invalidated through the store's existing _invalidate() seam.
+# ---------------------------------------------------------------------------
+
+def test_note_nodes_matches_fresh_recompute_across_notes(tmp_path):
+    store = CooccurStore(path=tmp_path / "cooc.json")
+    store.upsert_note("A", build_contribution("A", "alpha alpha beta"))
+    store.upsert_note("B", build_contribution("B", "gamma gamma gamma delta"))
+    st = __import__("snowballstemmer").stemmer("english").stemWord
+    assert store.note_nodes("A") == {st("alpha"): 2, st("beta"): 1}
+    assert store.note_nodes("B") == {st("gamma"): 3, st("delta"): 1}
+
+
+def test_note_nodes_returns_fresh_dict_each_call(tmp_path):
+    store = CooccurStore(path=tmp_path / "cooc.json")
+    store.upsert_note("A", build_contribution("A", "alpha alpha beta"))
+    d = store.note_nodes("A")
+    d["zzznotreal"] = 999
+    d.clear()
+    d2 = store.note_nodes("A")
+    assert "zzznotreal" not in d2
+    assert d2  # second call unaffected by mutating/clearing the first result
+
+
+def test_note_nodes_invalidated_on_upsert(tmp_path):
+    store = CooccurStore(path=tmp_path / "cooc.json")
+    store.upsert_note("A", build_contribution("A", "alpha alpha beta"))
+    store.note_nodes("A")  # warms the cache
+    store.upsert_note("A", build_contribution("A", "gamma delta"))
+    st = __import__("snowballstemmer").stemmer("english").stemWord
+    nodes = store.note_nodes("A")
+    assert st("alpha") not in nodes
+    assert st("gamma") in nodes
+
+
+def test_note_nodes_invalidated_on_delete(tmp_path):
+    store = CooccurStore(path=tmp_path / "cooc.json")
+    store.upsert_note("A", build_contribution("A", "alpha beta"))
+    store.note_nodes("A")  # warms the cache
+    store.delete_note("A")
+    assert store.note_nodes("A") == {}
+
+
+def test_note_nodes_second_call_served_from_cache(tmp_path):
+    store = CooccurStore(path=tmp_path / "cooc.json")
+    store.upsert_note("A", build_contribution("A", "alpha beta"))
+    store.note_nodes("A")
+    store.note_nodes("A")
+    assert "A" in store._note_nodes_cache
+
+
 def test_to_networkx_builds_weighted_undirected_graph(tmp_path):
     store = CooccurStore(path=tmp_path / "cooc.json")
     store.upsert_note("A", build_contribution("A", "alpha beta"))
