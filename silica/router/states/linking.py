@@ -49,7 +49,6 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
     non-fatal: they are logged and the FSM continues to LINT.  This is
     intentional — autolink only ADDs links; it can never break a valid note.
     """
-    idx = fsm._current_chunk_idx
     fsm._progress_note(fsm._chunk_task_id("autolink"), "autolink", "running")
 
     try:
@@ -124,7 +123,6 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
     rollback inverses for any modified note so ROLLBACK and LINT graph-diff
     both cover the backlinks.
     """
-    idx = fsm._current_chunk_idx
     fsm._progress_note(fsm._chunk_task_id("backlink"), "backlink", "running")
 
     try:

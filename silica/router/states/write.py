@@ -27,19 +27,15 @@ logger = logging.getLogger(__name__)
 from silica.kernel.ops import OpType
 
 
-def _moc_prefix(sample: str) -> str:
-    """Return 'Da' (Italian) or 'From' (English/other) for the MOC heading.
+def _moc_heading(source_name: str, sample: str) -> str:
+    """Language-aware MOC section heading: '## Da: {name}' or '## From: {name}'.
 
     Routes through kernel/language (C1) — the private Italian marker regex
     this replaces missed prose outside its hardcoded word list.
     """
     from silica.kernel.language import detect
-    return "Da" if detect(sample) == "italian" else "From"
-
-
-def _moc_heading(source_name: str, sample: str) -> str:
-    """Language-aware MOC section heading: '## Da: {name}' or '## From: {name}'."""
-    return f"## {_moc_prefix(sample)}: {source_name}"
+    prefix = "Da" if detect(sample) == "italian" else "From"
+    return f"## {prefix}: {source_name}"
 
 
 def _merge_moc_section(content: str, heading: str, note_lines: list[str]) -> str:
@@ -78,7 +74,6 @@ def _resolve_vault_path(name: str) -> str | None:
 
 
 def handle_snapshot(fsm: "InjectorFSM") -> None:
-    idx = fsm._current_chunk_idx
     fsm._progress_note(fsm._chunk_task_id("snapshot"), "snapshot", "running")
     from silica.tools.wrapped import silica_snapshot
     res = silica_snapshot(fsm._chunk_ctx["ops_path"])
@@ -392,7 +387,6 @@ def handle_write(fsm: "InjectorFSM") -> None:
 
 def handle_hub_update(fsm: "InjectorFSM") -> None:
     """Append MOC links to the Hub note for all newly written notes."""
-    idx = fsm._current_chunk_idx
     fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "running")
     if not fsm.hub:
         logger.info("HUB_UPDATE: no hub configured, skipping")
