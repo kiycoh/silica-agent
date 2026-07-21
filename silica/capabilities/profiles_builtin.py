@@ -34,7 +34,6 @@ def _router_parser(final_text: str, trace: list[dict]) -> WorkerResult:
 READER = WorkerProfile(
     name="reader",
     tools=("silica_read_note", "silica_search", "silica_search_context", "silica_outline"),
-    bounds_factory=None,
     max_iterations=4,
     system_prompt=(
         "You are a read-only retrieval worker. Gather the context relevant to the "
@@ -47,7 +46,6 @@ READER = WorkerProfile(
 ROUTER = WorkerProfile(
     name="router",
     tools=("silica_read_note", "silica_search", "silica_outline", "silica_links"),
-    bounds_factory=None,
     max_iterations=4,
     system_prompt=(
         "You are a routing adjudicator. A chunk has a high embedding similarity to "

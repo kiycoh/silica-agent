@@ -202,7 +202,7 @@ class GraphIndexMixin:
         self._ensure_graph()
         return list(self._mention_index.get(title.lower(), set()))
 
-    def graph_data(self, folder: str = "") -> tuple[dict, set, Any]:
+    def graph_data(self) -> tuple[dict, set, Any]:
         """Return (notes, unresolved_links, graph) for in-process consumers."""
         self._ensure_graph()
         return self._notes, self._unresolved_links, self._graph
@@ -352,7 +352,7 @@ class ObsidianDriver(Protocol):
 
     # -- graph data (in-process, avoids O(N) subprocess calls) -------------
 
-    def graph_data(self, folder: str = "") -> tuple[dict, set, Any]:
+    def graph_data(self) -> tuple[dict, set, Any]:
         """Return (notes, unresolved_links, graph) for in-process consumers.
 
         Ensures the graph index is populated first. Used by graph_export to

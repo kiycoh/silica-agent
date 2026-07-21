@@ -50,18 +50,17 @@ def _resolve_vault_path(vault_path: str | None) -> str | None:
         return None
 
 
-def _store_path(vault_path: str | None, filename: str) -> Path | None:
+def _store_path(vault_path: str | None) -> Path | None:
     resolved = _resolve_vault_path(vault_path)
     if not resolved:
         return None
-    return Path(resolved) / filename
+    return Path(resolved) / DEFAULT_PROVENANCE_FILENAME
 
 
 def read_records(
     source: str | None = None,
     *,
     vault_path: str | None = None,
-    filename: str = DEFAULT_PROVENANCE_FILENAME,
 ) -> list[dict[str, Any]]:
     """All provenance records, optionally filtered to one source basename.
 
@@ -72,7 +71,7 @@ def read_records(
     vault — and a later append_record would otherwise clobber the corrupt
     bytes with a fresh array.
     """
-    path = _store_path(vault_path, filename)
+    path = _store_path(vault_path)
     if not path or not path.exists():
         return []
     try:
@@ -97,7 +96,6 @@ def append_record(
     notes: list[str],
     *,
     vault_path: str | None = None,
-    filename: str = DEFAULT_PROVENANCE_FILENAME,
     date: str | None = None,
 ) -> bool:
     """Append one record for `source`. Best-effort: swallows I/O errors and
@@ -108,7 +106,7 @@ def append_record(
     that must not duplicate the record (mirrors run_log.append_log_line's
     resume-safety).
     """
-    path = _store_path(vault_path, filename)
+    path = _store_path(vault_path)
     if not path:
         return False
 
@@ -121,7 +119,7 @@ def append_record(
     }
 
     try:
-        existing = read_records(vault_path=vault_path, filename=filename)
+        existing = read_records(vault_path=vault_path)
         if any(
             r.get("source") == source and r.get("sha256") == sha256 and r.get("run_id") == run_id
             for r in existing
@@ -139,7 +137,6 @@ def append_record(
 def drifted_notes(
     *,
     vault_path: str | None = None,
-    filename: str = DEFAULT_PROVENANCE_FILENAME,
 ) -> list[tuple[str, str]]:
     """`[(note, source_basename), ...]` for notes derived from a superseded
     source version.
@@ -149,7 +146,7 @@ def drifted_notes(
     from the source's CURRENT (latest) sha — its notes that do NOT appear
     in ANY record carrying the current sha are drifted.
     """
-    records = read_records(vault_path=vault_path, filename=filename)
+    records = read_records(vault_path=vault_path)
     by_source: dict[str, list[dict]] = {}
     for r in records:
         src = r.get("source")
@@ -196,7 +193,6 @@ def note_authored_by(
     source: str,
     *,
     vault_path: str | None = None,
-    filename: str = DEFAULT_PROVENANCE_FILENAME,
 ) -> bool:
     """True when `source` (a source basename) already authored `note_path`.
 
@@ -212,7 +208,7 @@ def note_authored_by(
     target = _norm_note_ref(note_path)
     if not target:
         return False
-    for r in read_records(source, vault_path=vault_path, filename=filename):
+    for r in read_records(source, vault_path=vault_path):
         if any(_norm_note_ref(n) == target for n in (r.get("notes") or [])):
             return True
     return False
@@ -223,7 +219,6 @@ def check_renucleate(
     incoming_sha256: str,
     *,
     vault_path: str | None = None,
-    filename: str = DEFAULT_PROVENANCE_FILENAME,
 ) -> tuple[bool, int]:
     """`(is_modified, notes_derived_from_the_prior_version)`.
 
@@ -232,7 +227,7 @@ def check_renucleate(
     record for that source basename. No prior record -> (False, 0) — a
     first nucleate is not a re-nucleate.
     """
-    recs = read_records(source, vault_path=vault_path, filename=filename)
+    recs = read_records(source, vault_path=vault_path)
     if not recs:
         return False, 0
     last = recs[-1]

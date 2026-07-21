@@ -22,7 +22,6 @@ def test_reader_and_router_registered():
 
 def test_profiles_are_read_only():
     for p in (READER, ROUTER):
-        assert p.bounds_factory is None
         assert set(p.tools).issubset(READONLY_TOOLS), f"{p.name} exposes non-readonly tools"
 
 

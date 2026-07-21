@@ -111,11 +111,8 @@ def handle_crossdedup(fsm: "InjectorFSM") -> None:
     fi = fsm._current_file_idx
     removed = 0
     for name, vec in zip(names, vecs):
-        dup = next(
-            ((pn, _cosine(vec, pv)) for pn, pv in fsm._crossdedup_vecs
-             if _cosine(vec, pv) >= τ_high),
-            None,
-        )
+        scored = ((pn, _cosine(vec, pv)) for pn, pv in fsm._crossdedup_vecs)
+        dup = next(((pn, s) for pn, s in scored if s >= τ_high), None)
         if dup is not None:
             nc = cur.get("new_concepts", [])
             if name in nc:
@@ -143,7 +140,7 @@ def _within_cluster_tol(cached_sig, sig: list[int]) -> bool:
     return abs(n - cn) <= max(50, n // 50) and abs(e - ce) <= max(100, e // 50)
 
 
-def build_vault_graph_ctx(fsm: "InjectorFSM") -> dict[str, dict]:
+def build_vault_graph_ctx() -> dict[str, dict]:
     """Compute per-note graph context (cluster/hub) from the current vault state.
 
     Returns a dict keyed by vault-relative path without .md extension:
@@ -471,7 +468,7 @@ def handle_payload(fsm: "InjectorFSM") -> None:
     # across files (consumers accept bounded staleness). Consumed by COLLISION,
     # DELEGATE (distiller enrichment), AUTOLINK, and HUB_UPDATE.
     if "vault_graph_ctx" not in fsm.context:
-        fsm.context["vault_graph_ctx"] = build_vault_graph_ctx(fsm)
+        fsm.context["vault_graph_ctx"] = build_vault_graph_ctx()
 
     fsm._transition_success()
 

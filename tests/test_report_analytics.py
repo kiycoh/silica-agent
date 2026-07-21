@@ -113,7 +113,7 @@ def test_vault_graph_ctx_has_no_pagerank_field(monkeypatch):
         [{"from": "A", "to": "B", "type": "EXTRACTED"}],
     ))
 
-    ctx = build_vault_graph_ctx(None)
+    ctx = build_vault_graph_ctx()
     assert ctx, "ctx should be populated"
     for entry in ctx.values():
         assert set(entry) == {"cluster_id", "hub", "is_hub"}  # no 'pagerank'

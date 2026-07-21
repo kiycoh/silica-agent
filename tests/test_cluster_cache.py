@@ -40,12 +40,12 @@ def test_cache_hit_skips_louvain(tmp_path, monkeypatch):
     n = [0]
     _patch(monkeypatch, tmp_path, nodes, edges, n)
 
-    ctx1 = setup.build_vault_graph_ctx(None)
+    ctx1 = setup.build_vault_graph_ctx()
     assert n[0] == 1                     # miss → Louvain ran
     assert ctx1["a"]["cluster_id"] == 0
     assert ctx1["z"]["cluster_id"] == -1  # isolated node enumerated
 
-    ctx2 = setup.build_vault_graph_ctx(None)
+    ctx2 = setup.build_vault_graph_ctx()
     assert n[0] == 1                     # hit → compute_report NOT called again
     assert ctx2 == ctx1
 
@@ -56,7 +56,7 @@ def test_cache_recomputes_on_large_drift(tmp_path, monkeypatch):
     n = [0]
     _patch(monkeypatch, tmp_path, nodes, edges, n)
 
-    setup.build_vault_graph_ctx(None)
+    setup.build_vault_graph_ctx()
     assert n[0] == 1
 
     # graph grows far beyond tolerance → recompute
@@ -64,7 +64,7 @@ def test_cache_recomputes_on_large_drift(tmp_path, monkeypatch):
     big_edges = [{"from": f"n{i}", "to": f"n{i+1}", "type": "EXTRACTED"} for i in range(499)]
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (big_nodes, big_edges))
 
-    setup.build_vault_graph_ctx(None)
+    setup.build_vault_graph_ctx()
     assert n[0] == 2                     # drift > tol → Louvain re-ran
 
 
@@ -74,11 +74,11 @@ def test_small_drift_still_reuses_cache(tmp_path, monkeypatch):
     n = [0]
     _patch(monkeypatch, tmp_path, nodes, edges, n)
 
-    setup.build_vault_graph_ctx(None)
+    setup.build_vault_graph_ctx()
     assert n[0] == 1
 
     # +5 nodes (< 2% of 1000) → still within tolerance → reuse
     nodes2 = nodes + [{"id": f"x{i}", "type": "note"} for i in range(5)]
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (nodes2, list(edges)))
-    setup.build_vault_graph_ctx(None)
+    setup.build_vault_graph_ctx()
     assert n[0] == 1                     # reused

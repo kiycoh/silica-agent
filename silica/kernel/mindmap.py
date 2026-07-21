@@ -648,7 +648,7 @@ def note_resolver():
     """
     from silica.driver import get_driver
 
-    notes, _unresolved, _g = get_driver().graph_data("")
+    notes, _unresolved, _g = get_driver().graph_data()
     titles = {p.replace("\\", "/"): ref.name for p, ref in notes.items()}
     paths = list(notes)
     return lambda ref: _resolve_in(ref, paths, titles)
@@ -673,7 +673,7 @@ def reading_path(
     if graph is None:
         from silica.driver import get_driver
 
-        _notes, _unresolved, g = get_driver().graph_data("")
+        _notes, _unresolved, g = get_driver().graph_data()
         graph = g.to_undirected(as_view=True) if hasattr(g, "to_undirected") else g
     if cooccur_store is None:  # embed leg unused here — load only the cooccur half
         try:
@@ -726,10 +726,10 @@ def gather_materials(root: str, *, latent_k: int = 10) -> MapMaterials:
     from silica.kernel.relatedness import related_notes
 
     driver = get_driver()
-    notes, _unresolved, g = driver.graph_data("")
+    notes, _unresolved, g = driver.graph_data()
     titles = {p.replace("\\", "/"): ref.name for p, ref in notes.items()}
 
-    nodes, edges = build_graph_data("")
+    nodes, edges = build_graph_data()
     detect_communities(nodes, edges)  # assigns node["group"] in place (global, seed=42)
     community_of = {n["id"]: n.get("group", -1) for n in nodes}
 

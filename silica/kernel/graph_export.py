@@ -94,7 +94,7 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
     from silica.driver import get_driver
 
     driver = get_driver()
-    internal_notes, unresolved_links, internal_graph = driver.graph_data(folder=folder)
+    internal_notes, unresolved_links, internal_graph = driver.graph_data()
 
     def _in_scope(path: str) -> bool:
         if not folder:

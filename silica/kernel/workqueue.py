@@ -160,7 +160,7 @@ class WorkQueue:
 
     def __init__(self, run_dir: str | Path | None = None):
         self._q: queue.Queue = queue.Queue()
-        self._items: list[WorkItem] = []        # every item ever enqueued (for inspect/resume)
+        self._items: list[WorkItem] = []        # every item ever enqueued (feeds summary/inspection)
         self._lock = threading.Lock()
         self._closed = threading.Event()
         self._pending: int = 0                  # items enqueued but not yet complete
@@ -253,6 +253,9 @@ class WorkQueue:
             return dict(Counter(it.status for it in self._items))
 
     def _persist(self) -> None:
+        # ponytail: write-only debug dump — workqueue.json has no reader/from_dict,
+        # so this is post-mortem inspection only. Add atomic_write_bytes + a loader
+        # if programmatic resume is ever built (until then, no resume path exists).
         if not self._run_dir:
             return
         try:
