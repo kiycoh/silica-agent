@@ -693,7 +693,9 @@ def silica_lexical_refresh(folder: str = "", force: bool = False) -> dict[str, A
 
     store = get_lexical_store()
     if force:
-        store.clear()
+        for p in list(store.paths()):
+            if _in_folder(p, folder):
+                store.remove(p)
     for idx_path, name, body in notes:
         store.upsert(idx_path, name, body)
 

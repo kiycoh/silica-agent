@@ -98,10 +98,10 @@ def test_gc_drops_notes_removed_from_vault(vault):
     assert any(p.endswith("Neural") for p in store.paths())
 
 
-def test_force_clears_entries_outside_scanned_folder(vault):
-    """force=True rebuilds the whole index from empty; a plain incremental
-    refresh only GCs stale entries WITHIN the scanned folder, leaving entries
-    outside that scope untouched."""
+def test_scoped_force_preserves_out_of_folder_entries(vault):
+    """force=True rebuilds the SCANNED folder's slice of the index from empty;
+    it must never wipe entries outside that scope (a scoped `--force` run
+    must not delete unrelated, out-of-folder index data)."""
     from silica.tools.composed import silica_lexical_refresh
 
     # Seed a bogus entry outside the "Concepts" folder this run will scan.
@@ -118,9 +118,13 @@ def test_force_clears_entries_outside_scanned_folder(vault):
     res = silica_lexical_refresh(folder="Concepts", force=True)
     assert res["total_notes"] == 2
     store = get_lexical_store()
-    # force wipes the whole store before reseeding.
-    assert "Other/Ghost" not in store.paths()
-    assert len(store) == 2
+    # A scoped force only clears+reseeds the in-folder slice; the
+    # out-of-folder entry survives and stays rank-able.
+    assert "Other/Ghost" in store.paths()
+    assert store.rank("unrelated content", k=5)
+    assert any(p.endswith("Neural") for p in store.paths())
+    assert any(p.endswith("Boats") for p in store.paths())
+    assert len(store) == 3
 
 
 def test_cli_lexical_command_routes_to_tool():

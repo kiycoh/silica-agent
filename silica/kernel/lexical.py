@@ -70,11 +70,6 @@ class LexicalStore:
     def paths(self) -> list[str]:
         return list(self._docs)
 
-    def clear(self) -> None:
-        self._docs.clear()
-        self._len.clear()
-        self._name.clear()
-
     def rank(self, query: str, *, k: int = 25) -> list[tuple[str, float]]:
         if not self._docs:
             return []
