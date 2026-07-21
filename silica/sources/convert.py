@@ -21,6 +21,7 @@ embeds → write the note to the inbox) is shared and provider-agnostic.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -268,6 +269,21 @@ def _pdf_via_opendataloader(src: Path, workdir: Path) -> tuple[str, Path]:
     return Path(hits[0]).read_text(encoding="utf-8", errors="replace"), images
 
 
+def _mineru_error(stderr: str) -> str:
+    """One-line, human-readable error from mineru's stderr.
+
+    mineru may write a JSON task blob (with an ``error`` field) or plain text.
+    Pull the ``error`` field when present; otherwise head-truncate (not tail —
+    the useful message is at the front, and a tail slice starts mid-token).
+    """
+    err = stderr.strip()
+    try:
+        parsed = json.loads(err)
+        return str(parsed.get("error") or err[:300])
+    except (ValueError, AttributeError):
+        return err[:300]
+
+
 def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
     out = workdir / "out"
     try:
@@ -281,7 +297,7 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
             "'mineru[pipeline]'`), or set SILICA_PDF_PROVIDER to docling/opendataloader"
         ) from None
     if proc.returncode != 0:
-        raise ValueError(f"mineru failed: {proc.stderr.strip()[-300:]}")
+        raise ValueError(f"mineru failed: {_mineru_error(proc.stderr)}")
     hits = glob(str(out / src.stem / "**" / f"{src.stem}.md"), recursive=True)
     if not hits:
         raise ValueError("mineru produced no markdown")

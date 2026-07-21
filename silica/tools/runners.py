@@ -50,6 +50,24 @@ def silica_run_injector(
     if not files:
         return {"error": "No inbox file(s) specified"}
 
+    # The FSM re-reads inbox files as prose; a file no adapter claims (PDF, other
+    # binaries) would be read as garbage. Conversion (convert()) is a CLI/GUI step,
+    # not an agent tool, so surface it instead of nucleating junk. See cli.py:923.
+    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.sources.registry import adapter_for
+
+    enabled = get_active_manifest().sources
+    unclaimed = [f for f in files if adapter_for(f, enabled=enabled) is None]
+    if unclaimed:
+        pdfs = [f for f in unclaimed if f.lower().endswith(".pdf")]
+        hint = (
+            f"Ask the user to run `/convert {' '.join(pdfs)}` (or upload via the GUI), "
+            "then nucleate the resulting .md note(s)."
+            if pdfs
+            else "No adapter or converter handles this file type."
+        )
+        return {"error": f"Not ingestible as-is: {', '.join(unclaimed)}. {hint}"}
+
     coordinator = Coordinator(
         inbox_files=files,
         target_dir=target_dir,

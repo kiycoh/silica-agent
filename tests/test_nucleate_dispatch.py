@@ -63,13 +63,59 @@ def test_nucleate_md_missing_target_expands_to_auto_target():
     assert "most relevant existing vault folder" in msg
 
 
-def test_nucleate_no_files_returns_error():
-    msg = _expand_workflow_shortcut("/nucleate --target=Concepts")
-    assert msg is not None and msg.startswith("Error:")
+def test_nucleate_no_resolvable_files_falls_back_to_agent():
+    # A dropped --folder= (starts with '-', so the flag parser skips it) used to
+    # hard-error "requires at least one file". Now the raw line goes to the agent
+    # to infer intent instead of rejecting it.
+    msg = _expand_workflow_shortcut("/nucleate --folder=Inbox/x --target=Concepts")
+    assert msg is not None
+    assert not msg.startswith("Error:")
+    assert "silica_run_injector" in msg
+    assert "--folder=Inbox/x" in msg  # the raw input is echoed for the agent
+
+
+def test_unknown_slash_command_falls_through_to_agent():
+    from silica.cli import _handle_slash_command
+    # Known meta command → handled deterministically (True).
+    assert _handle_slash_command("/model", []) is True
+    # Unknown command → None so the REPL hands the raw line to the agent
+    # instead of printing "Unknown command".
+    assert _handle_slash_command("/ingest --folder=x --target=y", []) is None
 
 
 def test_inject_shortcut_is_retired():
     assert _expand_workflow_shortcut("/inject Inbox/a.md --target=C") is None
+
+
+def test_plain_prose_with_apostrophe_is_not_hijacked():
+    # An Italian contraction ("L'hub") is a single unmatched shlex quote char.
+    # Non-slash input must skip shlex entirely, not get replaced by the
+    # "unbalanced quotes" error message.
+    msg = _expand_workflow_shortcut("L'hub machine learning quali 5 argomenti fondamentali riporta?")
+    assert msg is None
+
+
+def test_slash_command_unbalanced_quotes_still_errors():
+    msg = _expand_workflow_shortcut('/nucleate "Inbox/no closing quote.pdf')
+    assert msg == 'Error: unbalanced quotes in command. Wrap paths with spaces in "...".'
+
+
+def test_run_injector_rejects_pdf_with_convert_hint(repo_vault):
+    # The agent tool has no converter; a .pdf reaching the FSM would be read as
+    # binary garbage. Guard rejects it and points the agent at /convert.
+    from silica.tools import TOOLS
+
+    out = TOOLS["silica_run_injector"].fn(inbox_files=["Inbox/paper.pdf"], target_dir="Concepts")
+    assert "error" in out
+    assert "paper.pdf" in out["error"] and "/convert" in out["error"]
+
+
+def test_run_injector_rejects_unknown_type_without_convert_hint(repo_vault):
+    from silica.tools import TOOLS
+
+    out = TOOLS["silica_run_injector"].fn(inbox_files=["Inbox/data.csv"], target_dir="Concepts")
+    assert "error" in out
+    assert "data.csv" in out["error"] and "/convert" not in out["error"]
 
 
 @pytest.fixture
@@ -117,6 +163,18 @@ def test_nucleate_unsupported_extension_is_skipped(repo_vault, capsys):
     assert not (vault / "Inbox" / "data.md").exists()
     out = capsys.readouterr().out
     assert "data.csv" in out and "Skipped" in out  # warning is part of the contract
+
+
+def test_nucleate_folder_and_connective_words_falls_back_to_agent(repo_vault):
+    # "Inbox/lacascia in lacascia/" — a folder plus the connective word "in".
+    # None of the three tokens resolves to an ingestible file (no extension), but
+    # the intent is clear, so the raw line goes to the agent instead of silently
+    # doing nothing.
+    root, vault = repo_vault
+    msg = _expand_workflow_shortcut("/nucleate Inbox/lacascia in lacascia/")
+    assert msg is not None and msg != ""   # not the silent "handled" sentinel
+    assert not msg.startswith("Error:")
+    assert "silica_run_injector" in msg
 
 
 def test_nucleate_pdf_converts_and_forwards_converted_md(repo_vault, monkeypatch):

@@ -24,6 +24,7 @@ from silica.prompts import system_prompt
 from silica.ui.console import CONSOLE
 from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
+from prompt_toolkit.patch_stdout import patch_stdout
 
 # Import tools to trigger registration via @tool decorator
 import silica.tools.atomic  # noqa: F401
@@ -173,6 +174,9 @@ def _setup_logging(debug: bool = False) -> None:
     logging.getLogger("LiteLLM").setLevel(logging.ERROR)
     logging.getLogger("openai").setLevel(logging.WARNING)
     logging.getLogger("markdown_it").setLevel(logging.WARNING)
+    # websockets DEBUG is the raw bridge handshake + per-frame dump; connect.py
+    # already logs the meaningful lifecycle (connect/disconnect/refusals) itself.
+    logging.getLogger("websockets").setLevel(logging.WARNING)
     # asyncio DEBUG is one "Using selector" line per event loop — litellm's sync
     # streaming path creates a fresh loop PER CHUNK, so --verbose drowns in them.
     logging.getLogger("asyncio").setLevel(logging.WARNING)
@@ -881,6 +885,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         /nucleate "Inbox/papers/With Spaces.pdf" --target=Concepts/AI
         /convert paper.pdf
     """
+    if not user_input.strip().startswith("/"):
+        return None  # not a shortcut — skip shlex entirely, plain prose can have stray quotes/apostrophes
     try:
         parts = shlex.split(user_input.strip())  # honours quoted paths with spaces
     except ValueError:
@@ -902,15 +908,16 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 hub = arg[len("--hub="):]
             elif not arg.startswith("-"):
                 files.append(arg)  # preserve original case
-        if not files:
-            return "Error: /nucleate requires at least one file path. Usage: /nucleate <file...> [--target=DIR]"
 
+        from pathlib import Path
         from silica.kernel.vault_manifest import get_active_manifest
         from silica.sources.convert import convert
         from silica.sources.registry import adapter_for, stage
 
         enabled = get_active_manifest().sources
         md_files: list[str] = []
+        staged = 0
+        needs_agent = not files  # only flags given (dropped --folder=) → agent infers
         for f in files:
             adapter = adapter_for(f, enabled=enabled)
             if adapter is None:
@@ -919,12 +926,20 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 try:
                     md_files.extend(convert(f, dest_dir=target_dir))
                 except ValueError as e:
-                    CONSOLE.print(f"  [yellow]Skipped {f}: {e}[/]")
+                    # A path with a real extension is a genuinely-unsupported file:
+                    # skip it deterministically (no round-trip can convert a .csv).
+                    # A bare name or folder (no suffix) is a resolvable intent the
+                    # flag parser couldn't read — let the agent handle it.
+                    if Path(f).suffix:
+                        CONSOLE.print(f"  [yellow]Skipped {f}: {e}[/]")
+                    else:
+                        needs_agent = True
                 continue
             result = stage(adapter, f)
             if result["status"] == "distill":
                 md_files.append(f)
             elif result["status"] == "ok":
+                staged += 1
                 code_ref = result["meta"].get("code_ref", "")
                 CONSOLE.print(
                     f"  Staged [bold]{result['note_path']}[/] "
@@ -934,7 +949,20 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 CONSOLE.print(f"  [yellow]{f}: {result.get('message', '')}[/]")
 
         if not md_files:
-            return ""  # fully handled inline — sentinel: nothing for the agent
+            if staged or not needs_agent:
+                # Staged inline, or only genuinely-unsupported files — nothing for the agent.
+                return ""
+            # A dropped --folder=, a directory arg, or connective words the flag
+            # parser can't read. Hand the raw line to the agent so it infers intent
+            # (it already holds the tools + the vault map).
+            return (
+                f"The user typed {user_input!r} to nucleate/ingest, but no ingestible "
+                "file was resolved. The argument may be a folder (list its .md notes "
+                "with silica_files and nucleate them), a single note, or carry a "
+                "--target/--folder the flag parser missed. Resolve the inbox file(s), "
+                "then call silica_run_injector with the resolved inbox_files and "
+                "target_dir. If nothing is ingestible, say so briefly."
+            )
 
         from pathlib import Path as _Path
         from silica.kernel.provenance import check_renucleate, content_sha256
@@ -1327,8 +1355,9 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
     return None
 
 
-def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
-    """Handle slash commands. Returns True if the command was handled."""
+def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
+    """Handle a meta slash command. True = handled, False = exit the REPL,
+    None = not a recognized command (the caller hands it to the agent)."""
     cmd = cmd.strip().lower()
 
     if cmd in ("/exit", "/quit", "/q"):
@@ -1386,8 +1415,7 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool:
 
         return True
 
-    CONSOLE.print(f"  Unknown command: {cmd}. Use [bold cyan]/help[/] to see options.")
-    return True
+    return None  # unrecognized: the caller lets the agent infer the intent
 
 
 _NO_MODEL_HINT = (
@@ -1520,7 +1548,12 @@ def main():
 
     while True:
         try:
-            user_input = session.prompt(prompt_text(), bottom_toolbar=bottom_toolbar)
+            # raw=True: background-thread logs (bridge connect, workers) write
+            # pre-rendered ANSI to the patched stderr. Without raw, prompt_toolkit
+            # escapes the codes and they print literally (e.g. "?[1;2m") above the
+            # prompt instead of rendering as colour.
+            with patch_stdout(raw=True):
+                user_input = session.prompt(prompt_text(), bottom_toolbar=bottom_toolbar)
         except (EOFError, KeyboardInterrupt):
             print("\n  (_  _)。˚")
             break
@@ -1552,11 +1585,21 @@ def main():
                 collapsed = set()  # indices reset with the history
                 continue
 
-            should_continue = _handle_slash_command(user_input, messages)
-            if not should_continue:
+            result = _handle_slash_command(user_input, messages)
+            if result is False:
                 print("  (_  _)。˚")
                 break
-            continue
+            if result is True:
+                continue
+            # None → unrecognized command: let the agent infer the intent
+            # (ponytail: unknown slash → one LLM round-trip, not a hard reject).
+            user_input = (
+                f"The user typed the command {user_input!r}, which has no built-in "
+                "handler. Interpret their intent from it and use your tools to carry "
+                "it out; if it's genuinely unclear, ask one brief clarifying question."
+            )
+            is_directive = True
+            # fall through to the agentic loop below
 
         # Fail-fast guard: a chat turn without a model would only surface a
         # provider stack trace — point at `silica init` instead.
