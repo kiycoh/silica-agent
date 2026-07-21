@@ -108,7 +108,7 @@ class LexicalStore:
         df: dict[str, int] = {term: len(self._postings.get(term, {})) for term in q_term_set}
         candidates: set[str] = set().union(
             *(self._postings.get(t, {}).keys() for t in q_term_set)
-        ) if q_term_set else set()
+        )
 
         bm25: dict[str, float] = {}
         for path in candidates:

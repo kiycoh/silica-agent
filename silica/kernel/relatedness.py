@@ -294,21 +294,25 @@ def _rank_cooccur_from_profile(
     if not note_scores:
         return None
     ranked = sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
-    # Confidence signals (retrieval-gates spec): coverage measures the diagnosed
-    # cause (query/corpus vocabulary mismatch — IDF mass of profile stems the top
-    # hit actually matches), flatness the symptom (indiscriminate near-uniform
-    # scores). Values already in hand; no extra corpus pass.
-    total_mass = sum(w * idf.get(s, 0.0) for s, w in profile.items())
-    top_stems = set(cooccur_store.note_nodes(ranked[0][0]))
-    matched = sum(w * idf.get(s, 0.0) for s, w in profile.items() if s in top_stems)
-    coverage = (matched / total_mass) if total_mass > 0 else 0.0
-    scores = [s for _p, s in ranked]
-    flatness = scores[0] / statistics.median(scores)
-    fired = coverage < _COOCCUR_MIN_CONFIDENCE
-    if COOCCUR_GATE_PROBE:
-        COOCCUR_GATE_PROBE({"coverage": coverage, "flatness": flatness, "fired": fired})
-    if fired:
-        return None
+    # Confidence gate is off in production (_COOCCUR_MIN_CONFIDENCE == 0.0, no probe),
+    # so skip the whole signal compute — an extra note_nodes() call plus two IDF sums
+    # per query — unless the experiment hook or a real threshold is active.
+    if COOCCUR_GATE_PROBE or _COOCCUR_MIN_CONFIDENCE > 0.0:
+        # Confidence signals (retrieval-gates spec): coverage measures the diagnosed
+        # cause (query/corpus vocabulary mismatch — IDF mass of profile stems the top
+        # hit actually matches), flatness the symptom (indiscriminate near-uniform
+        # scores). Values already in hand; no extra corpus pass.
+        total_mass = sum(w * idf.get(s, 0.0) for s, w in profile.items())
+        top_stems = set(cooccur_store.note_nodes(ranked[0][0]))
+        matched = sum(w * idf.get(s, 0.0) for s, w in profile.items() if s in top_stems)
+        coverage = (matched / total_mass) if total_mass > 0 else 0.0
+        scores = [s for _p, s in ranked]
+        flatness = scores[0] / statistics.median(scores)
+        fired = coverage < _COOCCUR_MIN_CONFIDENCE
+        if COOCCUR_GATE_PROBE:
+            COOCCUR_GATE_PROBE({"coverage": coverage, "flatness": flatness, "fired": fired})
+        if fired:
+            return None
     return ranked
 
 

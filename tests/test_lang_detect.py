@@ -1,4 +1,5 @@
-from silica.kernel.cooccurrence import CooccurStore, build_index, detect_lang
+from silica.kernel.cooccurrence import CooccurStore, build_index
+from silica.kernel.language import detect as detect_lang
 
 
 def test_detect_empty_defaults_english():

@@ -75,12 +75,6 @@ def frozen_lang(vault: str) -> str | None:
     except Exception:
         return None
 
-# Thin re-export: detect_lang is public API of this module, though the
-# implementation now lives in language.py (silica/kernel/language.py). No
-# external callers today (verified by grep), but the name stays live.
-detect_lang = language.detect
-
-
 def tokenize(
     text: str,
     stem_lang: str = "english",
@@ -599,7 +593,7 @@ def build_index(
     cmap = concepts_by_path or {}
     strip_fences = _strip_fences_for_active_vault()
     for path, name, body in notes:
-        if not force and path in store.paths():
+        if not force and path in store._notes:  # O(1); paths() rebuilds a full list per iter
             continue
         store.upsert_note(
             path,

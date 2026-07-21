@@ -11,6 +11,7 @@ ranked/reranked; neighbours enter as periphery and are never re-ranked.
 """
 from __future__ import annotations
 
+import functools
 import re
 from dataclasses import dataclass, field
 from typing import Callable
@@ -172,6 +173,12 @@ def assemble(
     """Directional 1-hop expansion + budget + squash. See module docstring."""
     if not seed_paths:
         return AssemblyResult(blocks=[], truncation=Truncation())
+
+    # The injected reader is expensive (props + links + backlinks + cooccur, none
+    # memoized) and each path is queried up to ~8x (seed expansion, hub_of, and
+    # _MAX_CHAIN breadcrumb walks). Cache per path for this call. Neighbors are read
+    # only (callers slice copies), so sharing one object across reads is safe.
+    neighbors_of = functools.cache(neighbors_of)
 
     seed_set = set(seed_paths)
     seeds = [Unit(path=p, text=body_of(p), is_seed=True, rank=i)
