@@ -56,6 +56,9 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._mention_index: dict[str, set[str]] = {}        # title_lower -> set(path)
         self._needs_reindex: bool = True
         self._dirty_paths: set[str] = set()           # paths patched since last full rebuild
+        # ponytail: unbounded — grows to the whole vault's bodies in RAM; add
+        # an LRU bound only if a very large vault OOMs.
+        self._body_cache: dict[str, tuple[float, str]] = {}  # abs-path str -> (mtime, content)
 
     def _path_of(self, ref: NoteRef | str) -> str | None:
         if isinstance(ref, NoteRef):
@@ -337,6 +340,29 @@ class ObsidianFSBackend(GraphIndexMixin):
         # Fallback for new files not yet in index
         return self.vault_path / f"{name}.md"
 
+    def _read_cached(self, full: Path) -> str:
+        """Body of a file, served from an mtime-keyed in-memory cache.
+
+        Backend writes invalidate their own path explicitly; this mtime check is
+        the secondary guard for edits made outside the backend.
+        """
+        key = str(full)
+        try:
+            mtime = full.stat().st_mtime
+        except OSError:
+            self._body_cache.pop(key, None)
+            raise
+        hit = self._body_cache.get(key)
+        if hit is not None and hit[0] == mtime:
+            return hit[1]
+        content = full.read_text(encoding="utf-8")
+        self._body_cache[key] = (mtime, content)
+        return content
+
+    def _invalidate_body(self, rel_path: str) -> None:
+        """Drop the cached body for a vault-relative path (write just landed)."""
+        self._body_cache.pop(str(self.vault_path / rel_path), None)
+
     # ------------------------------------------------------------------
     # Discovery / Read
     # ------------------------------------------------------------------
@@ -360,7 +386,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         for name, ref in self._notes.items():
             path = self.vault_path / ref.path
             try:
-                content = path.read_text(encoding="utf-8")
+                content = self._read_cached(path)
                 lines = content.splitlines()
                 for i, line in enumerate(lines):
                     if query_lower in line.lower():
@@ -372,23 +398,54 @@ class ObsidianFSBackend(GraphIndexMixin):
                         ))
             except Exception:
                 continue
-                
+
         return results
 
     def search_context_batch(self, queries: list[str]) -> dict[str, list[Hit]]:
-        """Batch of search_context. The FS backend reads from an in-memory index,
-        so a plain loop is fine — the per-query rescan is only costly on the CLI
-        backend (one CDP eval per query). Contract is symmetric to search_context.
+        """Batch of search_context: one vault sweep instead of one per query.
+
+        Reads and lowercases each body once, then scans every query against it,
+        so the output is byte-for-byte identical to
+        ``{q: self.search_context(q) for q in queries}`` (same Hit ordering:
+        notes in ``self._notes`` iteration order, then ascending line number).
         """
-        return {q: self.search_context(q) for q in queries}
+        self._ensure_index()
+        if not queries:
+            return {}
+
+        # Dedupe (first-seen order): search_context(q) is called once per
+        # distinct q in the reference impl, so a repeated query string must
+        # not append its hits twice here.
+        uniq = list(dict.fromkeys(queries))
+        results: dict[str, list[Hit]] = {q: [] for q in uniq}
+        queries_lower = [(q, q.lower()) for q in uniq]
+
+        for ref in self._notes.values():
+            path = self.vault_path / ref.path
+            try:
+                content = self._read_cached(path)
+                lines = content.splitlines()
+                lines_lower = [line.lower() for line in lines]
+                for q, q_lower in queries_lower:
+                    for i, line_lower in enumerate(lines_lower):
+                        if q_lower in line_lower:
+                            results[q].append(Hit(
+                                ref=ref,
+                                line=i + 1,
+                                snippet=lines[i].strip()
+                            ))
+            except Exception:
+                continue
+
+        return results
 
     def read_note(self, ref: NoteRef | str) -> NoteContent:
         """Read a note's full content by name or ref."""
         path = self._resolve_path(ref)
         if not path.exists():
             raise RuntimeError(f"File not found: {path}")
-            
-        content = path.read_text(encoding="utf-8")
+
+        content = self._read_cached(path)
         name = ref if isinstance(ref, str) else ref.name
         
         try:
@@ -576,6 +633,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         full_path.write_text(content, encoding="utf-8")
+        self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
         if self._needs_reindex:
             self._rebuild_index()
@@ -604,6 +662,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             raise RuntimeError(f"Cannot overwrite non-existent file: {path}")
 
         full_path.write_text(content, encoding="utf-8")
+        self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
         if self._needs_reindex:
             self._rebuild_index()
@@ -636,10 +695,11 @@ class ObsidianFSBackend(GraphIndexMixin):
             f.write(content)
 
         rel_path_str = path.relative_to(self.vault_path).as_posix()
+        self._invalidate_body(rel_path_str)
         if self._needs_reindex:
             self._rebuild_index()
         else:
-            full_content = path.read_text(encoding="utf-8")
+            full_content = self._read_cached(path)
             self._patch_index(rel_path_str, full_content)
 
     def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
@@ -658,6 +718,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         
         new_content = fm.dump(data, body)
         path.write_text(new_content, encoding="utf-8")
+        self._body_cache.pop(str(path), None)
 
     def move(self, ref: NoteRef | str, to: str) -> None:
         """Move/rename a note, rewriting incoming wikilinks in all referrers.
@@ -700,6 +761,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         dst = self.vault_path / new_rel
         dst.parent.mkdir(parents=True, exist_ok=True)
         src.rename(dst)
+        self._invalidate_body(old_rel)
+        self._invalidate_body(new_rel)
 
         # move() is the only multi-file write in this backend.  Everything after
         # the physical rename (referrer disk-writes, index patches, unresolved
@@ -738,6 +801,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 if n > 0:
                     # Write directly — avoids re-entrant overwrite() logic
                     referrer_path.write_text(new_content, encoding="utf-8")
+                    self._invalidate_body(referrer_rel)
                     referrer_updates.append((referrer_rel, new_content))
                 else:
                     # Even if content is unchanged, we must re-patch after the old
@@ -774,8 +838,11 @@ class ObsidianFSBackend(GraphIndexMixin):
 
         except Exception:
             # Force a full rebuild on next _ensure_index() so no torn state
-            # persists into subsequent operations.
+            # persists into subsequent operations. A torn move can leave any
+            # number of referrer bodies rewritten on disk but uninvalidated
+            # here, so drop the whole cache rather than track partial state.
             self._needs_reindex = True
+            self._body_cache.clear()
             raise
 
     def delete(self, ref: NoteRef | str) -> None:
@@ -786,6 +853,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             
         rel_path_str = path.relative_to(self.vault_path).as_posix()
         path.unlink()
+        self._invalidate_body(rel_path_str)
         if self._needs_reindex:
             self._rebuild_index()
         else:
@@ -851,6 +919,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 full_path = self.vault_path / path
                 if full_path.exists():
                     full_path.unlink()
+                    self._invalidate_body(path)
                     logger.info("Rolled back created note: %s", path)
                     if self._needs_reindex:
                         pass  # full rebuild will happen on next _ensure_index
