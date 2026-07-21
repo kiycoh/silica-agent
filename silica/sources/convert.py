@@ -21,6 +21,7 @@ embeds → write the note to the inbox) is shared and provider-agnostic.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -52,6 +53,13 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 # Measured ~0.9 s/page on CPU (80-page probe): 600s died on an 800-page book.
 _MINERU_BACKEND = "pipeline"
 _MINERU_TIMEOUT_S = 3600
+
+# stderr triage (see _mineru_error): noise = loguru INFO/DEBUG, uvicorn banner
+# lines, tqdm progress bars; error-ish = a line naming an error/exception.
+_MINERU_NOISE_RE = re.compile(
+    r"\|\s*(?:INFO|DEBUG)\s*\||^(?:INFO|DEBUG|WARNING):|it/s|\d+%\|", re.IGNORECASE
+)
+_MINERU_ERR_RE = re.compile(r"error|exception|traceback", re.IGNORECASE)
 
 
 def convert(target: str, dest_dir: str = "") -> list[str]:
@@ -268,6 +276,33 @@ def _pdf_via_opendataloader(src: Path, workdir: Path) -> tuple[str, Path]:
     return Path(hits[0]).read_text(encoding="utf-8", errors="replace"), images
 
 
+def _mineru_error(stderr: str) -> str:
+    """One-line, human-readable error from mineru's stderr.
+
+    mineru may write a JSON task blob (with an ``error`` field) or a loguru
+    stream. Pull the ``error`` field when present. Otherwise the cause is NOT
+    at the head: this mineru version spins up an internal ``mineru-api`` server
+    and floods stderr with startup logs + tqdm bars before any work, so
+    head-truncating just surfaces "Started local mineru-api ...". Drop
+    INFO/progress noise, then return the last error-ish line (else the last
+    meaningful line) — a Python traceback puts "XError: msg" last too.
+    """
+    err = stderr.strip()
+    try:
+        parsed = json.loads(err)
+        return str(parsed.get("error") or err[:300])
+    except (ValueError, AttributeError):
+        pass
+    lines = [
+        ln.strip() for ln in err.splitlines()  # \r-split too: tqdm bars separate
+        if ln.strip() and not _MINERU_NOISE_RE.search(ln)
+    ]
+    if not lines:
+        return err[:300]
+    hits = [ln for ln in lines if _MINERU_ERR_RE.search(ln)]
+    return (hits[-1] if hits else lines[-1])[:300]
+
+
 def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
     out = workdir / "out"
     try:
@@ -281,7 +316,7 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
             "'mineru[pipeline]'`), or set SILICA_PDF_PROVIDER to docling/opendataloader"
         ) from None
     if proc.returncode != 0:
-        raise ValueError(f"mineru failed: {proc.stderr.strip()[-300:]}")
+        raise ValueError(f"mineru failed: {_mineru_error(proc.stderr)}")
     hits = glob(str(out / src.stem / "**" / f"{src.stem}.md"), recursive=True)
     if not hits:
         raise ValueError("mineru produced no markdown")
