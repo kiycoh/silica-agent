@@ -194,7 +194,10 @@ def silica_deferred_flush(content_hash: str) -> dict:
 
 @tool(EmptyArgs, cls="atomic")
 def silica_inbox_ls() -> list:
-    """Lists all files in the Inbox folder (inbox_dir)."""
+    """Lists all files in the Inbox folder (inbox_dir), including non-markdown
+    files (PDFs etc.). Non-markdown files cannot be read or nucleated directly:
+    ask the user to run `/convert <path>` first, then work on the resulting .md.
+    """
     refs = DRIVER.list_inbox_files()
     return [{"name": r.name, "path": r.path} for r in refs]
 

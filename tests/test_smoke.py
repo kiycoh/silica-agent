@@ -208,6 +208,8 @@ def test_list_inbox_files_fs(tmp_path):
     (inbox_dir / "lecture_15.md").write_text("Hello from lecture 15", encoding="utf-8")
     (inbox_dir / "subfolder").mkdir()
     (inbox_dir / "subfolder" / "lecture_16.md").write_text("Hello from lecture 16", encoding="utf-8")
+    (inbox_dir / "paper.pdf").write_bytes(b"%PDF-1.4 fake")
+    (inbox_dir / ".DS_Store").write_bytes(b"junk")
     
     orig_inbox = CONFIG.inbox_dir
     orig_vault = CONFIG.vault_path
@@ -226,6 +228,11 @@ def test_list_inbox_files_fs(tmp_path):
         assert "Inbox/subfolder/lecture_16.md" in paths
         assert "lecture_15" in names
         assert "lecture_16" in names
+        # Non-md files (PDFs awaiting /convert) are listed, name keeps extension.
+        assert "Inbox/paper.pdf" in paths
+        assert "paper.pdf" in names
+        # Dotfiles stay hidden.
+        assert not any(".DS_Store" in p for p in paths)
     finally:
         CONFIG.inbox_dir = orig_inbox
         CONFIG.vault_path = orig_vault

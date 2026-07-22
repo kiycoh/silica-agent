@@ -921,16 +921,21 @@ class ObsidianFSBackend(GraphIndexMixin):
         if not inbox_path.exists() or not inbox_path.is_dir():
             return []
         results = []
-        for root, _, files in os.walk(inbox_path):
+        for root, dirs, files in os.walk(inbox_path):
+            # The inbox holds files awaiting conversion (PDFs etc.), not just
+            # notes — list everything except dotfiles (.trash, .DS_Store...).
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
             for file in files:
-                if file.endswith(".md"):
-                    full_p = Path(root) / file
-                    try:
-                        rel_p = full_p.relative_to(self.vault_path).as_posix()
-                    except ValueError:
-                        rel_p = full_p.resolve().as_posix()
-                    name = file.removesuffix(".md")
-                    results.append(NoteRef(name=name, path=rel_p))
+                if file.startswith("."):
+                    continue
+                full_p = Path(root) / file
+                try:
+                    rel_p = full_p.relative_to(self.vault_path).as_posix()
+                except ValueError:
+                    rel_p = full_p.resolve().as_posix()
+                # Non-md names keep the extension (removesuffix is a no-op).
+                name = file.removesuffix(".md")
+                results.append(NoteRef(name=name, path=rel_p))
         return results
 
     # ------------------------------------------------------------------

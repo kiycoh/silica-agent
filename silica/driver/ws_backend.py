@@ -245,7 +245,11 @@ class ObsidianWSBackend(GraphIndexMixin):
         from silica.config import CONFIG
         if not CONFIG.inbox_dir:
             return []
-        return self.list_files(folder=CONFIG.inbox_dir)
+        # all=True: the inbox holds files awaiting conversion (PDFs etc.), not
+        # just notes — hiding them made the agent conclude they don't exist.
+        # Older plugins ignore the flag and degrade to md-only.
+        rows = self._rpc("list_files", folder=CONFIG.inbox_dir, all=True)
+        return [NoteRef(name=r["name"], path=r["path"]) for r in (rows or [])]
 
     def search_names(self, query: str) -> list[NoteRef]:
         q = query.lower()
