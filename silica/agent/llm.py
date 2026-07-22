@@ -134,6 +134,47 @@ def _bounded(fn, timeout: float, model: str):
     return box["r"]
 
 
+def _bounded_stream(make_iter, per_chunk_timeout: float, model: str):
+    """Yield chunks from make_iter()'s stream, raising litellm.Timeout if any
+    single gap (including connecting + the first chunk) exceeds per_chunk_timeout.
+
+    The streaming twin of _bounded: the non-stream call's silent-hang mode
+    (provider accepts the request then never sends a body) shows up on the stream
+    path as a blocking next() that never returns. A per-chunk deadline catches
+    that without capping a healthy long stream — the clock resets on every chunk.
+
+    ponytail: pump thread is daemon and abandoned on timeout, same trade as
+    _bounded; swap for a cancellable HTTP client if abandoned threads pile up.
+    """
+    import queue
+
+    q: "queue.Queue" = queue.Queue()
+    _DONE = object()
+
+    def _pump():
+        try:
+            for c in make_iter():
+                q.put(("chunk", c))
+        except BaseException as e:  # noqa: BLE001 - carried to the consumer
+            q.put(("err", e))
+        finally:
+            q.put(("done", _DONE))
+
+    threading.Thread(target=_pump, daemon=True, name="llm-stream").start()
+    while True:
+        try:
+            kind, payload = q.get(timeout=per_chunk_timeout)
+        except queue.Empty:
+            raise litellm.Timeout(
+                message=f"local wall-clock timeout after {per_chunk_timeout:.0f}s (stream stalled)",
+                model=model, llm_provider=model.split("/", 1)[0])
+        if kind == "err":
+            raise payload
+        if kind == "done":
+            return
+        yield payload
+
+
 def openrouter_routing(provider_list: str | None = None) -> dict | None:
     """OpenRouter `extra_body` provider-routing block, or None.
 
@@ -294,7 +335,10 @@ def call_llm(
         def _stream_once():
             on_delta("reset", "")
             chunks = []
-            for chunk in litellm.completion(**kwargs, stream=True):
+            _stream = _bounded_stream(
+                lambda: litellm.completion(**kwargs, stream=True),
+                _LOCAL_LLM_TIMEOUT, model)
+            for chunk in _stream:
                 chunks.append(chunk)
                 try:
                     delta = chunk.choices[0].delta

@@ -43,6 +43,46 @@ def test_call_llm_streams_deltas_and_reassembles():
     assert res.text == "Hello"
 
 
+def test_bounded_stream_times_out_on_stalled_chunk():
+    """A stream that hangs (provider accepts then sends nothing) raises
+    litellm.Timeout via the per-chunk deadline, instead of blocking forever (A3)."""
+    import threading
+
+    import litellm
+    import pytest
+
+    from silica.agent.llm import _bounded_stream
+
+    block = threading.Event()
+
+    def _hung_stream():
+        block.wait()  # never released before the deadline → simulates a hang
+        yield  # pragma: no cover
+
+    gen = _bounded_stream(_hung_stream, per_chunk_timeout=0.05, model="test/model")
+    with pytest.raises(litellm.Timeout):
+        next(gen)
+    block.set()  # let the daemon pump exit cleanly
+
+
+def test_bounded_stream_forwards_chunks_and_propagates_error():
+    import litellm
+    import pytest
+
+    from silica.agent.llm import _bounded_stream
+
+    assert list(_bounded_stream(lambda: iter([1, 2, 3]), 5.0, "test/model")) == [1, 2, 3]
+
+    def _boom():
+        yield 1
+        raise litellm.APIConnectionError("dropped", model="m", llm_provider="p")
+
+    gen = _bounded_stream(_boom, 5.0, "test/model")
+    assert next(gen) == 1
+    with pytest.raises(litellm.APIConnectionError):
+        next(gen)
+
+
 def test_call_llm_without_on_delta_does_not_stream():
     from silica.agent.llm import call_llm
 
