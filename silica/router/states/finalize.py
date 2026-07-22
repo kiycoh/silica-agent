@@ -248,89 +248,85 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
 
     fsm._get_chunks_from_context_if_empty()
     fi, ci = fsm._chunk_flat_to_fi_ci.get(fsm._current_chunk_idx, (0, fsm._current_chunk_idx))
-    fsm._progress_note(fsm._chunk_task_id("cleanup"), "cleanup", "running")
+    with orch.phase(fsm, fsm._chunk_task_id("cleanup"), "cleanup"):
+        # Always write ledger for this chunk's ops (per chunk)
+        fsm._write_ledger_for_file(fi, "committed")
 
-    # Always write ledger for this chunk's ops (per chunk)
-    fsm._write_ledger_for_file(fi, "committed")
+        # Archive the physical file only on the last chunk of its file group
+        file_group = fsm._file_chunks.get(fi, {})
+        n_chunks_in_file = len(file_group.get("chunks", []))
+        is_last_chunk_of_file = (ci + 1 >= n_chunks_in_file)
 
-    # Archive the physical file only on the last chunk of its file group
-    file_group = fsm._file_chunks.get(fi, {})
-    n_chunks_in_file = len(file_group.get("chunks", []))
-    is_last_chunk_of_file = (ci + 1 >= n_chunks_in_file)
-
-    if is_last_chunk_of_file:
-        # Only archive if no chunk of this file failed
-        fi_prefix = f"f{fi}_"
-        file_has_failure = any(
-            t.status == "failed" for t in fsm.progress.tasks
-            if t.id.startswith(fi_prefix)
-        )
-        inbox_file_for_fi = file_group.get("source_file", fsm.inbox_file)
-        if not file_has_failure:
-            res = silica_cleanup(inbox_file_for_fi, "done")
-            if "error" in res:
-                fsm.context["cleanup_warning"] = res["error"]
-            _log_nucleate_completion(fsm, fi, inbox_file_for_fi)
-            # Title-index run cache: the archived source moved out of its
-            # indexed path — drop its ref so AUTOLINK can't link to a stale
-            # inbox title.
-            _cached_refs = getattr(fsm, "_run_title_refs", None)
-            if _cached_refs is not None:
-                _src_abs = os.path.abspath(inbox_file_for_fi)
-                _cached_refs[:] = [
-                    r for r in _cached_refs
-                    if not getattr(r, "path", None) or os.path.abspath(r.path) != _src_abs
-                ]
+        if is_last_chunk_of_file:
+            # Only archive if no chunk of this file failed
+            fi_prefix = f"f{fi}_"
+            file_has_failure = any(
+                t.status == "failed" for t in fsm.progress.tasks
+                if t.id.startswith(fi_prefix)
+            )
+            inbox_file_for_fi = file_group.get("source_file", fsm.inbox_file)
+            if not file_has_failure:
+                res = silica_cleanup(inbox_file_for_fi, "done")
+                if "error" in res:
+                    fsm.context["cleanup_warning"] = res["error"]
+                _log_nucleate_completion(fsm, fi, inbox_file_for_fi)
+                # Title-index run cache: the archived source moved out of its
+                # indexed path — drop its ref so AUTOLINK can't link to a stale
+                # inbox title.
+                _cached_refs = getattr(fsm, "_run_title_refs", None)
+                if _cached_refs is not None:
+                    _src_abs = os.path.abspath(inbox_file_for_fi)
+                    _cached_refs[:] = [
+                        r for r in _cached_refs
+                        if not getattr(r, "path", None) or os.path.abspath(r.path) != _src_abs
+                    ]
+            else:
+                logger.info(
+                    "File %d (%s) had chunk failures — not archiving.",
+                    fi, file_group.get("source_file", "?"),
+                )
+            # Provenance covers whatever DID commit: a partial file's validated
+            # write/patch ops are real derived notes, and both session attribution
+            # (eval session_recall) and re-ingest idempotence (note_authored_by)
+            # must see them even while the source stays in inbox for retry.
+            _record_provenance(fsm, fi, inbox_file_for_fi)
         else:
             logger.info(
-                "File %d (%s) had chunk failures — not archiving.",
-                fi, file_group.get("source_file", "?"),
+                "Chunk f%d_c%d done. Archiving deferred until last chunk of file %d.",
+                fi, ci, fi,
             )
-        # Provenance covers whatever DID commit: a partial file's validated
-        # write/patch ops are real derived notes, and both session attribution
-        # (eval session_recall) and re-ingest idempotence (note_authored_by)
-        # must see them even while the source stays in inbox for retry.
-        _record_provenance(fsm, fi, inbox_file_for_fi)
-    else:
-        logger.info(
-            "Chunk f%d_c%d done. Archiving deferred until last chunk of file %d.",
-            fi, ci, fi,
-        )
 
-    # Run-level verdict, recomputed each chunk's CLEANUP (last write wins).
-    # no_ops is a whole-run property — it holds only when NO chunk had actionable
-    # ops. A later chunk that had ops lifts a prior all-skip chunk's provisional
-    # no_ops rather than staying stuck on it, in either order (A24).
-    if fsm.context.get("has_partial_failure"):
-        fsm.context["final_status"] = "partial"
-    elif fsm.context.get("run_had_ops"):
-        fsm.context["final_status"] = "Success"
-    else:
-        fsm.context["final_status"] = "no_ops"
+        # Run-level verdict, recomputed each chunk's CLEANUP (last write wins).
+        # no_ops is a whole-run property — it holds only when NO chunk had actionable
+        # ops. A later chunk that had ops lifts a prior all-skip chunk's provisional
+        # no_ops rather than staying stuck on it, in either order (A24).
+        if fsm.context.get("has_partial_failure"):
+            fsm.context["final_status"] = "partial"
+        elif fsm.context.get("run_had_ops"):
+            fsm.context["final_status"] = "Success"
+        else:
+            fsm.context["final_status"] = "no_ops"
 
-    # Persist this run's inverses for /revert, with final content hash.
-    if fsm._undo_run_id and fsm._run_inverses:
-        import hashlib
-        from silica.kernel.ops import InverseOpKind
-        from silica.kernel.undo_journal import get_undo_journal
-        journal = get_undo_journal()
-        for path, inv, _ in fsm._run_inverses:
-            try:
-                post = orch.DRIVER.read_note(path).content
-                post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
-            except Exception:
-                post_hash = None
-                if inv.kind != InverseOpKind.recreate_deleted:
-                    # Note should exist after this write; without its hash the
-                    # /revert "modified since inject" guard can't protect it.
-                    logger.warning(
-                        "finalize: could not hash %s post-write; /revert guard "
-                        "disabled for it", path)
-            journal.record(fsm._undo_run_id, inv, post_hash)
-        fsm._run_inverses.clear()
-
-    fsm._progress_note(fsm._chunk_task_id("cleanup"), "cleanup", "done")
-    fsm._transition_success()
+        # Persist this run's inverses for /revert, with final content hash.
+        if fsm._undo_run_id and fsm._run_inverses:
+            import hashlib
+            from silica.kernel.ops import InverseOpKind
+            from silica.kernel.undo_journal import get_undo_journal
+            journal = get_undo_journal()
+            for path, inv, _ in fsm._run_inverses:
+                try:
+                    post = orch.DRIVER.read_note(path).content
+                    post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
+                except Exception:
+                    post_hash = None
+                    if inv.kind != InverseOpKind.recreate_deleted:
+                        # Note should exist after this write; without its hash the
+                        # /revert "modified since inject" guard can't protect it.
+                        logger.warning(
+                            "finalize: could not hash %s post-write; /revert guard "
+                            "disabled for it", path)
+                journal.record(fsm._undo_run_id, inv, post_hash)
+            fsm._run_inverses.clear()
 
 
 def handle_rollback(fsm: "InjectorFSM") -> None:

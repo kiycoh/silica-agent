@@ -374,23 +374,27 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     τ_high = getattr(orch.CONFIG, "sim_threshold_high", 0.85)
     τ_low = getattr(orch.CONFIG, "sim_threshold_low", 0.65)
 
-    try:
-        from silica.agent.providers import get_embedder
-        from silica.kernel.embed import get_store
+    from silica.agent.providers import get_embedder_or_none
+    from silica.kernel.embed import get_store
 
-        store = get_store()
-        if len(store) == 0:
-            logger.info("COLLISION: embedding index empty — falling back to MinHash dedup leg")
-            fsm._get_chunks_from_context_if_empty()
-            _run_embedder_free_dedup_leg(fsm, idx, fsm._chunks[idx])
-            fsm._progress_note(fsm._chunk_task_id("collision", idx), "collision", "done")
-            return
-        embedder = get_embedder(orch.CONFIG)
-    except Exception as _e:
-        logger.warning("COLLISION: embedder unavailable (%s) — falling back to MinHash dedup leg", _e)
+    def _minhash_fallback() -> None:
         fsm._get_chunks_from_context_if_empty()
         _run_embedder_free_dedup_leg(fsm, idx, fsm._chunks[idx])
         fsm._progress_note(fsm._chunk_task_id("collision", idx), "collision", "done")
+
+    try:
+        store = get_store()
+    except Exception as _e:
+        logger.warning("COLLISION: embed store unavailable (%s) — falling back to MinHash dedup leg", _e)
+        _minhash_fallback()
+        return
+    if len(store) == 0:
+        logger.info("COLLISION: embedding index empty — falling back to MinHash dedup leg")
+        _minhash_fallback()
+        return
+    embedder = get_embedder_or_none(orch.CONFIG, "COLLISION")
+    if embedder is None:
+        _minhash_fallback()
         return
 
     # Co-occurrence leg for the relatedness facade — embedder-free, best-effort:

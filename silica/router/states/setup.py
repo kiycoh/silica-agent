@@ -33,42 +33,38 @@ def handle_recon(fsm: "InjectorFSM") -> None:
     """
     fi = fsm._current_file_idx
     inbox_file = fsm.inbox_files[fi]
-    fsm._progress_note("recon", "recon", "running")
+    with orch.phase(fsm, "recon", "recon"):
+        res = orch.silica_recon(inbox_file)
+        if "error" in res:
+            fsm._progress_note("recon", "recon", "failed", error=res["error"])
+            raise RuntimeError(f"Recon failed for {inbox_file}: {res['error']}")
+        # Accumulated across files — context["recon"] stays a list for uniformity
+        fsm.context.setdefault("recon", []).append(res)
 
-    res = orch.silica_recon(inbox_file)
-    if "error" in res:
-        fsm._progress_note("recon", "recon", "failed", error=res["error"])
-        raise RuntimeError(f"Recon failed for {inbox_file}: {res['error']}")
-    # Accumulated across files — context["recon"] stays a list for uniformity
-    fsm.context.setdefault("recon", []).append(res)
-
-    # Surface any deferred ops from a previous run of this file
-    content_hash = fsm._file_content_hashes[fi] if fi < len(fsm._file_content_hashes) else ""
-    if content_hash:
-        from silica.kernel.deferred import get_deferred_store
-        bundle = get_deferred_store().get(content_hash)
-        if bundle:
-            rejected_count = len(bundle.get("rejected_ops", []))
-            logger.info(
-                "RECON: %d deferred op(s) from a previous run of '%s' are waiting. "
-                "Call silica_deferred_retry('%s') to attempt them.",
-                rejected_count, inbox_file, content_hash[:8],
-            )
-            notice = {
-                "inbox_file": inbox_file,
-                "content_hash": content_hash,
-                "rejected_count": rejected_count,
-            }
-            existing = fsm.context.get("deferred")
-            if existing is None:
-                fsm.context["deferred"] = notice
-            elif isinstance(existing, list):
-                existing.append(notice)
-            else:
-                fsm.context["deferred"] = [existing, notice]
-
-    fsm._progress_note("recon", "recon", "done")
-    fsm._transition_success()
+        # Surface any deferred ops from a previous run of this file
+        content_hash = fsm._file_content_hashes[fi] if fi < len(fsm._file_content_hashes) else ""
+        if content_hash:
+            from silica.kernel.deferred import get_deferred_store
+            bundle = get_deferred_store().get(content_hash)
+            if bundle:
+                rejected_count = len(bundle.get("rejected_ops", []))
+                logger.info(
+                    "RECON: %d deferred op(s) from a previous run of '%s' are waiting. "
+                    "Call silica_deferred_retry('%s') to attempt them.",
+                    rejected_count, inbox_file, content_hash[:8],
+                )
+                notice = {
+                    "inbox_file": inbox_file,
+                    "content_hash": content_hash,
+                    "rejected_count": rejected_count,
+                }
+                existing = fsm.context.get("deferred")
+                if existing is None:
+                    fsm.context["deferred"] = notice
+                elif isinstance(existing, list):
+                    existing.append(notice)
+                else:
+                    fsm.context["deferred"] = [existing, notice]
 
 
 def handle_crossdedup(fsm: "InjectorFSM") -> None:
@@ -91,12 +87,10 @@ def handle_crossdedup(fsm: "InjectorFSM") -> None:
         fsm._transition_success()
         return
 
-    try:
-        from silica.agent.providers import get_embedder
-        from silica.kernel.embed import _cosine
-        embedder = get_embedder(orch.CONFIG)
-    except Exception as _e:
-        logger.warning("CROSSDEDUP: embedder unavailable (%s) — skipping", _e)
+    from silica.agent.providers import get_embedder_or_none
+    from silica.kernel.embed import _cosine
+    embedder = get_embedder_or_none(orch.CONFIG, "CROSSDEDUP")
+    if embedder is None:
         fsm._transition_success()
         return
 
@@ -221,15 +215,17 @@ def novelty_gate(fsm: "InjectorFSM", raw_payload: dict) -> tuple[dict, int]:
     if tau <= 0.0:
         return raw_payload, 0
 
+    from silica.agent.providers import get_embedder_or_none
     try:
-        from silica.agent.providers import get_embedder
         from silica.kernel.embed import get_store
         store = get_store()
-        if len(store) == 0:
-            return raw_payload, 0
-        embedder = get_embedder(orch.CONFIG)
     except Exception as _e:
-        logger.debug("NOVELTY: embedder unavailable (%s); gate skipped", _e)
+        logger.debug("NOVELTY: embed store unavailable (%s); gate skipped", _e)
+        return raw_payload, 0
+    if len(store) == 0:
+        return raw_payload, 0
+    embedder = get_embedder_or_none(orch.CONFIG, "NOVELTY", level="debug")
+    if embedder is None:
         return raw_payload, 0
 
     from silica.kernel.embed import _note_title_text
@@ -493,13 +489,11 @@ def handle_salience(fsm: "InjectorFSM") -> None:
     correct.
     """
     τ_theme = getattr(orch.CONFIG, "sim_threshold_theme", 0.35)
-    try:
-        from silica.agent.providers import get_embedder
-        from silica.kernel.embed import document_theme_vector, _cosine
-        from silica.kernel.text import clean_body
-        embedder = get_embedder(orch.CONFIG)
-    except Exception as _e:
-        logger.warning("SALIENCE: embedder unavailable (%s) — skipping", _e)
+    from silica.agent.providers import get_embedder_or_none
+    from silica.kernel.embed import document_theme_vector, _cosine
+    from silica.kernel.text import clean_body
+    embedder = get_embedder_or_none(orch.CONFIG, "SALIENCE")
+    if embedder is None:
         fsm._transition_success()
         return
 

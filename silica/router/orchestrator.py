@@ -24,6 +24,7 @@ import hashlib
 import logging
 import os
 import time
+from contextlib import contextmanager
 from enum import Enum, auto
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -250,6 +251,24 @@ class InjectorState(Enum):
     ROLLBACK = auto()      # On gate fail — C3: apply inverses
     DONE = auto()
     ERROR = auto()
+
+
+@contextmanager
+def phase(fsm, task_id: str, capability_name: str):
+    """Bracket a handler's happy path: 'running' on entry, then 'done' +
+    _transition_success() on clean exit. An exception propagates WITHOUT
+    emitting 'done'/transition (the caller's raise routes to ROLLBACK/error
+    exactly as before). Fits only linear handlers with a single trailing
+    success; handlers with early-exit transitions, a split done/transition,
+    or ROLLBACK routing keep their explicit progress notes.
+
+    A free function (not an FSM method) so it depends only on `_progress_note`
+    and `_transition_success`: handler unit tests keep stubbing those two on a
+    plain fake without needing to know about (or bind) the concrete FSM."""
+    fsm._progress_note(task_id, capability_name, "running")
+    yield
+    fsm._progress_note(task_id, capability_name, "done")
+    fsm._transition_success()
 
 
 class InjectorFSM(BaseFSM[InjectorState]):

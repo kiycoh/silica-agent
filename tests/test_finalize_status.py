@@ -13,7 +13,7 @@ from silica.router.states import finalize
 
 
 def _cleanup_fsm(context):
-    return types.SimpleNamespace(
+    ns = types.SimpleNamespace(
         _get_chunks_from_context_if_empty=lambda: None,
         _chunk_flat_to_fi_ci={0: (0, 0)},
         _current_chunk_idx=0,
@@ -29,6 +29,7 @@ def _cleanup_fsm(context):
         _transition_success=lambda: None,
         _chunk_task_id=lambda *a: "cleanup",
     )
+    return ns
 
 
 def test_no_ops_when_run_had_no_ops():

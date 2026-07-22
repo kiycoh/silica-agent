@@ -74,91 +74,88 @@ def _resolve_vault_path(name: str) -> str | None:
 
 
 def handle_snapshot(fsm: "InjectorFSM") -> None:
-    fsm._progress_note(fsm._chunk_task_id("snapshot"), "snapshot", "running")
-    from silica.tools.wrapped import silica_snapshot
-    res = silica_snapshot(fsm._chunk_ctx["ops_path"])
-    if "error" in res:
-        raise RuntimeError(f"SNAPSHOT failed: {res['error']}")
+    with orch.phase(fsm, fsm._chunk_task_id("snapshot"), "snapshot"):
+        from silica.tools.wrapped import silica_snapshot
+        res = silica_snapshot(fsm._chunk_ctx["ops_path"])
+        if "error" in res:
+            raise RuntimeError(f"SNAPSHOT failed: {res['error']}")
 
-    fsm._chunk_ctx["snapshot"] = res
-    fsm._chunk_ctx["txn_id"] = res["txn_id"]
-    try:
-        from silica.driver.base import NoteRef, Txn
-        from silica.kernel.ops import InverseOp
-        inv = [InverseOp(**d) for d in res["inverses"]]
-        
-        # Reconstruct refs for Txn from inverses
-        refs = []
-        for d in res["inverses"]:
-            if d.get("kind") == "restore_version":
-                path = d.get("path")
-                name = path.rsplit("/", 1)[-1].removesuffix(".md")
-                refs.append(NoteRef(name=name, path=path))
-                
-        fsm._txn = Txn(
-            id=res["txn_id"],
-            refs=refs,
-            created_paths=res.get("created_paths", []),
-            inverses=inv
-        )
-    except Exception as e:
-        raise RuntimeError(f"SNAPSHOT rebuild failed: {e}")
+        fsm._chunk_ctx["snapshot"] = res
+        fsm._chunk_ctx["txn_id"] = res["txn_id"]
+        try:
+            from silica.driver.base import NoteRef, Txn
+            from silica.kernel.ops import InverseOp
+            inv = [InverseOp(**d) for d in res["inverses"]]
 
-    # S3.2: Take pre-write graph snapshot incrementally
-    try:
-        from silica.kernel.ast import extract_links as _extract_links
-        ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
-        touched_refs = []
-        snapshot_domain = set()
+            # Reconstruct refs for Txn from inverses
+            refs = []
+            for d in res["inverses"]:
+                if d.get("kind") == "restore_version":
+                    path = d.get("path")
+                    name = path.rsplit("/", 1)[-1].removesuffix(".md")
+                    refs.append(NoteRef(name=name, path=path))
 
-        for op in ops:
-            path = op.touched_ref()
-            if path:
-                name = os.path.splitext(os.path.basename(path))[0]
-                ref = NoteRef(name=name, path=path)
-                touched_refs.append(ref)
-                snapshot_domain.add(ref)
+            fsm._txn = Txn(
+                id=res["txn_id"],
+                refs=refs,
+                created_paths=res.get("created_paths", []),
+                inverses=inv
+            )
+        except Exception as e:
+            raise RuntimeError(f"SNAPSHOT rebuild failed: {e}")
 
-                if op.op in (OpType.patch, OpType.overwrite, OpType.delete):
-                    # Capture current outgoing targets so we can detect orphaning.
-                    try:
-                        for target_ref in orch.DRIVER.links(ref):
-                            snapshot_domain.add(target_ref)
-                    except Exception as ex:
-                        logger.warning("Failed to fetch pre-write links for %s: %s", path, ex)
+        # S3.2: Take pre-write graph snapshot incrementally
+        try:
+            from silica.kernel.ast import extract_links as _extract_links
+            ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
+            touched_refs = []
+            snapshot_domain = set()
 
-                elif op.op == OpType.write:
-                    # A write op creates a new note that didn't exist at pre-snapshot
-                    # orch.time.  After the write, graph_snapshot expands its neighborhood
-                    # to include every vault note the new note links to.  If those
-                    # linked notes carry pre-existing unresolved links, they appear as
-                    # new_unres in graph_diff Rule 2 — a false positive.
-                    # Fix: add those link targets to the pre-snapshot domain now so
-                    # their existing ghost links cancel out in the diff.
-                    content = op.snippet or op.content or ""
-                    for link_target in _extract_links(content):
-                        target_stem = link_target.removesuffix(".md")
-                        target_key = target_stem.lower()
+            for op in ops:
+                path = op.touched_ref()
+                if path:
+                    name = os.path.splitext(os.path.basename(path))[0]
+                    ref = NoteRef(name=name, path=path)
+                    touched_refs.append(ref)
+                    snapshot_domain.add(ref)
+
+                    if op.op in (OpType.patch, OpType.overwrite, OpType.delete):
+                        # Capture current outgoing targets so we can detect orphaning.
                         try:
-                            if "/" in target_stem:
-                                target_name = os.path.splitext(os.path.basename(target_stem))[0]
-                                snapshot_domain.add(NoteRef(name=target_name, path=target_stem + ".md"))
-                            else:
-                                for match in orch.DRIVER.search_names(target_stem):
-                                    if match.name.lower() == target_key:
-                                        snapshot_domain.add(match)
+                            for target_ref in orch.DRIVER.links(ref):
+                                snapshot_domain.add(target_ref)
                         except Exception as ex:
-                            logger.debug("Snapshot domain expansion: could not resolve '%s': %s", link_target, ex)
+                            logger.warning("Failed to fetch pre-write links for %s: %s", path, ex)
 
-        snapshot_domain_list = list(snapshot_domain)
-        fsm._chunk_ctx["snapshot_domain"] = [{"name": r.name, "path": r.path} for r in snapshot_domain_list]
-        fsm._pre_graph = orch.DRIVER.graph_snapshot(snapshot_domain_list)
-    except Exception as e:
-        logger.error("Failed to take pre-write graph snapshot: %s", e)
-        raise RuntimeError(f"Pre-write graph snapshot failed: {e}")
+                    elif op.op == OpType.write:
+                        # A write op creates a new note that didn't exist at pre-snapshot
+                        # orch.time.  After the write, graph_snapshot expands its neighborhood
+                        # to include every vault note the new note links to.  If those
+                        # linked notes carry pre-existing unresolved links, they appear as
+                        # new_unres in graph_diff Rule 2 — a false positive.
+                        # Fix: add those link targets to the pre-snapshot domain now so
+                        # their existing ghost links cancel out in the diff.
+                        content = op.snippet or op.content or ""
+                        for link_target in _extract_links(content):
+                            target_stem = link_target.removesuffix(".md")
+                            target_key = target_stem.lower()
+                            try:
+                                if "/" in target_stem:
+                                    target_name = os.path.splitext(os.path.basename(target_stem))[0]
+                                    snapshot_domain.add(NoteRef(name=target_name, path=target_stem + ".md"))
+                                else:
+                                    for match in orch.DRIVER.search_names(target_stem):
+                                        if match.name.lower() == target_key:
+                                            snapshot_domain.add(match)
+                            except Exception as ex:
+                                logger.debug("Snapshot domain expansion: could not resolve '%s': %s", link_target, ex)
 
-    fsm._progress_note(fsm._chunk_task_id("snapshot"), "snapshot", "done")
-    fsm._transition_success()
+            snapshot_domain_list = list(snapshot_domain)
+            fsm._chunk_ctx["snapshot_domain"] = [{"name": r.name, "path": r.path} for r in snapshot_domain_list]
+            fsm._pre_graph = orch.DRIVER.graph_snapshot(snapshot_domain_list)
+        except Exception as e:
+            logger.error("Failed to take pre-write graph snapshot: %s", e)
+            raise RuntimeError(f"Pre-write graph snapshot failed: {e}")
 
 
 def _attach_section_images(fsm: "InjectorFSM", ops: list) -> None:

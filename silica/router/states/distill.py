@@ -467,14 +467,12 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
 
 
 def handle_sanitize(fsm: "InjectorFSM") -> None:
-    fsm._progress_note(fsm._chunk_task_id("sanitize"), "sanitize", "running")
-    res = orch.silica_sanitize(fsm._chunk_ctx["distiller_output_path"])
-    if "error" in res:
-        fsm._progress_note(fsm._chunk_task_id("sanitize"), "sanitize", "failed", error=res["error"])
-        raise RuntimeError(f"Sanitize failed: {res['error']}")
-    fsm._chunk_ctx["sanitized"] = res
-    fsm._progress_note(fsm._chunk_task_id("sanitize"), "sanitize", "done")
-    fsm._transition_success()
+    with orch.phase(fsm, fsm._chunk_task_id("sanitize"), "sanitize"):
+        res = orch.silica_sanitize(fsm._chunk_ctx["distiller_output_path"])
+        if "error" in res:
+            fsm._progress_note(fsm._chunk_task_id("sanitize"), "sanitize", "failed", error=res["error"])
+            raise RuntimeError(f"Sanitize failed: {res['error']}")
+        fsm._chunk_ctx["sanitized"] = res
 
 
 def handle_validate(fsm: "InjectorFSM") -> None:
