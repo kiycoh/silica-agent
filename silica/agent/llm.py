@@ -9,10 +9,13 @@ selection for the Distiller's constrained decoding path is in agent/providers.py
 """
 from __future__ import annotations
 
+import atexit
+import collections
 import json
 import logging
 import os
 import random
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -211,6 +214,46 @@ class ToolCall:
     args: dict
 
 
+# --- token meter (opt-in via SILICA_TOKEN_METER=1) -------------------------
+# Attributes each call's token usage to the first stack frame outside the LLM
+# plumbing, so distill/collision/loop/codewiki show up as separate call-sites.
+# Single point: every provider path constructs an LLMResponse, so recording in
+# __post_init__ captures all of them with zero wiring. atexit dumps a sorted
+# table. Off = one bool check, no stack-walk.
+# ponytail: profiling aid, not a live endpoint — dump on process exit only.
+_METER_ON = os.getenv("SILICA_TOKEN_METER") == "1"
+_meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0])  # site -> [calls, prompt, completion]
+
+
+def _meter_site() -> str:
+    f = sys._getframe(2)  # skip _meter_site + _meter_record
+    while f is not None:
+        name = f.f_code.co_filename
+        if not (name.endswith(("llm.py", "providers.py")) or name == "<string>"):
+            return f"{os.path.basename(name)}:{f.f_code.co_name}"
+        f = f.f_back
+    return "?"
+
+
+def _meter_record(usage: dict) -> None:
+    slot = _meter[_meter_site()]
+    slot[0] += 1
+    slot[1] += usage.get("prompt_tokens") or 0
+    slot[2] += usage.get("completion_tokens") or 0
+
+
+@atexit.register
+def _meter_dump() -> None:
+    if not _meter:
+        return
+    rows = sorted(_meter.items(), key=lambda kv: kv[1][1] + kv[1][2], reverse=True)
+    grand = sum(p + c for _, (_, p, c) in rows)
+    print(f"\n=== token meter (prompt+completion by call-site) — total {grand:,} ===", file=sys.stderr)
+    print(f"{'call-site':<44}{'calls':>7}{'prompt':>13}{'compl':>11}", file=sys.stderr)
+    for site, (n, p, c) in rows:
+        print(f"{site:<44}{n:>7}{p:>13,}{c:>11,}", file=sys.stderr)
+
+
 @dataclass
 class LLMResponse:
     """Structured response from the LLM."""
@@ -221,6 +264,10 @@ class LLMResponse:
     usage: dict = field(default_factory=dict)
     reasoning: str | None = None
     finish_reason: str | None = None
+
+    def __post_init__(self):
+        if _METER_ON and self.usage:
+            _meter_record(self.usage)
 
 
 def _split_arg_objects(cid: str, name: str, arg_str: str) -> list[tuple[str, dict, str]]:
