@@ -48,7 +48,6 @@ def _compute_cooccur_delta(
     `cooccur_store` is injectable for testing; loaded from disk when None.
     Returns empty lists when the index is empty (best-effort, never raises).
     """
-    import networkx as nx
     from silica.kernel.cooccurrence import cooccur_key, get_cooccur_store, tokenize
     from silica.kernel.relatedness import _concept_idf, _cooccur_ranking
 
@@ -89,6 +88,18 @@ def _compute_cooccur_delta(
     # AUTOLINK section silently comes out empty.
     gid_by_key = {cooccur_key(n): n for n in G_und.nodes}
 
+    # Precompute once for the AUTOLINK loop below: the symmetric note-edge
+    # adjacency (else note_edges_for does an O(E) reverse scan per note -> O(N*E))
+    # and G_und neighbour sets (the gate only needs distance <= 2, not a full
+    # shortest-path search per candidate).
+    note_adj = store.note_adjacency()
+    adj_sets: dict[str, set[str]] = {n: set(G_und.neighbors(n)) for n in G_und.nodes}
+
+    def _within_2_hops(s: str, t: str) -> bool:
+        if s == t or t in adj_sets.get(s, ()):
+            return True  # 0 or 1 hop
+        return bool(adj_sets.get(s, set()) & adj_sets.get(t, set()))  # common neighbour
+
     # --- AUTOLINK: direct note_edges (CORRELATE) UNION expanded ranking, both
     #     >2 hops away and not already wikilinked. Direct pairs are a lookup
     #     (free) and win provenance when a pair appears in both legs.
@@ -100,7 +111,7 @@ def _compute_cooccur_delta(
         src_gid = gid_by_key.get(nid)
         if src_gid is None:
             continue
-        direct = store.note_edges_for(nid)  # {tgt: jaccard}, both directions
+        direct = note_adj.get(nid, {})  # {tgt: jaccard}, both directions
         expanded = _cooccur_ranking(store, nid, k=k, exclude=set(), scope=scope, expand=True) or []
         legs = (
             [(tgt, w, "direct") for tgt, w in direct.items()]
@@ -110,11 +121,8 @@ def _compute_cooccur_delta(
             tgt_gid = gid_by_key.get(tgt)
             if tgt_gid is None:
                 continue
-            try:
-                if nx.shortest_path_length(G_und, src_gid, tgt_gid) <= 2:
-                    continue  # already linked or trivially close
-            except Exception:
-                pass  # no path -> genuinely disconnected -> a valid candidate
+            if _within_2_hops(src_gid, tgt_gid):
+                continue  # already linked or trivially close (disconnected -> valid)
             key = (min(nid, tgt), max(nid, tgt))
             if key in seen:
                 continue

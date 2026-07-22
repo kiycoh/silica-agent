@@ -275,18 +275,23 @@ def compute_report(
         if cid >= 0:
             cluster_members.setdefault(cid, []).append(nid)
 
+    # Cohesion (intra-cluster edges / possible pairs) — analytics-only. One O(E)
+    # pass tallies intra-edges per cluster; the per-cluster scan was O(C x E).
+    intra_edges: dict[int, int] = {}
+    if analytics:
+        for u, v in G_und.edges():
+            cu = cluster_map.get(u, -1)
+            if cu >= 0 and cu == cluster_map.get(v, -1):
+                intra_edges[cu] = intra_edges.get(cu, 0) + 1
+
     clusters: list[ClusterStat] = []
     for cid, members in sorted(cluster_members.items()):
         size = len(members)
         hub_node = max(members, key=lambda n: (deg.get(n, 0), n)) if members else None
-        # Cohesion (intra-cluster edges / possible pairs) — analytics-only: an
-        # edge scan per cluster. The structural core leaves it 0.0.
         cohesion = 0.0
         possible = size * (size - 1) / 2 if size >= 2 else 0
         if analytics and possible > 0:
-            member_set = set(members)
-            intra = sum(1 for u, v in G_und.edges() if u in member_set and v in member_set)
-            cohesion = round(intra / possible, 4)
+            cohesion = round(intra_edges.get(cid, 0) / possible, 4)
         clusters.append(ClusterStat(
             cluster_id=cid,
             size=size,

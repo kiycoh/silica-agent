@@ -479,11 +479,10 @@ def silica_concepts(term: str, k: int = 10) -> dict[str, Any]:
     stem = stem_word(term.strip().lower(), lang=store.lang)
     neighbors = store.neighbors(term, k=k)
 
-    # Concept -> notes inverted lookup, ranked by contribution count.
-    notes = sorted(
-        ((p, c[stem]) for p in store.paths() if (c := store.note_nodes(p)).get(stem)),
-        key=lambda kv: (-kv[1], kv[0]),
-    )[:k]
+    # Concept -> notes inverted lookup, ranked by contribution count. Read the
+    # cached stem postings directly (O(df log df)) instead of an O(N) vault scan.
+    posting = store.stem_postings().get(stem, {})
+    notes = sorted(posting.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
 
     out: dict[str, Any] = {
         "term": term,

@@ -15,14 +15,20 @@ logger = logging.getLogger(__name__)
 
 def _coverage_from(graph, docmap: dict[str, list[str]]) -> CodeCoverage:
     documented = {p for paths in docmap.values() for p in paths if p in graph.files}
+    # Invert imports once: {imported_path: importer_count}. graph.fan_in is an
+    # O(F) scan; sorting + listing undocumented called it ~2F times -> O(F^2).
+    fan_in: dict[str, int] = {}
+    for entry in graph.files.values():
+        for imp in entry.get("imports", []):
+            fan_in[imp] = fan_in.get(imp, 0) + 1
     undocumented = sorted(
         (p for p in graph.files if p not in documented),
-        key=lambda p: (-graph.fan_in(p), p),
+        key=lambda p: (-fan_in.get(p, 0), p),
     )
     return CodeCoverage(
         documented=len(documented),
         total=len(graph.files),
-        undocumented=[[p, graph.fan_in(p)] for p in undocumented],
+        undocumented=[[p, fan_in.get(p, 0)] for p in undocumented],
     )
 
 
