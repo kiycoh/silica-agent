@@ -237,6 +237,17 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_PDF_PROVIDER", "mineru")
     )
 
+    # OCR languages for PDF conversion, comma-separated (split at point of use).
+    # Only docling consumes it: mineru 3.x has no latin-script language option
+    # (its default `ch` models cover latin) and opendataloader only OCRs in its
+    # generative `hybrid` mode, which we never enable. Default keeps docling's
+    # European coverage and adds Italian; all latin-script languages share one
+    # EasyOCR model, so the list is cheap. Language detection can't replace
+    # this: for a scanned PDF there is no text to detect from until OCR runs.
+    pdf_ocr_lang: str = field(
+        default_factory=lambda: os.getenv("SILICA_PDF_OCR_LANG", "en,it,fr,de,es")
+    )
+
     # Tavily API key for /web-search. Empty → /web-search errors clearly and
     # writes no note. The only new config this feature adds.
     tavily_api_key: str = field(

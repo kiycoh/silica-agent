@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.config import CONFIG
+from silica.config import CONFIG, SilicaConfig
 from silica.sources import convert as conv
 
 
@@ -51,7 +51,12 @@ def test_missing_file_raises(tmp_vault, monkeypatch):
 # --- docling provider (keeps figures) ---------------------------------------
 
 def _fake_docling(monkeypatch, md="# Title\n\n![](images/fig.png)\n\nbody"):
-    """Inject a fake docling whose save_as_markdown writes one image + references it."""
+    """Inject a fake docling whose save_as_markdown writes one image + references it.
+
+    Returns a dict capturing the PdfFormatOption kwargs (``pipeline_options``)
+    so tests can assert the precision pins.
+    """
+    captured: dict = {}
 
     class _Doc:
         def save_as_markdown(self, path, *, image_mode, artifacts_dir):
@@ -66,13 +71,21 @@ def _fake_docling(monkeypatch, md="# Title\n\n![](images/fig.png)\n\nbody"):
         def convert(self, path):
             return types.SimpleNamespace(document=_Doc())
 
+    class PdfPipelineOptions:
+        def __init__(self):
+            self.table_structure_options = types.SimpleNamespace(
+                mode=None, do_cell_matching=None
+            )
+            self.ocr_options = types.SimpleNamespace(lang=None)
+
     dc = types.ModuleType("docling.document_converter")
     dc.DocumentConverter = DocumentConverter
-    dc.PdfFormatOption = lambda **kw: None
+    dc.PdfFormatOption = lambda **kw: captured.update(kw)
     base = types.ModuleType("docling.datamodel.base_models")
     base.InputFormat = types.SimpleNamespace(PDF="pdf")
     popts = types.ModuleType("docling.datamodel.pipeline_options")
-    popts.PdfPipelineOptions = type("PdfPipelineOptions", (), {})
+    popts.PdfPipelineOptions = PdfPipelineOptions
+    popts.TableFormerMode = types.SimpleNamespace(ACCURATE="accurate")
     core = types.ModuleType("docling_core.types.doc")
     core.ImageRefMode = types.SimpleNamespace(REFERENCED="referenced")
     fakes = {
@@ -87,6 +100,7 @@ def _fake_docling(monkeypatch, md="# Title\n\n![](images/fig.png)\n\nbody"):
     }
     for name, mod in fakes.items():
         monkeypatch.setitem(sys.modules, name, mod)
+    return captured
 
 
 def test_pdf_docling_provider_embeds_extracted_image(tmp_vault, monkeypatch):
@@ -113,6 +127,37 @@ def test_unreferenced_extracted_image_is_not_copied(tmp_vault, monkeypatch):
     assert not (Path(CONFIG.vault_path) / "Concepts/X/Images/fig.png").exists()
 
 
+def test_docling_precision_pins(tmp_vault, monkeypatch):
+    """Max-precision non-generative config is passed explicitly (spec
+    2026-07-22): ACCURATE TableFormer, cell matching, 144 dpi figures, OCR
+    languages from config."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "docling")
+    tmp_vault.note("paper.pdf", "x")
+    captured = _fake_docling(monkeypatch)
+
+    conv.convert("paper.pdf")
+
+    opts = captured["pipeline_options"]
+    assert opts.do_table_structure is True
+    assert opts.table_structure_options.mode == "accurate"
+    assert opts.table_structure_options.do_cell_matching is True
+    assert opts.images_scale == 2.0
+    assert opts.do_ocr is True
+    assert opts.ocr_options.lang == CONFIG.pdf_ocr_lang.split(",")
+
+
+def test_pdf_ocr_lang_env_override_reaches_docling(tmp_vault, monkeypatch):
+    monkeypatch.setenv("SILICA_PDF_OCR_LANG", "en, ja")
+    monkeypatch.setattr(CONFIG, "pdf_ocr_lang", SilicaConfig().pdf_ocr_lang)
+    monkeypatch.setattr(CONFIG, "pdf_provider", "docling")
+    tmp_vault.note("paper.pdf", "x")
+    captured = _fake_docling(monkeypatch)
+
+    conv.convert("paper.pdf")
+
+    assert captured["pipeline_options"].ocr_options.lang == ["en", "ja"]  # csv split, stripped
+
+
 def test_docling_missing_raises(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "pdf_provider", "docling")
     tmp_vault.note("paper.pdf", "x")
@@ -127,7 +172,10 @@ def _fake_opendataloader(monkeypatch, md="# Title\n\n![](images/fig.png)\n\nbody
     """Inject a fake opendataloader_pdf.convert that writes one .md + one image."""
     mod = types.ModuleType("opendataloader_pdf")
 
-    def convert(*, input_path, output_dir, format, image_output, image_dir):
+    def convert(*, input_path, output_dir, format, image_output, image_dir, **kw):
+        # Exactly the struct-tree pin, and never `hybrid` (generative, out of
+        # boundary — spec 2026-07-22).
+        assert kw == {"use_struct_tree": True}
         out = Path(output_dir)
         out.mkdir(parents=True, exist_ok=True)
         (out / f"{Path(input_path).stem}.md").write_text(md, encoding="utf-8")
@@ -170,6 +218,11 @@ def test_opendataloader_no_markdown_raises(tmp_vault, monkeypatch):
 
 def _fake_mineru_run(returncode=0, stderr="", write_md=True):
     def run(cmd, **kw):
+        # Full pinned command (spec 2026-07-22): explicit non-generative backend
+        # plus today's upstream defaults pinned against drift. No -l (mineru has
+        # no latin-script option; default models cover latin).
+        assert cmd[0] == "mineru"
+        assert cmd[cmd.index("-b"):] == ["-b", "pipeline", "-m", "auto", "-f", "true", "-t", "true"]
         if write_md:
             out = Path(cmd[cmd.index("-o") + 1])
             stem = Path(cmd[cmd.index("-p") + 1]).stem

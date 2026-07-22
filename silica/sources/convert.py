@@ -53,6 +53,12 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 # Measured ~0.9 s/page on CPU (80-page probe): 600s died on an 800-page book.
 _MINERU_BACKEND = "pipeline"
 _MINERU_TIMEOUT_S = 3600
+# Maximum-precision non-generative pins (today's upstream defaults, pinned
+# against drift — the upstream default backend already drifted to a VLM):
+# -m auto (parse method), -f true (formula parsing), -t true (table parsing).
+# No -l: mineru 3.4.4 has no latin-script choice (ch|ch_server|korean|...) and
+# the default `ch` OCR models cover latin script.
+_MINERU_ARGS = ["-m", "auto", "-f", "true", "-t", "true"]
 
 # stderr triage (see _mineru_error): noise = loguru INFO/DEBUG, uvicorn banner
 # lines, tqdm progress bars; error-ish = a line naming an error/exception.
@@ -232,7 +238,7 @@ def _pdf_to_md(target: str, dest_dir: str) -> list[str]:
 def _pdf_via_docling(src: Path, workdir: Path) -> tuple[str, Path]:
     try:
         from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
+        from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
         from docling.document_converter import DocumentConverter, PdfFormatOption
         from docling_core.types.doc import ImageRefMode
     except ImportError:
@@ -243,6 +249,15 @@ def _pdf_via_docling(src: Path, workdir: Path) -> tuple[str, Path]:
 
     opts = PdfPipelineOptions()
     opts.generate_picture_images = True  # else REFERENCED export emits placeholders
+    # Maximum-precision non-generative pins. No do_formula_enrichment /
+    # do_code_enrichment: CodeFormula is a generative model, out of boundary.
+    opts.do_table_structure = True
+    opts.table_structure_options.mode = TableFormerMode.ACCURATE
+    opts.table_structure_options.do_cell_matching = True
+    opts.images_scale = 2.0  # extracted figures at 144 dpi instead of 72
+    opts.do_ocr = True
+    # docling's default language list omits Italian; csv config, split here.
+    opts.ocr_options.lang = [s.strip() for s in CONFIG.pdf_ocr_lang.split(",") if s.strip()]
     converter = DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)}
     )
@@ -266,9 +281,15 @@ def _pdf_via_opendataloader(src: Path, workdir: Path) -> tuple[str, Path]:
 
     out = workdir / "out"
     images = workdir / "images"
+    # use_struct_tree: when the PDF carries native structure tags, headings and
+    # reading order come from the author's own markup. `hybrid` (the only OCR
+    # path) is never passed — it is generative, out of boundary — so scanned
+    # PDFs yield nothing from this provider; use mineru/docling for those. If
+    # the installed wrapper predates the kwarg, the TypeError names it.
     opendataloader_pdf.convert(
         input_path=str(src), output_dir=str(out),
         format="markdown", image_output="external", image_dir=str(images),
+        use_struct_tree=True,
     )
     hits = glob(str(out / "**" / "*.md"), recursive=True)
     if not hits:
@@ -313,7 +334,7 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
     out = workdir / "out"
     try:
         proc = subprocess.run(
-            ["mineru", "-p", str(src), "-o", str(out), "-b", _MINERU_BACKEND],
+            ["mineru", "-p", str(src), "-o", str(out), "-b", _MINERU_BACKEND, *_MINERU_ARGS],
             capture_output=True, text=True, timeout=_MINERU_TIMEOUT_S,
         )
     except FileNotFoundError:
