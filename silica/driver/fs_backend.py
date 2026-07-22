@@ -779,6 +779,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         src.rename(dst)
         self._invalidate_body(old_rel)
         self._invalidate_body(new_rel)
+        # The old key's vector now points at a gone path; drop it or a rename makes
+        # the note appear twice in candidates (stale old key + fresh new key). The
+        # new path re-embeds lazily on the next build_index (A13).
+        self._drop_embed_vector(old_rel)
 
         # move() is the only multi-file write in this backend.  Everything after
         # the physical rename (referrer disk-writes, index patches, unresolved
@@ -861,12 +865,29 @@ class ObsidianFSBackend(GraphIndexMixin):
             self._body_cache.clear()
             raise
 
+    def _drop_embed_vector(self, rel_path: str) -> None:
+        """Remove a note's embedding vector when it is deleted/renamed, so
+        cosine_top_k stops returning it as a phantom candidate before the next
+        full /embed rebuild (audit A13). Best-effort: retrieval quality, never fatal.
+        """
+        # ponytail: per-op npz save; if /organize on a 10k vault gets slow, batch
+        # these behind a dirty flag flushed once at end of run.
+        try:
+            from silica.kernel.embed import get_store
+            store = get_store()
+            key = rel_path.removesuffix(".md")
+            if store.get_vec(key) is not None:  # skip non-embedding vaults / unindexed notes
+                store.delete(key)
+                store.save()
+        except Exception as exc:
+            logger.debug("embed vector cleanup failed for %s (non-fatal): %s", rel_path, exc)
+
     def delete(self, ref: NoteRef | str) -> None:
         """Delete a note from the vault."""
         path = self._resolve_path(ref)
         if not path.exists():
             raise RuntimeError(f"File not found: {path}")
-            
+
         rel_path_str = path.relative_to(self.vault_path).as_posix()
         path.unlink()
         self._invalidate_body(rel_path_str)
@@ -874,6 +895,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             self._rebuild_index()
         else:
             self._patch_index(rel_path_str, None)
+        self._drop_embed_vector(rel_path_str)
 
     # ------------------------------------------------------------------
     # Advanced

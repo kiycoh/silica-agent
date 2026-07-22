@@ -567,6 +567,14 @@ def build_index(
             vecs = embedder.embed(interleaved)
         except Exception as exc:
             raise RuntimeError(f"Embedding call failed on batch {i//batch_size}: {exc}") from exc
+        # A backend that dedups/drops/returns an odd count would make the 0::2/1::2
+        # de-interleave silently truncate and mispair full-vs-title vectors, poisoning
+        # the index with no error. Fail loud like COLLISION's batched_ok guard (A12).
+        if len(vecs) != 2 * len(batch):
+            raise RuntimeError(
+                f"Embedder returned {len(vecs)} vectors for {2 * len(batch)} interleaved "
+                f"inputs (batch {i//batch_size}); refusing to de-interleave a mispaired reply"
+            )
         full_vecs  = vecs[0::2]  # even positions
         title_vecs = vecs[1::2]  # odd positions
         for (path, name, body), fv, tv, f in zip(batch, full_vecs, title_vecs, folders):
