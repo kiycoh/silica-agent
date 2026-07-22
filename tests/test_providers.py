@@ -233,6 +233,46 @@ def test_call_llm_custom_routes_via_openai(monkeypatch):
     assert resp.text == "ok"
 
 
+def test_call_llm_lmstudio_routes_via_openai(monkeypatch):
+    """An lmstudio/ model reaches litellm as openai/<id> pinned to the preset
+    endpoint: litellm's registry has no `lmstudio` (BadRequestError), and its
+    `lm_studio` dialect resolves api_base only from LM_STUDIO_API_BASE — no
+    localhost default — so the generic openai/ route with the preset URL is
+    the only self-contained path."""
+    from silica.agent import llm
+    from silica.agent.providers import PROVIDER_PRESETS
+
+    captured: dict = {}
+
+    class _Msg:
+        content = "ok"
+        tool_calls = None
+        reasoning_content = None
+        reasoning = None
+        thinking_blocks = None
+
+    class _Choice:
+        message = _Msg()
+        finish_reason = "stop"
+
+    class _Resp:
+        choices = [_Choice()]
+        usage = None
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return _Resp()
+
+    monkeypatch.setattr(llm.litellm, "completion", fake_completion)
+
+    resp = llm.call_llm("lmstudio/qwen3-30b", [{"role": "user", "content": "hi"}])
+
+    assert captured["model"] == "openai/qwen3-30b"
+    assert captured["api_base"] == PROVIDER_PRESETS["lmstudio"]["base_url"]
+    assert captured["api_key"] == PROVIDER_PRESETS["lmstudio"]["api_key"]
+    assert resp.text == "ok"
+
+
 def test_call_llm_ollama_routes_via_ollama_chat(monkeypatch):
     """An ollama/ model reaches litellm as ollama_chat/<id> so tool calls use
     /api/chat (native) rather than /api/generate (prompt-emulated)."""

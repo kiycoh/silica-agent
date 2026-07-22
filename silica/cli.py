@@ -1434,6 +1434,25 @@ def _model_configured() -> bool:
     return bool(CONFIG.model.strip())
 
 
+def _autolaunch_wizard_if_unconfigured() -> None:
+    """First run with no model: launch the wizard, then re-exec so the new config
+    takes effect. Non-tty (script/CI/pipe) or an already-relaunched child skips
+    this — the caller then prints the hint and drops into the offline REPL."""
+    if _model_configured():
+        return
+    if not sys.stdin.isatty() or os.getenv("SILICA_WIZARD_DONE") == "1":
+        return
+    import silica.onboarding.wizard as wizard_mod
+    if wizard_mod.run_wizard() != 0:
+        return  # aborted / failed → no re-exec, fall back to the hint
+    # ponytail: re-exec rather than reload — CONFIG is a module-level singleton
+    # imported by value across the codebase, so reassigning it wouldn't reach
+    # those aliases. execve inherits the wizard's os.environ updates; the guard
+    # env var stops an infinite relaunch if config still doesn't resolve.
+    os.environ["SILICA_WIZARD_DONE"] = "1"
+    os.execve(sys.executable, [sys.executable, *sys.argv], os.environ)
+
+
 def _resolve_context_budget() -> None:
     """Size the REPL context meter to the live model's window.
 
@@ -1543,6 +1562,7 @@ def main():
     if _bridge is not None:
         CONSOLE.print(f"  [dim]Obsidian bridge on ws://127.0.0.1:{_bridge.port}[/]\n")
     if not _model_configured():
+        _autolaunch_wizard_if_unconfigured()  # re-execs on success; returns otherwise
         CONSOLE.print(_NO_MODEL_HINT)
 
     session = build_session()

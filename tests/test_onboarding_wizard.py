@@ -38,8 +38,40 @@ class TestMergeEnv:
         assert "SILICA_MODEL=new" in out
         assert "old" not in out
 
+    def test_uncomments_and_fills_commented_key(self):
+        from silica.onboarding.wizard import merge_env
+        out = merge_env("# SILICA_MODEL=example\n", {"SILICA_MODEL": "m"})
+        assert "SILICA_MODEL=m" in out
+        assert "# SILICA_MODEL" not in out
+
+    def test_leaves_unrelated_commented_lines_verbatim(self):
+        from silica.onboarding.wizard import merge_env
+        out = merge_env("# SILICA_MODEL=example\n# SILICA_BACKEND=fs\n", {"SILICA_MODEL": "m"})
+        assert "SILICA_MODEL=m" in out
+        assert "# SILICA_BACKEND=fs" in out  # unrelated key stays commented
+
+    def test_appends_key_absent_from_commented_template(self):
+        from silica.onboarding.wizard import merge_env
+        out = merge_env("# SILICA_MODEL=example\n", {"GROQ_API_KEY": "gsk"})
+        assert "# SILICA_MODEL=example" in out  # untouched
+        assert out.splitlines()[-1] == "GROQ_API_KEY=gsk"
+
+    def test_duplicate_commented_key_sets_only_first(self):
+        from silica.onboarding.wizard import merge_env
+        out = merge_env("# SILICA_MODEL=a\n# SILICA_MODEL=b\n", {"SILICA_MODEL": "m"})
+        lines = out.splitlines()
+        assert lines[0] == "SILICA_MODEL=m"    # first uncommented + set
+        assert lines[1] == "# SILICA_MODEL=b"  # later duplicate stays a comment
+
 
 class TestRunWizard:
+    @pytest.fixture(autouse=True)
+    def _no_live_endpoint_probe(self, monkeypatch):
+        # Never touch a real LM Studio / local endpoint from the suite. Tests that
+        # exercise autodetect re-monkeypatch this to a fixed list (later wins).
+        import silica.onboarding.wizard as wizard
+        monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: [])
+
     def _scripted(self, answers):
         it = iter(answers)
         return lambda prompt: next(it)
@@ -223,7 +255,10 @@ class TestRunWizard:
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
-        assert "SILICA_VAULT" not in env_path.read_text()
+        # Repo mode must not *set* SILICA_VAULT. A commented `# SILICA_VAULT=`
+        # line seeded from .env.example is fine; an active one is not.
+        active = [l for l in env_path.read_text().splitlines() if not l.lstrip().startswith("#")]
+        assert not any(l.startswith("SILICA_VAULT=") for l in active)
 
     def test_repo_mode_writes_vault_manifest(self, monkeypatch, tmp_path):
         import silica.onboarding.wizard as wizard
@@ -489,6 +524,214 @@ class TestRunWizard:
 
         assert rc == 0
         assert (vault / "vault.yaml").read_text(encoding="utf-8") == "sources: [prose]\n"
+
+
+    def test_lmstudio_autodetect_offers_probed_default(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: ["qwen3-30b"])
+
+        answers = [
+            str(vault),  # vault path
+            "",          # force language? → Enter
+            "",          # provider → lmstudio
+            "",          # model id → Enter accepts probed default
+            "skip",      # embeddings
+            "",          # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        assert "SILICA_MODEL=qwen3-30b" in env_path.read_text()
+
+    def test_lmstudio_falls_back_to_freetext_when_probe_empty(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        # autouse fixture already stubs _endpoint_model_ids → []
+
+        answers = [
+            str(vault),      # vault path
+            "",              # force language? → Enter
+            "",              # provider → lmstudio
+            "typed-model",   # model id → must be typed (no probed default)
+            "skip",          # embeddings
+            "",              # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        assert "SILICA_MODEL=typed-model" in env_path.read_text()
+
+    def test_embeddings_reuse_single_confirm_local(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(
+            wizard, "_endpoint_model_ids", lambda url: ["qwen3-30b", "nomic-embed-text"]
+        )
+
+        answers = [
+            str(vault),  # vault path
+            "",          # force language? → Enter
+            "",          # provider → lmstudio
+            "",          # model → Enter accepts probed qwen3-30b
+            "",          # configure embeddings? → default y
+            "",          # "use nomic-embed-text at ...?" → default y
+            "",          # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        content = env_path.read_text()
+        assert "SILICA_EMBEDDING_MODEL=nomic-embed-text" in content
+        assert "SILICA_EMBEDDING_BASE_URL=http://localhost:1234/v1" in content
+        assert "SILICA_EMBEDDING_API_KEY=" in content
+
+    def test_embeddings_no_candidate_prefills_local_base_url(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        # A chat model is listed but nothing with "embed" → no candidate.
+        monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: ["qwen3-30b"])
+
+        answers = [
+            str(vault),  # vault path
+            "",          # force language? → Enter
+            "",          # provider → lmstudio
+            "",          # model → Enter accepts qwen3-30b
+            "y",         # configure embeddings?
+            "",          # embedding model → Enter accepts default
+            "",          # embedding base URL → Enter accepts pre-filled local
+            "",          # embedding API key → Enter accepts default
+            "",          # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        assert "SILICA_EMBEDDING_BASE_URL=http://localhost:1234/v1" in env_path.read_text()
+
+    def test_fresh_env_seeds_from_example(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        example = tmp_path / "example.env"
+        example.write_text(
+            "# SILICA_MODEL=example-default\n"
+            "# SILICA_PROVIDER=openrouter\n"
+            "# SILICA_BACKEND=fs\n"
+            "# SILICA_SIM_THRESHOLD_HIGH=0.85\n"
+        )
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"  # does not exist → seed from example
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(wizard, "_find_env_example", lambda *a: example)
+
+        answers = [str(vault), "", "", "test-model", "skip", ""]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        content = env_path.read_text()
+        assert "SILICA_MODEL=test-model" in content       # collected → uncommented
+        assert "SILICA_PROVIDER=lmstudio" in content
+        assert "# SILICA_BACKEND=fs" in content            # untouched knob stays commented
+        assert "# SILICA_SIM_THRESHOLD_HIGH=0.85" in content
+
+    def test_find_env_example_none_falls_back_to_minimal(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        monkeypatch.setattr(wizard, "_find_env_example", lambda *a: None)
+
+        answers = [str(vault), "", "", "test-model", "skip", ""]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        content = env_path.read_text()
+        assert "SILICA_MODEL=test-model" in content
+        assert "SIM_THRESHOLD" not in content  # no scaffolding when no example found
+
+    def test_existing_env_ignores_example_and_keeps_unrelated_comment(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+        env_path.write_text("# SILICA_SIM_THRESHOLD_HIGH=0.85\nFOO=bar\n")
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        def _boom(*a):
+            raise AssertionError("_find_env_example must not be consulted when .env exists")
+
+        monkeypatch.setattr(wizard, "_find_env_example", _boom)
+
+        answers = [str(vault), "", "", "test-model", "skip", ""]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        content = env_path.read_text()
+        assert "# SILICA_SIM_THRESHOLD_HIGH=0.85" in content  # unrelated, still commented
+        assert "FOO=bar" in content
+        assert "SILICA_MODEL=test-model" in content
+
+
+class TestEndpointModelIds:
+    def test_returns_ids_from_openai_models_payload(self, monkeypatch):
+        import silica.onboarding.wizard as wizard
+
+        class _Resp:
+            @staticmethod
+            def json():
+                return {"data": [{"id": "a"}, {"id": "b"}, {"no_id": 1}]}
+
+        monkeypatch.setattr("httpx.get", lambda url, timeout=0: _Resp())
+        assert wizard._endpoint_model_ids("http://x/v1") == ["a", "b"]
+
+    def test_returns_empty_on_error(self, monkeypatch):
+        import silica.onboarding.wizard as wizard
+
+        def _raise(url, timeout=0):
+            raise OSError("down")
+
+        monkeypatch.setattr("httpx.get", _raise)
+        assert wizard._endpoint_model_ids("http://x/v1") == []
 
 
 class TestAskSecret:

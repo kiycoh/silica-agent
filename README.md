@@ -77,6 +77,14 @@ uv pip install -e '.[all]'      # every feature above except dev
 
 `[all]` inherits `[pdf]` and `[rerank]`, so it pulls torch and downloads several GB of model weights the first time those run.
 
+To install `silica` as a global command without cloning for development:
+
+```bash
+uv tool install git+https://github.com/kiycoh/silica-agent.git
+```
+
+The editable install above stays the primary path for hacking on Silica.
+
 ### Setup and Execution
 
 Run the interactive wizard to set up your `.env` (vault, backend, chat provider, embeddings):

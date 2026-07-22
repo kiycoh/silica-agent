@@ -19,7 +19,9 @@ from silica.ui.style import GLYPHS
 
 _STEPS = 4
 
-_KEY_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
+# Optional leading `#` so merge_env can uncomment-and-fill a `# KEY=default`
+# line seeded from .env.example, not just rewrite an already-active key.
+_KEY_RE = re.compile(r"^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 _LANG_PROMPT = (
     "Force a language for distilled notes? "
@@ -35,9 +37,34 @@ _LANG_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z ]*$")
 _LANG_ANSWER_REJECT = {"y", "n", "yes", "no", "true", "false", "on", "off"}
 
 
+def _find_env_example(repo_root: Path | str | None) -> Path | None:
+    """Locate `.env.example` to seed a fresh `.env`: the vault repo root first,
+    then this package's own checkout. `None` when neither exists (a future
+    non-editable install) — the caller then falls back to a minimal write."""
+    candidates: list[Path] = []
+    if repo_root is not None:
+        candidates.append(Path(repo_root) / ".env.example")
+    candidates.append(Path(__file__).resolve().parents[2] / ".env.example")
+    return next((c for c in candidates if c.is_file()), None)
+
+
+def _endpoint_model_ids(base_url: str) -> list[str]:
+    """Model ids advertised by an OpenAI-compatible `/models` endpoint, best-effort
+    ([] on any error). Powers LM Studio autodetect and the local-embeddings
+    suggestion, mirroring _ollama_installed_models / check_chat_endpoint."""
+    import httpx
+
+    try:
+        data = httpx.get(f"{base_url.rstrip('/')}/models", timeout=3.0).json()
+        return [m["id"] for m in data.get("data", []) if m.get("id")]
+    except Exception:
+        return []
+
+
 def merge_env(existing: str, updates: dict[str, str]) -> str:
-    """Update KEY=VALUE lines in place, preserve every other line untouched,
-    append keys that were not present. Never deletes a line it did not write."""
+    """Update KEY=VALUE lines in place — uncommenting a `# KEY=default` line when
+    KEY is collected — preserve every other line untouched, and append keys that
+    were not present. Never deletes a line it did not write."""
     pending = dict(updates)
     out: list[str] = []
     for line in existing.splitlines():
@@ -197,6 +224,7 @@ def _run_wizard_inner(
     # 2. Chat provider — the hosted PROVIDER_PRESETS entries that need a key,
     # plus `custom` for any other OpenAI-compatible URL (vLLM, llama.cpp, ...).
     _section("model", "Chat provider", 2)
+    from silica.agent.providers import PROVIDER_PRESETS
     # (key env var, default model, key prompt) per hosted preset.
     _HOSTED = {
         "openrouter": ("OPENROUTER_API_KEY", "openrouter/anthropic/claude-sonnet-5", "OpenRouter API key"),
@@ -245,10 +273,16 @@ def _run_wizard_inner(
         model = ""
         while not model:
             model = _ask(input_fn, prompt, default)
-    else:
+    else:  # lmstudio — probe /models like the Ollama branch does with tags.
+        loaded = _endpoint_model_ids(PROVIDER_PRESETS["lmstudio"]["base_url"])
+        prompt = (
+            f"LM Studio model id (loaded: {', '.join(loaded)})"
+            if loaded else "Model id as loaded in LM Studio (e.g. qwen3-30b)"
+        )
+        default = loaded[0] if loaded else ""
         model = ""
         while not model:
-            model = _ask(input_fn, "Model id as loaded in LM Studio (e.g. qwen3-30b)")
+            model = _ask(input_fn, prompt, default)
     updates["SILICA_MODEL"] = model
 
     # 3. Embeddings — optional; skipping degrades gracefully.
@@ -261,19 +295,36 @@ def _run_wizard_inner(
     )
     if answer.lower() in ("skip", "s", "n", "no"):
         CONSOLE.print(
-            "  [yellow]Embeddings skipped — dedup routing and /find need them; "
+            "  [yellow]Embeddings skipped. Dedup routing and /find will not run; "
             "relatedness falls back to co-occurrence.[/]"
         )
     else:
-        updates["SILICA_EMBEDDING_MODEL"] = _ask(
-            input_fn, "Embedding model", defaults.embedding_model
-        )
-        updates["SILICA_EMBEDDING_BASE_URL"] = _ask(
-            input_fn, "Embedding base URL", defaults.embedding_base_url
-        )
-        updates["SILICA_EMBEDDING_API_KEY"] = _ask(
-            input_fn, "Embedding API key", defaults.embedding_api_key
-        )
+        # Reuse the chat endpoint when it is local — it can usually serve
+        # embeddings too, so a good setup needs no separate server.
+        local = provider in ("lmstudio", "ollama")
+        local_base = PROVIDER_PRESETS[provider]["base_url"] if local else defaults.embedding_base_url
+        # ponytail: the "embed" substring is the ceiling — covers nomic-embed-text,
+        # text-embedding-*; a served embedder without "embed" in its id needs the
+        # explicit prompts below. Upgrade path: probe each model's capabilities.
+        candidate = next(
+            (m for m in _endpoint_model_ids(local_base) if "embed" in m.lower()), ""
+        ) if local else ""
+        if candidate and _ask(
+            input_fn, f"Use {candidate} at {local_base} for embeddings? [y/n]", "y"
+        ).lower() in ("y", "yes"):
+            updates["SILICA_EMBEDDING_MODEL"] = candidate
+            updates["SILICA_EMBEDDING_BASE_URL"] = local_base
+            updates["SILICA_EMBEDDING_API_KEY"] = defaults.embedding_api_key
+        else:
+            updates["SILICA_EMBEDDING_MODEL"] = _ask(
+                input_fn, "Embedding model", defaults.embedding_model
+            )
+            updates["SILICA_EMBEDDING_BASE_URL"] = _ask(
+                input_fn, "Embedding base URL", local_base
+            )
+            updates["SILICA_EMBEDDING_API_KEY"] = _ask(
+                input_fn, "Embedding API key", defaults.embedding_api_key
+            )
 
     # 4. Confirm and write.
     _section("arrow", "Write configuration", 4)
@@ -285,8 +336,14 @@ def _run_wizard_inner(
     if answer.lower() not in ("y", "yes"):
         CONSOLE.print(f"  [dim]{GLYPHS['err']} Aborted — nothing written.[/]")
         return 1
-    existing = env_path.read_text() if env_path.exists() else ""
-    env_path.write_text(merge_env(existing, updates))
+    # Fresh .env: seed from .env.example so every knob ships documented, with the
+    # collected keys filled in. Existing .env: merge in place, untouched otherwise.
+    if env_path.exists():
+        base = env_path.read_text()
+    else:
+        example = _find_env_example(repo_root)
+        base = example.read_text(encoding="utf-8") if example else ""
+    env_path.write_text(merge_env(base, updates))
     CONSOLE.print(f"  [green]{GLYPHS['ok']} Wrote {env_path}[/]")
 
     # 5. Doctor checks against the values just chosen.

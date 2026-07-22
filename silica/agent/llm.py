@@ -373,7 +373,7 @@ def call_llm(
         tool_count = len(tools) if tools else 0
         logger.info("LLM call: model=%s | msg=%d | tools=%d", model, len(messages), tool_count)
 
-    from silica.agent.providers import clamp_max_tokens  # lazy: providers.py imports this module
+    from silica.agent.providers import PROVIDER_PRESETS, clamp_max_tokens  # lazy: providers.py imports this module
 
     input_chars = len(str(messages)) + (len(str(tools)) if tools else 0)
     kwargs: dict = {
@@ -407,6 +407,16 @@ def call_llm(
         kwargs["model"] = "openai/" + model.split("/", 1)[1]
         kwargs["api_base"] = CONFIG.provider_base_url or None
         kwargs["api_key"] = CONFIG.provider_api_key or "dummy-key"
+
+    # LM Studio: litellm's registry has no `lmstudio` (BadRequestError), and its
+    # `lm_studio` dialect resolves api_base only from LM_STUDIO_API_BASE — no
+    # localhost default. Same generic openai/ route, pinned to the preset
+    # endpoint the OpenAI-SDK path (get_provider) already uses.
+    if model.startswith("lmstudio/"):
+        preset = PROVIDER_PRESETS["lmstudio"]
+        kwargs["model"] = "openai/" + model.split("/", 1)[1]
+        kwargs["api_base"] = preset["base_url"]
+        kwargs["api_key"] = preset["api_key"]
 
     kwargs["timeout"] = 120.0  # litellm's own (fires first if it works); _bounded is the backstop
 
