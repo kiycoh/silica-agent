@@ -660,7 +660,12 @@ def resolve_note_path(note: str) -> str | None:
 
 
 def reading_path(
-    src: str, dst: str, *, graph: object = None, cooccur_store: object = None
+    src: str,
+    dst: str,
+    *,
+    graph: object = None,
+    cooccur_store: object = None,
+    weighted: bool = False,
 ) -> list[tuple[str, str]] | None:
     """Shortest reading path src → dst: BFS over wikilinks + latent cooccur edges.
 
@@ -669,6 +674,11 @@ def reading_path(
     previous one ("start" | "wikilink" | "cooccur"); None when the two notes
     are not connected. Read-only. Pass graph/cooccur_store to skip loading
     the live vault (tests).
+
+    With `weighted=True` the hop count gives way to association strength:
+    edge cost = 1/strength (wikilink strength 1.0, cooccur strength = its
+    Jaccard score, so a weak 0.25 bridge costs 4 wikilink hops) and Dijkstra
+    picks the strongest chain instead of the fewest hops.
     """
     if graph is None:
         from silica.driver import get_driver
@@ -685,28 +695,46 @@ def reading_path(
         except Exception:
             cooccur_store = None
 
-    def neighbors(u: str) -> list[tuple[str, str]]:
-        out: dict[str, str] = {}
+    def neighbors(u: str) -> list[tuple[str, tuple[str, float]]]:
+        out: dict[str, tuple[str, float]] = {}
         if cooccur_store is not None:
             # ponytail: note_edges_for is O(E) per node → BFS worst case O(V·E);
             # fine at vault scale, precompute a two-way adjacency if it drags.
-            for nb in cooccur_store.note_edges_for(u):
-                out[nb + ".md"] = "cooccur"
+            for nb, score in cooccur_store.note_edges_for(u).items():
+                out[nb + ".md"] = ("cooccur", max(float(score), 1e-6))
         if u in graph:
             for nb in graph.neighbors(u):
-                out[nb] = "wikilink"  # wikilink wins when both legs share an edge
+                out[nb] = ("wikilink", 1.0)  # wikilink wins when both legs share an edge
         return sorted(out.items())
 
     prev: dict[str, tuple[str | None, str]] = {src: (None, "start")}
-    q: deque[str] = deque([src])
-    while q:
-        u = q.popleft()
-        if u == dst:
-            break
-        for v, leg in neighbors(u):
-            if v not in prev:
-                prev[v] = (u, leg)
-                q.append(v)
+    if weighted:
+        import heapq
+
+        dist = {src: 0.0}
+        heap: list[tuple[float, str]] = [(0.0, src)]  # node id breaks ties ⇒ deterministic
+        while heap:
+            d, u = heapq.heappop(heap)
+            if d > dist.get(u, math.inf):
+                continue
+            if u == dst:
+                break
+            for v, (leg, strength) in neighbors(u):
+                nd = d + 1.0 / strength
+                if nd < dist.get(v, math.inf):
+                    dist[v] = nd
+                    prev[v] = (u, leg)
+                    heapq.heappush(heap, (nd, v))
+    else:
+        q: deque[str] = deque([src])
+        while q:
+            u = q.popleft()
+            if u == dst:
+                break
+            for v, (leg, _strength) in neighbors(u):
+                if v not in prev:
+                    prev[v] = (u, leg)
+                    q.append(v)
     if dst not in prev:
         return None
     steps: list[tuple[str, str]] = []
