@@ -94,3 +94,51 @@ def test_locomo_note_pairs(tmp_path):
     assert by["entity"]["sessions"] == [factscore._FULL_CONV]
     assert by["entity"]["source"] == "Alice: hi\n\nBob: bye"
     assert unmapped == ["empty"]  # only bodyless notes are unmapped now
+
+
+_INST_2S = {"conversation": {
+    "session_1": [{"speaker": "Alice", "text": "hi"}],
+    "session_1_date_time": "1:56 pm on 8 May, 2023",
+    "session_2": [{"speaker": "Bob", "text": "bye"}],
+    "session_2_date_time": "2:00 pm on 9 May, 2023"}}
+
+
+def _fsm_vault(tmp_path, records):
+    import json as _json
+    vault = tmp_path / "vault"
+    (vault / "memory").mkdir(parents=True)
+    (vault / "memory" / "Alice.md").write_text("Alice fact\n", encoding="utf-8")
+    (vault / "memory" / "Both.md").write_text("Merged fact\n", encoding="utf-8")
+    (vault / "provenance.json").write_text(_json.dumps(records), encoding="utf-8")
+    return vault
+
+
+def test_entity_notes_use_provenance_when_ledger_complete(tmp_path):
+    """Every session recorded -> an entity note is judged against exactly the
+    sessions that wrote it (concatenated in order), not the whole conversation."""
+    vault = _fsm_vault(tmp_path, [
+        {"source": "session_1.md", "sha256": "s1", "run_id": "r1",
+         "notes": ["memory/Both"]},
+        {"source": "session_2.md", "sha256": "s2", "run_id": "r2",
+         "notes": ["memory/Alice", "memory/Both"]},
+    ])
+    pairs, _ = factscore.locomo_note_pairs(vault, _INST_2S)
+    by = {p["rel"]: p for p in pairs}
+    assert by["memory/Alice"]["sessions"] == ["session_2"]
+    assert by["memory/Alice"]["source"] == "Bob: bye"
+    assert by["memory/Both"]["sessions"] == ["session_1", "session_2"]
+    assert by["memory/Both"]["source"] == "Alice: hi\n\nBob: bye"
+
+
+def test_entity_notes_fall_back_to_full_conv_on_incomplete_ledger(tmp_path):
+    """A session with no record may have contributed unrecorded text to any
+    note -> per-session attribution is untrustworthy, keep the full-conv
+    reference (the 0.669 misattribution artifact must not come back)."""
+    vault = _fsm_vault(tmp_path, [
+        {"source": "session_2.md", "sha256": "s2", "run_id": "r2",
+         "notes": ["memory/Alice"]},
+    ])
+    pairs, _ = factscore.locomo_note_pairs(vault, _INST_2S)
+    by = {p["rel"]: p for p in pairs}
+    assert by["memory/Alice"]["sessions"] == [factscore._FULL_CONV]
+    assert by["memory/Alice"]["source"] == "Alice: hi\n\nBob: bye"

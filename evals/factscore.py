@@ -155,15 +155,16 @@ def locomo_note_pairs(vault: Path, inst: dict) -> tuple[list[dict], list[str]]:
     Reference document:
       flat vault (note has a `session_id` frontmatter key) -> that one session,
         strict 1:1, the same render_session() text the distiller saw.
-      entity/merged note (no session_id — FSM vaults) -> the FULL conversation.
-        These aggregate across sessions, so the reference is the whole
-        transcript, not one session (Min et al. judge a bio against the entire
-        Wikipedia article, not a paragraph). Per-session provenance was over-
-        narrow: it recorded only the sessions with a complete run, so a note
-        drawing on an unrecorded session scored its verbatim facts as
-        unsupported against the wrong source. Judging against the whole
-        conversation removes that artifact and stops dropping every entity
-        note whose provenance record is missing.
+      entity/merged note (no session_id — FSM vaults) -> its provenance-recorded
+        sessions, concatenated in order, IF the vault ledger is complete (every
+        session of the conversation has at least one record — true since
+        CLEANUP records partial files too). A tighter reference shrinks the
+        judge's needle-in-haystack misses on 19-session sources.
+      incomplete ledger (older vaults) -> the FULL conversation. A session with
+        no record may have contributed unrecorded text to any note, so
+        per-session attribution is untrustworthy: judging against the whole
+        transcript is the fix for the 0.669 misattribution artifact and must
+        stay the fallback (Min et al. judge a bio against the entire article).
 
     Returns (pairs, unmapped) — only bodyless notes end up unmapped now."""
     from silica.kernel import frontmatter
@@ -172,6 +173,9 @@ def locomo_note_pairs(vault: Path, inst: dict) -> tuple[list[dict], list[str]]:
                 for n, _dt, turns in conversation_sessions(inst["conversation"])}
     full_source = "\n\n".join(sessions[s] for s in sorted(
         sessions, key=lambda s: int(s.split("_")[1])))
+    prov = _provenance_session_map(vault)
+    recorded = set().union(*prov.values()) if prov else set()
+    ledger_complete = recorded >= set(sessions)
     pairs, unmapped = [], []
     for f in sorted(vault.rglob("*.md")):
         parts = f.relative_to(vault).parts
@@ -193,7 +197,13 @@ def locomo_note_pairs(vault: Path, inst: dict) -> tuple[list[dict], list[str]]:
         if sid in sessions:
             sids, source = [sid], sessions[sid]
         else:
-            sids, source = [_FULL_CONV], full_source
+            sids = [s for s in sorted(prov.get(rel, ()),
+                                      key=lambda s: int(s.split("_")[1]))
+                    if s in sessions]
+            if ledger_complete and sids:
+                source = "\n\n".join(sessions[s] for s in sids)
+            else:
+                sids, source = [_FULL_CONV], full_source
         pairs.append({"rel": rel, "sessions": sids, "body": body,
                       "source": source})
     return pairs, unmapped
