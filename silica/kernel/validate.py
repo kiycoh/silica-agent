@@ -136,8 +136,13 @@ def validate_operations(
                 # If there's an overwrite in the group, richest_op becomes overwrite
                 if any(o.op == OpType.overwrite for o in group):
                     richest_op.op = OpType.overwrite
+                    # overwrite reads op.content; a coerced write/patch carries its body
+                    # in snippet — copy it so _execute_overwrite doesn't crash on content=None (A18)
+                    richest_op.content = richest_op.content or richest_op.snippet
                 else:
                     richest_op.op = OpType.write
+                    # write reads op.snippet; a coerced overwrite carries its body in content (A18)
+                    richest_op.snippet = richest_op.snippet or richest_op.content or ""
 
     # C3 title-identity gate: existing note titles in target_dir, keyed by
     # title_key, built lazily once per call. Empty on any driver failure —
@@ -205,6 +210,26 @@ def validate_operations(
                     op.op = OpType.write
             else:
                 op.op = OpType.write
+
+    # 2b. Band-1 title-key coercion above can retarget two different-path writes
+    # onto the SAME existing note; the step-1 path dedup ran before coercion and
+    # cannot see it. Re-dedup by post-coercion path so two ops never target one
+    # note (also removes the duplicate touched_ref that would let write.py's
+    # failed-op lookup defer one op twice and drop the other — audit A21/A4).
+    coerced_groups: dict[str, list[Op]] = {}
+    for op in ops:
+        if op.op == OpType.skip:
+            continue
+        ref = op.touched_ref()
+        if ref:
+            coerced_groups.setdefault(os.path.abspath(ref), []).append(op)
+    for _ref_path, group in coerced_groups.items():
+        if len(group) > 1:
+            keep = max(group, key=lambda o: len(o.snippet or o.content or ""))
+            for op in group:
+                if op is not keep:
+                    op.op = OpType.skip
+                    op.reason = f"Duplicate operation to the same path '{op.path}' after coercion"
 
     # Pre-compute note stems created in this run so parent validation can allow
     # forward references to notes being written in the same batch.
@@ -452,8 +477,11 @@ def validate_operations(
                 continue
 
             if not path_exists(path):
-                # If target note doesn't exist, overwrite degrades to write gracefully
+                # If target note doesn't exist, overwrite degrades to write gracefully.
+                # overwrite body lives in op.content; _execute_write reads op.snippet,
+                # so carry it over or the degraded write persists an empty note (A17).
                 op.op = OpType.write
+                op.snippet = op.snippet or op.content or ""
             elif op.base_content is None:
                 # Snapshot the current note so the write path can 3-way-detect
                 # a concurrent edit (charter UC6); the refiner snapshots at
