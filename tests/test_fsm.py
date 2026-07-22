@@ -1421,3 +1421,34 @@ def test_coordinator_forwards_seen_override():
     coord = Coordinator(inbox_files=["Inbox/test.md"], target_dir="TargetDir",
                         seen_override="2023-05-08")
     assert coord.fsm.seen_override == "2023-05-08"
+
+
+def test_best_effort_states_from_recipe():
+    # A26: crossdedup/salience/collision/autolink/backlink are best_effort in the
+    # recipe, so an unhandled failure in any of them must skip, not abort.
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    assert fsm._best_effort_states == {
+        InjectorState.CROSSDEDUP, InjectorState.SALIENCE, InjectorState.COLLISION,
+        InjectorState.AUTOLINK, InjectorState.BACKLINK,
+    }
+
+
+def test_best_effort_failure_skips_to_next_phase():
+    # A26: a raising best-effort handler advances to the next phase instead of
+    # routing to ERROR (which for post-write phases would strand a live txn).
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    fsm.state = InjectorState.SALIENCE
+
+    def _boom():
+        raise RuntimeError("salience blew up")
+
+    def _stop():
+        fsm.state = InjectorState.DONE
+
+    fsm._HANDLERS[InjectorState.SALIENCE] = _boom
+    fsm._HANDLERS[InjectorState.COLLISION] = _stop  # next in sequence after salience
+
+    fsm._run_loop()
+
+    assert fsm.state == InjectorState.DONE  # reached COLLISION, not ERROR
+    assert fsm.context.get("error") == "salience blew up"

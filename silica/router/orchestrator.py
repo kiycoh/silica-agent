@@ -429,6 +429,17 @@ class InjectorFSM(BaseFSM[InjectorState]):
             InjectorState.LINT: InjectorState.ROLLBACK,
         }
 
+        # Phases the recipe declares best_effort: an unhandled failure skips to
+        # the next phase instead of aborting the run (A26). Without this a
+        # best-effort phase whose handler doesn't self-guard (e.g. collision_pass
+        # tail) would route to ERROR — for post-write AUTOLINK/BACKLINK that
+        # bypasses ROLLBACK and strands a half-committed chunk.
+        self._best_effort_states = {
+            self._phase_to_state[p["id"]]
+            for p in self._recipe.get("phases", [])
+            if p.get("best_effort") and p.get("id") in self._phase_to_state
+        }
+
     def _get_chunks_from_context_if_empty(self) -> None:
         """Helper to extract chunks from self.context['payload'] if self._chunks is empty."""
         if not self._chunks and "payload" in self.context:
@@ -617,6 +628,13 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 except Exception as e:
                     logger.error("FSM Error in state %s: %s", self.state, e)
                     self.context["error"] = str(e)
+                    if self.state in self._best_effort_states:
+                        logger.warning(
+                            "FSM: best-effort phase %s failed (%s) — skipping to next phase",
+                            self.state.name, e,
+                        )
+                        self._transition_success()
+                        continue
                     next_state = self._ON_ERROR.get(self.state, self._error_state)
                     if next_state == self._rollback_state:
                         self._chunk_ctx["abort_reason"] = str(e)
