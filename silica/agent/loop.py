@@ -88,6 +88,40 @@ def _is_tool_failure(result: Any) -> bool:
 ToolProgressCallback = Callable[[RenderEvent], None] | None
 
 
+def repair_tool_call_history(messages: list[dict]) -> int:
+    """Ensure every assistant `tool_calls` block is answered by a tool result.
+
+    An interrupt (KeyboardInterrupt is a BaseException, uncaught by the dispatch
+    loop) or the convergence abort can exit mid-dispatch, leaving an assistant
+    message whose tool_calls have no matching `tool` responses. The next
+    `call_llm` then rejects the orphaned block with a 400 and the session is dead
+    until /clear. Insert a synthetic error result for each unanswered id, right
+    after that block's existing tool responses. Idempotent. Returns count inserted.
+    """
+    inserted = 0
+    i = 0
+    while i < len(messages):
+        m = messages[i]
+        calls = m.get("tool_calls") if m.get("role") == "assistant" else None
+        if calls:
+            j = i + 1
+            answered: set = set()
+            while j < len(messages) and messages[j].get("role") == "tool":
+                answered.add(messages[j].get("tool_call_id"))
+                j += 1
+            missing = [c.get("id") for c in calls if c.get("id") not in answered]
+            for k, cid in enumerate(missing):
+                messages.insert(j + k, {
+                    "role": "tool", "tool_call_id": cid,
+                    "content": '{"error": "tool call interrupted before it produced a result"}',
+                })
+            inserted += len(missing)
+            i = j + len(missing)
+        else:
+            i += 1
+    return inserted
+
+
 def run_agent(
     messages: list[dict],
     model: str,
@@ -95,6 +129,7 @@ def run_agent(
     progress: "ProgressLedger | None" = None,
     cancel_token: "threading.Event | None" = None,
     constraints: "AgentConstraints | None" = None,
+    temperature: float | None = None,
 ) -> str:
     """Execute the agentic loop until the model produces a text response.
 
@@ -127,6 +162,11 @@ def run_agent(
     effective_model = (
         constraints.model if (constraints is not None and constraints.model) else model
     )
+
+    # A33: a prior turn interrupted (Ctrl+C, BaseException) or convergence-aborted
+    # mid-dispatch can leave an assistant tool_calls block with unanswered ids;
+    # the first call_llm below would then 400 the whole session. Self-heal on entry.
+    repair_tool_call_history(messages)
 
     iteration = 0
     max_iterations = (
@@ -169,6 +209,10 @@ def run_agent(
     # The kwarg is only passed when active, so call_llm test doubles only need
     # the bare signature plus cancel=None.
     _llm_kwargs: dict = {"tools": None}
+    if temperature is not None:
+        # None keeps the provider default (product behavior). Eval agent arms
+        # pin 0.0 so a single-run A/B measures the lever, not sampling noise.
+        _llm_kwargs["temperature"] = temperature
     if tool_progress_callback is not None and constraints is None:
         _llm_kwargs["on_delta"] = _stream_delta
 
@@ -222,7 +266,8 @@ def run_agent(
             return resp.text or ""
 
         # Dispatch each tool call
-        for tc in resp.tool_calls:
+        pending_notices: list[dict] = []  # A34: convergence warnings, flushed AFTER
+        for tc in resp.tool_calls:        # the tool block, never between sibling results
             logger.info("Tool call: %s(%s)", tc.name, tc.args)
 
             # Key representing the specific tool call + args
@@ -314,7 +359,7 @@ def run_agent(
                     )
                 elif failures_count == 2:
                     logger.warning("Convergence guard: tool '%s' with args %s failed consecutively. Injecting warning message.", tc.name, tc.args)
-                    messages.append(
+                    pending_notices.append(
                         {
                             "role": "system",
                             "content": f"IMPORTANT: Tool '{tc.name}' failed consecutively with these parameters. DO NOT call this tool again with the exact same arguments."
@@ -322,6 +367,11 @@ def run_agent(
                     )
             else:
                 consecutive_failures[tool_key] = 0
+
+        # A34: convergence notices go after ALL tool results for this assistant
+        # block, never interleaved between sibling results (strict tool protocols
+        # require the tool messages contiguous immediately after the assistant).
+        messages.extend(pending_notices)
 
         # Loop continues: re-call LLM with tool results
 
