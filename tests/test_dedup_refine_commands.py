@@ -112,14 +112,51 @@ def test_silica_enrich_batch_enqueues_items():
 
 # --- CLI wiring ------------------------------------------------------------
 
-def test_cli_dedup_shortcut_invokes_tool():
+def test_cli_dedup_seeds_ledger():
+    """/dedup scans for pairs then seeds a resumable, agent-driven ledger
+    (like /refine), instead of blocking on a synchronous silica_dedup call."""
     from silica import cli
-    fake_tool = MagicMock()
-    fake_tool.run.return_value = json.dumps({"pairs_found": 3, "summary": {"committed": 2, "no_merge": 1}})
-    with patch.dict("silica.tools.TOOLS", {"silica_dedup": fake_tool}, clear=False):
-        handled = cli._handle_direct_shortcut("/dedup Concepts/ML", [])
-    assert handled is True
-    fake_tool.run.assert_called_once_with(folder="Concepts/ML")
+
+    pairs = [{"source": "Concepts/A", "target": "Concepts/B", "score": 0.8}]
+    with patch("silica.tools.runners._scan_dedup_pairs", return_value=(pairs, None)) as scan, \
+         patch("silica.cli._seed_batch_ledger", return_value="ledger msg") as seed:
+        msg = cli._expand_workflow_shortcut("/dedup Concepts/ML")
+
+    scan.assert_called_once_with("Concepts/ML")
+    cap, payloads = seed.call_args.args
+    assert cap == "silica_dedup_pairs"
+    assert payloads == [{"pairs": pairs}]
+    assert seed.call_args.kwargs["kind"] == "dedup"
+    assert msg == "ledger msg"
+
+
+def test_cli_dedup_no_pairs_handled_inline():
+    """An empty scan is fully handled inline — the agent gets nothing to do."""
+    from silica import cli
+    with patch("silica.tools.runners._scan_dedup_pairs", return_value=([], None)):
+        msg = cli._expand_workflow_shortcut("/dedup")
+    assert msg == ""
+
+
+def test_cli_refine_scopes_with_in_folder():
+    """/refine Foo must not leak into a sibling FooBar/ folder (prefix bug)."""
+    from silica import cli
+    from silica.driver.base import NoteRef
+
+    refs = [NoteRef(name="a", path="Foo/a.md"), NoteRef(name="b", path="FooBar/b.md")]
+    captured = {}
+
+    def fake_seed(cap, payloads, *, kind, label):
+        captured["cap"] = cap
+        captured["paths"] = [p for pl in payloads for p in pl["note_paths"]]
+        return "ok"
+
+    with patch("silica.driver.DRIVER.list_files", return_value=refs), \
+         patch("silica.cli._seed_batch_ledger", side_effect=fake_seed):
+        cli._expand_workflow_shortcut("/refine Foo")
+
+    assert captured["cap"] == "silica_refine_batch"
+    assert captured["paths"] == ["Foo/a.md"]  # FooBar/b.md excluded by _in_folder
 
 
 # --- Regression: k=1 horizon bug -------------------------------------------

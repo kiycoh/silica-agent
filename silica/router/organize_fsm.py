@@ -75,6 +75,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         self._tmp_files: list[str] = []
         self._txn = None
         self._pre_graph: GraphSnapshot | None = None
+        self._undo_run_id: str | None = None
 
         # Bundled package data — if it's missing the install is broken; fail fast.
         from silica.router.recipe_parser import load_recipe
@@ -357,6 +358,15 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         from silica.kernel.ops import InverseOp, InverseOpKind
         import uuid
 
+        # Open an undo-journal run so `/revert` can move these notes back later.
+        # Only reached in apply mode with real moves (PLAN returns early on dry_run).
+        from silica.config import CONFIG
+        from silica.kernel.undo_journal import get_undo_journal
+        self._undo_run_id = get_undo_journal().start_run(
+            source=f"organize:{self.scope or 'vault'}",
+            vault=getattr(CONFIG, "vault_path", None) or None,
+        )
+
         # For move ops, the inverse is moving back (from_path → to_path becomes to_path → from_path)
         # We also pre-capture the pre-move graph snapshot for the lint gate.
         inverses = [
@@ -468,10 +478,39 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         self._transition_success()
 
     def _handle_cleanup(self) -> None:
-        """Mark run as committed in the ledger."""
+        """Mark run as committed in the ledger and journal move inverses for /revert."""
         self.context["final_status"] = "Success"
         self._write_ledger("committed")
+        self._record_undo_inverses()
         self._transition_success()
+
+    def _record_undo_inverses(self) -> None:
+        """Persist each committed move's inverse so `/revert <run>` can move it back.
+
+        Only successful moves are journalled — a move that failed (or was rolled
+        back before reaching CLEANUP) never lands here.
+        """
+        if not self._undo_run_id:
+            return
+        import hashlib
+        from silica.kernel.ops import InverseOp, InverseOpKind
+        from silica.kernel.undo_journal import get_undo_journal
+
+        journal = get_undo_journal()
+        for res in self.context.get("move_results", []):
+            if not res.get("success"):
+                continue
+            from_path, to_path = res["from"], res["to"]
+            try:
+                post = DRIVER.read_note(to_path).content
+                post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
+            except Exception:
+                post_hash = None
+            journal.record(
+                self._undo_run_id,
+                InverseOp(kind=InverseOpKind.move_back, path=from_path, to_path=to_path),
+                post_hash,
+            )
 
     def _handle_rollback(self) -> None:
         """Undo moves by calling DRIVER.move() in reverse."""

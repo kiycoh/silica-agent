@@ -1,7 +1,16 @@
+import pytest
 from unittest.mock import patch, MagicMock, call
 from silica.router.orchestrator import InjectorFSM, InjectorState
 from silica.router.recipe_parser import load_recipe
 from silica.tools import TOOLS
+
+
+@pytest.fixture(autouse=True)
+def _historical_snippet_floor(monkeypatch):
+    # Predates the 100→400 write-floor raise; short fixtures here exercise
+    # routing/coercion, not the length gate — pin their original floor.
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "100")
+
 
 # Loaded before any test patches builtins.open: tests that mock open() would
 # otherwise break the (fail-fast) recipe load inside InjectorFSM.__init__.

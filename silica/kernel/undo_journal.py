@@ -80,7 +80,8 @@ class UndoJournalStore:
                 kind          TEXT NOT NULL,
                 version       INTEGER,
                 prior_content TEXT,
-                post_hash     TEXT
+                post_hash     TEXT,
+                to_path       TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_inverses_run ON inverses(run_id);
             """
@@ -92,6 +93,12 @@ class UndoJournalStore:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(runs)")}
         if "vault" not in cols:
             conn.execute("ALTER TABLE runs ADD COLUMN vault TEXT")
+        # Migration: pre-move_back DBs lack `to_path` (only restore_version /
+        # delete_created / recreate_deleted were ever journalled). Legacy rows
+        # stay NULL — those kinds don't use it.
+        inv_cols = {r["name"] for r in conn.execute("PRAGMA table_info(inverses)")}
+        if "to_path" not in inv_cols:
+            conn.execute("ALTER TABLE inverses ADD COLUMN to_path TEXT")
         conn.commit()
 
     def start_run(self, source: str | None = None, vault: str | None = None) -> str:
@@ -107,10 +114,10 @@ class UndoJournalStore:
     def record(self, run_id: str, inverse: InverseOp, post_hash: str | None) -> None:
         conn = self._conn()
         conn.execute(
-            "INSERT INTO inverses (run_id, path, kind, version, prior_content, post_hash) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO inverses (run_id, path, kind, version, prior_content, post_hash, to_path) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             (run_id, inverse.path, inverse.kind.value, inverse.version,
-             inverse.prior_content, post_hash),
+             inverse.prior_content, post_hash, inverse.to_path),
         )
         conn.commit()
 
@@ -135,7 +142,7 @@ class UndoJournalStore:
 
     def inverses_for(self, run_id: str) -> list[tuple[InverseOp, str | None]]:
         rows = self._conn().execute(
-            "SELECT path, kind, version, prior_content, post_hash "
+            "SELECT path, kind, version, prior_content, post_hash, to_path "
             "FROM inverses WHERE run_id = ? ORDER BY id DESC",
             (run_id,),
         ).fetchall()
@@ -144,6 +151,7 @@ class UndoJournalStore:
             inv = InverseOp(
                 kind=InverseOpKind(r["kind"]), path=r["path"],
                 version=r["version"], prior_content=r["prior_content"],
+                to_path=r["to_path"],
             )
             out.append((inv, r["post_hash"]))
         return out

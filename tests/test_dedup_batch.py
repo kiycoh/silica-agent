@@ -1,9 +1,17 @@
 """Family-batched ternary dedup: grouping, batch parsing, fan-out routing."""
+import pytest
 from unittest.mock import patch
 
 from silica.capabilities.dedup import DedupDecision, _parse_batch, run_dedup
 from silica.config import SilicaConfig
 from silica.kernel.workqueue import WorkItem, batch_dedup_items
+
+
+@pytest.fixture(autouse=True)
+def _historical_snippet_floor(monkeypatch):
+    # Predates the 100→400 write-floor raise; short fixtures here exercise
+    # routing/coercion, not the length gate — pin their original floor.
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "100")
 
 
 def _item(target: str, concept: str, **ctx) -> WorkItem:

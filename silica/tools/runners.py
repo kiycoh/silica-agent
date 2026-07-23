@@ -104,91 +104,22 @@ def silica_ledger_digest(run_id: str = "") -> dict[str, Any]:
     return {"run_id": resolved_id, "digest": ledger.digest()}
 
 
-class DedupPairsArgs(BaseModel):
-    pairs: list[dict] = Field(description="List of duplicate pairs to merge. Each dict must have 'source' and 'target' keys.")
+def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
+    """Cosine + title scan for near-duplicate note pairs — vectors only, no body
+    reads. Returns (pairs, error); each pair is {source, target, score, full_score,
+    title_score}. Shared by silica_dedup (sync) and the /dedup ledger seed.
 
-@tool(DedupPairsArgs, cls="composed")
-def silica_dedup_pairs(pairs: list[dict]) -> dict[str, Any]:
-    """Merge an ALREADY-KNOWN list of duplicate note pairs (e.g. from a ledger task).
-
-    The smaller note's genuinely-new info is appended to the larger note as a
-    single patch. To discover duplicate pairs by scanning, use silica_dedup.
-    """
-    from silica.kernel.workqueue import WorkItem
-    from silica.agent.subagent import run_subagent_batch
-    
-    if not pairs:
-        return {"error": "No pairs provided."}
-        
-    items: list[WorkItem] = []
-    
-    for pair in pairs:
-        source = pair.get("source")
-        target = pair.get("target")
-        score = pair.get("score", 0.0)
-        
-        if not source or not target:
-            continue
-            
-        try:
-            body_src = DRIVER.read_note(source).content or ""
-            body_tgt = DRIVER.read_note(target).content or ""
-        except Exception:
-            continue
-            
-        # The larger note is the merge target; the smaller is the source of new info.
-        if len(body_tgt) >= len(body_src):
-            larger, smaller, smaller_body = target, source, body_src
-        else:
-            larger, smaller, smaller_body = source, target, body_tgt
-            
-        items.append(WorkItem(
-            kind="dedup",
-            target_path=larger,
-            context={
-                "concept": smaller.rsplit("/", 1)[-1],
-                "excerpt": smaller_body[:4000],
-                "candidate": larger.rsplit("/", 1)[-1],
-                "score": score,
-                "inbox_file": smaller,
-            },
-            reason=f"ledger_dedup score={score:.3f}",
-        ))
-        
-    if not items:
-        return {"success": False, "message": "No valid pairs to process"}
-        
-    res = run_subagent_batch(items)
-    res["pairs_found"] = len(items)
-    return res
-
-
-class DedupFolderArgs(BaseModel):
-    folder: str = Field(default="", description="Vault folder to scan for near-duplicate notes (empty = whole vault)")
-
-
-@tool(DedupFolderArgs, cls="composed")
-def silica_dedup(folder: str = "", cancel_token: Any = None) -> dict[str, Any]:
-    """SCAN a folder (or the vault) for near-duplicate note pairs and merge each
-    smaller note into its larger twin.
-
-    Only the smaller note's genuinely-new info is appended to the larger note
-    (a single append-only patch) — never rewrites, deletes, or creates notes.
-    Requires the embedding index (silica_embed_refresh). If you already know
-    the pairs, use silica_dedup_pairs instead.
-
-    A pair is admitted when its body similarity is borderline OR its titles are
-    strongly similar — the latter catches cases like "ROS" / "JSON in ROS 2"
-    where bodies diverge but titles are clearly related.
+    A pair is admitted when body similarity is borderline (tau_low < score <
+    tau_high) OR titles are strongly similar (title_score >= tau_title) — the
+    latter catches "ROS" / "JSON in ROS 2" where bodies diverge but titles are
+    clearly related.
     """
     from silica.kernel.embed import get_store, _cosine
-    from silica.kernel.workqueue import WorkItem
-    from silica.agent.subagent import run_subagent_batch
     from silica.config import CONFIG as _C
 
     store = get_store()
     if len(store) == 0:
-        return {"error": "Embedding index empty — run /embed first."}
+        return [], "Embedding index empty — run /embed first."
 
     τ_high = getattr(_C, "sim_threshold_high", 0.85)
     τ_low = getattr(_C, "sim_threshold_low", 0.65)
@@ -196,7 +127,7 @@ def silica_dedup(folder: str = "", cancel_token: Any = None) -> dict[str, Any]:
 
     scope = [p for p in store.paths() if _in_folder(p, folder)]
     seen_pairs: set[tuple[str, str]] = set()
-    items: list[WorkItem] = []
+    pairs: list[dict] = []
 
     for p in scope:
         vec = store.get_vec(p)
@@ -220,10 +151,9 @@ def silica_dedup(folder: str = "", cancel_token: Any = None) -> dict[str, Any]:
             )
 
             in_full_window = τ_low < score < τ_high
-            in_title_gate  = title_score >= τ_title
-
-            # continue (not break): list is sorted descending; a match above τ_high
-            # arrives before borderline ones — break would kill the loop too early.
+            in_title_gate = title_score >= τ_title
+            # continue (not break): candidates are score-descending; a match above
+            # τ_high arrives before borderline ones — break would kill the loop early.
             if not in_full_window and not in_title_gate:
                 continue
 
@@ -232,34 +162,109 @@ def silica_dedup(folder: str = "", cancel_token: Any = None) -> dict[str, Any]:
                 continue
             seen_pairs.add(key)
 
-            try:
-                body_p = DRIVER.read_note(p).content or ""
-                body_o = DRIVER.read_note(other).content or ""
-            except Exception:
-                continue
+            pairs.append({
+                "source": p,
+                "target": other,
+                "score": max(score, title_score),
+                "full_score": score,
+                "title_score": title_score,
+            })
 
-            # The larger note is the merge target; the smaller is the source of new info.
-            if len(body_o) >= len(body_p):
-                larger, smaller, smaller_body = other, p, body_p
-            else:
-                larger, smaller, smaller_body = p, other, body_o
+    return pairs, None
 
-            effective_score = max(score, title_score)
-            items.append(WorkItem(
-                kind="dedup",
-                target_path=larger,
-                context={
-                    "concept": smaller.removesuffix(".md").rsplit("/", 1)[-1],
-                    "excerpt": smaller_body[:4000],
-                    "candidate": larger.removesuffix(".md").rsplit("/", 1)[-1],
-                    "score": effective_score,
-                    "full_score": score,
-                    "title_score": title_score,
-                    "inbox_file": smaller,
-                },
-                reason=f"folder_dedup score={effective_score:.3f} (full={score:.3f} title={title_score:.3f})",
-            ))
 
+def _pairs_to_items(pairs: list[dict]) -> list[WorkItem]:
+    """Build dedup WorkItems from {source, target, score} dicts — the single
+    place bodies are read and the larger/smaller split is decided. Optional
+    full_score/title_score telemetry is propagated into context when present.
+    """
+    from silica.kernel.workqueue import WorkItem
+
+    items: list[WorkItem] = []
+    for pair in pairs:
+        source = pair.get("source")
+        target = pair.get("target")
+        score = pair.get("score", 0.0)
+        if not source or not target:
+            continue
+        try:
+            body_src = DRIVER.read_note(source).content or ""
+            body_tgt = DRIVER.read_note(target).content or ""
+        except Exception:
+            continue
+
+        # The larger note is the merge target; the smaller is the source of new info.
+        if len(body_tgt) >= len(body_src):
+            larger, smaller, smaller_body = target, source, body_src
+        else:
+            larger, smaller, smaller_body = source, target, body_tgt
+
+        context = {
+            "concept": smaller.removesuffix(".md").rsplit("/", 1)[-1],
+            "excerpt": smaller_body[:4000],
+            "candidate": larger.removesuffix(".md").rsplit("/", 1)[-1],
+            "score": score,
+            "inbox_file": smaller,
+        }
+        reason = f"dedup score={score:.3f}"
+        if "full_score" in pair and "title_score" in pair:
+            context["full_score"] = pair["full_score"]
+            context["title_score"] = pair["title_score"]
+            reason += f" (full={pair['full_score']:.3f} title={pair['title_score']:.3f})"
+
+        items.append(WorkItem(kind="dedup", target_path=larger, context=context, reason=reason))
+    return items
+
+
+class DedupPairsArgs(BaseModel):
+    pairs: list[dict] = Field(description="List of duplicate pairs to merge. Each dict must have 'source' and 'target' keys.")
+
+@tool(DedupPairsArgs, cls="composed")
+def silica_dedup_pairs(pairs: list[dict]) -> dict[str, Any]:
+    """Merge an ALREADY-KNOWN list of duplicate note pairs (e.g. from a ledger task).
+
+    The smaller note's genuinely-new info is appended to the larger note as a
+    single patch. To discover duplicate pairs by scanning, use silica_dedup.
+    """
+    from silica.agent.subagent import run_subagent_batch
+
+    if not pairs:
+        return {"error": "No pairs provided."}
+
+    items = _pairs_to_items(pairs)
+    if not items:
+        return {"success": False, "message": "No valid pairs to process"}
+
+    res = run_subagent_batch(items)
+    res["pairs_found"] = len(items)
+    return res
+
+
+class DedupFolderArgs(BaseModel):
+    folder: str = Field(default="", description="Vault folder to scan for near-duplicate notes (empty = whole vault)")
+
+
+@tool(DedupFolderArgs, cls="composed")
+def silica_dedup(folder: str = "", cancel_token: Any = None) -> dict[str, Any]:
+    """SCAN a folder (or the vault) for near-duplicate note pairs and merge each
+    smaller note into its larger twin.
+
+    Only the smaller note's genuinely-new info is appended to the larger note
+    (a single append-only patch) — never rewrites, deletes, or creates notes.
+    Requires the embedding index (silica_embed_refresh). If you already know
+    the pairs, use silica_dedup_pairs instead.
+
+    A pair is admitted when its body similarity is borderline OR its titles are
+    strongly similar — the latter catches cases like "ROS" / "JSON in ROS 2"
+    where bodies diverge but titles are clearly related.
+    """
+    from silica.agent.subagent import run_subagent_batch
+
+    pairs, err = _scan_dedup_pairs(folder)
+    if err:
+        return {"error": err}
+
+    items = _pairs_to_items(pairs)
     res = run_subagent_batch(items, cancel_token=cancel_token)
     res["pairs_found"] = len(items)
     res["folder"] = folder or "(vault)"

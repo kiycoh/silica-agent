@@ -29,8 +29,28 @@ class TestDispatchSubcommand:
     def test_init_delegates_to_wizard(self, monkeypatch):
         import silica.onboarding.wizard as wizard_mod
         from silica.cli import _dispatch_subcommand
-        monkeypatch.setattr(wizard_mod, "run_wizard", lambda: 0)
+        seen = {}
+
+        def fake(advanced=False):
+            seen["advanced"] = advanced
+            return 0
+
+        monkeypatch.setattr(wizard_mod, "run_wizard", fake)
         assert _dispatch_subcommand(["init"]) == 0
+        assert seen["advanced"] is False
+
+    def test_init_advanced_flag_forwarded(self, monkeypatch):
+        import silica.onboarding.wizard as wizard_mod
+        from silica.cli import _dispatch_subcommand
+        seen = {}
+
+        def fake(advanced=False):
+            seen["advanced"] = advanced
+            return 0
+
+        monkeypatch.setattr(wizard_mod, "run_wizard", fake)
+        assert _dispatch_subcommand(["init", "--advanced"]) == 0
+        assert seen["advanced"] is True
 
 
 class TestAutolaunchWizard:

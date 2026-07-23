@@ -114,6 +114,25 @@ def _isolate_deferred_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_undo_journal(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect the undo journal to a per-test tmp DB.
+
+    run_subagent_batch and the organizer FSM now open a journal run with no
+    explicit path; without this every batch/organize test would write into the
+    developer's real ~/.silica/undo_journal.db.
+    """
+    # Lazy, like the other store fixtures: only redirect the DEFAULT path and
+    # reset the singleton — the DB (and its dir + WAL sidecars) is created only
+    # when a test actually opens the journal, so tests that assert on tmp_path's
+    # contents never see a stray undo_journal/ dir.
+    import silica.kernel.undo_journal as uj
+    monkeypatch.setattr(uj, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo_journal" / "j.db")
+    uj._store = None
+    yield
+    uj._store = None
+
+
+@pytest.fixture(autouse=True)
 def _clear_store_singletons() -> None:
     """Reset the cached store singletons (Fix 3 seam) around every test.
 

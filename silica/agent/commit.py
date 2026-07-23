@@ -30,6 +30,41 @@ from silica.kernel.paths import silica_tmp_dir
 
 logger = logging.getLogger(__name__)
 
+# Ambient undo-journal run for a subagent batch. run_subagent_batch opens one
+# run and sets this in every pool worker, so each commit_ops within the batch
+# records its inverses under the SAME run — /revert then undoes the whole
+# /refine, /enrich or /dedup, not just the last note. Default None: callers
+# outside a batch (interactive tools) journal nothing, unchanged.
+import contextvars
+_current_undo_run: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "silica_undo_run", default=None
+)
+
+
+def _journal_inverses(run_id: str, inverses: list[dict]) -> None:
+    """Record a committed batch's inverses so /revert can undo subagent writes.
+
+    Best-effort: a failed hash only weakens the /revert "modified since" guard
+    for that note, never blocks the commit that already landed.
+    """
+    import hashlib
+    from silica.driver import DRIVER
+    from silica.kernel.ops import InverseOp
+    from silica.kernel.undo_journal import get_undo_journal
+
+    journal = get_undo_journal()
+    for raw in inverses:
+        try:
+            inv = InverseOp(**raw)
+        except Exception:
+            continue
+        try:
+            post = DRIVER.read_note(inv.path).content
+            post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
+        except Exception:
+            post_hash = None
+        journal.record(run_id, inv, post_hash)
+
 
 def _write_ops_tmp(ops: list[Op]) -> str:
     path = str(silica_tmp_dir() / f"{uuid.uuid4().hex}.json")
@@ -161,6 +196,12 @@ def commit_ops(
                     lint_failures.append({"path": p, "errors": lr.get("errors")})
             if lint_failures:
                 return _rollback({"lint_failures": lint_failures})
+
+        # Committed cleanly — journal the inverses if inside a batch run so the
+        # whole pass is revertable via /revert.
+        undo_run_id = _current_undo_run.get()
+        if undo_run_id:
+            _journal_inverses(undo_run_id, inverses)
 
         return {
             "status": "committed",

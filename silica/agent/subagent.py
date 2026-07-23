@@ -91,8 +91,22 @@ def run_subagent_batch(
         wq.enqueue(it)
     wq.close()
 
+    # One undo-journal run for the whole batch so /revert can undo the entire
+    # /refine, /enrich or /dedup. Pool workers don't inherit contextvars, so
+    # each worker sets the same run id at entry (see commit._current_undo_run).
+    from silica.agent.commit import _current_undo_run
+    from silica.kernel.undo_journal import get_undo_journal
+    undo_run_id = get_undo_journal().start_run(
+        source=f"{items[0].kind}-batch",
+        vault=getattr(config, "vault_path", None) or None,
+    )
+
+    def _worker():
+        _current_undo_run.set(undo_run_id)
+        return consume(wq, agent, cancel_token)
+
     with ThreadPoolExecutor(max_workers=mw, thread_name_prefix="subagent") as ex:
-        futures = [ex.submit(consume, wq, agent, cancel_token) for _ in range(mw)]
+        futures = [ex.submit(_worker) for _ in range(mw)]
     for f in futures:
         exc = f.exception()
         if exc:

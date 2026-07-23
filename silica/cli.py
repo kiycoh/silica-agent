@@ -802,24 +802,6 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             CONSOLE.print("  Use [bold]/review --flush=<hash>[/] to discard a bundle.")
         return True
 
-    if cmd == "/dedup":
-        positional = [p for p in parts[1:] if not p.startswith("-")]
-        folder = " ".join(positional)
-        tool_name = "silica_dedup"
-        label = "Dedup"
-        CONSOLE.print(f"  {label} on [bold]{folder or '(vault)'}[/] — sub-agents on the worker model…")
-        result = TOOLS[tool_name].run(folder=folder)
-        try:
-            parsed = json.loads(result)
-            if "error" in parsed:
-                CONSOLE.print(f"  [yellow]{parsed['error']}[/]")
-            else:
-                scope = parsed.get("pairs_found", parsed.get("notes", parsed.get("items", 0)))
-                CONSOLE.print(f"  Processed [bold]{scope}[/] pair(s) — outcomes: {parsed.get('summary', {})}")
-        except Exception:
-            CONSOLE.print(result)
-        return True
-
     if cmd == "/curate":
         apply = any(p == "--apply" for p in parts[1:])
         positional = [p for p in parts[1:] if not p.startswith("-")]
@@ -860,6 +842,55 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         return True
 
     return False
+
+
+def _chunk_by_json_size(items: list, max_bytes: int = 4000) -> list[list]:
+    """Greedily pack items into chunks whose JSON size stays under max_bytes.
+    Each chunk becomes one ledger task / one batch-tool call."""
+    chunks: list[list] = []
+    cur: list = []
+    size = 0
+    for it in items:
+        s = len(json.dumps(it))
+        if size + s > max_bytes and cur:
+            chunks.append(cur)
+            cur, size = [it], s
+        else:
+            cur.append(it)
+            size += s
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def _seed_batch_ledger(cap: str, payloads: list[dict], *, kind: str, label: str) -> str:
+    """Create a remediation Run whose tasks each invoke `cap` with one payload,
+    emit the batch-start event, and return the agent-facing message. Shared by
+    /refine, /enrich and /dedup — the async, resumable, progress-tracked path."""
+    from pathlib import Path
+    import orjson
+    from silica.kernel.progress import PlanStep, Run
+    from silica.ui.renderer import emit_batch_event
+    from silica.agent.events import BatchRunStartEvent
+
+    run = Run.new(
+        mode="analyst",
+        user_request=f"{kind} {label}",
+        checkpoints=[PlanStep(id="remediate", kind="gate", objective=cap)],
+        inputs={"scope": label},
+    )
+    for i, payload in enumerate(payloads):
+        task = run.progress.add_task(cap)
+        body = {**payload, "_reason": f"Batch {i + 1} of {len(payloads)}"}
+        payload_path = str(run.payloads_dir / f"{task.id}.json")
+        Path(payload_path).write_bytes(orjson.dumps(body, option=orjson.OPT_INDENT_2))
+        task.input_ref = payload_path
+    run.save()
+    emit_batch_event(BatchRunStartEvent(run_id=run.run_id, kind=kind, label=label, total=len(payloads)))
+    return (
+        f"A ledger for /{kind} has been created with {len(payloads)} chunk(s). "
+        "Use `silica_ledger_next` to execute them."
+    )
 
 
 def _expand_workflow_shortcut(user_input: str) -> str | None:
@@ -1133,58 +1164,38 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         )
 
     if cmd in ("/refine", "/enrich"):
+        from silica.driver import DRIVER
+        from silica.tools.graph import _in_folder
+
         args = parts[1:]
         folder = next((p for p in args if not p.startswith("-")), "")
 
-        from silica.driver import DRIVER
-        from silica.kernel.progress import PlanStep, Run
-        from pathlib import Path
-        import orjson
-
-        refs = DRIVER.list_files(folder=folder)
-        paths = [r.path for r in refs if r.path.startswith(folder) or r.path == folder]
+        # list_files(folder) pre-filters loosely (startswith); _in_folder tightens
+        # it so /refine Foo never leaks into a sibling FooBar/ folder.
+        paths = [r.path for r in DRIVER.list_files(folder=folder) if _in_folder(r.path, folder)]
         if not paths:
             return f"Error: no files found in '{folder}'."
 
-        chunks = []
-        cur_chunk = []
-        cur_size = 0
-        for p in paths:
-            s = len(json.dumps(p))
-            if cur_size + s > 4000 and cur_chunk:
-                chunks.append(cur_chunk)
-                cur_chunk = [p]
-                cur_size = s
-            else:
-                cur_chunk.append(p)
-                cur_size += s
-        if cur_chunk:
-            chunks.append(cur_chunk)
-
         cap = "silica_refine_batch" if cmd == "/refine" else "silica_enrich_batch"
+        payloads = [{"note_paths": chunk} for chunk in _chunk_by_json_size(paths)]
+        return _seed_batch_ledger(cap, payloads, kind=cmd.strip("/"), label=folder or "vault")
 
-        run = Run.new(
-            mode="analyst",
-            user_request=f"{cmd.strip('/')} {folder or 'vault'}",
-            checkpoints=[PlanStep(id="remediate", kind="gate", objective=cap)],
-            inputs={"scope": folder or "vault"},
-        )
-        payloads_dir = run.payloads_dir
+    if cmd == "/dedup":
+        from silica.tools.runners import _scan_dedup_pairs
 
-        for i, chunk in enumerate(chunks):
-            task = run.progress.add_task(cap)
-            payload = {"note_paths": chunk, "_reason": f"Batch {i+1} of {len(chunks)}"}
-            payload_path = str(payloads_dir / f"{task.id}.json")
-            Path(payload_path).write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
-            task.input_ref = payload_path
+        args = parts[1:]
+        folder = " ".join(a for a in args if not a.startswith("-"))
 
-        run.save()
+        pairs, err = _scan_dedup_pairs(folder)
+        if err:
+            CONSOLE.print(f"  [yellow]{err}[/]")
+            return ""  # handled inline — nothing for the agent
+        if not pairs:
+            CONSOLE.print(f"  No near-duplicate pairs in [bold]{folder or '(vault)'}[/].")
+            return ""
 
-        from silica.ui.renderer import emit_batch_event
-        from silica.agent.events import BatchRunStartEvent
-        emit_batch_event(BatchRunStartEvent(run_id=run.run_id, kind=cmd.strip("/"), label=folder or "vault", total=len(chunks)))
-
-        return f"A ledger for {cmd} has been created with {len(chunks)} chunk(s) across {len(paths)} note(s). Use `silica_ledger_next` to execute them."
+        payloads = [{"pairs": chunk} for chunk in _chunk_by_json_size(pairs)]
+        return _seed_batch_ledger("silica_dedup_pairs", payloads, kind="dedup", label=folder or "vault")
 
     if cmd == "/organize":
         args = parts[1:]
@@ -1489,7 +1500,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         return 1 if checks.has_failures(results) else 0
     if args[:1] == ["init"]:
         import silica.onboarding.wizard as wizard_mod
-        return wizard_mod.run_wizard()
+        return wizard_mod.run_wizard(advanced="--advanced" in args[1:])
     if args[:1] == ["connect"]:
         # Dispatch runs before main()'s setup (unlike --gui) — do it here.
         _activate_repo_mode()

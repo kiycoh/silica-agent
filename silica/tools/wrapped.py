@@ -261,6 +261,17 @@ def silica_restore(txn_id: str, inverses: list[dict]) -> dict[str, Any]:
                 else:
                     errors.append(f"recreate_deleted missing prior_content for {path}")
 
+            elif inv.kind == InverseOpKind.move_back:
+                # Undo a move: send the note from where it landed back to origin.
+                # ponytail: if a new note now occupies `path`, DRIVER.move raises
+                # and we route it to errors — same collision stance as the FSM's
+                # in-run rollback; no silent overwrite.
+                if inv.to_path:
+                    DRIVER.move(inv.to_path, path)
+                    applied.append(f"moved_back:{inv.to_path}->{path}")
+                else:
+                    errors.append(f"move_back missing to_path for {path}")
+
         except Exception as e:
             errors.append(f"Inverse op {inv.kind} on {path} failed: {e}")
             logger.error("Rollback error: %s", e)

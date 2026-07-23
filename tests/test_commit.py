@@ -139,3 +139,52 @@ def test_commit_derived_first_write_gets_minimal_floor(derived_vault):
     assert res["status"] == "committed", res
     landed = (derived_vault / "Fresh.md").read_text(encoding="utf-8")
     assert landed.startswith("---\nAI: true\nlast modified: ")
+
+
+# --- #4: subagent-batch writes are revertable ------------------------------
+
+def test_commit_journals_inverses_when_in_batch_run():
+    """Inside a batch run (ctxvar set), a clean commit records its inverses so
+    /revert can undo the pass."""
+    from silica.agent.commit import _current_undo_run
+
+    inverses = [{"kind": "restore_version", "path": "Concepts/Big.md"}]
+    recorded = []
+
+    class _FakeJournal:
+        def record(self, run_id, inv, post_hash):
+            recorded.append((run_id, inv.path, inv.kind.value))
+
+    token = _current_undo_run.set("RUNX")
+    try:
+        with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
+             patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": inverses}), \
+             patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
+             patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
+             patch("silica.kernel.undo_journal.get_undo_journal", return_value=_FakeJournal()), \
+             patch("silica.driver.DRIVER.read_note", side_effect=RuntimeError("absent")):
+            res = commit_ops([_patch_op()], target_dir="Concepts")
+    finally:
+        _current_undo_run.reset(token)
+
+    assert res["status"] == "committed"
+    assert recorded == [("RUNX", "Concepts/Big.md", "restore_version")]
+
+
+def test_commit_does_not_journal_outside_batch_run():
+    """Interactive callers (ctxvar unset) journal nothing — behaviour unchanged."""
+    recorded = []
+
+    class _FakeJournal:
+        def record(self, *a):
+            recorded.append(a)
+
+    with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
+         patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": [{"kind": "restore_version", "path": "x.md"}]}), \
+         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
+         patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
+         patch("silica.kernel.undo_journal.get_undo_journal", return_value=_FakeJournal()):
+        res = commit_ops([_patch_op()], target_dir="Concepts")
+
+    assert res["status"] == "committed"
+    assert recorded == []

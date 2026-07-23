@@ -195,3 +195,28 @@ def test_concurrent_writes_from_many_threads(tmp_path):
     assert len(store.inverses_for(run_id)) == 80
     mode = store._conn().execute("PRAGMA journal_mode").fetchone()[0]
     assert mode == "wal"
+
+
+def test_revert_run_applies_move_back(tmp_vault, tmp_path):
+    """Root fix: silica_restore now applies move_back, so /revert of a move
+    actually sends the note back to origin (it was a silent no-op before)."""
+    from silica.driver import DRIVER
+
+    tmp_vault.note("Inbox/Note.md", "# Note\n\nbody\n")
+    DRIVER.move("Inbox/Note.md", "Concepts/Note.md")
+    assert (tmp_path / "vault" / "Concepts" / "Note.md").exists()
+    assert not (tmp_path / "vault" / "Inbox" / "Note.md").exists()
+
+    store = UndoJournalStore(tmp_path / "j.db")
+    run_id = store.start_run(source="organize:vault")
+    store.record(
+        run_id,
+        InverseOp(kind=InverseOpKind.move_back, path="Inbox/Note.md", to_path="Concepts/Note.md"),
+        post_hash=None,
+    )
+
+    res = revert_run(run_id, store=store)
+    assert res["reverted"] == ["Inbox/Note.md"]
+    assert res["errors"] == []
+    assert (tmp_path / "vault" / "Inbox" / "Note.md").exists()
+    assert not (tmp_path / "vault" / "Concepts" / "Note.md").exists()
