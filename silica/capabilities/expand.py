@@ -20,7 +20,7 @@ from typing import Any
 from silica.agent.commit import commit_ops
 from silica.agent.bounds import expand_bounds
 from silica.kernel.ops import Op, OpType
-from silica.kernel.validate import MIN_WRITE_SNIPPET_CHARS
+from silica.kernel.validate import min_write_snippet_chars
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import NoteContent, emit_feedback, load_prompt
 
@@ -56,17 +56,18 @@ def run_expand(item: WorkItem, config: Any) -> dict[str, Any]:
             hub=hub,
             feedback=feedback,
         ).strip()
-        if len(body) >= MIN_WRITE_SNIPPET_CHARS:
+        _floor = min_write_snippet_chars()
+        if len(body) >= _floor:
             break
         feedback = (
             f"Your previous body was too short ({len(body)} chars; minimum "
-            f"{MIN_WRITE_SNIPPET_CHARS}). Write a complete body grounded in the excerpt."
+            f"{_floor}). Write a complete body grounded in the excerpt."
         )
     else:
         return {
             "status": "still_short",
             "attempts": MAX_EXPAND_ATTEMPTS,
-            "reason": f"body still under {MIN_WRITE_SNIPPET_CHARS} chars — op stays deferred",
+            "reason": f"body still under {min_write_snippet_chars()} chars — op stays deferred",
         }
 
     if item.cancel_token.is_set():

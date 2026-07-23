@@ -566,6 +566,22 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 phase, len(rejected_ops),
             )
             return False
+        # Persist the payload the ops were validated against, so the deferred
+        # retry re-validates with the same grounding/heading/collision checks
+        # instead of the strictly weaker empty-payload pass (finding 2).
+        # Best-effort: an early defer site (SETUP) has no payload yet.
+        payloads: list[dict] = []
+        try:
+            if self._chunks and self._current_chunk_idx < len(self._chunks):
+                payloads = [self._chunks[self._current_chunk_idx]]
+            else:
+                pd = self.context.get("payload", {})
+                if "chunks" in pd:
+                    payloads = list(pd["chunks"])
+                elif "payload" in pd:
+                    payloads = [pd["payload"]]
+        except Exception:
+            payloads = []
         try:
             from silica.kernel.deferred import get_deferred_store
             store = get_deferred_store()
@@ -578,6 +594,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 rejected_ops=list(existing.get("rejected_ops", [])) + rejected_ops,
                 rejection_reasons={**existing.get("rejection_reasons", {}), **rejection_reasons},
                 phase=phase,
+                payloads=list(existing.get("payloads", [])) + payloads,
             )
             return True
         except Exception as _de:

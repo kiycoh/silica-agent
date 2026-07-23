@@ -32,6 +32,50 @@ def test_deferred_put_and_get(store):
     assert bundle["rejection_reasons"]["Agenti Autonomi/MCU.md"] == "too generic"
 
 
+def test_put_persists_payloads_deduplicated(store):
+    """Payloads (the ops' original validation evidence, audit finding 2) are
+    stored with the bundle; the existing+new merge across chunks/re-runs must
+    not re-append the same payload verbatim."""
+    p = {"batches": [{"inbox_file": "inbox/a.md", "concepts": [{"name": "X"}]}]}
+    store.put(
+        "h1", "inbox/a.md", "Dir", None,
+        [{"op": "write", "path": "Dir/X.md", "heading": "X"}],
+        payloads=[p, p, {**p}],  # duplicates by content, not identity
+    )
+    bundle = store.get("h1")
+    assert bundle["payloads"] == [p]
+
+
+def test_put_without_payloads_stores_empty_list(store):
+    store.put("h2", "inbox/a.md", "Dir", None, [{"op": "write", "path": "Dir/X.md"}])
+    assert store.get("h2")["payloads"] == []
+
+
+def test_defer_ops_persists_current_chunk_payload(tmp_path, monkeypatch):
+    """The FSM funnel (_defer_ops) snapshots the current chunk's payload into
+    the bundle, so every defer site gets retry-time grounding parity for free."""
+    from silica.kernel import deferred
+    from silica.router.orchestrator import InjectorFSM
+
+    monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
+    deferred._stores.clear()
+
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    fsm._file_content_hashes = ["hash-defer"]  # _current_content_hash property source
+    chunk_payload = {"batches": [{"inbox_file": "Inbox/test.md",
+                                  "concepts": [{"name": "C", "inbox_excerpt": "testo"}]}]}
+    fsm._chunks = [chunk_payload]
+    fsm._current_chunk_idx = 0
+
+    assert fsm._defer_ops(
+        [{"op": "write", "path": "TargetDir/C.md", "heading": "C", "snippet": "corpo"}],
+        {"TargetDir/C.md": "snippet too short"},
+        phase="VALIDATE",
+    )
+    bundle = deferred.get_deferred_store().get("hash-defer")
+    assert bundle["payloads"] == [chunk_payload]
+
+
 def test_put_stamps_per_op_rejection_reason_and_phase(store):
     """Each op self-describes why and where it was deferred — forensics must
     not need the file-level dict join (path-keyed and heading-keyed alike)."""

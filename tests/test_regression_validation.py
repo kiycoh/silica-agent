@@ -1,7 +1,15 @@
+import pytest
 from unittest.mock import patch
 
 
 from silica.kernel.validate import validate_operations
+
+
+@pytest.fixture(autouse=True)
+def _historical_snippet_floor(monkeypatch):
+    # Predates the 100→400 write-floor raise; short fixtures here exercise
+    # routing/coercion, not the length gate — pin their original floor.
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "100")
 
 
 def test_write_rejects_sibling_directory_with_same_prefix(tmp_path):

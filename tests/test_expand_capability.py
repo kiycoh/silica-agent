@@ -16,7 +16,7 @@ from silica.kernel.ops import OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities.expand import run_expand, MAX_EXPAND_ATTEMPTS
 
-_GOOD_BODY = "La matrice diagonale ha $D_{i,j}=0$ per $i \\neq j$. " * 5
+_GOOD_BODY = "La matrice diagonale ha $D_{i,j}=0$ per $i \\neq j$. " * 9
 _SHORT_BODY = "troppo corto"
 
 

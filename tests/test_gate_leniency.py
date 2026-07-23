@@ -3,7 +3,15 @@
 fence auto-close, and diff-aware patch lint. Each recovers a class of op the
 mineru run of 2026-07-22 deferred without a real defect."""
 
+import pytest
 from silica.kernel.templates import _link_name, close_unbalanced_fences
+
+
+@pytest.fixture(autouse=True)
+def _historical_snippet_floor(monkeypatch):
+    # Predates the 100→400 write-floor raise; short fixtures here exercise
+    # routing/coercion, not the length gate — pin their original floor.
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "100")
 
 
 # --- pure normalizers --------------------------------------------------------

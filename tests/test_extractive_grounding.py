@@ -64,6 +64,7 @@ def test_headings_and_blank_lines_ignored():
 # --- enforcement wired into validate_operations (gated) ---------------------
 
 def test_verbatim_body_passes_under_enforce(tmp_vault, monkeypatch):
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "1")  # test extractivity, not length
     monkeypatch.setenv("SILICA_EXTRACTIVE_ENFORCE", "1")
     verbatim = ("Elena: I finally signed up for the beginners pottery class at the "
                 "community center downtown, it starts on the twentieth of May and "
@@ -78,6 +79,7 @@ def test_paraphrase_rejected_under_enforce_but_passes_without(tmp_vault, monkeyp
     paraphrase = ("Elena enrolled in a beginners ceramics course at the local "
                   "recreation hall downtown, with the first session on May "
                   "twentieth held every Tuesday in the evening, taught by Alvarez.")
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "1")  # test extractivity, not length
     # Gate ON -> the reworded body is rejected (routed to defer/steer).
     monkeypatch.setenv("SILICA_EXTRACTIVE_ENFORCE", "1")
     _, rejected_on = validate_operations(
@@ -94,6 +96,7 @@ def test_paraphrase_rejected_under_enforce_but_passes_without(tmp_vault, monkeyp
 def test_profile_alone_enables_enforcement(tmp_vault, monkeypatch):
     """The extractive profile IS the contract: selecting it (env or vault
     conventions) enforces the verbatim invariant without a second env var."""
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "1")  # test extractivity, not length
     monkeypatch.delenv("SILICA_EXTRACTIVE_ENFORCE", raising=False)
     monkeypatch.setenv("SILICA_DISTILL_PROFILE", "extractive")
     paraphrase = ("Elena enrolled in a beginners ceramics course at the local "
@@ -110,7 +113,7 @@ def test_short_verbatim_floor_is_env_lowerable(tmp_vault, monkeypatch):
     excerpt = short + "\nSam: Nice, when does it start?"
     monkeypatch.delenv("SILICA_MIN_WRITE_SNIPPET_CHARS", raising=False)
     _, rejected = validate_operations([_write_op(short)], _payload(excerpt), "mem")
-    assert any("snippet too short" in r.reason for r in rejected)  # default 100 defers it
+    assert any("snippet too short" in r.reason for r in rejected)  # default floor defers it
     monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "40")
     validated, rejected2 = validate_operations([_write_op(short)], _payload(excerpt), "mem")
     assert not any("snippet too short" in r.reason for r in rejected2)  # lowered floor admits it

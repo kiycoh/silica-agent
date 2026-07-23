@@ -22,6 +22,12 @@ Bundle schema:
   rejection_reasons — {path_or_heading: reason} (file-level; per-op stamps are
                      the forensic source of truth — this dict clobbers on key
                      collision across phases)
+  payloads         — list[payload dict] the ops were originally validated
+                     against. Persisted so silica_deferred_retry re-validates
+                     with the SAME grounding/heading/collision checks that
+                     rejected the ops — the retry used to pass [] and admit on
+                     strictly weaker validation (audit 2026-07-23, finding 2).
+                     Optional: old bundles without it retry as before.
 """
 from __future__ import annotations
 
@@ -103,6 +109,7 @@ class DeferredStore:
         rejected_ops: list[dict],
         rejection_reasons: dict[str, str] | None = None,
         phase: str | None = None,
+        payloads: list[dict] | None = None,
     ) -> None:
         """Persist (or overwrite) a deferred bundle for this content hash.
 
@@ -127,6 +134,19 @@ class DeferredStore:
                 op = {**op, "rejection_phase": phase}
             return op
 
+        # Dedup payloads by content: _defer_ops merges existing + current across
+        # chunks and re-runs of the same source, which would re-append verbatim.
+        seen_p: set[bytes] = set()
+        payloads_dedup: list[dict] = []
+        for p in payloads or []:
+            try:
+                key = orjson.dumps(p, option=orjson.OPT_SORT_KEYS)
+            except Exception:
+                continue
+            if key not in seen_p:
+                seen_p.add(key)
+                payloads_dedup.append(p)
+
         bundle: dict[str, Any] = {
             "content_hash": content_hash,
             "source_path": source_path,
@@ -135,6 +155,7 @@ class DeferredStore:
             "timestamp": time.time(),
             "rejected_ops": _dedup_ops([_stamp(o) for o in rejected_ops]),
             "rejection_reasons": reasons,
+            "payloads": payloads_dedup,
         }
         atomic_write_bytes(
             self._bundle_path(content_hash),

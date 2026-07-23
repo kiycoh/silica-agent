@@ -10,8 +10,17 @@ when the source itself uses that markup.
 """
 from __future__ import annotations
 
+import pytest
+
 from silica.kernel.provenance import ungrounded_spans
 from silica.kernel.validate import validate_operations
+
+
+@pytest.fixture(autouse=True)
+def _low_snippet_floor(monkeypatch):
+    # These integration tests exercise the grounding gate, not the length gate;
+    # keep the raised write-snippet floor from shadowing short verbatim fixtures.
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "1")
 
 
 # --- pure function -----------------------------------------------------------

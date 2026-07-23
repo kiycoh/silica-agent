@@ -11,6 +11,7 @@ exposed as silica_run_injector). Only the deferred retry is agent-facing.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -19,6 +20,77 @@ from silica.driver import DRIVER
 from silica.tools import tool
 from silica.kernel.ops import OpType
 from silica.kernel.ops_io import load_ops, dump_ops
+
+logger = logging.getLogger(__name__)
+
+
+def _link_recovered_writes(
+    ops: list, target_dir: str, hub: str | None, source_path: str = ""
+) -> None:
+    """Give anneal-recovered writes the graph edges the FSM's AUTOLINK and
+    HUB_UPDATE states would have added — the deferred retry path bypasses both,
+    so recovered notes otherwise land as orphans with zero edges and no MOC
+    membership (audit finding 2).
+
+    Best-effort, mirroring the FSM's non-fatal stance: both passes only ADD
+    links; neither can break a valid note.
+    """
+    import os
+    from silica.kernel.autolink import build_title_index
+    from silica.kernel.moc import hub_desc, merge_moc_section, moc_heading
+
+    hub_name = (hub or "").strip("[]")
+    hub_l = hub_name.lower()
+    written = [
+        op for op in ops
+        if op.op in (OpType.write, OpType.overwrite) and op.touched_ref()
+        and os.path.splitext(os.path.basename(op.touched_ref()))[0].lower() != hub_l
+    ]
+    if not written:
+        return
+
+    # Inline autolink (what the FSM's AUTOLINK state does per chunk).
+    try:
+        title_index = build_title_index(DRIVER.list_files(target_dir or ""))
+    except Exception as e:
+        logger.warning("anneal: title-index build failed, recovered notes stay unlinked: %s", e)
+        return
+    for op in written:
+        try:
+            DRIVER.autolink_note(
+                op.touched_ref(), candidates=title_index, title_index=title_index
+            )
+        except Exception as e:
+            logger.debug("anneal: autolink skipped '%s' (non-fatal): %s", op.touched_ref(), e)
+
+    # Hub-MOC membership (what the FSM's HUB_UPDATE state does per chunk):
+    # same heading/merge helpers, so recovered bullets coalesce with the
+    # section an in-flight chunk of the same source already created.
+    if not hub_name:
+        return
+    hub_path = f"{(target_dir or '').rstrip('/')}/{hub_name}.md"
+    try:
+        hub_note = DRIVER.read_note(hub_path)
+    except Exception as e:
+        logger.warning("anneal: hub '%s' not readable, MOC membership skipped: %s", hub_path, e)
+        return
+    try:
+        entries = [
+            (os.path.splitext(os.path.basename(op.touched_ref()))[0],
+             hub_desc(op.snippet or op.content or ""))
+            for op in written
+        ]
+        source_name = os.path.splitext(os.path.basename(source_path))[0] or "deferred"
+        sample = hub_note.content + " ".join(d for _, d in entries[:3])
+        heading = moc_heading(source_name, sample)
+        note_lines = [f"- [[{n}]] — {d}" if d else f"- [[{n}]]" for n, d in entries]
+        DRIVER.overwrite(hub_path, merge_moc_section(hub_note.content, heading, note_lines))
+        logger.info(
+            "anneal: %d recovered note(s) autolinked and added to hub '%s' MOC",
+            len(written), hub_name,
+        )
+    except Exception as e:
+        logger.warning("anneal: hub MOC update failed (non-fatal): %s", e)
 
 
 def _recon_embedder():
@@ -355,7 +427,13 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
     except Exception as e:
         return {"error": f"Failed to parse deferred ops: {e}"}
 
-    validated, still_rejected = validate_operations(ops, [], target_dir, hub=hub)
+    # Re-validate against the bundle's ORIGINAL payloads (persisted at defer
+    # time) so grounding/heading/collision checks run with the same evidence
+    # that rejected the ops — an empty list here used to admit them on strictly
+    # weaker validation (audit finding 2). Old bundles without payloads keep
+    # the previous behavior.
+    payloads = bundle.get("payloads") or []
+    validated, still_rejected = validate_operations(ops, payloads, target_dir, hub=hub)
 
     if not validated:
         return {
@@ -391,6 +469,9 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
         except Exception:
             pass
 
+    # Recovered writes bypassed the FSM's AUTOLINK/HUB_UPDATE — give them edges.
+    _link_recovered_writes(validated, target_dir, hub, bundle.get("source_path", ""))
+
     # Update or clear the deferred store
     if still_rejected:
         store.put(
@@ -403,6 +484,7 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
                 (r.op.path or r.op.heading or "?"): r.reason for r in still_rejected
             },
             phase="RETRY",
+            payloads=payloads,  # keep grounding evidence for the next retry
         )
     else:
         store.remove(content_hash)

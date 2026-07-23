@@ -6,6 +6,15 @@ vault — that is how the four «Machine Learning» umbrella notes were born.
 """
 from __future__ import annotations
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _historical_snippet_floor(monkeypatch):
+    # Predates the 100→400 write-floor raise; short fixtures here exercise
+    # routing/coercion, not the length gate — pin their original floor.
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "100")
+
 
 # ---------------------------------------------------------------------------
 # title_key — the equivalence key

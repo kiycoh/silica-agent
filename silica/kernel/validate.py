@@ -3,6 +3,7 @@
 
 import os
 import logging
+import re
 from pydantic import BaseModel
 from silica.driver import DRIVER
 from silica.kernel.ops import Op, OpType
@@ -17,7 +18,95 @@ logger = logging.getLogger(__name__)
 # distiller returned whole chunks with snippet="" despite full inbox excerpts).
 # Rejection routes through the existing defer + steer path, so the distiller
 # gets re-prompted with the reason.
-MIN_WRITE_SNIPPET_CHARS = 100
+#
+# Raised 100→400 (audit 2026-07-23): a 130-220 char body is a meta-summary of
+# the source section, not the section — the run's note-body length was bimodal
+# (thin ≤220 vs rich ≥1300), and 400 routes the thin band to expand.
+# ponytail: length is a proxy for "content, not a description of it" — a true
+# shape check needs semantic judgment, not a regex; left as the worker-model lever.
+MIN_WRITE_SNIPPET_CHARS = 400
+
+
+def min_write_snippet_chars() -> int:
+    """Effective write-body floor: env override else the compiled default, read
+    at call time. Single source so the expand recovery uses the SAME floor the
+    gate enforces — they used to diverge (expand cleared bodies at 100 while the
+    gate could want more, so expanded notes stayed thin, audit finding 1)."""
+    return int(os.getenv("SILICA_MIN_WRITE_SNIPPET_CHARS", str(MIN_WRITE_SNIPPET_CHARS)))
+
+
+# --- meta-description shape gate (audit 2026-07-23, finding 1) ---------------
+# A small worker model writes bodies that ANNOUNCE the source section instead of
+# delivering it: "Task: classificazione supervisionata... Include definizione
+# formale e esempio di applicazione pratica." Length alone can't catch a 400+
+# char announcement, so this detects announcement *shape*: content-noun
+# announcements ("include definizione", "provides an overview"), deixis to the
+# source artifact ("questa sezione", "la lezione"), or patch-style openers
+# ("Estende la sezione su..."). Rejection routes through defer/steer/expand,
+# which re-prompts with this reason — a false positive costs one retry, not the
+# note. ponytail: lexical heuristic, IT+EN only; a semantic judge is the upgrade
+# path if new marker families appear.
+
+# Announcement verb followed (same clause) by an abstract content-noun.
+_META_ANNOUNCE_RE = re.compile(
+    r"\b(?:include|contiene|presenta|descrive|copre|tratta|riassume|illustra|fornisce"
+    r"|includes?|contains?|presents?|describes?|covers?|summarizes?|outlines?|provides?)\b"
+    r"[^.\n]{0,60}?"
+    r"\b(?:definizion\w*|esemp\w*|panoramic\w*|descrizion\w*|spiegazion\w*|introduzion\w*"
+    r"|dettagl\w*|informazion\w*|overview|definitions?|examples?|details?"
+    r"|explanations?|introductions?)\b",
+    re.IGNORECASE,
+)
+# Deixis to the source artifact itself (demonstratives, or the unambiguous
+# section words — "il documento" is left out: too common as subject matter).
+_META_DEICTIC_RE = re.compile(
+    r"\b(?:questa|questo)\s+(?:sezione|nota|documento|capitolo)\b"
+    r"|\b(?:la\s+sezione|il\s+capitolo|la\s+lezione)\b"
+    r"|\bthis\s+(?:section|note|document|chapter)\b|\bthe\s+section\b",
+    re.IGNORECASE,
+)
+_META_VERB_RE = re.compile(
+    r"\b(?:include|contiene|presenta|descrive|copre|tratta|riassume|illustra|spiega"
+    r"|covers?|describes?|contains?|includes?|presents?|summarizes?|outlines?|explains?)\b",
+    re.IGNORECASE,
+)
+# Patch-style opener on a WRITE body: extends/adds something instead of being it.
+_META_OPENER_RE = re.compile(
+    r"^(?:estende|aggiunge|aggiunto|integra|amplia|extends?|adds?|added|updates?)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_content_evidence(body: str) -> bool:
+    """Signals the body delivers material rather than announcing it: code,
+    math, a real list, or multi-paragraph length."""
+    if "```" in body or "$" in body:
+        return True
+    if sum(1 for l in body.splitlines() if l.lstrip().startswith(("-", "*", "+"))) >= 3:
+        return True
+    paragraphs = [p for p in re.split(r"\n\s*\n", body) if p.strip()]
+    return len(paragraphs) >= 3 or len(body) >= 800
+
+
+def meta_description_reason(body: str) -> str | None:
+    """Reason string when a write body reads as a meta-description of its
+    source section instead of the section's content; None when it looks fine."""
+    b = (body or "").strip()
+    if not b or _has_content_evidence(b):
+        return None
+    markers = []
+    if _META_ANNOUNCE_RE.search(b):
+        markers.append("content announcement")
+    if _META_OPENER_RE.match(b):
+        markers.append("patch-style opener")
+    if not markers and _META_DEICTIC_RE.search(b) and _META_VERB_RE.search(b):
+        markers.append("source-artifact deixis")
+    if not markers:
+        return None
+    return (
+        f"body reads as a meta-description of the source ({', '.join(markers)}) "
+        f"— write the section's actual content, not a summary of what it contains"
+    )
 
 
 class Rejection(BaseModel):
@@ -490,7 +579,7 @@ def validate_operations(
             # a durable fact can live in a legitimately short turn — a 60-char
             # verbatim fact is real content, not the prose-placeholder this gate
             # guards against — so the extractive arm sets a lower floor.
-            _min_snippet = int(os.getenv("SILICA_MIN_WRITE_SNIPPET_CHARS", str(MIN_WRITE_SNIPPET_CHARS)))
+            _min_snippet = min_write_snippet_chars()
             if body_len < _min_snippet:
                 rejected_ops.append(Rejection(
                     op=op,
@@ -500,6 +589,17 @@ def validate_operations(
                     ),
                 ))
                 continue
+
+            # Shape gate: a long-enough body can still be an announcement of the
+            # section instead of the section. Skipped under extractive enforce
+            # (verbatim-selected content is grounded by construction, and the
+            # source's own wording must not be judged); env kill-switch for
+            # eval arms, same pattern as the length floor.
+            if not _extract_enforce and os.getenv("SILICA_META_SHAPE_CHECK", "1") != "0":
+                _shape_reason = meta_description_reason(op.snippet or "")
+                if _shape_reason:
+                    rejected_ops.append(Rejection(op=op, reason=_shape_reason))
+                    continue
 
             _resolve_parent(op, cleared_parents_out)
             _check_grounding(op)

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import TYPE_CHECKING
 
 from silica.router import orchestrator as orch
@@ -26,33 +25,13 @@ logger = logging.getLogger(__name__)
 
 from silica.kernel.ops import OpType
 
-
-def _moc_heading(source_name: str, sample: str) -> str:
-    """Language-aware MOC section heading: '## Da: {name}' or '## From: {name}'.
-
-    Routes through kernel/language (C1) — the private Italian marker regex
-    this replaces missed prose outside its hardcoded word list.
-    """
-    from silica.kernel.language import detect
-    prefix = "Da" if detect(sample) == "italian" else "From"
-    return f"## {prefix}: {source_name}"
-
-
-def _merge_moc_section(content: str, heading: str, note_lines: list[str]) -> str:
-    """Append note_lines to an existing MOC section or create a new one.
-
-    When the same source file produces multiple chunks, each chunk calls
-    HUB_UPDATE.  Rather than duplicating the heading, new links are appended
-    inside the existing section.
-    """
-    if heading + "\n" in content or heading + "\r\n" in content:
-        # Append new links just before the next same-level heading or end of file.
-        pattern = re.compile(re.escape(heading) + r'(.*?)(?=\n##\s|\Z)', re.DOTALL)
-        def _append(m: re.Match) -> str:
-            return m.group(0).rstrip() + "\n" + "\n".join(note_lines) + "\n"
-        return pattern.sub(_append, content, count=1)
-    moc_block = f"\n{heading}\n\n" + "\n".join(note_lines) + "\n"
-    return content.rstrip() + "\n" + moc_block
+# Extracted to kernel/moc.py so the deferred-retry path (tools/pipeline.py) can
+# reuse them; aliased here to keep the FSM code and existing tests unchanged.
+from silica.kernel.moc import (
+    hub_desc as _hub_desc,
+    merge_moc_section as _merge_moc_section,
+    moc_heading as _moc_heading,
+)
 
 
 def _resolve_vault_path(name: str) -> str | None:
@@ -417,7 +396,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
         if note_name.lower() == hub_name_lower:
             continue
         snippet = (op.snippet or "").strip()
-        desc = snippet.split("\n")[0] if snippet else ""
+        desc = _hub_desc(snippet)
         effective_parent = (op.parent.strip("[]") if op.parent else None) or hub_name
         if effective_parent.lower() == hub_name_lower:
             hub_notes.append((note_name, desc))

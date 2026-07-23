@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 import re
+import unicodedata
 import yaml
 
 FM_RE = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
@@ -25,6 +26,9 @@ def clean_tag(t):
     # require a separator + space so "3d"/"2fa"/"3D-Printing" keep their leading digit.
     t = re.sub(r'^\d+[.\)]\s+', '', str(t))
     t = t.lower()
+    # Transliterate accented chars to ASCII (à→a, ì→i) instead of deleting them:
+    # on an Italian vault the old strip truncated "scalabilità"→"scalabilit".
+    t = unicodedata.normalize('NFKD', t).encode('ascii', 'ignore').decode('ascii')
     t = re.sub(r'[^a-z0-9\s-]', '', t)
     t = re.sub(r'[\s_]+', '-', t)
     return t.strip('-')
