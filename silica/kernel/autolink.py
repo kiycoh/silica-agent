@@ -12,12 +12,12 @@ Rule (from the plan):
   the autolink pass focused and fast.
 
 Skip regions (never modified):
-  - YAML frontmatter  (--- block at the very top of the note)
-  - Fenced code       (``` or ~~~ blocks)
+  - YAML frontmatter  (--- block at the very top of the note, LF or CRLF)
+  - Fenced code       (``` or ~~~ blocks, incl. unclosed-to-EOF) and indented code
   - Inline code       (`...`)
   - LaTeX math        ($...$  and  $$...$$)
-  - Existing wikilinks ([[...]])
-  - HTML comments     (<!-- ... -->)
+  - Bare URLs, markdown links/images, inline #tags, HTML tags/comments
+  - Existing wikilinks ([[...]]) and heading lines
 
 Disambiguation rule:
   If `title_index` contains two entries that differ only in path but share the
@@ -38,11 +38,10 @@ from typing import Sequence
 # Skip-region detection
 # ---------------------------------------------------------------------------
 
-# Matches the YAML frontmatter at the very top of a note (OFM convention)
-_FRONTMATTER_RE = re.compile(r"\A---\n.*?\n---\n?", re.DOTALL)
-
-# Fenced code blocks (``` or ~~~, any info string)
-_FENCED_CODE_RE = re.compile(r"(?:```|~~~)[^\n]*\n.*?(?:```|~~~)", re.DOTALL)
+# Matches the YAML frontmatter at the very top of a note (OFM convention).
+# \r?\n so Windows (CRLF) user notes touched by backlink_pass are protected too
+# — otherwise the whole frontmatter fails to match and becomes linkable.
+_FRONTMATTER_RE = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*\r?\n?", re.DOTALL)
 
 # Inline code (`...`)
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
@@ -53,8 +52,23 @@ _DISPLAY_MATH_RE = re.compile(r"\$\$.*?\$\$", re.DOTALL)
 # Inline math ($...$) — single-line only
 _INLINE_MATH_RE = re.compile(r"\$[^$\n]+\$")
 
+# Bare URLs — never link a word inside https://example.com/Neural-Networks
+_URL_RE = re.compile(r"https?://[^\s<>()\[\]]+")
+
+# Inline Obsidian tags (#tag, #nested/tag) — preceded by start/whitespace so
+# C# and heading markers ("# Title") don't match. Linking would kill the tag.
+_INLINE_TAG_RE = re.compile(r"(?<!\S)#[A-Za-z_][\w/-]*")
+
 # Existing wikilinks [[...]]
 _WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
+
+# Markdown links and images: [text](href) / ![alt](href). Protects both the
+# link/alt text and the href. Autolink-only — rename REWRITES these hrefs, so
+# this never goes in the BASE set.
+_MD_LINK_RE = re.compile(r"!?\[[^\]\n]*\]\([^)\n]*\)")
+
+# HTML tags with their attributes (<img alt="Neural Networks" ...>)
+_HTML_TAG_RE = re.compile(r"</?[A-Za-z][^>]*>")
 
 # HTML comments
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
@@ -63,30 +77,83 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _HEADING_RE = re.compile(r"^#{1,6} .+$", re.MULTILINE)
 
 
+def _block_skip_spans(text: str) -> list[tuple[int, int]]:
+    """Char spans for line-based code regions: fenced code (``` / ~~~, including
+    an unclosed fence that runs to EOF) and indented (4-space/tab) code blocks.
+
+    Line-scanned, not regex: sequential-pairing regexes can't survive an
+    unbalanced fence marker (audit finding 6), and an indented code block is
+    defined by a preceding blank line (CommonMark) — neither is a clean regex.
+    """
+    spans: list[tuple[int, int]] = []
+    pos = 0
+    fence_open_at: int | None = None
+    prev_blank = True          # start of doc can begin an indented code block
+    in_indented = False
+    for line in text.splitlines(keepends=True):
+        end = pos + len(line)
+        is_fence = line.lstrip(" \t").startswith(("```", "~~~"))
+        is_blank = line.strip() == ""
+
+        if fence_open_at is not None:          # inside a fence
+            if is_fence:                       # closing delimiter
+                spans.append((fence_open_at, end))
+                fence_open_at = None
+            prev_blank, in_indented, pos = False, False, end
+            continue
+        if is_fence:                           # opening delimiter
+            fence_open_at = pos
+            prev_blank, in_indented, pos = False, False, end
+            continue
+
+        indented = (line.startswith(("    ", "\t")) and not is_blank)
+        if indented and (prev_blank or in_indented):
+            spans.append((pos, end))
+            in_indented = True
+        elif not is_blank:                     # blank lines may sit inside a block
+            in_indented = False
+        prev_blank, pos = is_blank, end
+
+    if fence_open_at is not None:              # unclosed fence → mask to EOF
+        spans.append((fence_open_at, len(text)))
+    return spans
+
+
 # Shared skip-region idiom (kernel/rename.py reuses it via build_skip_mask).
-# BASE = regions both callers protect; FULL adds regions only autolink skips
-# (it must not touch existing wikilinks/headings, rename wants to rewrite them).
+# BASE = regions both callers protect; FULL adds regions only autolink skips.
+# rename REWRITES wikilinks, headings and markdown-link hrefs, so those live in
+# FULL, never BASE. Fenced/indented code is always masked (see build_skip_mask).
 SKIP_PATTERNS_BASE = (
     _FRONTMATTER_RE,
-    _FENCED_CODE_RE,
     _INLINE_CODE_RE,
     _DISPLAY_MATH_RE,
     _INLINE_MATH_RE,
+    _URL_RE,
+    _INLINE_TAG_RE,
 )
 SKIP_PATTERNS_FULL = SKIP_PATTERNS_BASE + (
     _WIKILINK_RE,
+    _MD_LINK_RE,
+    _HTML_TAG_RE,
     _HTML_COMMENT_RE,
     _HEADING_RE,
 )
 
 
 def build_skip_mask(text: str, patterns=SKIP_PATTERNS_FULL) -> list[bool]:
-    """Return a per-character boolean mask: True = inside a skip region."""
+    """Return a per-character boolean mask: True = inside a skip region.
+
+    Applies `patterns` plus the always-on line-based code regions
+    (`_block_skip_spans`): fenced and indented code protect both callers.
+    """
     mask = [False] * len(text)
     for pattern in patterns:
         for m in pattern.finditer(text):
             for i in range(m.start(), m.end()):
                 mask[i] = True
+    for start, end in _block_skip_spans(text):
+        for i in range(start, end):
+            mask[i] = True
     return mask
 
 
@@ -152,13 +219,23 @@ def autolink(
     # Pre-scan: collect titles that are already wikilinked in the body.
     # A note should have at most one [[title]] link — if it's already there,
     # skip that title entirely regardless of where in the body it appears.
+    # Path-qualified targets ([[topics/Python]]) also register their basename
+    # ("python") so we don't add a second, redundant [[Python]] (audit §3).
     from silica.kernel.ast import WIKILINK_TARGET_RE
-    existing_links: set[str] = {
-        m.strip().lower() for m in WIKILINK_TARGET_RE.findall(body)
-    }
+    existing_links: set[str] = set()
+    for _m in WIKILINK_TARGET_RE.findall(body):
+        t = _m.strip().lower()
+        if t:
+            existing_links.add(t)
+            existing_links.add(t.rsplit("/", 1)[-1])
 
     added: list[str] = []
     current = body
+
+    # Skip mask built once; rebuilt only after an actual substitution shifts
+    # positions. When most titles don't match (full-index fallback), this is the
+    # difference between one mask build and one-per-title (audit §4).
+    mask = _build_skip_mask(current)
 
     for title in work_titles:
         if len(title) < 2:
@@ -174,9 +251,6 @@ def autolink(
             re.IGNORECASE,
         )
 
-        # Rebuild skip mask on the current body (changes after each substitution)
-        mask = _build_skip_mask(current)
-
         # Find the first match that is NOT inside a skip region
         match = None
         for m in pattern.finditer(current):
@@ -187,11 +261,15 @@ def autolink(
         if match is None:
             continue
 
-        # Preserve the exact casing from the body but link to the title
-        link = f"[[{title}]]"
+        # Preserve the body's casing as an alias when it differs from the
+        # canonical title ([[Neural Networks|neural networks]]) — otherwise the
+        # canonical form rewrites mid-sentence prose (audit §3).
+        matched_text = current[match.start() : match.end()]
+        link = f"[[{title}]]" if matched_text == title else f"[[{title}|{matched_text}]]"
         current = current[: match.start()] + link + current[match.end() :]
         added.append(title)
         existing_links.add(title.lower())  # prevent duplicates within this call
+        mask = _build_skip_mask(current)   # positions shifted — rebuild
 
     return current, added
 
@@ -245,7 +323,9 @@ def build_title_index(refs: list) -> list[str]:
     """Build a disambiguated title list from driver NoteRef objects.
 
     Drops any title that appears more than once (basename conflict) — such
-    titles cannot be safely linked without an explicit path qualifier.
+    titles cannot be safely linked without an explicit path qualifier. The count
+    is case-insensitive to match autolink's IGNORECASE matching: `Foo` and `foo`
+    are ambiguous together and both dropped (audit §3).
 
     Args:
         refs: list of NoteRef objects with `.name` attribute.
@@ -255,10 +335,14 @@ def build_title_index(refs: list) -> list[str]:
     """
     from collections import Counter
 
-    name_counts: Counter[str] = Counter()
+    lower_counts: Counter[str] = Counter()
+    first_casing: dict[str, str] = {}
     for ref in refs:
         name = ref if isinstance(ref, str) else (getattr(ref, "name", None) or "")
         if name:
-            name_counts[name] += 1
+            lower_counts[name.lower()] += 1
+            first_casing.setdefault(name.lower(), name)
 
-    return sorted(name for name, count in name_counts.items() if count == 1)
+    return sorted(
+        first_casing[lc] for lc, count in lower_counts.items() if count == 1
+    )

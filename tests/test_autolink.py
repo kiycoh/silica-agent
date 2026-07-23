@@ -19,7 +19,10 @@ def test_autolink_adds_wikilink_for_matching_title():
 def test_autolink_case_insensitive():
     body = "We study neural networks."
     new_body, added = autolink(body, ["Neural Networks"])
-    assert "[[Neural Networks]]" in new_body
+    # Casing differs from the canonical title → alias-preserving link so the
+    # body prose keeps its own casing (audit §3).
+    assert "[[Neural Networks|neural networks]]" in new_body
+    assert "Neural Networks" in added
 
 
 def test_autolink_links_first_occurrence_only():
@@ -64,6 +67,18 @@ def test_autolink_skips_fenced_code():
     # Only the first occurrence (before the code block) should be linked
     assert new_body.count("[[Neural Networks]]") == 1
     assert "# Neural Networks example" in new_body  # code unchanged
+
+
+def test_autolink_never_links_fence_info_string_even_when_unbalanced():
+    # An unbalanced fence elsewhere used to shift the sequential-pairing mask and
+    # leave a later info string exposed: ```python → ```[[Python]] (audit finding 5).
+    body = (
+        "See ```unclosed fence with no partner\n\n"
+        "Later:\n```python\nx = 1\n```\n"
+    )
+    new_body, added = autolink(body, ["Python"])
+    assert "```python" in new_body          # info string intact
+    assert "[[Python]]" not in new_body     # fence delimiter never linked
 
 
 def test_autolink_skips_inline_code():
@@ -265,3 +280,101 @@ def test_autolink_self_link_not_excluded_when_none():
     new_body, added = autolink(body, ["PWM"])
     # Without self_title, the title IS linked (previous behavior preserved)
     assert "[[PWM]]" in new_body
+
+
+# ---------------------------------------------------------------------------
+# Content-corruption regressions (audit 2026-07-23 §2 — incomplete skip mask)
+# Each case ran `autolink()` real and produced corruption before the fix.
+# ---------------------------------------------------------------------------
+
+def test_autolink_skips_bare_url():
+    body = "See https://example.com/page for more."
+    new_body, added = autolink(body, ["example", "page"])
+    assert new_body == body
+    assert added == []
+
+
+def test_autolink_skips_markdown_link_text():
+    body = "Read [intro to Neural Networks](http://u) today."
+    new_body, added = autolink(body, ["Neural Networks"])
+    assert new_body == body  # link text is not prose to link
+
+
+def test_autolink_skips_url_inside_markdown_link():
+    body = "Read [the docs](https://x.com/page) now."
+    new_body, added = autolink(body, ["page"])
+    assert new_body == body
+
+
+def test_autolink_does_not_kill_inline_tag():
+    body = "This note is about #Python and its ecosystem."
+    new_body, added = autolink(body, ["Python"])
+    assert "#Python" in new_body            # tag survives intact
+    assert "#[[Python]]" not in new_body    # never rewritten into the tag
+
+
+def test_autolink_skips_indented_code_block():
+    body = "Prose here.\n\n    import Python\n    Python.run()\n\nMore prose."
+    new_body, added = autolink(body, ["Python"])
+    assert "    import Python" in new_body
+    assert "[[Python]]" not in new_body
+
+
+def test_autolink_skips_unclosed_fence_to_eof():
+    # A fence opened and never closed leaves its body exposed to matching
+    # unless masked to EOF (audit finding 6).
+    body = "intro\n```python\nresult = Python.run()\n"
+    new_body, added = autolink(body, ["Python"])
+    assert new_body == body
+    assert added == []
+
+
+def test_autolink_skips_crlf_frontmatter():
+    # Windows line endings must not defeat frontmatter masking — backlink_pass
+    # rewrites pre-existing USER notes, which may be CRLF (audit finding 7).
+    body = "---\r\ntitle: Neural Networks\r\ntags: [ai]\r\n---\r\nNeural Networks rock."
+    new_body, added = autolink(body, ["Neural Networks"])
+    assert "title: Neural Networks" in new_body            # frontmatter untouched
+    assert "[[Neural Networks]]" in new_body               # body occurrence linked
+    assert new_body.count("[[Neural Networks]]") == 1
+
+
+def test_autolink_skips_html_attribute():
+    body = 'Diagram: <img alt="Neural Networks flow" src="x.png"> below.'
+    new_body, added = autolink(body, ["Neural Networks"])
+    assert new_body == body
+
+
+# ---------------------------------------------------------------------------
+# Link-coherence regressions (audit 2026-07-23 §3)
+# ---------------------------------------------------------------------------
+
+def test_autolink_preserves_body_casing_as_alias():
+    body = "we love neural networks a lot"
+    new_body, added = autolink(body, ["Neural Networks"])
+    assert "[[Neural Networks|neural networks]]" in new_body
+    # And it stays idempotent through the alias
+    again, added2 = autolink(new_body, ["Neural Networks"])
+    assert again == new_body
+    assert added2 == []
+
+
+def test_autolink_exact_casing_uses_plain_link():
+    body = "Neural Networks are powerful."
+    new_body, added = autolink(body, ["Neural Networks"])
+    assert "[[Neural Networks]]" in new_body
+    assert "|" not in new_body  # no needless alias when casing matches
+
+
+def test_autolink_path_qualified_link_blocks_duplicate():
+    # [[topics/Python]] already links the note — do not add a bare [[Python]].
+    body = "See [[topics/Python]]. Python is great."
+    new_body, added = autolink(body, ["Python"])
+    assert new_body.count("[[") == 1
+    assert added == []
+
+
+def test_build_title_index_case_insensitive_dedup():
+    # Foo and foo are ambiguous under IGNORECASE matching → both dropped.
+    index = build_title_index(["Foo", "foo", "Bar"])
+    assert index == ["Bar"]
