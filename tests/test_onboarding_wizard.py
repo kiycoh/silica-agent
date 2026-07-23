@@ -69,8 +69,11 @@ class TestRunWizard:
     def _no_live_endpoint_probe(self, monkeypatch):
         # Never touch a real LM Studio / local endpoint from the suite. Tests that
         # exercise autodetect re-monkeypatch this to a fixed list (later wins).
+        # Rerank-extra detection is pinned False so the reranker question is
+        # deterministic regardless of what this machine has installed.
         import silica.onboarding.wizard as wizard
         monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: [])
+        monkeypatch.setattr(wizard, "_rerank_extra_present", lambda: False)
 
     def _scripted(self, answers):
         it = iter(answers)
@@ -90,11 +93,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",            # setup mode → essential
             str(vault),    # vault path (no repo detected)
             "",            # force language? → Enter, follow source
             "",            # provider → default lmstudio
             "test-model",  # model id
-            "skip",        # embeddings → skip
+            "n",           # high-value gate → skip embeddings/reranker
             "",            # write .env → default y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -120,13 +124,14 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",                             # setup mode → essential
             str(vault),                     # vault path
             "",                             # force language? → Enter
             "custom",                       # provider
             "http://localhost:8000/v1",     # base URL
             "",                             # API key → default dummy-key
             "qwen3",                        # model id
-            "skip",                         # embeddings
+            "n",                            # high-value gate → skip
             "",                             # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -152,11 +157,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "_ollama_installed_models", lambda: ["llama3.2:3b"])
 
         answers = [
+            "",              # setup mode → essential
             str(vault),      # vault path
             "",              # force language? → Enter
             "ollama",        # provider
             "llama3.2:3b",   # model id
-            "skip",          # embeddings
+            "n",             # high-value gate → skip
             "",              # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -179,11 +185,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "_ollama_installed_models", lambda: ["mistral:7b"])
 
         answers = [
+            "",          # setup mode → essential
             str(vault),  # vault path
             "",          # force language? → Enter
             "ollama",    # provider
             "",          # model id → Enter accepts first installed default
-            "skip",      # embeddings
+            "n",         # high-value gate → skip
             "",          # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -203,12 +210,13 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",             # setup mode → essential
             str(vault),     # vault path
             "",             # force language? → Enter
             "groq",         # provider
             "",             # model → default groq/llama-3.3-70b-versatile
             "gsk_test",     # Groq API key
-            "skip",         # embeddings
+            "n",            # high-value gate → skip
             "",             # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -228,7 +236,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
 
-        answers = [str(vault), "", "", "test-model", "skip", "n"]
+        answers = ["", str(vault), "", "", "test-model", "n", "n"]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 1
@@ -245,11 +253,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",            # setup mode → essential
             "",            # repo mode? → default y
             "",            # force language? → Enter, follow source
             "",            # provider → lmstudio
             "test-model",  # model
-            "skip",        # embeddings
+            "n",           # high-value gate → skip
             "",            # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -270,11 +279,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",            # setup mode → essential
             "",            # repo mode? → default y
             "",            # force language? → Enter, follow source
             "",            # provider → lmstudio
             "test-model",  # model
-            "skip",        # embeddings
+            "n",           # high-value gate → skip
             "",            # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -296,11 +306,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",            # setup mode → essential
             "",            # repo mode? → default y
             "Italian",     # force language? → explicit answer
             "",            # provider → lmstudio
             "test-model",  # model
-            "skip",        # embeddings
+            "n",           # high-value gate → skip
             "",            # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -320,7 +331,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
-        answers = ["", "Italian", "", "test-model", "skip", ""]
+        answers = ["", "", "Italian", "", "test-model", "n", ""]
         wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         manifest = load_manifest(str(tmp_path / "docs" / "silica"))
@@ -336,7 +347,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
-        answers = ["", "", "", "test-model", "skip", ""]
+        answers = ["", "", "", "", "test-model", "n", ""]
         wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         manifest = load_manifest(str(tmp_path / "docs" / "silica"))
@@ -353,7 +364,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
-        answers = ["", "", "test-model", "skip", ""]
+        answers = ["", "", "", "test-model", "n", ""]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
@@ -368,7 +379,7 @@ class TestRunWizard:
         vault = tmp_path / "vault"
         vault.mkdir()
         # Input exhausts after the vault answer → simulates Ctrl+D mid-wizard
-        rc = wizard.run_wizard(input_fn=self._scripted([str(vault)]), env_path=env_path)
+        rc = wizard.run_wizard(input_fn=self._scripted(["", str(vault)]), env_path=env_path)
 
         assert rc == 1
         assert not env_path.exists()
@@ -389,11 +400,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",            # setup mode → essential
             str(vault),    # vault path (no repo detected)
             "Italian",     # force language? → explicit answer
             "",            # provider → lmstudio
             "test-model",  # model
-            "skip",        # embeddings
+            "n",           # high-value gate → skip
             "",            # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -426,11 +438,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",            # setup mode → essential
             str(vault),    # vault path (no repo detected)
             "",            # force language? → Enter, follow source
             "",            # provider → lmstudio
             "test-model",  # model
-            "skip",        # embeddings
+            "n",           # high-value gate → skip
             "",            # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -452,11 +465,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",            # setup mode → essential
             "",            # repo mode? → default y
             "yes",         # force language? → looks like consent, not a language
             "",            # provider → lmstudio
             "test-model",  # model
-            "skip",        # embeddings
+            "n",           # high-value gate → skip
             "",            # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -481,11 +495,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",                   # setup mode → essential
             "",                   # repo mode? → default y
             "English: British",  # force language? → colon would corrupt raw YAML
             "",                   # provider → lmstudio
             "test-model",         # model
-            "skip",               # embeddings
+            "n",                  # high-value gate → skip
             "",                   # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -513,11 +528,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
 
         answers = [
+            "",            # setup mode → essential
             str(vault),    # vault path (no repo detected)
             # NO language answer — vault.yaml already exists, must not be asked
             "",            # provider → lmstudio
             "test-model",  # model
-            "skip",        # embeddings
+            "n",           # high-value gate → skip
             "",            # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -539,11 +555,12 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: ["qwen3-30b"])
 
         answers = [
+            "",          # setup mode → essential
             str(vault),  # vault path
             "",          # force language? → Enter
             "",          # provider → lmstudio
             "",          # model id → Enter accepts probed default
-            "skip",      # embeddings
+            "n",         # high-value gate → skip
             "",          # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -564,11 +581,12 @@ class TestRunWizard:
         # autouse fixture already stubs _endpoint_model_ids → []
 
         answers = [
+            "",              # setup mode → essential
             str(vault),      # vault path
             "",              # force language? → Enter
             "",              # provider → lmstudio
             "typed-model",   # model id → must be typed (no probed default)
-            "skip",          # embeddings
+            "n",             # high-value gate → skip
             "",              # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -591,12 +609,15 @@ class TestRunWizard:
         )
 
         answers = [
+            "",          # setup mode → essential
             str(vault),  # vault path
             "",          # force language? → Enter
             "",          # provider → lmstudio
             "",          # model → Enter accepts probed qwen3-30b
+            "",          # high-value gate → default y
             "",          # configure embeddings? → default y
             "",          # "use nomic-embed-text at ...?" → default y
+            "",          # in-process reranker? → default n
             "",          # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -621,14 +642,17 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: ["qwen3-30b"])
 
         answers = [
+            "",          # setup mode → essential
             str(vault),  # vault path
             "",          # force language? → Enter
             "",          # provider → lmstudio
             "",          # model → Enter accepts qwen3-30b
+            "",          # high-value gate → default y
             "y",         # configure embeddings?
             "",          # embedding model → Enter accepts default
             "",          # embedding base URL → Enter accepts pre-filled local
             "",          # embedding API key → Enter accepts default
+            "",          # in-process reranker? → default n
             "",          # write → y
         ]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
@@ -655,7 +679,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
         monkeypatch.setattr(wizard, "_find_env_example", lambda *a: example)
 
-        answers = [str(vault), "", "", "test-model", "skip", ""]
+        answers = ["", str(vault), "", "", "test-model", "n", ""]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
@@ -677,7 +701,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
         monkeypatch.setattr(wizard, "_find_env_example", lambda *a: None)
 
-        answers = [str(vault), "", "", "test-model", "skip", ""]
+        answers = ["", str(vault), "", "", "test-model", "n", ""]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
@@ -702,7 +726,7 @@ class TestRunWizard:
 
         monkeypatch.setattr(wizard, "_find_env_example", _boom)
 
-        answers = [str(vault), "", "", "test-model", "skip", ""]
+        answers = ["", str(vault), "", "", "test-model", "n", ""]
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
@@ -732,6 +756,193 @@ class TestEndpointModelIds:
 
         monkeypatch.setattr("httpx.get", _raise)
         assert wizard._endpoint_model_ids("http://x/v1") == []
+
+
+class TestWizardModes:
+    """Spec 2026-07-23: essential/advanced modes, high-value gate, reranker
+    step, back navigation, next-steps block."""
+
+    @pytest.fixture(autouse=True)
+    def _stub(self, monkeypatch, tmp_path):
+        import silica.onboarding.wizard as wizard
+
+        monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: [])
+        monkeypatch.setattr(wizard, "_rerank_extra_present", lambda: False)
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        self.wizard = wizard
+        self.vault = tmp_path / "vault"
+        self.vault.mkdir()
+        self.env_path = tmp_path / ".env"
+
+    def _run(self, answers, **kw):
+        it = iter(answers)
+        return self.wizard.run_wizard(
+            input_fn=lambda p: next(it), env_path=self.env_path, **kw
+        )
+
+    def _active(self):
+        return [
+            l for l in self.env_path.read_text().splitlines()
+            if l and not l.lstrip().startswith("#")
+        ]
+
+    def test_mode_enter_defaults_to_essential(self):
+        # Exact answer count proves no advanced question is asked.
+        rc = self._run(["", str(self.vault), "", "", "m", "n", ""])
+        assert rc == 0
+        assert "SILICA_MODEL=m" in self.env_path.read_text()
+
+    def test_essential_gate_n_writes_no_embedding_or_rerank_keys(self):
+        rc = self._run(["", str(self.vault), "", "", "m", "n", ""])
+        assert rc == 0
+        active = self._active()
+        assert not any(l.startswith("SILICA_EMBEDDING") for l in active)
+        assert not any(l.startswith("SILICA_RERANK") for l in active)
+
+    def test_essential_gate_y_embeddings_autodetect_still_works(self, monkeypatch):
+        monkeypatch.setattr(
+            self.wizard, "_endpoint_model_ids",
+            lambda url: ["qwen3-30b", "nomic-embed-text"],
+        )
+        answers = [
+            "",              # mode → essential
+            str(self.vault), # vault path
+            "",              # language
+            "",              # provider → lmstudio
+            "",              # model → probed qwen3-30b
+            "",              # high-value gate → default y
+            "",              # configure embeddings? → y
+            "",              # use candidate? → y
+            "",              # in-process reranker? → default n
+            "",              # write → y
+        ]
+        rc = self._run(answers)
+        assert rc == 0
+        content = self.env_path.read_text()
+        assert "SILICA_EMBEDDING_MODEL=nomic-embed-text" in content
+
+    def test_advanced_mode_writes_curated_keys(self):
+        answers = [
+            "advanced",       # mode
+            str(self.vault),  # vault
+            "",               # language
+            "",               # provider → lmstudio
+            "m",              # model
+            "skip",           # embeddings (asked directly, no gate)
+            "",               # in-process reranker → n
+            "worker-x",       # worker model
+            "y",              # git auto-commit → auto
+            "tvly-key",       # tavily key
+            "docling",        # pdf provider
+            "",               # OCR languages → default
+            "",               # external reranker → default n
+            "",               # write → y
+        ]
+        rc = self._run(answers)
+        assert rc == 0
+        content = self.env_path.read_text()
+        assert "SILICA_WORKER_MODEL=worker-x" in content
+        assert "SILICA_GIT_COMMIT=auto" in content
+        assert "SILICA_TAVILY_API_KEY=tvly-key" in content
+        assert "SILICA_PDF_PROVIDER=docling" in content
+        assert "SILICA_PDF_OCR_LANG=en,it,fr,de,es" in content
+
+    def test_advanced_enter_through_writes_no_advanced_keys(self):
+        answers = [
+            "advanced", str(self.vault), "", "", "m",
+            "skip",  # embeddings
+            "",      # reranker → n
+            "",      # worker → inherit
+            "",      # git → leave off
+            "",      # tavily → skip
+            "",      # pdf → mineru default
+            "",      # external reranker → n
+            "",      # write → y
+        ]
+        rc = self._run(answers)
+        assert rc == 0
+        active = self._active()
+        for prefix in (
+            "SILICA_WORKER_MODEL", "SILICA_GIT_COMMIT", "SILICA_TAVILY_API_KEY",
+            "SILICA_PDF_", "SILICA_RERANK_",
+        ):
+            assert not any(l.startswith(prefix) for l in active), prefix
+
+    def test_advanced_external_reranker_writes_all_three_keys(self):
+        answers = [
+            "advanced", str(self.vault), "", "", "m",
+            "skip", "",       # embeddings, in-process reranker
+            "", "", "", "",   # worker, git, tavily, pdf
+            "y",              # external reranker → yes
+            "", "", "",       # URL, model, key → defaults
+            "",               # write
+        ]
+        rc = self._run(answers)
+        assert rc == 0
+        content = self.env_path.read_text()
+        assert "SILICA_RERANK_BASE_URL=http://localhost:1235/v1" in content
+        assert "SILICA_RERANK_MODEL=bge-reranker-v2-m3" in content
+        assert "SILICA_RERANK_API_KEY=lm-studio" in content
+
+    def test_advanced_flag_skips_mode_question(self):
+        # No mode answer: first prompt is already the vault question.
+        answers = [
+            str(self.vault), "", "", "m",
+            "skip", "", "worker-x", "", "", "", "", "",
+        ]
+        rc = self._run(answers, advanced=True)
+        assert rc == 0
+        assert "SILICA_WORKER_MODEL=worker-x" in self.env_path.read_text()
+
+    def test_back_from_provider_rewinds_to_vault(self, tmp_path):
+        vault_b = tmp_path / "vault-b"
+        vault_b.mkdir()
+        answers = [
+            "",               # mode → essential
+            str(self.vault),  # vault → first answer
+            "",               # language
+            "back",           # provider prompt → go back to vault step
+            str(vault_b),     # vault → second answer
+            "",               # language (asked again)
+            "",               # provider → lmstudio
+            "m",              # model
+            "n",              # gate → skip to write
+            "",               # write → y
+        ]
+        rc = self._run(answers)
+        assert rc == 0
+        lines = self.env_path.read_text().splitlines()
+        assert f"SILICA_VAULT={vault_b}" in lines
+        assert f"SILICA_VAULT={self.vault}" not in lines
+
+    def test_back_on_first_step_reprompts(self):
+        rc = self._run(["back", "", str(self.vault), "", "", "m", "n", ""])
+        assert rc == 0
+
+    def test_rerank_extra_present_skips_prompt(self, monkeypatch):
+        monkeypatch.setattr(self.wizard, "_rerank_extra_present", lambda: True)
+        # No reranker answer in the script: if the wizard asked, the write
+        # answer would be consumed and the run would abort on EOF.
+        answers = ["", str(self.vault), "", "", "m", "", "skip", ""]
+        rc = self._run(answers)
+        assert rc == 0
+        assert not any(l.startswith("SILICA_RERANK") for l in self._active())
+
+    def test_rerank_absent_yes_prints_install_command(self, capsys):
+        answers = ["", str(self.vault), "", "", "m", "", "skip", "y", ""]
+        rc = self._run(answers)
+        assert rc == 0
+        assert "silica[rerank]" in capsys.readouterr().out
+        assert not any(l.startswith("SILICA_RERANK") for l in self._active())
+
+    def test_next_steps_block_printed(self, capsys):
+        rc = self._run(["", str(self.vault), "", "", "m", "n", ""])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Next steps" in out
+        assert "silica init" in out
 
 
 class TestAskSecret:
