@@ -19,9 +19,13 @@ _ONESHOT_SNAPSHOT = (
     "date is 2023-06-01. Use ONLY the memory provided. A 'Personal memory' "
     "section, when present, lists dated facts distilled from those "
     "conversations — treat them as reliable memory on par with the session "
-    "transcripts. Answer concisely with only the information asked for. If "
-    "the memory does not contain the answer, reply that you do not have "
-    "that information — never guess."
+    "transcripts. Answer concisely with only the information asked for. Base "
+    "every fact about the speakers and their conversations strictly on the "
+    "memory. You may additionally use well-known general knowledge to name or "
+    "interpret what the memory describes (for example a widely known place, "
+    "work, or game). If neither the memory nor general knowledge supplies the "
+    "answer, reply that you do not have that information; never fabricate "
+    "details about the speakers or their conversations."
 )
 
 

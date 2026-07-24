@@ -65,13 +65,29 @@ _META_BODY_RE = re.compile(
     r"|(?:conversation|session|transcript) (?:about|between|covers|discusses))\b")
 
 # --- Judge rubric (LongMemEval evaluate_qa.py, reconstructed faithfully) -----
+# Deliberate deviation (last two sentences): CONTENT-MATCH clarification. The
+# base rubric already intends "contains the correct answer -> yes", but the LLM
+# judge under-credits correct answers that are verbose/bulleted/paraphrased,
+# scoring them "no" on wording rather than content. Measured over LoCoMo
+# verbatim+agent (evals/probe_single_hop_regrade.py + probe_regrade_sweep.py):
+# 39/152 conv-26 and 7/150 conv-47 "wrong" answers ASSERT the gold fact; the
+# conv-26-vs-conv-47 gap collapses 0.248 -> 0.038 (below the ~4pp noise floor)
+# once graded on content. The clause only recovers such false-negatives (it adds
+# no new "yes" policy the base did not already intend) and keeps the subset=no
+# omission guard, so it cannot inflate genuine misses. Verify with
+# evals/probe_judge_ab.py before trusting the number.
 _JUDGE_BASE = (
     "I will give you a question, a correct answer, and a response from a model. "
     "Please answer yes if the response contains the correct answer. Otherwise, "
     "answer no. If the response is equivalent to the correct answer or contains "
     "all the intermediate steps to get the correct answer, answer yes. If the "
     "response only contains a subset of the information required by the answer, "
-    "answer no."
+    "answer no. Judge on CONTENT, not wording or length: answer yes when the "
+    "response asserts the correct answer even if it is more verbose, reformatted "
+    "(bullets or prose), or paraphrased, and even if it adds other correct "
+    "detail; extra correct information never makes a response wrong. Answer no "
+    "only when the response omits the required fact, states a contradictory fact, "
+    "or hedges without committing to it."
 )
 _JUDGE_TEMPORAL = (
     " In addition, do not penalize off-by-one errors for the number of days. If "

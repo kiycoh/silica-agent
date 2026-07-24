@@ -425,10 +425,21 @@ _AGENT_DELIVERY = (
     "Use your memory tools to recall those conversations before answering; "
     "nothing is provided inline. "
 )
+# "never guess" is scoped to SPEAKER facts, not world knowledge. Measured on
+# LoCoMo (project_answer_fail_diagnosis): conv-47 open-domain wrong were 0
+# judge-FN, all genuine over-abstentions where the memory DESCRIBES a thing and
+# the answer needs general knowledge to name it (a game, a place). A blanket
+# "never guess" blocked that. Split the contract: speaker facts stay strict (so
+# adversarial false-premise traps still abstain); general world knowledge is
+# allowed to name/interpret what the memory describes.
 _CONTRACT_CLOSE = (
-    "Answer concisely with only the information asked for. If "
-    "the memory does not contain the answer, reply that you do not have "
-    "that information — never guess."
+    "Answer concisely with only the information asked for. Base every fact "
+    "about the speakers and their conversations strictly on the memory. You "
+    "may additionally use well-known general knowledge to name or interpret "
+    "what the memory describes (for example a widely known place, work, or "
+    "game). If neither the memory nor general knowledge supplies the answer, "
+    "reply that you do not have that information; never fabricate details "
+    "about the speakers or their conversations."
 )
 
 
