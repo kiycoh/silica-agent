@@ -1497,6 +1497,28 @@ def _model_configured() -> bool:
     return bool(CONFIG.model.strip())
 
 
+def _doctor_live_probe() -> bool:
+    """`silica doctor --live`: one tiny real completion so a green report proves
+    the model actually answers (right key, model id valid, endpoint serving) —
+    run_checks only probes key-presence and /models reachability, never a paid
+    call. Returns True on a non-empty reply, False otherwise; prints the outcome."""
+    if not _model_configured():
+        CONSOLE.print("  [yellow]⚠ live probe skipped — no model configured[/]")
+        return True
+    from silica.agent.llm import call_llm
+    CONSOLE.print(f"  [dim]→ live probe: asking {CONFIG.model} to reply…[/]")
+    try:
+        resp = call_llm(CONFIG.model, [{"role": "user", "content": "Reply with: ok"}], max_tokens=5)
+    except Exception as e:  # any provider/transport error → not working
+        CONSOLE.print(f"  [red]✗ live probe failed:[/] {e}")
+        return False
+    if (resp.text or "").strip():
+        CONSOLE.print("  [green]✓ live probe: model replied[/]")
+        return True
+    CONSOLE.print("  [red]✗ live probe: empty reply[/]")
+    return False
+
+
 def _autolaunch_wizard_if_unconfigured() -> None:
     """First run with no model: launch the wizard, then re-exec so the new config
     takes effect. Non-tty (script/CI/pipe) or an already-relaunched child skips
@@ -1549,7 +1571,9 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         import silica.onboarding.checks as checks
         results = checks.run_checks(CONFIG)
         checks.render_report(results)
-        return 1 if checks.has_failures(results) else 0
+        # --live: opt-in real completion (costs a token on hosted providers).
+        live_ok = _doctor_live_probe() if "--live" in args[1:] else True
+        return 1 if (checks.has_failures(results) or not live_ok) else 0
     if args[:1] == ["init"]:
         import silica.onboarding.wizard as wizard_mod
         return wizard_mod.run_wizard(advanced="--advanced" in args[1:])
@@ -1610,7 +1634,7 @@ def main():
         try:
             from silica.ui.web import serve
         except ImportError:
-            CONSOLE.print("  [red]La GUI richiede l'extra:[/] pip install 'silica\\[gui]'")
+            CONSOLE.print("  [red]The GUI needs an extra:[/] pip install 'silica\\[gui]'")
             sys.exit(1)
         serve(port=_gui_port())
         return

@@ -186,6 +186,35 @@ def _ask_language(input_fn: Callable[[str], str]) -> str:
     return raw
 
 
+def _ask_local_model(
+    input_fn: Callable[[str], str],
+    ids: list[str],
+    label: str,
+    base_url: str,
+    example: str,
+) -> str:
+    """Ask for a local (LM Studio / Ollama) model id, offering the served ids as
+    a pick-list with the first as default. When the endpoint returned nothing —
+    server down or no model loaded — warn that the id is being entered blind
+    (`silica doctor` verifies reachability) rather than silently asking for a
+    guess that only fails at first chat."""
+    if ids:
+        prompt = f"{label} model id (loaded: {', '.join(ids)})"
+        default = ids[0]
+    else:
+        CONSOLE.print(
+            f"  [yellow]{GLYPHS['warn']} {label} not reachable at {base_url} — start it "
+            "(and load a model) to get a pick-list. You can still type an id to set up "
+            "offline; `silica doctor` will confirm once it's running.[/]"
+        )
+        prompt = f"{label} model id (e.g. {example})"
+        default = ""
+    model = ""
+    while not model:
+        model = _ask(input_fn, prompt, default)
+    return model
+
+
 def _run_wizard_inner(
     input_fn: Callable[[str], str],
     env_path: Path,
@@ -318,25 +347,15 @@ def _run_wizard_inner(
             while not model:
                 model = _ask(input_fn, "Model id served at that URL")
         elif provider == "ollama":
-            installed = _ollama_installed_models()
-            prompt = (
-                f"Ollama model id (installed: {', '.join(installed)})"
-                if installed else "Ollama model id (e.g. llama3.2)"
+            ollama_base = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
+            model = _ask_local_model(
+                input_fn, _ollama_installed_models(), "Ollama", ollama_base, "llama3.2"
             )
-            default = installed[0] if installed else ""
-            model = ""
-            while not model:
-                model = _ask(input_fn, prompt, default)
         else:  # lmstudio — probe /models like the Ollama branch does with tags.
-            loaded = _endpoint_model_ids(PROVIDER_PRESETS["lmstudio"]["base_url"])
-            prompt = (
-                f"LM Studio model id (loaded: {', '.join(loaded)})"
-                if loaded else "Model id as loaded in LM Studio (e.g. qwen3-30b)"
+            lmstudio_base = PROVIDER_PRESETS["lmstudio"]["base_url"]
+            model = _ask_local_model(
+                input_fn, _endpoint_model_ids(lmstudio_base), "LM Studio", lmstudio_base, "qwen3-30b"
             )
-            default = loaded[0] if loaded else ""
-            model = ""
-            while not model:
-                model = _ask(input_fn, prompt, default)
         updates["SILICA_MODEL"] = model
         return True
 
@@ -591,6 +610,10 @@ def _run_wizard_inner(
     CONSOLE.print()
     CONSOLE.print(f"  [bold brand.cyan]{GLYPHS['arrow']} Next steps[/]")
     CONSOLE.print("  [dim]·[/] Run [bold]silica[/] — try ingesting a file or asking a question.")
+    CONSOLE.print(
+        "  [dim]·[/] Run [bold]silica doctor --live[/] to confirm the model actually replies "
+        "(sends one tiny request)."
+    )
     CONSOLE.print(
         f"  [dim]·[/] Every other option lives documented in [bold]{env_path}[/] — edit anytime."
     )
