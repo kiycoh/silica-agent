@@ -142,6 +142,22 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add(f"| {_TOTAL_LABELS.get(k, k.replace('_', ' ').capitalize())} | {v} |")
     add("")
 
+    # E(vault) — lattice-energy thermometer with its per-term decomposition
+    # (spec-harness-promotion §3). Lower is more coherent; the six signed
+    # contributions sum to the total, so ΔE between two reports decomposes
+    # per term. Every term is an existing VaultReport field.
+    from silica.kernel.vault_energy import vault_energy
+
+    e = vault_energy(r)
+    add("## Energy")
+    add(f"**E(vault): {e.total:+.2f}** — lower is more coherent (thermometer, not a target).")
+    add("")
+    add("| Term | Contribution |")
+    add("|---|---|")
+    for term in ("cohesion", "orphans", "dangling", "gaps", "deficits", "contested"):
+        add(f"| {term} | {getattr(e, term):+.2f} |")
+    add("")
+
     # God nodes (PageRank dropped — it reads 0.0 at this scale; degree is the signal)
     add("## God Nodes (High-Degree Hubs)")
     if r.god_nodes:
@@ -460,6 +476,32 @@ def write_report(report: VaultReport, output_path: str) -> dict:
 
     out_json = out_md.with_suffix(".json")
     out_json.write_bytes(orjson.dumps(dataclasses.asdict(report), option=orjson.OPT_INDENT_2))
+
+    # Persist E(vault) for /status (spec-harness-promotion §3). Whole-vault
+    # reports only: a folder-scoped E is not comparable and would corrupt the
+    # delta. `prev` carries the prior value so /status can show the delta
+    # without a second file. Best-effort: never fails the report write.
+    if not report.scope:
+        try:
+            import datetime as _dt
+
+            from silica.config import CONFIG
+            from silica.kernel.vault_energy import vault_energy
+
+            vault = getattr(CONFIG, "vault_path", None)
+            if vault:
+                energy_path = Path(vault) / ".silica" / "energy.json"
+                prev: float | None = None
+                if energy_path.is_file():
+                    prev = orjson.loads(energy_path.read_bytes()).get("value")
+                payload: dict = {"value": vault_energy(report).total,
+                                 "at": _dt.datetime.now().isoformat(timespec="seconds")}
+                if prev is not None:
+                    payload["prev"] = prev
+                energy_path.parent.mkdir(parents=True, exist_ok=True)
+                energy_path.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
+        except Exception as exc:
+            logger.debug("graph_report: energy.json persist skipped (%s)", exc)
 
     logger.info(
         "graph_report: wrote %s and %s",

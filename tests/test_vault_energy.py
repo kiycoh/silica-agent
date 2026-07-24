@@ -12,7 +12,7 @@ from silica.kernel.graph_report.models import (
     StructuralGap,
     VaultReport,
 )
-from evals.vault_energy import Weights, vault_energy
+from silica.kernel.vault_energy import Weights, vault_energy
 
 
 def _report(**over) -> VaultReport:
@@ -64,3 +64,43 @@ def test_compute_report_feeds_vault_energy():
     e = vault_energy(compute_report(analytics=True, _nodes_edges_override=(nodes, edges)))
     assert isinstance(e.total, float)
     assert e.orphans >= 2.0  # a and c have in-degree 0
+
+
+# ---------------------------------------------------------------------------
+# Product surfaces (spec-harness-promotion §3): report section + energy.json
+# ---------------------------------------------------------------------------
+
+def _energy_file():
+    import json
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    p = Path(CONFIG.vault_path) / ".silica" / "energy.json"
+    return p, (json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None)
+
+
+def test_write_report_renders_energy_and_persists(tmp_path):
+    from silica.kernel.graph_report import write_report
+
+    r = _report(orphans=["a", "b"])
+    out = write_report(r, str(tmp_path / "GRAPH_REPORT.md"))
+    md = open(out["path_md"], encoding="utf-8").read()
+    assert "## Energy" in md and "E(vault): +2.00" in md
+    p, data = _energy_file()
+    assert data is not None and data["value"] == 2.0 and "at" in data
+    assert "prev" not in data  # first run: no prior value
+
+    # Second report records the previous value for the /status delta.
+    write_report(_report(orphans=["a"]), str(tmp_path / "GRAPH_REPORT.md"))
+    _, data = _energy_file()
+    assert data["value"] == 1.0 and data["prev"] == 2.0
+
+
+def test_scoped_report_never_persists_energy(tmp_path):
+    from silica.kernel.graph_report import write_report
+
+    write_report(_report(scope="Concepts", orphans=["a"]),
+                 str(tmp_path / "GRAPH_REPORT.md"))
+    p, data = _energy_file()
+    assert data is None  # folder-scoped E must not corrupt the vault-wide delta

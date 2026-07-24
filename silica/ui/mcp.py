@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 # taxonomy, graph exports) stays behind --all.
 CORE_TOOLS = (
     "silica_recall",
+    "silica_timeline",
     "silica_semantic_search",
     "silica_related",
     "silica_concepts",
@@ -73,7 +74,7 @@ def run_mcp(all_tools: bool = False) -> int:
         from mcp.server.stdio import stdio_server
     except ImportError:
         print(
-            "silica mcp needs the [mcp] extra: uv pip install 'silica[mcp]'",
+            "silica mcp needs the [mcp] extra: uv pip install 'silica-agent[mcp]'",
             file=sys.stderr,
         )
         return 1

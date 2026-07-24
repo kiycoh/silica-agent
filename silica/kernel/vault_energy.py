@@ -25,6 +25,11 @@ improves per local event, not by chasing a global minimum.
 Comparability caveat: cohesion and structural_gaps are only populated when the
 report is built with full=True (compute_report skips them in the cheap nucleate
 path). Compare E only across reports computed at the same depth.
+
+History: extracted to evals/ by the 2026-07-21 ponytail audit (nothing in the
+product consumed it); moved back 2026-07-24 (spec-harness-promotion §3) because
+/status and the graph report now consume it. The frozen perturbation bench
+(evals/test_vault_energy_bench.py) stays the behavioral pin.
 """
 from __future__ import annotations
 

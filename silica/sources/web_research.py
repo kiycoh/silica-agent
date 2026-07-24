@@ -131,7 +131,43 @@ def web_research(
     from silica.driver import DRIVER
 
     DRIVER.create(note_rel, note)
+    _write_leaf(note_rel, messages)
     return note_rel
+
+
+def _write_leaf(note_rel: str, messages: list[dict]) -> None:
+    """Verbatim source leaf beside the findings note (spec-harness-promotion §2).
+
+    web_research bypasses the FSM, so it writes its own leaf: the raw
+    web_search tool results the findings were written from. Named after the
+    inbox note's basename, so a later /nucleate of that note finds the leaf
+    and links the distilled notes to it at CLEANUP. Retrieval-invisible like
+    every sources/ file. Best-effort: a leaf failure never loses the note.
+    """
+    try:
+        from silica.kernel.paths import SOURCES_DIR
+
+        raw = "\n\n".join(
+            str(m.get("content") or "")
+            for m in messages
+            if m.get("role") == "tool" and m.get("content")
+        )
+        if not raw:
+            return
+        from silica.driver import DRIVER
+
+        basename = note_rel.rsplit("/", 1)[-1]
+        today = datetime.date.today().isoformat()
+        DRIVER.create(
+            f"{SOURCES_DIR}/{basename}",
+            f"---\ndate: {today}\nsource_id: {basename}\n---\n\n{raw}\n",
+        )
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "web_research: leaf write skipped (non-fatal)", exc_info=True
+        )
 
 
 def _collect_sources(messages: list[dict]) -> list[tuple[str, str]]:

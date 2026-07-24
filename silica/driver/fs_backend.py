@@ -39,6 +39,7 @@ from silica.driver.base import (
 from silica.kernel import frontmatter as fm
 from silica.kernel import ofm
 from silica.kernel.graph_export import is_vault_artifact
+from silica.kernel.paths import is_source_leaf
 logger = logging.getLogger(__name__)
 
 
@@ -373,11 +374,17 @@ class ObsidianFSBackend(GraphIndexMixin):
     # ------------------------------------------------------------------
 
     def search_names(self, query: str) -> list[NoteRef]:
-        """Search vault note names matching query."""
+        """Search vault note names matching query.
+
+        sources/ leaves stay in the index (wikilink + read_note resolution)
+        but are retrieval-invisible: excluded here and from every list/search
+        surface, reachable only via an explicit `## Sources` link."""
         self._ensure_index()
         query = query.lower()
         results = []
         for ref in self._notes.values():
+            if is_source_leaf(ref.path):
+                continue
             if query in ref.name.lower():
                 results.append(ref)
         return results
@@ -387,8 +394,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._ensure_index()
         query_lower = query.lower()
         results = []
-        
+
         for name, ref in self._notes.items():
+            if is_source_leaf(ref.path):  # leaves are search-invisible
+                continue
             path = self.vault_path / ref.path
             try:
                 content = self._read_cached(path)
@@ -426,6 +435,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         queries_lower = [(q, q.lower()) for q in uniq]
 
         for ref in self._notes.values():
+            if is_source_leaf(ref.path):  # parity with search_context
+                continue
             path = self.vault_path / ref.path
             try:
                 content = self._read_cached(path)
@@ -902,14 +913,20 @@ class ObsidianFSBackend(GraphIndexMixin):
     # ------------------------------------------------------------------
 
     def list_files(self, folder: str = "") -> list[NoteRef]:
-        """List all markdown files, optionally filtered by folder."""
+        """List all markdown files, optionally filtered by folder.
+
+        sources/ leaves are excluded: list_files feeds every derived index
+        (embed, co-occurrence, lexical, autolink title index, vault map), and
+        the one-rule exclusion here keeps leaves out of all of them at once."""
         self._ensure_index()
-        
+
         results = []
         for ref in self._notes.values():
+            if is_source_leaf(ref.path):
+                continue
             if not folder or ref.path.startswith(folder):
                 results.append(ref)
-                
+
         return results
 
     def list_inbox_files(self) -> list[NoteRef]:

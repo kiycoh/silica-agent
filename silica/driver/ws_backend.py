@@ -38,6 +38,7 @@ from silica.driver.base import (
 )
 from silica.kernel.ast import extract_links
 from silica.kernel.graph_export import is_vault_artifact
+from silica.kernel.paths import is_source_leaf
 from silica.kernel.ops import InverseOp, InverseOpKind
 
 logger = logging.getLogger(__name__)
@@ -238,7 +239,8 @@ class ObsidianWSBackend(GraphIndexMixin):
         return [
             NoteRef(name=r["name"], path=r["path"])
             for r in (rows or [])
-            if not is_vault_artifact(r["path"])
+            # sources/ leaves: retrieval-invisible (same seam as fs backend)
+            if not is_vault_artifact(r["path"]) and not is_source_leaf(r["path"])
         ]
 
     def list_inbox_files(self) -> list[NoteRef]:
@@ -280,6 +282,8 @@ class ObsidianWSBackend(GraphIndexMixin):
         """Flatten PROTOCOL's `[{path, name, matches:[{line, content}]}]` into Hits."""
         hits: list[Hit] = []
         for g in (groups or []):
+            if is_source_leaf(g.get("path", "")):  # leaves are search-invisible
+                continue
             ref = NoteRef(name=g.get("name", ""), path=g.get("path", ""))
             for m in g.get("matches", []):
                 hits.append(Hit(ref=ref, line=m.get("line", 0), snippet=str(m.get("content", ""))))

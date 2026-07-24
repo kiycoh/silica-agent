@@ -73,6 +73,24 @@ def quarantine(path: Path) -> Path | None:
 
 
 # ---------------------------------------------------------------------------
+# Verbatim source leaves (spec-harness-promotion 2026-07-24 §2)
+# ---------------------------------------------------------------------------
+
+# Vault folder holding verbatim source leaves. Leaves are retrieval-invisible:
+# excluded from search, embeddings, co-occurrence, and the autolink title
+# index (one rule, all indexes — partial exclusion reintroduces the dilution
+# the LoCoMo hybrid arm measured). A leaf is reachable only through an
+# explicit `## Sources` wikilink and silica_read_note.
+SOURCES_DIR = "sources"
+
+
+def is_source_leaf(path: str) -> bool:
+    """True when `path` (vault-relative, any separator) lives under sources/."""
+    norm = (path or "").replace("\\", "/").lstrip("/")
+    return norm.startswith(SOURCES_DIR + "/")
+
+
+# ---------------------------------------------------------------------------
 # Silica runtime directory helpers
 # ---------------------------------------------------------------------------
 

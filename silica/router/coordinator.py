@@ -39,6 +39,7 @@ class Coordinator:
         *,
         resume_run_id: str | None = None,
         seen_override: str | None = None,
+        keep_sources: bool = False,
         config: Any = CONFIG,
         cancel_token: "threading.Event | None" = None,
     ):
@@ -54,6 +55,7 @@ class Coordinator:
             hub=hub,
             resume_run_id=resume_run_id,
             seen_override=seen_override,
+            keep_sources=keep_sources,
         )
 
     def run(self) -> dict[str, Any]:

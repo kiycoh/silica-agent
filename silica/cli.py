@@ -410,6 +410,19 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             CONSOLE.print(FlatMarkdown(str(digest)))
         except Exception:
             CONSOLE.print(result)
+        # E(vault) cache line — written by /report (write_report). No cache
+        # file → nothing shown; /status never triggers a VaultReport itself.
+        try:
+            from pathlib import Path as _EP
+            energy_file = _EP(CONFIG.vault_path or "") / ".silica" / "energy.json"
+            if energy_file.is_file():
+                e = json.loads(energy_file.read_text(encoding="utf-8"))
+                line = f"  E(vault): [bold]{e['value']:+.2f}[/]"
+                if e.get("prev") is not None:
+                    line += f"  (delta {e['value'] - e['prev']:+.2f} since last report)"
+                CONSOLE.print(line)
+        except Exception:
+            pass
         return True
 
     if cmd == "/embed":
@@ -938,7 +951,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
     Syntax:
         /report [folder] [--top-k=N] [--embeddings]
-        /nucleate <file...> [--target=DIR] [--hub=H]
+        /nucleate <file...> [--target=DIR] [--hub=H] [--keep-sources]
         /convert <file...> [--target=DIR]
         /summarize <note|folder...>
         /explain "<concept>" [--level=intro|expert]
@@ -974,11 +987,14 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         files: list[str] = []
         target_dir = ""
         hub = ""
+        keep_sources = False
         for arg in args:
             if arg.startswith("--target="):
                 target_dir = arg[len("--target="):]
             elif arg.startswith("--hub="):
                 hub = arg[len("--hub="):]
+            elif arg == "--keep-sources":
+                keep_sources = True  # verbatim leaf in sources/ beside the notes
             elif not arg.startswith("-"):
                 files.append(arg)  # preserve original case
 
@@ -1087,7 +1103,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
         CONSOLE.print(f"  nucleate: {len(md_files)} file(s) → [bold]{target_dir}[/]")
         result = Coordinator(
-            inbox_files=md_files, target_dir=target_dir, hub=hub or None
+            inbox_files=md_files, target_dir=target_dir, hub=hub or None,
+            keep_sources=keep_sources,
         ).run()
         status = result.get("final_status") or result.get("error") or "done"
         failed = result.get("failed_chunks") or []

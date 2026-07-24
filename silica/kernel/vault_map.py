@@ -79,11 +79,14 @@ def build_vault_map(
             from silica.driver import DRIVER
 
             contested_names: list[str] = []
+            dated_count = 0  # same props pass feeds the silica_timeline hint below
             for ref in refs:
                 try:
                     props = DRIVER.props_of(ref)
                 except Exception:
                     continue
+                if props and props.get("date"):
+                    dated_count += 1
                 if props and props.get("contested"):
                     contested_names.append(
                         ref.path.rsplit("/", 1)[-1].removesuffix(".md")
@@ -94,6 +97,11 @@ def build_vault_map(
                 if extra > 0:
                     shown += f" … +{extra}"
                 lines.append(f"⚠ {len(contested_names)} contested notes: {shown}")
+            if dated_count:
+                lines.append(
+                    f"- Timeline: {dated_count} dated notes — "
+                    "silica_timeline for chronology/ordering questions"
+                )
         except Exception as e:  # best-effort
             logger.debug("build_vault_map: contested block skipped: %s", e)
 

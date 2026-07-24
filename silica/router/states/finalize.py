@@ -265,6 +265,91 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
         logger.debug("CLEANUP: provenance append skipped (non-fatal): %s", exc)
 
 
+_SOURCES_MARKER = "## Sources"
+
+
+def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
+    """Verbatim source leaf + `## Sources` links (spec-harness-promotion §2).
+
+    Runs at CLEANUP, before archiving — the one point where the source text
+    and the produced notes are both in hand. A leaf is written when the run
+    asked for it (`keep_sources`, the /nucleate --keep-sources flag) or when
+    it is a conversation capture (`seen_override` set: the source is
+    ephemeral, otherwise lost). Independently of who wrote the leaf — this
+    run or web_research beside its own inbox note — every note this source
+    produced (manifest write/patch entries, same derivation as provenance)
+    gains a `## Sources` block linking the leaf. Idempotent on the link, so
+    a re-ingest never double-links. Inverses ride fsm._run_inverses, so the
+    undo journal covers leaf and block like any other write of the run.
+    Best-effort and must never block CLEANUP.
+    """
+    try:
+        import datetime
+
+        from silica.kernel import frontmatter
+        from silica.kernel.ops import InverseOp, InverseOpKind
+        from silica.kernel.paths import SOURCES_DIR
+
+        basename = os.path.basename(source_file)
+        leaf_rel = f"{SOURCES_DIR}/{basename}"
+        leaf_stem = basename.removesuffix(".md")
+
+        try:
+            orch.DRIVER.read_note(leaf_rel)
+            leaf_exists = True
+        except Exception:
+            leaf_exists = False
+
+        wants_leaf = getattr(fsm, "keep_sources", False) or bool(
+            getattr(fsm, "seen_override", None)
+        )
+        if wants_leaf and not leaf_exists:
+            source_text = orch.DRIVER.read_note(source_file).content or ""
+            # Single frontmatter block: keep the source BODY verbatim; the
+            # date comes from the capture clock, the source's own `date`, or
+            # today — in that order.
+            data, _raw, body = frontmatter.split(source_text)
+            date = (
+                getattr(fsm, "seen_override", None)
+                or (data or {}).get("date")
+                or datetime.date.today().isoformat()
+            )
+            leaf = f"---\ndate: {date}\nsource_id: {basename}\n---\n\n{body.lstrip()}"
+            orch.DRIVER.create(leaf_rel, leaf)
+            fsm._run_inverses.append(
+                (leaf_rel, InverseOp(kind=InverseOpKind.delete_created, path=leaf_rel), None)
+            )
+            leaf_exists = True
+
+        if not leaf_exists:
+            return
+
+        notes = sorted({
+            e.path for e in fsm.manifest.entries
+            if e.source_basename == basename and e.op in ("write", "patch")
+        })
+        for rel in notes:
+            note_path = f"{rel}.md"  # manifest paths carry no .md
+            try:
+                prior = orch.DRIVER.read_note(note_path).content or ""
+            except Exception:
+                continue
+            if f"[[{leaf_stem}]]" in prior:
+                continue  # already linked — idempotent on re-ingest
+            # New block, or one more link appended below an existing block
+            # (blocks land at EOF by construction, so EOF-append stays inside).
+            block = f"\n\n{_SOURCES_MARKER}\n" if _SOURCES_MARKER not in prior else "\n"
+            orch.DRIVER.overwrite(note_path, f"{prior.rstrip()}{block}[[{leaf_stem}]]\n")
+            fsm._run_inverses.append(
+                (note_path,
+                 InverseOp(kind=InverseOpKind.restore_version, path=note_path,
+                           prior_content=prior),
+                 None)
+            )
+    except Exception as exc:
+        logger.debug("CLEANUP: source leaf skipped (non-fatal): %s", exc)
+
+
 def handle_cleanup(fsm: "InjectorFSM") -> None:
     from silica.tools.wrapped import silica_cleanup
 
@@ -293,6 +378,10 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
             # (a partial source stays in the inbox for retry).
             _log_nucleate_completion(fsm, fi, inbox_file_for_fi)
             if not file_has_failure:
+                # Leaf before archive: the source text must still be readable
+                # at its inbox path. On failure the source stays in the inbox
+                # for retry, so nothing is lost by skipping the leaf here.
+                _write_source_leaf(fsm, inbox_file_for_fi)
                 res = silica_cleanup(inbox_file_for_fi, "done")
                 if "error" in res:
                     fsm.context["cleanup_warning"] = res["error"]

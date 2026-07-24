@@ -283,6 +283,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         inbox_files: list[str] | None = None,
         resume_run_id: str | None = None,
         seen_override: str | None = None,
+        keep_sources: bool = False,
     ):
         # Normalize to a list. inbox_files takes precedence; inbox_file is a
         # compat shim inserted at position 0 if not already present.
@@ -306,6 +307,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Bench-only episodic clock: when set, capture_from_distill dates
         # facts with this ISO day instead of the ingest day (LoCoMo e2e leg).
         self.seen_override = seen_override
+
+        # Verbatim source leaves (spec-harness-promotion §2): /ingest
+        # --keep-sources. Conversation captures (seen_override set) always
+        # leave a leaf — their source is ephemeral, otherwise lost.
+        self.keep_sources = keep_sources
 
         self.state = InjectorState.INIT
         self.context: dict[str, Any] = {}

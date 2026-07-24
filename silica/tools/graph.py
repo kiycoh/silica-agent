@@ -343,6 +343,39 @@ def silica_recall(query: str, k: int = 15) -> dict[str, Any]:
             "notes": [b.path for b in p.blocks], "facts": len(p.fact_hits)}
 
 
+class TimelineArgs(BaseModel):
+    start: str = Field(default="", description="Inclusive ISO start date (empty = unbounded)")
+    end: str = Field(default="", description="Inclusive ISO end date (empty = unbounded)")
+    limit: int = Field(default=50, description="Maximum rows; on overflow the most recent are kept")
+
+
+@tool(TimelineArgs, cls="composed")
+def silica_timeline(start: str = "", end: str = "", limit: int = 50) -> dict[str, Any]:
+    """Chronological index of the vault's dated notes — oldest first.
+
+    Use for questions about ORDERING and TIME: "when did X happen", "what came
+    before/after Y", "what is the most recent Z". Deterministic and LLM-free:
+    reads each note's `date` frontmatter (undated notes have no place on a
+    chronology and are excluded). Consult once to order events, then read the
+    linked note (silica_read_note on its stem) for detail. For content-based
+    recall use silica_recall instead.
+    """
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.kernel.timeline import timeline
+
+    vault = Path(getattr(CONFIG, "vault_path", "") or "").expanduser()
+    if not vault.is_dir():
+        return {"error": "No vault configured."}
+    t = timeline(vault, start=start, end=end, limit=limit)
+    lines = [f"{date}  -> {label} ({stem}.md)" for date, label, stem in t["rows"]]
+    if t["dropped"]:
+        lines.append(f"...and {t['dropped']} more dated notes before this range")
+    return {"timeline": "\n".join(lines),
+            "total_dated": t["total_dated"], "dropped": t["dropped"]}
+
+
 class RelatedArgs(BaseModel):
     note: str = Field(description="Note name (wikilink-style) or vault-relative path to find related notes for")
     k: int = Field(default=5, description="Number of results to return")

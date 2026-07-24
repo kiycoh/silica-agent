@@ -70,7 +70,8 @@ def test_nucleate_md_with_target_dispatches_fsm_directly(stub_coordinator):
     msg = _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI")
     assert msg == ""  # handled inline — no agent turn
     assert stub_coordinator == [
-        {"inbox_files": ["Inbox/a.md"], "target_dir": "Concepts/AI", "hub": None}
+        {"inbox_files": ["Inbox/a.md"], "target_dir": "Concepts/AI", "hub": None,
+         "keep_sources": False}
     ]
 
 

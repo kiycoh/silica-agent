@@ -22,6 +22,9 @@ own recollection:
 - By meaning: `silica_semantic_search {query, k}` — "what do I have about X".
 - Exact strings (error messages, names, quotes): `silica_search_context {query}`.
 - Known title: `silica_search {query}`, then read it.
+- Temporal ("when", "before/after", "most recent"): `silica_timeline
+  {start?, end?, limit?}` — chronological index of dated notes; consult it
+  before free-text recall, then read the linked note.
 
 Never conclude "nothing in the vault" from a single miss — try at least one
 semantic and one literal probe. If `silica_semantic_search` errors with
