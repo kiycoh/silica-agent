@@ -286,6 +286,11 @@ class OpenAICompatibleProvider:
                         "completion_tokens": getattr(u, "completion_tokens", 0),
                         "total_tokens": getattr(u, "total_tokens", 0),
                     }
+                    # Keep cache-hit visibility (token meter reads cached_tokens).
+                    ptd = getattr(u, "prompt_tokens_details", None)
+                    cached = getattr(ptd, "cached_tokens", None) if ptd is not None else None
+                    if cached:
+                        usage_dict["prompt_tokens_details"] = {"cached_tokens": cached}
 
             content = "".join(content_chunks) or None
             tool_calls_list = [tc_acc[k] for k in sorted(tc_acc)]

@@ -253,8 +253,12 @@ def test_llm_captures_reasoning(mock_completion):
 
 
 @patch("litellm.completion")
-def test_llm_openrouter_include_reasoning(mock_completion):
+def test_llm_openrouter_include_reasoning(mock_completion, monkeypatch):
     from silica.agent.llm import call_llm
+
+    # Pin the output budget: the expected max_tokens must not track the
+    # developer's .env MAX_TOKENS.
+    monkeypatch.setenv("MAX_TOKENS", "256000")
     
     mock_message = MagicMock()
     mock_message.content = "My answer"

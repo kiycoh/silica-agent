@@ -222,7 +222,7 @@ class ToolCall:
 # table. Off = one bool check, no stack-walk.
 # ponytail: profiling aid, not a live endpoint — dump on process exit only.
 _METER_ON = os.getenv("SILICA_TOKEN_METER") == "1"
-_meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0])  # site -> [calls, prompt, completion]
+_meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0, 0])  # site -> [calls, prompt, completion, cached]
 
 
 def _meter_site() -> str:
@@ -235,11 +235,19 @@ def _meter_site() -> str:
     return "?"
 
 
+def _cached_tokens(usage: dict) -> int:
+    """Cache-hit prompt tokens across provider dialects (0 when unreported)."""
+    ptd = usage.get("prompt_tokens_details")
+    cached = ptd.get("cached_tokens") if isinstance(ptd, dict) else getattr(ptd, "cached_tokens", None)
+    return cached or usage.get("cache_read_input_tokens") or usage.get("prompt_cache_hit_tokens") or 0
+
+
 def _meter_record(usage: dict) -> None:
     slot = _meter[_meter_site()]
     slot[0] += 1
     slot[1] += usage.get("prompt_tokens") or 0
     slot[2] += usage.get("completion_tokens") or 0
+    slot[3] += _cached_tokens(usage)
 
 
 @atexit.register
@@ -247,11 +255,14 @@ def _meter_dump() -> None:
     if not _meter:
         return
     rows = sorted(_meter.items(), key=lambda kv: kv[1][1] + kv[1][2], reverse=True)
-    grand = sum(p + c for _, (_, p, c) in rows)
-    print(f"\n=== token meter (prompt+completion by call-site) — total {grand:,} ===", file=sys.stderr)
-    print(f"{'call-site':<44}{'calls':>7}{'prompt':>13}{'compl':>11}", file=sys.stderr)
-    for site, (n, p, c) in rows:
-        print(f"{site:<44}{n:>7}{p:>13,}{c:>11,}", file=sys.stderr)
+    grand = sum(p + c for _, (_, p, c, _k) in rows)
+    grand_p = sum(p for _, (_, p, _c, _k) in rows)
+    grand_k = sum(k for _, (_, _p, _c, k) in rows)
+    rate = f" · cached {grand_k:,}/{grand_p:,} ({grand_k / grand_p:.0%})" if grand_p else ""
+    print(f"\n=== token meter (prompt+completion by call-site) — total {grand:,}{rate} ===", file=sys.stderr)
+    print(f"{'call-site':<44}{'calls':>7}{'prompt':>13}{'cached':>13}{'compl':>11}", file=sys.stderr)
+    for site, (n, p, c, k) in rows:
+        print(f"{site:<44}{n:>7}{p:>13,}{k:>13,}{c:>11,}", file=sys.stderr)
 
 
 @dataclass
