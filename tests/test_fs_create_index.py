@@ -5,7 +5,10 @@ from silica.driver.fs_backend import ObsidianFSBackend
 def test_fs_create_patches_index(tmp_path):
     """FS create() atomically patches the index — no settle wait needed."""
     backend = ObsidianFSBackend(vault_path=str(tmp_path))
-    (tmp_path / "test.md").write_text("", encoding="utf-8")
+    # A pre-existing note + rebuild puts the index in the "built" state so
+    # create() takes the _patch_index fast path (not a full reindex). The
+    # created note must be a NEW path — create raises on existing ones.
+    (tmp_path / "other.md").write_text("", encoding="utf-8")
     backend._rebuild_index()
 
     ref = backend.create("test.md", "some content with [[Missing]]")

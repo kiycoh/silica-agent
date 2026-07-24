@@ -646,6 +646,14 @@ class ObsidianFSBackend(GraphIndexMixin):
             rel_path = p.as_posix()
 
         full_path = self.vault_path / rel_path
+        # Base contract: "Raises if file exists" (base.py). Unconditional
+        # write_text here used to clobber a note created between validate-time
+        # path_exists() and execute-time create() — silent data loss, no
+        # 3-way merge (write ops carry no base_content). WS backend already
+        # raises (Obsidian vault.create throws on existing). Refresh callers
+        # go through upsert() instead.
+        if full_path.exists():
+            raise FileExistsError(f"Note already exists: {rel_path}")
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         full_path.write_text(content, encoding="utf-8")

@@ -626,9 +626,13 @@ def validate_operations(
                 op.op = OpType.write
                 op.snippet = op.snippet or op.content or ""
             elif op.base_content is None:
-                # Snapshot the current note so the write path can 3-way-detect
-                # a concurrent edit (charter UC6); the refiner snapshots at
-                # triage time, every other producer relies on this choke point.
+                # LAST-RESORT fallback, deliberately weak: it only guards the
+                # validate->execute window. An edit that landed while the
+                # producer computed `content` is already on disk here and
+                # becomes the base itself — no conflict detected, edit stomped.
+                # Producers must snapshot base_content at READ time (refine
+                # and enrich do); this exists only for future producers that
+                # forget, so their overwrites are not entirely unguarded.
                 op.base_content = DRIVER.read_note(path).content
 
             _resolve_parent(op, cleared_parents_out)

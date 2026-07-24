@@ -203,9 +203,9 @@ def silica_write_note(
     content = tpl.ensure_system_floor(content)
 
     # The existence check and the create must be atomic: the fs backend's
-    # create() overwrites silently, so two concurrent writers to the same new
-    # path would both pass the check and the second would clobber the first.
-    # The lease closes that window (and, cross-process, guards other agents).
+    # create() now raises on an existing note, but the pre-check under lease
+    # stays: it returns a friendly "use silica_patch_note" error instead of a
+    # backend exception, and cross-process it still guards other agents.
     with path_lease(path):
         try:
             DRIVER.read_note(path)

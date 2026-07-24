@@ -207,6 +207,21 @@ class GraphIndexMixin:
         self._ensure_graph()
         return self._notes, self._unresolved_links, self._graph
 
+    def upsert(self, path: str, content: str) -> NoteRef:
+        """Write content unconditionally: create when missing, overwrite when present.
+
+        For callers whose semantics are "refresh this staging/derived note"
+        (inbox conversion, source stubs, undo restore) — NOT for vault write
+        ops, which must fail loudly on an unexpected existing note (create).
+        Existence-probe via read_note keeps this backend-agnostic (create's
+        raise type differs across backends).
+        """
+        try:
+            self.read_note(path)
+        except Exception:
+            return self.create(path, content)
+        return self.overwrite(path, content)
+
 
 # ---------------------------------------------------------------------------
 # ObsidianDriver Protocol — the domain interface (SILICA.md §3 L0)
@@ -293,6 +308,14 @@ class ObsidianDriver(Protocol):
 
     def create(self, path: str, content: str) -> NoteRef:
         """Create a new note. Path is relative to vault root. Raises if file exists."""
+        ...
+
+    def upsert(self, path: str, content: str) -> NoteRef:
+        """Write content unconditionally: create when missing, overwrite when present.
+
+        Concrete implementation in GraphIndexMixin (Protocol bodies are not
+        inherited by structural implementors).
+        """
         ...
 
     def overwrite(self, path: str, content: str) -> NoteRef:

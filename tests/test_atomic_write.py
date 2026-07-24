@@ -61,3 +61,26 @@ def test_failing_sibling_does_not_roll_back_others(tmp_vault, monkeypatch):
     assert "body" in tmp_vault.read(c)
     assert "body" not in tmp_vault.read(b)
     assert result.ok is False
+
+
+def test_commit_note_atomic_waits_for_path_lease(tmp_vault):
+    """The FSM ingest path must serialize with lease-holding writers (subagent
+    commit_ops, MCP note tools). Without the lease, patch's read-modify-write
+    interleaves with a concurrent writer and one append is silently lost."""
+    import threading
+    from silica.kernel.workqueue import path_lease
+
+    target = tmp_vault.note("People/Ada.md", "---\n---\nseed\n")
+    done = threading.Event()
+
+    def worker():
+        commit_note_atomic(_patch_op(target), lint=False)
+        done.set()
+
+    with path_lease(target):
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        assert not done.wait(0.3), "write landed while another writer held the lease"
+    assert done.wait(5), "write never completed after the lease was released"
+    t.join(5)
+    assert "body" in tmp_vault.read(target)

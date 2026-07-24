@@ -47,6 +47,11 @@ def run_refine(item: WorkItem, config: Any) -> dict[str, Any]:
         source_basename=os.path.basename(target_path),
         path=target_path,
         content=refined.content,
+        # Snapshot at READ time: refined.content was computed from `original`,
+        # so a concurrent edit during the LLM call must 3-way-conflict against
+        # it. Validate's fallback reads the note post-LLM and would adopt the
+        # concurrent edit as base — silently stomping it (charter UC6).
+        base_content=original,
         hub=hub,
         reason="stylistic refine",
     )

@@ -35,6 +35,11 @@ class NoteCommitResult:
 def commit_note_atomic(op: Op, *, hub: str | None = None, lint: bool = True) -> NoteCommitResult:
     """Apply one Op atomically: micro-snapshot -> write -> lint -> self-revert on fail.
 
+    The whole window runs under ``path_lease`` so the FSM ingest path
+    serializes with every other lease-holding writer (subagent commit_ops,
+    the MCP note tools) — patch is read-modify-write, and without the lease
+    a concurrent append to the same note is silently lost.
+
     Args:
         op:   The single Op to apply (write / patch / overwrite / delete / skip).
         hub:  Optional hub override (falls back to op.hub).
@@ -45,6 +50,16 @@ def commit_note_atomic(op: Op, *, hub: str | None = None, lint: bool = True) -> 
         NoteCommitResult with ok=True on success, ok=False + reverted=True if
         lint failed and the note was restored to its prior state.
     """
+    from silica.kernel.workqueue import path_lease
+
+    path = op.touched_ref() or ""
+    if not path:  # skip ops touch nothing — no lease to take
+        return _commit_note_atomic_unlocked(op, hub=hub, lint=lint)
+    with path_lease(path):
+        return _commit_note_atomic_unlocked(op, hub=hub, lint=lint)
+
+
+def _commit_note_atomic_unlocked(op: Op, *, hub: str | None = None, lint: bool = True) -> NoteCommitResult:
     from silica.tools.wrapped import build_txn, silica_restore
     from silica.tools.composed import silica_lint
 

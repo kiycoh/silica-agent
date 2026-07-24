@@ -44,6 +44,9 @@ def run_enrich(item: WorkItem, config: Any) -> dict[str, Any]:
         source_basename=os.path.basename(target_path),
         path=target_path,
         content=enriched.content,
+        # Snapshot at READ time — see refine.py: a concurrent edit during the
+        # LLM window must 3-way-conflict against what the enricher actually read.
+        base_content=original,
         hub=hub,
         reason="semantic enrichment",
     )

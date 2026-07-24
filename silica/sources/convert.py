@@ -215,7 +215,7 @@ def _pdf_to_md(target: str, dest_dir: str) -> list[str]:
     # embeds (![[fig.png]]) so they resolve from any segment regardless of dir.
     if len(segments) == 1:
         note_rel = f"{CONFIG.inbox_dir}/{src.stem}.md"
-        DRIVER.create(note_rel, body)
+        DRIVER.upsert(note_rel, body)  # re-converting the same source refreshes its inbox note
         return [note_rel]
 
     width = len(str(len(segments)))
@@ -223,7 +223,7 @@ def _pdf_to_md(target: str, dest_dir: str) -> list[str]:
     for i, seg in enumerate(segments, 1):
         slug = _segment_slug(seg, "part")
         note_rel = f"{CONFIG.inbox_dir}/{src.stem}/{i:0{width}d}-{slug}.md"
-        DRIVER.create(note_rel, seg)
+        DRIVER.upsert(note_rel, seg)  # re-converting the same source refreshes its segments
         paths.append(note_rel)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
     return paths

@@ -256,7 +256,9 @@ def silica_restore(txn_id: str, inverses: list[dict]) -> dict[str, Any]:
 
             elif inv.kind == InverseOpKind.recreate_deleted:
                 if inv.prior_content is not None:
-                    DRIVER.create(path, inv.prior_content)
+                    # upsert: a re-run restore (partial rollback retry) finds the
+                    # note already recreated — restoring content is still correct.
+                    DRIVER.upsert(path, inv.prior_content)
                     applied.append(f"recreated_deleted:{path}")
                 else:
                     errors.append(f"recreate_deleted missing prior_content for {path}")

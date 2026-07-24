@@ -70,5 +70,5 @@ def stage(adapter: SourceAdapter, target: str) -> dict:
         return {"status": "error", "message": str(e)}
     if stub.lane != "terminal":
         return {"status": "distill", "target": target}
-    DRIVER.create(stub.note_path, stub.body)
+    DRIVER.upsert(stub.note_path, stub.body)  # re-ingesting the same target refreshes the stub
     return {"status": "ok", "note_path": stub.note_path, "meta": dict(item.meta)}

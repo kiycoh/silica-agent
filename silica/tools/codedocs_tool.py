@@ -33,7 +33,7 @@ def silica_document(path: str) -> dict:
         stub = CODE.to_stub(item)
     except ValueError as e:
         return {"status": "error", "message": str(e)}
-    DRIVER.create(stub.note_path, stub.body)
+    DRIVER.upsert(stub.note_path, stub.body)  # re-running on the same file refreshes the stub
     return {
         "status": "ok",
         "note_path": stub.note_path,
