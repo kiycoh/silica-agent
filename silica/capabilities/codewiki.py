@@ -134,7 +134,7 @@ def _call_worker(config, system_prompt: str, user_message: str) -> NoteContent:
                   {"role": "user", "content": user_message}],
         tools=None,
         response_schema=NoteContent,
-        max_tokens=int(os.getenv("WIKI_MAX_TOKENS", os.getenv("MAX_TOKENS", "65536"))),
+        max_tokens=int(os.getenv("WIKI_MAX_TOKENS", os.getenv("MAX_TOKENS", "32768"))),
     )
     raw = response.text or ""
     try:

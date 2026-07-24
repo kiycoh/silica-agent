@@ -6,10 +6,11 @@
 from silica.agent import providers
 
 
-def test_default_is_64k(monkeypatch):
+def test_default_is_32k(monkeypatch):
+    # 32768 keeps the OpenRouter endpoint pool wide (256k was measured bad).
     monkeypatch.delenv("MAX_TOKENS", raising=False)
     monkeypatch.setattr(providers, "model_limits", lambda p, m: (0, 0))
-    assert providers.clamp_max_tokens("", "gpt-4", None) == 65536
+    assert providers.clamp_max_tokens("", "gpt-4", None) == 32768
 
 
 def test_env_overrides_default(monkeypatch):

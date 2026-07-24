@@ -89,7 +89,7 @@ def _enrich_note(config: Any, target_path: str, original: str, hub: str) -> Note
         ],
         tools=None,
         response_schema=NoteContent,
-        max_tokens=int(os.getenv("ENRICH_MAX_TOKENS", os.getenv("MAX_TOKENS", "65536"))),
+        max_tokens=int(os.getenv("ENRICH_MAX_TOKENS", os.getenv("MAX_TOKENS", "32768"))),
     )
     raw = response.text or ""
     try:

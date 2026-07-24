@@ -132,7 +132,10 @@ def clamp_max_tokens(provider: str, model: str, requested: int | None, input_cha
     count (English runs ~4 chars/token, JSON/code closer to 3), which errs on
     the side of a smaller output budget.
     """
-    want = requested if requested is not None else int(os.getenv("MAX_TOKENS", "65536"))
+    # ponytail: 32768 default keeps the OpenRouter pool wide — cheap endpoints
+    # advertise smaller output caps and get dropped above this. 256k measured
+    # bad, 32768 measured good; in-between never A/B'd. Override via MAX_TOKENS.
+    want = requested if requested is not None else int(os.getenv("MAX_TOKENS", "32768"))
     window, out_cap = model_limits(provider, model)
     if out_cap:
         want = min(want, out_cap)
