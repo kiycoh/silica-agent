@@ -40,14 +40,19 @@ def test_target_dir_titles_scopes_enumeration_to_target_dir(tmp_vault, monkeypat
     tmp_vault.note("Corso/Sub/Nested.md", "# Nested\n\ncorpo")
     tmp_vault.note("Altro/Other.md", "# Other\n\ncorpo")
 
-    real_list_files = driver_mod.DRIVER.list_files
+    # Spy on the real driver instance, NOT the DRIVER proxy. The proxy has no
+    # own `list_files` (it forwards via __getattr__), so monkeypatch.setattr on
+    # the proxy "restores" by writing an instance attribute bound to THIS test's
+    # driver — leaking a stale index into every later DRIVER.list_files() call.
+    driver = driver_mod.get_driver()
+    real_list_files = driver.list_files
     calls: list[str] = []
 
     def _spy(folder=""):
         calls.append(folder)
         return real_list_files(folder)
 
-    monkeypatch.setattr(driver_mod.DRIVER, "list_files", _spy)
+    monkeypatch.setattr(driver, "list_files", _spy)
 
     validate_operations(
         [_write_op("Machine Learning (9 CFU)", "Corso/Machine Learning (9 CFU).md")],
