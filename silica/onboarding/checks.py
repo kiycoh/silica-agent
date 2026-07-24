@@ -153,7 +153,7 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
             return CheckResult(
                 "rerank", "warn",
                 f"{config.rerank_base_url} unreachable",
-                "start the reranker, or unset SILICA_RERANK_* and `pip install silica[rerank]`",
+                "start the reranker, or unset SILICA_RERANK_* and `pip install silica-agent[rerank]`",
             )
         return CheckResult(
             "rerank", "ok", f"{config.rerank_model} @ {config.rerank_base_url}",
@@ -163,7 +163,7 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
     return CheckResult(
         "rerank", "warn",
         "disabled (no cross-encoder available)",
-        "`pip install silica[rerank]` sharpens recall; LM Studio and Ollama cannot serve one",
+        "`pip install silica-agent[rerank]` sharpens recall; LM Studio and Ollama cannot serve one",
     )
 
 
@@ -379,7 +379,7 @@ def render_report(results: list[CheckResult]) -> None:
     table = Table(show_header=False, box=None, padding=(0, 1))
     for r in results:
         glyph, style = _STATUS_GLYPH[r.status]
-        # escape: detail/hint carry data (paths, model ids, `silica[rerank]`), and
+        # escape: detail/hint carry data (paths, model ids, `silica-agent[rerank]`), and
         # rich reads a bare [word] as a style tag and swallows it.
         hint = f"[dim]→ {escape(r.hint)}[/]" if r.hint else ""
         table.add_row(f"[{style}]{glyph}[/]", f"[bold]{r.name}[/]", escape(r.detail), hint)

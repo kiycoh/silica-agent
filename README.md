@@ -6,7 +6,7 @@
 [![Powered by UV](https://img.shields.io/badge/package--manager-uv-6366f1.svg)](https://github.com/astral-sh/uv)
 
 <p align="center">
-  <img src="assets/sili_no_bg.png" alt="Silica Mascot Sili" width="200" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/sili_no_bg.png" alt="Silica Mascot Sili" width="200" />
 </p>
 
 <h3 align="center">Silica istantly knows what you're working on, helping you edit and organize your content without corrupting it.</h3>
@@ -55,55 +55,54 @@ A pile of pdf, or a repository, becomes something you can *ask* and *reshape* wi
 
 ### Installation
 
-Clone the repository and install it in editable mode:
+Install it as a global command (no clone needed):
 
 ```bash
-git clone https://github.com/kiycoh/silica-agent.git
-cd silica-agent
-uv pip install -e .
+uv tool install silica-agent      # or: pipx install silica-agent
 ```
 
-Optional features are installed as extras, alone or combined (`'.[gui,mcp]'`):
+Then run `silica` from anywhere. Optional features are extras, alone or combined (`'silica-agent[gui,mcp]'`):
 
 ```bash
-uv pip install -e '.[gui]'      # web GUI: silica --gui
-uv pip install -e '.[mcp]'      # MCP server: silica mcp (Silica as agent memory)
-uv pip install -e '.[connect]'  # Obsidian plugin bridge: silica connect
-uv pip install -e '.[pdf]'      # PDF nucleation
-uv pip install -e '.[rerank]'   # in-process cross-encoder rerank
-uv pip install -e '.[dev]'      # tests and linters
-uv pip install -e '.[all]'      # every feature above except dev
+uv tool install 'silica-agent[gui]'      # web GUI: silica --gui
+uv tool install 'silica-agent[mcp]'      # MCP server: silica mcp (Silica as agent memory)
+uv tool install 'silica-agent[connect]'  # Obsidian plugin bridge: silica connect
+uv tool install 'silica-agent[pdf]'      # PDF nucleation
+uv tool install 'silica-agent[rerank]'   # in-process cross-encoder rerank
+uv tool install 'silica-agent[all]'      # every feature above except dev
 ```
 
 `[all]` inherits `[pdf]` and `[rerank]`, so it pulls torch and downloads several GB of model weights the first time those run.
 
-To install `silica` as a global command without cloning for development:
+**For development**, clone and install editable instead (adds tests and linters):
 
 ```bash
-uv tool install git+https://github.com/kiycoh/silica-agent.git
+git clone https://github.com/kiycoh/silica-agent.git
+cd silica-agent
+uv pip install -e '.[dev]'
 ```
-
-The editable install above stays the primary path for hacking on Silica.
 
 ### Setup and Execution
 
 Run the interactive wizard to set up your `.env` (vault, backend, chat provider, embeddings):
 
 ```bash
-uv run silica init
+silica init
 ```
 
-Re-check the environment at any time:
+Re-check the environment at any time (add `--live` to send one tiny request that confirms the model actually replies):
 
 ```bash
-uv run silica doctor
+silica doctor
 ```
 
 Start the interactive REPL:
 
 ```bash
-uv run silica
+silica
 ```
+
+(From an editable dev checkout, prefix these with `uv run`, e.g. `uv run silica init`.)
 
 A good first move on an existing vault is a read-only structural audit. It never writes, and it shows you the hubs, bridges, and orphans before you touch anything:
 
@@ -120,17 +119,17 @@ The same vault model serves four different drivers. What changes is who holds th
 1. **GUI (`silica --gui`)**
    A chat-first web interface (default `http://localhost:8765`). Query and curate the vault from the browser, watch answers stream in, and open the graph. The friendliest way in, and the best first impression.
 
-    ![Web UI Screenshot](assets/web_gui_screenshot.png)
+    ![Web UI Screenshot](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/web_gui_screenshot.png)
 
 2. **CLI / TUI (`silica`)**
    The interactive terminal REPL. Every command in the [reference](#command-reference) lives here: nucleate, audit, search, refactor, visualize. Fastest for real work once you know the verbs.
 
-    ![CLI Screenshot](assets/cli_screenshot.png)
+    ![CLI Screenshot](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/cli_screenshot.png)
 
 3. **Obsidian plugin (`silica connect`)**
    A live bridge into the Obsidian desktop app, so Silica reads and writes the vault you already have open, with its rollback and cache backing every change. *Feature-complete, pending end-to-end hardening.*
 
-    ![Obsidian Plugin Screenshot](assets/obsidian_plugin_screenshot.png)
+    ![Obsidian Plugin Screenshot](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/obsidian_plugin_screenshot.png)
 
 4. **MCP server (`silica mcp`)**
    Silica serves the vault over stdio to any MCP client. An assistant recalls from your real notes before it answers, grounding on your real decisions instead of guessing. For Claude Code, the repo is also a plugin:
@@ -139,7 +138,7 @@ The same vault model serves four different drivers. What changes is who holds th
    claude plugin install silica@silica
    ```
    
-    ![Claude Code Screenshot](assets/mcp_screenshot.png)
+    ![Claude Code Screenshot](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/mcp_screenshot.png)
 ---
 
 ## What you can do
@@ -178,7 +177,7 @@ You already let deterministic tools rewrite and reject your work every day. You 
 | a **formatter** rewrite your code without asking | drift and inconsistency | graph-safe refactors that redirect links so a merge or split never orphans a note |
 
 <p align="center">
-  <img src="assets/pipeline.svg" alt="Silica vault pipeline mapped onto a software engineering pipeline" width="880" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/pipeline.svg" alt="Silica vault pipeline mapped onto a software engineering pipeline" width="880" />
 </p>
 
 ### Design contracts
@@ -192,7 +191,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 - **Layered rollback:** `/undo` (per note), `/revert` (per run), and optional `SILICA_GIT_COMMIT=auto` stack as independent safety nets.
 
 <p align="center">
-  <img src="assets/architecture.svg" alt="Silica Architectural Schematic" width="880" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/architecture.svg" alt="Silica Architectural Schematic" width="880" />
 </p>
 
 ---

@@ -1,17 +1,24 @@
 [build-system]
-requires = ["setuptools>=61.0", "setuptools-scm>=8"]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 version_file = "silica/_version.py"
 
 [project]
-name = "silica"
+name = "silica-agent"
 dynamic = ["version"]
 description = "Obsidian-native agentic CLI — vault curation with quality gates"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "AGPL-3.0-or-later" }
+license = "AGPL-3.0-or-later"
+authors = [{ name = "Alessandro Carosia" }]
+classifiers = [
+  "Environment :: Console",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Text Processing",
+]
 dependencies = [
   "litellm",
   "httpx",
@@ -65,16 +72,27 @@ pdf = [
 # Everything except [dev]. Self-referential extra: pip resolves it back to this
 # same project. Note it inherits [pdf] and [rerank], so it pulls torch and
 # downloads several GB of weights on first use.
-all = ["silica[gui,connect,mcp,rerank,pdf]"]
+all = ["silica-agent[gui,connect,mcp,rerank,pdf]"]
 
 [project.scripts]
 silica = "silica.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/kiycoh/silica-agent"
+Repository = "https://github.com/kiycoh/silica-agent"
+Issues = "https://github.com/kiycoh/silica-agent/issues"
+
+[tool.setuptools]
+# Ship every git-tracked non-.py asset under the package (prompts, recipes,
+# domains, overlays, web static, .env.example). Beats per-package data globs:
+# capabilities/prompts/** sits under the silica.capabilities package while
+# recipes/ and domains/ are non-package subdirs of silica — include-package-data
+# attributes each file to its nearest package automatically, and new asset dirs
+# ship for free. Without this a wheel install drops them and crashes at runtime.
+include-package-data = true
+
 [tool.setuptools.packages.find]
 include = ["silica", "silica.*"]
-
-[tool.setuptools.package-data]
-silica = ["overlays/*.yaml", "ui/web/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

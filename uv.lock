@@ -3682,7 +3682,7 @@ wheels = [
 ]
 
 [[package]]
-name = "silica"
+name = "silica-agent"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
@@ -3768,7 +3768,7 @@ requires-dist = [
     { name = "rich" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0" },
-    { name = "silica", extras = ["connect", "gui", "mcp", "pdf", "rerank"], marker = "extra == 'all'" },
+    { name = "silica-agent", extras = ["connect", "gui", "mcp", "pdf", "rerank"], marker = "extra == 'all'" },
     { name = "six", marker = "extra == 'pdf'" },
     { name = "snowballstemmer" },
     { name = "stop-words", specifier = ">=2025.11.4" },

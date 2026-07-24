@@ -237,7 +237,7 @@ class TestCheckRerank:
         monkeypatch.setattr(checks, "has_local_rerank", lambda: False)
         r = checks.check_rerank(self._rr_cfg())
         assert r.status == "warn"
-        assert "silica[rerank]" in r.hint
+        assert "silica-agent[rerank]" in r.hint
 
     def test_configured_endpoint_reachable_is_ok(self, monkeypatch):
         import silica.onboarding.checks as checks

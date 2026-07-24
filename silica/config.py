@@ -230,7 +230,7 @@ class SilicaConfig:
     # on first run), "docling" (MIT, keeps figures/tables AND heading structure),
     # or "opendataloader" (Apache-2.0, strong on complex tables and multi-column
     # reading order, needs a JVM). Default preserves heading structure so book
-    # segmentation has headings to split on. mineru installs via the `silica[pdf]`
+    # segmentation has headings to split on. mineru installs via the `silica-agent[pdf]`
     # extra; docling/opendataloader are installed manually. An unmet provider
     # errors clearly.
     pdf_provider: str = field(
@@ -304,7 +304,7 @@ class SilicaConfig:
     )
 
     # Cross-encoder reranker: the precision pass over the fused candidate pool.
-    # Leave these EMPTY for the normal path — `pip install silica[rerank]` then
+    # Leave these EMPTY for the normal path — `pip install silica-agent[rerank]` then
     # runs the cross-encoder in-process (see providers.LocalReranker), because no
     # local LLM runtime (LM Studio, Ollama) can serve one. Set both to point at a
     # served /rerank endpoint instead (llama.cpp --reranking, Infinity, Jina,

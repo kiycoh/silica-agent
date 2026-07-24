@@ -64,6 +64,23 @@ class TestMergeEnv:
         assert lines[1] == "# SILICA_MODEL=b"  # later duplicate stays a comment
 
 
+class TestFindEnvExample:
+    def test_finds_packaged_copy_without_repo_root(self):
+        # The seeding fix: a real pip/uv-tool install has no repo root, so the
+        # wizard must locate silica/.env.example shipped inside the package.
+        # Guards both the symlink and the parents[1] candidate.
+        from silica.onboarding.wizard import _find_env_example
+        found = _find_env_example(None)
+        assert found is not None and found.is_file(), found
+        assert found.name == ".env.example"
+        assert found.read_text(encoding="utf-8").lstrip().startswith("#")
+
+    def test_repo_root_copy_wins_when_present(self, tmp_path):
+        from silica.onboarding.wizard import _find_env_example
+        (tmp_path / ".env.example").write_text("# repo-root seed\n", encoding="utf-8")
+        assert _find_env_example(tmp_path) == tmp_path / ".env.example"
+
+
 class TestRunWizard:
     @pytest.fixture(autouse=True)
     def _no_live_endpoint_probe(self, monkeypatch):
@@ -934,7 +951,7 @@ class TestWizardModes:
         answers = ["", str(self.vault), "", "", "m", "", "skip", "y", ""]
         rc = self._run(answers)
         assert rc == 0
-        assert "silica[rerank]" in capsys.readouterr().out
+        assert "silica-agent[rerank]" in capsys.readouterr().out
         assert not any(l.startswith("SILICA_RERANK") for l in self._active())
 
     def test_next_steps_block_printed(self, capsys):

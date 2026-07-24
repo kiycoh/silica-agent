@@ -10,7 +10,8 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: write   # create the GitHub Release
+  id-token: write   # OIDC for PyPI Trusted Publishing (no stored token)
 
 jobs:
   release:
@@ -31,6 +32,25 @@ jobs:
 
       - name: Verify built version matches the tag
         run: ls -1 dist/ && python -c "import pathlib,sys; t='${{ github.ref_name }}'.lstrip('v'); files=[p.name for p in pathlib.Path('dist').glob('*.whl')]; sys.exit(0 if any(t.replace('-','_') in f for f in files) else f'tag {t} not in {files}')"
+
+      - name: Verify the wheel ships runtime assets
+        # Guards the package-data config: a wheel that drops these crashes at
+        # runtime (recipes/prompts/domains are loaded via Path(__file__)).
+        run: |
+          for f in \
+            silica/capabilities/prompts/distiller_prompt.txt \
+            silica/recipes/injector.yaml \
+            silica/domains/codebase.yaml \
+            silica/ui/web/static/index.html \
+            silica/.env.example; do
+            unzip -l dist/*.whl | grep -q "$f" || { echo "MISSING from wheel: $f"; exit 1; }
+          done
+          echo "all runtime assets present in wheel"
+
+      - name: Publish to PyPI
+        # Trusted Publishing via OIDC — the PyPI project must have this repo +
+        # workflow registered as a trusted publisher. No API token in secrets.
+        uses: pypa/gh-action-pypi-publish@release/v1
 
       - name: Generate release notes
         uses: orhun/git-cliff-action@v4

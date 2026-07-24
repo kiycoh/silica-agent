@@ -10,7 +10,7 @@ extension; PDF is the only converter today, provider-selectable via
 fidelity, downloads models on first run), `docling` (permissive, keeps
 figures/tables and heading structure), `opendataloader` (Java-backed, strong on
 complex tables and multi-column reading order, needs a JVM). All open-source
-under permissive licences; `mineru` installs via the `silica[pdf]` extra, the
+under permissive licences; `mineru` installs via the `silica-agent[pdf]` extra, the
 alternatives are installed manually. The default preserves heading structure so
 book segmentation (below) has headings to split on instead of falling back to
 blind size-cutting.
@@ -339,7 +339,7 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
         )
     except FileNotFoundError:
         raise ValueError(
-            "mineru not installed — `pip install 'silica[pdf]'` (or `pip install "
+            "mineru not installed — `pip install 'silica-agent[pdf]'` (or `pip install "
             "'mineru[pipeline]'`), or set SILICA_PDF_PROVIDER to docling/opendataloader"
         ) from None
     if proc.returncode != 0:

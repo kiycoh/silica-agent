@@ -56,12 +56,15 @@ _LANG_ANSWER_REJECT = {"y", "n", "yes", "no", "true", "false", "on", "off"}
 
 def _find_env_example(repo_root: Path | str | None) -> Path | None:
     """Locate `.env.example` to seed a fresh `.env`: the vault repo root first,
-    then this package's own checkout. `None` when neither exists (a future
-    non-editable install) — the caller then falls back to a minimal write."""
+    then the copy shipped inside the installed package, then this package's own
+    checkout root. `None` when none exists — the caller falls back to a minimal
+    write. The packaged copy (silica/.env.example) is what makes seeding work for
+    a real `pip`/`uv tool` install, not just an editable checkout."""
     candidates: list[Path] = []
     if repo_root is not None:
         candidates.append(Path(repo_root) / ".env.example")
-    candidates.append(Path(__file__).resolve().parents[2] / ".env.example")
+    candidates.append(Path(__file__).resolve().parents[1] / ".env.example")  # silica/ package dir
+    candidates.append(Path(__file__).resolve().parents[2] / ".env.example")  # dev checkout root
     return next((c for c in candidates if c.is_file()), None)
 
 
@@ -157,7 +160,7 @@ def _rerank_install_cmd() -> str:
     """Exact install command for the [rerank] extra, matching how this process
     was installed (uv-managed interpreter → uv pip, else pip)."""
     pip = "uv pip" if "uv" in Path(sys.executable).resolve().parts else "pip"
-    return f"{pip} install 'silica[rerank]'"
+    return f"{pip} install 'silica-agent[rerank]'"
 
 
 def _ask_language(input_fn: Callable[[str], str]) -> str:
