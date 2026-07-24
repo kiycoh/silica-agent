@@ -159,7 +159,10 @@ Thumbs.db
 # Agents
 /.agents
 CLAUDE.md
-/.claude
+# Ignore local/session Claude state, but track shared harness config.
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
 /memory
 .superpowers
 
