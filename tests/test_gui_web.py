@@ -781,3 +781,23 @@ def test_heatmap_route_threads_focus_query(client, monkeypatch):
     tc.get("/heatmap")
     assert seen["focus"] is None
     assert seen["note"] is None
+
+
+def test_config_reports_toggle_and_post_flips_thinking_but_not_model(client, monkeypatch):
+    # /config mirrors the TUI's display-only /model plus the live /thinking
+    # toggle. Model is read-only (no runtime switch op). Empty model skips the
+    # network probe in model_limits, so this stays offline.
+    from silica.config import CONFIG
+
+    tc, _server = client
+    monkeypatch.setattr(CONFIG, "model", "")
+    monkeypatch.setattr(CONFIG, "show_thinking", False)
+
+    got = tc.get("/config").json()
+    assert set(got) >= {"model", "provider", "context_window", "show_thinking"}
+    assert got["show_thinking"] is False
+
+    out = tc.post("/config", json={"show_thinking": True, "model": "hacker/model"}).json()
+    assert out["show_thinking"] is True
+    assert CONFIG.show_thinking is True
+    assert CONFIG.model == ""  # POST never sets the model

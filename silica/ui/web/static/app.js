@@ -8,6 +8,27 @@ const stopBtn = $("#stop");
 let streaming = false;
 let activeTab = "chat";
 
+// --- notifications + screen-reader status ------------------------------------
+// A hairline toast strip fills the silent catch(){} gaps: a failed background
+// fetch now says so instead of leaving a stale "—". Two levels only (info =
+// accent, error = gold/caution) — the palette reserves no third UI signal.
+// Every notify() also lands in the polite SR region, so the streaming
+// transcript itself needn't be a chatty live region.
+const srStatus = $("#sr-status");
+const toasts = $("#toasts");
+function announce(msg) { if (srStatus) srStatus.textContent = msg; }
+function notify(msg, level = "error") {
+  announce(msg);
+  if ([...toasts.children].some((t) => t.textContent === msg)) return; // dedupe visible
+  const t = document.createElement("div");
+  t.className = "toast " + level;
+  t.textContent = msg;
+  const kill = () => t.remove();
+  t.addEventListener("click", kill);
+  toasts.appendChild(t);
+  setTimeout(kill, level === "error" ? 6000 : 3000);
+}
+
 function bubble(role) {
   const el = document.createElement("div");
   el.className = "msg " + (role === "user" ? "user" : "silica");
@@ -98,6 +119,7 @@ async function runTurn(fetchPromise) {
   if (streaming) return;
   streaming = true;
   stopBtn.hidden = false;
+  announce("silica is responding");
   const body = bubble("silica");
   // flow = thinking blocks, tool groups and text segments interleaved in arrival
   // order, so the transcript reads chronologically: think, tools, think, tools,
@@ -179,6 +201,7 @@ async function runTurn(fetchPromise) {
   } catch (e) {
     flowMsg("error: " + e);
     peekError(String(e));
+    notify("the turn failed: " + e);
   } finally {
     streaming = false;
     stopBtn.hidden = true;
@@ -252,9 +275,11 @@ async function runTurn(fetchPromise) {
       close(""); // collapse any open thinking, end all segments
       setCtxTokens(ev.context_tokens, ev.max_context_tokens);
       peekDone(ev); // card gets the canonical OFM render
+      announce("response ready");
     } else if (ev.type === "error") {
       close("");
       peekError(ev.error);
+      notify("response failed: " + ev.error);
       const t = document.createElement("div");
       t.className = "tool error";
       t.textContent = "error: " + ev.error;
@@ -473,7 +498,7 @@ async function loadVaultInfo() {
     renderMapPicker(data.hubs || []); // map landing: best-connected notes
     buildNoteIndex();                 // explore note search reads the fresh tree
     applySidebarFilter();
-  } catch (_) {}
+  } catch { notify("couldn't refresh vault stats"); }
 }
 
 // Tree click routing follows the active view: in explore's map mode a click
@@ -539,17 +564,19 @@ async function loadSessions() {
     });
     $("#sessions-more").textContent = "+ " + Math.max(0, sessionCount - SESSION_CAP) + " more";
     applySidebarFilter();
-  } catch (_) {}
+  } catch { notify("couldn't load chat history"); }
 }
 
 async function openSession(id) {
   if (streaming) return;
-  const r = await fetch("/session/load", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id }),
-  });
-  if (!r.ok) return;
+  try {
+    const r = await fetch("/session/load", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    if (!r.ok) { notify("couldn't load that chat"); return; }
+  } catch { notify("couldn't load that chat"); return; }
   document.querySelector('.tab[data-tab="chat"]').click(); // surface the loaded chat
   await loadVault();
   loadSessions();
@@ -879,7 +906,7 @@ async function openNote(path) {
     document.body.classList.add("note-open"); // dock insets to the drawer's edge
     const btn = $("#note-last");
     btn.querySelector("span").textContent = data.title || path;
-  } catch (_) {}
+  } catch { notify("couldn't open that note"); }
 }
 function closeNote() {
   notePanel.classList.remove("open");
@@ -1053,10 +1080,67 @@ async function loadVault() {
       if (m.role === "user") b.textContent = m.content;
       else { b.innerHTML = m.html || escapeHtml(m.content); addCopyBtn(b, () => m.content); }
     }
-  } catch (_) {}
+  } catch { notify("couldn't load the conversation"); }
 }
+// --- quick-action launch pad (empty chat only; CSS collapses it on first turn).
+// Command chips prefill the composer (the user reviews + hits enter); action
+// chips fire directly.
+$("#quick-actions").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const a = btn.dataset.action;
+  if (a === "attach") $("#attach").click();
+  else if (a === "graph") document.querySelector('.tab[data-tab="graph"]').click();
+  else { input.value = a + " "; input.focus(); autoGrow(input); renderCommands(input.value); }
+});
+
+// --- session config panel (header) — model read-only (Silica has no runtime
+// model-switch op, mirroring the TUI's display-only /model) + the live thinking
+// toggle (/thinking). Progressive disclosure: nothing until the model chip is
+// clicked.
+const sessionPanel = $("#session-panel");
+const modelBtn = $("#model-btn");
+let configLoaded = false;
+async function loadConfig() {
+  try {
+    const c = await (await fetch("/config")).json();
+    $("#model-name").textContent = c.model ? c.model.split("/").pop() : "no model";
+    $("#sp-model").textContent = c.model || "(not configured)";
+    $("#sp-provider").textContent = c.provider || "—";
+    $("#sp-ctx").textContent = c.context_window ? (c.context_window / 1000).toFixed(0) + "k tokens" : "—";
+    $("#sp-thinking").checked = !!c.show_thinking;
+    configLoaded = true;
+  } catch { notify("couldn't load session config"); }
+}
+function closeSessionPanel() {
+  sessionPanel.hidden = true;
+  modelBtn.setAttribute("aria-expanded", "false");
+}
+modelBtn.addEventListener("click", (e) => {
+  e.stopPropagation(); // don't let the outside-click handler below re-close it
+  const opening = sessionPanel.hidden;
+  sessionPanel.hidden = !opening;
+  modelBtn.setAttribute("aria-expanded", opening ? "true" : "false");
+  if (opening && !configLoaded) loadConfig();
+});
+$("#sp-thinking").addEventListener("change", async (e) => {
+  const want = e.target.checked;
+  try {
+    await fetch("/config", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ show_thinking: want }),
+    });
+  } catch { notify("couldn't update thinking"); e.target.checked = !want; }
+});
+document.addEventListener("click", (e) => {
+  if (!sessionPanel.hidden && !e.target.closest("#session-panel") && !e.target.closest("#model-btn"))
+    closeSessionPanel();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSessionPanel(); });
+
 loadVault();
 loadSessions();
 loadVaultInfo();
+loadConfig(); // header shows the active model without opening the panel
 // Land on chat — it's the primary surface. The tab handler does the rest.
 document.querySelector('.tab[data-tab="chat"]').click();

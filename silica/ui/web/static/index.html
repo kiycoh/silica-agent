@@ -10,19 +10,27 @@
   <div id="drop-hint">[ DROP TO NUCLEATE &rarr; INBOX/ ]</div>
 
   <header>
-    <button id="sidebar-toggle" class="ghost" title="toggle sidebar">&#9776;</button>
-    <button class="brand" id="brand-logo">SILICA</button>
+    <button id="sidebar-toggle" class="ghost" title="toggle sidebar" aria-label="toggle sidebar">&#9776;</button>
+    <button class="brand" id="brand-logo" title="new chat" aria-label="new chat">SILICA</button>
     <nav class="tabs">
       <button class="tab active" data-tab="chat">chat</button>
       <button class="tab" data-tab="graph">explore</button>
     </nav>
     <div class="spacer"></div>
-    <div class="ctx-tokens" id="ctx-tokens" title="context window usage"></div>
-    <button id="note-last" class="ghost" title="reopen last note">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; color:var(--accent);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+    <div class="ctx-tokens" id="ctx-tokens" title="context window usage" aria-hidden="true"></div>
+    <button id="model-btn" class="ghost" title="session config" aria-label="session config" aria-haspopup="dialog" aria-expanded="false"><span id="model-name">model</span></button>
+    <button id="note-last" class="ghost" title="reopen last note" aria-label="reopen last note">
+      <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; color:var(--accent);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
       <span></span>
     </button>
-    <button id="stop" class="ghost" hidden>&#9632; stop</button>
+    <button id="stop" class="ghost" hidden aria-label="stop the current response">&#9632; stop</button>
+    <div id="session-panel" hidden role="dialog" aria-label="session config">
+      <div class="sp-title">session</div>
+      <div class="sp-row"><span class="sp-key">model</span><span class="sp-val" id="sp-model">&mdash;</span></div>
+      <div class="sp-row"><span class="sp-key">provider</span><span class="sp-val" id="sp-provider">&mdash;</span></div>
+      <div class="sp-row"><span class="sp-key">context</span><span class="sp-val" id="sp-ctx">&mdash;</span></div>
+      <label class="sp-toggle"><span>thinking</span><input type="checkbox" id="sp-thinking" /></label>
+    </div>
   </header>
 
   <main>
@@ -55,7 +63,7 @@
     </aside>
 
     <section id="view-chat" class="view active">
-      <div id="log" data-caption="vault ready · type below, or drop a file to nucleate" data-intro="
+      <div id="log" aria-label="conversation transcript" data-caption="vault ready · type below, or drop a file to nucleate" data-intro="
               ▒▒▒                ░░                   ░░░░
              ▒▒▒▒▒▒           ░░░░░░░░            ░░░░░▒▒░
              ▒▒▒▓▓▒▒▒      ░░░░░░▒░▒▒░░░       ░░▒▒░░░▒▓▒▒
@@ -99,11 +107,17 @@
                               ░░░░   ░░░
                                     ░▒▒░"></div>
       <div id="attachments" hidden></div>
+      <div id="quick-actions">
+        <button type="button" class="qa" data-action="attach">nucleate a file</button>
+        <button type="button" class="qa" data-action="/report">report</button>
+        <button type="button" class="qa" data-action="/organize">organize</button>
+        <button type="button" class="qa" data-action="graph">explore graph</button>
+      </div>
       <form id="composer">
         <div class="commands" id="commands" hidden></div>
         <input id="nucleate-file" type="file" multiple hidden />
         <button type="button" id="attach" title="attach files (pdf, code, notes…)">+</button>
-        <textarea id="input" rows="1" placeholder="message silica…  (⏎ send, ⇧⏎ newline)"></textarea>
+        <textarea id="input" rows="1" aria-label="message silica" placeholder="message silica…  (⏎ send, ⇧⏎ newline)"></textarea>
         <button type="submit" id="send">send</button>
       </form>
     </section>
@@ -166,19 +180,19 @@
     <header>
       <span id="note-title"></span>
       <button id="note-summarize" class="ghost" title="summarize this note in chat">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>
       </button>
       <button id="note-explain" class="ghost" title="explain this note's topic, grounded in the vault">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
       </button>
       <button id="note-quiz" class="ghost" title="quiz yourself on this note">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
       </button>
       <button id="note-relate" class="ghost" title="map how this note relates to its neighbors">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
       </button>
       <button id="note-map" class="ghost" title="open in map view">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>
+        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>
       </button>
       <button id="note-close" class="ghost" title="close">&#10005;</button>
     </header>
@@ -203,10 +217,13 @@
       <div id="peek-body"></div>
     </div>
     <form id="dock-composer">
-      <textarea id="dock-input" rows="1" placeholder="ask the vault from here…  (⏎ send, ⇧⏎ newline)"></textarea>
+      <textarea id="dock-input" rows="1" aria-label="ask the vault from here" placeholder="ask the vault from here…  (⏎ send, ⇧⏎ newline)"></textarea>
       <button type="submit" id="dock-send">send</button>
     </form>
   </div>
+
+  <div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
+  <div id="toasts" aria-hidden="true"></div>
 
   <script src="/static/app.js"></script>
 </body>

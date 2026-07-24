@@ -981,6 +981,33 @@ def stop():
     return {"ok": True}
 
 
+@app.get("/config")
+def get_config():
+    """Session config for the header panel: the active model (read-only — Silica
+    has no runtime model-switch op, so this mirrors the TUI's display-only
+    /model) plus the one live toggle the web surfaces, thinking (/thinking)."""
+    from silica.agent.providers import model_limits
+
+    window = 0
+    if CONFIG.model:
+        window, _ = model_limits(CONFIG.provider, CONFIG.model)
+    return {
+        "model": CONFIG.model or "",
+        "provider": CONFIG.provider or "",
+        "context_window": window or 0,
+        "show_thinking": CONFIG.show_thinking,
+    }
+
+
+@app.post("/config")
+def set_config(payload: dict):
+    """Flip the one runtime toggle the web exposes — the same field /thinking
+    flips in the REPL. Model is not settable (no such operation)."""
+    if "show_thinking" in payload:
+        CONFIG.show_thinking = bool(payload["show_thinking"])
+    return get_config()
+
+
 @app.get("/")
 def index():
     # Cache-bust app.js/app.css by content hash: StaticFiles sets no
