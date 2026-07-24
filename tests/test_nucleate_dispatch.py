@@ -1,7 +1,8 @@
 """/nucleate — one verb, extension dispatch (spec D2).
 
-md/.txt → Injector FSM message (agent loop); code → skeleton stub staged
-inline, returns "" sentinel (fully handled, nothing for the agent)."""
+md/.txt → Coordinator FSM dispatched inline ("" sentinel); target folder from
+--target= or a single folder-pick LLM call (agent-message fallback if the pick
+fails); code → skeleton stub staged inline, "" sentinel."""
 import json
 import subprocess
 from pathlib import Path
@@ -18,6 +19,23 @@ def _reset_manifest_cache():
     reset_manifest_cache()
     yield
     reset_manifest_cache()
+
+
+@pytest.fixture
+def stub_coordinator(monkeypatch):
+    """Record Coordinator ctor kwargs; skip the real FSM."""
+    calls: list[dict] = []
+
+    class _FakeCoordinator:
+        def __init__(self, **kw):
+            calls.append(kw)
+
+        def run(self):
+            return {"final_status": "Success"}
+
+    import silica.router.coordinator as coord_mod
+    monkeypatch.setattr(coord_mod, "Coordinator", _FakeCoordinator)
+    return calls
 
 
 def test_supported_nucleate_extensions_covers_every_lane():
@@ -48,13 +66,30 @@ def test_code_adapter_matches_new_languages_not_bare():
         assert not adapter.matches(bare)
 
 
-def test_nucleate_md_expands_to_injector_message():
+def test_nucleate_md_with_target_dispatches_fsm_directly(stub_coordinator):
     msg = _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI")
-    assert msg is not None and "silica_run_injector" in msg
-    assert "Inbox/a.md" in msg and "Concepts/AI" in msg
+    assert msg == ""  # handled inline — no agent turn
+    assert stub_coordinator == [
+        {"inbox_files": ["Inbox/a.md"], "target_dir": "Concepts/AI", "hub": None}
+    ]
 
 
-def test_nucleate_md_missing_target_expands_to_auto_target():
+def test_nucleate_md_missing_target_uses_folder_pick(stub_coordinator, monkeypatch):
+    import silica.cli as cli_mod
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "Concepts/AI")
+    msg = _expand_workflow_shortcut("/nucleate Inbox/a.md")
+    assert msg == ""
+    assert stub_coordinator[0]["target_dir"] == "Concepts/AI"
+    assert stub_coordinator[0]["inbox_files"] == ["Inbox/a.md"]
+
+
+def test_nucleate_folder_pick_failure_falls_back_to_agent(monkeypatch):
+    import silica.cli as cli_mod
+
+    def boom(files):
+        raise ValueError("no llm")
+
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", boom)
     msg = _expand_workflow_shortcut("/nucleate Inbox/a.md")
     assert msg is not None and "silica_run_injector" in msg
     assert "Inbox/a.md" in msg
@@ -147,12 +182,12 @@ def test_nucleate_code_stages_stub_and_returns_sentinel(repo_vault):
     assert "def hi()" in text and "return 1" not in text
 
 
-def test_nucleate_mixed_batch_stages_code_and_expands_md(repo_vault):
+def test_nucleate_mixed_batch_stages_code_and_dispatches_md(repo_vault, stub_coordinator):
     root, vault = repo_vault
     msg = _expand_workflow_shortcut("/nucleate m.py Inbox/note.md --target=Concepts")
-    assert msg is not None and "silica_run_injector" in msg
-    assert '"Inbox/note.md"' in msg  # md file forwarded to the agent
-    assert '"m.py"' not in msg       # code file NOT forwarded (staged inline)
+    assert msg == ""
+    assert stub_coordinator[0]["inbox_files"] == ["Inbox/note.md"]  # md → FSM
+    # code file NOT forwarded (staged inline)
     assert (vault / "Inbox" / "m.md").is_file()
 
 
@@ -177,16 +212,15 @@ def test_nucleate_folder_and_connective_words_falls_back_to_agent(repo_vault):
     assert "silica_run_injector" in msg
 
 
-def test_nucleate_pdf_converts_and_forwards_converted_md(repo_vault, monkeypatch):
+def test_nucleate_pdf_converts_and_forwards_converted_md(repo_vault, monkeypatch, stub_coordinator):
     """No adapter claims .pdf → convert() runs and the CONVERTED .md is what
     the FSM is told to re-read (not the .pdf)."""
     import silica.sources.convert as conv_mod
 
     monkeypatch.setattr(conv_mod, "convert", lambda f, dest_dir="": ["Inbox/paper.md"])
     msg = _expand_workflow_shortcut("/nucleate paper.pdf --target=Concepts/AI")
-    assert msg is not None and "silica_run_injector" in msg
-    assert '"Inbox/paper.md"' in msg   # converted .md forwarded
-    assert "paper.pdf" not in msg      # original .pdf is NOT re-read
+    assert msg == ""
+    assert stub_coordinator[0]["inbox_files"] == ["Inbox/paper.md"]  # converted .md, not the .pdf
 
 
 def test_nucleate_pdf_converter_error_is_caught(repo_vault, monkeypatch, capsys):
@@ -222,7 +256,7 @@ def test_convert_command_no_files_errors():
 # it may now be stale.
 # ---------------------------------------------------------------------------
 
-def test_nucleate_renucleate_of_modified_source_warns(repo_vault, capsys):
+def test_nucleate_renucleate_of_modified_source_warns(repo_vault, capsys, stub_coordinator):
     root, vault = repo_vault
     inbox = vault / "Inbox"
     inbox.mkdir(exist_ok=True)
@@ -232,14 +266,14 @@ def test_nucleate_renucleate_of_modified_source_warns(repo_vault, capsys):
     append_record("lezione.md", "old-sha-not-matching", "run1", ["Concepts/A", "Concepts/B"])
 
     msg = _expand_workflow_shortcut("/nucleate Inbox/lezione.md --target=Concepts/AI")
-    assert msg is not None and "silica_run_injector" in msg
+    assert msg == ""
 
     out = capsys.readouterr().out
     assert "re-nucleate of a modified source" in out
     assert "2 note" in out
 
 
-def test_nucleate_same_sha_no_warning(repo_vault, capsys):
+def test_nucleate_same_sha_no_warning(repo_vault, capsys, stub_coordinator):
     root, vault = repo_vault
     inbox = vault / "Inbox"
     inbox.mkdir(exist_ok=True)
@@ -256,7 +290,7 @@ def test_nucleate_same_sha_no_warning(repo_vault, capsys):
     assert "re-nucleate of a modified source" not in out
 
 
-def test_nucleate_no_prior_provenance_no_warning(repo_vault, capsys):
+def test_nucleate_no_prior_provenance_no_warning(repo_vault, capsys, stub_coordinator):
     root, vault = repo_vault
     inbox = vault / "Inbox"
     inbox.mkdir(exist_ok=True)
@@ -269,9 +303,10 @@ def test_nucleate_no_prior_provenance_no_warning(repo_vault, capsys):
     assert "re-nucleate of a modified source" not in out
 
 
-def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys):
+def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys, monkeypatch):
     """Auto-target (no --target) is a valid invocation — the provenance
-    drift warning must still print on the way to the agent message."""
+    drift warning must still print on the way to the agent fallback."""
+    import silica.cli as cli_mod
     root, vault = repo_vault
     inbox = vault / "Inbox"
     inbox.mkdir(exist_ok=True)
@@ -280,6 +315,8 @@ def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys):
     from silica.kernel.provenance import append_record
     append_record("lezione.md", "old-sha-not-matching", "run1", ["Concepts/A", "Concepts/B"])
 
+    monkeypatch.setattr(cli_mod, "_pick_target_folder",
+                        lambda files: (_ for _ in ()).throw(ValueError("no llm")))
     msg = _expand_workflow_shortcut("/nucleate Inbox/lezione.md")
 
     assert msg is not None and "silica_run_injector" in msg
@@ -303,3 +340,36 @@ def test_settings_sets_and_shows_vault_yaml(repo_vault, capsys):
 
     assert _expand_workflow_shortcut("/settings bogus.key x").startswith("Error:")
     reset_manifest_cache()
+
+
+def test_run_injector_projects_outcomes_not_raw_context(repo_vault, monkeypatch):
+    """Agent boundary gets outcomes only: no payload/recon (planned concepts once
+    read as 'created notes'), per-chunk failures not last-error-wins."""
+    import silica.router.coordinator as coord_mod
+
+    raw = {
+        "final_status": "failed",
+        "committed_chunks": 0,
+        "failed_chunks": [{"chunk": f"f0_c{i}", "error": "boom"} for i in range(6)],
+        "error": "Critical failure delegating batch 5: boom",
+        "payload": {"chunks": ["planned concepts must not leak"]},
+        "recon": {"concepts": ["Stimatore media campionaria"]},
+        "subagents": {},
+    }
+
+    class _Fake:
+        def __init__(self, **kw):
+            self.fsm = type("F", (), {"progress": type("P", (), {"run_id": "r1"})()})()
+
+        def run(self):
+            return raw
+
+    monkeypatch.setattr(coord_mod, "Coordinator", _Fake)
+    from silica.tools import TOOLS
+
+    out = TOOLS["silica_run_injector"].fn(inbox_files=["Inbox/a.md"], target_dir="C")
+    assert out["final_status"] == "failed"
+    assert out["chunks_failed"] == 6 and out["chunks_committed"] == 0
+    assert len(out["failed_chunks"]) == 6
+    assert "payload" not in out and "recon" not in out
+    assert out["run_id"] == "r1"

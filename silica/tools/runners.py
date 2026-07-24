@@ -75,7 +75,25 @@ def silica_run_injector(
         resume_run_id=resume_run_id or None,
         cancel_token=cancel_token,
     )
-    return coordinator.run()
+    result = coordinator.run()
+
+    # Agent-facing projection: outcomes only, never the raw FSM context. The
+    # raw context once fed a confabulated success report — planned concepts in
+    # payload.chunks read as "created notes", and a last-write-wins error field
+    # hid 5 of 6 batch failures.
+    failed = result.get("failed_chunks", [])
+    projected: dict[str, Any] = {
+        "final_status": result.get("final_status", "unknown"),
+        "run_id": getattr(coordinator.fsm.progress, "run_id", None),
+        "chunks_committed": result.get("committed_chunks", 0),
+        "chunks_failed": len(failed),
+        "failed_chunks": failed,
+        "files_summary": result.get("files_summary", []),
+        "subagents": result.get("subagents", {}),
+    }
+    if result.get("error"):
+        projected["error"] = result["error"]
+    return projected
 
 
 class LedgerDigestArgs(BaseModel):

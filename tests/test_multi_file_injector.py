@@ -253,7 +253,8 @@ class TestT2ChunkContainment:
         assert fsm.state in (InjectorState.COLLISION, InjectorState.DELEGATE)
 
     def test_last_chunk_failure_goes_to_done(self):
-        """When the last chunk fails, state → DONE with final_status='partial'."""
+        """When the only chunk fails, state → DONE with final_status='failed'
+        (zero commits: 'partial' would oversell a fully-failed run)."""
         fsm = InjectorFSM("Inbox/test.md", "Concepts")
         fsm._chunks = [{"chunk": 0}]
         fsm._current_chunk_idx = 0
@@ -262,8 +263,47 @@ class TestT2ChunkContainment:
         fsm._contain_chunk_failure()
 
         assert fsm.state == InjectorState.DONE
-        assert fsm.context["final_status"] == "partial"
+        assert fsm.context["final_status"] == "failed"
         assert fsm.context.get("has_partial_failure") is True
+        assert len(fsm.context["failed_chunks"]) == 1  # per-chunk ledger, not last-error-wins
+
+    def test_last_chunk_failure_still_records_file_outcome(self, tmp_vault):
+        """A file whose LAST chunk fails never reaches CLEANUP, but its earlier
+        committed notes must still land in log.md + files_summary (accounting
+        used to be CLEANUP-anchored, so it silently vanished on this path)."""
+        from pathlib import Path
+        from silica.config import CONFIG
+        from silica.kernel.progress import RunManifestEntry
+        from silica.kernel.run_log import DEFAULT_LOG_FILENAME
+
+        fsm = InjectorFSM("Inbox/lezione-07.md", "Concepts")
+        fsm._chunks = [{"chunk": 0}, {"chunk": 1}]
+        fsm._current_chunk_idx = 1  # last chunk of the file
+        fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}
+        fsm._file_chunks = {0: {"source_file": "Inbox/lezione-07.md",
+                                "chunks": [{"chunk": 0}, {"chunk": 1}]}}
+        # chunk 0 committed a real note before chunk 1 blew up
+        fsm.manifest.entries.append(RunManifestEntry(
+            title="A", path="Concepts/A", parent=None, cluster_id=-1,
+            source_basename="lezione-07.md", op="write",
+        ))
+
+        fsm._contain_chunk_failure()
+
+        content = (Path(CONFIG.vault_path) / DEFAULT_LOG_FILENAME).read_text(encoding="utf-8")
+        assert "nucleate `lezione-07.md` → 1 new, 0 patch" in content
+        assert fsm.context["files_summary"] == [
+            {"file": "lezione-07.md", "new": 1, "patch": 0, "deferred": 0}
+        ]
+
+    def test_file_outcome_logged_once_across_paths(self, tmp_vault):
+        """The success (CLEANUP) and failure (containment) entry points must not
+        both record the same file — the _files_logged guard keeps it to one."""
+        fsm = InjectorFSM("Inbox/lezione-07.md", "Concepts")
+        from silica.router.states.finalize import _log_nucleate_completion
+        _log_nucleate_completion(fsm, 0, "Inbox/lezione-07.md")
+        _log_nucleate_completion(fsm, 0, "Inbox/lezione-07.md")
+        assert len(fsm.context["files_summary"]) == 1
 
     def test_on_error_per_chunk_routes_to_rollback(self):
         """DELEGATE/SANITIZE/SNAPSHOT errors now route to ROLLBACK (not ERROR)."""
@@ -516,47 +556,64 @@ class TestT6DirectShortcuts:
 # ---------------------------------------------------------------------------
 
 class TestT7NucleateShortcut:
-    def _expand(self, cmd: str) -> str | None:
+    def _expand(self, cmd: str, monkeypatch) -> tuple[str | None, list[dict]]:
+        """Expand with a stubbed Coordinator; return (msg, recorded ctor kwargs)."""
+        import silica.router.coordinator as coord_mod
+        calls: list[dict] = []
+
+        class _Fake:
+            def __init__(self, **kw):
+                calls.append(kw)
+
+            def run(self):
+                return {"final_status": "Success"}
+
+        monkeypatch.setattr(coord_mod, "Coordinator", _Fake)
         from silica.cli import _expand_workflow_shortcut
-        return _expand_workflow_shortcut(cmd)
+        return _expand_workflow_shortcut(cmd), calls
 
-    def test_nucleate_single_file(self):
-        msg = self._expand("/nucleate Inbox/a.md --target=Concepts/AI")
-        assert msg is not None
-        assert "Inbox/a.md" in msg
-        assert "Concepts/AI" in msg
-        assert "silica_run_injector" in msg
+    def test_nucleate_single_file(self, monkeypatch):
+        msg, calls = self._expand("/nucleate Inbox/a.md --target=Concepts/AI", monkeypatch)
+        assert msg == ""
+        assert calls[0]["inbox_files"] == ["Inbox/a.md"]
+        assert calls[0]["target_dir"] == "Concepts/AI"
 
-    def test_nucleate_multi_file(self):
-        msg = self._expand("/nucleate Inbox/a.md Inbox/b.md --target=Concepts/AI")
-        assert msg is not None
-        assert "Inbox/a.md" in msg
-        assert "Inbox/b.md" in msg
-        assert "Concepts/AI" in msg
+    def test_nucleate_multi_file(self, monkeypatch):
+        msg, calls = self._expand("/nucleate Inbox/a.md Inbox/b.md --target=Concepts/AI", monkeypatch)
+        assert msg == ""
+        assert calls[0]["inbox_files"] == ["Inbox/a.md", "Inbox/b.md"]
+        assert calls[0]["target_dir"] == "Concepts/AI"
 
-    def test_nucleate_with_hub(self):
-        msg = self._expand("/nucleate Inbox/a.md --target=Concepts/AI --hub=AI")
-        assert msg is not None
-        assert "AI" in msg
+    def test_nucleate_with_hub(self, monkeypatch):
+        msg, calls = self._expand("/nucleate Inbox/a.md --target=Concepts/AI --hub=AI", monkeypatch)
+        assert msg == ""
+        assert calls[0]["hub"] == "AI"
 
-    def test_nucleate_missing_target_expands_to_auto_target(self):
-        msg = self._expand("/nucleate Inbox/a.md")
+    def test_nucleate_missing_target_falls_back_when_pick_fails(self, monkeypatch):
+        import silica.cli as cli_mod
+
+        def boom(files):
+            raise ValueError("no llm")
+
+        monkeypatch.setattr(cli_mod, "_pick_target_folder", boom)
+        msg, _ = self._expand("/nucleate Inbox/a.md", monkeypatch)
         assert msg is not None and "silica_run_injector" in msg
         assert "target_dir=<chosen folder>" in msg
 
-    def test_nucleate_missing_files_returns_error(self):
-        msg = self._expand("/nucleate --target=Concepts/AI")
+    def test_nucleate_missing_files_returns_error(self, monkeypatch):
+        msg, _ = self._expand("/nucleate --target=Concepts/AI", monkeypatch)
         assert msg is not None
         assert "Error" in msg or "file" in msg.lower()
 
-    def test_nucleate_case_preserved_in_paths(self):
+    def test_nucleate_case_preserved_in_paths(self, monkeypatch):
         """File paths must preserve their original casing."""
-        msg = self._expand("/nucleate Inbox/MyNote.md --target=Concepts/AI")
-        assert "MyNote.md" in msg
+        msg, calls = self._expand("/nucleate Inbox/MyNote.md --target=Concepts/AI", monkeypatch)
+        assert msg == ""
+        assert calls[0]["inbox_files"] == ["Inbox/MyNote.md"]
 
-    def test_report_still_works_after_nucleate_added(self):
+    def test_report_still_works_after_nucleate_added(self, monkeypatch):
         """/report shortcut is unaffected by /nucleate addition."""
-        msg = self._expand("/report Concepts/ML")
+        msg, _ = self._expand("/report Concepts/ML", monkeypatch)
         assert msg is not None
         assert "silica_vault_report" in msg
 

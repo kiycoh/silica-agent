@@ -916,8 +916,30 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # here or the next chunk's CLEANUP journals them (corrupting /revert replay).
         self._run_inverses.clear()
 
-        # Record that at least one chunk failed (used by cleanup to set "partial")
+        # Record that at least one chunk failed (used by cleanup to set "partial").
+        # failed_chunks is the per-chunk ledger: context["error"] is last-write-wins,
+        # which once collapsed 6 batch failures into "batch 5 failed" and fed a
+        # false "5/6 ok" success report downstream.
         self.context["has_partial_failure"] = True
+        self.context.setdefault("failed_chunks", []).append(
+            {"chunk": f"f{fi}_c{ci}", "error": abort_reason[:200]}
+        )
+
+        # Per-file accounting is CLEANUP-anchored, but a failed last chunk never
+        # reaches CLEANUP — so this file (whose earlier chunks may have committed
+        # real notes) would otherwise get no log.md line / files_summary entry.
+        # Emit it here on the file boundary; _log_nucleate_completion is guarded
+        # against double-recording the success path.
+        file_group = self._file_chunks.get(fi, {})
+        n_chunks_in_file = len(file_group.get("chunks", []))
+        if ci + 1 >= n_chunks_in_file:
+            try:
+                from silica.router.states.finalize import _log_nucleate_completion
+                _log_nucleate_completion(
+                    self, fi, file_group.get("source_file", self.inbox_file)
+                )
+            except Exception as _le:
+                logger.debug("containment: per-file log skipped (non-fatal): %s", _le)
 
         # Advance to next uncommitted chunk, or conclude the run as partial
         self._get_chunks_from_context_if_empty()
@@ -938,7 +960,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
             logger.info(
                 "Chunk f%d_c%d failed (last uncommitted chunk). Run concludes with partial success.", fi, ci
             )
-            self.context["final_status"] = "partial"
+            # "partial" implies something committed; with zero commits the honest
+            # verdict is "failed" (the old unconditional "partial" helped sell a
+            # fully-failed run as a mostly-successful one).
+            self.context["final_status"] = (
+                "partial" if self.context.get("committed_chunks") else "failed"
+            )
             self.state = InjectorState.DONE
 
     def _next_uncommitted_chunk_idx(self, start: int) -> int:

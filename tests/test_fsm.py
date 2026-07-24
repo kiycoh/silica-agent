@@ -464,7 +464,7 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
     mock_restore.assert_called_once_with(txn_id="txn_123", inverses=inverses)
 
     assert fsm.state == InjectorState.DONE
-    assert fsm.context["final_status"] == "partial"
+    assert fsm.context["final_status"] == "failed"  # zero commits: honest verdict, not "partial"
 
 
 @patch("silica.router.orchestrator.silica_recon")
@@ -1050,7 +1050,9 @@ def test_fsm_create_settle_timeout_rollback(
         with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])):
             res = fsm.run()
         
-    # Chunk-level containment: single-chunk run concludes as partial (not ERROR)
+    # Chunk-level containment: single-chunk run concludes as partial (not ERROR):
+    # the settle-timeout defers the ops but the chunk still reaches CLEANUP, so
+    # committed_chunks=1 and "partial" is the honest verdict (vs "failed" = zero commits)
     assert fsm.state == InjectorState.DONE
     assert res.get("final_status") == "partial"
 

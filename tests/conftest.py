@@ -175,6 +175,25 @@ def _reset_manifest_cache() -> None:
     manifest_mod.reset_manifest_cache()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_vault_path(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point CONFIG.vault_path at a per-test tmp dir by default.
+
+    At import CONFIG.vault_path is the developer's REAL configured vault (from
+    .env). run_log.append_log_line falls back to it whenever no explicit
+    vault_path is passed, so any unit test that drove a CLEANUP (or the curator)
+    leaked `nucleate test.md → 0 new…` lines into the real log.md. This runs
+    before requested fixtures, so tmp_vault and in-test monkeypatches still win
+    for tests that need a specific vault.
+    """
+    import silica.config as config_mod
+    # Lazy, like the other store fixtures: don't create the dir (a bare
+    # tmp_path/… would pollute tests that assert on tmp_path's contents). Any
+    # code that actually writes here (append_log_line) creates it on demand.
+    safe_vault = tmp_path / "isolated_vault"
+    monkeypatch.setattr(config_mod.CONFIG, "vault_path", str(safe_vault))
+
+
 @pytest.fixture(scope="session")
 def synthetic_vault() -> Path:
     """Return the path to the synthetic test vault, building it if needed.

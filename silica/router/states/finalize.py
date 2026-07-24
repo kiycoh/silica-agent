@@ -178,11 +178,23 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
     file): a multi-file run shares one run_id and fires this once per file,
     so each file needs its own line, while a resume of the same run must not
     duplicate any (dedup_key). Best-effort and must never block CLEANUP.
+
+    Called on every file conclusion — the success path (last chunk's CLEANUP)
+    AND the failure path (last chunk rolled back, so CLEANUP never runs for it).
+    A file whose earlier chunks committed real notes must still be accounted
+    even when its last chunk fails; the `_files_logged` guard keeps the two
+    entry points from double-recording.
     """
     try:
         from silica.kernel.run_log import append_log_line, format_nucleate_event
 
         basename = os.path.basename(source_file)
+        logged = getattr(fsm, "_files_logged", None)
+        if logged is None:
+            logged = fsm._files_logged = set()
+        if fi in logged:
+            return
+        logged.add(fi)
         new_count = sum(
             1 for e in fsm.manifest.entries
             if e.source_basename == basename and e.op == "write"
@@ -202,6 +214,16 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
                     deferred_count = len(bundle.get("rejected_ops", []))
             except Exception as _de:
                 logger.debug("CLEANUP: deferred count lookup failed (non-fatal): %s", _de)
+
+        # Stash the grounded per-file outcome before any log I/O: this is what
+        # the agent-facing tool result reports as actually written. Guarded so
+        # a context-less fsm stub can't sink the log append below.
+        ctx = getattr(fsm, "context", None)
+        if isinstance(ctx, dict):
+            ctx.setdefault("files_summary", []).append(
+                {"file": basename, "new": new_count, "patch": patch_count,
+                 "deferred": deferred_count}
+            )
 
         event = format_nucleate_event(basename, new_count, patch_count, deferred_count)
         append_log_line(event, fsm.progress.run_id, dedup_key=f"`{basename}`")
@@ -265,11 +287,15 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
                 if t.id.startswith(fi_prefix)
             )
             inbox_file_for_fi = file_group.get("source_file", fsm.inbox_file)
+            # Log the per-file outcome regardless of failures: a file that
+            # committed notes in earlier chunks still deserves its log.md line
+            # and files_summary entry. Only ARCHIVING is gated on no-failure
+            # (a partial source stays in the inbox for retry).
+            _log_nucleate_completion(fsm, fi, inbox_file_for_fi)
             if not file_has_failure:
                 res = silica_cleanup(inbox_file_for_fi, "done")
                 if "error" in res:
                     fsm.context["cleanup_warning"] = res["error"]
-                _log_nucleate_completion(fsm, fi, inbox_file_for_fi)
                 # Title-index run cache: the archived source moved out of its
                 # indexed path — drop its ref so AUTOLINK can't link to a stale
                 # inbox title.
@@ -295,6 +321,10 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
                 "Chunk f%d_c%d done. Archiving deferred until last chunk of file %d.",
                 fi, ci, fi,
             )
+
+        # Grounded outcome evidence: committed-chunk count lets the terminal
+        # verdict (here and in ROLLBACK) tell "partial" from "failed".
+        fsm.context["committed_chunks"] = fsm.context.get("committed_chunks", 0) + 1
 
         # Run-level verdict, recomputed each chunk's CLEANUP (last write wins).
         # no_ops is a whole-run property — it holds only when NO chunk had actionable

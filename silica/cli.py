@@ -893,6 +893,42 @@ def _seed_batch_ledger(cap: str, payloads: list[dict], *, kind: str, label: str)
     )
 
 
+def _pick_target_folder(md_files: list[str]) -> str:
+    """Choose the destination folder for a nucleate run with ONE small LLM call.
+
+    Replaces a full agent turn: the old auto-target path resent the entire
+    session history to the orchestrator to make this single decision.
+    Raises on any failure — the caller falls back to the agent message.
+    """
+    from pathlib import Path
+
+    from silica.agent.llm import call_llm
+    from silica.driver import DRIVER
+
+    inbox = (getattr(CONFIG, "inbox_dir", "") or "Inbox").rstrip("/")
+    folders = sorted({
+        str(Path(r.path or r.name).parent)
+        for r in DRIVER.list_files("")
+        if (r.path or r.name).endswith(".md")
+    } - {".", inbox})
+    folders = [f for f in folders if not f.startswith(f"{inbox}/")]
+    excerpt = (DRIVER.read_note(md_files[0]).content or "")[:1500]
+    prompt = (
+        "Pick the single most relevant destination folder for nucleating this "
+        "content into a knowledge vault. Reply with ONLY the folder path on one "
+        "line, no quotes. Prefer an existing folder; invent a sensible new path "
+        "only if nothing fits.\n\n"
+        "Existing folders:\n" + "\n".join(f"- {f}" for f in folders[:200]) +
+        f"\n\nContent excerpt ({md_files[0]}):\n{excerpt}"
+    )
+    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=2048)
+    lines = [ln.strip().strip('"').strip("`").rstrip("/") for ln in (resp.text or "").splitlines()]
+    pick = next((ln for ln in lines if ln), "")
+    if not pick:
+        raise ValueError("empty folder pick")
+    return pick
+
+
 def _expand_workflow_shortcut(user_input: str) -> str | None:
     """Expand workflow shortcuts (e.g. /report, /nucleate) into agent-directed messages.
 
@@ -1018,17 +1054,18 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             except Exception as exc:
                 logger.debug("/nucleate: re-nucleate provenance check skipped for %s (non-fatal): %s", mf, exc)
 
-        files_json = json.dumps(md_files)
-        if target_dir:
-            msg = (
-                f"Run the Injector pipeline for {len(md_files)} file(s).\n"
-                f"Call `silica_run_injector` with "
-                f"inbox_files={files_json}, target_dir={json.dumps(target_dir)}"
-            )
-        else:
-            # ponytail: auto-target = one folder per run chosen by the chat
-            # agent (it already holds the vault map); per-note thematic
-            # placement stays /organize's job.
+        if not target_dir:
+            # auto-target: one small folder-pick call, not a full agent turn;
+            # per-note thematic placement stays /organize's job.
+            try:
+                target_dir = _pick_target_folder(md_files)
+                CONSOLE.print(f"  auto-target: [bold]{target_dir}[/]")
+            except Exception as exc:
+                logger.debug("/nucleate: auto-target pick failed (non-fatal): %s", exc)
+
+        if not target_dir:
+            # Fallback: hand the folder choice to the agent (legacy behavior).
+            files_json = json.dumps(md_files)
             msg = (
                 f"Run the Injector pipeline for {len(md_files)} file(s).\n"
                 f"No target folder was given. Skim the inbox file(s) {files_json}, "
@@ -1038,10 +1075,25 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 f"folder in one line, then call `silica_run_injector` with "
                 f"inbox_files={files_json}, target_dir=<chosen folder>"
             )
-        if hub:
-            msg += f", hub={json.dumps(hub)}"
-        msg += "."
-        return msg
+            if hub:
+                msg += f", hub={json.dumps(hub)}"
+            return msg + "."
+
+        # Direct FSM dispatch — no LLM orchestrator. The old path round-tripped
+        # the whole session history through the model on every turn just to
+        # relay these arguments to silica_run_injector (~40% of a nucleate
+        # run's tokens for a handful of decision tokens).
+        from silica.router.coordinator import Coordinator
+
+        CONSOLE.print(f"  nucleate: {len(md_files)} file(s) → [bold]{target_dir}[/]")
+        result = Coordinator(
+            inbox_files=md_files, target_dir=target_dir, hub=hub or None
+        ).run()
+        status = result.get("final_status") or result.get("error") or "done"
+        failed = result.get("failed_chunks") or []
+        extra = f" — {len(failed)} chunk(s) failed" if failed else ""
+        CONSOLE.print(f"  nucleate finished: [bold]{status}[/]{extra} — details in log.md")
+        return ""
 
     if cmd == "/settings":
         # View/edit vault.yaml without the wizard. ponytail: safe_dump rewrite —
