@@ -1,0 +1,31 @@
+# Dependabot version updates.
+# Two ecosystems match this repo: uv-managed Python deps (pyproject.toml + uv.lock)
+# and the pinned actions in .github/workflows/release.yml.
+# Commit prefixes (build / ci) map to cliff.toml's "^build|^ci" -> Build & CI section.
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    open-pull-requests-limit: 5
+    # Minor/patch bumps arrive as one grouped PR to cut solo-maintainer noise;
+    # majors stay individual so breaking changes are reviewed on their own.
+    groups:
+      python-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      actions:
+        patterns: ["*"]
