@@ -158,3 +158,81 @@ def test_reconcile_skips_when_drift_exceeds_cap(tmp_path, monkeypatch):
                         lambda cfg: (_ for _ in ()).throw(AssertionError("must not embed past cap")))
 
     assert orch._reconcile_embed_index() == 0  # 5 missing > cap 2 → skip
+
+
+# --- startup reconcile: PRUNE leg (out-of-band deletion auto-heal) ---------
+
+def test_reconcile_prunes_out_of_band_deletion(tmp_path, monkeypatch):
+    """A note deleted from the vault (Obsidian/rm) leaves a phantom vector;
+    the reconcile drops it. No embedding — the ADD leg never runs here."""
+    import silica.kernel.embed as embed
+    import silica.router.orchestrator as orch
+    from silica.driver.base import NoteRef
+    from types import SimpleNamespace
+
+    ei = tmp_path / "embeddings.json"
+    monkeypatch.setattr(embed, "_index_path", lambda: ei)
+    _seed_index(embed, ei, ["a", "b", "c"])   # c is deleted out-of-band below
+
+    monkeypatch.setattr(orch, "DRIVER", SimpleNamespace(
+        list_files=lambda folder="": [NoteRef("A", "a.md"), NoteRef("B", "b.md")],
+    ))
+    assert orch._reconcile_embed_index() == 0       # nothing added
+    store = embed.get_store()
+    assert store.has("a") and store.has("b")
+    assert not store.has("c")                        # phantom pruned
+
+
+def test_reconcile_refuses_prune_on_empty_live_view(tmp_path, monkeypatch):
+    """An empty vault view against a populated index is a misconfig (wrong vault
+    path), not 'user deleted everything' — refuse to prune, defer to /embed."""
+    import silica.kernel.embed as embed
+    import silica.router.orchestrator as orch
+    from types import SimpleNamespace
+
+    ei = tmp_path / "embeddings.json"
+    monkeypatch.setattr(embed, "_index_path", lambda: ei)
+    _seed_index(embed, ei, ["a", "b", "c"])
+
+    monkeypatch.setattr(orch, "DRIVER", SimpleNamespace(list_files=lambda folder="": []))
+    assert orch._reconcile_embed_index() == 0
+    store = embed.get_store()
+    assert store.has("a") and store.has("b") and store.has("c")   # nothing pruned
+
+
+def test_reconcile_refuses_prune_when_view_half_missing(tmp_path, monkeypatch):
+    """A view missing more than half a populated store smells like a partial fs
+    read — refuse to prune (ratio guard), keep every entry."""
+    import silica.kernel.embed as embed
+    import silica.router.orchestrator as orch
+    from silica.driver.base import NoteRef
+    from types import SimpleNamespace
+
+    ei = tmp_path / "embeddings.json"
+    monkeypatch.setattr(embed, "_index_path", lambda: ei)
+    _seed_index(embed, ei, [f"n{i}" for i in range(100)])
+
+    live = [NoteRef(f"N{i}", f"n{i}.md") for i in range(40)]  # 60/100 absent
+    monkeypatch.setattr(orch, "DRIVER", SimpleNamespace(list_files=lambda folder="": live))
+    assert orch._reconcile_embed_index() == 0
+    assert len(embed.get_store()) == 100     # 60 > ceil(50) → skip, all kept
+
+
+def test_cooccur_reconcile_prunes_out_of_band_deletion(tmp_path, monkeypatch):
+    """The embedder-free twin: a deleted note's co-occurrence node+edges are
+    pruned at the same chokepoint (conftest isolates the cooccur index path)."""
+    import silica.router.orchestrator as orch
+    from silica.driver.base import NoteRef
+    from types import SimpleNamespace
+
+    store = cooc.get_cooccur_store(lang="english")
+    for p in ("a", "b", "c"):
+        store.upsert_note(p, {})
+    store.save()
+    assert set(store.paths()) == {"a", "b", "c"}
+
+    monkeypatch.setattr(orch, "DRIVER", SimpleNamespace(
+        list_files=lambda folder="": [NoteRef("A", "a.md"), NoteRef("B", "b.md")],
+    ))
+    assert orch._prune_cooccur_orphans() == 1
+    assert set(cooc.get_cooccur_store().paths()) == {"a", "b"}

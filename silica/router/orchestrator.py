@@ -133,17 +133,40 @@ def _refresh_cooccurrence_for_ops(
 # the reconcile warns and defers to an explicit /embed rather than embedding a
 # large batch implicitly at run start.
 _RECONCILE_CAP = 500
+# A live vault view missing more than this fraction of a populated store smells
+# like a misconfig/partial-read, not mass deletion. ponytail: a flat ratio;
+# swap for a delete-journal or two-scan confirmation if false skips ever bite.
+_PRUNE_RATIO_CEILING = 0.5
+
+
+def _safe_to_prune(orphaned: set[str], live: set[str], store_len: int) -> bool:
+    """Trust the live vault view enough to prune against it only if it is
+    non-empty and accounts for most of the store. An empty view (wrong vault
+    path) or a half-missing one (partial fs read) is a bug, not deletions —
+    refuse and defer to an explicit /embed. A small floor lets tiny vaults,
+    which churn proportionally more, still self-heal. Prune damage is
+    recoverable (vectors re-derive from the still-present bodies); we just
+    never risk it on an untrustworthy view.
+    """
+    if not orphaned or not live:
+        return False
+    return len(orphaned) <= max(20, _PRUNE_RATIO_CEILING * store_len)
 
 
 def _reconcile_embed_index(*, folder: str = "") -> int:
-    """Repair embed-index drift from a prior hard crash (Fix A safety net).
+    """Repair embed-index drift before a run reads the index (Fix A safety net).
 
-    Set-diffs vault note paths against index keys and embeds ONLY the missing
-    ones. Bounded best-effort: a cold/empty index is left to an explicit /embed
-    (never implicitly embed the whole vault), and drift beyond ``_RECONCILE_CAP``
-    is treated as a stale index — warn and skip. Also closes the pre-existing gap
-    where a mid-run crash desynced the index until a manual /embed. Returns the
-    number of notes re-embedded.
+    Two directions, both best-effort:
+      ADD   — embed notes present on disk but missing from the index (crash-drift
+              or a note written while the embedder was down). Bounded by
+              ``_RECONCILE_CAP``: embedding costs API calls, so mass-drift defers
+              to an explicit /embed rather than an implicit whole-vault build.
+      PRUNE — drop index entries whose note was deleted out-of-band (Obsidian,
+              ``rm``). Free (no embedding), so unbounded — but guarded by
+              ``_safe_to_prune`` against a bogus live view that would wipe a
+              good index.
+    A cold/empty index is left to an explicit /embed. Returns the number of
+    notes re-embedded (adds); prunes are logged, not returned.
     """
     try:
         from silica.agent.providers import get_embedder
@@ -153,12 +176,33 @@ def _reconcile_embed_index(*, folder: str = "") -> int:
         store = get_store()
         if len(store) == 0:
             return 0  # cold index — an explicit /embed owns the full build
+
         have = set(store.paths())
+        live: set[str] = set()
         missing: list[tuple[str, str]] = []
         for ref in DRIVER.list_files(folder or ""):
             idx_path = (ref.path or ref.name).removesuffix(".md")
-            if idx_path and idx_path not in have:
+            if not idx_path:
+                continue
+            live.add(idx_path)
+            if idx_path not in have:
                 missing.append((idx_path, ref.name or idx_path))
+
+        # PRUNE first (free): notes deleted from the vault out-of-band.
+        orphaned = have - live
+        if _safe_to_prune(orphaned, live, len(store)):
+            for p in orphaned:
+                store.delete(p)
+            store.save()
+            logger.info("embed reconcile pruned %d note(s) deleted out-of-band", len(orphaned))
+        elif orphaned:
+            logger.warning(
+                "embed index has %d/%d entries absent from vault — run /embed to "
+                "reconcile; skipping auto-prune (stale/partial view)",
+                len(orphaned), len(store),
+            )
+
+        # ADD (capped): notes on disk but not yet embedded.
         if not missing:
             return 0
         if len(missing) > _RECONCILE_CAP:
@@ -180,6 +224,43 @@ def _reconcile_embed_index(*, folder: str = "") -> int:
         return len(notes)
     except Exception as e:
         logger.debug("embed reconcile skipped (%s)", e)
+        return 0
+
+
+def _prune_cooccur_orphans(*, folder: str = "") -> int:
+    """Drop co-occurrence nodes+edges whose note was deleted out-of-band.
+
+    The embedder-free twin of the PRUNE leg above: same guard, same chokepoint.
+    Free (no LLM/embedder), so it runs every run start. Returns the prune count.
+    """
+    try:
+        from silica.kernel.cooccurrence import get_cooccur_store
+
+        store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
+        have = set(store.paths())
+        if not have:
+            return 0  # unseeded — an explicit /cooccur owns the first build
+        live = {
+            (ref.path or ref.name).removesuffix(".md")
+            for ref in DRIVER.list_files(folder or "")
+        }
+        live.discard("")
+        orphaned = have - live
+        if _safe_to_prune(orphaned, live, len(have)):
+            for p in orphaned:
+                store.delete_note(p)  # also prunes its edges
+            store.save()
+            logger.info("cooccur reconcile pruned %d note(s) deleted out-of-band", len(orphaned))
+            return len(orphaned)
+        if orphaned:
+            logger.warning(
+                "cooccur index has %d/%d nodes absent from vault — run /cooccur to "
+                "reconcile; skipping auto-prune (stale/partial view)",
+                len(orphaned), len(have),
+            )
+        return 0
+    except Exception as e:
+        logger.debug("cooccur reconcile skipped (%s)", e)
         return 0
 
 
@@ -649,9 +730,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
             source=self.inbox_file, vault=getattr(CONFIG, "vault_path", None) or None
         )
 
-        # Fix A: repair any embed-index drift left by a prior hard crash before
-        # this run reads the index (no-op/sub-ms when the index is in sync).
+        # Fix A: repair index drift before this run reads the indexes — crash-drift
+        # (embed adds) and out-of-band deletions (embed + cooccur prunes). No-op/
+        # sub-ms when in sync; the prunes are free (no embedder/LLM).
         _reconcile_embed_index()
+        _prune_cooccur_orphans()
 
         # Per-file pipeline: start at the first uncommitted file (committed
         # files are skipped entirely — no recon/embedding spent on them).

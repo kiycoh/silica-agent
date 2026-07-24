@@ -515,6 +515,8 @@ def build_index(
     batch_size: int = 32,
     force: bool = False,
     save: bool = True,
+    prune: bool = False,
+    folder: str = "",
 ) -> EmbedStore:
     """Build or incrementally refresh the embedding index.
 
@@ -525,6 +527,13 @@ def build_index(
         store: existing EmbedStore to update (loads from disk if None).
         batch_size: number of texts to embed per API call.
         force: if True, re-embed ALL notes regardless of existing entries.
+        prune: if True, `notes` is the AUTHORITATIVE live set for `folder` —
+               drop index entries under `folder` whose note is absent from it
+               (deleted out-of-band, e.g. in Obsidian). Off by default because
+               incremental callers pass a PARTIAL `notes` (see
+               `_reconcile_embed_index`, which embeds only the missing paths);
+               pruning against a partial list would delete the unlisted rest.
+        folder: scope for `prune` (empty = whole vault).
 
     Returns:
         The updated EmbedStore (already saved to disk).
@@ -576,6 +585,12 @@ def build_index(
         for (path, name, body), fv, tv, f in zip(batch, full_vecs, title_vecs, folders):
             store.upsert(path, name, fv, title_vec=tv,
                          content_hash=_embed_signature(name, body, folder=f, model=_model))
+
+    if prune:
+        from silica.kernel.paths import in_folder
+        live = {path for path, _, _ in notes}
+        for p in [p for p in store.paths() if p not in live and in_folder(p, folder)]:
+            store.delete(p)
 
     if save:
         store.save()

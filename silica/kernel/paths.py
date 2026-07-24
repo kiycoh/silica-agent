@@ -27,6 +27,19 @@ from silica.config import CONFIG
 logger = logging.getLogger(__name__)
 
 
+def in_folder(path: str, folder: str) -> bool:
+    """True if vault-rel `path` is inside `folder` (empty folder ⇒ whole vault).
+
+    Single source of truth for the folder-scoping used by index reconciliation
+    (embed/cooccur build_index) and the /embed, /cooccur, /dedup tools.
+    """
+    if not folder:
+        return True
+    f = folder.replace("\\", "/").strip("/").lower()
+    p = path.replace("\\", "/").removesuffix(".md").lower()
+    return p == f or p.startswith(f + "/")
+
+
 def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Torn-write-proof write: tmp file in the same dir, fsync, os.replace.
 

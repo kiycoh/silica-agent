@@ -245,6 +245,37 @@ def test_build_index_embeds_new_notes(tmp_path):
     assert embedder.embed.call_count == 1  # both in one batch
 
 
+def test_build_index_prune_reconciles_out_of_band_deletion(tmp_path):
+    # A note deleted from the vault (out-of-band, e.g. Obsidian) is absent from
+    # the authoritative `notes`; prune=True drops its phantom vector, scoped to
+    # `folder` so notes in other folders survive.
+    idx = tmp_path / "idx.json"
+    store = EmbedStore(idx)
+    store.upsert("Concepts/Gone", "Gone", [1.0, 0.0])   # deleted since last build
+    store.upsert("Other/Keep", "Keep", [0.0, 1.0])      # different folder
+
+    build_index(_make_embedder(), [("Concepts/A", "A", "a")],
+                store=store, prune=True, folder="Concepts")
+
+    assert store.has("Concepts/A")           # new note embedded
+    assert not store.has("Concepts/Gone")    # phantom pruned
+    assert store.has("Other/Keep")           # out-of-folder untouched
+
+
+def test_build_index_default_does_not_prune(tmp_path):
+    # Guard: incremental callers pass a PARTIAL `notes` (only missing paths).
+    # Without prune, unlisted entries must survive — else the reconcile path
+    # (_reconcile_embed_index) would wipe every valid vector.
+    idx = tmp_path / "idx.json"
+    store = EmbedStore(idx)
+    store.upsert("Concepts/Present", "Present", [1.0, 0.0])
+
+    build_index(_make_embedder(), [("Concepts/New", "New", "n")], store=store)
+
+    assert store.has("Concepts/Present")     # not listed, but kept
+    assert store.has("Concepts/New")
+
+
 def test_build_index_skips_existing(tmp_path):
     embedder = _make_embedder()
     idx = tmp_path / "idx.json"

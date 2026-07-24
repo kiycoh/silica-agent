@@ -593,6 +593,8 @@ def build_index(
     refreeze: bool = False,
     concepts_by_path: dict[str, list[str]] | None = None,
     save: bool = True,
+    prune: bool = False,
+    folder: str = "",
 ) -> CooccurStore:
     """Build/refresh the co-occurrence store from (path, name, body) tuples.
 
@@ -610,6 +612,11 @@ def build_index(
 
     `concepts_by_path` (#9): optional map of note path -> LLM-extracted concept
     phrases, forwarded into build_contribution to reinforce those concepts.
+
+    `prune`: if True, `notes` is the AUTHORITATIVE live set for `folder` — drop
+    (and un-edge) nodes under `folder` whose note is absent from it (deleted
+    out-of-band). Off by default: incremental callers pass a partial `notes`,
+    so pruning against it would delete the unlisted rest. `folder` scopes it.
     """
     if store is None:
         store = get_cooccur_store(lang=lang or "english")
@@ -638,6 +645,11 @@ def build_index(
                 name, body, lang=use_lang, concepts=cmap.get(path), strip_fences=strip_fences
             ),
         )
+    if prune:
+        from silica.kernel.paths import in_folder
+        live = {path for path, _, _ in notes}
+        for p in [p for p in store.paths() if p not in live and in_folder(p, folder)]:
+            store.delete_note(p)
     if save:
         store.save()
     return store

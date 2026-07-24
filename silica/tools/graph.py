@@ -20,13 +20,7 @@ from silica.tools.atomic import EmptyArgs
 logger = logging.getLogger(__name__)
 
 
-def _in_folder(path: str, folder: str) -> bool:
-    """True if vault-rel `path` is inside `folder` (empty folder ⇒ whole vault)."""
-    if not folder:
-        return True
-    f = folder.replace("\\", "/").strip("/").lower()
-    p = path.replace("\\", "/").removesuffix(".md").lower()
-    return p == f or p.startswith(f + "/")
+from silica.kernel.paths import in_folder as _in_folder  # canonical folder-scope predicate
 
 
 class GraphExportArgs(BaseModel):
@@ -575,20 +569,11 @@ def silica_embed_refresh(folder: str = "", force: bool = False) -> dict[str, Any
 
     try:
         embedder = get_embedder(CONFIG)
-        store = build_index(embedder, notes, force=force)
+        # prune=True: `notes` is the authoritative live set for `folder`, so
+        # build_index drops entries whose note was deleted out-of-band.
+        store = build_index(embedder, notes, force=force, prune=True, folder=folder)
     except Exception as e:
         return {"error": f"Index build failed: {e}", "read_errors": errors}
-
-    # Garbage collection: remove stale paths from the store
-    current_paths = {idx_path for idx_path, _, _ in notes}
-    stale_paths = [
-        p for p in store.paths()
-        if _in_folder(p, folder) and p not in current_paths
-    ]
-    for p in stale_paths:
-        store.delete(p)
-    if stale_paths:
-        store.save()
 
     return {
         "indexed": len(store),
@@ -649,21 +634,14 @@ def silica_cooccurrence_refresh(folder: str = "", force: bool = False) -> dict[s
         # refreeze: flipping the language without re-stemming existing
         # contributions would mix stemmers across node keys. save=False: one
         # flush at the end after GC + edge refresh.
+        # prune=True: drop nodes+edges for notes deleted out-of-band. save=False:
+        # one flush at the end after the prune and edge refresh below.
         build_index(
             notes, store=store, lang=CONFIG.cooccurrence_lang,
-            force=force, refreeze=force, save=False,
+            force=force, refreeze=force, save=False, prune=True, folder=folder,
         )
     except Exception as e:
         return {"error": f"Index build failed: {e}", "read_errors": errors}
-
-    # Garbage collection: remove stale paths from the store (also prunes their edges)
-    current_paths = {idx_path for idx_path, _, _ in notes}
-    stale_paths = [
-        p for p in store.paths()
-        if _in_folder(p, folder) and p not in current_paths
-    ]
-    for p in stale_paths:
-        store.delete_note(p)
 
     # CORRELATE note_edges (ADR-0013): --force rebuilds the whole graph; a plain
     # incremental /cooccur only recomputes rows for notes seeded this run — the
