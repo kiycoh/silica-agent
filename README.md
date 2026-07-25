@@ -1,80 +1,83 @@
-# Silica
-
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-22d3ee.svg)](https://www.python.org/)
-[![Obsidian Compatible](https://img.shields.io/badge/Obsidian-Compatible-38afef.svg)](https://obsidian.md/)
-[![License: AGPL 3.0](https://img.shields.io/badge/License-AGPL_v3-4d8af0.svg)](https://opensource.org/licenses/AGPL-3.0)
-[![Powered by UV](https://img.shields.io/badge/package--manager-uv-6366f1.svg)](https://github.com/astral-sh/uv)
-
 <p align="center">
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/sili_no_bg.png" alt="Silica Mascot Sili" width="200" />
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/banner-light.svg" />
+    <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/banner.svg" alt="Silica" width="100%" />
+  </picture>
 </p>
 
-<h3 align="center">Silica istantly knows what you're working on, helping you edit and organize your content without corrupting it.</h3>
-
 <p align="center">
-Point it at a folder of notes or a codebase. Silica builds a live model of what's inside, so the LLM answers from your actual material, and every edit it makes is checked and rolled back if it broke something. <b>Local-first</b>, Obsidian-compatible.<br/>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11+-22d3ee.svg" alt="Python 3.11+" /></a>
+  <a href="https://obsidian.md/"><img src="https://img.shields.io/badge/Obsidian-compatible-38afef.svg" alt="Obsidian Compatible" /></a>
+  <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/badge/pip-silica--agent-6366f1.svg" alt="PyPI silica-agent" /></a>
+  <a href="https://opensource.org/licenses/AGPL-3.0"><img src="https://img.shields.io/badge/license-AGPL_v3-4d8af0.svg" alt="License AGPL 3.0" /></a>
 </p>
 
+<h3 align="center">Point Silica at a folder of notes or at a codebase.<br/>Ask it anything. Let it clean up.</h3>
+
+<p align="center">
+It reads what you <i>actually</i> have, answers from that instead of guessing, and every edit it makes is<br/>
+re-checked afterwards and rolled back if it broke something. Local-first. Your files stay plain markdown.
+</p>
 
 https://github.com/user-attachments/assets/9f603fb6-cc70-469d-a4bc-b520e9f5836f
 
+---
 
-> **License:** AGPL-3.0-or-later, *strong copyleft*. Copying any part obliges your whole project to AGPL, including network-only use (§13). [Details below](#license).
+## Why Silica
+
+Most "chat with your notes" tools hand a free-running agent the keys and hope for the best. The damage is quiet: a merge orphans a note, a rewrite breaks a link, and you find out three weeks later. Silica is built the other way around.
+
+🛡️ &nbsp;**Edits cannot rot your vault.**<br/>
+Every write is re-read and verified after it lands. If it broke coherence, it is reverted automatically. If you simply changed your mind, `/undo` takes back one note and `/revert` takes back an entire run.
+
+🧠 &nbsp;**Answers come from your material.**<br/>
+Before answering, Silica looks at the actual shape of your vault: its hubs, its clusters, and the notes nearest to your question. Contradictions between notes get surfaced, not smoothed over.
+
+💻 &nbsp;**It runs on your machine.**<br/>
+Local models (LM Studio, Ollama) are first-class. With no embedding model at all, relatedness degrades to a deterministic local graph instead of failing.
+
+📂 &nbsp;**Nothing is locked in.**<br/>
+Your vault stays a folder of plain markdown files. Open it in Obsidian, in any editor, or in nothing at all. Silica is a layer on top, never a container around it.
+
+<sub><b>New to this?</b> A "vault" is just a folder of markdown (<code>.md</code>) files. If you already use Obsidian, that folder is your Obsidian vault, and Silica works on it directly.</sub>
 
 ---
 
-## Table of Contents
-- [What you get](#what-you-get)
-- [Quick Start](#quick-start)
-- [Ways to use Silica](#ways-to-use-silica)
-- [What you can do](#what-you-can-do)
-- [See your vault](#see-your-vault)
-- [How Silica actually works](#how-silica-actually-works)
-- [Silica for codebases](#silica-for-codebases)
-- [A promise](#a-promise)
-- [Command reference](#command-reference)
-- [Configuration](#configuration)
-- [Status](#status)
-- [References](#references)
-- [Contributing](#contributing) · [License](#license)
-
----
-
-## What you get
-
-A pile of pdf, or a repository, becomes something you can *ask* and *reshape* without babysitting it:
-
-- **Answers from what you actually have.** Before you describe anything, Silica sees the *shape* of your vault: hubs, clusters, and notes nearest your questions so you get grounded answers.
-- **Edits don't rot in your vault.** When Silica nucleates, merges, or refactors, every write can be reverted. The blast radius of a bad edit is one `/undo`.
-- **A graph you can navigate.** Export the whole knowledge graph to an interactive page, or grow a radial mind-map out from any single note.
-- **Works offline.** Local models (LM Studio, Ollama) are supported; if no embedder is configured, relatedness degrades to a deterministic local graph instead of failing. Still, embeddings are highly recommended for better quality.
-
----
-
-## Quick Start
-
-### Installation
-
-Install it as a global command (no clone needed):
+## Try it in 60 seconds
 
 ```bash
-uv tool install silica-agent      # or: pipx install silica-agent
+uv tool install silica-agent    # or: pipx install silica-agent
+silica init                     # interactive setup: vault, model, embeddings
+silica                          # start the interactive session
 ```
 
-Then run `silica` from anywhere. Optional features are extras, alone or combined (`'silica-agent[gui,mcp]'`):
+Then run a read-only audit as your first move. It never writes anything, and it shows you the hubs, bridges, and orphans in what you already have:
+
+```
+/report
+```
+
+<details>
+<summary><b>Optional features and development setup</b></summary>
+
+<br/>
+
+Extras install alone or combined, for example `'silica-agent[gui,mcp]'`:
 
 ```bash
 uv tool install 'silica-agent[gui]'      # web GUI: silica --gui
-uv tool install 'silica-agent[mcp]'      # MCP server: silica mcp (Silica as agent memory)
+uv tool install 'silica-agent[mcp]'      # MCP server: silica mcp
 uv tool install 'silica-agent[connect]'  # Obsidian plugin bridge: silica connect
 uv tool install 'silica-agent[pdf]'      # PDF nucleation
 uv tool install 'silica-agent[rerank]'   # in-process cross-encoder rerank
-uv tool install 'silica-agent[all]'      # every feature above except dev
+uv tool install 'silica-agent[all]'      # everything above except dev
 ```
 
 `[all]` inherits `[pdf]` and `[rerank]`, so it pulls torch and downloads several GB of model weights the first time those run.
 
-**For development**, clone and install editable instead (adds tests and linters):
+Check your environment at any time with `silica doctor`. Add `--live` to send one tiny request that confirms the model really replies.
+
+For development, clone and install editable instead (adds tests and linters), then prefix commands with `uv run`:
 
 ```bash
 git clone https://github.com/kiycoh/silica-agent.git
@@ -82,99 +85,101 @@ cd silica-agent
 uv pip install -e '.[dev]'
 ```
 
-### Setup and Execution
-
-Run the interactive wizard to set up your `.env` (vault, backend, chat provider, embeddings):
-
-```bash
-silica init
-```
-
-Re-check the environment at any time (add `--live` to send one tiny request that confirms the model actually replies):
-
-```bash
-silica doctor
-```
-
-Start the interactive REPL:
-
-```bash
-silica
-```
-
-(From an editable dev checkout, prefix these with `uv run`, e.g. `uv run silica init`.)
-
-A good first move on an existing vault is a read-only structural audit. It never writes, and it shows you the hubs, bridges, and orphans before you touch anything:
-
-```
-/report
-```
+</details>
 
 ---
 
-## Ways to use Silica
+## Four ways in
 
-The same vault model serves four different drivers. What changes is who holds the write key, and whether they read or write:
+The same vault model serves four different drivers. What changes is who holds the write key.
 
-1. **GUI (`silica --gui`)**
-   A chat-first web interface (default `http://localhost:8765`). Query and curate the vault from the browser, watch answers stream in, and open the graph. The friendliest way in, and the best first impression.
+### 1. Web GUI &nbsp;·&nbsp; `silica --gui`
 
-    ![Web UI Screenshot](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/web_gui_screenshot.png)
+A chat-first interface at `http://localhost:8765`. Query and curate from the browser, watch answers stream in, open the graph. The friendliest way to start.
 
-2. **CLI / TUI (`silica`)**
-   The interactive terminal REPL. Every command in the [reference](#command-reference) lives here: nucleate, audit, search, refactor, visualize. Fastest for real work once you know the verbs.
+![Web UI](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/web_gui_screenshot.png)
 
-    ![CLI Screenshot](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/cli_screenshot.png)
+### 2. Terminal &nbsp;·&nbsp; `silica`
 
-3. **Obsidian plugin (`silica connect`)**
-   A live bridge into the Obsidian desktop app, so Silica reads and writes the vault you already have open, with its rollback and cache backing every change. *Feature-complete, pending end-to-end hardening.*
+The interactive REPL. Every command in the [reference](#command-reference) lives here. Fastest for real work once you know the verbs.
 
-    ![Obsidian Plugin Screenshot](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/obsidian_plugin_screenshot.png)
+![CLI](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/cli_screenshot.png)
 
-4. **MCP server (`silica mcp`)**
-   Silica serves the vault over stdio to any MCP client. An assistant recalls from your real notes before it answers, grounding on your real decisions instead of guessing. For Claude Code, the repo is also a plugin:
-   ```bash
-   claude plugin marketplace add /path/to/silica-agent
-   claude plugin install silica@silica
-   ```
-   
-    ![Claude Code Screenshot](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/mcp_screenshot.png)
+### 3. Obsidian plugin &nbsp;·&nbsp; `silica connect`
+
+A live bridge into the Obsidian desktop app, so Silica reads and writes the vault you already have open, with rollback and cache backing every change. *Feature-complete, pending end-to-end hardening.*
+
+![Obsidian plugin](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/obsidian_plugin_screenshot.png)
+
+### 4. Agent memory &nbsp;·&nbsp; `silica mcp`
+
+Silica serves your vault over stdio to any MCP client, so an assistant recalls your real notes and real decisions before it answers. For Claude Code, this repo is also a plugin:
+
+```bash
+claude plugin marketplace add /path/to/silica-agent
+claude plugin install silica@silica
+```
+
+![Claude Code](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/mcp_screenshot.png)
+
 ---
 
 ## What you can do
 
-- **Clear inbox files without losing anything.** Drop raw clippings and drafts in a folder; `/nucleate Inbox/*.md` distills each into an atomic note, checks it against what you already have so you don't get a fifth copy of the same idea, and files it. Hand it 20 files at once; it never gets confused by the pile.
-- **Ask your notes, not your memory.** `/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz <note>`: read-only answers grounded in the vault, with contradictions surfaced instead of smoothed over.
-- **Reorganize by intent.** `/organize "group by project"` classifies and moves notes to a taxonomy. `/curate` plans the autolink, dedup, and cleanup work; add `--apply` to run it.
-- **Refactor safely.** Merges and splits redirect every incoming link automatically, so you never end up with a broken reference or an orphan. Changed your mind? `/undo` a note or `/revert` a whole run.
-- **Research into the vault.** `/web-search "<topic>"` pulls cited findings into the inbox; `/nucleate` them when you're ready. Nothing from the web lands in the vault without your say-so.
+**Clear an inbox without losing anything.**<br/>
+Drop raw clippings and drafts in a folder. `/nucleate Inbox/*.md` distills each one into an atomic note, checks it against what you already have so you do not end up with a fifth copy of the same idea, and files it. Hand it 20 files at once, it will not get confused by the pile.
+
+**Ask your notes instead of your memory.**<br/>
+`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz <note>`. All read-only, all grounded in the vault.
+
+**Reorganize by intent.**<br/>
+`/organize "group by project"` classifies and moves notes into a taxonomy. `/curate` plans the autolink, dedup, and cleanup work, and `--apply` runs it.
+
+**Refactor without breaking links.**<br/>
+Merges and splits redirect every incoming link automatically, so you never end up with a broken reference or an orphan.
+
+**Research straight into the vault.**<br/>
+`/web-search "<topic>"` pulls cited findings into the inbox. Nothing from the web reaches your notes without you nucleating it first.
 
 ---
 
 ## See your vault
 
-Silica turns the invisible structure of your notes into something on screen.
+Silica turns the invisible structure of your notes into something on screen. Both views run locally and work without an embedder: the deterministic co-occurrence graph still gives you clusters and relatedness.
 
-**Knowledge graph (`/graph out.html`)** exports an interactive page: notes as nodes, links as edges, communities colored and named automatically so the clusters read at a glance. Open it in any browser, no server needed.
-
-**Mind-map (`/map <note>`)** grows a radial map rooted on one note and writes it as `maps/<stem>.canvas` (opens natively in Obsidian) plus an SVG. Layout is by community, laid out so nodes never overlap, so the picture is legible from the first render.
-
-Both run locally and work embedder-free: even with no embedding model, the deterministic co-occurrence graph still gives you clusters and relatedness. Can be viewed in GUI or saved as file.
+| View | What it gives you |
+| :--- | :--- |
+| **`/graph out.html`** | An interactive page: notes as nodes, links as edges, communities colored and named automatically so the clusters read at a glance. Opens in any browser, no server needed. |
+| **`/map <note>`** | A radial mind-map grown out from a single note, written as `maps/<stem>.canvas` (opens natively in Obsidian) plus an SVG. Laid out by community so nodes never overlap. |
 
 ---
 
-## How Silica actually works
+## Point it at code
 
-### Guardrails, not blind trust
+Set `SILICA_VAULT` to a repository instead of a note folder, and Silica keeps a living, human-readable map of the code under `docs/silica/`, honest against git.
 
-You already let deterministic tools rewrite and reject your work every day. You don't extend them trust; you trust the guardrail. Silica wraps an LLM's edits to your vault in the same kind of guardrail:
+- **`/nucleate <file>`** extracts a shallow AST skeleton with tree-sitter (signatures, structure, imports) and turns it into a markdown note, stamped with the commit it was verified against.
+- **`/wiki`** grows that into a behavioral wiki: an `ARCHITECTURE.md` plus one note per subsystem.
+- **`/stale`** flags notes whose source *changed in shape* since you documented it, meaning a signature or control-flow change rather than a reformat. **`/impact`** maps changed files to the notes they affect. You re-document what actually moved, not the whole tree.
 
-| You already let a deterministic tool… | to guard against… | Silica does the same for a vault by… |
+Two readers, one artifact: a human reads it as an always-current map, and a coding agent reads it over the [MCP server](#4-agent-memory--silica-mcp) to ground its work in the real structure instead of re-deriving it every session.
+
+---
+
+## How the guardrail works
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/sili_no_bg.png" alt="Sili, the Silica mascot" width="150" />
+</p>
+
+You already let deterministic tools reject and rewrite your work every day. You do not extend those tools trust, you trust the guardrail. Silica wraps an LLM's edits in the same kind of guardrail:
+
+| You already let a tool… | to guard against… | Silica does the same by… |
 | :--- | :--- | :--- |
-| a **compiler** reject source that won't build | syntax and type errors | an FSM refusing to commit a note that fails its structural checks |
-| a **test suite** block a merge that breaks behavior | regressions | a post-write **verify gate** that reverts any edit which breaks vault coherence |
-| **git** roll back a bad commit | losing history | `/undo` and `/revert` rolling back an injection, per-note or per-run |
-| a **formatter** rewrite your code without asking | drift and inconsistency | graph-safe refactors that redirect links so a merge or split never orphans a note |
+| a **compiler** reject source that will not build | syntax and type errors | an FSM refusing to commit a note that fails its structural checks |
+| a **test suite** block a merge that breaks behavior | regressions | a post-write verify gate that reverts any edit which breaks vault coherence |
+| **git** roll back a bad commit | losing history | `/undo` and `/revert` rolling back per note or per run |
+| a **formatter** rewrite your code without asking | drift and inconsistency | graph-safe refactors that redirect links so a merge never orphans a note |
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/pipeline.svg" alt="Silica vault pipeline mapped onto a software engineering pipeline" width="880" />
@@ -182,49 +187,25 @@ You already let deterministic tools rewrite and reject your work every day. You 
 
 ### Design contracts
 
-Silica is not a free-form agent. Every vault mutation passes through a finite-state machine that enforces these contracts:
+Silica is not a free-form agent. Every vault mutation passes through a finite-state machine that enforces these:
 
-- **Single entry point:** all nucleation flows through the Injector FSM. There is no side channel that writes to the vault.
-- **Verify-or-revert:** every write is re-read and checked afterward; a mismatch (`VerifyMismatchError`) rolls the write back.
-- **Graph-safe moves:** renames, merges, and splits redirect incoming links atomically. No operation leaves a broken reference or an orphan.
-- **Zero-trust ingress:** external content (e.g. web search) can only land in `Inbox/`. Nothing reaches the vault without explicit human staging and FSM review.
-- **Layered rollback:** `/undo` (per note), `/revert` (per run), and optional `SILICA_GIT_COMMIT=auto` stack as independent safety nets.
+- **Single entry point.** All nucleation flows through the Injector FSM. There is no side channel that writes to the vault.
+- **Verify or revert.** Every write is re-read and checked afterwards. A mismatch (`VerifyMismatchError`) rolls the write back.
+- **Graph-safe moves.** Renames, merges, and splits redirect incoming links atomically. No operation leaves a broken reference or an orphan.
+- **Zero-trust ingress.** External content such as web search results can only land in `Inbox/`. Nothing reaches the vault without explicit human staging and FSM review.
+- **Layered rollback.** `/undo` (per note), `/revert` (per run), and optional `SILICA_GIT_COMMIT=auto` stack as independent safety nets.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/architecture.svg" alt="Silica Architectural Schematic" width="880" />
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/architecture.svg" alt="Silica architectural schematic" width="880" />
 </p>
 
----
-
-## Silica for codebases
-
-Point `SILICA_VAULT` at a repository instead of a note folder, and Silica keeps a living, human-readable map of the code under `docs/silica/`, honest against git.
-
-- `/nucleate <file>` extracts a shallow AST skeleton with tree-sitter (signatures, structure, imports) and turns it into a markdown note that documents its source, stamped with the commit it was verified against.
-- `/wiki` grows that into a behavioral wiki: an `ARCHITECTURE.md` plus one note per subsystem.
-- `/stale` flags notes whose source *changed in shape* since you last documented it (a signature or control-flow change, not just a reformat); `/impact` maps a set of changed files to the notes they affect. You re-document what actually moved, not the whole tree.
-
-Two readers, one artifact: a human reads it as an always-current map, and a coding agent reads it over the [MCP server](#ways-to-use-silica) to ground its work in the real structure instead of re-deriving it every session.
-
----
-
-## A promise
-
-Most "chat with your notes" tools hand an open-ended agent a write key and hope the edits are good. The failure is quiet: a merge orphans a note, a rewrite breaks a wikilink.
-
-There is no free-running loop holding a key to your vault. Every change goes one way: the agent proposes, a state machine checks it, you confirm, and the write is re-read and rolled back if it broke coherence. ***You can still use git alongside Silica*** as the byte-level backstop; Silica is the coherence layer on top.
-
-> **⚠️ Note:** It is always highly recommended to create a backup of your vault before allowing Silica to manipulate your files.
-
-That's the whole idea. You don't have to believe anything about the model, only that the guardrail runs on every write. It does.
-
-> Enforced today on the normal write path. Not yet crash-verified (a harness that kills the process mid-write to prove invariants survive failure is [in progress](#status)): trust it as enforced control flow, not a proof under adversarial faults.
+> **Scope of the claim.** The guardrail is enforced today on the normal write path. It is not yet crash-verified: a harness that kills the process mid-write to prove the invariants survive failure is [in progress](#status). Trust it as enforced control flow, not as a proof under adversarial faults. Back your vault up before letting any tool rewrite it, and keep using git as the byte-level backstop.
 
 ---
 
 ## Command reference
 
-**Ask & audit (read-only):**
+**Ask and audit** (read-only)
 
 | Command | What it does |
 | :--- | :--- |
@@ -236,75 +217,75 @@ That's the whole idea. You don't have to believe anything about the model, only 
 | `/relate <note>` · `/path A B` | How notes relate · shortest reading path |
 | `/find <query>` | Semantic search |
 
-**Bring in & reshape:**
+**Bring in and reshape**
 
 | Command | What it does |
 | :--- | :--- |
 | `/nucleate <file...> [--target=DIR]` | Notes via the gate; code as skeletons |
-| `/organize "<intent>" [--apply]` | Classify and move notes to a taxonomy |
-| `/curate [--apply]` · `/dedup` · `/refine` · `/enrich` | Plan / run autolink, dedup, enrichment |
+| `/organize "<intent>" [--apply]` | Classify and move notes into a taxonomy |
+| `/curate [--apply]` · `/dedup` · `/refine` · `/enrich` | Plan and run autolink, dedup, enrichment |
 | `/web-search "<topic>"` | Cited web findings into the inbox |
 | `/convert <file>` | Transcode a PDF into a markdown draft |
 
-**Indexes:** `/embed` · `/cooccur` (embedder-free) · `/lexical` (BM25/fuzzy)
+**Indexes** `/embed` · `/cooccur` (embedder-free) · `/lexical` (BM25 and fuzzy)
 
-**Visualize:** `/graph [out.html]` · `/map <note>`
+**Visualize** `/graph [out.html]` · `/map <note>`
 
-**Codebase:** `/wiki` · `/stale` · `/impact [<range>]`
+**Codebase** `/wiki` · `/stale` · `/impact [<range>]`
 
-**Undo & inspect:** `/undo [note]` · `/revert [run]` · `/status` · `/review` · `/plans` · `/contested`
+**Undo and inspect** `/undo [note]` · `/revert [run]` · `/status` · `/review` · `/plans` · `/contested`
 
-**System:** `/help` · `/model` · `/vault [path]` · `/settings [<key> <value>]` · `/tools` · `/verbose` · `/thinking` · `/clear` · `/exit`
+**System** `/help` · `/model` · `/vault [path]` · `/settings [<key> <value>]` · `/tools` · `/verbose` · `/thinking` · `/clear` · `/exit`
 
 ---
 
 ## Configuration
 
-`silica init` writes the essentials; the full list with defaults is in [`.env.example`](.env.example).
+`silica init` writes the essentials. The full list with defaults is in [`.env.example`](.env.example).
 
 | Variable | Description |
 | :--- | :--- |
-| `SILICA_MODEL` | Chat model (litellm format, e.g. `openrouter/anthropic/claude-sonnet-4`) |
+| `SILICA_MODEL` | Chat model, litellm format (e.g. `openrouter/anthropic/claude-sonnet-4`) |
 | `SILICA_PROVIDER` | `lmstudio` or `openrouter` |
-| `SILICA_VAULT` | Vault path. Obsidian vault used verbatim; any other path is repo mode → `docs/silica/` |
+| `SILICA_VAULT` | Vault path. An Obsidian vault is used verbatim; any other path is repo mode and writes to `docs/silica/` |
 | `SILICA_EMBEDDING_MODEL` | Embedding model for semantic tasks (default `qwen3-embedding-4b`) |
-| `SILICA_BACKEND` | `fs` (default, headless); the Obsidian plugin bridge installs `ws` live at dial-in |
+| `SILICA_BACKEND` | `fs` (default, headless). The Obsidian bridge installs `ws` live at dial-in |
 | `SILICA_GIT_COMMIT` | Git safety net for writes (`off`, `auto`) |
 | `SILICA_TAVILY_API_KEY` | Enables `/web-search` |
-| `SILICA_WORKER_MODEL` | Sub-agent worker model (for dedup/refinement operations) |
+| `SILICA_WORKER_MODEL` | Sub-agent worker model, used for dedup and refinement |
 
 ---
 
 ## Status
 
-- **Available now:** note nucleation, structural audit (`/report`), semantic and embedder-free search, graph-safe refactor / dedup / merge, graph and mind-map export, codebase skeletons with git-backed `/stale` and `/impact`, the code `/wiki`, layered `/undo` and `/revert`, git safety net, the MCP server and Claude Code plugin.
-- **In progress:** richer codebase coverage across more languages, PDF/DOCX/TXT nucleation, the live Obsidian bridge (`silica connect`), and the crash harness backing the guardrail.
-- **Planned:** image nucleation, MCP packaging for non-Claude agents.
+What ships today is enforced. What is in progress or planned is not yet present.
 
-What ships today is enforced; what's in-progress or planned is not yet present.
+**Available now.** Note nucleation, structural audit, semantic and embedder-free search, graph-safe refactor / dedup / merge, graph and mind-map export, codebase skeletons with git-backed `/stale` and `/impact`, the code wiki, layered `/undo` and `/revert`, the git safety net, the MCP server, and the Claude Code plugin.
+
+**In progress.** Richer codebase coverage across more languages, PDF/DOCX/TXT nucleation, the live Obsidian bridge, and the crash harness backing the guardrail.
+
+**Planned.** Image nucleation, MCP packaging for non-Claude agents.
 
 ---
 
 ## References
 
-*   **[From Agent Loops to Structured Graphs: A Scheduler-Theoretic Framework for LLM Agent Execution](https://arxiv.org/abs/2604.11378)** (arXiv:2604.11378, 2026)
-*   **[Goal-Autopilot: A Verifiable Anti-Fabrication Firewall for Unattended Long-Horizon Agents](https://arxiv.org/abs/2606.11688)** (arXiv:2606.11688, 2026)
-*   **[Is Your Agent Playing Dead? Deployed LLM Agents Exhibit Constraint-Evasive Fabrication and Thanatosis](https://arxiv.org/abs/2606.14831)** (arXiv:2606.14831, 2026)
-*   **[Reliable Graph-RAG for Codebases: AST-Derived Graphs vs LLM-Extracted Knowledge Graphs](https://arxiv.org/abs/2601.08773)** (arXiv:2601.08773, 2026)
-*   **[Predicting new research directions in materials science using large language models and concept graphs](https://doi.org/10.1038/s42256-026-01206-y)** (*Nature Machine Intelligence*, 2026)
+* **[From Agent Loops to Structured Graphs: A Scheduler-Theoretic Framework for LLM Agent Execution](https://arxiv.org/abs/2604.11378)** (arXiv:2604.11378, 2026)
+* **[Goal-Autopilot: A Verifiable Anti-Fabrication Firewall for Unattended Long-Horizon Agents](https://arxiv.org/abs/2606.11688)** (arXiv:2606.11688, 2026)
+* **[Is Your Agent Playing Dead? Deployed LLM Agents Exhibit Constraint-Evasive Fabrication and Thanatosis](https://arxiv.org/abs/2606.14831)** (arXiv:2606.14831, 2026)
+* **[Reliable Graph-RAG for Codebases: AST-Derived Graphs vs LLM-Extracted Knowledge Graphs](https://arxiv.org/abs/2601.08773)** (arXiv:2601.08773, 2026)
+* **[Predicting new research directions in materials science using large language models and concept graphs](https://doi.org/10.1038/s42256-026-01206-y)** (*Nature Machine Intelligence*, 2026)
 
-Silica's embedder-free near-duplicate detection (`/dedup`) is inspired by and ports the well-thought-out MinHash design from [Graphify](https://github.com/safishamsi/graphify).
+Silica's embedder-free near-duplicate detection (`/dedup`) is inspired by and ports the MinHash design from [Graphify](https://github.com/safishamsi/graphify).
 
 ---
 
 ## Contributing
 
-Issues and pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and conventions (English-only, conventional commits). By contributing you license your work under AGPL-3.0-or-later. For security issues follow [SECURITY.md](SECURITY.md); do not open a public issue.
-
----
+Issues and pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and conventions (English-only, conventional commits). By contributing you license your work under AGPL-3.0-or-later. For security issues follow [SECURITY.md](SECURITY.md) and do not open a public issue.
 
 ## License
 
 **GNU Affero General Public License v3.0** (AGPL-3.0-or-later). Copyright (C) 2026 Alessandro Carosia.
 
-Strong copyleft: incorporate any portion of Silica and that work becomes a derivative that must itself be AGPL-3.0, with complete corresponding source offered to everyone who uses it. **§13** extends this to network use: running a modified version as a hosted service obliges you to provide source to your users. There is no permissive fallback. See [LICENSE](LICENSE) for the full text.
+Strong copyleft. Incorporate any portion of Silica and that work becomes a derivative that must itself be AGPL-3.0, with complete corresponding source offered to everyone who uses it. **§13** extends this to network use: running a modified version as a hosted service obliges you to provide source to your users. There is no permissive fallback. See [LICENSE](LICENSE) for the full text.
