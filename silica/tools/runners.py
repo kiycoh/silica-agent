@@ -211,8 +211,10 @@ def _pairs_to_items(pairs: list[dict]) -> list[WorkItem]:
         except Exception:
             continue
 
-        # The larger note is the merge target; the smaller is the source of new info.
-        if len(body_tgt) >= len(body_src):
+        # The more reliable note is the merge target; the other is the source of
+        # new info. Reliability first, length only to break a tie within a tier.
+        from silica.kernel.contested import merge_rank
+        if merge_rank(body_tgt) >= merge_rank(body_src):
             larger, smaller, smaller_body = target, source, body_src
         else:
             larger, smaller, smaller_body = source, target, body_tgt
@@ -223,6 +225,9 @@ def _pairs_to_items(pairs: list[dict]) -> list[WorkItem]:
             "candidate": larger.removesuffix(".md").rsplit("/", 1)[-1],
             "score": score,
             "inbox_file": smaller,
+            # The loser is a real vault note here (unlike the FSM path, where
+            # inbox_file is a source document), so it can be marked on merge.
+            "loser_path": smaller,
         }
         reason = f"dedup score={score:.3f}"
         if "full_score" in pair and "title_score" in pair:

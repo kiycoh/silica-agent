@@ -318,16 +318,25 @@ AI: true
     return frontmatter + content
 
 
-def patch_snippet(heading: str, snippet: str, source_basename: str, hub: str | None = None, existing_content: str | None = None) -> str:
+def patch_snippet(heading: str, snippet: str, source_basename: str, hub: str | None = None, existing_content: str | None = None, valid_from: str | None = None) -> str:
+    # No valid_from → no stamp line and the block is byte-identical to what
+    # every pre-stamp write produced. Only the FSM supplies one today.
+    stamp_line = ""
+    if valid_from:
+        from silica.kernel.contested import stamp
+        rendered = stamp(valid_from=valid_from)
+        if rendered:
+            stamp_line = f"{rendered}\n\n"
     patch_text = f"""
 
 ## Note aggiuntive — {heading} (da {source_basename})
 
-{close_unbalanced_fences(snippet.strip())}
+{stamp_line}{close_unbalanced_fences(snippet.strip())}
 """
     if existing_content is not None:
+        from silica.kernel.contested import append_before_superseded
         existing_content = ensure_hub_link(existing_content, hub)
-        return existing_content.rstrip() + "\n" + patch_text
+        return append_before_superseded(existing_content, patch_text)
 
     return patch_text
 
@@ -414,6 +423,9 @@ def ensure_system_floor(content: str, prior: str | None = None) -> str:
     else:
         head += f"\nlast modified: {today}"
     return _stamp_agent(head + tail)
+
+
+PROVENANCE_HEADER_PREFIX = "## Note aggiuntive"
 
 
 def provenance_header(heading: str, source_basename: str) -> str:

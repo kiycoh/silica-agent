@@ -105,7 +105,7 @@ def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[s
     import os
 
     from silica.kernel.checkpoints import get_checkpoint_store
-    from silica.kernel.contested import clear_contested, mark_contested
+    from silica.kernel.contested import mark_contested, resolve_contested
 
     try:
         nc = DRIVER.read_note(name)
@@ -114,12 +114,16 @@ def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[s
 
     path = nc.ref.path or name
     prior_content = nc.content
+    who = os.environ.get("SILICA_AGENT_ID") or "user"
+    today = datetime.date.today().isoformat()
 
     if clear:
-        new_content = clear_contested(prior_content)
+        # Not clear_contested: dropping the flag while leaving a body callout
+        # that still reads "Unresolved" makes the note lie about its own state.
+        # resolve_contested files the callout under `## Superseded` first.
+        new_content = resolve_contested(prior_content, resolved_by=who, valid_to=today)
     else:
-        who = os.environ.get("SILICA_AGENT_ID") or "user"
-        source_ref = f"flagged: {reason} (by {who}, {datetime.date.today().isoformat()})"
+        source_ref = f"flagged: {reason} (by {who}, {today})"
         new_content = mark_contested(prior_content, source_ref)
 
     if new_content == prior_content:

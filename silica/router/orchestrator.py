@@ -414,6 +414,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Per-file content info — populated by run() before _run_loop starts
         self._file_canonicals: list[str] = []
         self._file_content_hashes: list[str] = []
+        self._file_valid_from: list[str] = []  # source event clock, stamped on each claim
         self._committed_file_indices: set[int] = set()  # indices of already-committed files
 
         # Iterative chunk processing state fields
@@ -694,8 +695,10 @@ class InjectorFSM(BaseFSM[InjectorState]):
         ledger = get_ledger()
 
         # Compute per-file canonicals and content hashes; track committed status
+        from silica.kernel.provenance import source_valid_from
         self._file_canonicals = []
         self._file_content_hashes = []
+        self._file_valid_from = []
         # One is_committed() lookup per file: accumulate the committed indices here
         # and derive all_committed from the set (was a second pass of lookups).
         for i, inbox_file in enumerate(self.inbox_files):
@@ -709,8 +712,16 @@ class InjectorFSM(BaseFSM[InjectorState]):
                     content_bytes = open(inbox_file, "rb").read()
                     content_hash = hashlib.sha256(content_bytes).hexdigest()
                 except OSError:
+                    content_bytes = b""  # never carry the previous file's bytes forward
                     content_hash = ""
             self._file_content_hashes.append(content_hash)
+            # Resolve the event clock once per file, off the bytes already read.
+            self._file_valid_from.append(
+                source_valid_from(
+                    content_bytes.decode("utf-8", "replace"),
+                    getattr(self, "seen_override", None),
+                )
+            )
             if ledger.is_committed(canonical, content_hash=content_hash):
                 self._committed_file_indices.add(i)
 

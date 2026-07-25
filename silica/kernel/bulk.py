@@ -96,6 +96,16 @@ def _execute_write(op: Op, path: str) -> dict:
     if not heading or not hub:
         raise ValueError("Missing 'heading' or 'hub' parameter for write operation")
 
+    # Claim stamp under the H1. Only when there is a body to stamp: prepending
+    # to an empty snippet would make it truthy and swallow prepare_fields'
+    # "(da espandere)" placeholder. op.snippet stays untouched so the MOC
+    # bullet (hub_desc) still reads the first line of real prose.
+    if op.valid_from and snippet.strip():
+        from silica.kernel.contested import stamp
+        rendered = stamp(valid_from=op.valid_from)
+        if rendered:
+            snippet = f"{rendered}\n\n{snippet.lstrip()}"
+
     fields = templates.prepare_fields(
         title=op.title or heading,
         body=snippet,
@@ -159,6 +169,7 @@ def _execute_patch(op: Op, path: str) -> dict:
         source_basename=source_basename,
         hub=op.hub,
         existing_content=nc.content,
+        valid_from=op.valid_from,
     )
     if op.contested_by:
         from silica.kernel.contested import mark_contested

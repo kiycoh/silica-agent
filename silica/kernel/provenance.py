@@ -57,6 +57,29 @@ def _store_path(vault_path: str | None) -> Path | None:
     return Path(resolved) / DEFAULT_PROVENANCE_FILENAME
 
 
+def source_valid_from(source_text: str, seen_override: str | None = None) -> str:
+    """Event clock for a source: when the thing it describes happened.
+
+    Distinct from the ingest clock (this store's `date`, the day we read the
+    file). Precedence: capture clock, then the source's own `date:`, then
+    today. Two callers share it: the source leaf writer and the claim stamp
+    the FSM puts on every note it writes, which must agree or a claim and its
+    leaf would date the same event differently.
+    """
+    if seen_override:
+        return str(seen_override)
+    try:
+        from silica.kernel import frontmatter
+
+        data, _raw, _body = frontmatter.split(source_text or "")
+        date = (data or {}).get("date")
+        if date:
+            return str(date)
+    except Exception:
+        pass
+    return datetime.now().date().isoformat()
+
+
 def read_records(
     source: str | None = None,
     *,

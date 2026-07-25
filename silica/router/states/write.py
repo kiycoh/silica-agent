@@ -183,6 +183,18 @@ def handle_write(fsm: "InjectorFSM") -> None:
         _attach_section_images(fsm, ops)
     except Exception as _ie:
         logger.debug("WRITE: image re-attach skipped (%s)", _ie)
+
+    # Claim stamp: the current file's event clock rides every note this chunk
+    # writes. Resolved once per file in run(); an unresolved index leaves
+    # valid_from None, which emits no stamp at all.
+    try:
+        _valid_from = fsm._file_valid_from[fsm._current_file_idx]
+        for op in ops:
+            if op.op in (OpType.write, OpType.patch):
+                op.valid_from = _valid_from
+    except (AttributeError, IndexError) as _ve:
+        logger.debug("WRITE: claim stamp skipped (%s)", _ve)
+
     result = bulk_write_atomic(ops, hub=fsm.hub, lint=True)
 
     # Accumulate surviving notes' inverses for the undo journal (recorded at

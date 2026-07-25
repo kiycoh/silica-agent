@@ -265,7 +265,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
         logger.debug("CLEANUP: provenance append skipped (non-fatal): %s", exc)
 
 
-_SOURCES_MARKER = "## Sources"
+from silica.kernel.paths import SOURCES_MARKER as _SOURCES_MARKER
 
 
 def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
@@ -284,11 +284,11 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
     Best-effort and must never block CLEANUP.
     """
     try:
-        import datetime
-
         from silica.kernel import frontmatter
+        from silica.kernel.contested import append_before_superseded
         from silica.kernel.ops import InverseOp, InverseOpKind
         from silica.kernel.paths import SOURCES_DIR
+        from silica.kernel.provenance import source_valid_from
 
         basename = os.path.basename(source_file)
         leaf_rel = f"{SOURCES_DIR}/{basename}"
@@ -305,15 +305,12 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         )
         if wants_leaf and not leaf_exists:
             source_text = orch.DRIVER.read_note(source_file).content or ""
-            # Single frontmatter block: keep the source BODY verbatim; the
-            # date comes from the capture clock, the source's own `date`, or
-            # today — in that order.
-            data, _raw, body = frontmatter.split(source_text)
-            date = (
-                getattr(fsm, "seen_override", None)
-                or (data or {}).get("date")
-                or datetime.date.today().isoformat()
-            )
+            # Single frontmatter block: keep the source BODY verbatim; the date
+            # is the source's event clock, resolved by the same function that
+            # stamps it on every claim (kernel/provenance) so leaf and claim
+            # can never disagree.
+            _data, _raw, body = frontmatter.split(source_text)
+            date = source_valid_from(source_text, getattr(fsm, "seen_override", None))
             leaf = f"---\ndate: {date}\nsource_id: {basename}\n---\n\n{body.lstrip()}"
             orch.DRIVER.create(leaf_rel, leaf)
             fsm._run_inverses.append(
@@ -336,10 +333,14 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                 continue
             if f"[[{leaf_stem}]]" in prior:
                 continue  # already linked — idempotent on re-ingest
-            # New block, or one more link appended below an existing block
-            # (blocks land at EOF by construction, so EOF-append stays inside).
-            block = f"\n\n{_SOURCES_MARKER}\n" if _SOURCES_MARKER not in prior else "\n"
-            orch.DRIVER.overwrite(note_path, f"{prior.rstrip()}{block}[[{leaf_stem}]]\n")
+            # New block, or one more link appended below an existing block.
+            # Routed through append_before_superseded: blocks used to land at
+            # EOF by construction, which stopped being safe once a note can
+            # end with a `## Superseded` section.
+            head = f"\n{_SOURCES_MARKER}\n" if _SOURCES_MARKER not in prior else ""
+            orch.DRIVER.overwrite(
+                note_path, append_before_superseded(prior, f"{head}[[{leaf_stem}]]\n")
+            )
             fsm._run_inverses.append(
                 (note_path,
                  InverseOp(kind=InverseOpKind.restore_version, path=note_path,

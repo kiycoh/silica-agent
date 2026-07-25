@@ -148,8 +148,9 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
 
     items: list[WorkItem] = []
     # 1. Each confirmed component → collapse every member into its largest note.
+    from silica.kernel.contested import merge_rank
     for members in components:
-        canonical = max(members, key=lambda p: len(body(p)))
+        canonical = max(members, key=lambda p: merge_rank(body(p)))
         for m in members:
             if m == canonical:
                 continue
@@ -163,11 +164,12 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
                     "candidate": stem(canonical),
                     "score": sc,
                     "inbox_file": m,
+                    "loser_path": m,
                 },
                 reason=f"curate dedup family → {stem(canonical)} (score={sc:.3f})",
             ))
 
-    # 2. Borderline pairs — historical per-pair behaviour (larger note is target),
+    # 2. Borderline pairs — per-pair behaviour (more reliable note is target),
     #    skipping any pair already absorbed by a shared confirmed component.
     for it in pairs:
         if it.score >= tau_high:
@@ -176,7 +178,7 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
         if comp_of.get(source, -1) == comp_of.get(target, -2):
             continue
         body_s, body_t = body(source), body(target)
-        if len(body_t) >= len(body_s):
+        if merge_rank(body_t) >= merge_rank(body_s):
             larger, smaller, smaller_body = target, source, body_s
         else:
             larger, smaller, smaller_body = source, target, body_t
@@ -189,6 +191,7 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
                 "candidate": stem(larger),
                 "score": it.score,
                 "inbox_file": smaller,
+                "loser_path": smaller,
             },
             reason=it.reason or f"curate dedup score={it.score:.3f}",
         ))

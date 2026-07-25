@@ -190,6 +190,42 @@ def _gated_batch_decisions(
     ]
 
 
+def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
+    """Point the absorbed note at the one that took its content.
+
+    Only fires when the loser is a real vault note: `loser_path` is set by the
+    note-vs-note seams (/dedup pairs, /curate families), never by the FSM, whose
+    "loser" is an incoming concept that was never written. Best-effort — a
+    committed merge must not be reported failed over a bookkeeping key.
+    """
+    loser_path = ctx.get("loser_path")
+    if not loser_path or loser_path == winner_path:
+        return
+    try:
+        from silica.agent.bounds import dedup_supersede_bounds
+        from silica.kernel.contested import mark_superseded_by
+
+        prior = read_or_skip(loser_path)[0] or ""
+        marked = mark_superseded_by(prior, winner_path)
+        if marked == prior:
+            return
+        commit_ops(
+            [Op(
+                op=OpType.overwrite,
+                heading=ctx.get("concept", "") or "merged note",
+                source_basename=os.path.basename(loser_path),
+                path=loser_path,
+                content=marked,
+                base_content=prior,
+                reason="dedup merge: superseded_by pointer",
+            )],
+            target_dir=os.path.dirname(loser_path),
+            bounds=dedup_supersede_bounds(loser_path),
+        )
+    except Exception as e:
+        logger.debug("dedup: superseded_by mark failed (non-fatal): %s", e)
+
+
 def _route_verdict(
     item: WorkItem, ctx: dict, decision: DedupDecision, config: Any
 ) -> dict[str, Any]:
@@ -242,6 +278,17 @@ def _route_verdict(
     result.setdefault("verdict", decision.verdict)
     if result.get("status") == "committed":
         _clean_twin_bundle(ctx)
+        if decision.verdict == "duplicate":
+            _mark_merge_loser(ctx, candidate_path)
+        if decision.verdict == "contradicts":
+            # Without this the judge's contradictions never reach the run
+            # digest worklist: only silica_flag_note used to feed the register,
+            # so LLM-detected ones were visible solely to a full-vault scan.
+            try:
+                from silica.kernel import contested_register
+                contested_register.add(candidate_path)
+            except Exception as e:
+                logger.debug("dedup: contested register add failed (non-fatal): %s", e)
     return result
 
 

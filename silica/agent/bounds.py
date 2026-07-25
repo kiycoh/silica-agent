@@ -208,6 +208,22 @@ def dedup_bounds(larger_path: str, *, hub: str | None = None) -> CapabilityBound
     )
 
 
+def dedup_supersede_bounds(loser_path: str, *, hub: str | None = None) -> CapabilityBounds:
+    """Supersede bounds: one `overwrite` of the note a merge just absorbed.
+
+    The content is framework-computed (a single `superseded_by` frontmatter
+    key), never model-authored — the envelope exists so the write cannot drift
+    onto another path if that ever changes.
+    """
+    loser_key = _norm_path(loser_path)
+    return CapabilityBounds(
+        name="dedup_supersede",
+        allowed_ops=frozenset({OpType.overwrite}),
+        target_predicate=lambda p: _norm_path(p) == loser_key,
+        forbidden_paths=frozenset({hub} if hub else set()),
+    )
+
+
 def _single_write_bounds(spoke_path: str, name: str, *, hub: str | None) -> CapabilityBounds:
     """One-note write envelope: a single `write` of the framework-derived
     `spoke_path`, hub never touchable. `name` sets log attribution."""

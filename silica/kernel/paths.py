@@ -96,6 +96,11 @@ def quarantine(path: Path) -> Path | None:
 # explicit `## Sources` wikilink and silica_read_note.
 SOURCES_DIR = "sources"
 
+# The H2 under which a note links back to its verbatim leaf. Its presence is
+# also the note-side signal that the source is still retrievable, which is what
+# separates a grounded claim from a purely distilled one (reliability_tier).
+SOURCES_MARKER = "## Sources"
+
 
 def is_source_leaf(path: str) -> bool:
     """True when `path` (vault-relative, any separator) lives under sources/."""
