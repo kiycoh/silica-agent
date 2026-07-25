@@ -195,6 +195,23 @@ def test_concepts_unknown_term_hints(tmp_path, monkeypatch):
     assert "hint" in out
 
 
+def test_concepts_by_note_ranks_own_concepts(tmp_path, monkeypatch):
+    from silica.tools.graph import silica_concepts
+    st = CooccurStore(path=tmp_path / "c.json", lang="english")
+    st.upsert_note("A", build_contribution("A", "neural network network training model"))
+    st.upsert_note("B", build_contribution("B", "gardening tomatoes"))
+    monkeypatch.setattr("silica.kernel.cooccurrence.get_cooccur_store", lambda **_: st)
+
+    out = silica_concepts(note="A", k=3)
+    labels = [c["concept"] for c in out["concepts"]]
+    assert labels[0] == "network"          # highest weight wins
+    assert "tomatoes" not in labels        # B's concepts stay out
+    assert "hint" not in out
+
+    missing = silica_concepts(note="Nope")
+    assert missing["concepts"] == [] and "hint" in missing
+
+
 def test_concepts_empty_index_errors(tmp_path, monkeypatch):
     from silica.tools.graph import silica_concepts
     monkeypatch.setattr(

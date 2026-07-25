@@ -476,21 +476,25 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
 
 
 class ConceptsArgs(BaseModel):
-    term: str = Field(description="A single word/concept to look up in the vault's co-occurrence graph")
+    term: str = Field(default="", description="A single word/concept to look up in the vault's co-occurrence graph")
+    note: str = Field(default="", description="An existing note (name or path): return ITS concepts instead of a term's neighbourhood")
     k: int = Field(default=10, description="Number of neighbouring concepts and containing notes to return")
 
 @tool(ConceptsArgs, cls="composed")
-def silica_concepts(term: str, k: int = 10) -> dict[str, Any]:
-    """What the vault's discourse associates with a concept: co-occurring terms and the notes that carry it.
+def silica_concepts(term: str = "", note: str = "", k: int = 10) -> dict[str, Any]:
+    """The vault's concepts: what a term is associated with, or what a note is about.
 
-    Embedder-free read of the deterministic concept co-occurrence graph. Returns
-    the concept's canonical surface label, its weighted centrality in the
-    discourse, the top-k co-occurring concepts, and the notes mentioning it most.
-    Use it for terminology decisions (does the vault already have a word for
-    this?) and to pick wikilink targets for a concept BEFORE coining a synonym;
-    for ranked related NOTES use silica_related or silica_semantic_search
-    instead. Single-word concepts only — for a phrase, query its most
-    distinctive word.
+    Embedder-free read of the deterministic concept co-occurrence graph, in two modes:
+
+    - `term=`: the concept's canonical surface label, its weighted centrality in the
+      discourse, the top-k co-occurring concepts, and the notes mentioning it most.
+      Use it for terminology decisions (does the vault already have a word for this?)
+      and to pick wikilink targets for a concept BEFORE coining a synonym.
+      Single-word concepts only — for a phrase, query its most distinctive word.
+    - `note=`: the top-k concepts of that note, ranked by weight. Use it to answer
+      "what is this note about" without reading and re-summarising the whole body.
+
+    For ranked related NOTES use silica_related or silica_semantic_search instead.
     """
     from silica.config import CONFIG
     from silica.kernel.cooccurrence import get_cooccur_store
@@ -502,6 +506,31 @@ def silica_concepts(term: str, k: int = 10) -> dict[str, Any]:
         return {"error": f"co-occurrence store unavailable ({e}) — run silica_cooccurrence_refresh"}
     if len(store) == 0:
         return {"error": "co-occurrence index empty. Run silica_cooccurrence_refresh first."}
+
+    if note:
+        # The note's own concept vector is already stored per note by the index —
+        # no extraction, no LLM. note_nodes() applies cooccur_key to the path itself.
+        from silica.driver import DRIVER
+
+        try:
+            path = DRIVER.read_note(note).ref.path or note
+        except Exception:
+            path = note
+        nodes = store.note_nodes(path)
+        top = sorted(nodes.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+        out = {
+            "note": note,
+            "concepts": [{"concept": store.node_label(s), "weight": c} for s, c in top],
+        }
+        if not top:
+            out["hint"] = (
+                f"'{note}' has no entry in the co-occurrence index — check the name/path, "
+                "or run silica_cooccurrence_refresh if the note is new."
+            )
+        return out
+
+    if not term.strip():
+        return {"error": "pass either term= (concept neighbourhood) or note= (a note's concepts)."}
 
     stem = stem_word(term.strip().lower(), lang=store.lang)
     neighbors = store.neighbors(term, k=k)
