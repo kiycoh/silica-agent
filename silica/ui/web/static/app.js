@@ -535,6 +535,19 @@ function applySidebarFilter() {
 }
 $("#side-search").addEventListener("input", applySidebarFilter);
 
+// collapse every open folder in the tree. The button lives inside the Files
+// <summary>, so a click on it would also toggle the whole section. Cancelling
+// on the summary itself is what reliably suppresses that: preventDefault from
+// the button's own listener is order-dependent and stopPropagation does not
+// consistently reach summary's activation behaviour.
+$("#side-files").querySelector("summary").addEventListener("click", (e) => {
+  if (e.target.closest("#tree-collapse")) e.preventDefault();
+});
+
+$("#tree-collapse").addEventListener("click", () => {
+  for (const d of $("#tree").querySelectorAll("details[open]")) d.open = false;
+});
+
 // --- history (last sidebar section; capped, "expand" reveals the rest) -------
 const SESSION_CAP = 8;
 let sessionsExpanded = false;

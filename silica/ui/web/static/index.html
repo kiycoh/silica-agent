@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
-  <div id="drop-hint">[ DROP TO NUCLEATE &rarr; INBOX/ ]</div>
+  <div id="drop-hint">Drop to nucleate into Inbox/</div>
 
   <header>
     <button id="sidebar-toggle" class="ghost" title="toggle sidebar" aria-label="toggle sidebar">&#9776;</button>
@@ -51,14 +51,16 @@
       </div>
 
       <details class="side-section" id="side-files" open>
-        <summary class="side-title">Files</summary>
-        <div id="tree"></div>
+        <summary class="side-title">Files<button type="button" id="tree-collapse" title="collapse all folders" aria-label="collapse all folders">collapse</button></summary>
+        <div class="side-body"><div id="tree"></div></div>
       </details>
 
       <details class="side-section" id="side-history" open>
         <summary class="side-title">History</summary>
-        <div id="sessions"></div>
-        <button id="sessions-more" class="linklike" hidden></button>
+        <div class="side-body">
+          <div id="sessions"></div>
+          <button id="sessions-more" class="linklike" hidden></button>
+        </div>
       </details>
     </aside>
 
@@ -153,11 +155,11 @@
 
       <div id="graph-loading" class="frame-loading" hidden>
         <div class="spinner"></div>
-        <div>[ BUILDING GRAPH&hellip; LARGE VAULTS TAKE A MOMENT ]</div>
+        <div>Building the graph. Large vaults take a moment.</div>
       </div>
       <div id="map-loading" class="frame-loading" hidden>
         <div class="spinner"></div>
-        <div>[ BUILDING MAP&hellip; ]</div>
+        <div>Building the map.</div>
       </div>
 
       <!-- map landing: a radial map needs a root, so before one is picked we

@@ -164,18 +164,16 @@ def render_html(
   <title>{title}</title>
   {f'<script>{lib_js}</script>' if lib_js else '<script src="' + _VIS_JS_URL + '"></script>'}
   <style>
-    /* Silicon-carbide iridescence: blue-black crystal substrate, cool-white
-       foreground, one azure accent (exact pixel samples from the SiC macro).
-       Gold flags caution. Community hues stay data-driven. Type: Lexend,
-       matching the app shell (inlined data: URI — this file must stay
-       self-contained for file:// use). */
+    /* Palette mirrors the app shell: blue-black substrate, iced cyan accent,
+       amber for caution. Community hues stay data-driven. Type: Lexend, inlined
+       as a data: URI because this file must stay self-contained for file:// use.
+       Keep these tokens in sync with static/app.css. */
     {_vendored_font_face()}
     :root{{
-      --void:#0A0D14;--slate:#0F131C;--slate-2:#161B27;
-      --line:#232A3A;--line-2:#38425A;
-      --frost:#E8ECF5;--ash:#8B95AC;--ash-dim:#566076;
-      --accent:#00A5E1;--gold:#C69700;
-      --grad:linear-gradient(115deg,#00CEEA 0%,#0068B8 42%,#9D00B6 100%);
+      --void:#080B11;--slate:#0D1119;--slate-2:#1E2536;
+      --line:#283043;--line-2:#3B4661;
+      --frost:#EBEFF8;--text:#BAC4D8;--ash:#8E99B0;--ash-dim:#757F99;
+      --accent:#35C6E8;--warn:#E0A93B;
       --sans:"Lexend",system-ui,sans-serif;
     }}
     *{{box-sizing:border-box;margin:0;padding:0;border-radius:0}}
@@ -186,23 +184,19 @@ def render_html(
     ::-webkit-scrollbar-thumb:hover{{background:var(--ash-dim)}}
     body{{display:flex;height:100vh;font-family:var(--sans);font-weight:400;
           background:var(--void);color:var(--frost);overflow:hidden;-webkit-font-smoothing:antialiased}}
-    /* CRT scanlines — decorative only, clicks pass through */
-    body::after{{content:"";position:fixed;inset:0;z-index:99;pointer-events:none;
-      background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,0,0,.07) 3px,rgba(0,0,0,.07) 4px)}}
     #sidebar{{width:240px;flex-shrink:0;background:var(--slate);border-right:1px solid var(--line);
               display:flex;flex-direction:column;padding:14px 12px;gap:14px;overflow-y:auto}}
-    #sidebar h1{{font-size:.82rem;font-weight:800;letter-spacing:.28em;text-transform:uppercase;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}}
+    #sidebar h1{{font-size:14px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--frost)}}
     body.embedded #sidebar{{display:none}}
     .stat-grid{{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line)}}
     .stat{{background:var(--slate-2);padding:9px;text-align:center}}
-    .stat .val{{font-size:20px;font-weight:700;color:var(--frost)}}
-    .stat .val.warn{{color:var(--gold)}}
+    .stat .val{{font-size:24px;font-weight:600;letter-spacing:-.02em;color:var(--frost)}}
+    .stat .val.warn{{color:var(--warn)}}
     .stat .lbl{{font-size:10px;color:var(--ash-dim);margin-top:2px;letter-spacing:.08em;text-transform:uppercase}}
     #search{{width:100%;padding:8px 10px;background:var(--slate-2);border:1px solid var(--line-2);
              color:var(--frost);font-family:var(--sans);font-size:13px;outline:none}}
     #search:focus{{border-color:var(--frost)}}
     .section-title{{font-size:10px;color:var(--ash-dim);text-transform:uppercase;letter-spacing:.18em}}
-    .section-title::before{{content:"// ";color:var(--accent)}}
     .filter-row{{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ash);cursor:pointer;
                  padding:3px 0;user-select:none}}
     .filter-row input{{cursor:pointer;accent-color:var(--accent)}}
