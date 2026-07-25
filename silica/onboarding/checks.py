@@ -16,11 +16,20 @@ from typing import Literal
 
 import httpx
 
-from silica.agent.providers import LOCAL_RERANK_MODEL, PROVIDER_PRESETS, has_local_rerank
+from silica.agent.providers import (
+    LOCAL_RERANK_MODEL,
+    PROVIDER_PRESETS,
+    has_local_rerank,
+    model_limits,
+)
 from silica.config import SilicaConfig
 from silica.kernel import gitstate
 
 _HTTP_TIMEOUT = 3.0
+
+# One agentic turn is system prompt + tool schemas + history; below this the
+# first turn already overflows. Ollama's own default window is 4096.
+_MIN_OLLAMA_WINDOW = 8192
 
 
 @dataclass(frozen=True)
@@ -75,6 +84,35 @@ def check_chat_endpoint(config: SilicaConfig) -> CheckResult:
             f"start {label}, or switch provider with `silica init`",
         )
     return CheckResult("chat endpoint", "ok", f"{base_url} reachable")
+
+
+def check_ollama_context(config: SilicaConfig) -> CheckResult:
+    """Warn when the Ollama model loads with a window too small for one turn.
+
+    Ollama does not reject an oversized prompt — it drops the overflow and
+    answers anyway (measured: a ~30k-token prompt came back with
+    prompt_tokens=2050 and the head of the prompt gone, HTTP 200, no warning).
+    That failure is invisible from inside silica, so surfacing the window here
+    is the only place a user learns about it before the answers go quietly wrong.
+
+    Deliberately advisory: raising num_ctx costs VRAM on the user's machine, so
+    the choice stays theirs rather than being made silently per request.
+    """
+    window, _ = model_limits(config.provider, config.model)
+    if not window:
+        return CheckResult(
+            "ollama context", "warn",
+            f"{config.model} — window unknown (model not pulled, or Ollama unreachable)",
+            f"`ollama pull {config.model.removeprefix('ollama/')}`, then re-run `silica doctor`",
+        )
+    if window < _MIN_OLLAMA_WINDOW:
+        return CheckResult(
+            "ollama context", "warn",
+            f"{window} tokens — Ollama silently discards anything past it, no error",
+            f"restart the server with OLLAMA_CONTEXT_LENGTH={_MIN_OLLAMA_WINDOW} "
+            "(costs VRAM), or pin num_ctx in a Modelfile",
+        )
+    return CheckResult("ollama context", "ok", f"{window} tokens")
 
 
 def check_vault(config: SilicaConfig) -> CheckResult:
@@ -354,6 +392,8 @@ def run_checks(config: SilicaConfig) -> list[CheckResult]:
     return [
         check_chat_model(config),
         check_chat_endpoint(config),
+        # Ollama-only: the silent-truncation trap is specific to it.
+        *([check_ollama_context(config)] if config.provider == "ollama" else []),
         check_vault(config),
         check_manifest(config),
         check_language(config),

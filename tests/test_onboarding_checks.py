@@ -510,3 +510,40 @@ class TestAggregation:
         out = buf.getvalue()
         assert "chat model" in out
         assert "silica init" in out
+
+
+class TestOllamaContextCheck:
+    """Ollama silently truncates past its window; the doctor is the only place
+    the user can learn the window is too small before answers go quietly wrong."""
+
+    def _check(self, window, monkeypatch):
+        import silica.onboarding.checks as checks
+        monkeypatch.setattr(checks, "model_limits", lambda p, m: (window, 0))
+        return checks.check_ollama_context(_cfg(model="ollama/llama3.2:3b"))
+
+    def test_default_4096_window_warns(self, monkeypatch):
+        r = self._check(4096, monkeypatch)
+        assert r.status == "warn"
+        assert "4096" in r.detail
+        assert "OLLAMA_CONTEXT_LENGTH" in r.hint
+
+    def test_roomy_window_is_ok(self, monkeypatch):
+        assert self._check(32768, monkeypatch).status == "ok"
+
+    def test_unknown_window_warns_with_pull_hint(self, monkeypatch):
+        r = self._check(0, monkeypatch)
+        assert r.status == "warn"
+        assert "llama3.2:3b" in r.hint  # the ollama/ prefix is stripped for the pull command
+
+    def test_registered_only_for_ollama(self, monkeypatch):
+        import silica.onboarding.checks as checks
+
+        monkeypatch.setattr(checks, "check_chat_endpoint",
+                            lambda c: checks.CheckResult("chat endpoint", "ok", ""))
+        monkeypatch.setattr(checks, "model_limits", lambda p, m: (4096, 0))
+        assert "ollama context" not in [
+            r.name for r in checks.run_checks(_cfg(model="lmstudio/qwen3-8b"))
+        ]
+        assert "ollama context" in [
+            r.name for r in checks.run_checks(_cfg(model="ollama/llama3.2:3b"))
+        ]

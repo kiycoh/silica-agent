@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+
+import pytest
 from unittest.mock import MagicMock, patch
 from pydantic import BaseModel
 
@@ -445,3 +447,92 @@ def test_call_llm_structured_rate_limit_propagates_without_fallback(mock_sleep, 
     assert mock_client.chat.completions.create.call_count == 0
     assert mock_sleep.call_count == _RATE_LIMIT_ATTEMPTS - 1  # backoff between attempts
 
+
+
+# --- Ollama seam: OLLAMA_HOST, streamed usage, structured-decode temperature ---
+
+@pytest.mark.parametrize(
+    "env, expected",
+    [
+        (None, "http://localhost:11434/v1"),
+        ("", "http://localhost:11434/v1"),
+        ("remote-box", "http://remote-box:11434/v1"),           # bare host -> ollama's default port
+        ("remote-box:9999", "http://remote-box:9999/v1"),
+        ("http://10.0.0.5:11434", "http://10.0.0.5:11434/v1"),
+        ("https://ollama.internal:443", "https://ollama.internal:443/v1"),
+        ("http://10.0.0.5:11434/", "http://10.0.0.5:11434/v1"),  # trailing slash
+        ("host:not-a-port", "http://localhost:11434/v1"),        # garbage degrades, never raises
+    ],
+)
+def test_ollama_base_url_honours_ollama_host(env, expected, monkeypatch):
+    from silica.agent.providers import _ollama_base_url
+
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    if env is not None:
+        monkeypatch.setenv("OLLAMA_HOST", env)
+    assert _ollama_base_url() == expected
+
+
+@patch("silica.agent.providers.openai.OpenAI")
+def test_stream_usage_chunk_with_empty_choices_is_recorded(mock_openai_cls):
+    """The include_usage chunk carries choices: [] — it must not be skipped.
+
+    Regression: the empty-choices `continue` ran before the usage read, so
+    LLMResponse.usage came back {} on every streamed call (verified against a
+    live Ollama, which does send this chunk).
+    """
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+
+    text_chunk = MagicMock(usage=None)
+    text_chunk.choices = [MagicMock(finish_reason=None, delta=MagicMock(content="hi", tool_calls=None))]
+
+    usage_chunk = MagicMock()
+    usage_chunk.choices = []  # exactly what OpenAI-compatible servers send
+    usage_chunk.usage = MagicMock(
+        prompt_tokens=26, completion_tokens=5, total_tokens=31, prompt_tokens_details=None
+    )
+
+    mock_client.chat.completions.create.return_value = iter([text_chunk, usage_chunk])
+
+    provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="m")
+    resp = provider.call_llm(messages=[{"role": "user", "content": "hi"}])
+
+    assert resp.text == "hi"
+    assert resp.usage == {"prompt_tokens": 26, "completion_tokens": 5, "total_tokens": 31}
+
+
+@patch("silica.agent.providers.openai.OpenAI")
+def test_structured_decode_defaults_to_temperature_zero(mock_openai_cls):
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+    parsed = MagicMock(
+        content='{"key":"k","value":1}', tool_calls=None, parsed=SchemaModel(key="k", value=1)
+    )
+    mock_client.beta.chat.completions.parse.return_value = MagicMock(
+        choices=[MagicMock(message=parsed, finish_reason="stop")], usage=None
+    )
+
+    provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="m")
+    provider.call_llm(messages=[{"role": "user", "content": "hi"}], response_schema=SchemaModel)
+    assert mock_client.beta.chat.completions.parse.call_args.kwargs["temperature"] == 0.0
+
+    # An explicit temperature still wins over the greedy default.
+    provider.call_llm(
+        messages=[{"role": "user", "content": "hi"}], response_schema=SchemaModel, temperature=0.7
+    )
+    assert mock_client.beta.chat.completions.parse.call_args.kwargs["temperature"] == 0.7
+
+
+@patch("silica.agent.providers.openai.OpenAI")
+def test_unstructured_call_sends_no_temperature_by_default(mock_openai_cls):
+    """The agentic/text path keeps the provider default — only extraction goes greedy."""
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+    chunk = MagicMock(usage=None)
+    chunk.choices = [MagicMock(finish_reason="stop", delta=MagicMock(content="ok", tool_calls=None))]
+    mock_client.chat.completions.create.return_value = iter([chunk])
+
+    provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="m")
+    provider.call_llm(messages=[{"role": "user", "content": "hi"}])
+    assert "temperature" not in mock_client.chat.completions.create.call_args.kwargs

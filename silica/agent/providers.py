@@ -8,6 +8,7 @@ import logging
 import os
 from functools import lru_cache
 from typing import Any
+from urllib.parse import urlsplit
 import httpx
 import openai
 import orjson
@@ -17,13 +18,37 @@ from silica.agent.llm import LLMResponse, build_assistant_message, openrouter_ro
 
 logger = logging.getLogger(__name__)
 
+_OLLAMA_DEFAULT_URL = "http://localhost:11434/v1"
+
+
+def _ollama_base_url() -> str:
+    """Ollama's endpoint, honouring its own OLLAMA_HOST convention.
+
+    OLLAMA_HOST is what `ollama` itself reads, so a user who already points the
+    CLI at a remote box or a non-default port expects silica to follow. Accepts
+    every shape ollama does: `host`, `host:port`, `http://host:port`. Port
+    defaults to 11434, matching ollama's client.
+    """
+    raw = (os.getenv("OLLAMA_HOST") or "").strip()
+    if not raw:
+        return _OLLAMA_DEFAULT_URL
+    try:
+        u = urlsplit(raw if "://" in raw else f"http://{raw}")
+        return f"{u.scheme}://{u.hostname}:{u.port or 11434}/v1"
+    except ValueError:
+        # Falling back beats crashing every `silica` import on a typo'd env var;
+        # the endpoint check then reports localhost unreachable.
+        logger.warning("OLLAMA_HOST=%r is not a valid host — using %s", raw, _OLLAMA_DEFAULT_URL)
+        return _OLLAMA_DEFAULT_URL
+
+
 PROVIDER_PRESETS = {
     "lmstudio": {
         "base_url": "http://localhost:1234/v1",
         "api_key": "lm-studio"
     },
     "ollama": {
-        "base_url": "http://localhost:11434/v1",
+        "base_url": _ollama_base_url(),
         "api_key": "ollama"  # Ollama ignores it; the OpenAI SDK demands non-empty.
     },
     "openrouter": {
@@ -181,6 +206,7 @@ class OpenAICompatibleProvider:
         response_schema: type[BaseModel] | None = None,
         max_tokens: int | None = None,
         openrouter_provider: str | None = None,
+        temperature: float | None = None,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": self.model,
@@ -189,7 +215,17 @@ class OpenAICompatibleProvider:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
-            
+        # Structured decoding defaults to greedy: this path exists to extract a
+        # fixed shape, and sampling at the provider default (0.8 on Ollama, 1.0
+        # on OpenAI) buys variety nobody wants in an extraction. Ollama's
+        # structured-outputs doc calls for temperature 0 explicitly. Pass an
+        # explicit temperature to override.
+        if temperature is None and response_schema is not None:
+            temperature = 0.0
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+
+
         provider = "openrouter" if "openrouter.ai" in self.base_url else ""
         input_chars = len(str(kwargs["messages"])) + (len(str(tools)) if tools else 0)
         kwargs["max_tokens"] = clamp_max_tokens(provider, self.model, max_tokens, input_chars)
@@ -259,6 +295,22 @@ class OpenAICompatibleProvider:
             usage_dict: dict[str, int] = {}
 
             for chunk in stream:
+                # Usage first: the include_usage chunk carries `choices: []` by
+                # contract (verified on Ollama, and OpenAI-style APIs alike), so
+                # reading it after the empty-choices `continue` below dropped it
+                # every time and left usage={} on this whole path.
+                if getattr(chunk, "usage", None) is not None:
+                    u = chunk.usage
+                    usage_dict = {
+                        "prompt_tokens": getattr(u, "prompt_tokens", 0),
+                        "completion_tokens": getattr(u, "completion_tokens", 0),
+                        "total_tokens": getattr(u, "total_tokens", 0),
+                    }
+                    # Keep cache-hit visibility (token meter reads cached_tokens).
+                    ptd = getattr(u, "prompt_tokens_details", None)
+                    cached = getattr(ptd, "cached_tokens", None) if ptd is not None else None
+                    if cached:
+                        usage_dict["prompt_tokens_details"] = {"cached_tokens": cached}
                 if not chunk.choices:
                     continue
                 _choice = chunk.choices[0]
@@ -282,18 +334,6 @@ class OpenAICompatibleProvider:
                                 tc_acc[_i]["function"]["name"] += _tc.function.name
                             if _tc.function.arguments:
                                 tc_acc[_i]["function"]["arguments"] += _tc.function.arguments
-                if getattr(chunk, "usage", None) is not None:
-                    u = chunk.usage
-                    usage_dict = {
-                        "prompt_tokens": getattr(u, "prompt_tokens", 0),
-                        "completion_tokens": getattr(u, "completion_tokens", 0),
-                        "total_tokens": getattr(u, "total_tokens", 0),
-                    }
-                    # Keep cache-hit visibility (token meter reads cached_tokens).
-                    ptd = getattr(u, "prompt_tokens_details", None)
-                    cached = getattr(ptd, "cached_tokens", None) if ptd is not None else None
-                    if cached:
-                        usage_dict["prompt_tokens_details"] = {"cached_tokens": cached}
 
             content = "".join(content_chunks) or None
             tool_calls_list = [tc_acc[k] for k in sorted(tc_acc)]
