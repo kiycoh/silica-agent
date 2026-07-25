@@ -103,8 +103,17 @@ class TestGenerateTaxonomyTool:
     @pytest.fixture(autouse=True)
     def clean_env(self, monkeypatch):
         # Ensure CONFIG.vault_path doesn't interfere with relative paths in tests
+        from unittest.mock import MagicMock
+
+        import silica.driver
         from silica.config import CONFIG
         monkeypatch.setattr(CONFIG, "vault_path", "")
+        # patch("silica.driver.DRIVER") reads the attribute to stash the original,
+        # and the lazy module __getattr__ answers that read by BUILDING a driver,
+        # which the empty vault_path above makes impossible. These tests only ever
+        # passed because some earlier test file left the singleton populated; seed
+        # it here so the class stands on its own whatever the run order.
+        monkeypatch.setattr(silica.driver, "_driver", MagicMock())
 
     def test_silica_generate_taxonomy_lists_files(self, tmp_path):
         from unittest.mock import MagicMock, patch
