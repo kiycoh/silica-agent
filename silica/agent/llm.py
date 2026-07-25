@@ -235,6 +235,40 @@ def _meter_site() -> str:
     return "?"
 
 
+# Anthropic bills the entire prompt every turn unless the request carries an
+# explicit cache breakpoint; the OpenAI family caches long prefixes on its own,
+# and local backends have no billing to amortise. So this applies to Anthropic
+# models only, whether direct or proxied (openrouter/, bedrock/, vertex_ai/).
+_CACHEABLE_MODELS = ("anthropic", "claude")
+
+
+def _with_prompt_cache(model: str, messages: list[dict]) -> list[dict]:
+    """Mark the system prompt as an Anthropic cache breakpoint.
+
+    An agentic turn's static head is the tool schemas plus the system prompt —
+    together the largest stable prefix we send, and re-billed in full on every
+    turn without this. Anthropic orders the prompt tools → system → messages and
+    a breakpoint caches everything up to and including its own block, so ONE
+    breakpoint on the system block covers the tool schemas too.
+    """
+    if not any(k in model.lower() for k in _CACHEABLE_MODELS):
+        return messages
+    if not messages or messages[0].get("role") != "system":
+        return messages
+    content = messages[0].get("content")
+    if not isinstance(content, str) or not content:
+        return messages  # already content blocks, or nothing to cache
+    # Copy the head: `messages` is the caller's live history and run_agent keeps
+    # appending to it, so mutating it here would persist the marker into the
+    # stored conversation and into every later turn's history.
+    return [
+        {**messages[0], "content": [
+            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}},
+        ]},
+        *messages[1:],
+    ]
+
+
 def _cached_tokens(usage: dict) -> int:
     """Cache-hit prompt tokens across provider dialects (0 when unreported)."""
     ptd = usage.get("prompt_tokens_details")
@@ -389,7 +423,7 @@ def call_llm(
     input_chars = len(str(messages)) + (len(str(tools)) if tools else 0)
     kwargs: dict = {
         "model": model,
-        "messages": messages,
+        "messages": _with_prompt_cache(model, messages),
         "max_tokens": clamp_max_tokens(model.split("/", 1)[0], model, max_tokens, input_chars),
     }
     if tools:

@@ -18,6 +18,7 @@ from typing import NamedTuple
 
 from silica.ui.style import FlatMarkdown
 
+from silica.agent.constraints import AgentConstraints, chat_tools
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
 from silica.prompts import system_prompt
@@ -1746,7 +1747,12 @@ def main():
         messages.append(msg)
 
         try:
-            answer = run_agent(messages, model=CONFIG.model, tool_progress_callback=callback)
+            answer = run_agent(
+                messages,
+                model=CONFIG.model,
+                tool_progress_callback=callback,
+                constraints=AgentConstraints(tools=chat_tools()),
+            )
             if answer:
                 CONSOLE.print()
                 CONSOLE.print("[role.assistant]⏺ silica[/]")
