@@ -87,16 +87,14 @@ def check_chat_endpoint(config: SilicaConfig) -> CheckResult:
 
 
 def check_ollama_context(config: SilicaConfig) -> CheckResult:
-    """Warn when the Ollama model loads with a window too small for one turn.
+    """Report the window silica pins per request, and warn when it cannot hold a turn.
 
     Ollama does not reject an oversized prompt — it drops the overflow and
-    answers anyway (measured: a ~30k-token prompt came back with
-    prompt_tokens=2050 and the head of the prompt gone, HTTP 200, no warning).
-    That failure is invisible from inside silica, so surfacing the window here
-    is the only place a user learns about it before the answers go quietly wrong.
-
-    Deliberately advisory: raising num_ctx costs VRAM on the user's machine, so
-    the choice stays theirs rather than being made silently per request.
+    answers anyway (measured: a 6645-token prompt came back with
+    prompt_eval_count=2051 and the tool definitions gone, HTTP 200, no warning).
+    Silica pins num_ctx on every request so the runtime's 4096 default cannot
+    cause that, which leaves two ways to end up under water: OLLAMA_NUM_CTX set
+    too low by hand, or a model whose trained maximum is smaller than one turn.
     """
     window, _ = model_limits(config.provider, config.model)
     if not window:
@@ -108,11 +106,11 @@ def check_ollama_context(config: SilicaConfig) -> CheckResult:
     if window < _MIN_OLLAMA_WINDOW:
         return CheckResult(
             "ollama context", "warn",
-            f"{window} tokens — Ollama silently discards anything past it, no error",
-            f"restart the server with OLLAMA_CONTEXT_LENGTH={_MIN_OLLAMA_WINDOW} "
-            "(costs VRAM), or pin num_ctx in a Modelfile",
+            f"{window} tokens — too small for one turn, Ollama discards the rest with no error",
+            f"raise OLLAMA_NUM_CTX to {_MIN_OLLAMA_WINDOW} or more (costs VRAM); if the model's "
+            "own trained maximum is the limit, use a model with a wider window",
         )
-    return CheckResult("ollama context", "ok", f"{window} tokens")
+    return CheckResult("ollama context", "ok", f"{window} tokens pinned per request")
 
 
 def check_vault(config: SilicaConfig) -> CheckResult:

@@ -304,10 +304,58 @@ def test_call_llm_ollama_routes_via_ollama_chat(monkeypatch):
     monkeypatch.setattr(llm.litellm, "completion", fake_completion)
     # Don't let clamp_max_tokens probe a live Ollama during the test.
     monkeypatch.setattr(providers, "model_limits", lambda p, m: (0, 0))
+    monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+    # The preset is the single endpoint authority (doctor and model_limits read
+    # the same one, resolved from OLLAMA_HOST at import). Patching it here proves
+    # the chat path follows it instead of litellm's hardcoded localhost.
+    monkeypatch.setitem(providers.PROVIDER_PRESETS["ollama"], "base_url",
+                        "http://gpu-box:11500/v1")
 
     llm.call_llm("ollama/llama3.2:3b", [{"role": "user", "content": "hi"}])
 
     assert captured["model"] == "ollama_chat/llama3.2:3b"
+    # Ollama loads at a 4096 window by default and drops the overflow silently,
+    # which strips the ~8k-token toolset out of the prompt. The pin is what keeps
+    # tool calling working at all, so its absence is a regression, not a nit.
+    assert captured["num_ctx"] == 16384
+    # litellm reads OLLAMA_API_BASE only; without an explicit api_base the chat
+    # path would ignore OLLAMA_HOST while doctor and model_limits honour it.
+    assert captured["api_base"] == "http://gpu-box:11500"
+
+
+def test_get_provider_ollama_avoids_the_v1_endpoint(monkeypatch):
+    """/v1 cannot size the context window (it ignores num_ctx and reloads the
+    model at 4096), so the distiller path must go through /api/chat instead."""
+    from types import SimpleNamespace
+    from pydantic import BaseModel
+    from silica.agent import llm as llm_mod
+    from silica.agent import providers
+
+    monkeypatch.delenv("OLLAMA_NUM_CTX", raising=False)
+    config = SimpleNamespace(provider="ollama", model="ollama/gemma3:4b")
+    provider = providers.get_provider(config)
+
+    assert isinstance(provider, providers.OllamaNativeProvider)
+    assert provider.model == "gemma3:4b"
+
+    captured: dict = {}
+
+    def fake_call_llm(**kw):
+        captured.update(kw)
+        return llm_mod.LLMResponse(text="{}", tool_calls=[],
+                                   assistant_message={"role": "assistant"}, usage={})
+
+    monkeypatch.setattr(llm_mod, "call_llm", fake_call_llm)
+
+    class Schema(BaseModel):
+        title: str
+
+    provider.call_llm(messages=[{"role": "user", "content": "hi"}], tools=None,
+                      response_schema=Schema, max_tokens=512)
+
+    assert captured["model"] == "ollama/gemma3:4b"
+    assert captured["response_format"] is Schema  # litellm renders it as Ollama's `format`
+    assert captured["temperature"] == 0.0  # extraction stays greedy, not Ollama's 0.8
 
 
 def test_streaming_path_collects_usage():

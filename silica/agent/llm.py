@@ -418,7 +418,11 @@ def call_llm(
         tool_count = len(tools) if tools else 0
         logger.info("LLM call: model=%s | msg=%d | tools=%d", model, len(messages), tool_count)
 
-    from silica.agent.providers import PROVIDER_PRESETS, clamp_max_tokens  # lazy: providers.py imports this module
+    from silica.agent.providers import (  # lazy: providers.py imports this module
+        PROVIDER_PRESETS,
+        clamp_max_tokens,
+        ollama_num_ctx,
+    )
 
     input_chars = len(str(messages)) + (len(str(tools)) if tools else 0)
     kwargs: dict = {
@@ -445,6 +449,16 @@ def call_llm(
     # `ollama/` in config; clamp_max_tokens above already ran on that prefix.
     if model.startswith("ollama/"):
         kwargs["model"] = "ollama_chat/" + model.split("/", 1)[1]
+        # Without this the model loads at Ollama's 4096-token default and the
+        # ~8k-token toolset is truncated away in silence, so the model answers in
+        # prose instead of calling a tool (measured: 2051 of 6645 prompt tokens
+        # kept, zero tool calls at 4096; the same request calls the right tool at
+        # 8192). /api/chat is the only Ollama endpoint that accepts this.
+        kwargs["num_ctx"] = ollama_num_ctx()
+        # litellm resolves Ollama's endpoint from OLLAMA_API_BASE alone, so
+        # without this the chat path talks to localhost while doctor and
+        # model_limits honour OLLAMA_HOST and talk to the box the user configured.
+        kwargs["api_base"] = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
 
     # Custom OpenAI-compatible endpoint: litellm has no `custom/` provider, so
     # route via its generic openai/ path with an explicit api_base/api_key.

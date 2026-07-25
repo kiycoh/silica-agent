@@ -42,6 +42,33 @@ def _ollama_base_url() -> str:
         return _OLLAMA_DEFAULT_URL
 
 
+# Ollama loads a model with a 4096-token window unless told otherwise, and it
+# drops whatever does not fit in silence: HTTP 200, no warning (measured — a
+# 6645-token prompt came back with prompt_eval_count=2051, the tool definitions
+# gone, and the model answered in prose instead of calling a tool). The chat
+# toolset alone is ~8k tokens, so the default window cannot hold a single turn.
+# Pinned per request rather than left to the server's OLLAMA_CONTEXT_LENGTH,
+# which is invisible from inside silica: a user who never set it got garbage.
+_OLLAMA_DEFAULT_NUM_CTX = 16384
+
+
+def ollama_num_ctx() -> int:
+    """Context window silica pins on every Ollama request.
+
+    Costs VRAM — the KV cache scales with it — so OLLAMA_NUM_CTX raises or lowers
+    it. model_limits caps the effective value at the model's trained maximum.
+    """
+    raw = (os.getenv("OLLAMA_NUM_CTX") or "").strip()
+    if not raw:
+        return _OLLAMA_DEFAULT_NUM_CTX
+    try:
+        return max(int(raw), 1024)
+    except ValueError:
+        logger.warning("OLLAMA_NUM_CTX=%r is not an integer — using %d",
+                       raw, _OLLAMA_DEFAULT_NUM_CTX)
+        return _OLLAMA_DEFAULT_NUM_CTX
+
+
 PROVIDER_PRESETS = {
     "lmstudio": {
         "base_url": "http://localhost:1234/v1",
@@ -87,12 +114,11 @@ def model_limits(provider: str, model: str) -> tuple[int, int]:
     lmstudio   → GET {base}/api/v0/models: `loaded_context_length` (the window
                  the model is loaded with RIGHT NOW, often below its max) with
                  `max_context_length` as fallback. No output cap.
-    ollama     → GET {base}/api/ps: `context_length` of the model as LOADED
-                 right now (often the 4096 default, far below the trained max —
-                 the real ceiling, past which Ollama truncates silently). Falls
-                 back to POST {base}/api/show when the model isn't loaded:
-                 `num_ctx` from the Modelfile parameters if pinned, else the
-                 trained max from `model_info["<arch>.context_length"]`. No output cap.
+    ollama     → the window silica pins per request (ollama_num_ctx), capped at
+                 the trained max from POST {base}/api/show
+                 `model_info["<arch>.context_length"]`. Neither the runtime's
+                 4096 default nor a Modelfile `num_ctx` can widen or narrow this:
+                 request options win over both. No output cap.
     openrouter → GET /api/v1/models: `context_length` plus the top provider's
                  `max_completion_tokens` (often far below the window — e.g.
                  qwen3-8b: 131k ctx, 8k out).
@@ -103,30 +129,14 @@ def model_limits(provider: str, model: str) -> tuple[int, int]:
         if provider == "ollama":
             base = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
             wanted = model.removeprefix("ollama/")
-            # A loaded model reports its ACTUAL window in /api/ps — this is the
-            # ground truth (it already reflects the Modelfile pin or the runtime
-            # 4096 default), so it wins outright when present. Its own try/except
-            # falls through to /api/show if ps is down or predates this field.
-            try:
-                ps = httpx.get(f"{base}/api/ps", timeout=5.0).json().get("models") or []
-                loaded = next((m for m in ps if wanted in (m.get("name"), m.get("model"))), None)
-                if loaded and loaded.get("context_length"):
-                    return int(loaded["context_length"]), 0
-            except Exception as e:
-                logger.debug("ollama /api/ps unavailable for %s: %s", wanted, e)
             info = httpx.post(f"{base}/api/show", json={"model": wanted}, timeout=5.0).json()
-            # Model not loaded: prefer num_ctx if the Modelfile pins it.
-            # ponytail: Ollama's *default* num_ctx (~4096) isn't reported in /api/show,
-            # so an unpinned model reports its trained max here — /api/ps above is the
-            # real fix; this remains the pre-load estimate.
-            params = info.get("parameters") or ""
-            num_ctx = next((int(f[1]) for p in params.splitlines()
-                            if (f := p.split())[:1] == ["num_ctx"] and len(f) > 1), 0)
             mi = info.get("model_info") or {}
             arch = mi.get("general.architecture", "")
-            max_ctx = mi.get(f"{arch}.context_length") or next(
-                (v for k, v in mi.items() if k.endswith(".context_length")), 0)
-            return int(num_ctx or max_ctx or 0), 0
+            trained = int(mi.get(f"{arch}.context_length") or next(
+                (v for k, v in mi.items() if k.endswith(".context_length")), 0) or 0)
+            if not trained:
+                return (0, 0)  # model not pulled / unknown arch → caller's default
+            return min(ollama_num_ctx(), trained), 0
         if provider == "lmstudio":
             base = PROVIDER_PRESETS["lmstudio"]["base_url"].removesuffix("/v1")
             data = httpx.get(f"{base}/api/v0/models", timeout=5.0).json()["data"]
@@ -355,6 +365,53 @@ class OpenAICompatibleProvider:
         )
 
 
+class OllamaNativeProvider:
+    """Ollama through /api/chat instead of the OpenAI-compatible /v1 endpoint.
+
+    /v1 cannot set the context window. It ignores `num_ctx` both bare and inside
+    `options`, loads the model at Ollama's 4096 default, and evicts a wider
+    runner to do it (measured: with a 16384 runner already loaded, one /v1 call
+    reloaded at 4096, kept 2051 of 6645 prompt tokens and returned no tool calls,
+    HTTP 200). Every window-sized prompt on this path — distiller, dedup, refine,
+    codewiki — was therefore truncated in silence, which corrupts notes rather
+    than failing. /api/chat honours a per-request num_ctx and expresses
+    JSON-schema structured outputs through `format`, so it is the only endpoint
+    that can serve this path at all.
+
+    Duck-types OpenAICompatibleProvider: same call_llm keyword contract, same
+    LLMResponse, so every capability call site stays untouched.
+    """
+
+    def __init__(self, model: str):
+        self.model = model
+        self.base_url = PROVIDER_PRESETS["ollama"]["base_url"]
+
+    def call_llm(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        response_schema: type[BaseModel] | None = None,
+        max_tokens: int | None = None,
+        openrouter_provider: str | None = None,
+        temperature: float | None = None,
+    ) -> LLMResponse:
+        from silica.agent.llm import call_llm  # lazy: llm.py imports this module
+
+        # Same greedy default as the OpenAI-SDK path: an extraction wants the
+        # fixed shape, not Ollama's 0.8 sampling default.
+        if temperature is None and response_schema is not None:
+            temperature = 0.0
+        # ponytail: openrouter_provider is an OpenRouter routing pin, inert here.
+        return call_llm(
+            model=f"ollama/{self.model}",
+            messages=[_to_wire(m) for m in messages],
+            tools=tools,
+            max_tokens=max_tokens,
+            response_format=response_schema,
+            temperature=temperature,
+        )
+
+
 class OpenAIEmbedder:
     """Thin wrapper for the OpenAI-compatible /v1/embeddings endpoint.
 
@@ -534,7 +591,7 @@ def get_reranker(config: Any) -> Reranker | LocalReranker | None:
     return LocalReranker(model=model or LOCAL_RERANK_MODEL)
 
 
-def get_provider(config: Any, role: str = "router") -> OpenAICompatibleProvider:
+def get_provider(config: Any, role: str = "router") -> OpenAICompatibleProvider | OllamaNativeProvider:
     """Return an LLM provider for the given role.
 
     role="router" (default) → uses config.provider / config.model (the main model).
@@ -584,5 +641,10 @@ def get_provider(config: Any, role: str = "router") -> OpenAICompatibleProvider:
     # endpoint wants the bare model id. No-op when the model carries no prefix.
     # For openrouter this drops only the leading "openrouter/", keeping "vendor/model".
     model_name = model_name.removeprefix(f"{provider_name}/")
+
+    # Ollama never goes through /v1: that endpoint cannot size the context window
+    # and truncates in silence (see OllamaNativeProvider).
+    if provider_name == "ollama":
+        return OllamaNativeProvider(model=model_name)
 
     return OpenAICompatibleProvider(base_url=base_url, api_key=api_key, model=model_name)

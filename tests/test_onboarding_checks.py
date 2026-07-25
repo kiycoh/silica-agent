@@ -513,19 +513,19 @@ class TestAggregation:
 
 
 class TestOllamaContextCheck:
-    """Ollama silently truncates past its window; the doctor is the only place
-    the user can learn the window is too small before answers go quietly wrong."""
+    """Ollama silently truncates past its window; the doctor is where the user
+    learns the pinned window cannot hold a turn before answers go quietly wrong."""
 
     def _check(self, window, monkeypatch):
         import silica.onboarding.checks as checks
         monkeypatch.setattr(checks, "model_limits", lambda p, m: (window, 0))
         return checks.check_ollama_context(_cfg(model="ollama/llama3.2:3b"))
 
-    def test_default_4096_window_warns(self, monkeypatch):
+    def test_window_below_one_turn_warns(self, monkeypatch):
         r = self._check(4096, monkeypatch)
         assert r.status == "warn"
         assert "4096" in r.detail
-        assert "OLLAMA_CONTEXT_LENGTH" in r.hint
+        assert "OLLAMA_NUM_CTX" in r.hint
 
     def test_roomy_window_is_ok(self, monkeypatch):
         assert self._check(32768, monkeypatch).status == "ok"
