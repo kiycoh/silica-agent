@@ -424,6 +424,20 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
                 if e.get("prev") is not None:
                     line += f"  (delta {e['value'] - e['prev']:+.2f} since last report)"
                 CONSOLE.print(line)
+                # Attribute the delta: the six contributions sum to the total, so
+                # naming the terms that moved says WHICH force changed the vault.
+                # Movers only — an unchanged term is noise on this line.
+                terms, prev_terms = e.get("terms") or {}, e.get("prev_terms") or {}
+                movers = sorted(
+                    ((t, v - prev_terms[t]) for t, v in terms.items() if t in prev_terms),
+                    key=lambda kv: -abs(kv[1]),
+                )
+                movers = [(t, d) for t, d in movers if abs(d) >= 0.01]
+                if movers:
+                    CONSOLE.print(
+                        "    moved: " + ", ".join(f"{t} {d:+.2f}" for t, d in movers[:4]),
+                        markup=False,
+                    )
         except Exception:
             pass
         return True
