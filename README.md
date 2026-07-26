@@ -309,7 +309,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `/explain "<concept>" [--level]` | Explain a concept, grounded in the vault |
 | `/summarize <note\|folder>` | Digest of one or more notes |
 | `/compare "A" "B"` | Comparison table, surfaces contradictions |
-| `/quiz <note> [--n=10]` | Active-recall quiz from your notes |
+| `/quiz [note] [--n=10]` | Active-recall quiz; misses resurface. No target = review queue |
 | `/relate <note>` · `/path A B` | How notes relate · shortest reading path |
 | `/schematize <target>` · `/diagram <target>` | Table · Mermaid diagram of a note, folder, or topic |
 | `/find <query>` | Semantic search |

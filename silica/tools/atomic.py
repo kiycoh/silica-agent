@@ -497,3 +497,60 @@ def silica_ledger_update(run_id: str, task_id: str, status: str, error: str = ""
 
     return {"ok": True, "digest": progress.digest()}
 
+
+
+# ---------------------------------------------------------------------------
+# Study loop
+# ---------------------------------------------------------------------------
+
+class QuizResult(BaseModel):
+    path: str = Field(description="Note the question was drawn from (wikilink name or vault-relative path)")
+    correct: bool = Field(description="True if the reader's answer was right")
+
+
+class RecordQuizArgs(BaseModel):
+    results: list[QuizResult] = Field(description="One entry per graded question")
+
+
+@tool(RecordQuizArgs, cls="atomic")
+def silica_record_quiz(results: list) -> dict:
+    """Record graded quiz answers so the notes the reader failed resurface later.
+
+    Call once after grading a round of questions, one entry per question. This
+    writes no note: the log is derived state, and it is what makes
+    silica_weak_notes and the report's attention list rank by what the reader
+    actually got wrong instead of by file age.
+    """
+    from silica.kernel import quiz
+
+    entries = []
+    for r in results:
+        r = r if isinstance(r, dict) else r.model_dump()
+        name = str(r.get("path") or "").strip()
+        if not name:
+            continue
+        try:  # resolve wikilink names to the path the report keys on
+            name = DRIVER.read_note(name).ref.path or name
+        except Exception:
+            pass  # unresolvable: log the reader's spelling rather than drop the answer
+        entries.append({"path": name, "correct": bool(r.get("correct"))})
+
+    written = quiz.record(entries)
+    return {"recorded": written, "wrong": sum(1 for e in entries if not e["correct"])}
+
+
+class WeakNotesArgs(BaseModel):
+    limit: int = Field(default=10, description="How many notes to return")
+
+
+@tool(WeakNotesArgs, cls="atomic")
+def silica_weak_notes(limit: int = 10) -> list:
+    """Notes the reader has answered wrong, worst first — the review queue.
+
+    Reads the graded-quiz log written by silica_record_quiz. Empty until at
+    least one round has been graded, which means "nothing measured yet", not
+    "nothing to review".
+    """
+    from silica.kernel import quiz
+
+    return quiz.weakest(limit)

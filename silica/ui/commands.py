@@ -103,9 +103,9 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/quiz",
         group="workflow",
-        usage="<note|folder> [--n=10]",
-        summary="active-recall quiz from notes: questions first, answers keyed below",
-        examples=("/quiz Concepts/ML --n=5",),
+        usage="[note|folder] [--n=10]",
+        summary="active-recall quiz; graded answers resurface the notes you miss. No target = review queue",
+        examples=("/quiz Concepts/ML --n=5", "/quiz"),
     ),
     Command(
         name="/relate",

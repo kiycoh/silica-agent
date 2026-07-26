@@ -44,6 +44,7 @@ def compute_report(
     _nodes_edges_override: tuple[list[dict], list[dict]] | None = None,
     _cooccur_store_override: Any | None = None,
     _mtimes_override: dict[str, float] | None = None,
+    _quiz_override: dict[str, dict] | None = None,
 ) -> VaultReport:
     """Build a VaultReport from the driver's wikilink graph.
 
@@ -213,18 +214,29 @@ def compute_report(
 
     # ------------------------------------------------------------------
     # Attention candidates — analytics-only. Spaced-repetition
-    # surfacing, embedder-free: a note untouched for long AND weakly linked
-    # floats up.  score = (days_idle + 1) / (1 + degree)  — pure ranking, no
-    # weights, no config.  degree stands in for a per-note "confidence" (a
-    # well-integrated note is trusted); adding a real confidence field would be
-    # new source of truth to maintain — out of charter (derived data only).
+    # surfacing, embedder-free: a note the reader gets WRONG, or leaves
+    # untouched while weakly linked, floats up.
+    #   score = (days_idle + 1)(1 + misses) / ((1 + degree)(1 + correct))
+    # Pure ranking, no weights, no config. With no quiz history the two quiz
+    # terms are 1 and the score is bit-identical to the mtime-only ranking it
+    # replaces; degree still stands in for a per-note "confidence" until a
+    # graded answer measures the reader's instead of guessing from structure.
     #
-    # ponytail: mtime = "last touch by ANYONE", not "last human review" — a bulk
-    # op (AI:true stamps, autolink) resets it and the list starts blind, then
-    # repopulates over time.  Upgrade path if it misranks in practice: git
-    # last-commit-per-file (SILICA_GIT_COMMIT vaults) or a last_reviewed stamp.
+    # The recall log also supplies the review date mtime could not: mtime is
+    # "last touch by ANYONE" (a bulk autolink resets it), while a graded answer
+    # is the reader, on a date, on this note. Quizzed notes date from that;
+    # the rest keep the mtime proxy and its ceiling.
     attention: list[AttentionCandidate] = []
     if analytics:
+        quiz_stats = _quiz_override
+        if quiz_stats is None:
+            from silica.kernel import quiz as _quiz
+
+            try:
+                quiz_stats = _quiz.stats()
+            except Exception as exc:  # a broken log must not sink the report
+                logger.warning("graph_report: quiz log unreadable (%s)", exc)
+                quiz_stats = {}
         mtimes = _mtimes_override
         if mtimes is None:
             mtimes = {}
@@ -239,19 +251,33 @@ def compute_report(
                         ts = None
                     if ts is not None:
                         mtimes[nid] = ts
-        if mtimes:
+        if mtimes or quiz_stats:
+            from silica.kernel.quiz import key as _quiz_key
+
             now_ts = datetime.now(timezone.utc).timestamp()
             for nid in real_ids:
+                q = quiz_stats.get(_quiz_key(nid)) or {}
                 ts = mtimes.get(nid)
+                if q.get("last"):
+                    try:
+                        ts = datetime.fromisoformat(q["last"]).timestamp()
+                    except ValueError:
+                        pass  # unparseable stamp: fall back to mtime
                 if ts is None:
                     continue  # abstain: no recency signal for this note
                 days_idle = max(0, int((now_ts - ts) // 86400))
                 d = deg.get(nid, 0)
+                misses, correct = int(q.get("misses", 0)), int(q.get("correct", 0))
                 attention.append(AttentionCandidate(
                     path=nid, days_idle=days_idle, degree=d,
-                    score=round((days_idle + 1) / (1 + d), 3),
+                    misses=misses, attempts=misses + correct,
+                    score=round((days_idle + 1) * (1 + misses) / ((1 + d) * (1 + correct)), 3),
                 ))
-            attention.sort(key=lambda a: (-a.score, a.path))
+            # Two tiers, because idle-days are unbounded and would otherwise
+            # drown the measurement: a note failed more often than recalled
+            # outranks ANY note whose weakness is only guessed at from file age.
+            # Recall enough times and it retires to the proxy tier on its own.
+            attention.sort(key=lambda a: (0 if 2 * a.misses > a.attempts else 1, -a.score, a.path))
             attention = attention[:top_k]
 
     # Cluster map from detect_communities output

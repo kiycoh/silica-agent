@@ -328,11 +328,14 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
             add("")
 
     if r.attention_candidates:
-        add("\n## Attention Candidates _(idle × weakly-linked — not authoritative)_")
-        lines.append("| Note | Idle (days) | Links | Score |")
-        lines.append("|---|---|---|---|")
+        add("\n## Attention Candidates _(recall misses × idle × weakly-linked, not authoritative)_")
+        lines.append("| Note | Idle (days) | Links | Wrong/Asked | Score |")
+        lines.append("|---|---|---|---|---|")
         for ac in r.attention_candidates:
-            lines.append(f"| [[{_short(ac.path)}]] | {ac.days_idle} | {ac.degree} | {ac.score} |")
+            asked = f"{ac.misses}/{ac.attempts}" if ac.attempts else "-"
+            lines.append(
+                f"| [[{_short(ac.path)}]] | {ac.days_idle} | {ac.degree} | {asked} | {ac.score} |"
+            )
 
     if r.lean_notes:
         add(f"\n### Lean Notes (Enrichment Candidates) ({len(r.lean_notes)})")
@@ -431,7 +434,9 @@ def to_digest(report: VaultReport, *, max_items: int = 8) -> str:
 
     if report.attention_candidates:
         att = ", ".join(
-            f"{a.path.rsplit('/',1)[-1].removesuffix('.md')}(idle={a.days_idle}d,deg={a.degree})"
+            f"{a.path.rsplit('/',1)[-1].removesuffix('.md')}(idle={a.days_idle}d,deg={a.degree}"
+            + (f",wrong={a.misses}/{a.attempts}" if a.attempts else "")
+            + ")"
             for a in report.attention_candidates[:max_items]
         )
         lines.append(f"ATTENTION  {att}")

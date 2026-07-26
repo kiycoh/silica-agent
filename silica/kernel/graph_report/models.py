@@ -105,11 +105,13 @@ class IntegrationDeficit:  # PROPOSED — concept-rich note, weakly wikilinked
 
 
 @dataclass
-class AttentionCandidate:   # PROPOSED — spaced-repetition, idle-time × weak-linkage decay
+class AttentionCandidate:   # PROPOSED — spaced-repetition: recall misses × idle-time × weak-linkage
     path: str              # node id
-    days_idle: int         # days since last file mtime (ANY touch, not just human review — see ceiling in compute.py)
+    days_idle: int         # days since the last graded quiz answer, else since file mtime (see compute.py)
     degree: int            # wikilink degree: integration proxy standing in for a per-note "confidence"
-    score: float           # (days_idle + 1) / (1 + degree) — higher = more neglected
+    score: float           # (days_idle+1)(1+misses) / ((1+degree)(1+correct)) — higher = more neglected
+    misses: int = 0        # graded quiz answers this note got WRONG (0 = never quizzed, or never missed)
+    attempts: int = 0      # graded quiz answers total; 0 means the recall signal is absent, not clean
 
 
 @dataclass

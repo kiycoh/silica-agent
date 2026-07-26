@@ -1030,7 +1030,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         /summarize <note|folder...>
         /explain "<concept>" [--level=intro|expert]
         /compare "<A>" "<B>" [...]
-        /quiz <note|folder> [--n=10]
+        /quiz [note|folder] [--n=10]
         /relate <note> [--n=8]
         /schematize <note|folder|topic> [--save=<path>]
         /diagram <note|folder|topic> [--save=<path>]
@@ -1494,15 +1494,30 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                     pass
             elif not arg.startswith("-"):
                 targets.append(arg)
-        if not targets:
-            return "Error: /quiz requires a note or folder. Usage: /quiz <note|folder> [--n=10]"
-        listing = ", ".join(f"`{t}`" for t in targets)
+        if targets:
+            source = "from " + ", ".join(f"`{t}`" for t in targets)
+            pick = "Read the note(s) (list a folder's notes first)."
+        else:
+            # No target: the review queue picks. Recall failures are the whole
+            # point of logging them, so an untargeted /quiz spends its questions
+            # where the reader has already been measured wrong.
+            source = "from the notes this reader keeps getting wrong"
+            pick = (
+                "Call silica_weak_notes to pick the targets, and read them. If it comes back "
+                "empty nothing has been graded yet: say so, then quiz the vault's recent or "
+                "central notes instead."
+            )
         return (
-            f"Create a {n}-question active-recall quiz from {listing}.\n"
-            f"Read the note(s) (list a folder's notes first). Mix recall, comprehension, and "
-            f"application questions; ask only what the notes actually support. Output in chat: "
-            f"numbered questions first, then an 'Answers' section keyed by number, each answer "
-            f"citing its source note as a [[wikilink]].\n"
+            f"Run a {n}-question active-recall quiz {source}.\n"
+            f"{pick}\n"
+            f"Mix recall, comprehension, and application questions; ask only what the notes "
+            f"actually support.\n"
+            f"Ask the numbered questions and STOP. Do not reveal the answers in the same "
+            f"message: retrieving from memory is what makes the round worth running, and a "
+            f"visible answer key destroys it.\n"
+            f"When the reader replies, grade each answer, cite each source note as a "
+            f"[[wikilink]], then call silica_record_quiz once with one entry per question "
+            f"({{path, correct}}). Grade an unanswered or skipped question as incorrect.\n"
             f"READ-ONLY: do not create, edit, patch, or move any note."
         )
 
