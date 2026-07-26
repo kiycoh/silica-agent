@@ -39,7 +39,7 @@ def test_pdf_rewrites_any_image_link(tmp_vault, monkeypatch):
 
     body = _inbox_note(conv.convert("paper.pdf")[0]).read_text(encoding="utf-8")
     assert "[ref](https://x.test/a)" in body          # ordinary link survives
-    assert "![[fig.png]]" in body                      # image link → Obsidian embed
+    assert "![[paper-fig.png]]" in body                # image link → Obsidian embed
 
 
 def test_missing_file_raises(tmp_vault, monkeypatch):
@@ -111,8 +111,8 @@ def test_pdf_docling_provider_embeds_extracted_image(tmp_vault, monkeypatch):
     note_rels = conv.convert("paper.pdf", dest_dir="Concepts/X")
     assert note_rels == [f"{CONFIG.inbox_dir}/paper.md"]  # small PDF → one flat note
     body = _inbox_note(note_rels[0]).read_text(encoding="utf-8")
-    assert "![[fig.png]]" in body
-    assert (Path(CONFIG.vault_path) / "Concepts/X/Images/fig.png").is_file()
+    assert "![[paper-fig.png]]" in body          # namespaced by source stem
+    assert (Path(CONFIG.vault_path) / "Concepts/X/Images/paper-fig.png").is_file()
 
 
 def test_unreferenced_extracted_image_is_not_copied(tmp_vault, monkeypatch):
@@ -192,8 +192,8 @@ def test_pdf_opendataloader_provider_embeds_extracted_image(tmp_vault, monkeypat
     _fake_opendataloader(monkeypatch)
 
     body = _inbox_note(conv.convert("paper.pdf", dest_dir="Concepts/X")[0]).read_text(encoding="utf-8")
-    assert "![[fig.png]]" in body
-    assert (Path(CONFIG.vault_path) / "Concepts/X/Images/fig.png").is_file()
+    assert "![[paper-fig.png]]" in body
+    assert (Path(CONFIG.vault_path) / "Concepts/X/Images/paper-fig.png").is_file()
 
 
 def test_opendataloader_missing_raises(tmp_vault, monkeypatch):
@@ -246,8 +246,45 @@ def test_pdf_mineru_provider_success(tmp_vault, monkeypatch):
     monkeypatch.setattr(conv.subprocess, "run", _fake_mineru_run())
 
     body = _inbox_note(conv.convert("paper.pdf")[0]).read_text(encoding="utf-8")
-    assert "![[h.jpg]]" in body
-    assert (Path(CONFIG.vault_path) / "Inbox/Images/h.jpg").is_file()
+    assert "![[paper-h.jpg]]" in body
+    assert (Path(CONFIG.vault_path) / "Inbox/Images/paper-h.jpg").is_file()
+
+
+def test_same_figure_name_from_two_pdfs_does_not_clobber(tmp_vault, monkeypatch):
+    """Providers name figures by page index (`_page_0_Figure_1.jpeg`), which
+    repeats across documents. The vault Images/ dir is flat and the embed is by
+    basename, so an un-namespaced second PDF would overwrite the first's figure
+    AND silently repoint the first note at it."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "opendataloader")
+    tmp_vault.note("alpha.pdf", "x")
+    tmp_vault.note("beta.pdf", "x")
+
+    _fake_opendataloader(monkeypatch, md="# A\n\n![](images/fig.png)\n")
+    a_body = _inbox_note(conv.convert("alpha.pdf")[0]).read_text(encoding="utf-8")
+    images = Path(CONFIG.vault_path) / "Inbox/Images"
+    (images / "alpha-fig.png").write_bytes(b"ALPHA")   # distinguishable content
+
+    _fake_opendataloader(monkeypatch, md="# B\n\n![](images/fig.png)\n")
+    b_body = _inbox_note(conv.convert("beta.pdf")[0]).read_text(encoding="utf-8")
+
+    assert "![[alpha-fig.png]]" in a_body
+    assert "![[beta-fig.png]]" in b_body
+    assert (images / "alpha-fig.png").read_bytes() == b"ALPHA"  # untouched by beta
+    assert (images / "beta-fig.png").is_file()
+
+
+def test_image_names_are_stable_across_reconversion(tmp_vault, monkeypatch):
+    """Re-converting the same PDF must reuse the same image names, or every run
+    would leave the previous run's figures behind as orphans."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "opendataloader")
+    tmp_vault.note("paper.pdf", "x")
+    _fake_opendataloader(monkeypatch)
+
+    conv.convert("paper.pdf")
+    conv.convert("paper.pdf")
+
+    images = Path(CONFIG.vault_path) / "Inbox/Images"
+    assert [p.name for p in sorted(images.iterdir())] == ["paper-fig.png"]
 
 
 def test_mineru_missing_raises(tmp_vault, monkeypatch):

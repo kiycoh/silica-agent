@@ -205,8 +205,10 @@ def _pdf_to_md(target: str, dest_dir: str) -> list[str]:
         # detects (477 files for a 200-page book, 19 referenced) — the rest
         # would land in the vault as orphans.
         referenced = {os.path.basename(m.group(1)) for m in _MD_IMG_RE.finditer(md_text)}
-        _copy_images(images_src, _images_dest(dest_dir), only=referenced)  # before tmp is cleaned
-    body = _rewrite_image_links(_respace_prose(strip_degenerate_runs(md_text)))
+        renamed = _copy_images(                                  # before tmp is cleaned
+            images_src, _images_dest(dest_dir), _image_prefix(src), only=referenced
+        )
+    body = _rewrite_image_links(_respace_prose(strip_degenerate_runs(md_text)), renamed)
     from silica.driver import DRIVER
 
     segments = split_markdown(body)
@@ -376,26 +378,61 @@ def _images_dest(dest_dir: str) -> Path:
     return Path(CONFIG.vault_path) / base / "Images"
 
 
-def _copy_images(src_dir: Path, dest_dir: Path, only: set[str] | None = None) -> None:
+def _image_prefix(src: Path) -> str:
+    """Per-source namespace for the flat `Images/` dir.
+
+    Derived from the source STEM, not its content: re-converting the same PDF
+    must reproduce the same image names, or every run would leave the previous
+    run's figures behind as orphans. Same identity the note path already assumes
+    (`{inbox}/{src.stem}.md`), so two sources that collide here already collide
+    there.
+    """
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "-", src.stem).strip("-_")[:40]
+    return slug or "doc"
+
+
+def _copy_images(
+    src_dir: Path,
+    dest_dir: Path,
+    prefix: str,
+    only: set[str] | None = None,
+) -> dict[str, str]:
+    """Copy referenced images into the flat vault dir, namespaced per source.
+
+    Returns `{original basename: copied basename}` for the link rewrite. The
+    prefix is load-bearing: providers name figures by page index
+    (`_page_0_Figure_1.jpeg`), which repeats across documents, and both the copy
+    and the `![[basename]]` embed are flat — an un-namespaced second PDF would
+    overwrite the first's figure AND silently repoint the first note's embed at
+    it.
+    """
     if not src_dir.is_dir():
-        return
+        return {}
     files = [
         f for f in src_dir.iterdir()
         if f.is_file() and (only is None or f.name in only)
     ]
     if not files:
-        return
+        return {}
     dest_dir.mkdir(parents=True, exist_ok=True)
+    renamed: dict[str, str] = {}
     for f in files:
-        # ponytail: basenames are unique by construction (content hash / page-index);
-        # two PDFs with a same-named figure would clash — namespace then if it bites.
-        shutil.copy2(f, dest_dir / f.name)
+        name = f"{prefix}-{f.name}"
+        shutil.copy2(f, dest_dir / name)
+        renamed[f.name] = name
+    return renamed
 
 
-def _rewrite_image_links(md: str) -> str:
-    """`![alt](any/path/x.png)` → `![[x.png]]` (basename, Obsidian embed)."""
+def _rewrite_image_links(md: str, renamed: dict[str, str] | None = None) -> str:
+    """`![alt](any/path/x.png)` → `![[x.png]]` (basename, Obsidian embed).
+
+    `renamed` maps the provider's basename to the namespaced one actually
+    copied into the vault; an unmapped basename embeds unchanged.
+    """
     def repl(m: "re.Match[str]") -> str:
         base = os.path.basename(m.group(1))
-        return f"![[{base}]]" if base.lower().endswith(_IMG_EXTS) else m.group(0)
+        if not base.lower().endswith(_IMG_EXTS):
+            return m.group(0)
+        return f"![[{(renamed or {}).get(base, base)}]]"
 
     return _MD_IMG_RE.sub(repl, md)
