@@ -134,7 +134,7 @@ The interactive REPL. Every command in the [reference](#command-reference) lives
 
 ### 3. Obsidian plugin &nbsp;·&nbsp; `silica connect`
 
-A live bridge into the Obsidian desktop app: Silica reads and writes the vault you already have open, with rollback and cache behind every change. *Feature-complete, pending end-to-end hardening.*
+A live bridge into the Obsidian desktop app: Silica reads and writes the vault you already have open, with rollback and cache behind every change, and every write shows up in a changes panel with a per-file diff. The plugin side lives in [kiycoh/obsidian-silica](https://github.com/kiycoh/obsidian-silica).
 
 ![Obsidian plugin](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/obsidian_plugin_screenshot.png)
 

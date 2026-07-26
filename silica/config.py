@@ -212,7 +212,8 @@ class SilicaConfig:
 
     # Obsidian WebSocket bridge (backend="ws"): port `silica connect` binds (0 →
     # OS picks a free one) and the shared token (empty → minted on first connect,
-    # written to <vault>/.obsidian/silica-bridge.json). See obsidian-silica/PROTOCOL.md.
+    # written to <vault>/.obsidian/silica-bridge.json). The wire contract is
+    # PROTOCOL.md in github.com/kiycoh/obsidian-silica — change both sides together.
     ws_port: int = field(
         default_factory=lambda: int(os.getenv("SILICA_WS_PORT", "0"))
     )
