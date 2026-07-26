@@ -775,6 +775,42 @@ class TestEndpointModelIds:
         assert wizard._endpoint_model_ids("http://x/v1") == []
 
 
+class TestPick:
+    """Model pick-list: a number selects, `other` asks, free text passes through."""
+
+    def _scripted(self, answers):
+        it = iter(answers)
+        return lambda prompt: next(it)
+
+    def test_number_selects_that_option(self):
+        from silica.onboarding.wizard import _pick
+        got = _pick(self._scripted(["2"]), "Model", ["a", "b", "c"])
+        assert got == "b"
+
+    def test_enter_accepts_first_option(self):
+        from silica.onboarding.wizard import _pick
+        assert _pick(self._scripted([""]), "Model", ["a", "b"]) == "a"
+
+    def test_other_slot_asks_for_an_id(self):
+        from silica.onboarding.wizard import _pick
+        # 3 = the `other` slot after two options; then the id, empty once first.
+        got = _pick(self._scripted(["3", "", "vendor/mine"]), "Model", ["a", "b"])
+        assert got == "vendor/mine"
+
+    def test_free_text_bypasses_the_list(self):
+        from silica.onboarding.wizard import _pick
+        assert _pick(self._scripted(["vendor/typed"]), "Model", ["a"]) == "vendor/typed"
+
+    def test_default_none_lets_enter_answer_nothing(self):
+        from silica.onboarding.wizard import _pick
+        got = _pick(self._scripted([""]), "Model", ["a"], default=None, required=False)
+        assert got == ""
+
+    def test_empty_options_falls_back_to_a_plain_ask(self):
+        from silica.onboarding.wizard import _pick
+        assert _pick(self._scripted([""]), "Model", [], default="d") == "d"
+
+
 class TestWizardModes:
     """Spec 2026-07-23: essential/advanced modes, high-value gate, reranker
     step, back navigation, next-steps block."""

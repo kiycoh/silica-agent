@@ -22,16 +22,46 @@ from silica.ui.style import GLYPHS
 # line seeded from .env.example, not just rewrite an already-active key.
 _KEY_RE = re.compile(r"^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
-# (key env var, default model, key prompt) per hosted preset.
+# (key env var, model pick-list, key prompt) per hosted preset. First entry is
+# what Enter accepts; `other` is appended by _pick so any id stays reachable.
+# ponytail: a hand-kept list goes stale as vendors ship — that is the ceiling,
+# and `other` is the escape hatch. Upgrade path if it rots: fetch /models from
+# the provider (OpenRouter and OpenAI both expose one) instead of hardcoding.
 _HOSTED = {
-    "openrouter": ("OPENROUTER_API_KEY", "openrouter/anthropic/claude-sonnet-5", "OpenRouter API key"),
-    "gemini": ("GEMINI_API_KEY", "gemini/gemini-2.5-flash", "Google Gemini API key"),
-    "openai": ("OPENAI_API_KEY", "openai/gpt-4o", "OpenAI API key"),
-    "groq": ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile", "Groq API key"),
-    "deepseek": ("DEEPSEEK_API_KEY", "deepseek/deepseek-chat", "DeepSeek API key"),
-    "mistral": ("MISTRAL_API_KEY", "mistral/mistral-large-latest", "Mistral API key"),
-    "xai": ("XAI_API_KEY", "xai/grok-2-latest", "xAI (Grok) API key"),
+    "openrouter": ("OPENROUTER_API_KEY", [
+        "openrouter/deepseek/deepseek-v4-flash",
+        "openrouter/anthropic/claude-sonnet-5",
+        "openrouter/google/gemini-3.5-flash",
+        "openrouter/mistralai/mistral-small-2603",
+    ], "OpenRouter API key"),
+    "gemini": ("GEMINI_API_KEY", ["gemini/gemini-2.5-flash"], "Google Gemini API key"),
+    "openai": ("OPENAI_API_KEY", ["openai/gpt-4o"], "OpenAI API key"),
+    "groq": ("GROQ_API_KEY", ["groq/llama-3.3-70b-versatile"], "Groq API key"),
+    "deepseek": ("DEEPSEEK_API_KEY", ["deepseek/deepseek-chat"], "DeepSeek API key"),
+    "mistral": ("MISTRAL_API_KEY", ["mistral/mistral-large-latest"], "Mistral API key"),
+    "xai": ("XAI_API_KEY", ["xai/grok-2-latest"], "xAI (Grok) API key"),
 }
+
+# Worker (sub-agent) suggestions: small and cheap, the job is dedup/refine, not
+# reasoning. Hosted providers not listed fall back to their main list.
+_WORKER_MODELS = {
+    "openrouter": [
+        "openrouter/mistralai/mistral-small-2603",
+        "openrouter/deepseek/deepseek-v4-flash",
+    ],
+    "mistral": ["mistral/mistral-small-latest"],
+}
+
+_EMBED_MODELS = [
+    "text-embedding-qwen3-embedding-4b",  # LM Studio's id for the same weights
+    "qwen3-embedding-4b",
+    "nomic-embed-text",
+    "text-embedding-3-small",
+]
+
+# Served /rerank endpoints only (llama.cpp --reranking, Infinity, Jina) — the
+# in-process [rerank] extra picks its own weights.
+_RERANK_MODELS = ["bge-reranker-v2-m3-Q8_0", "bge-reranker-v2-m3"]
 
 _EMBED_KEYS = ("SILICA_EMBEDDING_MODEL", "SILICA_EMBEDDING_BASE_URL", "SILICA_EMBEDDING_API_KEY")
 
@@ -121,6 +151,45 @@ def _ask(
     return raw or default
 
 
+def _pick(
+    input_fn: Callable[[str], str],
+    prompt: str,
+    options: list[str],
+    *,
+    other_prompt: str = "Model id",
+    default: str | None = "",
+    required: bool = True,
+) -> str:
+    """Numbered pick-list so a model id gets chosen, not recalled from memory.
+
+    A number takes that entry; the last slot is always `other`, which then asks
+    for an id. Anything non-numeric IS the id — typing one straight past the
+    list stays the fastest path for whoever already knows what they want.
+
+    `default=""` (unset) makes Enter accept the first option; an explicit string
+    overrides it; `None` means Enter answers nothing (an optional question).
+
+    ponytail: a model id made only of digits would read as an index. No vendor
+    ships one; if that ever changes, the `other` slot still reaches it.
+    """
+    fallback = options[0] if (default == "" and options) else (default or "")
+    if not options:
+        return _ask(input_fn, other_prompt, fallback)
+    for n, opt in enumerate(options, 1):
+        CONSOLE.print(f"      [dim]{n}.[/] {opt}")
+    CONSOLE.print(f"      [dim]{len(options) + 1}.[/] other [dim]— type your own id[/]")
+    answer = _ask(input_fn, prompt, fallback)
+    if not answer.isdigit():
+        return answer
+    index = int(answer)
+    if 1 <= index <= len(options):
+        return options[index - 1]
+    model = _ask(input_fn, other_prompt)
+    while required and not model:
+        model = _ask(input_fn, other_prompt)
+    return model
+
+
 def _ollama_installed_models() -> list[str]:
     """Tags installed in the local Ollama, best-effort ([] if it's down/absent).
 
@@ -202,19 +271,18 @@ def _ask_local_model(
     (`silica doctor` verifies reachability) rather than silently asking for a
     guess that only fails at first chat."""
     if ids:
-        prompt = f"{label} model id (loaded: {', '.join(ids)})"
-        default = ids[0]
-    else:
-        CONSOLE.print(
-            f"  [yellow]{GLYPHS['warn']} {label} not reachable at {base_url} — start it "
-            "(and load a model) to get a pick-list. You can still type an id to set up "
-            "offline; `silica doctor` will confirm once it's running.[/]"
+        return _pick(
+            input_fn, f"{label} model — pick a number or type an id", ids,
+            other_prompt=f"{label} model id",
         )
-        prompt = f"{label} model id (e.g. {example})"
-        default = ""
+    CONSOLE.print(
+        f"  [yellow]{GLYPHS['warn']} {label} not reachable at {base_url} — start it "
+        "(and load a model) to get a pick-list. You can still type an id to set up "
+        "offline; `silica doctor` will confirm once it's running.[/]"
+    )
     model = ""
     while not model:
-        model = _ask(input_fn, prompt, default)
+        model = _ask(input_fn, f"{label} model id (e.g. {example})")
     return model
 
 
@@ -337,8 +405,8 @@ def _run_wizard_inner(
         updates["SILICA_PROVIDER"] = provider
         state["provider"] = provider
         if provider in _HOSTED:
-            key_env, default_model, key_prompt = _HOSTED[provider]
-            model = _ask(input_fn, "Model id", default_model)
+            key_env, models, key_prompt = _HOSTED[provider]
+            model = _pick(input_fn, "Model — pick a number or type an id", models)
             key = ""
             while not key:
                 key = _ask(input_fn, key_prompt, os.getenv(key_env, ""), secret=True)
@@ -427,8 +495,10 @@ def _run_wizard_inner(
             updates["SILICA_EMBEDDING_BASE_URL"] = local_base
             updates["SILICA_EMBEDDING_API_KEY"] = defaults.embedding_api_key
         else:
-            updates["SILICA_EMBEDDING_MODEL"] = _ask(
-                input_fn, "Embedding model", defaults.embedding_model
+            updates["SILICA_EMBEDDING_MODEL"] = _pick(
+                input_fn, "Embedding model — pick a number or type an id",
+                _EMBED_MODELS, other_prompt="Embedding model",
+                default=defaults.embedding_model,
             )
             updates["SILICA_EMBEDDING_BASE_URL"] = _ask(
                 input_fn, "Embedding base URL", local_base
@@ -472,25 +542,28 @@ def _run_wizard_inner(
         updates.pop("SILICA_WORKER_PROVIDER", None)
         _section("worker", "Advanced options", 5, total())
         provider = state["provider"]
-        suggestion = ""
         if provider == "lmstudio":
             from silica.agent.providers import PROVIDER_PRESETS
-            ids = _endpoint_model_ids(PROVIDER_PRESETS["lmstudio"]["base_url"])
-            suggestion = ids[0] if ids else ""
+            options = _endpoint_model_ids(PROVIDER_PRESETS["lmstudio"]["base_url"])
         elif provider == "ollama":
-            ids = _ollama_installed_models()
-            suggestion = ids[0] if ids else ""
-        hint = f", e.g. {suggestion}" if suggestion else ""
-        model = _ask(
+            options = _ollama_installed_models()
+        else:
+            options = _WORKER_MODELS.get(provider) or list(_HOSTED.get(provider, ("", [], ""))[1])
+        model = _pick(
             input_fn,
-            f"Worker model for background tasks (dedup, refiner){hint} "
+            "Worker model for background tasks (dedup, refiner) "
             "[Enter = inherit main model]",
+            options,
+            other_prompt="Worker model id",
+            default=None,  # Enter = inherit the main model, not options[0]
+            required=False,
         )
         if model:
             updates["SILICA_WORKER_MODEL"] = model
-            if provider == "ollama":
-                # lmstudio is already the worker-provider fallback; ollama must be pinned.
-                updates["SILICA_WORKER_PROVIDER"] = "ollama"
+            # get_provider(role="worker") falls back to the ROUTER model whenever
+            # worker_provider is unset, so a worker model alone is silently
+            # ignored — pin the provider with it, always.
+            updates["SILICA_WORKER_PROVIDER"] = provider
         return True
 
     def step_git() -> bool:
@@ -556,8 +629,9 @@ def _run_wizard_inner(
             updates["SILICA_RERANK_BASE_URL"] = _ask(
                 input_fn, "Reranker base URL", "http://localhost:1235/v1"
             )
-            updates["SILICA_RERANK_MODEL"] = _ask(
-                input_fn, "Reranker model id", "bge-reranker-v2-m3"
+            updates["SILICA_RERANK_MODEL"] = _pick(
+                input_fn, "Reranker model — pick a number or type an id",
+                _RERANK_MODELS, other_prompt="Reranker model id",
             )
             updates["SILICA_RERANK_API_KEY"] = _ask(
                 input_fn, "Reranker API key", "lm-studio", secret=True
