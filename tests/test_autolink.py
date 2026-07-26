@@ -378,3 +378,28 @@ def test_build_title_index_case_insensitive_dedup():
     # Foo and foo are ambiguous under IGNORECASE matching → both dropped.
     index = build_title_index(["Foo", "foo", "Bar"])
     assert index == ["Bar"]
+
+
+def test_autolink_escapes_the_alias_pipe_inside_a_table_row():
+    """An alias link in a table cell must not add a column.
+
+    The pipe in `[[Title|alias]]` is a column separator inside a table row, so a
+    cased alias silently widened the row (health.integrity_probe caught it on 5
+    vault notes). `\\|` is the GFM/Obsidian escape, and the vault's hand-written
+    tables already use it. Asserted through the linter, which is the instrument
+    that has to agree.
+    """
+    from silica.kernel.health import lint
+
+    body = "| Concept | Note |\n| --- | --- |\n| neural networks | see above |\n"
+    before = lint.totals(lint.scan(body, "Stem"))
+    new_body, added = autolink(body, ["Neural Networks"])
+
+    assert added == ["Neural Networks"]
+    assert "[[Neural Networks\\|neural networks]]" in new_body
+    # the transform introduced no structural violation: same column count
+    assert lint.totals(lint.scan(new_body, "Stem")) == before
+
+    # outside a table the alias pipe stays bare (escaping there would render).
+    prose, _ = autolink("I like neural networks a lot.", ["Neural Networks"])
+    assert "[[Neural Networks|neural networks]]" in prose

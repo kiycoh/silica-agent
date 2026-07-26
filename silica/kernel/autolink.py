@@ -265,7 +265,13 @@ def autolink(
         # canonical title ([[Neural Networks|neural networks]]) — otherwise the
         # canonical form rewrites mid-sentence prose (audit §3).
         matched_text = current[match.start() : match.end()]
-        link = f"[[{title}]]" if matched_text == title else f"[[{title}|{matched_text}]]"
+        # Inside a table row the alias pipe is a column separator, so an alias
+        # link silently adds a column to that row (health integrity_probe, 5
+        # notes). `\|` is the GFM/Obsidian escape and is what the vault's
+        # hand-written tables already use.
+        line_start = current.rfind("\n", 0, match.start()) + 1
+        sep = "\\|" if current[line_start:].lstrip().startswith("|") else "|"
+        link = f"[[{title}]]" if matched_text == title else f"[[{title}{sep}{matched_text}]]"
         current = current[: match.start()] + link + current[match.end() :]
         added.append(title)
         existing_links.add(title.lower())  # prevent duplicates within this call

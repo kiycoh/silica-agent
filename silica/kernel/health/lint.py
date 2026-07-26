@@ -178,7 +178,10 @@ def _table_column_mismatch(c: Ctx) -> int:
     mismatches = 0
     header_cols: int | None = None
     for line in c.body.splitlines():
-        s = line.strip()
+        # `\|` is the GFM/Obsidian escape for a literal pipe in a cell (the vault
+        # writes wikilink aliases that way): dropping it before any counting makes
+        # every check below escape-correct instead of reading it as a delimiter.
+        s = line.strip().replace("\\|", "")
         if not (s.startswith("|") or "|" in s and s.count("|") >= 2):
             header_cols = None
             continue
