@@ -91,6 +91,20 @@ uv pip install -e '.[dev]'
 
 One vault model, four drivers. What changes is who holds the write key.
 
+```mermaid
+flowchart LR
+    T["Terminal<br/>silica"] --> FSM
+    G["Web GUI<br/>silica --gui"] --> FSM
+    O["Obsidian plugin<br/>silica connect"] --> FSM
+    M["Any MCP client<br/>silica mcp"] --> FSM
+    FSM["Injector FSM<br/>the single write path<br/>verify or revert"] --> V["Your folder of<br/>plain .md files"]
+
+    style FSM fill:none,stroke:#3987e5,stroke-width:2px
+    style V fill:none,stroke:#3987e5,stroke-width:2px
+```
+
+<sub>Four front doors, one gate. Switching driver changes the interface, never the rules a write has to pass.</sub>
+
 ### 1. Web GUI &nbsp;·&nbsp; `silica --gui`
 
 A chat-first interface at `http://localhost:8765`. Query and curate from the browser, watch answers stream in, open the graph. Start here if you are new.
@@ -141,6 +155,32 @@ Merges and splits redirect every incoming link automatically, so a refactor leav
 
 ---
 
+## How an answer is grounded
+
+A question is not handed to one index and hoped for. It runs down independent legs, and the results are fused by rank:
+
+```mermaid
+flowchart LR
+    Q["Your question"] --> E["Embeddings<br/>semantic similarity<br/>needs an embedding model"]
+    Q --> C["Co-occurrence<br/>concept graph<br/>no model needed"]
+    Q -. "opt-in" .-> L["Lexical<br/>BM25 + fuzzy<br/>no model needed"]
+    E --> F["RRF fusion<br/>combines by rank, not by score"]
+    C --> F
+    L -.-> F
+    F --> R["Ranked notes, each carrying<br/>which leg found it"]
+
+    style C fill:none,stroke:#3987e5,stroke-width:2px
+    style L fill:none,stroke:#3987e5,stroke-width:2px
+```
+
+Fusing by rank is what lets legs that measure nothing comparable sit in the same pool: a cosine and an unbounded BM25 score never have to agree on a scale. And a leg with nothing useful to say **abstains** rather than emitting a flat ranking that would poison the pool, so fusion degrades to whichever legs survived.
+
+That is the whole reason the highlighted legs matter. They are deterministic and embedder-free, so with no embedding model at all, retrieval keeps working instead of failing. Each hit records its provenance, so an answer can name the note it came from.
+
+The lexical leg is dotted because it is exactly that: optional. Build it with `/lexical` and it joins the same fusion, strong on the rare tokens, proper nouns, and dates that a semantic index is weakest on.
+
+---
+
 ## See your vault
 
 Both views render the structure your notes already have. Both run locally, and both work without an embedder: the deterministic co-occurrence graph still yields clusters and relatedness.
@@ -159,6 +199,23 @@ Set `SILICA_VAULT` to a repository instead of a note folder and Silica keeps a h
 - **`/nucleate <file>`** extracts a shallow AST skeleton with tree-sitter (signatures, structure, imports) and turns it into a markdown note, stamped with the commit it was verified against.
 - **`/wiki`** grows that into a behavioral wiki: an `ARCHITECTURE.md` plus one note per subsystem.
 - **`/stale`** flags notes whose source *changed in shape* since you documented it, meaning a signature or control-flow change rather than a reformat. **`/impact`** maps changed files to the notes they affect. You re-document what actually moved, not the whole tree.
+
+The point is the loop, and git is what closes it:
+
+```mermaid
+flowchart TD
+    SRC["Source file"] -- "/nucleate" --> N["Note in docs/silica/<br/>AST skeleton, stamped<br/>code_ref: the verified sha"]
+    N -- "/wiki" --> W["ARCHITECTURE.md<br/>+ one note per subsystem"]
+    N --> GIT["You keep committing"]
+    GIT -- "/stale" --> D{"Shape changed<br/>since code_ref?"}
+    D -- "cosmetic only" --> Q["Stays quiet"]
+    D -- "signature or control flow" --> SRC
+
+    style D fill:none,stroke:#3987e5,stroke-width:2px
+    style Q fill:none,stroke:#3987e5,stroke-width:2px
+```
+
+<sub>A reformat is not a documentation debt. Only a real shape change is, and that is the difference `/stale` is built to make. `/impact` cuts the same question the other way: from a diff to the notes that document those files, plus their 1-hop neighbors.</sub>
 
 One artifact, two readers: a human reads it as a current map of the repository, and a coding agent reads it over the [MCP server](#4-agent-memory--silica-mcp) to ground its work in the real structure instead of re-deriving it every session.
 
