@@ -1367,11 +1367,18 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             "intro": "for a newcomer: plain language, concrete analogies, no unexplained jargon",
             "expert": "for an expert: precise and technical, no hand-holding",
         }.get(level, "for a practitioner: clear, correct, minimal jargon")
+        # The attribution clause is a measured defect of this command, not a guess:
+        # evals/probe_explain_spans.py (2026-07-26, 398 claims) found ~4.6% of claims
+        # attributed to a named note that does not support them, and as many drawn
+        # from general knowledge with no note at all.
         return (
             f"Explain {json.dumps(concept)} grounded in this vault, {register}.\n"
             f"Search the vault (semantic search + related notes), read the top matches, and explain "
             f"the concept in chat, citing every note you drew on as a [[wikilink]]. If the vault has "
-            f"nothing relevant, say so plainly — do not silently answer from general knowledge alone.\n"
+            f"nothing relevant, say so plainly: do not silently answer from general knowledge alone.\n"
+            f"Attribute a claim to a note only if that note states it. A note that merely sits near "
+            f"the topic is not a source for it, and a point no note supports goes in its own "
+            f"sentence, marked as not coming from the vault.\n"
             f"READ-ONLY: do not create, edit, patch, or move any note."
         )
 
