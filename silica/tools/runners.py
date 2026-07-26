@@ -140,7 +140,7 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
         return [], "Embedding index empty — run /embed first."
 
     τ_high = getattr(_C, "sim_threshold_high", 0.85)
-    τ_low = getattr(_C, "sim_threshold_low", 0.65)
+    τ_low = getattr(_C, "sim_threshold_low", 0.75)
     τ_title = getattr(_C, "sim_title_threshold", 0.80)
 
     scope = [p for p in store.paths() if _in_folder(p, folder)]

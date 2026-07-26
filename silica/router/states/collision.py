@@ -372,7 +372,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     fsm._progress_note(fsm._chunk_task_id("collision", idx), "collision", "running")
 
     τ_high = getattr(orch.CONFIG, "sim_threshold_high", 0.85)
-    τ_low = getattr(orch.CONFIG, "sim_threshold_low", 0.65)
+    τ_low = getattr(orch.CONFIG, "sim_threshold_low", 0.75)
 
     from silica.agent.providers import get_embedder_or_none
     from silica.kernel.embed import get_store

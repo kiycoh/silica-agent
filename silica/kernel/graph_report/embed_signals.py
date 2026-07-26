@@ -214,7 +214,7 @@ def _compute_duplicate_pairs(
             return [], []
 
     tau_high = getattr(CONFIG, "sim_threshold_high", 0.85)
-    tau_low = getattr(CONFIG, "sim_threshold_low", 0.65)
+    tau_low = getattr(CONFIG, "sim_threshold_low", 0.75)
 
     borderline: list[DuplicatePair] = []
     confirmed: list[DuplicatePair] = []

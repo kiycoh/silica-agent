@@ -39,7 +39,7 @@ class _FakeStore:
     def cosine_top_k(self, vec, k=5, exclude=None):
         exclude = exclude or set()
         cand = next(x for x in ["Concepts/A", "Concepts/B"] if x not in exclude)
-        return [{"path": cand, "score": 0.75, "name": cand}]
+        return [{"path": cand, "score": 0.80, "name": cand}]  # borderline: τ_low .75 < .80 < τ_high .85
 
 
 def _read_note(path):
@@ -164,7 +164,7 @@ def test_cli_refine_scopes_with_in_folder():
 class _ThreeNoteStore:
     """Simulates a vault where:
       - A→B scores 0.90 (above τ_high=0.85 → must be skipped, NOT stop the loop)
-      - A→C scores 0.75 (borderline [τ_low=0.65, τ_high=0.85] → must be found)
+      - A→C scores 0.80 (borderline [τ_low=0.75, τ_high=0.85] → must be found)
     With k=1 only B was returned, causing the dedup scan to miss C entirely.
     With k>=2 both B and C are returned; B is skipped, C is captured.
     """
@@ -186,7 +186,7 @@ class _ThreeNoteStore:
         # Return results in descending score order, honouring `k` and `exclude`.
         all_results = [
             {"path": "Folder/B", "score": 0.90, "name": "B"},  # above τ_high
-            {"path": "Folder/C", "score": 0.75, "name": "C"},  # borderline
+            {"path": "Folder/C", "score": 0.80, "name": "C"},  # borderline
             {"path": "Folder/A", "score": 0.30, "name": "A"},  # below τ_low
         ]
         return [r for r in all_results if r["path"] not in exclude][:k]
@@ -200,7 +200,7 @@ def test_dedup_secondary_borderline_found_with_expanded_k():
     """Regression for k=1 horizon bug.
 
     When A's primary match (B, score=0.90) is above τ_high, the old k=1 code
-    would discard B and move on without visiting C (score=0.75, borderline).
+    would discard B and move on without visiting C (score=0.80, borderline).
     With the multi-match loop (k=dedup_scan_k=5), C is correctly captured.
 
     The store also returns B→C as borderline (both excluded from k=1 scan),
@@ -230,7 +230,7 @@ def test_dedup_secondary_borderline_found_with_expanded_k():
 
 class _TitleGateStore:
     """Simulates a vault where 'ROS' and 'JSON in ROS 2' have:
-      - full-note score = 0.40 (below τ_low=0.65 → normally excluded)
+      - full-note score = 0.40 (below τ_low=0.75 → normally excluded)
       - title_vec cosine  = 0.85 (above sim_title_threshold=0.80 → admitted)
     """
 

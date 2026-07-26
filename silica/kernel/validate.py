@@ -22,9 +22,11 @@ logger = logging.getLogger(__name__)
 # Raised 100→400 (audit 2026-07-23): a 130-220 char body is a meta-summary of
 # the source section, not the section — the run's note-body length was bimodal
 # (thin ≤220 vs rich ≥1300), and 400 routes the thin band to expand.
+# Lowered 400→275 (2026-07-27) to match the value actually run against real
+# vaults: 400 also deferred short-but-complete notes, which cost a round trip.
 # ponytail: length is a proxy for "content, not a description of it" — a true
 # shape check needs semantic judgment, not a regex; left as the worker-model lever.
-MIN_WRITE_SNIPPET_CHARS = 400
+MIN_WRITE_SNIPPET_CHARS = 275
 
 
 def min_write_snippet_chars() -> int:

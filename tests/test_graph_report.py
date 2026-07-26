@@ -383,8 +383,8 @@ def test_duplicate_pairs_split_confirmed_vs_borderline(monkeypatch):
 
     nn = {  # each note's single nearest neighbour: (target, cosine)
         "a": ("b", 0.92),  # ≥ 0.85  → confirmed
-        "c": ("d", 0.70),  # 0.65..0.85 → borderline
-        "e": ("f", 0.50),  # ≤ 0.65  → dropped
+        "c": ("d", 0.80),  # 0.75..0.85 → borderline
+        "e": ("f", 0.50),  # ≤ 0.75  → dropped
     }
 
     class _Store:

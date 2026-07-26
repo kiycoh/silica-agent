@@ -289,9 +289,13 @@ class SilicaConfig:
     )
 
     # Embedding model — used by silica/kernel/embed.py (Phase 3)
-    # Example: "qwen3-embedding-8b" for LM Studio, "text-embedding-3-small" for OpenAI
+    # Default is LM Studio's id for qwen3-embedding-4b, the local setup this is
+    # developed against. Example alternatives: "qwen3-embedding-8b" (LM Studio),
+    # "text-embedding-3-small" (OpenAI), "nomic-embed-text" (Ollama).
     embedding_model: str = field(
-        default_factory=lambda: os.getenv("SILICA_EMBEDDING_MODEL", "qwen3-embedding-4b")
+        default_factory=lambda: os.getenv(
+            "SILICA_EMBEDDING_MODEL", "text-embedding-qwen3-embedding-4b"
+        )
     )
 
     # Base URL for the embeddings endpoint (defaults to the same LM Studio endpoint)
@@ -329,7 +333,7 @@ class SilicaConfig:
         default_factory=lambda: float(os.getenv("SILICA_SIM_THRESHOLD_HIGH", "0.85"))
     )
     sim_threshold_low: float = field(
-        default_factory=lambda: float(os.getenv("SILICA_SIM_THRESHOLD_LOW", "0.65"))
+        default_factory=lambda: float(os.getenv("SILICA_SIM_THRESHOLD_LOW", "0.75"))
     )
 
     # Number of candidates to retrieve per note during dedup scan.
@@ -342,7 +346,7 @@ class SilicaConfig:
 
     # Minimum title-only cosine similarity to promote a pair into the dedup
     # borderline window, regardless of the full-note score.
-    # Set higher than sim_threshold_low (0.65) to avoid spurious matches between
+    # Set higher than sim_threshold_low (0.75) to avoid spurious matches between
     # generically related titles (e.g. "Python" / "Python async").
     sim_title_threshold: float = field(
         default_factory=lambda: float(os.getenv("SILICA_SIM_TITLE_THRESHOLD", "0.80"))
