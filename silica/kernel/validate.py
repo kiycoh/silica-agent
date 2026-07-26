@@ -475,8 +475,20 @@ def validate_operations(
                 rejected_ops.append(Rejection(op=op, reason="Missing 'source_basename' field"))
                 continue
             if source_basename not in valid_concepts:
-                rejected_ops.append(Rejection(op=op, reason=f"Unknown source_basename '{source_basename}'"))
-                continue
+                if len(valid_concepts) == 1:
+                    # Unambiguous: exactly one source file in this chunk, so a
+                    # mismatched source_basename can only mean that one —
+                    # coerce instead of rejecting (mirrors the heading
+                    # near-match fallback below, same unique-candidate logic).
+                    (only_basename,) = valid_concepts.keys()
+                    logger.info(
+                        "validate: source_basename '%s' coerced to only candidate '%s'",
+                        source_basename, only_basename,
+                    )
+                    op.source_basename = source_basename = only_basename
+                else:
+                    rejected_ops.append(Rejection(op=op, reason=f"Unknown source_basename '{source_basename}'"))
+                    continue
             if heading not in valid_concepts[source_basename]:
                 # The distiller re-cases names and swaps typographic for
                 # straight apostrophes — remap a normalized unique match to
@@ -502,6 +514,28 @@ def validate_operations(
                         ]
                         if len(subset) == 1:
                             near = subset
+                if len(near) != 1:
+                    # Fallback: same idea, one more step of normalization for
+                    # morphological variants a raw-token subset can't see
+                    # ("Stima parametrica" vs "Stima dei parametri" — no shared
+                    # token, same Snowball stem). Same unique-match-only
+                    # discipline as above.
+                    from silica.config import CONFIG
+                    from silica.kernel.text import stem_word
+
+                    lang = getattr(CONFIG, "cooccurrence_lang", "auto")
+                    hs = frozenset(
+                        stem_word(t, lang=lang) for t in _heading_key(heading).split()
+                    )
+                    if hs:
+                        stemmed = [
+                            n for n in valid_concepts[source_basename]
+                            if (ns := frozenset(
+                                stem_word(t, lang=lang) for t in _heading_key(n).split()
+                            )) and (hs <= ns or ns <= hs)
+                        ]
+                        if len(stemmed) == 1:
+                            near = stemmed
                 if len(near) != 1:
                     rejected_ops.append(Rejection(op=op, reason=f"Heading '{heading}' not present in payload concepts"))
                     continue
