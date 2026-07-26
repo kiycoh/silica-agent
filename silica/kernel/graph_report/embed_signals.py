@@ -117,6 +117,70 @@ def _compute_missing_links(
     return results[:k]
 
 
+def _in_folder(path: str, folder: str) -> bool:
+    if not folder:
+        return True
+    f = folder.replace("\\", "/").strip("/").lower()
+    p = path.replace("\\", "/").removesuffix(".md").lower()
+    return p == f or p.startswith(f + "/")
+
+
+def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
+    """Embedder-free near-duplicate pairs — the STABLE leg of the maintenance dedup.
+
+    COLLISION already falls back to MinHash when the embedder is down
+    (router/states/collision.py), so INGEST keeps protecting itself against
+    duplicates. The maintenance path did not: `/dedup` and `/curate` read
+    `duplicate_pairs`, which is pure cosine, so an embedder-less vault got an
+    empty plan and reported itself coherent. Same signature scheme, same
+    threshold as the collision leg.
+
+    Pairs land in the BORDERLINE band only, never `confirmed`: an estimated
+    Jaccard over character shingles is a surface-form signal on a different
+    scale from cosine, so it must not be compared against the cosine taus. The
+    curator feeds both bands to the ternary dedup judge, which reads the two
+    bodies — so these still get judged, never mechanically merged.
+
+    ponytail: O(n^2) over 64-slot signatures after one O(n) signing pass. Fine
+    to a few thousand notes; add the LSH banding named in minhash_dedup's header
+    if a larger vault ever makes /curate feel slow.
+    """
+    from silica.config import CONFIG
+    from silica.driver import DRIVER
+    from silica.kernel import frontmatter
+    from silica.kernel.minhash_dedup import estimate_jaccard, minhash_signature
+
+    threshold = getattr(CONFIG, "minhash_dup_threshold", 0.6)
+    sigs: dict[str, tuple[int, ...]] = {}
+    for nid in report.pagerank_map:  # every real node, always populated
+        if not _in_folder(nid, report.scope):
+            continue
+        try:
+            content = DRIVER.read_note(nid).content
+        except Exception:
+            continue
+        if not content:
+            continue
+        _data, _raw, body = frontmatter.split(content)
+        # Title + body, mirroring the collision leg's "name + excerpt" query: two
+        # notes on the same concept usually differ in surface title, and body
+        # alone loses that signal.
+        name = nid.rsplit("/", 1)[-1].removesuffix(".md")
+        sig = minhash_signature(f"{name}\n{body}")
+        if sig:
+            sigs[nid] = sig
+
+    keys = sorted(sigs)
+    out: list[DuplicatePair] = []
+    for i, a in enumerate(keys):
+        for b in keys[i + 1:]:
+            score = estimate_jaccard(sigs[a], sigs[b])
+            if score >= threshold:
+                out.append(DuplicatePair(source=a, target=b, score=round(score, 4)))
+    out.sort(key=lambda d: (-d.score, d.source, d.target))
+    return out
+
+
 def _compute_duplicate_pairs(
     report: VaultReport,
 ) -> tuple[list[DuplicatePair], list[DuplicatePair]]:
@@ -137,10 +201,17 @@ def _compute_duplicate_pairs(
 
         store = get_store()
         if len(store) == 0:
-            return [], []
+            return _minhash_duplicate_pairs(report), []
     except Exception as exc:
         logger.debug("graph_report: embeddings unavailable for dedup (%s)", exc)
-        return [], []
+        # Degrade to the embedder-free leg instead of reporting zero duplicates:
+        # an empty list here reads as "the vault is clean" and silently disarms
+        # /dedup and /curate. Mirrors the abstention contract in relatedness.
+        try:
+            return _minhash_duplicate_pairs(report), []
+        except Exception as exc2:
+            logger.debug("graph_report: minhash dedup leg also unavailable (%s)", exc2)
+            return [], []
 
     tau_high = getattr(CONFIG, "sim_threshold_high", 0.85)
     tau_low = getattr(CONFIG, "sim_threshold_low", 0.65)
@@ -148,13 +219,6 @@ def _compute_duplicate_pairs(
     borderline: list[DuplicatePair] = []
     confirmed: list[DuplicatePair] = []
     seen: set[tuple[str, str]] = set()
-
-    def _in_folder(path: str, folder: str) -> bool:
-        if not folder:
-            return True
-        f = folder.replace("\\", "/").strip("/").lower()
-        p = path.replace("\\", "/").removesuffix(".md").lower()
-        return p == f or p.startswith(f + "/")
 
     scope = [p for p in store.paths() if _in_folder(p, report.scope)]
 
