@@ -158,6 +158,23 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add(f"| {term} | {getattr(e, term):+.2f} |")
     add("")
 
+    # Temporal layer — what the vault records about its own history. Counts only:
+    # this is a reading of the bi-temporal layer, not a score, and deliberately
+    # not folded into E (see TemporalStat).
+    if r.temporal and r.temporal.notes_scanned:
+        tp = r.temporal
+        add("## Temporal Layer")
+        add("| Signal | Value |")
+        add("|---|---|")
+        for tier, label in ((3, "human"), (2, "grounded"), (1, "distilled")):
+            add(f"| Notes at tier {tier} ({label}) | {tp.by_tier.get(tier, 0)} |")
+        add(f"| Notes with a `## Superseded` section | {tp.superseded_sections} |")
+        add(f"| Notes merged away (`superseded_by`) | {tp.superseded_notes} |")
+        add(f"| Notes carrying a claim stamp | {tp.stamped} / {tp.notes_scanned} |")
+        if tp.oldest_valid_from:
+            add(f"| Earliest `valid_from` | {tp.oldest_valid_from} |")
+        add("")
+
     # God nodes (PageRank dropped — it reads 0.0 at this scale; degree is the signal)
     add("## God Nodes (High-Degree Hubs)")
     if r.god_nodes:
@@ -492,12 +509,29 @@ def write_report(report: VaultReport, output_path: str) -> dict:
             if vault:
                 energy_path = Path(vault) / ".silica" / "energy.json"
                 prev: float | None = None
+                prev_terms: dict | None = None
                 if energy_path.is_file():
-                    prev = orjson.loads(energy_path.read_bytes()).get("value")
-                payload: dict = {"value": vault_energy(report).total,
-                                 "at": _dt.datetime.now().isoformat(timespec="seconds")}
+                    _old = orjson.loads(energy_path.read_bytes())
+                    prev = _old.get("value")
+                    prev_terms = _old.get("terms")
+                e = vault_energy(report)
+                # The six contributions sum to the total, so persisting them is what
+                # makes ΔE ATTRIBUTABLE ("orphans fell, cohesion held") instead of a
+                # bare number that moved. Storing only `value` made the decomposition
+                # the docstring promises unobservable across runs.
+                # ponytail: one step of history, not a series. If a trend is ever
+                # wanted, append these payloads to energy.jsonl and keep this file as
+                # the head.
+                payload: dict = {
+                    "value": e.total,
+                    "terms": {t: getattr(e, t) for t in
+                              ("cohesion", "orphans", "dangling", "gaps", "deficits", "contested")},
+                    "at": _dt.datetime.now().isoformat(timespec="seconds"),
+                }
                 if prev is not None:
                     payload["prev"] = prev
+                if prev_terms:
+                    payload["prev_terms"] = prev_terms
                 energy_path.parent.mkdir(parents=True, exist_ok=True)
                 energy_path.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
         except Exception as exc:

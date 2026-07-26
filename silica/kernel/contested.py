@@ -46,17 +46,29 @@ def stamp(**fields: str) -> str:
     return f"<!-- silica: {' '.join(parts)} -->" if parts else ""
 
 
-def parse_stamp(text: str) -> dict[str, str]:
-    """Fields of the first claim stamp in `text`; {} when there is none."""
-    m = STAMP_RE.search(text or "")
-    if not m:
-        return {}
+def _stamp_fields(raw: str) -> dict[str, str]:
     out: dict[str, str] = {}
-    for tok in m.group(1).split():
+    for tok in raw.split():
         k, _, v = tok.partition("=")
         if k and v:
             out[k] = v
     return out
+
+
+def parse_stamp(text: str) -> dict[str, str]:
+    """Fields of the first claim stamp in `text`; {} when there is none."""
+    m = STAMP_RE.search(text or "")
+    return _stamp_fields(m.group(1)) if m else {}
+
+
+def parse_stamps(text: str) -> list[dict[str, str]]:
+    """Fields of EVERY claim stamp in `text`, in document order.
+
+    A note accumulates claims from several sources on different dates, so the
+    first stamp is not the note's clock. The temporal report reads all of them;
+    `parse_stamp` stays the single-claim accessor its callers expect.
+    """
+    return [_stamp_fields(m.group(1)) for m in STAMP_RE.finditer(text or "")]
 
 
 def mark_contested(content: str, source_ref: str) -> str:

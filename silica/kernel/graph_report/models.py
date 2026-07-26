@@ -125,6 +125,23 @@ class SourceDrift:         # AUTHORITATIVE — derived from <vault>/provenance.j
 
 
 @dataclass
+class TemporalStat:        # AUTHORITATIVE — read from note text (frontmatter + claim stamps)
+    """What the bi-temporal layer says about the vault, as counts.
+
+    Every field already existed on disk (reliability tiers, `## Superseded`,
+    `superseded_by`, `<!-- silica: valid_from=... -->`) and nothing read it.
+    Deliberately NOT a term of E(vault): E is pinned by a frozen perturbation
+    bench, and "the vault records its own history" is not an entropic cost.
+    """
+    notes_scanned: int
+    by_tier: dict[int, int]        # reliability_tier -> count (3 human, 2 grounded, 1 distilled)
+    superseded_sections: int       # notes carrying a `## Superseded` graveyard
+    superseded_notes: int          # notes pointed at a winner via `superseded_by`
+    stamped: int                   # notes carrying >= 1 claim stamp
+    oldest_valid_from: str = ""    # earliest valid_from seen ("" when none)
+
+
+@dataclass
 class CodeCoverage:        # AUTHORITATIVE — derived codegraph vs documents: frontmatter
     documented: int        # supported files documented by at least one note
     total: int             # supported files in the codegraph index
@@ -158,3 +175,4 @@ class VaultReport:
     pagerank_map: dict[str, float] = field(default_factory=dict)  # all nodes: vault-relative path (no .md) → pagerank
     betweenness_map: dict[str, float] = field(default_factory=dict)  # all nodes → betweenness (analytics-only; zero-filled otherwise)
     code_coverage: CodeCoverage | None = None
+    temporal: TemporalStat | None = None   # analytics-only; None when the body scan did not run

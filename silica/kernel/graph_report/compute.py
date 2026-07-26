@@ -27,6 +27,7 @@ from silica.kernel.graph_report.models import (
     NodeStat,
     SourceDrift,
     StructuralGap,
+    TemporalStat,
     VaultReport,
 )
 
@@ -107,10 +108,19 @@ def compute_report(
     lean_notes: list[str] = []
     reformat_notes: list[str] = []
     contested: list[ContestedNote] = []
+    # Bi-temporal counters ride this same loop: reliability tiers, `## Superseded`
+    # graveyards, `superseded_by` pointers and claim stamps are all note text the
+    # scan is already holding, so reading the temporal layer costs no extra I/O.
+    temporal: TemporalStat | None = None
     if analytics:
         try:
+            from silica.kernel import contested as contested_kernel
             from silica.kernel import ofm, frontmatter
             from silica.driver import DRIVER
+
+            tiers: Counter = Counter()
+            scanned = superseded_sections = superseded_notes = stamped = 0
+            valid_froms: list[str] = []
 
             for nid in real_ids:
                 try:
@@ -122,6 +132,18 @@ def compute_report(
                         contested.append(
                             ContestedNote(path=nid, refs=list(data.get("contradictions") or []))
                         )
+
+                    scanned += 1
+                    tiers[contested_kernel.reliability_tier(nc.content)] += 1
+                    if contested_kernel.SUPERSEDED_HEADING in body:
+                        superseded_sections += 1
+                    if data and data.get(contested_kernel.SUPERSEDED_BY_KEY):
+                        superseded_notes += 1
+                    stamps = contested_kernel.parse_stamps(body)
+                    if stamps:
+                        stamped += 1
+                    valid_froms.extend(s["valid_from"] for s in stamps if s.get("valid_from"))
+
                     is_empty = len(body.strip()) == 0
                     is_lean = ofm.is_lean(body)
                     if is_empty or is_lean:
@@ -130,6 +152,17 @@ def compute_report(
                         reformat_notes.append(nid)
                 except Exception:
                     pass
+
+            temporal = TemporalStat(
+                notes_scanned=scanned,
+                by_tier=dict(sorted(tiers.items(), reverse=True)),
+                superseded_sections=superseded_sections,
+                superseded_notes=superseded_notes,
+                stamped=stamped,
+                # Stamps carry ISO dates, which sort lexicographically — min() is
+                # the earliest without parsing anything.
+                oldest_valid_from=min(valid_froms) if valid_froms else "",
+            )
         except Exception as exc:
             logger.warning("graph_report: triage failed — %s", exc)
 
@@ -361,6 +394,7 @@ def compute_report(
         source_drift=source_drift,
         structural_gaps=structural_gaps_list,
         discourse_state=discourse_state,
+        temporal=temporal,
     )
 
     if with_embeddings:
@@ -406,6 +440,8 @@ def compute_report(
         "lean_notes": len(lean_notes),
         "reformat_notes": len(reformat_notes),
         "contested": len(contested),
+        "superseded_notes": (temporal.superseded_notes if temporal else 0),
+        "superseded_sections": (temporal.superseded_sections if temporal else 0),
         "source_drift": len(source_drift),
         "orphans": len(orphans),
         "clusters": len(clusters),
