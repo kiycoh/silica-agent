@@ -140,12 +140,42 @@ A live bridge into the Obsidian desktop app: Silica reads and writes the vault y
 
 ### 4. Agent memory &nbsp;·&nbsp; `silica mcp`
 
-Silica serves your vault over stdio to any MCP client, so an assistant recalls your real notes and real decisions before it answers. For Claude Code, this repo is also a plugin:
+Silica serves your vault over stdio to any MCP client, so an assistant recalls your real notes and real decisions before it answers. One command line, `uvx --from 'silica-agent[mcp]' silica mcp`, wired three ways.
+
+**Claude Code.** This repo is also a plugin, so the server and the recall/capture skill arrive together:
 
 ```bash
-claude plugin marketplace add /path/to/silica-agent
+claude plugin marketplace add kiycoh/silica-agent
 claude plugin install silica@silica
 ```
+
+**Codex** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.silica]
+command = "uvx"
+args = ["--from", "silica-agent[mcp]", "silica", "mcp"]
+
+[mcp_servers.silica.env]
+SILICA_VAULT = "/path/to/your/vault"
+```
+
+**opencode** (`opencode.json`):
+
+```json
+{
+  "mcp": {
+    "silica": {
+      "type": "local",
+      "command": ["uvx", "--from", "silica-agent[mcp]", "silica", "mcp"],
+      "enabled": true,
+      "environment": { "SILICA_VAULT": "/path/to/your/vault" }
+    }
+  }
+}
+```
+
+`SILICA_VAULT` is optional: without it Silica serves the default vault at `~/.silica/vault`. An MCP client starts the server with its own environment, so any other setting the tools need (embedding endpoint, model) belongs in that same `env` block rather than in a shell profile.
 
 ![Claude Code](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/mcp_screenshot.png)
 

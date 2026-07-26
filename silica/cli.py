@@ -269,7 +269,8 @@ def _activate_repo_mode() -> None:
     """Side-effecting startup vault selection. Explicit SILICA_VAULT wins; else a
     *user* project repo (prompted before adoption, then adopted as-is with its
     write boundary declared); else — including inside Silica's own source repo
-    (dev mode) — a stable ~/.silica/vault."""
+    (dev mode), and whenever stdin is not a terminal to prompt on — a stable
+    ~/.silica/vault."""
     from pathlib import Path
     from silica.kernel import gitstate
     from silica.onboarding.adopt import declare_write_dir
@@ -297,7 +298,11 @@ def _activate_repo_mode() -> None:
         CONSOLE.print(f"  Repo mode: vault = [bold]{existing}[/]")
         return
     root = gitstate.find_repo_root(cwd)
-    if root is not None and root != self_repo:  # user repo, not yet a vault → ask
+    # No terminal ⇒ no question. Under `silica mcp` stdin *is* the protocol
+    # channel, so a prompt would eat the client's first JSON-RPC message and
+    # then die on EOF; the same guard covers any other piped invocation.
+    interactive = sys.stdin is not None and sys.stdin.isatty()
+    if root is not None and root != self_repo and interactive:  # user repo, not yet a vault → ask
         CONSOLE.print(f"  Git repo detected at [bold]{root}[/], not yet a Silica vault.")
         answer = input("  Manage this repo as the Silica vault? [y/N] ").strip().lower()
         if answer in ("y", "yes"):
@@ -1730,10 +1735,15 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     if args[:1] == ["mcp"]:
         # Same bootstrap as connect, minus the REPL context meter (no agent
         # loop behind MCP tools). stdio transport: stdout is the protocol
-        # channel, so plain stderr logging instead of _setup_logging's console.
-        _activate_repo_mode()
-        from silica.kernel.vault_manifest import apply_manifest_to_config
-        apply_manifest_to_config()
+        # channel, so plain stderr logging instead of _setup_logging's console,
+        # and the bootstrap banner is diverted too (rich resolves sys.stdout per
+        # write, so redirecting it here is enough). The redirect must NOT wrap
+        # run_mcp: that is where stdout has to be the real protocol stream.
+        import contextlib
+        with contextlib.redirect_stdout(sys.stderr):
+            _activate_repo_mode()
+            from silica.kernel.vault_manifest import apply_manifest_to_config
+            apply_manifest_to_config()
         logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
         import silica.ui.mcp as mcp_mod
         return mcp_mod.run_mcp(all_tools="--all" in args[1:])

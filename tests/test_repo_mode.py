@@ -1,5 +1,8 @@
+import io
 import subprocess
 from pathlib import Path
+
+import pytest
 
 from silica.cli import _activate_repo_mode, default_user_vault, resolve_repo_mode_vault
 from silica.config import CONFIG
@@ -134,6 +137,22 @@ def test_repo_mode_unaffected_when_self_repo_differs(tmp_path):
         cwd=tmp_path, vault_env="", adopt_ok=True, self_repo=tmp_path / "elsewhere"
     )
     assert Path(result).resolve() == (tmp_path / "docs" / "silica").resolve()
+
+
+def test_unadopted_repo_never_prompts_without_a_terminal(tmp_path, monkeypatch):
+    # `silica mcp` runs with stdin bound to the MCP client: a prompt there would
+    # eat the first JSON-RPC message and then die on EOF. No tty ⇒ home vault.
+    _init_repo(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO())  # StringIO.isatty() is False
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("prompted without a tty"))
+    orig = CONFIG.vault_path
+    try:
+        CONFIG.vault_path = ""
+        _activate_repo_mode()
+        assert Path(CONFIG.vault_path).resolve() == default_user_vault().resolve()
+    finally:
+        CONFIG.vault_path = orig
 
 
 def test_default_user_vault_under_home(tmp_path):

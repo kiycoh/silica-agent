@@ -8,16 +8,8 @@
   "keywords": ["memory", "knowledge-graph", "obsidian", "vault", "mcp"],
   "mcpServers": {
     "silica": {
-      "command": "uv",
-      "args": [
-        "run",
-        "--project",
-        "${CLAUDE_PLUGIN_ROOT}",
-        "--with",
-        "mcp",
-        "silica",
-        "mcp"
-      ]
+      "command": "uvx",
+      "args": ["--from", "silica-agent[mcp]", "silica", "mcp"]
     }
   }
 }
