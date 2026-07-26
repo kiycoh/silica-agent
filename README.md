@@ -19,6 +19,18 @@ It answers from what you <i>actually</i> have instead of guessing, and it re-rea
 confirm the edit held. Local-first. Your files stay plain markdown, readable with or without it.
 </p>
 
+<p align="center">
+  <a href="#why-silica">Why Silica</a> &nbsp;•&nbsp;
+  <a href="#install">Install</a> &nbsp;•&nbsp;
+  <a href="#four-ways-in">Drivers</a> &nbsp;•&nbsp;
+  <a href="#what-you-can-do">Features</a> &nbsp;•&nbsp;
+  <a href="#how-an-answer-is-grounded">Grounding</a> &nbsp;•&nbsp;
+  <a href="#point-it-at-code">Codebase</a> &nbsp;•&nbsp;
+  <a href="#how-the-guardrail-works">Guardrails</a> &nbsp;•&nbsp;
+  <a href="#command-reference">Commands</a> &nbsp;•&nbsp;
+  <a href="#configuration">Config</a>
+</p>
+
 ---
 
 ## Why Silica
@@ -30,6 +42,9 @@ Every write is re-read and checked after it lands. If it broke vault coherence, 
 
 🧠 &nbsp;**Answers come from your material.**<br/>
 Before answering, Silica reads the actual shape of your vault: its hubs, its clusters, and the notes nearest to your question. Contradictions between notes are surfaced, not smoothed over.
+
+🌐 &nbsp;**Hidden connections surfaced visually.**<br/>
+Silica calculates graph metrics to uncover structural hubs, bridge notes, and clusters. It links distant concepts that are hard to connect manually, surfacing them through interactive visual maps and graph audits.
 
 💻 &nbsp;**It runs on your machine.**<br/>
 Local models (LM Studio, Ollama) are first-class. With no embedding model at all, relatedness degrades to a deterministic local graph instead of failing.
