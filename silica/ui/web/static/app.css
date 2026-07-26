@@ -136,10 +136,12 @@ header {
      under the drawer and #stop went with it. */
   flex-wrap: wrap;
   gap: 0;
-  position: relative; /* anchor for the session-config dropdown */
+  position: relative;
+  /* anchor for the session-config dropdown */
   border-bottom: 1px solid var(--line-2);
   background: var(--slate);
-  transition: padding-right .14s linear; /* match drawer animation */
+  transition: padding-right .14s linear;
+  /* match drawer animation */
 }
 
 body.note-open header {
@@ -269,21 +271,23 @@ header>* {
 /* reopen-last-note — the one header button that names content, so it keeps the
    note's own casing and clips like a title instead of shouting uppercase */
 #note-last {
-  display: flex; /* text-overflow + SVG needs flex */
+  display: flex;
+  /* text-overflow + SVG needs flex */
   align-items: center;
   border-left: 1px solid var(--line);
   text-transform: none;
   letter-spacing: 0.02em;
 }
 
-#note-last > span {
+#note-last>span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 25ch; /* adattarsi alla lunghezza del nome della nota fino ad un certo numero di caratteri */
+  max-width: 25ch;
+  /* adattarsi alla lunghezza del nome della nota fino ad un certo numero di caratteri */
 }
 
-#note-last > span:not(:empty) {
+#note-last>span:not(:empty) {
   margin-left: 6px;
 }
 
@@ -654,9 +658,24 @@ details.side-section:hover>summary.side-title {
   padding: 1.7rem 2rem;
 }
 
-/* your turn recedes to the chrome surface, the answer sits on the page */
+/* Sided transcript, Claude-style: one shared measure, inside which your turn is
+   a tinted block hugging its own text against the right edge while the answer
+   runs the full width. The padding here IS the measure, so the block can align
+   to the column edge and not to the pane edge. */
 .msg.user {
+  padding-inline: max(2rem, calc(50% - 23rem));
+}
+
+.msg.user>.role {
+  text-align: right;
+}
+
+.msg.user>.body {
   background: var(--slate);
+  border: 1px solid var(--line);
+  padding: 0.7rem 0.9rem;
+  width: fit-content;
+  margin-inline: auto 0;
 }
 
 /* one measure in rem, not ch: ch resolves against each element's own font-size,
@@ -664,7 +683,7 @@ details.side-section:hover>summary.side-title {
    byline would sit indented from the paragraph under it. 38rem is ~74 chars. */
 .msg>.role,
 .msg>.body {
-  max-width: 38rem;
+  max-width: 48rem;
   margin-inline: auto;
 }
 
@@ -1093,7 +1112,8 @@ details.side-section:hover>summary.side-title {
   color: var(--ash);
   font-size: 12px;
   transition: color .1s linear;
-  overflow-wrap: anywhere; /* tool lines now carry a vault path as their target */
+  overflow-wrap: anywhere;
+  /* tool lines now carry a vault path as their target */
 }
 
 .tool.done {
@@ -1119,16 +1139,18 @@ details.side-section:hover>summary.side-title {
   background: var(--slate);
   border: 1px solid var(--line);
   border-radius: 0;
-  box-shadow: 0 -4px 12px rgba(0,0,0,0.2);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
   display: flex;
   flex-direction: column;
   padding: 4px;
   margin-bottom: 8px;
   z-index: 100;
 }
+
 .commands[hidden] {
   display: none !important;
 }
+
 .cmd-item {
   display: flex;
   align-items: baseline;
@@ -1143,15 +1165,19 @@ details.side-section:hover>summary.side-title {
   font-family: var(--font-mono);
   font-size: 13px;
 }
-.cmd-item:hover, .cmd-item.sel {
+
+.cmd-item:hover,
+.cmd-item.sel {
   background: var(--slate-2);
   color: var(--frost);
 }
+
 .cmd-item .cmd-name {
   color: var(--accent);
   font-weight: bold;
   white-space: nowrap;
 }
+
 .cmd-item .cmd-summary {
   font-size: 12px;
   color: var(--ash-dim);
@@ -1358,7 +1384,7 @@ details.side-section:hover>summary.side-title {
   pointer-events: none;
 }
 
-#graph-bar > * {
+#graph-bar>* {
   pointer-events: auto;
 }
 
@@ -1738,7 +1764,8 @@ body.dragging #drop-hint {
 
 #note-title {
   flex: 1;
-  min-width: 0; /* yield space to the action buttons; ellipsis instead of pushing them off */
+  min-width: 0;
+  /* yield space to the action buttons; ellipsis instead of pushing them off */
   color: var(--frost);
   font-size: 13px;
   overflow: hidden;
@@ -1749,14 +1776,14 @@ body.dragging #drop-hint {
 /* header actions (summarize/explain/quiz/map/close) read as real buttons:
    outlined chips recessed one step darker than the header. Still tight
    enough that title + all actions hold one line. */
-#note-panel > header .ghost {
+#note-panel>header .ghost {
   padding: 0.35rem 0.5rem;
   font-size: 10px;
   border: 1px solid var(--line-2);
   background: var(--slate);
 }
 
-#note-panel > header .ghost:hover {
+#note-panel>header .ghost:hover {
   border-color: var(--ash-dim);
   background: var(--slate-2);
 }
@@ -1900,7 +1927,8 @@ details.fm summary:hover {
   flex-direction: column;
   background: var(--slate);
   border-top: 1px solid var(--line-2);
-  transition: right .14s linear, left .12s linear; /* match drawer + sidebar */
+  transition: right .14s linear, left .12s linear;
+  /* match drawer + sidebar */
 }
 
 body.sidebar-collapsed #dock {
@@ -1915,7 +1943,7 @@ body.note-open #dock {
   border-bottom: 1px solid var(--line);
 }
 
-#peek > header {
+#peek>header {
   gap: 0.5rem;
   padding: 0.2rem 0.2rem 0.2rem 0.9rem;
   border-bottom: 1px solid var(--line);
@@ -1924,7 +1952,8 @@ body.note-open #dock {
 
 #peek-title {
   flex: 1;
-  min-width: 0; /* same clip idiom as #note-title */
+  min-width: 0;
+  /* same clip idiom as #note-title */
   color: var(--frost);
   font-size: 11px;
   overflow: hidden;
@@ -1934,14 +1963,14 @@ body.note-open #dock {
 
 
 /* header actions read as real buttons — same outlined chips as the drawer's */
-#peek > header .ghost {
+#peek>header .ghost {
   padding: 0.35rem 0.5rem;
   font-size: 10px;
   border: 1px solid var(--line-2);
   background: var(--slate);
 }
 
-#peek > header .ghost:hover {
+#peek>header .ghost:hover {
   border-color: var(--ash-dim);
   background: var(--slate-2);
 }
@@ -1956,11 +1985,13 @@ body.note-open #dock {
 }
 
 #peek-body.error {
-  color: var(--accent); /* same signal as .tool.error */
+  color: var(--accent);
+  /* same signal as .tool.error */
 }
 
 #dock-composer {
-  border-top: none; /* #dock's own border-top (or the card's bottom rule) separates */
+  border-top: none;
+  /* #dock's own border-top (or the card's bottom rule) separates */
 }
 
 /* --- notifications: hairline status strip (bottom-right). Two levels only —
@@ -1971,7 +2002,8 @@ body.note-open #dock {
   position: fixed;
   right: 1rem;
   bottom: 1rem;
-  z-index: 120; /* above drawer (50), drop-hint (100), scanline (90) */
+  z-index: 120;
+  /* above drawer (50), drop-hint (100), scanline (90) */
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
@@ -1998,7 +2030,10 @@ body.note-open #dock {
 }
 
 @keyframes toast-in {
-  from { transform: translateX(8px); opacity: 0; }
+  from {
+    transform: translateX(8px);
+    opacity: 0;
+  }
 }
 
 /* screen-reader-only: the polite a11y status region (turn state + notifications),
@@ -2028,16 +2063,19 @@ body.note-open #dock {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-transform: none; /* a model id keeps its own casing */
+  text-transform: none;
+  /* a model id keeps its own casing */
   letter-spacing: 0.02em;
 }
 
 #session-panel {
-  display: block; /* beats `header > * { display:flex }`; [hidden] still wins */
+  display: block;
+  /* beats `header > * { display:flex }`; [hidden] still wins */
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 60; /* above the note drawer header (50) */
+  z-index: 60;
+  /* above the note drawer header (50) */
   width: min(320px, 90vw);
   background: var(--slate);
   border: 1px solid var(--line-2);
@@ -2074,7 +2112,8 @@ body.note-open #dock {
 
 .sp-val {
   color: var(--frost);
-  font-family: var(--mono); /* a model/provider id is a technical token — grid font */
+  font-family: var(--mono);
+  /* a model/provider id is a technical token — grid font */
   font-size: 11px;
   text-align: right;
   overflow: hidden;
@@ -2163,25 +2202,30 @@ body.note-open #dock {
 }
 
 #view-chat:has(#log:empty) #log {
-  flex: 0 1 auto; /* shrink to the mascot; never stretch the empty transcript */
+  flex: 0 1 auto;
+  /* shrink to the mascot; never stretch the empty transcript */
 }
 
 #view-chat:has(#log:empty) :is(#quick-actions, #composer) {
-  width: min(680px, 90%); /* a centered island, not an edge-to-edge bar */
+  width: min(680px, 90%);
+  /* a centered island, not an edge-to-edge bar */
 }
 
 #view-chat:has(#log:empty) #quick-actions {
-  justify-content: center; /* chips centered under the art */
+  justify-content: center;
+  /* chips centered under the art */
   padding: 0;
 }
 
 #view-chat:has(#log:empty) #composer {
-  border-top: none; /* floating: the input control carries its own border */
+  border-top: none;
+  /* floating: the input control carries its own border */
   padding: 0;
 }
 
 /* honor reduced-motion for the animated bits added/kept here */
 @media (prefers-reduced-motion: reduce) {
+
   .caret,
   .tool:not(.done):not(.error),
   .spinner,
