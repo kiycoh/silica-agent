@@ -141,6 +141,9 @@ _TOOL_DESC: dict[str, tuple[str, str | None]] = {
     "silica_search": ("search", "query"),
     "silica_search_context": ("search", "query"),
     "silica_read_note": ("read", "name"),
+    "silica_write_note": ("write note", "path"),
+    "silica_patch_note": ("patch note", "name"),
+    "silica_flag_note": ("flag note", "name"),
     "silica_props": ("props", "name"),
     "silica_outline": ("outline", "name"),
     "silica_links": ("links", "name"),
@@ -171,6 +174,19 @@ _TOOL_DESC: dict[str, tuple[str, str | None]] = {
 def _tool_verb(name: str) -> str:
     verb, _ = _TOOL_DESC.get(name, (name.removeprefix("silica_").replace("_", " "), None))
     return verb
+
+
+def _tool_target(name: str, args: dict) -> str:
+    """The one argument that names what the tool acted on, as plain text.
+
+    Same table as `_synthetic_tool_desc`, without the rich markup, so the web
+    transcript can name the note a write touched instead of showing a bare verb.
+    """
+    if name == "silica_move":
+        return f'{args.get("ref", "")} {GLYPHS["arrow"]} {args.get("to", "")}'.strip()
+    _, key = _TOOL_DESC.get(name, (None, None))
+    val = args.get(key) if key else None
+    return str(val).strip() if val else ""
 
 
 def _synthetic_tool_desc(name: str, args: dict) -> str:

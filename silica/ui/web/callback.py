@@ -15,7 +15,22 @@ from silica.agent.events import (
     ToolErrorEvent,
     ToolStartEvent,
 )
-from silica.ui.renderer import _tool_verb  # same human verb the TUI shows
+from silica.ui.renderer import _tool_target, _tool_verb  # same verb + target the TUI shows
+
+# How a tool changes the vault, for the chat footer's grouping. Only the tools
+# that mutate notes are listed; everything else is a read. Deliberately keyed on
+# the note-touching surface (the tools whose args `_note_refs` can resolve), so a
+# batch pipeline that names an ops file rather than a note produces no chip and
+# needs no entry here.
+_TOOL_EFFECT: dict[str, str] = {
+    "silica_write_note": "written",
+    "silica_patch_note": "written",
+    "silica_flag_note": "written",
+    "silica_bulk_write": "written",
+    "silica_restore": "written",
+    "silica_delete": "deleted",
+    "silica_move": "moved",
+}
 
 # Arg keys that name a note across the tool surface (read=name, write=path,
 # related=note, mindmap=note_path, move/delete=ref). A small allowlist, not
@@ -37,8 +52,15 @@ def event_to_json(ev) -> dict | None:
     if isinstance(ev, LLMStreamEvent):
         return {"type": "delta", "kind": ev.chunk_type, "text": ev.content}
     if isinstance(ev, ToolStartEvent):
+        # A move leaves the note at `to`, so that is the ref worth offering as a
+        # chip; `ref` is a path that no longer resolves once the move lands.
+        notes = _note_refs(ev.args)
+        if ev.name == "silica_move" and isinstance(ev.args.get("to"), str):
+            notes = [ev.args["to"].strip()]
         return {"type": "tool_start", "name": _tool_verb(ev.name), "id": ev.call_id,
-                "notes": _note_refs(ev.args)}
+                "target": _tool_target(ev.name, ev.args),
+                "effect": _TOOL_EFFECT.get(ev.name, "read"),
+                "notes": notes}
     if isinstance(ev, ToolCompleteEvent):
         return {"type": "tool_done", "name": _tool_verb(ev.name), "id": ev.call_id}
     if isinstance(ev, ToolErrorEvent):

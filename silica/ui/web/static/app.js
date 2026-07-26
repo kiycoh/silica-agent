@@ -67,8 +67,17 @@ function addCopyBtn(bodyEl, getText) {
 // turns; swap in a vendored parser if full CommonMark is ever needed here.
 function mdLite(src) {
   const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  // `[[note|alias]]` -> the same .note-link the server render emits. The target
+  // is passed through raw: /note resolves titles and paths itself, so the live
+  // segment needs no vault index (and an unresolvable one just says so on click).
+  const wiki = (t) =>
+    t.replace(/\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/g, (_m, target, alias) => {
+      const path = target.split("#")[0].trim();
+      const shown = (alias || path.split("/").pop().replace(/\.md$/, "")).trim();
+      return `<a class="note-link" data-path="${path.replace(/"/g, "&quot;")}">${shown}</a>`;
+    });
   const inline = (t) =>
-    esc(t)
+    wiki(esc(t))
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*([^*\n]+?)\*/g, "<em>$1</em>")
@@ -115,10 +124,19 @@ function setCtxTokens(used, max) {
   $("#ctx-tokens").textContent = max ? `CTX ${fmtTokens(used)}/${fmtTokens(max)}` : "";
 }
 
-async function runTurn(fetchPromise) {
+// Both send buttons go dead for the length of a turn: the server answers one at
+// a time (409 otherwise), and an enabled-looking button that discards the click
+// is worse than a disabled one.
+function setSendDisabled(v) {
+  $("#send").disabled = v;
+  $("#dock-send").disabled = v;
+}
+
+async function runTurn(fetchPromise, pendingLabel = "working") {
   if (streaming) return;
   streaming = true;
   stopBtn.hidden = false;
+  setSendDisabled(true);
   announce("silica is responding");
   const body = bubble("silica");
   // flow = thinking blocks, tool groups and text segments interleaved in arrival
@@ -136,7 +154,11 @@ async function runTurn(fetchPromise) {
 
   const toolEls = {};
   const texts = [];    // every text segment { el, raw }, for the copy button
-  const touched = new Set(); // notes referenced by tools this turn → sources footer
+  // ref → effect ("read" | "written" | "moved" | "deleted"), for the footer.
+  // A ref is only recorded once its tool SUCCEEDS: a failed write must not be
+  // reported as written, in the one place the user looks to trust the agent.
+  const touched = new Map();
+  const claimed = {};  // call id → { refs, effect }, held until tool_done
   let curText = null;   // open markdown segment { el, raw }
   let curTools = null;  // open group of consecutive tools
   let curThink = null;  // open thinking block { details, body, raw }
@@ -180,6 +202,16 @@ async function runTurn(fetchPromise) {
   }
   const flowMsg = (s) => { const d = document.createElement("div"); d.className = "stream-text"; d.textContent = s; flow.appendChild(d); };
 
+  // The first SSE event can be minutes away — /nucleate converts a PDF before
+  // the turn even starts — and until it lands `flow` is empty, so the answer
+  // block read as a hang next to a live Stop button. Park a pulsing line and the
+  // caret there and drop them on the first event, as openPeek() does for the dock.
+  const pending = document.createElement("div");
+  pending.className = "tools";
+  pending.innerHTML = `<div class="tool">» ${escapeHtml(pendingLabel)} …</div>`;
+  flow.appendChild(pending);
+  pending.appendChild(caret);
+
   try {
     const resp = await fetchPromise;
     if (resp.status === 409) { flowMsg("(a turn is already in progress)"); return; }
@@ -205,19 +237,42 @@ async function runTurn(fetchPromise) {
   } finally {
     streaming = false;
     stopBtn.hidden = true;
+    setSendDisabled(false);
+    pending.remove(); // no-op if the first event already dropped it
     caret.remove(); // no-op if a rerender already detached it
     freezePeek(); // done or aborted — stop mirroring, keep the preview up
     if (curThink) curThink.details.open = false; // aborted mid-thought — still collapse
     if (touched.size) {
+      // Grouped by what the turn DID, not merged into one "sources" row: a note
+      // the agent deleted is not a citation, and a write is the whole point of
+      // the product. Mutations first — that is the part worth checking.
       const s = document.createElement("div");
       s.className = "sources";
-      s.innerHTML = '<span class="sources-label">sources</span>';
-      for (const ref of touched) {
-        const c = document.createElement("span");
-        c.className = "note-link"; // reuses the delegated click → note drawer
-        c.dataset.path = ref;
-        c.textContent = ref.split("/").pop().replace(/\.md$/, "");
-        s.appendChild(c);
+      for (const effect of ["written", "moved", "deleted", "read"]) {
+        const refs = [...touched].filter(([, e]) => e === effect).map(([r]) => r);
+        if (!refs.length) continue;
+        const g = document.createElement("div");
+        g.className = "sgroup " + effect;
+        g.innerHTML = `<span class="sources-label">${effect}</span>`;
+        for (const ref of refs) {
+          const c = document.createElement("span");
+          // A deleted note has no page to open: keep the chip as a record, drop
+          // the click, or it routes to /note and answers "not found in vault".
+          c.className = effect === "deleted" ? "note-gone" : "note-link";
+          if (effect !== "deleted") c.dataset.path = ref; // delegated click → note drawer
+          c.textContent = ref.split("/").pop().replace(/\.md$/, "");
+          g.appendChild(c);
+        }
+        s.appendChild(g);
+      }
+      if ([...touched.values()].some((e) => e !== "read")) {
+        const u = document.createElement("button");
+        u.type = "button";
+        u.className = "undo-turn";
+        u.textContent = "undo this turn";
+        u.title = "run /undo — rolls back this turn's vault writes";
+        u.addEventListener("click", () => { u.disabled = true; send("/undo"); });
+        s.appendChild(u);
       }
       flow.appendChild(s);
     }
@@ -229,6 +284,7 @@ async function runTurn(fetchPromise) {
   }
 
   function handle(ev) {
+    pending.remove(); // something arrived — the placeholder has done its job
     if (ev.type === "delta" && ev.kind === "reasoning") {
       const th = thinkSeg();
       th.raw += ev.text;
@@ -244,17 +300,28 @@ async function runTurn(fetchPromise) {
     } else if (ev.type === "tool_start") {
       const t = document.createElement("div");
       t.className = "tool";
-      t.textContent = "» " + ev.name + " …";
+      // Name what it acted on. The verb alone ("write note") never told the user
+      // which file the agent touched in their own vault.
+      t.dataset.label = ev.target ? `${ev.name} "${ev.target}"` : ev.name;
+      t.textContent = "» " + t.dataset.label + " …";
       toolsGroup().appendChild(t);
       curTools.appendChild(caret);
       toolEls[ev.id] = t;
-      (ev.notes || []).forEach((n) => touched.add(n));
+      claimed[ev.id] = { refs: ev.notes || [], effect: ev.effect || "read" };
     } else if (ev.type === "tool_done") {
       const t = toolEls[ev.id];
-      if (t) { t.className = "tool done"; t.textContent = "✓ " + ev.name; }
+      if (t) { t.className = "tool done"; t.textContent = "✓ " + (t.dataset.label || ev.name); }
+      const c = claimed[ev.id];
+      if (c) {
+        // A mutation always wins over a read of the same note; a read never
+        // downgrades a write recorded earlier in the turn.
+        for (const r of c.refs) if (c.effect !== "read" || !touched.has(r)) touched.set(r, c.effect);
+        delete claimed[ev.id];
+      }
     } else if (ev.type === "tool_error") {
       const t = toolEls[ev.id];
-      if (t) { t.className = "tool error"; t.textContent = "✗ " + ev.name + " — " + ev.error; }
+      if (t) { t.className = "tool error"; t.textContent = "✗ " + (t.dataset.label || ev.name) + " — " + ev.error; }
+      delete claimed[ev.id]; // it failed: do not claim its notes
     } else if (ev.type === "batch") {
       const t = document.createElement("div");
       t.className = "tool";
@@ -335,6 +402,11 @@ function autoGrow(el) {
 }
 $("#composer").addEventListener("submit", (e) => {
   e.preventDefault();
+  // Guard BEFORE clearing. send() and nucleateStaged() both bail out on
+  // `streaming`, so clearing first silently destroyed a follow-up typed while
+  // the answer was still landing — the most natural thing to do on this surface.
+  // #dock-composer already had the check in this order.
+  if (streaming) return;
   const t = input.value;
   input.value = "";
   autoGrow(input);
@@ -482,6 +554,7 @@ if (localStorage.getItem("sidebar-collapsed") === "1")
 $("#sidebar-toggle").addEventListener("click", () => {
   const collapsed = document.body.classList.toggle("sidebar-collapsed");
   localStorage.setItem("sidebar-collapsed", collapsed ? "1" : "0");
+  sidebarYielded = false; // an explicit choice outranks the drawer's auto-yield
 });
 
 // Vault stats + file tree, from /vault_info. Best-effort: on error the placeholders stay.
@@ -612,31 +685,21 @@ $(".tabs").addEventListener("click", (e) => {
   if (tab === "graph") setGraphMode(graphMode); // load the active mode's content
 });
 
-// --- explore tab: network graph | concept heatmap | radial map ---------------
-// Three modes in one view, one toolbar. "graph" is one build (wikilink structure
-// + semantic k-NN overlay, layers toggled in the frame's HUD); "heat" is a
-// server-rendered co-occurrence matrix (/heatmap) — not a network graph, hence
-// its own label; "map" is a radial map rooted on one note (/map), which needs a
-// root, so it opens on a hub-picker landing. network + heatmap share one iframe
-// (src-swapped); map has its own so switching back doesn't rebuild the graph.
+// --- explore tab: network graph | radial map ---------------------------------
+// Two modes in one view, one toolbar. "graph" is one build (wikilink structure
+// + semantic k-NN overlay, layers toggled in the frame's HUD); "map" is a radial
+// map rooted on one note (/map), which needs a root, so it opens on a hub-picker
+// landing. Each mode owns its iframe so switching back doesn't rebuild the graph.
 let graphMode = "graph";
-let loadedMode = null;    // which page (/graph or /heatmap) #graph-frame holds
 let mapRootedPath = null; // note the radial map is rooted on, or null → picker
 
-function graphURL() {
-  return graphMode === "heat" ? "/heatmap?t=" + Date.now() : "/graph?t=" + Date.now();
-}
-
-// Show one mode: toggle its controls + which frame/picker is visible, and load
-// the graph/heatmap page only when it isn't the one already sitting in the frame
-// (or the vault changed under us). Also the entry point when switching INTO the
+// Show one mode: toggle which frame/picker is visible, and rebuild /graph only
+// when the vault changed under us. Also the entry point when switching INTO the
 // explore tab, so it must be idempotent.
 function setGraphMode(m) {
   graphMode = m;
   document.querySelectorAll(".gmode-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.gmode === m));
-  const isMap = m === "map", isHeat = m === "heat";
-  $("#heat-controls").hidden = !isHeat;
-  $("#node-search-wrap").hidden = isHeat;       // note search: network + map only
+  const isMap = m === "map";
   $("#graph-frame").hidden = isMap;
   $("#map-frame").hidden = !isMap || !mapRootedPath;
   $("#map-picker").hidden = !isMap || !!mapRootedPath;
@@ -647,10 +710,9 @@ function setGraphMode(m) {
     $("#node-search").focus();
   } else {
     $("#map-loading").hidden = true;
-    if (graphStale || loadedMode !== m) {
+    if (graphStale) {
       $("#graph-loading").hidden = false;
-      $("#graph-frame").src = graphURL();
-      loadedMode = m;
+      $("#graph-frame").src = "/graph?t=" + Date.now();
       graphStale = false;
     }
   }
@@ -669,19 +731,6 @@ $("#graph-frame").addEventListener("load", () => {
   if (lastNotePath) focusGraphNode(lastNotePath);
 });
 $("#map-frame").addEventListener("load", () => { $("#map-loading").hidden = true; });
-
-// heatmap mode: the concept focus fields drive /heatmap's own query params (its
-// in-page HUD hides when embedded, so these are the live controls).
-$("#heat-controls").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const q = $("#heat-q").value.trim();
-  const n = $("#heat-n").value || 40;
-  const p = $("#heat-p").value || 0;
-  $("#graph-loading").hidden = false;
-  loadedMode = "heat";
-  $("#graph-frame").src = "/heatmap?q=" + encodeURIComponent(q) +
-    "&n=" + encodeURIComponent(n) + "&p=" + encodeURIComponent(p) + "&t=" + Date.now();
-});
 
 // --- map landing: root the radial map on a note; hub-picker until one is set --
 function rootMap(path) {
@@ -824,7 +873,7 @@ function nucleateStaged(text) {
   fd.append("text", text);
   staged = [];
   renderAttachments();
-  runTurn(fetch("/nucleate", { method: "POST", body: fd }));
+  runTurn(fetch("/nucleate", { method: "POST", body: fd }), "staging " + names.length + (names.length === 1 ? " file" : " files"));
 }
 
 let dragDepth = 0;
@@ -898,6 +947,26 @@ function renderMermaid(root) {
   mermaidLoad.then(() => mermaid.run({ nodes: blocks }).catch(() => {}));
 }
 
+// Below this width the shell cannot hold the sidebar, a readable transcript and
+// the drawer at once: at 900px an open 55vw drawer left 141px of prose. Two panes
+// is the answer, so the sidebar yields — via the real `sidebar-collapsed` class,
+// so #sidebar-toggle keeps telling the truth — and comes back with the note,
+// unless the user had collapsed it themselves.
+const NARROW_W = 1100;
+let sidebarYielded = false;
+
+function yieldSidebarToDrawer() {
+  if (window.innerWidth > NARROW_W || document.body.classList.contains("sidebar-collapsed")) return;
+  document.body.classList.add("sidebar-collapsed");
+  sidebarYielded = true;
+}
+
+function restoreYieldedSidebar() {
+  if (!sidebarYielded) return;
+  document.body.classList.remove("sidebar-collapsed");
+  sidebarYielded = false;
+}
+
 async function openNote(path) {
   if (!path) return;
   lastNotePath = path;
@@ -905,8 +974,6 @@ async function openNote(path) {
   focusGraphNode(path);
   $("#note-mini-map").open = false; // reset: reload lazily if reopened for the new note
   $("#note-mini-map-frame").src = "";
-  $("#note-heatmap").open = false;
-  $("#note-heatmap-frame").src = "";
   try {
     const r = await fetch("/note?path=" + encodeURIComponent(path));
     const data = await r.json();
@@ -916,7 +983,8 @@ async function openNote(path) {
     $("#note-body").scrollTop = 0;
     notePanel.classList.add("open");
     notePanel.setAttribute("aria-hidden", "false");
-    document.body.classList.add("note-open"); // dock insets to the drawer's edge
+    document.body.classList.add("note-open"); // dock + chat inset to the drawer's edge
+    yieldSidebarToDrawer();
     const btn = $("#note-last");
     btn.querySelector("span").textContent = data.title || path;
   } catch { notify("couldn't open that note"); }
@@ -925,6 +993,7 @@ function closeNote() {
   notePanel.classList.remove("open");
   notePanel.setAttribute("aria-hidden", "true");
   document.body.classList.remove("note-open");
+  restoreYieldedSidebar();
   lastNotePath = null; // lastViewedPath survives — the header button can reopen
   focusGraphNode(null);
 }
@@ -937,14 +1006,6 @@ $("#note-last").addEventListener("click", () => {
 $("#note-mini-map").addEventListener("toggle", function () {
   if (this.open && lastNotePath) {
     $("#note-mini-map-frame").src = "/map?note=" + encodeURIComponent(lastNotePath);
-  }
-});
-
-// Concept heatmap: same lazy idiom — this note's concepts plus their
-// strongest out-of-note neighbors, rendered only when expanded.
-$("#note-heatmap").addEventListener("toggle", function () {
-  if (this.open && lastNotePath) {
-    $("#note-heatmap-frame").src = "/heatmap?note=" + encodeURIComponent(lastNotePath);
   }
 });
 
@@ -1035,7 +1096,16 @@ $("#peek-close").addEventListener("click", closePeek);
 const NOTE_MIN_W = 280, NOTE_MAX_W = 800;
 const savedNoteWidth = parseInt(localStorage.getItem("note-width"), 10);
 if (savedNoteWidth) notePanel.style.width = Math.min(NOTE_MAX_W, Math.max(NOTE_MIN_W, savedNoteWidth)) + "px";
-setNoteW(parseInt(notePanel.style.width, 10) || 420);
+// Read the rendered width, not the inline style: with no saved width the inline
+// style is "" and the old `|| 420` fallback set --note-w to 420 while the panel
+// rendered at its stylesheet width, so the header and dock reserved 210px too
+// little and the drawer covered #stop and #dock-send on every fresh profile.
+const syncNoteW = () => setNoteW(Math.round(notePanel.getBoundingClientRect().width));
+syncNoteW();
+// The drawer's max-width is viewport-relative, so its rendered width changes with
+// the window. --note-w drives the header and dock insets, so it has to follow or
+// they reserve the wrong gap and the drawer covers #stop / #dock-send again.
+window.addEventListener("resize", syncNoteW);
 let resizingNote = false; // guards the outside-click-closes handler below: a drag
                            // that ends outside #note-panel fires a "click" there too
 $("#note-resize").addEventListener("mousedown", (e) => {
@@ -1045,12 +1115,14 @@ $("#note-resize").addEventListener("mousedown", (e) => {
   const onMove = (e2) => {
     const w = Math.min(NOTE_MAX_W, Math.max(NOTE_MIN_W, startWidth + (startX - e2.clientX)));
     notePanel.style.width = w + "px";
-    setNoteW(w); // keep the dock inset glued to the drawer edge while dragging
+    // Read the rendered width, not the requested one: max-width can clamp the
+    // drawer on a narrow window, and --note-w must never disagree with it.
+    setNoteW(Math.round(notePanel.getBoundingClientRect().width));
   };
   const onUp = () => {
     document.removeEventListener("mousemove", onMove);
     document.removeEventListener("mouseup", onUp);
-    localStorage.setItem("note-width", parseInt(notePanel.style.width, 10));
+    localStorage.setItem("note-width", Math.round(notePanel.getBoundingClientRect().width));
     setTimeout(() => { resizingNote = false; }, 0); // clear after this click event finishes
   };
   document.addEventListener("mousemove", onMove);

@@ -54,6 +54,8 @@ def test_event_to_json_maps_the_render_event_seam():
         "type": "tool_start",
         "name": "t",
         "id": "c1",
+        "target": "",
+        "effect": "read",
         "notes": [],
     }
     # note refs are pulled from the tool args (allowlisted keys) → sources chips
@@ -61,7 +63,27 @@ def test_event_to_json_maps_the_render_event_seam():
         "type": "tool_start",
         "name": "t",
         "id": "c2",
+        "target": "",  # unknown tool: no table entry, so no named target
+        "effect": "read",
         "notes": ["a/b.md"],
+    }
+    # a write names the file it touched, and the footer can group it apart from reads
+    assert event_to_json(ToolStartEvent("silica_write_note", {"path": "a/b.md"}, "c3", 0)) == {
+        "type": "tool_start",
+        "name": "write note",
+        "id": "c3",
+        "target": "a/b.md",
+        "effect": "written",
+        "notes": ["a/b.md"],
+    }
+    # a move leaves the note at `to`: that is the ref the chip can open
+    assert event_to_json(ToolStartEvent("silica_move", {"ref": "a.md", "to": "b.md"}, "c4", 0)) == {
+        "type": "tool_start",
+        "name": "move",
+        "id": "c4",
+        "target": "a.md → b.md",
+        "effect": "moved",
+        "notes": ["b.md"],
     }
     assert event_to_json(ToolCompleteEvent("t", {}, "c1", "ok", 0.1, 0)) == {
         "type": "tool_done",
@@ -735,52 +757,6 @@ def test_top_hubs_ranks_by_resolved_degree():
     assert [h["path"] for h in hubs] == ["a.md", "b.md"]  # a(2) > b(1); c(0) dropped
     assert hubs[0]["degree"] == 2 and hubs[0]["name"] == "A"
     assert _top_hubs(nodes, edges, top_n=1) == hubs[:1]   # cap honored
-
-
-def test_heatmap_route_serves_kernel_page(client, monkeypatch):
-    """GET /heatmap returns the kernel-rendered page; a kernel failure degrades
-    to a readable message like /graph, never a 500."""
-    import silica.kernel.heatmap as hm
-
-    tc, _server = client
-    monkeypatch.setattr(hm, "heatmap_page",
-                        lambda focus=None, top_n=40, min_pct=0, note=None: "<html>hm-stub</html>")
-    r = tc.get("/heatmap")
-    assert r.status_code == 200
-    assert "hm-stub" in r.text
-
-    def boom(focus=None, top_n=40, min_pct=0, note=None):
-        raise RuntimeError("no index")
-
-    monkeypatch.setattr(hm, "heatmap_page", boom)
-    r = tc.get("/heatmap")
-    assert r.status_code == 200
-    assert "heatmap unavailable" in r.text
-
-
-def test_heatmap_route_threads_focus_query(client, monkeypatch):
-    import silica.kernel.heatmap as hm
-
-    tc, _server = client
-    seen = {}
-
-    def spy(focus=None, top_n=40, min_pct=0, note=None):
-        seen["focus"] = focus
-        seen["top_n"] = top_n
-        seen["min_pct"] = min_pct
-        seen["note"] = note
-        return "<html>x</html>"
-
-    monkeypatch.setattr(hm, "heatmap_page", spy)
-    tc.get("/heatmap?q=training&n=25&p=35")
-    assert seen["focus"] == "training"
-    assert seen["top_n"] == 25
-    assert seen["min_pct"] == 35
-    tc.get("/heatmap?note=sub%2Fn4.md")
-    assert seen["note"] == "sub/n4.md"
-    tc.get("/heatmap")
-    assert seen["focus"] is None
-    assert seen["note"] is None
 
 
 def test_config_reports_toggle_and_post_flips_thinking_but_not_model(client, monkeypatch):

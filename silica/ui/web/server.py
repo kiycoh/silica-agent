@@ -673,9 +673,10 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
     written to the vault. The semantic step (nucleate? summarize?) is the agent's,
     driven by the user's message — see `_compose_nucleate_turn`.
 
-    ponytail: convert() shells out to mineru (can be minutes on a book) and runs
-    on the loop thread, same as the old path did during message expansion — the
-    UI just holds the spinner. Move to a worker thread if it ever blocks /stop.
+    convert() shells out to mineru (can be minutes on a book) and stage() reads
+    whole files, so both run in a worker thread: on the loop thread they blocked
+    /stop for the whole conversion, leaving a visible Stop button that could not
+    be served.
     """
     from silica.kernel.vault_manifest import get_active_manifest
     from silica.sources.convert import convert
@@ -693,11 +694,11 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
         adapter = adapter_for(rel, enabled=enabled)
         if adapter is None:  # no source claims it → converter fallback (PDF today)
             try:
-                ready.extend(convert(rel))
+                ready.extend(await asyncio.to_thread(convert, rel))
             except ValueError as exc:
                 logger.warning("nucleate: skipped %s: %s", dest.name, exc)
             continue
-        result = stage(adapter, rel)
+        result = await asyncio.to_thread(stage, adapter, rel)
         if result["status"] == "distill":       # prose → injector re-reads it
             ready.append(rel)
         elif result["status"] == "ok":            # code/notebook → stub written
@@ -749,22 +750,6 @@ def graph():
         return HTMLResponse(out.read_text(encoding="utf-8"))
     except Exception as exc:
         return HTMLResponse(f"<p style='font-family:monospace'>graph unavailable: {exc}</p>")
-
-
-@app.get("/heatmap")
-def heatmap(q: str = "", n: int = 0, p: int = 0, note: str = ""):
-    """Concept co-occurrence matrix, regenerated per request like /graph.
-    ?q= focuses the matrix on one concept and its strongest co-occurrents;
-    ?note= scopes it to one note's concepts + their out-of-note neighbors
-    (the drawer's collapsible preview); ?n= caps the number of concepts,
-    ?p= floors cell weight as % of the strongest (both clamped kernel-side)."""
-    from silica.kernel import heatmap as hm
-
-    try:
-        return HTMLResponse(hm.heatmap_page(focus=q or None, top_n=n or 40,
-                                            min_pct=p, note=note or None))
-    except Exception as exc:
-        return HTMLResponse(f"<p style='font-family:monospace'>heatmap unavailable: {exc}</p>")
 
 
 @app.get("/map")

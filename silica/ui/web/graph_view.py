@@ -147,7 +147,9 @@ def render_html(
         f'<span class="dot" style="background:{c.color}"></span>{html.escape(c.label)} '
         f'<span style="color:#5a6372;font-size:11px;margin-left:auto">{c.size}</span>'
         f'</div>\n'
-        for c in communities
+        # Biggest first: the legend is read top-down, and the clusters that
+        # carry the vault are the ones worth seeing without scrolling.
+        for c in sorted(communities, key=lambda c: (-c.size, c.id))
     )
 
     comm_labels_json = json.dumps(
@@ -308,7 +310,7 @@ def render_html(
       <div class="section-title" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between">
         Communities
         <span id="sort-communities" style="color:#8f8f8f;cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
-              onclick="toggleCommunitySort()" title="sort by size">size &#8597;</span>
+              onclick="toggleCommunitySort()" title="sort by size">size &#8595;</span>
       </div>
       {discourse_badge}
       <div id="legend-box">

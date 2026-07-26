@@ -128,25 +128,12 @@
       <div id="graph-bar">
         <div class="gmode-tabs">
           <button type="button" class="active" data-gmode="graph" title="wikilink structure + semantic k-NN overlay — toggle the layers in the HUD">network</button>
-          <button type="button" data-gmode="heat" title="concept co-occurrence matrix — not a network graph, a heat matrix">heatmap</button>
           <button type="button" data-gmode="map" title="radial map rooted on one note">map</button>
         </div>
 
-        <!-- heatmap mode: concept focus controls (the /heatmap page's own HUD
-             hides itself when embedded, so these are the only visible copy) -->
-        <form id="heat-controls" class="gbar-controls" hidden>
-          <label class="gbar-f gbar-grow"><span class="gbar-lbl">concept</span>
-            <input id="heat-q" type="text" placeholder="focus a concept…" autocomplete="off" /></label>
-          <label class="gbar-f gbar-narrow"><span class="gbar-lbl">max concepts</span>
-            <input id="heat-n" type="number" min="5" max="120" value="40" /></label>
-          <label class="gbar-f gbar-narrow"><span class="gbar-lbl">min wt %</span>
-            <input id="heat-p" type="number" min="0" max="95" value="0" /></label>
-          <button type="submit">focus</button>
-        </form>
-
         <!-- network + map modes: fuzzy note search. Pick → fly the graph camera
              (network) or root the radial map (map). Index built from the tree. -->
-        <div id="node-search-wrap" class="gbar-controls" hidden>
+        <div id="node-search-wrap" class="gbar-controls">
           <label class="gbar-f gbar-grow"><span class="gbar-lbl">find a note</span>
             <input id="node-search" type="text" placeholder="type a note name…" autocomplete="off" /></label>
           <div id="node-results" hidden></div>
@@ -201,10 +188,6 @@
     <details id="note-mini-map">
       <summary>map preview</summary>
       <iframe id="note-mini-map-frame" title="note map preview"></iframe>
-    </details>
-    <details id="note-heatmap">
-      <summary>concept heatmap</summary>
-      <iframe id="note-heatmap-frame" title="note concept heatmap"></iframe>
     </details>
     <div id="note-body"></div>
   </aside>

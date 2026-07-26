@@ -48,15 +48,25 @@
   /* prose */
   --ash: #8E99B0;
   /* secondary */
-  --ash-dim: #757F99;
-  /* meta labels; holds WCAG AA at 11px over --slate */
+  --ash-dim: #838DA7;
+  /* meta labels. Was #757F99, which held AA over --slate (4.73:1) but landed at
+     3.83:1 on --slate-2, and that is where the 9-10px stat labels and every
+     placeholder actually sit. #838DA7 clears 4.5:1 on the brightest plane it
+     touches (4.61:1) at the cost of a slightly shorter step down from --ash. */
   --accent: #35C6E8;
   /* iced cyan, sampled off the mascot. The only vivid colour. */
   --warn: #E0A93B;
   /* amber, caution only */
   --mono: "Martian Mono", ui-monospace, Menlo, monospace;
   --sans: "Lexend", system-ui, sans-serif;
+  /* the sidebar's width, so #dock's left inset cannot drift from it */
+  --side-w: 264px;
 }
+
+/* Supported floor: 900px. Below it the three-column shell compresses rather
+   than reorganising — no phone layout, by decision. What the floor requires is
+   that nothing overflows the viewport and the drawer never eats the transcript;
+   both are handled where they arise (.view min-width, #note-panel max-width). */
 
 * {
   box-sizing: border-box;
@@ -120,6 +130,11 @@ body {
 header {
   display: flex;
   align-items: stretch;
+  /* One strip at full width, where it never wraps. It wraps only when the drawer
+     is open on a narrow window: the row needs ~457px and body.note-open leaves
+     it viewport minus --note-w, so without this the right cluster overflowed
+     under the drawer and #stop went with it. */
+  flex-wrap: wrap;
   gap: 0;
   position: relative; /* anchor for the session-config dropdown */
   border-bottom: 1px solid var(--line-2);
@@ -239,6 +254,7 @@ header>* {
 .ghost:focus-visible,
 .commands button:focus-visible,
 .linklike:focus-visible,
+.undo-turn:focus-visible,
 #send:focus-visible,
 #dock-send:focus-visible {
   outline: 1px solid var(--accent);
@@ -287,6 +303,17 @@ main {
    empty. */
 #view-chat {
   background: var(--page);
+  /* The inset SNAPS, deliberately: unlike the header, this element holds the
+     whole transcript, and animating its padding would reflow every message on
+     every frame of the drawer's slide. One reflow, not eight. */
+}
+
+/* The drawer is position: fixed and overlays, and #log had no measure cap, so an
+   open note hid the right part of every transcript line — and with it the tail of
+   #composer, including #send. header and #dock already reserved this exact gap;
+   the reading surface was the one that did not. */
+body.note-open #view-chat {
+  padding-right: var(--note-w, 630px);
 }
 
 .view {
@@ -294,6 +321,10 @@ main {
   display: none;
   flex-direction: column;
   min-height: 0;
+  /* without this the pane cannot shrink below its min-content width, so a narrow
+     window pushed the composer and the quick actions past the viewport edge and
+     the body scrolled sideways instead of the layout tightening */
+  min-width: 0;
 }
 
 .view.active {
@@ -302,7 +333,7 @@ main {
 
 /* --- unified left sidebar: vault stats · search · files · history ----------- */
 #sidebar {
-  flex: 0 0 264px;
+  flex: 0 0 var(--side-w);
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line-2);
@@ -683,10 +714,25 @@ details.side-section:hover>summary.side-title {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.4rem 0.9rem;
   margin-top: 0.7rem;
   padding-top: 0.5rem;
   border-top: 1px solid var(--line);
+}
+
+/* One group per effect (written / moved / deleted / read), each labelled. The
+   groups sit on one row while they fit and wrap as whole units, so a label never
+   detaches from its chips. */
+.sgroup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* the vault changed: name it in caution amber, the palette's only alarm */
+.sgroup:is(.written, .moved, .deleted)>.sources-label {
+  color: var(--warn);
 }
 
 .sources-label {
@@ -706,6 +752,41 @@ details.side-section:hover>summary.side-title {
 
 .sources .note-link:hover {
   border-bottom-color: var(--accent);
+}
+
+/* A deleted note keeps its chip as a record but has nothing to open: same shape
+   as a live chip, struck through, no pointer — the .note-link.broken convention
+   applied to a note that is gone rather than never written. */
+.note-gone {
+  font-size: 12px;
+  padding: 0.05rem 0.35rem;
+  background: var(--slate-2);
+  color: var(--ash-dim);
+  text-decoration: line-through;
+  cursor: default;
+}
+
+/* The turn wrote something, so the way back is offered at the moment it matters
+   instead of being a command the user has to know exists. */
+.undo-turn {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ash);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  padding: 0.2rem 0.5rem;
+}
+
+.undo-turn:hover {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.undo-turn:disabled {
+  color: var(--ash-dim);
+  border-color: var(--line);
+  cursor: default;
 }
 
 /* markdown-it output — typeset it instead of leaving raw-looking browser
@@ -1012,6 +1093,7 @@ details.side-section:hover>summary.side-title {
   color: var(--ash);
   font-size: 12px;
   transition: color .1s linear;
+  overflow-wrap: anywhere; /* tool lines now carry a vault path as their target */
 }
 
 .tool.done {
@@ -1119,6 +1201,11 @@ details.side-section:hover>summary.side-title {
 #input::placeholder,
 #dock-input::placeholder {
   color: var(--ash-dim);
+  /* the hint is two clauses long, and the field is one row tall: in a narrow
+     column it wrapped and the second line was clipped mid-word */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 #attachments {
@@ -1200,6 +1287,16 @@ details.side-section:hover>summary.side-title {
   background: var(--frost);
   border-color: var(--frost);
   color: var(--void);
+}
+
+/* One turn at a time server-side, so the button recedes to a chip for the length
+   of it rather than staying vivid and swallowing the click. */
+#send:disabled,
+#dock-send:disabled {
+  background: var(--slate-2);
+  border-color: var(--line-2);
+  color: var(--ash-dim);
+  cursor: default;
 }
 
 #graph-frame,
@@ -1299,7 +1396,7 @@ details.side-section:hover>summary.side-title {
   font-weight: 700;
 }
 
-/* per-mode control cluster (heatmap fields / note search), pushed to the right */
+/* per-mode control cluster (note search), pushed to the right */
 .gbar-controls {
   display: flex;
   align-items: flex-end;
@@ -1344,10 +1441,6 @@ details.side-section:hover>summary.side-title {
   transition: border-color .1s linear;
 }
 
-.gbar-narrow input {
-  width: 78px;
-}
-
 #graph-bar input:focus {
   outline: none;
   border-color: var(--frost);
@@ -1357,26 +1450,6 @@ details.side-section:hover>summary.side-title {
 
 #graph-bar input::placeholder {
   color: var(--ash-dim);
-}
-
-#heat-controls button {
-  align-self: flex-end;
-  background: var(--accent);
-  color: var(--void);
-  font-weight: 700;
-  border: 1px solid var(--accent);
-  padding: 0 1.1rem;
-  height: 31px;
-  cursor: pointer;
-  font-family: var(--sans);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 11px;
-}
-
-#heat-controls button:hover {
-  background: var(--frost);
-  border-color: var(--frost);
 }
 
 /* note-search ranked dropdown — drops below the toolbar, same idiom as the
@@ -1628,7 +1701,9 @@ body.dragging #drop-hint {
   z-index: 50;
   width: 630px;
   min-width: 280px;
-  max-width: 90vw;
+  /* 55vw, not 90vw: at the 900px floor a 630px drawer left 270px of transcript,
+     so the reading surface lost to the drawer that is meant to serve it. */
+  max-width: 55vw;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -1769,15 +1844,12 @@ details.fm summary:hover {
   font-size: 12px;
 }
 
-/* note drawer mini-map + concept heatmap — native <details>, same collapse
-   idiom as .thinking */
-#note-mini-map,
-#note-heatmap {
+/* note drawer mini-map — native <details>, same collapse idiom as .thinking */
+#note-mini-map {
   border-bottom: 1px solid var(--line);
 }
 
-#note-mini-map summary,
-#note-heatmap summary {
+#note-mini-map summary {
   cursor: pointer;
   list-style: none;
   padding: 0.5rem 1.1rem;
@@ -1788,28 +1860,23 @@ details.fm summary:hover {
   transition: color .1s linear;
 }
 
-#note-mini-map summary::-webkit-details-marker,
-#note-heatmap summary::-webkit-details-marker {
+#note-mini-map summary::-webkit-details-marker {
   display: none;
 }
 
-#note-mini-map:not([open]) summary::before,
-#note-heatmap:not([open]) summary::before {
+#note-mini-map:not([open]) summary::before {
   content: "▸ ";
 }
 
-#note-mini-map[open] summary::before,
-#note-heatmap[open] summary::before {
+#note-mini-map[open] summary::before {
   content: "▾ ";
 }
 
-#note-mini-map summary:hover,
-#note-heatmap summary:hover {
+#note-mini-map summary:hover {
   color: var(--frost);
 }
 
-#note-mini-map-frame,
-#note-heatmap-frame {
+#note-mini-map-frame {
   width: 100%;
   height: 240px;
   border: none;
@@ -1825,7 +1892,7 @@ details.fm summary:hover {
    z-index below the drawer (50) so the drawer's slide passes cleanly over. */
 #dock {
   position: fixed;
-  left: 264px;
+  left: var(--side-w);
   right: 0;
   bottom: 0;
   z-index: 40;
