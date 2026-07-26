@@ -947,8 +947,8 @@ def _seed_batch_ledger(cap: str, payloads: list[dict], *, kind: str, label: str)
     run.save()
     emit_batch_event(BatchRunStartEvent(run_id=run.run_id, kind=kind, label=label, total=len(payloads)))
     return (
-        f"A ledger for /{kind} has been created with {len(payloads)} chunk(s). "
-        "Use `silica_ledger_next` to execute them."
+        f"A ledger for /{kind} has been created with {len(payloads)} chunk(s) "
+        f"(run_id={run.run_id}). Use `silica_ledger_next` with this run_id to execute them."
     )
 
 
@@ -1894,4 +1894,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        # A second Ctrl+C landing inside the REPL's own interrupt cleanup
+        # (or during exception printing) can otherwise escape main() uncaught,
+        # hitting interpreter shutdown while abandoned daemon threads (distill
+        # prefetch, run_with_deadline) are still alive — CPython then fails to
+        # print the traceback (stderr already torn down) and dumps a raw
+        # _PyObject_Dump instead. sys.exit() skips traceback printing entirely.
+        sys.exit(130)
