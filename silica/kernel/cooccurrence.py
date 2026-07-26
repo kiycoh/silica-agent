@@ -226,6 +226,8 @@ class CooccurStore:
         self._note_nodes_cache: dict[str, dict[str, int]] = {}
         # stem -> {path: count} inverted index cache (mirrors the _adj cache)
         self._stem_postings: dict[str, dict[str, int]] | None = None
+        # ({path: total stem count}, mean) for the BM25 length term
+        self._doc_lengths: tuple[dict[str, int], float] | None = None
         self._load()
 
     # --- caches ---
@@ -236,6 +238,7 @@ class CooccurStore:
         self._scope_paths_cache = {}
         self._note_nodes_cache = {}
         self._stem_postings = None
+        self._doc_lengths = None
 
     # --- I/O ---
     def _load(self) -> None:
@@ -363,6 +366,21 @@ class CooccurStore:
             from silica.kernel.paths import build_postings
             self._stem_postings = build_postings({p: self.note_nodes(p) for p in self._notes})
         return self._stem_postings
+
+    def doc_lengths(self) -> tuple[dict[str, int], float]:
+        """({path: total stem count}, mean length) for the BM25 length term.
+
+        Derived like stem_postings, from the same cached note_nodes, and dropped
+        by the same _invalidate() — so a write (upsert_note/delete_note) refreshes
+        avgdl instead of leaving a stale one behind. Living ON the store also
+        keeps two stores from sharing lengths: the memory lane passes a DIFFERENT
+        store to the same ranking seam, and borrowing the active vault's avgdl
+        there would be a silent cross-vault bug.
+        """
+        if self._doc_lengths is None:
+            lens = {p: sum(self.note_nodes(p).values()) for p in self._notes}
+            self._doc_lengths = (lens, (sum(lens.values()) / len(lens)) if lens else 1.0)
+        return self._doc_lengths
 
     def top_stems(self, n: int = 20) -> list[str]:
         """Top-n stem nodes by total weight across all notes, as display labels.

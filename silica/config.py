@@ -354,6 +354,15 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_COOCCURRENCE_LANG", "auto")
     )
 
+    # BM25 tf term in the co-occurrence ranking leg (docs/spec-cooccur-scoring.md).
+    # Off by default: the probe gate (+4.02pp recall@10, +0.055 mrr, p=0.0015) covers
+    # retrieval only, and the same seam feeds autolink, dedup, /map and collision
+    # routing. Fase 2 (those surfaces) and fase 3 (answer-side) promote it, not this
+    # flag. k1/b stay untuned module constants in relatedness.py, by spec section 8.
+    cooccur_bm25: bool = field(
+        default_factory=lambda: os.getenv("SILICA_COOCCUR_BM25", "False").lower() in ("true", "1", "t")
+    )
+
     # Salience gate (Phase 2.05): concept kept only if cosine(concept, doc_centroid) >= threshold
     sim_threshold_theme: float = field(
         default_factory=lambda: float(os.getenv("SILICA_SIM_THRESHOLD_THEME", "0.35"))

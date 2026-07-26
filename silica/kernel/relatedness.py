@@ -48,6 +48,13 @@ RRF_K = 60
 # (e.g. a zero query vector makes every cosine 0.0) and abstains.
 _NOISE_FLOOR = 1e-6
 
+# BM25 knobs for the cooccur tf term (CONFIG.cooccur_bm25, spec section 9.2).
+# Textbook defaults, DELIBERATELY UNTUNED: the +4.02pp gate is credible precisely
+# because they were not fitted to this vault, so they stay constants rather than
+# config knobs. A sweep, if ever, is pre-declared after fase 3.
+BM25_K1 = 1.2
+BM25_B = 0.75
+
 # Cooccur confidence gate (retrieval-gates spec 2026-07-14). ponytail: dormant —
 # 0.0 never fires. Phase-0 (2026-07-17, bench/phase0_gates.json) recorded the
 # no-fire reference only: vault coverage p10 0.259 / lme_s p10 0.432, so any
@@ -280,14 +287,23 @@ def _rank_cooccur_from_profile(
 ) -> list[tuple[str, float]] | None:
     """Rank in-scope notes by IDF-weighted concept overlap with `profile`
     (implicit concept->notes inverted index). Returns None when nothing overlaps.
+
+    The tf term is raw count by default and BM25-saturated under
+    CONFIG.cooccur_bm25 (docs/spec-cooccur-scoring.md fase 1). Nothing else moves
+    with the flag: same IDF, same candidate set, same filters, same abstain, same
+    tie-break, so the flag isolates the tf term the probe measured.
     """
     if not profile:
         return None
+    from silica.config import CONFIG
+
+    bm25 = bool(getattr(CONFIG, "cooccur_bm25", False))
     idf = _concept_idf(cooccur_store, set(profile), scope=scope)
     # Candidate set = union of the query stems' postings (Task 3.4): only notes
     # sharing at least one profile stem can score > 0, so this yields the same
     # note_scores as a full-notes scan without visiting notes that can't match.
     postings = cooccur_store.stem_postings()
+    lens, avgdl = cooccur_store.doc_lengths() if bm25 else ({}, 1.0)
     candidates: set[str] = set()
     for stem in profile:
         plist = postings.get(stem)
@@ -297,13 +313,22 @@ def _rank_cooccur_from_profile(
     for path in candidates:
         if path in blocked or not _path_in_scope(path, scope):
             continue
+        # Length normalisation depends on the document alone, so it is hoisted out
+        # of the stem loop (this is why the measured cost is +0.7ms per endpoint).
+        # `or 1`: a candidate always has a posting, hence a positive length — the
+        # fallback only guards an incoherent store, where a 0 would collapse norm
+        # to K1*(1-B) and hand that note the top score.
+        norm = (BM25_K1 * (1.0 - BM25_B + BM25_B * (lens.get(path, 0) or 1) / avgdl)
+                if bm25 else 0.0)
         overlap = 0.0
         for stem, weight in profile.items():
             if not weight:
                 continue
             plist = postings.get(stem)
             if plist and path in plist:
-                overlap += weight * plist[path] * idf.get(stem, 0.0)
+                tf = plist[path]
+                term = tf * (BM25_K1 + 1.0) / (tf + norm) if bm25 else tf
+                overlap += weight * term * idf.get(stem, 0.0)
         if overlap > 0.0:
             note_scores[path] = overlap
     if not note_scores:

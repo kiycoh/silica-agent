@@ -142,8 +142,15 @@ def length_bias(store, groups: dict[str, list[tuple[str, str]]]) -> dict:
 
 def run(vault: Path, *, k1: float = K1, b: float = B) -> dict:
     from evals.golden.runner import _open_stores, vault_digest
+    from silica.config import CONFIG
     from silica.kernel import correlate
     from silica.kernel.relatedness import _POOL_MIN
+
+    # Arm A is the frozen state whatever the operator's env says, and arm P below
+    # turns the product flag on deliberately. Pinned here so a stray
+    # SILICA_COOCCUR_BM25=1 cannot quietly make the baseline the treatment.
+    _flag_was = CONFIG.cooccur_bm25
+    CONFIG.cooccur_bm25 = False
 
     store, embed_store = _open_stores(vault)
     es = embed_store if (embed_store is not None and len(embed_store)) else None
@@ -170,15 +177,32 @@ def run(vault: Path, *, k1: float = K1, b: float = B) -> dict:
     ):
         arms[name] = _run_arm(endpoints, eligible, store, es, rank_fn=fn)
         arms[name]["label"] = label
+
+    # Arm P: the SHIPPED function under CONFIG.cooccur_bm25, not a swapped-in
+    # ranker. It must reproduce E pair for pair. This is the arm that catches
+    # fase 1 implementing something subtly different from what passed the gate
+    # and nobody noticing because the number moved the right way anyway.
+    CONFIG.cooccur_bm25 = True
+    try:
+        arms["P"] = _run_arm(endpoints, eligible, store, es)
+    finally:
+        CONFIG.cooccur_bm25 = _flag_was
+    arms["P"]["label"] = "product flag     CONFIG.cooccur_bm25"
+    p_matches_e = (k1, b) == (K1, B) and arms["P"]["per_pair"] == arms["E"]["per_pair"]
+
     print(f"   A baseline       linear tf     recall@{K} {arm_a['recall_at_10']:.4f}  "
           f"mrr {arm_a['mrr']:.4f}  {arm_a['ms_per_endpoint']:>6.1f}ms")
-    for name in ("D", "E", "F", "V"):
+    for name in ("D", "E", "F", "V", "P"):
         arm = arms[name]
         note = ""
         if name == "V":
             note = ("   [harness check: identical to A]"
                     if arm["recall_at_10"] == arm_a["recall_at_10"]
                     else "   [HARNESS BUG: k1=1e9 must equal A]")
+        if name == "P":
+            note = ("   [product check: identical to E]" if p_matches_e else
+                    "   [knobs overridden, E is not comparable]" if (k1, b) != (K1, B) else
+                    "   [PRODUCT BUG: the flag does not reproduce E]")
         print(f"   {name} {arm['label']} recall@{K} {arm['recall_at_10']:.4f}  "
               f"mrr {arm['mrr']:.4f}  {arm['ms_per_endpoint']:>6.1f}ms"
               f"  ({arm['recall_at_10'] - arm_a['recall_at_10']:+.4f}){note}")
@@ -215,6 +239,7 @@ def run(vault: Path, *, k1: float = K1, b: float = B) -> dict:
                  for n, arm in arms.items()},
         "gates": gates,
         "best_arm": best,
+        "product_reproduces_E": p_matches_e,
     }
 
 

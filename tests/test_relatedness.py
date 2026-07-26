@@ -652,3 +652,76 @@ def test_rank_cooccur_postings_invalidated_on_upsert_and_delete(tmp_path):
     st.delete_note("C")
     ranked4 = _rank_cooccur_from_profile(st, profile, k=10, blocked=set(), scope=None)
     assert ranked4 is None
+
+
+# ---------------------------------------------------------------------------
+# BM25 tf term (CONFIG.cooccur_bm25, docs/spec-cooccur-scoring.md fase 1)
+# ---------------------------------------------------------------------------
+
+def _nodes(**counts: int) -> dict:
+    """A hand-built contribution: exact stem counts, so tf and note length are
+    controlled instead of inferred from prose."""
+    return {"nodes": {s: {"label": s, "count": c} for s, c in counts.items()}, "edges": []}
+
+
+def _bm25_store(tmp_path, name: str = "bm25.json") -> CooccurStore:
+    """Two notes sharing one stem: `long` says it 3 times in 200 stems, `short`
+    twice in 5. Raw tf ranks long first; saturation plus length normalisation
+    ranks short first. avgdl = 102.5.
+    """
+    st = CooccurStore(path=tmp_path / name, lang="english")
+    st.upsert_note("long", _nodes(graph=3, filler=197))
+    st.upsert_note("short", _nodes(graph=2, filler=3))
+    return st
+
+
+def test_cooccur_bm25_flag_off_keeps_the_linear_tf_ranking(tmp_path, monkeypatch):
+    """Default path is frozen: score stays weight * tf * idf, so the two notes
+    keep the raw-count order AND the raw-count ratio (3/2). Flipping the flag on
+    saturates the tf and normalises by length, which reverses them.
+    """
+    from silica.config import CONFIG
+
+    st = _bm25_store(tmp_path)
+    profile = {"graph": 1.0}
+
+    monkeypatch.setattr(CONFIG, "cooccur_bm25", False)
+    ranked = _rank_cooccur_from_profile(st, profile, k=10, blocked=set(), scope=None)
+    assert [p for p, _s in ranked] == ["long", "short"]
+    # idf is common to both candidates, so the score ratio IS the tf ratio.
+    assert ranked[0][1] / ranked[1][1] == 3 / 2
+
+    monkeypatch.setattr(CONFIG, "cooccur_bm25", True)
+    ranked_bm25 = _rank_cooccur_from_profile(st, profile, k=10, blocked=set(), scope=None)
+    assert [p for p, _s in ranked_bm25] == ["short", "long"]
+
+
+def test_cooccur_bm25_lengths_are_per_store_and_current(tmp_path, monkeypatch):
+    """avgdl belongs to the store it was measured on, and to its current content.
+
+    Two failure modes, one invariant: a cache shared across stores would lend
+    this store the OTHER vault's avgdl (the memory lane passes a different store
+    to this same seam), and a cache that outlives a write would keep an avgdl the
+    vault no longer has.
+    """
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "cooccur_bm25", True)
+    profile = {"graph": 1.0}
+
+    # A different store, whose notes are ~100x longer (avgdl 10000).
+    other = CooccurStore(path=tmp_path / "other.json", lang="english")
+    other.upsert_note("huge", _nodes(graph=1, filler=9999))
+    assert _rank_cooccur_from_profile(other, profile, k=10, blocked=set(), scope=None)
+
+    # Queried after it, this store still ranks by ITS OWN avgdl (102.5). Under
+    # `other`'s avgdl the length term would vanish and long would win on tf.
+    st = _bm25_store(tmp_path)
+    ranked = _rank_cooccur_from_profile(st, profile, k=10, blocked=set(), scope=None)
+    assert [p for p, _s in ranked] == ["short", "long"]
+
+    # A write moves avgdl to ~10068: the length penalty on long all but
+    # disappears and the order flips back. A stale cache would not notice.
+    st.upsert_note("bulk", _nodes(filler=30000))
+    ranked_after = _rank_cooccur_from_profile(st, profile, k=10, blocked=set(), scope=None)
+    assert [p for p, _s in ranked_after] == ["long", "short"]
