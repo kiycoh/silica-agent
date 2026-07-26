@@ -408,7 +408,9 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         try:
             parsed = json.loads(result)
             digest = parsed.get("digest", result)
-            CONSOLE.print(FlatMarkdown(str(digest)))
+            # Preformatted plain text: Markdown would reflow every line into one
+            # paragraph, and markup would eat the "[16 checkpoints]" brackets.
+            CONSOLE.print(str(digest), markup=False, highlight=False)
         except Exception:
             CONSOLE.print(result)
         # E(vault) cache line — written by /report (write_report). No cache
