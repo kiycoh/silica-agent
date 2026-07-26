@@ -283,6 +283,13 @@ def silica_graph_explain(note: str, depth: int = 1) -> dict:
     bottleneck signal distinct from degree. A note with LOW degree but HIGH
     betweenness is a bridge whose removal fragments the vault: worth reinforcing
     even though it has few links.
+
+    `diagnosis` answers "how well is THIS note integrated" by reading every
+    vault-wide coherence signal for this one note: orphan/hub status, the
+    cohesion of its own cluster, whether it is contested or built on a drifted
+    source, and its rank in the attention / integration-deficit lists. A `null`
+    in a ranked field means the note did not make that list's top-k, which is
+    "not among the worst", not "clean".
     """
     from silica.kernel.graph_report import compute_report
 
@@ -353,6 +360,45 @@ def silica_graph_explain(note: str, depth: int = 1) -> dict:
     )
 
     degree = (node_stat.degree if node_stat else len(out_links) + len(backlinks))
+
+    # Per-note diagnosis: every vault-wide coherence signal, read for THIS note.
+    # All of it is already on the report — the signals existed only as vault
+    # aggregates or as rows in GRAPH_REPORT.md, with no way to ask "how well is
+    # this one note integrated". Composition only, no extra computation.
+    # ponytail: the co-occurrence signals (integration deficit, stale links) need
+    # with_cooccurrence, which this tool does not pay for; they read `null` here.
+    # Flip the compute_report call above if the diagnosis ever needs them.
+    cluster_stat = next((c for c in report.clusters if c.cluster_id == cluster_id), None)
+    contested_note = next((c for c in report.contested if c.path == resolved_id), None)
+    attention = next((a for a in report.attention_candidates if a.path == resolved_id), None)
+    deficit = next((d for d in report.integration_deficits if d.path == resolved_id), None)
+    stale = [
+        {"source": s.source, "target": s.target}
+        for s in report.stale_links
+        if resolved_id in (s.source, s.target)
+    ]
+    diagnosis = {
+        # Structural position
+        "is_orphan": resolved_id in report.orphans,
+        "is_hub": bool(cluster_stat and cluster_stat.hub == resolved_id),
+        "cluster_size": (cluster_stat.size if cluster_stat else 0),
+        # How tightly its own area holds together: a well-linked note in a loose
+        # cluster is integrated; the same note in a dense cluster is ordinary.
+        "cluster_cohesion": (cluster_stat.cohesion if cluster_stat else 0.0),
+        # Authority / freshness
+        "contested": bool(contested_note),
+        "contradictions": (contested_note.refs if contested_note else []),
+        "drifted_source": any(
+            sd.note == resolved_id.removesuffix(".md") for sd in report.source_drift
+        ),
+        # Ranked signals: present only when the note made the report's top-k, so
+        # `null` means "not among the worst", NOT "clean".
+        "attention_score": (attention.score if attention else None),
+        "days_idle": (attention.days_idle if attention else None),
+        "integration_deficit": (deficit.score if deficit else None),
+        "stale_links": stale,
+    }
+
     return {
         "note": resolved_id,
         "cluster": cluster_id,
@@ -362,6 +408,7 @@ def silica_graph_explain(note: str, depth: int = 1) -> dict:
         "out_links": out_links[:depth * 10],
         "backlinks": backlinks[:depth * 10],
         "bridges": bridges_involving,
+        "diagnosis": diagnosis,
     }
 
 

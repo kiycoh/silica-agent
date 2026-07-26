@@ -858,7 +858,9 @@ def silica_vault_report(
         card = IssueCard(
             task_id=f"issue_{i}",
             question=candidate.reason,
-            options=[
+            # Per-candidate when the rule knows what it is asking; the dangling-link
+            # wording is only the fallback, not every escalation's question.
+            options=candidate.options or [
                 {"label": "create_note", "description": "Create a new note with this title"},
                 {"label": "rename_existing", "description": "Rename an existing note to match"},
                 {"label": "ignore", "description": "Leave the broken link as-is"},

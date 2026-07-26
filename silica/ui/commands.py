@@ -25,6 +25,7 @@ COMMANDS: tuple[Command, ...] = (
         examples=(
             "/report Concepts/ML",
             "/report --embeddings",
+            "/report --cooccurrence",
             "/report --top-k=15 --embeddings",
         ),
     ),

@@ -90,6 +90,11 @@ class TaskCandidate:
     tier: Tier             # auto | propose | escalate
     priority: int = 0      # 0 = highest priority
     confidence: Confidence | None = None  # provenance that drove the tier (None = N/A)
+    # Escalate-only: the choices the human is actually being offered. None keeps
+    # the caller's generic default. Without this every escalate card inherited
+    # the dangling-link options (create note / rename existing / ignore), which
+    # are meaningless for a stale link or a missing hub.
+    options: list[dict] | None = None
 
 
 @dataclass
@@ -355,6 +360,51 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
                 tier="escalate",
                 priority=5,
             ))
+
+    # 6. Stale links → escalate. The contrary reading of AUTOLINK: the human
+    #    linked two notes whose text shares no concept at all. Either the link is
+    #    wrong or a note drifted out from under it, and both readings are the
+    #    human's call — deleting someone's wikilink is never an `auto`.
+    #    Unlike an unlinked pair (humans under-link, so AUTOLINK's misses are
+    #    cheap), a stale link is a labelled negative: the human asserted a
+    #    relation the text no longer supports.
+    for sl in getattr(report, "stale_links", []):
+        escalate.append(TaskCandidate(
+            capability_name="",  # no automatic capability — removing a link is destructive
+            payload={"source": sl.source, "target": sl.target},
+            reason=(
+                f"'{sl.source}' links '{sl.target}' but the two share no concept in text "
+                f"— decide: the link is stale, or a note drifted"
+            ),
+            tier="escalate",
+            confidence="AMBIGUOUS",
+            priority=5,
+            options=[
+                {"label": "keep_link", "description": "The relation is real; the text just does not name it"},
+                {"label": "remove_link", "description": "The link no longer holds — unlink the two notes"},
+                {"label": "enrich_source", "description": "The relation is real but the note drifted — re-enrich it"},
+            ],
+        ))
+
+    # 7. Missing hubs → escalate. The only GENERATIVE signal in the report: a
+    #    concept central in the discourse that no note is titled after. Creating
+    #    a note is irreversible-ish and needs content, so it never goes in auto.
+    for mh in getattr(report, "missing_hubs", []):
+        escalate.append(TaskCandidate(
+            capability_name="",  # human decides; creation runs through the normal write path
+            payload={"concept": mh.concept, "centrality": mh.centrality},
+            reason=(
+                f"'{mh.concept}' is central in the discourse (centrality={mh.centrality}) "
+                f"but no note is titled after it — decide: create the hub note, or ignore"
+            ),
+            tier="escalate",
+            priority=6,
+            options=[
+                {"label": "create_hub", "description": f"Write a hub note for '{mh.concept}'"},
+                {"label": "alias_existing", "description": "An existing note already covers it — add the alias"},
+                {"label": "ignore", "description": "Not a concept worth its own note"},
+            ],
+        ))
 
     # §3.2-bis safety check: strip any irreversible capability that leaked into auto
     auto = [c for c in auto if c.capability_name not in _IRREVERSIBLE]

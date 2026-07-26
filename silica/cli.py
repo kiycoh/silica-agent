@@ -1218,6 +1218,11 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         folder = ""
         top_k = 10
         with_embeddings = False
+        # Off by default like --embeddings: the co-occurrence delta runs a
+        # per-note expanded ranking, the report's other expensive pass. Without
+        # it stale links and missing hubs are never computed at all, so the
+        # escalate rules that read them can never fire.
+        with_cooccurrence = False
 
         for arg in args:
             if arg.startswith("--folder="):
@@ -1229,17 +1234,23 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                     pass
             elif arg in ("--embeddings", "--with-embeddings"):
                 with_embeddings = True
+            elif arg in ("--cooccurrence", "--with-cooccurrence"):
+                with_cooccurrence = True
             elif not arg.startswith("-"):
                 folder = arg  # positional: /report Concepts/ML
 
         scope_desc = f"scoped to `{folder}`" if folder else "on the whole vault"
         embed_note = " Also propose missing links via the embedding index." if with_embeddings else ""
+        if with_cooccurrence:
+            embed_note += (" Also read the co-occurrence delta: autolink candidates, stale links"
+                           " and missing hubs.")
 
         return (
             f"Run a structural vault audit {scope_desc}.{embed_note}\n"
             f"Call `silica_vault_report` with "
             f"folder={json.dumps(folder)}, top_k={top_k}, "
-            f"with_embeddings={'true' if with_embeddings else 'false'}, seed_ledger=true.\n"
+            f"with_embeddings={'true' if with_embeddings else 'false'}, "
+            f"with_cooccurrence={'true' if with_cooccurrence else 'false'}, seed_ledger=true.\n"
             f"Then STOP. Write a short, human-readable brief in chat from the returned `digest` "
             f"(totals, top hubs, and how many fixes are available: auto / propose / issues), and "
             f"point the user to the GRAPH_REPORT.md that was written.\n"
