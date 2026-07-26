@@ -247,7 +247,9 @@ def main(argv=None) -> int:
     from silica.config import CONFIG
 
     model = args.model or CONFIG.model
-    _shared.warn_unpinned_provider(model, os.getenv("SILICA_OPENROUTER_PROVIDER"))
+    # CONFIG owns the pin; os.getenv here read a name nothing sets, so the
+    # warning fired on every run whether or not the route was pinned.
+    _shared.warn_unpinned_provider(model, CONFIG.openrouter_provider)
 
     if args.note:
         if not args.source:

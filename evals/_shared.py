@@ -89,11 +89,17 @@ def assert_reranker_live(config) -> None:
 def warn_unpinned_provider(model: str, provider_pin: str | None) -> None:
     """Unpinned openrouter routing is nondeterministic even at temperature=0
     (proven: a byte-identical prompt flipped verdicts). Warn, do not fail —
-    local backends legitimately have no provider concept."""
-    if provider_pin is None and str(model).startswith("openrouter/"):
+    local backends legitimately have no provider concept.
+
+    Falsy, not `is None`: CONFIG.openrouter_provider defaults to "", so an
+    `is None` test made this guard dead for every caller that passed the config
+    field straight through (probe_explain_rubric, probe_code_why) — no pin, no
+    warning, a nondeterministic run reported as an A/B.
+    """
+    if not provider_pin and str(model).startswith("openrouter/"):
         print("WARNING: openrouter model with no provider pin — unpinned routing "
-              "is nondeterministic even at temperature=0. Set "
-              "SILICA_OPENROUTER_PROVIDER for a comparable A/B.", file=sys.stderr)
+              "is nondeterministic even at temperature=0. Set OPENROUTER_PROVIDER "
+              "for a comparable A/B.", file=sys.stderr)
 
 
 if __name__ == "__main__":
