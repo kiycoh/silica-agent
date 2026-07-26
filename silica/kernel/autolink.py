@@ -300,9 +300,17 @@ def backlink_pass(
     """
     import os as _os
     from silica.driver import DRIVER
+    from silica.kernel.vault_manifest import active_write_dir, within
+
+    # This path rewrites pre-existing notes without passing validate_operations,
+    # so it enforces the vault write boundary itself: on a vault that reads a
+    # whole source tree, a backlink must never edit its README or its docs.
+    write_root = active_write_dir()
 
     result: dict[str, list[str]] = {}
     for path in neighbourhood:
+        if write_root and not within(path, write_root):
+            continue
         try:
             nc = DRIVER.read_note(path)
             body = nc.content or ""

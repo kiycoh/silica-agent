@@ -133,14 +133,15 @@ def check_vault(config: SilicaConfig) -> CheckResult:
         return CheckResult("vault", "ok", vault)
     root = gitstate.find_repo_root(Path.cwd())
     if root is not None:
-        from silica.kernel.paths import is_obsidian_vault, repo_mode_vault
+        from silica.kernel.paths import is_obsidian_vault
+        from silica.kernel.vault_manifest import adopted_vault, is_declared_vault
 
-        vault_dir = Path(root) if is_obsidian_vault(root) else repo_mode_vault(root)
-        if vault_dir.is_dir():
+        vault_dir = adopted_vault(root)
+        if vault_dir != Path(root) or is_declared_vault(root) or is_obsidian_vault(root):
             return CheckResult("vault", "ok", f"repo mode → {vault_dir}")
     return CheckResult(
         "vault", "fail",
-        "SILICA_VAULT not set and no docs/silica/ in this repo",
+        "SILICA_VAULT not set and this repo is not a Silica vault yet",
         "set SILICA_VAULT=/path/to/vault in .env, or run `silica init`",
     )
 

@@ -250,19 +250,23 @@ def _run_wizard_inner(
         return True
 
     def step_vault() -> bool:
-        # Repo mode (docs/silica/) when inside a git repo, else explicit path.
-        # An Obsidian-vault repo (.obsidian/) is adopted verbatim instead.
+        # Repo mode: the repo root becomes the vault as-is, and `write_dir` says
+        # where inside it Silica may write (docs/silica for a source tree).
         updates.pop("SILICA_VAULT", None)
         _section("vault", "Vault", 1, total())
         use_repo_mode = False
         if repo_root is not None:
-            from silica.kernel.paths import is_obsidian_vault, repo_mode_vault
+            from silica.kernel.vault_manifest import adopted_vault
+            from silica.onboarding.adopt import write_dir_for
 
-            repo_vault = Path(repo_root) if is_obsidian_vault(repo_root) else repo_mode_vault(repo_root)
-            exists = "exists" if repo_vault.is_dir() else "will be created"
+            # Same precedence as every other entry point: a vault that already
+            # exists under this repo keeps its place, new ones take the root.
+            repo_vault = adopted_vault(repo_root)
+            write_dir = write_dir_for(repo_vault)
+            where = f"writes → {write_dir}/" if write_dir else "writes in place"
             answer = _ask(
                 input_fn,
-                f"Git repo detected — use repo mode? vault = {repo_vault} ({exists}) [y/n]",
+                f"Git repo detected — use repo mode? vault = {repo_vault} ({where}) [y/n]",
                 "y",
             )
             if answer.lower() in ("y", "yes"):
@@ -274,6 +278,8 @@ def _run_wizard_inner(
                     # codebase overlay and the code source active.
                     lang_answer = _ask_language(input_fn)
                     content = "sources: [prose, code]\noverlay: codebase\n"
+                    if write_dir:
+                        content += f"write_dir: {write_dir}\n"
                     if lang_answer:
                         # cooccurrence_lang (stemmer/stopwords) is separate from
                         # conventions.language (distiller translation intent). Pin

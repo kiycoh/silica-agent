@@ -39,7 +39,7 @@ from silica.driver.base import (
 from silica.kernel import frontmatter as fm
 from silica.kernel import ofm
 from silica.kernel.graph_export import is_vault_artifact
-from silica.kernel.paths import is_source_leaf
+from silica.kernel.paths import NOISE_DIRS, is_source_leaf
 logger = logging.getLogger(__name__)
 
 
@@ -166,8 +166,12 @@ class ObsidianFSBackend(GraphIndexMixin):
         for root, dirs, files in os.walk(self.vault_path):
             rel_path = Path(root).relative_to(self.vault_path).as_posix()
 
-            # Skip hidden folders
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            # Skip hidden folders, plus vendored/build trees: a vault adopted
+            # as-is can be a repo root, where node_modules/ alone would flood
+            # the note graph with thousands of third-party READMEs.
+            dirs[:] = [
+                d for d in dirs if not d.startswith(".") and d not in NOISE_DIRS
+            ]
 
             # Skip inbox directory if configured
             if inbox_norm:

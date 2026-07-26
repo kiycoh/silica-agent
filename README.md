@@ -298,7 +298,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | :--- | :--- |
 | `SILICA_MODEL` | Chat model, litellm format (e.g. `openrouter/anthropic/claude-sonnet-4`) |
 | `SILICA_PROVIDER` | `lmstudio` or `openrouter` |
-| `SILICA_VAULT` | Vault path. An Obsidian vault is used verbatim; any other path is repo mode and writes to `docs/silica/` |
+| `SILICA_VAULT` | Vault path, adopted as-is. Reads cover the whole folder; writes are confined by `write_dir` in `vault.yaml` (a source tree declares `docs/silica`, a note folder writes in place) |
 | `SILICA_EMBEDDING_MODEL` | Embedding model for semantic tasks (default `qwen3-embedding-4b`) |
 | `SILICA_BACKEND` | `fs` (default, headless). The Obsidian bridge installs `ws` live at dial-in |
 | `SILICA_GIT_COMMIT` | Git safety net for writes (`off`, `auto`) |

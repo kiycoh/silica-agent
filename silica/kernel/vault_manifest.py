@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -93,6 +93,78 @@ class VaultManifest:
     overlay: str | None = None
     cooccurrence_lang: str | None = None
     conventions: VaultConventions = DEFAULT_CONVENTIONS
+    # Write boundary: the only subtree of the vault Silica may create, patch,
+    # move or delete notes in. "" ⇒ the vault root (in place, today's Obsidian
+    # behaviour and the default for a vault with no manifest). A relative subdir
+    # ⇒ reads stay vault-wide, writes are confined there, so everything outside
+    # is read-only context. Top-level rather than under `conventions:` on
+    # purpose: this is a boundary the framework enforces against the model, and
+    # a malformed sibling block must never widen it (`_parse_conventions` folds
+    # the whole block to defaults). None ⇒ declared but unresolvable; the
+    # activation seam refuses the vault instead of silently writing everywhere.
+    write_dir: str | None = ""
+
+
+def is_declared_vault(root: str | Path) -> bool:
+    """True when `root` carries a manifest, i.e. it has already been adopted."""
+    return (Path(root) / MANIFEST_REL).is_file()
+
+
+def adopted_vault(root: str | Path) -> Path:
+    """The vault path for a directory: itself, unless an older layout says otherwise.
+
+    Single precedence rule, shared by every entry point that turns a directory
+    into a vault (`/vault`, startup repo detection, `silica init`, `doctor`) so
+    they can never disagree about which folder is the vault:
+
+      1. a `vault.yaml` at `root` settles it — `root` IS the vault, and any
+         `docs/silica` under it is merely where it writes (`write_dir`);
+      2. an existing `<root>/docs/silica` — a vault created before `write_dir`
+         existed keeps resolving exactly where it already is;
+      3. otherwise `root` itself, adopted as-is.
+    """
+    from silica.kernel.paths import repo_mode_vault
+
+    root = Path(root)
+    if is_declared_vault(root):
+        return root
+    legacy = repo_mode_vault(root)
+    return legacy if legacy.is_dir() else root
+
+
+def _safe_rel_dir(value) -> str | None:
+    """Normalize a user-authored vault-relative dir; None when it escapes.
+
+    Trust boundary: vault.yaml is hand-written and these paths reach the read
+    and write paths — an absolute path or a traversal would scatter notes
+    outside the vault, invisible to the index, /undo and snapshots. "" and "."
+    both mean the vault root. Shared by write_dir, wiki_dir and templates_dir
+    so the rule is stated once.
+    """
+    if not isinstance(value, str):
+        return None
+    raw = value.strip().replace("\\", "/")
+    if not raw or raw == ".":
+        return ""
+    if raw.startswith("/"):
+        return None
+    parts = [p for p in raw.split("/") if p and p != "."]
+    if ".." in parts or ":" in parts[0]:
+        return None
+    return "/".join(parts)
+
+
+def within(rel_path: str, root: str) -> bool:
+    """True when vault-relative `rel_path` sits inside vault-relative dir `root`.
+
+    `root=""` is the vault root, which contains everything. Segment-wise so
+    `docs/silica` never matches `docs/silicate/x.md`.
+    """
+    if not root:
+        return True
+    prefix = root.strip("/").lower()
+    p = (rel_path or "").replace("\\", "/").strip("/").lower()
+    return p == prefix or p.startswith(prefix + "/")
 
 
 def default_sources(vault: str | Path) -> tuple[str, ...]:
@@ -145,17 +217,11 @@ def _parse_conventions(raw: dict) -> VaultConventions:
     else:
         extra_callouts = DEFAULT_CONVENTIONS.extra_callouts
 
-    wiki_dir = conv_raw.get("wiki_dir")
-    wiki_dir = wiki_dir.strip() if isinstance(wiki_dir, str) else ""
-    if wiki_dir:
-        # trust boundary: vault.yaml is user-authored, and wiki_dir reaches the
-        # write path — a traversal or absolute path would scatter derived notes
-        # outside the vault, invisible to the index, /undo and snapshots
-        parts = wiki_dir.replace("\\", "/").split("/")
-        if wiki_dir.startswith(("/", "\\")) or ".." in parts or ":" in parts[0]:
-            logger.warning("vault.yaml: conventions.wiki_dir must be a relative "
-                           "path inside the vault — ignoring %r", wiki_dir)
-            wiki_dir = ""
+    wiki_dir = _safe_rel_dir(conv_raw.get("wiki_dir")) if "wiki_dir" in conv_raw else ""
+    if wiki_dir is None:
+        logger.warning("vault.yaml: conventions.wiki_dir must be a relative "
+                       "path inside the vault — ignoring %r", conv_raw.get("wiki_dir"))
+        wiki_dir = ""
 
     default_template = conv_raw.get("default_template")
     if isinstance(default_template, str) and default_template.strip():
@@ -163,16 +229,13 @@ def _parse_conventions(raw: dict) -> VaultConventions:
     else:
         default_template = None
 
-    templates_dir = conv_raw.get("templates_dir")
-    templates_dir = templates_dir.strip() if isinstance(templates_dir, str) else ""
-    if templates_dir:
-        # trust boundary: same rule as wiki_dir — user-authored path that
-        # reaches the read path must stay inside the vault
-        parts = templates_dir.replace("\\", "/").split("/")
-        if templates_dir.startswith(("/", "\\")) or ".." in parts or ":" in parts[0]:
-            logger.warning("vault.yaml: conventions.templates_dir must be a relative "
-                           "path inside the vault — ignoring %r", templates_dir)
-            templates_dir = ""
+    templates_dir = (
+        _safe_rel_dir(conv_raw.get("templates_dir")) if "templates_dir" in conv_raw else ""
+    )
+    if templates_dir is None:
+        logger.warning("vault.yaml: conventions.templates_dir must be a relative "
+                       "path inside the vault — ignoring %r", conv_raw.get("templates_dir"))
+        templates_dir = ""
     if not templates_dir:
         templates_dir = "templates"
 
@@ -241,11 +304,40 @@ def load_manifest(vault: str | Path) -> VaultManifest:
 
     overlay = raw.get("overlay")
     lang = raw.get("cooccurrence_lang")
+
+    # Absent ⇒ "" (vault root, in place). Declared-but-unresolvable ⇒ None, and
+    # unlike every other field that does NOT degrade to the default: the default
+    # is the widest write scope, so a typo would silently hand the whole vault
+    # to the writer. `cli` refuses to activate the vault instead.
+    write_dir = "" if raw.get("write_dir") is None else _safe_rel_dir(raw.get("write_dir"))
+    if write_dir is None:
+        logger.warning(
+            "vault.yaml: `write_dir` must be a relative path inside the vault — got %r",
+            raw.get("write_dir"),
+        )
+
+    conventions = _parse_conventions(raw)
+    if write_dir and not conventions.wiki_dir:
+        # `/wiki` writes through commit_derived, which bypasses the validate gate.
+        # Defaulting its landing dir to the boundary (instead of the vault root)
+        # is what keeps derived notes inside it without a second check.
+        conventions = replace(conventions, wiki_dir=write_dir)
+    elif write_dir and not within(conventions.wiki_dir, write_dir):
+        # wiki_dir is a landing dir for writes, so it cannot sit outside the
+        # write boundary. Collapse rather than reject: /wiki still works, just
+        # inside the declared subtree.
+        logger.warning(
+            "vault.yaml: conventions.wiki_dir %r is outside write_dir %r — using %r",
+            conventions.wiki_dir, write_dir, write_dir,
+        )
+        conventions = replace(conventions, wiki_dir=write_dir)
+
     return VaultManifest(
         sources=src,
         overlay=overlay if isinstance(overlay, str) and overlay else None,
         cooccurrence_lang=lang if isinstance(lang, str) and lang else None,
-        conventions=_parse_conventions(raw),
+        conventions=conventions,
+        write_dir=write_dir,
     )
 
 
@@ -265,6 +357,22 @@ def get_active_manifest() -> VaultManifest:
 
         _cached = load_manifest((getattr(CONFIG, "vault_path", "") or "").strip())
     return _cached
+
+
+# A path no note can have (validate sanitizes filenames and prunes hidden dirs),
+# so every write op is rejected while a broken declaration stands.
+_UNRESOLVABLE_WRITE_DIR = ".invalid-write-dir"
+
+
+def active_write_dir() -> str:
+    """Vault-relative write boundary for the active vault; "" ⇒ the whole vault.
+
+    An unresolvable declaration (None) never degrades to "": the /vault seam
+    refuses activation, and answering with an impossible path keeps any caller
+    that skipped that seam (GUI, MCP) from writing vault-wide.
+    """
+    declared = get_active_manifest().write_dir
+    return declared if declared is not None else _UNRESOLVABLE_WRITE_DIR
 
 
 def apply_manifest_to_config() -> None:

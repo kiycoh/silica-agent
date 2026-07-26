@@ -186,30 +186,35 @@ def _setup_logging(debug: bool = False) -> None:
 class VaultTarget(NamedTuple):
     """Outcome of resolving a runtime ``/vault <arg>`` switch.
 
-    ``vault`` is the absolute path to adopt. ``created`` is True when repo mode
-    has no ``docs/silica`` yet and the caller must mkdir it. Every path now
-    resolves to a valid target — an Obsidian vault verbatim, everything else
-    repo mode — so there is no error outcome.
+    ``vault`` is the absolute path to adopt, ``created`` True when the directory
+    does not exist yet and the caller must mkdir it. ``error`` is set (and the
+    other fields meaningless) only when the path cannot be a vault at all.
     """
     vault: str
     created: bool
+    error: str | None = None
 
 
 def resolve_vault_switch(arg: str) -> VaultTarget:
     """Resolve a ``/vault <arg>`` (or explicit ``SILICA_VAULT``) target.
 
-    ``.obsidian/`` is the sole layout signal, not git: an Obsidian vault is
-    adopted verbatim (notes in its root); anything else — a code repo, a plain
-    or not-yet-existing directory — is Silica repo mode, notes under
-    ``<arg>/docs/silica`` (created on demand). Pure, read-only I/O.
+    The path is adopted **as-is**: the vault is the folder the user named, never
+    a subfolder Silica invents for it. Whether notes may be written into that
+    root or into a subtree is a separate axis, declared per-vault as `write_dir`
+    in ``vault.yaml`` (see `onboarding.adopt`) rather than guessed from layout.
+
+    A pre-existing ``<arg>/docs/silica`` is still adopted, so vaults created
+    before this split keep resolving to the same place — unless ``<arg>`` itself
+    carries a ``vault.yaml``, which settles the question: it is the vault, and
+    its ``docs/silica`` is merely where it writes. Read-only I/O.
     """
     from pathlib import Path
-    from silica.kernel.paths import is_obsidian_vault, repo_mode_vault
+    from silica.kernel.vault_manifest import adopted_vault
 
     target = Path(arg).expanduser().resolve()
-    if is_obsidian_vault(target):
-        return VaultTarget(str(target), False)
-    vault = repo_mode_vault(target)
+    if target.exists() and not target.is_dir():
+        return VaultTarget("", False, f"not a directory: {target}")
+    vault = adopted_vault(target)
     return VaultTarget(str(vault), not vault.is_dir())
 
 
@@ -222,23 +227,29 @@ def default_user_vault(home=None):
     return (home or Path.home()) / ".silica" / "vault"
 
 
-def resolve_repo_mode_vault(cwd, vault_env: str, docs_exists_ok: bool, self_repo=None):
-    """Pure resolver for repo-mode vault selection (testable, no I/O prompts).
+def resolve_repo_mode_vault(cwd, vault_env: str, adopt_ok: bool, self_repo=None):
+    """Pure resolver for startup vault selection from cwd (testable, no prompts).
 
     Returns the vault path string to adopt, or None to leave config unchanged.
-    Git still *discovers* the project root from cwd; ``.obsidian`` then decides
-    the layout on that root.
+    Git *discovers* the project root; the root is then adopted as-is, exactly
+    like an explicit ``/vault`` argument. Where writes may land inside it is the
+    separate `write_dir` axis (`onboarding.adopt`), not a layout guess here.
     - Explicit SILICA_VAULT (vault_env truthy) always wins → None.
     - Not inside a git repo → None.
     - Inside Silica's own source repo (root == self_repo) → None: that's dev
       mode, not a vault. Caller falls back to the home default.
-    - root is an Obsidian vault (.obsidian/) → adopt it verbatim.
-    - else docs/silica exists → return it; missing → only if docs_exists_ok
-      (caller confirmed creation); otherwise None.
+    - root carries a ``vault.yaml`` → it is already a declared vault, adopt it.
+    - ``<root>/docs/silica`` already exists → it stays the vault (pre-write_dir
+      layout, adopted unchanged so existing setups do not move).
+    - root is an Obsidian vault → adopt it, no confirmation needed.
+    - any other repo root → only if adopt_ok (the caller asked the user), since
+      silently adopting whatever repo the shell happens to sit in is not a vault
+      decision Silica gets to make.
     """
     from pathlib import Path
     from silica.kernel import gitstate
-    from silica.kernel.paths import is_obsidian_vault, repo_mode_vault
+    from silica.kernel.paths import is_obsidian_vault
+    from silica.kernel.vault_manifest import adopted_vault, is_declared_vault
 
     if vault_env.strip():
         return None
@@ -247,53 +258,53 @@ def resolve_repo_mode_vault(cwd, vault_env: str, docs_exists_ok: bool, self_repo
         return None
     if self_repo is not None and root == Path(self_repo):
         return None
-    if is_obsidian_vault(root):
-        return str(Path(root).resolve())
-    vault_dir = repo_mode_vault(root)
-    if vault_dir.is_dir():
-        return str(vault_dir)
-    if docs_exists_ok:
-        return str(vault_dir)
-    return None
+    root = Path(root).resolve()
+    vault = adopted_vault(root)
+    already = vault != root or is_declared_vault(root) or is_obsidian_vault(root)
+    return str(vault) if (already or adopt_ok) else None
 
 
 def _activate_repo_mode() -> None:
-    """Side-effecting startup vault selection. Explicit SILICA_VAULT wins; else
-    a *user* project repo → its docs/silica (prompted if absent), unless the
-    repo is an Obsidian vault (adopted verbatim); else — including inside
-    Silica's own source repo (dev mode) — a stable ~/.silica/vault."""
+    """Side-effecting startup vault selection. Explicit SILICA_VAULT wins; else a
+    *user* project repo (prompted before adoption, then adopted as-is with its
+    write boundary declared); else — including inside Silica's own source repo
+    (dev mode) — a stable ~/.silica/vault."""
     from pathlib import Path
     from silica.kernel import gitstate
+    from silica.onboarding.adopt import declare_write_dir
     import silica
 
     if CONFIG.vault_path.strip():
-        # Explicit SILICA_VAULT wins, resolved like /vault: an Obsidian vault
-        # (.obsidian/) is adopted verbatim; anything else → <path>/docs/silica,
-        # created on demand. Git is never consulted for a named path.
+        # Explicit SILICA_VAULT wins, resolved exactly like /vault: the named
+        # path as-is (a pre-existing docs/silica under it still wins for
+        # back-compat). Git is never consulted for a named path.
         t = resolve_vault_switch(CONFIG.vault_path)
+        if t.error:
+            CONSOLE.print(f"  [red]SILICA_VAULT cannot be a vault — {t.error}[/]")
+            return
         if t.vault:
             if t.created:
                 Path(t.vault).mkdir(parents=True, exist_ok=True)
+            declare_write_dir(t.vault)
             CONFIG.vault_path = t.vault
         return
     cwd = Path.cwd()
     self_repo = gitstate.find_repo_root(Path(silica.__file__).resolve())
-    existing = resolve_repo_mode_vault(cwd, "", docs_exists_ok=False, self_repo=self_repo)
-    if existing:  # user repo already carries a .silica/
+    existing = resolve_repo_mode_vault(cwd, "", adopt_ok=False, self_repo=self_repo)
+    if existing:  # already a vault: legacy docs/silica, or an Obsidian repo root
         CONFIG.vault_path = existing
         CONSOLE.print(f"  Repo mode: vault = [bold]{existing}[/]")
         return
     root = gitstate.find_repo_root(cwd)
-    if root is not None and root != self_repo:  # user repo, no docs/silica → ask
-        from silica.kernel.paths import repo_mode_vault
-
-        vault_dir = repo_mode_vault(root)
-        CONSOLE.print(f"  Git repo detected at [bold]{root}[/] but no [bold]docs/silica/[/] folder.")
-        answer = input("  Create docs/silica/ and manage it as the Silica vault? [y/N] ").strip().lower()
+    if root is not None and root != self_repo:  # user repo, not yet a vault → ask
+        CONSOLE.print(f"  Git repo detected at [bold]{root}[/], not yet a Silica vault.")
+        answer = input("  Manage this repo as the Silica vault? [y/N] ").strip().lower()
         if answer in ("y", "yes"):
-            vault_dir.mkdir(parents=True, exist_ok=True)
-            CONFIG.vault_path = str(vault_dir)
-            CONSOLE.print(f"  Repo mode: vault = [bold]{vault_dir}[/]")
+            CONFIG.vault_path = str(Path(root).resolve())
+            declared = declare_write_dir(CONFIG.vault_path)
+            CONSOLE.print(f"  Repo mode: vault = [bold]{CONFIG.vault_path}[/]")
+            if declared:
+                CONSOLE.print(f"  Writes confined to [bold]{declared}/[/] (`write_dir` in vault.yaml).")
             return
     # No user repo, Silica's own repo, or declined → stable home vault.
     home_vault = default_user_vault()
@@ -346,13 +357,21 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         arg = " ".join(parts[1:]).strip()
         if arg:
             target = resolve_vault_switch(arg)
+            if target.error:
+                CONSOLE.print(f"  [red]Cannot adopt as a vault — {target.error}[/]")
+                return True
             if target.created:
                 Path(target.vault).mkdir(parents=True, exist_ok=True)
-                CONSOLE.print(
-                    f"  Codebase detected — created [bold]{target.vault}[/] "
-                    "as the session vault (memory node)."
-                )
+                CONSOLE.print(f"  Created [bold]{target.vault}[/] as the session vault.")
             resolved = target.vault
+            from silica.onboarding.adopt import declare_write_dir
+
+            declared = declare_write_dir(resolved)
+            if declared:
+                CONSOLE.print(
+                    f"  Source tree — writes confined to [bold]{declared}/[/]; the rest of "
+                    "the vault is read-only context. Change `write_dir` in vault.yaml."
+                )
             CONFIG.vault_path = resolved
             reset_driver()
             from silica.kernel.overlay import reset_overlay_cache
@@ -360,6 +379,15 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             from silica.kernel.vault_manifest import apply_manifest_to_config, reset_manifest_cache
             reset_manifest_cache()  # manifest is vault-scoped too
             apply_manifest_to_config()
+            from silica.kernel.vault_manifest import get_active_manifest
+
+            if get_active_manifest().write_dir is None:
+                # Declared but unresolvable (absolute/traversal). Refusing here is
+                # the whole point of not degrading it to "" in the parser.
+                CONSOLE.print(
+                    "  [red]⚠ vault.yaml declares an invalid `write_dir` — every write "
+                    "will be rejected until it is a relative path inside the vault.[/]"
+                )
             # Vault-scoped store caches are path-keyed (harmless on lookup) but
             # retain the old vault's index/vectors for the process lifetime.
             from silica.kernel.relatedness import reset_vault_caches

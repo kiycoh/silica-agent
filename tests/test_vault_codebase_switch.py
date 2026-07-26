@@ -1,7 +1,9 @@
 # tests/test_vault_codebase_switch.py
-"""Vault resolution is driven by `.obsidian/`, not git: an Obsidian vault is
-adopted verbatim; anything else (code repo, plain or missing dir) is Silica
-repo mode → <target>/docs/silica, created on demand."""
+"""A vault path is adopted as-is: Silica reads the folder the user named, never a
+subfolder it invents. Where it may *write* inside that folder is the separate
+`write_dir` axis, declared in vault.yaml at adoption time (docs/silica for a
+source tree, in place for prose). Pre-`write_dir` layouts still resolve to
+<target>/docs/silica so existing vaults do not move."""
 import subprocess
 
 import silica.driver as driver_pkg
@@ -17,6 +19,11 @@ def _obsidian(path):
     (path / ".obsidian").mkdir(parents=True, exist_ok=True)
 
 
+def _code_repo(path):
+    _git_init(path)
+    (path / "pyproject.toml").write_text("[project]\nname='x'\n")
+
+
 def test_obsidian_vault_is_verbatim(tmp_path):
     _obsidian(tmp_path)
 
@@ -26,20 +33,22 @@ def test_obsidian_vault_is_verbatim(tmp_path):
     assert target.created is False
 
 
-def test_non_obsidian_dir_is_repo_mode(tmp_path):
+def test_plain_dir_is_adopted_as_is(tmp_path):
     target = resolve_vault_switch(str(tmp_path))
 
-    assert target.vault == str((tmp_path / "docs" / "silica").resolve())
-    assert target.created is True  # docs/silica not there yet
+    assert target.vault == str(tmp_path.resolve())  # no docs/silica invented
+    assert target.created is False
 
 
-def test_git_is_not_the_proxy(tmp_path):
-    # A git repo with no .obsidian is repo mode, NOT verbatim/.silica.
-    _git_init(tmp_path)
+def test_code_repo_is_adopted_as_is(tmp_path):
+    # The repo root becomes the vault; only the write boundary differs, and that
+    # lives in vault.yaml, not in the resolved path.
+    _code_repo(tmp_path)
 
     target = resolve_vault_switch(str(tmp_path))
 
-    assert target.vault == str((tmp_path / "docs" / "silica").resolve())
+    assert target.vault == str(tmp_path.resolve())
+    assert not (tmp_path / "docs" / "silica").exists()
 
 
 def test_git_tracked_obsidian_vault_stays_verbatim(tmp_path):
@@ -49,11 +58,12 @@ def test_git_tracked_obsidian_vault_stays_verbatim(tmp_path):
 
     target = resolve_vault_switch(str(tmp_path))
 
-    assert target.vault == str(tmp_path.resolve())  # not <vault>/docs/silica
+    assert target.vault == str(tmp_path.resolve())
     assert target.created is False
 
 
 def test_existing_docs_silica_is_adopted(tmp_path):
+    # Pre-write_dir layout: the vault stays exactly where it already is.
     (tmp_path / "docs" / "silica").mkdir(parents=True)
 
     target = resolve_vault_switch(str(tmp_path))
@@ -62,28 +72,61 @@ def test_existing_docs_silica_is_adopted(tmp_path):
     assert target.created is False
 
 
-def test_nonexistent_path_is_repo_mode(tmp_path):
-    # No .obsidian to check → repo mode, backend creates docs/silica.
+def test_root_manifest_beats_legacy_docs_silica(tmp_path):
+    # A declared vault at the root owns the docs/silica it writes into: adopting
+    # the subfolder instead would silently halve the vault.
+    (tmp_path / "vault.yaml").write_text("write_dir: docs/silica\n", encoding="utf-8")
+    (tmp_path / "docs" / "silica").mkdir(parents=True)
+
+    target = resolve_vault_switch(str(tmp_path))
+
+    assert target.vault == str(tmp_path.resolve())
+
+
+def test_nonexistent_path_is_created_as_the_vault(tmp_path):
     missing = tmp_path / "missing"
 
     target = resolve_vault_switch(str(missing))
 
-    assert target.vault == str((missing / "docs" / "silica").resolve())
+    assert target.vault == str(missing.resolve())
     assert target.created is True
 
 
-def test_handler_on_code_repo_switches_to_docs_silica(tmp_path, monkeypatch):
-    _git_init(tmp_path)
+def test_file_path_is_refused(tmp_path):
+    note = tmp_path / "note.md"
+    note.write_text("# not a vault")
+
+    target = resolve_vault_switch(str(note))
+
+    assert target.error and "not a directory" in target.error
+
+
+def test_handler_on_code_repo_adopts_root_and_confines_writes(tmp_path, monkeypatch, capsys):
+    _code_repo(tmp_path)
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "old"))
     monkeypatch.setattr(driver_pkg, "_driver", object())  # sentinel to observe reset
 
     handled = _handle_direct_shortcut(f"/vault {tmp_path}", [])
 
     assert handled is True
-    docs_silica = tmp_path / "docs" / "silica"
-    assert docs_silica.is_dir()  # created on demand
-    assert CONFIG.vault_path == str(docs_silica.resolve())  # not the repo root
-    assert driver_pkg._driver is None  # reset so next read uses docs/silica
+    assert CONFIG.vault_path == str(tmp_path.resolve())  # the repo IS the vault
+    assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: docs/silica\n"
+    assert "docs/silica" in capsys.readouterr().out
+    assert driver_pkg._driver is None  # reset so the next read uses the new vault
+
+
+def test_handler_on_file_refuses_without_switching(tmp_path, monkeypatch):
+    note = tmp_path / "note.md"
+    note.write_text("# not a vault")
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "old"))
+    sentinel = object()
+    monkeypatch.setattr(driver_pkg, "_driver", sentinel)
+
+    handled = _handle_direct_shortcut(f"/vault {note}", [])
+
+    assert handled is True
+    assert CONFIG.vault_path == str(tmp_path / "old")  # unchanged
+    assert driver_pkg._driver is sentinel  # never reset
 
 
 def test_handler_on_obsidian_vault_is_verbatim(tmp_path, monkeypatch):
@@ -96,3 +139,4 @@ def test_handler_on_obsidian_vault_is_verbatim(tmp_path, monkeypatch):
     assert handled is True
     assert CONFIG.vault_path == str(tmp_path.resolve())  # root, no docs/silica
     assert not (tmp_path / "docs" / "silica").exists()
+    assert not (tmp_path / "vault.yaml").exists()  # in place is the default

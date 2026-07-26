@@ -80,9 +80,9 @@ def test_vault_switch_updates_config_and_resets_driver(tmp_path, monkeypatch):
     assert driver_pkg._driver is None  # reset so next get_driver() rebuilds
 
 
-def test_vault_switch_nonexistent_path_creates_repo_mode(tmp_path, monkeypatch):
-    # A not-yet-existing path is no longer rejected: no .obsidian → repo mode,
-    # docs/silica created on demand.
+def test_vault_switch_nonexistent_path_is_created(tmp_path, monkeypatch):
+    # A not-yet-existing path is not rejected: it becomes the vault, created on
+    # demand and adopted as-is (no docs/silica invented underneath it).
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     monkeypatch.setattr(driver_pkg, "_driver", object())
     target = tmp_path / "does_not_exist"
@@ -90,8 +90,9 @@ def test_vault_switch_nonexistent_path_creates_repo_mode(tmp_path, monkeypatch):
     handled = _handle_direct_shortcut(f"/vault {target}", [])
 
     assert handled is True
-    assert CONFIG.vault_path == str((target / "docs" / "silica").resolve())
-    assert (target / "docs" / "silica").is_dir()
+    assert CONFIG.vault_path == str(target.resolve())
+    assert target.is_dir()
+    assert not (target / "docs").exists()
     assert driver_pkg._driver is None  # reset
 
 

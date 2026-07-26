@@ -131,8 +131,13 @@ def validate_operations(
     excerpt (fabrication candidates). Never causes a rejection.
     """
     from silica.kernel.ops_io import parse_ops
+    from silica.kernel.vault_manifest import active_write_dir, within
     ops_parsed = parse_ops(ops)
     ops = [op.model_copy(deep=True) for op in ops_parsed]
+
+    # Vault write boundary (`write_dir` in vault.yaml); "" ⇒ the whole vault, so
+    # a vault that declares nothing behaves exactly as before.
+    write_root = active_write_dir()
 
     # Sanitize filesystem-illegal characters (e.g. ':') from path filenames.
     # When a write op carries a `title` field, rebuild the path from title so
@@ -145,6 +150,17 @@ def validate_operations(
                 if new_path != op.path:
                     logger.debug("validate: title-derived path '%s' → '%s'", op.path, new_path)
                     op.path = new_path
+
+        # A NEW note's location is Silica's own filing decision, so a write
+        # aimed outside the boundary is rebased into it (structure preserved)
+        # rather than rejected — target_dir and the model both predate the
+        # vault's declaration. Ops that touch an EXISTING note are never
+        # rebased: that would silently hit a different file. They get rejected
+        # in the main loop below.
+        if write_root and op.op == OpType.write and op.path and not within(op.path, write_root):
+            rebased = write_root + "/" + op.path.replace("\\", "/").strip("/")
+            logger.debug("validate: write_dir rebase '%s' → '%s'", op.path, rebased)
+            op.path = rebased
 
         if op.path:
             folder, filename = os.path.split(op.path)
@@ -433,6 +449,23 @@ def validate_operations(
         # actionable-only denominator, so short-circuit before any check.
         if op_type == OpType.skip:
             continue
+
+        # Vault write boundary (`write_dir` in vault.yaml). Distinct from
+        # target_dir, which is a per-run landing folder: this one is per-vault,
+        # applies to every op type, and protects files Silica reads but must not
+        # author (a source tree, someone's hand-written notes). "" ⇒ whole vault,
+        # so a vault that declares nothing is unaffected.
+        if write_root:
+            touched = [op.touched_ref()]
+            if op_type == OpType.move:
+                touched.append(op.to_path)  # a move must not leave the boundary either
+            outside = [t for t in touched if t and not within(t, write_root)]
+            if outside:
+                rejected_ops.append(Rejection(
+                    op=op,
+                    reason=f"outside the vault write boundary '{write_root}/': {outside[0]}",
+                ))
+                continue
 
         if has_payloads:
             if not heading:

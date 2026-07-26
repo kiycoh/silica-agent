@@ -171,12 +171,68 @@ def is_obsidian_vault(path) -> bool:
 def repo_mode_vault(root) -> Path:
     """Silica's notes location for a non-Obsidian target: `<root>/docs/silica`.
 
-    Visible and committable next to the code it documents, unlike the old
-    hidden `<root>/.silica`. ponytail: a plain dir with neither `.obsidian` nor
-    git also lands here; telling a real repo from a bare dir would need a
-    stronger signal (source files? a marker?) — not worth it until it bites.
+    No longer a resolution outcome: a vault path is adopted as-is (see
+    `cli.resolve_vault_switch`). This survives as the *default write root*
+    offered for a source tree (`onboarding.adopt`) and as the back-compat
+    lookup for vaults created before that change.
     """
     return Path(root) / "docs" / "silica"
+
+
+# Directories never walked when sampling or indexing a vault: vendored trees and
+# build output, never someone's notes. Hidden dirs are pruned separately (that
+# covers .git/.venv/.obsidian). Deliberately NOT `.gitignore`: a gitignored
+# folder can be exactly where private notes live (this repo's own `docs/`), so
+# honouring it would hide notes. ponytail: fixed list, grows when it bites.
+NOISE_DIRS: frozenset[str] = frozenset({
+    "node_modules", "vendor", "build", "dist", "target", "__pycache__",
+    "site-packages", "coverage", "htmlcov",
+})
+
+
+# Root-level files that mark a source tree regardless of file counts (a repo
+# whose sources all sit under src/ still has one at the top).
+_CODE_MARKERS: frozenset[str] = frozenset({
+    "pyproject.toml", "setup.py", "package.json", "Cargo.toml", "go.mod",
+    "CMakeLists.txt", "Makefile", "pom.xml", "build.gradle", "Gemfile",
+    "composer.json", "mix.exs", "build.sbt", "Package.swift",
+})
+
+
+def looks_like_code(root, sample_max: int = 400) -> bool:
+    """True when `root` reads as a source tree rather than a folder of prose.
+
+    Two signals, cheapest first: a root-level build/manifest marker, else a
+    bounded walk comparing code files to prose files. Never git: an Obsidian
+    vault under git is ordinary, and `.git/` says nothing about content.
+
+    Only picks the *default* write root at adoption (`onboarding.adopt`), which
+    the vault then declares in `vault.yaml` — a wrong guess costs one edit, not
+    a wrong vault. Ratio rather than mere presence so a stray snippet.py in a
+    notes folder does not read as a codebase.
+    """
+    from silica.kernel.codeast.base import BARE_LANGUAGES, EXTENSION_MAP
+
+    root = Path(root)
+    if not root.is_dir():
+        return False
+    if any((root / marker).is_file() for marker in _CODE_MARKERS):
+        return True
+
+    code_exts = {e for e, lang in EXTENSION_MAP.items() if lang not in BARE_LANGUAGES}
+    code = prose = seen = 0
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in NOISE_DIRS]
+        for name in files:
+            ext = os.path.splitext(name)[1].lower()
+            if ext in code_exts:
+                code += 1
+            elif ext in (".md", ".txt", ".docx", ".pdf"):
+                prose += 1
+            seen += 1
+            if seen >= sample_max:
+                return code > prose
+    return code > prose
 
 
 def resolve_repo_root(vault: str | Path) -> tuple[Path | None, str | None]:

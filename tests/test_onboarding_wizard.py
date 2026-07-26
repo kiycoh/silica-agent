@@ -307,7 +307,7 @@ class TestRunWizard:
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
-        manifest = tmp_path / "docs" / "silica" / "vault.yaml"
+        manifest = tmp_path / "vault.yaml"
         assert manifest.is_file()
         text = manifest.read_text(encoding="utf-8")
         assert "sources:" in text and "code" in text and "overlay: codebase" in text
@@ -334,7 +334,7 @@ class TestRunWizard:
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
-        manifest = tmp_path / "docs" / "silica" / "vault.yaml"
+        manifest = tmp_path / "vault.yaml"
         text = manifest.read_text(encoding="utf-8")
         assert "conventions:\n  language: Italian" in text
 
@@ -351,7 +351,7 @@ class TestRunWizard:
         answers = ["", "", "Italian", "", "test-model", "n", ""]
         wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
-        manifest = load_manifest(str(tmp_path / "docs" / "silica"))
+        manifest = load_manifest(str(tmp_path))
         assert manifest.conventions.language == "Italian"
 
     def test_enter_leaves_language_none_after_load_manifest(self, monkeypatch, tmp_path):
@@ -367,7 +367,7 @@ class TestRunWizard:
         answers = ["", "", "", "", "test-model", "n", ""]
         wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
-        manifest = load_manifest(str(tmp_path / "docs" / "silica"))
+        manifest = load_manifest(str(tmp_path))
         assert manifest.conventions.language is None
 
     def test_repo_mode_preserves_existing_manifest(self, monkeypatch, tmp_path):
@@ -493,7 +493,7 @@ class TestRunWizard:
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
-        manifest = tmp_path / "docs" / "silica" / "vault.yaml"
+        manifest = tmp_path / "vault.yaml"
         text = manifest.read_text(encoding="utf-8")
         assert "language" not in text
 
@@ -523,7 +523,7 @@ class TestRunWizard:
         rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
 
         assert rc == 0
-        manifest = load_manifest(str(tmp_path / "docs" / "silica"))
+        manifest = load_manifest(str(tmp_path))
         # sources/overlay are written unconditionally in repo mode — an invalid
         # language answer must never degrade the whole manifest to defaults.
         assert "code" in manifest.sources
