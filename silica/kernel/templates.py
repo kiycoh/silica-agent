@@ -394,6 +394,40 @@ def _stamp_agent(content: str) -> str:
     return content[:end] + "\n" + line + content[end:]
 
 
+_DOCS_BLOCK_RE = re.compile(r"^documents:[^\n]*(?:\n[ \t]+-[^\n]*)*\n?", re.MULTILINE)
+_CODE_REF_RE = re.compile(r"^code_ref:.*$", re.MULTILINE)
+
+
+def stamp_documents(content: str, documents: list[str], code_ref: str | None = None) -> str:
+    """Splice `documents:` (and `code_ref:`) into the frontmatter head.
+
+    String-level like `_stamp_agent`, deliberately not `prepare_fields`: the
+    binding has to land on the `template="none"` branch too, and going through
+    the template renderer would demand a `{{documents}}` placeholder in every
+    template. An existing block is replaced by the union, prior entries first,
+    so patching a note adds a binding instead of dropping the old ones.
+    """
+    if not documents or not content.startswith("---\n"):
+        return content
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return content  # unterminated frontmatter — leave for the lint to flag
+    from silica.kernel.codedocs import documents_of
+
+    data, _, _ = frontmatter.split(content)
+    merged = list(dict.fromkeys(documents_of(data if isinstance(data, dict) else {})
+                                + list(documents)))
+    head, tail = _DOCS_BLOCK_RE.sub("", content[4:end]).rstrip("\n"), content[end:]
+    lines = "".join('  - "%s"\n' % p.replace("\\", "\\\\").replace('"', '\\"')
+                    for p in merged)
+    head = f"{head}\ndocuments:\n{lines}".rstrip("\n")
+    if code_ref:
+        line = f"code_ref: {code_ref}"
+        head = (_CODE_REF_RE.sub(line, head, count=1)
+                if _CODE_REF_RE.search(head) else f"{head}\n{line}")
+    return "---\n" + head + tail
+
+
 def ensure_system_floor(content: str, prior: str | None = None) -> str:
     """String-level floor under every write: `AI: true` + `last modified`
     always land, whatever the model emitted. No YAML round-trip.

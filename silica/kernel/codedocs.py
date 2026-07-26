@@ -46,6 +46,30 @@ def documents_of(data: dict) -> list[str]:
 _documents_of = documents_of  # internal alias (pre-rename call sites)
 
 
+def validate_documents(entries: list[str], root: Path | str) -> tuple[list[str], str | None]:
+    """Normalize agent-supplied `documents:` entries against the repo root.
+
+    Trust boundary: the value reaches frontmatter and nothing else ever reads
+    the path back, so a typo'd binding would be invisible forever. Rejects
+    absolute paths, traversal and drive letters (same rule as `wiki_dir` in
+    vault_manifest) and any entry that does not exist in the working tree.
+    Returns (normalized, error): on error the caller must not write.
+    """
+    root = Path(root)
+    out: list[str] = []
+    for raw in entries or []:
+        p = str(raw or "").strip().replace("\\", "/").rstrip("/")
+        if not p:
+            continue
+        parts = p.split("/")
+        if p.startswith("/") or ".." in parts or ":" in parts[0]:
+            return [], f"documents entry must be a repo-relative path: {raw!r}"
+        if not (root / p).exists():
+            return [], f"documents entry does not exist in the repo: {p}"
+        out.append(p)
+    return list(dict.fromkeys(out)), None
+
+
 def iter_documenting_notes(vault: Path | str):
     """Yield (note_path, data, body) for every note carrying `documents:`."""
     vault = Path(vault)
@@ -126,10 +150,18 @@ def stale_docs(vault: Path | str, repo_root: Path | str | None = None) -> list[S
 
     notes = list(iter_documenting_notes(vault))
     wanted: set[str] = set()
+    by_ref: dict[str, set[str]] = {}
     for _, data, _ in notes:
-        if str(data.get("code_ref") or "").strip():
-            wanted.update(_documents_of(data))
+        recorded = str(data.get("code_ref") or "").strip()
+        if recorded:
+            docs = _documents_of(data)
+            wanted.update(docs)
+            by_ref.setdefault(recorded, set()).update(docs)
     latest = gitstate.latest_shas(root, sorted(wanted))
+    # One history walk per distinct code_ref, not per (note, path): notes
+    # written in the same session share a ref.
+    touched = {ref: gitstate.paths_touched_since(root, ref, sorted(paths))
+               for ref, paths in by_ref.items()}
 
     out: list[StaleDoc] = []
     for note_path, data, _ in notes:
@@ -140,7 +172,13 @@ def stale_docs(vault: Path | str, repo_root: Path | str | None = None) -> list[S
             current = latest.get(code_path, "")
             if not current:
                 continue  # path has no history → unknown, not stale
-            if current != recorded:
+            # Not `current != recorded`: code_ref is HEAD when the note was
+            # verified, so that test fires for every path HEAD did not touch
+            # and reports "stale" with zero intervening commits. The path is
+            # stale only when a commit after `recorded` actually touched it.
+            # None = the ref does not resolve at all → conservatively stale.
+            moved = touched.get(recorded)
+            if moved is None or code_path in moved:
                 level, details = classify_change(root, recorded, code_path)
                 out.append(
                     StaleDoc(

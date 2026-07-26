@@ -177,3 +177,38 @@ def test_notebook_staleness_classifies_like_code(tmp_path):
     _commit(tmp_path, "a.ipynb", nb("def f(x, y):\n    return x\n"), "c3")
     stale = codedocs.stale_docs(vault, repo_root=tmp_path)
     assert stale[0].change_level == codedocs.CHANGE_STRUCTURAL
+
+
+def test_directory_binding_never_stale(tmp_path):
+    # a `documents:` entry pointing at a package is a rationale binding, not a
+    # behavior binding: it must not expire because some file under it changed
+    # (classify_change has no language for a directory and would call it
+    # STRUCTURAL forever). Holds today for free — `git log --name-only` emits
+    # file paths, so a directory entry never resolves in latest_shas and falls
+    # into the "no history → unknown, not stale" branch. This test pins that
+    # emergent behavior as intended, so a latest_shas refactor cannot lose it.
+    _init_repo(tmp_path)
+    ref0 = _commit(tmp_path, "src/m.py", "v1\n", "c1")
+    vault = tmp_path / "docs"; vault.mkdir()
+    _write_note(vault, "pkg.md", ["src"], ref0)
+    _write_note(vault, "file.md", ["src/m.py"], ref0)
+    _commit(tmp_path, "src/m.py", "v2\n", "c2")
+
+    stale = codedocs.stale_docs(vault, repo_root=tmp_path)
+    assert [d.note_path for d in stale] == ["file.md"]   # the dir binding is gone
+
+
+def test_head_stamped_ref_is_not_stale_until_the_path_moves(tmp_path):
+    # `code_ref` records HEAD when the note was verified, not the bound path's
+    # own newest sha. Comparing it against that sha called every note stale the
+    # moment ANY other file was committed — a "stale" with zero intervening
+    # commits. Staleness must follow the bound path, not the repo.
+    _init_repo(tmp_path)
+    _commit(tmp_path, "src/m.py", "v1\n", "c1")
+    head = _commit(tmp_path, "src/other.py", "v1\n", "c2")   # unrelated commit
+    vault = tmp_path / "docs"; vault.mkdir()
+    _write_note(vault, "m.md", ["src/m.py"], head)           # stamped at HEAD
+
+    assert codedocs.stale_docs(vault, repo_root=tmp_path) == []
+    _commit(tmp_path, "src/m.py", "v2\n", "c3")              # now the path moved
+    assert [d.code_path for d in codedocs.stale_docs(vault, repo_root=tmp_path)] == ["src/m.py"]

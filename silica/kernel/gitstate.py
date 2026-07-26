@@ -151,6 +151,29 @@ def latest_shas(root: Path | str, paths: list[str]) -> dict[str, str]:
     return out
 
 
+def paths_touched_since(root: Path | str, since_ref: str, paths: list[str]) -> set[str] | None:
+    """Which of `paths` a commit after `since_ref` touched, in ONE history walk.
+
+    The staleness primitive. `code_ref` records HEAD at verification time, not
+    the path's own newest sha, so "newest sha != code_ref" is true for every
+    path that HEAD did not happen to touch — it says the repo moved, not that
+    the documented code moved. This asks the question the verdict actually needs.
+
+    None (not an empty set) when the walk could not run — an unresolvable ref
+    (rebased or squashed history, shallow clone) or no git. Callers must keep
+    that distinct from "nothing was touched": unverifiable is conservatively
+    stale, verified-untouched is not.
+    # ponytail: paths as argv, same ARG_MAX ceiling as latest_shas
+    """
+    if not since_ref or not paths:
+        return None if not since_ref else set()
+    proc = _run(["log", "--format=", "--name-only", f"{since_ref}..HEAD", "--", *paths], root)
+    if proc is None or proc.returncode != 0:
+        return None
+    wanted = set(paths)
+    return {ln for ln in proc.stdout.splitlines() if ln in wanted}
+
+
 def commits_since(root: Path | str, since_ref: str, path: str) -> list[CommitInfo]:
     """Commits touching `path` after `since_ref` (newest-first, `since_ref`
     excluded). Empty on failure or when `since_ref` is unknown."""

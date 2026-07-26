@@ -17,12 +17,43 @@ from silica.tools import tool
 from silica.kernel.ops import Op, OpType
 
 
+_DOCUMENTS_FIELD = Field(
+    default=None,
+    description="Repo-relative paths (file or directory) whose rationale this note "
+                "records — the why, not the what: closed directions, measured "
+                "ceilings, constraints not derivable from the source. Conventionally "
+                "the note lives at <wiki_dir>/<repo-path>.md so the vault mirrors "
+                "the code tree. Read them back with silica_code_why.",
+)
+
+
+def _bind_documents(entries: list[str]) -> tuple[list[str], str | None, str | None]:
+    """Validate a `documents:` binding against the repo. Returns
+    (paths, code_ref, error) — on error the caller must not write."""
+    from silica.config import CONFIG
+    from silica.kernel import codedocs, gitstate
+    from silica.kernel.paths import repo_root_for
+
+    root = repo_root_for(getattr(CONFIG, "vault_path", "") or "")
+    if root is None:
+        return [], None, "no repo for this vault: `documents:` needs codebase mode"
+    docs, err = codedocs.validate_documents(entries, root)
+    if err:
+        return [], None, err
+    # code_ref only when a file is bound: a directory binding records a
+    # rationale, and a rationale does not expire because some file under the
+    # package changed (a file binding keeps staleness — see codedocs).
+    ref = gitstate.head_ref(root) if any((root / p).is_file() for p in docs) else None
+    return docs, ref, None
+
+
 class PatchNoteArgs(BaseModel):
     name: str = Field(description="Name or vault-relative path of the note to patch")
     heading: str = Field(description="Concept/section heading the snippet is filed under")
     snippet: str = Field(description="Distilled body text to append to the note")
     source_basename: str = Field(description="Provenance: source filename this snippet derives from")
     hub: str | None = Field(default=None, description="Optional [[Hub]] to link in frontmatter if missing")
+    documents: list[str] | None = _DOCUMENTS_FIELD
 
 @tool(PatchNoteArgs, cls="composed", collapse="eager")
 def silica_patch_note(
@@ -31,6 +62,7 @@ def silica_patch_note(
     snippet: str,
     source_basename: str,
     hub: str | None = None,
+    documents: list[str] | None = None,
 ) -> dict[str, Any]:
     """Append a snippet under a heading in a single EXISTING note — the fast path
     for interactive edits.
@@ -39,9 +71,17 @@ def silica_patch_note(
     into many notes use silica_run_injector. Every successful patch is
     checkpointed and can be reverted with /undo.
     """
+    from silica.kernel import templates as tpl
     from silica.kernel.bulk import execute_one
     from silica.kernel.checkpoints import get_checkpoint_store
     from silica.kernel.workqueue import path_lease
+
+    docs: list[str] = []
+    code_ref: str | None = None
+    if documents:
+        docs, code_ref, err = _bind_documents(documents)
+        if err:
+            return {"error": err}
 
     # Resolve the note to its vault-relative path (read is idempotent).
     try:
@@ -70,6 +110,15 @@ def silica_patch_note(
             result = execute_one(op)
         except Exception as e:
             return {"error": f"Failed to patch '{name}': {e}"}
+
+        if docs:
+            try:
+                patched = DRIVER.read_note(path).content
+                stamped = tpl.stamp_documents(patched, docs, code_ref)
+                if stamped != patched:
+                    DRIVER.overwrite(path, stamped)
+            except Exception as e:
+                return {"error": f"Failed to bind documents on '{name}': {e}"}
 
         # Record the resulting on-disk content as a restore point.
         checkpoint_depth = None
@@ -158,6 +207,7 @@ class WriteNoteArgs(BaseModel):
     related: list[str] | None = Field(default=None, description="Related note names, rendered as frontmatter wikilinks")
     parent: str | None = Field(default=None, description="Parent note name for the 'parent note' frontmatter key")
     template: str | None = Field(default=None, description="Named template from the vault's templates dir; 'none' skips the skeleton (AI/last-modified floor still applied)")
+    documents: list[str] | None = _DOCUMENTS_FIELD
 
 
 @tool(WriteNoteArgs, cls="composed", collapse="eager")
@@ -169,6 +219,7 @@ def silica_write_note(
     related: list[str] | None = None,
     parent: str | None = None,
     template: str | None = None,
+    documents: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a new note in the vault — the fast path for single-note creation.
 
@@ -189,6 +240,13 @@ def silica_write_note(
     from silica.kernel.checkpoints import get_checkpoint_store
     from silica.kernel.workqueue import path_lease
 
+    docs: list[str] = []
+    code_ref: str | None = None
+    if documents:
+        docs, code_ref, err = _bind_documents(documents)
+        if err:
+            return {"error": err}
+
     if template == "none":
         content = body
     else:
@@ -205,6 +263,8 @@ def silica_write_note(
         )
         content = tpl.render_note(source, fields)
     content = tpl.ensure_system_floor(content)
+    if docs:
+        content = tpl.stamp_documents(content, docs, code_ref)
 
     # The existence check and the create must be atomic: the fs backend's
     # create() now raises on an existing note, but the pre-check under lease
