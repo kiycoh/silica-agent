@@ -352,6 +352,9 @@ def silica_curate(
     )
     plan = compose_curation_plan(report)
     available = plan.counts()                    # pre-filter shape (no_matches honesty)
+    # Computed pre-filter: a bare `x.md` target that hit several folders would
+    # otherwise apply to notes the caller never named, invisibly.
+    ambiguous = plan.ambiguous_targets(targets)
     plan = plan.filtered(kinds, targets)         # may raise ValueError → tool error
 
     result: dict[str, Any] = {
@@ -363,6 +366,8 @@ def silica_curate(
             for i in plan.items
         ],
     }
+    if ambiguous:
+        result["ambiguous_targets"] = ambiguous
 
     if plan.is_empty():
         # A filter that emptied a non-empty plan is `no_matches`, not

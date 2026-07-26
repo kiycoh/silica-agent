@@ -116,11 +116,11 @@ class CurationPlan:
             if kset is not None and item.kind not in kset:
                 return False
             if reqs:
-                # ponytail: bare-stem `x.md` suffix-matches every folder's x.md
+                # A bare stem `x.md` suffix-matches every folder's x.md
                 # (intended convenience); the escape hatch is a folder-qualified
                 # path (Concepts/x.md), which the segment-boundary rule narrows.
-                # Warn on multi-folder matches if a bare stem ever curates the
-                # wrong note.
+                # `ambiguous_targets` reports when a bare stem hit >1 folder, so
+                # --apply can never silently rewrite a note the caller never named.
                 paths = [_norm_note_path(item.target)]
                 if item.partner:
                     paths.append(_norm_note_path(item.partner))
@@ -131,6 +131,38 @@ class CurationPlan:
             return True
 
         return CurationPlan(items=[i for i in self.items if keep(i)])
+
+    def ambiguous_targets(
+        self,
+        targets: list[str] | None = None,
+    ) -> dict[str, list[str]]:
+        """Bare-stem requests that match items in more than one folder.
+
+        `filtered` matches a request against any path segment-suffix, so a bare
+        `x.md` selects EVERY folder's `x.md`. That is convenient for a dry-run
+        and dangerous for --apply, which would rewrite notes the caller never
+        named. Maps each such request to the sorted distinct paths it hits (>=2
+        by definition); a folder-qualified request never appears. Pure, and
+        deliberately advisory: "curate every x.md" stays expressible.
+        """
+        out: dict[str, list[str]] = {}
+        for t in (targets or []):
+            if not t.strip():
+                continue
+            req = _norm_note_path(t)
+            if "/" in req:
+                continue                      # folder-qualified: unambiguous by construction
+            hits: set[str] = set()
+            for item in self.items:
+                for raw in (item.target, item.partner):
+                    if not raw:
+                        continue
+                    p = _norm_note_path(raw)
+                    if p == req or p.endswith("/" + req):
+                        hits.add(p)
+            if len(hits) > 1:
+                out[t] = sorted(hits)
+        return out
 
 
 def compose_curation_plan(report: VaultReport) -> CurationPlan:

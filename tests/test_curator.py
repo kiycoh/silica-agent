@@ -262,3 +262,26 @@ def test_filtered_unknown_kind_raises_listing_valid_kinds():
     assert "dedups" in msg
     for valid in ("autolink", "orphan", "dedup", "refine"):
         assert valid in msg
+
+
+def test_ambiguous_targets_flags_bare_stem_hitting_several_folders():
+    """A bare `x.md` selects every folder's x.md — harmless on a dry-run, but
+    --apply would rewrite notes the caller never named."""
+    plan = CurationPlan(items=[
+        CurationItem(kind="refine", target="Concepts/x.md"),
+        CurationItem(kind="refine", target="Other/x.md"),
+        CurationItem(kind="refine", target="Concepts/y.md"),
+    ])
+    assert plan.ambiguous_targets(["x.md"]) == {"x.md": ["Concepts/x.md", "Other/x.md"]}
+    assert plan.ambiguous_targets(["y.md"]) == {}              # single hit, not ambiguous
+    assert plan.ambiguous_targets(["Concepts/x.md"]) == {}     # folder-qualified escape hatch
+    assert plan.ambiguous_targets([]) == {}
+    assert plan.ambiguous_targets(None) == {}
+
+
+def test_ambiguous_targets_counts_partners_and_ignores_extension():
+    """dedup items carry a second note in `partner`; --apply touches it too."""
+    plan = CurationPlan(items=[
+        CurationItem(kind="dedup", target="A/dup.md", partner="B/dup.md"),
+    ])
+    assert plan.ambiguous_targets(["dup"]) == {"dup": ["A/dup.md", "B/dup.md"]}
