@@ -67,12 +67,14 @@ class ObsidianFSBackend(GraphIndexMixin):
     def _path_of(self, ref: NoteRef | str) -> str | None:
         if isinstance(ref, NoteRef):
             return ref.path
-        if ref.endswith(".md"):
+        if ref in self._notes:
             return ref
-        matched = self._notes_by_name.get(ref.lower(), [])
-        if matched:
-            return matched[0].path
-        return None
+        # A bare name, a vault-relative path, with or without ".md": the link
+        # resolver already handles all four shapes. Trusting a ".md" suffix as
+        # a graph key instead made links("Statistica.md") return [] for a note
+        # actually stored at Matematica/Statistica/Statistica.md.
+        resolved = self._resolve_target(ref)
+        return resolved.path if resolved else None
 
     # ------------------------------------------------------------------
     # Indexing (in-memory graph)

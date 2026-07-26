@@ -157,3 +157,24 @@ def test_vault_root_artifacts_excluded_from_index(tmp_path):
     mentioners = backend._mention_index.get("real", set())
     assert "GRAPH_REPORT.md" not in mentioners
     assert "log.md" not in mentioners
+
+
+def test_links_resolve_every_ref_shape(tmp_path):
+    """links()/backlinks() accept a bare name, a vault-relative path, +/- ".md".
+
+    The tools hand the model {name, path} pairs, so it feeds back either one.
+    Trusting a ".md" suffix as a graph key made links("Note.md") return [] for
+    a note stored at folder/sub/Note.md — a silent empty, not an error.
+    """
+    vault = tmp_path / "vault"
+    (vault / "folder" / "sub").mkdir(parents=True)
+    (vault / "folder" / "sub" / "Note.md").write_text("[[Target]]", encoding="utf-8")
+    (vault / "Target.md").write_text("# Target", encoding="utf-8")
+
+    backend = ObsidianFSBackend(str(vault))
+    for ref in ("Note", "Note.md", "folder/sub/Note", "folder/sub/Note.md"):
+        assert [r.name for r in backend.links(ref)] == ["Target"], ref
+    for ref in ("Target", "Target.md"):
+        assert [r.name for r in backend.backlinks(ref)] == ["Note"], ref
+
+    assert backend.links("Nonexistent") == []
