@@ -13,6 +13,10 @@ class Command:
     usage: str
     summary: str
     examples: tuple[str, ...] = ()
+    # REPL-only: driven by the terminal session itself, so the web GUI cannot run
+    # it as a chat turn (it has its own affordance instead — new chat, the header
+    # panel, the thinking toggle). Kept out of the GUI's command picker.
+    repl_only: bool = False
 
 
 COMMANDS: tuple[Command, ...] = (
@@ -273,42 +277,49 @@ COMMANDS: tuple[Command, ...] = (
         group="system",
         usage="",
         summary="show this help",
+        repl_only=True,
     ),
     Command(
         name="/model",
         group="system",
         usage="",
         summary="show the current LLM model",
+        repl_only=True,
     ),
     Command(
         name="/tools",
         group="system",
         usage="",
         summary="list registered tools",
+        repl_only=True,
     ),
     Command(
         name="/clear",
         group="system",
         usage="",
         summary="reset conversation history",
+        repl_only=True,
     ),
     Command(
         name="/verbose",
         group="system",
         usage="",
         summary="cycle tool progress: off → new → all → verbose",
+        repl_only=True,
     ),
     Command(
         name="/thinking",
         group="system",
         usage="",
         summary="toggle display of the reasoning block",
+        repl_only=True,
     ),
     Command(
         name="/exit",
         group="system",
         usage="",
         summary="exit silica",
+        repl_only=True,
     ),
 )
 

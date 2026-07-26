@@ -42,13 +42,6 @@ _busy = False  # one turn at a time; a second /chat is refused with 409
 current_session_id: str | None = None  # file backing the live conversation, if saved
 SESSIONS_DIR = Path.home() / ".silica" / "web_sessions"  # persisted chat transcripts
 
-# Direct-tool commands the REPL handles console-side; the GUI now runs them
-# synchronously without an LLM round-trip, yielding a fast Markdown response.
-_WEB_DIRECT_COMMANDS = {
-    "/embed", "/cooccur", "/status", "/undo", "/dedup", "/curate", 
-    "/refine", "/enrich", "/stale", "/impact", "/plans", "/path", "/contested", "/revert", "/review"
-}
-
 
 # Fresh-session seed, precomputed so /reset ("new chat") is instant instead of
 # rebuilding the vault map + token count on the click path (~seconds on a real
@@ -530,27 +523,30 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
             loop.call_soon_threadsafe(q.put_nowait, data)
 
     try:
-        agent_msg = _agent_message_for(text)
-        
-        # Intercept direct REPL tools for synchronous, LLM-free execution
-        if text.strip().split() and text.strip().split()[0].lower() in _WEB_DIRECT_COMMANDS:
+        # A slash command follows the REPL's dispatch order (silica/cli.py): the
+        # direct handler first — synchronous, no LLM round-trip — then the
+        # workflow expansion. Asking the same handler the REPL asks is the point:
+        # the hand-kept list of "web commands" that used to gate this drifted, and
+        # /lexical /wiki /graph /map /find /vault fell through it into an error.
+        if text.startswith("/"):
             from silica.cli import _handle_direct_shortcut
             from silica.ui.console import CONSOLE
-            
-            messages.append({"role": "user", "content": text, "origin": "cli"})
-            
+
             def _run_direct():
                 with CONSOLE.capture() as capture:
                     handled = _handle_direct_shortcut(text, messages)
                 return handled, capture.get()
 
             handled, captured_out = await asyncio.to_thread(_run_direct)
-                
+
             if handled:
+                # Appended only once the verdict is in: a False falls through to
+                # the agent below, which appends the expanded turn itself.
+                messages.append({"role": "user", "content": text, "origin": "cli"})
                 out = captured_out.strip()
                 answer = f"```text\n{out}\n```" if out else "```text\n(done)\n```"
                 messages.append({"role": "assistant", "content": answer})
-                
+
                 # Yield a fake agent turn with the direct result
                 yield {
                     "type": "done",
@@ -561,6 +557,7 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
                 }
                 return
 
+        agent_msg = _agent_message_for(text)
         if agent_msg is None:
             yield {"type": "error", "error": f"'{text}' not available in this session"}
             return
@@ -660,9 +657,16 @@ def supported_types():
 
 @app.get("/commands")
 def list_commands():
-    """List of all REPL commands for the web GUI's fuzzy picker."""
+    """Commands the web GUI's fuzzy picker offers — everything the chat turn can
+    actually dispatch. `repl_only` ones are terminal-session business and would
+    only answer 'not available in this session' if offered here."""
     from silica.ui.commands import COMMANDS
-    return [{"name": c.name, "summary": c.summary, "usage": c.usage} for c in COMMANDS]
+
+    return [
+        {"name": c.name, "summary": c.summary, "usage": c.usage}
+        for c in COMMANDS
+        if not c.repl_only
+    ]
 
 
 async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]:
@@ -880,6 +884,10 @@ def vault_info():
     except Exception as exc:
         return {"error": str(exc)}
     return {
+        # `path` so the header label follows a `/vault <dir>` switch mid-session:
+        # this endpoint already re-runs after every turn, the boot-time header
+        # never did.
+        "path": CONFIG.vault_path or "",
         "notes": sum(1 for n in nodes if n.get("type") != "ghost"),
         "links": sum(1 for e in edges if e.get("type") == "EXTRACTED"),
         "clusters": len(communities),

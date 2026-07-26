@@ -117,6 +117,77 @@ def test_index_cache_busts_churning_assets(client):
     assert "/static/app.js\"" not in html, "unversioned app.js reference still present"
 
 
+def _repl_dispatched_commands() -> set[str]:
+    """Command names the REPL's two dispatchers recognise, read off their source.
+
+    ponytail: a source-level lint, because the direct handler does the work inline
+    (calling it to ask "do you know /embed?" would rebuild an index). It breaks if
+    the dispatch stops being a `cmd == "/x"` chain — rewrite it as a dict then, and
+    read the keys.
+    """
+    import inspect
+    import re
+
+    from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
+
+    src = inspect.getsource(_handle_direct_shortcut) + inspect.getsource(_expand_workflow_shortcut)
+    return set(re.findall(r'cmd (?:==|in \()\s*"(/[a-z-]+)"', src)) | set(
+        re.findall(r'"(/[a-z-]+)"\)', src)
+    )
+
+
+def test_every_advertised_command_is_dispatchable_by_the_gui():
+    """The GUI's picker must not offer what the chat turn answers 'not available'
+    to. This is the drift that shipped: the web kept its own hand-written list of
+    direct commands, and /lexical /wiki /graph /map /find /vault were never on it.
+    """
+    from silica.ui.commands import COMMANDS
+
+    dispatched = _repl_dispatched_commands()
+    orphans = [c.name for c in COMMANDS if not c.repl_only and c.name not in dispatched]
+    assert not orphans, f"advertised in the GUI but no dispatcher handles them: {orphans}"
+
+
+def test_commands_endpoint_hides_repl_only_commands(client):
+    tc, _ = client
+    from silica.ui.commands import COMMANDS
+
+    offered = {c["name"] for c in tc.get("/commands").json()}
+    assert "/exit" not in offered and "/help" not in offered
+    assert offered == {c.name for c in COMMANDS if not c.repl_only}
+
+
+def test_direct_command_runs_without_an_llm_round_trip(client, monkeypatch):
+    """/plans is REPL-direct: the GUI must run it inline, not hand it to the agent."""
+    tc, server = client
+
+    def boom(*a, **kw):
+        raise AssertionError("a direct command must not reach the agent")
+
+    monkeypatch.setattr(server, "run_agent", boom)
+
+    events = _read_sse(tc.post("/chat", json={"text": "/plans"}))
+    assert events[-1]["type"] == "done"
+    assert [m["content"] for m in server.messages if m["role"] == "user"] == ["/plans"]
+
+
+def test_declined_direct_command_leaves_no_duplicate_user_turn(client, monkeypatch):
+    """Every slash command is offered to the direct handler first; one it declines
+    must fall through with exactly ONE user turn in history — the expanded one."""
+    tc, server = client
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+
+    tc.post("/chat", json={"text": "/summarize Concepts/RAG.md"})
+    users = [m["content"] for m in server.messages if m["role"] == "user"]
+    assert len(users) == 1, f"duplicated user turn: {users}"
+    assert users[0] != "/summarize Concepts/RAG.md", "the agent got the raw command, not the expansion"
+
+
 def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
     tc, server = client
 

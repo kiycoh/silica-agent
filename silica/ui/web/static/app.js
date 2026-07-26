@@ -410,6 +410,7 @@ $("#composer").addEventListener("submit", (e) => {
   const t = input.value;
   input.value = "";
   autoGrow(input);
+  renderCommands(input.value); // clearing by hand fires no `input` event — dismiss the picker
   if (staged.length) nucleateStaged(t); // files attached: upload + act on them together
   else send(t);
 });
@@ -563,6 +564,7 @@ async function loadVaultInfo() {
     const r = await fetch("/vault_info");
     const data = await r.json();
     if (data.error) return;
+    if (data.path) $("#vault").textContent = data.path; // follows a /vault switch
     $("#stat-notes").textContent = data.notes;
     $("#stat-links").textContent = data.links;
     $("#stat-clusters").textContent = data.clusters;
