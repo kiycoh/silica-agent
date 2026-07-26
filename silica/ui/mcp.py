@@ -19,11 +19,8 @@ module loads without the [mcp] extra.
 """
 from __future__ import annotations
 
-import logging
 import sys
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 # Search + read + single-note write + structural lookup: the surface a coding
 # agent needs to use the vault as memory. Everything else (pipelines, batches,
@@ -107,6 +104,12 @@ def run_mcp(all_tools: bool = False) -> int:
         async with stdio_server() as (read, write):
             await server.run(read, write, server.create_initialization_options())
 
-    logger.info("silica mcp: serving %d tools on stdio", len(tools))
+    # stderr, not stdout: stdout is the protocol channel. Without this the
+    # server looks hung when a human runs it by hand instead of a client.
+    print(
+        f"silica mcp: serving {len(tools)} tools on stdio, waiting for a client "
+        "(Ctrl+C to stop)",
+        file=sys.stderr,
+    )
     anyio.run(_serve)
     return 0
