@@ -25,6 +25,22 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
+def _strip_titles(node: Any) -> Any:
+    """Drop every `title` from a JSON Schema, at any depth.
+
+    pydantic emits one per field that just restates the field name in Title Case
+    ("with_cooccurrence" → "With Cooccurrence"). Pure annotation, zero
+    information for the model, and the whole toolset is re-sent on every
+    iteration of the agent loop: ~600 tokens per request on the chat toolset.
+    Popping only the top-level title left all of the per-property ones behind.
+    """
+    if isinstance(node, dict):
+        return {k: _strip_titles(v) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_strip_titles(v) for v in node]
+    return node
+
+
 class Tool:
     """Metadata and executor for a single registered tool."""
 
@@ -61,15 +77,12 @@ class Tool:
 
     def json_schema(self) -> dict:
         """Return the OpenAI-compatible function schema for this tool."""
-        # Build a clean JSON Schema, removing pydantic's 'title' noise
-        schema = self.params_model.model_json_schema()
-        schema.pop("title", None)
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": schema,
+                "parameters": _strip_titles(self.params_model.model_json_schema()),
             },
         }
 
@@ -126,9 +139,12 @@ def tool(
 
     def decorator(fn: Callable) -> Callable:
         tool_name = fn.__name__
-        tool_desc = fn.__doc__ or ""
+        # cleandoc, not strip: a docstring's continuation lines carry the source
+        # indentation, and every "\n    " is its own token in a description sent
+        # on every request.
+        tool_desc = inspect.cleandoc(fn.__doc__ or "")
         TOOLS[tool_name] = Tool(
-            fn, tool_name, tool_desc.strip(), params_model, cls,
+            fn, tool_name, tool_desc, params_model, cls,
             collapse=collapse, summarize=summarize, sensitive=sensitive,
             internal=internal,
         )

@@ -237,36 +237,57 @@ def _meter_site() -> str:
 
 # Anthropic bills the entire prompt every turn unless the request carries an
 # explicit cache breakpoint; the OpenAI family caches long prefixes on its own,
-# and local backends have no billing to amortise. So this applies to Anthropic
-# models only, whether direct or proxied (openrouter/, bedrock/, vertex_ai/).
-_CACHEABLE_MODELS = ("anthropic", "claude")
+# and local backends have no billing to amortise. Gemini caches implicitly from
+# 2.5 on, but an explicit breakpoint raises the hit rate through OpenRouter.
+# Applies whether direct or proxied (openrouter/, bedrock/, vertex_ai/); the
+# native gemini/ route ignores the marker rather than rejecting it.
+_CACHEABLE_MODELS = ("anthropic", "claude", "gemini")
+
+
+def _cache_marked(msg: dict) -> dict:
+    """Copy of `msg` with a cache breakpoint on its content, else `msg` as-is.
+
+    Only plain non-empty string content is marked. A tool-role message's blocks
+    get nested inside a `tool_result` by the translation layer, where a
+    cache_control marker is not a valid position, so those are left alone.
+    """
+    content = msg.get("content")
+    if not isinstance(content, str) or not content:
+        return msg
+    return {**msg, "content": [
+        {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}},
+    ]}
 
 
 def _with_prompt_cache(model: str, messages: list[dict]) -> list[dict]:
-    """Mark the system prompt as an Anthropic cache breakpoint.
+    """Mark up to two cache breakpoints in the request.
 
-    An agentic turn's static head is the tool schemas plus the system prompt —
-    together the largest stable prefix we send, and re-billed in full on every
-    turn without this. Anthropic orders the prompt tools → system → messages and
-    a breakpoint caches everything up to and including its own block, so ONE
-    breakpoint on the system block covers the tool schemas too.
+    A breakpoint caches everything up to and including its own block, and the
+    prompt is ordered tools → system → messages, so:
+
+      • the LAST leading system message caches the whole static head — the tool
+        schemas (~7k tokens), the system prompt, and the vault map. Marking only
+        messages[0] left every later system message outside the prefix.
+      • the last user message caches the conversation accumulated so far, which
+        is otherwise re-billed in full on every turn.
+
+    Never mutates `messages`: it is the caller's live history and run_agent keeps
+    appending to it, so a marker persisted there would end up in the stored
+    conversation and in every later turn.
     """
     if not any(k in model.lower() for k in _CACHEABLE_MODELS):
         return messages
-    if not messages or messages[0].get("role") != "system":
-        return messages
-    content = messages[0].get("content")
-    if not isinstance(content, str) or not content:
-        return messages  # already content blocks, or nothing to cache
-    # Copy the head: `messages` is the caller's live history and run_agent keeps
-    # appending to it, so mutating it here would persist the marker into the
-    # stored conversation and into every later turn's history.
-    return [
-        {**messages[0], "content": [
-            {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}},
-        ]},
-        *messages[1:],
-    ]
+    out = list(messages)
+    head = 0
+    while head < len(out) and out[head].get("role") == "system":
+        head += 1
+    if head:
+        out[head - 1] = _cache_marked(out[head - 1])
+    for i in range(len(out) - 1, head - 1, -1):
+        if out[i].get("role") == "user":
+            out[i] = _cache_marked(out[i])
+            break
+    return out
 
 
 def _cached_tokens(usage: dict) -> int:
@@ -422,7 +443,15 @@ def call_llm(
         PROVIDER_PRESETS,
         clamp_max_tokens,
         ollama_num_ctx,
+        _to_wire,
     )
+
+    # The wire boundary: strips the internal `origin` field and renders the
+    # <silica-cli> marker. The interactive loop calls this module directly, so
+    # without it `origin` reached the provider verbatim (litellm forwards unknown
+    # message keys) and the CLI marker was never applied on the chat path.
+    # Idempotent, so the provider paths that already ran it are unaffected.
+    messages = [_to_wire(m) for m in messages]
 
     input_chars = len(str(messages)) + (len(str(tools)) if tools else 0)
     kwargs: dict = {
@@ -494,8 +523,14 @@ def call_llm(
         def _stream_once():
             on_delta("reset", "")
             chunks = []
+            # include_usage: without it the provider sends no usage chunk and
+            # stream_chunk_builder falls back to counting tokens locally, so the
+            # token meter reports an estimate and `cached_tokens` — the only way
+            # to verify the breakpoints above are hitting — never arrives.
+            # Providers that don't support it (ollama_chat) drop it themselves.
             _stream = _bounded_stream(
-                lambda: litellm.completion(**kwargs, stream=True),
+                lambda: litellm.completion(
+                    **kwargs, stream=True, stream_options={"include_usage": True}),
                 _LOCAL_LLM_TIMEOUT, model)
             for chunk in _stream:
                 chunks.append(chunk)
@@ -538,8 +573,12 @@ def call_llm(
     raw = ([(tc.id, tc.function.name, tc.function.arguments) for tc in message.tool_calls]
            if message.tool_calls else None)
     assistant_msg, parsed_calls = build_assistant_message(message.content, raw)
-    if reasoning:
-        assistant_msg["reasoning_content"] = reasoning
+    # `reasoning_content` is deliberately NOT stored in the history: it is
+    # re-sent on every later iteration of the tool loop (litellm forwards it
+    # verbatim, and ollama_chat maps it to `thinking`), which re-bills a
+    # multi-thousand-token trace once per iteration for nothing — no provider
+    # but Anthropic consumes it, and Anthropic wants thinking_blocks. Display
+    # reads LLMResponse.reasoning instead.
     if isinstance(blocks, list):
         assistant_msg["thinking_blocks"] = blocks
 

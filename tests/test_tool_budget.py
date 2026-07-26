@@ -72,12 +72,56 @@ def test_chat_tools_actually_cuts_the_block():
 _MSGS = [{"role": "system", "content": "you are silica"}, {"role": "user", "content": "hi"}]
 
 
+def _marked(text):
+    return [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+
+
 def test_cache_breakpoint_marks_system_for_anthropic():
     out = _with_prompt_cache("anthropic/claude-opus-4", _MSGS)
-    assert out[0]["content"] == [
-        {"type": "text", "text": "you are silica", "cache_control": {"type": "ephemeral"}},
+    assert out[0]["content"] == _marked("you are silica")
+    # Second breakpoint on the last user message: without it the whole
+    # conversation is re-billed at full price on every turn.
+    assert out[1]["content"] == _marked("hi")
+
+
+def test_cache_breakpoint_covers_the_whole_static_head():
+    # The vault map is a second system message; marking only messages[0] left it
+    # (and anything else appended to the head) outside the cached prefix.
+    msgs = [
+        {"role": "system", "content": "you are silica"},
+        {"role": "system", "content": "vault map"},
+        {"role": "user", "content": "hi"},
     ]
-    assert out[1] == _MSGS[1]
+    out = _with_prompt_cache("anthropic/claude-opus-4", msgs)
+    assert out[0] == msgs[0]  # not the breakpoint — the head's LAST block is
+    assert out[1]["content"] == _marked("vault map")
+    assert out[2]["content"] == _marked("hi")
+
+
+def test_cache_breakpoint_skips_tool_results():
+    # A tool message's content blocks get nested inside a tool_result by the
+    # translation layer, where cache_control is not a valid position.
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c1"}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "{}"},
+    ]
+    out = _with_prompt_cache("anthropic/claude-opus-4", msgs)
+    assert out[3] == msgs[3]
+    assert out[1]["content"] == _marked("hi")  # rolling marker walks back to it
+
+
+def test_cache_breakpoint_marks_the_latest_user_turn_only():
+    msgs = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "second"},
+    ]
+    out = _with_prompt_cache("anthropic/claude-opus-4", msgs)
+    assert out[1] == msgs[1]
+    assert out[3]["content"] == _marked("second")
 
 
 def test_cache_breakpoint_applies_through_a_proxy_prefix():
@@ -85,9 +129,17 @@ def test_cache_breakpoint_applies_through_a_proxy_prefix():
     assert isinstance(out[0]["content"], list)
 
 
-def test_cache_breakpoint_skips_non_anthropic():
-    for model in ("ollama/gemma4:e4b", "openai/gpt-4o", "gemini/gemini-2.0-flash"):
+def test_cache_breakpoint_skips_providers_that_cache_on_their_own():
+    # OpenAI caches long prefixes itself; a local backend has no billing to
+    # amortise. Gemini is NOT here: its explicit breakpoints raise the hit rate
+    # through OpenRouter, and the native route ignores the marker.
+    for model in ("ollama/gemma4:e4b", "openai/gpt-4o", "deepseek/deepseek-chat"):
         assert _with_prompt_cache(model, _MSGS) is _MSGS
+
+
+def test_cache_breakpoint_applies_to_gemini():
+    out = _with_prompt_cache("openrouter/google/gemini-2.5-pro", _MSGS)
+    assert out[0]["content"] == _marked("you are silica")
 
 
 def test_cache_breakpoint_never_mutates_caller_history():
@@ -100,10 +152,14 @@ def test_cache_breakpoint_never_mutates_caller_history():
 
 def test_cache_breakpoint_tolerates_odd_histories():
     assert _with_prompt_cache("anthropic/claude-opus-4", []) == []
-    no_sys = [{"role": "user", "content": "hi"}]
-    assert _with_prompt_cache("anthropic/claude-opus-4", no_sys) is no_sys
+    # No system head: the rolling breakpoint still lands on the user turn.
+    no_sys = _with_prompt_cache("anthropic/claude-opus-4", [{"role": "user", "content": "hi"}])
+    assert no_sys[0]["content"] == _marked("hi")
+    # Content already in block form, or empty: left exactly as it came in.
     blocks = [{"role": "system", "content": [{"type": "text", "text": "x"}]}]
-    assert _with_prompt_cache("anthropic/claude-opus-4", blocks) is blocks
+    assert _with_prompt_cache("anthropic/claude-opus-4", blocks) == blocks
+    empty = [{"role": "system", "content": ""}, {"role": "user", "content": ""}]
+    assert _with_prompt_cache("anthropic/claude-opus-4", empty) == empty
 
 
 if __name__ == "__main__":

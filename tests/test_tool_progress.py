@@ -228,7 +228,9 @@ def test_llm_captures_reasoning(mock_completion):
     assert res.text == "My answer"
     assert res.assistant_message["role"] == "assistant"
     assert res.assistant_message["content"] == "My answer"
-    assert res.assistant_message["reasoning_content"] == "Thinking hard..."
+    # Reasoning is surfaced on the response but kept OUT of the history: it would
+    # be re-sent (and re-billed) on every later iteration of the tool loop.
+    assert "reasoning_content" not in res.assistant_message
 
     mock_message2 = MagicMock()
     mock_message2.content = "Answer with blocks"
