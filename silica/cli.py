@@ -988,6 +988,29 @@ def _pick_target_folder(md_files: list[str]) -> str:
     return pick
 
 
+def _target_and_save(args: list[str]) -> tuple[str, str]:
+    """Split `<free-text target words> [--save=<path>]` into (target, save_path)."""
+    save_path = ""
+    words: list[str] = []
+    for arg in args:
+        if arg.startswith("--save="):
+            save_path = arg[len("--save="):]
+        elif not arg.startswith("-"):
+            words.append(arg)
+    return " ".join(words).strip(), save_path
+
+
+def _save_or_readonly_clause(save_path: str) -> str:
+    """The trailing persistence contract shared by /schematize and /diagram."""
+    if save_path:
+        return (
+            f"Then write it to the note at `{save_path}` using silica_write_note "
+            f"(create it if missing, overwrite if present): the table/diagram is "
+            f"the entire body, plus a one-line title."
+        )
+    return "READ-ONLY: do not create, edit, patch, or move any note."
+
+
 def _expand_workflow_shortcut(user_input: str) -> str | None:
     """Expand workflow shortcuts (e.g. /report, /nucleate) into agent-directed messages.
 
@@ -1004,6 +1027,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         /compare "<A>" "<B>" [...]
         /quiz <note|folder> [--n=10]
         /relate <note> [--n=8]
+        /schematize <note|folder|topic> [--save=<path>]
+        /diagram <note|folder|topic> [--save=<path>]
 
     Examples:
         /report
@@ -1016,6 +1041,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         /nucleate paper.pdf --target=Concepts/AI
         /nucleate "Inbox/papers/With Spaces.pdf" --target=Concepts/AI
         /convert paper.pdf
+        /schematize "the ingest pipeline"
+        /diagram Concepts/ML --save=Concepts/ML/map.md
     """
     if not user_input.strip().startswith("/"):
         return None  # not a shortcut — skip shlex entirely, plain prose can have stray quotes/apostrophes
@@ -1500,6 +1527,38 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             f"neighbor as a [[wikilink]]. If a neighbor is `contested: true` or contradicts the "
             f"target, flag it.\n"
             f"READ-ONLY: do not create, edit, patch, or move any note."
+        )
+
+    if cmd == "/schematize":
+        target, save_path = _target_and_save(parts[1:])
+        if not target:
+            return "Error: /schematize requires a target. Usage: /schematize <note|folder|topic> [--save=<path>]"
+        return (
+            f"Schematize {json.dumps(target)} from the vault.\n"
+            f"Resolve the target: it may be a note (path or title), a folder (list and "
+            f"skim its notes), or a general topic (search the vault, then read the top "
+            f"matches).\n"
+            f"Output in chat: a one-line caption, then a Markdown table whose rows/columns "
+            f"best decompose what you found (components, phases, comparison dimensions, "
+            f"whatever shape fits); do not force a fixed template.\n"
+            f"{_save_or_readonly_clause(save_path)}"
+        )
+
+    if cmd == "/diagram":
+        target, save_path = _target_and_save(parts[1:])
+        if not target:
+            return "Error: /diagram requires a target. Usage: /diagram <note|folder|topic> [--save=<path>]"
+        return (
+            f"Diagram {json.dumps(target)} from the vault.\n"
+            f"Resolve the target the same way as /schematize (note, folder, or topic; "
+            f"search and read as needed).\n"
+            f"Pick whichever Mermaid diagram type fits what you found best: flowchart/graph "
+            f"for architectures and processes, mindmap for concept trees, sequence for "
+            f"temporal flows, classDiagram or erDiagram for structured relationships, "
+            f"timeline for chronologies. Do not default to one type mechanically.\n"
+            f"Output in chat: a one-line caption, then a single fenced ```mermaid block "
+            f"and nothing else.\n"
+            f"{_save_or_readonly_clause(save_path)}"
         )
 
     return None

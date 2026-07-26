@@ -266,6 +266,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `/compare "A" "B"` | Comparison table, surfaces contradictions |
 | `/quiz <note> [--n=10]` | Active-recall quiz from your notes |
 | `/relate <note>` · `/path A B` | How notes relate · shortest reading path |
+| `/schematize <target>` · `/diagram <target>` | Table · Mermaid diagram of a note, folder, or topic |
 | `/find <query>` | Semantic search |
 
 **Bring in and reshape**

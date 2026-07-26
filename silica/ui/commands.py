@@ -114,6 +114,20 @@ COMMANDS: tuple[Command, ...] = (
         summary="typed relationship map: how/why one note relates to its vault neighbors",
         examples=("/relate Concepts/AI/RAG.md --n=6",),
     ),
+    Command(
+        name="/schematize",
+        group="workflow",
+        usage="<note|folder|topic> [--save=<path>]",
+        summary="Markdown table schematizing a note, folder, or topic",
+        examples=("/schematize Concepts/ML", '/schematize "the ingest pipeline"'),
+    ),
+    Command(
+        name="/diagram",
+        group="workflow",
+        usage="<note|folder|topic> [--save=<path>]",
+        summary="Mermaid diagram of a note, folder, or topic",
+        examples=("/diagram kernel/codegraph.py", '/diagram "the ingest pipeline" --save=Concepts/diagram.md'),
+    ),
     # Direct — immediate, no LLM round-trip
     Command(
         name="/status",
