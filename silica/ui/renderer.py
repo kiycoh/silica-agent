@@ -236,6 +236,7 @@ def _stage_track(pipeline_phases: list[dict], console_width: int) -> "Text":
     Leading/trailing "…" indicate clipped phases.
     """
     status_map: dict[str, str] = {e["phase"]: e["status"] for e in pipeline_phases}
+    start_map: dict[str, float] = {e["phase"]: e["start"] for e in pipeline_phases if e.get("start")}
 
     running_idx = next(
         (i for i, p in enumerate(_PHASE_ORDER) if status_map.get(p) == "running"),
@@ -262,7 +263,9 @@ def _stage_track(pipeline_phases: list[dict], console_width: int) -> "Text":
         if st == "done":
             t.append(f"✓ {phase}", style="dim")
         elif st == "running":
-            t.append(f"◉ {phase}", style="bold #22d3ee")
+            start = start_map.get(phase)
+            suffix = f" {_fmt_dur(time.monotonic() - start)}" if start else ""
+            t.append(f"◉ {phase}{suffix}", style="bold #22d3ee")
         elif st == "failed":
             t.append(f"✗ {phase}", style="bold red")
         else:
@@ -277,6 +280,23 @@ def _stage_track(pipeline_phases: list[dict], console_width: int) -> "Text":
     t.no_wrap = True
     t.overflow = "ellipsis"
     return t
+
+
+class _StageTrack:
+    """Re-renders ``_stage_track`` on every Live auto-refresh tick.
+
+    Same trick ``rich.spinner.Spinner`` uses to animate without explicit
+    ``.update()`` calls: Live's own refresh thread re-renders whatever is
+    currently displayed, so a running phase's elapsed time ticks live instead
+    of freezing at the value captured when the phase started.
+    """
+
+    def __init__(self, phases: list[dict], width: int) -> None:
+        self._phases = phases
+        self._width = width
+
+    def __rich_console__(self, console, options):
+        yield _stage_track(self._phases, self._width)
 
 
 class _ProgressRenderer:
@@ -365,14 +385,16 @@ class _ProgressRenderer:
         """Callback registered as the global pipeline hook while injector runs."""
         label = _PHASE_LABELS.get(phase, phase)
         if status == "running":
-            self._phase_start_times[phase] = time.monotonic()
+            now = time.monotonic()
+            self._phase_start_times[phase] = now
             for entry in self._pipeline_phases:
                 if entry["phase"] == label:
                     entry["status"] = "running"
                     entry["elapsed"] = None
+                    entry["start"] = now
                     break
             else:
-                self._pipeline_phases.append({"phase": label, "status": "running", "elapsed": None})
+                self._pipeline_phases.append({"phase": label, "status": "running", "elapsed": None, "start": now})
         elif status in ("done", "failed"):
             start = self._phase_start_times.pop(phase, time.monotonic())
             dur = elapsed if elapsed is not None else (time.monotonic() - start)
@@ -436,7 +458,7 @@ class _ProgressRenderer:
                     text=f" [bold]injector[/] [dim]·[/] {escape(self._inject_inbox_label)}",
                     style="brand.cyan",
                 )
-                parts: list = [header, Padding(_stage_track(self._pipeline_phases, CONSOLE.width), (0, 0, 0, 2))]
+                parts: list = [header, Padding(_StageTrack(self._pipeline_phases, CONSOLE.width), (0, 0, 0, 2))]
                 if self._inject_progress is not None:
                     parts.append(Padding(self._inject_progress, (0, 0, 0, 2)))
                 renderables.append(Group(*parts))

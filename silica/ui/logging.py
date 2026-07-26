@@ -30,19 +30,18 @@ class LiveAwareStreamHandler(logging.StreamHandler):
         pass  # always dynamic — ignore the value StreamHandler.__init__ assigns
 
     def emit(self, record: logging.LogRecord) -> None:
-        # Serialize the stderr write against CONSOLE's stdout flush. Without this,
-        # a background-thread log (e.g. websocket keepalive) can land mid-way
-        # through a main-thread `CONSOLE.print` and split the LLM answer panel.
-        # rich holds `_lock` (an RLock) around its own buffer flush, so grabbing
-        # the same lock forces our line fully before or after — never inside.
-        # ponytail: couples to rich's private _lock; if rich drops it, fall back
-        # to unsynchronized emit (the pre-existing race), never crash logging.
-        lock = getattr(CONSOLE, "_lock", None)
-        if lock is None:
-            super().emit(record)
-            return
-        with lock:
-            super().emit(record)
+        # Do NOT wrap this in CONSOLE._lock: while a Live is active, writing to
+        # the redirected stderr re-enters rich's own Live.process_renderables(),
+        # which acquires Live._lock (a *different* RLock). A background thread
+        # holding Console._lock while blocking on Live._lock, concurrently with
+        # the main thread holding Live._lock (inside Live.update()) and wanting
+        # Console._lock, is a classic two-lock deadlock — reproduced live via
+        # py-spy: two identical stack dumps seconds apart, zero progress.
+        # rich's own Live._lock/Console._lock already serialize concurrent
+        # writes; adding a second, independently-ordered lock on top is what
+        # turns that safe serialization into a cycle. Accept the pre-existing
+        # rare torn-panel-line race instead of a guaranteed hang.
+        super().emit(record)
 
 
 class HumanFriendlyFormatter(logging.Formatter):

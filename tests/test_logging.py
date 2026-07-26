@@ -194,9 +194,14 @@ def test_ansi_formatter_applies_repr_highlighting(monkeypatch):
     assert "\x1b[32m" in out and "\x1b[1;36m" in out
 
 
-def test_bg_handler_serializes_with_console_lock():
-    """A background emit must block while the main thread holds CONSOLE's lock,
-    so a keepalive line can't split a main-thread CONSOLE.print (the LLM answer).
+def test_bg_handler_does_not_take_console_lock():
+    """A background emit must NOT wait on CONSOLE's lock.
+
+    Emitting under an active Live re-enters rich's Live._lock; a thread holding
+    Console._lock while wanting Live._lock, against a main thread holding
+    Live._lock and wanting Console._lock, is a two-lock cycle that hangs the
+    whole REPL. rich already serializes the writes, so this handler must add no
+    lock of its own — the regression this pins is the hang, not a torn line.
     """
     import threading
     from silica.ui.console import CONSOLE
@@ -209,13 +214,11 @@ def test_bg_handler_serializes_with_console_lock():
         handler.emit(logging.LogRecord("t", logging.INFO, "", 0, "hi", (), None))
         emitted.set()
 
-    with CONSOLE._lock:  # stand in for a main-thread print holding the flush lock
+    with CONSOLE._lock:  # stand in for a main thread mid-render
         t = threading.Thread(target=_bg)
         t.start()
-        # While we hold the lock the emit is blocked — it must not complete.
-        assert not emitted.wait(0.25)
+        assert emitted.wait(1.0), "emit blocked on CONSOLE._lock — deadlock risk is back"
     t.join(timeout=1)
-    assert emitted.is_set()  # released → emit proceeds
 
 
 def test_no_root_handler_caches_real_stderr(monkeypatch):
