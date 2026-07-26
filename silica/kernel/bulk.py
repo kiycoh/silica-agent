@@ -151,8 +151,8 @@ def _execute_patch(op: Op, path: str) -> dict:
     # Either way the hub-link repair must still land, or the post-write lint
     # fails this op on every retry (2026-07-17 nucleate run: notes patched by
     # an interrupted run could never be re-patched).
-    # ponytail: reads provenance.json per patch op; cache per run if a large
-    # re-ingest ever drags.
+    # read_records memoizes the parsed ledger on (path, mtime, size), so this
+    # stays one parse per run rather than one per patch op.
     from silica.kernel.provenance import note_authored_by
     already_present = templates.block_present(nc.content, heading, source_basename) or (
         bool(source_basename) and note_authored_by(path, source_basename)

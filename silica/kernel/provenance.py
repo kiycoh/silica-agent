@@ -80,6 +80,14 @@ def source_valid_from(source_text: str, seen_override: str | None = None) -> str
     return datetime.now().date().isoformat()
 
 
+# ponytail: single-entry memo keyed on (path, mtime_ns, size) — a big re-ingest
+# calls this once per patch op (bulk._execute_patch → note_authored_by) and would
+# otherwise re-parse the whole ledger every time. Self-invalidating: any writer,
+# in-process or not, moves mtime/size. Widen to an LRU only if two vaults ever
+# interleave reads in one process.
+_records_memo: tuple[tuple[str, int, int], list[dict[str, Any]]] | None = None
+
+
 def read_records(
     source: str | None = None,
     *,
@@ -93,23 +101,42 @@ def read_records(
     is authoritative — run_id/sha history is not reconstructible from the
     vault — and a later append_record would otherwise clobber the corrupt
     bytes with a fresh array.
+
+    The returned list is always the caller's own: append_record mutates what it
+    gets back, and the memo below must not see that.
     """
+    global _records_memo
+
     path = _store_path(vault_path)
     if not path or not path.exists():
         return []
     try:
-        records = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(records, list):
-            raise ValueError(f"expected JSON array, got {type(records).__name__}")
-    except Exception as exc:
-        from silica.kernel.paths import quarantine
+        st = path.stat()
+        key = (str(path), st.st_mtime_ns, st.st_size)
+    except OSError:
+        key = None
 
-        dest = quarantine(path)
-        logger.warning("provenance: corrupt store quarantined to %s: %s", dest or path, exc)
-        return []
+    records: list[dict[str, Any]] | None = None
+    if key is not None and _records_memo is not None and _records_memo[0] == key:
+        records = _records_memo[1]
+
+    if records is None:
+        try:
+            records = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(records, list):
+                raise ValueError(f"expected JSON array, got {type(records).__name__}")
+        except Exception as exc:
+            from silica.kernel.paths import quarantine
+
+            dest = quarantine(path)
+            logger.warning("provenance: corrupt store quarantined to %s: %s", dest or path, exc)
+            return []
+        if key is not None:
+            _records_memo = (key, records)
+
     if source is not None:
-        records = [r for r in records if isinstance(r, dict) and r.get("source") == source]
-    return records
+        return [r for r in records if isinstance(r, dict) and r.get("source") == source]
+    return list(records)
 
 
 def append_record(

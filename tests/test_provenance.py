@@ -217,3 +217,49 @@ def test_content_sha256_missing_file_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
 
     assert content_sha256("Inbox/does-not-exist.md") == ""
+
+
+# ---------------------------------------------------------------------------
+# read_records memo (bulk._execute_patch calls this once per patch op)
+# ---------------------------------------------------------------------------
+
+def test_read_records_parses_once_for_repeated_reads(tmp_path, monkeypatch):
+    append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
+
+    import silica.kernel.provenance as prov
+
+    parses = 0
+    real_loads = prov.json.loads
+
+    def counting_loads(*a, **kw):
+        nonlocal parses
+        parses += 1
+        return real_loads(*a, **kw)
+
+    monkeypatch.setattr(prov.json, "loads", counting_loads)
+    for _ in range(5):
+        assert len(read_records(vault_path=str(tmp_path))) == 1
+    assert parses == 1
+
+
+def test_read_records_memo_invalidates_on_write(tmp_path):
+    append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
+    assert len(read_records(vault_path=str(tmp_path))) == 1
+
+    append_record("b.md", "sha2", "r2", ["N2"], vault_path=str(tmp_path))
+    assert len(read_records(vault_path=str(tmp_path))) == 2
+
+    # an out-of-process writer must be seen too: rewrite the file behind our back
+    store = tmp_path / DEFAULT_PROVENANCE_FILENAME
+    store.write_text(json.dumps([]), encoding="utf-8")
+    assert read_records(vault_path=str(tmp_path)) == []
+
+
+def test_read_records_caller_cannot_poison_the_memo(tmp_path):
+    """append_record mutates the list it gets back; the memo must not see it."""
+    append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
+
+    first = read_records(vault_path=str(tmp_path))
+    first.append({"source": "ghost.md"})
+
+    assert [r["source"] for r in read_records(vault_path=str(tmp_path))] == ["a.md"]
