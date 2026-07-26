@@ -20,11 +20,18 @@ confirm the edit held. Local-first. Your files stay plain markdown, readable wit
 </p>
 
 <p align="center">
+  <b>78%</b> answerable accuracy and <b>~90%</b> correct refusals on LoCoMo &nbsp;·&nbsp;
+  <b>100%</b> write integrity across a real 758-note vault<br/>
+  <sub><a href="#measured">how these were measured, and the numbers that do not flatter</a></sub>
+</p>
+
+<p align="center">
   <a href="#why-silica">Why Silica</a> &nbsp;•&nbsp;
   <a href="#install">Install</a> &nbsp;•&nbsp;
   <a href="#four-ways-in">Drivers</a> &nbsp;•&nbsp;
   <a href="#what-you-can-do">Features</a> &nbsp;•&nbsp;
   <a href="#how-an-answer-is-grounded">Grounding</a> &nbsp;•&nbsp;
+  <a href="#measured">Measured</a> &nbsp;•&nbsp;
   <a href="#point-it-at-code">Codebase</a> &nbsp;•&nbsp;
   <a href="#how-the-guardrail-works">Guardrails</a> &nbsp;•&nbsp;
   <a href="#command-reference">Commands</a> &nbsp;•&nbsp;
@@ -223,6 +230,32 @@ Fusing by rank is what lets legs that measure nothing comparable sit in the same
 That is the whole reason the highlighted legs matter. They are deterministic and embedder-free, so with no embedding model at all, retrieval keeps working instead of failing. Each hit records its provenance, so an answer can name the note it came from.
 
 The lexical leg is dotted because it is exactly that: optional. Build it with `/lexical` and it joins the same fusion, strong on the rare tokens, proper nouns, and dates that a semantic index is weakest on.
+
+---
+
+## Measured
+
+Every number below comes from the harness in [`evals/`](evals/), run against the product path rather than a benchmark-only shortcut. Samples are small and the judge is a local-grade model, so read them as evidence you can re-run, not as leaderboard entries.
+
+| What was measured | Result | Sample |
+| :--- | :--- | :--- |
+| **LoCoMo**, questions the memory can answer | **77.7%** and **78.0%** accuracy | conv-26 (152 q) and conv-47 (150 q) |
+| **LoCoMo**, questions it should refuse | **94.4%** and **89.7%** correct abstention | 47 q and 40 q |
+| **MuSiQue** multi-hop retrieval | **61.3%** recall@10, **0.83** MRR | 50 questions over an 11,654-note vault |
+| **Link recall** on a real vault: wikilinks stripped, then recovered | **68.8%** of the human's own links found again | 1,196 links across 393 notes |
+| **Fused retrieval** on the same vault, masked pairs | **77.6%** recall@10 | 522 pairs |
+| **Write integrity** on the same vault | **100%** (758 of 758) notes where no write transform introduces a new structural violation | 758 notes |
+
+**How they were run.** LoCoMo ingests two of the ten conversations through the production FSM (`fsm-extractive`) and answers them with the production agent loop, `deepseek-v4-flash` as both answer and judge model, retrieval top-10 through the `bge-reranker-v2-m3` cross-encoder. MuSiQue is retrieval only, no answer model, embeddings plus co-occurrence fused at k=10. The three vault rows are the deterministic tier of the golden harness against a live 758-note Obsidian vault, frozen in [`evals/golden/baseline.json`](evals/golden/baseline.json).
+
+```bash
+uv run python -m evals.golden --vault ~/path/to/vault
+uv run python -m evals.musique --vault BENCH_DIR --corpus musique_corpus.json --questions musique.json --load --index
+uv run python -m evals.locomo --data locomo10.json --run-root RUN_DIR \
+  --conversations conv-26,conv-47 --ingest fsm-extractive --answer agent
+```
+
+**And the numbers that do not flatter.** The same frozen baseline reports 0.33 agreement between `/organize` and the folders the human had already chosen, and 0.11 recall for concept-expanded correlation. They ship unedited next to the good ones.
 
 ---
 
