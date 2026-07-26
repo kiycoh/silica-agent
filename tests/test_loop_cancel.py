@@ -19,7 +19,7 @@ def _fake_resp(*, tool_calls=None, text="done"):
         assistant_message={"role": "assistant", "content": text},
         tool_calls=tool_calls or [],
         text=text,
-        reasoning=None,
+        reasoning=None, usage={},
     )
     return resp
 
@@ -68,7 +68,7 @@ def test_cancel_after_first_iteration():
                 assistant_message={"role": "assistant", "content": ""},
                 tool_calls=[tc],
                 text="",
-                reasoning=None,
+                reasoning=None, usage={},
             )
             token.set()   # set token AFTER first LLM call returns
             return resp

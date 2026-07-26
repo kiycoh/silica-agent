@@ -237,7 +237,7 @@ def test_main_agent_default_toolset_excludes_web_search():
         captured["tools"] = tools
         return SimpleNamespace(
             assistant_message={"role": "assistant", "content": "ok"},
-            tool_calls=[], text="ok", reasoning=None,
+            tool_calls=[], text="ok", reasoning=None, usage={},
         )
 
     with patch("silica.agent.loop.call_llm", fake_call_llm):

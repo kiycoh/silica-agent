@@ -21,7 +21,7 @@ def _resp(tool_calls=None, text="done"):
         assistant_message={"role": "assistant", "content": text},
         tool_calls=tool_calls or [],
         text=text,
-        reasoning=None,
+        reasoning=None, usage={},
     )
 
 

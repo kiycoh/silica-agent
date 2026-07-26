@@ -48,13 +48,13 @@ def _two_turn_llm(tool_name: str):
                 },
                 tool_calls=[SimpleNamespace(id="c1", name=tool_name, args={})],
                 text="",
-                reasoning=None,
+                reasoning=None, usage={},
             )
         return SimpleNamespace(
             assistant_message={"role": "assistant", "content": "done"},
             tool_calls=[],
             text="done",
-            reasoning=None,
+            reasoning=None, usage={},
         )
 
     return fake_call_llm
@@ -115,6 +115,46 @@ def test_compact_context_collapses_old_read_and_recounts(monkeypatch):
     assert collapsed == {2}
     assert "re-call fake_read" in messages[2]["content"]
     assert CONFIG.context_tokens < 1_000  # meter refreshed after the collapse
+
+
+def test_loop_compacts_between_its_own_iterations(monkeypatch):
+    """A fat read must not survive to the end of the turn just because the
+    callers only sweep once run_agent has already returned. On a pinned local
+    window that overrun is truncated in silence, so the loop compacts itself."""
+    from silica.config import CONFIG
+
+    big = "x" * 5_000
+    tool = _FakeTool("fake_read", "lazy", big)
+    calls = [0]
+
+    def fake_call_llm(model, messages, **kw):
+        calls[0] += 1
+        # Four tool calls, then a text answer: enough turns to push the first
+        # read past the 3-turn recency floor.
+        if calls[0] <= 4:
+            cid = f"c{calls[0]}"
+            return SimpleNamespace(
+                assistant_message={"role": "assistant", "tool_calls": [
+                    {"id": cid, "type": "function",
+                     "function": {"name": "fake_read", "arguments": "{}"}}]},
+                tool_calls=[SimpleNamespace(id=cid, name="fake_read", args={})],
+                text="", reasoning=None,
+                usage={"prompt_tokens": 10_000},  # over budget from the first call
+            )
+        return SimpleNamespace(
+            assistant_message={"role": "assistant", "content": "done"},
+            tool_calls=[], text="done", reasoning=None, usage={"prompt_tokens": 10_000},
+        )
+
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 1_000)  # budget = 600
+    messages = [{"role": "user", "content": "q"}]
+    with patch.dict("silica.tools.TOOLS", {"fake_read": tool}, clear=True):
+        with patch("silica.agent.loop.call_llm", fake_call_llm):
+            run_agent(messages=messages, model="m")
+
+    bodies = [m["content"] for m in messages if m.get("role") == "tool"]
+    assert any("re-call fake_read" in b for b in bodies), "no read was collapsed mid-turn"
+    assert bodies[-1] == big, "the most recent read must stay verbatim"
 
 
 def test_write_gate_tools_are_classified_eager():

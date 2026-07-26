@@ -41,7 +41,13 @@ from silica.agent.events import (
     LLMStreamEvent,
 )
 from silica.agent.llm import call_llm
-from silica.agent.compaction import eager_stub
+from silica.agent.compaction import (
+    COMPACT_FLOOR_TURNS,
+    COMPACT_FRACTION,
+    compact_read_history,
+    eager_stub,
+)
+from silica.config import CONFIG
 from silica.agent.concurrency import worker_slot
 from silica.agent.constraints import AgentConstraints
 from silica.tools import TOOLS, Tool
@@ -180,6 +186,11 @@ def run_agent(
     # Value: consecutive failure count
     consecutive_failures: dict[tuple[str, str], int] = {}
 
+    # Message indices already elided by this run's compaction sweeps. The callers
+    # keep their own set across turns; the two never conflict because a stub is
+    # shorter than MIN_COLLAPSE_CHARS, so a second sweep skips it.
+    collapsed: set[int] = set()
+
     def _emit(event: RenderEvent) -> None:
         """Best-effort event emission to callback and bus."""
         if tool_progress_callback is not None:
@@ -264,6 +275,25 @@ def run_agent(
         # No tool calls → model produced a final text response
         if not resp.tool_calls:
             return resp.text or ""
+
+        # The loop is where the history explodes — a single fat read can add
+        # thousands of tokens, and every later iteration re-sends it. The
+        # callers only sweep once run_agent has already returned, so on a local
+        # backend a long turn could overrun the pinned window mid-flight and get
+        # truncated in silence. `prompt_tokens` is the provider's own count of
+        # what we just sent, so this costs no tokenizer pass; when a provider
+        # reports no usage, fall back to the same chars/4 estimate the meter uses.
+        prompt_tokens = resp.usage.get("prompt_tokens") or sum(
+            len(str(m.get("content") or "")) for m in messages
+        ) // 4
+        collapsed = compact_read_history(
+            messages,
+            collapsed,
+            prompt_tokens=prompt_tokens,
+            budget=int(COMPACT_FRACTION * CONFIG.max_context_tokens),
+            floor_turns=COMPACT_FLOOR_TURNS,
+            tools=TOOLS,
+        )
 
         # Dispatch each tool call
         pending_notices: list[dict] = []  # A34: convergence warnings, flushed AFTER

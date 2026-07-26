@@ -19,6 +19,11 @@ from typing import Any
 
 MIN_COLLAPSE_CHARS = 200  # don't collapse a body smaller than its own stub
 
+# ponytail: fixed knobs, promote to Config only if someone actually needs to tune
+# them. Here rather than in the CLI because the agent loop compacts too.
+COMPACT_FRACTION = 0.6   # collapse old reads once history crosses 60% of the window
+COMPACT_FLOOR_TURNS = 3  # the last N assistant turns are never collapsed
+
 
 def generic_projection(result: dict) -> str:
     """Conservative fallback stub for an eager tool with no `summarize`.

@@ -52,27 +52,28 @@ def _update_context_tokens(messages: list[dict]) -> None:
     CONFIG.context_tokens = _count_context_tokens(messages)
 
 
-# ponytail: fixed knobs, promote to Config only if someone actually needs to tune them
-_COMPACT_FRACTION = 0.6   # collapse old reads once history crosses 60% of the window
-_COMPACT_FLOOR_TURNS = 3  # the last N assistant turns are never collapsed
-
-
 def _compact_context(messages: list[dict], collapsed: set[int]) -> set[int]:
     """Collapse old read-tool results once the context meter crosses the budget.
 
-    Runs after _update_context_tokens (which feeds prompt_tokens); when
-    anything collapsed, recounts so the toolbar meter reflects the slimmer
-    history. Loss is recoverable: each stub names the call to re-issue.
+    The between-turns sweep; the agent loop runs the same pass per iteration
+    (see run_agent). Runs after _update_context_tokens (which feeds
+    prompt_tokens); when anything collapsed, recounts so the toolbar meter
+    reflects the slimmer history. Loss is recoverable: each stub names the call
+    to re-issue.
     """
-    from silica.agent.compaction import compact_read_history
+    from silica.agent.compaction import (
+        COMPACT_FLOOR_TURNS,
+        COMPACT_FRACTION,
+        compact_read_history,
+    )
     from silica.tools import TOOLS
 
     updated = compact_read_history(
         messages,
         collapsed,
         prompt_tokens=CONFIG.context_tokens,
-        budget=int(_COMPACT_FRACTION * CONFIG.max_context_tokens),
-        floor_turns=_COMPACT_FLOOR_TURNS,
+        budget=int(COMPACT_FRACTION * CONFIG.max_context_tokens),
+        floor_turns=COMPACT_FLOOR_TURNS,
         tools=TOOLS,
     )
     if updated != collapsed:
