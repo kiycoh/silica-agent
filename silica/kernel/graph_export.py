@@ -244,29 +244,37 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     return edges
 
 
-def detect_communities(
-    nodes: list[dict], edges: list[dict], edge_type: str = "EXTRACTED"
-) -> list[Community]:
-    """Louvain community detection on `edge_type` edges, in-place.
+def edge_graph(nodes: list[dict], edges: list[dict], *, directed: bool = False):
+    """nx graph over EXTRACTED edges between non-ghost nodes.
+
+    The one builder every consumer of the driver graph shares (communities,
+    distances, canvas metrics, the vault report) — they all filtered the same
+    way by hand. `G.nodes()` is the real-id set, so callers need not recompute it.
+    """
+    import networkx as nx
+
+    real = {n["id"] for n in nodes if n.get("type") != "ghost"}
+    G = nx.DiGraph() if directed else nx.Graph()
+    G.add_nodes_from(real)
+    for e in edges:
+        if e.get("type") == "EXTRACTED" and e.get("from") in real and e.get("to") in real:
+            G.add_edge(e["from"], e["to"])
+    return G
+
+
+def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
+    """Louvain community detection on the EXTRACTED (wikilink) edges, in-place.
 
     Assigns node["group"] (int) and node["color"]. Ghost nodes keep group == -1.
-    `edge_type` selects which edge kind carries the topology: EXTRACTED (wikilinks,
-    the default and every existing caller) or SIMILAR (the semantic-map k-NN).
 
     Returns a list of Community objects with topic labels where available.
     """
-    import networkx as nx
     from networkx.algorithms.community import louvain_communities
 
-    real_ids = {n["id"] for n in nodes if n.get("type") != "ghost"}
-    G = nx.Graph()
-    G.add_nodes_from(real_ids)
-    for e in edges:
-        if e.get("type") == edge_type and e["from"] in real_ids and e["to"] in real_ids:
-            G.add_edge(e["from"], e["to"])
+    G = edge_graph(nodes, edges)
 
     if G.number_of_edges() == 0:
-        logger.info("graph_export: no %s edges — community detection skipped.", edge_type)
+        logger.info("graph_export: no EXTRACTED edges — community detection skipped.")
         return []
 
     try:
@@ -303,7 +311,7 @@ def detect_communities(
     except Exception:
         labels = {}
 
-    logger.info("graph_export: %d communities across %d nodes.", len(communities), len(real_ids))
+    logger.info("graph_export: %d communities across %d nodes.", len(communities), G.number_of_nodes())
 
     return [
         Community(
@@ -448,11 +456,6 @@ def save_cluster_ctx(sig: list[int], ctx: dict) -> None:
         logger.debug("graph_export: cluster ctx cache save skipped (%s)", e)
 
 
-def cluster_ctx_map() -> dict[str, dict]:
-    """Just the ctx map from the cached envelope; {} when cold or unreadable."""
-    return (load_cluster_ctx() or {}).get("ctx") or {}
-
-
 def ctx_from_report(report) -> dict[str, dict]:
     """Per-note cluster ctx from a VaultReport (duck-typed: importing
     graph_report here would be a cycle — its compute imports this module)."""
@@ -487,17 +490,12 @@ def graph_distances(source: str, *, folder: str = "") -> dict[str, int] | None:
         nodes, edges = build_graph_data(folder=folder)
     except Exception:
         return None
-    real = {n["id"] for n in nodes if n.get("type") != "ghost"}
-    src = source if source in real else source + ".md"
-    if src not in real:
+    G = edge_graph(nodes, edges)
+    src = source if source in G else source + ".md"
+    if src not in G:
         src = source.removesuffix(".md")
-        if src not in real:
+        if src not in G:
             return None
-    G = nx.Graph()
-    G.add_nodes_from(real)
-    for e in edges:
-        if e.get("type") == "EXTRACTED" and e["from"] in real and e["to"] in real:
-            G.add_edge(e["from"], e["to"])
     dist = nx.single_source_shortest_path_length(G, src)
     return {p.removesuffix(".md"): d for p, d in dist.items()}
 
@@ -528,12 +526,7 @@ def canvas_metrics(nodes: list[dict], edges: list[dict], k: int = 400) -> tuple[
     """
     import networkx as nx
 
-    real = {n["id"] for n in nodes if n.get("type") != "ghost"}
-    G = nx.Graph()
-    G.add_nodes_from(real)
-    for e in edges:
-        if e.get("type") == "EXTRACTED" and e.get("from") in real and e.get("to") in real:
-            G.add_edge(e["from"], e["to"])
+    G = edge_graph(nodes, edges)
 
     giant = max((len(c) for c in nx.connected_components(G)), default=0)
     bet: dict[str, float] = {}

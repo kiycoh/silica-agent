@@ -55,18 +55,6 @@ def lint_tags(data):
             issues.append(f"tag '{t}' is empty after normalization")
     return issues
 
-def normalize_tags(data):
-    from silica.kernel.ofm import LIMITS
-    data = dict(data or {})
-    tags = _ensure_tag_list(data.get('tags'))
-    seen, out = set(), []
-    for t in tags:
-        ct = clean_tag(t)
-        if ct and ct not in seen:
-            seen.add(ct); out.append(ct)
-    data['tags'] = out[:LIMITS["max_tags"]]
-    return data
-
 def dump(data, body):
     """Re-emit a full note: --- yaml --- + blank line + body."""
     fm = yaml.safe_dump(data, allow_unicode=True, sort_keys=False).strip()

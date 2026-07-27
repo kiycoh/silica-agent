@@ -51,7 +51,6 @@ def _isolate_cooccurrence_index(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
     """
     import silica.kernel.cooccurrence as cooc_mod
     monkeypatch.setattr(cooc_mod, "_index_path", lambda: tmp_path / "cooccurrence_index.json")
-    monkeypatch.setattr(cooc_mod, "_LEGACY_INDEX_PATH", tmp_path / "legacy_cooc.json")
 
 
 @pytest.fixture(autouse=True)

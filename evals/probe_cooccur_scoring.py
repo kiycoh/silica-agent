@@ -66,7 +66,8 @@ def bm25_ranker(*, k1: float = K1, b: float = B, binary: bool = False):
     """
 
     def rank(cooccur_store, profile, *, k, blocked, scope):
-        from silica.kernel.relatedness import _concept_idf, _path_in_scope
+        from silica.kernel.paths import in_folder as _path_in_scope
+        from silica.kernel.relatedness import _concept_idf
 
         if not profile:
             return None

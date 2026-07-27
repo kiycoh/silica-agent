@@ -39,6 +39,7 @@ from typing import Any, Callable
 from silica.kernel.cooccurrence import CooccurStore
 from silica.kernel.embed import EmbedStore
 from silica.kernel.graph_export import is_vault_artifact
+from silica.kernel.paths import in_folder
 
 # Standard RRF damping constant (Cormack et al. 2009). Larger -> flatter weight
 # decay across ranks; 60 is the widely-used default.
@@ -182,14 +183,6 @@ def _embed_ranking(
 # Co-occurrence leg (granularity reconciliation)
 # ---------------------------------------------------------------------------
 
-def _path_in_scope(path: str, scope: str | None) -> bool:
-    if not scope:
-        return True
-    s = scope.strip("/").lower()
-    p = path.strip("/").lower()
-    return p == s or p.startswith(s + "/")
-
-
 def _profile_from_seeds(
     cooccur_store: CooccurStore,
     seeds: dict[str, float],
@@ -311,7 +304,7 @@ def _rank_cooccur_from_profile(
             candidates.update(plist)
     note_scores: dict[str, float] = {}
     for path in candidates:
-        if path in blocked or not _path_in_scope(path, scope):
+        if path in blocked or not in_folder(path, scope):
             continue
         # Length normalisation depends on the document alone, so it is hoisted out
         # of the stem loop (this is why the measured cost is +0.7ms per endpoint).

@@ -361,7 +361,7 @@ def test_missing_links_common_neighbors_boosts_ranking(monkeypatch):
     report = VaultReport(
         generated_at="x", scope="", totals={},
         god_nodes=[NodeStat(id="S", label="S", cluster=0,
-                            out_degree=3, in_degree=0, degree=3, pagerank=0.0)],
+                            out_degree=3, in_degree=0, degree=3)],
         bridges=[], orphans=[], dangling=[], clusters=[],
     )
 
@@ -579,7 +579,7 @@ def test_to_digest_analytics_signals():
     r = VaultReport(
         generated_at="t", scope="", totals={},
         god_nodes=[NodeStat(id="a", label="A", cluster=0, out_degree=2,
-                            in_degree=3, degree=5, pagerank=0.0, betweenness=0.42)],
+                            in_degree=3, degree=5, betweenness=0.42)],
         bridges=[], orphans=[], dangling=[],
         clusters=[ClusterStat(cluster_id=0, size=3, hub="Hub/H.md",
                               members=["a"], cohesion=0.5)],

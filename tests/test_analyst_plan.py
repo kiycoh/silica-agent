@@ -26,7 +26,7 @@ from silica.kernel.analyst_plan import (
 
 
 def _node(nid: str, label: str = "", cluster: int = 0, degree: int = 5) -> NodeStat:
-    return NodeStat(id=nid, label=label or nid, cluster=cluster, out_degree=degree // 2, in_degree=degree // 2, degree=degree, pagerank=0.1)
+    return NodeStat(id=nid, label=label or nid, cluster=cluster, out_degree=degree // 2, in_degree=degree // 2, degree=degree)
 
 
 def _cluster(cid: int, size: int, hub: str, members: list[str]) -> ClusterStat:

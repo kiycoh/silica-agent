@@ -239,17 +239,17 @@ def _compute_cooccur_delta(
     stale = stale[:k]
 
     # --- MISSING HUB: central concept with no note titled after it ----------
-    Gc = store.to_networkx(scope=scope)
+    adj = store.adjacency(scope)  # the aggregate to_networkx() would wrap, unwrapped
     titled_stems: set[str] = set()
     for label in node_label.values():
         for sentence in tokenize(label, stem_lang=store.lang, stopword_lang=store.lang):
             titled_stems.update(stem for stem, _surface in sentence)
 
     hubs: list[MissingHub] = []
-    for stem in Gc.nodes():
+    for stem, nbrs in adj.items():
         if stem in titled_stems:
             continue  # a hub note already formalises this concept
-        wdeg = sum(d.get("weight", 0.0) for _u, _v, d in Gc.edges(stem, data=True))
+        wdeg = sum(nbrs.values())
         hubs.append(MissingHub(concept=store.node_label(stem), centrality=round(wdeg, 2)))
     hubs.sort(key=lambda h: (-h.centrality, h.concept))
     hubs = hubs[:k]

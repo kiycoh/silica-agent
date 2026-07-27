@@ -640,23 +640,27 @@ def _resolve_in(note: str, note_paths: list[str], titles: dict[str, str]) -> str
     return None
 
 
+def _driver_graph():
+    """One driver read → (raw notes map, {path: title}, undirected wikilink graph)."""
+    from silica.driver import get_driver
+
+    notes, _unresolved, g = get_driver().graph_data()
+    return (
+        notes,
+        {p.replace("\\", "/"): ref.name for p, ref in notes.items()},
+        g.to_undirected(as_view=True) if hasattr(g, "to_undirected") else g,
+    )
+
+
 def note_resolver():
     """One driver read → a pure closure: ref (path or title) -> graph key | None.
 
     Reuse when resolving many refs per render (e.g. linkifying a message): the
     driver graph is read once, the returned callable does no further IO.
     """
-    from silica.driver import get_driver
-
-    notes, _unresolved, _g = get_driver().graph_data()
-    titles = {p.replace("\\", "/"): ref.name for p, ref in notes.items()}
+    notes, titles, _g = _driver_graph()
     paths = list(notes)
     return lambda ref: _resolve_in(ref, paths, titles)
-
-
-def resolve_note_path(note: str) -> str | None:
-    """Resolve a note path or title to its vault-relative graph key (with .md)."""
-    return note_resolver()(note)
 
 
 def reading_path(
@@ -681,19 +685,9 @@ def reading_path(
     picks the strongest chain instead of the fewest hops.
     """
     if graph is None:
-        from silica.driver import get_driver
-
-        _notes, _unresolved, g = get_driver().graph_data()
-        graph = g.to_undirected(as_view=True) if hasattr(g, "to_undirected") else g
+        _notes, _titles, graph = _driver_graph()
     if cooccur_store is None:  # embed leg unused here — load only the cooccur half
-        try:
-            from silica.config import CONFIG
-            from silica.kernel.cooccurrence import get_cooccur_store
-
-            cs = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-            cooccur_store = cs if len(cs) > 0 else None
-        except Exception:
-            cooccur_store = None
+        cooccur_store = _cooccur_store()
 
     def neighbors(u: str) -> list[tuple[str, tuple[str, float]]]:
         out: dict[str, tuple[str, float]] = {}
@@ -749,13 +743,10 @@ def reading_path(
 
 def gather_materials(root: str, *, latent_k: int = 10) -> MapMaterials:
     """Collect wikilink graph, titles, global communities, and the latent leg."""
-    from silica.driver import get_driver
     from silica.kernel.graph_export import build_graph_data, detect_communities
     from silica.kernel.relatedness import related_notes
 
-    driver = get_driver()
-    notes, _unresolved, g = driver.graph_data()
-    titles = {p.replace("\\", "/"): ref.name for p, ref in notes.items()}
+    _notes, titles, undirected = _driver_graph()
 
     nodes, edges = build_graph_data()
     detect_communities(nodes, edges)  # assigns node["group"] in place (global, seed=42)
@@ -771,16 +762,25 @@ def gather_materials(root: str, *, latent_k: int = 10) -> MapMaterials:
     except Exception:
         latent = []
 
-    undirected = g.to_undirected(as_view=True) if hasattr(g, "to_undirected") else g
     return MapMaterials(
         graph=undirected, titles=titles, community_of=community_of, latent=latent
     )
 
 
+def _cooccur_store():
+    """The cooccur store, or None when empty/unavailable ⇒ that leg abstains."""
+    try:
+        from silica.config import CONFIG
+        from silica.kernel.cooccurrence import get_cooccur_store
+
+        cs = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
+        return cs if len(cs) > 0 else None
+    except Exception:
+        return None
+
+
 def _load_stores():
     """(embed_store, cooccur_store), each None when empty/unavailable ⇒ leg abstains."""
-    from silica.config import CONFIG
-
     embed_store = None
     try:
         from silica.kernel.embed import get_store
@@ -789,12 +789,4 @@ def _load_stores():
     except Exception:
         embed_store = None
 
-    cooccur_store = None
-    try:
-        from silica.kernel.cooccurrence import get_cooccur_store
-        cs = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        cooccur_store = cs if len(cs) > 0 else None
-    except Exception:
-        cooccur_store = None
-
-    return embed_store, cooccur_store
+    return embed_store, _cooccur_store()

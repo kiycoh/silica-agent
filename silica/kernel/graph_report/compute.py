@@ -64,6 +64,7 @@ def compute_report(
     from silica.kernel.graph_export import (
         build_graph_data,
         detect_communities,
+        edge_graph,
         structural_gaps,
     )
 
@@ -82,19 +83,10 @@ def compute_report(
     real_nodes = [n for n in nodes if n.get("type") != "ghost"]
     real_ids: set[str] = {n["id"] for n in real_nodes}
 
-    # Build undirected graph from EXTRACTED edges only (authoritative)
-    G_und = nx.Graph()
-    G_und.add_nodes_from(real_ids)
-    for e in edges:
-        if e.get("type") == "EXTRACTED" and e["from"] in real_ids and e["to"] in real_ids:
-            G_und.add_edge(e["from"], e["to"])
-
-    # Build directed graph for in/out-degree
-    G_dir = nx.DiGraph()
-    G_dir.add_nodes_from(real_ids)
-    for e in edges:
-        if e.get("type") == "EXTRACTED" and e["from"] in real_ids and e["to"] in real_ids:
-            G_dir.add_edge(e["from"], e["to"])
+    # One build over EXTRACTED edges only (authoritative); the undirected view
+    # everything but in/out-degree wants is a projection of the same edges.
+    G_dir = edge_graph(nodes, edges, directed=True)
+    G_und = G_dir.to_undirected()
 
     # Degree maps
     out_deg: dict[str, int] = dict(G_dir.out_degree())
@@ -303,7 +295,6 @@ def compute_report(
                 out_degree=out_deg.get(nid, 0),
                 in_degree=in_deg.get(nid, 0),
                 degree=deg.get(nid, 0),
-                pagerank=round(pr.get(nid, 0.0), 5),
                 betweenness=round(bet.get(nid, 0.0), 4),
             ))
 

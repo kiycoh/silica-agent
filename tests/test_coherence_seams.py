@@ -184,3 +184,12 @@ def test_duplicate_pairs_fall_back_to_minhash_without_an_embedder(monkeypatch):
     # MinHash Jaccard is not on the cosine scale, so it must never auto-merge:
     # everything goes to the judged band.
     assert confirmed == []
+
+    # Same leg when the store cannot even be built (the other entry into the
+    # fallback): an exception must not read as "the vault is clean" either.
+    def _boom():
+        raise RuntimeError("no index")
+
+    monkeypatch.setattr("silica.kernel.embed.get_store", _boom)
+    borderline_2, confirmed_2 = embed_signals._compute_duplicate_pairs(report)
+    assert (borderline_2, confirmed_2) == (borderline, confirmed)

@@ -27,16 +27,18 @@ from silica.config import CONFIG
 logger = logging.getLogger(__name__)
 
 
-def in_folder(path: str, folder: str) -> bool:
+def in_folder(path: str, folder: str | None) -> bool:
     """True if vault-rel `path` is inside `folder` (empty folder ⇒ whole vault).
 
-    Single source of truth for the folder-scoping used by index reconciliation
-    (embed/cooccur build_index) and the /embed, /cooccur, /dedup tools.
+    Single source of truth for folder-scoping: index reconciliation
+    (embed/cooccur build_index), the /embed, /cooccur, /dedup tools, the
+    graph-report signals, and the cooccur/relatedness scope filters. The `.md`
+    strip is a no-op on keyspaces that are already suffix-free (cooccur_key).
     """
     if not folder:
         return True
     f = folder.replace("\\", "/").strip("/").lower()
-    p = path.replace("\\", "/").removesuffix(".md").lower()
+    p = path.replace("\\", "/").strip("/").lower().removesuffix(".md")
     return p == f or p.startswith(f + "/")
 
 

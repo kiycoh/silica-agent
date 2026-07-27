@@ -122,8 +122,8 @@ def build_substrate(
         # {} when cold — annotation simply absent). Same cluster = cohesion,
         # different cluster = deliberate bridge: the distiller's parent choice
         # needs to know which.
-        from silica.kernel.graph_export import cluster_ctx_map, cluster_hub_of
-        gctx_map = cluster_ctx_map()
+        from silica.kernel.graph_export import cluster_hub_of, load_cluster_ctx
+        gctx_map = (load_cluster_ctx() or {}).get("ctx") or {}
 
         lines: list[str] = []
         for r in related:

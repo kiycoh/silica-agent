@@ -23,19 +23,6 @@ def has_wikilink(content, name):
 
 from silica.kernel.ast import parse_headings, _balanced, WIKILINK_TARGET_RE
 
-def sections_by_h2(body):
-    """Split body at H2 boundaries. Each section's content includes nested H3+.
-    Returns [{'title': str, 'content': str}]."""
-    heads = [h for h in parse_headings(body) if h["level"] == 2]
-    out = []
-    for i, h in enumerate(heads):
-        start = h["pos"]
-        end = heads[i + 1]["pos"] if i + 1 < len(heads) else len(body)
-        block = body[start:end]
-        section_body = block.split("\n", 1)[1] if "\n" in block else ""
-        out.append({"title": h["text"], "content": section_body.strip()})
-    return out
-
 
 # ---------------------------------------------------------------------------
 # OFM structural linter (calibrated against golden notes)
@@ -57,8 +44,6 @@ CALLOUT_TYPES = frozenset({
 
 # Matches the YYYY, MM, DD date prefix (allows optional time suffix)
 DATE_PREFIX_RE = re.compile(r'^\s*\d{4}[-,]\s*\d{1,2}[-,]\s*\d{1,2}')
-# Matches callout opening lines (case-insensitive type)
-CALLOUT_RE = re.compile(r'^>\s*\[!([A-Za-z]+)\][+-]?', re.MULTILINE)
 
 
 # _balanced is imported from ast.py

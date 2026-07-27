@@ -89,11 +89,11 @@ def silica_mindmap(note_path: str, force: bool = False) -> dict[str, Any]:
         build_mapview,
         gather_materials,
         mapview_to_canvas,
-        resolve_note_path,
+        note_resolver,
     )
 
     # Accept a path OR a title (the GUI input and casual CLI use give titles).
-    root = resolve_note_path(note_path)
+    root = note_resolver()(note_path)
     if root is None:
         return {"error": f"'{note_path}' not found in the vault graph."}
 
@@ -435,9 +435,9 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
     # tells the caller whether a candidate sits in the query's own knowledge
     # area or across a cluster boundary. Memory-lane notes are another vault —
     # never annotated.
-    from silica.kernel.graph_export import cluster_ctx_map, cluster_hub_of, graph_distances
+    from silica.kernel.graph_export import cluster_hub_of, graph_distances, load_cluster_ctx
 
-    gctx_map = cluster_ctx_map()
+    gctx_map = (load_cluster_ctx() or {}).get("ctx") or {}
     # Structural distance: wikilink hops from the query to each result — the
     # per-pair coherence read. High fused score + null (unreachable) or large
     # distance = a missing link worth creating; distance 1 = already linked.

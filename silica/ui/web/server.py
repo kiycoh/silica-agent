@@ -767,15 +767,15 @@ def mindmap(note: str = ""):
     from silica.kernel.mindmap import (
         build_mapview,
         gather_materials,
+        note_resolver,
         render_map_svg,
-        resolve_note_path,
     )
 
     if not note.strip():
         return HTMLResponse("<p style='font-family:monospace;color:#8a93a3'>enter a note: /map?note=…</p>")
     try:
         # Accept a title or a path — the input field usually gives a title.
-        root = resolve_note_path(note)
+        root = note_resolver()(note)
         if root is None:
             return HTMLResponse(
                 f"<p style='font-family:monospace;color:#8a93a3'>'{note}' not found in vault.</p>"

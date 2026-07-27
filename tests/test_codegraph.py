@@ -2,7 +2,7 @@
 """kernel/codegraph — derived structural code index (spec-code-lane §1)."""
 from pathlib import Path
 
-from silica.kernel.codegraph import classify_import, is_first_party, package_of
+from silica.kernel.codegraph import classify_import, is_first_party
 
 PY_FILES = {
     "silica/__init__.py",
@@ -68,7 +68,6 @@ def test_moved_helpers_still_work(tmp_path):
     (tmp_path / "silica" / "kernel").mkdir(parents=True)
     assert is_first_party("silica.kernel.embed", tmp_path)
     assert not is_first_party("numpy", tmp_path)
-    assert package_of("silica.kernel.embed", tmp_path) == "silica/kernel"
 
 
 import subprocess

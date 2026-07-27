@@ -7,6 +7,7 @@ Read-only over the report — no graph computation, no signal logic.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 from pathlib import Path
 
@@ -43,20 +44,22 @@ _TOTAL_LABELS = {
 }
 
 
-def _fold(add, kind: str, title: str, items: list, fmt, *, cap: int = _LIST_CAP, more_json: bool = True) -> None:
+def _fold(add, kind: str, title: str, items: list, fmt) -> None:
     """Wrap a bulleted list in a collapsed OFM callout (`> [!kind]- title`).
 
     Every line is `>`-prefixed so it renders inside the callout and the
     `[[wikilinks]]` survive — an HTML <details> fold would swallow them.
-    `fmt(item)` returns each bullet's text; the list is capped at `cap`.
+    `fmt(item)` returns each bullet's text; the list is capped at `_LIST_CAP`.
     Trailing blank line separates this callout from the next block.
+
+    The overflow line always points at GRAPH_REPORT.json: every folded list is
+    a VaultReport field, so the full list is always there.
     """
     add(f"> [!{kind}]- {title}")
-    for it in items[:cap]:
+    for it in items[:_LIST_CAP]:
         add(f"> - {fmt(it)}")
-    if len(items) > cap:
-        tail = " (see GRAPH_REPORT.json)" if more_json else ""
-        add(f"> - _… +{len(items) - cap} more{tail}_")
+    if len(items) > _LIST_CAP:
+        add(f"> - _… +{len(items) - _LIST_CAP} more (see GRAPH_REPORT.json)_")
     add("")
 
 
@@ -146,6 +149,10 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
     # (spec-harness-promotion §3). Lower is more coherent; the six signed
     # contributions sum to the total, so ΔE between two reports decomposes
     # per term. Every term is an existing VaultReport field.
+    # Local import, and it has to stay local: vault_energy imports
+    # graph_report.models at module level, and graph_report/__init__ imports
+    # this module — a module-level import here deadlocks whenever vault_energy
+    # is the first of the two to be imported.
     from silica.kernel.vault_energy import vault_energy
 
     e = vault_energy(r)
@@ -247,7 +254,7 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
     add("## Dangling Links (Unresolved Wikilinks)")
     if r.dangling:
         _fold(add, "bug", f"{len(r.dangling)} broken links", r.dangling,
-              lambda d: f"`{d['target']}` — {d['refs']}×", more_json=False)
+              lambda d: f"`{d['target']}` — {d['refs']}×")
     else:
         add("_No unresolved wikilinks._")
         add("")
@@ -290,32 +297,31 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
 
     # Co-occurrence delta (proposed, embedder-free)
     if r.autolink_candidates:
-        lines.append("\n## Autolink Candidates _(co-occurrence − wikilink — not authoritative)_")
-        lines.append("| Source | Target | Via | Weight | Hubs | Shared Concepts |")
-        lines.append("|---|---|---|---|---|---|")
+        add("\n## Autolink Candidates _(co-occurrence − wikilink — not authoritative)_")
+        add("| Source | Target | Via | Weight | Hubs | Shared Concepts |")
+        add("|---|---|---|---|---|---|")
         for a in r.autolink_candidates:
             shared = ", ".join(a.shared) if a.shared else "_(associative)_"
-            lines.append(f"| [[{_short(a.source)}]] | [[{_short(a.target)}]] | {a.provenance} | {a.weight} | {a.convergence} | {shared} |")
+            add(f"| [[{_short(a.source)}]] | [[{_short(a.target)}]] | {a.provenance} | {a.weight} | {a.convergence} | {shared} |")
 
     if r.stale_links:
         add("\n## Stale Links _(wikilink − co-occurrence — review)_")
         _fold(add, "note", f"{len(r.stale_links)} stale links", r.stale_links,
-              lambda s: f"[[{_short(s.source)}]] ↔ [[{_short(s.target)}]] _(linked, no shared concepts)_",
-              more_json=False)
+              lambda s: f"[[{_short(s.source)}]] ↔ [[{_short(s.target)}]] _(linked, no shared concepts)_")
 
     if r.missing_hubs:
-        lines.append("\n## Missing Hubs _(central concepts with no hub note)_")
-        lines.append("| Concept | Centrality |")
-        lines.append("|---|---|")
+        add("\n## Missing Hubs _(central concepts with no hub note)_")
+        add("| Concept | Centrality |")
+        add("|---|---|")
         for h in r.missing_hubs:
-            lines.append(f"| {h.concept} | {h.centrality} |")
+            add(f"| {h.concept} | {h.centrality} |")
 
     if r.integration_deficits:
-        lines.append("\n## Integration Deficit _(concept-rich, weakly linked — not authoritative)_")
-        lines.append("| Note | Concepts | Links | Score |")
-        lines.append("|---|---|---|---|")
+        add("\n## Integration Deficit _(concept-rich, weakly linked — not authoritative)_")
+        add("| Note | Concepts | Links | Score |")
+        add("|---|---|---|---|")
         for idf in r.integration_deficits:
-            lines.append(f"| [[{_short(idf.path)}]] | {idf.concepts} | {idf.degree} | {idf.score} |")
+            add(f"| [[{_short(idf.path)}]] | {idf.concepts} | {idf.degree} | {idf.score} |")
 
     if r.code_coverage:
         cc = r.code_coverage
@@ -329,13 +335,11 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
 
     if r.attention_candidates:
         add("\n## Attention Candidates _(recall misses × idle × weakly-linked, not authoritative)_")
-        lines.append("| Note | Idle (days) | Links | Wrong/Asked | Score |")
-        lines.append("|---|---|---|---|---|")
+        add("| Note | Idle (days) | Links | Wrong/Asked | Score |")
+        add("|---|---|---|---|---|")
         for ac in r.attention_candidates:
             asked = f"{ac.misses}/{ac.attempts}" if ac.attempts else "-"
-            lines.append(
-                f"| [[{_short(ac.path)}]] | {ac.days_idle} | {ac.degree} | {asked} | {ac.score} |"
-            )
+            add(f"| [[{_short(ac.path)}]] | {ac.days_idle} | {ac.degree} | {asked} | {ac.score} |")
 
     if r.lean_notes:
         add(f"\n### Lean Notes (Enrichment Candidates) ({len(r.lean_notes)})")
@@ -377,121 +381,55 @@ def to_digest(report: VaultReport, *, max_items: int = 8) -> str:
     lines.append(header)
     lines.append("─" * 36)
 
-    if report.god_nodes:
-        # bet= only when analytics computed it: a popular hub vs a bottleneck
-        # whose removal fragments the discourse are different signals.
-        hubs = ", ".join(
-            f"{n.label}(deg={n.degree}"
-            + (f",bet={n.betweenness}" if n.betweenness else "")
-            + ")"
-            for n in report.god_nodes[:max_items]
-        )
-        lines.append(f"TOP HUBS  {hubs}")
+    def row(label: str, items, fmt) -> None:
+        """`LABEL  a, b, c` capped at max_items. Empty list ⇒ no line at all.
 
-    if report.bridges:
-        shown = report.bridges[:max_items]
-        blist = ", ".join(
-            f"{b.source.rsplit('/',1)[-1].removesuffix('.md')}↔{b.target.rsplit('/',1)[-1].removesuffix('.md')}(w={b.weight})"
-            for b in shown
-        )
-        lines.append(f"BRIDGES  {blist}")
+        The overflow count is never silent: a truncated row that looked complete
+        would read as "this is all of them".
+        """
+        if not items:
+            return
+        body = ", ".join(fmt(it) for it in items[:max_items])
+        if len(items) > max_items:
+            body += f" (+{len(items) - max_items} more)"
+        lines.append(f"{label}  {body}")
 
-    if report.structural_gaps:
-        gaps = ", ".join(
-            f"{_short(g.hub_a)}↮{_short(g.hub_b)}(links={g.inter_edges})"
-            for g in report.structural_gaps[:max_items]
-        )
-        lines.append(f"GAPS  {gaps}")
+    def pair(dp) -> str:
+        return f"{_short(dp.source)}↔{_short(dp.target)}(cos={dp.score})"
 
-    if report.orphans:
-        orp = ", ".join(
-            o.rsplit("/", 1)[-1].removesuffix(".md")
-            for o in report.orphans[:max_items]
-        )
-        extra = f" (+{len(report.orphans)-max_items} more)" if len(report.orphans) > max_items else ""
-        lines.append(f"ORPHANS  {orp}{extra}")
-
-    if report.dangling:
-        dang = ", ".join(
-            f"{d['target']}(×{d['refs']})"
-            for d in report.dangling[:max_items]
-        )
-        lines.append(f"DANGLING  {dang}")
-
-    if report.contested:
-        con = ", ".join(
-            c.path.rsplit("/", 1)[-1].removesuffix(".md")
-            for c in report.contested[:max_items]
-        )
-        lines.append(f"CONTESTED  {con}")
-
-    if report.source_drift:
-        sd = ", ".join(
-            f"{d.note.rsplit('/', 1)[-1].removesuffix('.md')}←{d.source}"
-            for d in report.source_drift[:max_items]
-        )
-        lines.append(f"SOURCE DRIFT  {sd}")
-
-    if report.attention_candidates:
-        att = ", ".join(
-            f"{a.path.rsplit('/',1)[-1].removesuffix('.md')}(idle={a.days_idle}d,deg={a.degree}"
-            + (f",wrong={a.misses}/{a.attempts}" if a.attempts else "")
-            + ")"
-            for a in report.attention_candidates[:max_items]
-        )
-        lines.append(f"ATTENTION  {att}")
-
-    if report.clusters:
-        clist = ", ".join(
-            f"C{c.cluster_id}(n={c.size},hub={c.hub.rsplit('/',1)[-1].removesuffix('.md') if c.hub else '-'}"
-            + (f",coh={c.cohesion}" if c.cohesion else "")
-            + ")"
-            for c in report.clusters[:max_items]
-        )
-        lines.append(f"CLUSTERS  {clist}")
-
-    if report.missing_hubs:
-        mh = ", ".join(
-            f"{h.concept}(cent={h.centrality})"
-            for h in report.missing_hubs[:max_items]
-        )
-        lines.append(f"MISSING HUBS  {mh}")
-
-    if report.integration_deficits:
-        idf = ", ".join(
-            f"{_short(i.path)}(concepts={i.concepts},deg={i.degree})"
-            for i in report.integration_deficits[:max_items]
-        )
-        lines.append(f"INTEGRATION DEFICIT  {idf}")
-
-    if report.missing_links:
-        ml = ", ".join(
-            f"{m.source.rsplit('/',1)[-1].removesuffix('.md')}→{m.target.rsplit('/',1)[-1].removesuffix('.md')}(cos={m.cosine},d={m.d_prev})"
-            for m in report.missing_links[:max_items]
-        )
-        lines.append(f"PROPOSED  {ml}")
-
-    if report.confirmed_duplicate_pairs:
-        cd_list = ", ".join(
-            f"{dp.source.rsplit('/',1)[-1].removesuffix('.md')}↔{dp.target.rsplit('/',1)[-1].removesuffix('.md')}(cos={dp.score})"
-            for dp in report.confirmed_duplicate_pairs[:max_items]
-        )
-        lines.append(f"DUPS  {cd_list}")
-
-    if report.duplicate_pairs:
-        dp_list = ", ".join(
-            f"{dp.source.rsplit('/',1)[-1].removesuffix('.md')}↔{dp.target.rsplit('/',1)[-1].removesuffix('.md')}(cos={dp.score})"
-            for dp in report.duplicate_pairs[:max_items]
-        )
-        lines.append(f"RELATED  {dp_list}")
+    # bet=, wrong= and coh= appear only when the signal exists: a popular hub and
+    # a bottleneck whose removal fragments the discourse are different readings,
+    # and a printed zero would read as "measured, came out flat".
+    row("TOP HUBS", report.god_nodes,
+        lambda n: f"{n.label}(deg={n.degree}"
+                  + (f",bet={n.betweenness}" if n.betweenness else "") + ")")
+    row("BRIDGES", report.bridges,
+        lambda b: f"{_short(b.source)}↔{_short(b.target)}(w={b.weight})")
+    row("GAPS", report.structural_gaps,
+        lambda g: f"{_short(g.hub_a)}↮{_short(g.hub_b)}(links={g.inter_edges})")
+    row("ORPHANS", report.orphans, _short)
+    row("DANGLING", report.dangling, lambda d: f"{d['target']}(×{d['refs']})")
+    row("CONTESTED", report.contested, lambda c: _short(c.path))
+    row("SOURCE DRIFT", report.source_drift, lambda d: f"{_short(d.note)}←{d.source}")
+    row("ATTENTION", report.attention_candidates,
+        lambda a: f"{_short(a.path)}(idle={a.days_idle}d,deg={a.degree}"
+                  + (f",wrong={a.misses}/{a.attempts}" if a.attempts else "") + ")")
+    row("CLUSTERS", report.clusters,
+        lambda c: f"C{c.cluster_id}(n={c.size},hub={_short(c.hub) if c.hub else '-'}"
+                  + (f",coh={c.cohesion}" if c.cohesion else "") + ")")
+    row("MISSING HUBS", report.missing_hubs, lambda h: f"{h.concept}(cent={h.centrality})")
+    row("INTEGRATION DEFICIT", report.integration_deficits,
+        lambda i: f"{_short(i.path)}(concepts={i.concepts},deg={i.degree})")
+    row("PROPOSED", report.missing_links,
+        lambda m: f"{_short(m.source)}→{_short(m.target)}(cos={m.cosine},d={m.d_prev})")
+    row("DUPS", report.confirmed_duplicate_pairs, pair)
+    row("RELATED", report.duplicate_pairs, pair)
 
     return "\n".join(lines)
 
 
 def write_report(report: VaultReport, output_path: str) -> dict:
     """Write GRAPH_REPORT.md and report.json. Returns {path_md, path_json}."""
-    import dataclasses
-
     out_md = Path(output_path)
     out_md.parent.mkdir(parents=True, exist_ok=True)
     out_md.write_text(to_markdown(report), encoding="utf-8")

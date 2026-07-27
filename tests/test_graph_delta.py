@@ -411,9 +411,9 @@ def test_autolink_convergence_counts_hubs_and_drives_ranking(convergence_store):
     report = VaultReport(
         generated_at="", scope="", totals={},
         god_nodes=[
-            NodeStat(id="H1", label="H1", cluster=0, out_degree=1, in_degree=1, degree=2, pagerank=0.0),
-            NodeStat(id="H2", label="H2", cluster=0, out_degree=2, in_degree=2, degree=4, pagerank=0.0),
-            NodeStat(id="H3", label="H3", cluster=0, out_degree=1, in_degree=1, degree=2, pagerank=0.0),
+            NodeStat(id="H1", label="H1", cluster=0, out_degree=1, in_degree=1, degree=2),
+            NodeStat(id="H2", label="H2", cluster=0, out_degree=2, in_degree=2, degree=4),
+            NodeStat(id="H3", label="H3", cluster=0, out_degree=1, in_degree=1, degree=2),
         ],
         bridges=[], orphans=[], dangling=[], clusters=[],
     )

@@ -5,7 +5,6 @@ import re
 from typing import Any
 from silica.driver import DRIVER
 
-DEFAULT_WINDOW = 450          # Chars on each side of a non-heading concept match.
 MAX_EXCERPT_CHARS = 2000      # Hard per-excerpt cap.
 MAX_OCCURRENCES = 2           # Max non-overlapping windows per concept per file.
 FULL_INCLUDE_THRESHOLD = 6000 # Include whole note below this.
@@ -95,13 +94,6 @@ def extract_excerpt_from_content(content: str, concept: str, window: int) -> str
     if not windows:
         return ""
     return safe_truncate("\n\n[...]\n\n".join(windows), MAX_EXCERPT_CHARS)
-
-def extract_excerpt_from_note(note_name: str, concept: str, window: int) -> str:
-    try:
-        nc = DRIVER.read_note(note_name)
-        return extract_excerpt_from_content(nc.content, concept, window)
-    except RuntimeError:
-        return ""
 
 def vault_content_or_excerpt(note_name: str, concept: str, window: int, is_title_match: bool) -> str:
     try:

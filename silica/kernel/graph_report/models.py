@@ -24,7 +24,9 @@ class NodeStat:
     out_degree: int
     in_degree: int
     degree: int       # out+in
-    pagerank: float   # rounded to 5 decimal places
+    # No per-node pagerank: nothing read it (the markdown dropped the column, it
+    # reads 0.0 at vault scale) and VaultReport.pagerank_map already carries the
+    # value for every node, god-nodes included.
     betweenness: float = 0.0  # fraction of shortest paths through the node — bottleneck signal, distinct from degree
 
 

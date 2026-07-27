@@ -34,21 +34,6 @@ _TS_ALIAS_PREFIXES = ("@/", "~/")
 # ponytail: no tsconfig.paths parsing in v1; add it if a real TS repo makes unresolved noisy
 
 
-def package_of(module: str, root: Path) -> str:
-    """Resolve a first-party module to package granularity (silica.kernel.x →
-    silica/kernel). Falls back to the raw module string."""
-    if module.startswith("."):
-        return module  # relative import — can't resolve without the importer's location
-    parts = [p for p in module.replace("/", ".").split(".") if p]
-    pkg: list[str] = []
-    for part in parts:
-        if root.joinpath(*pkg, part).is_dir():
-            pkg.append(part)
-        else:
-            break
-    return "/".join(pkg) if pkg else module
-
-
 def is_first_party(module: str, root: Path) -> bool:
     if module.startswith("."):  # python relative / TS "./x" "../x"
         return True
@@ -169,7 +154,7 @@ class CodeGraph:
         return sorted(p for p, e in self.files.items() if path in e.get("imports", []))
 
     def fan_in(self, path: str) -> int:
-        return sum(1 for e in self.files.values() if path in e.get("imports", []))
+        return len(self.importers(path))
 
     def call_edges(self) -> list[tuple[str, str, str, str]]:
         """Sorted (source_file, target_file, callee, caller) across the graph."""

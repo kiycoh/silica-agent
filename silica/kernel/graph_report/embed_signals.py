@@ -15,6 +15,7 @@ import time
 from typing import Any
 
 from silica.kernel.graph_report.models import DuplicatePair, MissingLink, VaultReport
+from silica.kernel.paths import in_folder
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,11 @@ logger = logging.getLogger(__name__)
 # 90 days the boost is negligible.  The constant is chosen so the recency
 # factor degrades smoothly without overwhelming the cosine signal.
 _RECENCY_HALFLIFE_DAYS = 30.0
+
+
+def _pair_key(d: DuplicatePair) -> tuple[float, str, str]:
+    """Deterministic pair ordering — best score first, then path. Byte-stable output."""
+    return (-d.score, d.source, d.target)
 
 
 def _compute_missing_links(
@@ -117,14 +123,6 @@ def _compute_missing_links(
     return results[:k]
 
 
-def _in_folder(path: str, folder: str) -> bool:
-    if not folder:
-        return True
-    f = folder.replace("\\", "/").strip("/").lower()
-    p = path.replace("\\", "/").removesuffix(".md").lower()
-    return p == f or p.startswith(f + "/")
-
-
 def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
     """Embedder-free near-duplicate pairs — the STABLE leg of the maintenance dedup.
 
@@ -153,7 +151,7 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
     threshold = getattr(CONFIG, "minhash_dup_threshold", 0.6)
     sigs: dict[str, tuple[int, ...]] = {}
     for nid in report.pagerank_map:  # every real node, always populated
-        if not _in_folder(nid, report.scope):
+        if not in_folder(nid, report.scope):
             continue
         try:
             content = DRIVER.read_note(nid).content
@@ -177,7 +175,7 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
             score = estimate_jaccard(sigs[a], sigs[b])
             if score >= threshold:
                 out.append(DuplicatePair(source=a, target=b, score=round(score, 4)))
-    out.sort(key=lambda d: (-d.score, d.source, d.target))
+    out.sort(key=_pair_key)
     return out
 
 
@@ -195,23 +193,27 @@ def _compute_duplicate_pairs(
 
     One cosine pass over the vault feeds both bands; a pair lands in exactly one.
     """
+    store = None
     try:
-        from silica.config import CONFIG
         from silica.kernel.embed import get_store
 
         store = get_store()
         if len(store) == 0:
-            return _minhash_duplicate_pairs(report), []
+            store = None
     except Exception as exc:
         logger.debug("graph_report: embeddings unavailable for dedup (%s)", exc)
+
+    if store is None:
         # Degrade to the embedder-free leg instead of reporting zero duplicates:
         # an empty list here reads as "the vault is clean" and silently disarms
         # /dedup and /curate. Mirrors the abstention contract in relatedness.
         try:
             return _minhash_duplicate_pairs(report), []
-        except Exception as exc2:
-            logger.debug("graph_report: minhash dedup leg also unavailable (%s)", exc2)
+        except Exception as exc:
+            logger.debug("graph_report: minhash dedup leg also unavailable (%s)", exc)
             return [], []
+
+    from silica.config import CONFIG
 
     tau_high = getattr(CONFIG, "sim_threshold_high", 0.85)
     tau_low = getattr(CONFIG, "sim_threshold_low", 0.75)
@@ -220,7 +222,7 @@ def _compute_duplicate_pairs(
     confirmed: list[DuplicatePair] = []
     seen: set[tuple[str, str]] = set()
 
-    scope = [p for p in store.paths() if _in_folder(p, report.scope)]
+    scope = [p for p in store.paths() if in_folder(p, report.scope)]
 
     for p in scope:
         vec = store.get_vec(p)
@@ -247,7 +249,6 @@ def _compute_duplicate_pairs(
         pair = DuplicatePair(source=p, target=tgt, score=round(score, 4))
         (confirmed if score >= tau_high else borderline).append(pair)
 
-    sort_key = lambda d: (-d.score, d.source, d.target)
-    borderline.sort(key=sort_key)
-    confirmed.sort(key=sort_key)
+    borderline.sort(key=_pair_key)
+    confirmed.sort(key=_pair_key)
     return borderline, confirmed

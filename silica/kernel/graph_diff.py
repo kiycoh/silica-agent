@@ -6,25 +6,16 @@ from silica.driver.base import GraphSnapshot, NoteRef
 
 logger = logging.getLogger(__name__)
 
-def normalize_ref(ref: NoteRef) -> str:
-    path = ref.path or ref.name
-    if path.endswith(".md"):
-        path = path[:-3]
-    path = path.replace("\\", "/")
-    return path.strip("/").lower()
-
 def normalize_path(p: str) -> str:
-    if p.endswith(".md"):
-        p = p[:-3]
-    p = p.replace("\\", "/")
-    return p.strip("/").lower()
+    # Case-fold before stripping the suffix so a hand-written "[[Foo.MD]]"
+    # folds onto the same key as "Foo.md" (the old normalize_ref did not).
+    return p.replace("\\", "/").strip("/").lower().removesuffix(".md")
+
+def normalize_ref(ref: NoteRef) -> str:
+    return normalize_path(ref.path or ref.name)
 
 def normalize_link(source_ref: NoteRef, target: str) -> tuple[str, str]:
-    src = normalize_ref(source_ref)
-    tgt = target.replace("\\", "/").strip("/").lower()
-    if tgt.endswith(".md"):
-        tgt = tgt[:-3]
-    return (src, tgt)
+    return (normalize_ref(source_ref), normalize_path(target))
 
 def check_graph_regression(
     pre: GraphSnapshot,

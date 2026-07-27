@@ -22,16 +22,13 @@ from typing import Any
 import orjson
 
 from silica.kernel import language
-from silica.kernel.paths import atomic_write_bytes, quarantine
+from silica.kernel.paths import atomic_write_bytes, in_folder, quarantine
 
 # --- algorithm constants -------------------------------------
 NARRATIVE_WEIGHT = 3
-LANDSCAPE_WEIGHT = 3
 GAP = 4               # effective look-back of GAP - 1 = 3 tokens
 MIN_TOKEN_LEN = 3
 EVIDENCE = "cooccur"
-
-_LEGACY_INDEX_PATH = Path.home() / ".silica" / "index" / "cooccurrence.json"
 
 
 def _index_path() -> Path:
@@ -412,17 +409,10 @@ class CooccurStore:
         if scope is not None and scope in self._scoped_agg_cache:
             return self._scoped_agg_cache[scope]
 
-        def _in_scope(p: str) -> bool:
-            if not scope:
-                return True
-            s = scope.strip("/").lower()
-            pp = p.strip("/").lower()
-            return pp == s or pp.startswith(s + "/")
-
         adj: dict[str, dict[str, float]] = {}
         label_counts: dict[str, dict[str, int]] = {}
         for path, contrib in self._notes.items():
-            if not _in_scope(path):
+            if not in_folder(path, scope):
                 continue
             for stem, meta in contrib.get("nodes", {}).items():
                 lc = label_counts.setdefault(stem, {})
@@ -450,11 +440,7 @@ class CooccurStore:
             return self.paths()
         cached = self._scope_paths_cache.get(scope)
         if cached is None:
-            s = scope.strip("/").lower()
-            cached = [
-                p for p in self._notes
-                if (pp := p.strip("/").lower()) == s or pp.startswith(s + "/")
-            ]
+            cached = [p for p in self._notes if in_folder(p, scope)]
             self._scope_paths_cache[scope] = cached
         return list(cached)
 

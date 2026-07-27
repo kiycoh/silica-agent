@@ -23,8 +23,7 @@ Paper-inspired signals (Marwitz et al., Nature Mach. Intell. 2026):
 Package layout: models (dataclasses), compute (compute_report core),
 embed_signals (embedding proposals), cooccur_delta (co-occurrence vs
 wikilink delta — ADR-0013 CORRELATE lands there), render (output).
-This façade re-exports the full historical module surface; consumers
-import from silica.kernel.graph_report only.
+Consumers import from silica.kernel.graph_report; `__all__` is the surface.
 """
 from __future__ import annotations
 
