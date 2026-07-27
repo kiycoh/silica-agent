@@ -485,7 +485,7 @@ def handle_salience(fsm: "InjectorFSM") -> None:
     Drops concepts whose embedding is too far from the document's thematic
     centroid.  Best-effort: any failure (embedder down, empty index) is
     logged and chunks pass unchanged.  Runs once per file (per-file
-    pipeline); _eval_loop_or_done restarts chunks from COLLISION, which is
+    pipeline); _on_pipeline_end restarts chunks from COLLISION, which is
     correct.
     """
     τ_theme = getattr(orch.CONFIG, "sim_threshold_theme", 0.35)

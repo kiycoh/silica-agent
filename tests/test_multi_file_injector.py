@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
+from silica.router.states import finalize
 from silica.router.orchestrator import InjectorFSM, InjectorState
 from silica.tools import TOOLS
 
@@ -124,7 +125,7 @@ class TestT1MultiFileInit:
         # File 1 not yet processed — its tasks appear only after its own PAYLOAD pass
         assert not [tid for tid in task_ids if tid.startswith("f1_")]
 
-        # File advance (normally triggered by _eval_loop_or_done after f0's last chunk)
+        # File advance (normally triggered by _on_pipeline_end after f0's last chunk)
         assert fsm._advance_file_or_done()
         assert fsm.state == InjectorState.RECON
         fsm.step()  # RECON → CROSSDEDUP
@@ -405,7 +406,7 @@ class TestT4PerFileCleanup:
                     fsm._current_chunk_idx = 0  # ci=0, not last
                     fsm.context["ops_path"] = "/tmp/ops.json"
                     fsm.context["txn_id"] = "txn_1"
-                    fsm._handle_cleanup()
+                    finalize.handle_cleanup(fsm)
         mock_cleanup.assert_not_called()
 
     def test_cleanup_archives_on_last_chunk_of_file(self):
@@ -420,7 +421,7 @@ class TestT4PerFileCleanup:
                     fsm._current_chunk_idx = 1  # ci=1, last chunk
                     fsm.context["ops_path"] = "/tmp/ops.json"
                     fsm.context["txn_id"] = "txn_1"
-                    fsm._handle_cleanup()
+                    finalize.handle_cleanup(fsm)
         mock_cleanup.assert_called_once_with("Inbox/test.md", "done")
 
 

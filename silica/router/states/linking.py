@@ -157,29 +157,16 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
         neighbourhood: list[str] = []
         seen_norm: set[str] = set()
 
-        # Use the O(1) inverted text index if available; fall back to search_context.
-        if hasattr(orch.DRIVER, "mentions_of"):
-            for title in new_titles:
-                try:
-                    for path in orch.DRIVER.mentions_of(title):
-                        norm = os.path.abspath(path)
-                        if norm not in seen_norm and norm not in touched_paths_abs:
-                            seen_norm.add(norm)
-                            neighbourhood.append(path)
-                except Exception as _me:
-                    logger.debug("BACKLINK: mentions_of for '%s' failed: %s", title, _me)
-        else:
-            for title in new_titles:
-                try:
-                    for hit in orch.DRIVER.search_context(title):
-                        p = hit.ref.path or hit.ref.name
-                        norm = os.path.abspath(p)
-                        if norm not in seen_norm and norm not in touched_paths_abs:
-                            seen_norm.add(norm)
-                            neighbourhood.append(p)
-                except Exception as _se:
-                    logger.debug("BACKLINK: search_context for '%s': %s", title, _se)
-
+        # O(1) lookup into the inverted text index (GraphIndexMixin, both backends).
+        for title in new_titles:
+            try:
+                for path in orch.DRIVER.mentions_of(title):
+                    norm = os.path.abspath(path)
+                    if norm not in seen_norm and norm not in touched_paths_abs:
+                        seen_norm.add(norm)
+                        neighbourhood.append(path)
+            except Exception as _me:
+                logger.debug("BACKLINK: mentions_of for '%s' failed: %s", title, _me)
 
         if not neighbourhood:
             fsm._progress_note(fsm._chunk_task_id("backlink"), "backlink", "done")

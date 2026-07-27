@@ -1,4 +1,4 @@
-"""Test that InjectorFSM._handle_write uses bulk_write_atomic per-note atomicity."""
+"""Test that the WRITE phase uses bulk_write_atomic per-note atomicity."""
 from __future__ import annotations
 
 import json
@@ -12,6 +12,7 @@ import silica.driver
 import silica.kernel.progress as prog_mod
 
 from silica.kernel.ops import Op, OpType
+from silica.router import states
 from silica.router.orchestrator import InjectorFSM
 
 
@@ -84,8 +85,8 @@ def test_injector_write_defers_failing_note_keeps_siblings(vault_fsm, monkeypatc
     fsm = vault_fsm.make_fsm()
     fsm.context["chunk"] = {"ops_path": vault_fsm.ops_path([_patch(a), _patch(bad), _patch(c)])}
 
-    # _handle_write should use bulk_write_atomic — per-note lint is applied
-    fsm._handle_write()
+    # WRITE should use bulk_write_atomic — per-note lint is applied
+    states.write.handle_write(fsm)
 
     # Committed notes got the snippet; failed note was reverted
     assert "x" in vault_fsm.read(a)

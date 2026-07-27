@@ -358,9 +358,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
     except Exception as _ge:
         logger.debug("WRITE: git auto-commit skipped (%s)", _ge)
 
-    if not result.committed and result.failed:
-        pass
-    else:
+    if result.committed or not result.failed:
         fsm._progress_note(fsm._chunk_task_id("write"), "write", "done")
 
     # Title-index run cache (Tier 1): make this chunk's new notes visible to
@@ -415,10 +413,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
         else:
             parent_notes.setdefault(effective_parent, []).append((note_name, desc))
 
-    # Flatten for backward-compat references below
-    new_notes = hub_notes
-
-    if not new_notes and not parent_notes:
+    if not hub_notes and not parent_notes:
         logger.info("HUB_UPDATE: no new notes to link, skipping")
         fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "done")
         fsm._transition_success()
@@ -460,7 +455,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
     _hub_key = hub_path.removesuffix(".md")
     _hub_cluster = _gctx.get(_hub_key, {}).get("cluster_id", -1)
     if _gctx and _hub_cluster >= 0:
-        for note_name, _ in new_notes:
+        for note_name, _ in hub_notes:
             _note_key = f"{fsm.target_dir}/{note_name}".replace("//", "/")
             _note_cluster = _gctx.get(_note_key, {}).get("cluster_id", -1)
             if _note_cluster >= 0 and _note_cluster != _hub_cluster:
@@ -481,13 +476,13 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
 
     # Language-aware heading: "## Da: {name}" (Italian) or "## From: {name}" (English).
     # Sample the hub content + first snippet to detect language.
-    _lang_sample = hub_note.content + " ".join(d for _, d in new_notes[:3])
+    _lang_sample = hub_note.content + " ".join(d for _, d in hub_notes[:3])
     moc_heading = _moc_heading(source_name, _lang_sample)
 
     # Build note link lines.
     note_lines = [
         f"- [[{n}]] — {d}" if d else f"- [[{n}]]"
-        for n, d in new_notes
+        for n, d in hub_notes
     ]
 
     # Merge: append to existing section if present (same file, multiple chunks),
@@ -507,7 +502,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
             orch.time.sleep(0.15)
         else:
             logger.warning("HUB_UPDATE: MOC block settle timeout for hub '%s' — graph may lag", hub_path)
-        logger.info("HUB_UPDATE: updated hub '%s' with %d links", hub_path, len(new_notes))
+        logger.info("HUB_UPDATE: updated hub '%s' with %d links", hub_path, len(hub_notes))
     except Exception as e:
         raise RuntimeError(f"HUB_UPDATE: failed to update hub '{hub_path}': {e}")
 

@@ -181,7 +181,7 @@ def test_ledger_null_hash_is_stale(ledger, tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_orchestrator_writes_content_hash(tmp_path, monkeypatch):
-    """InjectorFSM._write_ledger passes the source content_hash from context."""
+    """InjectorFSM ledger writes pass the source content_hash from context."""
     from silica.router.orchestrator import InjectorFSM
     from silica.kernel.ops import Op, OpType
     from silica.config import CONFIG
@@ -216,7 +216,7 @@ def test_orchestrator_writes_content_hash(tmp_path, monkeypatch):
         from silica.kernel.ledger import Ledger
         test_ledger = Ledger(tmp_path / "test.db")
         with patch("silica.kernel.ledger.get_ledger", return_value=test_ledger):
-            fsm._write_ledger("committed")
+            fsm._write_ledger_for_file(0, "committed")
 
         # Verify the ledger row has the content_hash
         rows = test_ledger._conn.execute(

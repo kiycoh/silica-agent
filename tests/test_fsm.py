@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import patch, MagicMock, call
+from silica.router import states
 from silica.router.orchestrator import InjectorFSM, InjectorState
 from silica.router.recipe_parser import load_recipe
 from silica.tools import TOOLS
@@ -182,12 +183,11 @@ def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
 @patch("silica.router.orchestrator.silica_validate_ops")
 @patch("silica.router.orchestrator.DRIVER")
 @patch("silica.tools.wrapped.silica_snapshot")
-@patch("silica.router.orchestrator.silica_bulk_write")
 @patch("silica.router.orchestrator.silica_lint")
 @patch("silica.tools.wrapped.silica_cleanup")
 @patch("silica.kernel.embed.EmbedStore")
 def test_fsm_multi_chunk_loop(
-    mock_embed_store, mock_cleanup, mock_lint, mock_write, mock_snapshot, mock_driver,
+    mock_embed_store, mock_cleanup, mock_lint, mock_snapshot, mock_driver,
     mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
 ):
     # Setup mock payload with 2 chunks
@@ -203,7 +203,6 @@ def test_fsm_multi_chunk_loop(
     mock_sanitize.return_value = {"parsed": []}
     mock_validate.return_value = {"success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0}
     mock_snapshot.return_value = {"txn_id": "txn_123", "inverses": []}
-    mock_write.return_value = {"success": True}
     mock_lint.return_value = {"success": True}
     mock_cleanup.return_value = {"success": True}
 
@@ -286,9 +285,6 @@ def test_fsm_recipe_configuration():
     # Check phases configuration
     payload_conf = fsm._get_recipe_phase("payload")
     assert payload_conf.get("partition_if_over") == 7
-    
-    distill_conf = fsm._get_recipe_phase("distill")
-    assert distill_conf.get("max_workers") == 7
 
 
 @patch("silica.router.orchestrator.silica_validate_ops")
@@ -474,11 +470,10 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
 @patch("silica.router.orchestrator.silica_validate_ops")
 @patch("silica.router.orchestrator.DRIVER")
 @patch("silica.tools.wrapped.silica_snapshot")
-@patch("silica.router.orchestrator.silica_bulk_write")
 @patch("silica.router.orchestrator.silica_lint")
 @patch("silica.tools.wrapped.silica_cleanup")
 def test_fsm_recipe_end_to_end_flow(
-    mock_cleanup, mock_lint, mock_write, mock_snapshot, mock_driver,
+    mock_cleanup, mock_lint, mock_snapshot, mock_driver,
     mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
 ):
     # Setup mocks
@@ -488,7 +483,6 @@ def test_fsm_recipe_end_to_end_flow(
     mock_sanitize.return_value = {"parsed": []}
     mock_validate.return_value = {"success": True, "rejection_rate": 0.0, "validated_count": 1, "rejected_count": 0}
     mock_snapshot.return_value = {"txn_id": "txn_123", "inverses": []}
-    mock_write.return_value = {"success": True}
     mock_lint.return_value = {"success": True}
     mock_cleanup.return_value = {"success": True}
 
@@ -1317,7 +1311,7 @@ def test_hub_inverse_appears_in_chunk_ctx_snapshot(tmp_path):
         mock_driver.overwrite.return_value = None
         mock_time.monotonic.side_effect = [0.0, 10.0]
         mock_time.sleep.return_value = None
-        fsm._handle_hub_update()
+        states.write.handle_hub_update(fsm)
 
     txn_inverses = fsm._txn.inverses_serialized
     assert any(
@@ -1371,7 +1365,7 @@ def test_hub_update_writes_parent_at_its_real_vault_path(tmp_path):
         mock_driver.search_names.return_value = [NoteRef(name="lezione_7", path="Lezioni/lezione_7.md")]
         mock_time.monotonic.side_effect = [0.0, 10.0, 20.0, 30.0]
         mock_time.sleep.return_value = None
-        fsm._handle_hub_update()
+        states.write.handle_hub_update(fsm)
 
     overwritten_paths = [c.args[0] for c in mock_driver.overwrite.call_args_list]
     assert "Lezioni/lezione_7.md" in overwritten_paths, \

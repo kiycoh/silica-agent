@@ -26,10 +26,6 @@ from silica.config import CONFIG
 logger = logging.getLogger(__name__)
 
 
-def _log_work_event(event: Any) -> None:
-    logger.debug("work event: %s", event)
-
-
 class Coordinator:
     def __init__(
         self,
@@ -67,7 +63,7 @@ class Coordinator:
         wq = WorkQueue(run_dir=run_dir)
         self.fsm.work_queue = wq
         self.fsm.warning_ledger = WarningLedger(run_dir=run_dir)
-        BUS.subscribe("work/*", _log_work_event)
+        BUS.subscribe("work/*", lambda e: logger.debug("work event: %s", e))
 
         max_workers = max(1, int(getattr(self.config, "subagent_max_concurrent", 3)))
         pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="subagent")

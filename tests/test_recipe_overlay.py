@@ -44,11 +44,10 @@ def test_unknown_phase_id_is_rejected():
         merge_overlay(_base(), {"phases": [{"id": "translate", "kind": "semantic"}]})
 
 
-def test_reordering_is_rejected():
-    # an overlay cannot change phase order
-    reordered = {"phases": [{"id": "distill"}, {"id": "recon"}]}
-    with pytest.raises(OverlayError):
-        merge_overlay(_base(), reordered)
+def test_overlay_cannot_change_phase_order():
+    # whatever order the overlay lists ids in, the result keeps the base's
+    out = merge_overlay(_base(), {"phases": [{"id": "distill"}, {"id": "recon"}]})
+    assert [p["id"] for p in out["phases"]] == ["recon", "payload", "distill"]
 
 
 def test_does_not_mutate_base():

@@ -78,9 +78,9 @@ class BaseFSM(Generic[StateT]):
                 if "cleanup" in [p["id"] for p in phases]:
                     self.state = self._phase_to_state["cleanup"]
                 else:
-                    self._on_sequence_end()
+                    self._on_pipeline_end()
         elif self.state == self._phase_to_state.get("cleanup"):
-            self._on_cleanup_done()
+            self._on_pipeline_end()
         elif self.state == self._rollback_state:
             self.state = self._error_state
 
@@ -94,6 +94,8 @@ class BaseFSM(Generic[StateT]):
                 except Exception as e:
                     logger.error("FSM Error in state %s: %s", self.state, e)
                     self.context["error"] = str(e)
+                    if self._on_step_error(e):
+                        continue
                     next_state = self._ON_ERROR.get(self.state, self._error_state)
                     if next_state == self._rollback_state and self._txn:
                         self.context["abort_reason"] = str(e)
@@ -108,13 +110,14 @@ class BaseFSM(Generic[StateT]):
     # Hooks — override in subclasses to change terminal behaviour
     # ------------------------------------------------------------------
 
-    def _on_sequence_end(self) -> None:
-        """Called when the recipe sequence is exhausted and no cleanup phase exists."""
+    def _on_pipeline_end(self) -> None:
+        """Called when the recipe sequence is exhausted (after cleanup, if any)."""
         self.state = self._done_state
 
-    def _on_cleanup_done(self) -> None:
-        """Called after the cleanup phase handler succeeds."""
-        self.state = self._done_state
+    def _on_step_error(self, exc: Exception) -> bool:
+        """Called before the _ON_ERROR routing. Return True after setting
+        ``self.state`` yourself to keep the loop going; False for the default."""
+        return False
 
     # ------------------------------------------------------------------
     # Shared recipe helpers
@@ -138,12 +141,7 @@ class BaseFSM(Generic[StateT]):
         import uuid
         path = str(silica_tmp_dir() / f"{uuid.uuid4().hex}{suffix}")
         with open(path, "wb") as f:
-            if isinstance(content, list) and len(content) > 0 and hasattr(content[0], "model_dump"):
-                f.write(orjson.dumps([item.model_dump() for item in content], option=orjson.OPT_INDENT_2))
-            elif hasattr(content, "model_dump"):
-                f.write(orjson.dumps(content.model_dump(), option=orjson.OPT_INDENT_2))
-            else:
-                f.write(orjson.dumps(content, option=orjson.OPT_INDENT_2))
+            f.write(orjson.dumps(content, option=orjson.OPT_INDENT_2))
         self._tmp_files.append(path)
         logger.debug("Created staging file: %s", path)
         return path

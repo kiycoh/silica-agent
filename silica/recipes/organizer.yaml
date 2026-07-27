@@ -11,5 +11,5 @@ phases:
   - { id: snapshot,  kind: txn }
   - { id: move,      kind: mechanical }
   - { id: lint,      kind: gate }
-  - { id: cleanup,   kind: mechanical, on_success_only: true }
+  - { id: cleanup,   kind: mechanical }
   - { id: rollback,  kind: txn, on_gate_fail: true }

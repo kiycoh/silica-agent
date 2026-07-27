@@ -34,7 +34,6 @@ if TYPE_CHECKING:
 from silica.driver import DRIVER
 from silica.config import CONFIG
 from silica.tools.composed import (
-    silica_bulk_write,
     silica_lint,
     silica_payload,
     silica_recon,
@@ -153,18 +152,39 @@ def _safe_to_prune(orphaned: set[str], live: set[str], store_len: int) -> bool:
     return len(orphaned) <= max(20, _PRUNE_RATIO_CEILING * store_len)
 
 
+def _prune_orphans(store: Any, live: set[str], delete: Callable[[str], None], label: str) -> int:
+    """Drop index entries whose note was deleted out-of-band (Obsidian, ``rm``).
+
+    The PRUNE leg shared by the embed and co-occurrence reconciles. Free (no
+    embedder/LLM) so it is unbounded — but guarded by ``_safe_to_prune`` against
+    a bogus live view that would wipe a good index. Returns the prune count.
+    """
+    have = set(store.paths())
+    orphaned = have - live
+    if not orphaned:
+        return 0
+    if not _safe_to_prune(orphaned, live, len(have)):
+        logger.warning(
+            "%s index has %d/%d entries absent from vault — run /%s to reconcile; "
+            "skipping auto-prune (stale/partial view)",
+            label, len(orphaned), len(have), label,
+        )
+        return 0
+    for p in orphaned:
+        delete(p)
+    store.save()
+    logger.info("%s reconcile pruned %d note(s) deleted out-of-band", label, len(orphaned))
+    return len(orphaned)
+
+
 def _reconcile_embed_index(*, folder: str = "") -> int:
     """Repair embed-index drift before a run reads the index (Fix A safety net).
 
-    Two directions, both best-effort:
-      ADD   — embed notes present on disk but missing from the index (crash-drift
-              or a note written while the embedder was down). Bounded by
-              ``_RECONCILE_CAP``: embedding costs API calls, so mass-drift defers
-              to an explicit /embed rather than an implicit whole-vault build.
-      PRUNE — drop index entries whose note was deleted out-of-band (Obsidian,
-              ``rm``). Free (no embedding), so unbounded — but guarded by
-              ``_safe_to_prune`` against a bogus live view that would wipe a
-              good index.
+    Two directions, both best-effort: PRUNE (see ``_prune_orphans``) then ADD —
+    embed notes present on disk but missing from the index (crash-drift or a
+    note written while the embedder was down). ADD is bounded by
+    ``_RECONCILE_CAP``: embedding costs API calls, so mass-drift defers to an
+    explicit /embed rather than an implicit whole-vault build.
     A cold/empty index is left to an explicit /embed. Returns the number of
     notes re-embedded (adds); prunes are logged, not returned.
     """
@@ -189,18 +209,7 @@ def _reconcile_embed_index(*, folder: str = "") -> int:
                 missing.append((idx_path, ref.name or idx_path))
 
         # PRUNE first (free): notes deleted from the vault out-of-band.
-        orphaned = have - live
-        if _safe_to_prune(orphaned, live, len(store)):
-            for p in orphaned:
-                store.delete(p)
-            store.save()
-            logger.info("embed reconcile pruned %d note(s) deleted out-of-band", len(orphaned))
-        elif orphaned:
-            logger.warning(
-                "embed index has %d/%d entries absent from vault — run /embed to "
-                "reconcile; skipping auto-prune (stale/partial view)",
-                len(orphaned), len(store),
-            )
+        _prune_orphans(store, live, store.delete, "embed")
 
         # ADD (capped): notes on disk but not yet embedded.
         if not missing:
@@ -237,28 +246,14 @@ def _prune_cooccur_orphans(*, folder: str = "") -> int:
         from silica.kernel.cooccurrence import get_cooccur_store
 
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        have = set(store.paths())
-        if not have:
+        if not store.paths():
             return 0  # unseeded — an explicit /cooccur owns the first build
         live = {
             (ref.path or ref.name).removesuffix(".md")
             for ref in DRIVER.list_files(folder or "")
         }
         live.discard("")
-        orphaned = have - live
-        if _safe_to_prune(orphaned, live, len(have)):
-            for p in orphaned:
-                store.delete_note(p)  # also prunes its edges
-            store.save()
-            logger.info("cooccur reconcile pruned %d note(s) deleted out-of-band", len(orphaned))
-            return len(orphaned)
-        if orphaned:
-            logger.warning(
-                "cooccur index has %d/%d nodes absent from vault — run /cooccur to "
-                "reconcile; skipping auto-prune (stale/partial view)",
-                len(orphaned), len(have),
-            )
-        return 0
+        return _prune_orphans(store, live, store.delete_note, "cooccur")  # delete_note also prunes edges
     except Exception as e:
         logger.debug("cooccur reconcile skipped (%s)", e)
         return 0
@@ -501,24 +496,24 @@ class InjectorFSM(BaseFSM[InjectorState]):
             "rollback":   InjectorState.ROLLBACK,
         }
 
-        # S2.2.1: Handlers mapping and error policy
+        # S2.2.1: Handlers mapping and error policy.
         self._HANDLERS = {
-            InjectorState.RECON: self._handle_recon,
-            InjectorState.CROSSDEDUP: self._handle_crossdedup,
-            InjectorState.PAYLOAD: self._handle_payload,
-            InjectorState.SALIENCE: self._handle_salience,
-            InjectorState.COLLISION: self._handle_collision,
-            InjectorState.DELEGATE: self._handle_delegate,
-            InjectorState.SANITIZE: self._handle_sanitize,
-            InjectorState.VALIDATE: self._handle_validate,
-            InjectorState.SNAPSHOT: self._handle_snapshot,
-            InjectorState.WRITE: self._handle_write,
-            InjectorState.HUB_UPDATE: self._handle_hub_update,
-            InjectorState.AUTOLINK: self._handle_autolink,
-            InjectorState.BACKLINK: self._handle_backlink,
-            InjectorState.LINT: self._handle_lint,
-            InjectorState.CLEANUP: self._handle_cleanup,
-            InjectorState.ROLLBACK: self._handle_rollback,
+            InjectorState.RECON:      lambda: states.setup.handle_recon(self),
+            InjectorState.CROSSDEDUP: lambda: states.setup.handle_crossdedup(self),
+            InjectorState.PAYLOAD:    lambda: states.setup.handle_payload(self),
+            InjectorState.SALIENCE:   lambda: states.setup.handle_salience(self),
+            InjectorState.COLLISION:  lambda: states.collision.handle_collision(self),
+            InjectorState.DELEGATE:   lambda: states.distill.handle_delegate(self),
+            InjectorState.SANITIZE:   lambda: states.distill.handle_sanitize(self),
+            InjectorState.VALIDATE:   lambda: states.distill.handle_validate(self),
+            InjectorState.SNAPSHOT:   lambda: states.write.handle_snapshot(self),
+            InjectorState.WRITE:      lambda: states.write.handle_write(self),
+            InjectorState.HUB_UPDATE: lambda: states.write.handle_hub_update(self),
+            InjectorState.AUTOLINK:   lambda: states.linking.handle_autolink(self),
+            InjectorState.BACKLINK:   lambda: states.linking.handle_backlink(self),
+            InjectorState.LINT:       lambda: states.finalize.handle_lint(self),
+            InjectorState.CLEANUP:    lambda: states.finalize.handle_cleanup(self),
+            InjectorState.ROLLBACK:   lambda: states.finalize.handle_rollback(self),
         }
 
         self._ON_ERROR = {
@@ -755,35 +750,30 @@ class InjectorFSM(BaseFSM[InjectorState]):
         return self._run_loop()
 
     def _run_loop(self) -> dict[str, Any]:
-        """Override: remove txn guard so per-chunk phases route to ROLLBACK without a live txn."""
         try:
-            while self.state not in (self._done_state, self._error_state):
-                try:
-                    logger.debug("FSM Transition: %s -> executing handler", self.state.name)
-                    self.step()
-                except Exception as e:
-                    logger.error("FSM Error in state %s: %s", self.state, e)
-                    self.context["error"] = str(e)
-                    if self.state in self._best_effort_states:
-                        logger.warning(
-                            "FSM: best-effort phase %s failed (%s) — skipping to next phase",
-                            self.state.name, e,
-                        )
-                        self._transition_success()
-                        continue
-                    next_state = self._ON_ERROR.get(self.state, self._error_state)
-                    if next_state == self._rollback_state:
-                        self._chunk_ctx["abort_reason"] = str(e)
-                        self.state = self._rollback_state
-                    else:
-                        self.state = self._error_state
+            return super()._run_loop()
         finally:
             if getattr(self, "_prefetcher", None) is not None:
                 self._prefetcher.shutdown()
-            self._cleanup_tmp()
             self._boundary_anneal()
             self._flush_indexes()
-        return self.context
+
+    def _on_step_error(self, exc: Exception) -> bool:
+        """Best-effort phases skip to the next one; per-chunk phases route to
+        ROLLBACK without the base's live-txn guard (WRITE can fail before the
+        txn is assigned) and record the reason in the per-chunk namespace."""
+        if self.state in self._best_effort_states:
+            logger.warning(
+                "FSM: best-effort phase %s failed (%s) — skipping to next phase",
+                self.state.name, exc,
+            )
+            self._transition_success()
+            return True
+        if self._ON_ERROR.get(self.state) == self._rollback_state:
+            self._chunk_ctx["abort_reason"] = str(exc)
+            self.state = self._rollback_state
+            return True
+        return False
 
     def _boundary_anneal(self) -> None:
         """Mechanical recovery sweep, once per run: re-validate every deferred
@@ -840,15 +830,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
             except Exception as e:
                 logger.debug("flush: lexical index save skipped (%s)", e)
 
-    def _on_sequence_end(self) -> None:
-        # ponytail: defensive. BaseFSM only calls this when the last sequence phase
-        # has no "cleanup" successor; injector.yaml always ends in cleanup, so this
-        # is dead for the shipped recipe — kept as the fallback if an overlay drops it.
-        self._eval_loop_or_done()
-
-    def _on_cleanup_done(self) -> None:
-        self._eval_loop_or_done()
-
     def _emit_files_progress(self, upto_idx: int) -> None:
         """Surface files-processed/total to the TUI bar (no-op without a renderer)."""
         try:
@@ -888,7 +869,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.state = InjectorState.RECON
         return True
 
-    def _eval_loop_or_done(self) -> None:
+    def _on_pipeline_end(self) -> None:
         """Check if there are more chunks to process or if the queue is empty."""
         # Clear the per-chunk volatile namespace atomically before advancing
         self.context.pop("chunk", None)
@@ -908,58 +889,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
             self._emit_files_progress(len(self._chunks))
             logger.info("🎉 All batched chunks have been successfully injected and verified!")
             self.state = InjectorState.DONE
-
-    # ------------------------------------------------------------------
-    # State Handlers
-    # ------------------------------------------------------------------
-
-    def _handle_recon(self) -> None:
-        states.setup.handle_recon(self)
-
-    def _handle_crossdedup(self) -> None:
-        states.setup.handle_crossdedup(self)
-
-    def _handle_payload(self) -> None:
-        states.setup.handle_payload(self)
-
-    def _handle_salience(self) -> None:
-        states.setup.handle_salience(self)
-
-    def _handle_collision(self) -> None:
-        states.collision.handle_collision(self)
-
-    def _handle_delegate(self) -> None:
-        states.distill.handle_delegate(self)
-
-    def _handle_sanitize(self) -> None:
-        states.distill.handle_sanitize(self)
-
-    def _handle_validate(self) -> None:
-        states.distill.handle_validate(self)
-
-    def _handle_snapshot(self) -> None:
-        states.write.handle_snapshot(self)
-
-    def _handle_write(self) -> None:
-        states.write.handle_write(self)
-
-    def _handle_hub_update(self) -> None:
-        states.write.handle_hub_update(self)
-
-    def _handle_autolink(self) -> None:
-        states.linking.handle_autolink(self)
-
-    def _handle_backlink(self) -> None:
-        states.linking.handle_backlink(self)
-
-    def _handle_lint(self) -> None:
-        states.finalize.handle_lint(self)
-
-    def _handle_cleanup(self) -> None:
-        states.finalize.handle_cleanup(self)
-
-    def _handle_rollback(self) -> None:
-        states.finalize.handle_rollback(self)
 
     def _source_canonical_for(self, inbox_file: str) -> str:
         """Vault-relative canonical path for an arbitrary inbox file (no .md, lowercase)."""
@@ -1132,10 +1061,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
                 )
         except Exception as e:
             logger.warning("Failed to write ledger for file %d: %s", fi, e)
-
-    def _write_ledger(self, status: str) -> None:
-        """Record all ops from ops_path into the ledger (single-file compat wrapper)."""
-        self._write_ledger_for_file(0, status)
 
     def _write_ledger_rollback(self, txn_id: str) -> None:
         try:

@@ -27,11 +27,10 @@ def merge_overlay(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, An
     if "gates" in overlay:
         result.setdefault("gates", {}).update(overlay["gates"] or {})
 
-    # phases: override params of existing ids only; same order enforced
+    # phases: override params of existing ids only. Reordering needs no check —
+    # the update is in place, so the result always carries the base's order.
     if "phases" in overlay:
-        base_ids = [p.get("id") for p in result.get("phases", [])]
         base_by_id = {p.get("id"): p for p in result.get("phases", [])}
-        seen: list[str] = []
         for ov_phase in overlay["phases"] or []:
             pid = ov_phase.get("id")
             if pid not in base_by_id:
@@ -40,10 +39,6 @@ def merge_overlay(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, An
                     f"removing phases is a control-flow change (needs compiler C)"
                 )
             base_by_id[pid].update({k: v for k, v in ov_phase.items() if k != "id"})
-            seen.append(pid)
-        # reject reordering: overlay phase ids must appear in base order
-        if seen != [pid for pid in base_ids if pid in seen]:
-            raise OverlayError("overlay may not reorder phases (needs compiler C)")
 
     # top-level scalars (name, inputs, ...) — override but never 'phases'/'gates'
     for k, v in overlay.items():

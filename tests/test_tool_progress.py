@@ -639,7 +639,7 @@ def test_file_advance_surfaces_finished_file():
     fsm.context["payload"] = {"chunks": fsm._chunks}
 
     with patch.object(fsm, "_advance_file_or_done", return_value=True):
-        seen = _capture_file_progress(fsm._eval_loop_or_done)
+        seen = _capture_file_progress(fsm._on_pipeline_end)
     assert seen, "no progress emitted when a file finished and the FSM advanced"
     done, _total = seen[-1]
     assert done >= 1, f"finished file 0 not reflected (done={done})"
