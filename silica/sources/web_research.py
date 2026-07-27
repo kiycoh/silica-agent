@@ -214,10 +214,13 @@ def _build_note(concept: str, body: str, sources: list[tuple[str, str]]) -> str:
 
 def _unique_inbox_path(concept: str) -> str:
     """`<inbox>/<slug>.md`, with a numeric suffix on filename collision."""
+    from silica.kernel.vault_manifest import active_inbox_dir
+
+    inbox = active_inbox_dir() or "Inbox"
     slug = slugify(concept) or "web-research"
-    candidate = f"{CONFIG.inbox_dir}/{slug}.md"
+    candidate = f"{inbox}/{slug}.md"
     n = 2
     while (Path(CONFIG.vault_path) / candidate).exists():
-        candidate = f"{CONFIG.inbox_dir}/{slug} {n}.md"
+        candidate = f"{inbox}/{slug} {n}.md"
         n += 1
     return candidate

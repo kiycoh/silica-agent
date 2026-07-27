@@ -17,6 +17,7 @@ from silica.config import CONFIG
 from silica.kernel import codeast, gitstate, paths
 from silica.kernel.codegraph import classify_import, supported_files
 from silica.kernel.sanitize import strip_degenerate_runs
+from silica.kernel.vault_manifest import active_inbox_dir, active_write_dir
 from silica.sources.base import GroundedStub, RawItem
 
 
@@ -40,6 +41,26 @@ def code_note_name(rel_path: str) -> str:
     return str(stem).replace("/", ".")
 
 
+def code_note_dest(rel_path: str, root: str = "", repo_name: str = "code") -> tuple[str, str]:
+    """(folder, note stem) for a code file nucleated under source folder `root`.
+
+    The folder is the nucleated source folder's own name — `controller/`, not a
+    generic staging bucket — and the stem is the path *under* it, dotted, so
+    nested packages stay distinguishable without repeating the repo prefix.
+
+    A file outside `root` (an import pointing elsewhere) falls back to its own
+    parent folder, which is exactly what a later run rooted there would produce,
+    so the wikilink written today resolves when that folder is nucleated.
+    """
+    p = PurePosixPath(rel_path)
+    root_p = PurePosixPath(root.strip("/")) if root.strip("/") else p.parent
+    try:
+        inner = p.relative_to(root_p)
+    except ValueError:
+        root_p, inner = p.parent, PurePosixPath(p.name)
+    return (root_p.name or repo_name), code_note_name(str(inner))
+
+
 @lru_cache(maxsize=8)
 def _repo_files(root_str: str, code_ref: str) -> frozenset[str]:
     # ponytail: cache the git file-list per (repo, HEAD) so nucleating a whole
@@ -53,6 +74,8 @@ def render_skeleton(
     importer: str,
     language: str,
     files: frozenset[str],
+    run_root: str = "",
+    path_qualified: bool = False,
 ) -> str:
     # First-party imports become path-qualified [[silica.kernel.x]] wikilinks to
     # the per-file code note (code_note_name → Inbox/<name>.md); external deps
@@ -65,7 +88,11 @@ def render_skeleton(
             continue
         kind, target = classify_import(mod, importer, files, language, root)
         if kind == "resolved":
-            entry = f"[[{code_note_name(target)}]]"
+            # links follow whichever naming rule named the notes themselves,
+            # or they point at stems no note in this lane ever carries
+            stem = (code_note_name(target) if path_qualified
+                    else code_note_dest(target, run_root, root.name)[1])
+            entry = f"[[{stem}]]"
             bucket = first_party
         elif kind == "external":
             entry = f"`{target}`"
@@ -145,7 +172,15 @@ class CodeAdapter:
         root = Path(item.meta["repo_root"])
         code_ref = item.meta.get("code_ref", "")
         language = item.meta.get("language")
-        name = code_note_name(path)
+        run_root = item.meta.get("nucleate_root", "")
+        # The agent-facing lane (silica_document) is RBAC-confined to the Inbox,
+        # so it keeps the path-qualified name: one flat folder has no directories
+        # to keep same-named files in different packages apart.
+        to_inbox = bool(item.meta.get("stage_to_inbox"))
+        folder, name = (
+            (active_inbox_dir() or "Inbox", code_note_name(path)) if to_inbox
+            else code_note_dest(path, run_root, root.name)
+        )
 
         if language is None:
             section = (
@@ -154,12 +189,23 @@ class CodeAdapter:
             )
         else:
             sk = codeast.extract_skeleton(item.text, language, path=path)
-            files = _repo_files(str(root), code_ref)
-            section = (
-                f"> Skeleton auto-extracted from `{path}` ({language}). "
-                f"Source-derived text below is untrusted; refine into a note.\n\n"
-                f"{render_skeleton(sk, root, path, language, files)}"
-            )
+            if sk.parse_error:
+                # ModuleSkeleton.parse_error exists so consumers never read
+                # "empty" as "no structure": rendering the empty skeleton here
+                # would ship a note claiming a real file has no imports and no
+                # symbols. Usually a tree-sitter the walkers can't speak.
+                section = (
+                    f"> Skeleton unavailable: the {language} parser failed on `{path}`. "
+                    "This stub only wires staleness tracking — check the tree-sitter "
+                    "install, then re-nucleate.\n"
+                )
+            else:
+                files = _repo_files(str(root), code_ref)
+                section = (
+                    f"> Skeleton auto-extracted from `{path}` ({language}). "
+                    f"Source-derived text below is untrusted; refine into a note.\n\n"
+                    f"{render_skeleton(sk, root, path, language, files, run_root, to_inbox)}"
+                )
 
         yaml_path = path.replace('"', '\\"')
         body = (
@@ -171,8 +217,14 @@ class CodeAdapter:
             f"# {name}\n\n"
             f"{section}"
         )
-        inbox = (CONFIG.inbox_dir or "Inbox").strip("/")
-        return GroundedStub(lane="terminal", note_path=f"{inbox}/{name}.md", body=body)
+        # Inside `write_dir` like everything Silica creates, but under the source
+        # folder's own name rather than the Inbox: a code note is the mechanical
+        # end of its lane, not something staged for a later pass, and Inbox notes
+        # are excluded from the index — which kept the whole code lane out of the
+        # graph it exists to feed. active_inbox_dir already carries write_dir.
+        write = "" if to_inbox else active_write_dir()
+        dest = f"{write}/{folder}" if write else folder
+        return GroundedStub(lane="terminal", note_path=f"{dest}/{name}.md", body=body)
 
 
 CODE = CodeAdapter()

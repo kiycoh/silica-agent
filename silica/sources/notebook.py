@@ -87,7 +87,9 @@ class NotebookAdapter:
             f"# {name}\n\n"
             + "\n".join(sections)
         )
-        inbox = (CONFIG.inbox_dir or "Inbox").strip("/")
+        from silica.kernel.vault_manifest import active_inbox_dir
+
+        inbox = active_inbox_dir() or "Inbox"
         return GroundedStub(lane="terminal", note_path=f"{inbox}/{name}.md", body=body)
 
 

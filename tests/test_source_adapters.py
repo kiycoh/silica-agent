@@ -100,12 +100,51 @@ def test_code_read_guards_path_escape(code_repo):
 def test_code_stub_is_terminal_with_grounding(code_repo):
     from silica.sources.code import CODE
 
+    root, _vault = code_repo
     item = CODE.read("m.py")
     stub = CODE.to_stub(item)
     assert stub.lane == "terminal"
-    assert stub.note_path == "Inbox/m.md"
+    # folder named after the source folder the file sits in (repo root → repo name)
+    assert stub.note_path == f"{root.name}/m.md"
     assert "documents:" in stub.body and "code_ref:" in stub.body
     assert "def hi()" in stub.body and "return 1" not in stub.body  # skeleton, never full source
+
+
+def test_code_note_dest_names_the_folder_after_the_nucleated_source():
+    from silica.sources.code import code_note_dest
+
+    root = "core/src/main/java/io/github/soulslight/controller"
+    # folder = the nucleated folder's own name; stem = the path under it, dotted
+    assert code_note_dest(f"{root}/GameController.java", root) == ("controller", "GameController")
+    assert code_note_dest(f"{root}/commands/AttackCommand.java", root) == (
+        "controller", "commands.AttackCommand")
+    # a file outside the run falls back to its own parent — which is exactly what
+    # a later run rooted there produces, so the wikilink written now resolves then
+    outside = "core/src/main/java/io/github/soulslight/manager/GameManager.java"
+    assert code_note_dest(outside, root) == ("manager", "GameManager")
+    assert code_note_dest(outside, "core/src/main/java/io/github/soulslight/manager") == (
+        "manager", "GameManager")
+    # no run root (single-file nucleate) → the file's own folder
+    assert code_note_dest("pkg/main.py") == ("pkg", "main")
+    # repo-root file has no parent folder to borrow: the repo names it
+    assert code_note_dest("m.py", "", "souls-light") == ("souls-light", "m")
+
+
+def test_code_stub_says_so_when_the_parser_fails(code_repo, monkeypatch):
+    """A parser silica cannot drive must never render as "(no imports)": that
+    ships a note asserting a real file is empty (tree-sitter 0.26 did exactly
+    this, silently, for every language)."""
+    from silica.kernel.codeast import ModuleSkeleton
+    from silica.sources import code as code_mod
+
+    monkeypatch.setattr(
+        code_mod.codeast, "extract_skeleton",
+        lambda *a, **k: ModuleSkeleton(path="m.py", language="python", parse_error=True),
+    )
+    body = code_mod.CODE.to_stub(code_mod.CODE.read("m.py")).body
+    assert "Skeleton unavailable" in body
+    assert "no imports" not in body and "no top-level symbols" not in body
+    assert "code_ref:" in body  # staleness tracking still wired
 
 
 def test_code_note_name_qualifies_and_folds_package_init():
@@ -140,8 +179,8 @@ def test_code_stub_wikilinks_first_party_imports(tmp_path, monkeypatch):
     from silica.sources.code import CODE
 
     stub = CODE.to_stub(CODE.read("pkg/main.py"))
-    assert stub.note_path == "Inbox/pkg.main.md"   # path-qualified, collision-free
-    assert "[[pkg.helper]]" in stub.body  # first-party import → path-qualified wikilink
+    assert stub.note_path == "pkg/main.md"   # folder = the source folder
+    assert "[[helper]]" in stub.body  # first-party import → wikilink, same naming rule
     assert "`os`" in stub.body            # external dep → code span, not linked
     assert "[[os]]" not in stub.body
 
@@ -181,6 +220,6 @@ def test_stage_writes_terminal_stub(code_repo, monkeypatch):
     monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
     result = stage(CODE, "m.py")
     assert result["status"] == "ok"
-    assert result["note_path"] == "Inbox/m.md"
-    assert (vault / "Inbox" / "m.md").is_file()
+    assert result["note_path"] == f"{root.name}/m.md"
+    assert (vault / root.name / "m.md").is_file()
     assert result["meta"].get("code_ref")

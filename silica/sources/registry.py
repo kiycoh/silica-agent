@@ -48,6 +48,56 @@ def supported_nucleate_extensions() -> list[str]:
     return sorted({".pdf", ".ipynb", *PROSE_EXTS, *code_exts})
 
 
+def folder_rel(target: str) -> str | None:
+    """`target` as a repo-relative folder path, or None when it is not one.
+
+    "" means the repo root. Split out of `expand_folder` because callers also
+    need the folder itself, not just its contents: it is what a code note's
+    destination folder is named after, and re-deriving it from the expanded
+    files would land on their deepest common parent, not the folder asked for.
+    """
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.kernel.paths import repo_root_for
+
+    root = repo_root_for(CONFIG.vault_path) if CONFIG.vault_path else None
+    if root is None:
+        return None
+    p = Path(target)
+    try:
+        rel = (p if p.is_absolute() else root / p).resolve().relative_to(root.resolve())
+    except (ValueError, OSError):
+        return None  # escapes the repo
+    if not (root / rel).is_dir():
+        return None
+    return "" if str(rel) == "." else rel.as_posix()
+
+
+def expand_folder(target: str, enabled: Sequence[str] | None = None) -> list[str]:
+    """Repo-relative ingestible files under a folder argument, sorted.
+
+    `supported_files` is the repo's own git-backed census, so ignored and
+    vendored trees never enter and no walk is hand-rolled here. Returns [] when
+    `target` names no directory inside the code-lane repo — a folder of vault
+    notes, a typo, or a non-code-lane vault all land there, and the caller keeps
+    whatever it already did for an unresolved argument.
+    """
+    from silica.config import CONFIG
+    from silica.kernel.codegraph import supported_files
+    from silica.kernel.paths import repo_root_for
+
+    rel = folder_rel(target)
+    if rel is None:
+        return []
+    root = repo_root_for(CONFIG.vault_path)
+    prefix = f"{rel}/" if rel else ""
+    return [
+        f for f in supported_files(root)
+        if f.startswith(prefix) and adapter_for(f, enabled) is not None
+    ]
+
+
 def adapter_for(target: str, enabled: Sequence[str] | None = None) -> SourceAdapter | None:
     for adapter in enabled_adapters(enabled):
         if adapter.matches(target):
@@ -55,20 +105,70 @@ def adapter_for(target: str, enabled: Sequence[str] | None = None) -> SourceAdap
     return None
 
 
-def stage(adapter: SourceAdapter, target: str) -> dict:
+def _record_inverse(run_id: str, path: str, prior: str | None) -> None:
+    """Journal one terminal-lane write so `/revert` can undo it.
+
+    Mirrors the FSM's C3 strategy (silica/tools/wrapped.py): a note that did not
+    exist is undone by deleting it, one that did by restoring the body read just
+    before the write. The post-hash comes from reading the note back, not from
+    the stub text, so it matches what `revert_run`'s modified-since guard
+    recomputes after any normalisation the backend applied on the way in.
+    """
+    from silica.driver import DRIVER
+    from silica.kernel.ops import InverseOp, InverseOpKind
+    from silica.kernel.undo_journal import _content_hash, get_undo_journal
+
+    inv = (
+        InverseOp(kind=InverseOpKind.restore_version, path=path, prior_content=prior)
+        if prior is not None
+        else InverseOp(kind=InverseOpKind.delete_created, path=path)
+    )
+    try:
+        post_hash = _content_hash(DRIVER.read_note(path).content)
+    except Exception:
+        # Without the hash /revert loses its "modified since" guard but still
+        # undoes the write — the journal entry is worth more than the guard.
+        post_hash = None
+        logger.warning("could not hash %s post-write; /revert guard disabled for it", path)
+    get_undo_journal().record(run_id, inv, post_hash)
+
+
+def stage(
+    adapter: SourceAdapter, target: str, run_root: str = "", run_id: str | None = None
+) -> dict:
     """read → to_stub → write, for terminal-lane stubs; status dict out.
 
     Distill-lane stubs are NOT written here — the Injector FSM owns that
     lane (ADR-0013); the caller forwards the target to the agent instead.
+
+    `run_root` is the folder argument this target was expanded from, when there
+    was one. It rides in `meta` rather than the Protocol signature: only the code
+    lane names its destination after it, and one more adapter method for one
+    adapter is the bloat ADR-0014 exists to refuse.
+
+    `run_id` opts this write into the caller's undo run. The terminal lane skips
+    the FSM by design (ADR-0013), and the FSM is where journalling lived — so
+    until a caller opens a run, these were the one writes `/revert` could not
+    see. The run is the caller's because it spans the whole batch, not one file.
     """
     from silica.driver import DRIVER
 
     try:
         item = adapter.read(target)
+        if run_root:
+            item.meta["nucleate_root"] = run_root
         stub = adapter.to_stub(item)
     except ValueError as e:
         return {"status": "error", "message": str(e)}
     if stub.lane != "terminal":
         return {"status": "distill", "target": target}
+    prior: str | None = None
+    if run_id:
+        try:  # read before the write: refreshing a stub must restore, not delete
+            prior = DRIVER.read_note(stub.note_path).content
+        except Exception:
+            prior = None
     DRIVER.upsert(stub.note_path, stub.body)  # re-ingesting the same target refreshes the stub
+    if run_id:
+        _record_inverse(run_id, stub.note_path, prior)
     return {"status": "ok", "note_path": stub.note_path, "meta": dict(item.meta)}

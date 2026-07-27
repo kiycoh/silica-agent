@@ -210,13 +210,15 @@ def _pdf_to_md(target: str, dest_dir: str) -> list[str]:
         )
     body = _rewrite_image_links(_respace_prose(strip_degenerate_runs(md_text)), renamed)
     from silica.driver import DRIVER
+    from silica.kernel.vault_manifest import active_inbox_dir
 
+    inbox = active_inbox_dir() or "Inbox"
     segments = split_markdown(body)
     # Single segment (a paper, an article) keeps the flat inbox path — no change
     # in behaviour, no subdir for the common case. Image links are basename
     # embeds (![[fig.png]]) so they resolve from any segment regardless of dir.
     if len(segments) == 1:
-        note_rel = f"{CONFIG.inbox_dir}/{src.stem}.md"
+        note_rel = f"{inbox}/{src.stem}.md"
         DRIVER.upsert(note_rel, body)  # re-converting the same source refreshes its inbox note
         return [note_rel]
 
@@ -224,7 +226,7 @@ def _pdf_to_md(target: str, dest_dir: str) -> list[str]:
     paths: list[str] = []
     for i, seg in enumerate(segments, 1):
         slug = _segment_slug(seg, "part")
-        note_rel = f"{CONFIG.inbox_dir}/{src.stem}/{i:0{width}d}-{slug}.md"
+        note_rel = f"{inbox}/{src.stem}/{i:0{width}d}-{slug}.md"
         DRIVER.upsert(note_rel, seg)  # re-converting the same source refreshes its segments
         paths.append(note_rel)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
@@ -374,7 +376,9 @@ def _resolve_input(target: str) -> Path:
 
 
 def _images_dest(dest_dir: str) -> Path:
-    base = dest_dir.strip() or CONFIG.inbox_dir
+    from silica.kernel.vault_manifest import active_inbox_dir
+
+    base = dest_dir.strip() or active_inbox_dir() or "Inbox"
     return Path(CONFIG.vault_path) / base / "Images"
 
 
