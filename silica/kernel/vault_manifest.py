@@ -105,31 +105,11 @@ class VaultManifest:
     write_dir: str | None = ""
 
 
-def is_declared_vault(root: str | Path) -> bool:
-    """True when `root` carries a manifest, i.e. it has already been adopted."""
-    return (Path(root) / MANIFEST_REL).is_file()
-
-
-def adopted_vault(root: str | Path) -> Path:
-    """The vault path for a directory: itself, unless an older layout says otherwise.
-
-    Single precedence rule, shared by every entry point that turns a directory
-    into a vault (`/vault`, startup repo detection, `silica init`, `doctor`) so
-    they can never disagree about which folder is the vault:
-
-      1. a `vault.yaml` at `root` settles it — `root` IS the vault, and any
-         `docs/silica` under it is merely where it writes (`write_dir`);
-      2. an existing `<root>/docs/silica` — a vault created before `write_dir`
-         existed keeps resolving exactly where it already is;
-      3. otherwise `root` itself, adopted as-is.
-    """
-    from silica.kernel.paths import repo_mode_vault
-
-    root = Path(root)
-    if is_declared_vault(root):
-        return root
-    legacy = repo_mode_vault(root)
-    return legacy if legacy.is_dir() else root
+# There is deliberately no function mapping a directory to "the vault it really
+# means". The vault is the directory you launched in or named, full stop, and a
+# resolver that could answer something else is what made the vault a thing you
+# had to reconstruct rather than read off the screen. Where notes may be written
+# inside it is the separate `write_dir` axis (`onboarding.adopt`).
 
 
 def _safe_rel_dir(value) -> str | None:
@@ -373,6 +353,25 @@ def active_write_dir() -> str:
     """
     declared = get_active_manifest().write_dir
     return declared if declared is not None else _UNRESOLVABLE_WRITE_DIR
+
+
+def active_inbox_dir() -> str:
+    """Vault-relative inbox root for the active vault; "" ⇒ no inbox configured.
+
+    The inbox is Silica's own staging area, so it belongs inside the write
+    boundary like everything else Silica creates. Composed here rather than read
+    raw off `CONFIG.inbox_dir` because that field knows nothing about
+    `write_dir`: every caller that built a path from it was dropping an `Inbox/`
+    at the root of the user's source tree, outside the one folder writes are
+    supposed to land in. An unresolvable boundary propagates, same as above.
+    """
+    from silica.config import CONFIG
+
+    inbox = (getattr(CONFIG, "inbox_dir", "") or "").replace("\\", "/").strip("/")
+    if not inbox:
+        return ""
+    write_dir = active_write_dir()
+    return f"{write_dir}/{inbox}" if write_dir else inbox
 
 
 def apply_manifest_to_config() -> None:

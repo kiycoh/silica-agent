@@ -37,10 +37,18 @@ def write_dir_for(vault: str | Path) -> str:
     Pure decision, no I/O beyond the detection scan. Callers that compose
     `vault.yaml` themselves (the first-run wizard) use this; `declare_write_dir`
     is the persisting variant.
+
+    A `docs/silica` that already holds notes settles it whatever the content
+    ratio says: that is a vault from before the write boundary existed, and the
+    same declaration every new repo gets is also its migration — the notes stay
+    where they are, the vault goes back to being the folder you launched in.
     """
     root = Path(vault)
     if not root.is_dir() or is_obsidian_vault(root):
         return ""
+    # glob is lazy and stops at the first hit; a missing dir yields nothing.
+    if next((root / CODE_WRITE_DIR).glob("**/*.md"), None):
+        return CODE_WRITE_DIR
     return CODE_WRITE_DIR if looks_like_code(root) else ""
 
 

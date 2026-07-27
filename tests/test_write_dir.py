@@ -8,10 +8,10 @@ validate_operations, and never widens on a malformed manifest.
 """
 import pytest
 
+from silica.cli import resolve_vault_switch
 from silica.kernel.paths import looks_like_code
 from silica.kernel.vault_manifest import (
     active_write_dir,
-    adopted_vault,
     load_manifest,
     reset_manifest_cache,
     within,
@@ -140,19 +140,17 @@ def test_within_is_segment_wise():
 
 # --- which folder is the vault ----------------------------------------------
 
-def test_adopted_vault_takes_the_root_as_is(tmp_path):
-    assert adopted_vault(tmp_path) == tmp_path
-
-
-def test_adopted_vault_keeps_a_pre_write_dir_layout_in_place(tmp_path):
-    (tmp_path / "docs" / "silica").mkdir(parents=True)
-    assert adopted_vault(tmp_path) == tmp_path / "docs" / "silica"
-
-
-def test_a_declared_root_owns_the_subfolder_it_writes_into(tmp_path):
-    (tmp_path / "vault.yaml").write_text("write_dir: docs/silica\n", encoding="utf-8")
-    (tmp_path / "docs" / "silica").mkdir(parents=True)
-    assert adopted_vault(tmp_path) == tmp_path
+@pytest.mark.parametrize("layout", [
+    lambda p: None,                                             # bare directory
+    lambda p: (p / "vault.yaml").write_text("write_dir: docs/silica\n"),
+    lambda p: (p / "docs" / "silica" / "nota.md").parent.mkdir(parents=True),
+])
+def test_the_vault_is_always_the_path_you_named(tmp_path, layout):
+    # No layout under a directory can make Silica open a different one. The
+    # resolver that used to answer `docs/silica` is why the vault was something
+    # you reconstructed instead of read off the screen.
+    layout(tmp_path)
+    assert resolve_vault_switch(str(tmp_path)).vault == str(tmp_path.resolve())
 
 
 # --- adoption ---------------------------------------------------------------
@@ -162,10 +160,17 @@ def test_declare_write_dir_confines_a_source_tree(tmp_path):
 
     assert declare_write_dir(tmp_path) == "docs/silica"
     assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: docs/silica\n"
-    # No directory created: an empty docs/silica would read as a legacy vault to
-    # every back-compat lookup, hijacking the root on the next resolve.
-    assert not (tmp_path / "docs").exists()
-    assert adopted_vault(tmp_path) == tmp_path
+    assert not (tmp_path / "docs").exists()  # declaring is not creating
+
+
+def test_a_pre_write_dir_layout_declares_itself(tmp_path):
+    # The migration for a vault created before the split: same declaration every
+    # new repo gets, so the notes stay put and the repo becomes readable again.
+    (tmp_path / "docs" / "silica").mkdir(parents=True)
+    (tmp_path / "docs" / "silica" / "nota.md").write_text("# nota")
+
+    assert declare_write_dir(tmp_path) == "docs/silica"
+    assert resolve_vault_switch(str(tmp_path)).vault == str(tmp_path.resolve())
 
 
 def test_declare_write_dir_leaves_prose_in_place_and_file_free(tmp_path):

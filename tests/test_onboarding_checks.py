@@ -135,13 +135,23 @@ class TestCheckVault:
         assert "SILICA_VAULT" in r.hint
         assert "silica init" in r.hint
 
-    def test_unset_with_repo_docs_silica_ok(self, monkeypatch, tmp_path):
+    def test_unset_with_repo_reports_the_root_as_the_vault(self, monkeypatch, tmp_path):
+        # Startup adopts the repo root without asking, so doctor must agree.
         import silica.onboarding.checks as checks
-        (tmp_path / "docs" / "silica").mkdir(parents=True)
         monkeypatch.setattr(checks.gitstate, "find_repo_root", lambda p: tmp_path)
         r = checks.check_vault(_cfg(vault_path=""))
         assert r.status == "ok"
-        assert "repo mode" in r.detail
+        assert r.detail == f"repo mode → {tmp_path}"
+
+    def test_unset_with_repo_reports_the_root_even_with_a_legacy_layout(
+        self, monkeypatch, tmp_path
+    ):
+        import silica.onboarding.checks as checks
+        (tmp_path / "docs" / "silica").mkdir(parents=True)
+        (tmp_path / "docs" / "silica" / "nota.md").write_text("# nota", encoding="utf-8")
+        monkeypatch.setattr(checks.gitstate, "find_repo_root", lambda p: tmp_path)
+        r = checks.check_vault(_cfg(vault_path=""))
+        assert r.detail == f"repo mode → {tmp_path}"
 
     def test_explicit_path_not_writable_fails(self, tmp_path):
         import os as os_mod

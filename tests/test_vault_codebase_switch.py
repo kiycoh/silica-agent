@@ -62,13 +62,14 @@ def test_git_tracked_obsidian_vault_stays_verbatim(tmp_path):
     assert target.created is False
 
 
-def test_existing_docs_silica_is_adopted(tmp_path):
-    # Pre-write_dir layout: the vault stays exactly where it already is.
+def test_a_legacy_docs_silica_does_not_capture_the_switch(tmp_path):
+    # /vault <path> opens <path>. What it holds cannot redirect it elsewhere.
     (tmp_path / "docs" / "silica").mkdir(parents=True)
+    (tmp_path / "docs" / "silica" / "nota.md").write_text("# nota", encoding="utf-8")
 
     target = resolve_vault_switch(str(tmp_path))
 
-    assert target.vault == str((tmp_path / "docs" / "silica").resolve())
+    assert target.vault == str(tmp_path.resolve())
     assert target.created is False
 
 

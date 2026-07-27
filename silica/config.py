@@ -18,13 +18,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
-# Load .env from the working directory (or project root)
-_dotenv_path = Path.cwd() / ".env"
-if not _dotenv_path.exists():
-    _dotenv_path = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(_dotenv_path, override=False)
+# A SILICA_VAULT *exported* in the real environment (`SILICA_VAULT=x silica`, an
+# MCP server's env block, a cron unit) is a deliberate per-invocation pin: the
+# one thing that outranks the working directory in cli._activate_repo_mode. The
+# same name sitting in a .env file is config, not intent, and loses to cwd.
+# Captured here because load_dotenv below is what makes the two indistinguishable.
+VAULT_PINNED = bool(os.environ.get("SILICA_VAULT", "").strip())
+
+# .env layering, first value wins per key (override=False): the project's own
+# .env, found from the working directory upwards, then the user-level
+# ~/.silica/.env the wizard writes when there is no project file. An installed
+# silica has no .env beside its package, so before the user-level file existed
+# every setting evaporated the moment you ran `silica` outside a checkout.
+USER_ENV = Path.home() / ".silica" / ".env"
+for _dotenv_path in (find_dotenv(usecwd=True), USER_ENV):
+    if _dotenv_path:
+        load_dotenv(_dotenv_path, override=False)
 
 
 # Provider prefixes that map a `prefix/model` string to an endpoint and get

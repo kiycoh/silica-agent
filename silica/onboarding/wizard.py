@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from silica.config import SilicaConfig
+from silica.config import USER_ENV, SilicaConfig
 from silica.kernel import gitstate
 from silica.kernel.vault_manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
@@ -296,7 +296,10 @@ def _run_wizard_inner(
     # fixed set of `updates` keys and pops them on entry, so a re-run after
     # `back` never leaves stale leftovers.
     state: dict = {"advanced": advanced, "provider": "", "high_value": True, "write": False}
-    repo_root = gitstate.find_repo_root(env_path.parent)
+    # From the working directory, not env_path.parent: the vault question is
+    # about where you launched `silica init`, and the settings file may well sit
+    # in ~/.silica/ instead of in the repo.
+    repo_root = gitstate.find_repo_root(Path.cwd())
 
     print_banner()
     CONSOLE.print()
@@ -324,12 +327,10 @@ def _run_wizard_inner(
         _section("vault", "Vault", 1, total())
         use_repo_mode = False
         if repo_root is not None:
-            from silica.kernel.vault_manifest import adopted_vault
             from silica.onboarding.adopt import write_dir_for
 
-            # Same precedence as every other entry point: a vault that already
-            # exists under this repo keeps its place, new ones take the root.
-            repo_vault = adopted_vault(repo_root)
+            # Same rule as every other entry point: the repo root is the vault.
+            repo_vault = Path(repo_root)
             write_dir = write_dir_for(repo_vault)
             where = f"writes → {write_dir}/" if write_dir else "writes in place"
             answer = _ask(
@@ -714,8 +715,16 @@ def run_wizard(
 ) -> int:
     cwd = Path.cwd()
     if env_path is None:
+        # An existing project .env is updated in place; otherwise the settings go
+        # to the user-level file, which config.py loads from any directory. The
+        # old "cwd/.env" default dropped a config file into whatever folder the
+        # shell sat in, and one an installed silica would never read again.
         repo_root = gitstate.find_repo_root(cwd)
-        env_path = (Path(repo_root) if repo_root else cwd) / ".env"
+        env_path = next(
+            (p for p in (cwd / ".env", Path(repo_root or cwd) / ".env") if p.exists()),
+            USER_ENV,
+        )
+        env_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         return _run_wizard_inner(input_fn, env_path, advanced=advanced)
     except KeyboardInterrupt:

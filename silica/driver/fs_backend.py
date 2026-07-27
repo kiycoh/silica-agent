@@ -159,8 +159,9 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._unresolved_links.clear()
         self._mention_index.clear()
 
-        from silica.config import CONFIG
-        inbox_norm = os.path.normcase(CONFIG.inbox_dir.replace("\\", "/").strip("/")) if CONFIG.inbox_dir else None
+        from silica.kernel.vault_manifest import active_inbox_dir
+        inbox = active_inbox_dir()
+        inbox_norm = os.path.normcase(inbox) if inbox else None
 
         files_to_process = []
 
@@ -247,10 +248,11 @@ class ObsidianFSBackend(GraphIndexMixin):
 
     def _is_inbox_path(self, rel_path: str) -> bool:
         """True if rel_path is the inbox directory or lives inside it."""
-        from silica.config import CONFIG
-        if not CONFIG.inbox_dir:
+        from silica.kernel.vault_manifest import active_inbox_dir
+        inbox = active_inbox_dir()
+        if not inbox:
             return False
-        inbox_norm = os.path.normcase(CONFIG.inbox_dir.replace("\\", "/").strip("/"))
+        inbox_norm = os.path.normcase(inbox)
         rel_norm = os.path.normcase(rel_path.replace("\\", "/").strip("/"))
         return rel_norm == inbox_norm or rel_norm.startswith(inbox_norm + "/")
 
@@ -945,10 +947,11 @@ class ObsidianFSBackend(GraphIndexMixin):
 
     def list_inbox_files(self) -> list[NoteRef]:
         """List all files in the inbox directory."""
-        from silica.config import CONFIG
-        if not CONFIG.inbox_dir:
+        from silica.kernel.vault_manifest import active_inbox_dir
+        inbox = active_inbox_dir()
+        if not inbox:
             return []
-        inbox_path = self.vault_path / CONFIG.inbox_dir
+        inbox_path = self.vault_path / inbox
         if not inbox_path.exists() or not inbox_path.is_dir():
             return []
         results = []

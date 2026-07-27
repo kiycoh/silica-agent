@@ -163,22 +163,12 @@ def path_keyed_singleton(cache: dict, key: str, factory):
 def is_obsidian_vault(path) -> bool:
     """True when `path` is an Obsidian vault (carries a `.obsidian/` dir).
 
-    This — not git presence — is the single signal that decides vault layout:
-    an Obsidian vault is adopted verbatim (notes in its root), anything else is
-    Silica repo mode (notes under `docs/silica`). Non-existent paths are False.
+    Never decides *which* folder is the vault (that is always the one you named
+    or launched in), only whether writing notes into its root is at home there:
+    an Obsidian vault writes in place, a source tree gets a `write_dir`
+    (`onboarding.adopt`). Non-existent paths are False.
     """
     return (Path(path) / ".obsidian").is_dir()
-
-
-def repo_mode_vault(root) -> Path:
-    """Silica's notes location for a non-Obsidian target: `<root>/docs/silica`.
-
-    No longer a resolution outcome: a vault path is adopted as-is (see
-    `cli.resolve_vault_switch`). This survives as the *default write root*
-    offered for a source tree (`onboarding.adopt`) and as the back-compat
-    lookup for vaults created before that change.
-    """
-    return Path(root) / "docs" / "silica"
 
 
 # Directories never walked when sampling or indexing a vault: vendored trees and
@@ -375,8 +365,9 @@ def is_inbox_path(path: str) -> bool:
     inbox root (case-insensitive). The inbox is staging, never a write or
     merge target — callers use this to filter candidates and reject ops.
     """
-    inbox = getattr(CONFIG, "inbox_dir", None)
-    root = inbox.strip("/") if isinstance(inbox, str) and inbox.strip("/") else "Inbox"
+    from silica.kernel.vault_manifest import active_inbox_dir
+
+    root = active_inbox_dir() or "Inbox"
     return path.replace("\\", "/").lstrip("/").casefold().startswith(root.casefold() + "/")
 
 

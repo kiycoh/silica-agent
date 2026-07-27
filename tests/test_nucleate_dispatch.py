@@ -169,15 +169,20 @@ def repo_vault(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "inbox_dir", "Inbox")
     from silica.driver import fs_backend
     import silica.driver as driver_mod
-    monkeypatch.setattr(driver_mod, "DRIVER", fs_backend.ObsidianFSBackend(str(vault)))
-    return tmp_path, vault
+    backend = fs_backend.ObsidianFSBackend(str(vault))
+    monkeypatch.setattr(driver_mod, "DRIVER", backend)
+    # Also install it behind the proxy: modules that bind `DRIVER` at import time
+    # (kernel.undo_journal) never see the name-level patch above.
+    driver_mod.set_driver(backend)
+    yield tmp_path, vault
+    driver_mod.set_driver(None)
 
 
 def test_nucleate_code_stages_stub_and_returns_sentinel(repo_vault):
     root, vault = repo_vault
     msg = _expand_workflow_shortcut("/nucleate m.py")
     assert msg == ""  # fully handled inline, nothing for the agent
-    stub = vault / "Inbox" / "m.md"
+    stub = vault / root.name / "m.md"
     assert stub.is_file()
     text = stub.read_text(encoding="utf-8")
     assert "def hi()" in text and "return 1" not in text
@@ -189,7 +194,94 @@ def test_nucleate_mixed_batch_stages_code_and_dispatches_md(repo_vault, stub_coo
     assert msg == ""
     assert stub_coordinator[0]["inbox_files"] == ["Inbox/note.md"]  # md → FSM
     # code file NOT forwarded (staged inline)
-    assert (vault / "Inbox" / "m.md").is_file()
+    assert (vault / root.name / "m.md").is_file()
+
+
+def test_nucleate_folder_of_code_stages_a_stub_per_file(repo_vault):
+    """A folder of source files (no .md in sight) is ingestible: it expands to
+    the git-listed files under it, one skeleton stub each."""
+    root, vault = repo_vault
+    pkg = root / "controller"
+    pkg.mkdir()
+    (pkg / "Api.java").write_text("class Api { void get() {} }\n", encoding="utf-8")
+    (pkg / "Web.java").write_text("class Web { void post() {} }\n", encoding="utf-8")
+    (pkg / "notes.txt").write_text("scratch\n", encoding="utf-8")  # no code lane
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "java"], cwd=root, check=True)
+
+    msg = _expand_workflow_shortcut("/nucleate controller")
+    assert msg == ""  # handled inline, nothing punted to the agent
+    # destination folder is named after the nucleated source folder, not Inbox
+    assert (vault / "controller" / "Api.md").is_file()
+    assert (vault / "controller" / "Web.md").is_file()
+
+
+def test_nucleate_run_is_revertable(repo_vault):
+    """The terminal lane skips the FSM, which is where journalling lived — so
+    without its own run these writes were the only ones /revert could not see."""
+    from silica.kernel.undo_journal import get_undo_journal, revert_run
+
+    root, vault = repo_vault
+    assert _expand_workflow_shortcut("/nucleate m.py") == ""
+    note = vault / root.name / "m.md"
+    assert note.is_file()
+
+    run_id = get_undo_journal().last_active_run(vault=str(vault))
+    assert run_id, "nucleate must open an undo run for this vault"
+    res = revert_run(run_id)
+    assert res["reverted"] == [f"{root.name}/m.md"]
+    assert not note.exists()  # the note did not exist before → undo deletes it
+
+
+def test_nucleate_revert_restores_a_refreshed_note(repo_vault):
+    """Re-nucleating an existing note must undo to its prior body, not delete it."""
+    from silica.kernel.undo_journal import get_undo_journal, revert_run
+
+    root, vault = repo_vault
+    _expand_workflow_shortcut("/nucleate m.py")
+    note = vault / root.name / "m.md"
+    first = note.read_text(encoding="utf-8")
+
+    (root / "m.py").write_text("def hi():\n    return 2\n\ndef bye():\n    pass\n", encoding="utf-8")
+    subprocess.run(["git", "commit", "-qam", "second"], cwd=root, check=True)
+    _expand_workflow_shortcut("/nucleate m.py")
+    assert "def bye()" in note.read_text(encoding="utf-8")
+
+    revert_run(get_undo_journal().last_active_run(vault=str(vault)))
+    assert note.read_text(encoding="utf-8") == first
+
+
+def test_expand_folder_ignores_untracked_noise_and_escapes(repo_vault):
+    from silica.sources.registry import expand_folder
+
+    root, _ = repo_vault
+    (root / "node_modules").mkdir()
+    (root / "node_modules" / "dep.js").write_text("x\n", encoding="utf-8")
+    (root / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+
+    assert expand_folder("node_modules") == []   # git-ignored → never staged
+    assert expand_folder("/etc") == []           # outside the repo
+    assert expand_folder("m.py") == []           # a file, not a folder
+    assert expand_folder("nope") == []           # missing
+
+
+def test_silica_files_lists_code_under_a_folder(repo_vault):
+    """A code folder holds no .md: the old listing read as empty and the agent
+    concluded there was nothing to nucleate."""
+    from silica.tools import TOOLS
+
+    root, _ = repo_vault
+    pkg = root / "controller"
+    pkg.mkdir()
+    (pkg / "Api.java").write_text("class Api {}\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "java"], cwd=root, check=True)
+
+    out = TOOLS["silica_files"].fn(folder="controller")
+    assert out["files"] == [] and out["total"] == 0
+    assert out["code"] == ["controller/Api.java"] and out["code_total"] == 1
+    # a bare call stays a vault listing — no repo dump into the context window
+    assert "code" not in TOOLS["silica_files"].fn()
 
 
 def test_nucleate_unsupported_extension_is_skipped(repo_vault, capsys):

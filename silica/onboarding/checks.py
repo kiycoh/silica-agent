@@ -124,21 +124,26 @@ def check_vault(config: SilicaConfig) -> CheckResult:
             )
         if not os.access(p, os.W_OK):
             return CheckResult("vault", "fail", f"{vault} is not writable", "fix permissions")
-        if not (p / config.inbox_dir).is_dir():
+        # Doctor may be handed a config that is not the active vault (the wizard
+        # does exactly that), so the boundary comes from this path's own
+        # manifest rather than from active_inbox_dir().
+        from silica.kernel.vault_manifest import load_manifest
+
+        write_dir = load_manifest(str(p)).write_dir or ""
+        inbox = "/".join(x for x in (write_dir, config.inbox_dir.strip("/")) if x)
+        if inbox and not (p / inbox).is_dir():
             return CheckResult(
                 "vault", "warn",
-                f"{vault} ok, but inbox folder `{config.inbox_dir}/` is missing",
-                f"create `{config.inbox_dir}/` inside the vault for nucleation",
+                f"{vault} ok, but inbox folder `{inbox}/` is missing",
+                f"create `{inbox}/` inside the vault for nucleation",
             )
         return CheckResult("vault", "ok", vault)
     root = gitstate.find_repo_root(Path.cwd())
     if root is not None:
-        from silica.kernel.paths import is_obsidian_vault
-        from silica.kernel.vault_manifest import adopted_vault, is_declared_vault
-
-        vault_dir = adopted_vault(root)
-        if vault_dir != Path(root) or is_declared_vault(root) or is_obsidian_vault(root):
-            return CheckResult("vault", "ok", f"repo mode → {vault_dir}")
+        # Same rule startup applies: the repo root is the vault, as-is. The old
+        # "is this repo a vault *yet*" test predates that and reported a failure
+        # for the very repo `silica` would have opened without asking.
+        return CheckResult("vault", "ok", f"repo mode → {root}")
     return CheckResult(
         "vault", "fail",
         "SILICA_VAULT not set and this repo is not a Silica vault yet",
