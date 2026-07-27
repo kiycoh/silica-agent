@@ -71,6 +71,8 @@ silica init                     # interactive setup: vault, model, embeddings
 silica                          # start the interactive session
 ```
 
+`silica` curates the folder you launch it in (the repository root, when that folder is inside one). Your settings live in `~/.silica/.env` and follow you between folders; a `.env` in the project overrides them there.
+
 Make a read-only audit your first move. It writes nothing, and it shows you the hubs, bridges, and orphans already sitting in your vault:
 
 ```
@@ -191,19 +193,28 @@ SILICA_VAULT = "/path/to/your/vault"
 ## What you can do
 
 **Clear an inbox without losing anything.**<br/>
-Drop raw clippings and drafts in a folder. `/nucleate Inbox/*.md` distills each one into an atomic note, checks it against what you already have so you do not end up with a fifth copy of the same idea, and files it. Hand it twenty files at once and each one still goes through the same gate.
+Drop raw clippings, drafts, PDFs, or Jupyter Notebooks (`.ipynb`) in a folder. `/nucleate Inbox/*` distills each one into an atomic note, checks it against what you already have so you do not end up with a fifth copy of the same idea, and files it. Hand it twenty files at once and each one still goes through the same gate.
 
 **Ask your notes instead of your memory.**<br/>
-`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz <note>`. All read-only, all grounded in the vault.
+`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz [note]`. All read-only, all grounded in the vault. Untargeted `/quiz` targets notes you previously missed, updating retrieval weights over time.
+
+**Visualize structure and schema.**<br/>
+`/diagram "<topic>"` generates Mermaid flowcharts, mindmaps, sequence, or class diagrams. `/schematize "<topic>"` generates structured breakdown tables. Pass `--save=<path>` to persist them directly into your notes.
+
+**Surface relationships and reading paths.**<br/>
+`/relate <note>` builds a typed relationship matrix (prerequisite, elaborates, contradicts, sibling, depends-on) to neighboring notes. `/path "Note A" "Note B"` computes the shortest reading path across wikilinks and co-occurrence graphs.
+
+**Track contested claims and project plans.**<br/>
+`/contested` lists notes flagged with `contested: true` and their unresolved contradictions. `/plans` groups active project notes by status (`todo`, `in-progress`, `blocked`, `done`).
 
 **Reorganize by intent.**<br/>
-`/organize "group by project"` classifies and moves notes into a taxonomy. `/curate` plans the autolink, dedup, and cleanup work; `--apply` runs it.
+`/organize "group by project"` classifies and moves notes into a taxonomy. `/curate` plans autolink, dedup (embedder-free MinHash LSH), and cleanup work; `--apply` runs it. Staged batch transformations can be reviewed with `/review` and flushed safely.
 
 **Refactor without breaking links.**<br/>
 Merges and splits redirect every incoming link automatically, so a refactor leaves no broken reference and no orphan behind.
 
 **Research straight into the vault.**<br/>
-`/web-search "<topic>"` pulls cited findings into the inbox. Nothing from the web reaches your notes until you nucleate it.
+`/web-search "<topic>"` pulls cited findings into the inbox. `/convert <file>` transcodes PDFs into Markdown drafts. Nothing from the web reaches your notes until you nucleate it.
 
 ---
 
@@ -246,7 +257,7 @@ Every number below comes from the harness in [`evals/`](evals/), run against the
 | **Fused retrieval** on the same vault, masked pairs | **77.6%** recall@10 | 522 pairs |
 | **Write integrity** on the same vault | **100%** (758 of 758) notes where no write transform introduces a new structural violation | 758 notes |
 
-**How they were run.** LoCoMo ingests two of the ten conversations through the production FSM (`fsm-extractive`) and answers them with the production agent loop, `deepseek-v4-flash` as both answer and judge model, retrieval top-10 through the `bge-reranker-v2-m3` cross-encoder. MuSiQue is retrieval only, no answer model, embeddings plus co-occurrence fused at k=10. The three vault rows are the deterministic tier of the golden harness against a live 758-note Obsidian vault, frozen in [`evals/golden/baseline.json`](evals/golden/baseline.json).
+**How they were run.** LoCoMo ingests two of the ten conversations through the production FSM (`fsm-extractive`) and answers them with the production agent loop, `deepseek-v4-flash` as both answer and judge model, retrieval top-10 through the `bge-reranker-v2-m3` cross-encoder. MuSiQue is retrieval only, no answer model, embeddings plus co-occurrence fused at k=10. The three vault rows are the deterministic tier of the golden harness against a live 758-note Obsidian vault, frozen in [`evals/golden/baseline.json`](evals/golden/baseline.json). Additional evaluation probes in [`evals/`](evals/) measure **FactScore** factual precision (`factscore.py`), claim span attribution (`probe_explain_spans.py`), **LongMemEval** long-memory retention, and paired statistical significance testing (`paired_stats.py`).
 
 ```bash
 uv run python -m evals.golden --vault ~/path/to/vault
@@ -338,34 +349,52 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 
 | Command | What it does |
 | :--- | :--- |
-| `/report [folder]` | Structural audit: hubs, bridges, orphans |
-| `/explain "<concept>" [--level]` | Explain a concept, grounded in the vault |
-| `/summarize <note\|folder>` | Digest of one or more notes |
-| `/compare "A" "B"` | Comparison table, surfaces contradictions |
-| `/quiz [note] [--n=10]` | Active-recall quiz; misses resurface. No target = review queue |
-| `/relate <note>` · `/path A B` | How notes relate · shortest reading path |
-| `/schematize <target>` · `/diagram <target>` | Table · Mermaid diagram of a note, folder, or topic |
+| `/report [folder] [--embeddings] [--cooccurrence]` | Structural audit: hubs, bridges, orphans, autolink candidates |
+| `/explain "<concept>" [--level=intro\|expert]` | Explain a concept grounded in the vault at the chosen register |
+| `/summarize <note\|folder...>` | Read-only digest of one or more notes in chat |
+| `/compare "A" "B"` | Comparison table; surfaces contradictions and contested notes |
+| `/quiz [note\|folder] [--n=10]` | Active-recall quiz; misses resurface. No target = weak notes queue |
+| `/relate <note> [--n=8]` | Typed relationship map (prerequisite, elaborates, contradicts, etc.) |
+| `/path <noteA> <noteB>` | Shortest reading path between two notes (wikilinks + co-occurrence) |
+| `/schematize <target> [--save=<path>]` | Breakdown table of a note, folder, or topic (optional note save) |
+| `/diagram <target> [--save=<path>]` | Mermaid diagram (flowchart, mindmap, sequence, class, timeline) |
+| `/contested` | List notes flagged `contested: true` with unresolved contradictions |
 | `/find <query>` | Semantic search |
 
 **Bring in and reshape**
 
 | Command | What it does |
 | :--- | :--- |
-| `/nucleate <file...> [--target=DIR]` | Notes via the gate; code as skeletons |
-| `/organize "<intent>" [--apply]` | Classify and move notes into a taxonomy |
-| `/curate [--apply]` · `/dedup` · `/refine` · `/enrich` | Plan and run autolink, dedup, enrichment |
-| `/web-search "<topic>"` | Cited web findings into the inbox |
-| `/convert <file>` | Transcode a PDF into a markdown draft |
+| `/nucleate <file...> [--target=DIR]` | Notes/PDFs/Notebooks via the gate; code as skeletons |
+| `/organize "<intent>" [--scope=DIR] [--file=tax.yaml] [--apply]` | Classify and move notes into a taxonomy |
+| `/curate [--apply]` · `/dedup` · `/refine` · `/enrich` | Plan and run autolink, MinHash LSH dedup, and enrichment |
+| `/web-search "<topic>" [--max-searches=N]` | Research on the web → cited findings note in Inbox |
+| `/convert <file...>` | Transcode non-markdown files (PDFs) into markdown drafts |
 
 **Indexes** `/embed` · `/cooccur` (embedder-free) · `/lexical` (BM25 and fuzzy)
 
-**Visualize** `/graph [out.html]` · `/map <note>`
+**Visualize** `/graph [out.html]` · `/map <note>` (radial mind-map canvas)
 
 **Codebase** `/wiki` · `/stale` · `/impact [<range>]`
 
-**Undo and inspect** `/undo [note]` · `/revert [run]` · `/status` · `/review` · `/plans` · `/contested`
+**Undo, inspect, and queue**
 
-**System** `/help` · `/model` · `/vault [path]` · `/settings [<key> <value>]` · `/tools` · `/verbose` · `/thinking` · `/clear` · `/exit`
+| Command | What it does |
+| :--- | :--- |
+| `/undo [note]` | Undo the last patch on a note |
+| `/revert [run-id]` | Revert a whole injection (per-run, LIFO) |
+| `/status [run-id]` | Progress digest of the current/last batch run |
+| `/review [--flush=HASH]` | Inspect or flush the async review queue (deferred operations) |
+| `/plans` | List `plans/` notes grouped by status (`todo\|in-progress\|blocked\|done`) |
+
+**System & Settings**
+
+| Command | What it does |
+| :--- | :--- |
+| `/settings [<key> <value\|none>]` | View or edit `vault.yaml` settings without the wizard |
+| `/vault [path]` | Show active vault or switch to another path for this session |
+| `/help` · `/model` · `/tools` | Display help, current LLM model limits, or registered toolset |
+| `/verbose` · `/thinking` · `/clear` · `/exit` | Cycle tool progress, toggle CoT reasoning, clear history, or exit |
 
 ---
 
@@ -377,7 +406,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | :--- | :--- |
 | `SILICA_MODEL` | Chat model, litellm format (e.g. `openrouter/anthropic/claude-sonnet-4`) |
 | `SILICA_PROVIDER` | `lmstudio` or `openrouter` |
-| `SILICA_VAULT` | Vault path, adopted as-is. Reads cover the whole folder; writes are confined by `write_dir` in `vault.yaml` (a source tree declares `docs/silica`, a note folder writes in place) |
+| `SILICA_VAULT` | Vault path, adopted as-is. The working directory wins over this value unless it is exported in the environment (`SILICA_VAULT=... silica`, or an MCP client's `env` block). Reads cover the whole folder; writes are confined by `write_dir` in `vault.yaml` (a source tree declares `docs/silica`, a note folder writes in place) |
 | `SILICA_EMBEDDING_MODEL` | Embedding model for semantic tasks (default `qwen3-embedding-4b`) |
 | `SILICA_BACKEND` | `fs` (default, headless). The Obsidian bridge installs `ws` live at dial-in |
 | `SILICA_GIT_COMMIT` | Git safety net for writes (`off`, `auto`) |

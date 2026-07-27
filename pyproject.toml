@@ -34,8 +34,11 @@ dependencies = [
   "numpy>=2.4.6",
   "snowballstemmer",
   "stop-words>=2025.11.4",
-  "tree-sitter>=0.23",
-  "tree-sitter-language-pack",
+  "tree-sitter>=0.25",
+  # up to 1.8.x the pack shipped its own binding (method-style nodes, parse_bytes);
+  # newer ones hand back upstream py-tree-sitter objects, which is what codeast
+  # speaks. Unpinned, the mismatch parsed nothing and every code note came out empty.
+  "tree-sitter-language-pack>=1.13",
   "yake>=0.7.3",
   "scipy>=1.17.1",
   "mdit-py-plugins>=0.6.1",
