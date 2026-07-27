@@ -160,9 +160,11 @@ COMMANDS: tuple[Command, ...] = (
     Command(
         name="/wiki",
         group="direct",
-        usage="[folder] [--overview-only] [--force]",
+        usage="[folder|path] [--overview-only] [--force]",
         summary="behavioral code wiki: ARCHITECTURE.md + one note per subsystem",
-        examples=("/wiki", "/wiki kernel", "/wiki --overview-only", "/wiki --force"),
+        examples=("/wiki", "/wiki kernel", "/wiki silica/kernel",
+                  "/wiki /core/src/main/java/io/github/app/manager",
+                  "/wiki --overview-only", "/wiki --force"),
     ),
     Command(
         name="/graph",

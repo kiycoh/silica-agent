@@ -135,12 +135,16 @@ _FILES_CAP = 200
 
 @tool(ListFilesArgs, cls="atomic")
 def silica_files(folder: str = "") -> dict:
-    """Lists markdown files in the vault, optionally filtered by folder.
+    """Lists the notes in the vault and the source files under a folder.
 
-    Returns {"total": N, "files": [{name, path}, ...]}. The listing is capped
-    at 200 entries: when "truncated" is true, narrow with folder= instead of
-    re-calling. For a bare count ("how many notes?") use the returned "total"
-    — or the '## Vault map' block already in context, without any call.
+    Returns {"total": N, "files": [{name, path}, ...]} for markdown notes, plus
+    "code": [repo-relative path, ...] with the ingestible source files under
+    `folder` (empty folder= lists notes only). A folder of code is NOT empty
+    just because it holds no .md — feed the "code" paths to /nucleate to stage
+    a skeleton stub per file. Both listings are capped at 200 entries: when
+    "truncated" is true, narrow with folder= instead of re-calling. For a bare
+    count ("how many notes?") use the returned "total" — or the '## Vault map'
+    block already in context, without any call.
     """
     refs = DRIVER.list_files(folder)
     files = [{"name": r.name, "path": r.path} for r in refs]
@@ -148,6 +152,15 @@ def silica_files(folder: str = "") -> dict:
     if len(files) > _FILES_CAP:
         result["truncated"] = True
         result["hint"] = "Listing capped at 200 entries; pass folder= to narrow."
+    # ponytail: folder-scoped only — a bare call would dump a whole repo into
+    # the context window, and the vault map already covers "what is here".
+    if folder:
+        from silica.sources.registry import expand_folder
+
+        code = expand_folder(folder)
+        if code:
+            result["code"] = code[:_FILES_CAP]
+            result["code_total"] = len(code)
     return result
 
 

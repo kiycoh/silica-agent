@@ -99,8 +99,29 @@ def _inject_vault_map(messages: list[dict]) -> None:
         logger.debug("vault map injection skipped: %s", exc)
 
 
+def _vault_scope() -> str:
+    """One line naming the two paths the agent must not confuse.
+
+    Reads span the whole vault; new notes are confined to `write_dir`. Without
+    this the model reads "vault" as the folder it writes in and reports an empty
+    vault while sitting on a repo full of Markdown.
+    """
+    from silica.kernel.vault_manifest import active_write_dir
+
+    vault = CONFIG.vault_path
+    write_dir = active_write_dir()
+    if not write_dir:
+        return f"Vault: {vault} — you read and write notes anywhere under it."
+    return (
+        f"Vault: {vault} — you read everything under it, including files that "
+        f"are not yours (a repo's own README, docs, specs). New notes go under "
+        f"{write_dir}/, the only place you may write; that folder being empty "
+        f"does not mean the vault is empty."
+    )
+
+
 def _fresh_messages() -> list[dict]:
-    """Seed a fresh conversation: system prompt + vault map + token count.
+    """Seed a fresh conversation: system prompt + vault scope + map + token count.
 
     Single source of truth for the initial state, shared by session start and
     /clear so the two can't drift.
@@ -110,6 +131,7 @@ def _fresh_messages() -> list[dict]:
     conv = get_active_manifest().conventions
     reply = conv.reply_language or conv.language
     messages: list[dict] = [{"role": "system", "content": system_prompt(reply)}]
+    messages.append({"role": "system", "content": _vault_scope()})
     _inject_vault_map(messages)
     _update_context_tokens(messages)
     return messages
@@ -199,24 +221,21 @@ class VaultTarget(NamedTuple):
 def resolve_vault_switch(arg: str) -> VaultTarget:
     """Resolve a ``/vault <arg>`` (or explicit ``SILICA_VAULT``) target.
 
-    The path is adopted **as-is**: the vault is the folder the user named, never
-    a subfolder Silica invents for it. Whether notes may be written into that
-    root or into a subtree is a separate axis, declared per-vault as `write_dir`
-    in ``vault.yaml`` (see `onboarding.adopt`) rather than guessed from layout.
+    The path is adopted **as-is**, always: the vault is the folder the user
+    named, never a subfolder Silica invents or remembers. Whether notes may be
+    written into that root or into a subtree is a separate axis, declared
+    per-vault as `write_dir` in ``vault.yaml`` (see `onboarding.adopt`).
 
-    A pre-existing ``<arg>/docs/silica`` is still adopted, so vaults created
-    before this split keep resolving to the same place — unless ``<arg>`` itself
-    carries a ``vault.yaml``, which settles the question: it is the vault, and
-    its ``docs/silica`` is merely where it writes. Read-only I/O.
+    So a vault created before that split reads its whole repo again on the next
+    launch, while its notes stay in the ``docs/silica`` its manifest now names.
+    Read-only I/O.
     """
     from pathlib import Path
-    from silica.kernel.vault_manifest import adopted_vault
 
     target = Path(arg).expanduser().resolve()
     if target.exists() and not target.is_dir():
         return VaultTarget("", False, f"not a directory: {target}")
-    vault = adopted_vault(target)
-    return VaultTarget(str(vault), not vault.is_dir())
+    return VaultTarget(str(target), not target.is_dir())
 
 
 def default_user_vault(home=None):
@@ -228,91 +247,63 @@ def default_user_vault(home=None):
     return (home or Path.home()) / ".silica" / "vault"
 
 
-def resolve_repo_mode_vault(cwd, vault_env: str, adopt_ok: bool, self_repo=None):
-    """Pure resolver for startup vault selection from cwd (testable, no prompts).
+def resolve_cwd_vault(cwd, home=None):
+    """Pure resolver for the vault a `silica` launched in `cwd` curates.
 
-    Returns the vault path string to adopt, or None to leave config unchanged.
-    Git *discovers* the project root; the root is then adopted as-is, exactly
-    like an explicit ``/vault`` argument. Where writes may land inside it is the
-    separate `write_dir` axis (`onboarding.adopt`), not a layout guess here.
-    - Explicit SILICA_VAULT (vault_env truthy) always wins → None.
-    - Not inside a git repo → None.
-    - Inside Silica's own source repo (root == self_repo) → None: that's dev
-      mode, not a vault. Caller falls back to the home default.
-    - root carries a ``vault.yaml`` → it is already a declared vault, adopt it.
-    - ``<root>/docs/silica`` already exists → it stays the vault (pre-write_dir
-      layout, adopted unchanged so existing setups do not move).
-    - root is an Obsidian vault → adopt it, no confirmation needed.
-    - any other repo root → only if adopt_ok (the caller asked the user), since
-      silently adopting whatever repo the shell happens to sit in is not a vault
-      decision Silica gets to make.
+    Returns the directory to adopt, or None when this place is not a vault and
+    the caller should fall back. The shell already says which vault you mean, so
+    the working directory decides — a SILICA_VAULT constant in a .env would
+    otherwise follow you into every other project.
+
+    - inside a git repo → the repo root (one project is one vault, from any of
+      its subdirectories);
+    - anywhere else → cwd itself;
+    - $HOME itself → None: a vault is a folder of notes, not everything you own.
+
+    Adoption of the returned path (a pre-existing ``docs/silica`` under it still
+    wins for back-compat) belongs to ``resolve_vault_switch``; where writes may
+    land inside it is the separate `write_dir` axis (`onboarding.adopt`).
     """
     from pathlib import Path
     from silica.kernel import gitstate
-    from silica.kernel.paths import is_obsidian_vault
-    from silica.kernel.vault_manifest import adopted_vault, is_declared_vault
 
-    if vault_env.strip():
+    cwd = Path(cwd).resolve()
+    if cwd == Path(home or Path.home()).resolve():
         return None
     root = gitstate.find_repo_root(cwd)
     if root is None:
-        return None
-    if self_repo is not None and root == Path(self_repo):
-        return None
-    root = Path(root).resolve()
-    vault = adopted_vault(root)
-    already = vault != root or is_declared_vault(root) or is_obsidian_vault(root)
-    return str(vault) if (already or adopt_ok) else None
+        return str(cwd)
+    return str(Path(root).resolve())
 
 
 def _activate_repo_mode() -> None:
-    """Side-effecting startup vault selection. Explicit SILICA_VAULT wins; else a
-    *user* project repo (prompted before adoption, then adopted as-is with its
-    write boundary declared); else — including inside Silica's own source repo
-    (dev mode), and whenever stdin is not a terminal to prompt on — a stable
-    ~/.silica/vault."""
-    from pathlib import Path
-    from silica.kernel import gitstate
-    from silica.onboarding.adopt import declare_write_dir
-    import silica
+    """Side-effecting startup vault selection: the working directory wins.
 
-    if CONFIG.vault_path.strip():
-        # Explicit SILICA_VAULT wins, resolved exactly like /vault: the named
-        # path as-is (a pre-existing docs/silica under it still wins for
-        # back-compat). Git is never consulted for a named path.
-        t = resolve_vault_switch(CONFIG.vault_path)
+    An *exported* SILICA_VAULT outranks it (`config.VAULT_PINNED` — the pin for
+    MCP servers and cron, where cwd is whatever the client happened to set); one
+    read from a .env file does not. Where cwd is not a vault ($HOME), SILICA_VAULT
+    is the fallback, then a stable ~/.silica/vault.
+    """
+    from pathlib import Path
+    from silica.config import VAULT_PINNED
+    from silica.onboarding.adopt import declare_write_dir
+
+    target = None if VAULT_PINNED else resolve_cwd_vault(Path.cwd())
+    target = target or CONFIG.vault_path.strip()
+    if target:
+        t = resolve_vault_switch(target)
         if t.error:
-            CONSOLE.print(f"  [red]SILICA_VAULT cannot be a vault — {t.error}[/]")
+            CONSOLE.print(f"  [red]{target} cannot be a vault — {t.error}[/]")
             return
-        if t.vault:
-            if t.created:
-                Path(t.vault).mkdir(parents=True, exist_ok=True)
-            declare_write_dir(t.vault)
-            CONFIG.vault_path = t.vault
+        if t.created:
+            Path(t.vault).mkdir(parents=True, exist_ok=True)
+        CONFIG.vault_path = t.vault
+        declared = declare_write_dir(t.vault)
+        CONSOLE.print(f"  Vault: [bold]{t.vault}[/]")
+        if declared:
+            CONSOLE.print(f"  Writes confined to [bold]{declared}/[/] (`write_dir` in vault.yaml).")
         return
-    cwd = Path.cwd()
-    self_repo = gitstate.find_repo_root(Path(silica.__file__).resolve())
-    existing = resolve_repo_mode_vault(cwd, "", adopt_ok=False, self_repo=self_repo)
-    if existing:  # already a vault: legacy docs/silica, or an Obsidian repo root
-        CONFIG.vault_path = existing
-        CONSOLE.print(f"  Repo mode: vault = [bold]{existing}[/]")
-        return
-    root = gitstate.find_repo_root(cwd)
-    # No terminal ⇒ no question. Under `silica mcp` stdin *is* the protocol
-    # channel, so a prompt would eat the client's first JSON-RPC message and
-    # then die on EOF; the same guard covers any other piped invocation.
-    interactive = sys.stdin is not None and sys.stdin.isatty()
-    if root is not None and root != self_repo and interactive:  # user repo, not yet a vault → ask
-        CONSOLE.print(f"  Git repo detected at [bold]{root}[/], not yet a Silica vault.")
-        answer = input("  Manage this repo as the Silica vault? [y/N] ").strip().lower()
-        if answer in ("y", "yes"):
-            CONFIG.vault_path = str(Path(root).resolve())
-            declared = declare_write_dir(CONFIG.vault_path)
-            CONSOLE.print(f"  Repo mode: vault = [bold]{CONFIG.vault_path}[/]")
-            if declared:
-                CONSOLE.print(f"  Writes confined to [bold]{declared}/[/] (`write_dir` in vault.yaml).")
-            return
-    # No user repo, Silica's own repo, or declined → stable home vault.
+    # $HOME with nothing configured → stable home vault.
     home_vault = default_user_vault()
     home_vault.mkdir(parents=True, exist_ok=True)
     CONFIG.vault_path = str(home_vault)
@@ -969,7 +960,9 @@ def _pick_target_folder(md_files: list[str]) -> str:
     from silica.agent.llm import call_llm
     from silica.driver import DRIVER
 
-    inbox = (getattr(CONFIG, "inbox_dir", "") or "Inbox").rstrip("/")
+    from silica.kernel.vault_manifest import active_inbox_dir
+
+    inbox = active_inbox_dir() or "Inbox"
     folders = sorted({
         str(Path(r.path or r.name).parent)
         for r in DRIVER.list_files("")
@@ -1025,7 +1018,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
     Syntax:
         /report [folder] [--top-k=N] [--embeddings]
-        /nucleate <file...> [--target=DIR] [--hub=H] [--keep-sources]
+        /nucleate <file|folder...> [--target=DIR] [--hub=H] [--keep-sources]
         /convert <file...> [--target=DIR]
         /summarize <note|folder...>
         /explain "<concept>" [--level=intro|expert]
@@ -1043,6 +1036,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         /nucleate Inbox/notes.md --target=Concepts/AI
         /nucleate Inbox/notes.md
         /nucleate silica/cli.py
+        /nucleate silica/kernel                 (folder → one stub per source file)
         /nucleate paper.pdf --target=Concepts/AI
         /nucleate "Inbox/papers/With Spaces.pdf" --target=Concepts/AI
         /convert paper.pdf
@@ -1079,12 +1073,33 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         from pathlib import Path
         from silica.kernel.vault_manifest import get_active_manifest
         from silica.sources.convert import convert
-        from silica.sources.registry import adapter_for, stage
+        from silica.kernel.undo_journal import get_undo_journal
+        from silica.sources.registry import adapter_for, expand_folder, folder_rel, stage
 
         enabled = get_active_manifest().sources
+        # A folder argument is the common way to say "this subsystem": expand it
+        # to the source files under it, then dispatch each exactly like a file.
+        # `run_root` remembers which folder each file came from — the code lane
+        # names its destination folder after it.
+        expanded: list[str] = []
+        run_root: dict[str, str] = {}
+        for f in files:
+            group = expand_folder(f, enabled) if adapter_for(f, enabled=enabled) is None else []
+            if group:
+                CONSOLE.print(f"  {f}: [bold]{len(group)}[/] source file(s)")
+                run_root.update(dict.fromkeys(group, folder_rel(f) or ""))
+            expanded.extend(group or [f])
+        files = expanded
+
         md_files: list[str] = []
         staged = 0
         needs_agent = not files  # only flags given (dropped --folder=) → agent infers
+        # One run per /nucleate invocation, so /revert undoes the batch the user
+        # asked for rather than one file of it. A run with no inverses (nothing
+        # staged) is invisible to last_active_run, so opening it costs nothing.
+        undo_run = get_undo_journal().start_run(
+            source="nucleate", vault=CONFIG.vault_path.strip() or None
+        ) if files else None
         for f in files:
             adapter = adapter_for(f, enabled=enabled)
             if adapter is None:
@@ -1102,18 +1117,24 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                     else:
                         needs_agent = True
                 continue
-            result = stage(adapter, f)
+            result = stage(adapter, f, run_root.get(f, ""), undo_run)
             if result["status"] == "distill":
                 md_files.append(f)
             elif result["status"] == "ok":
                 staged += 1
                 code_ref = result["meta"].get("code_ref", "")
-                CONSOLE.print(
-                    f"  Staged [bold]{result['note_path']}[/] "
-                    f"(code_ref {code_ref[:8]}). Refine via the inbox."
-                )
+                if len(files) <= 10:  # a whole subsystem would flood the terminal
+                    CONSOLE.print(
+                        f"  Wrote [bold]{result['note_path']}[/] "
+                        f"(code_ref {code_ref[:8]})."
+                    )
             else:
                 CONSOLE.print(f"  [yellow]{f}: {result.get('message', '')}[/]")
+
+        if staged:
+            if len(files) > 10:
+                CONSOLE.print(f"  Wrote [bold]{staged}[/] code note(s). /wiki for prose.")
+            CONSOLE.print("  [dim]/revert undoes this run.[/]")
 
         if not md_files:
             if staged or not needs_agent:
@@ -1124,8 +1145,9 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             # (it already holds the tools + the vault map).
             return (
                 f"The user typed {user_input!r} to nucleate/ingest, but no ingestible "
-                "file was resolved. The argument may be a folder (list its .md notes "
-                "with silica_files and nucleate them), a single note, or carry a "
+                "file was resolved. The argument may be a folder (call silica_files "
+                "with folder= and nucleate both its notes and its \"code\" entries — "
+                "a code folder holds no .md and is still ingestible), a single note, or carry a "
                 "--target/--folder the flag parser missed. Resolve the inbox file(s), "
                 "then call silica_run_injector with the resolved inbox_files and "
                 "target_dir. If nothing is ingestible, say so briefly."
@@ -1810,11 +1832,13 @@ def main():
     from silica.ui.connect import start_bridge_thread
     _bridge = start_bridge_thread()
 
+    # Wizard first: it prints its own banner and re-execs on success, so running
+    # it after print_home() showed the banner twice in one screen.
+    _autolaunch_wizard_if_unconfigured()  # re-execs on success; returns otherwise
     print_home()
     if _bridge is not None:
         CONSOLE.print(f"  [dim]Obsidian bridge on ws://127.0.0.1:{_bridge.port}[/]\n")
     if not _model_configured():
-        _autolaunch_wizard_if_unconfigured()  # re-execs on success; returns otherwise
         CONSOLE.print(_NO_MODEL_HINT)
 
     session = build_session()
