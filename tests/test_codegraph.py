@@ -261,6 +261,15 @@ def test_java_zero_match_first_segment_dir_is_unresolved(tmp_path):
     assert (kind, val) == ("unresolved", "com.ghost.Thing")
 
 
+def test_java_stdlib_is_external_despite_the_src_main_java_root(tmp_path):
+    """`src/main/java/` is the standard Maven/Gradle source root, so the
+    first-party directory probe sees `/java/` and would claim the whole JDK."""
+    for mod, top in (("java.util.List", "java.util"), ("javax.swing.JFrame", "javax.swing")):
+        kind, val = classify_import(
+            mod, "src/main/java/com/example/app/App.java", JAVA_FILES, "java", tmp_path)
+        assert (kind, val) == ("external", top)
+
+
 def test_java_external_labeled_with_two_segments(tmp_path):
     kind, val = classify_import(
         "org.springframework.boot.SpringApplication", "App.java", JAVA_FILES, "java", tmp_path)

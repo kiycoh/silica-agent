@@ -83,6 +83,10 @@ def _resolve_ts(module: str, importer: str, files: set[str]) -> str | None:
     return None
 
 
+# JDK/Android platform namespaces: reserved, so no project ships them as source
+_JDK_ROOTS = frozenset({"java", "javax", "jdk", "sun", "android", "androidx"})
+
+
 def classify_import(
     module: str, importer: str, files: set[str], language: str, root: Path
 ) -> tuple[str, str]:
@@ -106,6 +110,11 @@ def classify_import(
         if matches:
             return ("resolved", min(matches, key=lambda p: (len(p), p)))
         top = module.split(".", 1)[0]
+        # The platform namespaces are never user code, and the directory probe
+        # below cannot tell them apart: `src/main/java/` — the standard Maven
+        # and Gradle source root — makes every `java.*` import look first-party.
+        if top in _JDK_ROOTS:
+            return ("external", ".".join(module.split(".")[:2]))
         if (root / top).is_dir() or any(f.startswith(top + "/") or f"/{top}/" in f
                                         for f in files):
             return ("unresolved", module)  # first-party package tree, no file

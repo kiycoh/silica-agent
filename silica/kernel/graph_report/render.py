@@ -435,7 +435,15 @@ def write_report(report: VaultReport, output_path: str) -> dict:
     out_md.write_text(to_markdown(report), encoding="utf-8")
 
     out_json = out_md.with_suffix(".json")
-    out_json.write_bytes(orjson.dumps(dataclasses.asdict(report), option=orjson.OPT_INDENT_2))
+    # NON_STR_KEYS: TemporalStat.by_tier is int-keyed; JSON has no int keys, so
+    # they land as "3"/"2"/"1". The file is write-only (humans + tests), never
+    # round-tripped, so the coercion costs nothing.
+    out_json.write_bytes(
+        orjson.dumps(
+            dataclasses.asdict(report),
+            option=orjson.OPT_INDENT_2 | orjson.OPT_NON_STR_KEYS,
+        )
+    )
 
     # Persist E(vault) for /status (spec-harness-promotion §3). Whole-vault
     # reports only: a folder-scoped E is not comparable and would corrupt the

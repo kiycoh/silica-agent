@@ -62,34 +62,106 @@ def source_root(graph: CodeGraph) -> str:
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0]
 
 
-def partition(graph: CodeGraph) -> list[Subsystem]:
-    root_prefix = source_root(graph)
-    groups: dict[str, list[str]] = {}
-    for path in sorted(graph.files):
-        if root_prefix:
-            if not path.startswith(root_prefix + "/"):
-                continue
-            rest = path[len(root_prefix) + 1:]
-        else:
-            rest = path
-        head, _, tail = rest.partition("/")
-        if not root_prefix and head in _EXCLUDED_TOP:
+def module_roots(graph: CodeGraph) -> list[str]:
+    """Sibling modules of a multi-module build (Gradle/Maven core/, desktop/,
+    android/), each its own source root. Empty when the repo has none.
+
+    Without this `source_root` elects the densest module and every other one
+    silently vanishes from the wiki — on a two-module game repo that is half
+    the codebase.
+    # ponytail: keyed on the src/ convention, the one that creates the problem;
+    # probe pom.xml/build.gradle if a real repo lays its modules out otherwise
+    """
+    mods: set[str] = set()
+    for path in graph.files:
+        if not _symbol_bearing(path):
             continue
-        # "(root)" cannot be a package name, so loose files under the source
-        # root can never merge with a real directory (a repo with <root>/core/
-        # would otherwise silently conflate the two under one key)
-        key = head if tail else _ROOT_KEY
-        groups.setdefault(key, []).append(path)
+        top, _, rest = path.partition("/")
+        if rest.startswith("src/") and top not in _EXCLUDED_TOP:
+            mods.add(top)
+    return sorted(mods) if len(mods) > 1 else []
+
+
+def _corridor(rest: list[str]) -> str:
+    """Prefix of information-free directories to skip, "" when there is none.
+
+    A directory holding a single subdirectory of code and no code of its own
+    says nothing about the design: Maven's src/main/java, Java's io/github/app.
+    Descend it until a real fork. Only symbol-bearing files vote and tests/docs
+    never do, so src/{main,test} still reads as a corridor and a stray
+    src/main/resources/*.toml never forks it.
+    """
+    out = ""
+    while True:
+        dirs: set[str] = set()
+        loose = False
+        for r in rest:
+            if not _symbol_bearing(r):
+                continue
+            head, sep, _ = r.partition("/")
+            if not sep:
+                loose = True
+            elif head not in _EXCLUDED_TOP:
+                dirs.add(head)
+        if loose or len(dirs) != 1:
+            return out
+        only = dirs.pop()
+        out += only + "/"
+        rest = [r[len(only) + 1:] for r in rest if r.startswith(only + "/")]
+
+
+def partition(graph: CodeGraph) -> list[Subsystem]:
+    roots = module_roots(graph) or [source_root(graph)]
     out: list[Subsystem] = []
-    for key, members in sorted(groups.items()):
-        if key == _ROOT_KEY:
-            sub_path = root_prefix
-        elif root_prefix:
-            sub_path = f"{root_prefix}/{key}"
-        else:
-            sub_path = key
-        out.append(Subsystem(key=key, path=sub_path, members=members))
-    return out
+    for root_prefix in roots:
+        under = {}
+        for path in sorted(graph.files):
+            if not root_prefix:
+                under[path] = path
+            elif path.startswith(root_prefix + "/"):
+                under[path] = path[len(root_prefix) + 1:]
+        skip = _corridor(sorted(under.values()))
+        groups: dict[str, list[str]] = {}
+        for path, rest in under.items():
+            if skip:
+                if not rest.startswith(skip):
+                    continue          # the corridor's excluded siblings (src/test)
+                rest = rest[len(skip):]
+            head, _, tail = rest.partition("/")
+            if not root_prefix and head in _EXCLUDED_TOP:
+                continue
+            # "(root)" cannot be a package name, so loose files under the source
+            # root can never merge with a real directory (a repo with <root>/core/
+            # would otherwise silently conflate the two under one key)
+            groups.setdefault(head if tail else _ROOT_KEY, []).append(path)
+        base = "/".join(p for p in (root_prefix, skip.rstrip("/")) if p)
+        for key, members in sorted(groups.items()):
+            sub_path = base if key == _ROOT_KEY else (f"{base}/{key}" if base else key)
+            # one module's "manager" is not another's: qualify keys, or the two
+            # would share a note path and overwrite each other
+            if len(roots) > 1:
+                key = root_prefix if key == _ROOT_KEY else f"{root_prefix}.{key}"
+            out.append(Subsystem(key=key, path=sub_path, members=members))
+    return sorted(out, key=lambda s: s.key)
+
+
+def subsystem_for_path(graph: CodeGraph, rel: str,
+                       taken: frozenset[str] = frozenset()) -> Subsystem | None:
+    """Ad-hoc subsystem over an arbitrary repo directory, recursive.
+
+    `partition` cuts one level under the source root, so a deep tree
+    (Maven's core/src/main/java/io/github/app/manager) never surfaces as a
+    key. /wiki <path> synthesizes the subsystem instead of refusing.
+    None when no indexed source file lives under it."""
+    prefix = rel.strip("/")
+    members = sorted(p for p in graph.files if p.startswith(prefix + "/"))
+    if not members:
+        return None
+    key = prefix.rsplit("/", 1)[-1]
+    # the note path is subsystems/<key>.md: a leaf name shared with a real
+    # subsystem would overwrite its note, so fall back to the full path
+    return Subsystem(key=prefix.replace("/", ".") if key in taken else key,
+                     path=prefix, members=members)
 
 
 # ---------------------------------------------------------------------------
@@ -196,9 +268,13 @@ def _entry_points(graph: CodeGraph, sub: Subsystem, scripts: set[str],
     return out
 
 
-def build_digests(graph: CodeGraph, subsystems: list[Subsystem],
-                  root: Path) -> list[SubsystemDigest]:
-    key_of = _file_to_key(subsystems)
+def build_digests(graph: CodeGraph, subsystems: list[Subsystem], root: Path,
+                  context: list[Subsystem] | None = None) -> list[SubsystemDigest]:
+    """`context` names every file in the repo, so a scoped run still resolves
+    its collaborators: keyed on `subsystems` alone, every edge leaving the
+    scope hits an unknown file and the digest reports no collaborators at all.
+    The scoped subsystems come last, so they win the key for their own files."""
+    key_of = _file_to_key((context or []) + subsystems)
     all_calls = graph.call_edges()
     call_in: Counter = Counter()
     call_out: Counter = Counter()

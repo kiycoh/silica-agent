@@ -1,6 +1,6 @@
 """kernel/codewiki — partition + digest for the behavioral code wiki."""
 from silica.kernel.codegraph import CodeGraph
-from silica.kernel.codewiki import Subsystem, partition, source_root
+from silica.kernel.codewiki import Subsystem, module_roots, partition, source_root
 
 
 def _graph(paths, entries=None):
@@ -64,6 +64,56 @@ def test_source_root_loose_bare_files_do_not_count():
     # loose HTML at the repo root must not drag the source root to ""
     g = _graph(["a.html", "b.html", "c.html", "src/a.py", "src/b.py"])
     assert source_root(g) == "src"
+
+
+def test_maven_scaffolding_and_root_package_are_not_subsystems():
+    # src/main/java says nothing about the design, and neither does the
+    # io/github/app root package: the subsystems are the leaf packages.
+    g = _graph(["src/main/java/io/github/app/App.java",
+                "src/main/java/io/github/app/svc/A.java",
+                "src/main/java/io/github/app/svc/B.java",
+                "src/main/java/io/github/app/ui/W.java",
+                "src/test/java/io/github/app/svc/ATest.java"])
+    subs = {s.key: s for s in partition(g)}
+    assert set(subs) == {"(root)", "svc", "ui"}
+    assert subs["svc"].path == "src/main/java/io/github/app/svc"
+    assert subs["(root)"].members == ["src/main/java/io/github/app/App.java"]
+    # test sources are not the code, at any depth
+    assert all("src/test/" not in m for s in subs.values() for m in s.members)
+
+
+def test_corridor_descent_stops_at_a_real_fork_and_at_loose_code():
+    # a dir holding code of its own is never a corridor, however few files it
+    # has: descending past it would hide them
+    g = _graph(["src/main/java/io/github/app/App.java",
+                "src/main/java/io/github/app/svc/A.java"])
+    subs = {s.key: s for s in partition(g)}
+    assert set(subs) == {"(root)", "svc"}
+    # a bare (non symbol-bearing) sibling must not fork the corridor
+    g = _graph(["src/main/java/io/app/svc/A.java", "src/main/java/io/app/ui/W.java",
+                "src/main/resources/app.toml"])
+    subs = {s.key: s for s in partition(g)}
+    assert set(subs) == {"svc", "ui"}
+
+
+def test_multi_module_repo_keeps_every_module():
+    # source_root() elects the densest module; the others must not vanish
+    g = _graph(["core/src/main/java/io/gh/g/manager/M.java",
+                "core/src/main/java/io/gh/g/entity/P.java",
+                "core/src/main/java/io/gh/g/Main.java",
+                "desktop/src/main/java/io/gh/g/Launcher.java"])
+    assert module_roots(g) == ["core", "desktop"]
+    subs = {s.key: s for s in partition(g)}
+    assert set(subs) == {"core", "core.entity", "core.manager", "desktop"}
+    # keys are module-qualified: one module's "manager" is not another's
+    assert subs["core.manager"].path == "core/src/main/java/io/gh/g/manager"
+    assert subs["desktop"].members == ["desktop/src/main/java/io/gh/g/Launcher.java"]
+
+
+def test_single_module_repo_is_not_treated_as_multi_module():
+    g = _graph(["src/main/java/io/gh/g/svc/A.java", "src/main/java/io/gh/g/App.java"])
+    assert module_roots(g) == []
+    assert {s.key for s in partition(g)} == {"(root)", "svc"}
 
 
 def test_flat_repo_root_excludes_tests_and_docs():

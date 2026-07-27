@@ -45,9 +45,9 @@ def extract(root, src: bytes, path: str, language: str) -> ModuleSkeleton:
 
 def _walk(container, src: bytes, imports, symbols, calls, state) -> None:
     pending: list = []
-    for i in range(container.named_child_count()):
+    for i in range(container.named_child_count):
         node = container.named_child(i)
-        kind = node.kind()
+        kind = node.type
         if kind == "comment":
             pending.append(node)
             continue
@@ -133,10 +133,10 @@ def _sig(node, src: bytes) -> str:
 def _function_declarator(node):
     d = node.child_by_field_name("declarator")
     depth = 0
-    while d is not None and d.kind() != "function_declarator" and depth < 8:
+    while d is not None and d.type != "function_declarator" and depth < 8:
         d = d.child_by_field_name("declarator")
         depth += 1
-    return d if d is not None and d.kind() == "function_declarator" else None
+    return d if d is not None and d.type == "function_declarator" else None
 
 
 def _function(node, src: bytes, symbols, calls, state, doc_comments,
@@ -182,9 +182,9 @@ def _type_spec(node, src: bytes, symbols, calls, state, doc_comments,
     _add(symbols, Symbol(kind="class", name=name, signature=_sig(node, src),
                          doc=_first_line(full), doc_full=full, parent=parent))
     pending: list = []
-    for i in range(body.named_child_count()):
+    for i in range(body.named_child_count):
         child = body.named_child(i)
-        kind = child.kind()
+        kind = child.type
         if kind == "comment":
             pending.append(child)
             continue
@@ -201,11 +201,11 @@ def _type_spec(node, src: bytes, symbols, calls, state, doc_comments,
 
 
 def _collect_calls(node, src: bytes, out: dict, parent: str) -> None:
-    if node.kind() == "call_expression":
+    if node.type == "call_expression":
         fn = node.child_by_field_name("function")
         if fn is not None:
             text = _text(fn, src).replace("::", ".")
             if _CALL_NAME.match(text):
                 out[(text, parent)] = None
-    for i in range(node.named_child_count()):
+    for i in range(node.named_child_count):
         _collect_calls(node.named_child(i), src, out, parent)

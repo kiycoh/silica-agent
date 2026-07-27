@@ -254,6 +254,55 @@ def test_scoped_run_keeps_other_subsystems_in_overview(wiki_env):
     assert "[[(root)]]" in fake.messages[1]["content"]
 
 
+def test_scope_accepts_paths_not_just_subsystem_keys(wiki_env):
+    root, vault, fake = wiki_env
+    (root / "pkg" / "sub").mkdir()
+    (root / "pkg" / "sub" / "mod.py").write_text(
+        '"""Sub module."""\n\n\ndef work():\n    pass\n', encoding="utf-8")
+    run_wiki(vault, config=None)
+
+    # absolute, repo-relative, /-rooted-as-in-the-vault, repo-name-prefixed, key
+    for scope in (str(root / "pkg" / "sub"), "pkg/sub", "./pkg/sub",
+                  "/pkg/sub", f"{root.name}/pkg/sub", "sub"):
+        result = run_wiki(vault, config=None, folder=scope, force=True)
+        assert result["status"] == "ok", scope
+        assert any(p.endswith("sub.md") for p in result["written"]), scope
+
+    # the repo root is not a subsystem: it means "no scoping", not an error
+    assert run_wiki(vault, config=None, folder=str(root),
+                    force=True)["status"] == "ok"
+    # a folder with no indexed source under it still fails loudly
+    assert run_wiki(vault, config=None,
+                    folder="/nowhere/at/all")["status"] == "error"
+
+
+def test_scope_synthesizes_a_subsystem_for_a_deep_folder(wiki_env):
+    # partition() cuts one level under the source root, so a Maven-shaped tree
+    # is a single subsystem. /wiki <deep folder> must still describe it.
+    root, vault, fake = wiki_env
+    deep = root / "pkg" / "a" / "b" / "manager"
+    deep.mkdir(parents=True)
+    (deep / "svc.py").write_text(
+        '"""Manager service."""\nfrom pkg.util import helper\n\n\n'
+        "def serve():\n    helper()\n", encoding="utf-8")
+    run_wiki(vault, config=None)                       # partition-only baseline
+    assert not (vault / "subsystems" / "manager.md").exists()
+
+    result = run_wiki(vault, config=None, folder="pkg/a/b/manager")
+    assert result["status"] == "ok" and result["failed"] == []
+    note = vault / "subsystems" / "manager.md"
+    assert note.is_file()
+    assert "pkg/a/b/manager/svc.py" in note.read_text(encoding="utf-8")
+
+    # scoped grounding keeps its collaborators: the digest must still see the
+    # edge out to the rest of the repo, not an island
+    digest = fake.messages[1]["content"]
+    assert "out -> " in digest
+    # ARCHITECTURE.md describes the partition and must not gain the folder note
+    arch = (vault / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    assert "[[manager]]" not in arch
+
+
 def test_whitespace_only_note_body_does_not_crash(wiki_env):
     root, vault, fake = wiki_env
     run_wiki(vault, config=None)

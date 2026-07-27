@@ -32,6 +32,7 @@ def silica_document(path: str) -> dict:
 
     try:
         item = CODE.read(path)
+        item.meta["stage_to_inbox"] = True  # RBAC inbox-write, never the vault
         stub = CODE.to_stub(item)
     except ValueError as e:
         return {"status": "error", "message": str(e)}

@@ -296,6 +296,20 @@ def test_write_report_json_deserializable(tmp_path, report):
     assert "god_nodes" in data
 
 
+def test_write_report_json_handles_int_keyed_by_tier(tmp_path, report):
+    """TemporalStat.by_tier is int-keyed; orjson rejects those without OPT_NON_STR_KEYS.
+
+    The synthetic fixture builds from a nodes/edges override, so it never runs
+    the on-disk triage that populates by_tier — set it explicitly.
+    """
+    import orjson
+    report.temporal.by_tier = {3: 2, 1: 1}
+    out = str(tmp_path / "GRAPH_REPORT.md")
+    result = write_report(report, out)
+    data = orjson.loads(open(result["path_json"], "rb").read())
+    assert data["temporal"]["by_tier"] == {"3": 2, "1": 1}
+
+
 # ---------------------------------------------------------------------------
 # Determinism: same input → same output
 # ---------------------------------------------------------------------------

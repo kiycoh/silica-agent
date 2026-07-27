@@ -228,6 +228,58 @@ def _project_info(root) -> str:
             f"scripts: {scripts or '(none)'}")
 
 
+def _scope_candidates(folder: str, root) -> list[str]:
+    """Readings of the /wiki scope argument, best first, each a subsystem key
+    ("kernel") or a repo-relative dir ("silica/kernel"). "" means the repo
+    root itself: no scoping.
+
+    A real absolute path is rebased on the repo root. Everything else is read
+    against the repo root, never the process cwd — the REPL is routinely run
+    from elsewhere — which is what makes a leading slash work as "from the
+    repo root" (/silica/kernel), the way a path reads inside the vault. A
+    path that still carries the repo directory itself in front (souls-light/
+    core/...) gets that prefix stripped as a second reading, not the first:
+    a repo whose own name is also a directory inside it stays unambiguous."""
+    from pathlib import Path
+
+    root = Path(root).resolve()
+    raw = folder.strip()
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        try:
+            rel = candidate.resolve().relative_to(root).as_posix()
+            return [""] if rel == "." else [rel]
+        except ValueError:
+            pass          # not a real path under the repo: read it repo-relative
+    rel = raw.removeprefix("./").strip("/")
+    if rel == root.name:
+        return [""]
+    out = [rel]
+    if rel.startswith(root.name + "/"):
+        out.append(rel[len(root.name) + 1:])
+    return out
+
+
+def _resolve_scope(graph, all_subs, folder: str, root):
+    """(subsystems, is_adhoc) for a /wiki scope argument; (None, False) when
+    nothing in the repo answers to it. A folder that is not a partition
+    subsystem becomes one on demand — the partition cuts a single level under
+    the source root, so a deep tree is otherwise unreachable."""
+    from silica.kernel.codewiki import subsystem_for_path
+
+    taken = frozenset(s.key for s in all_subs)
+    for want in _scope_candidates(folder, root):
+        if not want:
+            return all_subs, False                     # the repo root: no scoping
+        hit = [s for s in all_subs if want in (s.key, s.path)]
+        if hit:
+            return hit, False
+        sub = subsystem_for_path(graph, want, taken)
+        if sub is not None:
+            return [sub], True
+    return None, False
+
+
 def run_wiki(vault, config, folder: str | None = None,
              overview_only: bool = False, force: bool = False) -> dict:
     """Five-stage /wiki pipeline. Deterministic stages 0-1 and 4; one worker
@@ -265,13 +317,13 @@ def run_wiki(vault, config, folder: str | None = None,
                        "Python/TypeScript/JavaScript)", root)
         return {"status": "empty", "written": [], "skipped": [], "failed": [],
                 "parse_errors": 0}
-    subs = all_subs
+    subs, adhoc = all_subs, False
     if folder:
-        subs = [s for s in all_subs if s.key == folder.strip("/")]
-        if not subs:
-            return {"status": "error", "reason": f"unknown subsystem: {folder}",
+        subs, adhoc = _resolve_scope(graph, all_subs, folder, root)
+        if subs is None:
+            return {"status": "error", "reason": f"unknown subsystem or folder: {folder}",
                     "written": [], "skipped": [], "failed": [], "parse_errors": 0}
-    digests = build_digests(graph, subs, root)
+    digests = build_digests(graph, subs, root, context=all_subs)
     head = gitstate.head_ref(root) or ""
     edges = cross_edges(graph, all_subs)   # full graph, even when scoped
     ref = edges_ref(edges)
@@ -329,7 +381,7 @@ def run_wiki(vault, config, folder: str | None = None,
             regen = False
         if not regen:
             skipped.append(rel)
-            if existing:
+            if existing and not adhoc:
                 summaries.append((d.key, _first_line(body)))
             continue
         digest_text = render_digest(d)
@@ -339,8 +391,13 @@ def run_wiki(vault, config, folder: str | None = None,
             continue
         if _commit(rel, _note_body(_subsystem_frontmatter(d, head), note.content)):
             written.append(rel)
-            any_regen = True
-            summaries.append((d.key, _first_line(note.content)))
+            # ARCHITECTURE.md describes the partition; an ad-hoc folder note is
+            # an extra, not a member. Listing it would put a subsystem in the
+            # overview that the next unscoped run cannot backfill, so it would
+            # silently vanish from the next regen.
+            if not adhoc:
+                any_regen = True
+                summaries.append((d.key, _first_line(note.content)))
 
     # A scoped or failed regen must not shrink the overview's grounding to the
     # subsystems touched this run: backfill from the notes already on disk.
@@ -355,6 +412,11 @@ def run_wiki(vault, config, folder: str | None = None,
     summaries.sort()
 
     arch_rel = f"{prefix}ARCHITECTURE.md"
+    if adhoc:
+        # nothing about the partition changed, and the overview is not allowed
+        # to name the folder note: leave ARCHITECTURE.md alone, LLM call included
+        return {"status": "ok", "written": written, "skipped": skipped, "failed": failed,
+                "parse_errors": sum(d.parse_errors for d in digests)}
     existing_arch = _read(arch_rel)
     arch_data, _, arch_body = frontmatter.split(existing_arch) if existing_arch else ({}, "", "")
     regen_arch = force or not existing_arch or any_regen \

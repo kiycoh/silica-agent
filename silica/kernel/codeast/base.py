@@ -12,7 +12,7 @@ Grammars come from tree-sitter-language-pack (one package, no postinstall
 compilation). Language detection is extension-based, but
 limited to languages this extractor actually supports.
 
-NOTE: tree-sitter >= 0.23 uses a method-call API — node.kind(), node.start_byte(),
+NOTE: tree-sitter >= 0.23 uses a method-call API — node.type, node.start_byte,
 etc. are methods, not properties. All internal helpers use that calling convention.
 """
 from __future__ import annotations
@@ -95,14 +95,14 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
         return ModuleSkeleton(path=path, language=language)
     try:
         from tree_sitter_language_pack import get_parser
-        tree = get_parser(language).parse_bytes(source.encode("utf-8"))
+        tree = get_parser(language).parse(source.encode("utf-8"))
     except Exception:
         return ModuleSkeleton(path=path, language=language, parse_error=True)
 
     src = source.encode("utf-8")
     imports: list[str] = []
     symbols: list[Symbol] = []
-    root = tree.root_node()
+    root = tree.root_node
     module_doc, module_comments, dunder_all = ("", [], None)
     calls: list[Call] = []
     aliases: dict[str, str] = {}
@@ -115,7 +115,7 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
         return _c.extract(root, src, path=path, language=language)
     if language == "python":
         from silica.kernel.codeast import python as _py
-        for i in range(root.named_child_count()):
+        for i in range(root.named_child_count):
             _py._py_extract(root.named_child(i), src, imports, symbols, aliases=aliases)
         module_doc, module_comments = _py._py_module_docs(root, src)
         dunder_all = _py._py_dunder_all(root, src)
@@ -124,7 +124,7 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
     else:
         # ponytail: TS doc/comment/call capture deferred with the rest of the TS lane
         from silica.kernel.codeast import ts as _ts
-        for i in range(root.named_child_count()):
+        for i in range(root.named_child_count):
             _ts._ts_extract(root.named_child(i), src, imports, symbols)
     return ModuleSkeleton(path=path, language=language, imports=imports,
                           symbols=symbols, module_doc=module_doc,
@@ -138,14 +138,14 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
 # ---------------------------------------------------------------------------
 
 def _text(node, src: bytes) -> str:
-    return src[node.start_byte():node.end_byte()].decode("utf-8", errors="replace")
+    return src[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
 def _signature(node, src: bytes) -> str:
     """Declaration text up to (excluding) the body, whitespace-collapsed."""
     body = node.child_by_field_name("body")
-    end = body.start_byte() if body is not None else node.end_byte()
-    sig = src[node.start_byte():end].decode("utf-8", errors="replace")
+    end = body.start_byte if body is not None else node.end_byte
+    sig = src[node.start_byte:end].decode("utf-8", errors="replace")
     return " ".join(sig.split()).rstrip(":")
 
 

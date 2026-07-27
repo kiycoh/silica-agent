@@ -10,14 +10,14 @@ from silica.kernel.codeast.base import _CALL_NAME, Call, Symbol, _signature, _te
 def _py_doc_node(node):
     """Bare string node of a body's leading docstring, or None."""
     body = node.child_by_field_name("body")
-    if body is None or body.named_child_count() == 0:
+    if body is None or body.named_child_count == 0:
         return None
     first = body.named_child(0)
     # In tree-sitter >= 0.23 the docstring is a bare 'string' node as first
     # child of the block; older grammars wrap it in expression_statement.
-    if first.kind() == "expression_statement" and first.named_child_count() > 0:
+    if first.type == "expression_statement" and first.named_child_count > 0:
         first = first.named_child(0)
-    return first if first.kind() == "string" else None
+    return first if first.type == "string" else None
 
 
 def _strip_quotes(text: str) -> str:
@@ -51,21 +51,21 @@ def _py_module_docs(root, src: bytes) -> tuple[str, list[str]]:
     """Module-level docstring (whole) and top-level comment blocks. Comments
     group by consecutive source rows; capped at _COMMENT_CAP_LINES per file."""
     module_doc = ""
-    if root.named_child_count() > 0:
+    if root.named_child_count > 0:
         first = root.named_child(0)
-        if first.kind() == "expression_statement" and first.named_child_count() > 0:
+        if first.type == "expression_statement" and first.named_child_count > 0:
             first = first.named_child(0)
-        if first.kind() == "string":
+        if first.type == "string":
             module_doc = _doc_text(first, src)
     blocks: list[str] = []
     current: list[str] = []
     last_row = None
     total = 0
-    for i in range(root.child_count()):
+    for i in range(root.child_count):
         child = root.child(i)
-        if child.kind() != "comment":
+        if child.type != "comment":
             continue
-        row = child.start_position().row
+        row = child.start_point.row
         if last_row is not None and row != last_row + 1 and current:
             blocks.append("\n".join(current))
             current = []
@@ -81,9 +81,9 @@ def _py_module_docs(root, src: bytes) -> tuple[str, list[str]]:
 def _py_decorators(node, src: bytes) -> list[str]:
     """Decorator names of a decorated_definition, '@' and call args stripped."""
     out: list[str] = []
-    for i in range(node.named_child_count()):
+    for i in range(node.named_child_count):
         child = node.named_child(i)
-        if child.kind() == "decorator":
+        if child.type == "decorator":
             out.append(_text(child, src).lstrip("@").split("(", 1)[0].strip())
     return out
 
@@ -92,23 +92,23 @@ def _py_dunder_all(root, src: bytes) -> list[str] | None:
     """Literal `__all__` list, or None (absent / dynamic: no authority). This
     grammar emits a bare `assignment` at module level; older ones wrap it in
     `expression_statement`, so both shapes are unwrapped."""
-    for i in range(root.named_child_count()):
+    for i in range(root.named_child_count):
         node = root.named_child(i)
         assign = node
-        if node.kind() == "expression_statement" and node.named_child_count() > 0:
+        if node.type == "expression_statement" and node.named_child_count > 0:
             assign = node.named_child(0)
-        if assign.kind() != "assignment":
+        if assign.type != "assignment":
             continue
         left = assign.child_by_field_name("left")
         right = assign.child_by_field_name("right")
         if left is None or right is None or _text(left, src) != "__all__":
             continue
-        if right.kind() != "list":
+        if right.type != "list":
             return None
         names: list[str] = []
-        for j in range(right.named_child_count()):
+        for j in range(right.named_child_count):
             el = right.named_child(j)
-            if el.kind() != "string":
+            if el.type != "string":
                 return None
             names.append(_strip_quotes(_text(el, src).strip()))
         return names
@@ -122,22 +122,22 @@ def _py_calls(root, src: bytes) -> list[Call]:
     out: dict[tuple[str, str], None] = {}
 
     def walk(node, parent: str) -> None:
-        if node.kind() == "call":
+        if node.type == "call":
             fn = node.child_by_field_name("function")
             if fn is not None:
                 text = _text(fn, src)
                 if _CALL_NAME.match(text):
                     out[(text, parent)] = None
-        for i in range(node.named_child_count()):
+        for i in range(node.named_child_count):
             walk(node.named_child(i), parent)
 
-    for i in range(root.named_child_count()):
+    for i in range(root.named_child_count):
         node = root.named_child(i)
         target = node
-        if node.kind() == "decorated_definition":
+        if node.type == "decorated_definition":
             target = node.child_by_field_name("definition") or node
         name = ""
-        if target.kind() in ("function_definition", "class_definition"):
+        if target.type in ("function_definition", "class_definition"):
             n = target.child_by_field_name("name")
             name = _text(n, src) if n is not None else ""
         walk(node, name)
@@ -145,9 +145,9 @@ def _py_calls(root, src: bytes) -> list[Call]:
 
 
 def _py_has_main_guard(root, src: bytes) -> bool:
-    for i in range(root.named_child_count()):
+    for i in range(root.named_child_count):
         node = root.named_child(i)
-        if node.kind() == "if_statement":
+        if node.type == "if_statement":
             cond = node.child_by_field_name("condition")
             if cond is not None and "__name__" in _text(cond, src):
                 return True
@@ -157,17 +157,17 @@ def _py_has_main_guard(root, src: bytes) -> bool:
 def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
                 decorators: list[str] | None = None,
                 aliases: dict[str, str] | None = None) -> None:
-    if node.kind() == "decorated_definition":
+    if node.type == "decorated_definition":
         inner = node.child_by_field_name("definition")
         if inner is not None:
             _py_extract(inner, src, imports, symbols, _py_decorators(node, src), aliases)
         return
-    if node.kind() == "import_statement":
-        for i in range(node.named_child_count()):
+    if node.type == "import_statement":
+        for i in range(node.named_child_count):
             child = node.named_child(i)
-            if child.kind() == "dotted_name":
+            if child.type == "dotted_name":
                 imports.append(_text(child, src))
-            elif child.kind() == "aliased_import":
+            elif child.type == "aliased_import":
                 name = child.child_by_field_name("name")
                 alias = child.child_by_field_name("alias")
                 if name is not None:
@@ -175,21 +175,21 @@ def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
                     if alias is not None and aliases is not None:
                         aliases[_text(alias, src)] = _text(name, src)
         return
-    if node.kind() == "import_from_statement":
+    if node.type == "import_from_statement":
         module = node.child_by_field_name("module_name")
         if module is None:
             return
         base = _text(module, src)
         sep = "" if base.endswith(".") else "."
         names: list[str] = []
-        mstart = module.start_byte()
-        for i in range(node.named_child_count()):
+        mstart = module.start_byte
+        for i in range(node.named_child_count):
             child = node.named_child(i)
-            if child.start_byte() == mstart:
+            if child.start_byte == mstart:
                 continue  # the module_name node itself
-            if child.kind() == "dotted_name":
+            if child.type == "dotted_name":
                 names.append(_text(child, src))
-            elif child.kind() == "aliased_import":
+            elif child.type == "aliased_import":
                 name = child.child_by_field_name("name")
                 alias = child.child_by_field_name("alias")
                 if name is not None:
@@ -201,7 +201,7 @@ def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
         else:
             imports.append(base)  # `from X import *` — bare module
         return
-    if node.kind() == "function_definition":
+    if node.type == "function_definition":
         name = node.child_by_field_name("name")
         symbols.append(Symbol(
             kind="function",
@@ -212,7 +212,7 @@ def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
             decorators=decorators or [],
         ))
         return
-    if node.kind() == "class_definition":
+    if node.type == "class_definition":
         name_node = node.child_by_field_name("name")
         cls_name = _text(name_node, src) if name_node is not None else "?"
         symbols.append(Symbol(
@@ -224,14 +224,14 @@ def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
             decorators=decorators or [],
         ))
         body = node.child_by_field_name("body")
-        for i in range(body.named_child_count() if body is not None else 0):
+        for i in range(body.named_child_count if body is not None else 0):
             child = body.named_child(i)
             target = child
             method_decos: list[str] = []
-            if child.kind() == "decorated_definition":
+            if child.type == "decorated_definition":
                 target = child.child_by_field_name("definition") or child
                 method_decos = _py_decorators(child, src)
-            if target.kind() == "function_definition":
+            if target.type == "function_definition":
                 mname = target.child_by_field_name("name")
                 symbols.append(Symbol(
                     kind="method",

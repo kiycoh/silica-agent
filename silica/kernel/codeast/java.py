@@ -34,18 +34,18 @@ def extract(root, src: bytes, path: str, language: str) -> ModuleSkeleton:
     has_main = False
 
     module_doc = ""
-    if root.named_child_count() > 0:
+    if root.named_child_count > 0:
         first = root.named_child(0)
-        nxt = root.named_child(1) if root.named_child_count() > 1 else None
+        nxt = root.named_child(1) if root.named_child_count > 1 else None
         # a leading comment is the file header unless it is javadoc-positioned
         # (directly above the first type declaration — then the walk claims it)
-        if first.kind() == "block_comment" and (nxt is None or nxt.kind() not in _TYPE_DECLS):
+        if first.type == "block_comment" and (nxt is None or nxt.type not in _TYPE_DECLS):
             module_doc = _comment_text(first, src)
 
     last_comment = None
-    for i in range(root.named_child_count()):
+    for i in range(root.named_child_count):
         node = root.named_child(i)
-        kind = node.kind()
+        kind = node.type
         if kind == "block_comment":
             last_comment = node
             continue
@@ -91,13 +91,13 @@ def _import_text(node, src: bytes) -> str:
 def _annotations(node, src: bytes) -> list[str]:
     """Annotation names of a declaration, '@' and call args stripped."""
     out: list[str] = []
-    for i in range(node.named_child_count()):
+    for i in range(node.named_child_count):
         child = node.named_child(i)
-        if child.kind() != "modifiers":
+        if child.type != "modifiers":
             continue
-        for j in range(child.named_child_count()):
+        for j in range(child.named_child_count):
             ann = child.named_child(j)
-            if ann.kind() in ("marker_annotation", "annotation"):
+            if ann.type in ("marker_annotation", "annotation"):
                 out.append(_text(ann, src).lstrip("@").split("(", 1)[0].strip())
     return out
 
@@ -105,27 +105,27 @@ def _annotations(node, src: bytes) -> list[str]:
 def _signature(node, src: bytes) -> str:
     """Declaration text after annotations, up to the body, collapsed —
     annotations live in `decorators`, mirroring Python's decorator handling."""
-    start = node.start_byte()
-    for i in range(node.named_child_count()):
+    start = node.start_byte
+    for i in range(node.named_child_count):
         child = node.named_child(i)
-        if child.kind() == "modifiers":
-            for j in range(child.named_child_count()):
+        if child.type == "modifiers":
+            for j in range(child.named_child_count):
                 ann = child.named_child(j)
-                if ann.kind() in ("marker_annotation", "annotation"):
-                    start = max(start, ann.end_byte())
+                if ann.type in ("marker_annotation", "annotation"):
+                    start = max(start, ann.end_byte)
     body = node.child_by_field_name("body")
-    end = body.start_byte() if body is not None else node.end_byte()
+    end = body.start_byte if body is not None else node.end_byte
     return " ".join(src[start:end].decode("utf-8", errors="replace").split())
 
 
 def _is_static_void(node, src: bytes) -> bool:
     static = False
     void = False
-    for i in range(node.named_child_count()):
+    for i in range(node.named_child_count):
         child = node.named_child(i)
-        if child.kind() == "modifiers":
+        if child.type == "modifiers":
             static = "static" in _text(child, src).split()
-        elif child.kind() == "void_type":
+        elif child.type == "void_type":
             void = True
     return static and void
 
@@ -149,9 +149,9 @@ def _type_decl(node, src: bytes, symbols: list[Symbol], comment, parent: str) ->
     if body is None:
         return False
     last_comment = None
-    for i in range(body.named_child_count()):
+    for i in range(body.named_child_count):
         child = body.named_child(i)
-        kind = child.kind()
+        kind = child.type
         if kind == "block_comment":
             last_comment = child
             continue
@@ -172,7 +172,7 @@ def _type_decl(node, src: bytes, symbols: list[Symbol], comment, parent: str) ->
 
 
 def _collect_calls(node, src: bytes, out: dict[tuple[str, str], None], parent: str) -> None:
-    kind = node.kind()
+    kind = node.type
     if kind == "method_invocation":
         obj = node.child_by_field_name("object")
         name = node.child_by_field_name("name")
@@ -186,5 +186,5 @@ def _collect_calls(node, src: bytes, out: dict[tuple[str, str], None], parent: s
             text = _text(typ, src)
             if _CALL_NAME.match(text):
                 out[(text, parent)] = None
-    for i in range(node.named_child_count()):
+    for i in range(node.named_child_count):
         _collect_calls(node.named_child(i), src, out, parent)
