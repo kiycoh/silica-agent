@@ -58,7 +58,31 @@ class ReadNoteArgs(BaseModel):
 def silica_read_note(name: str) -> str:
     """Reads the complete content of a note in the vault by name (wikilink-style resolution). DO NOT use paths."""
     nc = DRIVER.read_note(name)
-    return nc.content
+    return _with_stale_banner(nc.content)
+
+
+def _with_stale_banner(content: str) -> str:
+    """Prefix a code-doc note with its staleness warning, when it has one.
+
+    A wiki note derived from source outlives the source: after a refactor it
+    still reads as authoritative while naming files that have moved. The
+    `code_ref`/`documents:` frontmatter always carried the answer, but only the
+    `/stale` report ever asked — so the reader, the one acting on the note, was
+    the one kept in the dark. Parsed from the content already in hand: no extra
+    driver round-trip, and notes without `documents:` cost one dict lookup.
+    """
+    try:
+        from silica.config import CONFIG
+        from silica.kernel.code import codedocs
+        from silica.kernel.write import frontmatter
+
+        data, _, _ = frontmatter.split(content)
+        if not data or not codedocs.documents_of(data):
+            return content
+        warning = codedocs.read_warning(CONFIG.vault_path, data)
+        return f"> {warning}\n\n{content}" if warning else content
+    except Exception:
+        return content
 
 
 class PropsArgs(BaseModel):

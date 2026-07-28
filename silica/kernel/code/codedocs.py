@@ -169,33 +169,86 @@ def stale_docs(vault: Path | str, repo_root: Path | str | None = None) -> list[S
 
     out: list[StaleDoc] = []
     for note_path, data, _ in notes:
+        out.extend(_stale_for_note(root, note_path, data, latest, touched))
+    return out
+
+
+def _stale_for_note(root: Path, note_path: str, data: dict,
+                    latest: dict[str, str], touched: dict) -> list[StaleDoc]:
+    """Per-(note, path) staleness, shared by the vault scan and the read gate.
+
+    One rule in one place: a second copy for the read path would drift from the
+    report and the two would disagree about the same note.
+    """
+    recorded = str(data.get("code_ref") or "").strip()
+    if not recorded:
+        return []  # unknown → not stale
+    out: list[StaleDoc] = []
+    for code_path in _documents_of(data):
+        current = latest.get(code_path, "")
+        if not current:
+            continue  # path has no history → unknown, not stale
+        # Not `current != recorded`: code_ref is HEAD when the note was
+        # verified, so that test fires for every path HEAD did not touch
+        # and reports "stale" with zero intervening commits. The path is
+        # stale only when a commit after `recorded` actually touched it.
+        # None = the ref does not resolve at all → conservatively stale.
+        moved = touched.get(recorded)
+        if moved is None or code_path in moved:
+            level, details = classify_change(root, recorded, code_path)
+            out.append(
+                StaleDoc(
+                    note_path=note_path,
+                    code_path=code_path,
+                    recorded_ref=recorded,
+                    current_ref=current,
+                    intervening=gitstate.commits_since(root, recorded, code_path),
+                    change_level=level,
+                    details=details,
+                )
+            )
+    return out
+
+
+def read_warning(vault: Path | str, data: dict, repo_root: Path | str | None = None) -> str:
+    """One-line staleness banner for a note being READ, "" when it is fine.
+
+    The freshness signal already existed in frontmatter and was only ever
+    consumed by the `/stale` report, so an agent reading a wiki note got no hint
+    that it described a layout that had since moved. Two checks, cheapest first:
+
+    - a `documents:` path that is gone from the working tree — free, and the
+      loud case: after a refactor the note names a file nobody can open;
+    - the git staleness rule above, for paths that still exist.
+
+    Soft on every failure: a banner is an aid, never a reason a read fails.
+    """
+    try:
+        docs = _documents_of(data)
+        if not docs:
+            return ""
+        root = Path(repo_root) if repo_root else paths.repo_root_for(Path(vault))
+        if root is None:
+            return ""
+        missing = [p for p in docs if not (root / p).exists()]
+        if missing:
+            return (f"[stale] documents {len(missing)}/{len(docs)} path(s) that no longer "
+                    f"exist ({', '.join(missing[:3])}) — the source moved or was deleted "
+                    f"since code_ref. Verify against the working tree before trusting this.")
         recorded = str(data.get("code_ref") or "").strip()
         if not recorded:
-            continue  # unknown → not stale
-        for code_path in _documents_of(data):
-            current = latest.get(code_path, "")
-            if not current:
-                continue  # path has no history → unknown, not stale
-            # Not `current != recorded`: code_ref is HEAD when the note was
-            # verified, so that test fires for every path HEAD did not touch
-            # and reports "stale" with zero intervening commits. The path is
-            # stale only when a commit after `recorded` actually touched it.
-            # None = the ref does not resolve at all → conservatively stale.
-            moved = touched.get(recorded)
-            if moved is None or code_path in moved:
-                level, details = classify_change(root, recorded, code_path)
-                out.append(
-                    StaleDoc(
-                        note_path=note_path,
-                        code_path=code_path,
-                        recorded_ref=recorded,
-                        current_ref=current,
-                        intervening=gitstate.commits_since(root, recorded, code_path),
-                        change_level=level,
-                        details=details,
-                    )
-                )
-    return out
+            return ""
+        latest = gitstate.latest_shas(root, sorted(docs))
+        touched = {recorded: gitstate.paths_touched_since(root, recorded, sorted(docs))}
+        stale = _stale_for_note(root, "", data, latest, touched)
+        if not stale:
+            return ""
+        level, _ = note_verdict(stale)
+        changed = ", ".join(sorted({d.code_path for d in stale})[:3])
+        return (f"[stale] {level} change in {len(stale)} documented path(s) since code_ref "
+                f"{recorded[:8]} ({changed}). Verify against the source before trusting this.")
+    except Exception:
+        return ""
 
 
 def stale_count(vault: Path | str) -> int:
