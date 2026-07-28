@@ -128,6 +128,8 @@ def test_code_note_dest_names_the_folder_after_the_nucleated_source():
     assert code_note_dest("pkg/main.py") == ("pkg", "main")
     # repo-root file has no parent folder to borrow: the repo names it
     assert code_note_dest("m.py", "", "souls-light") == ("souls-light", "m")
+    # relative subfolder root (e.g. "agent") rebased on top-level package "silica"
+    assert code_note_dest("silica/agent/commit.py", "agent", "silica-agent") == ("silica", "agent.commit")
 
 
 def test_code_stub_says_so_when_the_parser_fails(code_repo, monkeypatch):

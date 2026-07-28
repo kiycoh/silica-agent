@@ -265,13 +265,15 @@ def _resolve_scope(graph, all_subs, folder: str, root):
     nothing in the repo answers to it. A folder that is not a partition
     subsystem becomes one on demand — the partition cuts a single level under
     the source root, so a deep tree is otherwise unreachable."""
-    from silica.kernel.codewiki import subsystem_for_path
+    from silica.kernel.codewiki import subsystem_for_path, source_root
 
     taken = frozenset(s.key for s in all_subs)
+    src_root = source_root(graph)
     for want in _scope_candidates(folder, root):
-        if not want:
-            return all_subs, False                     # the repo root: no scoping
-        hit = [s for s in all_subs if want in (s.key, s.path)]
+        if not want or (src_root and want == src_root):
+            return all_subs, False                     # the repo root or source root: no scoping
+        hit = [s for s in all_subs
+               if want in (s.key, s.path) or (src_root and f"{src_root}/{want}" == s.path)]
         if hit:
             return hit, False
         sub = subsystem_for_path(graph, want, taken)

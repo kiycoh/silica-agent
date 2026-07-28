@@ -53,7 +53,16 @@ def code_note_dest(rel_path: str, root: str = "", repo_name: str = "code") -> tu
     so the wikilink written today resolves when that folder is nucleated.
     """
     p = PurePosixPath(rel_path)
-    root_p = PurePosixPath(root.strip("/")) if root.strip("/") else p.parent
+    raw_root = root.strip("/")
+    if raw_root:
+        root_p = PurePosixPath(raw_root)
+        if len(p.parts) > 1 and not rel_path.startswith(str(root_p) + "/"):
+            top = p.parts[0]
+            cand = PurePosixPath(top) / root_p
+            if rel_path.startswith(str(cand) + "/") or rel_path == str(cand):
+                root_p = PurePosixPath(top)
+    else:
+        root_p = PurePosixPath(p.parts[0]) if len(p.parts) > 1 else p.parent
     try:
         inner = p.relative_to(root_p)
     except ValueError:

@@ -271,6 +271,9 @@ def test_scope_accepts_paths_not_just_subsystem_keys(wiki_env):
     # the repo root is not a subsystem: it means "no scoping", not an error
     assert run_wiki(vault, config=None, folder=str(root),
                     force=True)["status"] == "ok"
+    # source_root folder (e.g. "pkg") also means unscoped full run across all subsystems
+    res_source_root = run_wiki(vault, config=None, folder="pkg", force=True)
+    assert res_source_root["status"] == "ok"
     # a folder with no indexed source under it still fails loudly
     assert run_wiki(vault, config=None,
                     folder="/nowhere/at/all")["status"] == "error"
