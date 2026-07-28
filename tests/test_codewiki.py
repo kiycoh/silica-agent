@@ -344,3 +344,29 @@ def test_doc_budget_leaves_a_small_subsystem_untouched():
                          "doc_full": "long"}]}
     assert _spend_doc_budget(publics, _G(), privileged=set()) == set()
     assert not publics["a.py"][0].get("brief")
+
+
+def _files(*paths):
+    return _graph(list(paths))
+
+
+def test_oversized_subsystem_descends_one_level():
+    """93 files under one key is a catalogue; its own subdirs name the split."""
+    big = [f"silica/kernel/{lane}/m{i}.py"
+           for lane in ("write", "recall", "code") for i in range(15)]
+    loose = ["silica/kernel/workqueue.py", "silica/kernel/progress.py"]
+    g = _graph([*big, *loose, "silica/cli.py"])
+    keys = {s.key: len(s.members) for s in partition(g)}
+    assert keys == {"kernel.write": 15, "kernel.recall": 15,
+                    "kernel.code": 15, "kernel": 2, "(root)": 1}
+
+
+def test_small_subsystem_is_left_whole():
+    g = _graph([f"silica/kernel/{d}/m.py" for d in "abc"] + ["silica/cli.py"])
+    assert {s.key for s in partition(g)} == {"kernel", "(root)"}
+
+
+def test_big_but_flat_package_does_not_descend():
+    """No subdirectories below means nothing to descend into."""
+    g = _graph([f"silica/kernel/m{i}.py" for i in range(45)] + ["silica/cli.py"])
+    assert {s.key: len(s.members) for s in partition(g)} == {"kernel": 45, "(root)": 1}

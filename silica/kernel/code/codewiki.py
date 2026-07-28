@@ -110,6 +110,34 @@ def _corridor(rest: list[str]) -> str:
         rest = [r[len(only) + 1:] for r in rest if r.startswith(only + "/")]
 
 
+_SPLIT_ABOVE = 40    # files: past this a note catalogues modules, it stops explaining
+_MIN_FORK = 3        # subdirectories needed below, or there is nothing to split on
+
+
+def _descend(sub: Subsystem) -> list[Subsystem]:
+    """One level deeper, for a subsystem too big to read as a single note whose
+    own subdirectories already name the split.
+
+    The one-level cut is right for a repo's top layer, but it also fuses a
+    93-file package into one digest that no doc budget can rescue: signatures
+    alone outrun a comfortable prompt, so the note lists modules instead of
+    explaining a design. Files loose at this level keep the parent key.
+    """
+    if len(sub.members) <= _SPLIT_ABOVE:
+        return [sub]
+    groups: dict[str, list[str]] = {}
+    for m in sub.members:
+        rest = m[len(sub.path) + 1:] if sub.path else m   # "" path = repo root
+        head, sep, _ = rest.partition("/")
+        groups.setdefault(head if sep else _ROOT_KEY, []).append(m)
+    if len(groups) - (_ROOT_KEY in groups) < _MIN_FORK:
+        return [sub]                       # flat package: descending buys nothing
+    return [Subsystem(
+        key=sub.key if key == _ROOT_KEY else f"{sub.key}.{key}",
+        path=sub.path if key == _ROOT_KEY else f"{sub.path}/{key}",
+        members=members) for key, members in sorted(groups.items())]
+
+
 def partition(graph: CodeGraph) -> list[Subsystem]:
     roots = module_roots(graph) or [source_root(graph)]
     out: list[Subsystem] = []
@@ -141,7 +169,7 @@ def partition(graph: CodeGraph) -> list[Subsystem]:
             # would share a note path and overwrite each other
             if len(roots) > 1:
                 key = root_prefix if key == _ROOT_KEY else f"{root_prefix}.{key}"
-            out.append(Subsystem(key=key, path=sub_path, members=members))
+            out.extend(_descend(Subsystem(key=key, path=sub_path, members=members)))
     return sorted(out, key=lambda s: s.key)
 
 
