@@ -19,7 +19,9 @@ import hashlib
 import logging
 import os
 import tempfile
+from collections.abc import Callable
 from datetime import datetime
+from fnmatch import fnmatch
 from pathlib import Path
 
 from silica.config import CONFIG
@@ -175,11 +177,49 @@ def is_obsidian_vault(path) -> bool:
 # build output, never someone's notes. Hidden dirs are pruned separately (that
 # covers .git/.venv/.obsidian). Deliberately NOT `.gitignore`: a gitignored
 # folder can be exactly where private notes live (this repo's own `docs/`), so
-# honouring it would hide notes. ponytail: fixed list, grows when it bites.
+# honouring it would hide notes. Per-vault additions go in `.silicaignore`.
 NOISE_DIRS: frozenset[str] = frozenset({
     "node_modules", "vendor", "build", "dist", "target", "__pycache__",
     "site-packages", "coverage", "htmlcov",
 })
+
+# Per-vault extension of NOISE_DIRS, because "grows when it bites" should not
+# mean "edit the source". Seeded by `onboarding.adopt.seed_silicaignore`.
+SILICAIGNORE_REL = ".silicaignore"
+
+
+def _ignore_patterns(vault) -> tuple[frozenset[str], tuple[str, ...]]:
+    """(exact names, globs) to prune: NOISE_DIRS plus `<vault>/.silicaignore`.
+
+    Split so the common case stays a set lookup; a missing or unreadable file
+    means the built-ins alone (an ignore file is a convenience, never a gate).
+    """
+    names, globs = set(NOISE_DIRS), []
+    try:
+        text = (Path(vault) / SILICAIGNORE_REL).read_text(encoding="utf-8")
+    except OSError:
+        return frozenset(names), ()
+    for line in text.splitlines():
+        pat = line.split("#", 1)[0].strip().strip("/")
+        if not pat:
+            continue
+        (globs.append(pat) if any(c in pat for c in "*?[") else names.add(pat))
+    return frozenset(names), tuple(globs)
+
+
+def ignore_matcher(vault) -> Callable[[str], bool]:
+    """Predicate over a directory NAME: True ⇒ do not walk it.
+
+    Matches by name at any depth, like NOISE_DIRS itself — not by path, so
+    `docs/private` does not work but `private` and `*.egg-info` do.
+    ponytail: name-only matching, add path anchoring when someone needs it.
+
+    Reads the file once: build the matcher before a walk, never inside it.
+    """
+    names, globs = _ignore_patterns(vault)
+    if not globs:
+        return names.__contains__
+    return lambda d: d in names or any(fnmatch(d, g) for g in globs)
 
 
 # Root-level files that mark a source tree regardless of file counts (a repo
@@ -213,8 +253,9 @@ def looks_like_code(root, sample_max: int = 400) -> bool:
 
     code_exts = {e for e, lang in EXTENSION_MAP.items() if lang not in BARE_LANGUAGES}
     code = prose = seen = 0
+    skip = ignore_matcher(root)
     for dirpath, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if not d.startswith(".") and d not in NOISE_DIRS]
+        dirs[:] = [d for d in dirs if not d.startswith(".") and not skip(d)]
         for name in files:
             ext = os.path.splitext(name)[1].lower()
             if ext in code_exts:

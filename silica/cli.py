@@ -286,7 +286,7 @@ def _activate_repo_mode() -> None:
     """
     from pathlib import Path
     from silica.config import VAULT_PINNED
-    from silica.onboarding.adopt import declare_write_dir
+    from silica.onboarding.adopt import declare_write_dir, seed_silicaignore
 
     target = None if VAULT_PINNED else resolve_cwd_vault(Path.cwd())
     target = target or CONFIG.vault_path.strip()
@@ -299,9 +299,12 @@ def _activate_repo_mode() -> None:
             Path(t.vault).mkdir(parents=True, exist_ok=True)
         CONFIG.vault_path = t.vault
         declared = declare_write_dir(t.vault)
+        seeded = seed_silicaignore(t.vault)
         CONSOLE.print(f"  Vault: [bold]{t.vault}[/]")
         if declared:
             CONSOLE.print(f"  Writes confined to [bold]{declared}/[/] (`write_dir` in vault.yaml).")
+        if seeded:
+            CONSOLE.print("  Created [bold].silicaignore[/] — add folders to keep out of the index.")
         return
     # $HOME with nothing configured → stable home vault.
     home_vault = default_user_vault()
@@ -361,7 +364,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
                 Path(target.vault).mkdir(parents=True, exist_ok=True)
                 CONSOLE.print(f"  Created [bold]{target.vault}[/] as the session vault.")
             resolved = target.vault
-            from silica.onboarding.adopt import declare_write_dir
+            from silica.onboarding.adopt import declare_write_dir, seed_silicaignore
 
             declared = declare_write_dir(resolved)
             if declared:
@@ -369,6 +372,8 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
                     f"  Source tree — writes confined to [bold]{declared}/[/]; the rest of "
                     "the vault is read-only context. Change `write_dir` in vault.yaml."
                 )
+            if seed_silicaignore(resolved):
+                CONSOLE.print("  Created [bold].silicaignore[/] — add folders to keep out of the index.")
             CONFIG.vault_path = resolved
             reset_driver()
             from silica.kernel.overlay import reset_overlay_cache

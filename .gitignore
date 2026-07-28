@@ -189,3 +189,4 @@ evals/*/metrics.*.json
 
 # benchmark vaults + frozen corpora (never committed)
 bench/
+.silicaignore

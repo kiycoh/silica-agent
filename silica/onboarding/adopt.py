@@ -22,13 +22,50 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from silica.kernel.paths import is_obsidian_vault, looks_like_code
+from silica.kernel.paths import (
+    NOISE_DIRS,
+    SILICAIGNORE_REL,
+    is_obsidian_vault,
+    looks_like_code,
+)
 from silica.kernel.vault_manifest import MANIFEST_REL
 
 logger = logging.getLogger(__name__)
 
 # Where notes go in a source tree: visible and committable next to the code.
 CODE_WRITE_DIR = "docs/silica"
+
+_SILICAIGNORE_HEADER = """\
+# .silicaignore — directory names Silica never walks when indexing this vault.
+#
+# One name or glob per line; `#` starts a comment. Matched against the directory
+# NAME at any depth, not against a path. Hidden dirs (.git, .venv, .obsidian)
+# are always skipped, and .gitignore is deliberately NOT honoured — a gitignored
+# folder is often exactly where private notes live.
+#
+# The list below is built in. It is here to be read and extended, so
+# uncommenting a line changes nothing; add your own below it.
+"""
+
+
+def seed_silicaignore(vault: str | Path) -> Path | None:
+    """Write the `.silicaignore` template into a source-tree vault, once.
+
+    Returns the path when this call created it, else None: the file is already
+    there (never overwrite a hand-edited one), the vault reads as prose (a notes
+    folder has no vendored trees to prune), or the root is unwritable.
+    """
+    root = Path(vault)
+    target = root / SILICAIGNORE_REL
+    if not root.is_dir() or target.exists() or not looks_like_code(root):
+        return None
+    body = "".join(f"# {d}\n" for d in sorted(NOISE_DIRS))
+    try:
+        target.write_text(_SILICAIGNORE_HEADER + body, encoding="utf-8")
+    except OSError as exc:
+        logger.warning("could not write %s (%s) — built-in ignores still apply", target, exc)
+        return None
+    return target
 
 
 def write_dir_for(vault: str | Path) -> str:
