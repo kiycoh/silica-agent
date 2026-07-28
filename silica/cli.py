@@ -280,9 +280,15 @@ def _activate_repo_mode() -> None:
     """Side-effecting startup vault selection: the working directory wins.
 
     An *exported* SILICA_VAULT outranks it (`config.VAULT_PINNED` — the pin for
-    MCP servers and cron, where cwd is whatever the client happened to set); one
+    headless runs like cron, which start wherever the scheduler put them); one
     read from a .env file does not. Where cwd is not a vault ($HOME), SILICA_VAULT
     is the fallback, then a stable ~/.silica/vault.
+
+    Do NOT pin an MCP server this way: a stdio client (Claude Code) spawns the
+    server with cwd set to the project it opened, so cwd is already the answer,
+    and a pin in the server's env silently serves one vault to every project.
+    Cross-project personal memory is the separate SILICA_MEMORY_VAULT axis
+    (`kernel/recall/memory_lane.py`), which self-disables inside its own vault.
     """
     from pathlib import Path
     from silica.config import VAULT_PINNED

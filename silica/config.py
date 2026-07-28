@@ -20,12 +20,10 @@ from typing import Literal
 
 from dotenv import find_dotenv, load_dotenv
 
-# A SILICA_VAULT *exported* in the real environment (`SILICA_VAULT=x silica`, an
-# MCP server's env block, a cron unit) is a deliberate per-invocation pin: the
-# one thing that outranks the working directory in cli._activate_repo_mode. The
-# same name sitting in a .env file is config, not intent, and loses to cwd.
-# Captured here because load_dotenv below is what makes the two indistinguishable.
-VAULT_PINNED = bool(os.environ.get("SILICA_VAULT", "").strip())
+# Captured at package import (silica/__init__.py), before any third-party
+# load_dotenv can blur an exported pin into a .env value. Re-exported here
+# because this is where every caller expects to find it.
+from silica import VAULT_PINNED  # noqa: E402,F401
 
 # .env layering, first value wins per key (override=False): the project's own
 # .env, found from the working directory upwards, then the user-level
