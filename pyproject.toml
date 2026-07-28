@@ -210,6 +210,32 @@ forbidden_modules = ["silica.kernel.code.codegraph"]
 # semantically-empty neighbors (spec-code-lane, Principio ordinatore).
 
 [[tool.importlinter.contracts]]
+name = "the /organize lane is a leaf — no kernel lane depends on the classifier"
+type = "forbidden"
+source_modules = [
+  "silica.kernel.write", "silica.kernel.recall", "silica.kernel.code",
+  "silica.kernel.report", "silica.kernel.text", "silica.kernel.link",
+]
+forbidden_modules = ["silica.kernel.organize"]
+# taxonomy + classify serve one user-facing command (/organize) and nothing
+# else. Keeping the arrow one-way is what lets the pair stay a two-file lane
+# instead of dissolving back into text/ and recall/.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "text and code lanes sit low — they reach only recall and write"
+type = "forbidden"
+source_modules = ["silica.kernel.text", "silica.kernel.code"]
+forbidden_modules = [
+  "silica.kernel.report", "silica.kernel.link", "silica.kernel.organize",
+]
+# The seven lanes are mutually recursive (136 cycles between them), so there is
+# no layering to declare here. These two arrows are the exception that is
+# actually true, and freezing them keeps the two most reusable lanes from
+# acquiring dependencies on the vault-shaped ones.
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
 name = "graph data stays offline — the kernel viewer split leaves no network dep"
 type = "forbidden"
 source_modules = ["silica.kernel.recall.graph_export"]
