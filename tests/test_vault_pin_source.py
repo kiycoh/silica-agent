@@ -5,7 +5,7 @@
 
 Exported in the real environment = deliberate pin, outranks cwd. The same name
 in a .env = config, loses to cwd. The two are indistinguishable once anything
-calls load_dotenv, and litellm does at import time — so the capture has to sit
+calls load_dotenv, and litellm does at import time, so the capture has to sit
 in silica/__init__.py, ahead of every third-party import. Subprocesses because
 the whole point is import-time ordering.
 """
