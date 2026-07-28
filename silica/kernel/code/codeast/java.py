@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from silica.kernel.code.codeast.base import (
     _CALL_NAME, Call, ModuleSkeleton, Symbol,
-    _block_comment_text as _comment_text, _text,
+    _block_comment_text as _comment_text, _text, clean_comment_block,
 )
 
 _TYPE_DECLS = {
@@ -40,7 +40,7 @@ def extract(root, src: bytes, path: str, language: str) -> ModuleSkeleton:
         # a leading comment is the file header unless it is javadoc-positioned
         # (directly above the first type declaration — then the walk claims it)
         if first.type == "block_comment" and (nxt is None or nxt.type not in _TYPE_DECLS):
-            module_doc = _comment_text(first, src)
+            module_doc = clean_comment_block(_comment_text(first, src))
 
     last_comment = None
     for i in range(root.named_child_count):

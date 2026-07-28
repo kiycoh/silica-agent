@@ -22,8 +22,8 @@ SILICA_ROOT = Path(__file__).resolve().parent.parent / "silica"
 _LEG_IMPORT_RE = re.compile(
     r"from silica\.kernel\.recall\.(embed|cooccurrence) import|"
     r"import silica\.kernel\.recall\.(embed|cooccurrence)\b|"
-    # `from silica.kernel.recall import cooccurrence` (any name position, aliased or
-    # not) is functionally the same direct leg import — without this
+    # `from silica.kernel.recall import cooccurrence` (any name position,
+    # aliased or not) is functionally the same direct leg import — without this
     # alternative it slipped past the regex, defeating the test's documented
     # purpose of forcing an explicit facade-or-allowlist decision. `\b` keeps
     # non-leg names like `embed_signals` from matching.

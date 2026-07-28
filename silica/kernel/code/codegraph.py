@@ -147,7 +147,7 @@ def classify_import(
 # store — derived index at paths.index_dir()/codegraph.json
 # ---------------------------------------------------------------------------
 
-STORE_VERSION = 2
+STORE_VERSION = 4   # v4: TS re-exports resolve; C/Java module_doc loses licence noise
 
 
 def store_path() -> Path:
@@ -196,7 +196,9 @@ def _resolve_calls(sk, rel: str, files: set[str], root: Path,
     ground LLM prose only and never enter automatic decisions (module docstring).
     # ponytail: import-scoped only; scope-stack/receiver if flows read wrong
     """
-    imports = [m for m in dict.fromkeys(sk.imports) if m]
+    # deferred imports resolve calls exactly like top-level ones: `_py.f()`
+    # after a function-local `from pkg import python as _py` is a real edge
+    imports = [m for m in dict.fromkeys([*sk.imports, *sk.deferred_imports]) if m]
     by_len = sorted(imports, key=len, reverse=True)
     edges: dict[tuple[str, str, str], None] = {}
     for call in sk.calls:
@@ -239,8 +241,55 @@ def _resolve_calls(sk, rel: str, files: set[str], root: Path,
     return [{"target": t, "callee": ce, "caller": ca} for (t, ce, ca) in sorted(edges)]
 
 
+def _resolve_calls_ts(sk, rel: str, files: set[str], root: Path,
+                      language: str) -> list[dict]:
+    """TS/JS call edges. The specifier is a path (`./util`), not a dotted
+    module, so the import-scoped spell-matcher cannot see it; the alias table
+    already maps every local binding to its specifier, which is the whole
+    resolution."""
+    edges: dict[tuple[str, str, str], None] = {}
+    for call in sk.calls:
+        head, _, rest = call.name.partition(".")
+        module = sk.import_aliases.get(head)
+        if not module:
+            continue
+        kind, value = classify_import(module, rel, files, language, root)
+        if kind == "resolved" and value != rel:
+            edges[(value, rest or head, call.parent)] = None
+    return [{"target": t, "callee": c, "caller": p} for (t, c, p) in sorted(edges)]
+
+
+def _reexports(sk, rel: str, files: set[str], root: Path,
+               language: str) -> list[dict]:
+    """Names a facade re-exports without defining them. `__init__.py` and
+    `index.ts` otherwise render as an empty file: an `__all__` of twenty names
+    and not one symbol to show for it."""
+    if not sk.dunder_all:
+        return []
+    wanted = set(sk.dunder_all) - {s.name for s in sk.symbols}
+    out: list[dict] = []
+
+    def take(name: str, mod: str) -> None:
+        kind, value = classify_import(mod, rel, files, language, root)
+        if kind == "resolved" and value != rel:
+            out.append({"name": name, "from": value})
+            wanted.discard(name)
+
+    # an alias binds the surfaced name straight to its source: the only route
+    # for TS, whose specifiers are paths that the leaf match below never sees
+    for name in sorted(wanted):
+        mod = sk.import_aliases.get(name)
+        if mod:
+            take(name, mod)
+    for mod in dict.fromkeys([*sk.imports, *sk.deferred_imports]):
+        leaf = mod.rsplit(".", 1)[-1]
+        if leaf in wanted:
+            take(leaf, mod)
+    return out
+
+
 _EMPTY_V2 = {"module_doc": "", "module_comments": [], "dunder_all": None,
-             "has_main_guard": False, "calls": []}
+             "has_main_guard": False, "calls": [], "deferred": [], "reexports": []}
 
 
 def _file_entry(root: Path, rel: str, files: set[str]) -> tuple[dict, list[tuple[str, str]]]:
@@ -270,6 +319,7 @@ def _file_entry(root: Path, rel: str, files: set[str]) -> tuple[dict, list[tuple
     imports: list[str] = []
     external: list[str] = []
     unresolved: list[str] = []
+    deferred: list[str] = []
     for mod in dict.fromkeys(sk.imports):
         if not mod:
             continue
@@ -277,9 +327,24 @@ def _file_entry(root: Path, rel: str, files: set[str]) -> tuple[dict, list[tuple
         bucket = {"resolved": imports, "external": external, "unresolved": unresolved}[kind]
         if value not in bucket:
             bucket.append(value)
+    # Deferred imports land in "imports" too: they are real dependencies and
+    # every consumer (hubs, collaborators, impact) must see them. "deferred"
+    # keeps the subset so prose can name the ones that break an import cycle.
+    for mod in dict.fromkeys(sk.deferred_imports):
+        if not mod:
+            continue
+        kind, value = classify_import(mod, rel, files, language, root)
+        if kind == "resolved":
+            if value not in deferred:
+                deferred.append(value)
+            if value not in imports:
+                imports.append(value)
+        elif kind == "external" and value not in external:
+            external.append(value)
     entry = {
         "language": language,
         "imports": imports,
+        "deferred": deferred,
         "external": external,
         "unresolved": unresolved,
         "symbols": [
@@ -291,11 +356,13 @@ def _file_entry(root: Path, rel: str, files: set[str]) -> tuple[dict, list[tuple
         "module_doc": sk.module_doc,
         "module_comments": sk.module_comments,
         "dunder_all": sk.dunder_all,
+        "reexports": _reexports(sk, rel, files, root, language),
         "has_main_guard": sk.has_main_guard,
-        # ponytail: TS call edges empty in v1, matches codeast TS deferral;
         # C/C++ edges come from the graph-level include join in build_codegraph
         "calls": (_resolve_calls(sk, rel, files, root, language)
-                  if language in ("python", "java") else []),
+                  if language in ("python", "java")
+                  else _resolve_calls_ts(sk, rel, files, root, language)
+                  if language in ("typescript", "javascript") else []),
         "parse_error": sk.parse_error,
     }
     raw_calls = ([(c.name, c.parent) for c in sk.calls]

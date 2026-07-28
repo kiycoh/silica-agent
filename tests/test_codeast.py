@@ -566,3 +566,156 @@ def test_cpp_header_guard_is_transparent():
            "int helper(int x);\n\n#endif\n")
     sk = extract_skeleton(src, "cpp", path="x.h")
     assert any(s.name == "helper" and s.kind == "function" for s in sk.symbols)
+
+
+DEFERRED_SRC = '''\
+"""Module with the deferred-import idiom."""
+import os
+from silica.kernel.write import frontmatter
+
+if TYPE_CHECKING:
+    from silica.kernel.write.ops import Op
+
+
+def commit():
+    from silica.kernel.workqueue import path_lease
+    with path_lease("x"):
+        pass
+
+
+class Runner:
+    def run(self):
+        from silica.kernel.code.codeast import python as _py
+        return _py.walk()
+'''
+
+
+def test_deferred_imports_are_captured_apart_from_top_level():
+    sk = extract_skeleton(DEFERRED_SRC, "python", path="src/m.py")
+    assert sk.imports == ["os", "silica.kernel.write.frontmatter"]
+    assert "silica.kernel.workqueue.path_lease" in sk.deferred_imports
+    assert "silica.kernel.code.codeast.python" in sk.deferred_imports
+    assert "silica.kernel.write.ops.Op" in sk.deferred_imports   # TYPE_CHECKING guard
+    # top-level ones never leak into the deferred bucket
+    assert not any(m in sk.deferred_imports for m in ("os", "silica.kernel.write.frontmatter"))
+
+
+def test_deferred_import_alias_resolves_calls():
+    sk = extract_skeleton(DEFERRED_SRC, "python", path="src/m.py")
+    assert sk.import_aliases["_py"] == "silica.kernel.code.codeast.python"
+
+
+def test_deferred_import_change_is_structural():
+    from silica.kernel.code.codeast import diff_skeletons
+    old = extract_skeleton(DEFERRED_SRC, "python", path="src/m.py")
+    new = extract_skeleton(DEFERRED_SRC.replace(
+        "from silica.kernel.workqueue import path_lease",
+        "from silica.kernel.write.ledger import path_lease"), "python", path="src/m.py")
+    assert any("silica.kernel.write.ledger.path_lease" in d for d in diff_skeletons(old, new))
+
+
+NOISY_SRC = '''\
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Someone
+
+"""Module docstring."""
+
+# ---------------------------------------------------------------------------
+# Rollback inverse ops (ADR-009)
+# ---------------------------------------------------------------------------
+
+x = 1
+'''
+
+
+def test_licence_and_rule_comments_never_reach_the_digest():
+    sk = extract_skeleton(NOISY_SRC, "python", path="src/m.py")
+    assert sk.module_comments == ["Rollback inverse ops (ADR-009)"]
+    assert sk.module_doc == "Module docstring."
+
+
+TS_DOC_SRC = '''/**
+ * Vault client.
+ */
+import { fetchJson } from "./http";
+
+/** Retry budget. */
+export const MAX_RETRIES = 3;
+
+/** Load one note. */
+export async function loadNote(id: string): Promise<Note> {
+  return fetchJson(id);
+}
+
+const helper = () => 1;
+'''
+
+
+def test_ts_lane_has_docs_exports_and_calls():
+    sk = extract_skeleton(TS_DOC_SRC, "typescript", path="src/c.ts")
+    assert sk.module_doc == "Vault client."
+    by_name = {s.name: s for s in sk.symbols}
+    assert by_name["loadNote"].doc == "Load one note."
+    assert by_name["MAX_RETRIES"].kind == "constant"
+    assert by_name["helper"].kind == "function"          # arrow-function idiom
+    assert sk.dunder_all == ["MAX_RETRIES", "loadNote"]  # helper is module-private
+    assert sk.import_aliases == {"fetchJson": "./http"}
+    assert ("fetchJson", "loadNote") in [(c.name, c.parent) for c in sk.calls]
+
+
+def test_python_top_level_constants_are_symbols():
+    sk = extract_skeleton("RRF_K = 60\n_HIDDEN = {'a': 1}\nlowercase = 2\n",
+                          "python", path="src/m.py")
+    consts = {s.name: s.signature for s in sk.symbols if s.kind == "constant"}
+    assert consts == {"RRF_K": "RRF_K = 60", "_HIDDEN": "_HIDDEN = {'a': 1}"}
+
+
+TS_REEXPORT_SRC = """\
+export { parse, format as fmt } from './codec';
+export * as util from './util';
+export * from './legacy';
+
+/** Local thing. */
+export function local() { return 1; }
+"""
+
+
+def test_ts_reexports_reach_surface_and_alias_table():
+    sk = extract_skeleton(TS_REEXPORT_SRC, "typescript", path="index.ts")
+    assert set(sk.dunder_all or []) == {"parse", "fmt", "util", "local"}
+    assert sk.import_aliases["parse"] == "./codec"
+    assert sk.import_aliases["fmt"] == "./codec"
+    assert sk.import_aliases["util"] == "./util"
+    # `export * from` surfaces no name but still carries the edge
+    assert "./legacy" in sk.imports
+
+
+C_NOISY_SRC = """\
+/* SPDX-License-Identifier: MIT
+ * Copyright (C) 2026 Someone
+ * ------------------------------
+ * Ring buffer for the audio path.
+ */
+#include <stdio.h>
+
+int depth(void) { return 0; }
+"""
+
+JAVA_NOISY_SRC = """\
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ * Copyright (C) 2026 Someone
+ * ==============================
+ * Session token minting.
+ */
+package com.example;
+
+class Tokens { }
+"""
+
+
+def test_c_and_java_module_doc_drop_licence_noise():
+    c = extract_skeleton(C_NOISY_SRC, "c", path="ring.c")
+    assert c.module_doc == "Ring buffer for the audio path."
+    j = extract_skeleton(JAVA_NOISY_SRC, "java", path="Tokens.java")
+    assert j.module_doc == "Session token minting."

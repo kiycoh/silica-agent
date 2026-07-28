@@ -72,6 +72,7 @@ class ModuleSkeleton:
     path: str                  # repo-relative source path
     language: str              # EXTENSION_MAP value
     imports: list[str] = field(default_factory=list)   # module strings, duplicates possible
+    deferred_imports: list[str] = field(default_factory=list)  # nested (function-local, guarded)
     symbols: list[Symbol] = field(default_factory=list)  # document order
     parse_error: bool = False  # tree-sitter setup failed — consumers must not read "empty" as "no structure"
     module_doc: str = ""                                   # module-level docstring, whole
@@ -106,6 +107,7 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
     module_doc, module_comments, dunder_all = ("", [], None)
     calls: list[Call] = []
     aliases: dict[str, str] = {}
+    deferred: list[str] = []
     has_main_guard = False
     if language == "java":
         from silica.kernel.code.codeast import java as _java
@@ -120,13 +122,13 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
         module_doc, module_comments = _py._py_module_docs(root, src)
         dunder_all = _py._py_dunder_all(root, src)
         calls = _py._py_calls(root, src)
+        deferred = _py._py_deferred_imports(root, src, aliases)
         has_main_guard = _py._py_has_main_guard(root, src)
     else:
-        # ponytail: TS doc/comment/call capture deferred with the rest of the TS lane
         from silica.kernel.code.codeast import ts as _ts
-        for i in range(root.named_child_count):
-            _ts._ts_extract(root.named_child(i), src, imports, symbols)
+        return _ts.extract(root, src, path=path, language=language)
     return ModuleSkeleton(path=path, language=language, imports=imports,
+                          deferred_imports=deferred,
                           symbols=symbols, module_doc=module_doc,
                           module_comments=module_comments, dunder_all=dunder_all,
                           calls=calls, import_aliases=aliases,
@@ -147,6 +149,21 @@ def _signature(node, src: bytes) -> str:
     end = body.start_byte if body is not None else node.end_byte
     sig = src[node.start_byte:end].decode("utf-8", errors="replace")
     return " ".join(sig.split()).rstrip(":")
+
+
+_LICENCE_LINE = re.compile(r"^(SPDX-[\w-]+:|Copyright\b|All rights reserved)", re.I)
+_RULE_CHARS = set("-=_*#~+ ")
+
+
+def clean_comment_block(block: str) -> str:
+    """Comment block with licence headers and rule-only lines removed; "" when
+    nothing survives. The header repeats once per file and the rules frame a
+    title without adding to it, so both are pure cost in a digest."""
+    kept = [line for line in block.splitlines()
+            if (s := line.strip())
+            and not _LICENCE_LINE.match(s)
+            and (set(s) - _RULE_CHARS)]
+    return "\n".join(kept).strip()
 
 
 def _block_comment_text(node, src: bytes) -> str:
@@ -177,7 +194,10 @@ def diff_skeletons(old: ModuleSkeleton, new: ModuleSkeleton) -> list[str]:
     and whitespace-collapsed signatures — the COSMETIC/STRUCTURAL verdict
     for git-native staleness classification."""
     out: list[str] = []
-    old_imp, new_imp = set(old.imports), set(new.imports)
+    # deferred imports count: a cycle-break refactor changes the dependency
+    # graph the wiki narrates, so it is structural, not cosmetic
+    old_imp = set(old.imports) | set(old.deferred_imports)
+    new_imp = set(new.imports) | set(new.deferred_imports)
     out.extend(f"+ import {m}" for m in sorted(new_imp - old_imp))
     out.extend(f"- import {m}" for m in sorted(old_imp - new_imp))
 

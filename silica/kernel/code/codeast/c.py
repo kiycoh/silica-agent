@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from silica.kernel.code.codeast.base import (
     _CALL_NAME, Call, ModuleSkeleton, Symbol,
-    _block_comment_text, _signature, _text,
+    _block_comment_text, _signature, _text, clean_comment_block,
 )
 
 _TYPE_SPECIFIERS = {
@@ -55,7 +55,7 @@ def _walk(container, src: bytes, imports, symbols, calls, state) -> None:
             # file-header comment block: whatever the first real node does not
             # claim as its own doc comment becomes module_doc
             header = _split_doc(pending, src)[0] if kind in _DOC_TAKERS else pending
-            state["module_doc"] = _comments_text(header, src)
+            state["module_doc"] = clean_comment_block(_comments_text(header, src))
         if kind == "preproc_include":
             p = node.child_by_field_name("path")
             if p is not None:

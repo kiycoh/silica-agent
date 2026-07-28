@@ -4,7 +4,9 @@
 """codeast.python — Python skeleton walker."""
 from __future__ import annotations
 
-from silica.kernel.code.codeast.base import _CALL_NAME, Call, Symbol, _signature, _text
+from silica.kernel.code.codeast.base import (
+    _CALL_NAME, Call, Symbol, _signature, _text, clean_comment_block,
+)
 
 
 def _py_doc_node(node):
@@ -51,12 +53,18 @@ def _py_module_docs(root, src: bytes) -> tuple[str, list[str]]:
     """Module-level docstring (whole) and top-level comment blocks. Comments
     group by consecutive source rows; capped at _COMMENT_CAP_LINES per file."""
     module_doc = ""
-    if root.named_child_count > 0:
-        first = root.named_child(0)
+    # skip leading comments: a licence header sits above the docstring in most
+    # real files, and reading named_child(0) alone dropped the single most
+    # informative field of the whole digest for every one of them
+    for i in range(root.named_child_count):
+        first = root.named_child(i)
+        if first.type == "comment":
+            continue
         if first.type == "expression_statement" and first.named_child_count > 0:
             first = first.named_child(0)
         if first.type == "string":
             module_doc = _doc_text(first, src)
+        break
     blocks: list[str] = []
     current: list[str] = []
     last_row = None
@@ -69,13 +77,15 @@ def _py_module_docs(root, src: bytes) -> tuple[str, list[str]]:
         if last_row is not None and row != last_row + 1 and current:
             blocks.append("\n".join(current))
             current = []
-        if total < _COMMENT_CAP_LINES:
-            current.append(_text(child, src).lstrip("#").strip())
+        line = _text(child, src).lstrip("#").strip()
+        # noise never spends the budget: the cap is for real commentary
+        if clean_comment_block(line) and total < _COMMENT_CAP_LINES:
+            current.append(line)
             total += 1
         last_row = row
     if current:
         blocks.append("\n".join(current))
-    return module_doc, blocks
+    return module_doc, [b for b in (clean_comment_block(b) for b in blocks) if b]
 
 
 def _py_decorators(node, src: bytes) -> list[str]:
@@ -144,6 +154,36 @@ def _py_calls(root, src: bytes) -> list[Call]:
     return [Call(name=k[0], parent=k[1]) for k in out]
 
 
+def _py_deferred_imports(root, src: bytes, aliases: dict[str, str]) -> list[str]:
+    """Imports that are not direct children of the module root: function-local
+    (the deliberate cycle-break idiom), class-body, try/except and
+    TYPE_CHECKING guards.
+
+    A module-level walk cannot see them, and a codebase that leans on the
+    deferred-import idiom keeps most of its dependency graph there (this repo:
+    706 nested vs 306 top-level). Dropping them silently under-counts every
+    derived signal — collaborator weights, fan-in hubs, entry points, flow
+    sketches, impact — and makes a lazily-imported module look caller-free.
+    """
+    out: list[str] = []
+    sink: list[Symbol] = []
+
+    def walk(node) -> None:
+        for i in range(node.named_child_count):
+            child = node.named_child(i)
+            if child.type in ("import_statement", "import_from_statement"):
+                _py_extract(child, src, out, sink, aliases=aliases)
+            else:
+                walk(child)
+
+    for i in range(root.named_child_count):
+        node = root.named_child(i)
+        if node.type in ("import_statement", "import_from_statement"):
+            continue          # top-level: the module walk already has it
+        walk(node)
+    return out
+
+
 def _py_has_main_guard(root, src: bytes) -> bool:
     for i in range(root.named_child_count):
         node = root.named_child(i)
@@ -152,6 +192,36 @@ def _py_has_main_guard(root, src: bytes) -> bool:
             if cond is not None and "__name__" in _text(cond, src):
                 return True
     return False
+
+
+_CONST_VALUE_CAP = 70
+
+
+def _py_constant(node, src: bytes, symbols: list[Symbol]) -> None:
+    """Module-level CONSTANT = value. Tuning knobs, thresholds and lookup
+    tables are contract, and the comment blocks that explain them were landing
+    in the digest with nothing to attach to: a paragraph about an RRF damping
+    constant, and no `_RRF_K = 60` anywhere in sight.
+    # ponytail: name + truncated value; the explaining comment stays in the
+    # module_comments block rather than being re-homed onto the symbol
+    """
+    assign = node
+    if node.type == "expression_statement" and node.named_child_count > 0:
+        assign = node.named_child(0)
+    if assign.type != "assignment":
+        return
+    left = assign.child_by_field_name("left")
+    right = assign.child_by_field_name("right")
+    if left is None or left.type != "identifier":
+        return
+    name = _text(left, src)
+    if name == "__all__" or not name.lstrip("_").isupper():
+        return
+    value = " ".join(_text(right, src).split()) if right is not None else ""
+    if len(value) > _CONST_VALUE_CAP:
+        value = value[:_CONST_VALUE_CAP] + " ..."
+    symbols.append(Symbol(kind="constant", name=name,
+                          signature=f"{name} = {value}" if value else name))
 
 
 def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
@@ -200,6 +270,9 @@ def _py_extract(node, src: bytes, imports: list[str], symbols: list[Symbol],
             imports.extend(f"{base}{sep}{n}" for n in names)
         else:
             imports.append(base)  # `from X import *` — bare module
+        return
+    if node.type in ("expression_statement", "assignment"):
+        _py_constant(node, src, symbols)
         return
     if node.type == "function_definition":
         name = node.child_by_field_name("name")

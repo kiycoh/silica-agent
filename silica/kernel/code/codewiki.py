@@ -171,7 +171,7 @@ def subsystem_for_path(graph: CodeGraph, rel: str,
 _HUB_CAP = 5
 _REG_DECORATORS = {"command", "route", "tool", "get", "post", "websocket"}
 # ponytail: minimal decorator shortlist; extend when a real framework is missing
-_ORCHESTRATOR_MIN_CALLS = 3
+_INBOUND_SEED_CAP = 5
 
 
 @dataclass(frozen=True)
@@ -197,6 +197,15 @@ def _file_to_key(subsystems: list[Subsystem]) -> dict[str, str]:
 
 
 def _public_symbols(entry: dict) -> list[dict]:
+    """Every top-level symbol, with a docstring budget instead of a cut.
+
+    Exported symbols carry the contract, private ones carry the mechanism, and
+    a digest that keeps only the contract cannot explain how a module works
+    (in this repo 42% of top-level defs are private). Private symbols come
+    back marked `brief`: the renderer spends their signature and first
+    docstring line, not the whole doc. Private *methods* still stay out —
+    a class's internal helpers are noise at subsystem altitude.
+    """
     allow = entry.get("dunder_all")
     out: list[dict] = []
     for s in entry.get("symbols", []):
@@ -206,12 +215,14 @@ def _public_symbols(entry: dict) -> list[dict]:
                 continue
             if allow is not None and s["parent"] not in allow:
                 continue
-        elif allow is not None:
-            if name not in allow:
-                continue
-        elif name.startswith("_"):
+            out.append(s)
             continue
-        out.append(s)
+        exported = (name in allow) if allow is not None else not name.startswith("_")
+        out.append(s if exported else {**s, "brief": True})
+    for r in entry.get("reexports", []):
+        out.append({"kind": "reexport", "name": r["name"], "parent": "",
+                    "signature": f"{r['name']}  # re-exported from {r['from']}",
+                    "doc": "", "doc_full": "", "decorators": []})
     return out
 
 
@@ -246,8 +257,18 @@ def _pyproject_script_files(root: Path, files: set[str]) -> set[str]:
     return out
 
 
-def _entry_points(graph: CodeGraph, sub: Subsystem, scripts: set[str],
-                  call_in: Counter, call_out: Counter) -> list[tuple[str, str]]:
+def _entry_points(graph: CodeGraph, sub: Subsystem,
+                  scripts: set[str]) -> list[tuple[str, str]]:
+    """Files execution can actually start at: a declared script, a main guard,
+    a `python -m` target, a framework registration.
+
+    No "caller-free" heuristic. Absence of an inbound call edge is evidence
+    about the graph, not about the code: a lazily-imported module reads as
+    caller-free, and a library subsystem is entered from outside by
+    definition, so the label named every leaf an entry point. An empty list
+    is the honest answer for a library layer; `_inbound_prefixes` is what
+    carries the "how is this entered" signal there.
+    """
     out: list[tuple[str, str]] = []
     for path in sub.members:
         entry = graph.files[path]
@@ -261,11 +282,69 @@ def _entry_points(graph: CodeGraph, sub: Subsystem, scripts: set[str],
         if any(d.rsplit(".", 1)[-1] in _REG_DECORATORS
                for s in entry.get("symbols", []) for d in s.get("decorators", [])):
             labels.append("registration decorator")
-        if call_in[path] == 0 and call_out[path] >= _ORCHESTRATOR_MIN_CALLS:
-            labels.append("caller-free orchestrator")
         if labels:
             out.append((path, ", ".join(labels)))
     return out
+
+
+def _inbound_prefixes(all_calls: list[tuple[str, str, str, str]],
+                      member_set: set[str], key_of: dict[str, str]) -> list[list[str]]:
+    """Chain prefixes [external caller, member] for the heaviest callers into
+    the subsystem, one per caller. These make the flow section useful for a
+    library layer, whose real flows all begin outside its own files.
+
+    Only callers that belong to a subsystem qualify: `partition` keeps tests
+    and docs out of the architecture, and they are the heaviest callers of a
+    well-tested kernel — seeded from them the section would document the test
+    suite instead of the product.
+    """
+    weight: Counter = Counter()
+    for src, tgt, _callee, _caller in all_calls:
+        if tgt in member_set and src not in member_set and key_of.get(src):
+            weight[(src, tgt)] += 1
+    out: list[list[str]] = []
+    seen_src: set[str] = set()
+    for (src, tgt), _w in weight.most_common():
+        if src in seen_src:
+            continue
+        seen_src.add(src)
+        out.append([src, tgt])
+        if len(out) >= _INBOUND_SEED_CAP:
+            break
+    return out
+
+
+_DOC_BUDGET_CHARS = 45_000   # per subsystem, spent on full docstrings by rank
+
+
+def _spend_doc_budget(publics: dict[str, list[dict]], graph: CodeGraph,
+                      privileged: set[str]) -> set[str]:
+    """Full docstrings to the files that carry the subsystem, first lines to the
+    tail; returns the paths that ran out of budget.
+
+    A flat 86-file package is a real shape and no partition rule shrinks it:
+    silica/kernel renders at ~68k tokens, more than most read paths will accept
+    in one prompt, and half of that is docstring prose. Rank is fan-in, with
+    entry points and flow members privileged. Nothing disappears — every symbol
+    keeps its signature and its first doc line.
+    # ponytail: one char budget for the whole subsystem, cheapest thing that
+    # bounds the note; split the subsystem for real if it still reads as a
+    # catalogue rather than an explanation
+    """
+    order = sorted(publics, key=lambda p: (p not in privileged, -graph.fan_in(p), p))
+    spent = 0
+    trimmed: set[str] = set()
+    for path in order:
+        if spent >= _DOC_BUDGET_CHARS:
+            trimmed.add(path)
+        for sym in publics[path]:
+            if sym.get("brief"):
+                continue          # already on the short budget (module-private)
+            if spent < _DOC_BUDGET_CHARS:
+                spent += len(sym.get("doc_full", ""))
+            else:
+                sym["brief"] = True
+    return trimmed
 
 
 def build_digests(graph: CodeGraph, subsystems: list[Subsystem], root: Path,
@@ -328,20 +407,29 @@ def build_digests(graph: CodeGraph, subsystems: list[Subsystem], root: Path,
 
         hubs = sorted(((p, graph.fan_in(p)) for p in sub.members),
                       key=lambda t: (-t[1], t[0]))[:_HUB_CAP]
-        eps = _entry_points(graph, sub, scripts, call_in, call_out)
+        eps = _entry_points(graph, sub, scripts)
+        flows = flow_sketches(adj, [p for p, _ in eps],
+                              prefixes=_inbound_prefixes(all_calls, member_set, key_of))
+        publics = {p: _public_symbols(graph.files[p]) for p in sub.members}
+        trimmed = _spend_doc_budget(
+            publics, graph, {p for p, _ in eps} | {p for f in flows for p in f})
         digests.append(SubsystemDigest(
             key=sub.key, path=sub.path, members=sub.members,
             struct_sig=_struct_sig(sub.members, sub_calls,
                                    {p: graph.files[p] for p in sub.members}),
-            public_symbols={p: _public_symbols(graph.files[p]) for p in sub.members},
+            public_symbols=publics,
             module_docs={p: graph.files[p].get("module_doc", "") for p in sub.members},
-            module_comments={p: graph.files[p].get("module_comments", []) for p in sub.members},
+            # a hoisted inline comment is the least useful field on a file the
+            # note only lists, so it goes with the rest of the trimmed budget
+            module_comments={p: [] if p in trimmed
+                             else graph.files[p].get("module_comments", [])
+                             for p in sub.members},
             external_deps=sorted(externals),
             collaborators_out=_merge(imp_out, c_out),
             collaborators_in=_merge(imp_in, c_in),
             fan_in_hubs=hubs,
             entry_points=eps,
-            flow_sketches=flow_sketches(adj, [p for p, _ in eps]),
+            flow_sketches=flows,
             parse_errors=parse_errors,
         ))
     return digests
@@ -392,14 +480,19 @@ def call_adjacency(graph: CodeGraph) -> dict[str, list[str]]:
             for src, c in weights.items()}
 
 
-def flow_sketches(adj: dict[str, list[str]], entries: list[str]) -> list[list[str]]:
+def flow_sketches(adj: dict[str, list[str]], entries: list[str],
+                  prefixes: list[list[str]] | None = None) -> list[list[str]]:
     """Real call paths from each entry point: the LLM narrates these instead
-    of guessing flows from import adjacency."""
+    of guessing flows from import adjacency.
+
+    `prefixes` are chain starts already in progress (an external caller and
+    the member it calls), so a subsystem with no entry point of its own still
+    shows how it is reached."""
     out: list[list[str]] = []
     seen: set[frozenset] = set()
-    for entry in entries:
+    for start in [[e] for e in entries] + list(prefixes or []):
         count = 0
-        queue: list[tuple[str, list[str]]] = [(entry, [entry])]
+        queue: list[tuple[str, list[str]]] = [(start[-1], list(start))]
         while queue and count < _FLOWS_PER_ENTRY:
             node, chain = queue.pop(0)
             nxt = [t for t in adj.get(node, []) if t not in chain]

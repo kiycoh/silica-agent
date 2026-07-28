@@ -379,3 +379,18 @@ def test_call_edge_survives_external_import_shadowing(tmp_path):
     graph = build_codegraph(tmp_path)
     edges = graph.files["app.py"]["calls"]
     assert {"target": "pkg/yamlmod.py", "callee": "load", "caller": "main"} in edges
+
+
+def test_ts_reexport_resolves_to_its_source(tmp_path):
+    _init_repo(tmp_path)
+    (tmp_path / "codec.ts").write_text(
+        "export function parse() {}\nexport function format() {}\n", encoding="utf-8")
+    (tmp_path / "index.ts").write_text(
+        "export { parse, format as fmt } from './codec';\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=tmp_path, check=True)
+    g = codegraph.build_codegraph(tmp_path)
+    entry = g.files["index.ts"]
+    assert entry["imports"] == ["codec.ts"]
+    assert {(r["name"], r["from"]) for r in entry["reexports"]} == {
+        ("parse", "codec.ts"), ("fmt", "codec.ts")}

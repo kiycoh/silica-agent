@@ -42,10 +42,16 @@ def render_digest(d: SubsystemDigest) -> str:
     ordered = sorted(d.members, key=lambda p: (hub_rank.get(p, len(hub_rank)), p))
 
     lines: list[str] = [f"# Subsystem digest: {d.key} ({d.path})", ""]
+    lines += ["## Entry points", ""]
     if d.entry_points:
-        lines += ["## Entry points", ""]
         lines += _capped([f"- `{p}` [{label}]" for p, label in d.entry_points], "entry points")
-        lines.append("")
+    else:
+        # stating the absence beats omitting the section: asked for entry
+        # points and handed none, the model promotes the file list into one
+        lines.append("None. This subsystem is a library: execution never "
+                     "starts here, it is entered from the callers in the flow "
+                     "sketches below.")
+    lines.append("")
     if d.flow_sketches:
         lines += ["## Flow sketches (real call paths)", ""]
         lines += _capped([" -> ".join(chain) for chain in d.flow_sketches], "flows")
@@ -77,9 +83,12 @@ def render_digest(d: SubsystemDigest) -> str:
                 for deco in s.get("decorators", []):
                     lines.append(f"{indent}@{deco}")
                 lines.append(f"{indent}{s['signature']}")
-                if s.get("doc_full"):
+                # private symbols get the first docstring line only: the
+                # mechanism is worth naming, its full prose is not worth the budget
+                text = s.get("doc", "") if s.get("brief") else s.get("doc_full", "")
+                if text:
                     doc = "\n".join(f"{indent}  {ln}"
-                                    for ln in _defang(s["doc_full"]).splitlines())
+                                    for ln in _defang(text).splitlines())
                     lines.append(doc)
             lines.append("```")
         lines.append("")

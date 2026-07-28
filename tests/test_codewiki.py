@@ -1,6 +1,7 @@
 """kernel/codewiki — partition + digest for the behavioral code wiki."""
 from silica.kernel.code.codegraph import CodeGraph
-from silica.kernel.code.codewiki import Subsystem, module_roots, partition, source_root
+from silica.kernel.code.codewiki import (
+    Subsystem, _spend_doc_budget, module_roots, partition, source_root)
 
 
 def _graph(paths, entries=None):
@@ -173,8 +174,12 @@ def test_digest_collaborators_two_weights_and_publics(tmp_path):
     kernel = digests["kernel"]
     assert ("(root)", 1, 1) in kernel.collaborators_in
     assert ("router", 1, 0) in kernel.collaborators_in      # import-only, zero calls
-    names = [s["name"] for s in kernel.public_symbols["silica/kernel/util.py"]]
-    assert names == ["helper"]                              # __all__ is the authority
+    syms = kernel.public_symbols["silica/kernel/util.py"]
+    # __all__ is the authority on the doc budget, not on inclusion: the
+    # unexported symbol still shows up, marked brief
+    assert [s["name"] for s in syms] == ["helper", "not_exported"]
+    assert {s["name"]: s.get("brief", False) for s in syms} == \
+        {"helper": False, "not_exported": True}
     assert "orjson" in kernel.external_deps
 
 
@@ -288,3 +293,54 @@ def test_render_mermaid_survives_reserved_and_symbol_keys():
     assert '["(root)"] --> ' in block and '["end"]' in block
     for line in block.splitlines():
         assert not line.strip().startswith("end")
+
+
+def test_library_subsystem_has_no_entry_points_but_keeps_flows(tmp_path):
+    """kernel/ has no main guard, no script, no registration decorator: the
+    honest answer is an empty entry-point list. The flow section still shows
+    how it is reached, seeded from the caller that enters it."""
+    g = _rich_graph()
+    digests = {d.key: d for d in build_digests(g, partition(g), tmp_path)}
+    kernel = digests["kernel"]
+    assert kernel.entry_points == []
+    assert ["silica/cli.py", "silica/kernel/util.py"] in kernel.flow_sketches
+
+
+def test_flow_prefixes_extend_instead_of_restarting():
+    adj = {"a.py": ["b.py"], "b.py": ["c.py"]}
+    assert flow_sketches(adj, [], prefixes=[["z.py", "a.py"]]) == \
+        [["z.py", "a.py", "b.py", "c.py"]]
+
+
+def test_doc_budget_trims_the_tail_and_spares_the_privileged():
+    class _G:
+        def fan_in(self, p):
+            return {"hub.py": 9, "mid.py": 5, "tail.py": 0, "entry.py": 0}[p]
+
+    def syms(n):
+        return [{"kind": "function", "name": f"f{i}", "signature": "f()",
+                 "doc": "one line", "doc_full": "x" * 5000} for i in range(n)]
+
+    publics = {p: syms(4) for p in ("hub.py", "mid.py", "tail.py", "entry.py")}
+    trimmed = _spend_doc_budget(publics, _G(), privileged={"entry.py"})
+
+    def full(p):
+        return [s for s in publics[p] if not s.get("brief")]
+
+    assert full("entry.py") == publics["entry.py"]   # privileged is spent first
+    assert full("hub.py")                            # highest fan-in keeps prose
+    assert not full("tail.py")                       # budget exhausted
+    assert "tail.py" in trimmed and "entry.py" not in trimmed
+    # nothing vanishes: every symbol still carries its signature
+    assert all(s["signature"] for s in publics["tail.py"])
+
+
+def test_doc_budget_leaves_a_small_subsystem_untouched():
+    class _G:
+        def fan_in(self, p):
+            return 1
+
+    publics = {"a.py": [{"name": "f", "signature": "f()", "doc": "d",
+                         "doc_full": "long"}]}
+    assert _spend_doc_budget(publics, _G(), privileged=set()) == set()
+    assert not publics["a.py"][0].get("brief")
