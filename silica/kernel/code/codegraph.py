@@ -200,6 +200,13 @@ def _resolve_calls(sk, rel: str, files: set[str], root: Path,
     # after a function-local `from pkg import python as _py` is a real edge
     imports = [m for m in dict.fromkeys([*sk.imports, *sk.deferred_imports]) if m]
     by_len = sorted(imports, key=len, reverse=True)
+    # Callees defined right here. Import-scoped matching structurally cannot see
+    # them (they are declared, not imported), so before this every same-file
+    # caller was invisible: `execute_operations` calling `execute_one` one
+    # screen below it produced no edge at all, and a blast-radius query over
+    # call_edges() silently under-reported.
+    local_defs = {s.name for s in sk.symbols
+                  if s.kind in ("function", "class") and not s.parent}
     edges: dict[tuple[str, str, str], None] = {}
     for call in sk.calls:
         name = call.name
@@ -238,6 +245,11 @@ def _resolve_calls(sk, rel: str, files: set[str], root: Path,
                         break
         if target and target != rel:
             edges[(target, callee or "", call.parent)] = None
+        elif target is None and "." not in name and name in local_defs:
+            # Self-edge. Cross-file consumers (codewiki's call_in/call_out and
+            # call_adjacency) already drop src == tgt, so this only reaches the
+            # queries that want it.
+            edges[(rel, name, call.parent)] = None
     return [{"target": t, "callee": ce, "caller": ca} for (t, ce, ca) in sorted(edges)]
 
 
@@ -247,11 +259,18 @@ def _resolve_calls_ts(sk, rel: str, files: set[str], root: Path,
     module, so the import-scoped spell-matcher cannot see it; the alias table
     already maps every local binding to its specifier, which is the whole
     resolution."""
+    # Same-file callees, as in the python resolver: no alias binds them, so the
+    # specifier table structurally cannot see them and every intra-file caller
+    # was missing from the graph.
+    local_defs = {s.name for s in sk.symbols
+                  if s.kind in ("function", "class") and not s.parent}
     edges: dict[tuple[str, str, str], None] = {}
     for call in sk.calls:
         head, _, rest = call.name.partition(".")
         module = sk.import_aliases.get(head)
         if not module:
+            if not rest and head in local_defs:
+                edges[(rel, head, call.parent)] = None
             continue
         kind, value = classify_import(module, rel, files, language, root)
         if kind == "resolved" and value != rel:
@@ -383,6 +402,13 @@ def _join_c_calls(rel: str, raw: list[tuple[str, str]], entries: dict[str, dict]
             callee = name.rsplit(".", 1)[-1]
             if callee in names and target != rel:
                 edges[(target, callee, parent)] = None
+    # A file is not among its own includes, so the loop above can never see a
+    # callee defined here: same-file edges need the file's own symbols.
+    own = {s["name"] for s in entries[rel].get("symbols", [])}
+    for name, parent in raw:
+        callee = name.rsplit(".", 1)[-1]
+        if callee in own:
+            edges[(rel, callee, parent)] = None
     return [{"target": t, "callee": c, "caller": p} for (t, c, p) in sorted(edges)]
 
 

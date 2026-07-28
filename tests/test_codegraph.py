@@ -220,8 +220,11 @@ def test_call_edges_resolved_bare_dotted_alias(tmp_path):
     assert {"target": "pkg/alias_target.py", "callee": "go", "caller": "main"} in edges
     # bare helper() and util.helper() dedupe to one edge
     assert len([e for e in edges if e["target"] == "pkg/util.py"]) == 1
-    # external (os.path.join) and local (local()) never become edges
+    # external (os.path.join) never becomes an edge
     assert all(e["target"].startswith("pkg/") for e in edges)
+    assert not any(e["callee"] == "join" for e in edges)
+    # local() IS an edge: defined in this same file, so it is first-party
+    assert {"target": "pkg/app.py", "callee": "local", "caller": "main"} in edges
     assert ("pkg/app.py", "pkg/util.py", "helper", "main") in graph.call_edges()
 
 
