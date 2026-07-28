@@ -13,7 +13,7 @@ quoted from angled.
 """
 from __future__ import annotations
 
-from silica.kernel.codeast.base import (
+from silica.kernel.code.codeast.base import (
     _CALL_NAME, Call, ModuleSkeleton, Symbol,
     _block_comment_text, _signature, _text,
 )

@@ -30,14 +30,14 @@ _FUZZY_MIN = 0.82  # SequenceMatcher ratio floor for a fuzzy title/key hit
 
 
 def _index_path() -> Path:
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
     return paths.index_file("lexical")
 
 
 def _tokens(text: str) -> list[str]:
     """Tokens for lexical matching — reuse the C1 text seam, surface (unstemmed)
     so proper nouns and dates match verbatim."""
-    from silica.kernel.text import tokens
+    from silica.kernel.text.text import tokens
     from silica.config import CONFIG
     out: list[str] = []
     for sentence in tokens(text, lang=CONFIG.cooccurrence_lang, stem=False):
@@ -68,7 +68,7 @@ class LexicalStore:
 
     def _reindex(self) -> None:
         """Rebuild the derived postings/name_lower indexes from _docs/_name."""
-        from silica.kernel.paths import build_postings
+        from silica.kernel.recall.paths import build_postings
         self._postings = build_postings(self._docs)
         self._name_lower = {path: name.lower() for path, name in self._name.items()}
 
@@ -146,7 +146,7 @@ class LexicalStore:
         return sorted(fused.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
 
     def save(self) -> Path:
-        from silica.kernel.paths import atomic_write_bytes
+        from silica.kernel.recall.paths import atomic_write_bytes
         self._path.parent.mkdir(parents=True, exist_ok=True)
         payload: dict[str, Any] = {
             "docs": self._docs, "len": self._len, "name": self._name,
@@ -167,7 +167,7 @@ class LexicalStore:
         except Exception:
             # Derived index: quarantine for doctor visibility, then
             # reset to empty (a rebuild repopulates it).
-            from silica.kernel.paths import quarantine
+            from silica.kernel.recall.paths import quarantine
             quarantine(store._path)
             store._docs = {}
             store._len = {}
@@ -181,7 +181,7 @@ _STORE_CACHE: dict[str, "LexicalStore"] = {}
 
 
 def get_lexical_store() -> "LexicalStore":
-    from silica.kernel.paths import path_keyed_singleton
+    from silica.kernel.recall.paths import path_keyed_singleton
     return path_keyed_singleton(_STORE_CACHE, str(_index_path()), LexicalStore.load)
 
 

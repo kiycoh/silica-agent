@@ -18,8 +18,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from silica.kernel import frontmatter, language
-from silica.kernel.media import strip_images
+from silica.kernel.write import frontmatter
+
+from silica.kernel.text import language
+from silica.kernel.text.media import strip_images
 
 MIN_TOKEN_LEN = 3
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.payload import build_concept_entry, build_payload, classify_action
+from silica.kernel.text.payload import build_concept_entry, build_payload, classify_action
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +53,7 @@ def _hints(payload: dict) -> dict[str, str]:
 @pytest.fixture
 def fake_vault(monkeypatch):
     """One inbox note: 'entropia' twice, 'retropropagazione' once."""
-    import silica.kernel.payload as payload_mod
+    import silica.kernel.text.payload as payload_mod
     body = (
         "L'entropia misura il disordine del sistema; l'entropia cresce sempre.\n\n"
         "La retropropagazione viene citata di passaggio una volta sola.\n"

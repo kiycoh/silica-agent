@@ -13,8 +13,8 @@ import hashlib
 from dataclasses import dataclass, field
 
 from silica.driver import DRIVER
-from silica.kernel.bulk import VerifyMismatchError, execute_one
-from silica.kernel.ops import Op, OpType, InverseOp
+from silica.kernel.write.bulk import VerifyMismatchError, execute_one
+from silica.kernel.write.ops import Op, OpType, InverseOp
 
 
 def _sha256(text: str | None) -> str:

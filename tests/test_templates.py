@@ -1,7 +1,7 @@
 import datetime
 import logging
 
-from silica.kernel.templates import (
+from silica.kernel.write.templates import (
     BUILTIN_TEMPLATE,
     ensure_ai_flag,
     prepare_fields,
@@ -33,7 +33,7 @@ def test_ensure_ai_flag_stamps_missing_field_on_legacy_note():
     `AI` convention lack the field, and the OFM lint fails the whole note on a
     patch. ensure_ai_flag stamps `AI: true` (honest provenance) so the lint passes.
     """
-    from silica.kernel import ofm
+    from silica.kernel.link import ofm
     legacy = "---\ntags:\n  - statistica\n---\n# Varianza\nLa varianza misura la dispersione."
     stamped = ensure_ai_flag(legacy)
     assert "AI: true" in stamped.split("---")[1]
@@ -122,8 +122,8 @@ def test_floor_preserves_prior_frontmatter_on_bare_rewrite():
     """A model that omits frontmatter while rewriting means 'keep it', not
     'delete it': the prior block is re-injected verbatim, AI ensured,
     last modified refreshed — no silent metadata loss, lint green."""
-    from silica.kernel import ofm
-    from silica.kernel.templates import ensure_system_floor
+    from silica.kernel.link import ofm
+    from silica.kernel.write.templates import ensure_system_floor
     prior = ("---\ntags:\n  - keep\naliases:\n  - K\ncustom: v\n"
              "last modified: 2020-01-01\n---\n\n# Old\n\nold body\n")
     out = ensure_system_floor("# New\n\nnew body\n", prior=prior)
@@ -142,7 +142,7 @@ def test_floor_preserves_prior_frontmatter_on_bare_rewrite():
 
 
 def test_floor_creates_minimal_block_when_no_prior():
-    from silica.kernel.templates import ensure_system_floor
+    from silica.kernel.write.templates import ensure_system_floor
     today = datetime.date.today().isoformat()
     out = ensure_system_floor("# N\n\nbody\n")
     assert out.startswith(f"---\nAI: true\nlast modified: {today}\n---\n\n# N")
@@ -153,7 +153,7 @@ def test_floor_creates_minimal_block_when_no_prior():
 def test_floor_with_existing_block_is_ensure_ai_flag():
     """Content that carries its own frontmatter: today's behavior, unchanged —
     prior is ignored, last modified NOT touched."""
-    from silica.kernel.templates import ensure_system_floor
+    from silica.kernel.write.templates import ensure_system_floor
     c = "---\ntags:\n  - x\nlast modified: 2020-01-01\n---\n# n\nbody"
     assert ensure_system_floor(c) == ensure_ai_flag(c)
     assert ensure_system_floor(c, prior="---\nother: y\n---\nold") == ensure_ai_flag(c)
@@ -161,7 +161,7 @@ def test_floor_with_existing_block_is_ensure_ai_flag():
 
 
 def test_floor_adds_last_modified_when_prior_lacks_it():
-    from silica.kernel.templates import ensure_system_floor
+    from silica.kernel.write.templates import ensure_system_floor
     out = ensure_system_floor("# N\nb\n", prior="---\ntags:\n  - k\n---\n\nold\n")
     assert f"last modified: {datetime.date.today().isoformat()}" in out.split("\n---\n")[0]
 
@@ -169,7 +169,7 @@ def test_floor_adds_last_modified_when_prior_lacks_it():
 def test_floor_preserves_crlf_prior_metadata():
     """CRLF notes (Windows-synced vaults): prior metadata still preserved,
     fences canonicalized — not silently replaced by the minimal block."""
-    from silica.kernel.templates import ensure_system_floor
+    from silica.kernel.write.templates import ensure_system_floor
     prior = "---\r\ntags:\r\n  - keep\r\n---\r\n\r\nold\r\n"
     out = ensure_system_floor("# New\n\nbody\n", prior=prior)
     head = out.split("\n---\n")[0]
@@ -179,7 +179,7 @@ def test_floor_preserves_crlf_prior_metadata():
 def test_floor_canonicalizes_fence_whitespace():
     """Trailing space on the prior's closing fence must not mangle the splice:
     last modified lands inside the block, never after the body."""
-    from silica.kernel.templates import ensure_system_floor
+    from silica.kernel.write.templates import ensure_system_floor
     prior = "---\ntags:\n  - keep\n--- \n\nold\n"
     out = ensure_system_floor("# New\n\nbody\n", prior=prior)
     head, tail = out.split("\n---\n", 1)
@@ -191,7 +191,7 @@ def test_floor_canonicalizes_fence_whitespace():
 def test_crlf_template_renders_lists_not_reprs(tpl_vault):
     """A CRLF template file must render list placeholders as YAML sequences,
     not Python reprs (read path normalizes line endings)."""
-    from silica.kernel.templates import render_note, resolve_template
+    from silica.kernel.write.templates import render_note, resolve_template
     (tpl_vault / "templates").mkdir()
     (tpl_vault / "templates" / "win.md").write_bytes(
         b"---\r\ntags: {{tags}}\r\nAI: true\r\n---\r\n\r\n{{body}}\r\n")
@@ -222,7 +222,7 @@ def _write_tpl(vault, name, body="{{body}}\n"):
 
 
 def test_resolution_explicit_beats_vault_default(tpl_vault):
-    from silica.kernel.templates import resolve_template
+    from silica.kernel.write.templates import resolve_template
     _write_tpl(tpl_vault, "paper")
     _write_tpl(tpl_vault, "other")
     (tpl_vault / "vault.yaml").write_text(
@@ -233,13 +233,13 @@ def test_resolution_explicit_beats_vault_default(tpl_vault):
 
 
 def test_resolution_builtin_when_unconfigured(tpl_vault):
-    from silica.kernel.templates import BUILTIN_TEMPLATE, resolve_template
+    from silica.kernel.write.templates import BUILTIN_TEMPLATE, resolve_template
     assert resolve_template() == BUILTIN_TEMPLATE
 
 
 def test_resolution_broken_default_falls_back_to_builtin(tpl_vault, caplog):
     """The pipeline never stops for a broken template (soft, like vault.yaml)."""
-    from silica.kernel.templates import BUILTIN_TEMPLATE, resolve_template
+    from silica.kernel.write.templates import BUILTIN_TEMPLATE, resolve_template
     (tpl_vault / "templates").mkdir()
     (tpl_vault / "templates" / "broken.md").write_text("---\nunterminated",
                                                        encoding="utf-8")
@@ -252,7 +252,7 @@ def test_resolution_broken_default_falls_back_to_builtin(tpl_vault, caplog):
 
 
 def test_unknown_explicit_name_raises_listing_available(tpl_vault):
-    from silica.kernel.templates import TemplateNotFoundError, resolve_template
+    from silica.kernel.write.templates import TemplateNotFoundError, resolve_template
     _write_tpl(tpl_vault, "paper")
     with pytest.raises(TemplateNotFoundError, match="paper"):
         resolve_template("nope")
@@ -261,7 +261,7 @@ def test_unknown_explicit_name_raises_listing_available(tpl_vault):
 def test_path_shaped_template_names_rejected(tpl_vault, caplog):
     """Template names are user-authored and reach a file path — separators
     and traversal are rejected, mirroring the templates_dir trust boundary."""
-    from silica.kernel.templates import (BUILTIN_TEMPLATE, TemplateNotFoundError,
+    from silica.kernel.write.templates import (BUILTIN_TEMPLATE, TemplateNotFoundError,
                                          resolve_template)
     with pytest.raises(TemplateNotFoundError):
         resolve_template("../evil")

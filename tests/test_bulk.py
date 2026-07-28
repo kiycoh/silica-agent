@@ -10,10 +10,10 @@ from pathlib import Path
 
 import pytest
 
-import silica.kernel.checkpoints as checkpoints
+import silica.kernel.write.checkpoints as checkpoints
 from silica.driver import DRIVER
-from silica.kernel.bulk import execute_one, execute_operations
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.bulk import execute_one, execute_operations
+from silica.kernel.write.ops import Op, OpType
 
 
 @pytest.fixture
@@ -34,13 +34,13 @@ def vault(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.driver._driver", None)
 
     # Isolated checkpoint store for the duration of the test.
-    monkeypatch.setattr("silica.kernel.checkpoints._store", None)
+    monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
     checkpoints.get_checkpoint_store(tmp_path / "checkpoints.db")
 
     yield vault_dir
 
     monkeypatch.setattr("silica.driver._driver", None)
-    monkeypatch.setattr("silica.kernel.checkpoints._store", None)
+    monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
 
 
 # ---------------------------------------------------------------------------

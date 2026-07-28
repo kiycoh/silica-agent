@@ -19,7 +19,7 @@ def moc_heading(source_name: str, sample: str) -> str:
     Routes through kernel/language (C1) — the private Italian marker regex
     this replaces missed prose outside its hardcoded word list.
     """
-    from silica.kernel.language import detect
+    from silica.kernel.text.language import detect
     prefix = "Da" if detect(sample) == "italian" else "From"
     return f"## {prefix}: {source_name}"
 

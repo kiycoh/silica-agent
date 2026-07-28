@@ -108,13 +108,13 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
     aliases: dict[str, str] = {}
     has_main_guard = False
     if language == "java":
-        from silica.kernel.codeast import java as _java
+        from silica.kernel.code.codeast import java as _java
         return _java.extract(root, src, path=path, language=language)
     if language in ("c", "cpp"):
-        from silica.kernel.codeast import c as _c
+        from silica.kernel.code.codeast import c as _c
         return _c.extract(root, src, path=path, language=language)
     if language == "python":
-        from silica.kernel.codeast import python as _py
+        from silica.kernel.code.codeast import python as _py
         for i in range(root.named_child_count):
             _py._py_extract(root.named_child(i), src, imports, symbols, aliases=aliases)
         module_doc, module_comments = _py._py_module_docs(root, src)
@@ -123,7 +123,7 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
         has_main_guard = _py._py_has_main_guard(root, src)
     else:
         # ponytail: TS doc/comment/call capture deferred with the rest of the TS lane
-        from silica.kernel.codeast import ts as _ts
+        from silica.kernel.code.codeast import ts as _ts
         for i in range(root.named_child_count):
             _ts._ts_extract(root.named_child(i), src, imports, symbols)
     return ModuleSkeleton(path=path, language=language, imports=imports,

@@ -3,7 +3,7 @@
 
 """Curator dispatch — /curate: vault maintenance as a background policy.
 
-The pure composer (silica.kernel.curator) turns an L1 VaultReport into a typed
+The pure composer (silica.kernel.recall.curator) turns an L1 VaultReport into a typed
 CurationPlan. This module executes that plan on the *existing* machinery:
 
   * strong autolink candidate → the mechanical, LLM-free silica_autolink path
@@ -25,9 +25,9 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from silica.agent.subagent import run_subagent_batch
-from silica.kernel.curator import CurationPlan, compose_curation_plan
-from silica.kernel.graph_report import compute_report
-from silica.kernel.run_log import append_log_line, format_curate_event
+from silica.kernel.recall.curator import CurationPlan, compose_curation_plan
+from silica.kernel.report.graph_report import compute_report
+from silica.kernel.recall.run_log import append_log_line, format_curate_event
 from silica.kernel.workqueue import WorkItem
 from silica.tools import tool
 
@@ -55,12 +55,12 @@ def _orphan_candidates(path: str, k: int = 5) -> list[dict]:
     """
     try:
         from silica.config import CONFIG
-        from silica.kernel.cooccurrence import cooccur_key, get_cooccur_store
-        from silica.kernel.embed import get_store
-        from silica.kernel.relatedness import related_notes
+        from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
+        from silica.kernel.recall.embed import get_store
+        from silica.kernel.recall.relatedness import related_notes
 
         from silica.agent.providers import get_reranker
-        from silica.kernel.rerank import note_document, rerank_related
+        from silica.kernel.recall.rerank import note_document, rerank_related
 
         # cooccur_key (case-PRESERVED, .md-stripped) is the store keyspace; _norm_path
         # would lowercase and miss the case-preserving stored keys -> empty results.
@@ -148,7 +148,7 @@ def _dedup_workitems(plan: CurationPlan) -> list[WorkItem]:
 
     items: list[WorkItem] = []
     # 1. Each confirmed component → collapse every member into its largest note.
-    from silica.kernel.contested import merge_rank
+    from silica.kernel.write.contested import merge_rank
     for members in components:
         canonical = max(members, key=lambda p: merge_rank(body(p)))
         for m in members:

@@ -9,7 +9,7 @@ delete_note, prune orphans (endpoint with no contribution) on load.
 """
 from __future__ import annotations
 
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
 
 
 def test_set_and_read_edge_in_both_directions() -> None:

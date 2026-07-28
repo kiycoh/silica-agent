@@ -21,7 +21,7 @@ def _historical_snippet_floor(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_title_key_folds_case_and_parenthetical_suffix():
-    from silica.kernel.title import title_key
+    from silica.kernel.text.title import title_key
 
     # The real fixture: 4 umbrella notes that must share one key.
     assert (
@@ -33,14 +33,14 @@ def test_title_key_folds_case_and_parenthetical_suffix():
 
 
 def test_title_key_folds_punctuation_and_plurals():
-    from silica.kernel.title import title_key
+    from silica.kernel.text.title import title_key
 
     assert title_key("Reti Neurali", lang="italian") == title_key("rete neurale", lang="italian")
     assert title_key("K-Means: clustering") == title_key("k means clustering")
 
 
 def test_title_key_distinct_concepts_stay_distinct():
-    from silica.kernel.title import title_key
+    from silica.kernel.text.title import title_key
 
     assert title_key("Machine Learning") != title_key("ML per la statistica")
     assert title_key("Descriptor") != title_key("Description")
@@ -51,14 +51,14 @@ def test_title_key_distinct_concepts_stay_distinct():
 # ---------------------------------------------------------------------------
 
 def test_near_titles_catches_descriptor_description():
-    from silica.kernel.title import near_titles
+    from silica.kernel.text.title import near_titles
 
     hits = near_titles("Description", ["Descriptor", "Statistica"])
     assert [t for (t, _r) in hits] == ["Descriptor"]
 
 
 def test_near_titles_excludes_key_equal_and_unrelated():
-    from silica.kernel.title import near_titles
+    from silica.kernel.text.title import near_titles
 
     # key-equal is coercion territory, not review; unrelated stays out
     hits = near_titles(
@@ -86,7 +86,7 @@ def test_names_agree_converges_on_title_key():
 
 
 def test_recon_normalize_strips_leading_articles():
-    from silica.kernel.recon import normalize
+    from silica.kernel.text.recon import normalize
 
     assert normalize("della matrice Hessiana") == "matrice Hessiana"
     assert normalize("la discesa del gradiente") == "discesa del gradiente"
@@ -109,7 +109,7 @@ def _write_op(heading: str, path: str) -> dict:
 def test_write_gate_coerces_key_equal_title_to_patch(tmp_vault):
     """«Machine Learning (9 CFU)» must patch the existing «Machine Learning»,
     not become the fourth umbrella note."""
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
 
     tmp_vault.note("Corso/Machine Learning.md", "# ML\n\ncorpo")
     validated, rejected = validate_operations(
@@ -126,7 +126,7 @@ def test_write_gate_coerces_key_equal_title_to_patch(tmp_vault):
 def test_write_gate_defers_fuzzy_near_title(tmp_vault):
     """Fuzzy band → the op defers to the review queue (dedup judges it);
     never a hard block, never a silent write."""
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
 
     tmp_vault.note("Corso/Descriptor.md", "# Descriptor\n\ncorpo")
     validated, rejected = validate_operations(
@@ -178,7 +178,7 @@ def test_near_title_rejection_enqueues_dedup_workitem():
 def test_write_gate_lets_unrelated_titles_through(tmp_vault):
     """Below the band the write flows untouched — legitimate atomic spokes
     never pass through the guillotine."""
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
 
     tmp_vault.note("Corso/Analisi Matematica.md", "# AM\n\ncorpo")
     validated, rejected = validate_operations(

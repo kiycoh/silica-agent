@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from silica.kernel.paths import (
+from silica.kernel.recall.paths import (
     NOISE_DIRS,
     SILICAIGNORE_REL,
     is_obsidian_vault,

@@ -10,7 +10,7 @@ from silica.capabilities.dedup import (
     run_dedup,
 )
 from silica.config import SilicaConfig
-from silica.kernel.ops import OpType
+from silica.kernel.write.ops import OpType
 from silica.kernel.workqueue import WorkItem
 
 

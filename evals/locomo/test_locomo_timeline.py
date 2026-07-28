@@ -76,7 +76,7 @@ def test_build_timeline_seed_skips_undated_without_crashing(tmp_path):
 def _capture_messages(monkeypatch):
     """Patch run_agent + vmap; return a list that captures the messages sent."""
     import silica.agent.loop as loop_mod
-    from silica.kernel import vault_map
+    from silica.kernel.recall import vault_map
 
     captured = []
     monkeypatch.setattr(vault_map, "build_vault_map", lambda: "VMAP")

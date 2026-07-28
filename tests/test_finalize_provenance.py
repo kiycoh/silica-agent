@@ -14,7 +14,7 @@ import types
 from pathlib import Path
 
 from silica.kernel.progress import RunManifestEntry
-from silica.kernel.provenance import DEFAULT_PROVENANCE_FILENAME
+from silica.kernel.write.provenance import DEFAULT_PROVENANCE_FILENAME
 from silica.router.states import finalize
 
 

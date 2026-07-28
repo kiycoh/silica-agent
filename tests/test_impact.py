@@ -3,7 +3,7 @@
 import subprocess
 from pathlib import Path
 
-from silica.kernel import codegraph
+from silica.kernel.code import codegraph
 
 
 def _init_repo(path: Path) -> None:

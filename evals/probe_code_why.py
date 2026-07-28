@@ -39,7 +39,8 @@ from pydantic import BaseModel, Field
 
 import silica.tools.codedocs_tool  # noqa: F401  — registers silica_code_why
 import silica.tools.graph  # noqa: F401  — registers silica_recall
-from silica.kernel import codedocs, gitstate, templates
+from silica.kernel.code import codedocs, gitstate
+from silica.kernel.write import templates
 from silica.tools import TOOLS, tool
 
 # --- Pre-registered gate ------------------------------------------------------
@@ -90,7 +91,7 @@ QUESTIONS: list[dict] = [
     {"id": "L1", "stratum": "LOOKUP",
      "q": "Which module holds the doc-to-source staleness verdict, and which "
           "function decides whether a change is structural or cosmetic?",
-     "gold": "silica/kernel/codedocs.py; classify_change (aggregated per note by "
+     "gold": "silica/kernel/code/codedocs.py; classify_change (aggregated per note by "
              "note_verdict, driven by stale_docs)."},
     {"id": "L2", "stratum": "LOOKUP",
      "q": "Where is commit_derived defined and who calls it?",
@@ -98,7 +99,7 @@ QUESTIONS: list[dict] = [
              "silica/capabilities/codewiki.py."},
     {"id": "L3", "stratum": "LOOKUP",
      "q": "Where is the RRF fusion of the relatedness legs implemented?",
-     "gold": "_rrf_fuse in silica/kernel/relatedness.py."},
+     "gold": "_rrf_fuse in silica/kernel/recall/relatedness.py."},
     {"id": "L4", "stratum": "LOOKUP",
      "q": "Which environment variable sets Ollama's context window, and in which "
           "module is it read?",
@@ -106,7 +107,7 @@ QUESTIONS: list[dict] = [
     {"id": "L5", "stratum": "LOOKUP",
      "q": "Which function is the single choke point every code-lane consumer "
           "goes through to get its repo root?",
-     "gold": "repo_root_for in silica/kernel/paths.py."},
+     "gold": "repo_root_for in silica/kernel/recall/paths.py."},
     {"id": "L6", "stratum": "LOOKUP",
      "q": "Which module drives the /organize state machine?",
      "gold": "silica/router/organize_fsm.py."},
@@ -337,7 +338,7 @@ def extract_paths(text: str, root: Path) -> list[str]:
 
 
 def _body(source: Path) -> str:
-    from silica.kernel import frontmatter
+    from silica.kernel.write import frontmatter
 
     text = source.read_text(encoding="utf-8", errors="replace")
     _, _, body = frontmatter.split(text)
@@ -610,7 +611,7 @@ def main(argv=None) -> int:
 
     import silica.driver
     from silica.config import CONFIG
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
 
     CONFIG.vault_path = str(vault)
     silica.driver._driver = None

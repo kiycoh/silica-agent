@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import networkx as nx
 
-from silica.kernel.mindmap import reading_path
+from silica.kernel.recall.mindmap import reading_path
 
 
 class _Store:

@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Any
 import networkx as nx
-from silica.kernel.ast import extract_links
+from silica.kernel.link.ast import extract_links
 
 from silica.driver.base import (
     GraphIndexMixin,
@@ -36,10 +36,10 @@ from silica.driver.base import (
     trie_insert,
     trie_remove,
 )
-from silica.kernel import frontmatter as fm
-from silica.kernel import ofm
-from silica.kernel.graph_export import is_vault_artifact
-from silica.kernel.paths import ignore_matcher, is_source_leaf
+from silica.kernel.write import frontmatter as fm
+from silica.kernel.link import ofm
+from silica.kernel.recall.graph_export import is_vault_artifact
+from silica.kernel.recall.paths import ignore_matcher, is_source_leaf
 logger = logging.getLogger(__name__)
 
 
@@ -715,7 +715,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         self.list_files()) on every call.
         """
         import os
-        from silica.kernel.autolink import autolink, build_title_index
+        from silica.kernel.link.autolink import autolink, build_title_index
         nc = self.read_note(path)
         body = nc.content or ""
         if not body.strip():
@@ -779,7 +779,7 @@ class ObsidianFSBackend(GraphIndexMixin):
           unresolvable but now resolve to the new path are promoted to resolved
           graph edges via ``_patch_index``.
         """
-        from silica.kernel.rename import rewrite_links
+        from silica.kernel.link.rename import rewrite_links
 
         # Step 1: guarantee a fresh index before reading graph state
         self._ensure_index()
@@ -900,7 +900,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         # ponytail: per-op npz save; if /organize on a 10k vault gets slow, batch
         # these behind a dirty flag flushed once at end of run.
         try:
-            from silica.kernel.embed import get_store
+            from silica.kernel.recall.embed import get_store
             store = get_store()
             key = rel_path.removesuffix(".md")
             if store.get_vec(key) is not None:  # skip non-embedding vaults / unindexed notes

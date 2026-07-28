@@ -11,7 +11,7 @@ import silica.config
 import silica.driver
 import silica.kernel.progress as prog_mod
 
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 from silica.router import states
 from silica.router.orchestrator import InjectorFSM
 
@@ -119,7 +119,7 @@ def test_clean_batch_parity_old_vs_new(tmp_path, monkeypatch):
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault_a))
     silica.driver._driver = None
 
-    from silica.kernel.bulk import execute_operations
+    from silica.kernel.write.bulk import execute_operations
     ops_a = [
         Op(op=OpType.patch, heading="H", source_basename="m.md",
            path=str(vault_a / name), snippet="fact", hub="Hub")
@@ -137,7 +137,7 @@ def test_clean_batch_parity_old_vs_new(tmp_path, monkeypatch):
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault_b))
     silica.driver._driver = None
 
-    from silica.kernel.atomic_write import bulk_write_atomic
+    from silica.kernel.write.atomic_write import bulk_write_atomic
     ops_b = [
         Op(op=OpType.patch, heading="H", source_basename="m.md",
            path=str(vault_b / name), snippet="fact", hub="Hub")
@@ -157,8 +157,8 @@ def test_revert_restores_clean_batch(tmp_path, monkeypatch):
     import hashlib
     import silica.config
     import silica.driver
-    from silica.kernel.atomic_write import bulk_write_atomic
-    from silica.kernel.undo_journal import UndoJournalStore, revert_run
+    from silica.kernel.write.atomic_write import bulk_write_atomic
+    from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
 
     vault = tmp_path / "vault"
     vault.mkdir()

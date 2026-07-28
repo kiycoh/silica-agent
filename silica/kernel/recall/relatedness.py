@@ -36,10 +36,10 @@ import statistics
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from silica.kernel.cooccurrence import CooccurStore
-from silica.kernel.embed import EmbedStore
-from silica.kernel.graph_export import is_vault_artifact
-from silica.kernel.paths import in_folder
+from silica.kernel.recall.cooccurrence import CooccurStore
+from silica.kernel.recall.embed import EmbedStore
+from silica.kernel.recall.graph_export import is_vault_artifact
+from silica.kernel.recall.paths import in_folder
 
 # Standard RRF damping constant (Cormack et al. 2009). Larger -> flatter weight
 # decay across ranks; 60 is the widely-used default.
@@ -84,7 +84,7 @@ def reset_vault_caches() -> None:
     legs directly — the leg caches are path-keyed, so this is memory release,
     not correctness (a stale-keyed lookup would miss and rebuild anyway).
     """
-    from silica.kernel import cooccurrence, embed, lexical
+    from silica.kernel.recall import cooccurrence, embed, lexical
 
     embed.clear()
     cooccurrence.clear()
@@ -212,7 +212,7 @@ def _profile_from_seeds(
 
 def _seed_from_text(text: str, lang: str) -> dict[str, float]:
     """Seed concepts {stem: count} from raw query text (for fresh queries)."""
-    from silica.kernel.cooccurrence import tokenize
+    from silica.kernel.recall.cooccurrence import tokenize
 
     seeds: dict[str, float] = {}
     for sentence in tokenize(text, stem_lang=lang):

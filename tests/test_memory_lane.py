@@ -8,9 +8,9 @@ active vault's legs, read-only, with visible provenance (origin="memory",
 from __future__ import annotations
 
 from silica.config import CONFIG
-from silica.kernel import memory_lane
-from silica.kernel.embed import EmbedStore
-from silica.kernel.relatedness import related_notes, related_notes_for_query
+from silica.kernel.recall import memory_lane
+from silica.kernel.recall.embed import EmbedStore
+from silica.kernel.recall.relatedness import related_notes, related_notes_for_query
 
 
 def _store(path, notes) -> EmbedStore:

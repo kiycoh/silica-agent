@@ -50,7 +50,7 @@ def test_iter_plan_notes_yields_path_and_includes_unstatused(tmp_path):
 
 
 def test_check_plan_status_warns_on_bad_enum():
-    from silica.kernel.linter import check_plan_status
+    from silica.kernel.link.linter import check_plan_status
     assert check_plan_status({"status": "in-progress"}) == []
     assert check_plan_status({}) == []  # absent → no warning
     assert check_plan_status(None) == []  # None data dict → guarded, no warning

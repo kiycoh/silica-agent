@@ -33,7 +33,7 @@ import statistics
 from pathlib import Path
 
 from evals.probe_ppr_phase2 import GATE_DELTA, _gate, _run_arm
-from silica.kernel.health import K, eligible_pairs, wikilink_graph
+from silica.kernel.link.health import K, eligible_pairs, wikilink_graph
 
 K1 = 1.2      # textbook BM25 default, not tuned
 B = 0.75      # textbook BM25 default, not tuned
@@ -66,8 +66,8 @@ def bm25_ranker(*, k1: float = K1, b: float = B, binary: bool = False):
     """
 
     def rank(cooccur_store, profile, *, k, blocked, scope):
-        from silica.kernel.paths import in_folder as _path_in_scope
-        from silica.kernel.relatedness import _concept_idf
+        from silica.kernel.recall.paths import in_folder as _path_in_scope
+        from silica.kernel.recall.relatedness import _concept_idf
 
         if not profile:
             return None
@@ -144,8 +144,8 @@ def length_bias(store, groups: dict[str, list[tuple[str, str]]]) -> dict:
 def run(vault: Path, *, k1: float = K1, b: float = B) -> dict:
     from evals.golden.runner import _open_stores, vault_digest
     from silica.config import CONFIG
-    from silica.kernel import correlate
-    from silica.kernel.relatedness import _POOL_MIN
+    from silica.kernel.link import correlate
+    from silica.kernel.recall.relatedness import _POOL_MIN
 
     # Arm A is the frozen state whatever the operator's env says, and arm P below
     # turns the product flag on deliberately. Pinned here so a stray

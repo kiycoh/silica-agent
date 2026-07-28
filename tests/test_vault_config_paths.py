@@ -7,7 +7,7 @@ from silica.config import CONFIG
 
 def test_default_taxonomy_path_prefers_vault_root(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    from silica.kernel.taxonomy import default_taxonomy_path
+    from silica.kernel.organize.taxonomy import default_taxonomy_path
     assert default_taxonomy_path() == tmp_path / "taxonomy.yaml"
 
 
@@ -16,7 +16,7 @@ def test_default_taxonomy_path_falls_back_to_legacy(tmp_path, monkeypatch):
     legacy = tmp_path / "_silica" / "taxonomy.yaml"
     legacy.parent.mkdir()
     legacy.write_text("folders: {}\n", encoding="utf-8")
-    from silica.kernel.taxonomy import default_taxonomy_path
+    from silica.kernel.organize.taxonomy import default_taxonomy_path
     assert default_taxonomy_path() == legacy
 
 
@@ -26,13 +26,13 @@ def test_default_taxonomy_root_wins_over_legacy(tmp_path, monkeypatch):
     legacy = tmp_path / "_silica" / "taxonomy.yaml"
     legacy.parent.mkdir()
     legacy.write_text("folders: {}\n", encoding="utf-8")
-    from silica.kernel.taxonomy import default_taxonomy_path
+    from silica.kernel.organize.taxonomy import default_taxonomy_path
     assert default_taxonomy_path() == tmp_path / "taxonomy.yaml"
 
 
 def test_overlay_prefers_vault_root(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    from silica.kernel import overlay as overlay_mod
+    from silica.kernel.text import overlay as overlay_mod
     overlay_mod.reset_overlay_cache()
     # stopwords list extends the default; "zzzcustomword" is merged in
     (tmp_path / "overlay.yaml").write_text("stopwords:\n  - zzzcustomword\n", encoding="utf-8")
@@ -45,7 +45,7 @@ def test_overlay_prefers_vault_root(tmp_path, monkeypatch):
 
 def test_overlay_falls_back_to_legacy(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    from silica.kernel import overlay as overlay_mod
+    from silica.kernel.text import overlay as overlay_mod
     overlay_mod.reset_overlay_cache()
     legacy = tmp_path / "_silica" / "overlay.yaml"
     legacy.parent.mkdir()

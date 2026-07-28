@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from silica.kernel import language
+from silica.kernel.text import language
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +166,7 @@ def load_overlay(path: Path) -> DomainOverlay:
 
 _OVERLAY_REL = "overlay.yaml"
 _LEGACY_OVERLAY_REL = "_silica/overlay.yaml"
-_BUNDLED_OVERLAYS = Path(__file__).resolve().parent.parent / "overlays"  # ponytail: fs path, swap to importlib.resources only if shipped as a zip
+_BUNDLED_OVERLAYS = Path(__file__).resolve().parents[2] / "overlays"  # ponytail: fs path, swap to importlib.resources only if shipped as a zip
 _cached_overlay: DomainOverlay | None = None
 _lang_overlay_cache: dict[str, DomainOverlay] = {}
 

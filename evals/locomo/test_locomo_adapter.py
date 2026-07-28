@@ -146,7 +146,7 @@ def test_stuff_pipeline_scores_correct(tmp_path, monkeypatch):
 
 
 def test_facade_pipeline_session_recall(tmp_path, monkeypatch):
-    import silica.kernel.embed as embed_mod
+    import silica.kernel.recall.embed as embed_mod
 
     monkeypatch.setattr(embed_mod, "_index_path", lambda: tmp_path / "emb.json")
     _install_stub(monkeypatch)

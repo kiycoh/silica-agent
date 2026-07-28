@@ -16,7 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from silica.kernel import codedocs, gitstate, paths
+from silica.kernel.code import codedocs, gitstate
+
+from silica.kernel.recall import paths
 
 # exact < member < container: a note about the path itself outranks one about a
 # file inside it, which outranks one about the package above it.

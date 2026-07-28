@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-import silica.kernel.embed as embed_mod
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
+import silica.kernel.recall.embed as embed_mod
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
 
 
 @pytest.fixture

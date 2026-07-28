@@ -7,7 +7,8 @@ import json
 import os
 import sys
 from pathlib import Path
-from silica.kernel import ofm, frontmatter
+from silica.kernel.link import ofm
+from silica.kernel.write import frontmatter
 from silica.driver import DRIVER
 
 
@@ -83,7 +84,7 @@ def validate_note(path, hub, op_type=None):
             # Notes live in the vault, so the vault's validated code-lane root
             # (ADR-0019) is the right base — not a walk-up from the note file.
             from silica.config import CONFIG
-            from silica.kernel.paths import repo_root_for
+            from silica.kernel.recall.paths import repo_root_for
             warnings += check_documents_paths(
                 data, repo_root=repo_root_for(getattr(CONFIG, "vault_path", "") or "")
             )

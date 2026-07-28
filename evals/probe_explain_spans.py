@@ -222,8 +222,8 @@ def load_bodies(vault: Path) -> dict[str, dict]:
     the suffix, and by lowercased title, because a wikilink cites the title
     while retrieval returns a path.
     """
-    from silica.kernel import frontmatter
-    from silica.kernel.health import iter_notes
+    from silica.kernel.write import frontmatter
+    from silica.kernel.link.health import iter_notes
 
     out: dict[str, dict] = {}
     for p in iter_notes(vault):
@@ -261,7 +261,7 @@ def retrieve_pack(concept: str, bodies: dict[str, dict]) -> tuple[list[dict], bo
     """The notes `/explain` would read for `concept`, and whether the embed leg
     was live. Memory-lane hits are dropped: their paths are relative to another
     vault, so their bodies are not in `bodies` and could not be verified."""
-    from silica.kernel.perception import facade_retrieve
+    from silica.kernel.recall.perception import facade_retrieve
 
     results, query_vec = facade_retrieve(concept, k=K)
     pack: list[dict] = []
@@ -301,7 +301,7 @@ def anchor(explanation: str, pack: list[dict], model: str) -> list[dict]:
     would push H1 towards a harness failure and look like a finding.
     """
     from silica.agent.llm import call_llm
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.text.sanitize import parse_json
 
     resp = call_llm(
         model=model,

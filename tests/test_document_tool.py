@@ -8,7 +8,7 @@ from silica.config import CONFIG
 
 PY_SRC = '''\
 import os
-from silica.kernel import gitstate
+from silica.kernel.code import gitstate
 
 
 def hi(name: str) -> str:
@@ -24,9 +24,9 @@ def _init_repo(path: Path) -> None:
     f = path / "src" / "m.py"
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(PY_SRC, encoding="utf-8")
-    # real first-party file so `silica.kernel.gitstate` resolves to a wikilink
-    (path / "silica" / "kernel").mkdir(parents=True, exist_ok=True)
-    (path / "silica" / "kernel" / "gitstate.py").write_text(
+    # real first-party file so `silica.kernel.code.gitstate` resolves to a wikilink
+    (path / "silica" / "kernel" / "code").mkdir(parents=True, exist_ok=True)
+    (path / "silica" / "kernel" / "code" / "gitstate.py").write_text(
         "def head_ref():\n    return None\n", encoding="utf-8"
     )
     (path / "data.csv").write_text("a,b\n", encoding="utf-8")
@@ -73,7 +73,7 @@ def test_document_splits_first_party_and_external_imports(repo_vault):
     data = _run("src/m.py")
     written = (vault / data["note_path"]).read_text(encoding="utf-8")
     assert "First-party" in written
-    assert "[[silica.kernel.gitstate]]" in written  # path-qualified wikilink
+    assert "[[silica.kernel.code.gitstate]]" in written  # path-qualified wikilink
     assert "External" in written
     assert "`os`" in written
 

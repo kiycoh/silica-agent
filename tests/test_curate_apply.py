@@ -16,9 +16,9 @@ from __future__ import annotations
 import json
 
 import silica.tools.curate as curate
-from silica.kernel.curator import CurationItem, CurationPlan
-from silica.kernel.graph_report import VaultReport
-from silica.kernel.run_log import DEFAULT_LOG_FILENAME
+from silica.kernel.recall.curator import CurationItem, CurationPlan
+from silica.kernel.report.graph_report import VaultReport
+from silica.kernel.recall.run_log import DEFAULT_LOG_FILENAME
 
 
 def _plan(*items: CurationItem) -> CurationPlan:

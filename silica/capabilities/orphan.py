@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from silica.agent.commit import commit_ops
 from silica.agent.bounds import orphan_bounds
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
 
@@ -79,7 +79,7 @@ def _decide_links(
     candidates: list[dict],
 ) -> OrphanLinkDecision:
     from silica.agent.providers import get_provider
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.text.sanitize import parse_json
 
     prompt = load_prompt("orphan_prompt.txt")
     cand_block = "\n".join(

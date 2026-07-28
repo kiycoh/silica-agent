@@ -9,15 +9,15 @@ survivor's ranking passes through unchanged ("embedder down -> cooccur routing")
 from __future__ import annotations
 
 
-from silica.kernel.embed import EmbedStore
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.recall.embed import EmbedStore
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
 
 
 # ---------------------------------------------------------------------------
 # RRF fusion (pure)
 # ---------------------------------------------------------------------------
 
-from silica.kernel.relatedness import _rrf_fuse, RRF_K
+from silica.kernel.recall.relatedness import _rrf_fuse, RRF_K
 
 
 def test_rrf_fuse_single_ranking_orders_by_rank():
@@ -50,7 +50,7 @@ def test_rrf_fuse_empty_is_empty():
 # --- CORRELATE (ADR-0013): third fusion leg from note_edges -----------------
 
 def test_fuse_includes_edges_leg():
-    from silica.kernel.relatedness import _fuse
+    from silica.kernel.recall.relatedness import _fuse
     out = _fuse(None, None, edges_rank=[("B", 0.31)], k=5)
     assert out and out[0].path == "B"
     assert out[0].edge_score == 0.31
@@ -60,7 +60,7 @@ def test_fuse_includes_edges_leg():
 def test_fuse_drops_vault_root_artifacts():
     # A stale GRAPH_REPORT vector can outlive its index-build exclusion (the
     # store is upsert-only); _fuse must never surface it. "real" survives.
-    from silica.kernel.relatedness import _fuse
+    from silica.kernel.recall.relatedness import _fuse
     out = _fuse([("GRAPH_REPORT", "Graph Report", 0.99), ("real", "Real", 0.5)], None, k=5)
     assert [r.path for r in out] == ["real"]
 
@@ -69,7 +69,7 @@ def test_fuse_drops_vault_root_artifacts():
 # Embed leg + abstention
 # ---------------------------------------------------------------------------
 
-from silica.kernel.relatedness import _embed_ranking
+from silica.kernel.recall.relatedness import _embed_ranking
 
 
 def _embed_store(tmp_path) -> EmbedStore:
@@ -114,7 +114,7 @@ def test_embed_ranking_handles_md_suffixed_query(tmp_path):
 # Co-occurrence leg + abstention
 # ---------------------------------------------------------------------------
 
-from silica.kernel.relatedness import _cooccur_ranking
+from silica.kernel.recall.relatedness import _cooccur_ranking
 
 
 def _cooc_store(tmp_path) -> CooccurStore:
@@ -150,7 +150,7 @@ def test_cooccur_ranking_abstains_when_query_absent(tmp_path):
 def test_cooccur_gate_probe_receives_coverage_and_flatness(tmp_path, monkeypatch):
     # Phase-0 calibration hook (retrieval-gates spec): per-query signals are
     # emitted when the probe is set; the dormant gate must not fire.
-    from silica.kernel import relatedness
+    from silica.kernel.recall import relatedness
 
     st = _cooc_store(tmp_path)
     seen = []
@@ -167,7 +167,7 @@ def test_cooccur_gate_probe_receives_coverage_and_flatness(tmp_path, monkeypatch
 def test_cooccur_gate_abstains_below_threshold(tmp_path, monkeypatch):
     # Gate plumbing: with a frozen threshold above the fixture's coverage the
     # leg must abstain via the existing None protocol.
-    from silica.kernel import relatedness
+    from silica.kernel.recall import relatedness
 
     st = _cooc_store(tmp_path)
     monkeypatch.setattr(relatedness, "_COOCCUR_MIN_CONFIDENCE", 0.99)
@@ -211,7 +211,7 @@ def test_cooccur_ranking_expansion_reaches_associative_notes(tmp_path):
 # Facade integration: related_notes
 # ---------------------------------------------------------------------------
 
-from silica.kernel.relatedness import related_notes, RelatedNote
+from silica.kernel.recall.relatedness import related_notes, RelatedNote
 
 
 def test_related_notes_fuses_both_legs_with_evidence(tmp_path):
@@ -275,7 +275,7 @@ def test_related_notes_evidence_score_formats(tmp_path):
 
 
 def test_related_notes_direct_edge_leg_carries_edge_score(tmp_path):
-    from silica.kernel.correlate import recompute_all_edges
+    from silica.kernel.link.correlate import recompute_all_edges
     st = CooccurStore(path=tmp_path / "c.json", lang="english")
     st.upsert_note("A", build_contribution("A", "alpha beta gamma"))
     st.upsert_note("B", build_contribution("B", "alpha beta delta"))  # jaccard 0.5 -> edge
@@ -307,7 +307,7 @@ def test_related_note_exposes_structured_per_leg_scores(tmp_path):
 # Fresh-query facade: related_notes_for_query (vec + text, no indexed path)
 # ---------------------------------------------------------------------------
 
-from silica.kernel.relatedness import related_notes_for_query
+from silica.kernel.recall.relatedness import related_notes_for_query
 
 
 def test_for_query_embed_only_ranks_by_vector(tmp_path):
@@ -360,7 +360,7 @@ def test_for_query_respects_exclude(tmp_path):
 def test_for_query_never_has_edge_leg(tmp_path):
     # Structural abstention (ADR-0013 Q5): fresh query text has no note_edges
     # row, so the third leg NEVER fires here — even when the store has edges.
-    from silica.kernel.correlate import recompute_all_edges
+    from silica.kernel.link.correlate import recompute_all_edges
     st = _cooc_store(tmp_path)
     recompute_all_edges(st)
     out = related_notes_for_query(query_text="alpha beta gamma", cooccur_store=st, k=5)
@@ -381,7 +381,7 @@ def test_for_query_both_absent_returns_empty(tmp_path):
 # --- recall-outcome leg (phase 1 of `improve`) ------------------------------
 
 def test_fuse_recall_rank_none_is_identical_to_before():
-    from silica.kernel.relatedness import _fuse
+    from silica.kernel.recall.relatedness import _fuse
     embed = [("A", "A", 0.9), ("B", "B", 0.5)]
     cooc = [("B", 4.0), ("C", 1.0)]
     with_none = _fuse(embed, cooc, k=5, recall_rank=None)
@@ -390,14 +390,14 @@ def test_fuse_recall_rank_none_is_identical_to_before():
 
 
 def test_fuse_includes_recall_leg_in_evidence():
-    from silica.kernel.relatedness import _fuse
+    from silica.kernel.recall.relatedness import _fuse
     out = _fuse(None, None, recall_rank=[("B", 3.0)], k=5)
     assert out and out[0].path == "B"
     assert "recall:3" in out[0].evidence
 
 
 def test_fuse_recall_leg_proposes_notes_absent_from_semantic_legs():
-    from silica.kernel.relatedness import _fuse
+    from silica.kernel.recall.relatedness import _fuse
     embed = [("A", "A", 0.9), ("B", "B", 0.8)]
     out_without = _fuse(embed, None, k=10)
     assert "Z" not in [r.path for r in out_without]
@@ -419,9 +419,9 @@ def test_fuse_recall_leg_proposes_notes_absent_from_semantic_legs():
 import math as _math
 import statistics as _statistics
 
-from silica.kernel import relatedness as _relatedness_mod
-from silica.kernel.paths import in_folder as _path_in_scope
-from silica.kernel.relatedness import _concept_idf, _rank_cooccur_from_profile
+from silica.kernel.recall import relatedness as _relatedness_mod
+from silica.kernel.recall.paths import in_folder as _path_in_scope
+from silica.kernel.recall.relatedness import _concept_idf, _rank_cooccur_from_profile
 
 _snowball = __import__("snowballstemmer").stemmer("english").stemWord
 

@@ -23,7 +23,7 @@ from silica.agent.providers import (
     model_limits,
 )
 from silica.config import SilicaConfig
-from silica.kernel import gitstate
+from silica.kernel.code import gitstate
 
 _HTTP_TIMEOUT = 3.0
 
@@ -262,7 +262,7 @@ def detect_vault_language(vault: str) -> str | None:
     sample = sample_vault_text(vault)
     if not sample.strip():
         return None
-    from silica.kernel import language
+    from silica.kernel.text import language
 
     return language.detect(sample)
 
@@ -282,7 +282,7 @@ def frozen_store_language(vault: str) -> str | None:
     Direct leg import — allowlisted in tests/test_relatedness_boundary.py:
     metadata-only read via the public accessor, no store construction.
     """
-    from silica.kernel.cooccurrence import frozen_lang
+    from silica.kernel.recall.cooccurrence import frozen_lang
 
     return frozen_lang(vault)
 
@@ -378,7 +378,7 @@ def check_manifest(config: SilicaConfig) -> CheckResult:
 
 def check_quarantine(config: SilicaConfig) -> CheckResult:
     """Corrupt state files quarantined as *.corrupt.* — preserved, not lost."""
-    from silica.kernel.paths import index_dir_for
+    from silica.kernel.recall.paths import index_dir_for
 
     roots = [Path(p) for p in (config.vault_path,) if p]
     roots.append(index_dir_for(config.vault_path or ""))

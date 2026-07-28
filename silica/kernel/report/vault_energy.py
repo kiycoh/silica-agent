@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from silica.kernel.graph_report.models import VaultReport
+from silica.kernel.report.graph_report.models import VaultReport
 
 
 @dataclass(frozen=True)

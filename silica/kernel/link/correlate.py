@@ -60,7 +60,7 @@ def refresh_edges(store, paths: list[str]) -> None:
     is stable across the loop. Edges are stored once under the ordered pair, so
     refreshing A also updates A's edges seen from a non-refreshed neighbour.
     """
-    from silica.kernel.cooccurrence import cooccur_key
+    from silica.kernel.recall.cooccurrence import cooccur_key
 
     idx = _inverted_index(store)
     for path in paths:

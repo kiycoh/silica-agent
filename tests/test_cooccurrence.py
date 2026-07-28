@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 
-from silica.kernel.cooccurrence import tokenize
+from silica.kernel.recall.cooccurrence import tokenize
 
 
 def test_tokenize_breaks_sentences_on_terminators():
@@ -68,7 +68,7 @@ def test_tokenize_stopword_lang_none_detects_from_text():
     assert "il" not in stems
 
 
-from silica.kernel.cooccurrence import build_contribution
+from silica.kernel.recall.cooccurrence import build_contribution
 
 
 def _edge_weight(contribution, a, b):
@@ -170,7 +170,8 @@ def test_build_contribution_excludes_excalidraw_drawings():
 
 
 def test_strip_fences_keyed_on_manifest_sources(monkeypatch):
-    from silica.kernel import cooccurrence, vault_manifest
+    from silica.kernel.recall import cooccurrence
+    from silica.kernel import vault_manifest
 
     def _manifest(sources):
         return vault_manifest.VaultManifest(sources=sources)
@@ -181,7 +182,7 @@ def test_strip_fences_keyed_on_manifest_sources(monkeypatch):
     assert cooccurrence._strip_fences_for_active_vault() is False
 
 
-from silica.kernel.cooccurrence import CooccurStore
+from silica.kernel.recall.cooccurrence import CooccurStore
 
 
 def test_store_empty_on_missing_file(tmp_path):
@@ -402,7 +403,7 @@ def test_scope_restricts_aggregation(tmp_path):
     assert store.neighbors("alpha", scope="Robotica") != []
 
 
-from silica.kernel.cooccurrence import build_index, refresh_note
+from silica.kernel.recall.cooccurrence import build_index, refresh_note
 
 
 def test_build_index_bulk(tmp_path):
@@ -485,7 +486,7 @@ import ast
 def test_module_never_imports_embedder():
     """cooccurrence.py is the stable leg: it must not depend on the embedder
     or provider stack (works with LM Studio down)."""
-    src = (Path(__file__).parent.parent / "silica" / "kernel" / "cooccurrence.py").read_text()
+    src = (Path(__file__).parent.parent / "silica" / "kernel" / "recall" / "cooccurrence.py").read_text()
     tree = ast.parse(src)
     imported: list[str] = []
     for node in ast.walk(tree):

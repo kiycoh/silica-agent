@@ -11,8 +11,8 @@ thread). The singleton is therefore safe without a lock. See
 """
 from __future__ import annotations
 
-import silica.kernel.embed as embed
-import silica.kernel.cooccurrence as cooc
+import silica.kernel.recall.embed as embed
+import silica.kernel.recall.cooccurrence as cooc
 
 
 def test_get_store_returns_same_instance(tmp_path, monkeypatch):

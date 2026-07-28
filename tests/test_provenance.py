@@ -1,7 +1,7 @@
-"""Tests for silica/kernel/provenance.py (spec-hermes-coherence §3).
+"""Tests for silica/kernel/write/provenance.py (spec-hermes-coherence §3).
 
 Note<->source drift via sha256 provenance records. Pure filesystem module
-(stdlib json/hashlib/datetime), mirroring silica/kernel/run_log.py: append
+(stdlib json/hashlib/datetime), mirroring silica/kernel/recall/run_log.py: append
 is best-effort (never raises), absence of the store degrades to "no
 records" everywhere.
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.kernel.provenance import (
+from silica.kernel.write.provenance import (
     DEFAULT_PROVENANCE_FILENAME,
     append_record,
     check_renucleate,
@@ -88,7 +88,7 @@ def test_append_record_no_vault_path_returns_false(monkeypatch):
 
 def test_append_record_survives_unwritable_store(tmp_path, monkeypatch):
     """Best-effort: an I/O failure on write must not raise."""
-    import silica.kernel.provenance as prov_mod
+    import silica.kernel.write.provenance as prov_mod
 
     def _boom(*a, **k):
         raise OSError("disk full")
@@ -226,7 +226,7 @@ def test_content_sha256_missing_file_returns_empty(tmp_path, monkeypatch):
 def test_read_records_parses_once_for_repeated_reads(tmp_path, monkeypatch):
     append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
 
-    import silica.kernel.provenance as prov
+    import silica.kernel.write.provenance as prov
 
     parses = 0
     real_loads = prov.json.loads

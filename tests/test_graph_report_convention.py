@@ -1,4 +1,4 @@
-"""Convention test for silica/kernel/graph_report/.
+"""Convention test for silica/kernel/report/graph_report/.
 
 kernel/graph_report/ is covered by the import-linter contract "graph
 structure is deterministic — structural modules never import agent
@@ -22,7 +22,7 @@ from pathlib import Path
 import tomllib
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-GRAPH_REPORT_DIR = REPO_ROOT / "silica" / "kernel" / "graph_report"
+GRAPH_REPORT_DIR = REPO_ROOT / "silica" / "kernel" / "report" / "graph_report"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 
 CONTRACT_NAME = (
@@ -45,7 +45,7 @@ def _covered_stems() -> set[str]:
     contracts = data["tool"]["importlinter"]["contracts"]
     for contract in contracts:
         if contract.get("name") == CONTRACT_NAME:
-            prefix = "silica.kernel.graph_report."
+            prefix = "silica.kernel.report.graph_report."
             return {
                 mod[len(prefix):]
                 for mod in contract["source_modules"]
@@ -58,7 +58,7 @@ def test_graph_report_modules_are_covered_or_exempt():
     covered = _covered_stems()
     actual_stems = {p.stem for p in GRAPH_REPORT_DIR.glob("*.py")}
     assert actual_stems == covered | EXEMPT, (
-        "silica/kernel/graph_report/*.py drifted from the import-linter contract "
+        "silica/kernel/report/graph_report/*.py drifted from the import-linter contract "
         f"{CONTRACT_NAME!r} + this test's EXEMPT set.\n"
         f"On disk but unaccounted for: {sorted(actual_stems - covered - EXEMPT)}. "
         "Add to source_modules in pyproject.toml (and covered here), or add to "

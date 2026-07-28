@@ -8,10 +8,10 @@ byte-identical output to the pre-stamp behaviour, so every non-FSM path
 """
 from __future__ import annotations
 
-from silica.kernel import templates
-from silica.kernel.contested import parse_stamp, stamp
-from silica.kernel.ops import Op, OpType
-from silica.kernel.provenance import source_valid_from
+from silica.kernel.write import templates
+from silica.kernel.write.contested import parse_stamp, stamp
+from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.provenance import source_valid_from
 
 
 # --- stamp / parse_stamp (pure) ----------------------------------------------
@@ -112,7 +112,7 @@ Il dosaggio raccomandato è 5mg/die.
 
 def test_execute_write_stamps_under_the_h1(tmp_vault):
     from silica.driver import DRIVER
-    from silica.kernel.bulk import execute_one
+    from silica.kernel.write.bulk import execute_one
 
     execute_one(Op(
         op=OpType.write, heading="Dosaggio Warfarin", source_basename="appunti.md",
@@ -128,7 +128,7 @@ def test_execute_write_stamps_under_the_h1(tmp_vault):
 
 def test_execute_write_without_valid_from_emits_no_stamp(tmp_vault):
     from silica.driver import DRIVER
-    from silica.kernel.bulk import execute_one
+    from silica.kernel.write.bulk import execute_one
 
     execute_one(Op(
         op=OpType.write, heading="Dosaggio Warfarin", source_basename="appunti.md",
@@ -140,7 +140,7 @@ def test_execute_write_without_valid_from_emits_no_stamp(tmp_vault):
 
 
 def test_execute_patch_stamps_the_block(tmp_vault):
-    from silica.kernel.bulk import execute_one
+    from silica.kernel.write.bulk import execute_one
 
     path = tmp_vault.note("Farmacologia/Dosaggio Warfarin.md", NOTE)
     execute_one(Op(
@@ -158,8 +158,8 @@ def test_execute_patch_stamps_the_block(tmp_vault):
 def test_stamp_does_not_leak_into_the_moc_bullet(tmp_vault):
     """hub_desc reads op.snippet, which the stamp must never mutate: a MOC
     bullet reading '<!-- silica: ... -->' would be a visible regression."""
-    from silica.kernel.bulk import execute_one
-    from silica.kernel.moc import hub_desc
+    from silica.kernel.write.bulk import execute_one
+    from silica.kernel.write.moc import hub_desc
 
     op = Op(
         op=OpType.write, heading="Dosaggio Warfarin", source_basename="appunti.md",

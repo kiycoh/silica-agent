@@ -15,7 +15,7 @@ from silica.capabilities.enrich import run_enrich
 from silica.capabilities.orphan import run_orphan, OrphanLinkDecision
 from silica.capabilities._base import NoteContent
 from silica.config import SilicaConfig
-from silica.kernel.ops import OpType
+from silica.kernel.write.ops import OpType
 from silica.kernel.workqueue import WorkItem
 
 CONFIG = SilicaConfig()
@@ -151,7 +151,7 @@ def test_dedup_contradicts_without_claim_is_no_merge():
 def _seed_twin_bundle(content_hash: str = "hash1"):
     """Seed the (conftest-isolated) deferred store with the borderline bundle
     COLLISION would have written for _item()'s concept plus one sibling op."""
-    from silica.kernel.deferred import get_deferred_store
+    from silica.kernel.recall.deferred import get_deferred_store
 
     store = get_deferred_store()
     store.put(

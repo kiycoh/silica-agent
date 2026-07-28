@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 from silica.agent.commit import commit_ops
 from silica.agent.bounds import dedup_bounds, dedup_spoke_bounds
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
 
@@ -203,7 +203,7 @@ def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
         return
     try:
         from silica.agent.bounds import dedup_supersede_bounds
-        from silica.kernel.contested import mark_superseded_by
+        from silica.kernel.write.contested import mark_superseded_by
 
         prior = read_or_skip(loser_path)[0] or ""
         marked = mark_superseded_by(prior, winner_path)
@@ -246,7 +246,7 @@ def _route_verdict(
     inbox_file = ctx.get("inbox_file", "")
     source_basename = os.path.basename(inbox_file) if inbox_file else "dedup"
     if decision.verdict == "contradicts":
-        from silica.kernel.contested import contested_callout
+        from silica.kernel.write.contested import contested_callout
         op = Op(
             op=OpType.patch,
             heading=ctx.get("concept", "") or "contested claim",
@@ -311,7 +311,7 @@ def _route_distinct(
     if not target_dir:
         return no_merge
 
-    from silica.kernel.templates import slugify
+    from silica.kernel.write.templates import slugify
 
     concept = ctx.get("concept", "")
     candidate_name = ctx.get("candidate", "")
@@ -378,7 +378,7 @@ def _clean_twin_bundle(ctx: dict) -> None:
     if not content_hash:
         return
     try:
-        from silica.kernel.deferred import get_deferred_store
+        from silica.kernel.recall.deferred import get_deferred_store
         get_deferred_store().remove_op(content_hash, ctx.get("concept", ""))
     except Exception as e:
         logger.debug("dedup: twin bundle cleanup failed (non-fatal): %s", e)
@@ -398,7 +398,7 @@ def _decide_dedup(
     hub: str | None = None,
 ) -> DedupDecision:
     from silica.agent.providers import get_provider
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.text.sanitize import parse_json
 
     prompt = load_prompt("dedup_prompt.txt")
     if author_spoke:
@@ -542,7 +542,7 @@ def _parse_batch(raw: str, n: int) -> list[DedupDecision]:
     as the single path (distinct, no authorship → mechanical spoke or
     no_merge downstream) — never to a merge.
     """
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.text.sanitize import parse_json
 
     def fallback() -> DedupDecision:
         return DedupDecision(verdict="distinct", rationale="missing from batch response")

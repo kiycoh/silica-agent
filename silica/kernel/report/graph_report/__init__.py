@@ -23,12 +23,12 @@ Paper-inspired signals (Marwitz et al., Nature Mach. Intell. 2026):
 Package layout: models (dataclasses), compute (compute_report core),
 embed_signals (embedding proposals), cooccur_delta (co-occurrence vs
 wikilink delta — ADR-0013 CORRELATE lands there), render (output).
-Consumers import from silica.kernel.graph_report; `__all__` is the surface.
+Consumers import from silica.kernel.report.graph_report; `__all__` is the surface.
 """
 from __future__ import annotations
 
-from silica.kernel.graph_report.compute import compute_report
-from silica.kernel.graph_report.models import (
+from silica.kernel.report.graph_report.compute import compute_report
+from silica.kernel.report.graph_report.models import (
     AutolinkCandidate,
     BridgeStat,
     ClusterStat,
@@ -42,7 +42,7 @@ from silica.kernel.graph_report.models import (
     StaleLink,
     VaultReport,
 )
-from silica.kernel.graph_report.render import to_digest, to_facts, to_markdown, write_report
+from silica.kernel.report.graph_report.render import to_digest, to_facts, to_markdown, write_report
 
 __all__ = [
     "AutolinkCandidate",

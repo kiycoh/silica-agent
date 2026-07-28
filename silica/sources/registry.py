@@ -40,7 +40,7 @@ def supported_nucleate_extensions() -> list[str]:
     Lives here (the dispatch hub), not per-adapter: CODE matches by language,
     not an extension list, so there's nothing to enumerate on the adapter.
     """
-    from silica.kernel.codeast import BARE_LANGUAGES, EXTENSION_MAP
+    from silica.kernel.code.codeast import BARE_LANGUAGES, EXTENSION_MAP
     from silica.sources.prose import _EXTS as PROSE_EXTS
 
     # bare languages (toml/html/css) are graph-only presence: no nucleate lane
@@ -59,7 +59,7 @@ def folder_rel(target: str) -> str | None:
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.paths import repo_root_for
+    from silica.kernel.recall.paths import repo_root_for
 
     root = repo_root_for(CONFIG.vault_path) if CONFIG.vault_path else None
     if root is None:
@@ -84,8 +84,8 @@ def expand_folder(target: str, enabled: Sequence[str] | None = None) -> list[str
     whatever it already did for an unresolved argument.
     """
     from silica.config import CONFIG
-    from silica.kernel.codegraph import supported_files
-    from silica.kernel.paths import repo_root_for
+    from silica.kernel.code.codegraph import supported_files
+    from silica.kernel.recall.paths import repo_root_for
 
     rel = folder_rel(target)
     if rel is None:
@@ -115,8 +115,8 @@ def _record_inverse(run_id: str, path: str, prior: str | None) -> None:
     recomputes after any normalisation the backend applied on the way in.
     """
     from silica.driver import DRIVER
-    from silica.kernel.ops import InverseOp, InverseOpKind
-    from silica.kernel.undo_journal import _content_hash, get_undo_journal
+    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.undo_journal import _content_hash, get_undo_journal
 
     inv = (
         InverseOp(kind=InverseOpKind.restore_version, path=path, prior_content=prior)

@@ -8,7 +8,7 @@ validate passed them and execute_write filled the vault with placeholders
 """
 from __future__ import annotations
 
-from silica.kernel.validate import (
+from silica.kernel.write.validate import (
     MIN_WRITE_SNIPPET_CHARS,
     meta_description_reason,
     min_write_snippet_chars,

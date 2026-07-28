@@ -6,7 +6,7 @@ near-duplicate concepts instead of silently letting them land in the vault.
 """
 from __future__ import annotations
 
-from silica.kernel.minhash_dedup import (
+from silica.kernel.report.minhash_dedup import (
     estimate_jaccard,
     minhash_signature,
     near_duplicates,

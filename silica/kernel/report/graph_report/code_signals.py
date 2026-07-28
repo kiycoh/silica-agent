@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from silica.kernel.graph_report.models import AutolinkCandidate, CodeCoverage
+from silica.kernel.report.graph_report.models import AutolinkCandidate, CodeCoverage
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +66,10 @@ def _compute_code_signals(
     """Entry point for compute.py. Soft-None when the codegraph is disabled
     (vault outside git) — the report simply has no code section."""
     if graph is None:
-        from silica.kernel.codegraph import load_codegraph
+        from silica.kernel.code.codegraph import load_codegraph
         graph = load_codegraph(vault)
     if graph is None or not graph.files:
         return None, []
-    from silica.kernel.codedocs import documents_of, iter_documenting_notes
+    from silica.kernel.code.codedocs import documents_of, iter_documenting_notes
     docmap = {note: documents_of(data) for note, data, _ in iter_documenting_notes(vault)}
     return _coverage_from(graph, docmap), _import_autolinks_from(graph, docmap, wikilinks)

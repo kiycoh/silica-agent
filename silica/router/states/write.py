@@ -23,11 +23,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from silica.kernel.ops import OpType
+from silica.kernel.write.ops import OpType
 
 # Extracted to kernel/moc.py so the deferred-retry path (tools/pipeline.py) can
 # reuse them; aliased here to keep the FSM code and existing tests unchanged.
-from silica.kernel.moc import (
+from silica.kernel.write.moc import (
     hub_desc as _hub_desc,
     merge_moc_section as _merge_moc_section,
     moc_heading as _moc_heading,
@@ -63,7 +63,7 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
         fsm._chunk_ctx["txn_id"] = res["txn_id"]
         try:
             from silica.driver.base import NoteRef, Txn
-            from silica.kernel.ops import InverseOp
+            from silica.kernel.write.ops import InverseOp
             inv = [InverseOp(**d) for d in res["inverses"]]
 
             # Reconstruct refs for Txn from inverses
@@ -85,7 +85,7 @@ def handle_snapshot(fsm: "InjectorFSM") -> None:
 
         # S3.2: Take pre-write graph snapshot incrementally
         try:
-            from silica.kernel.ast import extract_links as _extract_links
+            from silica.kernel.link.ast import extract_links as _extract_links
             ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
             touched_refs = []
             snapshot_domain = set()
@@ -161,7 +161,7 @@ def _attach_section_images(fsm: "InjectorFSM", ops: list) -> None:
         return
     if "![" not in source:  # fast bail: no embeds at all
         return
-    from silica.kernel.media import append_section_images
+    from silica.kernel.text.media import append_section_images
     for op in ops:
         if op.op not in (OpType.write, OpType.patch):
             continue
@@ -175,7 +175,7 @@ def _attach_section_images(fsm: "InjectorFSM", ops: list) -> None:
 
 
 def handle_write(fsm: "InjectorFSM") -> None:
-    from silica.kernel.atomic_write import bulk_write_atomic
+    from silica.kernel.write.atomic_write import bulk_write_atomic
     fsm._progress_note(fsm._chunk_task_id("write"), "write", "running")
 
     ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
@@ -232,7 +232,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
                 if op.touched_ref() in failed_paths:
                     op.op = OpType.skip
                     op.reason = "Deferred because write/lint failed"
-            from silica.kernel.ops_io import dump_ops
+            from silica.kernel.write.ops_io import dump_ops
             dump_ops(fsm._chunk_ctx["ops_path"], ops)
         except Exception as _de:
             logger.debug("WRITE: deferred save/update failed (non-fatal): %s", _de)
@@ -283,7 +283,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
         # Best-effort incremental embed index refresh
         try:
             from silica.agent.providers import get_embedder
-            from silica.kernel.embed import get_store, refresh_note
+            from silica.kernel.recall.embed import get_store, refresh_note
             embedder = get_embedder(orch.CONFIG)
             store = get_store()
             for op in ops:
@@ -323,9 +323,9 @@ def handle_write(fsm: "InjectorFSM") -> None:
         # Best-effort incremental lexical (BM25) refresh — opt-in by index
         # presence, so vaults without a lexical index stay byte-identical.
         try:
-            from silica.kernel import paths as _paths
+            from silica.kernel.recall import paths as _paths
             if (_paths.index_dir() / "lexical.json").is_file():
-                from silica.kernel.lexical import get_lexical_store
+                from silica.kernel.recall.lexical import get_lexical_store
                 lex = get_lexical_store()
                 for op in ops:
                     path = op.touched_ref()
@@ -440,7 +440,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
         for p in (fsm._txn.created_paths or [])
     )
     if not hub_is_new and fsm._txn is not None:
-        from silica.kernel.ops import InverseOp, InverseOpKind
+        from silica.kernel.write.ops import InverseOp, InverseOpKind
         hub_inverse = InverseOp(
             kind=InverseOpKind.restore_version,
             path=hub_path,
@@ -514,7 +514,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
     # Write MOC sections to specific parent notes (best-effort — only active when
     # the distiller emits op.parent, which requires the Block 4 prompt update).
     if parent_notes:
-        from silica.kernel.ops import InverseOp, InverseOpKind
+        from silica.kernel.write.ops import InverseOp, InverseOpKind
         for parent_name, p_new_notes in parent_notes.items():
             # Resolve the parent wherever it actually lives in the vault (mirrors
             # validate's search_names check) instead of assuming it sits under

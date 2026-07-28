@@ -17,7 +17,7 @@ candidate list on every op. This covers:
      write op inside one `validate_operations()` call — built once, not
      rebuilt per op.
 """
-from silica.kernel.validate import MIN_WRITE_SNIPPET_CHARS, validate_operations
+from silica.kernel.write.validate import MIN_WRITE_SNIPPET_CHARS, validate_operations
 
 # Write ops must clear the precision gate; the padding keeps fixtures short.
 _PAD = " lorem" * (MIN_WRITE_SNIPPET_CHARS // 6 + 1)
@@ -97,7 +97,7 @@ def test_equivalence_target_dir_sibling_subfolder(tmp_vault):
 def test_target_dir_title_list_built_once_per_validate_call(tmp_vault, monkeypatch):
     """The near-title candidate list must be the SAME object across every
     write op inside one validate_operations() call — built once, not per-op."""
-    import silica.kernel.title as title_mod
+    import silica.kernel.text.title as title_mod
 
     tmp_vault.note("Corso/Existing.md", "# Existing\n\ncorpo")
 

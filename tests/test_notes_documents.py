@@ -11,8 +11,8 @@ import subprocess
 
 import pytest
 
-import silica.kernel.checkpoints as checkpoints
-from silica.kernel import paths
+import silica.kernel.write.checkpoints as checkpoints
+from silica.kernel.recall import paths
 from silica.tools.notes import silica_patch_note, silica_write_note
 
 
@@ -36,12 +36,12 @@ def vault(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
-    monkeypatch.setattr("silica.kernel.checkpoints._store", None)
+    monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
     checkpoints.get_checkpoint_store(tmp_path / "checkpoints.db")
     paths.clear_repo_root_cache()
     yield vault_dir
     monkeypatch.setattr("silica.driver._driver", None)
-    monkeypatch.setattr("silica.kernel.checkpoints._store", None)
+    monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
     paths.clear_repo_root_cache()
 
 

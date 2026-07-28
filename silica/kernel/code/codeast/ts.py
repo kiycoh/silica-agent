@@ -4,7 +4,7 @@
 """codeast.ts — TypeScript / JavaScript skeleton walker."""
 from __future__ import annotations
 
-from silica.kernel.codeast.base import Symbol, _signature, _text
+from silica.kernel.code.codeast.base import Symbol, _signature, _text
 
 
 def _ts_extract(node, src: bytes, imports: list[str], symbols: list[Symbol]) -> None:

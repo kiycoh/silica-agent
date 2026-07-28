@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from silica.kernel.ops import OpType
+from silica.kernel.write.ops import OpType
 
 
 def _run_title_refs(fsm: "InjectorFSM") -> list[typing.Any]:
@@ -52,7 +52,7 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
     fsm._progress_note(fsm._chunk_task_id("autolink"), "autolink", "running")
 
     try:
-        from silica.kernel.autolink import build_title_index
+        from silica.kernel.link.autolink import build_title_index
 
         ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
         touched_paths = [
@@ -126,7 +126,7 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
     fsm._progress_note(fsm._chunk_task_id("backlink"), "backlink", "running")
 
     try:
-        from silica.kernel.autolink import backlink_pass, build_title_index
+        from silica.kernel.link.autolink import backlink_pass, build_title_index
 
         ops = orch.load_ops(fsm._chunk_ctx["ops_path"])
 
@@ -186,7 +186,7 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
         added_map = backlink_pass(new_titles, title_index=title_index, neighbourhood=neighbourhood)
 
         if added_map and fsm._txn is not None:
-            from silica.kernel.ops import InverseOp, InverseOpKind
+            from silica.kernel.write.ops import InverseOp, InverseOpKind
             existing_snapshot_paths = {d["path"] for d in fsm._chunk_ctx.get("snapshot_domain", [])}
             for path_modified in added_map:
                 if path_modified not in existing_snapshot_paths:

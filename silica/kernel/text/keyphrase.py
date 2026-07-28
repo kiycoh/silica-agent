@@ -28,11 +28,11 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from silica.kernel import language
-from silica.kernel.embed import _cosine, document_theme_vector
-from silica.kernel.overlay import DomainOverlay, overlay_for_lang
-from silica.kernel.recon import is_concept, normalize
-from silica.kernel.text import clean_body
+from silica.kernel.text import language
+from silica.kernel.recall.embed import _cosine, document_theme_vector
+from silica.kernel.text.overlay import DomainOverlay, overlay_for_lang
+from silica.kernel.text.recon import is_concept, normalize
+from silica.kernel.text.text import clean_body
 
 # Cutoff knobs (calibration — tune on a real paper + lecture via the eval).
 # Tuned on the eval (3 real docs). Concept density varies wildly across genres
@@ -271,7 +271,7 @@ def extract_keyphrases(
 if __name__ == "__main__":  # ponytail: self-check, no framework
     txt = ("La discesa del gradiente ottimizza la funzione di perdita aggiornando "
            "i pesi della rete neurale a ogni iterazione del training. " * 3)
-    from silica.kernel.overlay import DomainOverlay as _DO
+    from silica.kernel.text.overlay import DomainOverlay as _DO
     cands = extract_keyphrases(txt, overlay=_DO(stopwords=frozenset(), noise_patterns=()),
                                lang="italian")
     assert cands, "expected concepts from prose"

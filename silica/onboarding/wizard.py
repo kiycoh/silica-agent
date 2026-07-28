@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 from silica.config import USER_ENV, SilicaConfig
-from silica.kernel import gitstate
+from silica.kernel.code import gitstate
 from silica.kernel.vault_manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
 from silica.ui.banner import print_banner

@@ -13,8 +13,8 @@ it silently persists an empty note / crashes on commit.
   A21: title-key coercion can retarget two writes onto one note; the post-coercion
        dedup must keep exactly one op per path.
 """
-from silica.kernel.ops import OpType
-from silica.kernel.validate import MIN_WRITE_SNIPPET_CHARS, validate_operations
+from silica.kernel.write.ops import OpType
+from silica.kernel.write.validate import MIN_WRITE_SNIPPET_CHARS, validate_operations
 
 _PAD = " lorem" * (MIN_WRITE_SNIPPET_CHARS // 6 + 2)
 

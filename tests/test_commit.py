@@ -5,8 +5,8 @@ import pytest
 
 from silica.agent.commit import commit_ops
 from silica.agent.bounds import dedup_bounds
-from silica.kernel.ops import Op, OpType
-import silica.kernel.checkpoints as checkpoints
+from silica.kernel.write.ops import Op, OpType
+import silica.kernel.write.checkpoints as checkpoints
 
 
 def _patch_op(path="Concepts/Big.md"):
@@ -84,7 +84,7 @@ def test_delete_op_path_is_leased():
 
 def test_commit_unlinks_staging_file():
     """The ~/.silica/tmp ops file must not survive the call (no disk leak)."""
-    from silica.kernel.paths import silica_tmp_dir
+    from silica.kernel.recall.paths import silica_tmp_dir
 
     before = set(silica_tmp_dir().glob("*.json"))
     with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
@@ -113,11 +113,11 @@ def derived_vault(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
-    monkeypatch.setattr("silica.kernel.checkpoints._store", None)
+    monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
     checkpoints.get_checkpoint_store(tmp_path / "checkpoints.db")
     yield vault_dir
     monkeypatch.setattr("silica.driver._driver", None)
-    monkeypatch.setattr("silica.kernel.checkpoints._store", None)
+    monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
 
 
 def test_commit_derived_floors_bare_regen_with_prior_frontmatter(derived_vault):
@@ -161,7 +161,7 @@ def test_commit_journals_inverses_when_in_batch_run():
              patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": inverses}), \
              patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
              patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
-             patch("silica.kernel.undo_journal.get_undo_journal", return_value=_FakeJournal()), \
+             patch("silica.kernel.write.undo_journal.get_undo_journal", return_value=_FakeJournal()), \
              patch("silica.driver.DRIVER.read_note", side_effect=RuntimeError("absent")):
             res = commit_ops([_patch_op()], target_dir="Concepts")
     finally:
@@ -183,7 +183,7 @@ def test_commit_does_not_journal_outside_batch_run():
          patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t1", "inverses": [{"kind": "restore_version", "path": "x.md"}]}), \
          patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
          patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
-         patch("silica.kernel.undo_journal.get_undo_journal", return_value=_FakeJournal()):
+         patch("silica.kernel.write.undo_journal.get_undo_journal", return_value=_FakeJournal()):
         res = commit_ops([_patch_op()], target_dir="Concepts")
 
     assert res["status"] == "committed"

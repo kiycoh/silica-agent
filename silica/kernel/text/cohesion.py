@@ -4,7 +4,7 @@
 """Post-distillation cohesion pass: detect sibling write ops and inject cross-references.
 
 Siblings are write ops whose display names share ≥ 1 discriminating content token
-after filtering vocabulary from the active domain overlay (see silica.kernel.overlay)
+after filtering vocabulary from the active domain overlay (see silica.kernel.text.overlay)
 and a small language-neutral structural set.
 
 The injected names land in each op's `related` list as bare titles — template_spoke
@@ -22,21 +22,21 @@ preferable to under-linking for note discovery.
 
 CONFIG: language-specific stopwords (function words, structural-academic terms) come
 from the DomainOverlay passed explicitly, or — when ``overlay`` is ``None`` — from
-per-note language detection (``silica.kernel.language.detect`` +
-``silica.kernel.overlay.overlay_for_lang``). English-generic stopwords live in
+per-note language detection (``silica.kernel.text.language.detect`` +
+``silica.kernel.text.overlay.overlay_for_lang``). English-generic stopwords live in
 DEFAULT_OVERLAY; Italian academic stopwords live in silica/overlays/italian.yaml.
 """
 from __future__ import annotations
 
 from typing import Any
 
-from silica.kernel import language
-from silica.kernel.overlay import DomainOverlay, overlay_for_lang
+from silica.kernel.text import language
+from silica.kernel.text.overlay import DomainOverlay, overlay_for_lang
 
 # Language-neutral tokens that have no discriminating power in any domain.
 # Deliberately narrow: only roman numerals used as chapter/section prefixes.
 # Language-specific stopwords (function words, structural academic terms) are
-# supplied by the active DomainOverlay — see silica.kernel.overlay.
+# supplied by the active DomainOverlay — see silica.kernel.text.overlay.
 _STRUCTURAL_TOKENS: frozenset[str] = frozenset({
     # Roman numerals used as chapter/section prefixes
     "ii", "iii", "iv", "vi", "vii", "viii", "ix",
@@ -61,7 +61,7 @@ def _content_tokens(name: str, overlay: DomainOverlay | None = None) -> frozense
         overlay: DomainOverlay to use for stopword filtering.  ``None`` resolves to
                  ``overlay_for_lang(language.detect(name))``.
     """
-    from silica.kernel.text import tokens
+    from silica.kernel.text.text import tokens
 
     lang = language.detect(name)
     if overlay is None:

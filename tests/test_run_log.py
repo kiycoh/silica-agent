@@ -1,4 +1,4 @@
-"""Tests for silica.kernel.run_log — the human-readable <vault>/log.md journal.
+"""Tests for silica.kernel.recall.run_log — the human-readable <vault>/log.md journal.
 
 Pure kernel helper: format the nucleate-completion event, append idempotently
 per run_id, and read back the tail for vault-map injection.
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from silica.kernel.run_log import (
+from silica.kernel.recall.run_log import (
     DEFAULT_LOG_FILENAME,
     append_log_line,
     format_nucleate_event,

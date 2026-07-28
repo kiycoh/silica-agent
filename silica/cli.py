@@ -90,7 +90,7 @@ def _inject_vault_map(messages: list[dict]) -> None:
     # ponytail: recomputed once per session; no storage/refresh.
     """
     try:
-        from silica.kernel.vault_map import build_vault_map
+        from silica.kernel.recall.vault_map import build_vault_map
 
         vault_map = build_vault_map()
         if vault_map:
@@ -265,7 +265,7 @@ def resolve_cwd_vault(cwd, home=None):
     land inside it is the separate `write_dir` axis (`onboarding.adopt`).
     """
     from pathlib import Path
-    from silica.kernel import gitstate
+    from silica.kernel.code import gitstate
 
     cwd = Path(cwd).resolve()
     if cwd == Path(home or Path.home()).resolve():
@@ -316,7 +316,7 @@ def _activate_repo_mode() -> None:
 def _announce_code_lane() -> None:
     """Eager repo-root resolution (ADR-0019): validate the vault⊂repo invariant
     once at startup / vault switch and surface a violation loudly."""
-    from silica.kernel.paths import repo_root_warning
+    from silica.kernel.recall.paths import repo_root_warning
 
     warn = repo_root_warning(CONFIG.vault_path)
     if warn:
@@ -376,7 +376,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
                 CONSOLE.print("  Created [bold].silicaignore[/] — add folders to keep out of the index.")
             CONFIG.vault_path = resolved
             reset_driver()
-            from silica.kernel.overlay import reset_overlay_cache
+            from silica.kernel.text.overlay import reset_overlay_cache
             reset_overlay_cache()  # overlay is vault-scoped; don't serve the old vault's
             from silica.kernel.vault_manifest import apply_manifest_to_config, reset_manifest_cache
             reset_manifest_cache()  # manifest is vault-scoped too
@@ -392,7 +392,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
                 )
             # Vault-scoped store caches are path-keyed (harmless on lookup) but
             # retain the old vault's index/vectors for the process lifetime.
-            from silica.kernel.relatedness import reset_vault_caches
+            from silica.kernel.recall.relatedness import reset_vault_caches
             reset_vault_caches()
             CONSOLE.print(f"  Vault → [bold]{resolved}[/] (backend: {CONFIG.backend})")
             _announce_code_lane()
@@ -643,7 +643,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
 
     if cmd == "/stale":
         from pathlib import Path
-        from silica.kernel import codedocs
+        from silica.kernel.code import codedocs
         vault = CONFIG.vault_path
         if not vault:
             CONSOLE.print("  No vault configured; /stale needs a .silica vault in a git repo.")
@@ -683,7 +683,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
 
     if cmd == "/impact":
         from pathlib import Path
-        from silica.kernel.codegraph import compute_impact
+        from silica.kernel.code.codegraph import compute_impact
         vault = CONFIG.vault_path
         if not vault:
             CONSOLE.print("  No vault configured; /impact needs a vault inside a git repo.")
@@ -731,7 +731,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         return True
 
     if cmd == "/path":
-        from silica.kernel.mindmap import note_resolver, reading_path
+        from silica.kernel.recall.mindmap import note_resolver, reading_path
         try:
             toks = shlex.split(raw_input.strip())[1:]  # honours quoted titles with spaces
         except ValueError:
@@ -769,7 +769,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
 
     if cmd == "/contested":
         from silica.driver import DRIVER
-        from silica.kernel.contested import CONTESTED_KEY, CONTRADICTIONS_KEY
+        from silica.kernel.write.contested import CONTESTED_KEY, CONTRADICTIONS_KEY
         # ponytail: frontmatter scan of every note per call; index it if a
         # 10k-note vault ever makes this command feel slow.
         found: list[tuple[str, list[str]]] = []
@@ -796,7 +796,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
 
     if cmd == "/undo":
         from silica.driver import DRIVER
-        from silica.kernel.checkpoints import get_checkpoint_store
+        from silica.kernel.write.checkpoints import get_checkpoint_store
 
         store = get_checkpoint_store()
         note_path = parts[1] if len(parts) > 1 else store.most_recent_path()
@@ -819,7 +819,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         return True
 
     if cmd == "/revert":
-        from silica.kernel.undo_journal import get_undo_journal, revert_run
+        from silica.kernel.write.undo_journal import get_undo_journal, revert_run
         parts_split = raw_input.strip().split(maxsplit=1)
         vault = CONFIG.vault_path.strip() or None
         run_id = parts_split[1].strip() if len(parts_split) > 1 else get_undo_journal().last_active_run(vault=vault)
@@ -837,7 +837,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         return True
 
     if cmd == "/review":
-        from silica.kernel.deferred import get_deferred_store
+        from silica.kernel.recall.deferred import get_deferred_store
         store = get_deferred_store()
         flush_hash = next((p[len("--flush="):] for p in parts[1:] if p.startswith("--flush=")), None)
         if flush_hash:
@@ -1078,7 +1078,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         from pathlib import Path
         from silica.kernel.vault_manifest import get_active_manifest
         from silica.sources.convert import convert
-        from silica.kernel.undo_journal import get_undo_journal
+        from silica.kernel.write.undo_journal import get_undo_journal
         from silica.sources.registry import adapter_for, expand_folder, folder_rel, stage
 
         enabled = get_active_manifest().sources
@@ -1159,7 +1159,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             )
 
         from pathlib import Path as _Path
-        from silica.kernel.provenance import check_renucleate, content_sha256
+        from silica.kernel.write.provenance import check_renucleate, content_sha256
 
         for mf in md_files:
             try:

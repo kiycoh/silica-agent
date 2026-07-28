@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.cooccurrence import CooccurStore
+from silica.kernel.recall.cooccurrence import CooccurStore
 
 
 @pytest.fixture
@@ -119,7 +119,7 @@ def test_force_rebuild_refreezes_wrong_frozen_language(tmp_path, monkeypatch):
 
     # Historic-bug state: the store is populated and frozen "english" on an
     # Italian vault (via the same singleton the tool will use).
-    from silica.kernel.cooccurrence import build_contribution, get_cooccur_store
+    from silica.kernel.recall.cooccurrence import build_contribution, get_cooccur_store
     store = get_cooccur_store(lang="english")
     store.lang = "english"
     store.upsert_note("Note/Old", build_contribution("Old", "old english note", lang="english"))

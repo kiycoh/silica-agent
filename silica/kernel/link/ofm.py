@@ -21,14 +21,14 @@ def has_wikilink(content, name):
     c, n = content.casefold(), name.casefold()
     return any(f"[[{n}{suffix}" in c for suffix in ("]]", "|", "#"))
 
-from silica.kernel.ast import parse_headings, _balanced, WIKILINK_TARGET_RE
+from silica.kernel.link.ast import parse_headings, _balanced, WIKILINK_TARGET_RE
 
 
 # ---------------------------------------------------------------------------
 # OFM structural linter (calibrated against golden notes)
 # ---------------------------------------------------------------------------
 
-from . import frontmatter as _fm
+from silica.kernel.write import frontmatter as _fm
 
 # Obsidian callout types (canonical + aliases), matched case-insensitively
 CALLOUT_TYPES = frozenset({
@@ -132,7 +132,7 @@ def ofm_lint(content, stem=None):
     # lint forever (real incident: 2026-07-17 nucleate run, Distribuzioni
     # condizionate.md).
     from .ast import get_non_code_text, extract_callouts
-    from .text import MATH_SPANS
+    from silica.kernel.text.text import MATH_SPANS
     naked = get_non_code_text(body)
     if "\\n" in MATH_SPANS.sub(" ", naked):
         V.append("literal '\\n' character sequence detected in body")

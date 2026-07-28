@@ -84,7 +84,7 @@ class TestT1MultiFileInit:
 
     @patch("silica.router.orchestrator.silica_recon")
     @patch("silica.router.orchestrator.silica_payload")
-    @patch("silica.kernel.ledger.get_ledger")
+    @patch("silica.kernel.write.ledger.get_ledger")
     def test_payload_produces_f0_and_f1_tasks(self, mock_ledger, mock_payload, mock_recon):
         """Per-file pipeline: each file's PAYLOAD pass registers its own f{fi}_* tasks."""
         mock_ledger.return_value.is_committed.return_value = False
@@ -164,10 +164,10 @@ class TestT2ChunkContainment:
     @patch("silica.router.orchestrator.silica_validate_ops")
     @patch("silica.router.orchestrator.DRIVER")
     @patch("silica.tools.wrapped.silica_snapshot")
-    @patch("silica.kernel.atomic_write.bulk_write_atomic")
+    @patch("silica.kernel.write.atomic_write.bulk_write_atomic")
     @patch("silica.tools.wrapped.silica_cleanup")
     @patch("silica.tools.wrapped.silica_restore")
-    @patch("silica.kernel.ledger.get_ledger")
+    @patch("silica.kernel.write.ledger.get_ledger")
     def test_write_failure_contained_at_chunk_level(
         self,
         mock_ledger, mock_restore, mock_cleanup,
@@ -175,7 +175,7 @@ class TestT2ChunkContainment:
         mock_sanitize, mock_distiller, mock_payload, mock_recon,
     ):
         """Write failure on chunk 1 → chunk 0 stays committed, run='partial', no ERROR."""
-        from silica.kernel.atomic_write import AtomicBulkResult, NoteCommitResult
+        from silica.kernel.write.atomic_write import AtomicBulkResult, NoteCommitResult
 
         mock_ledger.return_value.is_committed.return_value = False
         mock_recon.return_value = _make_recon_result()
@@ -275,7 +275,7 @@ class TestT2ChunkContainment:
         from pathlib import Path
         from silica.config import CONFIG
         from silica.kernel.progress import RunManifestEntry
-        from silica.kernel.run_log import DEFAULT_LOG_FILENAME
+        from silica.kernel.recall.run_log import DEFAULT_LOG_FILENAME
 
         fsm = InjectorFSM("Inbox/lezione-07.md", "Concepts")
         fsm._chunks = [{"chunk": 0}, {"chunk": 1}]
@@ -382,7 +382,7 @@ class TestT4PerFileCleanup:
         mock_op.op.__eq__ = lambda self, other: False  # not OpType.skip
 
         with patch("silica.router.orchestrator.load_ops", return_value=[mock_op]):
-            with patch("silica.kernel.ledger.get_ledger") as mock_ledger:
+            with patch("silica.kernel.write.ledger.get_ledger") as mock_ledger:
                 fsm.context.setdefault("chunk", {})["ops_path"] = "/tmp/ops.json"
                 fsm.context.setdefault("chunk", {})["txn_id"] = "txn_1"
                 fsm._write_ledger_for_file(1, "committed")
@@ -397,7 +397,7 @@ class TestT4PerFileCleanup:
         """Cleanup does NOT archive when ci < last chunk of the file."""
         with patch("silica.tools.wrapped.silica_cleanup") as mock_cleanup:
             with patch("silica.router.orchestrator.load_ops", return_value=[]):
-                with patch("silica.kernel.ledger.get_ledger"):
+                with patch("silica.kernel.write.ledger.get_ledger"):
                     fsm = InjectorFSM("Inbox/test.md", "Concepts")
                     # Two chunks under one file group
                     fsm._file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{"a": 1}, {"b": 2}]}}
@@ -413,7 +413,7 @@ class TestT4PerFileCleanup:
         """Cleanup DOES archive when ci == last chunk of the file (no failures)."""
         with patch("silica.tools.wrapped.silica_cleanup", return_value={"success": True}) as mock_cleanup:
             with patch("silica.router.orchestrator.load_ops", return_value=[]):
-                with patch("silica.kernel.ledger.get_ledger"):
+                with patch("silica.kernel.write.ledger.get_ledger"):
                     fsm = InjectorFSM("Inbox/test.md", "Concepts")
                     fsm._file_chunks = {0: {"source_file": "Inbox/test.md", "chunks": [{"a": 1}, {"b": 2}]}}
                     fsm._chunks = [{"a": 1}, {"b": 2}]
@@ -432,7 +432,7 @@ class TestT4PerFileCleanup:
 class TestT5DeadCodeRemoved:
     @patch("silica.router.orchestrator.silica_recon")
     @patch("silica.router.orchestrator.silica_payload")
-    @patch("silica.kernel.ledger.get_ledger")
+    @patch("silica.kernel.write.ledger.get_ledger")
     def test_no_task_ledger_load_in_payload(self, mock_ledger, mock_payload, mock_recon, caplog):
         """No FileNotFoundError is swallowed during PAYLOAD phase."""
         import logging

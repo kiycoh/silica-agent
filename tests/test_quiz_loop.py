@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from silica.kernel import quiz
-from silica.kernel.graph_report import compute_report
+from silica.kernel.report import quiz
+from silica.kernel.report.graph_report import compute_report
 
 
 @pytest.fixture

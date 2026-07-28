@@ -32,7 +32,7 @@ def test_gate_vault_and_vendored_repos_are_unreachable():
     assert P._excluded("evals/test_probe_code_why.py")
     assert not P._excluded("evals/probe_ppr_phase2.py")
     assert not P._excluded("docs/spec-code-lane.md")
-    assert not P._excluded("silica/kernel/codetree.py")
+    assert not P._excluded("silica/kernel/code/codetree.py")
 
 
 @pytest.mark.parametrize("bad", ["../../etc/passwd", "/etc/passwd",
@@ -44,9 +44,9 @@ def test_file_tools_refuse_out_of_bounds_paths(bad):
 
 
 def test_probe_read_and_grep_work_on_a_real_file():
-    r = P.probe_read(path="silica/kernel/codetree.py")
+    r = P.probe_read(path="silica/kernel/code/codetree.py")
     assert r["status"] == "ok" and "why_for" in r["text"]
-    g = P.probe_grep(pattern=r"def why_for", path="silica/kernel/codetree.py")
+    g = P.probe_grep(pattern=r"def why_for", path="silica/kernel/code/codetree.py")
     assert g["status"] == "ok" and len(g["matches"]) == 1
 
 
@@ -59,7 +59,7 @@ def test_extract_paths_keeps_only_real_repo_paths(tmp_path):
 
 
 def test_backfill_round_trips_through_why_for(tmp_path):
-    from silica.kernel import codetree
+    from silica.kernel.code import codetree
 
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=tmp_path, check=True)

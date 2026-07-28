@@ -13,7 +13,7 @@ from __future__ import annotations
 import types
 from pathlib import Path
 
-from silica.kernel.ops import InverseOpKind
+from silica.kernel.write.ops import InverseOpKind
 from silica.kernel.progress import RunManifestEntry
 from silica.router.states import finalize
 
@@ -240,7 +240,7 @@ def test_embed_index_invisible(tmp_vault, monkeypatch):
 
     res = silica_embed_refresh(force=True)
     assert "error" not in res
-    from silica.kernel.embed import get_store
+    from silica.kernel.recall.embed import get_store
 
     assert not any("uniqueleaf" in p for p in get_store().paths())
 
@@ -251,7 +251,7 @@ def test_cooccur_index_invisible(tmp_vault):
 
     res = silica_cooccurrence_refresh(force=True)
     assert "error" not in res
-    from silica.kernel.cooccurrence import CooccurStore
+    from silica.kernel.recall.cooccurrence import CooccurStore
 
     assert not any("uniqueleaf" in p for p in CooccurStore().paths())
 
@@ -262,7 +262,7 @@ def test_lexical_index_invisible(tmp_vault):
 
     res = silica_lexical_refresh(force=True)
     assert "error" not in res
-    from silica.kernel.lexical import get_lexical_store
+    from silica.kernel.recall.lexical import get_lexical_store
 
     assert not any("uniqueleaf" in p for p in get_lexical_store().paths())
 
@@ -270,7 +270,7 @@ def test_lexical_index_invisible(tmp_vault):
 def test_autolink_title_index_invisible(tmp_vault):
     _leafed_vault(tmp_vault)
     from silica.driver import get_driver
-    from silica.kernel.autolink import build_title_index
+    from silica.kernel.link.autolink import build_title_index
 
     titles = build_title_index(get_driver().list_files())
     assert not any("uniqueleaf" in t.lower() for t in titles)

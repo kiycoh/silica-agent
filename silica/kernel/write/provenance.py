@@ -69,7 +69,7 @@ def source_valid_from(source_text: str, seen_override: str | None = None) -> str
     if seen_override:
         return str(seen_override)
     try:
-        from silica.kernel import frontmatter
+        from silica.kernel.write import frontmatter
 
         data, _raw, _body = frontmatter.split(source_text or "")
         date = (data or {}).get("date")
@@ -126,7 +126,7 @@ def read_records(
             if not isinstance(records, list):
                 raise ValueError(f"expected JSON array, got {type(records).__name__}")
         except Exception as exc:
-            from silica.kernel.paths import quarantine
+            from silica.kernel.recall.paths import quarantine
 
             dest = quarantine(path)
             logger.warning("provenance: corrupt store quarantined to %s: %s", dest or path, exc)
@@ -230,7 +230,7 @@ def _norm_note_ref(p: str) -> str:
     path, so relativize when possible and degrade to a plain strip otherwise."""
     ref = p or ""
     try:
-        from silica.kernel.paths import to_vault_relative
+        from silica.kernel.recall.paths import to_vault_relative
 
         ref = to_vault_relative(ref, ensure_md=False)
     except Exception:

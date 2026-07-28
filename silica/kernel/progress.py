@@ -432,7 +432,7 @@ class ProgressLedger:
                 parts.append(section)
 
         try:
-            from silica.kernel.deferred import get_deferred_store
+            from silica.kernel.recall.deferred import get_deferred_store
             depth = get_deferred_store().queue_depth()
             if depth > 0:
                 parts.append(f"REVIEW QUEUE: {depth} bundle(s) pending — run /review to inspect")
@@ -441,7 +441,7 @@ class ProgressLedger:
 
         try:
             from silica.config import CONFIG
-            from silica.kernel import codedocs
+            from silica.kernel.code import codedocs
             if CONFIG.vault_path:
                 from pathlib import Path
                 n = codedocs.stale_count(Path(CONFIG.vault_path))
@@ -468,7 +468,7 @@ class ProgressLedger:
         try:
             import datetime as _dt
 
-            from silica.kernel.episodic import EpisodicStore
+            from silica.kernel.recall.episodic import EpisodicStore
             store = EpisodicStore()
             store.sweep(_dt.date.today().isoformat())
             for c in store.nucleation_candidates():
@@ -485,7 +485,7 @@ class ProgressLedger:
         try:
             from silica.driver import DRIVER
             from silica.kernel import contested_register
-            from silica.kernel.contested import contested_refs
+            from silica.kernel.write.contested import contested_refs
 
             for path in contested_register.entries():
                 try:

@@ -40,8 +40,8 @@ def title_key(t: str, *, lang: str | None = None) -> str:
     title itself — pass the vault language when you have it, detection on a
     2-4 word label is weak.
     """
-    from silica.kernel import language
-    from silica.kernel.text import tokens
+    from silica.kernel.text import language
+    from silica.kernel.text.text import tokens
 
     s = (t or "").strip()
     for rx in (_PAREN_SUFFIX, _DASH_SUFFIX):

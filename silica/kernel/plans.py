@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-from silica.kernel import frontmatter
+from silica.kernel.write import frontmatter
 
 VALID_STATUS = {"todo", "in-progress", "blocked", "done"}
 

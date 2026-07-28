@@ -2,7 +2,7 @@
 """kernel/codegraph — derived structural code index (spec-code-lane §1)."""
 from pathlib import Path
 
-from silica.kernel.codegraph import classify_import, is_first_party
+from silica.kernel.code.codegraph import classify_import, is_first_party
 
 PY_FILES = {
     "silica/__init__.py",
@@ -74,7 +74,7 @@ import subprocess
 
 import pytest
 
-from silica.kernel import codegraph
+from silica.kernel.code import codegraph
 
 
 def _init_repo(path: Path) -> None:
@@ -184,7 +184,7 @@ def test_code_vocabulary_top_fan_in(tmp_path):
 # Task 4: store v2 — import-scoped call edges
 # ---------------------------------------------------------------------------
 
-from silica.kernel.codegraph import build_codegraph
+from silica.kernel.code.codegraph import build_codegraph
 
 
 def _write(root, rel, text):

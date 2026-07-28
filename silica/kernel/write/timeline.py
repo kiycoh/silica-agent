@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from silica.kernel import frontmatter
-from silica.kernel.paths import SOURCES_DIR
+from silica.kernel.write import frontmatter
+from silica.kernel.recall.paths import SOURCES_DIR
 
 
 def timeline(vault: Path, start: str = "", end: str = "", limit: int = 50) -> dict:

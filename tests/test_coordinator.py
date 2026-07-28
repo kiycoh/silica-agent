@@ -104,7 +104,7 @@ def test_current_orphans_uses_driver_graph_not_full_report(monkeypatch):
         SimpleNamespace(orphans=lambda: [NoteRef(name="Lonely", path="Concepts/Lonely.md")]),
     )
     # The expensive report path must NOT run for an orphan check.
-    import silica.kernel.graph_report as gr
+    import silica.kernel.report.graph_report as gr
 
     def _boom(*a, **k):
         raise AssertionError("compute_report must not run for the orphan check")

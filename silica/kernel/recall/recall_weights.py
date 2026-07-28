@@ -18,8 +18,8 @@ from __future__ import annotations
 import json
 import logging
 
-from silica.kernel.cooccurrence import cooccur_key
-from silica.kernel.paths import atomic_write_bytes, index_dir
+from silica.kernel.recall.cooccurrence import cooccur_key
+from silica.kernel.recall.paths import atomic_write_bytes, index_dir
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@
 """Provenance + lever-liveness helpers shared by the benchmark runners.
 
 Provenance answers "which code, which data, which run produced this number":
-git SHA (via silica.kernel.gitstate), dataset path + sha256, a timestamped run
+git SHA (via silica.kernel.code.gitstate), dataset path + sha256, a timestamped run
 id. Liveness answers "was the lever I switched on actually live", so an A/B
 cannot silently compare baseline vs baseline (empty lexical index, dead
 reranker) or trust an unpinned nondeterministic provider route.
@@ -35,7 +35,7 @@ def run_id() -> str:
 
 def git_sha() -> str | None:
     """HEAD sha of the repo this code lives in, or None outside a git repo."""
-    from silica.kernel import gitstate
+    from silica.kernel.code import gitstate
 
     root = gitstate.find_repo_root(Path(__file__))
     return gitstate.head_ref(root) if root else None
@@ -62,7 +62,7 @@ def embedding_model(config, live: bool) -> str | None:
 def assert_lexical_live() -> None:
     """--lexical over an empty index is a documented no-op; refuse it rather
     than report a null result that is an artifact. Assumes the vault is bound."""
-    from silica.kernel.lexical import get_lexical_store
+    from silica.kernel.recall.lexical import get_lexical_store
 
     if len(get_lexical_store()) == 0:
         raise SystemExit(

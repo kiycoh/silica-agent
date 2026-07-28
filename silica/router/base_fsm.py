@@ -11,7 +11,7 @@ from typing import Any, Callable, Generic, TypeVar
 
 import orjson
 
-from silica.kernel.paths import silica_tmp_dir
+from silica.kernel.recall.paths import silica_tmp_dir
 
 logger = logging.getLogger(__name__)
 

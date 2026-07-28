@@ -288,7 +288,7 @@ class TestCheckLanguage:
         )
 
     def _store_with_lang(self, index_path, lang):
-        from silica.kernel.cooccurrence import CooccurStore
+        from silica.kernel.recall.cooccurrence import CooccurStore
 
         store = CooccurStore(path=index_path, lang=lang)
         store.upsert_note("n1", {"nodes": {}, "edges": []})
@@ -307,7 +307,7 @@ class TestCheckLanguage:
         assert "no notes" in r.detail
 
     def test_no_store_is_ok_and_names_detected_language(self, tmp_path, monkeypatch):
-        import silica.kernel.cooccurrence as cooc_mod
+        import silica.kernel.recall.cooccurrence as cooc_mod
         from silica.onboarding.checks import check_language
 
         self._seed_italian_notes(tmp_path)
@@ -319,7 +319,7 @@ class TestCheckLanguage:
         assert "no store" in r.detail
 
     def test_matching_store_is_ok(self, tmp_path, monkeypatch):
-        import silica.kernel.cooccurrence as cooc_mod
+        import silica.kernel.recall.cooccurrence as cooc_mod
         from silica.onboarding.checks import check_language
 
         self._seed_italian_notes(tmp_path)
@@ -336,7 +336,7 @@ class TestCheckLanguage:
         """User's bug: a vault DECLARES italian in vault.yaml and its store is
         frozen italian, but a frontmatter-heavy sample makes `detect` say
         english. The declaration is authority — no false 'mismatch' warning."""
-        import silica.kernel.cooccurrence as cooc_mod
+        import silica.kernel.recall.cooccurrence as cooc_mod
         from silica.onboarding.checks import check_language, detect_vault_language
 
         (tmp_path / "n.md").write_text(
@@ -355,7 +355,7 @@ class TestCheckLanguage:
         assert "language=italian" in r.detail
 
     def test_mismatched_store_warns_and_suggests_cooccur(self, tmp_path, monkeypatch):
-        import silica.kernel.cooccurrence as cooc_mod
+        import silica.kernel.recall.cooccurrence as cooc_mod
         from silica.onboarding.checks import check_language
 
         self._seed_italian_notes(tmp_path)
@@ -369,7 +369,7 @@ class TestCheckLanguage:
         assert "/cooccur" in r.hint
 
     def test_corrupt_store_degrades_to_ok_no_traceback(self, tmp_path, monkeypatch):
-        import silica.kernel.cooccurrence as cooc_mod
+        import silica.kernel.recall.cooccurrence as cooc_mod
         from silica.onboarding.checks import check_language
 
         self._seed_italian_notes(tmp_path)
@@ -390,7 +390,7 @@ class TestCheckLanguage:
         DIFFERENT, brand-new Italian vault with no store of its own yet. The old
         vault's frozen store must never leak into this vault's verdict.
         """
-        import silica.kernel.cooccurrence as cooc_mod
+        import silica.kernel.recall.cooccurrence as cooc_mod
         from silica.config import CONFIG
         from silica.onboarding.checks import check_language
 

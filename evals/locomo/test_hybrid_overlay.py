@@ -6,7 +6,7 @@ each distilled note linked to its source session(s) via provenance. The graph
 stays navigable; the agent follows a note's `## Sources` link to the exact
 transcript. Idempotent on vault reuse."""
 
-from silica.kernel.provenance import append_record
+from silica.kernel.write.provenance import append_record
 from evals.locomo.runner import build_hybrid_overlay
 
 

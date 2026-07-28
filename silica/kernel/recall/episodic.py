@@ -26,7 +26,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, TypeAdapter
 
-from silica.kernel.embed import _cosine  # noqa: F401 — shared helper, re-exported for probes
+from silica.kernel.recall.embed import _cosine  # noqa: F401 — shared helper, re-exported for probes
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def normalize_key(key: str) -> str:
     # ponytail: lang hardcoded to english — the distiller prompt shapes keys
     # as English-style slugs; non-English-keyed stores under-merge. Upgrade
     # path: a per-store language knob, when a non-English store shows drift.
-    from silica.kernel.text import stem_word
+    from silica.kernel.text.text import stem_word
 
     segs: list[str] = []
     for seg in key.casefold().split("."):
@@ -248,13 +248,13 @@ class EpisodicStore:
             self.next_id = int(doc.get("next_id", 1))
             self.facts = _FACTS_ADAPTER.validate_python(doc.get("facts", []))
         except Exception:
-            from silica.kernel.paths import quarantine
+            from silica.kernel.recall.paths import quarantine
 
             quarantine(self.path)
             self.next_id, self.facts = 1, []
 
     def save(self) -> None:
-        from silica.kernel.paths import atomic_write_bytes
+        from silica.kernel.recall.paths import atomic_write_bytes
 
         doc = {
             "schema_version": SCHEMA_VERSION,
@@ -542,6 +542,6 @@ def episodic_home() -> Path:
 
 
 def store_path() -> Path:
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
 
     return paths.index_dir_for(str(episodic_home())) / "episodic.json"

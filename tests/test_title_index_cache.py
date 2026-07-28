@@ -22,7 +22,7 @@ def test_list_files_called_once_and_cached():
 
 
 def test_write_appended_stems_visible_to_later_chunks():
-    from silica.kernel.autolink import build_title_index
+    from silica.kernel.link.autolink import build_title_index
     fsm = SimpleNamespace()
     driver = MagicMock()
     driver.list_files.return_value = [_ref("A", "A.md")]
@@ -38,7 +38,7 @@ def test_write_appended_stems_visible_to_later_chunks():
 def test_duplicate_basename_still_disambiguated():
     # build_title_index drops conflicting basenames; the cache must preserve
     # that by re-running it over cached refs, not by caching the index itself.
-    from silica.kernel.autolink import build_title_index
+    from silica.kernel.link.autolink import build_title_index
     fsm = SimpleNamespace()
     driver = MagicMock()
     driver.list_files.return_value = [_ref("Foo", "x/Foo.md")]

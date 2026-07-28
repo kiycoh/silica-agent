@@ -14,8 +14,8 @@ import logging
 import time
 from typing import Any
 
-from silica.kernel.graph_report.models import DuplicatePair, MissingLink, VaultReport
-from silica.kernel.paths import in_folder
+from silica.kernel.report.graph_report.models import DuplicatePair, MissingLink, VaultReport
+from silica.kernel.recall.paths import in_folder
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def _compute_missing_links(
     try:
         from silica.agent.providers import get_embedder
         from silica.config import CONFIG
-        from silica.kernel.embed import get_store
+        from silica.kernel.recall.embed import get_store
         import networkx as nx
 
         store = get_store()
@@ -145,8 +145,8 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
     """
     from silica.config import CONFIG
     from silica.driver import DRIVER
-    from silica.kernel import frontmatter
-    from silica.kernel.minhash_dedup import estimate_jaccard, minhash_signature
+    from silica.kernel.write import frontmatter
+    from silica.kernel.report.minhash_dedup import estimate_jaccard, minhash_signature
 
     threshold = getattr(CONFIG, "minhash_dup_threshold", 0.6)
     sigs: dict[str, tuple[int, ...]] = {}
@@ -195,7 +195,7 @@ def _compute_duplicate_pairs(
     """
     store = None
     try:
-        from silica.kernel.embed import get_store
+        from silica.kernel.recall.embed import get_store
 
         store = get_store()
         if len(store) == 0:

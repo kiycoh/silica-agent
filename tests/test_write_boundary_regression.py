@@ -9,7 +9,7 @@ Two independent defects compounded:
    content; NUL in a subprocess argv raises "embedded null byte", and the
    same fallback persisted the NULs into the vault.
 """
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 
 
 def test_op_path_gets_md_extension():

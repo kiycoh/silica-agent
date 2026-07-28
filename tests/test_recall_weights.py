@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from silica.config import CONFIG
-from silica.kernel import paths, recall_weights
+from silica.kernel.recall import paths, recall_weights
 
 
 def _bind(tmp_path, monkeypatch):

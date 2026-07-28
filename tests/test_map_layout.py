@@ -6,7 +6,7 @@ import math
 import networkx as nx
 import pytest
 
-from silica.kernel.mindmap import (
+from silica.kernel.recall.mindmap import (
     BOX_H,
     BOX_W,
     MapMaterials,

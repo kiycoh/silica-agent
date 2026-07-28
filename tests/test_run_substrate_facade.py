@@ -7,10 +7,10 @@ the embedding leg alone would miss, and still works when the embedder is down.
 from __future__ import annotations
 
 import silica.agent.providers as providers
-import silica.kernel.embed as embed_mod
-from silica.kernel.embed import EmbedStore
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
-from silica.kernel.run_substrate import build_substrate
+import silica.kernel.recall.embed as embed_mod
+from silica.kernel.recall.embed import EmbedStore
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.recall.run_substrate import build_substrate
 
 
 class _FakeEmbedder:
@@ -164,7 +164,7 @@ def test_substrate_annotates_degree_and_cluster(tmp_path, monkeypatch):
     es.save()
     monkeypatch.setattr(providers, "get_embedder", lambda *a, **k: _FakeEmbedder([1.0, 0.0]))
 
-    import silica.kernel.graph_export as ge
+    import silica.kernel.recall.graph_export as ge
     ge.save_cluster_ctx(
         [2, 1], {"Concepts/Near": {"cluster_id": 0, "hub": "Concepts/ML.md", "is_hub": False}}
     )
@@ -201,7 +201,7 @@ def test_substrate_omits_annotations_when_cold(tmp_path, monkeypatch):
 
 
 def test_substrate_includes_episodic_keys_section(tmp_path, monkeypatch):
-    import silica.kernel.episodic as ep_mod
+    import silica.kernel.recall.episodic as ep_mod
 
     monkeypatch.setattr(embed_mod, "_index_path", lambda: tmp_path / "emb.json")
     monkeypatch.setattr(providers, "get_embedder",
@@ -219,7 +219,7 @@ def test_substrate_includes_episodic_keys_section(tmp_path, monkeypatch):
 
 
 def test_substrate_omits_episodic_section_on_empty_store(tmp_path, monkeypatch):
-    import silica.kernel.episodic as ep_mod
+    import silica.kernel.recall.episodic as ep_mod
 
     monkeypatch.setattr(embed_mod, "_index_path", lambda: tmp_path / "emb.json")
     monkeypatch.setattr(providers, "get_embedder",

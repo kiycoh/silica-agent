@@ -1,7 +1,7 @@
 # tests/test_atomic_write.py
 import pytest
-from silica.kernel.ops import Op, OpType
-from silica.kernel.atomic_write import commit_note_atomic, NoteCommitResult, bulk_write_atomic, AtomicBulkResult
+from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.atomic_write import commit_note_atomic, NoteCommitResult, bulk_write_atomic, AtomicBulkResult
 
 
 def _patch_op(path: str, snippet: str = "body") -> Op:

@@ -8,7 +8,7 @@ can diverge.
 """
 from __future__ import annotations
 
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
 
 
 def _contrib(name: str, body: str):

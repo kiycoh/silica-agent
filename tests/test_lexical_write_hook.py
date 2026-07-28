@@ -7,7 +7,7 @@ cycle. The hook's index-presence gating and wiring are verified by
 inspection of silica/router/states/write.py and orchestrator.py's
 _flush_indexes (no lexical.json on disk => the hook never touches the
 store, so non-lexical vaults stay byte-identical)."""
-from silica.kernel.lexical import LexicalStore
+from silica.kernel.recall.lexical import LexicalStore
 
 
 def test_upsert_then_query_roundtrip(tmp_path):

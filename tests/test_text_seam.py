@@ -29,7 +29,7 @@ Chiude con \\alpha residuo.
 
 
 def test_clean_body_strips_frontmatter_math_images():
-    from silica.kernel.text import clean_body
+    from silica.kernel.text.text import clean_body
 
     out = clean_body(SAMPLE, fences=False)
     assert "tags:" not in out, "frontmatter must be stripped"
@@ -40,7 +40,7 @@ def test_clean_body_strips_frontmatter_math_images():
 
 
 def test_clean_body_fences_are_callers_choice():
-    from silica.kernel.text import clean_body
+    from silica.kernel.text.text import clean_body
 
     # cooccurrence keeps fences (identifiers are the graph signal of code notes)
     assert "fenced_token" in clean_body(SAMPLE, fences=False)
@@ -49,7 +49,7 @@ def test_clean_body_fences_are_callers_choice():
 
 
 def test_tokens_folds_plurals_and_drops_stopwords():
-    from silica.kernel.text import tokens
+    from silica.kernel.text.text import tokens
 
     sents = tokens("La rete neurale. Le reti neurali!", lang="italian")
     assert len(sents) == 2, "sentence boundary must be preserved"
@@ -60,7 +60,7 @@ def test_tokens_folds_plurals_and_drops_stopwords():
 
 
 def test_tokens_without_stemming_keeps_surfaces():
-    from silica.kernel.text import tokens
+    from silica.kernel.text.text import tokens
 
     sents = tokens("Descrittori compatti", lang="italian", stem=False)
     assert [(t, s) for sent in sents for (t, s) in sent] == [
@@ -71,8 +71,8 @@ def test_tokens_without_stemming_keeps_surfaces():
 def test_classify_stems_match_cooccur_nodes_on_dirty_body():
     """C1: classify and the co-occurrence index share ONE notion of «body» —
     math and images never diverge the two profiles again."""
-    from silica.kernel.classify import _stems_from_body
-    from silica.kernel.cooccurrence import build_contribution
+    from silica.kernel.organize.classify import _stems_from_body
+    from silica.kernel.recall.cooccurrence import build_contribution
 
     body = (
         "La discesa $\\nabla f = \\frac{a}{b}$ converge. ![[plot.png]]\n\n"
@@ -100,7 +100,7 @@ def test_moc_heading_uses_kernel_language_detection():
 
 
 def test_tokens_min_len_is_callers_choice():
-    from silica.kernel.text import tokens
+    from silica.kernel.text.text import tokens
 
     # zk/xj: verified absent from the (aggressive) english stopword list —
     # this asserts the length gate alone.

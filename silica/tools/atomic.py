@@ -188,7 +188,7 @@ def silica_deferred_list() -> list:
     Returns summary rows — use silica_deferred_retry(content_hash) to attempt
     writing them, or silica_deferred_flush(content_hash) to discard them.
     """
-    from silica.kernel.deferred import get_deferred_store
+    from silica.kernel.recall.deferred import get_deferred_store
     return get_deferred_store().list_all()
 
 
@@ -198,7 +198,7 @@ class DeferredFlushArgs(BaseModel):
 @tool(DeferredFlushArgs, cls="atomic", collapse="eager")
 def silica_deferred_flush(content_hash: str) -> dict:
     """Discard a deferred op bundle — marks those rejected ops as permanently skipped."""
-    from silica.kernel.deferred import get_deferred_store
+    from silica.kernel.recall.deferred import get_deferred_store
     removed = get_deferred_store().remove(content_hash)
     if removed:
         return {"removed": True, "content_hash": content_hash}
@@ -232,7 +232,7 @@ def silica_graph_path(source: str, target: str, max_paths: int = 1) -> dict:
     Uses the undirected view of the resolved (EXTRACTED) wikilink graph.
     """
     import networkx as nx
-    from silica.kernel.graph_export import build_graph_data
+    from silica.kernel.recall.graph_export import build_graph_data
 
     try:
         nodes, edges = build_graph_data(folder="")
@@ -304,7 +304,7 @@ def silica_graph_explain(note: str, depth: int = 1) -> dict:
     in a ranked field means the note did not make that list's top-k, which is
     "not among the worst", not "clean".
     """
-    from silica.kernel.graph_report import compute_report
+    from silica.kernel.report.graph_report import compute_report
 
     try:
         report = compute_report(analytics=True)  # on-demand: needs god_nodes/bridges
@@ -534,7 +534,7 @@ def silica_record_quiz(results: list) -> dict:
     silica_weak_notes and the report's attention list rank by what the reader
     actually got wrong instead of by file age.
     """
-    from silica.kernel import quiz
+    from silica.kernel.report import quiz
 
     entries = []
     for r in results:
@@ -564,6 +564,6 @@ def silica_weak_notes(limit: int = 10) -> list:
     least one round has been graded, which means "nothing measured yet", not
     "nothing to review".
     """
-    from silica.kernel import quiz
+    from silica.kernel.report import quiz
 
     return quiz.weakest(limit)

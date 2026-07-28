@@ -44,7 +44,7 @@ def handle_recon(fsm: "InjectorFSM") -> None:
         # Surface any deferred ops from a previous run of this file
         content_hash = fsm._file_content_hashes[fi] if fi < len(fsm._file_content_hashes) else ""
         if content_hash:
-            from silica.kernel.deferred import get_deferred_store
+            from silica.kernel.recall.deferred import get_deferred_store
             bundle = get_deferred_store().get(content_hash)
             if bundle:
                 rejected_count = len(bundle.get("rejected_ops", []))
@@ -88,7 +88,7 @@ def handle_crossdedup(fsm: "InjectorFSM") -> None:
         return
 
     from silica.agent.providers import get_embedder_or_none
-    from silica.kernel.embed import _cosine
+    from silica.kernel.recall.embed import _cosine
     embedder = get_embedder_or_none(orch.CONFIG, "CROSSDEDUP")
     if embedder is None:
         fsm._transition_success()
@@ -161,13 +161,13 @@ def build_vault_graph_ctx() -> dict[str, dict]:
     next recompute — fine for routing context.
     """
     try:
-        from silica.kernel.graph_export import (
+        from silica.kernel.recall.graph_export import (
             build_graph_data,
             ctx_from_report,
             load_cluster_ctx,
             save_cluster_ctx,
         )
-        from silica.kernel.graph_report import compute_report
+        from silica.kernel.report.graph_report import compute_report
         _t = orch.time.monotonic()
 
         nodes, edges = build_graph_data(folder="")  # cheap snapshot (no Louvain)
@@ -217,7 +217,7 @@ def novelty_gate(fsm: "InjectorFSM", raw_payload: dict) -> tuple[dict, int]:
 
     from silica.agent.providers import get_embedder_or_none
     try:
-        from silica.kernel.embed import get_store
+        from silica.kernel.recall.embed import get_store
         store = get_store()
     except Exception as _e:
         logger.debug("NOVELTY: embed store unavailable (%s); gate skipped", _e)
@@ -228,8 +228,8 @@ def novelty_gate(fsm: "InjectorFSM", raw_payload: dict) -> tuple[dict, int]:
     if embedder is None:
         return raw_payload, 0
 
-    from silica.kernel.embed import _note_title_text
-    from silica.kernel.paths import is_inbox_path
+    from silica.kernel.recall.embed import _note_title_text
+    from silica.kernel.recall.paths import is_inbox_path
     from silica.router.states.collision import _names_agree
 
     def _name_of(c) -> str:
@@ -423,7 +423,7 @@ def handle_payload(fsm: "InjectorFSM") -> None:
     # rendered template prefix is byte-identical across this file's chunks
     # (per-chunk detection can flap between chunks and bust the prefix cache).
     try:
-        from silica.kernel import language as lang_mod
+        from silica.kernel.text import language as lang_mod
         from silica.kernel.prep_delegation import _payload_sample_text
         from silica.kernel.vault_manifest import get_active_manifest
         if not get_active_manifest().conventions.language:
@@ -490,8 +490,8 @@ def handle_salience(fsm: "InjectorFSM") -> None:
     """
     τ_theme = getattr(orch.CONFIG, "sim_threshold_theme", 0.35)
     from silica.agent.providers import get_embedder_or_none
-    from silica.kernel.embed import document_theme_vector, _cosine
-    from silica.kernel.text import clean_body
+    from silica.kernel.recall.embed import document_theme_vector, _cosine
+    from silica.kernel.text.text import clean_body
     embedder = get_embedder_or_none(orch.CONFIG, "SALIENCE")
     if embedder is None:
         fsm._transition_success()

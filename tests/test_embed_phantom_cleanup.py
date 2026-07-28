@@ -9,7 +9,7 @@ live candidate until the next full `/embed` rebuild (a deleted note wastes a
 slot; a renamed note can appear twice).
 """
 import silica.driver as dm
-from silica.kernel import embed
+from silica.kernel.recall import embed
 
 
 def test_a13_delete_drops_embed_vector(tmp_vault):

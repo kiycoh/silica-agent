@@ -181,7 +181,7 @@ def test_provenance_session_map_and_recall(tmp_path):
 
 
 def test_run_question_session_recall_via_session_map(monkeypatch):
-    from silica.kernel import perception
+    from silica.kernel.recall import perception
 
     blocks = [SimpleNamespace(path="memory/Puppy"), SimpleNamespace(path="memory/Bob")]
     monkeypatch.setattr(perception, "perceive",
@@ -311,7 +311,7 @@ def test_oneshot_answer_error_isolated_not_fatal(monkeypatch):
     """One flaky provider response on the answer call must become an error row,
     not kill the whole run (post-mortem: baseline died at 9/585 on a transient
     OpenRouter APIError)."""
-    from silica.kernel import perception
+    from silica.kernel.recall import perception
 
     monkeypatch.setattr(perception, "perceive",
                         lambda *a, **kw: SimpleNamespace(
@@ -337,7 +337,7 @@ def test_oneshot_answer_error_isolated_not_fatal(monkeypatch):
 def test_oneshot_judge_error_isolated_not_fatal(monkeypatch):
     """A flaky judge call is guarded too (the agent path's judge was unguarded
     before this fix)."""
-    from silica.kernel import perception
+    from silica.kernel.recall import perception
 
     monkeypatch.setattr(perception, "perceive",
                         lambda *a, **kw: SimpleNamespace(
@@ -403,7 +403,7 @@ def _run_puppy_question(**overrides):
 
 def test_improve_bumps_recall_weights_on_correct_oneshot_answer(tmp_path, monkeypatch):
     _bind_small_vault(tmp_path, monkeypatch)
-    from silica.kernel import recall_weights
+    from silica.kernel.recall import recall_weights
 
     monkeypatch.setattr(runner, "answer_question", lambda *a, **kw: "Ann.")
     monkeypatch.setattr(runner, "judge", lambda *a, **kw: True)
@@ -416,7 +416,7 @@ def test_improve_bumps_recall_weights_on_correct_oneshot_answer(tmp_path, monkey
 
 def test_improve_does_not_bump_on_incorrect_answer(tmp_path, monkeypatch):
     _bind_small_vault(tmp_path, monkeypatch)
-    from silica.kernel import recall_weights
+    from silica.kernel.recall import recall_weights
 
     monkeypatch.setattr(runner, "answer_question", lambda *a, **kw: "wrong")
     monkeypatch.setattr(runner, "judge", lambda *a, **kw: False)
@@ -436,7 +436,7 @@ def test_improve_with_agent_mode_rejected_by_cli():
 def test_improve_does_not_bump_with_stuff(tmp_path, monkeypatch):
     """--stuff bypasses retrieval, so a correct answer must not dead-write a weight."""
     _bind_small_vault(tmp_path, monkeypatch)
-    from silica.kernel import recall_weights
+    from silica.kernel.recall import recall_weights
 
     monkeypatch.setattr(runner, "answer_question", lambda *a, **kw: "Ann.")
     monkeypatch.setattr(runner, "judge", lambda *a, **kw: True)

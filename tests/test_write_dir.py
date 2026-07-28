@@ -9,7 +9,7 @@ validate_operations, and never widens on a malformed manifest.
 import pytest
 
 from silica.cli import resolve_vault_switch
-from silica.kernel.paths import looks_like_code
+from silica.kernel.recall.paths import looks_like_code
 from silica.kernel.vault_manifest import (
     active_write_dir,
     load_manifest,
@@ -210,7 +210,7 @@ def bounded_vault(tmp_vault, monkeypatch):
 
 
 def _validate(ops):
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
 
     return validate_operations(ops, [], "")
 
@@ -300,7 +300,7 @@ def test_a_broken_declaration_rejects_every_write(tmp_vault, monkeypatch):
 def test_backlinks_never_edit_a_note_outside_the_boundary(bounded_vault):
     # autolink rewrites existing notes through DRIVER directly, bypassing
     # validate, so it carries the boundary itself.
-    from silica.kernel.autolink import backlink_pass
+    from silica.kernel.link.autolink import backlink_pass
 
     readme = bounded_vault.note("README.md", "This project uses Kubernetes for scheduling.\n")
     bounded_vault.note("docs/silica/Notes.md", "Kubernetes shows up here too.\n")

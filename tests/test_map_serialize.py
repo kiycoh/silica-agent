@@ -5,7 +5,7 @@ import json
 
 import networkx as nx
 
-from silica.kernel.mindmap import (
+from silica.kernel.recall.mindmap import (
     MapMaterials,
     _resolve_in,
     build_mapview,

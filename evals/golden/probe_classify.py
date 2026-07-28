@@ -18,8 +18,8 @@ from __future__ import annotations
 import math
 from collections import Counter, defaultdict
 
-from silica.kernel.classify import classify_notes
-from silica.kernel.taxonomy import FolderRule, Taxonomy
+from silica.kernel.organize.classify import classify_notes
+from silica.kernel.organize.taxonomy import FolderRule, Taxonomy
 
 TOP_N = 15
 DERIVATION = "ctfidf-top15"

@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from silica.kernel.cooccurrence import CooccurStore, build_index
-from silica.kernel.vault_map import build_vault_map
+from silica.kernel.recall.cooccurrence import CooccurStore, build_index
+from silica.kernel.recall.vault_map import build_vault_map
 
 
 def test_empty_store_returns_none(tmp_path):
@@ -31,7 +31,7 @@ def test_populated_store_yields_map(tmp_path):
 
 def test_inject_appends_system_message(monkeypatch):
     import silica.cli as cli
-    import silica.kernel.vault_map as vm
+    import silica.kernel.recall.vault_map as vm
 
     monkeypatch.setattr(vm, "build_vault_map", lambda **k: "## Vault map\n- Note: 3")
     messages = [{"role": "system", "content": "SYSTEM_PROMPT"}]
@@ -45,7 +45,7 @@ def test_inject_appends_system_message(monkeypatch):
 
 def test_inject_noop_when_map_is_none(monkeypatch):
     import silica.cli as cli
-    import silica.kernel.vault_map as vm
+    import silica.kernel.recall.vault_map as vm
 
     monkeypatch.setattr(vm, "build_vault_map", lambda **k: None)
     messages = [{"role": "system", "content": "SYSTEM_PROMPT"}]
@@ -57,7 +57,7 @@ def test_inject_noop_when_map_is_none(monkeypatch):
 
 def test_inject_swallows_errors(monkeypatch):
     import silica.cli as cli
-    import silica.kernel.vault_map as vm
+    import silica.kernel.recall.vault_map as vm
 
     def _boom(**k):
         raise RuntimeError("index corrotto")
@@ -86,7 +86,7 @@ def _populated_store(tmp_path):
 
 def test_log_tail_appears_when_log_exists(tmp_vault, tmp_path):
     from silica.config import CONFIG
-    from silica.kernel.run_log import append_log_line
+    from silica.kernel.recall.run_log import append_log_line
 
     store = _populated_store(tmp_path)
     append_log_line(

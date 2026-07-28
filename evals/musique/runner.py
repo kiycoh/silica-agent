@@ -83,8 +83,8 @@ def bind_vault(vault: Path) -> None:
     """Point CONFIG/DRIVER at the bench vault and drop store singletons, so a
     prior in-process vault can never leak its indexes into the run."""
     import silica.driver
-    import silica.kernel.cooccurrence as cooc_mod
-    import silica.kernel.embed as embed_mod
+    import silica.kernel.recall.cooccurrence as cooc_mod
+    import silica.kernel.recall.embed as embed_mod
     from silica.config import CONFIG
 
     CONFIG.vault_path = str(vault)
@@ -184,10 +184,10 @@ def probe(
     rerank_related; membership always belongs to the first stage)."""
     from silica.agent.providers import get_reranker
     from silica.config import CONFIG
-    from silica.kernel.cooccurrence import get_cooccur_store
-    from silica.kernel.embed import get_store
-    from silica.kernel.relatedness import related_notes_for_query
-    from silica.kernel.rerank import rerank_related
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.recall.embed import get_store
+    from silica.kernel.recall.relatedness import related_notes_for_query
+    from silica.kernel.recall.rerank import rerank_related
 
     key2idx: dict[tuple[str, str], int] = {}
     for i, item in enumerate(corpus):

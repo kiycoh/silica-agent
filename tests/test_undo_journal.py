@@ -1,7 +1,7 @@
 # tests/test_undo_journal.py
 import hashlib
-from silica.kernel.ops import InverseOp, InverseOpKind
-from silica.kernel.undo_journal import UndoJournalStore, revert_run
+from silica.kernel.write.ops import InverseOp, InverseOpKind
+from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
 
 
 def _inv(path: str, content: str = "old") -> InverseOp:
@@ -43,7 +43,7 @@ def test_write_over_existing_note_yields_restore_inverse(tmp_vault):
     """A write op whose path already holds a note must undo by RESTORING it,
     not deleting it — else /revert turns an accidental clobber into data loss."""
     from silica.tools.wrapped import build_txn
-    from silica.kernel.ops import Op, OpType
+    from silica.kernel.write.ops import Op, OpType
 
     path = tmp_vault.note("Ideas/Note.md", "PRE-EXISTING body")
     op = Op(op=OpType.write, heading="Note", source_basename="s.md",
@@ -58,7 +58,7 @@ def test_write_new_note_yields_delete_inverse(tmp_vault):
     """A write to a genuinely new path still undoes by deletion (unchanged)."""
     import os
     from silica.tools.wrapped import build_txn
-    from silica.kernel.ops import Op, OpType
+    from silica.kernel.write.ops import Op, OpType
 
     seed = tmp_vault.note("seed.md", "seed")            # materialise the vault
     new_path = os.path.join(os.path.dirname(seed), "Fresh.md")  # not created

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Unit tests for the fusion probe (silica.kernel.health) + reranker A/B.
+"""Unit tests for the fusion probe (silica.kernel.link.health) + reranker A/B.
 
 Magnitudes are corpus properties; these pin the mechanics on synthetic vaults:
 cheap-tier recovery via the cooccur legs, clean embed abstention, and the test
@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import math
 
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
-from silica.kernel import health
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.link import health
 from evals.golden import probe_fusion
 
 

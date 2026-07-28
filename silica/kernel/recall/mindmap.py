@@ -81,7 +81,7 @@ def node_color(community: int) -> str:
     """Community colour, shared with /graph; muted slate for -1 (no community)."""
     if community < 0:
         return _MUTED
-    from silica.kernel.graph_export import _community_color
+    from silica.kernel.recall.graph_export import _community_color
     return _community_color(community)
 
 
@@ -743,8 +743,8 @@ def reading_path(
 
 def gather_materials(root: str, *, latent_k: int = 10) -> MapMaterials:
     """Collect wikilink graph, titles, global communities, and the latent leg."""
-    from silica.kernel.graph_export import build_graph_data, detect_communities
-    from silica.kernel.relatedness import related_notes
+    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
+    from silica.kernel.recall.relatedness import related_notes
 
     _notes, titles, undirected = _driver_graph()
 
@@ -771,7 +771,7 @@ def _cooccur_store():
     """The cooccur store, or None when empty/unavailable ⇒ that leg abstains."""
     try:
         from silica.config import CONFIG
-        from silica.kernel.cooccurrence import get_cooccur_store
+        from silica.kernel.recall.cooccurrence import get_cooccur_store
 
         cs = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
         return cs if len(cs) > 0 else None
@@ -783,7 +783,7 @@ def _load_stores():
     """(embed_store, cooccur_store), each None when empty/unavailable ⇒ leg abstains."""
     embed_store = None
     try:
-        from silica.kernel.embed import get_store
+        from silica.kernel.recall.embed import get_store
         es = get_store()
         embed_store = es if len(es) > 0 else None
     except Exception:

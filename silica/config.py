@@ -299,7 +299,7 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_SHOW_BANNER", "True").lower() in ("true", "1", "t")
     )
 
-    # Embedding model — used by silica/kernel/embed.py (Phase 3)
+    # Embedding model — used by silica/kernel/recall/embed.py (Phase 3)
     # Default is LM Studio's id for qwen3-embedding-4b, the local setup this is
     # developed against. Example alternatives: "qwen3-embedding-8b" (LM Studio),
     # "text-embedding-3-small" (OpenAI), "nomic-embed-text" (Ollama).

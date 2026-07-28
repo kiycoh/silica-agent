@@ -28,7 +28,7 @@ import statistics
 import time
 from pathlib import Path
 
-from silica.kernel.health import K, eligible_pairs, wikilink_graph
+from silica.kernel.link.health import K, eligible_pairs, wikilink_graph
 
 HOPS = 3
 ALPHA = 0.5
@@ -96,8 +96,8 @@ def _pct(values: list[float], q: float) -> float:
 def run(vault: Path, *, hops: int = HOPS, alpha: float = ALPHA,
         samples: int = 100, verbose: bool = False) -> dict:
     from evals.golden.runner import _open_stores, vault_digest
-    from silica.kernel import correlate
-    from silica.kernel.relatedness import related_notes
+    from silica.kernel.link import correlate
+    from silica.kernel.recall.relatedness import related_notes
 
     store, embed_store = _open_stores(vault)
     es = embed_store if (embed_store is not None and len(embed_store)) else None
@@ -221,7 +221,7 @@ def run(vault: Path, *, hops: int = HOPS, alpha: float = ALPHA,
     # PPR replaces the cooccur leg's profile, so it can only move a pair the
     # cooccur leg itself can surface. If the counterpart is already inside that
     # leg's pool and RRF still buries it, the lever is fusion, not the profile.
-    from silica.kernel.relatedness import _POOL_MIN, _cooccur_ranking
+    from silica.kernel.recall.relatedness import _POOL_MIN, _cooccur_ranking
     pool_k = max(K * 3, _POOL_MIN)
     cooc: dict[str, dict[str, int]] = {}
     for key in {e for pr in missed for e in pr}:

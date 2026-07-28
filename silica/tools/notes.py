@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
 from silica.tools import tool
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 
 
 _DOCUMENTS_FIELD = Field(
@@ -31,8 +31,8 @@ def _bind_documents(entries: list[str]) -> tuple[list[str], str | None, str | No
     """Validate a `documents:` binding against the repo. Returns
     (paths, code_ref, error) — on error the caller must not write."""
     from silica.config import CONFIG
-    from silica.kernel import codedocs, gitstate
-    from silica.kernel.paths import repo_root_for
+    from silica.kernel.code import codedocs, gitstate
+    from silica.kernel.recall.paths import repo_root_for
 
     root = repo_root_for(getattr(CONFIG, "vault_path", "") or "")
     if root is None:
@@ -71,9 +71,9 @@ def silica_patch_note(
     into many notes use silica_run_injector. Every successful patch is
     checkpointed and can be reverted with /undo.
     """
-    from silica.kernel import templates as tpl
-    from silica.kernel.bulk import execute_one
-    from silica.kernel.checkpoints import get_checkpoint_store
+    from silica.kernel.write import templates as tpl
+    from silica.kernel.write.bulk import execute_one
+    from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.workqueue import path_lease
 
     docs: list[str] = []
@@ -153,8 +153,8 @@ def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[s
     import datetime
     import os
 
-    from silica.kernel.checkpoints import get_checkpoint_store
-    from silica.kernel.contested import mark_contested, resolve_contested
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+    from silica.kernel.write.contested import mark_contested, resolve_contested
 
     try:
         nc = DRIVER.read_note(name)
@@ -236,8 +236,8 @@ def silica_write_note(
     """
     from pathlib import PurePosixPath
 
-    from silica.kernel import templates as tpl
-    from silica.kernel.checkpoints import get_checkpoint_store
+    from silica.kernel.write import templates as tpl
+    from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.workqueue import path_lease
 
     docs: list[str] = []

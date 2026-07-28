@@ -7,8 +7,8 @@ a strong-but-uncorroborated cosine is INFERRED → propose.
 """
 from __future__ import annotations
 
-from silica.kernel.graph_report import AutolinkCandidate, MissingLink
-from silica.kernel.graph_report.compute import _empty_report
+from silica.kernel.report.graph_report import AutolinkCandidate, MissingLink
+from silica.kernel.report.graph_report.compute import _empty_report
 from silica.kernel.analyst_plan import (
     build_task_plan,
     classify_autolink,

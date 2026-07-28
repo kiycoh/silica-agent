@@ -66,7 +66,7 @@ def _lock_file(key: str) -> Path | None:
     """
     if fcntl is None:
         return None
-    from silica.kernel.paths import index_dir
+    from silica.kernel.recall.paths import index_dir
 
     d = index_dir() / "locks"
     d.mkdir(parents=True, exist_ok=True)

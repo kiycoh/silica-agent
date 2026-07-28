@@ -1,4 +1,4 @@
-"""Table-driven tests for silica.kernel.rename.rewrite_links.
+"""Table-driven tests for silica.kernel.link.rename.rewrite_links.
 
 Cases covered (one section per numbered spec requirement):
   1. Name-based wikilink, basename UNCHANGED (pure folder move) — not rewritten
@@ -16,7 +16,7 @@ Cases covered (one section per numbered spec requirement):
 from __future__ import annotations
 
 import pytest
-from silica.kernel.rename import rewrite_links
+from silica.kernel.link.rename import rewrite_links
 
 
 # ---------------------------------------------------------------------------

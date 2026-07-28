@@ -12,13 +12,13 @@ def test_revert_invokes_revert_run(monkeypatch):
         def last_active_run(self, vault=None):
             return "RUN1abc"
 
-    monkeypatch.setattr("silica.kernel.undo_journal.get_undo_journal",
+    monkeypatch.setattr("silica.kernel.write.undo_journal.get_undo_journal",
                         lambda: _FakeStore())
     calls = {}
     def fake_revert(run_id, **kw):
         calls["run_id"] = run_id
         return {"run_id": run_id, "reverted": ["a.md"], "skipped": [], "errors": []}
-    monkeypatch.setattr("silica.kernel.undo_journal.revert_run", fake_revert)
+    monkeypatch.setattr("silica.kernel.write.undo_journal.revert_run", fake_revert)
 
     handled = _handle_direct_shortcut("/revert", [])
     assert handled is True
@@ -30,7 +30,7 @@ def test_revert_no_active_run(monkeypatch, capsys):
         def last_active_run(self, vault=None):
             return None
 
-    monkeypatch.setattr("silica.kernel.undo_journal.get_undo_journal",
+    monkeypatch.setattr("silica.kernel.write.undo_journal.get_undo_journal",
                         lambda: _EmptyStore())
     handled = _handle_direct_shortcut("/revert", [])
     assert handled is True

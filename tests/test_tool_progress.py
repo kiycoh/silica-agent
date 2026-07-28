@@ -615,7 +615,7 @@ def test_committed_file_counts_toward_bar_done():
     flat map. It must still count as done, or the bar stalls below 100%."""
     from silica.router.orchestrator import InjectorFSM
 
-    with patch("silica.kernel.ledger.get_ledger"):
+    with patch("silica.kernel.write.ledger.get_ledger"):
         fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
     fsm._committed_file_indices = {0}          # file 0 already nucleated → skipped
     fsm._chunk_flat_to_fi_ci = {0: (1, 0)}     # only file 1 got payloaded
@@ -631,7 +631,7 @@ def test_file_advance_surfaces_finished_file():
     else a run of 1-chunk files sits at 0/N until the very last chunk."""
     from silica.router.orchestrator import InjectorFSM, InjectorState
 
-    with patch("silica.kernel.ledger.get_ledger"):
+    with patch("silica.kernel.write.ledger.get_ledger"):
         fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
     fsm._chunk_flat_to_fi_ci = {0: (0, 0)}     # file 0 payloaded, one chunk
     fsm._chunks = [{}]

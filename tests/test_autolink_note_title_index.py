@@ -91,8 +91,8 @@ class _FakeFSM:
 
 
 def test_handle_autolink_passes_title_index_to_driver():
-    from silica.kernel.ops import Op, OpType
-    from silica.kernel.autolink import build_title_index
+    from silica.kernel.write.ops import Op, OpType
+    from silica.kernel.link.autolink import build_title_index
     from silica.router.states.linking import handle_autolink
 
     fsm = _FakeFSM(ops_path="unused.json")

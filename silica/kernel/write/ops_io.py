@@ -6,7 +6,7 @@ import logging
 import orjson
 from pydantic import ValidationError
 from typing import Any
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 
 logger = logging.getLogger(__name__)
 

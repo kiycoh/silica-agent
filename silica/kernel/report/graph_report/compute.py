@@ -14,12 +14,12 @@ from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
 
-from silica.kernel.graph_report.cooccur_delta import _compute_cooccur_delta
-from silica.kernel.graph_report.embed_signals import (
+from silica.kernel.report.graph_report.cooccur_delta import _compute_cooccur_delta
+from silica.kernel.report.graph_report.embed_signals import (
     _compute_duplicate_pairs,
     _compute_missing_links,
 )
-from silica.kernel.graph_report.models import (
+from silica.kernel.report.graph_report.models import (
     AttentionCandidate,
     BridgeStat,
     ClusterStat,
@@ -61,7 +61,7 @@ def compute_report(
     Pass _nodes_edges_override for testing without a live driver.
     """
     import networkx as nx
-    from silica.kernel.graph_export import (
+    from silica.kernel.recall.graph_export import (
         build_graph_data,
         detect_communities,
         edge_graph,
@@ -107,8 +107,9 @@ def compute_report(
     temporal: TemporalStat | None = None
     if analytics:
         try:
-            from silica.kernel import contested as contested_kernel
-            from silica.kernel import ofm, frontmatter
+            from silica.kernel.write import contested as contested_kernel
+            from silica.kernel.link import ofm
+            from silica.kernel.write import frontmatter
             from silica.driver import DRIVER
 
             tiers: Counter = Counter()
@@ -165,7 +166,7 @@ def compute_report(
     source_drift: list[SourceDrift] = []
     if analytics:
         try:
-            from silica.kernel.provenance import drifted_notes
+            from silica.kernel.write.provenance import drifted_notes
 
             # Provenance notes are recorded WITHOUT the `.md` extension
             # (RunManifestEntry.path strips it), but graph node ids (real_ids)
@@ -222,7 +223,7 @@ def compute_report(
     if analytics:
         quiz_stats = _quiz_override
         if quiz_stats is None:
-            from silica.kernel import quiz as _quiz
+            from silica.kernel.report import quiz as _quiz
 
             try:
                 quiz_stats = _quiz.stats()
@@ -244,7 +245,7 @@ def compute_report(
                     if ts is not None:
                         mtimes[nid] = ts
         if mtimes or quiz_stats:
-            from silica.kernel.quiz import key as _quiz_key
+            from silica.kernel.report.quiz import key as _quiz_key
 
             now_ts = datetime.now(timezone.utc).timestamp()
             for nid in real_ids:
@@ -431,7 +432,7 @@ def compute_report(
     if analytics:
         try:
             from silica.config import CONFIG as _CFG
-            from silica.kernel.graph_report.code_signals import _compute_code_signals
+            from silica.kernel.report.graph_report.code_signals import _compute_code_signals
             vault_path = getattr(_CFG, "vault_path", "") or ""
             if vault_path:
                 wl = {(min(u, v), max(u, v)) for u, v in G_und.edges()}
@@ -476,7 +477,7 @@ def _discourse_state(G_und, clusters: list[ClusterStat]) -> str:
     the shared discourse_shape rule (single source, also used by the graph HUD)."""
     import networkx as nx
 
-    from silica.kernel.graph_export import discourse_shape
+    from silica.kernel.recall.graph_export import discourse_shape
 
     giant = max((len(c) for c in nx.connected_components(G_und)), default=0)
     return discourse_shape(G_und.number_of_nodes(), giant, [c.size for c in clusters])

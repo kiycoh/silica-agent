@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.contested import (
+from silica.kernel.write.contested import (
     clear_contested,
     contested_callout,
     contested_refs,
     mark_contested,
 )
-from silica.kernel import frontmatter
-from silica.kernel.ofm import ofm_lint
+from silica.kernel.write import frontmatter
+from silica.kernel.link.ofm import ofm_lint
 
 
 NOTE = """---
@@ -136,7 +136,7 @@ def test_contested_callout_lints_clean():
 
 @pytest.fixture()
 def contested_op():
-    from silica.kernel.ops import Op, OpType
+    from silica.kernel.write.ops import Op, OpType
 
     return Op(
         op=OpType.patch,
@@ -151,7 +151,7 @@ def contested_op():
 
 
 def test_execute_patch_contested_marks_note(tmp_vault, contested_op):
-    from silica.kernel.bulk import execute_one
+    from silica.kernel.write.bulk import execute_one
 
     path = tmp_vault.note("Farmacologia/Dosaggio Warfarin.md", NOTE)
     res = execute_one(contested_op)
@@ -164,7 +164,7 @@ def test_execute_patch_contested_marks_note(tmp_vault, contested_op):
 
 
 def test_execute_patch_contested_idempotent(tmp_vault, contested_op):
-    from silica.kernel.bulk import execute_one
+    from silica.kernel.write.bulk import execute_one
 
     path = tmp_vault.note("Farmacologia/Dosaggio Warfarin.md", NOTE)
     execute_one(contested_op)
@@ -219,8 +219,8 @@ def test_run_dedup_contradicts_end_to_end(tmp_vault):
 
 def test_execute_patch_without_contested_by_unchanged(tmp_vault):
     """Plain patches don't grow contested frontmatter."""
-    from silica.kernel.bulk import execute_one
-    from silica.kernel.ops import Op, OpType
+    from silica.kernel.write.bulk import execute_one
+    from silica.kernel.write.ops import Op, OpType
 
     path = tmp_vault.note("Farmacologia/Dosaggio Warfarin.md", NOTE)
     execute_one(Op(

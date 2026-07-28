@@ -22,7 +22,7 @@ from typing import Literal
 
 import networkx as nx
 
-from silica.kernel.graph_report import AutolinkCandidate, MissingLink, VaultReport
+from silica.kernel.report.graph_report import AutolinkCandidate, MissingLink, VaultReport
 from silica.kernel.progress import PlanStep
 
 Tier = Literal["auto", "propose", "escalate"]

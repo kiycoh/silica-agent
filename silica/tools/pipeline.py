@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
 from silica.tools import tool
-from silica.kernel.ops import OpType
-from silica.kernel.ops_io import load_ops, dump_ops
+from silica.kernel.write.ops import OpType
+from silica.kernel.write.ops_io import load_ops, dump_ops
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +36,8 @@ def _link_recovered_writes(
     links; neither can break a valid note.
     """
     import os
-    from silica.kernel.autolink import build_title_index
-    from silica.kernel.moc import hub_desc, merge_moc_section, moc_heading
+    from silica.kernel.link.autolink import build_title_index
+    from silica.kernel.write.moc import hub_desc, merge_moc_section, moc_heading
 
     hub_name = (hub or "").strip("[]")
     hub_l = hub_name.lower()
@@ -123,8 +123,8 @@ class ReconArgs(BaseModel):
 @tool(ReconArgs, cls="composed", internal=True)
 def silica_recon(inbox_file: str, limit: int = 0) -> dict[str, Any]:
     """Mechanical extraction of concepts from an inbox file and searching for collisions in the vault."""
-    from silica.kernel.recon import is_title_match, rank_hits, collision_priority
-    from silica.kernel.keyphrase import extract_keyphrases
+    from silica.kernel.text.recon import is_title_match, rank_hits, collision_priority
+    from silica.kernel.text.keyphrase import extract_keyphrases
     from silica.config import CONFIG
 
     try:
@@ -153,7 +153,7 @@ def silica_recon(inbox_file: str, limit: int = 0) -> dict[str, Any]:
             continue
             
         # Group hits by ref
-        from silica.kernel.paths import is_inbox_path
+        from silica.kernel.recall.paths import is_inbox_path
         grouped = {}
         for h in hits:
             if h.ref.path and ('/done/' in h.ref.path or h.ref.path.startswith('done/')):
@@ -211,7 +211,7 @@ class PayloadArgs(BaseModel):
 def silica_payload(recon_report_path: str, max_concepts: int = 7, max_bytes: int = 80 * 1024) -> dict[str, Any]:
     """Assembles payloads for the Distiller by pre-extracting snippets from the vault."""
     import orjson
-    from silica.kernel.payload import build_payload
+    from silica.kernel.text.payload import build_payload
     from silica.kernel.partition import partition_by_concepts
     
     try:
@@ -237,7 +237,7 @@ class SanitizeArgs(BaseModel):
 @tool(SanitizeArgs, cls="composed", internal=True)
 def silica_sanitize(distiller_output_path: str) -> dict[str, Any]:
     """Validates and sanitizes the JSON returned by Distiller workers."""
-    from silica.kernel.sanitize import parse_json, normalize_ops
+    from silica.kernel.text.sanitize import parse_json, normalize_ops
 
     try:
         with open(distiller_output_path, 'r', encoding='utf-8') as f:
@@ -297,7 +297,7 @@ def silica_validate_ops(
     after this call — never from a pre-validation snapshot.
     """
     import orjson
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
 
     if payload_paths is None:
         payload_paths = []
@@ -363,7 +363,7 @@ class BulkWriteArgs(BaseModel):
 @tool(BulkWriteArgs, cls="composed", collapse="eager", internal=True)
 def silica_bulk_write(ops_json_path: str) -> dict[str, Any]:
     """Applies write/patch/overwrite/delete operations in batch in the vault."""
-    from silica.kernel.bulk import execute_operations
+    from silica.kernel.write.bulk import execute_operations
 
     try:
         ops = load_ops(ops_json_path)
@@ -382,7 +382,7 @@ class LintArgs(BaseModel):
 @tool(LintArgs, cls="composed", internal=True)
 def silica_lint(note_name: str, op_type: str = "", hub: str = "") -> dict[str, Any]:
     """Post-write gate: executes the OFM linter to find structural regressions."""
-    from silica.kernel.linter import validate_note
+    from silica.kernel.link.linter import validate_note
 
     errors, warnings = validate_note(note_name, hub=hub or None, op_type=op_type or None)
 
@@ -407,11 +407,11 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
     - If the bundle is fully cleared, it is removed from the deferred store.
     """
     import os
-    from silica.kernel.deferred import get_deferred_store
-    from silica.kernel.validate import validate_operations
-    from silica.kernel.ops_io import parse_ops, dump_ops
+    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.validate import validate_operations
+    from silica.kernel.write.ops_io import parse_ops, dump_ops
     from silica.tools.wrapped import build_txn
-    from silica.kernel.bulk import execute_operations
+    from silica.kernel.write.bulk import execute_operations
 
     store = get_deferred_store()
     bundle = store.get(content_hash)
@@ -447,7 +447,7 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
         }
 
     import uuid
-    from silica.kernel.paths import silica_tmp_dir
+    from silica.kernel.recall.paths import silica_tmp_dir
     tmp_path = str(silica_tmp_dir() / f"{uuid.uuid4().hex}.json")
     try:
         dump_ops(tmp_path, validated)
@@ -513,7 +513,7 @@ def silica_anneal(steer: bool = False, limit: int = 0) -> dict[str, Any]:
     feedback. Recovery work happens here, at the boundary, where defects are
     segregated and batchable, instead of inflating the in-flight pipeline.
     """
-    from silica.kernel.deferred import get_deferred_store
+    from silica.kernel.recall.deferred import get_deferred_store
 
     store = get_deferred_store()
     bundles = store.list_all()
@@ -558,11 +558,11 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
 
     from silica.agent.providers import get_provider
     from silica.config import CONFIG
-    from silica.kernel.bulk import execute_operations
-    from silica.kernel.deferred import get_deferred_store
-    from silica.kernel.ops_io import parse_ops
-    from silica.kernel.sanitize import parse_json
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.bulk import execute_operations
+    from silica.kernel.recall.deferred import get_deferred_store
+    from silica.kernel.write.ops_io import parse_ops
+    from silica.kernel.text.sanitize import parse_json
+    from silica.kernel.write.validate import validate_operations
     from silica.tools.wrapped import build_txn
 
     store = get_deferred_store()

@@ -94,7 +94,7 @@ def _read_body(note_path: str) -> str | None:
     """Read a note's body (frontmatter stripped) via the driver; None on failure."""
     try:
         from silica.driver import DRIVER
-        from silica.kernel import frontmatter
+        from silica.kernel.write import frontmatter
         nc = DRIVER.read_note(note_path)
         _data, _fm, body = frontmatter.split(nc.content)
         return body
@@ -104,8 +104,8 @@ def _read_body(note_path: str) -> str | None:
 
 def _stems_from_body(body: str, lang: str) -> dict[str, int]:
     """Tokenize a note body into {stem: count} (same pipeline as the cooccur index)."""
-    from silica.kernel.cooccurrence import tokenize
-    from silica.kernel.text import clean_body
+    from silica.kernel.recall.cooccurrence import tokenize
+    from silica.kernel.text.text import clean_body
     return dict(Counter(
         stem
         for sentence in tokenize(clean_body(body, fences=False), stem_lang=lang)
@@ -210,7 +210,7 @@ def _score_note_against_rules(
     Returns (best_folder, best_score, evidence, matched_themes).
     evidence is "keyword" if a keyword exact-match fired, else "cooccur".
     """
-    from silica.kernel.cooccurrence import tokenize
+    from silica.kernel.recall.cooccurrence import tokenize
 
     title = _note_title(note_path)
     title_lower = title.lower()
@@ -273,7 +273,7 @@ def _llm_arbitrate(
 
     from silica.agent.llm import call_llm
     from silica.config import CONFIG
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.text.sanitize import parse_json
 
     # Build a concise prompt listing all ambiguous notes and their candidate folders
     folder_list = "\n".join(
@@ -394,7 +394,7 @@ def classify_notes(
     # Load co-occurrence store
     if cooccur_store is None:
         try:
-            from silica.kernel.cooccurrence import get_cooccur_store
+            from silica.kernel.recall.cooccurrence import get_cooccur_store
             cooccur_store = get_cooccur_store()
         except Exception as exc:
             logger.warning("classify: CooccurStore unavailable (%s) — using empty index", exc)

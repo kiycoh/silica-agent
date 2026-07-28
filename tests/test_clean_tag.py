@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-from silica.kernel.frontmatter import clean_tag
+from silica.kernel.write.frontmatter import clean_tag
 
 
 def test_clean_tag_keeps_leading_digit_fused_to_word():

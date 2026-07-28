@@ -4,15 +4,15 @@
 """E(vault) is a pure composition of an existing VaultReport (docs IV.1)."""
 from __future__ import annotations
 
-from silica.kernel.graph_report import compute_report
-from silica.kernel.graph_report.models import (
+from silica.kernel.report.graph_report import compute_report
+from silica.kernel.report.graph_report.models import (
     ClusterStat,
     ContestedNote,
     IntegrationDeficit,
     StructuralGap,
     VaultReport,
 )
-from silica.kernel.vault_energy import Weights, vault_energy
+from silica.kernel.report.vault_energy import Weights, vault_energy
 
 
 def _report(**over) -> VaultReport:
@@ -81,7 +81,7 @@ def _energy_file():
 
 
 def test_write_report_renders_energy_and_persists(tmp_path):
-    from silica.kernel.graph_report import write_report
+    from silica.kernel.report.graph_report import write_report
 
     r = _report(orphans=["a", "b"])
     out = write_report(r, str(tmp_path / "GRAPH_REPORT.md"))
@@ -98,7 +98,7 @@ def test_write_report_renders_energy_and_persists(tmp_path):
 
 
 def test_scoped_report_never_persists_energy(tmp_path):
-    from silica.kernel.graph_report import write_report
+    from silica.kernel.report.graph_report import write_report
 
     write_report(_report(scope="Concepts", orphans=["a"]),
                  str(tmp_path / "GRAPH_REPORT.md"))

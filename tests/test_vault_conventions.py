@@ -334,7 +334,7 @@ def _note_with_n_tags(n: int) -> str:
 
 def test_ofm_lint_default_max_tags_unchanged(monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", "")
-    from silica.kernel.ofm import ofm_lint
+    from silica.kernel.link.ofm import ofm_lint
 
     flags = ofm_lint(_note_with_n_tags(4))["flags"]
     assert any("too many tags (4); max 3" in f for f in flags)
@@ -346,7 +346,7 @@ def test_ofm_lint_accepts_max_tags_from_manifest(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     reset_manifest_cache()
-    from silica.kernel.ofm import ofm_lint
+    from silica.kernel.link.ofm import ofm_lint
 
     flags = ofm_lint(_note_with_n_tags(5))["flags"]
     assert not any("too many tags" in f for f in flags)
@@ -358,7 +358,7 @@ def test_ofm_lint_literal_newline_ignores_math_commands(monkeypatch):
     carrying them must lint clean or every patch to it fails forever (real
     incident: 2026-07-17, Distribuzioni condizionate.md, `$\\Sigma_k \\ne \\Sigma$`)."""
     monkeypatch.setattr(CONFIG, "vault_path", "")
-    from silica.kernel.ofm import ofm_lint
+    from silica.kernel.link.ofm import ofm_lint
 
     note = _NOTE_TMPL.format(tags="  - tag0") + (
         "\nLDA assume $\\Sigma_k = \\Sigma$, QDA consente $\\Sigma_k \\ne \\Sigma$"
@@ -370,7 +370,7 @@ def test_ofm_lint_literal_newline_ignores_math_commands(monkeypatch):
 
 def test_ofm_lint_literal_newline_still_detected_in_prose(monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", "")
-    from silica.kernel.ofm import ofm_lint
+    from silica.kernel.link.ofm import ofm_lint
 
     note = _NOTE_TMPL.format(tags="  - tag0") + "\nriga uno\\nriga due\n"
     violations = ofm_lint(note)["violations"]
@@ -379,7 +379,7 @@ def test_ofm_lint_literal_newline_still_detected_in_prose(monkeypatch):
 
 def test_ofm_lint_rejects_unknown_callout_by_default(monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", "")
-    from silica.kernel.ofm import ofm_lint
+    from silica.kernel.link.ofm import ofm_lint
 
     note = _note_with_n_tags(1) + "\n> [!clinica] some clinical note\n"
     violations = ofm_lint(note)["violations"]
@@ -392,7 +392,7 @@ def test_ofm_lint_extra_callouts_whitelisted_from_manifest(tmp_path, monkeypatch
     )
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     reset_manifest_cache()
-    from silica.kernel.ofm import ofm_lint
+    from silica.kernel.link.ofm import ofm_lint
 
     note = _note_with_n_tags(1) + "\n> [!clinica] some clinical note\n"
     violations = ofm_lint(note)["violations"]

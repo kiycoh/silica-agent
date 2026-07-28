@@ -4,7 +4,7 @@
 """codeast.python — Python skeleton walker."""
 from __future__ import annotations
 
-from silica.kernel.codeast.base import _CALL_NAME, Call, Symbol, _signature, _text
+from silica.kernel.code.codeast.base import _CALL_NAME, Call, Symbol, _signature, _text
 
 
 def _py_doc_node(node):

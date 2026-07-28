@@ -27,13 +27,13 @@ injection instead.
 """
 from __future__ import annotations
 
-from silica.kernel.graph_report import compute_report
-from silica.kernel.graph_report.models import (
+from silica.kernel.report.graph_report import compute_report
+from silica.kernel.report.graph_report.models import (
     ContestedNote,
     IntegrationDeficit,
     VaultReport,
 )
-from silica.kernel.vault_energy import Weights, vault_energy
+from silica.kernel.report.vault_energy import Weights, vault_energy
 
 
 def _clique(members: list[str]) -> list[dict]:

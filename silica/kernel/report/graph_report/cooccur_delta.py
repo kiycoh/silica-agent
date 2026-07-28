@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from silica.kernel.graph_report.models import (
+from silica.kernel.report.graph_report.models import (
     AutolinkCandidate,
     IntegrationDeficit,
     MissingHub,
@@ -48,8 +48,8 @@ def _compute_cooccur_delta(
     `cooccur_store` is injectable for testing; loaded from disk when None.
     Returns empty lists when the index is empty (best-effort, never raises).
     """
-    from silica.kernel.cooccurrence import cooccur_key, get_cooccur_store, tokenize
-    from silica.kernel.relatedness import _concept_idf, _cooccur_ranking
+    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store, tokenize
+    from silica.kernel.recall.relatedness import _concept_idf, _cooccur_ranking
 
     try:
         store = cooccur_store if cooccur_store is not None else get_cooccur_store()
@@ -141,7 +141,7 @@ def _compute_cooccur_delta(
     # (nonsensical, B in expert ratings). Best-effort: skipped silently when
     # embeddings are unavailable.
     try:
-        from silica.kernel.embed import get_store, _cosine
+        from silica.kernel.recall.embed import get_store, _cosine
         _embed_store = get_store()
         if len(_embed_store) > 0:
             _cos_hi = 0.92

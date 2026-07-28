@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from silica.kernel import codedocs
+from silica.kernel.code import codedocs
 
 
 def _init_repo(path: Path) -> None:
@@ -132,7 +132,7 @@ def test_deleted_path_is_structural(tmp_path):
 
 
 def test_note_verdict_aggregates_multi_path():
-    from silica.kernel.codedocs import CHANGE_COSMETIC, CHANGE_STRUCTURAL, StaleDoc, note_verdict
+    from silica.kernel.code.codedocs import CHANGE_COSMETIC, CHANGE_STRUCTURAL, StaleDoc, note_verdict
     a = StaleDoc("n.md", "a.py", "r", "c", change_level=CHANGE_COSMETIC, details=[])
     b = StaleDoc("n.md", "b.py", "r", "c", change_level=CHANGE_STRUCTURAL, details=["b.py: + function f"])
     level, details = note_verdict([a, b])

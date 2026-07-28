@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.kernel.embed import (
+from silica.kernel.recall.embed import (
     EmbedStore,
     _cosine,
     _note_text,
@@ -442,10 +442,10 @@ def test_refresh_note_then_build_index_skips_it(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_silica_semantic_search_empty_index(tmp_path, monkeypatch):
-    from silica.kernel.embed import EmbedStore as _ES
+    from silica.kernel.recall.embed import EmbedStore as _ES
 
     # Ensure the store loaded by the tool sees an empty index
-    monkeypatch.setattr("silica.kernel.embed._index_path", lambda: tmp_path / "empty.json")
+    monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: tmp_path / "empty.json")
 
     from silica.tools.composed import silica_semantic_search
     result = silica_semantic_search(query="neural networks")
@@ -456,9 +456,9 @@ def test_silica_semantic_search_uses_cooccurrence_when_embed_empty(tmp_path, mon
     """Routing through the relatedness facade: with an empty embedding index but
     a populated co-occurrence store, search still returns results (the co-occur
     leg carries it) instead of the old cosine-only 'empty index' error."""
-    monkeypatch.setattr("silica.kernel.embed._index_path", lambda: tmp_path / "empty_embed.json")
+    monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: tmp_path / "empty_embed.json")
 
-    from silica.kernel.cooccurrence import build_index as cooc_build
+    from silica.kernel.recall.cooccurrence import build_index as cooc_build
     cooc_build(
         [
             ("Concepts/Neural", "Neural", "neural network architecture deep learning"),
@@ -476,10 +476,10 @@ def test_silica_semantic_search_uses_cooccurrence_when_embed_empty(tmp_path, mon
 
 
 def test_silica_semantic_search_returns_results(tmp_path, monkeypatch):
-    from silica.kernel.embed import EmbedStore as _ES
+    from silica.kernel.recall.embed import EmbedStore as _ES
 
     idx = tmp_path / "embeddings.json"
-    monkeypatch.setattr("silica.kernel.embed._index_path", lambda: idx)
+    monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: idx)
     # Pre-populate the store
     store = _ES(idx)
     store.upsert("Concepts/A", "A", [1.0, 0.0])
@@ -536,8 +536,8 @@ def test_openai_embedder_empty_input():
 
 def test_index_path_is_keyed_by_vault(tmp_path, monkeypatch):
     from silica.config import CONFIG
-    from silica.kernel import paths
-    from silica.kernel.embed import _index_path
+    from silica.kernel.recall import paths
+    from silica.kernel.recall.embed import _index_path
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "v1"))
     p1 = _index_path()
@@ -550,7 +550,7 @@ def test_index_path_is_keyed_by_vault(tmp_path, monkeypatch):
 
 def test_index_path_falls_back_to_global_without_vault(monkeypatch):
     from silica.config import CONFIG
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
     from pathlib import Path
 
     monkeypatch.setattr(CONFIG, "vault_path", "")
@@ -559,8 +559,8 @@ def test_index_path_falls_back_to_global_without_vault(monkeypatch):
 
 def test_legacy_index_migrates_on_load(tmp_path, monkeypatch):
     import orjson
-    from silica.kernel import embed as embed_mod
-    from silica.kernel.embed import EmbedStore
+    from silica.kernel.recall import embed as embed_mod
+    from silica.kernel.recall.embed import EmbedStore
 
     legacy = tmp_path / "legacy" / "embeddings.json"
     legacy.parent.mkdir(parents=True)

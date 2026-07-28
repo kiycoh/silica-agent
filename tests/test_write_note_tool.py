@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-import silica.kernel.checkpoints as checkpoints
+import silica.kernel.write.checkpoints as checkpoints
 from silica.tools.notes import silica_write_note
 
 
@@ -19,11 +19,11 @@ def vault(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
-    monkeypatch.setattr("silica.kernel.checkpoints._store", None)
+    monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
     checkpoints.get_checkpoint_store(tmp_path / "checkpoints.db")
     yield vault_dir
     monkeypatch.setattr("silica.driver._driver", None)
-    monkeypatch.setattr("silica.kernel.checkpoints._store", None)
+    monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)
 
 
 def test_body_only_write_gets_mechanical_frontmatter(vault):

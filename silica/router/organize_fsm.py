@@ -26,8 +26,8 @@ from typing import Any
 
 from silica.driver import DRIVER
 from silica.driver.base import NoteRef, GraphSnapshot
-from silica.kernel.ops import Op, OpType
-from silica.kernel.taxonomy import Taxonomy
+from silica.kernel.write.ops import Op, OpType
+from silica.kernel.organize.taxonomy import Taxonomy
 from silica.router.base_fsm import BaseFSM
 
 logger = logging.getLogger(__name__)
@@ -167,7 +167,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
     def _handle_classify(self) -> None:
         """L1 deterministic classification via co-occurrence stems."""
-        from silica.kernel.classify import classify_notes
+        from silica.kernel.organize.classify import classify_notes
 
         note_paths = self.context["note_paths"]
         if not note_paths:
@@ -179,7 +179,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         # Load co-occurrence store once and pass it in to avoid repeated disk reads
         cooccur_store = None
         try:
-            from silica.kernel.cooccurrence import get_cooccur_store
+            from silica.kernel.recall.cooccurrence import get_cooccur_store
             from silica.config import CONFIG
             cooccur_store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
             if len(cooccur_store) == 0:
@@ -207,7 +207,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
     def _handle_arbitrate(self) -> None:
         """L2 LLM arbiter for notes in the ambiguous confidence band."""
-        from silica.kernel.classify import (
+        from silica.kernel.organize.classify import (
             Classification,
             _DEFAULT_TAU_HIGH,
             _DEFAULT_TAU_LOW,
@@ -241,7 +241,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             snippet = ""
             try:
                 nc = DRIVER.read_note(note_path)
-                from silica.kernel import frontmatter
+                from silica.kernel.write import frontmatter
                 _data, _fm, body = frontmatter.split(nc.content)
                 snippet = body[:300]
             except Exception:
@@ -284,7 +284,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
     def _handle_plan(self) -> None:
         """Generate MoveOp list from classifications."""
-        from silica.kernel.classify import Classification
+        from silica.kernel.organize.classify import Classification
 
         classifications: list[Classification] = self.context["classifications"]
         move_ops: list[Op] = []
@@ -355,13 +355,13 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             return
 
         from silica.driver.base import Txn
-        from silica.kernel.ops import InverseOp, InverseOpKind
+        from silica.kernel.write.ops import InverseOp, InverseOpKind
         import uuid
 
         # Open an undo-journal run so `/revert` can move these notes back later.
         # Only reached in apply mode with real moves (PLAN returns early on dry_run).
         from silica.config import CONFIG
-        from silica.kernel.undo_journal import get_undo_journal
+        from silica.kernel.write.undo_journal import get_undo_journal
         self._undo_run_id = get_undo_journal().start_run(
             source=f"organize:{self.scope or 'vault'}",
             vault=getattr(CONFIG, "vault_path", None) or None,
@@ -493,8 +493,8 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         if not self._undo_run_id:
             return
         import hashlib
-        from silica.kernel.ops import InverseOp, InverseOpKind
-        from silica.kernel.undo_journal import get_undo_journal
+        from silica.kernel.write.ops import InverseOp, InverseOpKind
+        from silica.kernel.write.undo_journal import get_undo_journal
 
         journal = get_undo_journal()
         for res in self.context.get("move_results", []):
@@ -547,7 +547,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
 
     def _write_ledger(self, status: str) -> None:
         try:
-            from silica.kernel.ledger import get_ledger
+            from silica.kernel.write.ledger import get_ledger
             txn_id = self.context.get("txn_id", "unknown")
             for op in self.context.get("move_ops", []):
                 canonical = (op.to_path or op.from_path or "").removesuffix(".md").lower()

@@ -6,7 +6,7 @@ Terminology:
     incoming — what the op wants to write
 """
 import pytest
-from silica.kernel.merge import (
+from silica.kernel.write.merge import (
     CONFLICT_CALLOUT_HEADER,
     detect_conflict,
     inject_conflict_callout,

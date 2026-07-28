@@ -20,7 +20,7 @@ from silica.tools.atomic import EmptyArgs
 logger = logging.getLogger(__name__)
 
 
-from silica.kernel.paths import in_folder as _in_folder  # canonical folder-scope predicate
+from silica.kernel.recall.paths import in_folder as _in_folder  # canonical folder-scope predicate
 
 
 class GraphExportArgs(BaseModel):
@@ -85,7 +85,7 @@ def silica_mindmap(note_path: str, force: bool = False) -> dict[str, Any]:
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.mindmap import (
+    from silica.kernel.recall.mindmap import (
         build_mapview,
         gather_materials,
         mapview_to_canvas,
@@ -137,7 +137,7 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
     neighbours) use silica_backlink; for a vault-wide maintenance pass that also
     finds the candidates itself, use silica_curate.
     """
-    from silica.kernel.autolink import build_title_index
+    from silica.kernel.link.autolink import build_title_index
 
     paths = note_paths or []
     if note_path and note_path not in paths:
@@ -160,7 +160,7 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
         try:
             from silica.agent.providers import get_embedder
             from silica.config import CONFIG
-            from silica.kernel.embed import get_store
+            from silica.kernel.recall.embed import get_store
             store = get_store()
             if len(store) > 0:
                 embedder = get_embedder(CONFIG)
@@ -170,7 +170,7 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
         # candidates survive (focused) even when the embedder is down.
         try:
             from silica.config import CONFIG
-            from silica.kernel.cooccurrence import get_cooccur_store
+            from silica.kernel.recall.cooccurrence import get_cooccur_store
             cooccur_store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
             if len(cooccur_store) == 0:
                 cooccur_store = None
@@ -200,7 +200,7 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
                 except Exception:
                     query_vec = None
             try:
-                from silica.kernel.relatedness import related_notes_for_query
+                from silica.kernel.recall.relatedness import related_notes_for_query
                 related = related_notes_for_query(
                     query_vec=query_vec,
                     query_text=body,
@@ -244,7 +244,7 @@ def silica_backlink(new_titles: list[str], neighbourhood: list[str]) -> dict[str
     with a wikilink — the reverse of silica_autolink. Skips frontmatter, code,
     math, and already-linked spans. Returns {path: [titles_added]}.
     """
-    from silica.kernel.autolink import backlink_pass, build_title_index
+    from silica.kernel.link.autolink import backlink_pass, build_title_index
 
     try:
         all_refs = DRIVER.list_files()
@@ -268,7 +268,7 @@ def _facade_search(text: str, k: int) -> dict[str, Any]:
     still serves co-occurrence results, and vice versa — mirroring how
     autolink/collision consume the facade.
     """
-    from silica.kernel.perception import facade_retrieve
+    from silica.kernel.recall.perception import facade_retrieve
 
     results, _query_vec = facade_retrieve(text, k=k)
     if results is None:
@@ -330,7 +330,7 @@ def silica_recall(query: str, k: int = 15) -> dict[str, Any]:
     """
     import datetime
 
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive(query, now=datetime.date.today().isoformat(), k=k)
     return {"query": query, "context": p.render(),
@@ -357,7 +357,7 @@ def silica_timeline(start: str = "", end: str = "", limit: int = 50) -> dict[str
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.timeline import timeline
+    from silica.kernel.write.timeline import timeline
 
     vault = Path(getattr(CONFIG, "vault_path", "") or "").expanduser()
     if not vault.is_dir():
@@ -391,9 +391,9 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
     """
     from silica.config import CONFIG
     from silica.driver import DRIVER
-    from silica.kernel.cooccurrence import cooccur_key, get_cooccur_store
-    from silica.kernel.embed import get_store
-    from silica.kernel.relatedness import related_notes
+    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
+    from silica.kernel.recall.embed import get_store
+    from silica.kernel.recall.relatedness import related_notes
 
     # Resolve name-or-path to the canonical vault path (any backend), then reduce to
     # the store keyspace via cooccur_key (strip .md, posix, CASE-PRESERVED). This is
@@ -420,7 +420,7 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
     if len(embed_store) == 0 and cooccur_store is None:
         return {"note": note, "error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
 
-    from silica.kernel.memory_lane import memory_stores
+    from silica.kernel.recall.memory_lane import memory_stores
 
     mem_embed, mem_cooccur = memory_stores()  # ADR-0019 second recall lane
     results = related_notes(
@@ -435,7 +435,7 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
     # tells the caller whether a candidate sits in the query's own knowledge
     # area or across a cluster boundary. Memory-lane notes are another vault —
     # never annotated.
-    from silica.kernel.graph_export import cluster_hub_of, graph_distances, load_cluster_ctx
+    from silica.kernel.recall.graph_export import cluster_hub_of, graph_distances, load_cluster_ctx
 
     gctx_map = (load_cluster_ctx() or {}).get("ctx") or {}
     # Structural distance: wikilink hops from the query to each result — the
@@ -497,8 +497,8 @@ def silica_concepts(term: str = "", note: str = "", k: int = 10) -> dict[str, An
     For ranked related NOTES use silica_related or silica_semantic_search instead.
     """
     from silica.config import CONFIG
-    from silica.kernel.cooccurrence import get_cooccur_store
-    from silica.kernel.text import stem_word
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.text.text import stem_word
 
     try:
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
@@ -570,14 +570,14 @@ def silica_embed_refresh(folder: str = "", force: bool = False) -> dict[str, Any
     """
     from silica.agent.providers import get_embedder
     from silica.config import CONFIG
-    from silica.kernel.embed import build_index
+    from silica.kernel.recall.embed import build_index
 
     try:
         all_refs = DRIVER.list_files(folder or None)
     except Exception as e:
         return {"error": f"Failed to list vault files: {e}"}
 
-    from silica.kernel.media import strip_images
+    from silica.kernel.text.media import strip_images
     notes: list[tuple[str, str, str]] = []
     errors: list[str] = []
     for ref in all_refs:
@@ -628,8 +628,8 @@ def silica_cooccurrence_refresh(folder: str = "", force: bool = False) -> dict[s
     fresh automatically afterwards.
     """
     from silica.config import CONFIG
-    from silica.kernel import correlate
-    from silica.kernel.cooccurrence import build_index, get_cooccur_store
+    from silica.kernel.link import correlate
+    from silica.kernel.recall.cooccurrence import build_index, get_cooccur_store
 
     try:
         all_refs = DRIVER.list_files(folder or None)
@@ -705,7 +705,7 @@ def silica_lexical_refresh(folder: str = "", force: bool = False) -> dict[str, A
     leg (use_lexical) has an index to query; writes keep it fresh automatically
     afterwards (write-hook, index-gated). Run once to create the index.
     """
-    from silica.kernel.lexical import get_lexical_store
+    from silica.kernel.recall.lexical import get_lexical_store
 
     try:
         all_refs = DRIVER.list_files(folder or None)
@@ -788,7 +788,7 @@ def silica_vault_report(
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.graph_report import compute_report, to_digest, to_facts, write_report
+    from silica.kernel.report.graph_report import compute_report, to_digest, to_facts, write_report
     from silica.kernel.analyst_plan import build_task_plan
     from silica.kernel.progress import IssueCard, Run
 
@@ -803,7 +803,7 @@ def silica_vault_report(
     # Whole-vault only: a folder-scoped map would clobber the global one.
     if not folder:
         try:
-            from silica.kernel.graph_export import ctx_from_report, save_cluster_ctx
+            from silica.kernel.recall.graph_export import ctx_from_report, save_cluster_ctx
 
             save_cluster_ctx(
                 [report.totals.get("notes", 0), report.totals.get("links", 0)],
@@ -900,9 +900,9 @@ def silica_health() -> dict[str, Any]:
     from pathlib import Path
 
     from silica.config import CONFIG
-    from silica.kernel.cooccurrence import get_cooccur_store
-    from silica.kernel.embed import get_store
-    from silica.kernel.health import fusion_probe, integrity_probe
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.recall.embed import get_store
+    from silica.kernel.link.health import fusion_probe, integrity_probe
 
     vault = Path(getattr(CONFIG, "vault_path", "") or "").expanduser()
     if not vault.is_dir():

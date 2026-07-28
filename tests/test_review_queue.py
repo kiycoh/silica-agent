@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.deferred import DeferredStore
+from silica.kernel.recall.deferred import DeferredStore
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ def test_queue_depth_decreases_after_remove(store):
 
 def test_digest_includes_queue_depth_when_nonzero(tmp_path, monkeypatch):
     import silica.kernel.progress as prog_mod
-    from silica.kernel.deferred import get_deferred_store
+    from silica.kernel.recall.deferred import get_deferred_store
 
     prog_mod._RUNS_DIR = tmp_path
     # conftest isolates the default store; populate it through the public seam.
@@ -94,8 +94,8 @@ def test_review_command_is_direct_group():
 
 def test_deferred_store_keyed_per_vault(tmp_path, monkeypatch):
     """Two vaults → two independent queues; switching back finds the bundle again."""
-    import silica.kernel.deferred as deferred_mod
-    import silica.kernel.paths as paths_mod
+    import silica.kernel.recall.deferred as deferred_mod
+    import silica.kernel.recall.paths as paths_mod
     from silica.config import CONFIG
 
     monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
@@ -122,7 +122,7 @@ def test_legacy_global_store_adopted_once(tmp_path, monkeypatch):
     """First load drains ~/.silica/deferred: real bundles adopted into the active
     vault's queue, test-fixture pollution («lint failed: ['e']») flushed."""
     import orjson
-    import silica.kernel.deferred as deferred_mod
+    import silica.kernel.recall.deferred as deferred_mod
 
     legacy = tmp_path / "legacy_global"
     legacy.mkdir()

@@ -178,17 +178,17 @@ ignore_imports = [
 name = "graph structure is deterministic — structural modules never import agent (P2/DKB)"
 type = "forbidden"
 source_modules = [
-  "silica.kernel.cooccurrence",
-  "silica.kernel.keyphrase",
-  "silica.kernel.ast",
+  "silica.kernel.recall.cooccurrence",
+  "silica.kernel.text.keyphrase",
+  "silica.kernel.link.ast",
   "silica.kernel.graph_diff",
-  "silica.kernel.autolink",
-  "silica.kernel.graph_report.compute",
-  "silica.kernel.graph_report.cooccur_delta",
-  "silica.kernel.graph_report.models",
-  "silica.kernel.graph_report.render",
-  "silica.kernel.graph_report.code_signals",
-  "silica.kernel.codegraph",
+  "silica.kernel.link.autolink",
+  "silica.kernel.report.graph_report.compute",
+  "silica.kernel.report.graph_report.cooccur_delta",
+  "silica.kernel.report.graph_report.models",
+  "silica.kernel.report.graph_report.render",
+  "silica.kernel.report.graph_report.code_signals",
+  "silica.kernel.code.codegraph",
 ]
 forbidden_modules = ["silica.agent"]
 # embed_signals e run_substrate NON sono in lista: importano get_embedder
@@ -197,14 +197,14 @@ forbidden_modules = ["silica.agent"]
 ignore_imports = [
   # embed_signals e' overlay di embedding (lecito, escluso dai source_modules);
   # compute lo importa per assemblare il report, non per costruire struttura.
-  "silica.kernel.graph_report.embed_signals -> silica.agent.providers",
+  "silica.kernel.report.graph_report.embed_signals -> silica.agent.providers",
 ]
 
 [[tool.importlinter.contracts]]
 name = "structural is not semantic — codegraph never enters the fusion legs"
 type = "forbidden"
-source_modules = ["silica.kernel.relatedness", "silica.kernel.rerank"]
-forbidden_modules = ["silica.kernel.codegraph"]
+source_modules = ["silica.kernel.recall.relatedness", "silica.kernel.recall.rerank"]
+forbidden_modules = ["silica.kernel.code.codegraph"]
 # Import edges are mechanical dependency, not semantic proximity: an import
 # hub (paths.py) would flood related_notes/RRF with structurally-adjacent,
 # semantically-empty neighbors (spec-code-lane, Principio ordinatore).
@@ -212,7 +212,7 @@ forbidden_modules = ["silica.kernel.codegraph"]
 [[tool.importlinter.contracts]]
 name = "graph data stays offline — the kernel viewer split leaves no network dep"
 type = "forbidden"
-source_modules = ["silica.kernel.graph_export"]
+source_modules = ["silica.kernel.recall.graph_export"]
 forbidden_modules = ["httpx"]
 # The viewer (render_html/export_graph) moved to silica.ui.web.graph_view and
 # now inlines a *vendored* JS bundle; the CDN fetch (httpx) is gone. This freezes

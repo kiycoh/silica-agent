@@ -52,12 +52,12 @@ def build_substrate(
     try:
         from silica.agent.providers import get_embedder
         from silica.config import CONFIG
-        from silica.kernel.embed import get_store
+        from silica.kernel.recall.embed import get_store
         from silica.driver import DRIVER
         from silica.driver.base import NoteRef
 
-        from silica.kernel.cooccurrence import get_cooccur_store
-        from silica.kernel.relatedness import related_notes_for_query
+        from silica.kernel.recall.cooccurrence import get_cooccur_store
+        from silica.kernel.recall.relatedness import related_notes_for_query
 
         store = get_store()
 
@@ -103,7 +103,7 @@ def build_substrate(
         if len(cooccur_store) == 0:
             cooccur_store = None
 
-        from silica.kernel.memory_lane import memory_stores
+        from silica.kernel.recall.memory_lane import memory_stores
 
         mem_embed, mem_cooccur = memory_stores()  # ADR-0019 second recall lane
         related = related_notes_for_query(
@@ -122,7 +122,7 @@ def build_substrate(
         # {} when cold — annotation simply absent). Same cluster = cohesion,
         # different cluster = deliberate bridge: the distiller's parent choice
         # needs to know which.
-        from silica.kernel.graph_export import cluster_hub_of, load_cluster_ctx
+        from silica.kernel.recall.graph_export import cluster_hub_of, load_cluster_ctx
         gctx_map = (load_cluster_ctx() or {}).get("ctx") or {}
 
         lines: list[str] = []
@@ -213,7 +213,7 @@ def build_substrate(
             # codegraph, read directly at build time — no store of their own.
             code_names: list[str] = []
             try:
-                from silica.kernel.codegraph import code_vocabulary, load_codegraph
+                from silica.kernel.code.codegraph import code_vocabulary, load_codegraph
                 cg = load_codegraph(CONFIG.vault_path) if CONFIG.vault_path else None
                 if cg is not None:
                     code_names = code_vocabulary(cg)
@@ -239,7 +239,7 @@ def build_substrate(
         # synonym keys. Independent leg: failure only drops this section.
         episodic_section: str | None = None
         try:
-            from silica.kernel.episodic import EpisodicStore, key_vocabulary_section
+            from silica.kernel.recall.episodic import EpisodicStore, key_vocabulary_section
 
             episodic_section = key_vocabulary_section(EpisodicStore())
         except Exception as _ep_e:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 from silica.router.orchestrator import _commit_docs_for_ops
 
 

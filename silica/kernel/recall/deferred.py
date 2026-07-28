@@ -37,7 +37,7 @@ from typing import Any
 
 import orjson
 
-from silica.kernel.paths import atomic_write_bytes
+from silica.kernel.recall.paths import atomic_write_bytes
 
 
 # Pre-C2 location: one global queue for every vault. Read once as a migration
@@ -50,7 +50,7 @@ _DEFERRED_TTL_SECONDS = 30 * 24 * 3600
 
 def _store_dir() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
 
     return paths.index_dir() / "deferred"
 

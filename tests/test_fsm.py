@@ -33,12 +33,12 @@ def test_injector_fsm_hub_inheritance():
 
 
 def test_validate_operations_hub_inheritance():
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
     ops = [
         {"op": "write", "path": "Deep Learning/Concepts/Neural Network.md", "heading": "Neural Network", "source_basename": "inbox.md", "snippet": "corpo " * 20}
     ]
     # We patch path_exists to return False so that the write operation is validated as a creation
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=RuntimeError("File not found")):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=RuntimeError("File not found")):
         validated, rejected = validate_operations(ops, [], "Deep Learning/Concepts")
     assert len(rejected) == 0
     # Returns 2: 1 for the auto-generated Hub note and 1 for the Neural Network spoke note
@@ -50,11 +50,11 @@ def test_validate_operations_hub_inheritance():
 
 
 def test_validate_operations_hub_coercion():
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
     ops = [
         {"op": "write", "path": "Deep Learning/Concepts/Neural Network.md", "heading": "Neural Network", "hub": "import_from_inbox", "source_basename": "inbox.md", "snippet": "corpo " * 20}
     ]
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=RuntimeError("File not found")):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=RuntimeError("File not found")):
         validated, rejected = validate_operations(ops, [], "Deep Learning/Concepts", hub="CustomConceptsHub")
     assert len(rejected) == 0
     assert len(validated) == 2
@@ -65,13 +65,13 @@ def test_validate_operations_hub_coercion():
 
 
 def test_validate_operations_auto_creates_missing_hub():
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
 
     # Case A: Hub note doesn't exist anywhere in the vault
     ops_missing = [
         {"op": "write", "path": "Deep Learning/Concepts/Neural Network.md", "heading": "Neural Network", "hub": "Concepts", "source_basename": "inbox.md", "snippet": "corpo " * 20}
     ]
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=RuntimeError("File not found")):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=RuntimeError("File not found")):
         validated, _ = validate_operations(ops_missing, [], "Deep Learning/Concepts")
     assert len(validated) == 2
     assert validated[0]["heading"] == "Concepts"
@@ -87,7 +87,7 @@ def test_validate_operations_auto_creates_missing_hub():
             return MagicMock()
         raise RuntimeError("File not found")
 
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=mock_read_note):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=mock_read_note):
         validated, _ = validate_operations(ops_exists, [], "Deep Learning/Concepts")
     # Only 1 because Hub note already exists
     assert len(validated) == 1
@@ -98,7 +98,7 @@ def test_validate_operations_auto_creates_missing_hub():
         {"op": "write", "path": "Deep Learning/Concepts/Concepts.md", "heading": "Concepts", "hub": "Concepts", "source_basename": "inbox.md", "snippet": "corpo " * 20},
         {"op": "write", "path": "Deep Learning/Concepts/Neural Network.md", "heading": "Neural Network", "hub": "Concepts", "source_basename": "inbox.md", "snippet": "corpo " * 20}
     ]
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=RuntimeError("File not found")):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=RuntimeError("File not found")):
         validated, _ = validate_operations(ops_already_creating, [], "Deep Learning/Concepts")
     # 2 because the explicit creation is preserved, and no duplicate is injected
     assert len(validated) == 2
@@ -185,7 +185,7 @@ def test_fsm_delegate_dated_doc_anchors_session_date(mock_run_distiller):
 @patch("silica.tools.wrapped.silica_snapshot")
 @patch("silica.router.orchestrator.silica_lint")
 @patch("silica.tools.wrapped.silica_cleanup")
-@patch("silica.kernel.embed.EmbedStore")
+@patch("silica.kernel.recall.embed.EmbedStore")
 def test_fsm_multi_chunk_loop(
     mock_embed_store, mock_cleanup, mock_lint, mock_snapshot, mock_driver,
     mock_validate, mock_sanitize, mock_run_distiller, mock_payload, mock_recon
@@ -532,7 +532,7 @@ def test_fsm_recipe_end_to_end_flow(
 
 def test_fsm_already_nucleated():
     # We patch get_ledger to return a mock ledger where is_committed is True
-    with patch("silica.kernel.ledger.get_ledger") as mock_get_ledger:
+    with patch("silica.kernel.write.ledger.get_ledger") as mock_get_ledger:
         mock_ledger = MagicMock()
         mock_ledger.is_committed.return_value = True
         mock_get_ledger.return_value = mock_ledger
@@ -581,7 +581,7 @@ def test_collision_high_similarity_routes_to_patch():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.router.orchestrator.DRIVER") as mock_driver, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
@@ -611,7 +611,7 @@ def test_collision_low_similarity_keeps_for_distillation():
     mock_embedder.embed.return_value = [[0.1, 0.2, 0.3]]
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
@@ -660,7 +660,7 @@ def test_collision_embeds_concept_with_excerpt():
     mock_embedder.embed.side_effect = _capture
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
@@ -701,9 +701,9 @@ def test_collision_high_score_name_mismatch_deferred_to_judge():
     mock_deferred = MagicMock()
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.kernel.deferred.get_deferred_store", return_value=mock_deferred):
+         patch("silica.kernel.recall.deferred.get_deferred_store", return_value=mock_deferred):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
         fsm.step()
@@ -739,7 +739,7 @@ def test_collision_high_score_acronym_match_still_patches():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.router.orchestrator.DRIVER") as mock_driver, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
@@ -766,9 +766,9 @@ def test_collision_borderline_deferred():
     mock_deferred = MagicMock()
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.kernel.deferred.get_deferred_store", return_value=mock_deferred):
+         patch("silica.kernel.recall.deferred.get_deferred_store", return_value=mock_deferred):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
 
@@ -812,9 +812,9 @@ def test_collision_borderline_defers_rematerializable_op_and_tags_workitem():
     mock_deferred.get.return_value = None
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.kernel.deferred.get_deferred_store", return_value=mock_deferred):
+         patch("silica.kernel.recall.deferred.get_deferred_store", return_value=mock_deferred):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
 
@@ -837,7 +837,7 @@ def test_collision_borderline_defers_rematerializable_op_and_tags_workitem():
 def test_collision_cooccur_only_candidate_is_never_routed():
     """A facade candidate the embed leg did not propose (embed_score=None) has
     no cosine to threshold against — the concept must flow to distillation."""
-    from silica.kernel.relatedness import RelatedNote
+    from silica.kernel.recall.relatedness import RelatedNote
 
     fsm = _make_fsm_at_collision([{"name": "Graph Theory", "inbox_excerpt": "Nodes and edges."}])
 
@@ -853,9 +853,9 @@ def test_collision_cooccur_only_candidate_is_never_routed():
     )]
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.kernel.relatedness.related_notes_for_query", return_value=cooccur_only):
+         patch("silica.kernel.recall.relatedness.related_notes_for_query", return_value=cooccur_only):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
 
@@ -877,7 +877,7 @@ def test_collision_inbox_candidate_is_filtered():
     patch target — validate rejects every Inbox path, so routing one guarantees
     a rejected op (real incident: 2026-07-17 nucleate run, Lezione 1↔2 and the
     SVM book cross-patching). The concept flows to normal distillation."""
-    from silica.kernel.relatedness import RelatedNote
+    from silica.kernel.recall.relatedness import RelatedNote
 
     fsm = _make_fsm_at_collision([{"name": "Support Vector Machines", "inbox_excerpt": "SVM intro."}])
 
@@ -894,9 +894,9 @@ def test_collision_inbox_candidate_is_filtered():
 
     with patch("silica.router.orchestrator.CONFIG") as mock_cfg, \
          patch("silica.router.orchestrator.DRIVER") as mock_driver, \
-         patch("silica.kernel.embed.EmbedStore", return_value=mock_store), \
+         patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store), \
          patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.kernel.relatedness.related_notes_for_query", return_value=inbox_hit):
+         patch("silica.kernel.recall.relatedness.related_notes_for_query", return_value=inbox_hit):
         mock_cfg.sim_threshold_high = 0.85
         mock_cfg.sim_threshold_low = 0.65
         mock_driver.read_note.return_value = MagicMock()  # graph would confirm the node
@@ -921,7 +921,7 @@ def test_collision_empty_index_skips_transparently():
     mock_store = MagicMock()
     mock_store.__len__ = lambda _: 0  # empty index
 
-    with patch("silica.kernel.embed.EmbedStore", return_value=mock_store):
+    with patch("silica.kernel.recall.embed.EmbedStore", return_value=mock_store):
         fsm.step()
 
     assert fsm.state == InjectorState.DELEGATE
@@ -1039,8 +1039,8 @@ def test_fsm_create_settle_timeout_rollback(
     
     fsm = InjectorFSM("Inbox/test_fsm_settle.md", "TargetDir")
     
-    # We patch silica.kernel.bulk.DRIVER.create to raise a driver write failure
-    with patch("silica.kernel.bulk.DRIVER.create", side_effect=RuntimeError("Settle timeout mock error")):
+    # We patch silica.kernel.write.bulk.DRIVER.create to raise a driver write failure
+    with patch("silica.kernel.write.bulk.DRIVER.create", side_effect=RuntimeError("Settle timeout mock error")):
         with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])):
             res = fsm.run()
         
@@ -1172,17 +1172,17 @@ def test_crossdedup_skips_when_embed_call_fails():
 # WRITE partial-failure containment (Fase A → B)
 # ---------------------------------------------------------------------------
 
-@patch("silica.kernel.deferred.get_deferred_store")
-@patch("silica.kernel.atomic_write.commit_note_atomic")
+@patch("silica.kernel.recall.deferred.get_deferred_store")
+@patch("silica.kernel.write.atomic_write.commit_note_atomic")
 def test_handle_write_partial_failure_defers_and_continues(
     mock_commit, mock_get_store, tmp_path
 ):
     """Partial write failure: committed ops survive, failed ops land in deferred store,
     FSM continues to HUB_UPDATE (no rollback), has_partial_failure is set."""
     import json
-    from silica.kernel.atomic_write import NoteCommitResult
-    from silica.kernel.deferred import DeferredStore
-    from silica.kernel.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.atomic_write import NoteCommitResult
+    from silica.kernel.recall.deferred import DeferredStore
+    from silica.kernel.write.ops import InverseOp, InverseOpKind
 
     ops_data = [
         {"op": "write", "path": "TargetDir/A.md", "heading": "A", "hub": "TargetDir",
@@ -1229,7 +1229,7 @@ def test_handle_write_partial_failure_defers_and_continues(
     assert "Settle timeout" in bundle["rejection_reasons"].get("TargetDir/B.md", "")
 
 
-@patch("silica.kernel.atomic_write.commit_note_atomic")
+@patch("silica.kernel.write.atomic_write.commit_note_atomic")
 def test_handle_write_all_fail_defers_and_continues(mock_commit, tmp_path):
     """When ALL ops fail lint/write, they are deferred and FSM continues (no rollback).
 
@@ -1238,7 +1238,7 @@ def test_handle_write_all_fail_defers_and_continues(mock_commit, tmp_path):
     with has_partial_failure set.
     """
     import json
-    from silica.kernel.atomic_write import NoteCommitResult
+    from silica.kernel.write.atomic_write import NoteCommitResult
 
     ops_data = [
         {"op": "write", "path": "TargetDir/A.md", "heading": "A", "hub": "TargetDir",
@@ -1391,7 +1391,7 @@ def test_fsm_seen_override_reaches_episodic_capture(mock_run_distiller):
         captured["seen"] = seen
 
     with patch.object(fsm, "_make_tmp", return_value="tmp.json"), \
-         patch("silica.kernel.episodic.capture_from_distill", side_effect=_rec):
+         patch("silica.kernel.recall.episodic.capture_from_distill", side_effect=_rec):
         fsm.step()
 
     assert captured["seen"] == "2023-05-08"
@@ -1414,7 +1414,7 @@ def test_fsm_seen_default_is_ingest_day(mock_run_distiller):
         captured["seen"] = seen
 
     with patch.object(fsm, "_make_tmp", return_value="tmp.json"), \
-         patch("silica.kernel.episodic.capture_from_distill", side_effect=_rec):
+         patch("silica.kernel.recall.episodic.capture_from_distill", side_effect=_rec):
         fsm.step()
 
     assert captured["seen"] == fsm.progress.started_at[:10]

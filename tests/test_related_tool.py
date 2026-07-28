@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import types
 
-from silica.kernel.embed import EmbedStore
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.recall.embed import EmbedStore
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
 
 
 def _embed_store(tmp_path) -> EmbedStore:
@@ -40,13 +40,13 @@ def _fake_driver(names: dict[str, str]):
 
 def _wire(monkeypatch, tmp_path, *, names, embed=True, cooc=True):
     es = _embed_store(tmp_path) if embed else EmbedStore(path=tmp_path / "empty.json")
-    monkeypatch.setattr("silica.kernel.embed.get_store", lambda: es)
+    monkeypatch.setattr("silica.kernel.recall.embed.get_store", lambda: es)
     if cooc:
         st = _cooc_store(tmp_path)
-        monkeypatch.setattr("silica.kernel.cooccurrence.get_cooccur_store", lambda **_: st)
+        monkeypatch.setattr("silica.kernel.recall.cooccurrence.get_cooccur_store", lambda **_: st)
     else:
         monkeypatch.setattr(
-            "silica.kernel.cooccurrence.get_cooccur_store",
+            "silica.kernel.recall.cooccurrence.get_cooccur_store",
             lambda **_: CooccurStore(path=tmp_path / "empty_c.json", lang="english"),
         )
     monkeypatch.setattr("silica.driver.DRIVER", _fake_driver(names))
@@ -120,7 +120,7 @@ def test_empty_embed_but_isolated_note_hints_embed_refresh(tmp_path, monkeypatch
 # --- Tier B: structural distance on silica_related results ---------------
 
 def _patch_graph(monkeypatch, nodes, edges):
-    import silica.kernel.graph_export as ge
+    import silica.kernel.recall.graph_export as ge
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (list(nodes), list(edges)))
 
 
@@ -156,7 +156,7 @@ def test_related_distance_null_when_unreachable(tmp_path, monkeypatch):
 
 def test_related_omits_distance_when_graph_unavailable(tmp_path, monkeypatch):
     from silica.tools.graph import silica_related
-    import silica.kernel.graph_export as ge
+    import silica.kernel.recall.graph_export as ge
     _wire(monkeypatch, tmp_path, names={"Alpha": "A"})
     monkeypatch.setattr(
         ge, "build_graph_data",
@@ -174,7 +174,7 @@ def test_concepts_neighbors_notes_centrality(tmp_path, monkeypatch):
     st = CooccurStore(path=tmp_path / "c.json", lang="english")
     st.upsert_note("A", build_contribution("A", "neural network model training"))
     st.upsert_note("B", build_contribution("B", "neural network inference"))
-    monkeypatch.setattr("silica.kernel.cooccurrence.get_cooccur_store", lambda **_: st)
+    monkeypatch.setattr("silica.kernel.recall.cooccurrence.get_cooccur_store", lambda **_: st)
 
     out = silica_concepts("network")
     assert out["concept"] == "network"
@@ -188,7 +188,7 @@ def test_concepts_unknown_term_hints(tmp_path, monkeypatch):
     from silica.tools.graph import silica_concepts
     st = CooccurStore(path=tmp_path / "c.json", lang="english")
     st.upsert_note("A", build_contribution("A", "alpha beta gamma"))
-    monkeypatch.setattr("silica.kernel.cooccurrence.get_cooccur_store", lambda **_: st)
+    monkeypatch.setattr("silica.kernel.recall.cooccurrence.get_cooccur_store", lambda **_: st)
 
     out = silica_concepts("zzzzz")
     assert out["neighbors"] == [] and out["notes"] == []
@@ -200,7 +200,7 @@ def test_concepts_by_note_ranks_own_concepts(tmp_path, monkeypatch):
     st = CooccurStore(path=tmp_path / "c.json", lang="english")
     st.upsert_note("A", build_contribution("A", "neural network network training model"))
     st.upsert_note("B", build_contribution("B", "gardening tomatoes"))
-    monkeypatch.setattr("silica.kernel.cooccurrence.get_cooccur_store", lambda **_: st)
+    monkeypatch.setattr("silica.kernel.recall.cooccurrence.get_cooccur_store", lambda **_: st)
 
     out = silica_concepts(note="A", k=3)
     labels = [c["concept"] for c in out["concepts"]]
@@ -215,7 +215,7 @@ def test_concepts_by_note_ranks_own_concepts(tmp_path, monkeypatch):
 def test_concepts_empty_index_errors(tmp_path, monkeypatch):
     from silica.tools.graph import silica_concepts
     monkeypatch.setattr(
-        "silica.kernel.cooccurrence.get_cooccur_store",
+        "silica.kernel.recall.cooccurrence.get_cooccur_store",
         lambda **_: CooccurStore(path=tmp_path / "empty.json", lang="english"),
     )
 

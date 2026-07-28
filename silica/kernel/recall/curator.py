@@ -28,8 +28,8 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
-from silica.kernel.graph_export import is_vault_artifact as _is_vault_artifact
-from silica.kernel.graph_report import VaultReport
+from silica.kernel.recall.graph_export import is_vault_artifact as _is_vault_artifact
+from silica.kernel.report.graph_report import VaultReport
 
 # The four item kinds the curator can emit. "autolink" is the mechanical,
 # LLM-free direct commit; the rest are WorkItem kinds on the capability seam.
@@ -53,7 +53,7 @@ def _norm_note_path(path: str) -> str:
 # Silica's own vault-root artifacts (log.md, GRAPH_REPORT.md) must never be
 # planned for work — --apply would LLM-rewrite the journal or the report on
 # every vault with >=1 nucleate. Same predicate now also keeps them out of the
-# graph itself (silica.kernel.graph_export.is_vault_artifact), so orphan/hub
+# graph itself (silica.kernel.recall.graph_export.is_vault_artifact), so orphan/hub
 # metrics no longer self-pollute from the report's own wikilinks.
 
 

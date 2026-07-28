@@ -53,9 +53,9 @@ def memory_stores():
     if mem is None:
         return None, None
     try:
-        from silica.kernel import paths
-        from silica.kernel.cooccurrence import CooccurStore
-        from silica.kernel.embed import EmbedStore
+        from silica.kernel.recall import paths
+        from silica.kernel.recall.cooccurrence import CooccurStore
+        from silica.kernel.recall.embed import EmbedStore
 
         idx = paths.index_dir_for(str(mem))
         key = str(idx)

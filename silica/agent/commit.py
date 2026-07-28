@@ -24,9 +24,9 @@ from typing import Any, Callable
 
 import orjson
 
-from silica.kernel.ops import Op, OpType
-from silica.kernel.ops_io import load_ops
-from silica.kernel.paths import silica_tmp_dir
+from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.ops_io import load_ops
+from silica.kernel.recall.paths import silica_tmp_dir
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +49,8 @@ def _journal_inverses(run_id: str, inverses: list[dict]) -> None:
     """
     import hashlib
     from silica.driver import DRIVER
-    from silica.kernel.ops import InverseOp
-    from silica.kernel.undo_journal import get_undo_journal
+    from silica.kernel.write.ops import InverseOp
+    from silica.kernel.write.undo_journal import get_undo_journal
 
     journal = get_undo_journal()
     for raw in inverses:
@@ -88,7 +88,7 @@ def commit_derived(rel: str, content: str) -> dict[str, Any]:
     Returns {"status": committed | rolled_back | error, "reason": ...}.
     """
     from silica.driver import DRIVER
-    from silica.kernel.templates import ensure_system_floor
+    from silica.kernel.write.templates import ensure_system_floor
     from silica.kernel.workqueue import path_lease
     from silica.tools.composed import silica_lint
 

@@ -42,7 +42,7 @@ def test_supported_nucleate_extensions_covers_every_lane():
     # The GUI "+" picker derives its accept= list from this; every nucleate lane
     # (prose, code, notebook, pdf) must be represented or the picker hides files
     # the server would actually accept.
-    from silica.kernel.codeast import BARE_LANGUAGES, EXTENSION_MAP
+    from silica.kernel.code.codeast import BARE_LANGUAGES, EXTENSION_MAP
     from silica.sources.registry import supported_nucleate_extensions
 
     exts = set(supported_nucleate_extensions())
@@ -219,7 +219,7 @@ def test_nucleate_folder_of_code_stages_a_stub_per_file(repo_vault):
 def test_nucleate_run_is_revertable(repo_vault):
     """The terminal lane skips the FSM, which is where journalling lived — so
     without its own run these writes were the only ones /revert could not see."""
-    from silica.kernel.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
 
     root, vault = repo_vault
     assert _expand_workflow_shortcut("/nucleate m.py") == ""
@@ -235,7 +235,7 @@ def test_nucleate_run_is_revertable(repo_vault):
 
 def test_nucleate_revert_restores_a_refreshed_note(repo_vault):
     """Re-nucleating an existing note must undo to its prior body, not delete it."""
-    from silica.kernel.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
 
     root, vault = repo_vault
     _expand_workflow_shortcut("/nucleate m.py")
@@ -355,7 +355,7 @@ def test_nucleate_renucleate_of_modified_source_warns(repo_vault, capsys, stub_c
     inbox.mkdir(exist_ok=True)
     (inbox / "lezione.md").write_text("v2 content", encoding="utf-8")
 
-    from silica.kernel.provenance import append_record
+    from silica.kernel.write.provenance import append_record
     append_record("lezione.md", "old-sha-not-matching", "run1", ["Concepts/A", "Concepts/B"])
 
     msg = _expand_workflow_shortcut("/nucleate Inbox/lezione.md --target=Concepts/AI")
@@ -372,7 +372,7 @@ def test_nucleate_same_sha_no_warning(repo_vault, capsys, stub_coordinator):
     inbox.mkdir(exist_ok=True)
     (inbox / "lezione.md").write_text("same content", encoding="utf-8")
 
-    from silica.kernel.provenance import append_record, content_sha256
+    from silica.kernel.write.provenance import append_record, content_sha256
     sha = content_sha256("Inbox/lezione.md")
     append_record("lezione.md", sha, "run1", ["Concepts/A"])
 
@@ -405,7 +405,7 @@ def test_nucleate_missing_target_still_warns_on_renucleate(repo_vault, capsys, m
     inbox.mkdir(exist_ok=True)
     (inbox / "lezione.md").write_text("v2 content", encoding="utf-8")
 
-    from silica.kernel.provenance import append_record
+    from silica.kernel.write.provenance import append_record
     append_record("lezione.md", "old-sha-not-matching", "run1", ["Concepts/A", "Concepts/B"])
 
     monkeypatch.setattr(cli_mod, "_pick_target_folder",

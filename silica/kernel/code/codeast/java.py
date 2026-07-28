@@ -11,7 +11,7 @@ doc/doc_full. Annotations fill `decorators` with '@' and call args stripped.
 """
 from __future__ import annotations
 
-from silica.kernel.codeast.base import (
+from silica.kernel.code.codeast.base import (
     _CALL_NAME, Call, ModuleSkeleton, Symbol,
     _block_comment_text as _comment_text, _text,
 )

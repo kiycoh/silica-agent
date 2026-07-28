@@ -22,8 +22,8 @@ edge is the product, not an error.
 """
 from __future__ import annotations
 
-from silica.kernel.health import pair as _pair
-from silica.kernel.health import wikilink_graph as _wikilink_graph
+from silica.kernel.link.health import pair as _pair
+from silica.kernel.link.health import wikilink_graph as _wikilink_graph
 
 # Per-note expanded ranking depth — matches graph_report's _cooccur_ranking(k=10).
 EXPANDED_K = 10
@@ -40,8 +40,8 @@ _EMPTY = {
 
 
 def run(vault, store, *, verbose: bool = False) -> dict:
-    from silica.kernel import correlate
-    from silica.kernel.relatedness import _cooccur_ranking
+    from silica.kernel.link import correlate
+    from silica.kernel.recall.relatedness import _cooccur_ranking
 
     if len(store) == 0:
         return dict(_EMPTY)

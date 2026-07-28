@@ -3,14 +3,14 @@
 
 """Reranker A/B over the fused ranking (opt-in, informational).
 
-The gated fusion probe itself lives in ``silica.kernel.health.fusion_probe``
+The gated fusion probe itself lives in ``silica.kernel.link.health.fusion_probe``
 (also served by the silica_health tool); the runner calls it directly. This
 module keeps only the reranker A/B — it depends on an HTTP provider, so it is
 neither deterministic nor free: never gated, never in the baseline.
 """
 from __future__ import annotations
 
-from silica.kernel.health import K, eligible_pairs, wikilink_graph
+from silica.kernel.link.health import K, eligible_pairs, wikilink_graph
 
 
 def _pair_ranks(eligible: list[tuple[str, str]],
@@ -53,9 +53,9 @@ def run_rerank_ab(vault, store, *, embed_store=None, reranker=None,
     degenerates to the unreranked pool. A high count means the A/B measured
     nothing, not that the reranker is neutral.
     """
-    from silica.kernel import correlate
-    from silica.kernel.relatedness import related_notes
-    from silica.kernel.rerank import note_document, rerank_related
+    from silica.kernel.link import correlate
+    from silica.kernel.recall.relatedness import related_notes
+    from silica.kernel.recall.rerank import note_document, rerank_related
 
     empty = {
         "pairs_evaluated": 0, "endpoints": 0, "empty_docs": 0,

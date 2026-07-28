@@ -1,9 +1,9 @@
 # tests/test_provenance_dedup.py
 from silica.config import CONFIG
-from silica.kernel.templates import provenance_header, block_present
-from silica.kernel.ops import Op, OpType
-from silica.kernel.bulk import execute_one
-from silica.kernel.provenance import append_record, note_authored_by
+from silica.kernel.write.templates import provenance_header, block_present
+from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.bulk import execute_one
+from silica.kernel.write.provenance import append_record, note_authored_by
 
 
 def test_provenance_helpers():

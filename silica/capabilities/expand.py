@@ -19,8 +19,8 @@ from typing import Any
 
 from silica.agent.commit import commit_ops
 from silica.agent.bounds import expand_bounds
-from silica.kernel.ops import Op, OpType
-from silica.kernel.validate import min_write_snippet_chars
+from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.validate import min_write_snippet_chars
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import NoteContent, emit_feedback, load_prompt
 
@@ -105,7 +105,7 @@ def _clean_twin_bundle(ctx: dict, heading: str) -> None:
     if not content_hash:
         return
     try:
-        from silica.kernel.deferred import get_deferred_store
+        from silica.kernel.recall.deferred import get_deferred_store
         get_deferred_store().remove_op(content_hash, heading)
     except Exception as e:
         logger.debug("expand: twin bundle cleanup failed (non-fatal): %s", e)
@@ -121,7 +121,7 @@ def _author_body(
     feedback: str = "",
 ) -> str:
     from silica.agent.providers import get_provider
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.text.sanitize import parse_json
 
     prompt = load_prompt("expand_prompt.txt")
     hub_hint = f"\nParent note: [[{hub}]]" if hub else ""

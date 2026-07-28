@@ -95,7 +95,7 @@ def run_subagent_batch(
     # /refine, /enrich or /dedup. Pool workers don't inherit contextvars, so
     # each worker sets the same run id at entry (see commit._current_undo_run).
     from silica.agent.commit import _current_undo_run
-    from silica.kernel.undo_journal import get_undo_journal
+    from silica.kernel.write.undo_journal import get_undo_journal
     undo_run_id = get_undo_journal().start_run(
         source=f"{items[0].kind}-batch",
         vault=getattr(config, "vault_path", None) or None,

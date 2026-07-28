@@ -1,7 +1,7 @@
 import math
 from difflib import SequenceMatcher
 
-from silica.kernel.lexical import LexicalStore, _BM25_K1, _BM25_B, _FUZZY_MIN, _tokens
+from silica.kernel.recall.lexical import LexicalStore, _BM25_K1, _BM25_B, _FUZZY_MIN, _tokens
 
 
 def _reference_rank(store: LexicalStore, query: str, k: int = 25) -> list[tuple[str, float]]:

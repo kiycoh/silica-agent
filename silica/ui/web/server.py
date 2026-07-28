@@ -26,7 +26,7 @@ from starlette.background import BackgroundTask
 
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
-from silica.kernel.mindmap import note_resolver
+from silica.kernel.recall.mindmap import note_resolver
 from silica.ui.web.callback import event_to_json
 
 logger = logging.getLogger(__name__)
@@ -764,7 +764,7 @@ def mindmap(note: str = ""):
     surfaces cannot diverge. Empty/unknown note degrades to a message, like /graph.
     """
     from silica.config import CONFIG
-    from silica.kernel.mindmap import (
+    from silica.kernel.recall.mindmap import (
         build_mapview,
         gather_materials,
         note_resolver,
@@ -875,7 +875,7 @@ def asset(path: str = ""):
 def vault_info():
     """Sidebar data: vault stats + file tree, from the same builders as the
     graph view so the numbers can't disagree between the two surfaces."""
-    from silica.kernel.graph_export import build_graph_data, detect_communities
+    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
     from silica.ui.web.graph_view import render_tree
 
     try:

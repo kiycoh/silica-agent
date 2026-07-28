@@ -4,14 +4,14 @@
 """Mechanical concept-recon over note content.
 
 Vocabulary (stopwords + noise patterns) is supplied by the domain overlay seam;
-see silica.kernel.overlay for the default English-generic overlay and the
+see silica.kernel.text.overlay for the default English-generic overlay and the
 load_overlay / get_active_overlay API.
 """
 from __future__ import annotations
 
 import re
 
-from silica.kernel.overlay import DomainOverlay, get_active_overlay
+from silica.kernel.text.overlay import DomainOverlay, get_active_overlay
 
 MIN_LEN, MAX_LEN = 3, 50
 TITLE_BONUS = 50

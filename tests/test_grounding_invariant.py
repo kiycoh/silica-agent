@@ -1,7 +1,7 @@
 import subprocess
 from pathlib import Path
 
-from silica.kernel import codedocs
+from silica.kernel.code import codedocs
 
 
 def _init_repo(path: Path) -> None:

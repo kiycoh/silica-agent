@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-from silica.kernel.ops import OpType
+from silica.kernel.write.ops import OpType
 
 
 def handle_lint(fsm: "InjectorFSM") -> None:
@@ -87,7 +87,7 @@ def handle_lint(fsm: "InjectorFSM") -> None:
             # collision-collapses after it is first folded, but its pre-collapse stems
             # only widen the allowed set — never manufacture a false regression.
             try:
-                from silica.kernel.templates import slugify
+                from silica.kernel.write.templates import slugify
                 chunks = getattr(fsm, "_chunks", [])
                 for chunk in chunks[fsm._run_concept_stems_n:]:
                     for batch in chunk.get("batches", []):
@@ -186,7 +186,7 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
     entry points from double-recording.
     """
     try:
-        from silica.kernel.run_log import append_log_line, format_nucleate_event
+        from silica.kernel.recall.run_log import append_log_line, format_nucleate_event
 
         basename = os.path.basename(source_file)
         logged = getattr(fsm, "_files_logged", None)
@@ -208,7 +208,7 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
         content_hashes = getattr(fsm, "_file_content_hashes", [])
         if fi < len(content_hashes):
             try:
-                from silica.kernel.deferred import get_deferred_store
+                from silica.kernel.recall.deferred import get_deferred_store
                 bundle = get_deferred_store().get(content_hashes[fi])
                 if bundle:
                     deferred_count = len(bundle.get("rejected_ops", []))
@@ -247,7 +247,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
     effort and must never block CLEANUP.
     """
     try:
-        from silica.kernel.provenance import append_record
+        from silica.kernel.write.provenance import append_record
 
         basename = os.path.basename(source_file)
         content_hashes = getattr(fsm, "_file_content_hashes", [])
@@ -265,7 +265,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
         logger.debug("CLEANUP: provenance append skipped (non-fatal): %s", exc)
 
 
-from silica.kernel.paths import SOURCES_MARKER as _SOURCES_MARKER
+from silica.kernel.recall.paths import SOURCES_MARKER as _SOURCES_MARKER
 
 
 def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
@@ -284,11 +284,11 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
     Best-effort and must never block CLEANUP.
     """
     try:
-        from silica.kernel import frontmatter
-        from silica.kernel.contested import append_before_superseded
-        from silica.kernel.ops import InverseOp, InverseOpKind
-        from silica.kernel.paths import SOURCES_DIR
-        from silica.kernel.provenance import source_valid_from
+        from silica.kernel.write import frontmatter
+        from silica.kernel.write.contested import append_before_superseded
+        from silica.kernel.write.ops import InverseOp, InverseOpKind
+        from silica.kernel.recall.paths import SOURCES_DIR
+        from silica.kernel.write.provenance import source_valid_from
 
         basename = os.path.basename(source_file)
         leaf_rel = f"{SOURCES_DIR}/{basename}"
@@ -430,8 +430,8 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
         # Persist this run's inverses for /revert, with final content hash.
         if fsm._undo_run_id and fsm._run_inverses:
             import hashlib
-            from silica.kernel.ops import InverseOpKind
-            from silica.kernel.undo_journal import get_undo_journal
+            from silica.kernel.write.ops import InverseOpKind
+            from silica.kernel.write.undo_journal import get_undo_journal
             journal = get_undo_journal()
             for path, inv, _ in fsm._run_inverses:
                 try:
@@ -487,7 +487,7 @@ def handle_rollback(fsm: "InjectorFSM") -> None:
         created_paths = list(snapshot_res["created_paths"])
     if created_paths:
         try:
-            from silica.kernel.embed import get_store
+            from silica.kernel.recall.embed import get_store
             store = get_store()
             for cp in created_paths:
                 store.delete(cp.removesuffix(".md"))

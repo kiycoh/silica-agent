@@ -26,8 +26,8 @@ from pathlib import Path
 
 import orjson
 
-from silica.kernel import codeast, gitstate
-from silica.kernel import paths as _paths
+from silica.kernel.code import codeast, gitstate
+from silica.kernel.recall import paths as _paths
 
 _TS_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 _TS_ALIAS_PREFIXES = ("@/", "~/")
@@ -254,7 +254,7 @@ def _file_entry(root: Path, rel: str, files: set[str]) -> tuple[dict, list[tuple
         return {"language": language, "imports": [], "external": [],
                 "unresolved": [], "symbols": [], "parse_error": True, **_EMPTY_V2}, []
     if rel.lower().endswith(".ipynb"):
-        from silica.kernel import ipynb
+        from silica.kernel.code import ipynb
         try:
             cells = ipynb.parse_cells(source)
         except ValueError:
@@ -423,7 +423,7 @@ def compute_impact(vault: Path | str, range_spec: str | None = None) -> list[Imp
     """Changed supported files → change_level + documenting notes + 1-hop
     import-neighbor notes. None when the vault is not in a git repo (the
     consumer reports "no repo"). Zero LLM; sorted (structural, fan-in desc)."""
-    from silica.kernel import codedocs
+    from silica.kernel.code import codedocs
 
     root = _paths.repo_root_for(vault)
     if root is None:

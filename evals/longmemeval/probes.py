@@ -54,7 +54,7 @@ def cluster_keys(keys: list[str], *, max_df: int | None = None) -> dict[str, str
     frozen corpus covers 15/17 gold sessions at cluster sizes 2-10). Returns
     key -> component display name (lexicographically first member key,
     `(+N)` suffix for the rest)."""
-    from silica.kernel.episodic import rare_token_components
+    from silica.kernel.recall.episodic import rare_token_components
 
     comp = rare_token_components(keys, max_df=max_df)
     members: dict[str, list[str]] = defaultdict(list)
@@ -78,7 +78,7 @@ def capture_sim(facts: list[dict], vecs: dict[str, list[float]], *,
     by canonical key joins the nearest live head by cosine when >= tau.
     Stats: `embed_joins` and every fallback decision as (nearest_cos, joined)
     — the tau calibration curve. Pure function of (facts, vecs, tau)."""
-    from silica.kernel.episodic import _cosine, normalize_key
+    from silica.kernel.recall.episodic import _cosine, normalize_key
 
     by_nkey: dict[str, str] = {}   # nkey -> live head id (arm 1)
     live: dict[str, str] = {}      # live head id -> chain root id
@@ -147,7 +147,7 @@ def sim_vecs(facts: list[dict], repr_: str, vault: Path,
     degradation would read as "no signal"."""
     import hashlib
 
-    from silica.kernel.paths import index_dir_for
+    from silica.kernel.recall.paths import index_dir_for
 
     def content(f: dict) -> str:
         if repr_ == "text":
@@ -197,7 +197,7 @@ _PROBE_MAX_GROUP = 12
 def product_groups(live: list[dict]) -> dict[str, str]:
     """fact id -> group display name via the (former) product regroup rule
     applied in memory to the live facts (a pure function of the key set)."""
-    from silica.kernel.episodic import rare_token_components
+    from silica.kernel.recall.episodic import rare_token_components
 
     comp = rare_token_components([f["key"] for f in live], max_df=_PROBE_DF)
     members: dict[str, list[dict]] = defaultdict(list)
@@ -221,7 +221,7 @@ def product_groups(live: list[dict]) -> dict[str, str]:
 
 
 def _load_facts(vault: Path) -> list[dict]:
-    from silica.kernel.paths import index_dir_for
+    from silica.kernel.recall.paths import index_dir_for
 
     path = index_dir_for(str(vault)) / "episodic.json"
     if not path.is_file():
@@ -247,7 +247,7 @@ def probe_question(inst: dict, run_root: Path, *, normalize: bool = False,
     embed_tau=t groups by the capture-order embedding-fallback simulation:
     the chains a capture-side semantic matcher WOULD have formed at cosine
     threshold t (row gains embed_joins + cosines)."""
-    from silica.kernel.episodic import normalize_key
+    from silica.kernel.recall.episodic import normalize_key
     from evals.longmemeval.runner import question_vault
 
     qid = inst["question_id"]

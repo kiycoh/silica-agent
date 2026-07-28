@@ -1,12 +1,12 @@
 """kernel/codeast — shallow tree-sitter skeleton extraction (ADR-0012 slice)."""
-from silica.kernel.codeast import EXTENSION_MAP, ModuleSkeleton, extract_skeleton, language_for
+from silica.kernel.code.codeast import EXTENSION_MAP, ModuleSkeleton, extract_skeleton, language_for
 
 PY_SRC = '''\
 """Module docstring."""
 import os
-import silica.kernel.gitstate
+import silica.kernel.code.gitstate
 from pathlib import Path
-from silica.kernel import frontmatter
+from silica.kernel.write import frontmatter
 
 
 def hi(name: str) -> str:
@@ -62,9 +62,9 @@ def test_python_imports():
     sk = extract_skeleton(PY_SRC, "python", path="src/m.py")
     assert isinstance(sk, ModuleSkeleton)
     assert "os" in sk.imports
-    assert "silica.kernel.gitstate" in sk.imports
+    assert "silica.kernel.code.gitstate" in sk.imports
     assert "pathlib.Path" in sk.imports               # was: "pathlib"
-    assert "silica.kernel.frontmatter" in sk.imports  # was: "silica.kernel"
+    assert "silica.kernel.write.frontmatter" in sk.imports  # was: "silica.kernel"
 
 
 def test_python_symbols_signatures_and_docstrings():
@@ -138,7 +138,8 @@ def test_javascript_smoke():
 
 
 FROM_IMPORTS = '''\
-from silica.kernel import frontmatter, gitstate
+from silica.kernel.write import frontmatter
+from silica.kernel.code import gitstate
 from pathlib import Path
 from .paths import atomic_write_bytes
 from . import helpers
@@ -148,8 +149,8 @@ from os import *
 
 def test_from_import_records_module_dot_name():
     sk = extract_skeleton(FROM_IMPORTS, "python", path="src/m.py")
-    assert "silica.kernel.frontmatter" in sk.imports
-    assert "silica.kernel.gitstate" in sk.imports
+    assert "silica.kernel.write.frontmatter" in sk.imports
+    assert "silica.kernel.code.gitstate" in sk.imports
     assert "pathlib.Path" in sk.imports
     assert ".paths.atomic_write_bytes" in sk.imports
     assert ".helpers" in sk.imports        # `from . import helpers`
@@ -166,12 +167,12 @@ def test_parse_error_flag():
 def test_diff_skeletons_empty_for_body_only_change():
     old = extract_skeleton("def hi(name: str) -> str:\n    return name\n", "python")
     new = extract_skeleton("def hi(name: str) -> str:\n    x = name.upper()\n    return x\n", "python")
-    from silica.kernel.codeast import diff_skeletons
+    from silica.kernel.code.codeast import diff_skeletons
     assert diff_skeletons(old, new) == []
 
 
 def test_diff_skeletons_reports_structure():
-    from silica.kernel.codeast import diff_skeletons
+    from silica.kernel.code.codeast import diff_skeletons
     old = extract_skeleton(
         "import os\n\nclass A:\n    def run(self) -> None: ...\n\ndef gone(): ...\n", "python")
     new = extract_skeleton(
@@ -317,7 +318,7 @@ def test_from_import_alias_recorded():
 # ---------------------------------------------------------------------------
 
 def test_bare_language_extensions_mapped():
-    from silica.kernel.codeast import BARE_LANGUAGES
+    from silica.kernel.code.codeast import BARE_LANGUAGES
     assert BARE_LANGUAGES == {"toml", "html", "css"}
     assert language_for("pyproject.toml") == "toml"
     assert language_for("site/index.html") == "html"

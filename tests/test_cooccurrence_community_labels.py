@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.kernel.cooccurrence import CooccurStore
+from silica.kernel.recall.cooccurrence import CooccurStore
 
 
 def _make_store(tmp_path: Path, notes: dict[str, dict]) -> CooccurStore:

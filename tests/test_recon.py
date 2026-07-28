@@ -1,6 +1,6 @@
-"""Tests for silica.kernel.recon — concept filtering via the DomainOverlay seam.
+"""Tests for silica.kernel.text.recon — concept filtering via the DomainOverlay seam.
 
-Concept *extraction* now lives in silica.kernel.keyphrase (YAKE); recon keeps the
+Concept *extraction* now lives in silica.kernel.text.keyphrase (YAKE); recon keeps the
 overlay-driven *filter* (`is_concept`) applied to every candidate, plus the
 collision-ranking helpers. These tests guard the domain knowledge in the overlays
 (which headings/words are noise) against the live filter.
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.kernel.overlay import DEFAULT_OVERLAY
+from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
 _BUNDLED_OVERLAYS = (
     Path(__file__).resolve().parent.parent / "silica" / "overlays"
@@ -24,7 +24,7 @@ def it_overlay():
     path = _BUNDLED_OVERLAYS / "italian.yaml"
     if not path.exists():
         pytest.skip(f"bundled overlay not found: {path}")
-    from silica.kernel.overlay import load_overlay
+    from silica.kernel.text.overlay import load_overlay
     return load_overlay(path)
 
 
@@ -43,7 +43,7 @@ class TestIsConceptFiltersNoise:
         "NB: important",             # ^[A-Z]{2,6}:\s noise prefix
     ])
     def test_rejected(self, phrase):
-        from silica.kernel.recon import is_concept
+        from silica.kernel.text.recon import is_concept
         assert not is_concept(phrase, overlay=DEFAULT_OVERLAY)
 
 
@@ -54,16 +54,16 @@ class TestIsConceptFiltersNoise:
 class TestIsConceptKeepsConcepts:
     @pytest.mark.parametrize("phrase", ["Backpropagation", "Gradient Descent", "PID"])
     def test_kept_default(self, phrase):
-        from silica.kernel.recon import is_concept
+        from silica.kernel.text.recon import is_concept
         assert is_concept(phrase, overlay=DEFAULT_OVERLAY)
 
     def test_italian_overlay_filters_noise(self, it_overlay):
-        from silica.kernel.recon import is_concept
+        from silica.kernel.text.recon import is_concept
         assert not is_concept("Capitolo 3: Reti Neurali", overlay=it_overlay)
         assert not is_concept("unipa", overlay=it_overlay)  # vault stopword
 
     def test_italian_overlay_keeps_concepts(self, it_overlay):
-        from silica.kernel.recon import is_concept
+        from silica.kernel.text.recon import is_concept
         assert is_concept("Reti Neurali", overlay=it_overlay)
         assert is_concept("Backpropagation", overlay=it_overlay)  # extends default
 
@@ -174,35 +174,35 @@ class TestReconBatch:
 class TestIsConceptOverlayArg:
     def test_explicit_overlay_used_over_active(self):
         """is_concept uses an explicitly passed overlay, not get_active_overlay."""
-        from silica.kernel.overlay import DomainOverlay
+        from silica.kernel.text.overlay import DomainOverlay
         import re
         block_bp = DomainOverlay(
             stopwords=frozenset(),
             noise_patterns=(re.compile(r"^Backpropagation$", re.IGNORECASE),),
         )
-        from silica.kernel.recon import is_concept
+        from silica.kernel.text.recon import is_concept
         assert not is_concept("Backpropagation", overlay=block_bp)
         assert is_concept("Backpropagation", overlay=DEFAULT_OVERLAY)
 
     def test_explicit_stopword_overlay(self):
         """is_concept filters a word that is a stopword only in the explicit overlay."""
-        from silica.kernel.overlay import DomainOverlay
+        from silica.kernel.text.overlay import DomainOverlay
         custom_overlay = DomainOverlay(
             stopwords=frozenset({"neuralnetwork"}),
             noise_patterns=(),
         )
-        from silica.kernel.recon import is_concept
+        from silica.kernel.text.recon import is_concept
         assert not is_concept("neuralnetwork", overlay=custom_overlay)
 
     def test_none_overlay_uses_active(self, monkeypatch):
         """is_concept(s, overlay=None) falls back to get_active_overlay()."""
-        from silica.kernel.overlay import DomainOverlay
+        from silica.kernel.text.overlay import DomainOverlay
         sentinel = DomainOverlay(
             stopwords=frozenset({"sentinel_word"}),
             noise_patterns=(),
         )
-        monkeypatch.setattr("silica.kernel.recon.get_active_overlay", lambda: sentinel)
-        from silica.kernel.recon import is_concept
+        monkeypatch.setattr("silica.kernel.text.recon.get_active_overlay", lambda: sentinel)
+        from silica.kernel.text.recon import is_concept
         assert not is_concept("sentinel_word")
 
 
@@ -213,7 +213,7 @@ class TestIsConceptOverlayArg:
 
 class TestStripMath:
     def test_strips_display_and_inline_spans(self):
-        from silica.kernel.text import strip_math
+        from silica.kernel.text.text import strip_math
         out = strip_math(
             r"prosa $$\sum_{i} x_i$$ poi $\mathbb{R}$ e \[ \int f \] e \( \alpha \) fine"
         )
@@ -222,14 +222,14 @@ class TestStripMath:
         assert "prosa" in out and "fine" in out
 
     def test_strips_residual_commands_outside_spans(self):
-        from silica.kernel.text import strip_math
+        from silica.kernel.text.text import strip_math
         out = strip_math(r"il vettore \mathbf{w} ha norma \leq uno")
         for junk in ("mathbf", "leq"):
             assert junk not in out
         assert "vettore" in out and "norma" in out and "uno" in out
 
     def test_leaves_prose_untouched_and_is_pure(self):
-        from silica.kernel.text import strip_math
+        from silica.kernel.text.text import strip_math
         src = "La rete neurale calcola il gradiente."
         out = strip_math(src)
         assert out == src                      # no math -> content unchanged

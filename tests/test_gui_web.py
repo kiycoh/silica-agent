@@ -731,7 +731,7 @@ def test_find_endpoint_requires_a_query(client):
 
 def test_find_endpoint_reports_empty_index_gracefully(client, tmp_path, monkeypatch):
     tc, _server = client
-    monkeypatch.setattr("silica.kernel.embed._index_path", lambda: tmp_path / "empty.json")
+    monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: tmp_path / "empty.json")
     r = tc.get("/find", params={"q": "gears"})
     assert r.status_code == 200
     # Both legs empty (embed + co-occurrence) → the facade reports no index.
@@ -740,11 +740,11 @@ def test_find_endpoint_reports_empty_index_gracefully(client, tmp_path, monkeypa
 
 def test_find_endpoint_renders_results_as_note_links(client, tmp_path, monkeypatch):
     from unittest.mock import MagicMock, patch
-    from silica.kernel.embed import EmbedStore
+    from silica.kernel.recall.embed import EmbedStore
 
     tc, _server = client
     idx = tmp_path / "embeddings.json"
-    monkeypatch.setattr("silica.kernel.embed._index_path", lambda: idx)
+    monkeypatch.setattr("silica.kernel.recall.embed._index_path", lambda: idx)
     store = EmbedStore(idx)
     store.upsert("Concepts/A", "A", [1.0, 0.0])
     store.save()

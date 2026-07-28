@@ -11,7 +11,7 @@ from __future__ import annotations
 import orjson
 import pytest
 
-from silica.kernel.embed import EmbedStore
+from silica.kernel.recall.embed import EmbedStore
 
 
 def test_binary_roundtrip_preserves_vectors(tmp_path):

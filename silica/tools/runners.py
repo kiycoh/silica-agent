@@ -132,7 +132,7 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
     latter catches "ROS" / "JSON in ROS 2" where bodies diverge but titles are
     clearly related.
     """
-    from silica.kernel.embed import get_store, _cosine
+    from silica.kernel.recall.embed import get_store, _cosine
     from silica.config import CONFIG as _C
 
     store = get_store()
@@ -213,7 +213,7 @@ def _pairs_to_items(pairs: list[dict]) -> list[WorkItem]:
 
         # The more reliable note is the merge target; the other is the source of
         # new info. Reliability first, length only to break a tie within a tier.
-        from silica.kernel.contested import merge_rank
+        from silica.kernel.write.contested import merge_rank
         if merge_rank(body_tgt) >= merge_rank(body_src):
             larger, smaller, smaller_body = target, source, body_src
         else:
@@ -378,8 +378,8 @@ def silica_generate_taxonomy(
 
     from silica.agent.llm import call_llm
     from silica.config import CONFIG
-    from silica.kernel.sanitize import parse_json
-    from silica.kernel.taxonomy import (
+    from silica.kernel.text.sanitize import parse_json
+    from silica.kernel.organize.taxonomy import (
         TAXONOMY_GENERATION_PROMPT,
         TAXONOMY_MERGE_BLOCK,
         Taxonomy,
@@ -528,7 +528,7 @@ def silica_run_organizer(
     automatic rollback if the post-move lint gate fails. To move a single note
     directly, use silica_move instead.
     """
-    from silica.kernel.taxonomy import load_taxonomy
+    from silica.kernel.organize.taxonomy import load_taxonomy
     from silica.router.organize_fsm import OrganizerFSM
 
     taxonomy = load_taxonomy(taxonomy_path or None)

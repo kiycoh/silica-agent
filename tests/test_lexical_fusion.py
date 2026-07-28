@@ -1,4 +1,4 @@
-from silica.kernel import relatedness as R
+from silica.kernel.recall import relatedness as R
 
 
 def test_lexical_leg_folds_into_fusion():

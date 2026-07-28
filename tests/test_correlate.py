@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.correlate import (
+from silica.kernel.link.correlate import (
     jaccard,
     recompute_all_edges,
     refresh_edges,
     topk_set,
 )
-from silica.kernel.cooccurrence import CooccurStore
+from silica.kernel.recall.cooccurrence import CooccurStore
 
 
 def _nodes(**counts: int) -> dict:

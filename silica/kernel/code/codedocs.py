@@ -16,8 +16,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from silica.kernel import codeast, frontmatter, gitstate, paths
-from silica.kernel.gitstate import CommitInfo
+from silica.kernel.code import codeast, gitstate
+
+from silica.kernel.write import frontmatter
+
+from silica.kernel.recall import paths
+from silica.kernel.code.gitstate import CommitInfo
 
 CHANGE_COSMETIC = "cosmetic"
 CHANGE_STRUCTURAL = "structural"
@@ -86,7 +90,7 @@ def iter_documenting_notes(vault: Path | str):
 
 def _skeleton_of(src: str, path: str, language):
     if path.lower().endswith(".ipynb"):
-        from silica.kernel import ipynb
+        from silica.kernel.code import ipynb
         cells = ipynb.parse_cells(src)          # ValueError → caller's fallback
         lang = ipynb.CODEAST_LANGUAGE.get(cells.language)
         if lang is None:

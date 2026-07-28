@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from silica.kernel import paths
+from silica.kernel.recall import paths
 
 logger = logging.getLogger(__name__)
 

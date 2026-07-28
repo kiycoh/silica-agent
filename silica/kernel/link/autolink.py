@@ -221,7 +221,7 @@ def autolink(
     # skip that title entirely regardless of where in the body it appears.
     # Path-qualified targets ([[topics/Python]]) also register their basename
     # ("python") so we don't add a second, redundant [[Python]] (audit §3).
-    from silica.kernel.ast import WIKILINK_TARGET_RE
+    from silica.kernel.link.ast import WIKILINK_TARGET_RE
     existing_links: set[str] = set()
     for _m in WIKILINK_TARGET_RE.findall(body):
         t = _m.strip().lower()

@@ -42,8 +42,8 @@ def test_vault_no_args_shows_detected_language(tmp_path, monkeypatch, capsys):
 
 
 def test_vault_no_args_warns_on_frozen_store_mismatch(tmp_path, monkeypatch, capsys):
-    import silica.kernel.cooccurrence as cooc_mod
-    from silica.kernel.cooccurrence import CooccurStore
+    import silica.kernel.recall.cooccurrence as cooc_mod
+    from silica.kernel.recall.cooccurrence import CooccurStore
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
     monkeypatch.setattr(CONFIG, "backend", "fs")

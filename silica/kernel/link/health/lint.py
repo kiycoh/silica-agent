@@ -27,10 +27,10 @@ import re
 from collections import Counter
 from typing import Callable, NamedTuple
 
-from silica.kernel import frontmatter
-from silica.kernel.ast import extract_callouts, parse_headings
-from silica.kernel.ofm import CALLOUT_TYPES
-from silica.kernel.title import title_key
+from silica.kernel.write import frontmatter
+from silica.kernel.link.ast import extract_callouts, parse_headings
+from silica.kernel.link.ofm import CALLOUT_TYPES
+from silica.kernel.text.title import title_key
 
 # ---------------------------------------------------------------------------
 # Code stripping — regex, NOT markdown_it (preserves $, \\, ** for the checks)

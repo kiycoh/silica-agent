@@ -27,8 +27,8 @@ from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
 from silica.driver.base import NoteRef, Txn
-from silica.kernel.ops import InverseOp, InverseOpKind, OpType, Op
-from silica.kernel.ops_io import parse_ops, load_ops
+from silica.kernel.write.ops import InverseOp, InverseOpKind, OpType, Op
+from silica.kernel.write.ops_io import parse_ops, load_ops
 from silica.tools import tool
 
 logger = logging.getLogger(__name__)

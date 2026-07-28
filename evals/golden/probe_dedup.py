@@ -65,7 +65,7 @@ def _hub_keys(vault) -> set[str]:
     """
     import orjson
 
-    from silica.kernel.paths import index_dir_for
+    from silica.kernel.recall.paths import index_dir_for
 
     p = index_dir_for(str(vault)) / "clusters_ctx.json"
     if not p.exists():
@@ -86,9 +86,9 @@ def _cos(a, b) -> float:
 
 def run(vault, store, *, embed_store=None, verbose: bool = False) -> dict:
     from silica.config import CONFIG
-    from silica.kernel.health import iter_notes
-    from silica.kernel.paths import is_inbox_path
-    from silica.kernel.relatedness import related_notes
+    from silica.kernel.link.health import iter_notes
+    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.recall.relatedness import related_notes
     from silica.router.states.collision import _names_agree, route_concept
 
     if embed_store is None or not len(embed_store):

@@ -10,9 +10,9 @@ gets auto-tiered, no embedder-free score is compared against a cosine tau).
 """
 from __future__ import annotations
 
-from silica.kernel import contested
+from silica.kernel.write import contested
 from silica.kernel.analyst_plan import build_task_plan
-from silica.kernel.graph_report.models import (
+from silica.kernel.report.graph_report.models import (
     ClusterStat,
     MissingHub,
     StaleLink,
@@ -72,7 +72,7 @@ def test_parse_stamps_reads_every_claim_not_just_the_first():
 
 
 def test_temporal_stat_is_populated_from_the_analytics_body_scan(tmp_path, monkeypatch):
-    from silica.kernel.graph_report import compute as compute_mod
+    from silica.kernel.report.graph_report import compute as compute_mod
 
     human = "# Plain note\nno frontmatter, so the agent never claimed it\n"
     distilled = (
@@ -112,7 +112,7 @@ def test_temporal_stat_absent_without_analytics():
 
 
 def compute_no_analytics(nodes):
-    from silica.kernel.graph_report import compute as compute_mod
+    from silica.kernel.report.graph_report import compute as compute_mod
     return compute_mod.compute_report(analytics=False, _nodes_edges_override=(nodes, []))
 
 
@@ -120,7 +120,7 @@ def compute_no_analytics(nodes):
 
 def test_energy_persists_its_decomposition(tmp_path, monkeypatch):
     import orjson
-    from silica.kernel.graph_report.render import write_report
+    from silica.kernel.report.graph_report.render import write_report
 
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(tmp_path), raising=False)
     energy_file = tmp_path / ".silica" / "energy.json"
@@ -154,7 +154,7 @@ def test_energy_persists_its_decomposition(tmp_path, monkeypatch):
 # --- 7: dedup degrades to the embedder-free leg instead of reporting zero ----
 
 def test_duplicate_pairs_fall_back_to_minhash_without_an_embedder(monkeypatch):
-    from silica.kernel.graph_report import embed_signals
+    from silica.kernel.report.graph_report import embed_signals
 
     twin = "Support Vector Data Description is a one-class boundary method.\n"
     bodies = {
@@ -173,7 +173,7 @@ def test_duplicate_pairs_fall_back_to_minhash_without_an_embedder(monkeypatch):
         def __len__(self): return 0
 
     monkeypatch.setattr("silica.driver.DRIVER", _Driver(), raising=False)
-    monkeypatch.setattr("silica.kernel.embed.get_store", lambda: _EmptyStore())
+    monkeypatch.setattr("silica.kernel.recall.embed.get_store", lambda: _EmptyStore())
 
     report = _report(pagerank_map={k: 0.0 for k in bodies})
     borderline, confirmed = embed_signals._compute_duplicate_pairs(report)
@@ -190,6 +190,6 @@ def test_duplicate_pairs_fall_back_to_minhash_without_an_embedder(monkeypatch):
     def _boom():
         raise RuntimeError("no index")
 
-    monkeypatch.setattr("silica.kernel.embed.get_store", _boom)
+    monkeypatch.setattr("silica.kernel.recall.embed.get_store", _boom)
     borderline_2, confirmed_2 = embed_signals._compute_duplicate_pairs(report)
     assert (borderline_2, confirmed_2) == (borderline, confirmed)

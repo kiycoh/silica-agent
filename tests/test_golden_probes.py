@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel import frontmatter
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
-from silica.kernel.health import integrity_probe, lint
+from silica.kernel.write import frontmatter
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.link.health import integrity_probe, lint
 from evals.golden import probe_classify, probe_links
 
 
@@ -56,7 +56,7 @@ def test_probe_classify_taxonomy_and_counting(synthetic_vault, tmp_path):
 
     m = probe_classify.run(synthetic_vault, store2)
 
-    from silica.kernel.classify import classify_notes
+    from silica.kernel.organize.classify import classify_notes
     domains = probe_classify.vault_domains(synthetic_vault)
     tax2 = probe_classify.derive_taxonomy(domains, store2)
     paths = probe_classify.domain_paths(synthetic_vault, domains)
@@ -69,7 +69,7 @@ def test_probe_classify_taxonomy_and_counting(synthetic_vault, tmp_path):
 
 def test_probe_dedup_skips_without_index(tmp_path):
     """No embed index ⇒ empty result, never a crash — the runner SKIPs it."""
-    from silica.kernel.cooccurrence import CooccurStore
+    from silica.kernel.recall.cooccurrence import CooccurStore
     from evals.golden import probe_dedup
 
     out = probe_dedup.run(tmp_path, CooccurStore(path=tmp_path / "c.json"), embed_store=None)
@@ -80,8 +80,8 @@ def test_probe_dedup_skips_without_index(tmp_path):
 def test_probe_dedup_fp_counts_mechanical_merge(tmp_path):
     """Two same-domain notes whose names fold to one key (Foo ⇄ Foo 1) at cos≈1
     are auto-routed `patch` — the FP arm must count that as an auto-merge."""
-    from silica.kernel.cooccurrence import CooccurStore
-    from silica.kernel.embed import EmbedStore
+    from silica.kernel.recall.cooccurrence import CooccurStore
+    from silica.kernel.recall.embed import EmbedStore
     from evals.golden import probe_dedup
 
     (tmp_path / "D").mkdir()

@@ -17,7 +17,7 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from silica.kernel.cooccurrence import CooccurStore
+    from silica.kernel.recall.cooccurrence import CooccurStore
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def build_vault_map(
 ) -> str | None:
     try:
         from silica.config import CONFIG
-        from silica.kernel.cooccurrence import get_cooccur_store
+        from silica.kernel.recall.cooccurrence import get_cooccur_store
 
         store = store if store is not None else get_cooccur_store(lang=CONFIG.cooccurrence_lang)
         if len(store) == 0:
@@ -158,7 +158,7 @@ def build_vault_map(
         # Tail of log.md — the agent sees what happened recently without
         # having to open the run JSON (Task 2: human-readable append-only journal).
         try:
-            from silica.kernel.run_log import tail_log
+            from silica.kernel.recall.run_log import tail_log
 
             recent = tail_log(log_tail)
             if recent:

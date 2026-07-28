@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import orjson
 
-from silica.kernel.embed import EmbedStore, refresh_note
-from silica.kernel import cooccurrence as cooc
+from silica.kernel.recall.embed import EmbedStore, refresh_note
+from silica.kernel.recall import cooccurrence as cooc
 
 
 class _Emb:
@@ -54,8 +54,8 @@ def test_cooccur_build_index_defers_save(tmp_path):
 
 def test_flush_indexes_persists_both_singletons(tmp_path, monkeypatch):
     """_flush_indexes saves the deferred embed + cooccur upserts once."""
-    import silica.kernel.embed as embed
-    import silica.kernel.cooccurrence as cooc_mod
+    import silica.kernel.recall.embed as embed
+    import silica.kernel.recall.cooccurrence as cooc_mod
     from silica.router.orchestrator import InjectorFSM
 
     ei = tmp_path / "embeddings.json"
@@ -78,7 +78,7 @@ def test_flush_indexes_persists_both_singletons(tmp_path, monkeypatch):
 
 def test_flush_skips_when_not_dirty(tmp_path, monkeypatch):
     """No writes this run (or embedder down) → no index rewrite at all."""
-    import silica.kernel.embed as embed
+    import silica.kernel.recall.embed as embed
     from silica.router.orchestrator import InjectorFSM
 
     ei = tmp_path / "embeddings.json"
@@ -103,7 +103,7 @@ def _seed_index(embed, ei, entries):
 
 
 def test_reconcile_embeds_only_missing(tmp_path, monkeypatch):
-    import silica.kernel.embed as embed
+    import silica.kernel.recall.embed as embed
     import silica.router.orchestrator as orch
     from silica.driver.base import NoteRef
     from types import SimpleNamespace
@@ -124,7 +124,7 @@ def test_reconcile_embeds_only_missing(tmp_path, monkeypatch):
 
 def test_reconcile_skips_cold_index(tmp_path, monkeypatch):
     """An empty index is a cold build — reconcile must not implicitly embed all."""
-    import silica.kernel.embed as embed
+    import silica.kernel.recall.embed as embed
     import silica.router.orchestrator as orch
     from types import SimpleNamespace
 
@@ -139,7 +139,7 @@ def test_reconcile_skips_cold_index(tmp_path, monkeypatch):
 
 
 def test_reconcile_skips_when_drift_exceeds_cap(tmp_path, monkeypatch):
-    import silica.kernel.embed as embed
+    import silica.kernel.recall.embed as embed
     import silica.router.orchestrator as orch
     from silica.driver.base import NoteRef
     from types import SimpleNamespace
@@ -165,7 +165,7 @@ def test_reconcile_skips_when_drift_exceeds_cap(tmp_path, monkeypatch):
 def test_reconcile_prunes_out_of_band_deletion(tmp_path, monkeypatch):
     """A note deleted from the vault (Obsidian/rm) leaves a phantom vector;
     the reconcile drops it. No embedding — the ADD leg never runs here."""
-    import silica.kernel.embed as embed
+    import silica.kernel.recall.embed as embed
     import silica.router.orchestrator as orch
     from silica.driver.base import NoteRef
     from types import SimpleNamespace
@@ -186,7 +186,7 @@ def test_reconcile_prunes_out_of_band_deletion(tmp_path, monkeypatch):
 def test_reconcile_refuses_prune_on_empty_live_view(tmp_path, monkeypatch):
     """An empty vault view against a populated index is a misconfig (wrong vault
     path), not 'user deleted everything' — refuse to prune, defer to /embed."""
-    import silica.kernel.embed as embed
+    import silica.kernel.recall.embed as embed
     import silica.router.orchestrator as orch
     from types import SimpleNamespace
 
@@ -203,7 +203,7 @@ def test_reconcile_refuses_prune_on_empty_live_view(tmp_path, monkeypatch):
 def test_reconcile_refuses_prune_when_view_half_missing(tmp_path, monkeypatch):
     """A view missing more than half a populated store smells like a partial fs
     read — refuse to prune (ratio guard), keep every entry."""
-    import silica.kernel.embed as embed
+    import silica.kernel.recall.embed as embed
     import silica.router.orchestrator as orch
     from silica.driver.base import NoteRef
     from types import SimpleNamespace

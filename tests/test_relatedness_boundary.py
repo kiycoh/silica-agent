@@ -20,35 +20,35 @@ import re
 SILICA_ROOT = Path(__file__).resolve().parent.parent / "silica"
 
 _LEG_IMPORT_RE = re.compile(
-    r"from silica\.kernel\.(embed|cooccurrence) import|"
-    r"import silica\.kernel\.(embed|cooccurrence)\b|"
-    # `from silica.kernel import cooccurrence` (any name position, aliased or
+    r"from silica\.kernel\.recall\.(embed|cooccurrence) import|"
+    r"import silica\.kernel\.recall\.(embed|cooccurrence)\b|"
+    # `from silica.kernel.recall import cooccurrence` (any name position, aliased or
     # not) is functionally the same direct leg import — without this
     # alternative it slipped past the regex, defeating the test's documented
     # purpose of forcing an explicit facade-or-allowlist decision. `\b` keeps
     # non-leg names like `embed_signals` from matching.
-    r"from silica\.kernel import [^\n]*\b(embed|cooccurrence)\b"
+    r"from silica\.kernel\.recall import [^\n]*\b(embed|cooccurrence)\b"
 )
 
 # The legs themselves are out of scope — they ARE the implementation.
-LEGS = {"kernel/embed.py", "kernel/cooccurrence.py"}
+LEGS = {"kernel/recall/embed.py", "kernel/recall/cooccurrence.py"}
 
 # module (relative to silica/) → why direct leg access is legitimate
 ALLOWED = {
-    "kernel/relatedness.py":        "the facade itself",
-    "kernel/correlate.py":          "owns note_edges computation; needs cooccur_key for keyspace normalization, not relatedness ranking",
-    "kernel/recall_weights.py":     "constructs recall-outcome weight store to inject into the facade; needs cooccur_key for keyspace normalization",
-    "kernel/run_substrate.py":      "constructs stores to inject into the facade",
-    "kernel/perception.py":         "constructs stores to inject into the facade (facade_retrieve, the shared fresh-query wiring)",
-    "kernel/graph_report/embed_signals.py": "pairwise cosine (missing links, dup pairs)",
-    "kernel/graph_report/cooccur_delta.py": "co-occurrence delta + cosine-band filter + store injection",
-    "kernel/graph_export.py":       "cluster labels via CooccurStore.community_labels, not relatedness ranking",
-    "kernel/mindmap.py":            "constructs stores to inject into the facade (mindmap latent leg)",
-    "kernel/memory_lane.py":        "constructs the memory-lane store pair to inject into the facade (ADR-0019), never ranks",
-    "kernel/vault_map.py":          "session-start vault map via CooccurStore (to_networkx/node_label, top_stems), not relatedness ranking",
-    "kernel/classify.py":           "L1 tokenizer/concept matching, not relatedness ranking",
-    "kernel/keyphrase.py":          "pairwise cosine (candidate phrase vs document theme) for concept reranking, not note ranking",
-    "kernel/episodic.py":           "pairwise cosine on its own fact vecs (episodic recall scoring), not note relatedness ranking",
+    "kernel/recall/relatedness.py":        "the facade itself",
+    "kernel/link/correlate.py":          "owns note_edges computation; needs cooccur_key for keyspace normalization, not relatedness ranking",
+    "kernel/recall/recall_weights.py":     "constructs recall-outcome weight store to inject into the facade; needs cooccur_key for keyspace normalization",
+    "kernel/recall/run_substrate.py":      "constructs stores to inject into the facade",
+    "kernel/recall/perception.py":         "constructs stores to inject into the facade (facade_retrieve, the shared fresh-query wiring)",
+    "kernel/report/graph_report/embed_signals.py": "pairwise cosine (missing links, dup pairs)",
+    "kernel/report/graph_report/cooccur_delta.py": "co-occurrence delta + cosine-band filter + store injection",
+    "kernel/recall/graph_export.py":       "cluster labels via CooccurStore.community_labels, not relatedness ranking",
+    "kernel/recall/mindmap.py":            "constructs stores to inject into the facade (mindmap latent leg)",
+    "kernel/recall/memory_lane.py":        "constructs the memory-lane store pair to inject into the facade (ADR-0019), never ranks",
+    "kernel/recall/vault_map.py":          "session-start vault map via CooccurStore (to_networkx/node_label, top_stems), not relatedness ranking",
+    "kernel/organize/classify.py":           "L1 tokenizer/concept matching, not relatedness ranking",
+    "kernel/text/keyphrase.py":          "pairwise cosine (candidate phrase vs document theme) for concept reranking, not note ranking",
+    "kernel/recall/episodic.py":           "pairwise cosine on its own fact vecs (episodic recall scoring), not note relatedness ranking",
     "router/coordinator.py":        "constructs stores to inject into the facade",
     "router/organize_fsm.py":       "L1 co-occurrence classification, not relatedness ranking",
     "router/orchestrator.py":       "co-occurrence index freshness hook (build_index)",

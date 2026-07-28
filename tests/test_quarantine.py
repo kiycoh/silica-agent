@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import json
 
-from silica.kernel.cooccurrence import CooccurStore
-from silica.kernel.paths import quarantine
-from silica.kernel.provenance import append_record, read_records
+from silica.kernel.recall.cooccurrence import CooccurStore
+from silica.kernel.recall.paths import quarantine
+from silica.kernel.write.provenance import append_record, read_records
 
 
 def test_quarantine_never_clobbers(tmp_path):

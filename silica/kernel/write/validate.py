@@ -6,9 +6,9 @@ import logging
 import re
 from pydantic import BaseModel
 from silica.driver import DRIVER
-from silica.kernel.ops import Op, OpType
-from silica.kernel.templates import slugify
-from silica.kernel.ast import extract_links
+from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.templates import slugify
+from silica.kernel.link.ast import extract_links
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,7 @@ def validate_operations(
     write/patch ops whose math/code spans can't be located in their source
     excerpt (fabrication candidates). Never causes a rejection.
     """
-    from silica.kernel.ops_io import parse_ops
+    from silica.kernel.write.ops_io import parse_ops
     from silica.kernel.vault_manifest import active_write_dir, within
     ops_parsed = parse_ops(ops)
     ops = [op.model_copy(deep=True) for op in ops_parsed]
@@ -261,7 +261,7 @@ def validate_operations(
         nonlocal _title_gate_cache
         if _title_gate_cache is not None:
             return _title_gate_cache
-        from silica.kernel.title import title_key
+        from silica.kernel.text.title import title_key
         out: dict[str, tuple[str, str]] = {}
         try:
             norm_dir = (target_dir or "").replace("\\", "/").strip("/")
@@ -300,7 +300,7 @@ def validate_operations(
             # target folder is the SAME note under a cosmetic variant
             # («Machine Learning (9 CFU)») — mechanical coercion to patch,
             # extending the exact-path coercion above.
-            from silica.kernel.title import title_key
+            from silica.kernel.text.title import title_key
             stem = os.path.splitext(os.path.basename(op.path))[0]
             match = _target_dir_titles().get(title_key(stem))
             if match is not None:
@@ -383,7 +383,7 @@ def validate_operations(
         body = op.snippet or op.content or ""
         if not source_text.strip() or not body:
             return
-        from silica.kernel.provenance import ungrounded_spans
+        from silica.kernel.write.provenance import ungrounded_spans
         spans = ungrounded_spans(body, source_text)
         if spans:
             logger.warning(
@@ -420,7 +420,7 @@ def validate_operations(
         body = op.snippet or op.content or ""
         if not source_text.strip() or not body.strip():
             return None
-        from silica.kernel.provenance import nonextractive_lines
+        from silica.kernel.write.provenance import nonextractive_lines
         bad = nonextractive_lines(body, source_text)
         if bad:
             return ("extractive: %d body line(s) not verbatim from source: %s"
@@ -523,7 +523,7 @@ def validate_operations(
                     # token, same Snowball stem). Same unique-match-only
                     # discipline as above.
                     from silica.config import CONFIG
-                    from silica.kernel.text import stem_word
+                    from silica.kernel.text.text import stem_word
 
                     lang = getattr(CONFIG, "cooccurrence_lang", "auto")
                     hs = frozenset(
@@ -549,7 +549,7 @@ def validate_operations(
             # Guard the whole configured inbox tree, not just the folders of the
             # current run — a patch aimed at a *different* Inbox subfolder used
             # to slip through validate and die (or land) at WRITE.
-            from silica.kernel.paths import is_inbox_path
+            from silica.kernel.recall.paths import is_inbox_path
             forbidden = (
                 is_inbox_path(path)
                 or any(_is_within_dir(path_abs, folder) for folder in inbox_folders)
@@ -607,7 +607,7 @@ def validate_operations(
             # C3 gate, band 2: fuzzy-near an existing title (Descriptor vs
             # Description) → defer to the review queue so the dedup judge
             # decides — never a hard block, never a silent fourth duplicate.
-            from silica.kernel.title import near_titles
+            from silica.kernel.text.title import near_titles
             stem = os.path.splitext(os.path.basename(path))[0]
             near = near_titles(stem, _target_dir_title_list())
             if near:

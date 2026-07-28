@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from silica.kernel.autolink import autolink, build_title_index
+from silica.kernel.link.autolink import autolink, build_title_index
 
 GOLDEN_PATH = Path(__file__).parent / "autolink_cases.json"
 

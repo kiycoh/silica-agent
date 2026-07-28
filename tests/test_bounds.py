@@ -7,7 +7,7 @@ from silica.agent.bounds import (
     make_no_info_loss_guard,
     _wikilinks,
 )
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 
 
 def _op(op_type, path, *, heading="H", content=None, snippet=""):

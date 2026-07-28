@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 
 from evals.probe_ppr_phase0 import ppr
-from silica.kernel.health import K, eligible_pairs, wikilink_graph
+from silica.kernel.link.health import K, eligible_pairs, wikilink_graph
 
 HOPS = 2          # fixed in phase 0 (section 5-bis): hops=3 is over the 50ms budget
 ALPHA = 0.5       # and buys no reach, the 3-hop closure is already saturated
@@ -89,7 +89,7 @@ def _swap(**attrs):
     are looked up as module globals by all four call sites, so one rebind
     covers every lane and the arm costs zero product diff.
     """
-    import silica.kernel.relatedness as R
+    import silica.kernel.recall.relatedness as R
 
     saved = {name: getattr(R, name) for name in attrs}
     for name, fn in attrs.items():
@@ -129,7 +129,7 @@ def _score(topk: dict[str, list[str]], eligible: list[tuple[str, str]]) -> dict:
 
 def _run_arm(endpoints, eligible, store, es, *, expand=False,
              profile_fn=None, rank_fn=None) -> dict:
-    from silica.kernel.relatedness import related_notes
+    from silica.kernel.recall.relatedness import related_notes
 
     swaps = {}
     if profile_fn:
@@ -154,7 +154,7 @@ def _run_arm(endpoints, eligible, store, es, *, expand=False,
 # ---------------------------------------------------------------------------
 
 def _legs(key: str, store, es, *, pool: int):
-    from silica.kernel.relatedness import _cooccur_ranking, _embed_ranking
+    from silica.kernel.recall.relatedness import _cooccur_ranking, _embed_ranking
 
     blocked = {key}
     embed_rank = _embed_ranking(es, key, k=pool, exclude=blocked)
@@ -167,8 +167,8 @@ def _legs(key: str, store, es, *, pool: int):
 
 def _fused(embed_rank, cooc_rank, edges_rank) -> dict[str, float]:
     """Reconstruct `_fuse`'s scores. Self-checked against `related_notes`."""
-    from silica.kernel.graph_export import is_vault_artifact
-    from silica.kernel.relatedness import _rrf_fuse
+    from silica.kernel.recall.graph_export import is_vault_artifact
+    from silica.kernel.recall.relatedness import _rrf_fuse
 
     rankings = []
     if embed_rank is not None:
@@ -195,7 +195,7 @@ def ceiling(missed, store, es, *, pool: int, arm_a_topk: dict[str, list[str]]) -
                 competitor loses its cooccur term. If this fails, no cooccur
                 ranking whatsoever puts the pair in the top-10.
     """
-    from silica.kernel.relatedness import RRF_K
+    from silica.kernel.recall.relatedness import RRF_K
 
     cache: dict[str, tuple] = {}
 
@@ -249,8 +249,8 @@ def ceiling(missed, store, es, *, pool: int, arm_a_topk: dict[str, list[str]]) -
 def run(vault: Path, *, hops: int = HOPS, alpha: float = ALPHA,
         top_n: int = TOP_STEMS, sweep: bool = False) -> dict:
     from evals.golden.runner import _open_stores, vault_digest
-    from silica.kernel import correlate
-    from silica.kernel.relatedness import _POOL_MIN
+    from silica.kernel.link import correlate
+    from silica.kernel.recall.relatedness import _POOL_MIN
 
     store, embed_store = _open_stores(vault)
     es = embed_store if (embed_store is not None and len(embed_store)) else None
@@ -423,7 +423,7 @@ def diagnose(vault: Path, *, samples: int = 100, record: Path | None = None) -> 
     import random
 
     from evals.golden.runner import _open_stores
-    from silica.kernel.relatedness import _concept_idf
+    from silica.kernel.recall.relatedness import _concept_idf
 
     store, _embed = _open_stores(vault)
     adj = store.adjacency()

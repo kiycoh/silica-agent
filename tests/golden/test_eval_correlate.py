@@ -10,7 +10,7 @@ and the union >= expanded invariant.
 """
 from __future__ import annotations
 
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
 from evals.golden import probe_correlate
 
 

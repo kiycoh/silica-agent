@@ -1,6 +1,6 @@
 """kernel/codewiki — partition + digest for the behavioral code wiki."""
-from silica.kernel.codegraph import CodeGraph
-from silica.kernel.codewiki import Subsystem, module_roots, partition, source_root
+from silica.kernel.code.codegraph import CodeGraph
+from silica.kernel.code.codewiki import Subsystem, module_roots, partition, source_root
 
 
 def _graph(paths, entries=None):
@@ -127,7 +127,7 @@ def test_flat_repo_root_excludes_tests_and_docs():
 # Task 6: SubsystemDigest
 # ---------------------------------------------------------------------------
 
-from silica.kernel.codewiki import build_digests, cross_edges, edges_ref
+from silica.kernel.code.codewiki import build_digests, cross_edges, edges_ref
 
 
 def _rich_graph():
@@ -224,7 +224,7 @@ def test_cross_edges_and_ref(tmp_path):
 # Task 7: flow sketches + deterministic mermaid
 # ---------------------------------------------------------------------------
 
-from silica.kernel.codewiki import call_adjacency, flow_sketches, render_mermaid
+from silica.kernel.code.codewiki import call_adjacency, flow_sketches, render_mermaid
 
 
 def test_flow_sketches_deterministic_and_capped():
@@ -256,7 +256,7 @@ def test_wiki_over_mixed_language_fixture(tmp_path):
     # end-to-end: build_codegraph → partition → build_digests on a repo mixing
     # java, c, and bare html; the html file rides along, the code drives
     import subprocess
-    from silica.kernel.codegraph import build_codegraph
+    from silica.kernel.code.codegraph import build_codegraph
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
 
     def w(rel, text):

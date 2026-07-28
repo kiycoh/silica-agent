@@ -25,14 +25,14 @@ from typing import Any
 import numpy as np
 import orjson
 
-from silica.kernel.paths import atomic_write_bytes
+from silica.kernel.recall.paths import atomic_write_bytes
 
 _LEGACY_INDEX_PATH = Path.home() / ".silica" / "index" / "embeddings.json"
 
 
 def _index_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
 
     return paths.index_file("embeddings")
 
@@ -449,7 +449,7 @@ def get_store() -> "EmbedStore":
     re-deserialising the index, and the write path mutates the same instance
     every reader sees (no reload needed for consistency). Use `clear()` in tests.
     """
-    from silica.kernel.paths import path_keyed_singleton
+    from silica.kernel.recall.paths import path_keyed_singleton
     return path_keyed_singleton(_STORE_CACHE, str(_index_path()), EmbedStore)
 
 
@@ -472,7 +472,7 @@ def _note_text(title: str, body: str, *, folder: str = "") -> str:
     Images and other media embeds are stripped via kernel.media.strip_images
     before the text is truncated, so they never pollute the embedding space.
     """
-    from silica.kernel.media import strip_images
+    from silica.kernel.text.media import strip_images
     prefix = f"[{folder}] " if folder else ""
     combined = f"{prefix}{title}\n\n{strip_images(body)}"
     return combined[:_MAX_CHARS]
@@ -587,7 +587,7 @@ def build_index(
                          content_hash=_embed_signature(name, body, folder=f, model=_model))
 
     if prune:
-        from silica.kernel.paths import in_folder
+        from silica.kernel.recall.paths import in_folder
         live = {path for path, _, _ in notes}
         for p in [p for p in store.paths() if p not in live and in_folder(p, folder)]:
             store.delete(p)

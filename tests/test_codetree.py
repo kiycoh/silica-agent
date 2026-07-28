@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import subprocess
 
-from silica.kernel import codetree
+from silica.kernel.code import codetree
 
 
 def _init_repo(path):
@@ -121,7 +121,7 @@ def test_directory_binding_is_never_stale(tmp_path):
 def test_no_repo_returns_empty(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
     vault.mkdir()
-    monkeypatch.setattr("silica.kernel.paths.repo_root_for", lambda v: None)
+    monkeypatch.setattr("silica.kernel.recall.paths.repo_root_for", lambda v: None)
     assert codetree.why_for(vault, "src") == ([], 0)
 
 
@@ -138,7 +138,7 @@ def test_no_git_degrades_to_not_stale(tmp_path):
 
 
 def test_silica_code_why_tool_shape(tmp_path, monkeypatch):
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
     from silica.tools.codedocs_tool import silica_code_why
 
     vault = _tree(tmp_path)

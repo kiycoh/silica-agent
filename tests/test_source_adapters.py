@@ -136,7 +136,7 @@ def test_code_stub_says_so_when_the_parser_fails(code_repo, monkeypatch):
     """A parser silica cannot drive must never render as "(no imports)": that
     ships a note asserting a real file is empty (tree-sitter 0.26 did exactly
     this, silently, for every language)."""
-    from silica.kernel.codeast import ModuleSkeleton
+    from silica.kernel.code.codeast import ModuleSkeleton
     from silica.sources import code as code_mod
 
     monkeypatch.setattr(
@@ -152,10 +152,10 @@ def test_code_stub_says_so_when_the_parser_fails(code_repo, monkeypatch):
 def test_code_note_name_qualifies_and_folds_package_init():
     from silica.sources.code import code_note_name
 
-    assert code_note_name("silica/kernel/codegraph.py") == "silica.kernel.codegraph"
+    assert code_note_name("silica/kernel/code/codegraph.py") == "silica.kernel.code.codegraph"
     assert code_note_name("m.py") == "m"
     # package import links by the package name, not the __init__ file
-    assert code_note_name("silica/kernel/codeast/__init__.py") == "silica.kernel.codeast"
+    assert code_note_name("silica/kernel/code/codeast/__init__.py") == "silica.kernel.code.codeast"
     # degenerate root-level __init__: no parent package to fold to
     assert code_note_name("__init__.py") == "__init__"
 

@@ -130,12 +130,12 @@ class Coordinator:
         """
         try:
             from silica.config import CONFIG
-            from silica.kernel.cooccurrence import cooccur_key, get_cooccur_store
-            from silica.kernel.embed import get_store
-            from silica.kernel.relatedness import related_notes
+            from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
+            from silica.kernel.recall.embed import get_store
+            from silica.kernel.recall.relatedness import related_notes
 
             from silica.agent.providers import get_reranker
-            from silica.kernel.rerank import note_document, rerank_related
+            from silica.kernel.recall.rerank import note_document, rerank_related
 
             # cooccur_key (case-PRESERVED, .md-stripped) is the store keyspace; _norm_path
             # would lowercase and miss the case-preserving stored keys -> empty results.

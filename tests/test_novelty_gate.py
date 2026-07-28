@@ -52,9 +52,9 @@ def _run_gate(fsm, payload, tau, hits_by_name):
     embedder = MagicMock()
     embedder.embed.side_effect = lambda texts: [[float(i)] for i in range(len(texts))]
     with patch.object(s.orch.CONFIG, "novelty_tau", tau), \
-         patch("silica.kernel.embed.get_store", return_value=store), \
+         patch("silica.kernel.recall.embed.get_store", return_value=store), \
          patch("silica.agent.providers.get_embedder", return_value=embedder), \
-         patch("silica.kernel.paths.is_inbox_path", side_effect=lambda p: p.startswith("Inbox")):
+         patch("silica.kernel.recall.paths.is_inbox_path", side_effect=lambda p: p.startswith("Inbox")):
         return s.novelty_gate(fsm, payload)
 
 
@@ -62,7 +62,7 @@ def test_tau_zero_returns_payload_untouched():
     fsm = _gate_fsm()
     payload = _payload("A")
     with patch.object(s.orch.CONFIG, "novelty_tau", 0.0), \
-         patch("silica.kernel.embed.get_store",
+         patch("silica.kernel.recall.embed.get_store",
                side_effect=AssertionError("gate must not touch the store at tau=0")):
         out, n = s.novelty_gate(fsm, payload)
     assert out is payload and n == 0

@@ -39,7 +39,7 @@ def _questions():
 
 
 def test_load_index_probe_roundtrip(tmp_path, monkeypatch):
-    import silica.kernel.embed as embed_mod
+    import silica.kernel.recall.embed as embed_mod
 
     # Share one resolved embed index path between refresh and probe (unused here
     # since use_embedder=False, but keeps get_store offline and deterministic).

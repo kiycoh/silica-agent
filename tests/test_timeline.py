@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""silica.kernel.timeline — chronological index over dated notes."""
+"""silica.kernel.write.timeline — chronological index over dated notes."""
 from __future__ import annotations
 
-from silica.kernel.timeline import timeline
+from silica.kernel.write.timeline import timeline
 
 
 def _note(path, date="", session_id=""):

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Answer-time perception (silica/kernel/perception.py).
+"""Answer-time perception (silica/kernel/recall/perception.py).
 
 perceive() is the single assembly of recalled memory into model context —
 the LongMemEval harness consumes this same function, so these tests cover the
@@ -19,8 +19,8 @@ import pytest
 def _bind(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point CONFIG/DRIVER at a fresh fs vault; singletons reset per test."""
     import silica.driver
-    import silica.kernel.cooccurrence as cooc_mod
-    import silica.kernel.embed as embed_mod
+    import silica.kernel.recall.cooccurrence as cooc_mod
+    import silica.kernel.recall.embed as embed_mod
     from silica.config import CONFIG
 
     vault.mkdir(parents=True, exist_ok=True)
@@ -50,7 +50,7 @@ LONG_BODY = ("filler chatter " * 400) + "the yoga class is on Tuesday evening " 
 
 def test_best_window_is_public():
     # The harness used to import the private name; the seam is public now.
-    from silica.kernel.rerank import _best_window, best_window
+    from silica.kernel.recall.rerank import _best_window, best_window
 
     assert best_window is _best_window
 
@@ -60,7 +60,7 @@ def test_perceive_windows_bodies_under_rank_evidence_date_headers(tmp_path, monk
     _write("sessions/a.md", "2026-01-01", LONG_BODY)
     _write("sessions/b.md", "2026-02-02", "short note about cooking pasta")
     _index()
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("when is my yoga class?", now="2026-05-01", k=2,
                  window_chars=200, use_embedder=False)
@@ -88,7 +88,7 @@ def test_perceive_demotes_contested_note_last_with_marker(tmp_path, monkeypatch)
         "---\n\nyoga on Monday\n",
     )
     DRIVER.create("sessions/good.md", '---\ndate: "2026-02-02"\n---\n\nyoga on Tuesday\n')
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     # paths= assembles the given notes in order (bad first): the contested one
     # must be demoted behind the clean note regardless of input order.
@@ -104,7 +104,7 @@ def test_render_flat_returns_whole_bodies_without_rank_headers(tmp_path, monkeyp
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", LONG_BODY)
     _index()
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("when is my yoga class?", now="2026-05-01", k=1,
                  window_chars=200, use_embedder=False)
@@ -128,7 +128,7 @@ def test_perceive_multi_window_excerpt_joins_with_elision_marker(tmp_path, monke
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", TWO_FACT_BODY)
     _index()
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("when is my yoga class?", now="2026-05-01", k=1,
                  window_chars=150, windows=2, use_embedder=False)
@@ -145,8 +145,8 @@ def test_perceive_default_single_window_is_unchanged(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", TWO_FACT_BODY)
     _index()
-    from silica.kernel.perception import perceive
-    from silica.kernel.rerank import best_window
+    from silica.kernel.recall.perception import perceive
+    from silica.kernel.recall.rerank import best_window
 
     p = perceive("when is my yoga class?", now="2026-05-01", k=1,
                  window_chars=150, use_embedder=False)
@@ -159,7 +159,7 @@ def test_perceive_multi_window_short_body_passes_whole(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", "short note about the yoga class")
     _index()
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("yoga class?", now="2026-05-01", k=1,
                  window_chars=200, windows=2, use_embedder=False)
@@ -170,7 +170,7 @@ def test_perceive_multi_window_short_body_passes_whole(tmp_path, monkeypatch):
 
 def _seed_fact(key="user.dog.name", text="My dog is named Zephyr",
                run_id="s1", seen="2026-01-01") -> None:
-    from silica.kernel.episodic import EpisodicStore
+    from silica.kernel.recall.episodic import EpisodicStore
 
     EpisodicStore().capture([{"key": key, "text": text}], run_id=run_id, seen=seen)
 
@@ -180,7 +180,7 @@ def test_facts_block_first_by_default_last_on_request(tmp_path, monkeypatch):
     _write("sessions/a.md", "2026-01-01", "we talked about my dog at the park")
     _index()
     _seed_fact()
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("What is my dog's name?", now="2026-05-01", k=5,
                  use_embedder=False, episodic_ttl_days=0)
@@ -198,7 +198,7 @@ def test_empty_episodic_store_yields_no_facts_block(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", "we talked about my dog at the park")
     _index()
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("What is my dog's name?", now="2026-05-01", k=5, use_embedder=False)
     assert p.facts_block == ""
@@ -210,7 +210,7 @@ def test_with_facts_false_skips_episodic_recall(tmp_path, monkeypatch):
     _write("sessions/a.md", "2026-01-01", "we talked about my dog at the park")
     _index()
     _seed_fact()
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("What is my dog's name?", now="2026-05-01", k=5,
                  use_embedder=False, with_facts=False)
@@ -222,7 +222,7 @@ def test_paths_override_skips_retrieval_keeps_order(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", "alpha body")
     _write("sessions/b.md", "2026-02-02", "beta body")
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("anything", now="2026-05-01", use_embedder=False,
                  paths=["sessions/b", "sessions/a"])
@@ -241,7 +241,7 @@ def test_note_without_frontmatter_does_not_crash_perceive(tmp_path, monkeypatch)
     _bind(tmp_path / "v", monkeypatch)
     from silica.driver import DRIVER
     DRIVER.create("memory/plain.md", "just a body, no frontmatter at all\n")
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("anything", now="2026-05-01", use_embedder=False,
                  paths=["memory/plain"])
@@ -254,7 +254,7 @@ def test_note_without_frontmatter_does_not_crash_perceive(tmp_path, monkeypatch)
 def test_unreadable_paths_are_skipped_rank_stays_dense(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", "alpha body")
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     p = perceive("anything", now="2026-05-01", use_embedder=False,
                  paths=["missing/nope", "sessions/a"])
@@ -280,8 +280,8 @@ def test_use_recall_weights_false_ignores_populated_store(tmp_path, monkeypatch)
     _write("sessions/a.md", "2026-01-01", "short note about cooking pasta")
     _write("sessions/b.md", "2026-02-02", "short note about hiking trails")
     _index()
-    from silica.kernel import recall_weights
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall import recall_weights
+    from silica.kernel.recall.perception import perceive
 
     recall_weights.bump(["sessions/b"])  # store populated, flag stays off
     p = perceive("pasta", now="2026-05-01", k=2, use_embedder=False)
@@ -294,8 +294,8 @@ def test_use_recall_weights_true_resurfaces_bumped_note(tmp_path, monkeypatch):
     _write("sessions/a.md", "2026-01-01", "short note about cooking pasta")
     _write("sessions/b.md", "2026-02-02", "short note about hiking trails")
     _index()
-    from silica.kernel import recall_weights
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall import recall_weights
+    from silica.kernel.recall.perception import perceive
 
     recall_weights.bump(["sessions/b"])
     p = perceive("pasta", now="2026-05-01", k=2, use_embedder=False,

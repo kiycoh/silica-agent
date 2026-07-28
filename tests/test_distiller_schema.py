@@ -19,8 +19,8 @@ from pydantic import BaseModel
 
 from silica.agent.providers import get_provider, OpenAICompatibleProvider, PROVIDER_PRESETS
 from silica.agent.llm import LLMResponse
-from silica.kernel.ops import Op, OpType, DistillerOutput
-from silica.kernel.sanitize import parse_json
+from silica.kernel.write.ops import Op, OpType, DistillerOutput
+from silica.kernel.text.sanitize import parse_json
 
 from tests.llm_mocks import litellm_mock_response as _litellm_mock_response
 

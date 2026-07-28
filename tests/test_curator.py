@@ -1,7 +1,7 @@
 """Tests for the Curator — vault maintenance as a background policy.
 
 Two layers under test:
-  * silica.kernel.curator.compose_curation_plan — the PURE composer that
+  * silica.kernel.recall.curator.compose_curation_plan — the PURE composer that
     projects graph_report findings into a typed CurationPlan (no I/O).
   * silica.tools.curate — the dispatch layer: dry-run (print, enqueue/write
     nothing) vs --apply (enqueue WorkItems on the existing capability seam,
@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.graph_report import (
+from silica.kernel.report.graph_report import (
     AutolinkCandidate,
     DuplicatePair,
     VaultReport,
 )
-from silica.kernel.curator import (
+from silica.kernel.recall.curator import (
     CurationItem,
     CurationPlan,
     compose_curation_plan,
@@ -171,14 +171,14 @@ def test_compose_does_not_exclude_subfolder_notes_sharing_the_artifact_name():
 # ---------------------------------------------------------------------------
 
 def test_format_curate_event_shape():
-    from silica.kernel.run_log import format_curate_event
+    from silica.kernel.recall.run_log import format_curate_event
 
     event = format_curate_event({"dedup": 2, "refine": 1, "orphan": 3, "autolink": 4})
     assert event == "curate → 10 item (2 dedup, 1 refine, 3 orphan, 4 autolink)"
 
 
 def test_format_curate_event_omits_zero_types():
-    from silica.kernel.run_log import format_curate_event
+    from silica.kernel.recall.run_log import format_curate_event
 
     event = format_curate_event({"orphan": 1})
     assert event == "curate → 1 item (1 orphan)"

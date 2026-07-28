@@ -24,7 +24,7 @@ from pathlib import Path
 
 # Gated probes (fusion_probe, integrity_probe) live in kernel.health — shared
 # with the silica_health tool; iter_notes re-exported so probes keep one source.
-from silica.kernel.health import fusion_probe, integrity_probe, iter_notes  # noqa: F401
+from silica.kernel.link.health import fusion_probe, integrity_probe, iter_notes  # noqa: F401
 from evals.golden import (
     probe_classify,
     probe_correlate,
@@ -121,9 +121,9 @@ def _open_stores(vault: Path):
     """
     import silica.driver
     from silica.config import CONFIG
-    from silica.kernel.cooccurrence import CooccurStore, _index_path_for
-    from silica.kernel.embed import EmbedStore
-    from silica.kernel.paths import index_dir_for
+    from silica.kernel.recall.cooccurrence import CooccurStore, _index_path_for
+    from silica.kernel.recall.embed import EmbedStore
+    from silica.kernel.recall.paths import index_dir_for
 
     CONFIG.vault_path = str(vault)
     CONFIG.backend = "fs"
@@ -208,8 +208,8 @@ def collect(vault: Path, *, tier: str = "cheap", verbose: bool = False) -> dict:
     # informational; to gate ΔE, gate those two with a tolerance band, not exact.
     # ponytail: analytics=True runs PageRank/betweenness; fine on the fixed
     # test vault, and that scan is the known ceiling if the vault ever grows.
-    from silica.kernel.graph_report import compute_report
-    from silica.kernel.vault_energy import vault_energy
+    from silica.kernel.report.graph_report import compute_report
+    from silica.kernel.report.vault_energy import vault_energy
 
     e = vault_energy(compute_report(
         analytics=True, with_cooccurrence=True, _cooccur_store_override=store,

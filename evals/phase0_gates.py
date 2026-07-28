@@ -99,7 +99,7 @@ def main(argv=None) -> int:
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args(argv)
 
-    from silica.kernel import relatedness, rerank
+    from silica.kernel.recall import relatedness, rerank
 
     rows: list[dict] = []
     ctx = {"corpus": "", "qid": ""}
@@ -130,7 +130,7 @@ def main(argv=None) -> int:
     ctx.update(corpus="vault", qid="")
     from silica.agent.providers import get_reranker
     from silica.config import CONFIG
-    from silica.kernel.health import fusion_probe
+    from silica.kernel.link.health import fusion_probe
     from evals.golden import probe_fusion
     from evals.golden.runner import _open_stores, resolve_vault
 

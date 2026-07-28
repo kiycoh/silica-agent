@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
-from silica.kernel.graph_report.cooccur_delta import _compute_cooccur_delta
-from silica.kernel.graph_report import (
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.report.graph_report.cooccur_delta import _compute_cooccur_delta
+from silica.kernel.report.graph_report import (
     AutolinkCandidate,
     IntegrationDeficit,
     MissingHub,
@@ -146,7 +146,7 @@ def test_autolink_provenance_is_expanded_without_edges(delta_report):
 
 
 def test_autolink_provenance_is_direct_when_edges_present(synthetic_graph, cooccur_store):
-    from silica.kernel.correlate import recompute_all_edges
+    from silica.kernel.link.correlate import recompute_all_edges
     recompute_all_edges(cooccur_store)  # A-E is a direct edge (jaccard 0.5 >= tau)
     nodes, edges = synthetic_graph
     r = compute_report(
@@ -162,7 +162,7 @@ def test_autolink_bridges_md_suffixed_graph_ids(cooccur_store):
     # Real vaults: graph node ids carry '.md' while store keys are stripped.
     # The delta must bridge the two keyspaces — a raw `nid in G_und` matches
     # nothing and AUTOLINK silently comes out empty (regression 2026-07-10).
-    from silica.kernel.correlate import recompute_all_edges
+    from silica.kernel.link.correlate import recompute_all_edges
     recompute_all_edges(cooccur_store)
     nodes = [_make_node(f"{x}.md", x, 0) for x in ("A", "B", "C", "D", "E", "F")]
     edges = [
@@ -183,7 +183,7 @@ def test_autolink_bridges_md_suffixed_graph_ids(cooccur_store):
 
 
 def test_direct_evidence_orders_shared_stems_by_idf(tmp_path):
-    from silica.kernel.correlate import recompute_all_edges
+    from silica.kernel.link.correlate import recompute_all_edges
     st = CooccurStore(path=tmp_path / "idf.json", lang="english")
     # "common" is ubiquitous (low IDF); "rare"/"scarce" live only in P,Q (high IDF).
     st.upsert_note("P", build_contribution("P", "common rare scarce alpha"))
@@ -210,7 +210,7 @@ def test_autolink_quota_keeps_direct_above_the_expanded_flood(tmp_path):
     # Direct weights are Jaccard (<=1); expanded overlap weights run orders of
     # magnitude higher. Without the per-leg quota one mixed sort floods the
     # top-k with expanded pairs and the direct leg never renders.
-    from silica.kernel.correlate import recompute_all_edges
+    from silica.kernel.link.correlate import recompute_all_edges
     st = CooccurStore(path=tmp_path / "quota.json", lang="english")
     st.upsert_note("P", build_contribution("P", "rare scarce alpha beta"))
     st.upsert_note("Q", build_contribution("Q", "rare scarce alpha gamma"))
@@ -364,7 +364,7 @@ def test_vault_report_tool_exposes_with_cooccurrence_flag():
 def test_delta_report_json_serializable(delta_report, tmp_path):
     import dataclasses
     import orjson
-    from silica.kernel.graph_report import write_report
+    from silica.kernel.report.graph_report import write_report
     paths = write_report(delta_report, str(tmp_path / "GRAPH_REPORT.md"))
     data = orjson.loads((tmp_path / "GRAPH_REPORT.json").read_bytes())
     # nested delta dataclasses survive the asdict -> orjson round-trip
@@ -399,8 +399,8 @@ def convergence_store(tmp_path):
 
 def test_autolink_convergence_counts_hubs_and_drives_ranking(convergence_store):
     import networkx as nx
-    from silica.kernel.graph_report import NodeStat
-    from silica.kernel.graph_report.cooccur_delta import _compute_cooccur_delta
+    from silica.kernel.report.graph_report import NodeStat
+    from silica.kernel.report.graph_report.cooccur_delta import _compute_cooccur_delta
 
     ids = ["H1", "H2", "H3", "X", "Y"]
     G = nx.Graph()

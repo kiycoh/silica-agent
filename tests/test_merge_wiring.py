@@ -7,15 +7,15 @@ callout prepended (kernel/merge.py), and the result reports the conflict.
 """
 import pytest
 
-from silica.kernel.bulk import execute_one
-from silica.kernel.merge import CONFLICT_CALLOUT_HEADER
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.bulk import execute_one
+from silica.kernel.write.merge import CONFLICT_CALLOUT_HEADER
+from silica.kernel.write.ops import Op, OpType
 
 
 @pytest.fixture(autouse=True)
 def clean_ledger(tmp_path):
     """Reset the global ledger singleton to a fresh temp DB before each test."""
-    import silica.kernel.ledger as _ledger_mod
+    import silica.kernel.write.ledger as _ledger_mod
     fresh = _ledger_mod.Ledger(tmp_path / "test_ledger.db")
     old = _ledger_mod._ledger
     _ledger_mod._ledger = fresh
@@ -91,7 +91,7 @@ class TestValidateSnapshotsBaseContent:
 
     def test_overwrite_on_existing_note_snapshots_base_content(self, tmp_vault):
         import os
-        from silica.kernel.validate import validate_operations
+        from silica.kernel.write.validate import validate_operations
 
         path = tmp_vault.note("Nota.md", "v1 originale\n")
 
@@ -110,7 +110,7 @@ class TestValidateSnapshotsBaseContent:
         """A producer that already snapshotted (the refiner, at triage read
         time) carries the more faithful base: validation must keep it."""
         import os
-        from silica.kernel.validate import validate_operations
+        from silica.kernel.write.validate import validate_operations
 
         path = tmp_vault.note("Nota.md", "v2 corrente\n")
         op_dict = self._overwrite_dict(path)
@@ -127,7 +127,7 @@ class TestValidateSnapshotsBaseContent:
         """End-to-end: validate snapshots the base, a concurrent edit lands,
         the write injects the conflict callout instead of stomping."""
         import os
-        from silica.kernel.validate import validate_operations
+        from silica.kernel.write.validate import validate_operations
 
         path = tmp_vault.note("Nota.md", "v1 originale\n")
 

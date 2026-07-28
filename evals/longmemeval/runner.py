@@ -22,7 +22,7 @@ Mem0 / Zep, not the agentic loop):
                one note stays one session and session_recall holds, and falls
                back to verbatim if the distiller errors on a session.
   2. index   — cooccur (offline) and, when an embedder is served, embeddings.
-  3. perceive— retrieval AND context assembly are silica.kernel.perception
+  3. perceive— retrieval AND context assembly are silica.kernel.recall.perception
                .perceive(), the product path: fused facade + rerank, per-note
                query-densest window under rank/evidence/date headers, episodic
                facts first. The harness owns no context assembler, so eval and
@@ -177,7 +177,7 @@ def _episodic_keys_substrate() -> str | None:
     capture snaps to the established key vocabulary instead of coining
     synonyms. Failure never blocks the distill (the section is advisory)."""
     try:
-        from silica.kernel.episodic import EpisodicStore, key_vocabulary_section
+        from silica.kernel.recall.episodic import EpisodicStore, key_vocabulary_section
 
         return key_vocabulary_section(EpisodicStore())
     except Exception as e:
@@ -211,7 +211,7 @@ def distill_session(session_id: str, date: str, excerpt: str) -> str:
         return excerpt
     # Episodic lane: session id is the run_id, the SESSION date is `seen`
     # (simulated time — what makes benchmark temporal reasoning possible).
-    from silica.kernel.episodic import capture_from_distill
+    from silica.kernel.recall.episodic import capture_from_distill
 
     capture_from_distill(result, run_id=session_id, seen=date)
     # skip ops carry no body per contract; models attach meta-lines anyway —
@@ -243,8 +243,8 @@ def bind_vault(vault: Path) -> None:
     """Point CONFIG/DRIVER at ``vault`` and drop every store singleton, so no
     prior question's sessions or indexes can leak into this one."""
     import silica.driver
-    import silica.kernel.cooccurrence as cooc_mod
-    import silica.kernel.embed as embed_mod
+    import silica.kernel.recall.cooccurrence as cooc_mod
+    import silica.kernel.recall.embed as embed_mod
     from silica.config import CONFIG
 
     CONFIG.vault_path = str(vault)
@@ -271,7 +271,7 @@ def load_question_vault(vault: Path, inst: dict, distill: bool = False,
     if reuse and sess_dir.is_dir():
         existing = sorted(sess_dir.glob("s*.md"))
         if existing:
-            from silica.kernel import frontmatter
+            from silica.kernel.write import frontmatter
 
             index = {}
             for f in existing:
@@ -424,7 +424,7 @@ def run_instance(inst: dict, run_root: Path, *, model: str, judge_model: str,
     # spec 2026-07-15): the harness owns no assembler of its own. Facts recall
     # is gated on --distill so verbatim arms stay episodic-free even on reused
     # vaults that carry a grafted store.
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     # None = mirror the perceive() defaults, so existing invocations track the
     # product surface even when the grid moves it (multi-window spec 2026-07-15).
@@ -536,7 +536,7 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
         data_path: str | Path | None = None,
         primary_metric: str = "overall_accuracy") -> dict:
     from silica.config import CONFIG
-    from silica.kernel import perception
+    from silica.kernel.recall import perception
 
     data = data[:limit] if limit else data
     rows: list[dict] = []

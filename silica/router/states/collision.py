@@ -62,7 +62,7 @@ def _names_agree(concept: str, note_name: str) -> bool:
     so it would otherwise fuse a concept with its opposite).
     """
     import re
-    from silica.kernel.title import title_key
+    from silica.kernel.text.title import title_key
 
     if not concept.strip() or not note_name.strip():
         return False
@@ -116,7 +116,7 @@ def _deferred_op_dict(fsm: "InjectorFSM", d: dict, reason_prefix: str) -> dict:
     it must carry the excerpt (snippet) and a real write path, so a retry — or
     the dedup verdict routing — can act on it without re-nucleating the source.
     """
-    from silica.kernel.templates import slugify
+    from silica.kernel.write.templates import slugify
 
     concept = d["concept"]
     name = concept.get("name", "") if isinstance(concept, dict) else str(concept)
@@ -145,7 +145,7 @@ def _embedder_free_near_dups(
     `sig_cache` (optional) memoizes corpus signatures across chunks in a run, so
     the vault's notes are hashed once instead of once per chunk.
     """
-    from silica.kernel.minhash_dedup import near_duplicates
+    from silica.kernel.report.minhash_dedup import near_duplicates
 
     out: list[dict] = []
     for batch in chunk.get("batches", []):
@@ -242,8 +242,8 @@ def _cold_intra_chunk_near_dup(a: tuple, b: tuple) -> bool:
     Paraphrased twins slip through (MinHash at this threshold is high-precision,
     low-recall); the main embedding path catches those when the embedder is up.
     """
-    from silica.kernel.title import title_key
-    from silica.kernel.minhash_dedup import minhash_signature, estimate_jaccard
+    from silica.kernel.text.title import title_key
+    from silica.kernel.report.minhash_dedup import minhash_signature, estimate_jaccard
 
     (na, ea), (nb, eb) = a, b
     ka, kb = title_key(na), title_key(nb)
@@ -375,7 +375,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     τ_low = getattr(orch.CONFIG, "sim_threshold_low", 0.75)
 
     from silica.agent.providers import get_embedder_or_none
-    from silica.kernel.embed import get_store
+    from silica.kernel.recall.embed import get_store
 
     def _minhash_fallback() -> None:
         fsm._get_chunks_from_context_if_empty()
@@ -402,7 +402,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     # to the embedding ranking alone.
     cooccur_store = None
     try:
-        from silica.kernel.cooccurrence import get_cooccur_store
+        from silica.kernel.recall.cooccurrence import get_cooccur_store
         cooccur_store = get_cooccur_store(lang=orch.CONFIG.cooccurrence_lang)
         if len(cooccur_store) == 0:
             cooccur_store = None
@@ -426,7 +426,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
     # vectors. Embedding the bare name lets short acronyms ("MEM", "ACE") score
     # spuriously high against unrelated short-acronym notes ("RAM (Random Access
     # Memory)", "MACE"); the excerpt anchors the concept in its real neighbourhood.
-    from silica.kernel.embed import _note_text
+    from silica.kernel.recall.embed import _note_text
 
     def _concept_embed_text(concept: Any) -> str:
         if isinstance(concept, dict):
@@ -499,7 +499,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
                 kept.append(concept)
                 continue
             try:
-                from silica.kernel.relatedness import related_notes_for_query
+                from silica.kernel.recall.relatedness import related_notes_for_query
                 excerpt_text = concept.get("inbox_excerpt", "") if isinstance(concept, dict) else ""
                 related = related_notes_for_query(
                     query_vec=vec,
@@ -516,7 +516,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
             # Inbox notes index like any vault note but are staging, not merge
             # targets — validate rejects every Inbox path, so surfacing one as
             # the collision candidate guarantees a rejected op + steer churn.
-            from silica.kernel.paths import is_inbox_path
+            from silica.kernel.recall.paths import is_inbox_path
             related = [r for r in related if not is_inbox_path(r.path)]
 
             if not related:

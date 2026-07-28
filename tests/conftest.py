@@ -35,7 +35,7 @@ def _isolate_embed_legacy_path(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
     """Guard against the real ~/.silica/index/embeddings.json leaking into tests
     via the legacy-migration fallback. Any test that redirects _index_path to a
     non-existent tmp file would otherwise fall back to the developer's real index."""
-    import silica.kernel.embed as embed_mod
+    import silica.kernel.recall.embed as embed_mod
     monkeypatch.setattr(embed_mod, "_LEGACY_INDEX_PATH", tmp_path / "legacy_embed.json")
 
 
@@ -49,7 +49,7 @@ def _isolate_cooccurrence_index(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
     ~/.silica/index/cooccurrence.json. Tests that need a store pass an explicit
     path; this only redirects the default.
     """
-    import silica.kernel.cooccurrence as cooc_mod
+    import silica.kernel.recall.cooccurrence as cooc_mod
     monkeypatch.setattr(cooc_mod, "_index_path", lambda: tmp_path / "cooccurrence_index.json")
 
 
@@ -62,7 +62,7 @@ def _isolate_episodic_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     developer's real ~/.silica/index/<digest>/episodic.json. Tests that need a
     store pass an explicit path; this only redirects the default.
     """
-    import silica.kernel.episodic as ep_mod
+    import silica.kernel.recall.episodic as ep_mod
     monkeypatch.setattr(ep_mod, "store_path", lambda: tmp_path / "episodic_default.json")
 
 
@@ -88,7 +88,7 @@ def _isolate_cluster_ctx_cache(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Non
     real ~/.silica index AND a cache from one test could leak into the next. Per
     tmp_path keeps each test's cache private and out of the real index.
     """
-    import silica.kernel.graph_export as ge_mod
+    import silica.kernel.recall.graph_export as ge_mod
     monkeypatch.setattr(
         ge_mod, "cluster_ctx_path", lambda: tmp_path / "clusters_ctx.json"
     )
@@ -104,7 +104,7 @@ def _isolate_deferred_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     ['e']» bundles). Also points the legacy migration source at an empty tmp
     dir so the one-shot adoption never reads the real ~/.silica/deferred.
     """
-    import silica.kernel.deferred as deferred_mod
+    import silica.kernel.recall.deferred as deferred_mod
     monkeypatch.setattr(deferred_mod, "_store_dir", lambda: tmp_path / "deferred_store")
     monkeypatch.setattr(deferred_mod, "_LEGACY_DEFERRED_DIR", tmp_path / "deferred_legacy")
     deferred_mod._stores.clear()
@@ -124,7 +124,7 @@ def _isolate_undo_journal(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     # reset the singleton — the DB (and its dir + WAL sidecars) is created only
     # when a test actually opens the journal, so tests that assert on tmp_path's
     # contents never see a stray undo_journal/ dir.
-    import silica.kernel.undo_journal as uj
+    import silica.kernel.write.undo_journal as uj
     monkeypatch.setattr(uj, "_DEFAULT_JOURNAL_PATH", tmp_path / "undo_journal" / "j.db")
     uj._store = None
     yield
@@ -140,8 +140,8 @@ def _clear_store_singletons() -> None:
     `_index_path` would leak into the next. Clear before AND after to also drop
     state seeded by import-time or session-scoped fixtures.
     """
-    import silica.kernel.embed as embed_mod
-    import silica.kernel.cooccurrence as cooc_mod
+    import silica.kernel.recall.embed as embed_mod
+    import silica.kernel.recall.cooccurrence as cooc_mod
     embed_mod.clear()
     cooc_mod.clear()
     yield
@@ -156,7 +156,7 @@ def _reset_overlay_cache() -> None:
     Prevents a test that calls get_active_overlay() (or monkeypatches the vault
     path) from polluting the cached result seen by subsequent tests.
     """
-    import silica.kernel.overlay as overlay_mod
+    import silica.kernel.text.overlay as overlay_mod
     overlay_mod.reset_overlay_cache()
 
 

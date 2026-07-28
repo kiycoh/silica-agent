@@ -204,8 +204,8 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     Deterministic, offline (stored vectors + a single BLAS matvec per note, via
     EmbedStore.cosine_top_k). Empty list when the embed index is absent.
     """
-    from silica.kernel.cooccurrence import cooccur_key
-    from silica.kernel.embed import get_store
+    from silica.kernel.recall.cooccurrence import cooccur_key
+    from silica.kernel.recall.embed import get_store
 
     store = get_store()
     if len(store) == 0:
@@ -305,7 +305,7 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
     # Fetch community labels from the co-occurrence index; degrade to {} on any failure.
     # Member ids carry '.md'; CooccurStore.note_nodes normalises via cooccur_key, so
     # no manual strip is needed here (single source of truth for the key).
-    from silica.kernel.cooccurrence import get_cooccur_store
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
     try:
         labels = get_cooccur_store().community_labels([set(c) for c in communities])
     except Exception:
@@ -427,7 +427,7 @@ def discourse_shape(n_nodes: int, giant: int, cluster_sizes: list[int]) -> str:
 
 def cluster_ctx_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
 
     return paths.index_dir() / "clusters_ctx.json"
 

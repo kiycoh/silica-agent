@@ -2,7 +2,7 @@
 """knn_edges: store-key↔node-id mapping, self-exclusion, undirected dedup."""
 from __future__ import annotations
 
-from silica.kernel import graph_export
+from silica.kernel.recall import graph_export
 
 
 class _FakeStore:
@@ -47,7 +47,7 @@ def test_knn_edges_maps_keys_and_dedups(monkeypatch):
     })
     monkeypatch.setattr(graph_export, "get_store", lambda: store, raising=False)
     # get_store is imported inside the function; patch the source module too.
-    from silica.kernel import embed
+    from silica.kernel.recall import embed
     monkeypatch.setattr(embed, "get_store", lambda: store)
 
     edges = graph_export.knn_edges(_nodes("a.md", "b.md", "c.md"), k=2)
@@ -67,6 +67,6 @@ def test_knn_edges_maps_keys_and_dedups(monkeypatch):
 
 
 def test_knn_edges_empty_store(monkeypatch):
-    from silica.kernel import embed
+    from silica.kernel.recall import embed
     monkeypatch.setattr(embed, "get_store", lambda: _FakeStore({}))
     assert graph_export.knn_edges(_nodes("a.md"), k=6) == []

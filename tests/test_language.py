@@ -1,4 +1,4 @@
-"""Tests for silica.kernel.language — centralized language resolution.
+"""Tests for silica.kernel.text.language — centralized language resolution.
 
 Leaf module: no LLM, offline, deterministic, never raises. Consumers
 (cooccurrence, overlay, keyphrase, cohesion, prep_delegation) are rewired to
@@ -6,7 +6,7 @@ this module in later tasks — these tests pin the module's own contract.
 """
 from __future__ import annotations
 
-import silica.kernel.language as language
+import silica.kernel.text.language as language
 
 IT = "Il gatto è sul tavolo e la casa è bella, ma non è facile trovare la strada giusta per la stazione."
 EN = "The cat is on the table and the house is very nice, but it is not easy to find the right way to the station."

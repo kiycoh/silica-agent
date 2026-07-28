@@ -22,7 +22,7 @@ def test_swapped_builder_matches_the_production_call_signature():
     """All four call sites pass (store, seeds) positionally with scope/expand
     keyword-only. If the swap did not accept that shape the arms would crash,
     or worse, silently fall back."""
-    import silica.kernel.relatedness as R
+    import silica.kernel.recall.relatedness as R
 
     original = R._profile_from_seeds
     with _profile_builder(_ppr_builder(hops=2, alpha=0.5, top_n=10)):

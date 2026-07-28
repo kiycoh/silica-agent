@@ -20,7 +20,7 @@ Skip regions (never modified):
     - Display math      ($$...$$)
     - Inline math       ($...$)
 
-See silica/kernel/autolink.py for the masking idiom this module mirrors.
+See silica/kernel/link/autolink.py for the masking idiom this module mirrors.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ from urllib.parse import unquote, quote
 # wikilinks and headings to rewrite them.
 # ---------------------------------------------------------------------------
 
-from silica.kernel.autolink import SKIP_PATTERNS_BASE, build_skip_mask, _FRONTMATTER_RE
+from silica.kernel.link.autolink import SKIP_PATTERNS_BASE, build_skip_mask, _FRONTMATTER_RE
 
 
 def _build_skip_mask(text: str) -> list[bool]:

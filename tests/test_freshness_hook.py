@@ -12,8 +12,8 @@ from pathlib import Path
 
 import snowballstemmer
 
-from silica.kernel.cooccurrence import CooccurStore
-from silica.kernel.ops import Op, OpType
+from silica.kernel.recall.cooccurrence import CooccurStore
+from silica.kernel.write.ops import Op, OpType
 from silica.router.orchestrator import _refresh_cooccurrence_for_ops
 
 
@@ -139,7 +139,7 @@ def test_auto_lang_hook_never_reflips_frozen_store_language(tmp_path):
     shape must NOT re-freeze store.lang from the batch — a single English note
     landing on an Italian-frozen store keeps store.lang="italian" and gets
     stemmed with the frozen Italian stemmer (uniform node keys)."""
-    from silica.kernel.cooccurrence import build_contribution
+    from silica.kernel.recall.cooccurrence import build_contribution
 
     store = CooccurStore(path=tmp_path / "c.json", lang="italian")
     store.upsert_note(

@@ -13,8 +13,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from silica.config import CONFIG
-from silica.kernel import codeast, gitstate, ipynb, paths
-from silica.kernel.sanitize import strip_degenerate_runs
+from silica.kernel.code import codeast, gitstate, ipynb
+from silica.kernel.recall import paths
+from silica.kernel.text.sanitize import strip_degenerate_runs
 from silica.sources.base import GroundedStub, RawItem
 from silica.sources.code import _repo_files, code_note_name, render_skeleton
 

@@ -36,10 +36,10 @@ from silica.driver.base import (
     build_title_trie,
     mentions_in,
 )
-from silica.kernel.ast import extract_links
-from silica.kernel.graph_export import is_vault_artifact
-from silica.kernel.paths import is_source_leaf
-from silica.kernel.ops import InverseOp, InverseOpKind
+from silica.kernel.link.ast import extract_links
+from silica.kernel.recall.graph_export import is_vault_artifact
+from silica.kernel.recall.paths import is_source_leaf
+from silica.kernel.write.ops import InverseOp, InverseOpKind
 
 logger = logging.getLogger(__name__)
 

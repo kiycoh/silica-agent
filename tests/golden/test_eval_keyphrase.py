@@ -20,8 +20,8 @@ from pathlib import Path
 
 import pytest
 
-from silica.kernel.cooccurrence import tokenize
-from silica.kernel.keyphrase import extract_keyphrases
+from silica.kernel.recall.cooccurrence import tokenize
+from silica.kernel.text.keyphrase import extract_keyphrases
 
 GOLDEN_PATH = Path(__file__).parent / "keyphrase_cases.json"
 _BUNDLED_OVERLAYS = Path(__file__).resolve().parent.parent.parent / "silica" / "overlays"
@@ -82,7 +82,7 @@ def _load_cases() -> list[dict]:
 
 
 def _overlay():
-    from silica.kernel.overlay import DEFAULT_OVERLAY, load_overlay
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY, load_overlay
     path = _BUNDLED_OVERLAYS / "italian.yaml"
     return load_overlay(path) if path.exists() else DEFAULT_OVERLAY
 

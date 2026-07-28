@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Structural-gap detection + discourse-shape / betweenness plumbing."""
-from silica.kernel.graph_export import structural_gaps
-from silica.kernel.graph_report.compute import compute_report
+from silica.kernel.recall.graph_export import structural_gaps
+from silica.kernel.report.graph_report.compute import compute_report
 
 
 def _clique(prefix: str, n: int, group: int):

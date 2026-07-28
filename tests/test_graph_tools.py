@@ -45,7 +45,7 @@ class TestGraphPath:
     def test_direct_path(self):
         from silica.tools.atomic import silica_graph_path
         nodes, edges = _make_graph()
-        with patch("silica.kernel.graph_export.build_graph_data", return_value=(nodes, edges)):
+        with patch("silica.kernel.recall.graph_export.build_graph_data", return_value=(nodes, edges)):
             res = silica_graph_path("A", "D")
         assert "error" not in res
         assert res["length"] == 3
@@ -55,7 +55,7 @@ class TestGraphPath:
     def test_same_node(self):
         from silica.tools.atomic import silica_graph_path
         nodes, edges = _make_graph()
-        with patch("silica.kernel.graph_export.build_graph_data", return_value=(nodes, edges)):
+        with patch("silica.kernel.recall.graph_export.build_graph_data", return_value=(nodes, edges)):
             res = silica_graph_path("A", "A")
         assert "error" not in res
         assert res["length"] == 0
@@ -65,21 +65,21 @@ class TestGraphPath:
         # Isolated node E with no edges
         nodes = [_node("A"), _node("E")]
         edges = []
-        with patch("silica.kernel.graph_export.build_graph_data", return_value=(nodes, edges)):
+        with patch("silica.kernel.recall.graph_export.build_graph_data", return_value=(nodes, edges)):
             res = silica_graph_path("A", "E")
         assert "error" in res
 
     def test_unknown_source(self):
         from silica.tools.atomic import silica_graph_path
         nodes, edges = _make_graph()
-        with patch("silica.kernel.graph_export.build_graph_data", return_value=(nodes, edges)):
+        with patch("silica.kernel.recall.graph_export.build_graph_data", return_value=(nodes, edges)):
             res = silica_graph_path("DOES_NOT_EXIST", "B")
         assert "error" in res
 
     def test_unknown_target(self):
         from silica.tools.atomic import silica_graph_path
         nodes, edges = _make_graph()
-        with patch("silica.kernel.graph_export.build_graph_data", return_value=(nodes, edges)):
+        with patch("silica.kernel.recall.graph_export.build_graph_data", return_value=(nodes, edges)):
             res = silica_graph_path("A", "DOES_NOT_EXIST")
         assert "error" in res
 
@@ -88,7 +88,7 @@ class TestGraphPath:
         # A ↔ B ↔ C and A ↔ C (two paths A→C)
         nodes = [_node("A"), _node("B"), _node("C")]
         edges = [_edge("e0", "A", "B"), _edge("e1", "B", "C"), _edge("e2", "A", "C")]
-        with patch("silica.kernel.graph_export.build_graph_data", return_value=(nodes, edges)):
+        with patch("silica.kernel.recall.graph_export.build_graph_data", return_value=(nodes, edges)):
             res = silica_graph_path("A", "C", max_paths=3)
         assert "error" not in res
         assert len(res["paths"]) >= 1

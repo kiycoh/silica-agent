@@ -4,8 +4,8 @@ import tempfile
 import unittest
 import os
 
-from silica.kernel.ops import Op, OpType
-from silica.kernel.ops_io import load_ops, dump_ops
+from silica.kernel.write.ops import Op, OpType
+from silica.kernel.write.ops_io import load_ops, dump_ops
 
 
 class TestOpsIO(unittest.TestCase):

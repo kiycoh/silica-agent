@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-# silica/kernel/undo_journal.py
+# silica/kernel/write/undo_journal.py
 from __future__ import annotations
 
 import logging
@@ -11,7 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
-from silica.kernel.ops import InverseOp, InverseOpKind
+from silica.kernel.write.ops import InverseOp, InverseOpKind
 
 logger = logging.getLogger(__name__)
 

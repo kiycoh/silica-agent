@@ -12,7 +12,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from silica.config import CONFIG
-from silica.kernel.ops import OpType
+from silica.kernel.write.ops import OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities.expand import run_expand, MAX_EXPAND_ATTEMPTS
 
@@ -47,7 +47,7 @@ def test_expand_commits_authored_body_with_op_metadata():
     with patch("silica.capabilities.expand._author_body", return_value=_GOOD_BODY) as author, \
          patch("silica.capabilities.expand.commit_ops",
                return_value={"status": "committed", "committed": 1}) as commit, \
-         patch("silica.kernel.deferred.get_deferred_store") as store:
+         patch("silica.kernel.recall.deferred.get_deferred_store") as store:
         res = run_expand(_item(), CONFIG)
 
     assert res["status"] == "committed"
@@ -74,7 +74,7 @@ def test_expand_retries_once_then_commits():
                side_effect=[_SHORT_BODY, _GOOD_BODY]) as author, \
          patch("silica.capabilities.expand.commit_ops",
                return_value={"status": "committed", "committed": 1}), \
-         patch("silica.kernel.deferred.get_deferred_store"):
+         patch("silica.kernel.recall.deferred.get_deferred_store"):
         res = run_expand(_item(), CONFIG)
 
     assert res["status"] == "committed"
@@ -86,7 +86,7 @@ def test_expand_retries_once_then_commits():
 def test_expand_gives_up_after_max_attempts():
     with patch("silica.capabilities.expand._author_body", return_value=_SHORT_BODY) as author, \
          patch("silica.capabilities.expand.commit_ops") as commit, \
-         patch("silica.kernel.deferred.get_deferred_store") as store:
+         patch("silica.kernel.recall.deferred.get_deferred_store") as store:
         res = run_expand(_item(), CONFIG)
 
     assert res["status"] == "still_short"
@@ -106,7 +106,7 @@ def test_expand_failed_commit_keeps_deferred_twin():
     with patch("silica.capabilities.expand._author_body", return_value=_GOOD_BODY), \
          patch("silica.capabilities.expand.commit_ops",
                return_value={"status": "rolled_back", "committed": 0}), \
-         patch("silica.kernel.deferred.get_deferred_store") as store:
+         patch("silica.kernel.recall.deferred.get_deferred_store") as store:
         res = run_expand(_item(), CONFIG)
 
     assert res["status"] == "rolled_back"

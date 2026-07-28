@@ -7,7 +7,7 @@ to the structural core (`analytics=False`); the commands opt into the full repor
 """
 from __future__ import annotations
 
-from silica.kernel.graph_report import compute_report
+from silica.kernel.report.graph_report import compute_report
 
 
 def _graph():
@@ -94,8 +94,8 @@ def test_triage_note_reads_are_analytics_only(monkeypatch):
 
 def test_vault_graph_ctx_has_no_pagerank_field(monkeypatch):
     """The deleted dead field: per-note ctx carries only cluster_id/hub/is_hub."""
-    import silica.kernel.graph_report as gr
-    from silica.kernel.graph_report.models import ClusterStat, VaultReport
+    import silica.kernel.report.graph_report as gr
+    from silica.kernel.report.graph_report.models import ClusterStat, VaultReport
     from silica.router.states.setup import build_vault_graph_ctx
 
     fake = VaultReport(
@@ -107,7 +107,7 @@ def test_vault_graph_ctx_has_no_pagerank_field(monkeypatch):
     monkeypatch.setattr(gr, "compute_report", lambda *a, **k: fake)
     # build_vault_graph_ctx first snapshots the graph for the cluster-cache key
     # (Scaling E); keep this hermetic (don't touch the real vault).
-    import silica.kernel.graph_export as ge
+    import silica.kernel.recall.graph_export as ge
     monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
         [{"id": "A", "type": "note"}, {"id": "B", "type": "note"}, {"id": "Z", "type": "note"}],
         [{"from": "A", "to": "B", "type": "EXTRACTED"}],

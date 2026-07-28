@@ -40,9 +40,9 @@ from silica.tools.composed import (
     silica_sanitize,
     silica_validate_ops,
 )
-from silica.kernel.ops import OpType
-from silica.kernel.ops_io import load_ops
-from silica.kernel.paths import to_vault_relative
+from silica.kernel.write.ops import OpType
+from silica.kernel.write.ops_io import load_ops
+from silica.kernel.recall.paths import to_vault_relative
 from silica.router.base_fsm import BaseFSM
 # Imported for the states modules (and tests), which resolve patchable
 # collaborators through this module's namespace — see silica.router.states.
@@ -85,7 +85,7 @@ def _refresh_cooccurrence_for_ops(
     ADR-0013) before that single save. Best-effort: a per-note read failure is
     skipped and the whole call never raises. Returns the number of notes refreshed.
     """
-    from silica.kernel.cooccurrence import build_index as _cooccur_build
+    from silica.kernel.recall.cooccurrence import build_index as _cooccur_build
 
     notes: list[tuple[str, str, str]] = []
     concepts_by_path: dict[str, list[str]] = {}
@@ -116,7 +116,7 @@ def _refresh_cooccurrence_for_ops(
         # (CORRELATE / ADR-0013), then a SINGLE save — so edges and contributions
         # persist together. save=False defers that save to the end-of-run flush,
         # which rewrites the same singleton (note_edges included).
-        from silica.kernel import correlate
+        from silica.kernel.link import correlate
         built = _cooccur_build(notes, store=store, lang=lang, force=True,
                                concepts_by_path=concepts_by_path or None, save=False)
         correlate.refresh_edges(built, [idx_path for idx_path, _n, _b in notes])
@@ -190,8 +190,8 @@ def _reconcile_embed_index(*, folder: str = "") -> int:
     """
     try:
         from silica.agent.providers import get_embedder
-        from silica.kernel.embed import build_index, get_store
-        from silica.kernel.media import strip_images
+        from silica.kernel.recall.embed import build_index, get_store
+        from silica.kernel.text.media import strip_images
 
         store = get_store()
         if len(store) == 0:
@@ -243,7 +243,7 @@ def _prune_cooccur_orphans(*, folder: str = "") -> int:
     Free (no LLM/embedder), so it runs every run start. Returns the prune count.
     """
     try:
-        from silica.kernel.cooccurrence import get_cooccur_store
+        from silica.kernel.recall.cooccurrence import get_cooccur_store
 
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
         if not store.paths():
@@ -274,7 +274,7 @@ def _commit_docs_for_ops(
     yield None and never raise. Commits ONLY vault paths — the out-of-vault
     guard lives inside gitstate.commit_docs, so a bug cannot commit source files.
     """
-    from silica.kernel import gitstate
+    from silica.kernel.code import gitstate
     from pathlib import Path as _Path
 
     if git_commit != "auto" or not vault:
@@ -295,7 +295,7 @@ def _commit_docs_for_ops(
         return None
 
     try:
-        from silica.kernel.paths import repo_root_for
+        from silica.kernel.recall.paths import repo_root_for
 
         root = repo_root_for(vault)
         if root is None:
@@ -370,7 +370,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             raise ValueError("At least one inbox file must be provided")
         self.inbox_files: list[str] = [to_vault_relative(f) for f in files]
         self.inbox_file: str = self.inbox_files[0]  # first file; compat with single-file callers
-        from silica.kernel.paths import resolve_target_dir
+        from silica.kernel.recall.paths import resolve_target_dir
         target_dir = resolve_target_dir(target_dir)
         self.target_dir = target_dir
 
@@ -666,7 +666,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         except Exception:
             payloads = []
         try:
-            from silica.kernel.deferred import get_deferred_store
+            from silica.kernel.recall.deferred import get_deferred_store
             store = get_deferred_store()
             existing = store.get(content_hash) or {}
             store.put(
@@ -686,11 +686,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
     def run(self) -> dict[str, Any]:
         """Execute the pipeline end-to-end (single or multi-file)."""
-        from silica.kernel.ledger import get_ledger
+        from silica.kernel.write.ledger import get_ledger
         ledger = get_ledger()
 
         # Compute per-file canonicals and content hashes; track committed status
-        from silica.kernel.provenance import source_valid_from
+        from silica.kernel.write.provenance import source_valid_from
         self._file_canonicals = []
         self._file_content_hashes = []
         self._file_valid_from = []
@@ -731,7 +731,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             return self.context
 
         # Only open a journal run when the pipeline will actually execute writes.
-        from silica.kernel.undo_journal import get_undo_journal
+        from silica.kernel.write.undo_journal import get_undo_journal
         self._undo_run_id = get_undo_journal().start_run(
             source=self.inbox_file, vault=getattr(CONFIG, "vault_path", None) or None
         )
@@ -790,7 +790,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         if os.getenv("SILICA_BOUNDARY_ANNEAL", "1") == "0":
             return
         try:
-            from silica.kernel.deferred import get_deferred_store
+            from silica.kernel.recall.deferred import get_deferred_store
             if not get_deferred_store().list_all():
                 return
             from silica.tools.pipeline import silica_anneal
@@ -813,19 +813,19 @@ class InjectorFSM(BaseFSM[InjectorState]):
         ctx = getattr(self, "context", {})
         if ctx.get("_embed_dirty"):
             try:
-                from silica.kernel.embed import get_store
+                from silica.kernel.recall.embed import get_store
                 get_store().save()
             except Exception as e:
                 logger.debug("flush: embed index save skipped (%s)", e)
         if ctx.get("_cooccur_dirty"):
             try:
-                from silica.kernel.cooccurrence import get_cooccur_store
+                from silica.kernel.recall.cooccurrence import get_cooccur_store
                 get_cooccur_store().save()
             except Exception as e:
                 logger.debug("flush: cooccur index save skipped (%s)", e)
         if ctx.get("_lexical_dirty"):
             try:
-                from silica.kernel.lexical import get_lexical_store
+                from silica.kernel.recall.lexical import get_lexical_store
                 get_lexical_store().save()
             except Exception as e:
                 logger.debug("flush: lexical index save skipped (%s)", e)
@@ -1035,7 +1035,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
     def _write_ledger_for_file(self, fi: int, status: str) -> None:
         """Record this chunk's ops into the ledger, attributed to file fi."""
         try:
-            from silica.kernel.ledger import get_ledger
+            from silica.kernel.write.ledger import get_ledger
             ledger = get_ledger()
             txn_id = self._chunk_ctx.get("txn_id", "unknown")
 
@@ -1064,7 +1064,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
     def _write_ledger_rollback(self, txn_id: str) -> None:
         try:
-            from silica.kernel.ledger import get_ledger
+            from silica.kernel.write.ledger import get_ledger
             get_ledger().mark_rolled_back(txn_id)
         except Exception as e:
             logger.warning("Failed to mark rollback in ledger: %s", e)

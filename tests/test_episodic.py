@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 
-from silica.kernel.episodic import EpisodicStore, Fact
+from silica.kernel.recall.episodic import EpisodicStore, Fact
 
 
 def _store(tmp_path):
@@ -193,7 +193,7 @@ def test_embed_snap_broken_embedder_is_silent(tmp_path):
 def test_capture_from_distill_wires_snap_tau_from_config(tmp_path, monkeypatch):
     import silica.agent.providers as providers
     from silica.config import CONFIG
-    from silica.kernel.episodic import EpisodicStore, capture_from_distill
+    from silica.kernel.recall.episodic import EpisodicStore, capture_from_distill
 
     monkeypatch.setattr(CONFIG, "episodic_embed_snap_tau", 0.8, raising=False)
     monkeypatch.setattr(providers, "get_embedder", lambda cfg: _KeyedEmbedder())
@@ -207,7 +207,7 @@ def test_capture_from_distill_wires_snap_tau_from_config(tmp_path, monkeypatch):
 def test_episodic_home_resolves_even_when_active_vault_is_memory_vault(tmp_path, monkeypatch):
     """Unlike memory_lane.memory_vault(), episodic_home never abstains."""
     from silica.config import CONFIG
-    from silica.kernel.episodic import episodic_home
+    from silica.kernel.recall.episodic import episodic_home
 
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -318,7 +318,7 @@ def test_recall_filters_expired_chains_without_mutating_store(tmp_path):
 
 
 def test_render_includes_chain_history_with_dates(tmp_path):
-    from silica.kernel import episodic
+    from silica.kernel.recall import episodic
 
     store = _store(tmp_path)
     store.capture([{"key": "user.dog.name", "text": "Il mio cane si chiama Rex"}],
@@ -338,13 +338,13 @@ def test_render_includes_chain_history_with_dates(tmp_path):
 
 
 def test_render_empty_hits_is_empty_string(tmp_path):
-    from silica.kernel import episodic
+    from silica.kernel.recall import episodic
 
     assert episodic.render([], store=_store(tmp_path)) == ""
 
 
 def test_distiller_output_parses_with_and_without_ephemerals():
-    from silica.kernel.ops import DistillerOutput
+    from silica.kernel.write.ops import DistillerOutput
 
     legacy = DistillerOutput.model_validate({"updates": []})
     assert legacy.ephemerals == []
@@ -370,7 +370,7 @@ def test_config_episodic_fields_env_overrides(monkeypatch):
 
 
 def test_capture_from_distill_routes_ephemerals_and_never_raises(tmp_path, monkeypatch):
-    from silica.kernel import episodic
+    from silica.kernel.recall import episodic
 
     monkeypatch.setattr(episodic, "store_path", lambda: tmp_path / "episodic.json")
     result = {
@@ -393,7 +393,7 @@ def test_capture_from_distill_routes_ephemerals_and_never_raises(tmp_path, monke
 def test_digest_sweeps_and_lists_nucleation_candidates(tmp_path, monkeypatch):
     import datetime as _dt
 
-    from silica.kernel import episodic
+    from silica.kernel.recall import episodic
     from silica.kernel.progress import ProgressLedger
 
     monkeypatch.setattr(episodic, "store_path", lambda: tmp_path / "episodic.json")
@@ -420,7 +420,7 @@ def test_distiller_prompt_routes_ephemerals():
 
 
 def test_normalize_key_merges_morphological_variants():
-    from silica.kernel.episodic import normalize_key
+    from silica.kernel.recall.episodic import normalize_key
 
     assert normalize_key("model_kits.gifts") == normalize_key("model_kit.gift")
     assert normalize_key("User.Car.Model") == "user.car.model"
@@ -437,7 +437,7 @@ def test_normalize_key_folds_change_marker_tokens():
     # ("aspiration_reinforced") despite the prompt's key-discipline block.
     # Mechanical lever: change-marker tokens fold away at lookup time so the
     # variant MATCHES the clean head. Stored spelling is never rewritten.
-    from silica.kernel.episodic import normalize_key
+    from silica.kernel.recall.episodic import normalize_key
 
     assert (normalize_key("caroline.counseling.aspiration_reinforced")
             == normalize_key("caroline.counseling.aspiration"))
@@ -469,7 +469,7 @@ def test_capture_change_marker_variant_supersedes_clean_head(tmp_path):
 
 
 def test_normalize_key_idempotent():
-    from silica.kernel.episodic import normalize_key
+    from silica.kernel.recall.episodic import normalize_key
 
     for k in ("model_kits.gifts", "user.preferences.color", "user.cities",
               "assistant.recipe.oven_temp"):
@@ -524,7 +524,7 @@ def test_capture_matches_legacy_head_written_before_layer_a(tmp_path):
 
 
 def test_key_vocabulary_lists_live_heads_by_recency_with_cap(tmp_path):
-    from silica.kernel.episodic import key_vocabulary
+    from silica.kernel.recall.episodic import key_vocabulary
 
     store = _store(tmp_path)
     store.capture([{"key": "user.dog.name", "text": "Tom"}],
@@ -540,7 +540,7 @@ def test_key_vocabulary_lists_live_heads_by_recency_with_cap(tmp_path):
 
 
 def test_key_vocabulary_section_renders_or_abstains(tmp_path):
-    from silica.kernel.episodic import key_vocabulary_section
+    from silica.kernel.recall.episodic import key_vocabulary_section
 
     store = _store(tmp_path)
     assert key_vocabulary_section(store) is None   # empty store: no section
@@ -554,7 +554,7 @@ def test_key_vocabulary_section_renders_or_abstains(tmp_path):
 
 
 def test_key_tokens_stemmed_entity_prefix_dropped():
-    from silica.kernel.episodic import key_tokens
+    from silica.kernel.recall.episodic import key_tokens
 
     # The probe-proven KU pair shares exactly two stemmed tokens.
     shared = (key_tokens("user.fitness.tournament.date")
@@ -580,26 +580,26 @@ def _schema(**kw):
 
 
 def test_enforce_compliant_key_passes_through():
-    from silica.kernel.episodic import enforce_key_schema
+    from silica.kernel.recall.episodic import enforce_key_schema
 
     assert enforce_key_schema("user.dog.name", _schema()) == "user.dog.name"
 
 
 def test_enforce_unknown_prefix_folds_under_default():
-    from silica.kernel.episodic import enforce_key_schema
+    from silica.kernel.recall.episodic import enforce_key_schema
 
     assert enforce_key_schema("dog.name", _schema()) == "user.dog.name"
 
 
 def test_enforce_depth_folds_tail_segments():
-    from silica.kernel.episodic import enforce_key_schema
+    from silica.kernel.recall.episodic import enforce_key_schema
 
     assert (enforce_key_schema("assistant.recipe.oven.temp", _schema())
             == "assistant.recipe.oven_temp")
 
 
 def test_enforce_prefix_match_is_canonical_stored_form_untouched():
-    from silica.kernel.episodic import enforce_key_schema
+    from silica.kernel.recall.episodic import enforce_key_schema
 
     # "assistants" stems to the same canonical form as "assistant": it IS a
     # known prefix, and the stored spelling is never rewritten.
@@ -607,7 +607,7 @@ def test_enforce_prefix_match_is_canonical_stored_form_untouched():
 
 
 def test_enforce_prepend_then_depth_fold_compose():
-    from silica.kernel.episodic import enforce_key_schema
+    from silica.kernel.recall.episodic import enforce_key_schema
 
     # Unknown prefix adds a segment, so the tail folds to honor max_depth.
     assert (enforce_key_schema("weather.city.today", _schema())
@@ -615,7 +615,7 @@ def test_enforce_prepend_then_depth_fold_compose():
 
 
 def test_enforce_is_idempotent():
-    from silica.kernel.episodic import enforce_key_schema
+    from silica.kernel.recall.episodic import enforce_key_schema
 
     schema = _schema()
     for raw in ("dog.name", "assistant.recipe.oven.temp", "weather.city.today",
@@ -625,13 +625,13 @@ def test_enforce_is_idempotent():
 
 
 def test_enforce_drops_empty_segments():
-    from silica.kernel.episodic import enforce_key_schema
+    from silica.kernel.recall.episodic import enforce_key_schema
 
     assert enforce_key_schema("user..dog.name", _schema()) == "user.dog.name"
 
 
 def test_enforce_honors_custom_schema_values():
-    from silica.kernel.episodic import enforce_key_schema
+    from silica.kernel.recall.episodic import enforce_key_schema
 
     schema = _schema(prefixes=("team",), default_prefix="team", max_depth=2)
     assert enforce_key_schema("velocity.sprint", schema) == "team.velocity_sprint"
@@ -655,7 +655,7 @@ def test_capture_without_schema_stores_raw_key(tmp_path):
 
 
 def test_capture_from_distill_loads_schema_from_memory_vault(tmp_path, monkeypatch):
-    from silica.kernel import episodic
+    from silica.kernel.recall import episodic
 
     vault = tmp_path / "memvault"
     vault.mkdir()
@@ -671,7 +671,7 @@ def test_capture_from_distill_loads_schema_from_memory_vault(tmp_path, monkeypat
 
 
 def test_capture_from_distill_without_schema_block_keeps_raw_key(tmp_path, monkeypatch):
-    from silica.kernel import episodic
+    from silica.kernel.recall import episodic
 
     vault = tmp_path / "memvault"
     vault.mkdir()  # no vault.yaml at all

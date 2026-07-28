@@ -232,8 +232,8 @@ def test_bind_vault_scopes_episodic_home_to_question_vault(tmp_path):
     # Isolation: episodic facts land in the per-question vault, while the
     # memory lane keeps abstaining (coincident-vault rule) so the adapter's
     # "personal-memory lane is never passed" guarantee holds.
-    from silica.kernel.episodic import episodic_home
-    from silica.kernel.memory_lane import memory_vault
+    from silica.kernel.recall.episodic import episodic_home
+    from silica.kernel.recall.memory_lane import memory_vault
 
     vault = tmp_path / "v"
     vault.mkdir()
@@ -319,7 +319,7 @@ def test_key_schema_flag_enforces_keys_through_product_seam(tmp_path, monkeypatc
     assert (vault / "vault.yaml").is_file()
     # run() leaves the last question bound, so store_path() IS the product
     # lookup for this vault's episodic store.
-    from silica.kernel.episodic import store_path
+    from silica.kernel.recall.episodic import store_path
 
     store = json.loads(store_path().read_text())
     keys = {f["key"] for f in store["facts"]}
@@ -331,7 +331,7 @@ def test_key_schema_flag_enforces_keys_through_product_seam(tmp_path, monkeypatc
 def test_context_assembly_is_the_product_perception(tmp_path, monkeypatch):
     # Perception promotion (spec 2026-07-15): the harness owns no context
     # assembler. The prompt's Memory section must be byte-identical to
-    # silica.kernel.perception.perceive().render() on the same vault — the
+    # silica.kernel.recall.perception.perceive().render() on the same vault — the
     # by-construction guarantee that eval and product cannot diverge, checked
     # once end-to-end.
     seen = {}
@@ -348,7 +348,7 @@ def test_context_assembly_is_the_product_perception(tmp_path, monkeypatch):
     runner.run([inst], tmp_path / "run", model="stub", judge_model="stub",
                k=2, stuff=False, use_embedder=False, limit=None, verbose=False)
 
-    from silica.kernel.perception import perceive
+    from silica.kernel.recall.perception import perceive
 
     runner.bind_vault(tmp_path / "run" / inst["question_id"])
     p = perceive(inst["question"], now=inst["question_date"], k=2,
@@ -620,13 +620,13 @@ def test_incremental_checkpoint_written_after_every_question(tmp_path, monkeypat
 
 
 def test_distill_passes_episodic_key_vocabulary(tmp_path, monkeypatch):
-    import silica.kernel.paths as paths_mod
+    import silica.kernel.recall.paths as paths_mod
     from silica.kernel import prep_delegation as prep
     from evals.longmemeval import runner
 
     monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
     runner.bind_vault(tmp_path / "vault")
-    from silica.kernel.episodic import EpisodicStore
+    from silica.kernel.recall.episodic import EpisodicStore
 
     EpisodicStore().capture([{"key": "user.car.model", "text": "Panda"}],
                             run_id="s0", seen="2026-01-01")

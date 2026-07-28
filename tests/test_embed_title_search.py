@@ -1,5 +1,5 @@
 """Title-vector search primitive backing the novelty gate's order parameter."""
-from silica.kernel.embed import EmbedStore
+from silica.kernel.recall.embed import EmbedStore
 
 
 def _store(tmp_path):

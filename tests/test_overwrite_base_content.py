@@ -17,7 +17,7 @@ from silica.capabilities.enrich import run_enrich
 from silica.capabilities.refine import run_refine
 from silica.config import CONFIG
 from silica.driver import DRIVER
-from silica.kernel.merge import CONFLICT_CALLOUT_HEADER
+from silica.kernel.write.merge import CONFLICT_CALLOUT_HEADER
 from silica.kernel.workqueue import WorkItem
 
 

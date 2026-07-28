@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.kernel.ledger import Ledger
+from silica.kernel.write.ledger import Ledger
 
 
 def _sha256(text: str) -> str:
@@ -183,7 +183,7 @@ def test_ledger_null_hash_is_stale(ledger, tmp_path):
 def test_orchestrator_writes_content_hash(tmp_path, monkeypatch):
     """InjectorFSM ledger writes pass the source content_hash from context."""
     from silica.router.orchestrator import InjectorFSM
-    from silica.kernel.ops import Op, OpType
+    from silica.kernel.write.ops import Op, OpType
     from silica.config import CONFIG
 
     # Point the vault at tmp_path so to_vault_relative can relativize the inbox path
@@ -213,9 +213,9 @@ def test_orchestrator_writes_content_hash(tmp_path, monkeypatch):
         fsm.context.setdefault("chunk", {})["ops_path"] = ops_path
         fsm.context.setdefault("chunk", {})["txn_id"] = "t_test"
 
-        from silica.kernel.ledger import Ledger
+        from silica.kernel.write.ledger import Ledger
         test_ledger = Ledger(tmp_path / "test.db")
-        with patch("silica.kernel.ledger.get_ledger", return_value=test_ledger):
+        with patch("silica.kernel.write.ledger.get_ledger", return_value=test_ledger):
             fsm._write_ledger_for_file(0, "committed")
 
         # Verify the ledger row has the content_hash

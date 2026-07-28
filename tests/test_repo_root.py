@@ -10,7 +10,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from silica.kernel import paths
+from silica.kernel.recall import paths
 
 
 def _init_repo(p: Path) -> None:

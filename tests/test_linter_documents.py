@@ -1,4 +1,4 @@
-from silica.kernel.linter import check_documents_paths
+from silica.kernel.link.linter import check_documents_paths
 
 
 def test_missing_documents_path_warns(tmp_path):

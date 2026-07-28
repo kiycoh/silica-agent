@@ -5,8 +5,8 @@
 source transcript. Enforced (reject/retry) under the `extractive` distill
 profile so 'non-lossy' is a checked property, not a prompt hope."""
 
-from silica.kernel.provenance import nonextractive_lines
-from silica.kernel.validate import validate_operations
+from silica.kernel.write.provenance import nonextractive_lines
+from silica.kernel.write.validate import validate_operations
 
 # Long enough that a body copied from it clears MIN_WRITE_SNIPPET_CHARS (100).
 _EXCERPT = ("Elena: I finally signed up for the beginners pottery class at the "

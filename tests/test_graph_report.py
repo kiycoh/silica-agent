@@ -1,4 +1,4 @@
-"""Tests for silica/kernel/graph_report.py.
+"""Tests for silica/kernel/report/graph_report.py.
 
 Uses a synthetic deterministic graph (2 Louvain clusters connected by one bridge
 edge, one orphan note) without touching a live driver or Obsidian.
@@ -9,8 +9,8 @@ import dataclasses
 
 import pytest
 
-from silica.kernel.graph_report.compute import _empty_report
-from silica.kernel.graph_report import (
+from silica.kernel.report.graph_report.compute import _empty_report
+from silica.kernel.report.graph_report import (
     BridgeStat,
     ClusterStat,
     MissingLink,
@@ -249,7 +249,7 @@ def test_to_markdown_folds_long_lists_into_callouts():
 
 
 def test_is_vault_artifact_matches_root_only():
-    from silica.kernel.graph_export import is_vault_artifact
+    from silica.kernel.recall.graph_export import is_vault_artifact
     assert is_vault_artifact("GRAPH_REPORT.md")
     assert is_vault_artifact("log")
     assert not is_vault_artifact("Concepts/log.md")   # a real note in a subfolder
@@ -259,7 +259,7 @@ def test_is_vault_artifact_matches_root_only():
 def test_build_graph_data_excludes_vault_artifacts(tmp_vault):
     """GRAPH_REPORT.md/log.md are Silica's own output — they must stay out of the
     graph, or the report's own `[[...]]` would zero the orphan count next run."""
-    from silica.kernel.graph_export import build_graph_data
+    from silica.kernel.recall.graph_export import build_graph_data
 
     tmp_vault.note("Real.md", "# Real\nNo links here.\n")
     tmp_vault.note("GRAPH_REPORT.md", "# Report\n[[Real]]\n")   # report links Real
@@ -342,7 +342,7 @@ def test_missing_links_common_neighbors_boosts_ranking(monkeypatch):
     candidates.
     """
     import networkx as nx
-    from silica.kernel import graph_report as gr
+    from silica.kernel.report import graph_report as gr
 
     # S reaches A through two shared neighbors (X, Y) and B through one (Z).
     # Both A and B sit at shortest-path distance 2 from S (so both clear the
@@ -369,7 +369,7 @@ def test_missing_links_common_neighbors_boosts_ranking(monkeypatch):
                 {"path": "B", "score": 0.90},
             ]
 
-    monkeypatch.setattr("silica.kernel.embed.EmbedStore", _Store)
+    monkeypatch.setattr("silica.kernel.recall.embed.EmbedStore", _Store)
     monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: object())
 
     report = VaultReport(
@@ -379,7 +379,7 @@ def test_missing_links_common_neighbors_boosts_ranking(monkeypatch):
         bridges=[], orphans=[], dangling=[], clusters=[],
     )
 
-    from silica.kernel.graph_report.embed_signals import _compute_missing_links
+    from silica.kernel.report.graph_report.embed_signals import _compute_missing_links
     links = _compute_missing_links(report, G, tau=0.5, k=10)
     by_target = {l.target: l for l in links}
 
@@ -393,7 +393,7 @@ def test_missing_links_common_neighbors_boosts_ranking(monkeypatch):
 
 def test_duplicate_pairs_split_confirmed_vs_borderline(monkeypatch):
     """≥ τ_high → confirmed (merge candidate); τ_low..τ_high → borderline; ≤ τ_low dropped."""
-    from silica.kernel import graph_report as gr
+    from silica.kernel.report import graph_report as gr
 
     nn = {  # each note's single nearest neighbour: (target, cosine)
         "a": ("b", 0.92),  # ≥ 0.85  → confirmed
@@ -410,13 +410,13 @@ def test_duplicate_pairs_split_confirmed_vs_borderline(monkeypatch):
             tgt, score = nn[vec[0]]
             return [{"path": tgt, "score": score}]
 
-    monkeypatch.setattr("silica.kernel.embed.EmbedStore", _Store)
+    monkeypatch.setattr("silica.kernel.recall.embed.EmbedStore", _Store)
 
     report = VaultReport(
         generated_at="x", scope="", totals={},
         god_nodes=[], bridges=[], orphans=[], dangling=[], clusters=[],
     )
-    from silica.kernel.graph_report.embed_signals import _compute_duplicate_pairs
+    from silica.kernel.report.graph_report.embed_signals import _compute_duplicate_pairs
     borderline, confirmed = _compute_duplicate_pairs(report)
 
     assert [(d.source, d.target) for d in confirmed] == [("a", "b")]
@@ -502,7 +502,7 @@ def test_contested_section_rendered(tmp_vault):
 def test_source_drift_acceptance_v2_touching_half_drifts_the_other_half(tmp_vault):
     """Nucleate v1 (A,B) -> modify source -> re-nucleate v2 (A only) -> graph_report
     lists B as drifted from lezione-03.md."""
-    from silica.kernel.provenance import append_record
+    from silica.kernel.write.provenance import append_record
 
     append_record("lezione-03.md", "sha-v1", "run1", ["A", "B"])
     append_record("lezione-03.md", "sha-v2", "run2", ["A"])
@@ -523,7 +523,7 @@ def test_source_drift_empty_without_provenance_file(tmp_vault):
 
 
 def test_source_drift_skipped_without_analytics(tmp_vault):
-    from silica.kernel.provenance import append_record
+    from silica.kernel.write.provenance import append_record
 
     append_record("a.md", "sha1", "run1", ["A", "B"])
     append_record("a.md", "sha2", "run2", ["A"])
@@ -534,7 +534,7 @@ def test_source_drift_skipped_without_analytics(tmp_vault):
 
 
 def test_source_drift_section_rendered(tmp_vault):
-    from silica.kernel.provenance import append_record
+    from silica.kernel.write.provenance import append_record
 
     append_record("lezione-03.md", "sha-v1", "run1", ["A", "B"])
     append_record("lezione-03.md", "sha-v2", "run2", ["A"])
@@ -563,7 +563,7 @@ def test_source_drift_matches_despite_md_suffix_on_node_ids(tmp_vault):
     the suffix). The id-form mismatch must not swallow the intersection —
     drift has to surface even when the graph node id is `Concepts/A.md` and
     the provenance note is `Concepts/A`."""
-    from silica.kernel.provenance import append_record
+    from silica.kernel.write.provenance import append_record
 
     append_record("lezione-03.md", "sha-v1", "run1", ["Concepts/A", "Concepts/B"])
     append_record("lezione-03.md", "sha-v2", "run2", ["Concepts/A"])
@@ -581,7 +581,7 @@ def test_source_drift_matches_despite_md_suffix_on_node_ids(tmp_vault):
 def test_to_digest_analytics_signals():
     # Tier A: shape/bet/coh/gaps/missing-hubs/integration reach the digest
     # (previously markdown-only, invisible to the agent).
-    from silica.kernel.graph_report.models import (
+    from silica.kernel.report.graph_report.models import (
         ClusterStat,
         IntegrationDeficit,
         MissingHub,

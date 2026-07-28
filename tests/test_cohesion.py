@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from silica.kernel.cohesion import cohesion_pass, _content_tokens
+from silica.kernel.text.cohesion import cohesion_pass, _content_tokens
 
 _BUNDLED_OVERLAYS = (
     Path(__file__).resolve().parent.parent / "silica" / "overlays"
@@ -17,7 +17,7 @@ def it_overlay():
     path = _BUNDLED_OVERLAYS / "italian.yaml"
     if not path.exists():
         pytest.skip(f"bundled overlay not found: {path}")
-    from silica.kernel.overlay import load_overlay
+    from silica.kernel.text.overlay import load_overlay
     return load_overlay(path)
 
 
@@ -69,13 +69,13 @@ def test_tokens_it_overlay_filters_italian_function_and_structural(it_overlay):
 
 def test_tokens_roman_numerals_filtered_regardless_of_overlay():
     """Roman numeral prefixes are filtered by _STRUCTURAL_TOKENS independent of overlay."""
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
     tokens_default = _content_tokens("III Chapter Backpropagation", overlay=DEFAULT_OVERLAY)
     assert "iii" not in tokens_default
     assert "backpropagation" in tokens_default
 
     if (_BUNDLED_OVERLAYS / "italian.yaml").exists():
-        from silica.kernel.overlay import load_overlay
+        from silica.kernel.text.overlay import load_overlay
         it_ov = load_overlay(_BUNDLED_OVERLAYS / "italian.yaml")
         tokens_it = _content_tokens("IV Reti Neurali", overlay=it_ov)
         assert "iv" not in tokens_it
@@ -205,7 +205,7 @@ def test_no_siblings_from_shared_italian_function_word_no_vault_overlay():
     get_active_overlay() (English DEFAULT_OVERLAY, which does not filter
     "cosa"), so the two ops shared "cosa" as a false discriminating token.
 
-    Verified directly: "cosa" in silica.kernel.language.stopwords_for("italian")
+    Verified directly: "cosa" in silica.kernel.text.language.stopwords_for("italian")
     is True, and "cosa" in stop_words.get_stop_words("en") is False — so the
     fixture only proves the intended thing if the body-language routing
     actually happens.

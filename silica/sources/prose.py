@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from silica.config import CONFIG
-from silica.kernel.sanitize import strip_degenerate_runs
+from silica.kernel.text.sanitize import strip_degenerate_runs
 from silica.sources.base import GroundedStub, RawItem
 
 _EXTS = (".md", ".txt")

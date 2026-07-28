@@ -3,7 +3,7 @@
 
 """Graph viewer — the 3d-force-graph HTML emitter for the vault wikilink graph.
 
-Split out of `silica.kernel.graph_export` (which keeps the deterministic *data*
+Split out of `silica.kernel.recall.graph_export` (which keeps the deterministic *data*
 role: build_graph_data / detect_communities). This module owns only the viewer:
 it turns nodes/edges/communities into a fully self-contained HTML file.
 
@@ -21,7 +21,7 @@ import json
 import logging
 from pathlib import Path
 
-from silica.kernel.graph_export import Community
+from silica.kernel.recall.graph_export import Community
 
 logger = logging.getLogger(__name__)
 
@@ -731,7 +731,7 @@ def _gap_edges(nodes: list[dict], edges: list[dict], top_k: int = 5) -> list[dic
     amber directional-particle links — WebGL has no dashed line, so motion, not
     a dash pattern, is what sets a gap apart. score rides along for the title map.
     """
-    from silica.kernel.graph_export import structural_gaps
+    from silica.kernel.recall.graph_export import structural_gaps
 
     return [
         {
@@ -769,7 +769,7 @@ def export_graph(
     success, path, nodes, edges (wikilinks), similar (k-NN), communities,
     unresolved, gaps.
     """
-    from silica.kernel.graph_export import (
+    from silica.kernel.recall.graph_export import (
         build_graph_data,
         canvas_metrics,
         detect_communities,

@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.graph_report.compute import _empty_report
-from silica.kernel.graph_report import (
+from silica.kernel.report.graph_report.compute import _empty_report
+from silica.kernel.report.graph_report import (
     BridgeStat,
     ClusterStat,
     MissingLink,

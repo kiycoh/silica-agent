@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import datetime
-from silica.kernel.linter import check_expires_at
+from silica.kernel.link.linter import check_expires_at
 
 
 def test_no_expires_at_returns_no_warning():
@@ -52,7 +52,7 @@ def test_expires_at_none_returns_no_warning():
 
 def test_check_expires_at_integrated_in_validate_note(tmp_path, monkeypatch):
     """validate_note emits an expires_at warning for an expired note."""
-    from silica.kernel import frontmatter
+    from silica.kernel.write import frontmatter
     import datetime
 
     past = (datetime.date.today() - datetime.timedelta(days=5)).isoformat()
@@ -63,9 +63,9 @@ def test_check_expires_at_integrated_in_validate_note(tmp_path, monkeypatch):
     )
 
     from silica.driver.fs_backend import ObsidianFSBackend
-    import silica.kernel.linter as linter_mod
+    import silica.kernel.link.linter as linter_mod
     monkeypatch.setattr(linter_mod, "DRIVER", ObsidianFSBackend(str(tmp_path)))
 
-    from silica.kernel.linter import validate_note
+    from silica.kernel.link.linter import validate_note
     errors, warnings = validate_note(str(note_path), hub=None, op_type=None)
     assert any("expired" in w.lower() for w in warnings), f"warnings={warnings}"

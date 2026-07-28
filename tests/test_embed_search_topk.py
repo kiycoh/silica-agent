@@ -14,7 +14,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from silica.kernel.embed import EmbedStore
+from silica.kernel.recall.embed import EmbedStore
 
 
 def _store(tmp_path):
@@ -103,7 +103,7 @@ def test_search_uses_heapq_nlargest(tmp_path):
     heapq.nlargest (module-level `import heapq`), not just output-compatible
     with it by coincidence."""
     store = _store(tmp_path)
-    from silica.kernel import embed as embed_mod
+    from silica.kernel.recall import embed as embed_mod
 
     with patch.object(embed_mod.heapq, "nlargest", wraps=embed_mod.heapq.nlargest) as spy:
         store.cosine_top_k([1.0, 0.0], k=3)

@@ -118,7 +118,7 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
     placeholder always receives a concrete language name ("Italian",
     "English", ...), never None.
     """
-    from silica.kernel import language as lang_mod
+    from silica.kernel.text import language as lang_mod
     from silica.kernel.vault_manifest import get_active_manifest
 
     conventions = get_active_manifest().conventions
@@ -403,8 +403,8 @@ def run_distiller(
     from silica.agent.providers import get_provider
     from silica.config import CONFIG
     from silica.kernel.context_builder import build_context
-    from silica.kernel.ops import DistillerOutput
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.write.ops import DistillerOutput
+    from silica.kernel.text.sanitize import parse_json
 
     prompt_text = render_prompt(target=target, hub=hub,
                                 source_text=_payload_sample_text(payload),

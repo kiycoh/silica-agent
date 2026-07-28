@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 def log_path() -> Path:
     from silica.config import CONFIG
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
 
     return paths.index_dir_for(CONFIG.vault_path) / "quiz.jsonl"
 

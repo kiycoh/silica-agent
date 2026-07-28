@@ -13,7 +13,7 @@ from pathlib import Path
 
 import orjson
 
-from silica.kernel.graph_report.models import VaultReport
+from silica.kernel.report.graph_report.models import VaultReport
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
     # graph_report.models at module level, and graph_report/__init__ imports
     # this module — a module-level import here deadlocks whenever vault_energy
     # is the first of the two to be imported.
-    from silica.kernel.vault_energy import vault_energy
+    from silica.kernel.report.vault_energy import vault_energy
 
     e = vault_energy(r)
     add("## Energy")
@@ -454,7 +454,7 @@ def write_report(report: VaultReport, output_path: str) -> dict:
             import datetime as _dt
 
             from silica.config import CONFIG
-            from silica.kernel.vault_energy import vault_energy
+            from silica.kernel.report.vault_energy import vault_energy
 
             vault = getattr(CONFIG, "vault_path", None)
             if vault:

@@ -72,7 +72,7 @@ def silica_code_why(path: str = "") -> dict:
     from dataclasses import asdict
 
     from silica.config import CONFIG
-    from silica.kernel import codetree
+    from silica.kernel.code import codetree
 
     notes, residue = codetree.why_for(getattr(CONFIG, "vault_path", "") or "", path)
     return {"status": "ok", "path": path,

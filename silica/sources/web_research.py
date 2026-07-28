@@ -23,7 +23,7 @@ import httpx
 from silica.agent.constraints import AgentConstraints
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
-from silica.kernel.templates import slugify
+from silica.kernel.write.templates import slugify
 from silica.tools import tool
 from pydantic import BaseModel
 
@@ -145,7 +145,7 @@ def _write_leaf(note_rel: str, messages: list[dict]) -> None:
     every sources/ file. Best-effort: a leaf failure never loses the note.
     """
     try:
-        from silica.kernel.paths import SOURCES_DIR
+        from silica.kernel.recall.paths import SOURCES_DIR
 
         raw = "\n\n".join(
             str(m.get("content") or "")

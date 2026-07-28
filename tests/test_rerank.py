@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import httpx
 
-from silica.kernel.rerank import _best_window, rerank_related
+from silica.kernel.recall.rerank import _best_window, rerank_related
 from silica.agent.providers import LocalReranker, Reranker, get_reranker
 
 
@@ -41,7 +41,7 @@ def test_membership_belongs_to_first_stage():
 def test_granularity_gate_skips_reranker_on_long_docs():
     # Gate 2b: when the median document dwarfs the cross-encoder window, its
     # ordering is noise — skip the call, keep first-stage order.
-    from silica.kernel import rerank as rr_mod
+    from silica.kernel.recall import rerank as rr_mod
 
     long_doc = "x" * (rr_mod._RERANK_WINDOW_FACTOR * rr_mod._WINDOW_CHARS + 1)
     fake = _Fake([0.9, 0.1])
@@ -58,7 +58,7 @@ def test_granularity_gate_lets_short_docs_rerank():
 
 
 def test_rerank_gate_probe_receives_median_and_fired(monkeypatch):
-    from silica.kernel import rerank as rr_mod
+    from silica.kernel.recall import rerank as rr_mod
 
     seen = []
     monkeypatch.setattr(rr_mod, "RERANK_GATE_PROBE", seen.append)
@@ -112,7 +112,7 @@ def test_window_falls_back_to_head_without_query_terms():
 # --- multi-window selection (multi-window spec 2026-07-15) -----------------
 
 def test_best_windows_do_not_overlap():
-    from silica.kernel.rerank import best_windows
+    from silica.kernel.recall.rerank import best_windows
 
     body = ("zebra zebra ") + ("filler " * 100) + ("zebra " * 5) + ("filler " * 100)
     wins = best_windows(body, "zebra", 60, 2)
@@ -122,7 +122,7 @@ def test_best_windows_do_not_overlap():
 
 
 def test_best_windows_output_in_document_order():
-    from silica.kernel.rerank import best_windows
+    from silica.kernel.recall.rerank import best_windows
 
     # The denser region sits LAST in the document, so greedy picks it first;
     # the output must still follow document order (chat chronology).
@@ -132,21 +132,21 @@ def test_best_windows_output_in_document_order():
 
 
 def test_best_windows_whole_text_when_it_fits_the_budget():
-    from silica.kernel.rerank import best_windows
+    from silica.kernel.recall.rerank import best_windows
 
     text = "zebra " * 30  # 180 chars <= 2 * 100
     assert best_windows(text, "zebra", 100, 2) == [text]
 
 
 def test_best_windows_head_slice_without_usable_terms():
-    from silica.kernel.rerank import best_windows
+    from silica.kernel.recall.rerank import best_windows
 
     text = "y" * 1000
     assert best_windows(text, "a an of it", 100, 2) == [text[:100]]
 
 
 def test_best_windows_drops_second_window_without_hits():
-    from silica.kernel.rerank import best_windows
+    from silica.kernel.recall.rerank import best_windows
 
     # All hits in the head: never pad with irrelevant text, fewer windows is normal.
     body = ("zebra " * 4) + ("filler " * 200)
@@ -156,7 +156,7 @@ def test_best_windows_drops_second_window_without_hits():
 
 
 def test_best_windows_n1_equals_best_window():
-    from silica.kernel.rerank import best_window, best_windows
+    from silica.kernel.recall.rerank import best_window, best_windows
 
     body = ("weather smalltalk " * 80) + "I attend yoga classes for my anxiety " \
            + ("unrelated filler " * 80)

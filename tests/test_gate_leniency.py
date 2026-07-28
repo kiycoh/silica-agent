@@ -4,7 +4,7 @@ fence auto-close, and diff-aware patch lint. Each recovers a class of op the
 mineru run of 2026-07-22 deferred without a real defect."""
 
 import pytest
-from silica.kernel.templates import _link_name, close_unbalanced_fences
+from silica.kernel.write.templates import _link_name, close_unbalanced_fences
 
 
 @pytest.fixture(autouse=True)
@@ -53,7 +53,7 @@ def _write_op(heading, path, source="spark.md"):
 def test_heading_unique_token_subset_remaps(tmp_vault):
     """'DataFrame' is a clean rephrase of the registered 'dataframe spark' —
     a unique token-subset match remaps instead of deferring."""
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
 
     validated, rejected = validate_operations(
         [_write_op("DataFrame", "Spark/DataFrame.md")],
@@ -67,7 +67,7 @@ def test_heading_unique_token_subset_remaps(tmp_vault):
 def test_heading_ambiguous_token_subset_still_rejects(tmp_vault):
     """Two concepts share the token — no unique match, so the anti-hallucination
     gate still refuses rather than guess."""
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.validate import validate_operations
 
     validated, rejected = validate_operations(
         [_write_op("DataFrame", "Spark/DataFrame.md")],
@@ -83,8 +83,8 @@ def test_heading_ambiguous_token_subset_still_rejects(tmp_vault):
 def test_patch_not_reverted_for_preexisting_violation(tmp_vault):
     """A patch to a user note carrying an [!definizione] callout must land —
     the pre-existing violation is not one the patch introduced."""
-    from silica.kernel.atomic_write import commit_note_atomic
-    from silica.kernel.ops import Op, OpType
+    from silica.kernel.write.atomic_write import commit_note_atomic
+    from silica.kernel.write.ops import Op, OpType
     from silica.driver import DRIVER
 
     path = "Math/Insiemi.md"
@@ -107,8 +107,8 @@ def test_patch_not_reverted_for_preexisting_violation(tmp_vault):
 def test_patch_reverted_for_newly_introduced_violation(tmp_vault):
     """The gate still bites: a snippet that introduces a NEW unknown callout is
     reverted, proving the baseline subtraction is not a blanket bypass."""
-    from silica.kernel.atomic_write import commit_note_atomic
-    from silica.kernel.ops import Op, OpType
+    from silica.kernel.write.atomic_write import commit_note_atomic
+    from silica.kernel.write.ops import Op, OpType
 
     path = "Math/Clean.md"
     tmp_vault.note(

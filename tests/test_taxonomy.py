@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from silica.kernel.taxonomy import FolderRule, Taxonomy
+from silica.kernel.organize.taxonomy import FolderRule, Taxonomy
 
 
 # ---------------------------------------------------------------------------

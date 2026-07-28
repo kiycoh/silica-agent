@@ -272,7 +272,7 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
 
     substrate: str | None = None
     try:
-        from silica.kernel.run_substrate import build_substrate
+        from silica.kernel.recall.run_substrate import build_substrate
         substrate = build_substrate(
             enriched_chunk,
             manifest_titles=fsm.manifest.titles(),
@@ -444,7 +444,7 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
 
         # Episodic lane: route personal/ephemeral facts to the short-term
         # store. Never fails the ingest (capture_from_distill swallows).
-        from silica.kernel.episodic import capture_from_distill
+        from silica.kernel.recall.episodic import capture_from_distill
         capture_from_distill(
             chunk_result,
             run_id=fsm.progress.run_id,
@@ -499,7 +499,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
     # Cohesion pass: inject sibling cross-references into write ops' related[]
     # before validation so the links land in the written frontmatter.
     # Scope: same-chunk siblings only (cross-chunk handled by AUTOLINK/BACKLINK).
-    from silica.kernel.cohesion import cohesion_pass
+    from silica.kernel.text.cohesion import cohesion_pass
     ops_raw = cohesion_pass(ops_raw)
 
     ops_path = fsm._make_tmp(ops_raw)

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.provenance import ungrounded_spans
-from silica.kernel.validate import validate_operations
+from silica.kernel.write.provenance import ungrounded_spans
+from silica.kernel.write.validate import validate_operations
 
 
 @pytest.fixture(autouse=True)

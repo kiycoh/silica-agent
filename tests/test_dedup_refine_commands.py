@@ -49,7 +49,7 @@ def _read_note(path):
 
 def test_silica_dedup_builds_pair_targeting_larger_note():
     from silica.tools.composed import silica_dedup
-    with patch("silica.kernel.embed.EmbedStore", _FakeStore), \
+    with patch("silica.kernel.recall.embed.EmbedStore", _FakeStore), \
          patch("silica.driver.DRIVER.read_note", side_effect=_read_note), \
          patch("silica.agent.subagent.run_subagent_batch", return_value={"items": 1, "summary": {"committed": 1}, "results": []}) as batch:
         res = silica_dedup(folder="Concepts")
@@ -69,7 +69,7 @@ def test_silica_dedup_requires_index():
         def __len__(self):
             return 0
 
-    with patch("silica.kernel.embed.EmbedStore", _Empty):
+    with patch("silica.kernel.recall.embed.EmbedStore", _Empty):
         res = silica_dedup(folder="X")
     assert "error" in res
 
@@ -210,7 +210,7 @@ def test_dedup_secondary_borderline_found_with_expanded_k():
     """
     from silica.tools.composed import silica_dedup
 
-    with patch("silica.kernel.embed.EmbedStore", _ThreeNoteStore), \
+    with patch("silica.kernel.recall.embed.EmbedStore", _ThreeNoteStore), \
          patch("silica.driver.DRIVER.read_note", side_effect=_read_three), \
          patch("silica.agent.subagent.run_subagent_batch",
                return_value={"items": 1, "summary": {"committed": 1}, "results": []}) as batch:
@@ -270,7 +270,7 @@ def test_dedup_title_gate_promotes_low_fullscore_pair():
     """
     from silica.tools.composed import silica_dedup
 
-    with patch("silica.kernel.embed.EmbedStore", _TitleGateStore), \
+    with patch("silica.kernel.recall.embed.EmbedStore", _TitleGateStore), \
          patch("silica.driver.DRIVER.read_note", side_effect=_read_ros), \
          patch("silica.agent.subagent.run_subagent_batch",
                return_value={"items": 1, "summary": {"committed": 1}, "results": []}) as batch:

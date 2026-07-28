@@ -40,10 +40,10 @@ import re
 import tempfile
 from pathlib import Path
 
-from silica.kernel import frontmatter
-from silica.kernel.autolink import autolink, build_title_index
-from silica.kernel.health import lint
-from silica.kernel.sanitize import normalize_ops
+from silica.kernel.write import frontmatter
+from silica.kernel.link.autolink import autolink, build_title_index
+from silica.kernel.link.health import lint
+from silica.kernel.text.sanitize import normalize_ops
 
 # Facade depth measured; matches the k of every production related_notes surface.
 # The metric name pins it — change both together or not at all.
@@ -127,8 +127,8 @@ def eligible_pairs(adj: dict[str, set[str]]) -> list[tuple[str, str]]:
 
 
 def fusion_probe(vault: Path, store, *, embed_store=None, k: int = K, verbose: bool = False) -> dict:
-    from silica.kernel import correlate
-    from silica.kernel.relatedness import related_notes
+    from silica.kernel.link import correlate
+    from silica.kernel.recall.relatedness import related_notes
 
     es = embed_store if (embed_store is not None and len(embed_store)) else None
     legs = ("embed+" if es is not None else "") + ("cooccur+edges" if len(store) else "")

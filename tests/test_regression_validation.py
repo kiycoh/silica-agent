@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch
 
 
-from silica.kernel.validate import validate_operations
+from silica.kernel.write.validate import validate_operations
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +28,7 @@ def test_write_rejects_sibling_directory_with_same_prefix(tmp_path):
         }
     ]
 
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=RuntimeError("not found")):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=RuntimeError("not found")):
         validated, rejected = validate_operations(ops, [], str(target_dir))
 
     assert not validated
@@ -53,7 +53,7 @@ def test_any_inbox_subfolder_is_forbidden_target(tmp_path):
         }
     ]
 
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=RuntimeError("not found")):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=RuntimeError("not found")):
         validated, rejected = validate_operations(ops, [], str(target_dir))
 
     assert not validated
@@ -83,7 +83,7 @@ def test_skip_ops_are_never_rejected(tmp_path):
 
 def test_validate_note_downgrades_size_limits_to_warnings():
     """validate_note must place max_lines and max_chars limit violations in warnings instead of errors."""
-    from silica.kernel.linter import validate_note
+    from silica.kernel.link.linter import validate_note
     from unittest.mock import MagicMock
     
     # Create content that exceeds max_lines (400) and max_chars (20000)
@@ -96,7 +96,7 @@ def test_validate_note_downgrades_size_limits_to_warnings():
         
     read_mock = MagicMock(return_value=FakeNoteContent())
     
-    with patch("silica.kernel.linter.DRIVER.read_note", read_mock):
+    with patch("silica.kernel.link.linter.DRIVER.read_note", read_mock):
         errors, warnings = validate_note("some_path.md", hub=None)
         
     # Verify size violations are warnings, not errors
@@ -110,8 +110,8 @@ def test_parse_ops_salvages_invalid_op_type():
     """One invalid op enum from the non-structured fallback must not raise —
     it killed a whole multi-file run (2026-07-17, FSM error at Lezione 4).
     The bad item degrades to a skip; valid siblings survive untouched."""
-    from silica.kernel.ops_io import parse_ops
-    from silica.kernel.ops import OpType
+    from silica.kernel.write.ops_io import parse_ops
+    from silica.kernel.write.ops import OpType
 
     ops = parse_ops([
         {"op": "update", "heading": "H", "source_basename": "s.md", "path": "A/B.md"},
@@ -149,8 +149,8 @@ def test_heading_matches_payload_concept_modulo_case_and_apostrophe(tmp_path):
         "snippet": "z" * 150,
     }]
 
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=RuntimeError("not found")), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=RuntimeError("not found")), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(ops, payloads, str(target_dir))
 
     assert rejected == []
@@ -172,14 +172,14 @@ Corpo della nota con [[Altra nota]].
 
 
 def _lint_note(content, path, hub, op_type="patch"):
-    from silica.kernel.linter import validate_note
+    from silica.kernel.link.linter import validate_note
     from unittest.mock import MagicMock
 
     class FakeNoteContent:
         pass
 
     FakeNoteContent.content = content
-    with patch("silica.kernel.linter.DRIVER.read_note", MagicMock(return_value=FakeNoteContent())):
+    with patch("silica.kernel.link.linter.DRIVER.read_note", MagicMock(return_value=FakeNoteContent())):
         return validate_note(path, hub=hub, op_type=op_type)
 
 

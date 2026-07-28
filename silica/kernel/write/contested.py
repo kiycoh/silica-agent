@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from silica.kernel import frontmatter
+from silica.kernel.write import frontmatter
 
 CONTESTED_KEY = "contested"
 CONTRADICTIONS_KEY = "contradictions"
@@ -170,7 +170,7 @@ def _extract_contradiction_callouts(body: str) -> tuple[str, list[str]]:
     whitespace under it is dropped with its callout: the header exists only to
     attribute the block that just moved.
     """
-    from silica.kernel.templates import PROVENANCE_HEADER_PREFIX
+    from silica.kernel.write.templates import PROVENANCE_HEADER_PREFIX
 
     lines = body.splitlines()
     kept: list[str] = []
@@ -243,7 +243,7 @@ def reliability_tier(content: str, *, has_source_leaf: bool | None = None) -> in
     if not data.get("AI"):
         return TIER_HUMAN
     if has_source_leaf is None:
-        from silica.kernel.paths import SOURCES_MARKER
+        from silica.kernel.recall.paths import SOURCES_MARKER
         has_source_leaf = SOURCES_MARKER in (content or "")
     return TIER_GROUNDED if has_source_leaf else TIER_DISTILLED
 
@@ -290,7 +290,7 @@ def resolve_contested(content: str, *, resolved_by: str, valid_to: str) -> str:
     leaving a body callout that still reads "Unresolved" makes the note lie
     about its own state, and drops every record of what was contested.
     """
-    from silica.kernel.moc import merge_moc_section
+    from silica.kernel.write.moc import merge_moc_section
 
     data, raw, body = frontmatter.split(content)
     if data is None:

@@ -9,7 +9,7 @@ the light single-note write path, and the flag can be cleared the same way.
 """
 from __future__ import annotations
 
-from silica.kernel.contested import contested_refs
+from silica.kernel.write.contested import contested_refs
 
 NOTE = (
     "---\n"

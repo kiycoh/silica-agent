@@ -1,4 +1,4 @@
-"""Tests for silica.kernel.keyphrase — content-based concept extraction (Fase 1).
+"""Tests for silica.kernel.text.keyphrase — content-based concept extraction (Fase 1).
 
 The thesis: markup-only extraction (recon.extract_concepts) returns ~0 real
 concepts on prose with no headings/bold/acronyms; YAKE recovers them.
@@ -25,13 +25,13 @@ def it_overlay():
     path = _BUNDLED_OVERLAYS / "italian.yaml"
     if not path.exists():
         pytest.skip(f"bundled overlay not found: {path}")
-    from silica.kernel.overlay import load_overlay
+    from silica.kernel.text.overlay import load_overlay
     return load_overlay(path)
 
 
 def test_prose_extracts_content_concepts(it_overlay):
     """Prose with no markup yields real domain concepts (markup-only gave ~0)."""
-    from silica.kernel.keyphrase import extract_keyphrases
+    from silica.kernel.text.keyphrase import extract_keyphrases
 
     cands = extract_keyphrases(_PROSE, overlay=it_overlay, lang="italian")
     phrases = " ".join(c.phrase.lower() for c in cands)
@@ -41,13 +41,13 @@ def test_prose_extracts_content_concepts(it_overlay):
 
 
 def _fake_ranked(n):
-    from silica.kernel.keyphrase import ConceptCandidate
+    from silica.kernel.text.keyphrase import ConceptCandidate
     return [ConceptCandidate(phrase=f"c{i}", score=float(i)) for i in range(n)]
 
 
 def test_cutoff_scales_with_tokens_and_caps():
     """k = clamp(n_tok / TOKENS_PER_CONCEPT, MIN, MAX), capped at candidates."""
-    from silica.kernel.keyphrase import (
+    from silica.kernel.text.keyphrase import (
         MAX_CONCEPTS, MIN_CONCEPTS, TOKENS_PER_CONCEPT, _cutoff,
     )
     pool = _fake_ranked(100)
@@ -66,7 +66,7 @@ def test_cutoff_scales_with_tokens_and_caps():
 
 def test_frontmatter_ignored(it_overlay):
     """YAML front matter is metadata, not content: it must not change concepts."""
-    from silica.kernel.keyphrase import extract_keyphrases
+    from silica.kernel.text.keyphrase import extract_keyphrases
 
     body = _PROSE
     with_fm = "---\ntitle: ZzzParolaSegreta\ntags: [nascosto]\n---\n" + body
@@ -78,7 +78,7 @@ def test_frontmatter_ignored(it_overlay):
 
 def test_empty_content_abstains(it_overlay):
     """No content => empty list (silica_recon handles it as an empty report)."""
-    from silica.kernel.keyphrase import extract_keyphrases
+    from silica.kernel.text.keyphrase import extract_keyphrases
 
     assert extract_keyphrases("", overlay=it_overlay, lang="italian") == []
 
@@ -98,8 +98,8 @@ class FakeEmbedder:
 
 def test_structural_concepts_from_markup():
     """Heading / bold / acronym concepts are extracted and overlay-filtered (lowercased)."""
-    from silica.kernel.keyphrase import _structural_concepts
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.keyphrase import _structural_concepts
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
     body = "# Reti Neurali\n\nUso di **Gradient Descent** e il PID controller."
     concs = _structural_concepts(body, DEFAULT_OVERLAY)
@@ -111,7 +111,7 @@ def test_structural_concepts_from_markup():
 
 def test_mmr_demotes_near_duplicate():
     """MMR picks a diverse candidate over a near-duplicate of an already-selected one."""
-    from silica.kernel.keyphrase import _mmr
+    from silica.kernel.text.keyphrase import _mmr
 
     vecs = [[1.0, 0.0], [1.0, 0.0], [0.0, 1.0]]  # 0 and 1 identical, 2 orthogonal
     order = _mmr(vecs, theme=[1.0, 1.0], k=2, lam=0.6)
@@ -122,8 +122,8 @@ def test_mmr_demotes_near_duplicate():
 
 
 def test_rerank_orders_thematic_above_junk_and_abstains_without_embedder():
-    from silica.kernel.keyphrase import _rerank, ConceptCandidate
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.keyphrase import _rerank, ConceptCandidate
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
     pool = [ConceptCandidate("promise to enhance", 0.0),
             ConceptCandidate("knowledge graph", 0.0),
@@ -139,8 +139,8 @@ def test_rerank_orders_thematic_above_junk_and_abstains_without_embedder():
 
 def test_structural_boost_promotes_markup_concept():
     """A thematically-flat concept that appears in a heading is lifted by the structural boost."""
-    from silica.kernel.keyphrase import _rerank, ConceptCandidate
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.keyphrase import _rerank, ConceptCandidate
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
     pool = [ConceptCandidate("alpha widget", 0.0), ConceptCandidate("beta gadget", 0.0)]
     body = "# Beta Gadget\n\nsome unrelated prose"  # both flat on theme; beta is in a heading
@@ -158,8 +158,8 @@ def test_structural_phrase_beyond_yake_ngram_enters_pool():
     """A markup-marked phrase longer than YAKE's max n-gram (n=3) can never be a
     YAKE candidate, yet the author bolded it. The structural leg must seed it into
     the pool so it survives even in the embedder-down fallback."""
-    from silica.kernel.keyphrase import _yake_leg, extract_keyphrases
-    from silica.kernel.overlay import DomainOverlay
+    from silica.kernel.text.keyphrase import _yake_leg, extract_keyphrases
+    from silica.kernel.text.overlay import DomainOverlay
 
     overlay = DomainOverlay(stopwords=frozenset(), noise_patterns=())
     body = ("This work studies sequential decision making in agents. "
@@ -189,8 +189,8 @@ def test_structural_phrase_beyond_yake_ngram_enters_pool():
 
 def test_yake_leg_abstains_when_yake_constructor_raises(monkeypatch):
     import yake
-    from silica.kernel.keyphrase import _yake_leg
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.keyphrase import _yake_leg
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
     def _boom(*_args, **_kwargs):
         raise ValueError("unsupported language")
@@ -202,8 +202,8 @@ def test_yake_leg_abstains_when_yake_constructor_raises(monkeypatch):
 def test_yake_leg_norwegian_does_not_raise():
     """Side effect of the norwegian -> nb root-fix (language.py): a real,
     unmocked _yake_leg("norwegian") call must not raise."""
-    from silica.kernel.keyphrase import _yake_leg
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.keyphrase import _yake_leg
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
     result = _yake_leg(
         "dette er en test av norsk tekst med flere ord i teksten for gradientnedstigning",
@@ -224,7 +224,7 @@ def test_embedder_down_structural_is_extracted_yake_only_is_inferred(it_overlay)
     YAKE concept has a single (junk-prone) signal → INFERRED. This is the gate
     the salience path cannot supply when the embedder is down.
     """
-    from silica.kernel.keyphrase import extract_keyphrases
+    from silica.kernel.text.keyphrase import extract_keyphrases
 
     body = (
         "# Discesa Del Gradiente Stocastico\n\n"
@@ -245,8 +245,8 @@ def test_embedder_down_structural_is_extracted_yake_only_is_inferred(it_overlay)
 def test_embedder_up_tier_independent_of_ranking_axis():
     """With an embedder, the tier still follows markup, not the theme cosine the
     ranker already uses: a heading concept is EXTRACTED, a theme-only one INFERRED."""
-    from silica.kernel.keyphrase import extract_keyphrases
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.keyphrase import extract_keyphrases
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
     body = (
         "# Graph Memory\n\n"
@@ -264,8 +264,8 @@ def test_embedder_up_tier_independent_of_ranking_axis():
 
 def test_extract_keyphrases_rerank_end_to_end():
     """With an embedder, extract_keyphrases reranks; without, it falls back to YAKE order."""
-    from silica.kernel.keyphrase import extract_keyphrases
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.keyphrase import extract_keyphrases
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
     body = ("The knowledge graph stores memory. Planning over the graph memory improves "
             "planning. A knowledge graph is a memory structure for planning.")
@@ -278,8 +278,8 @@ def test_extract_keyphrases_rerank_end_to_end():
 
 def test_code_fences_never_surface_as_concepts():
     """C1 fork ⚑: keyphrase strips code fences — YAKE must not rank identifiers."""
-    from silica.kernel.keyphrase import extract_keyphrases
-    from silica.kernel.overlay import DEFAULT_OVERLAY
+    from silica.kernel.text.keyphrase import extract_keyphrases
+    from silica.kernel.text.overlay import DEFAULT_OVERLAY
 
     body = (
         "The knowledge graph stores memory. Planning over the graph memory "
@@ -293,7 +293,7 @@ def test_code_fences_never_surface_as_concepts():
 
 def test_latex_body_yields_no_math_token_concepts():
     """LaTeX commands in the body never surface as concepts (stripped pre-YAKE)."""
-    from silica.kernel.keyphrase import extract_keyphrases
+    from silica.kernel.text.keyphrase import extract_keyphrases
     body = (
         "# Gradient descent\n\n"
         "The loss function $\\mathcal{L}$ is minimized by gradient descent. "
@@ -310,8 +310,8 @@ def test_latex_body_yields_no_math_token_concepts():
 def test_auto_lang_resolves_so_yake_drops_italian_function_words():
     """lang='auto' is resolved to a real Snowball language before YAKE, so YAKE
     drops Italian function words at candidate generation (no bogus 'au' ISO)."""
-    from silica.kernel.keyphrase import extract_keyphrases
-    from silica.kernel.overlay import DomainOverlay
+    from silica.kernel.text.keyphrase import extract_keyphrases
+    from silica.kernel.text.overlay import DomainOverlay
     # Empty overlay isolates the YAKE-language effect: is_concept filters nothing,
     # so a leaked function word would survive to the output if lang were wrong.
     empty = DomainOverlay(stopwords=frozenset(), noise_patterns=())
@@ -341,8 +341,8 @@ def test_yake_leg_augments_not_replaces_builtin_stopwords():
     With union semantics (the fix): 'ancora' IS in the unioned stopword set
     → YAKE never proposes it → it cannot appear in output.
     """
-    from silica.kernel.keyphrase import extract_keyphrases
-    from silica.kernel.overlay import overlay_for_lang
+    from silica.kernel.text.keyphrase import extract_keyphrases
+    from silica.kernel.text.overlay import overlay_for_lang
 
     overlay = overlay_for_lang("italian")
     # Precondition: 'ancora' is in YAKE's built-in Italian set but not the overlay
@@ -371,8 +371,8 @@ def test_recon_italian_drops_latex_and_structural_keeps_content():
     """End-to-end (overlay=None -> overlay_for_lang('italian')): LaTeX, the
     'Lezione' heading, and the CFU acronym are gone; an Italian content word
     survives."""
-    from silica.kernel.keyphrase import extract_keyphrases
-    from silica.kernel.overlay import reset_overlay_cache
+    from silica.kernel.text.keyphrase import extract_keyphrases
+    from silica.kernel.text.overlay import reset_overlay_cache
     reset_overlay_cache()
     body = (
         "## Lezione 10\n\n"

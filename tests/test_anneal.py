@@ -9,7 +9,7 @@ LONG = (
 
 def _park(monkeypatch, tmp_path):
     """Point the deferred store at a temp dir and return it."""
-    from silica.kernel import deferred
+    from silica.kernel.recall import deferred
 
     monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
     deferred._stores.clear()

@@ -99,11 +99,11 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     """
     from silica.agent.providers import get_embedder, get_reranker
     from silica.config import CONFIG
-    from silica.kernel.cooccurrence import get_cooccur_store
-    from silica.kernel.embed import get_store
-    from silica.kernel.memory_lane import memory_stores
-    from silica.kernel.relatedness import related_notes_for_query
-    from silica.kernel.rerank import rerank_related
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    from silica.kernel.recall.embed import get_store
+    from silica.kernel.recall.memory_lane import memory_stores
+    from silica.kernel.recall.relatedness import related_notes_for_query
+    from silica.kernel.recall.rerank import rerank_related
 
     embed_store = get_store()
     try:
@@ -126,13 +126,13 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
 
     recall_rank = None
     if use_recall_weights:
-        from silica.kernel.recall_weights import ranking
+        from silica.kernel.recall.recall_weights import ranking
 
         recall_rank = ranking()
 
     lexical_rank = None
     if use_lexical:
-        from silica.kernel.lexical import get_lexical_store
+        from silica.kernel.recall.lexical import get_lexical_store
 
         lexical_rank = get_lexical_store().rank(query, k=k) or None
 
@@ -160,7 +160,7 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[str, str | None,
     when unreadable. `contested` is the note's flag reason (first `contradictions`
     entry) or None. origin='memory' resolves in the personal-memory vault (ADR-0019)."""
     if origin == "memory":
-        from silica.kernel.memory_lane import memory_vault
+        from silica.kernel.recall.memory_lane import memory_vault
 
         mv = memory_vault()
         if mv is None:
@@ -178,7 +178,7 @@ def _read_dated_body(path: str, origin: str = "vault") -> tuple[str, str | None,
                 path if path.endswith(".md") else path + ".md").content or ""
         except Exception:
             return "", None, None
-    from silica.kernel import frontmatter
+    from silica.kernel.write import frontmatter
 
     data, _raw, body = frontmatter.split(content)
     # data is None for a body-only note (no frontmatter) or a YAML error —
@@ -201,7 +201,7 @@ def _recall_facts(perception: Perception, query: str, query_vec, *, now: str,
     """Fill the Personal-memory side of `perception`. Best-effort: additive
     evidence must never block answering (mirror of capture_from_distill)."""
     try:
-        from silica.kernel.episodic import EpisodicStore, render as render_facts
+        from silica.kernel.recall.episodic import EpisodicStore, render as render_facts
 
         store = EpisodicStore()
         if not store.live_facts():
@@ -243,8 +243,8 @@ def _driver_neighbors(path: str):
     through `body_of`; see the caller's keyspace concerns.
     """
     from silica.driver import DRIVER
-    from silica.kernel import assembly
-    from silica.kernel.cooccurrence import cooccur_key, get_cooccur_store
+    from silica.kernel.recall import assembly
+    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
     from silica.config import CONFIG
 
     parent = None
@@ -286,7 +286,7 @@ def _assembly_body(path: str) -> str:
 
 
 def _assemble_blocks(blocks: list[NoteBlock], query: str) -> list[NoteBlock]:
-    from silica.kernel import assembly
+    from silica.kernel.recall import assembly
 
     by_path = {b.path: b for b in blocks}
 
@@ -340,7 +340,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     ``use_lexical`` (default off) forwards to `facade_retrieve`'s lexical leg;
     no effect when ``paths`` is set.
     """
-    from silica.kernel.rerank import best_windows
+    from silica.kernel.recall.rerank import best_windows
 
     query_vec = None
     if paths is not None:

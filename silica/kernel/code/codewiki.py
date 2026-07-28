@@ -17,8 +17,8 @@ from pathlib import Path
 
 import orjson
 
-from silica.kernel.codeast import BARE_LANGUAGES, language_for
-from silica.kernel.codegraph import CodeGraph
+from silica.kernel.code.codeast import BARE_LANGUAGES, language_for
+from silica.kernel.code.codegraph import CodeGraph
 
 _EXCLUDED_TOP = {"tests", "test", "docs"}
 _ROOT_KEY = "(root)"   # synthetic subsystem for loose files under the source root

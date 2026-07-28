@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from silica.kernel.graph_export import (
+from silica.kernel.recall.graph_export import (
     Community,
     _community_color,
     detect_communities,
@@ -79,7 +79,7 @@ class TestCommunityFallback:
         nodes = [_node("A"), _node("B"), _node("C"), _node("D")]
         edges = [_edge("e0", "A", "B"), _edge("e1", "C", "D")]
         with patch(
-            "silica.kernel.cooccurrence.CooccurStore.community_labels",
+            "silica.kernel.recall.cooccurrence.CooccurStore.community_labels",
             return_value={},
         ):
             result = detect_communities(nodes, edges)
@@ -133,7 +133,7 @@ class TestNamedLabels:
         edges = [_edge("e0", "A", "B"), _edge("e1", "C", "D")]
 
         with patch(
-            "silica.kernel.cooccurrence.CooccurStore.community_labels",
+            "silica.kernel.recall.cooccurrence.CooccurStore.community_labels",
             return_value={0: "Kernel · Ledger", 1: "Notes · Graph"},
         ):
             result = detect_communities(nodes, edges)
@@ -148,7 +148,7 @@ class TestNamedLabels:
         edges = [_edge("e0", "A", "B"), _edge("e1", "C", "D")]
 
         with patch(
-            "silica.kernel.cooccurrence.CooccurStore.community_labels",
+            "silica.kernel.recall.cooccurrence.CooccurStore.community_labels",
             return_value={0: "Kernel · Ledger"},  # only community 0 named
         ):
             result = detect_communities(nodes, edges)
@@ -163,7 +163,7 @@ class TestNamedLabels:
         edges = [_edge("e0", "A", "B"), _edge("e1", "C", "D")]
 
         with patch(
-            "silica.kernel.cooccurrence.CooccurStore.community_labels",
+            "silica.kernel.recall.cooccurrence.CooccurStore.community_labels",
             side_effect=RuntimeError("index corrupt"),
         ):
             result = detect_communities(nodes, edges)
@@ -328,13 +328,13 @@ class TestCommunityLabelsIntegration:
         This test MUST fail without Fix 1 (the .removesuffix call) and pass
         with it.
         """
-        import silica.kernel.cooccurrence as cooc_mod
+        import silica.kernel.recall.cooccurrence as cooc_mod
 
         # Redirect the default index to a private tmp file for this test
         index_path = tmp_path / "test_cooccur.json"
         monkeypatch.setattr(cooc_mod, "_index_path", lambda: index_path)
 
-        from silica.kernel.cooccurrence import CooccurStore
+        from silica.kernel.recall.cooccurrence import CooccurStore
 
         # Seed keyed WITHOUT .md — this is the production convention
         store = CooccurStore(path=index_path)

@@ -21,7 +21,7 @@ def _fact(fid: str, key: str, runs: list[str], status: str = "live") -> dict:
 
 
 def _write_store(vault: Path, facts: list[dict], monkeypatch, tmp_path: Path) -> None:
-    import silica.kernel.paths as paths_mod
+    import silica.kernel.recall.paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
     d = paths_mod.index_dir_for(str(vault))
@@ -93,7 +93,7 @@ def test_answer_prefix_is_part_of_the_id(tmp_path, monkeypatch):
 
 
 def test_missing_store_reports_zero(tmp_path, monkeypatch):
-    import silica.kernel.paths as paths_mod
+    import silica.kernel.recall.paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
     r = probe_question(_inst("q5", "multi-session", ["answer_s1"]),
@@ -103,7 +103,7 @@ def test_missing_store_reports_zero(tmp_path, monkeypatch):
 
 
 def test_run_probes_filters_to_probed_types(tmp_path, monkeypatch):
-    import silica.kernel.paths as paths_mod
+    import silica.kernel.recall.paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
     data = [_inst("q1", "multi-session", ["answer_s1"]),
@@ -197,7 +197,7 @@ def test_cluster_drops_entity_prefix_but_not_topic(tmp_path, monkeypatch):
 
 
 def test_run_probes_passes_cluster_through(tmp_path, monkeypatch):
-    import silica.kernel.paths as paths_mod
+    import silica.kernel.recall.paths as paths_mod
 
     monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")
     rows = run_probes([_inst("q1", "multi-session", ["answer_s1"])],
@@ -334,7 +334,7 @@ def test_embed_view_links_drifted_ku_chain(tmp_path, monkeypatch):
 
 def test_sim_vecs_key_repr_embeds_once_then_caches(tmp_path, monkeypatch):
     import pytest
-    import silica.kernel.paths as paths_mod
+    import silica.kernel.recall.paths as paths_mod
     from evals.longmemeval.probes import sim_vecs
 
     monkeypatch.setattr(paths_mod, "_SILICA_HOME", tmp_path / "silica_home")

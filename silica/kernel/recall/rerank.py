@@ -86,7 +86,7 @@ def _read_body(path: str, *, origin: str = "vault") -> tuple[str, str]:
     origin='memory' (ADR-0019) resolves the path in the personal-memory vault,
     which the active-vault driver cannot open — so rerank never buries the lane."""
     if origin == "memory":
-        from silica.kernel.memory_lane import memory_vault
+        from silica.kernel.recall.memory_lane import memory_vault
 
         mv = memory_vault()
         if mv is None:
@@ -103,7 +103,7 @@ def _read_body(path: str, *, origin: str = "vault") -> tuple[str, str]:
             content = DRIVER.read_note(path).content or ""
         except Exception:
             return "", ""
-    from silica.kernel import frontmatter
+    from silica.kernel.write import frontmatter
 
     _data, _raw, body = frontmatter.split(content)
     name = path.rsplit("/", 1)[-1].removesuffix(".md")

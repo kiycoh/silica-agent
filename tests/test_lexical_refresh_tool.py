@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.lexical import LexicalStore, get_lexical_store
+from silica.kernel.recall.lexical import LexicalStore, get_lexical_store
 
 
 @pytest.fixture
@@ -32,7 +32,7 @@ def vault(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
-    import silica.kernel.lexical as lex_mod
+    import silica.kernel.recall.lexical as lex_mod
     monkeypatch.setattr(lex_mod, "_index_path", lambda: tmp_path / "lexical_index.json")
     yield vault_dir
     monkeypatch.setattr("silica.driver._driver", None)
@@ -160,7 +160,7 @@ def test_refresh_empty_vault_returns_error(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
-    import silica.kernel.lexical as lex_mod
+    import silica.kernel.recall.lexical as lex_mod
     monkeypatch.setattr(lex_mod, "_index_path", lambda: tmp_path / "lexical_index.json")
     from silica.tools.composed import silica_lexical_refresh
     res = silica_lexical_refresh()

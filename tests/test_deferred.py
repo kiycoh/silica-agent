@@ -3,7 +3,7 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from silica.kernel.deferred import DeferredStore
+from silica.kernel.recall.deferred import DeferredStore
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ def test_put_without_payloads_stores_empty_list(store):
 def test_defer_ops_persists_current_chunk_payload(tmp_path, monkeypatch):
     """The FSM funnel (_defer_ops) snapshots the current chunk's payload into
     the bundle, so every defer site gets retry-time grounding parity for free."""
-    from silica.kernel import deferred
+    from silica.kernel.recall import deferred
     from silica.router.orchestrator import InjectorFSM
 
     monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
@@ -144,7 +144,7 @@ def test_deferred_sweeps_expired_on_open(tmp_path):
     """A bundle older than the TTL is unlinked when the store re-opens; a fresh
     one (and one with no timestamp) survives."""
     import orjson, time
-    from silica.kernel.deferred import DeferredStore, _DEFERRED_TTL_SECONDS
+    from silica.kernel.recall.deferred import DeferredStore, _DEFERRED_TTL_SECONDS
 
     d = tmp_path / "deferred"
     store = DeferredStore(path=d)
@@ -191,8 +191,8 @@ def test_deferred_list_empty(store):
 
 def test_validate_returns_validated_and_rejected_lists(tmp_path):
     """validate_operations always returns (validated, rejected) lists — never raises."""
-    from silica.kernel.ops import Op, OpType
-    from silica.kernel.validate import validate_operations
+    from silica.kernel.write.ops import Op, OpType
+    from silica.kernel.write.validate import validate_operations
 
     op_a = Op(op=OpType.write, path="Dir/GPU.md", heading="GPU", source_basename="lezione.md")
     op_b = Op(op=OpType.write, path="Dir/MCU.md", heading="MCU", source_basename="lezione.md")
@@ -209,7 +209,7 @@ def test_validate_returns_validated_and_rejected_lists(tmp_path):
 
 def test_deferred_store_populated_on_partial_rejection(tmp_path):
     """When some ops are rejected, deferred store must receive the rejected ops."""
-    from silica.kernel.deferred import DeferredStore
+    from silica.kernel.recall.deferred import DeferredStore
 
     store = DeferredStore(path=tmp_path / "deferred")
 
@@ -245,7 +245,7 @@ def test_defer_ops_accumulates_across_phases(tmp_path, monkeypatch):
     """_defer_ops must MERGE into the bundle, not overwrite it: COLLISION,
     VALIDATE and WRITE all key on the same source content_hash, so a later
     phase (or chunk) deferring ops must not clobber an earlier phase's ops."""
-    import silica.kernel.deferred as deferred_mod
+    import silica.kernel.recall.deferred as deferred_mod
     from silica.router.orchestrator import InjectorFSM
 
     # conftest's _isolate_deferred_store already points the default store at tmp.
@@ -275,7 +275,7 @@ def test_defer_ops_accumulates_across_phases(tmp_path, monkeypatch):
 
 def test_defer_ops_skips_without_content_hash(tmp_path, monkeypatch):
     """No content_hash → nothing persisted, returns False (no crash)."""
-    import silica.kernel.deferred as deferred_mod
+    import silica.kernel.recall.deferred as deferred_mod
     from silica.router.orchestrator import InjectorFSM
 
     fsm = InjectorFSM("Inbox/lez.md", "TargetDir")

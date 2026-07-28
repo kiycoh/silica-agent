@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from silica.kernel.checkpoints import CheckpointStore
+from silica.kernel.write.checkpoints import CheckpointStore
 
 
 @pytest.fixture

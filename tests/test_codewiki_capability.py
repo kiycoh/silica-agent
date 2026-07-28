@@ -1,7 +1,7 @@
 """capabilities/codewiki — contract tests, provider mocked (like enrich)."""
 import pytest
 
-from silica.kernel.codewiki import SubsystemDigest
+from silica.kernel.code.codewiki import SubsystemDigest
 from silica.capabilities.codewiki import (
     generate_overview, generate_subsystem_note, render_digest,
 )
@@ -135,7 +135,7 @@ def wiki_env(tmp_path, monkeypatch):
     monkeypatch.setattr("silica.agent.providers.get_provider",
                         lambda config, role: fake)
     # keep the derived index inside the tmp vault
-    from silica.kernel import paths as kpaths
+    from silica.kernel.recall import paths as kpaths
     monkeypatch.setattr(kpaths, "index_dir", lambda: vault / ".index")
     (vault / ".index").mkdir(parents=True, exist_ok=True)
     # bind the write channel (DRIVER) at the tmp vault (canonical tmp_vault setup)
@@ -164,7 +164,7 @@ def test_no_supported_source_aborts_before_llm(tmp_path, monkeypatch):
 
     fake = _FakeProvider('{"content": "should never be produced"}')
     monkeypatch.setattr("silica.agent.providers.get_provider", lambda config, role: fake)
-    from silica.kernel import paths as kpaths
+    from silica.kernel.recall import paths as kpaths
     monkeypatch.setattr(kpaths, "index_dir", lambda: vault / ".index")
     (vault / ".index").mkdir(parents=True, exist_ok=True)
     import silica.config
@@ -318,7 +318,7 @@ def test_whitespace_only_note_body_does_not_crash(wiki_env):
 
 
 def test_no_repo_degrades_soft(tmp_path, monkeypatch):
-    from silica.kernel import paths as kpaths
+    from silica.kernel.recall import paths as kpaths
     monkeypatch.setattr(kpaths, "repo_root_for", lambda v: None)
     assert run_wiki(tmp_path, config=None)["status"] == "no_repo"
 

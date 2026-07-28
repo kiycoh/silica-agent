@@ -30,9 +30,9 @@ this distinction to decide whether a revert is needed.
 from __future__ import annotations
 
 from silica.driver import DRIVER
-from silica.kernel import templates
-from silica.kernel.merge import three_way_merge
-from silica.kernel.ops import Op, OpType, FailedOp, BulkResult
+from silica.kernel.write import templates
+from silica.kernel.write.merge import three_way_merge
+from silica.kernel.write.ops import Op, OpType, FailedOp, BulkResult
 
 
 class VerifyMismatchError(RuntimeError):
@@ -101,7 +101,7 @@ def _execute_write(op: Op, path: str) -> dict:
     # "(da espandere)" placeholder. op.snippet stays untouched so the MOC
     # bullet (hub_desc) still reads the first line of real prose.
     if op.valid_from and snippet.strip():
-        from silica.kernel.contested import stamp
+        from silica.kernel.write.contested import stamp
         rendered = stamp(valid_from=op.valid_from)
         if rendered:
             snippet = f"{rendered}\n\n{snippet.lstrip()}"
@@ -153,7 +153,7 @@ def _execute_patch(op: Op, path: str) -> dict:
     # an interrupted run could never be re-patched).
     # read_records memoizes the parsed ledger on (path, mtime, size), so this
     # stays one parse per run rather than one per patch op.
-    from silica.kernel.provenance import note_authored_by
+    from silica.kernel.write.provenance import note_authored_by
     already_present = templates.block_present(nc.content, heading, source_basename) or (
         bool(source_basename) and note_authored_by(path, source_basename)
     )
@@ -172,7 +172,7 @@ def _execute_patch(op: Op, path: str) -> dict:
         valid_from=op.valid_from,
     )
     if op.contested_by:
-        from silica.kernel.contested import mark_contested
+        from silica.kernel.write.contested import mark_contested
         new_content = mark_contested(new_content, op.contested_by)
     new_content = templates.ensure_ai_flag(new_content)
     DRIVER.overwrite(path, new_content)

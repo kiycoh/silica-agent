@@ -1,9 +1,9 @@
-"""Regression tests for silica/kernel/sanitize.py normalizers."""
+"""Regression tests for silica/kernel/text/sanitize.py normalizers."""
 from __future__ import annotations
 
 import pytest
-from silica.kernel.sanitize import _strip_md_ext, normalize_ops
-from silica.kernel.templates import slugify
+from silica.kernel.text.sanitize import _strip_md_ext, normalize_ops
+from silica.kernel.write.templates import slugify
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ def test_slugify_normalizes_whitespace():
 # strip_degenerate_runs — collapses 5+ identical consecutive chars to 1
 # ---------------------------------------------------------------------------
 
-from silica.kernel.sanitize import strip_degenerate_runs
+from silica.kernel.text.sanitize import strip_degenerate_runs
 
 
 def test_strip_degenerate_slash_run():
@@ -217,7 +217,7 @@ def test_strip_degenerate_normalized_in_ops():
 # collapse_nested_wikilinks — [[[[X]]]] → [[X]]
 # ---------------------------------------------------------------------------
 
-from silica.kernel.sanitize import collapse_nested_wikilinks
+from silica.kernel.text.sanitize import collapse_nested_wikilinks
 
 
 def test_collapse_quadruple_brackets():
@@ -252,7 +252,7 @@ def test_collapse_nested_wikilinks_normalized_in_ops_body():
 # never hand-escapes backslashes (root fix for distiller LaTeX corruption).
 # ---------------------------------------------------------------------------
 
-from silica.kernel.sanitize import parse_json
+from silica.kernel.text.sanitize import parse_json
 
 
 def test_parse_json_resolves_external_body_into_snippet():

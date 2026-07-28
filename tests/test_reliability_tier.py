@@ -7,8 +7,8 @@ verbose agent note from beating the terse hand-written one.
 """
 from __future__ import annotations
 
-from silica.kernel import frontmatter
-from silica.kernel.contested import (
+from silica.kernel.write import frontmatter
+from silica.kernel.write.contested import (
     TIER_DISTILLED,
     TIER_GROUNDED,
     TIER_HUMAN,

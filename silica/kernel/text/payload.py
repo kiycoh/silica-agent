@@ -85,7 +85,7 @@ def extract_windows(content: str, concept: str, window: int, max_occ: int) -> li
 def extract_excerpt_from_content(content: str, concept: str, window: int) -> str:
     if not content:
         return ""
-    from silica.kernel.media import strip_images
+    from silica.kernel.text.media import strip_images
     content = strip_images(content)
     heading = find_heading(content, concept)
     if heading:

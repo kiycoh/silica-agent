@@ -1,7 +1,7 @@
 # tests/test_report_code_signals.py
 """graph_report code signals — coverage + import autolink candidates (spec §4b, §5)."""
-from silica.kernel.codegraph import CodeGraph
-from silica.kernel.graph_report.code_signals import _coverage_from, _import_autolinks_from
+from silica.kernel.code.codegraph import CodeGraph
+from silica.kernel.report.graph_report.code_signals import _coverage_from, _import_autolinks_from
 
 GRAPH = CodeGraph(head_ref="x", files={
     "pkg/paths.py": {"imports": [], "symbols": []},

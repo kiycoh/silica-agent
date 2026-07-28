@@ -16,9 +16,9 @@ from unittest.mock import patch
 import pytest
 
 from silica.driver.base import NoteContent, NoteRef
-from silica.kernel.atomic_write import commit_note_atomic
-from silica.kernel.bulk import execute_operations
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.atomic_write import commit_note_atomic
+from silica.kernel.write.bulk import execute_operations
+from silica.kernel.write.ops import Op, OpType
 
 
 @pytest.fixture
@@ -188,7 +188,7 @@ class _DeadChannelDriver:
 # ---------------------------------------------------------------------------
 
 def test_write_corrupted_by_driver_fails_verify(monkeypatch):
-    import silica.kernel.bulk as bulk_mod
+    import silica.kernel.write.bulk as bulk_mod
 
     monkeypatch.setattr(bulk_mod, "DRIVER", _CorruptingDriver())
 
@@ -216,7 +216,7 @@ def test_write_corrupted_by_driver_fails_verify(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_patch_snippet_missing_from_readback_fails_verify(monkeypatch):
-    import silica.kernel.bulk as bulk_mod
+    import silica.kernel.write.bulk as bulk_mod
 
     driver = _SnippetDroppingDriver(
         seed={"Concepts/Existing.md": "# Existing\n\nOriginal body.\n"}
@@ -242,7 +242,7 @@ def test_patch_snippet_missing_from_readback_fails_verify(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_delete_note_still_present_fails_verify(monkeypatch):
-    import silica.kernel.bulk as bulk_mod
+    import silica.kernel.write.bulk as bulk_mod
 
     driver = _UndeadDriver(seed={"Concepts/Ghost.md": "# Ghost\n\nStill here.\n"})
     monkeypatch.setattr(bulk_mod, "DRIVER", driver)
@@ -267,7 +267,7 @@ def test_delete_note_still_present_fails_verify(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_commit_ops_rolls_back_on_verify_mismatch(monkeypatch):
-    import silica.kernel.bulk as bulk_mod
+    import silica.kernel.write.bulk as bulk_mod
     from silica.agent.commit import commit_ops
 
     monkeypatch.setattr(bulk_mod, "DRIVER", _CorruptingDriver())
@@ -333,7 +333,7 @@ def test_minimal_nucleate_all_op_types_committed_on_fs_backend(fs_vault):
 # ---------------------------------------------------------------------------
 
 def test_write_edge_whitespace_stripped_readback_passes_verify(monkeypatch):
-    import silica.kernel.bulk as bulk_mod
+    import silica.kernel.write.bulk as bulk_mod
 
     monkeypatch.setattr(bulk_mod, "DRIVER", _EdgeStrippingDriver())
 
@@ -378,7 +378,7 @@ def test_patch_with_whitespace_padded_snippet_passes_verify_on_fs_backend(fs_vau
 # ---------------------------------------------------------------------------
 
 def test_delete_dead_read_channel_fails_verify_not_confirmed(monkeypatch):
-    import silica.kernel.bulk as bulk_mod
+    import silica.kernel.write.bulk as bulk_mod
 
     monkeypatch.setattr(bulk_mod, "DRIVER", _DeadChannelDriver())
 
@@ -405,7 +405,7 @@ def test_delete_dead_read_channel_fails_verify_not_confirmed(monkeypatch):
 def test_commit_note_atomic_reverts_new_note_on_verify_mismatch(monkeypatch):
     """write op on a path that didn't exist -> corrupted note DID land ->
     exec raises post-write verify -> delete_created inverse removes it."""
-    import silica.kernel.bulk as bulk_mod
+    import silica.kernel.write.bulk as bulk_mod
     import silica.tools.wrapped as wrapped_mod
 
     driver = _CorruptingDriverWithVersions()
@@ -432,7 +432,7 @@ def test_commit_note_atomic_restores_prior_content_on_verify_mismatch(monkeypatc
     """patch op on an EXISTING note -> corrupting write lands and fails
     verify -> restore_version inverse (prior_content captured by build_txn
     before the write) puts the original content back exactly."""
-    import silica.kernel.bulk as bulk_mod
+    import silica.kernel.write.bulk as bulk_mod
     import silica.tools.wrapped as wrapped_mod
 
     original = "# Existing\n\nOriginal body.\n"

@@ -21,7 +21,7 @@ import pytest
 def test_export_graph_unifies_wikilinks_and_similar(monkeypatch, tmp_path):
     """One build carries BOTH the wikilink edges and the embedding k-NN overlay;
     communities are Louvain on the WIKILINKS, and the SIMILAR filter row renders."""
-    import silica.kernel.graph_export as ge
+    import silica.kernel.recall.graph_export as ge
     import silica.ui.web.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
@@ -57,7 +57,7 @@ def test_export_graph_unifies_wikilinks_and_similar(monkeypatch, tmp_path):
 
 
 def test_export_graph_inlines_vendored_bundle_no_cdn(monkeypatch, tmp_path):
-    import silica.kernel.graph_export as ge
+    import silica.kernel.recall.graph_export as ge
     import silica.ui.web.graph_view as gv
 
     sentinel = "/*VENDORED_SENTINEL_12345*/"
@@ -84,7 +84,7 @@ def test_export_graph_has_density_forces_panel(monkeypatch, tmp_path):
     """Density-aware layout: the emitted HTML carries the auto-scaling baseline
     (FORCE_SCALE from avg degree) and the live Forces sliders that multiply it.
     Same template serves both views, so one export covers links and semantic."""
-    import silica.kernel.graph_export as ge
+    import silica.kernel.recall.graph_export as ge
     import silica.ui.web.graph_view as gv
 
     monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")

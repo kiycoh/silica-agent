@@ -243,7 +243,7 @@ def looks_like_code(root, sample_max: int = 400) -> bool:
     a wrong vault. Ratio rather than mere presence so a stray snippet.py in a
     notes folder does not read as a codebase.
     """
-    from silica.kernel.codeast.base import BARE_LANGUAGES, EXTENSION_MAP
+    from silica.kernel.code.codeast.base import BARE_LANGUAGES, EXTENSION_MAP
 
     root = Path(root)
     if not root.is_dir():
@@ -278,7 +278,7 @@ def resolve_repo_root(vault: str | Path) -> tuple[Path | None, str | None]:
     on the wrong repo. (None, None) when git is absent or no repo contains the
     vault. Pure resolution, no caching — see `repo_root_for`.
     """
-    from silica.kernel import gitstate
+    from silica.kernel.code import gitstate
 
     v = Path(vault).resolve()
     root = gitstate.find_repo_root(v)

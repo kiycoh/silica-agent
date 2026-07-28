@@ -21,8 +21,8 @@ from typing import Any
 
 import orjson
 
-from silica.kernel import language
-from silica.kernel.paths import atomic_write_bytes, in_folder, quarantine
+from silica.kernel.text import language
+from silica.kernel.recall.paths import atomic_write_bytes, in_folder, quarantine
 
 # --- algorithm constants -------------------------------------
 NARRATIVE_WEIGHT = 3
@@ -33,7 +33,7 @@ EVIDENCE = "cooccur"
 
 def _index_path() -> Path:
     # Function, not constant: resolves per current vault; tests monkeypatch it.
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
 
     return paths.index_file("cooccurrence")
 
@@ -45,7 +45,7 @@ def _index_path_for(vault: str) -> Path:
     store must not silently fall back to whatever vault CONFIG currently
     points at (that would be a false cross-vault mismatch on a vault switch
     or a fresh `SilicaConfig()`). Tests monkeypatch this directly."""
-    from silica.kernel import paths
+    from silica.kernel.recall import paths
 
     return paths.index_dir_for(vault) / "cooccurrence.json"
 
@@ -87,7 +87,7 @@ def tokenize(
     matching a short label against store node keys, where detection on a
     2-4 word sample is noise).
     """
-    from silica.kernel import text as text_seam
+    from silica.kernel.text import text as text_seam
 
     return text_seam.tokens(text, lang=stem_lang, stopword_lang=stopword_lang)
 
@@ -122,7 +122,7 @@ def build_contribution(
     LLM-validated concepts above rule-based body noise. `None`/`[]` leaves the
     contribution byte-identical to a body-only build (graceful degradation).
     """
-    from silica.kernel.text import clean_body, is_drawing_note
+    from silica.kernel.text.text import clean_body, is_drawing_note
 
     # Excalidraw drawings carry no prose — skip entirely so their element-id /
     # SVG soup never becomes nodes (empty contribution = the note indexes clean).
@@ -184,7 +184,7 @@ def get_cooccur_store(lang: str = "english") -> "CooccurStore":
     ``embed.get_store``). ``lang`` only seeds an empty store; a loaded store
     keeps the language frozen on disk. Use ``clear()`` in tests.
     """
-    from silica.kernel.paths import path_keyed_singleton
+    from silica.kernel.recall.paths import path_keyed_singleton
     return path_keyed_singleton(_STORE_CACHE, str(_index_path()), lambda: CooccurStore(lang=lang))
 
 
@@ -360,7 +360,7 @@ class CooccurStore:
         invalidated with the other derived caches. Gives df (len of a posting) and
         the candidate set (union of query-stem postings) without an all-notes scan."""
         if self._stem_postings is None:
-            from silica.kernel.paths import build_postings
+            from silica.kernel.recall.paths import build_postings
             self._stem_postings = build_postings({p: self.note_nodes(p) for p in self._notes})
         return self._stem_postings
 
@@ -559,7 +559,7 @@ class CooccurStore:
         concept = concept.strip()
         if not concept:
             return []
-        from silica.kernel.text import stem_word
+        from silica.kernel.text.text import stem_word
         stem = stem_word(concept.lower(), lang=self.lang)  # 'auto' falls back inside the seam
         adj, labels = self._aggregate(scope=scope)
         nbrs = adj.get(stem)
@@ -650,7 +650,7 @@ def build_index(
             ),
         )
     if prune:
-        from silica.kernel.paths import in_folder
+        from silica.kernel.recall.paths import in_folder
         live = {path for path, _, _ in notes}
         for p in [p for p in store.paths() if p not in live and in_folder(p, folder)]:
             store.delete_note(p)

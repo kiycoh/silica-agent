@@ -140,7 +140,7 @@ def aggregate(rows: list[dict]) -> dict:
 def _note_body(text: str) -> str:
     """Strip frontmatter and the harness-added '## Sources' overlay block —
     neither is distiller output, so neither may contribute facts."""
-    from silica.kernel import frontmatter
+    from silica.kernel.write import frontmatter
 
     _data, _raw, body = frontmatter.split(text)
     return body.split(_SOURCES_MARKER)[0].strip()
@@ -167,7 +167,7 @@ def locomo_note_pairs(vault: Path, inst: dict) -> tuple[list[dict], list[str]]:
         stay the fallback (Min et al. judge a bio against the entire article).
 
     Returns (pairs, unmapped) — only bodyless notes end up unmapped now."""
-    from silica.kernel import frontmatter
+    from silica.kernel.write import frontmatter
 
     sessions = {f"session_{n}": render_session(turns)
                 for n, _dt, turns in conversation_sessions(inst["conversation"])}

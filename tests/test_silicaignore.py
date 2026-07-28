@@ -4,7 +4,7 @@
 """`.silicaignore` — per-vault extension of NOISE_DIRS."""
 from pathlib import Path
 
-from silica.kernel.paths import NOISE_DIRS, SILICAIGNORE_REL, ignore_matcher
+from silica.kernel.recall.paths import NOISE_DIRS, SILICAIGNORE_REL, ignore_matcher
 from silica.onboarding.adopt import seed_silicaignore
 
 

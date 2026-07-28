@@ -10,8 +10,8 @@ from __future__ import annotations
 import pytest
 
 from silica.router.coordinator import Coordinator
-from silica.kernel.embed import EmbedStore
-from silica.kernel.cooccurrence import CooccurStore, build_contribution
+from silica.kernel.recall.embed import EmbedStore
+from silica.kernel.recall.cooccurrence import CooccurStore, build_contribution
 
 
 def _bare_coordinator() -> Coordinator:
@@ -23,8 +23,8 @@ def _bare_coordinator() -> Coordinator:
 def isolated_indexes(tmp_path, monkeypatch):
     """Redirect BOTH on-disk indexes to tmp (cooccur is already isolated by the
     autouse conftest fixture; embed needs explicit redirection here)."""
-    import silica.kernel.embed as embed_mod
-    import silica.kernel.cooccurrence as cooc_mod
+    import silica.kernel.recall.embed as embed_mod
+    import silica.kernel.recall.cooccurrence as cooc_mod
     monkeypatch.setattr(embed_mod, "_index_path", lambda: tmp_path / "emb.json")
     return embed_mod, cooc_mod
 

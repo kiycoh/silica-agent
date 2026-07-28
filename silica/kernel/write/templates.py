@@ -11,8 +11,8 @@ import logging
 import os
 import re
 
-from silica.kernel import frontmatter
-from silica.kernel.frontmatter import clean_tag  # canonical; do not redefine
+from silica.kernel.write import frontmatter
+from silica.kernel.write.frontmatter import clean_tag  # canonical; do not redefine
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +295,7 @@ def ensure_hub_link(content: str, hub: str | None) -> str:
     present. Callers: patch_snippet (fresh append) and the duplicate-block
     branch of _execute_patch — the repair must land even when the snippet
     itself is skipped, or lint fails the op forever."""
-    from silica.kernel.ofm import has_wikilink
+    from silica.kernel.link.ofm import has_wikilink
     if not hub or has_wikilink(content, hub):
         return content
     if content.startswith("---\n"):
@@ -323,7 +323,7 @@ def patch_snippet(heading: str, snippet: str, source_basename: str, hub: str | N
     # every pre-stamp write produced. Only the FSM supplies one today.
     stamp_line = ""
     if valid_from:
-        from silica.kernel.contested import stamp
+        from silica.kernel.write.contested import stamp
         rendered = stamp(valid_from=valid_from)
         if rendered:
             stamp_line = f"{rendered}\n\n"
@@ -334,7 +334,7 @@ def patch_snippet(heading: str, snippet: str, source_basename: str, hub: str | N
 {stamp_line}{close_unbalanced_fences(snippet.strip())}
 """
     if existing_content is not None:
-        from silica.kernel.contested import append_before_superseded
+        from silica.kernel.write.contested import append_before_superseded
         existing_content = ensure_hub_link(existing_content, hub)
         return append_before_superseded(existing_content, patch_text)
 
@@ -412,7 +412,7 @@ def stamp_documents(content: str, documents: list[str], code_ref: str | None = N
     end = content.find("\n---\n", 4)
     if end == -1:
         return content  # unterminated frontmatter — leave for the lint to flag
-    from silica.kernel.codedocs import documents_of
+    from silica.kernel.code.codedocs import documents_of
 
     data, _, _ = frontmatter.split(content)
     merged = list(dict.fromkeys(documents_of(data if isinstance(data, dict) else {})

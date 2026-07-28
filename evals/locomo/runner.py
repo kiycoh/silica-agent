@@ -151,7 +151,7 @@ def load_conversation_vault(vault: Path, inst: dict, distill: bool = False,
     if reuse and sess_dir.is_dir():
         existing = sorted(sess_dir.glob("s*.md"))
         if existing:
-            from silica.kernel import frontmatter
+            from silica.kernel.write import frontmatter
 
             index = {}
             for f in existing:
@@ -187,7 +187,7 @@ def build_timeline_seed(vault: Path) -> str:
     resolves (its filename stem). Undated notes are EXCLUDED: a note with no
     date has no place on a chronology, and 'end of list' would read as
     most-recent — wrong. Returns "" when nothing is dated (seed suppressed)."""
-    from silica.kernel import frontmatter
+    from silica.kernel.write import frontmatter
 
     rows = []
     for f in sorted(vault.rglob("*.md")):
@@ -219,8 +219,8 @@ _INBOX_RE = re.compile(r"^session_(\d+)\.md$")
 def _clear_fsm_state() -> None:
     """Vault-keyed singletons beyond bind_vault's: deferred store cache and
     overlay/manifest caches (the FSM write path touches all of them)."""
-    import silica.kernel.deferred as deferred_mod
-    from silica.kernel.overlay import reset_overlay_cache
+    import silica.kernel.recall.deferred as deferred_mod
+    from silica.kernel.text.overlay import reset_overlay_cache
     from silica.kernel.vault_manifest import reset_manifest_cache
 
     deferred_mod._stores.clear()
@@ -233,7 +233,7 @@ def _wipe_index_namespace() -> None:
     deferred bundles) so a from-scratch re-ingest starts clean."""
     import shutil
 
-    from silica.kernel import paths as kpaths
+    from silica.kernel.recall import paths as kpaths
 
     shutil.rmtree(kpaths.index_dir(), ignore_errors=True)
 
@@ -342,7 +342,7 @@ def _provenance_session_map(vault: Path) -> dict[str, set[str]]:
     """note rel (no .md) -> contributing session ids, via provenance records
     keyed by inbox basename session_<n>.md. A note merged from 3 sessions
     counts for all 3; notes with no record count for no session."""
-    from silica.kernel.provenance import read_records
+    from silica.kernel.write.provenance import read_records
 
     out: dict[str, set[str]] = {}
     for rec in read_records(vault_path=str(vault)):
@@ -486,7 +486,7 @@ def answer_question_agent(model: str, question: str, now: str,
     from silica.agent import loop as loop_mod
     from silica.agent.constraints import AgentConstraints
     from silica.agent.events import ToolCompleteEvent
-    from silica.kernel.vault_map import build_vault_map
+    from silica.kernel.recall.vault_map import build_vault_map
 
     system = (_CONTRACT_OPEN.format(a=speakers[0], b=speakers[1], now=now)
               + _AGENT_DELIVERY + _CONTRACT_CLOSE)
@@ -624,7 +624,7 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
         err = agent["error"]
         rels = agent["notes_read"]
     else:
-        from silica.kernel import perception
+        from silica.kernel.recall import perception
 
         win_kw = {}
         if windows is not None:
@@ -682,7 +682,7 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
     # rejects both combos with --improve; this guard also protects a direct
     # run()/run_question() caller that bypasses main().
     if improve and correct and answer_mode == "oneshot" and not stuff:
-        from silica.kernel.recall_weights import bump
+        from silica.kernel.recall.recall_weights import bump
 
         bump(rels)
 
@@ -730,7 +730,7 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
         primary_metric: str = "overall_accuracy",
         verbose: bool = False, out: Path | None = None) -> dict:
     from silica.config import CONFIG
-    from silica.kernel import perception
+    from silica.kernel.recall import perception
 
     # fsm-extractive: same product Coordinator as fsm, but the distill phase
     # SELECTS verbatim spans (extractive profile); the validator enforces the

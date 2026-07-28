@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 from silica.driver.base import NoteContent, NoteRef
-from silica.kernel.validate import MIN_WRITE_SNIPPET_CHARS, validate_operations
+from silica.kernel.write.validate import MIN_WRITE_SNIPPET_CHARS, validate_operations
 
 # Write ops must clear the precision gate; the padding keeps fixtures short.
 _PAD = " lorem" * (MIN_WRITE_SNIPPET_CHARS // 6 + 1)
@@ -58,8 +58,8 @@ def test_write_op_forward_reference_neutralized():
     ]
     read_mock = _ReadSideEffect(known=set())  # nothing exists
     cleared_links: list[dict] = []
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(
             ops, [], "Concepts", cleared_links_out=cleared_links
         )
@@ -88,8 +88,8 @@ def test_patch_op_link_resolved_in_vault():
             "snippet": "Compare with [[Quantum Computing]].",
         }
     ]
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[existing_ref]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[existing_ref]):
         validated, rejected = validate_operations(ops, [], "Concepts")
 
     assert not rejected
@@ -114,8 +114,8 @@ def test_patch_op_broken_link_neutralized():
         }
     ]
     cleared_links: list[dict] = []
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(
             ops, [], "Concepts", cleared_links_out=cleared_links
         )
@@ -150,8 +150,8 @@ def test_patch_op_link_resolved_by_same_batch_write():
             "snippet": "See also [[New Concept]].",
         },
     ]
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(ops, [], "Concepts")
 
     assert not rejected
@@ -177,8 +177,8 @@ def test_overwrite_op_broken_link_neutralized():
         }
     ]
     cleared_links: list[dict] = []
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(
             ops, [], "Concepts", cleared_links_out=cleared_links
         )
@@ -204,8 +204,8 @@ def test_patch_op_no_snippet_skips_check():
             "snippet": "",
         }
     ]
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(ops, [], "Concepts")
 
     assert not rejected
@@ -230,8 +230,8 @@ def test_patch_op_link_to_auto_hub_resolves():
             "snippet": "Parent: [[Concepts]].",
         }
     ]
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(ops, [], "Concepts")
 
     # hub auto-op is a write whose path includes "Concepts.md",
@@ -255,8 +255,8 @@ def test_write_op_whitelist_link_accepted():
         }
     ]
     read_mock = _ReadSideEffect(known=set())
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(
             ops, [], "Concepts", future_ref_whitelist=["Vanishing Gradient", "Backpropagation"]
         )
@@ -295,8 +295,8 @@ def test_unresolved_inline_links_neutralized_not_rejected():
         },
     ]
     cleared_links: list[dict] = []
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(
             ops, [], "AI", cleared_links_out=cleared_links
         )
@@ -338,8 +338,8 @@ def test_patch_link_to_same_batch_patch_sibling_resolves():
         },
     ]
     cleared_links: list[dict] = []
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(
             ops, [], "Concepts", cleared_links_out=cleared_links
         )
@@ -376,8 +376,8 @@ def test_deduplication_before_coercion_prevents_unnecessary_rejection():
     # Path exists in vault
     read_mock = _ReadSideEffect(known={"Existing Note"})
     
-    with patch("silica.kernel.validate.DRIVER.read_note", side_effect=read_mock), \
-         patch("silica.kernel.validate.DRIVER.search_names", return_value=[]):
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]):
         validated, rejected = validate_operations(ops, [], "Concepts")
 
     assert not rejected

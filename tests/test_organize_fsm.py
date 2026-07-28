@@ -10,8 +10,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.kernel.classify import Classification, classify_notes
-from silica.kernel.taxonomy import FolderRule, Taxonomy
+from silica.kernel.organize.classify import Classification, classify_notes
+from silica.kernel.organize.taxonomy import FolderRule, Taxonomy
 
 from tests.llm_mocks import litellm_mock_response as _litellm_mock_response
 
@@ -96,7 +96,7 @@ class TestClassifyNotes:
         assert len(results) == len(paths)
 
     def test_metadata_filter_year_equals(self):
-        from silica.kernel.taxonomy import FolderRule, Taxonomy, MetadataFilter
+        from silica.kernel.organize.taxonomy import FolderRule, Taxonomy, MetadataFilter
         tax = Taxonomy(
             rules=[
                 FolderRule(
@@ -131,7 +131,7 @@ class TestClassifyNotes:
         assert results2[0].target_folder == "Misc"
 
     def test_metadata_filter_other_operators(self):
-        from silica.kernel.taxonomy import FolderRule, Taxonomy, MetadataFilter
+        from silica.kernel.organize.taxonomy import FolderRule, Taxonomy, MetadataFilter
         tax = Taxonomy(
             rules=[
                 FolderRule(
@@ -176,7 +176,7 @@ class TestClassifyNotes:
         assert r3[0].target_folder == "Recipe"
 
     def test_metadata_filter_fs_fallback(self):
-        from silica.kernel.taxonomy import FolderRule, Taxonomy, MetadataFilter
+        from silica.kernel.organize.taxonomy import FolderRule, Taxonomy, MetadataFilter
         tax = Taxonomy(
             rules=[
                 FolderRule(
@@ -192,7 +192,7 @@ class TestClassifyNotes:
         )
 
         # Key is missing, but fallback to fs returning 2026 -> Archive/2026
-        with patch("silica.kernel.classify._get_file_fs_year", return_value=2026):
+        with patch("silica.kernel.organize.classify._get_file_fs_year", return_value=2026):
             results = classify_notes(
                 ["report_a.md"],
                 tax,
@@ -266,7 +266,7 @@ class TestClassifyNotes:
         assert not c.needs_move
 
     def test_metadata_filter_case_insensitivity(self):
-        from silica.kernel.taxonomy import FolderRule, Taxonomy, MetadataFilter
+        from silica.kernel.organize.taxonomy import FolderRule, Taxonomy, MetadataFilter
         tax = Taxonomy(
             rules=[
                 FolderRule(
@@ -321,7 +321,7 @@ class TestLLMArbitrate:
     def test_response_format_passed_to_litellm(self, taxonomy_with_two_folders):
         """Both call-sites must request response_format at the litellm boundary,
         not just call call_llm() with a bare prompt."""
-        from silica.kernel.classify import ArbitrationResult, _llm_arbitrate
+        from silica.kernel.organize.classify import ArbitrationResult, _llm_arbitrate
 
         mock_resp = _litellm_mock_response(json.dumps({
             "assignments": [
@@ -339,7 +339,7 @@ class TestLLMArbitrate:
 
     def test_wrapper_conformant_response_applies_assignments(self, taxonomy_with_two_folders):
         """A response matching the ArbitrationResult wrapper is applied as before."""
-        from silica.kernel.classify import _llm_arbitrate
+        from silica.kernel.organize.classify import _llm_arbitrate
 
         mock_resp = _litellm_mock_response(json.dumps({
             "assignments": [
@@ -355,7 +355,7 @@ class TestLLMArbitrate:
     def test_malformed_shaped_response_falls_back_to_uncategorized(self, taxonomy_with_two_folders):
         """Valid JSON that doesn't match the wrapper shape (e.g. a bare list, the
         old pre-fix format) degrades to uncategorized — degradation unchanged."""
-        from silica.kernel.classify import _llm_arbitrate
+        from silica.kernel.organize.classify import _llm_arbitrate
 
         mock_resp = _litellm_mock_response(json.dumps([
             {"index": 0, "folder": "Concepts/AI"},
@@ -367,7 +367,7 @@ class TestLLMArbitrate:
 
     def test_unparseable_response_falls_back_to_uncategorized(self, taxonomy_with_two_folders):
         """Completely non-JSON output (parse_json raises) hits the except branch."""
-        from silica.kernel.classify import _llm_arbitrate
+        from silica.kernel.organize.classify import _llm_arbitrate
 
         mock_resp = _litellm_mock_response("not json at all <<<")
         with patch("litellm.completion", return_value=mock_resp):
@@ -378,7 +378,7 @@ class TestLLMArbitrate:
     def test_call_llm_exception_falls_back_to_uncategorized(self, taxonomy_with_two_folders):
         """The provider call itself failing (network, timeout, ...) must still
         degrade cleanly, exactly as before."""
-        from silica.kernel.classify import _llm_arbitrate
+        from silica.kernel.organize.classify import _llm_arbitrate
 
         with patch("litellm.completion", side_effect=RuntimeError("network down")):
             result = _llm_arbitrate(self._ambiguous(), taxonomy_with_two_folders)
@@ -472,7 +472,7 @@ class TestOrganizerFSMRollback:
     def test_rollback_only_moves_successful_ones_back(self):
         from silica.router.organize_fsm import OrganizerFSM, OrganizerState
         from silica.driver.base import NoteRef
-        from silica.kernel.taxonomy import Taxonomy, FolderRule
+        from silica.kernel.organize.taxonomy import Taxonomy, FolderRule
 
         taxonomy = Taxonomy(
             rules=[

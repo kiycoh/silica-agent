@@ -1,4 +1,4 @@
-"""Tests for render_html() in silica/kernel/graph_export.py.
+"""Tests for render_html() in silica/kernel/recall/graph_export.py.
 
 Exercises the 3d-force-graph renderer output without any network access.
 render_html() accepts lib_js as a string parameter, so we can pass a dummy

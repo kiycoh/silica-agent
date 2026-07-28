@@ -32,7 +32,7 @@ from glob import glob
 from pathlib import Path
 
 from silica.config import CONFIG
-from silica.kernel.sanitize import strip_degenerate_runs
+from silica.kernel.text.sanitize import strip_degenerate_runs
 
 logger = logging.getLogger(__name__)
 

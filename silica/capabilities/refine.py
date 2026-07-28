@@ -10,7 +10,7 @@ from typing import Any
 
 from silica.agent.commit import commit_ops
 from silica.agent.bounds import refiner_bounds
-from silica.kernel.ops import Op, OpType
+from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import NoteContent, emit_feedback, load_prompt, read_or_skip
 
@@ -69,7 +69,7 @@ def run_refine(item: WorkItem, config: Any) -> dict[str, Any]:
 
 def _refine_note(config: Any, target_path: str, original: str) -> NoteContent:
     from silica.agent.providers import get_provider
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.text.sanitize import parse_json
 
     prompt = load_prompt("refiner_prompt.txt") + "\n\n" + load_prompt("_anti_slop.txt")
     user_message = f"{prompt}\n\n---\nNOTE ({target_path}):\n{original}\n"

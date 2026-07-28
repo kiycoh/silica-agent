@@ -15,8 +15,8 @@ import logging
 import os
 
 from silica.capabilities._base import NoteContent, load_prompt
-from silica.kernel.codewiki import SubsystemDigest
-from silica.kernel.sanitize import strip_degenerate_runs
+from silica.kernel.code.codewiki import SubsystemDigest
+from silica.kernel.text.sanitize import strip_degenerate_runs
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,7 @@ _OVERVIEW_SYSTEM = (
 
 def _call_worker(config, system_prompt: str, user_message: str) -> NoteContent:
     from silica.agent.providers import get_provider
-    from silica.kernel.sanitize import parse_json
+    from silica.kernel.text.sanitize import parse_json
 
     provider = get_provider(config, role="worker")
     response = provider.call_llm(
@@ -265,7 +265,7 @@ def _resolve_scope(graph, all_subs, folder: str, root):
     nothing in the repo answers to it. A folder that is not a partition
     subsystem becomes one on demand — the partition cuts a single level under
     the source root, so a deep tree is otherwise unreachable."""
-    from silica.kernel.codewiki import subsystem_for_path, source_root
+    from silica.kernel.code.codewiki import subsystem_for_path, source_root
 
     taken = frozenset(s.key for s in all_subs)
     src_root = source_root(graph)
@@ -292,10 +292,12 @@ def run_wiki(vault, config, folder: str | None = None,
     from pathlib import Path
 
     from silica.agent.commit import commit_derived
-    from silica.kernel import frontmatter, gitstate, paths
-    from silica.kernel.codedocs import CHANGE_STRUCTURAL, stale_docs
-    from silica.kernel.codegraph import load_codegraph
-    from silica.kernel.codewiki import (
+    from silica.kernel.write import frontmatter
+    from silica.kernel.code import gitstate
+    from silica.kernel.recall import paths
+    from silica.kernel.code.codedocs import CHANGE_STRUCTURAL, stale_docs
+    from silica.kernel.code.codegraph import load_codegraph
+    from silica.kernel.code.codewiki import (
         build_digests, cross_edges, edges_ref, partition, render_mermaid,
     )
     from silica.kernel.vault_manifest import load_manifest

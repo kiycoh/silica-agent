@@ -25,8 +25,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable
 
-from silica.kernel.ast import WIKILINK_TARGET_RE
-from silica.kernel.ops import Op, OpType
+from silica.kernel.link.ast import WIKILINK_TARGET_RE
+from silica.kernel.write.ops import Op, OpType
 
 
 def _wikilinks(text: str) -> set[str]:
