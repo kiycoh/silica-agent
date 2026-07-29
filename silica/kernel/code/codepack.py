@@ -202,6 +202,73 @@ def _hierarchy(graph, path: str, entry: dict) -> list[tuple[str, str]]:
     return out
 
 
+def _signatures(entry: dict) -> str:
+    """Public signatures of a neighbour file, methods indented. Public is
+    spelled per family: no leading underscore (Python, TS), no `private`
+    modifier (Java, C++). Dunder names survive, since a constructor is exactly
+    the contract a port needs to read."""
+    lines: list[str] = []
+    for s in entry.get("symbols", []):
+        name, sig = s.get("name", ""), s.get("signature", "")
+        if (name.startswith("_") and not name.endswith("__")) or sig.startswith("private "):
+            continue
+        lines.append(("  " if s.get("parent") else "") + sig)
+    return "\n".join(lines)
+
+
+def _first_mention(source: str, path: str, entry: dict) -> int | None:
+    """Offset of the first place the target names this file: any top-level
+    symbol name, or the file stem. None means it is never named, so it is not
+    a neighbour. The filter took the median neighbourhood from 9 to 3 and the
+    median pack from 6588 to 2351 characters (spec section 2)."""
+    names = {s.get("name", "") for s in entry.get("symbols", []) if not s.get("parent")}
+    stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    if stem not in ("__init__", "index"):
+        names.add(stem)
+    best: int | None = None
+    for name in names:
+        if not name:
+            continue
+        m = re.search(rf"\b{re.escape(name)}\b", source)
+        if m is not None and (best is None or m.start() < best):
+            best = m.start()
+    return best
+
+
+def _neighborhood(graph, path: str, entry: dict,
+                  source: str) -> list[tuple[str, str]]:
+    """(label, block) pairs: resolved imports first, then package siblings,
+    each group by first mention with the path as the tiebreak (spec section 4).
+    An import crosses a package boundary, so it is a contract you cannot see by
+    opening the folder next door; a sibling is one `ls` away."""
+    if graph is None:
+        return []
+    imports = [p for p in entry.get("imports", []) if p != path and p in graph.files]
+    siblings: list[str] = []
+    if entry.get("language") == "java":
+        # D6: in Java the directory is the package, and a package sibling is
+        # referenced with no import at all. One rule, instantiated per language:
+        # every other family sees nothing beyond its explicit imports.
+        folder = path.rpartition("/")[0]
+        siblings = sorted(
+            p for p, e in graph.files.items()
+            if p != path and p not in imports
+            and p.rpartition("/")[0] == folder and e.get("language") == "java"
+        )
+    out: list[tuple[str, str]] = []
+    for group in (imports, siblings):
+        ranked = []
+        for p in group:
+            at = _first_mention(source, p, graph.files[p])
+            if at is not None:
+                ranked.append((at, p))
+        for _, p in sorted(ranked):
+            sigs = _signatures(graph.files[p])
+            if sigs:
+                out.append((p, f"{p}\n{sigs}"))
+    return out
+
+
 def code_pack(vault: Path | str, target: str,
               budget_chars: int = BUDGET_CHARS) -> dict:
     """Context pack for `target` ("path", "path#Class" or "path#Class.member").
@@ -233,7 +300,10 @@ def code_pack(vault: Path | str, target: str,
     body, mode = _target_block(source, entry, selector, budget_chars, dropped)
     chunks = [f"## target {path} @ {head_ref} mode: {mode}\n{body}"]
     sections: dict[str, list[str]] = {"target": [path]}
-    for name, entries in (("hierarchy", _hierarchy(graph, path, entry)),):
+    for name, entries in (
+        ("hierarchy", _hierarchy(graph, path, entry)),
+        ("neighborhood", _neighborhood(graph, path, entry, source)),
+    ):
         if not entries:
             continue
         chunks.append(f"## {name}\n" + "\n".join(line for _, line in entries))

@@ -262,3 +262,32 @@ def test_selector_prefers_the_shallowest_match_over_a_nested_shadow():
     assert picked is not None
     assert "real = 1" in picked
     assert "decoy" not in picked
+
+
+def test_neighborhood_has_imports_first_then_mentioned_package_siblings(repo):
+    pack = codepack.code_pack(repo, TARGET)
+    assert pack["sections"]["neighborhood"] == [
+        "src/main/java/util/Vec2.java",     # resolved import, crosses a package
+        "src/main/java/game/Entity.java",   # package sibling, no import needed
+    ]
+    assert "src/main/java/game/Hud.java" not in pack["sections"]["neighborhood"]
+    assert "public int len()" in pack["text"]      # neighbour signatures are there
+    assert "return 0;" not in pack["text"]         # neighbour bodies are not
+
+
+def test_python_siblings_never_enter_even_when_mentioned(repo):
+    _write(repo, "pkg/__init__.py", "")
+    _write(repo, "pkg/a.py", "def alpha():\n    return 1\n")
+    _write(repo, "pkg/b.py", "# alpha is named here but never imported\ndef beta():\n    return 2\n")
+    pack = codepack.code_pack(repo, "pkg/b.py")
+    assert "pkg/a.py" not in pack["sections"].get("neighborhood", [])
+
+
+def test_private_members_stay_out_of_neighbour_signatures(repo):
+    _write(repo, "src/main/java/game/Secret.java",
+           "package game;\n\npublic class Secret {\n"
+           "    private void hidden() {\n    }\n\n    public void shown() {\n    }\n}\n")
+    _write(repo, TARGET, GAME_MODEL.replace("private Vec2 pos;", "private Vec2 pos;\n    private Secret s;"))
+    pack = codepack.code_pack(repo, TARGET)
+    assert "public void shown()" in pack["text"]
+    assert "hidden" not in pack["text"]
