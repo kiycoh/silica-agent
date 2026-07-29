@@ -320,3 +320,95 @@ def test_web_fetch_rejects_a_private_target_before_any_request(monkeypatch):
     with pytest.raises(ValueError, match="non-global"):
         wf.web_fetch("http://localhost:8080/admin")
     assert called["n"] == 0
+
+
+# --- YouTube ----------------------------------------------------------------
+
+from pathlib import Path
+
+_VTT = """WEBVTT
+Kind: captions
+Language: en
+
+00:00:00.000 --> 00:00:02.000
+hello <00:00:01.000><c>world</c>
+
+00:00:02.000 --> 00:00:04.000
+hello world
+
+00:00:04.000 --> 00:00:06.000
+second line &amp; more
+"""
+
+
+def test_vtt_to_text_strips_timings_markup_and_rolling_duplicates():
+    assert wf._vtt_to_text(_VTT).splitlines() == [
+        "hello world",
+        "second line & more",
+    ]
+
+
+def test_youtube_without_ytdlp_prescribes_the_install(monkeypatch):
+    monkeypatch.setattr(wf.shutil, "which", lambda name: None)
+    with pytest.raises(ValueError, match="yt-dlp"):
+        wf.web_fetch("https://www.youtube.com/watch?v=abc")
+
+
+def test_youtube_never_takes_the_http_path(monkeypatch):
+    monkeypatch.setattr(wf.shutil, "which", lambda name: None)
+
+    def boom(*a, **kw):
+        raise AssertionError("httpx.get must not run for a YouTube URL")
+
+    monkeypatch.setattr(wf.httpx, "get", boom)
+    with pytest.raises(ValueError, match="yt-dlp"):
+        wf.web_fetch("https://youtu.be/abc")
+
+
+def _fake_ytdlp(monkeypatch, *, writes=True, stderr=""):
+    monkeypatch.setattr(wf.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+
+    def fake_run(argv, **kw):
+        if writes:
+            out = Path(argv[argv.index("-o") + 1])
+            out.with_suffix(".en.vtt").write_text(_VTT, encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr=stderr)
+
+    monkeypatch.setattr(wf.subprocess, "run", fake_run)
+
+
+def test_youtube_returns_the_transcript(monkeypatch):
+    _fake_ytdlp(monkeypatch)
+    out = wf.web_fetch("https://www.youtube.com/watch?v=abc")
+    assert out.splitlines()[0] == "Source: https://www.youtube.com/watch?v=abc"
+    assert "second line & more" in out
+
+
+def test_youtube_without_subtitles_reports_the_stderr_tail(monkeypatch):
+    _fake_ytdlp(monkeypatch, writes=False, stderr="ERROR: no subtitles available")
+    with pytest.raises(ValueError, match="no subtitles available"):
+        wf.web_fetch("https://youtu.be/abc")
+
+
+def test_youtube_lookalike_domain_takes_the_http_path(monkeypatch):
+    _serve(monkeypatch, _Resp(text="<p>not youtube</p>"))
+    out = wf.web_fetch("https://youtube.com.evil.test/watch?v=abc")
+    assert "not youtube" in out
+
+
+def test_youtube_userinfo_on_a_real_host_does_not_reach_ytdlp(monkeypatch):
+    """`urlsplit` already resolves `youtube.com@evil.test` to host `evil.test`,
+    so that disguise never needed the userinfo guard: it fails the domain
+    check regardless. The guard earns its keep on the opposite shape, where
+    `.hostname` genuinely IS youtube.com but userinfo is riding along
+    (`x@youtube.com`). The YouTube branch shells out to yt-dlp with no
+    `_validated()` call of its own, so `host_matches` is the only gate; without
+    the guard this URL would route straight to `subprocess.run`."""
+    monkeypatch.setattr(wf.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+
+    def boom(*a, **kw):
+        raise AssertionError("subprocess.run must not run: host_matches should reject userinfo")
+
+    monkeypatch.setattr(wf.subprocess, "run", boom)
+    with pytest.raises(ValueError, match="credentials"):
+        wf.web_fetch("https://x@youtube.com/watch?v=abc")

@@ -19,8 +19,14 @@ local-first posture. The price of dropping it is that SSRF becomes ours, and
 from __future__ import annotations
 
 import ipaddress
+import re
+import shutil
 import socket
+import subprocess
+import tempfile
+from html import unescape
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
@@ -33,6 +39,10 @@ from silica.tools import tool
 _MAX_CHARS = 30_000
 _MAX_REDIRECTS = 3
 _HTTP_TIMEOUT = 30
+_YT_DOMAINS: tuple[str, ...] = ("youtube.com", "youtu.be")
+# Auto-generated subs first, then uploaded ones, English then Italian.
+_YT_SUB_LANGS = "en.*,it.*,en"
+_YT_TIMEOUT = 120
 # A bare httpx user agent collects more 403s than a browser string does, and
 # the 401/403/429 branch below is how we surface the ones that remain.
 _HEADERS = {
@@ -235,6 +245,8 @@ def web_fetch(url: str) -> str:
     """Read one web page and return its text, boilerplate stripped and
     truncated. Call this on a promising search result instead of guessing from
     its snippet. The first line is `Source: <url>`, which is what to cite."""
+    if host_matches(url, *_YT_DOMAINS):
+        return _youtube_transcript(url)
     resp, final_url = _fetch(url)
     ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
     if ctype and not ctype.startswith(_TEXT_TYPES):
@@ -243,3 +255,72 @@ def web_fetch(url: str) -> str:
     body = resp.text
     text = _extract_text(body) if ("html" in ctype or not ctype) else body
     return _render(final_url, _truncate(text))
+
+
+_VTT_TAG_RE = re.compile(r"<[^>]*>")
+_VTT_NOISE = ("WEBVTT", "Kind:", "Language:", "NOTE ", "STYLE", "REGION")
+
+
+def _vtt_to_text(vtt: str) -> str:
+    """VTT to plain lines: drop cue timings and inline markup, and collapse the
+    rolling duplication auto-subs produce (each cue repeats the line before it).
+
+    ponytail: adjacent-equal dedup, not a diff of overlapping cues. It clears
+    the common rolling case; upgrade to longest-common-suffix trimming only if
+    real transcripts come out visibly doubled.
+    """
+    lines: list[str] = []
+    for raw in vtt.splitlines():
+        s = raw.strip()
+        if not s or "-->" in s or s.isdigit() or s.startswith(_VTT_NOISE):
+            continue
+        s = unescape(_VTT_TAG_RE.sub("", s)).strip()
+        if s and (not lines or lines[-1] != s):
+            lines.append(s)
+    return "\n".join(lines)
+
+
+def _youtube_transcript(url: str) -> str:
+    """Subtitles via yt-dlp, keyless.
+
+    There is no shortcut worth trying: the watch page does carry
+    `captionTracks`, but every `baseUrl` now returns HTTP 200 with 0 bytes in
+    every format, because timedtext is gated behind a PO token. yt-dlp handles
+    the token and player-client dance.
+
+    Auto-subs are ASR output: transcription errors, no speaker labels. Anything
+    nucleated from them inherits that noise, so the sources/ leaf matters more
+    here than usual.
+
+    ponytail: no installer and no doctor for one optional binary. A clear
+    prescription at call time beats a health-check subsystem. If stale-venv
+    shims start confusing users, the upgrade is Agent-Reach's probe taxonomy
+    (missing / broken / timeout / error), not an installer.
+    """
+    exe = shutil.which("yt-dlp")
+    if not exe:
+        raise ValueError(
+            "reading YouTube needs yt-dlp on PATH: install it with "
+            '`python -m pip install -U "yt-dlp[default]"`. The watch page '
+            "itself is a JavaScript shell with no transcript in the HTML."
+        )
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / "sub"
+        proc = subprocess.run(
+            [
+                exe, "--skip-download", "--write-auto-sub", "--write-sub",
+                "--sub-lang", _YT_SUB_LANGS, "--sub-format", "vtt",
+                "--no-playlist", "-o", str(out), "--", url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_YT_TIMEOUT,
+        )
+        files = sorted(Path(tmp).glob("*.vtt"))
+        if not files:
+            tail = (proc.stderr or proc.stdout or "").strip()[-300:]
+            raise ValueError(
+                f"yt-dlp found no subtitles for {url}" + (f": {tail}" if tail else "")
+            )
+        text = _vtt_to_text(files[0].read_text(encoding="utf-8", errors="replace"))
+    return _render(url, _truncate(text))
