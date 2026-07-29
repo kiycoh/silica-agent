@@ -365,11 +365,18 @@ _PDF_PROVIDERS = {
 # --- shared helpers ---------------------------------------------------------
 
 def _resolve_input(target: str) -> Path:
-    """Mirror ProseAdapter.read resolution; raise if the file is missing."""
+    """Absolute as given; relative tried vault-first, then cwd.
+
+    ProseAdapter.read resolves vault-only because its inputs are notes, which
+    live in the vault. A file to CONVERT is the opposite: a PDF sits where the
+    user is standing (a download dir, a repo), not among the markdown — so cwd
+    is a real fallback here, not just the no-vault special case.
+    """
     p = Path(target)
     if not p.is_absolute():
         vault = (CONFIG.vault_path or "").strip()
-        p = (Path(vault) / target) if vault else (Path.cwd() / target)
+        tries = ([Path(vault) / target] if vault else []) + [Path.cwd() / target]
+        p = next((c for c in tries if c.exists()), tries[-1])
     if not p.exists():
         raise ValueError(f"file not found: {target}")
     return p

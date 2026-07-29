@@ -48,6 +48,16 @@ def test_missing_file_raises(tmp_vault, monkeypatch):
         conv.convert("ghost.pdf")
 
 
+def test_relative_path_falls_back_to_cwd(tmp_vault, tmp_path, monkeypatch):
+    """A PDF in the user's directory, not in the vault, still converts."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "docling")
+    (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.4")
+    monkeypatch.chdir(tmp_path)
+    _fake_docling(monkeypatch, md="body")
+
+    assert _inbox_note(conv.convert("paper.pdf")[0]).exists()
+
+
 # --- docling provider (keeps figures) ---------------------------------------
 
 def _fake_docling(monkeypatch, md="# Title\n\n![](images/fig.png)\n\nbody"):
