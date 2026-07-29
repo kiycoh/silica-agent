@@ -24,7 +24,14 @@ from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
 logger = logging.getLogger(__name__)
 
 
-class DedupDecision(BaseModel):
+class DedupVerdict(BaseModel):
+    """Wire schema for the judge-only path — no authoring fields.
+
+    Constrained decoding forces the model to emit every key the schema declares,
+    so exposing title/body when no spoke was asked for made the judge re-author
+    the note it was judging: hundreds of wasted tokens, and a truncated response
+    (silent fallback verdict) whenever that regeneration outran max_tokens.
+    """
     # duplicate    → append only the genuinely-new info
     # distinct     → pipeline concepts: author the spoke note in the same call
     #                (giudice+autore); ad-hoc pairs: no write
@@ -32,9 +39,17 @@ class DedupDecision(BaseModel):
     verdict: Literal["duplicate", "distinct", "contradicts"] = "distinct"
     rationale: str = ""
     addition: str = ""
+
+
+class DedupDecision(DedupVerdict):
     # Authored spoke (distinct + pipeline item only; empty otherwise).
     title: str = ""
     body: str = ""
+
+
+class DedupVerdictBatch(BaseModel):
+    """Batch wire schema for the judge-only path (no authoring fields)."""
+    decisions: list[DedupVerdict] = []
 
 
 class DedupBatchDecision(BaseModel):
@@ -428,7 +443,7 @@ def _decide_dedup(
     response = provider.call_llm(
         messages=[{"role": "user", "content": user_message}],
         tools=None,
-        response_schema=DedupDecision,
+        response_schema=DedupDecision if author_spoke else DedupVerdict,
         max_tokens=int(os.getenv("DEDUP_MAX_TOKENS", "2048")),
     )
     raw = response.text or ""
@@ -464,15 +479,18 @@ def _score_block(score: float, full_score: float, title_score: float) -> str:
             f"  • Full-note similarity (body + title):  {full_score:.3f}\n"
             f"  • Title-only similarity:                {title_score:.3f}\n"
             f"Interpretation:\n"
-            f"  - High full-note score (>0.80): bodies cover the same topic → likely duplicate.\n"
-            f"  - High title score with low body score: notes are topically related but\n"
-            f"    cover distinct aspects (e.g. 'ROS' vs 'JSON in ROS 2') → prefer linking\n"
-            f"    over merging; set is_duplicate=false unless content genuinely overlaps."
+            f"  - A high score means the two texts READ alike, not that they state the\n"
+            f"    same things. Sibling notes filled from one template (same tables,\n"
+            f"    parallel prose) score high while differing exactly where it matters.\n"
+            f"  - High title score with low body score: topically related but distinct\n"
+            f"    (e.g. 'ROS' vs 'JSON in ROS 2') → prefer linking over merging.\n"
+            f"  - Judge the claims, never the layout: 'duplicate' only when the two texts\n"
+            f"    assert the same things about the same subject."
         )
     return (
         f"SEMANTIC CLOSENESS SCORE: {score:.3f} (0.0 to 1.0, where 1.0 is identical)\n"
-        f"Use this metric as an indicator. High scores (>0.85) strongly suggest "
-        f"duplicates, while lower scores might represent related but distinct topics."
+        f"Use this metric as an indicator only: a high score means the texts read alike,\n"
+        f"not that they state the same things. Judge the claims, never the layout."
     )
 
 
@@ -529,7 +547,7 @@ def _decide_dedup_batch(
     response = provider.call_llm(
         messages=[{"role": "user", "content": user_message}],
         tools=None,
-        response_schema=DedupBatchDecision,
+        response_schema=DedupBatchDecision if author_spoke else DedupVerdictBatch,
         max_tokens=int(os.getenv("DEDUP_MAX_TOKENS", "2048")) * n,
     )
     return _parse_batch(response.text or "", n)

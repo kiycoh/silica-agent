@@ -81,6 +81,42 @@ def test_parse_batch_pads_truncates_and_legacy():
 
 
 # ---------------------------------------------------------------------------
+# wire schema selection
+# ---------------------------------------------------------------------------
+
+def test_judge_schema_omits_authoring_fields_unless_spoke_requested():
+    """Constrained decoding fills every key the schema declares, so title/body on
+    the judge-only path made the worker re-author the note it was judging —
+    ~4x the output tokens and a truncated (silently unparseable) verdict.
+    """
+    from types import SimpleNamespace
+
+    from silica.capabilities.dedup import (
+        DedupBatchDecision, DedupVerdict, DedupVerdictBatch,
+        _decide_dedup, _decide_dedup_batch,
+    )
+
+    seen = []
+
+    class _Provider:
+        def call_llm(self, *, messages, tools, response_schema, max_tokens):
+            seen.append(response_schema)
+            return SimpleNamespace(text='{"verdict": "distinct", "rationale": "r"}')
+
+    cfg = SilicaConfig()
+    common = {"candidate_name": "N", "candidate_body": "body"}
+    with patch("silica.agent.providers.get_provider", return_value=_Provider()):
+        for spoke in (False, True):
+            _decide_dedup(cfg, concept="C", excerpt="e", author_spoke=spoke, **common)
+            _decide_dedup_batch(cfg, concepts=[{"concept": "C", "excerpt": "e"}],
+                                author_spoke=spoke, **common)
+
+    assert seen == [DedupVerdict, DedupVerdictBatch, DedupDecision, DedupBatchDecision]
+    assert "body" not in DedupVerdict.model_fields
+    assert "body" in DedupDecision.model_fields
+
+
+# ---------------------------------------------------------------------------
 # run_dedup on a batch item — real commit path
 # ---------------------------------------------------------------------------
 
