@@ -106,11 +106,16 @@ def silica_code_pack(target: str, budget_chars: int = 24000) -> dict:
     This is a closure, not a search: no ranking, no embeddings, no language
     server. The same repo state gives the same bytes. Use it before rewriting
     or porting a file, so you read the surrounding contracts in one call
-    instead of ten greps. Whatever did not fit the budget is listed in
-    `dropped`, so you know what is missing and can ask for it directly. A
-    section header's count (e.g. `importers (fan-in N)`) is always the true
-    repo-wide total, even when the list printed under it is shorter because
-    budget trimming dropped some of those entries.
+    instead of ten greps.
+
+    `dropped` tells you what you are not seeing, in two kinds. An entry
+    starting with `note: ` is a degrade note: something was unavailable and
+    the pack got poorer, not something you can fetch. Every other entry reads
+    `<section>: <label>` and is a real thing that did not fit the budget, so
+    you can ask for it directly by its label. A section header's count (e.g.
+    `importers (fan-in N)`) is always the true repo-wide total, even when the
+    list printed under it is shorter because budget trimming dropped some of
+    those entries.
     """
     from silica.config import CONFIG
     from silica.kernel.code import codepack

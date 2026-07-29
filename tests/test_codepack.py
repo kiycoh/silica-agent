@@ -170,6 +170,54 @@ def test_outline_skip_bare_name_only_drops_the_addressed_symbol():
     assert "void Foo()" in outline  # unrelated Bar.Foo(), not a member of Foo
 
 
+def test_outline_drops_the_members_of_a_filtered_out_inner_class():
+    # Review finding 2: `_outline`'s skip was one level deep while
+    # `_signatures` was already transitive. With a two-level entry the members
+    # of a skipped inner class used to be re-parented onto the outer class
+    # (a false fact, and a duplicate of text already served verbatim above),
+    # or left as orphan indented lines with no owner at all.
+    entry = {
+        "symbols": [
+            {"kind": "class", "name": "Outer", "parent": "",
+             "signature": "public class Outer", "doc": ""},
+            {"kind": "class", "name": "Builder", "parent": "Outer",
+             "signature": "static class Builder", "doc": ""},
+            {"kind": "method", "name": "withA", "parent": "Builder",
+             "signature": "public Builder withA()", "doc": ""},
+            {"kind": "method", "name": "build", "parent": "Builder",
+             "signature": "public Outer build()", "doc": ""},
+        ]
+    }
+    assert codepack._outline(entry, skip="Outer.Builder") == "public class Outer"
+    assert codepack._outline(entry, skip="Outer") == ""
+
+
+def test_outline_skip_does_not_poison_a_same_named_class_elsewhere():
+    # The closure is keyed by bare name, the only key `parent` ever carries,
+    # so a surviving symbol must re-open its own name: two unrelated classes
+    # can share a simple name, and skipping `Outer.Builder` must not silence
+    # the unrelated `Other.Builder`'s members.
+    entry = {
+        "symbols": [
+            {"kind": "class", "name": "Outer", "parent": "",
+             "signature": "public class Outer", "doc": ""},
+            {"kind": "class", "name": "Builder", "parent": "Outer",
+             "signature": "static class Builder", "doc": ""},
+            {"kind": "method", "name": "withA", "parent": "Builder",
+             "signature": "public Builder withA()", "doc": ""},
+            {"kind": "class", "name": "Other", "parent": "",
+             "signature": "public class Other", "doc": ""},
+            {"kind": "class", "name": "Builder", "parent": "Other",
+             "signature": "static class Builder", "doc": ""},
+            {"kind": "method", "name": "step2", "parent": "Builder",
+             "signature": "public Other step2()", "doc": ""},
+        ]
+    }
+    outline = codepack._outline(entry, skip="Outer.Builder")
+    assert "withA" not in outline
+    assert "public Other step2()" in outline
+
+
 def test_selector_serves_one_method_verbatim_and_the_rest_as_outline(repo):
     pack = codepack.code_pack(repo, f"{TARGET}#GameModel.tick")
     assert pack["target_mode"] == "symbol"
@@ -235,6 +283,21 @@ def test_supertypes_uses_the_last_dotted_segment():
     # package/enclosing-type prefix.
     assert codepack._supertypes("public class Foo extends com.example.Base") == ["Base"]
     assert codepack._supertypes("public class A extends Map.Entry") == ["Entry"]
+
+
+def test_supertypes_never_fabricates_a_base():
+    # Review finding 1, two independent fabrications in one function.
+    # (a) the C++ base regex ran on every family with no discriminator and
+    #     `[^{]+` ran to end of line, so a Python declaration line with a
+    #     trailing comment read the comment as its base list.
+    # (b) `_IDENT` had no `:`, so `std::runtime_error` tokenized as two
+    #     identifiers and the first-identifier rule picked the NAMESPACE,
+    #     losing every real base and inventing one that does not exist.
+    assert codepack._supertypes("class Config:  # noqa: D101") == []
+    assert codepack._supertypes("class Alone:  # a plain marker class") == []
+    assert codepack._supertypes("class Plain:") == []
+    assert codepack._supertypes("class MyError : public std::runtime_error") == ["runtime_error"]
+    assert codepack._supertypes("class Two : public ns::A, public ns::B") == ["A", "B"]
 
 
 def test_hierarchy_section_is_absent_when_empty(repo):
@@ -315,6 +378,28 @@ def test_import_never_used_in_body_is_not_a_neighbor(repo):
     assert "src/main/java/util/Vec2.java" in pack["sections"]["neighborhood"]
     # Launcher is imported but never named anywhere outside the import line.
     assert "src/main/java/app/Launcher.java" not in pack["sections"]["neighborhood"]
+
+
+def test_multi_line_typescript_import_is_masked_whole():
+    # Review finding 4: the mask anchored on the first physical line only, so
+    # the braced multi-line form (prettier's default past 80 columns) left the
+    # imported names AND the closing `} from "./mod";` line unmasked, and the
+    # mention filter was effectively off for idiomatic TS.
+    src = 'import {\n  Foo,\n  Bar,\n} from "./mod";\n\nconst x = 1;\n'
+    body = codepack._mask_imports(src)
+    assert len(body) == len(src)                       # offsets stay valid
+    assert body.index("const x = 1;") == src.index("const x = 1;")
+    entry = {"symbols": [{"name": "Foo", "parent": ""}, {"name": "Bar", "parent": ""}]}
+    assert codepack._first_mention(body, "src/mod.ts", entry) is None
+
+
+def test_multi_line_python_import_is_masked_whole():
+    src = "from pkg.mod import (\n    alpha,\n    beta,\n)\n\n\ndef use():\n    return 1\n"
+    body = codepack._mask_imports(src)
+    assert len(body) == len(src)
+    assert body.index("def use():") == src.index("def use():")
+    entry = {"symbols": [{"name": "alpha", "parent": ""}, {"name": "beta", "parent": ""}]}
+    assert codepack._first_mention(body, "pkg/mod.py", entry) is None
 
 
 def test_private_modifier_order_does_not_leak_the_member():
@@ -406,7 +491,14 @@ def test_fill_stops_at_the_first_entry_that_does_not_fit(repo):
 
 
 def test_dropped_is_a_suffix_of_the_entry_order(repo):
-    full = codepack.code_pack(repo, TARGET)
+    # Review finding 3: `dropped` carries two kinds of entry. Degrade notes
+    # are prefixed "note: " and come first; budget drops are "<section>:
+    # <label>" and form a suffix of the entry order. An unresolved selector
+    # puts both kinds in the same list, the case the old fixture never hit.
+    target = f"{TARGET}#GameModel.nosuch"
+    full = codepack.code_pack(repo, target)
+    note = "note: selector 'GameModel.nosuch' not found, degraded to a file-level pack"
+    assert full["dropped"] == [note]
     order = [f"{sec}: {label}"
              for sec in ("hierarchy", "neighborhood", "external", "importers")
              for label in full["sections"].get(sec, [])]
@@ -415,9 +507,12 @@ def test_dropped_is_a_suffix_of_the_entry_order(repo):
     # case most likely to break under a future refactor. A budget that drops
     # every entry (e.g. len(GAME_MODEL) + 60) would make `dropped == order`
     # look like a suffix by accident — the guard below rules that out.
-    tight = codepack.code_pack(repo, TARGET, budget_chars=len(full["text"]) - 100)
-    assert 0 < len(tight["dropped"]) < len(order)   # a PROPER suffix, not the whole list
-    assert tight["dropped"] == order[len(order) - len(tight["dropped"]):]
+    tight = codepack.code_pack(repo, target, budget_chars=len(full["text"]) - 100)
+    assert tight["dropped"][0] == note               # notes first, then the budget tail
+    tail = tight["dropped"][1:]
+    assert not any(d.startswith("note: ") for d in tail)
+    assert 0 < len(tail) < len(order)                # a PROPER suffix, not the whole list
+    assert tail == order[len(order) - len(tail):]
 
 
 def test_target_overhead_is_reconciled_with_the_pack_budget(repo):

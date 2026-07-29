@@ -28,15 +28,32 @@ BUDGET_CHARS = 24000
 def _outline(entry: dict, skip: str = "") -> str:
     """Signatures of a file, one per line, methods indented. This is the
     "everything around it" half of D5, and the fallback when the target itself
-    is too big to serve whole."""
+    is too big to serve whole.
+
+    `skip` drops the addressed symbol AND everything declared inside it, at any
+    depth: the same transitive rule `_signatures` applies to a filtered-out
+    class. A one-level skip re-parented an inner class's methods onto the outer
+    class (false, and a duplicate of text already served verbatim above the
+    outline) or left them as orphan indented lines with no owner at all.
+
+    `skipped` is keyed by bare name, the only key `parent` ever carries, so a
+    survivor re-opens its own name the moment it is emitted: two unrelated
+    classes can share a simple name (`Outer.Builder` skipped, `Other.Builder`
+    kept) and the first must not silence the second's members. Document order
+    makes this safe, since `ModuleSkeleton.symbols` always emits a class
+    before its own members."""
     head = skip.split(".", 1)[0]
     lines: list[str] = []
+    skipped: set[str] = set()
     for s in entry.get("symbols", []):
         name, parent = s.get("name", ""), s.get("parent", "")
         qual = f"{parent}.{name}" if parent else name
-        if skip and (qual == skip or ("." not in skip
-                and (parent == head or (parent == "" and name == head)))):
+        addressed = bool(skip) and (qual == skip or ("." not in skip
+                and (parent == head or (parent == "" and name == head))))
+        if addressed or (parent and parent in skipped):
+            skipped.add(name)
             continue
+        skipped.discard(name)  # a later same-named symbol that survives re-opens the name
         doc = f"  # {s['doc']}" if s.get("doc") else ""
         lines.append(("  " if parent else "") + s.get("signature", "") + doc)
     return "\n".join(lines)
@@ -113,7 +130,8 @@ def _target_block(source: str, entry: dict, selector: str, budget_chars: int,
             rest = _outline(entry, skip=selector)
             tail = f"\n\n-- rest of file, outline --\n{rest}" if rest else ""
             return picked.rstrip("\n") + tail, "symbol"
-        dropped.append(f"target: selector '{selector}' not found, degraded to a file-level pack")
+        dropped.append(
+            f"note: selector '{selector}' not found, degraded to a file-level pack")
     if len(source) <= budget_chars:
         return source.rstrip("\n"), "verbatim"
     outline = _outline(entry)
@@ -129,11 +147,19 @@ _JAVA_SUPER = re.compile(
     r"\b(?:extends|implements)\s+((?:(?!\bextends\b|\bimplements\b)[^{])+)"
 )
 _PY_BASES = re.compile(r"\bclass\s+\w+\s*\(([^)]*)\)")
-_CPP_BASES = re.compile(r"\b(?:class|struct)\s+\w+\s*:\s*([^{]+)")
-# Dots included so a qualified name (`com.example.Base`, `Map.Entry`) is
-# captured whole and reduced to its last segment, rather than truncated at
-# the first dot.
-_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
+# The base list stops at a comment introducer as well as at the body brace.
+# This regex is applied to every family (there is no language field here), and
+# a Python declaration line is stored verbatim including its trailing comment,
+# so `class Config:  # noqa: D101` would otherwise read `noqa` as a declared
+# base. Fabricating a base is worse than missing one: a porting agent acts on
+# it. `#` covers Python and the preprocessor, `/` covers `//` and `/*`.
+_CPP_BASES = re.compile(r"\b(?:class|struct)\s+\w+\s*:\s*([^{/#]+)")
+# Dots and colons included so a qualified name (`com.example.Base`,
+# `Map.Entry`, `std::runtime_error`) is captured whole and reduced to its last
+# segment, rather than tokenized into a package/namespace head that the
+# first-identifier rule below would then mistake for the base itself.
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_.:]*")
+_QUALIFIER = re.compile(r"::|\.")
 _GENERIC = re.compile(r"<[^<>]*>|\[[^\[\]]*\]")
 _ACCESS = frozenset({"public", "private", "protected", "virtual"})
 
@@ -160,11 +186,12 @@ def _supertypes(signature: str) -> list[str]:
             if "=" in part:
                 continue  # a Python keyword argument (metaclass=...), not a base
             # first identifier only: it drops C++ access keywords. A
-            # qualified name reduces to its last dotted segment, the class
-            # itself rather than its package or enclosing type.
+            # qualified name reduces to its last segment on either separator,
+            # the class itself rather than its package, namespace or
+            # enclosing type.
             idents = [i for i in _IDENT.findall(part) if i not in _ACCESS]
             if idents:
-                base = idents[0].rsplit(".", 1)[-1]
+                base = _QUALIFIER.split(idents[0])[-1]
                 if base and base not in out:
                     out.append(base)
     return out
@@ -247,16 +274,45 @@ def _signatures(entry: dict) -> str:
 
 # An import/include line always names the file it resolves to, so searching
 # it unmasked would make every import a "mention" by definition and the
-# filter below would exclude nothing. Blanked to same-length spaces (not
-# deleted) so byte offsets elsewhere in the source stay valid: ordering by
-# "first real use" still means position in the actual file.
-_IMPORT_LINE = re.compile(r"^[ \t]*(?:import|from|#include|using)\b.*$", re.MULTILINE)
+# filter below would exclude nothing.
+_IMPORT_START = re.compile(r"^[ \t]*(?:import|from|#include|using)\b")
+_OPEN, _CLOSE = "([{", ")]}"
+
+
+def _mask_imports(source: str) -> str:
+    """`source` with every import/include statement blanked to spaces.
+
+    Blanked, not deleted, so every offset outside the masked spans stays
+    exactly where it was: `_first_mention` orders neighbours by first real use
+    and that only means anything if its offsets are positions in the real file.
+
+    A statement is not a line. Anchoring on the first physical line left the
+    braced multi-line form (`import {\\n Foo,\\n} from "./mod";`, prettier's
+    default past 80 columns) mostly unmasked, names and module specifier
+    included, which switched the mention filter off for idiomatic TypeScript
+    and for the parenthesized Python form. So the mask runs on while the
+    brackets opened on the import line are still unbalanced, and stops on the
+    first line that closes them. Counting brackets is a heuristic, and a
+    deliberately cheap one: over-masking costs a neighbour, which is a poorer
+    pack, while the alternative is a parse per neighbour."""
+    lines = source.split("\n")
+    depth, masking = 0, False
+    for i, line in enumerate(lines):
+        if not masking and _IMPORT_START.match(line):
+            masking, depth = True, 0
+        if not masking:
+            continue
+        depth += sum(line.count(c) for c in _OPEN) - sum(line.count(c) for c in _CLOSE)
+        lines[i] = " " * len(line)
+        if depth <= 0:
+            masking, depth = False, 0
+    return "\n".join(lines)
 
 
 def _first_mention(source: str, path: str, entry: dict) -> int | None:
     """Offset of the first place `source` names this file: any top-level
     symbol name, or the file stem. `source` is expected to already have its
-    import/include lines masked to blanks (see `_neighborhood`) — otherwise
+    import/include statements masked to blanks (`_mask_imports`), otherwise
     an import's own line always matches its own target, and the filter that
     is supposed to separate real uses from bare imports never excludes
     anything. None means it is never named outside an import, so it is not a
@@ -283,12 +339,12 @@ def _neighborhood(graph, path: str, entry: dict,
     An import crosses a package boundary, so it is a contract you cannot see by
     opening the folder next door; a sibling is one `ls` away.
 
-    Mentions are searched for over `source` with its own import/include lines
-    masked to same-length blanks first: an import line always names the file
-    it imports, so searching the raw source would make the mention filter
-    vacuous for group 1 (every import "mentions itself"). Same-length blanks
-    keep the rest of the offsets meaningful, so `sorted(ranked)` still orders
-    by real position in the file."""
+    Mentions are searched for over `source` with its own import/include
+    statements masked to same-length blanks first (`_mask_imports`): an import
+    always names the file it imports, so searching the raw source would make
+    the mention filter vacuous for group 1 (every import "mentions itself").
+    Same-length blanks keep the rest of the offsets meaningful, so
+    `sorted(ranked)` still orders by real position in the file."""
     if graph is None:
         return []
     imports = [p for p in entry.get("imports", []) if p != path and p in graph.files]
@@ -303,7 +359,7 @@ def _neighborhood(graph, path: str, entry: dict,
             if p != path and p not in imports
             and p.rpartition("/")[0] == folder and e.get("language") == "java"
         )
-    body = _IMPORT_LINE.sub(lambda m: " " * len(m.group(0)), source)
+    body = _mask_imports(source)
     out: list[tuple[str, str]] = []
     for group in (imports, siblings):
         ranked = []
@@ -326,6 +382,16 @@ def code_pack(vault: Path | str, target: str,
     caller mistake, not a state to degrade around. Every other shortfall
     (no repo, no graph, unsupported language, empty neighbourhood) degrades to
     a poorer pack and says why in `dropped` (D4).
+
+    `dropped` holds two kinds of entry, in this order and told apart by their
+    prefix. First the degrade notes, `"note: <what was given up and why>"`,
+    which name no fetchable thing. Then the budget drops,
+    `"<section>: <label>"`, each one a real entry the caller can ask for
+    directly; that second part is always a suffix of the entry order, because
+    the fill stops at the first entry that does not fit and never lets a later
+    small entry jump the queue. The two used to share one shape, so an agent
+    reading `dropped` as a fetch list would go looking for a file called
+    "no code graph (vault is not inside a git repo)".
     """
     path, _, selector = target.partition("#")
     root = _paths.repo_root_for(vault) or Path(vault)
@@ -337,14 +403,14 @@ def code_pack(vault: Path | str, target: str,
     graph = codegraph.load_codegraph(vault)
     dropped: list[str] = []
     if graph is None:
-        dropped.append("neighborhood: no code graph (vault is not inside a git repo)")
+        dropped.append("note: no code graph (vault is not inside a git repo)")
         entry: dict = {}
         head_ref = ""
     else:
         head_ref = graph.head_ref
         entry = graph.files.get(path, {})
         if not entry:
-            dropped.append(f"neighborhood: {path} is not in the code graph")
+            dropped.append(f"note: {path} is not in the code graph")
 
     # `_target_block` bounds the target against the budget on its own, but it
     # only sees the body: the header line and the pack's own trailing newline
