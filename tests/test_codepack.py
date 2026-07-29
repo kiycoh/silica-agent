@@ -483,3 +483,29 @@ def test_two_calls_are_identical(repo):
     a = codepack.code_pack(repo, TARGET)
     b = codepack.code_pack(repo, TARGET)
     assert a == b
+
+
+def test_tool_returns_a_pack(repo, monkeypatch):
+    from silica.tools.codedocs_tool import silica_code_pack
+
+    monkeypatch.setattr("silica.config.CONFIG.vault_path", str(repo))
+    res = silica_code_pack(target=TARGET)
+    assert res["status"] == "ok"
+    assert res["target_mode"] == "verbatim"
+    assert "## neighborhood" in res["text"]
+
+
+def test_tool_reports_a_bad_path_instead_of_raising(repo, monkeypatch):
+    from silica.tools.codedocs_tool import silica_code_pack
+
+    monkeypatch.setattr("silica.config.CONFIG.vault_path", str(repo))
+    res = silica_code_pack(target="nope/missing.java")
+    assert res["status"] == "error"
+    assert "missing.java" in res["message"]
+
+
+def test_tool_is_outside_the_core_mcp_surface():
+    from silica.ui.mcp import CORE_TOOLS, exposed_tools
+
+    assert "silica_code_pack" not in CORE_TOOLS
+    assert "silica_code_pack" in exposed_tools(all_tools=True)
