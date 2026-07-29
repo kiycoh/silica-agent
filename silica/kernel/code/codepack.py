@@ -58,17 +58,22 @@ _DECL_NODES["javascript"] = _DECL_NODES["typescript"]
 
 
 def _find_decl(node, src: bytes, kinds: tuple[str, ...], name: str):
-    """First declaration node of `kinds` whose `name` field reads `name`."""
-    for i in range(node.named_child_count):
-        child = node.named_child(i)
-        if child.type in kinds:
-            field = child.child_by_field_name("name")
-            if field is not None and src[field.start_byte:field.end_byte].decode(
-                    "utf-8", errors="replace") == name:
-                return child
-        found = _find_decl(child, src, kinds, name)
-        if found is not None:
-            return found
+    """Shallowest declaration node of `kinds` whose `name` field reads `name`.
+    Breadth-first on purpose: a nested class or method with the same name must
+    never shadow the top-level one the selector addresses."""
+    level = [node]
+    while level:
+        nxt = []
+        for parent in level:
+            for i in range(parent.named_child_count):
+                child = parent.named_child(i)
+                if child.type in kinds:
+                    field = child.child_by_field_name("name")
+                    if field is not None and src[field.start_byte:field.end_byte].decode(
+                            "utf-8", errors="replace") == name:
+                        return child
+                nxt.append(child)
+        level = nxt
     return None
 
 
@@ -107,7 +112,7 @@ def _target_block(source: str, entry: dict, selector: str, budget_chars: int,
             rest = _outline(entry, skip=selector)
             tail = f"\n\n-- rest of file, outline --\n{rest}" if rest else ""
             return picked.rstrip("\n") + tail, "symbol"
-        dropped.append(f"target: selector '{selector}' not found, whole file served")
+        dropped.append(f"target: selector '{selector}' not found, degraded to a file-level pack")
     if len(source) <= budget_chars:
         return source.rstrip("\n"), "verbatim"
     outline = _outline(entry)

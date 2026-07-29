@@ -199,3 +199,24 @@ def test_python_top_level_function_selector(repo):
     assert pack["target_mode"] == "symbol"
     assert "return os.sep" in pack["text"]
     assert "return 2" not in pack["text"]
+
+
+def test_selector_prefers_the_shallowest_match_over_a_nested_shadow():
+    # A nested class named GameModel (inside Wrapper) shadows the real,
+    # top-level GameModel in document order. The selector must resolve to
+    # the shallowest (top-level) declaration, never the nested one.
+    src = (
+        "class Wrapper {\n"
+        "    class GameModel {\n"
+        "        void tick() { int decoy = 999; }\n"
+        "    }\n"
+        "}\n"
+        "\n"
+        "public class GameModel extends Entity {\n"
+        "    public void tick() { int real = 1; }\n"
+        "}\n"
+    )
+    picked = codepack._symbol_source(src, "java", "GameModel.tick")
+    assert picked is not None
+    assert "real = 1" in picked
+    assert "decoy" not in picked
