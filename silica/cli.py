@@ -33,7 +33,7 @@ import silica.tools.composed  # noqa: F401
 import silica.tools.wrapped  # noqa: F401
 import silica.tools.codedocs_tool  # noqa: F401
 import silica.tools.delegate_tool  # noqa: F401
-import silica.sources.web_research  # noqa: F401  (registers the web_search tool)
+import silica.sources.web_research  # noqa: F401  (registers the web_search and web_fetch tools)
 
 logger = logging.getLogger(__name__)
 
@@ -1260,6 +1260,19 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             CONSOLE.print(f"  Findings → [bold]{note_rel}[/]  (review, then /nucleate to bring it in)")
         except Exception as e:  # missing key, no findings, convergence guard, network
             CONSOLE.print(f"  [yellow]web-search failed: {e}[/]")
+        return ""  # fully handled inline — sentinel: nothing for the agent
+
+    if cmd == "/fetch":
+        from silica.sources.web_research import fetch_to_inbox
+        url = " ".join(parts[1:]).strip()
+        if not url:
+            return "Error: /fetch requires a URL. Usage: /fetch <url>"
+
+        try:
+            note_rel = fetch_to_inbox(url)
+            CONSOLE.print(f"  Fetched → [bold]{note_rel}[/]  (review, then /nucleate to bring it in)")
+        except Exception as e:  # SSRF guard, bot wall, missing yt-dlp, network
+            CONSOLE.print(f"  [yellow]fetch failed: {e}[/]")
         return ""  # fully handled inline — sentinel: nothing for the agent
 
     if cmd == "/report":

@@ -207,7 +207,12 @@ def _collect_sources(messages: list[dict]) -> list[tuple[str, str]]:
     return list(seen.items())
 
 
-def _build_note(concept: str, body: str, sources: list[tuple[str, str]]) -> str:
+def _build_note(
+    concept: str,
+    body: str,
+    sources: list[tuple[str, str]],
+    source: str = "web-research",
+) -> str:
     """Deterministic frontmatter + model body + guaranteed ## Sources.
 
     The date is set here, never trusted to the model. If the model already
@@ -217,9 +222,9 @@ def _build_note(concept: str, body: str, sources: list[tuple[str, str]]) -> str:
     front = (
         "---\n"
         f"title: {json.dumps(concept)}\n"
-        "source: web-research\n"
+        f"source: {source}\n"
         f"fetched: {today}\n"
-        "tags: [inbox, web-research]\n"
+        f"tags: [inbox, {source}]\n"
         "---\n"
     )
     out = body.strip()
@@ -242,3 +247,41 @@ def _unique_inbox_path(concept: str) -> str:
         candidate = f"{inbox}/{slug} {n}.md"
         n += 1
     return candidate
+
+
+def _title_of(text: str) -> str:
+    """First real line of the fetched text, skipping our own Source: header.
+
+    On a well-formed page that is the <title>, which html.parser emits first.
+    """
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line and not line.startswith("Source: "):
+            return line[:120]
+    return ""
+
+
+def fetch_to_inbox(url: str) -> str:
+    """`/fetch <url>` — read one page and drop it in the Inbox, verbatim.
+
+    No loop and no model: the fetched text *is* the note body. Same frontmatter,
+    same sources/ leaf and the same ADR-0015 boundary as web_research, so
+    /nucleate remains the only way into the vault.
+
+    Returns the note's vault-relative path. Raises ValueError when the fetch
+    fails or the page yielded nothing readable; no note is written either way.
+    """
+    text = _web_fetch.web_fetch(url).strip()
+    title = _title_of(text)
+    if not title:
+        raise ValueError(f"nothing readable at {url}")
+
+    note = _build_note(title, text, [(url, title)], source="web-fetch")
+    note_rel = _unique_inbox_path(title)
+    from silica.driver import DRIVER
+
+    DRIVER.create(note_rel, note)
+    # ponytail: _write_leaf reads role=="tool" messages, so hand it a synthetic
+    # one rather than growing a second leaf writer for a one-message trace.
+    _write_leaf(note_rel, [{"role": "tool", "content": text}])
+    return note_rel

@@ -294,3 +294,62 @@ def test_main_agent_default_toolset_excludes_web_search():
 
     names = {t["function"]["name"] for t in (captured["tools"] or [])}
     assert "web_search" not in names
+
+
+# --- /fetch ------------------------------------------------------------------
+
+def _patch_web_fetch(monkeypatch, text):
+    import silica.sources.web_fetch as wf
+    monkeypatch.setattr(wf, "web_fetch", lambda url: text)
+
+
+def test_fetch_to_inbox_writes_a_note_titled_after_the_page(tmp_vault, monkeypatch):
+    _patch_web_fetch(
+        monkeypatch,
+        "Source: https://a.test/post\n\nOn Graph Theory\n\nBody prose here.",
+    )
+
+    note_rel = wr.fetch_to_inbox("https://a.test/post")
+
+    assert note_rel.startswith(f"{CONFIG.inbox_dir}/")
+    body = (Path(CONFIG.vault_path) / note_rel).read_text(encoding="utf-8")
+    today = datetime.date.today().isoformat()
+    assert 'title: "On Graph Theory"' in body
+    assert "source: web-fetch" in body
+    assert "tags: [inbox, web-fetch]" in body
+    assert f"fetched: {today}" in body
+    assert "Body prose here." in body
+    assert "https://a.test/post" in body  # the ADR-0015 sources guarantee
+
+
+def test_fetch_to_inbox_writes_a_source_leaf(tmp_vault, monkeypatch):
+    from silica.kernel.recall.paths import SOURCES_DIR
+
+    _patch_web_fetch(monkeypatch, "Source: https://a.test/post\n\nTitle\n\nBody.")
+    note_rel = wr.fetch_to_inbox("https://a.test/post")
+
+    leaf = Path(CONFIG.vault_path) / SOURCES_DIR / note_rel.rsplit("/", 1)[-1]
+    assert leaf.exists()
+    assert "Body." in leaf.read_text(encoding="utf-8")
+
+
+def test_fetch_to_inbox_rejects_a_page_with_no_body(tmp_vault, monkeypatch):
+    """A login wall can extract down to nothing but our own Source: header."""
+    _patch_web_fetch(monkeypatch, "Source: https://a.test/post\n\n")
+    with pytest.raises(ValueError, match="nothing readable"):
+        wr.fetch_to_inbox("https://a.test/post")
+    inbox = Path(CONFIG.vault_path) / CONFIG.inbox_dir
+    assert not inbox.exists() or not list(inbox.glob("*.md"))
+
+
+def test_fetch_to_inbox_propagates_the_fetch_error(tmp_vault, monkeypatch):
+    import silica.sources.web_fetch as wf
+
+    def boom(url):
+        raise ValueError("403 at https://a.test: bot wall")
+
+    monkeypatch.setattr(wf, "web_fetch", boom)
+    with pytest.raises(ValueError, match="403"):
+        wr.fetch_to_inbox("https://a.test/post")
+    inbox = Path(CONFIG.vault_path) / CONFIG.inbox_dir
+    assert not inbox.exists() or not list(inbox.glob("*.md"))

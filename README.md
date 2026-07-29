@@ -215,7 +215,7 @@ Drop raw clippings, drafts, PDFs, or Jupyter Notebooks (`.ipynb`) in a folder. `
 Merges and splits redirect every incoming link automatically, so a refactor leaves no broken reference and no orphan behind.
 
 **Research straight into the vault.**<br/>
-`/web-search "<topic>"` pulls cited findings into the inbox. `/convert <file>` transcodes PDFs into Markdown drafts. Nothing from the web reaches your notes until you nucleate it.
+`/web-search "<topic>"` pulls cited findings into the inbox, reading the pages it finds rather than skimming snippets. `/fetch <url>` reads a single page (or a YouTube transcript) straight into the inbox. `/convert <file>` transcodes PDFs into Markdown drafts. Fetching is direct, with no third-party reader in the path, and nothing from the web reaches your notes until you nucleate it.
 
 ---
 
@@ -370,6 +370,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `/organize "<intent>" [--scope=DIR] [--file=tax.yaml] [--apply]` | Classify and move notes into a taxonomy |
 | `/curate [--apply]` · `/dedup` · `/refine` · `/enrich` | Plan and run autolink, MinHash LSH dedup, and enrichment |
 | `/web-search "<topic>" [--max-searches=N]` | Research on the web → cited findings note in Inbox |
+| `/fetch <url>` | Read one page or YouTube transcript → verbatim note in Inbox |
 | `/convert <file...>` | Transcode non-markdown files (PDFs) into markdown drafts |
 
 **Indexes** `/embed` · `/cooccur` (embedder-free) · `/lexical` (BM25 and fuzzy)

@@ -65,6 +65,16 @@ COMMANDS: tuple[Command, ...] = (
         ),
     ),
     Command(
+        name="/fetch",
+        group="direct",
+        usage="<url>",
+        summary="read one URL (YouTube gives its transcript) → verbatim note in the Inbox",
+        examples=(
+            "/fetch https://arxiv.org/abs/2005.11401",
+            "/fetch https://www.youtube.com/watch?v=aircAruvnKk",
+        ),
+    ),
+    Command(
         name="/organize",
         group="workflow",
         usage='"<intent>" [--scope=FOLDER] [--file=taxonomy.yaml] [--merge] [--move-uncategorized] [--apply]',
