@@ -386,3 +386,25 @@ def test_deduplication_before_coercion_prevents_unnecessary_rejection():
     assert validated[0].heading == "Concepts"
     assert validated[1].op == "patch"
     assert "much longer" in validated[1].snippet
+
+
+def test_dedup_collapses_paths_differing_only_by_case():
+    """Two ops whose paths differ only by case are ONE file on a case-insensitive
+    filesystem (macOS, Windows): committing both silently overwrites the first
+    note with the second, and every op still reports ok."""
+    ops = [
+        {"op": "write", "path": "Concepts/Percettrone.md", "heading": "Percettrone",
+         "source_basename": "inbox.md", "snippet": "short" + _PAD},
+        {"op": "write", "path": "Concepts/percettrone.md", "heading": "percettrone",
+         "source_basename": "inbox.md", "snippet": "the richer variant wins" + _PAD},
+    ]
+    read_mock = _ReadSideEffect(known=set())  # empty vault: writes stay writes
+
+    with patch("silica.kernel.write.validate.DRIVER.read_note", side_effect=read_mock), \
+         patch("silica.kernel.write.validate.DRIVER.search_names", return_value=[]), \
+         patch("silica.kernel.write.validate.DRIVER.list_files", return_value=[]):
+        validated, rejected = validate_operations(ops, [], "Concepts")
+
+    touching = [o for o in validated if (o.touched_ref() or "").lower() == "concepts/percettrone.md"]
+    assert len(touching) == 1, "case-variant paths must collapse to one op"
+    assert "richer variant" in (touching[0].snippet or "")

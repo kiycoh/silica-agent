@@ -4,6 +4,7 @@
 import os
 import logging
 import re
+import unicodedata
 from pydantic import BaseModel
 from silica.driver import DRIVER
 from silica.kernel.write.ops import Op, OpType
@@ -11,6 +12,24 @@ from silica.kernel.write.templates import slugify
 from silica.kernel.link.ast import extract_links
 
 logger = logging.getLogger(__name__)
+
+
+def same_file_key(path: str) -> str:
+    """Identity key for "these two refs are the same file on disk".
+
+    `os.path.abspath` alone is case- and composition-sensitive, but macOS and
+    Windows are not: `Percettrone.md` and `percettrone.md` are ONE file there,
+    so two ops surviving the dedup commit in sequence and the second silently
+    overwrites the first — both reporting ok. NFC folds the other half of the
+    same failure (macOS stores decomposed filenames).
+
+    ponytail: over-merges on a case-sensitive filesystem where two notes really
+    do differ only by case. That is a vault the rest of the pipeline already
+    treats as one note (title_key casefolds, the linter matches case-insensitively),
+    so collapsing is the consistent answer, not a regression.
+    """
+    return unicodedata.normalize("NFC", os.path.abspath(path)).casefold()
+
 
 # Precision gate: a write op whose snippet is shorter than this is deferred
 # instead of written — execute_write would otherwise fill the note with a
@@ -226,7 +245,7 @@ def validate_operations(
     for op in ops:
         path = op.touched_ref()
         if path:
-            norm_path = os.path.abspath(path)
+            norm_path = same_file_key(path)
             if norm_path not in path_groups:
                 path_groups[norm_path] = []
             path_groups[norm_path].append(op)
@@ -329,7 +348,7 @@ def validate_operations(
             continue
         ref = op.touched_ref()
         if ref:
-            coerced_groups.setdefault(os.path.abspath(ref), []).append(op)
+            coerced_groups.setdefault(same_file_key(ref), []).append(op)
     for _ref_path, group in coerced_groups.items():
         if len(group) > 1:
             keep = max(group, key=lambda o: len(o.snippet or o.content or ""))
@@ -729,7 +748,7 @@ def validate_operations(
             
             already_creating = any(
                 (o.op == OpType.write and o.heading == hub) or
-                (o.path and os.path.abspath(o.path) == os.path.abspath(hub_path))
+                (o.path and same_file_key(o.path) == same_file_key(hub_path))
                 for o in validated_ops
             )
             
