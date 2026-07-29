@@ -6,11 +6,19 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.11+-22d3ee.svg" alt="Python 3.11+" /></a>
-  <a href="https://obsidian.md/"><img src="https://img.shields.io/badge/Obsidian-compatible-38afef.svg" alt="Obsidian Compatible" /></a>
-  <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/badge/pip-silica--agent-6366f1.svg" alt="PyPI silica-agent" /></a>
-  <a href="https://opensource.org/licenses/AGPL-3.0"><img src="https://img.shields.io/badge/license-AGPL_v3-4d8af0.svg" alt="License AGPL 3.0" /></a>
+  <a href="https://github.com/kiycoh/silica-agent/actions/workflows/ci.yml"><img src="https://github.com/kiycoh/silica-agent/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/v/silica-agent.svg" alt="PyPI" /></a>
+  <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/dm/silica-agent.svg" alt="PyPI Downloads" /></a>
+  <a href="https://github.com/kiycoh/silica-agent/releases"><img src="https://img.shields.io/github/v/release/kiycoh/silica-agent?display_name=tag" alt="GitHub release" /></a>
+  <a href="https://github.com/kiycoh/silica-agent/blob/main/pyproject.toml#L13"><img src="https://img.shields.io/badge/python-%3E%3D3.11-blue?logo=python&logoColor=white" alt="Python >=3.11" /></a>
+  <br/>
+  <a href="#readme"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Platform" /></a>
+  <a href="#readme"><img src="https://img.shields.io/badge/local--first-100%25%20offline-2ea44f" alt="Local-first" /></a>
+  <a href="#readme"><img src="https://img.shields.io/badge/MCP-FastMCP%20stdio-6366f1" alt="MCP" /></a>
+  <a href="https://obsidian.md"><img src="https://img.shields.io/badge/Obsidian-Native-7a46e6" alt="Obsidian Native" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/kiycoh/silica-agent" alt="License" /></a>
 </p>
+
 
 <h3 align="center">Point Silica at a folder of notes or at a codebase.<br/>Ask it anything. Every write is verified or reverted.</h3>
 
@@ -22,7 +30,7 @@ confirm the edit held. Local-first. Your files stay plain markdown, readable wit
 <p align="center">
   <b>78%</b> answerable accuracy and <b>~90%</b> correct refusals on LoCoMo &nbsp;·&nbsp;
   <b>100%</b> write integrity across a real 758-note vault<br/>
-  <sub><a href="#measured">how these were measured, and the numbers that do not flatter</a></sub>
+  <sub><a href="#measured">how these were measured</a></sub>
 </p>
 
 <p align="center">
@@ -139,13 +147,9 @@ A chat-first interface at `http://localhost:8765`. Query and curate from the bro
 
 The interactive REPL. Every command in the [reference](#command-reference) lives here, and it is the fastest driver once you know the verbs.
 
-![CLI](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/cli_screenshot.png)
-
 ### 3. Obsidian plugin &nbsp;·&nbsp; `silica connect`
 
 A live bridge into the Obsidian desktop app: Silica reads and writes the vault you already have open, with rollback and cache behind every change, and every write shows up in a changes panel with a per-file diff. The plugin side lives in [kiycoh/obsidian-silica](https://github.com/kiycoh/obsidian-silica).
-
-![Obsidian plugin](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/obsidian_plugin_screenshot.png)
 
 ### 4. Agent memory &nbsp;·&nbsp; `silica mcp`
 
@@ -185,8 +189,6 @@ SILICA_VAULT = "/path/to/your/vault"
 ```
 
 `SILICA_VAULT` is optional: without it Silica serves the default vault at `~/.silica/vault`. An MCP client starts the server with its own environment, so any other setting the tools need (embedding endpoint, model) belongs in that same `env` block rather than in a shell profile.
-
-![Claude Code](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/mcp_screenshot.png)
 
 ---
 
