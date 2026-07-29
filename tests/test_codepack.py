@@ -216,6 +216,25 @@ def test_supertypes_across_families():
     assert codepack._supertypes("class A(B, C, metaclass=M)") == ["B", "C"]
     assert codepack._supertypes("class A : public B, private C") == ["B", "C"]
     assert codepack._supertypes("public class A") == []
+    assert codepack._supertypes("public class A implements C, D") == ["C", "D"]
+    assert codepack._supertypes("public class A extends B") == ["B"]
+    assert codepack._supertypes("public class Foo extends Base<T>") == ["Base"]
+
+
+def test_supertypes_does_not_split_nested_generic_commas():
+    # A multi-parameter generic base's inner commas are not base separators:
+    # `HashMap<K, V>` is one base, not two.
+    assert codepack._supertypes("public class Foo extends HashMap<K, V>") == ["HashMap"]
+    assert codepack._supertypes("class A extends B<C, D> implements E") == ["B", "E"]
+    assert codepack._supertypes("class A(B[C, D])") == ["B"]
+    assert codepack._supertypes("struct A : public B<C, D>") == ["B"]
+
+
+def test_supertypes_uses_the_last_dotted_segment():
+    # A qualified base name is a dependency on the class it names, not on its
+    # package/enclosing-type prefix.
+    assert codepack._supertypes("public class Foo extends com.example.Base") == ["Base"]
+    assert codepack._supertypes("public class A extends Map.Entry") == ["Entry"]
 
 
 def test_hierarchy_section_is_absent_when_empty(repo):

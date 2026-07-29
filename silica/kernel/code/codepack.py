@@ -130,7 +130,11 @@ _JAVA_SUPER = re.compile(
 )
 _PY_BASES = re.compile(r"\bclass\s+\w+\s*\(([^)]*)\)")
 _CPP_BASES = re.compile(r"\b(?:class|struct)\s+\w+\s*:\s*([^{]+)")
-_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+# Dots included so a qualified name (`com.example.Base`, `Map.Entry`) is
+# captured whole and reduced to its last segment, rather than truncated at
+# the first dot.
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
+_GENERIC = re.compile(r"<[^<>]*>|\[[^\[\]]*\]")
 _ACCESS = frozenset({"public", "private", "protected", "virtual"})
 
 
@@ -145,29 +149,44 @@ def _supertypes(signature: str) -> list[str]:
             groups.append(m.group(1))
     out: list[str] = []
     for group in groups:
+        # Strip bracket-nested spans (generic/template parameters) before
+        # splitting on comma: a multi-parameter generic base like
+        # `HashMap<K, V>` or `B[C, D]` must not read as two bases. Repeated
+        # until stable so a nested generic strips from the inside out.
+        prev = None
+        while prev != group:
+            prev, group = group, _GENERIC.sub("", group)
         for part in group.split(","):
             if "=" in part:
                 continue  # a Python keyword argument (metaclass=...), not a base
-            # first identifier only: it drops C++ access keywords and Java
-            # generic parameters (Base<T> is a dependency on Base, not on T)
+            # first identifier only: it drops C++ access keywords. A
+            # qualified name reduces to its last dotted segment, the class
+            # itself rather than its package or enclosing type.
             idents = [i for i in _IDENT.findall(part) if i not in _ACCESS]
-            if idents and idents[0] not in out:
-                out.append(idents[0])
+            if idents:
+                base = idents[0].rsplit(".", 1)[-1]
+                if base and base not in out:
+                    out.append(base)
     return out
 
 
 def _hierarchy(graph, path: str, entry: dict) -> list[tuple[str, str]]:
     """(label, line) pairs: the declared bases of each top-level class in the
-    target, then every class in the repo that declares one of them."""
+    target, then every class in the repo that declares one of them.
+
+    Known limitation, by design (declared facts only, no resolution): the
+    repo scan matches bases by bare name, so two same-named classes in
+    different packages can produce a false `Base <- path#Sub` edge."""
     out: list[tuple[str, str]] = []
     own: list[str] = []
     for s in entry.get("symbols", []):
         if s.get("kind") != "class" or s.get("parent"):
             continue
-        own.append(s.get("name", ""))
+        name = s.get("name", "")
+        own.append(name)
         bases = _supertypes(s.get("signature", ""))
         if bases:
-            out.append((s["name"], f"{s['name']} extends {', '.join(bases)}"))
+            out.append((name, f"{name} extends {', '.join(bases)}"))
     if graph is None or not own:
         return out
     for p in sorted(graph.files):
