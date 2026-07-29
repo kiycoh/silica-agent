@@ -6,7 +6,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/kiycoh/silica-agent/actions/workflows/ci.yml"><img src="https://github.com/kiycoh/silica-agent/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/v/silica-agent.svg" alt="PyPI" /></a>
   <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/dm/silica-agent.svg" alt="PyPI Downloads" /></a>
   <a href="https://github.com/kiycoh/silica-agent/releases"><img src="https://img.shields.io/github/v/release/kiycoh/silica-agent?display_name=tag" alt="GitHub release" /></a>
