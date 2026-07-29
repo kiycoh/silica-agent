@@ -412,6 +412,58 @@ class OllamaNativeProvider:
         )
 
 
+_warned_down: set[tuple[str, str]] = set()
+
+
+def _failure_kind(exc: Exception) -> str:
+    """'down' | 'rejected' | 'failed' — what the user has to go fix.
+
+    The distinction is whether an HTTP response came back at all: no response
+    means nothing is listening (start the server), a 4xx means something IS
+    listening and refused the request (wrong model name, or a base_url whose
+    path is off). 5xx and non-HTTP errors stay 'failed' — the server is up and
+    broken, which is neither.
+    """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+    if isinstance(status, int):
+        return "rejected" if 400 <= status < 500 else "failed"
+    # Not OSError at large: the local reranker's missing weights raise it too,
+    # and "unreachable" would be a lie there.
+    if isinstance(exc, (openai.APIConnectionError, httpx.TransportError, ConnectionError)):
+        return "down"
+    return "failed"
+
+
+def warn_down_once(role: str, where: str, exc: Exception, model: str = "") -> None:
+    """Report a degraded relatedness leg once per (role, kind), then at DEBUG.
+
+    Both legs fail open by design (embed leg abstains, rerank keeps the fused
+    order), and every caller swallows the failure at DEBUG — so a server the
+    user forgot to start degrades recall invisibly. This is the one line that
+    says so, and says which of the two problems it is. Once per kind and not
+    per call, because a batch embeds hundreds of times; keying on the kind too
+    means the follow-on problem still gets its own line after the first is fixed.
+    """
+    kind = _failure_kind(exc)
+    if kind == "down":
+        msg, args = "%s unreachable at %s (%s)", (role, where, exc)
+    elif kind == "rejected":
+        msg = "%s at %s is up but rejected model `%s` (%s)"
+        args = (role, where, model, exc)
+    else:
+        msg, args = "%s failed at %s (%s)", (role, where, exc)
+    msg += " — recall degrades; run `silica doctor`"
+
+    if (role, kind) in _warned_down:
+        logger.debug(msg, *args)
+        return
+    _warned_down.add((role, kind))
+    logger.warning(msg, *args)
+
+
 class OpenAIEmbedder:
     """Thin wrapper for the OpenAI-compatible /v1/embeddings endpoint.
 
@@ -430,6 +482,7 @@ class OpenAIEmbedder:
         self.client = openai.OpenAI(
             base_url=base_url, api_key=api_key, timeout=_timeout, max_retries=1
         )
+        self.base_url = base_url
         self.model = model
 
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -440,7 +493,13 @@ class OpenAIEmbedder:
         """
         if not texts:
             return []
-        response = self.client.embeddings.create(model=self.model, input=texts)
+        try:
+            response = self.client.embeddings.create(model=self.model, input=texts)
+        except Exception as e:
+            # Warn, then re-raise unchanged: the callers' fail-open guards stay
+            # in charge of what to skip, this only makes the skip visible.
+            warn_down_once("embedder", self.base_url, e, self.model)
+            raise
         # The API guarantees ordering matches the input list
         return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
 
@@ -510,7 +569,7 @@ class Reranker:
                     scored[i] = float(r.get("relevance_score", r.get("score", 0.0)))
             return scored
         except Exception as e:
-            logger.debug("rerank abstained: %s", e)
+            warn_down_once("reranker", self.url, e, self.model)
             return None
 
 
@@ -568,7 +627,7 @@ class LocalReranker:
             encoder = _load_cross_encoder(self.model)
             return [float(s) for s in encoder.predict([[query, d] for d in documents])]
         except Exception as e:
-            logger.debug("local rerank abstained: %s", e)
+            warn_down_once("local reranker", self.model, e, self.model)
             return None
 
 

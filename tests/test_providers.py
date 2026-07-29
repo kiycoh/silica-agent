@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+import httpx
+import openai
 import pytest
 from unittest.mock import MagicMock, patch
 from pydantic import BaseModel
@@ -584,3 +586,104 @@ def test_unstructured_call_sends_no_temperature_by_default(mock_openai_cls):
     provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="m")
     provider.call_llm(messages=[{"role": "user", "content": "hi"}])
     assert "temperature" not in mock_client.chat.completions.create.call_args.kwargs
+
+
+@pytest.fixture
+def fresh_warn_state():
+    """warn_down_once dedups per process; each test needs a clean slate."""
+    from silica.agent import providers
+
+    providers._warned_down.clear()
+    yield
+    providers._warned_down.clear()
+
+
+@patch("silica.agent.providers.openai.OpenAI")
+def test_embedder_down_warns_once_and_still_raises(mock_openai_cls, caplog, fresh_warn_state):
+    """A down embedder degrades recall silently — the warning is what says so."""
+    from silica.agent.providers import OpenAIEmbedder
+
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+    mock_client.embeddings.create.side_effect = ConnectionError("connection refused")
+
+    embedder = OpenAIEmbedder(base_url="http://localhost:1234/v1", api_key="k", model="m")
+    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+        for _ in range(2):
+            # Callers keep their own fail-open guards: the exception must survive.
+            with pytest.raises(ConnectionError):
+                embedder.embed(["text"])
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "embedder unreachable at http://localhost:1234/v1" in warnings[0].getMessage()
+
+
+@patch("silica.agent.providers.httpx.post")
+def test_reranker_down_warns_once_and_abstains(mock_post, caplog, fresh_warn_state):
+    """Rerank keeps abstaining (None), but no longer without telling anyone."""
+    from silica.agent.providers import Reranker
+
+    mock_post.side_effect = ConnectionError("connection refused")
+    reranker = Reranker(base_url="http://127.0.0.1:1235/v1", model="bge")
+
+    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+        assert reranker.scores("q", ["a"]) is None
+        assert reranker.scores("q", ["b"]) is None
+
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "reranker unreachable at http://127.0.0.1:1235/v1/rerank" in warnings[0].getMessage()
+
+
+@patch("silica.agent.providers.openai.OpenAI")
+def test_embedder_wrong_model_is_not_reported_as_down(mock_openai_cls, caplog, fresh_warn_state):
+    """A 404 means something IS listening — telling the user to start a server
+    would send them after the wrong problem."""
+    from silica.agent.providers import OpenAIEmbedder
+
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+    not_found = openai.NotFoundError(
+        "model not found",
+        response=httpx.Response(404, request=httpx.Request("POST", "http://localhost:1234/v1")),
+        body=None,
+    )
+    mock_client.embeddings.create.side_effect = not_found
+
+    embedder = OpenAIEmbedder(base_url="http://localhost:1234/v1", api_key="k", model="typo-model")
+    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+        with pytest.raises(openai.NotFoundError):
+            embedder.embed(["text"])
+
+    (warning,) = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert "is up but rejected model `typo-model`" in warning.getMessage()
+    assert "unreachable" not in warning.getMessage()
+
+
+@patch("silica.agent.providers.httpx.post")
+def test_reranker_down_then_wrong_model_each_warn_once(mock_post, caplog, fresh_warn_state):
+    """Dedup keys on the kind, so the second problem still surfaces once the
+    first is fixed — otherwise starting the server would silence the typo."""
+    from silica.agent.providers import Reranker
+
+    reranker = Reranker(base_url="http://127.0.0.1:1235/v1", model="typo-model")
+    rejected = MagicMock()
+    rejected.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "404",
+        request=httpx.Request("POST", reranker.url),
+        response=httpx.Response(404, request=httpx.Request("POST", reranker.url)),
+    )
+
+    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+        mock_post.side_effect = httpx.ConnectError("connection refused")
+        assert reranker.scores("q", ["a"]) is None
+        assert reranker.scores("q", ["a"]) is None  # same kind: deduped
+        mock_post.side_effect = None                # server comes up, model still wrong
+        mock_post.return_value = rejected
+        assert reranker.scores("q", ["a"]) is None
+        assert reranker.scores("q", ["a"]) is None  # same kind: deduped
+
+    down, wrong_model = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert "reranker unreachable at" in down
+    assert "is up but rejected model `typo-model`" in wrong_model
