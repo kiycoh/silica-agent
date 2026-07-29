@@ -115,9 +115,11 @@ def silica_code_pack(target: str, budget_chars: int = 24000) -> dict:
     from silica.config import CONFIG
     from silica.kernel.code import codepack
 
+    vault = getattr(CONFIG, "vault_path", "") or ""
+    if not vault:
+        return {"status": "error", "message": "no vault configured"}
     try:
-        pack = codepack.code_pack(
-            getattr(CONFIG, "vault_path", "") or "", target, budget_chars)
+        pack = codepack.code_pack(vault, target, budget_chars)
     except ValueError as e:
         return {"status": "error", "message": str(e)}
     return {"status": "ok", **pack}

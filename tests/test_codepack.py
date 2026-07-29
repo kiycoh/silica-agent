@@ -509,3 +509,19 @@ def test_tool_is_outside_the_core_mcp_surface():
 
     assert "silica_code_pack" not in CORE_TOOLS
     assert "silica_code_pack" in exposed_tools(all_tools=True)
+
+
+def test_tool_reports_missing_vault_instead_of_serving_the_cwd(monkeypatch):
+    # An unset vault_path must not silently fall through to code_pack's own
+    # `root = repo_root_for(vault) or Path(vault)` CWD fallback and report
+    # "ok" from whatever repo the process happens to be running in. The
+    # wrapper must catch this before calling code_pack, and the message must
+    # name the vault, not the target, so a caller can tell this apart from a
+    # genuinely bad target path.
+    from silica.tools.codedocs_tool import silica_code_pack
+
+    monkeypatch.setattr("silica.config.CONFIG.vault_path", "")
+    res = silica_code_pack(target=TARGET)
+    assert res["status"] == "error"
+    assert "vault" in res["message"]
+    assert TARGET not in res["message"]
