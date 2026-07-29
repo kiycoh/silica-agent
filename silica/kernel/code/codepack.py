@@ -346,7 +346,16 @@ def code_pack(vault: Path | str, target: str,
         if not entry:
             dropped.append(f"neighborhood: {path} is not in the code graph")
 
-    body, mode = _target_block(source, entry, selector, budget_chars, dropped)
+    # `_target_block` bounds the target against the budget on its own, but it
+    # only sees the body: the header line and the pack's own trailing newline
+    # (added below, at `used`'s seed) are overhead that its comparison must
+    # also account for, or a larger budget can select verbatim over an
+    # outline that would have fit inside it (spec section 6 exempts the
+    # target from the fill's per-entry check, not from the budget itself).
+    # "verbatim" (not "symbol"/"outline") is the longest mode word, so sizing
+    # the header on it is the conservative bound in every mode.
+    overhead = len(f"## target {path} @ {head_ref} mode: verbatim\n") + 1
+    body, mode = _target_block(source, entry, selector, budget_chars - overhead, dropped)
     chunks = [f"## target {path} @ {head_ref} mode: {mode}\n{body}"]
     sections: dict[str, list[str]] = {"target": [path]}
     fan_in = graph.fan_in(path) if graph is not None else 0

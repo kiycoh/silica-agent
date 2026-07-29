@@ -392,6 +392,8 @@ def test_section_order_is_fixed(repo):
 
 def test_fill_stops_at_the_first_entry_that_does_not_fit(repo):
     full = codepack.code_pack(repo, TARGET)
+    # -30 is less than the cost of the last entry (the importers line), so
+    # exactly one entry — the last one in section order — fails to fit.
     budget = len(full["text"]) - 30
     tight = codepack.code_pack(repo, TARGET, budget_chars=budget)
 
@@ -408,5 +410,33 @@ def test_dropped_is_a_suffix_of_the_entry_order(repo):
     order = [f"{sec}: {label}"
              for sec in ("hierarchy", "neighborhood", "external", "importers")
              for label in full["sections"].get(sec, [])]
-    tight = codepack.code_pack(repo, TARGET, budget_chars=len(GAME_MODEL) + 60)
+    # -100 lands mid-fill: three of the five entries drop and `neighborhood`
+    # itself is only partially filled (one of its two entries survives), the
+    # case most likely to break under a future refactor. A budget that drops
+    # every entry (e.g. len(GAME_MODEL) + 60) would make `dropped == order`
+    # look like a suffix by accident — the guard below rules that out.
+    tight = codepack.code_pack(repo, TARGET, budget_chars=len(full["text"]) - 100)
+    assert 0 < len(tight["dropped"]) < len(order)   # a PROPER suffix, not the whole list
     assert tight["dropped"] == order[len(order) - len(tight["dropped"]):]
+
+
+def test_target_overhead_is_reconciled_with_the_pack_budget(repo):
+    # Before this fix, `_target_block` compared the raw source length against
+    # the FULL budget while the fill loop measured `used` against `len(text)`:
+    # at budget_chars == len(GAME_MODEL) the target used to read as verbatim
+    # even though the header/newline overhead around it meant the resulting
+    # pack overshot its own budget by over 50%, with `truncated` misreporting
+    # `False`. The header + trailing newline must come out of the target's
+    # own budget so a larger budget never selects a worse (bigger) mode than
+    # a smaller one would have.
+    budget = len(GAME_MODEL)
+    pack = codepack.code_pack(repo, TARGET, budget_chars=budget)
+    assert len(pack["text"]) <= budget
+    assert pack["target_mode"] == "outline"
+    assert pack["truncated"] is True
+
+
+def test_a_pathologically_small_budget_still_serves_the_target(repo):
+    pack = codepack.code_pack(repo, TARGET, budget_chars=1)
+    assert pack["text"]
+    assert "GameModel" in pack["text"]
