@@ -69,19 +69,28 @@ def test_web_search_posts_and_returns_compact_results(monkeypatch):
 
 # --- web_research orchestrator ----------------------------------------------
 
-def _tool_msg(items):
-    return {"role": "tool", "tool_call_id": "c1", "content": json.dumps(items)}
-
-
 def _patch_run_agent(monkeypatch, body, tool_results=None):
-    """Fake run_agent: append tool-result messages (the source trace), return body."""
+    """Fake run_agent: replay a web_search trace the way the real loop does —
+    a ToolCompleteEvent per call *and* the same payload appended to `messages`
+    — then return the body."""
+    from silica.agent.events import ToolCompleteEvent
+
     captured = {}
 
     def fake_run_agent(messages, model, tool_progress_callback=None, constraints=None, **kw):
         captured["constraints"] = constraints
         captured["model"] = model
-        for items in (tool_results or []):
-            messages.append(_tool_msg(items))
+        for i, items in enumerate(tool_results or []):
+            call_id = f"c{i}"
+            payload = json.dumps(items)
+            if tool_progress_callback is not None:
+                tool_progress_callback(ToolCompleteEvent(
+                    name="web_search", args={"query": "q"}, call_id=call_id,
+                    result=payload, duration_s=0.0, iteration=i + 1,
+                ))
+            messages.append(
+                {"role": "tool", "tool_call_id": call_id, "content": payload}
+            )
         return body
 
     monkeypatch.setattr(wr, "run_agent", fake_run_agent)
@@ -158,20 +167,114 @@ def test_web_research_prompt_tells_the_model_to_fetch():
 
 def test_collect_sources_picks_up_a_fetched_url():
     """web_fetch returns prose, not JSON; its Source: line is the citation."""
-    messages = [
-        {"role": "tool", "content": json.dumps(
-            [{"title": "T1", "url": "https://a.test", "content": "c"}])},
-        {"role": "tool", "content": "Source: https://b.test/article\n\nBody text."},
+    results = [
+        json.dumps([{"title": "T1", "url": "https://a.test", "content": "c"}]),
+        "Source: https://b.test/article\n\nBody text.",
     ]
-    assert wr._collect_sources(messages) == [
+    assert wr._collect_sources(results) == [
         ("https://a.test", "T1"),
         ("https://b.test/article", "https://b.test/article"),
     ]
 
 
 def test_collect_sources_ignores_prose_without_a_source_line():
-    messages = [{"role": "tool", "content": "just some text\nno header"}]
-    assert wr._collect_sources(messages) == []
+    assert wr._collect_sources(["just some text\nno header"]) == []
+
+
+# --- compaction cannot reach the trace the leaf and the citations are built from
+
+
+def _patch_run_agent_then_compact(monkeypatch, body, fetches):
+    """run_agent double that behaves like the real loop on a long research run.
+
+    It emits a ToolCompleteEvent per tool call (as silica/agent/loop.py does,
+    before anything can rewrite the message), appends the same result to
+    `messages`, and then lets the *real* compaction sweep run over that history.
+    Past the recency floor the sweep replaces each fat web_fetch result with an
+    elision stub in place, which is exactly what a caller reading `messages`
+    after run_agent returns would find.
+    """
+    from silica.agent.compaction import COMPACT_FLOOR_TURNS, compact_read_history
+    from silica.agent.events import ToolCompleteEvent
+    from silica.tools import TOOLS
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, constraints=None, **kw):
+        for i, (url, text) in enumerate(fetches):
+            call_id = f"call-{i}"
+            messages.append({
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": "web_fetch",
+                                 "arguments": json.dumps({"url": url})},
+                }],
+            })
+            if tool_progress_callback is not None:
+                tool_progress_callback(ToolCompleteEvent(
+                    name="web_fetch", args={"url": url}, call_id=call_id,
+                    result=text, duration_s=0.1, iteration=i + 1,
+                ))
+            messages.append({"role": "tool", "tool_call_id": call_id, "content": text})
+        messages.append({"role": "assistant", "content": body})
+        compact_read_history(
+            messages, set(), prompt_tokens=10**9, budget=0,
+            floor_turns=COMPACT_FLOOR_TURNS, tools=TOOLS,
+        )
+        return body
+
+    monkeypatch.setattr(wr, "run_agent", fake_run_agent)
+
+
+_PAGES = [
+    (f"https://p{i}.test/article", f"Source: https://p{i}.test/article\n\nPage {i} title\n\n"
+     + f"body of page {i}. " * 40)
+    for i in range(5)
+]
+
+
+def test_web_research_leaf_survives_context_compaction(tmp_vault, monkeypatch):
+    """web_fetch is `collapse="lazy"` and ~7.5k tokens a call, so a handful of
+    fetches trips run_agent's compaction sweep, which rewrites the old tool
+    results in `messages` to elision stubs *in place*. A leaf built by reading
+    `messages` after the loop returns is then a list of stubs, not the pages."""
+    from silica.kernel.recall.paths import SOURCES_DIR
+
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
+    _patch_run_agent_then_compact(monkeypatch, body="Findings.", fetches=_PAGES)
+
+    note_rel = wr.web_research("deep topic")
+    leaf = (Path(CONFIG.vault_path) / SOURCES_DIR / note_rel.rsplit("/", 1)[-1]
+            ).read_text(encoding="utf-8")
+
+    assert "result elided" not in leaf
+    for i in range(len(_PAGES)):
+        assert f"body of page {i}." in leaf
+
+
+def test_web_research_citations_survive_context_compaction(tmp_vault, monkeypatch):
+    """Same sweep, other casualty: the ADR-0015 ## Sources fallback is built
+    from the same trace, so the elided fetches lose their URLs entirely."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
+    _patch_run_agent_then_compact(monkeypatch, body="Findings.", fetches=_PAGES)
+
+    body = (Path(CONFIG.vault_path) / wr.web_research("deep topic")).read_text(
+        encoding="utf-8")
+
+    assert body.count("## Sources") == 1
+    for url, _ in _PAGES:
+        assert url in body
+
+
+def test_web_research_still_forwards_progress_events_to_its_caller(tmp_vault, monkeypatch):
+    """The recorder wraps the caller's callback; it must not swallow it."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
+    _patch_run_agent_then_compact(monkeypatch, body="Findings.", fetches=_PAGES[:1])
+
+    seen = []
+    wr.web_research("x", tool_progress_callback=seen.append)
+    assert [e.call_id for e in seen] == ["call-0"]
 
 
 def test_main_agent_default_toolset_excludes_web_fetch():

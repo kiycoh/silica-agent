@@ -22,6 +22,7 @@ from pathlib import Path
 import httpx
 
 from silica.agent.constraints import AgentConstraints
+from silica.agent.events import ToolCompleteEvent
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
 from silica.kernel.write.templates import slugify
@@ -122,10 +123,27 @@ def web_research(
         {"role": "system", "content": _RESEARCH_SYSTEM_PROMPT},
         {"role": "user", "content": concept},
     ]
+
+    # The trace is recorded as it happens, never read back off `messages`.
+    # run_agent compacts its own history mid-loop (silica/agent/compaction.py):
+    # past the recency floor every `collapse="lazy"` tool result is rewritten
+    # *in place* to an elision stub, and web_fetch is lazy and ~7.5k tokens a
+    # call, so a handful of fetches is enough to gut what this function reads
+    # afterwards — a leaf of stubs and citations with no URLs. ToolCompleteEvent
+    # carries the untruncated result and a stable call id, and loop.py emits it
+    # before the eager projection and before any later sweep can touch it.
+    trace: dict[str, str] = {}
+
+    def _record(event) -> None:
+        if isinstance(event, ToolCompleteEvent) and isinstance(event.result, str):
+            trace[event.call_id] = event.result
+        if tool_progress_callback is not None:
+            tool_progress_callback(event)
+
     body = run_agent(
         messages,
         model=CONFIG.model,
-        tool_progress_callback=tool_progress_callback,
+        tool_progress_callback=_record,
         constraints=AgentConstraints(
             tools=("web_search", "web_fetch"), max_iterations=max_searches
         ),
@@ -137,32 +155,30 @@ def web_research(
             "(loop hit its limit, was cancelled, or all searches failed)."
         )
 
-    note = _build_note(concept, body, _collect_sources(messages))
+    results = list(trace.values())
+    note = _build_note(concept, body, _collect_sources(results))
     note_rel = _unique_inbox_path(concept)
     from silica.driver import DRIVER
 
     DRIVER.create(note_rel, note)
-    _write_leaf(note_rel, messages)
+    _write_leaf(note_rel, results)
     return note_rel
 
 
-def _write_leaf(note_rel: str, messages: list[dict]) -> None:
+def _write_leaf(note_rel: str, results: list[str]) -> None:
     """Verbatim source leaf beside the findings note (spec-harness-promotion §2).
 
     web_research bypasses the FSM, so it writes its own leaf: the raw
-    web_search tool results the findings were written from. Named after the
-    inbox note's basename, so a later /nucleate of that note finds the leaf
-    and links the distilled notes to it at CLEANUP. Retrieval-invisible like
-    every sources/ file. Best-effort: a leaf failure never loses the note.
+    web_search and web_fetch tool results the findings were written from, in
+    call order. Named after the inbox note's basename, so a later /nucleate of
+    that note finds the leaf and links the distilled notes to it at CLEANUP.
+    Retrieval-invisible like every sources/ file. Best-effort: a leaf failure
+    never loses the note.
     """
     try:
         from silica.kernel.recall.paths import SOURCES_DIR
 
-        raw = "\n\n".join(
-            str(m.get("content") or "")
-            for m in messages
-            if m.get("role") == "tool" and m.get("content")
-        )
+        raw = "\n\n".join(r for r in results if r)
         if not raw:
             return
         from silica.driver import DRIVER
@@ -181,14 +197,13 @@ def _write_leaf(note_rel: str, messages: list[dict]) -> None:
         )
 
 
-def _collect_sources(messages: list[dict]) -> list[tuple[str, str]]:
-    """Pull (url, title) pairs from the web_search tool-result trace, deduped,
-    first-seen order. These back the ADR-0015 Sources guarantee."""
+def _collect_sources(results: list[str]) -> list[tuple[str, str]]:
+    """Pull (url, title) pairs from the tool-result trace, deduped, first-seen
+    order. These back the ADR-0015 Sources guarantee."""
     seen: dict[str, str] = {}
-    for m in messages:
-        if m.get("role") != "tool":
+    for content in results:
+        if not content:
             continue
-        content = m.get("content") or ""
         try:
             items = json.loads(content)
         except (ValueError, TypeError):
@@ -289,7 +304,5 @@ def fetch_to_inbox(url: str) -> str:
     from silica.driver import DRIVER
 
     DRIVER.create(note_rel, note)
-    # ponytail: _write_leaf reads role=="tool" messages, so hand it a synthetic
-    # one rather than growing a second leaf writer for a one-message trace.
-    _write_leaf(note_rel, [{"role": "tool", "content": text}])
+    _write_leaf(note_rel, [text])
     return note_rel
