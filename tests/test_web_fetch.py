@@ -114,6 +114,14 @@ def test_validated_reports_dns_failure(monkeypatch):
         wf._validated("https://nx.evil.test/")
 
 
+def test_validated_fails_closed_on_an_empty_resolution(monkeypatch):
+    """No exception but no addresses either: the per-address loop then checks
+    nothing and approves the host. Fail closed instead."""
+    monkeypatch.setattr(wf.socket, "getaddrinfo", lambda *a, **kw: [])
+    with pytest.raises(ValueError, match="cannot resolve"):
+        wf._validated("https://silent.evil.test/")
+
+
 # --- extraction -------------------------------------------------------------
 
 _PAGE = """<html><head><title>Real Title</title>
@@ -268,6 +276,22 @@ def test_web_fetch_caps_the_redirect_chain(monkeypatch):
         wf.web_fetch("https://example.com/loop")
 
 
+def test_web_fetch_spends_the_whole_redirect_budget(monkeypatch):
+    """The cap's lower bound. `http -> https -> www -> canonical` is an ordinary
+    chain, so following one hop fewer than advertised is a real regression, and
+    only the upper bound was pinned: `range(_MAX_REDIRECTS)` instead of
+    `range(_MAX_REDIRECTS + 1)` passed the whole suite."""
+    hops = [
+        _Resp(status=302, location=f"https://example.com/h{i}")
+        for i in range(wf._MAX_REDIRECTS)
+    ]
+    seen = _serve(monkeypatch, *hops, _Resp(text="<p>arrived</p>"))
+    out = wf.web_fetch("https://example.com/start")
+    assert len(seen) == wf._MAX_REDIRECTS + 1
+    assert "arrived" in out
+    assert out.splitlines()[0] == f"Source: https://example.com/h{wf._MAX_REDIRECTS - 1}"
+
+
 def test_web_fetch_403_says_bot_wall(monkeypatch):
     _serve(monkeypatch, _Resp(status=403))
     with pytest.raises(ValueError, match="403"):
@@ -404,6 +428,12 @@ def test_youtube_channel_or_playlist_url_is_bounded_to_one_item(monkeypatch):
     argv = captured["argv"]
     assert "--playlist-items" in argv
     assert argv[argv.index("--playlist-items") + 1] == "1"
+    # The `--` end-of-options separator is the whole basis of the ruling that
+    # this branch needs no _validated() call of its own: without it a URL
+    # beginning with `-` is read by yt-dlp as a flag, not as the single
+    # positional it is bounded to. A security invariant with no test is not one.
+    assert argv[-2] == "--"
+    assert argv[-1] == "https://www.youtube.com/@someone"
 
 
 def test_youtube_without_subtitles_reports_the_stderr_tail(monkeypatch):
@@ -434,3 +464,28 @@ def test_youtube_userinfo_on_a_real_host_does_not_reach_ytdlp(monkeypatch):
     monkeypatch.setattr(wf.subprocess, "run", boom)
     with pytest.raises(ValueError, match="credentials"):
         wf.web_fetch("https://x@youtube.com/watch?v=abc")
+
+
+# --- the `Source: ` seam, producer to consumer -------------------------------
+
+
+def test_a_real_fetch_result_yields_a_citation_and_a_title(monkeypatch):
+    """`_render`'s `Source: <url>` header is a contract with web_research:
+    `_collect_sources` lifts the citation out of it (at a magic offset) and
+    `_title_of` skips past it to name the note. Every other test on both sides
+    hardcodes its own copy of that shape, so changing `_render` would leave the
+    suite green while every fetched note is titled `Source: https://...` and
+    every fetched citation disappears. Run the real producer into the real
+    consumers once, so the seam has somewhere to break."""
+    from silica.sources.web_research import _collect_sources, _title_of
+
+    _serve(
+        monkeypatch,
+        _Resp(text="<html><title>Real Title</title><body><p>Prose.</p></body></html>"),
+    )
+    out = wf.web_fetch("https://example.com/article")
+
+    assert _collect_sources([out]) == [
+        ("https://example.com/article", "https://example.com/article")
+    ]
+    assert _title_of(out) == "Real Title"

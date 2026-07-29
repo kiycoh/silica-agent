@@ -40,8 +40,13 @@ _MAX_CHARS = 30_000
 _MAX_REDIRECTS = 3
 _HTTP_TIMEOUT = 30
 _YT_DOMAINS: tuple[str, ...] = ("youtube.com", "youtu.be")
-# Auto-generated subs first, then uploaded ones, English then Italian.
-_YT_SUB_LANGS = "en.*,it.*,en"
+# Languages only: `--sub-lang` does not choose between auto-generated and
+# uploaded subs (that is `--write-auto-sub` / `--write-sub`, and we ask for
+# both). `en.*` already matches bare `en`, so no separate entry is needed.
+# Which of the downloaded files wins is alphabetical, not preferential:
+# `sorted(glob("*.vtt"))[0]`, where `sub.en-GB.vtt` beats `sub.en.vtt` because
+# `-` (0x2D) sorts before `.` (0x2E).
+_YT_SUB_LANGS = "en.*,it.*"
 _YT_TIMEOUT = 120
 # A bare httpx user agent collects more 403s than a browser string does, and
 # the 401/403/429 branch below is how we surface the ones that remain.
@@ -115,6 +120,11 @@ def _validated(url: str) -> None:
         infos = socket.getaddrinfo(host, port or default_port, type=socket.SOCK_STREAM)
     except socket.gaierror as e:
         raise ValueError(f"cannot resolve {host!r}: {e}") from e
+    if not infos:
+        # An empty answer means we checked nothing, so the loop below approves
+        # everything. The one function whose job is failing closed must not have
+        # a branch that fails open.
+        raise ValueError(f"cannot resolve {host!r}: no addresses returned")
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:
