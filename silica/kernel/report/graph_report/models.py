@@ -178,5 +178,10 @@ class VaultReport:
     discourse_state: str = ""     # "Focused" | "Diversified" | "Fragmented" | "" — topology one-word diagnosis
     pagerank_map: dict[str, float] = field(default_factory=dict)  # all nodes: vault-relative path (no .md) → pagerank
     betweenness_map: dict[str, float] = field(default_factory=dict)  # all nodes → betweenness (analytics-only; zero-filled otherwise)
+    # all nodes → resolved-link degree (in+out). Unlike the two maps above this
+    # one is populated at EVERY depth: degree falls out of the structural core
+    # the cheap nucleate path already computes, so it costs a dict comprehension.
+    # god_nodes only carries the top_k; the whole map is what a distribution needs.
+    degree_map: dict[str, int] = field(default_factory=dict)
     code_coverage: CodeCoverage | None = None
     temporal: TemporalStat | None = None   # analytics-only; None when the body scan did not run

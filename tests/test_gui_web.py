@@ -128,12 +128,12 @@ def _repl_dispatched_commands() -> set[str]:
     import inspect
     import re
 
-    from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
+    from silica.cli import _REFRESH, _expand_workflow_shortcut, _handle_direct_shortcut
 
     src = inspect.getsource(_handle_direct_shortcut) + inspect.getsource(_expand_workflow_shortcut)
     return set(re.findall(r'cmd (?:==|in \()\s*"(/[a-z-]+)"', src)) | set(
         re.findall(r'"(/[a-z-]+)"\)', src)
-    )
+    ) | set(_REFRESH)  # the three index refreshes dispatch off a dict, not the chain
 
 
 def test_every_advertised_command_is_dispatchable_by_the_gui():
@@ -155,6 +155,20 @@ def test_commands_endpoint_hides_repl_only_commands(client):
     offered = {c["name"] for c in tc.get("/commands").json()}
     assert "/exit" not in offered and "/help" not in offered
     assert offered == {c.name for c in COMMANDS if not c.repl_only}
+
+
+def test_health_reports_only_what_needs_fixing(client, monkeypatch):
+    """A down embedder must reach the browser; a green check must not toast."""
+    tc, _ = client
+    import silica.onboarding.checks as checks
+
+    monkeypatch.setattr(checks, "run_checks", lambda cfg: [
+        checks.CheckResult("chat model", "ok", "fine"),
+        checks.CheckResult("embeddings", "warn", "http://x unreachable", "start it"),
+    ])
+    assert tc.get("/health").json() == [
+        {"name": "embeddings", "status": "warn", "detail": "http://x unreachable", "hint": "start it"}
+    ]
 
 
 def test_direct_command_runs_without_an_llm_round_trip(client, monkeypatch):
@@ -848,3 +862,154 @@ def test_config_reports_toggle_and_post_flips_thinking_but_not_model(client, mon
     assert out["show_thinking"] is True
     assert CONFIG.show_thinking is True
     assert CONFIG.model == ""  # POST never sets the model
+
+
+# ---------------------------------------------------------------------------
+# GET /metrics — the metrics tab's whole payload, one full report pass.
+# ---------------------------------------------------------------------------
+
+def test_metrics_endpoint_shapes_the_report_for_the_dashboard(client, tmp_vault):
+    # Two linked notes, one orphan, one wikilink into the void — enough to put a
+    # value in every structural bucket the view reads.
+    tc, _server = client
+    tmp_vault.note("A.md", "links to [[B]] and to [[Nowhere]]")
+    tmp_vault.note("B.md", "back to [[A]]")
+    tmp_vault.note("Lonely.md", "no links at all")
+
+    d = tc.get("/metrics").json()
+    assert "error" not in d, d
+    assert d["totals"]["notes"] == 3
+    # Default is the cheap depth: the co-occurrence leg (~100x the rest) never
+    # ran, so `deficits` is absent rather than printed as a measured 0.00.
+    assert d["depth"] == "structural"
+    assert {t["name"] for t in d["energy"]["terms"]} == {
+        "cohesion", "orphans", "dangling", "gaps", "contested",
+    }
+    # The terms sum to the headline: ΔE between two runs has to decompose.
+    assert round(sum(t["value"] for t in d["energy"]["terms"]), 2) == d["energy"]["total"]
+    assert "Nowhere" in [x["target"] for x in d["dangling"]]
+    assert "Lonely.md" in [o["path"] for o in d["orphans"]]
+    # Every note-shaped row carries the path the drawer opens on click.
+    for row in d["orphans"] + d["hubs"]:
+        assert row["path"]
+
+    full = tc.get("/metrics", params={"proposals": 1}).json()
+    assert full["depth"] == "full"
+    assert {t["name"] for t in full["energy"]["terms"]} == {
+        "cohesion", "orphans", "dangling", "gaps", "deficits", "contested",
+    }
+    assert round(sum(t["value"] for t in full["energy"]["terms"]), 2) == full["energy"]["total"]
+
+
+def test_metrics_caps_the_uncapped_lists_without_hiding_the_count(client, tmp_vault, monkeypatch):
+    # orphans/dangling are exhaustive in the report; the view gets a slice, and
+    # totals keeps the true length so a cut list can't read as the whole list.
+    from silica.ui.web import server
+
+    monkeypatch.setattr(server, "_METRICS_ROWS", 2)
+    tc, _server = client
+    for i in range(5):
+        tmp_vault.note(f"O{i}.md", "no links")
+
+    d = tc.get("/metrics").json()
+    assert len(d["orphans"]) == 2
+    assert d["totals"]["orphans"] == 5
+
+
+def test_metrics_caps_autolink_candidates(client, tmp_vault, monkeypatch):
+    # The co-occurrence leg caps itself at top_k, but the import-derived
+    # candidates _compute_code_signals appends are exhaustive — 13k pairs on a
+    # 400-note vault, which shipped a 4 MB payload and rendered a card 390,000
+    # px tall. Same contract as the lists above: slice the rows, keep the count.
+    from silica.kernel.report import graph_report
+    from silica.kernel.report.graph_report.models import AutolinkCandidate
+    from silica.ui.web import server
+
+    monkeypatch.setattr(server, "_METRICS_ROWS", 2)
+    tmp_vault.note("A.md", "solo")
+    real = graph_report.compute_report
+
+    def padded(**kw):
+        report = real(**kw)
+        report.autolink_candidates = [
+            AutolinkCandidate(source=f"a{i}.md", target=f"b{i}.md", weight=1.0, shared=["x"])
+            for i in range(5)
+        ]
+        report.totals["autolink_candidates"] = 5
+        return report
+
+    monkeypatch.setattr(graph_report, "compute_report", padded)
+    tc, _server = client
+
+    d = tc.get("/metrics").json()
+    assert len(d["autolinks"]) == 2
+    assert d["totals"]["autolink_candidates"] == 5
+
+
+def test_metrics_gaps_carry_the_sizes_that_rank_them(client, tmp_vault):
+    # gap_score = size_a * size_b / (1 + inter_edges), so the two area sizes are
+    # what explains the ordering. gap_density is not sent: it reads 99.7-100% on
+    # every row of a real vault, and a constant column can't explain an order.
+    tc, _server = client
+    tmp_vault.note("A.md", "links to [[B]]")
+    tmp_vault.note("B.md", "back to [[A]]")
+    tmp_vault.note("C.md", "links to [[D]]")
+    tmp_vault.note("D.md", "back to [[C]]")
+
+    d = tc.get("/metrics").json()
+    assert d["gaps"], "two disconnected pairs must measure as a gap, or this asserts nothing"
+    for gap in d["gaps"]:
+        assert gap["size_a"] >= 1 and gap["size_b"] >= 1
+        assert "density" not in gap
+
+
+def test_degree_histogram_bins_are_heavy_tail_shaped_and_trim_empty_tail():
+    from silica.ui.web.server import _degree_histogram
+
+    # 3 isolated, 2 leaves, 1 note at degree 7 (the 5-8 bucket).
+    bins = _degree_histogram({"a": 0, "b": 0, "c": 0, "d": 1, "e": 1, "f": 7})
+    assert [(b["label"], b["count"]) for b in bins] == [
+        ("0", 3), ("1", 2), ("2", 0), ("3-4", 0), ("5-8", 1),
+    ]
+    # Interior zeros survive (a hole in the distribution is a reading); the
+    # empty tail above the largest degree is dropped.
+    assert not any(b["label"].endswith("+") for b in bins)
+
+    # A hub past the last named bucket lands in the open-ended one.
+    top = _degree_histogram({"h": 400})[-1]
+    assert top["label"] == "65+" and top["count"] == 1
+
+    # Never returns an empty axis, even for an empty vault.
+    assert len(_degree_histogram({})) == 1
+
+
+def test_metrics_reports_a_degree_distribution_over_every_note(client, tmp_vault):
+    tc, _server = client
+    tmp_vault.note("Hub.md", "[[A]] [[B]]")
+    tmp_vault.note("A.md", "[[Hub]]")
+    tmp_vault.note("B.md", "[[Hub]]")
+    tmp_vault.note("Alone.md", "no links")
+
+    d = tc.get("/metrics").json()
+    hist = d["degree_histogram"]
+    # Every note is binned exactly once — a distribution that drops notes lies.
+    assert sum(b["count"] for b in hist) == d["totals"]["notes"] == 4
+    assert hist[0]["label"] == "0" and hist[0]["count"] == 1  # Alone
+
+
+def test_degree_map_is_populated_without_analytics(tmp_vault):
+    # degree falls out of the structural core, so the cheap nucleate path that
+    # skips PageRank/betweenness still carries it.
+    from silica.kernel.report.graph_report import compute_report
+
+    tmp_vault.note("A.md", "[[B]]")
+    tmp_vault.note("B.md", "[[A]]")
+
+    cheap = compute_report()
+    # Same keyspace as its sibling maps — a degree map keyed differently from
+    # pagerank_map could not be joined against them.
+    assert cheap.degree_map and set(cheap.degree_map) == set(cheap.pagerank_map)
+    assert set(cheap.degree_map.values()) == {2}  # A<->B, one link each way
+    # …while betweenness, the analytics-only sibling, is still zero-filled here.
+    assert not any(cheap.betweenness_map.values())
+    assert compute_report(analytics=True).degree_map == cheap.degree_map

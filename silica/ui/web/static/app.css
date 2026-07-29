@@ -2237,3 +2237,460 @@ body.note-open #dock {
     transition: none;
   }
 }
+
+/* --- metrics tab ------------------------------------------------------------
+   Charts are HTML tables: the bar is a cell, so the chart and its table view
+   are one DOM and every value stays readable without hovering. No library, no
+   canvas, no toggle to keep in sync.
+
+   Chart fills get their own tokens rather than reusing --accent/--warn: those
+   two sit at OKLCH L .767, above the dark-mode mark band, and glow as large
+   fills. These are the same two hues snapped into the band (L .66), which is
+   also what makes the pair pass the contrast and CVD checks against --page.
+   Values below are computed, not eyeballed:
+     accent #05a3c2 / amber #bc8803 — 5.76:1 and 5.46:1 on --page,
+       CVD ΔE 20.1 (protan), 23.6 normal-vision. Cool/warm, so they read as
+       opposite arms of the diverging scale; the zero rule stays neutral gray.
+     ordinal ramp .66/.58/.50 — one hue, monotone, ΔL .08 per step. */
+:root {
+  --c-accent: #05a3c2;
+  --c-amber: #bc8803;
+  --c-ord-3: #05a3c2;
+  --c-ord-2: #0288a3;
+  --c-ord-1: #006f85;
+  --c-track: #005768;
+}
+
+/* .frame-loading is inset:0, so the view has to be its containing block —
+   without this the overlay resolves against the viewport and blanks the whole
+   app (header and sidebar included) while the report computes. #view-graph
+   already carries this for the same reason. */
+#view-metrics {
+  position: relative;
+}
+
+#metrics-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--slate);
+  flex-shrink: 0;
+}
+
+.mbar-title {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ash-dim);
+}
+
+.mbar-stamp {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ash-dim);
+  margin-right: auto;
+}
+
+#metrics-refresh {
+  font-size: 11px;
+  color: var(--ash);
+}
+
+#metrics-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  /* the ask-from-here dock floats over this view like it does over the graph —
+     leave it room, or the last card scrolls under the composer */
+  padding-bottom: 5.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: opacity 0.15s;
+  /* refetch holds the previous render at reduced opacity — no skeleton flash */
+}
+
+/* hero: the one number the view leads with. Proportional figures on purpose —
+   tabular-nums makes a display-size number read loose. */
+.mhero {
+  padding: 1.1rem 1.2rem;
+}
+
+.hero-lbl {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ash-dim);
+}
+
+.hero-val {
+  font-family: var(--sans);
+  font-size: 52px;
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--frost);
+  margin: 0.2rem 0 0.35rem;
+}
+
+.hero-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ash);
+  max-width: 56ch;
+}
+
+.chip {
+  display: inline-block;
+  margin-top: 0.7rem;
+  padding: 0.25rem 0.6rem;
+  border: 1px solid var(--line-2);
+  background: var(--slate-2);
+  font-size: 11px;
+  color: var(--text);
+}
+
+.mkpi {
+  display: grid;
+  /* 92px, so all six tiles still fit one row at the 900px supported floor —
+     at 110px the sixth wrapped and left a dead cell beside it */
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+/* Columns, not a grid: the cards run from ~200px to ~700px tall, and on a
+   grid every row is as tall as its tallest card — which left voids the size
+   of a card under the short ones. CSS multi-column packs and balances them for
+   free. The trade is column-major reading order, which costs nothing here:
+   every card is self-contained and none refers to the one beside it. */
+.mgrid {
+  columns: 330px 3;
+  column-gap: 1rem;
+}
+
+.mgrid > .mcard {
+  break-inside: avoid;
+  margin-bottom: 1rem;
+}
+
+.mcard {
+  border: 1px solid var(--line);
+  background: var(--page);
+  padding: 0.85rem 0.9rem 0.9rem;
+  min-width: 0;
+}
+
+.mcard-head {
+  margin-bottom: 0.7rem;
+}
+
+.mcard h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.mcard-sub {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.mcard.proposed {
+  border-left: 2px solid var(--line-2);
+}
+
+.mcard.proposed h3::after {
+  content: " · proposed";
+  font-weight: 400;
+  color: var(--ash-dim);
+}
+
+.mempty,
+.mnote {
+  margin: 0.4rem 0 0;
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+/* --- charts: a table where one cell carries the bar ------------------------ */
+.chart {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.chart th,
+.chart td {
+  padding: 0.3rem 0.4rem;
+  text-align: left;
+  font-weight: 400;
+  color: var(--text);
+  vertical-align: middle;
+}
+
+/* text never wears the data color — identity comes from the mark beside it */
+.chart thead th {
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ash-dim);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.35rem;
+}
+
+.chart .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.chart .num.sub {
+  color: var(--ash-dim);
+}
+
+.chart tbody tr {
+  border-bottom: 1px solid var(--line);
+  /* hairline, solid, one step off the surface — never dashed */
+}
+
+.chart tbody tr:last-child {
+  border-bottom: none;
+}
+
+/* Bar-chart row labels stay on one line: they are names, and a label wrapping
+   to two lines breaks the rhythm the bars beside it are read by. The full
+   string stays reachable through the cell's tooltip. */
+.chart tbody th {
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Data-table text cells wrap instead. Clamping them cost more than it saved:
+   the clipped column was usually the explanation ("frontmatter flags a …") or
+   the pair, the two things the row exists to say. Wrapping grows the card
+   downward, which the column layout absorbs; ellipsis just hid the content.
+   overflow-wrap because a vault path has no space to break at. */
+.chart tbody td:not(.num) {
+  overflow-wrap: anywhere;
+}
+
+/* last resort: a card never scrolls the page sideways — the wrapper scrolls,
+   not the table itself (display:block on a <table> drops column alignment) */
+.tscroll {
+  overflow-x: auto;
+}
+
+.chart tr.clickable {
+  cursor: pointer;
+}
+
+.chart tr.clickable:hover {
+  background: var(--slate-2);
+}
+
+/* the bar cell takes the slack; the label and value columns stay tight */
+.bars .cell {
+  width: 100%;
+}
+
+.bar {
+  height: 10px;
+  /* thin marks: the data is loud, nothing else is */
+  background: var(--c-accent);
+  min-width: 2px;
+  /* E's six terms span three orders of magnitude on a real vault; a term that
+     measured 8 next to one that measured 3600 must still paint, or it reads as
+     "measured, came out flat". The value column carries the real number. */
+}
+
+.bar.amber {
+  background: var(--c-amber);
+}
+
+/* waterfall: every bar is placed on one shared scale spanning the running
+   total, so a step starts where the last one ended. The zero rule sits
+   wherever 0 falls on that scale (--zero, set per chart), not at the middle:
+   when every term but one raises E, zero is near the left edge and pretending
+   otherwise would put the arms where the data isn't. */
+.chart.waterfall .cell {
+  position: relative;
+  height: 18px;
+}
+
+.chart.waterfall .cell::before {
+  content: "";
+  position: absolute;
+  left: var(--zero, 0%);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line-2);
+}
+
+.chart.waterfall .bar {
+  position: absolute;
+  top: 4px;
+  height: 10px;
+}
+
+/* the total is a sum, not a term: neutral, so it never joins either arm */
+.bar.total {
+  background: var(--ash);
+}
+
+.chart tbody tr.total th,
+.chart tbody tr.total .num {
+  color: var(--frost);
+}
+
+.chart tbody tr.total {
+  border-top: 1px solid var(--line-2);
+}
+
+.mlegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.9rem;
+  margin-bottom: 0.55rem;
+  font-size: 11px;
+  color: var(--ash);
+}
+
+.mlegend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.swatch {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.swatch.accent { background: var(--c-accent); }
+.swatch.amber { background: var(--c-amber); }
+.swatch.ord-3 { background: var(--c-ord-3); }
+.swatch.ord-2 { background: var(--c-ord-2); }
+.swatch.ord-1 { background: var(--c-ord-1); }
+
+/* stacked part-to-whole: 2px surface gaps do the separating, never a stroke */
+.stack {
+  display: flex;
+  height: 14px;
+  gap: 2px;
+  margin-bottom: 0.7rem;
+}
+
+.stack-seg {
+  min-width: 2px;
+}
+
+.stack-seg.ord-3 { background: var(--c-ord-3); }
+.stack-seg.ord-2 { background: var(--c-ord-2); }
+.stack-seg.ord-1 { background: var(--c-ord-1); }
+
+/* meter: one ratio against its limit, fill and track from one ramp */
+.meter-wrap {
+  margin-bottom: 0.7rem;
+}
+
+.meter {
+  height: 12px;
+  background: var(--c-track);
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--c-accent);
+}
+
+.meter-lbl {
+  margin-top: 0.35rem;
+  font-size: 11px;
+  color: var(--ash);
+}
+
+.mbtn {
+  margin-top: 0.7rem;
+  padding: 0.4rem 0.9rem;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mbtn:hover {
+  border-color: var(--frost);
+  color: var(--frost);
+}
+
+/* --- histogram: columns on an ordered numeric axis -------------------------- */
+.hist-plot {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  /* the 2px surface gap does the separating, same as the stacked bar. No fixed
+     height here: only the track is fixed, so the container grows to include the
+     cap and tick bands instead of clipping them. */
+}
+
+.hist-col {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.hist-track {
+  height: 120px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.hist-bar {
+  /* thin marks: capped so a wide card gives the bins air instead of slabs */
+  max-width: 24px;
+  width: 100%;
+  margin: 0 auto;
+  background: var(--c-accent);
+  min-height: 2px;
+}
+
+.hist-bar.empty {
+  min-height: 0;
+}
+
+/* values on the cap, so the columns are readable without a hover */
+.hist-cap {
+  font-size: 10px;
+  color: var(--ash);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 3px;
+  min-height: 13px;
+}
+
+/* the axis band lives inside the container, so the card never grows a nested
+   scrollbar to reach its own tick labels */
+.hist-tick {
+  font-size: 9px;
+  color: var(--ash-dim);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  margin-top: 3px;
+}

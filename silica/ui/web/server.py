@@ -742,6 +742,201 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     return _turn_response(_compose_nucleate_turn(text, ready, stubs))
 
 
+# How many rows of an uncapped list the metrics view receives. The report caps
+# its own ranked lists at top_k; orphans and dangling are exhaustive, so they get
+# cut here — and the true length always rides along in `totals`, so a cut list
+# can never read as "this is all of them".
+#
+# 12, not 60: at 60 the orphans and dangling cards ran to 60 rows each and the
+# dashboard became two long lists with charts above them (8.5k px on a 686-note
+# vault). A card samples; GRAPH_REPORT.md is where the full list lives.
+_METRICS_ROWS = 12
+
+# Degree-distribution buckets. Doubling widths, not equal ones: a wikilink graph
+# is heavy-tailed, so linear bins put ~everything in the first two and stretch a
+# hundred empty bins under the hubs. The first three degrees stay their own bin
+# because 0 (isolated), 1 (a leaf) and 2 mean different things about a note.
+_DEGREE_BINS = ((0, 0), (1, 1), (2, 2), (3, 4), (5, 8), (9, 16), (17, 32), (33, 64), (65, None))
+
+
+def _degree_histogram(degree_map: dict[str, int]) -> list[dict]:
+    """Bucket every note's resolved-link degree. Trailing empty buckets are
+    dropped so the axis ends where the vault does; interior empties stay, since
+    a hole in the middle of the distribution is itself the reading."""
+    out = []
+    for lo, hi in _DEGREE_BINS:
+        n = sum(1 for d in degree_map.values() if d >= lo and (hi is None or d <= hi))
+        label = str(lo) if hi == lo else (f"{lo}+" if hi is None else f"{lo}-{hi}")
+        out.append({"label": label, "count": n, "lo": lo})
+    while len(out) > 1 and out[-1]["count"] == 0:
+        out.pop()
+    return out
+
+
+@app.get("/metrics")
+def metrics(proposals: bool = False):
+    """Everything the L1 graph report measures, as JSON for the metrics tab.
+
+    Two depths, because the co-occurrence leg costs an order of magnitude more
+    than the rest and, unlike the rest, grows with the square of the vault
+    (_compute_cooccur_delta ranks every note against every other):
+
+      default          — analytics + embeddings (~2s on a 686-note vault).
+                         `depth: "structural"`.
+      ?proposals=1     — adds the co-occurrence delta (autolink candidates,
+                         stale links, missing hubs, integration deficits).
+                         ~7s on the same vault. `depth: "full"`.
+
+    The depth rides in the payload because E(vault) is only comparable across
+    reports built at the same depth (see vault_energy): its `deficits` term is
+    zero without the co-occurrence leg, and on a real vault that term dominates.
+    The client labels the number rather than letting two different E's look alike.
+    """
+    from silica.kernel.report.graph_report import compute_report
+    from silica.kernel.report.vault_energy import vault_energy
+
+    try:
+        report = compute_report(
+            analytics=True, with_embeddings=True, with_cooccurrence=proposals, top_k=20,
+        )
+    except Exception as exc:
+        logger.warning("metrics: report failed (%s)", exc)
+        return {"error": str(exc)}
+
+    e = vault_energy(report)
+    short = lambda nid: (nid or "").rsplit("/", 1)[-1]  # noqa: E731
+    # An area is named by its hub note's *name*: the full store path is a folder
+    # tree, and in a table cell it wraps to three lines and says nothing extra.
+    label = {c.cluster_id: (short(c.hub) or f"#{c.cluster_id}") for c in report.clusters}
+    size = {c.cluster_id: c.size for c in report.clusters}
+
+    return {
+        "path": CONFIG.vault_path or "",
+        "generated_at": report.generated_at,
+        "depth": "full" if proposals else "structural",
+        "totals": report.totals,
+        "discourse_state": report.discourse_state,
+        "energy": {
+            "total": round(e.total, 2),
+            # Ordered as E is composed: the one negative (bond-forming) term
+            # first, then the entropic costs. `deficits` is dropped rather than
+            # printed as 0.00 when the leg that measures it never ran — a zero
+            # would read as "measured, came out flat". It contributes 0.0 either
+            # way, so the terms still sum to `total`.
+            "terms": [
+                {"name": "cohesion", "value": round(e.cohesion, 2)},
+                {"name": "orphans", "value": round(e.orphans, 2)},
+                {"name": "dangling", "value": round(e.dangling, 2)},
+                {"name": "gaps", "value": round(e.gaps, 2)},
+                *([{"name": "deficits", "value": round(e.deficits, 2)}] if proposals else []),
+                {"name": "contested", "value": round(e.contested, 2)},
+            ],
+        },
+        "degree_histogram": _degree_histogram(report.degree_map),
+        "clusters": [
+            {"id": c.cluster_id, "size": c.size, "hub": short(c.hub), "path": c.hub,
+             "cohesion": c.cohesion}
+            for c in sorted(report.clusters, key=lambda c: -c.size)
+        ],
+        "hubs": [
+            {"label": n.label, "path": n.id, "area": label.get(n.cluster, f"#{n.cluster}"),
+             "degree": n.degree, "in": n.in_degree, "out": n.out_degree,
+             "betweenness": n.betweenness}
+            for n in report.god_nodes
+        ],
+        "bridges": [
+            {"source": short(b.source), "target": short(b.target),
+             "source_path": b.source, "target_path": b.target, "weight": b.weight}
+            for b in report.bridges
+        ],
+        # The two area sizes ride along because they *are* the ranking:
+        # gap_score = size_a * size_b / (1 + inter_edges). gap_density is left
+        # out — on a real vault it reads 99.7-100% on every row, and a column
+        # that never varies cannot explain the order it is sitting in.
+        "gaps": [
+            {"a": short(g.hub_a), "b": short(g.hub_b), "a_path": g.hub_a, "b_path": g.hub_b,
+             "inter_edges": g.inter_edges, "size_a": size.get(g.cluster_a, 0),
+             "size_b": size.get(g.cluster_b, 0)}
+            for g in report.structural_gaps
+        ],
+        "orphans": [{"label": short(p), "path": p} for p in report.orphans[:_METRICS_ROWS]],
+        "dangling": report.dangling[:_METRICS_ROWS],
+        "contested": [
+            {"label": short(c.path), "path": c.path, "refs": c.refs} for c in report.contested
+        ],
+        "source_drift": [
+            {"label": short(d.note), "path": d.note, "source": d.source}
+            for d in report.source_drift[:_METRICS_ROWS]
+        ],
+        "attention": [
+            {"label": short(a.path), "path": a.path, "days_idle": a.days_idle,
+             "degree": a.degree, "misses": a.misses, "attempts": a.attempts,
+             "score": round(a.score, 2)}
+            for a in report.attention_candidates
+        ],
+        "deficits": [
+            {"label": short(d.path), "path": d.path, "concepts": d.concepts,
+             "degree": d.degree, "score": round(d.score, 2)}
+            for d in report.integration_deficits
+        ],
+        # Confirmed first — those are the merge candidates; the borderline band
+        # is only "link, don't merge". Neither list is capped by the report, and
+        # on a real vault they run to the hundreds, so the slice happens here.
+        "duplicates": ([
+            {"a": short(d.source), "b": short(d.target), "a_path": d.source,
+             "b_path": d.target, "score": d.score, "confirmed": True}
+            for d in report.confirmed_duplicate_pairs
+        ] + [
+            {"a": short(d.source), "b": short(d.target), "a_path": d.source,
+             "b_path": d.target, "score": d.score, "confirmed": False}
+            for d in report.duplicate_pairs
+        ])[:_METRICS_ROWS],
+        # Sliced like every other uncapped list: the report caps the
+        # co-occurrence leg at top_k, but the import-derived candidates
+        # _compute_code_signals appends are exhaustive — 13k pairs on a
+        # 400-note vault, which is a 4 MB payload and a card 390,000 px tall.
+        # The true count rides in `totals`, so the cut list can't read as all.
+        "autolinks": [
+            {"a": short(a.source), "b": short(a.target), "a_path": a.source,
+             "b_path": a.target, "weight": a.weight, "shared": a.shared[:4]}
+            for a in report.autolink_candidates[:_METRICS_ROWS]
+        ],
+        "stale_links": [
+            {"a": short(s.source), "b": short(s.target), "a_path": s.source, "b_path": s.target}
+            for s in report.stale_links
+        ],
+        "missing_hubs": [
+            {"concept": h.concept, "centrality": round(h.centrality, 3)}
+            for h in report.missing_hubs
+        ],
+        "lean_notes": [{"label": short(p), "path": p} for p in report.lean_notes[:_METRICS_ROWS]],
+        "temporal": (
+            {
+                "notes_scanned": report.temporal.notes_scanned,
+                "by_tier": {str(k): v for k, v in report.temporal.by_tier.items()},
+                "stamped": report.temporal.stamped,
+                "superseded_notes": report.temporal.superseded_notes,
+                "superseded_sections": report.temporal.superseded_sections,
+                "oldest_valid_from": report.temporal.oldest_valid_from,
+            }
+            if report.temporal and report.temporal.notes_scanned
+            else None
+        ),
+        "code_coverage": (
+            {
+                "documented": report.code_coverage.documented,
+                "total": report.code_coverage.total,
+                "undocumented": [
+                    {"path": p, "fan_in": f}
+                    for p, f in report.code_coverage.undocumented[:_METRICS_ROWS]
+                ],
+            }
+            if report.code_coverage and report.code_coverage.total
+            else None
+        ),
+    }
+
+
 @app.get("/graph")
 def graph():
     import tempfile
@@ -972,6 +1167,25 @@ def stop():
     if current_cancel is not None:
         current_cancel.set()
     return {"ok": True}
+
+
+@app.get("/health")
+def health():
+    """The doctor's non-ok findings, for the boot toast.
+
+    A server the user forgot to start degrades recall silently here: the
+    embedder/reranker warnings go to the launching terminal's stderr, which the
+    browser never shows. Same checks as `silica doctor`, so the two surfaces
+    cannot disagree; ok rows are dropped because a toast is for what needs
+    fixing.
+    """
+    from silica.onboarding.checks import run_checks
+
+    return [
+        {"name": r.name, "status": r.status, "detail": r.detail, "hint": r.hint}
+        for r in run_checks(CONFIG)
+        if r.status != "ok"
+    ]
 
 
 @app.get("/config")

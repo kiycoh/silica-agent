@@ -405,6 +405,7 @@ def compute_report(
         clusters=clusters,
         pagerank_map={nid: round(pr.get(nid, 0.0), 5) for nid in real_ids},
         betweenness_map={nid: round(bet.get(nid, 0.0), 4) for nid in real_ids},
+        degree_map={nid: deg.get(nid, 0) for nid in real_ids},
         attention_candidates=attention,
         lean_notes=lean_notes,
         reformat_notes=reformat_notes,

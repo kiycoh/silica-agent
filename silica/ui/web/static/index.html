@@ -15,6 +15,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="chat">chat</button>
       <button class="tab" data-tab="graph">explore</button>
+      <button class="tab" data-tab="metrics">metrics</button>
     </nav>
     <div class="spacer"></div>
     <div class="ctx-tokens" id="ctx-tokens" title="context window usage" aria-hidden="true"></div>
@@ -161,6 +162,21 @@
 
       <iframe id="graph-frame" title="vault graph"></iframe>
       <iframe id="map-frame" title="radial map" hidden></iframe>
+    </section>
+
+    <!-- metrics: everything the L1 graph report measures, rendered as charts.
+         Cards are built in JS from /metrics; only the shell lives here. -->
+    <section id="view-metrics" class="view">
+      <div id="metrics-bar">
+        <div class="mbar-title">Vault metrics</div>
+        <div class="mbar-stamp" id="metrics-stamp"></div>
+        <button type="button" id="metrics-refresh" class="ghost" title="recompute the report">recompute</button>
+      </div>
+      <div id="metrics-loading" class="frame-loading" hidden>
+        <div class="spinner"></div>
+        <div>Measuring the vault. A full report takes a moment.</div>
+      </div>
+      <div id="metrics-body"></div>
     </section>
   </main>
 

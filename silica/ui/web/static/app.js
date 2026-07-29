@@ -281,6 +281,7 @@ async function runTurn(fetchPromise, pendingLabel = "working") {
     loadSessions(); // turn saved server-side — refresh titles/order
     loadVaultInfo(); // a turn may have written notes — refresh stats + tree
     graphStale = true; // a turn may have written notes — rebuild next graph view
+    metricsStale = true; // …and remeasure the next time the metrics tab opens
   }
 
   function handle(ev) {
@@ -684,7 +685,9 @@ $(".tabs").addEventListener("click", (e) => {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $("#view-chat").classList.toggle("active", tab === "chat");
   $("#view-graph").classList.toggle("active", tab === "graph");
+  $("#view-metrics").classList.toggle("active", tab === "metrics");
   if (tab === "graph") setGraphMode(graphMode); // load the active mode's content
+  if (tab === "metrics") loadMetrics();
 });
 
 // --- explore tab: network graph | radial map ---------------------------------
@@ -733,6 +736,584 @@ $("#graph-frame").addEventListener("load", () => {
   if (lastNotePath) focusGraphNode(lastNotePath);
 });
 $("#map-frame").addEventListener("load", () => { $("#map-loading").hidden = true; });
+
+// --- metrics tab -------------------------------------------------------------
+// Everything the L1 graph report measures, as cards. Charts are HTML tables:
+// the bar IS the row, so the chart and its table view are one DOM — every value
+// stays readable without a hover, and there is no chart/table toggle to keep in
+// sync. Deliberately library-free; a bar is a div with a width.
+//
+// Palette (validated with the dataviz skill's checker against the --page
+// surface, dark mode): magnitude uses the accent hue snapped into the dark
+// lightness band, the energy chart is diverging accent↔amber over a neutral
+// zero rule, and reliability tiers take a 3-step ordinal ramp of the accent.
+// The chrome tokens themselves (--accent, --warn) sit above the band and stay
+// where they are — they light chrome, not fills.
+// Two depths, because the report's co-occurrence leg costs ~100x the rest
+// (one expanded ranking per note). The tab opens at structural depth in a
+// couple of seconds; the four PROPOSED signals are a second, explicit pass the
+// reader asks for. E(vault) is labelled with the depth it was measured at —
+// its `deficits` term is absent from the cheap pass, and on a real vault that
+// term dominates, so an unlabelled number would compare two different things.
+let metricsStale = true;
+let metricsLoading = false;
+let metricsDepth = "structural";
+
+async function loadMetrics(force = false, proposals = false) {
+  if (metricsLoading) return;
+  if (!metricsStale && !force && !(proposals && metricsDepth !== "full")) return;
+  metricsLoading = true;
+  const body = $("#metrics-body");
+  const loading = $("#metrics-loading");
+  loading.querySelector("div:last-child").textContent = proposals
+    ? "Running the co-occurrence delta over every note."
+    : "Measuring the vault.";
+  loading.hidden = false;
+  body.style.opacity = body.childElementCount ? "0.45" : ""; // hold the last render, no skeleton flash
+  try {
+    const data = await (await fetch("/metrics" + (proposals ? "?proposals=1" : ""))).json();
+    if (data.error) { notify("metrics unavailable: " + data.error); return; }
+    metricsDepth = data.depth || "structural";
+    renderMetrics(data);
+    metricsStale = false;
+  } catch {
+    notify("couldn't measure the vault");
+  } finally {
+    metricsLoading = false;
+    loading.hidden = true;
+    body.style.opacity = "";
+  }
+}
+
+$("#metrics-refresh").addEventListener("click", () => loadMetrics(true, metricsDepth === "full"));
+
+// Clicking any row that names a note opens it in the drawer — the metrics are
+// only useful if the note they point at is one click away.
+$("#metrics-body").addEventListener("click", (e) => {
+  if (e.target.id === "metrics-proposals") { loadMetrics(true, true); return; }
+  const row = e.target.closest("[data-path]");
+  if (row && row.dataset.path) openNote(row.dataset.path);
+});
+
+const mkEl = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text; // labels are vault data — never innerHTML
+  return n;
+};
+
+// A card: hairline compartment, micro-label title, optional one-line note.
+// A div, not a <header>: the global `header>* {display:flex}` rule would flatten
+// the title and its subtitle onto one line.
+function mCard(title, sub) {
+  const c = mkEl("section", "mcard");
+  const h = mkEl("div", "mcard-head");
+  h.appendChild(mkEl("h3", null, title));
+  if (sub) h.appendChild(mkEl("span", "mcard-sub", sub));
+  c.appendChild(h);
+  return c;
+}
+
+function mEmpty(card, msg) { card.appendChild(mkEl("p", "mempty", msg)); return card; }
+
+// Magnitude chart: one hue, bars grow from a single baseline, value at the tip.
+// rows: [{label, value, path?, title?, note?}]
+function barChart(rows, { fmt = (v) => nfmt(v), tone = "accent" } = {}) {
+  const max = Math.max(...rows.map((r) => Math.abs(r.value)), 1);
+  const t = mkEl("table", "chart bars");
+  const tb = mkEl("tbody");
+  for (const r of rows) {
+    const tr = mkEl("tr");
+    if (r.path) { tr.dataset.path = r.path; tr.classList.add("clickable"); }
+    if (r.title) tr.title = r.title;
+    const th = mkEl("th", null, r.label);
+    th.scope = "row";
+    const td = mkEl("td", "cell");
+    const bar = mkEl("div", "bar " + tone);
+    bar.style.width = (Math.abs(r.value) / max) * 100 + "%";
+    td.appendChild(bar);
+    const val = mkEl("td", "num", fmt(r.value));
+    tr.append(th, td, val);
+    if (r.note !== undefined) tr.appendChild(mkEl("td", "num sub", r.note));
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb);
+  return t;
+}
+
+// Waterfall: the right form for an additive decomposition. Each bar starts
+// where the previous one ended, and the last bar IS the total — so the chart
+// says what the hero number is made of, which a common-baseline chart cannot.
+// It also survives the scale: E's terms span three orders of magnitude on a
+// real vault, and off a shared baseline the small ones paint as 2px slivers
+// that read "measured, came out flat". Stacked end to end they are steps.
+// Cool arm lowers the total, warm arm raises it, neutral rule marks zero.
+function waterfall(rows, total, { negLabel, posLabel }) {
+  let cum = 0, lo = 0, hi = 0;
+  const steps = rows.map((r) => {
+    const start = cum;
+    cum += r.value;
+    lo = Math.min(lo, cum);
+    hi = Math.max(hi, cum);
+    return { label: r.label, value: r.value, start, end: cum };
+  });
+  hi = Math.max(hi, total);
+  lo = Math.min(lo, total);
+  const span = hi - lo || 1;
+  const at = (v) => ((v - lo) / span) * 100;
+
+  const wrap = mkEl("div", "diverge");
+  wrap.appendChild(mLegend([
+    { tone: "accent", label: negLabel },
+    { tone: "amber", label: posLabel },
+  ]));
+  const t = mkEl("table", "chart bars waterfall");
+  t.style.setProperty("--zero", at(0) + "%");
+  const tb = mkEl("tbody");
+  const addRow = (label, from, to, value, tone, cls) => {
+    const tr = mkEl("tr", cls);
+    const num = (value > 0 ? "+" : "") + value.toFixed(2);
+    tr.title = `${label}: ${num}`;
+    const th = mkEl("th", null, label);
+    th.scope = "row";
+    const td = mkEl("td", "cell");
+    const bar = mkEl("div", "bar " + tone);
+    bar.style.left = at(Math.min(from, to)) + "%";
+    bar.style.width = (Math.abs(to - from) / span) * 100 + "%";
+    td.appendChild(bar);
+    tr.append(th, td, mkEl("td", "num", num));
+    tb.appendChild(tr);
+  };
+  for (const s of steps) {
+    addRow(s.label, s.start, s.end, s.value, s.value < 0 ? "accent" : "amber");
+  }
+  addRow("E(vault)", 0, total, total, "total", "total");
+  t.appendChild(tb);
+  wrap.appendChild(t);
+  return wrap;
+}
+
+// Histogram: columns, because the x-axis is an ordered numeric scale and
+// position has to read left-to-right. One hue — the bins are a single series
+// ("notes"), and their order is already carried by position, so spending the
+// identity channel on a ramp would re-encode what the axis says.
+// Every column is capped at 24px and labeled on the cap, so the values are
+// readable without hovering; the row beneath is the axis.
+function histogram(bins) {
+  const max = Math.max(...bins.map((b) => b.count), 1);
+  const wrap = mkEl("div", "hist");
+  const plot = mkEl("div", "hist-plot");
+  for (const b of bins) {
+    const col = mkEl("div", "hist-col");
+    col.title = `degree ${b.label}: ${nfmt(b.count)} notes`;
+    // A zero bin gets a labeled slot but no mark: painting a stub would say
+    // "small", and the reading here is "none".
+    col.appendChild(mkEl("div", "hist-cap", b.count ? nfmt(b.count) : ""));
+    // The track is the only fixed-height box, so the bar's percentage resolves
+    // against the plot area alone and the cap/tick bands sit outside it — a
+    // column chart whose fixed height swallowed its own axis labels would make
+    // the card grow a nested scrollbar.
+    const track = mkEl("div", "hist-track");
+    const bar = mkEl("div", "hist-bar" + (b.count ? "" : " empty"));
+    bar.style.height = (b.count / max) * 100 + "%";
+    track.appendChild(bar);
+    col.appendChild(track);
+    col.appendChild(mkEl("div", "hist-tick", b.label));
+    plot.appendChild(col);
+  }
+  wrap.appendChild(plot);
+  return wrap;
+}
+
+// A legend is always present for two or more series — identity never rests on
+// color alone. Single-series charts get none; their title already names them.
+function mLegend(items) {
+  const l = mkEl("div", "mlegend");
+  for (const it of items) {
+    const row = mkEl("span", "mlegend-item");
+    row.appendChild(mkEl("i", "swatch " + it.tone));
+    row.appendChild(mkEl("span", null, it.label));
+    l.appendChild(row);
+  }
+  return l;
+}
+
+// Meter: one ratio against its limit. Fill and track are steps of one ramp.
+function meter(done, total, label) {
+  const w = mkEl("div", "meter-wrap");
+  const track = mkEl("div", "meter");
+  const fill = mkEl("div", "meter-fill");
+  fill.style.width = (total ? (done / total) * 100 : 0) + "%";
+  track.appendChild(fill);
+  w.append(track, mkEl("div", "meter-lbl", label));
+  return w;
+}
+
+// Ordinal part-to-whole: one stacked bar, steps of a single hue in rank order,
+// 2px surface gaps doing the separating (never a stroke around a segment).
+function stackedBar(segs) {
+  const total = segs.reduce((s, x) => s + x.value, 0) || 1;
+  const bar = mkEl("div", "stack");
+  for (const s of segs) {
+    if (!s.value) continue;
+    const seg = mkEl("div", "stack-seg " + s.tone);
+    seg.style.width = (s.value / total) * 100 + "%";
+    seg.title = s.label + ": " + nfmt(s.value);
+    bar.appendChild(seg);
+  }
+  return bar;
+}
+
+// cols: [{key, label, num?}] — `num` right-aligns and tabularises the column.
+function mTable(cols, rows) {
+  const t = mkEl("table", "chart data");
+  const thead = mkEl("thead");
+  const hr = mkEl("tr");
+  for (const c of cols) {
+    const th = mkEl("th", c.num ? "num" : null, c.label);
+    th.scope = "col";
+    hr.appendChild(th);
+  }
+  thead.appendChild(hr);
+  const tb = mkEl("tbody");
+  for (const r of rows) {
+    const tr = mkEl("tr");
+    if (r._path) { tr.dataset.path = r._path; tr.classList.add("clickable"); }
+    if (r._title) tr.title = r._title;
+    for (const c of cols) {
+      const td = mkEl("td", c.num ? "num" : null, String(r[c.key] ?? ""));
+      // Text columns are clamped to keep the card from growing a scrollbar; the
+      // full value has to stay reachable, so it rides the cell's own tooltip.
+      if (!c.num) td.title = td.textContent;
+      tr.appendChild(td);
+    }
+    tb.appendChild(tr);
+  }
+  t.append(thead, tb);
+  const wrap = mkEl("div", "tscroll");
+  wrap.appendChild(t);
+  return wrap;
+}
+
+const nfmt = (n) => (typeof n === "number" ? n.toLocaleString() : String(n));
+
+// A cut list must never read as the whole list.
+function mMore(shown, total, noun) {
+  return shown < total ? mkEl("p", "mnote", `showing ${shown} of ${nfmt(total)} ${noun}`) : null;
+}
+
+function renderMetrics(d) {
+  const body = $("#metrics-body");
+  body.innerHTML = "";
+  const T = d.totals || {};
+  $("#metrics-stamp").textContent = d.generated_at ? d.generated_at.slice(0, 16).replace("T", " ") : "";
+
+  // --- hero: E(vault) + the KPI row it summarises ----------------------------
+  const head = mkEl("section", "mcard mhero");
+  const e = d.energy || { total: 0, terms: [] };
+  const full = d.depth === "full";
+  const hv = mkEl("div", "hero-val", (e.total > 0 ? "+" : "") + e.total.toFixed(2));
+  head.appendChild(mkEl("div", "hero-lbl", "E(vault) — lattice energy"));
+  head.appendChild(hv);
+  head.appendChild(mkEl("p", "hero-sub",
+    "Lower is more coherent. A thermometer, not a target: read it to compare runs, "
+    + "never descend it. "
+    + (full
+      ? "Measured at full depth — comparable only to other full-depth readings."
+      : "Structural depth: integration deficits are not measured, so this is not "
+        + "comparable to a full-depth E.")));
+  if (d.discourse_state) {
+    const chip = mkEl("div", "chip", "discourse: " + d.discourse_state);
+    head.appendChild(chip);
+  }
+  body.appendChild(head);
+
+  // Rates, not counts: notes / links / areas / unresolved already sit in the
+  // sidebar's vault box two panes to the left, and printing them twice on one
+  // screen spends the loudest row in the view on nothing. These are the
+  // numbers that box cannot carry — including the correction to its own
+  // "areas" count, most of which are single notes.
+  const kpi = mkEl("section", "mkpi");
+  const links = T.links || 0, notes = T.notes || 0;
+  const orphans = T.orphans || 0;
+  const zeroBin = d.degree_histogram?.[0];
+  const isolated = zeroBin && zeroBin.lo === 0 ? zeroBin.count : 0;
+  const pct = (n, of) => (of ? Math.round((n / of) * 100) + "%" : "—");
+  const tiles = [
+    ["Links / note", notes ? (links / notes).toFixed(1) : "0", false],
+    ["Orphaned", pct(orphans, notes), orphans > 0],
+    ["No link at all", nfmt(isolated), isolated > 0],
+    ["Areas > 1 note", nfmt((d.clusters || []).filter((c) => c.size > 1).length), false],
+  ];
+  // Four fixed plus at most two conditional: six is what fits one row at the
+  // 900px floor the .mkpi grid is sized for, and a seventh tile wraps to a row
+  // of its own with five dead cells beside it.
+  if (d.code_coverage) {
+    tiles.push(["Code documented",
+      pct(d.code_coverage.documented, d.code_coverage.total), false]);
+  }
+  if (d.temporal) {
+    tiles.push(["Human tier",
+      pct(d.temporal.by_tier?.["3"] || 0, d.temporal.notes_scanned), false]);
+  }
+  for (const [lbl, val, warn] of tiles) {
+    const s = mkEl("div", "stat");
+    s.appendChild(mkEl("div", "val" + (warn ? " warn" : ""), nfmt(val)));
+    s.appendChild(mkEl("div", "lbl", lbl));
+    kpi.appendChild(s);
+  }
+  body.appendChild(kpi);
+
+  const grid = mkEl("div", "mgrid");
+  body.appendChild(grid);
+
+  // --- energy decomposition --------------------------------------------------
+  const ec = mCard("Energy decomposition", `the ${e.terms.length} terms that sum to E`);
+  ec.appendChild(waterfall(
+    e.terms.map((t) => ({ label: t.name, value: t.value })), e.total,
+    { negLabel: "bonds formed (lowers E)", posLabel: "entropic cost (raises E)" },
+  ));
+  grid.appendChild(ec);
+
+  // --- areas -----------------------------------------------------------------
+  const CL_ROWS = 14;
+  const cl = mCard("Areas by size", "Louvain communities · cohesion = intra-links / possible");
+  if (d.clusters?.length) {
+    const shown = d.clusters.slice(0, CL_ROWS);
+    const rest = d.clusters.slice(CL_ROWS);
+    const rows = shown.map((c) => ({
+      label: c.hub || "#" + c.id, value: c.size, path: c.path,
+      note: c.cohesion ? c.cohesion.toFixed(2) : "—",
+      title: `${c.size} notes · cohesion ${c.cohesion}`,
+    }));
+    cl.appendChild(barChart(rows));
+    cl.appendChild(mkEl("p", "mnote", "right column: cohesion"));
+    // The tail is a count, not a fourteenth area: as a bar row its total
+    // outgrew every real area and crushed them all into stubs. An aggregate
+    // never shares a magnitude scale with the things it aggregates.
+    if (rest.length) {
+      cl.appendChild(mkEl("p", "mnote",
+        `${nfmt(rest.length)} smaller areas hold the other `
+        + `${nfmt(rest.reduce((s, c) => s + c.size, 0))} notes`));
+    }
+  } else mEmpty(cl, "No communities yet — link some notes.");
+  grid.appendChild(cl);
+
+  // --- degree distribution ---------------------------------------------------
+  // An empty vault gets no card at all: the endpoint still returns one zeroed
+  // bin, and "every note carries at least one link" is a silly thing to say
+  // about no notes.
+  if (d.degree_histogram?.some((b) => b.count)) {
+    const dh = mCard("Link distribution", "notes by how many resolved links they carry");
+    dh.appendChild(histogram(d.degree_histogram));
+    const isolated = d.degree_histogram[0];
+    dh.appendChild(mkEl("p", "mnote",
+      isolated && isolated.lo === 0 && isolated.count
+        ? `${nfmt(isolated.count)} notes carry no resolved link at all`
+        : "every note carries at least one resolved link"));
+    grid.appendChild(dh);
+  }
+
+  // --- hubs ------------------------------------------------------------------
+  // In/out degree are dropped: degree is their sum, and six columns in a card
+  // this narrow is a scrollbar, not a table. Both still ride the row tooltip.
+  const hb = mCard("Hubs", "degree · betweenness = how much traffic routes through");
+  if (d.hubs?.length) {
+    hb.appendChild(mTable(
+      [{ key: "label", label: "Note" }, { key: "area", label: "Area" },
+       { key: "degree", label: "Links", num: true },
+       { key: "betweenness", label: "Btw", num: true }],
+      d.hubs.map((h) => ({ ...h, _path: h.path, _title: `${h.in} in · ${h.out} out` })),
+    ));
+  } else mEmpty(hb, "No connected notes yet.");
+  grid.appendChild(hb);
+
+  // --- maintenance -----------------------------------------------------------
+  // Heterogeneous counts in different units — a bar chart would imply they are
+  // comparable. A table is the honest form.
+  const mt = mCard("Maintenance", "what the report says needs attention");
+  mt.appendChild(mTable(
+    [{ key: "what", label: "Signal" }, { key: "n", label: "Count", num: true },
+     { key: "means", label: "Means" }],
+    [
+      ["Orphans", T.orphans, "nothing links to them"],
+      ["Unresolved links", T.dangling_links, "wikilinks with no target"],
+      ["Contested", T.contested, "frontmatter flags a conflict"],
+      ["Source drift", T.source_drift, "source moved on without the note"],
+      // "—" not "0" when the leg that measures it never ran: a printed zero
+      // reads as "measured, came out flat".
+      ["Integration deficits", full ? T.integration_deficits : null, "concept-rich, weakly linked"],
+      ["Attention", T.attention_candidates, "idle + missed in recall"],
+      ["Lean notes", T.lean_notes, "too thin to carry their topic"],
+      ["Structural gaps", T.structural_gaps, "areas that should connect, don't"],
+    ].map(([what, n, means]) => ({ what, n: n === null ? "—" : nfmt(n || 0), means })),
+  ));
+  grid.appendChild(mt);
+
+  // --- reliability tiers -----------------------------------------------------
+  if (d.temporal) {
+    const tp = d.temporal, bt = tp.by_tier || {};
+    const tiers = [
+      { tone: "ord-3", label: "human", value: bt["3"] || 0 },
+      { tone: "ord-2", label: "grounded", value: bt["2"] || 0 },
+      { tone: "ord-1", label: "distilled", value: bt["1"] || 0 },
+    ];
+    const tc = mCard("Reliability", `${nfmt(tp.notes_scanned)} notes scanned`);
+    tc.appendChild(mLegend(tiers.map((t) => ({ tone: t.tone, label: t.label }))));
+    tc.appendChild(stackedBar(tiers));
+    tc.appendChild(mTable(
+      [{ key: "k", label: "Signal" }, { key: "v", label: "Notes", num: true }],
+      [
+        ...tiers.map((t) => ({ k: "Tier — " + t.label, v: nfmt(t.value) })),
+        { k: "Carrying a claim stamp", v: `${nfmt(tp.stamped)} / ${nfmt(tp.notes_scanned)}` },
+        { k: "With a Superseded section", v: nfmt(tp.superseded_sections) },
+        { k: "Merged away", v: nfmt(tp.superseded_notes) },
+        ...(tp.oldest_valid_from ? [{ k: "Earliest valid_from", v: tp.oldest_valid_from }] : []),
+      ],
+    ));
+    grid.appendChild(tc);
+  }
+
+  // --- code coverage ---------------------------------------------------------
+  if (d.code_coverage) {
+    const cc = d.code_coverage;
+    const card = mCard("Code coverage", "source files with at least one note");
+    card.appendChild(meter(cc.documented, cc.total,
+      `${nfmt(cc.documented)} / ${nfmt(cc.total)} files documented`));
+    if (cc.undocumented?.length) {
+      card.appendChild(mTable(
+        [{ key: "path", label: "Undocumented" }, { key: "fan_in", label: "Fan-in", num: true }],
+        cc.undocumented.slice(0, 10),
+      ));
+    }
+    grid.appendChild(card);
+  }
+
+  // --- structural gaps + bridges ---------------------------------------------
+  const gp = mCard("Structural gaps", "well-formed areas with few links between them");
+  if (d.gaps?.length) {
+    // Sizes, not the absent-link fraction: that fraction reads 99.7-100% on
+    // every row of a real vault, so it cannot explain why row 1 outranks row
+    // 20. Size × size ÷ (1 + links) is the actual ranking, and with both
+    // sizes on the row the order is readable instead of asserted.
+    gp.appendChild(mTable(
+      [{ key: "pair", label: "Area hubs" }, { key: "sizes", label: "Notes", num: true },
+       { key: "inter_edges", label: "Links", num: true }],
+      d.gaps.map((g) => ({
+        pair: g.a + " ↮ " + g.b, sizes: `${g.size_a} × ${g.size_b}`,
+        inter_edges: g.inter_edges,
+      })),
+    ));
+  } else mEmpty(gp, "No gaps measured.");
+  grid.appendChild(gp);
+
+  const br = mCard("Surprising bridges", "cross-area links between otherwise distant notes");
+  if (d.bridges?.length) {
+    br.appendChild(mTable(
+      [{ key: "pair", label: "Pair" }, { key: "weight", label: "Surprise", num: true }],
+      d.bridges.map((b) => ({ pair: b.source + " ↔ " + b.target, weight: b.weight, _path: b.source_path })),
+    ));
+  } else mEmpty(br, "No cross-area links yet.");
+  grid.appendChild(br);
+
+  // --- lists that point at a note -------------------------------------------
+  const orph = mCard("Orphans", "nothing links to these");
+  if (d.orphans?.length) {
+    orph.appendChild(mTable([{ key: "label", label: "Note" }],
+      d.orphans.map((o) => ({ ...o, _path: o.path }))));
+    const more = mMore(d.orphans.length, T.orphans || 0, "orphans");
+    if (more) orph.appendChild(more);
+  } else mEmpty(orph, "None — every note is reachable.");
+  grid.appendChild(orph);
+
+  const dg = mCard("Unresolved links", "wikilink targets that don't exist yet");
+  if (d.dangling?.length) {
+    dg.appendChild(mTable(
+      [{ key: "target", label: "Target" }, { key: "refs", label: "Refs", num: true }],
+      d.dangling,
+    ));
+    const more = mMore(d.dangling.length, T.dangling_links || 0, "targets");
+    if (more) dg.appendChild(more);
+  } else mEmpty(dg, "None — every wikilink resolves.");
+  grid.appendChild(dg);
+
+  const at = mCard("Attention", "idle × missed in recall ÷ how well linked");
+  if (d.attention?.length) {
+    at.appendChild(mTable(
+      [{ key: "label", label: "Note" }, { key: "days_idle", label: "Idle (d)", num: true },
+       { key: "misses", label: "Missed", num: true }, { key: "score", label: "Score", num: true }],
+      d.attention.map((a) => ({ ...a, _path: a.path })),
+    ));
+  } else mEmpty(at, "Nothing overdue.");
+  grid.appendChild(at);
+
+  if (full) {
+    const df = mCard("Integration deficits", "concept-rich text, few wikilinks");
+    if (d.deficits?.length) {
+      df.appendChild(mTable(
+        [{ key: "label", label: "Note" }, { key: "concepts", label: "Concepts", num: true },
+         { key: "degree", label: "Links", num: true }, { key: "score", label: "Score", num: true }],
+        d.deficits.map((x) => ({ ...x, _path: x.path })),
+      ));
+    } else mEmpty(df, "None measured.");
+    grid.appendChild(df);
+  }
+
+  if (d.contested?.length) {
+    const ct = mCard("Contested", "frontmatter marks these as in conflict");
+    ct.appendChild(mTable(
+      [{ key: "label", label: "Note" }, { key: "refs", label: "Conflicts with" }],
+      d.contested.map((c) => ({ label: c.label, refs: (c.refs || []).join(", "), _path: c.path })),
+    ));
+    grid.appendChild(ct);
+  }
+
+  // --- proposals (not authoritative) -----------------------------------------
+  // The co-occurrence leg runs one expanded ranking per note, so it is minutes
+  // on a real vault. Asked for, never assumed.
+  if (!full) {
+    const ask = mCard("Proposals", "co-occurrence delta — not yet measured");
+    ask.classList.add("proposed");
+    ask.appendChild(mkEl("p", "mempty",
+      "Autolink candidates, stale links, missing hubs and integration deficits "
+      + "come from comparing the co-occurrence graph against the wikilinks. "
+      + "That pass ranks every note against every other, so it grows with the "
+      + "square of the vault: seconds here, longer on a big one."));
+    const btn = mkEl("button", "mbtn", "measure proposals");
+    btn.type = "button";
+    btn.id = "metrics-proposals";
+    ask.appendChild(btn);
+    grid.appendChild(ask);
+  }
+  const props = [
+    ["Duplicate pairs", "embeddings propose · graph disposes", d.duplicates,
+     [{ key: "pair", label: "Pair" }, { key: "score", label: "Cosine", num: true },
+      { key: "band", label: "Band" }],
+     (x) => ({ pair: x.a + " ↔ " + x.b, score: x.score, band: x.confirmed ? "merge?" : "link", _path: x.a_path }),
+     (T.confirmed_duplicates || 0) + (T.duplicate_pairs || 0), "pairs"],
+    ["Autolink candidates", "co-mentioned in text, never linked", d.autolinks,
+     [{ key: "pair", label: "Pair" }, { key: "shared", label: "Shared concepts" },
+      { key: "weight", label: "Weight", num: true }],
+     (x) => ({ pair: x.a + " ↔ " + x.b, shared: (x.shared || []).join(", "), weight: x.weight, _path: x.a_path }),
+     T.autolink_candidates || 0, "pairs"],
+    ["Stale links", "linked, but share no concepts in text", d.stale_links,
+     [{ key: "pair", label: "Pair" }],
+     (x) => ({ pair: x.a + " ↔ " + x.b, _path: x.a_path }),
+     T.stale_links || 0, "links"],
+    ["Missing hubs", "central concepts with no note of their own", d.missing_hubs,
+     [{ key: "concept", label: "Concept" }, { key: "centrality", label: "Centrality", num: true }],
+     (x) => x, T.missing_hubs || 0, "concepts"],
+  ];
+  for (const [title, sub, rows, cols, map, total, noun] of props) {
+    if (!rows?.length) continue;
+    const c = mCard(title, sub);
+    c.classList.add("proposed");
+    c.appendChild(mTable(cols, rows.map(map)));
+    const more = total ? mMore(rows.length, total, noun) : null;
+    if (more) c.appendChild(more);
+    grid.appendChild(c);
+  }
+}
 
 // --- map landing: root the radial map on a note; hub-picker until one is set --
 function rootMap(path) {
@@ -1225,9 +1806,20 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSessionPanel(); });
 
+// --- boot health: the doctor's non-ok rows as toasts -------------------------
+// The TUI logs a degraded embedder/reranker to stderr; the browser sees none of
+// that, so without this a server left down just makes recall quietly worse.
+async function loadHealth() {
+  try {
+    for (const r of await (await fetch("/health")).json())
+      notify(r.name + ": " + r.detail + (r.hint ? " — " + r.hint : ""));
+  } catch { /* the page works without the report; don't toast about the toast */ }
+}
+
 loadVault();
 loadSessions();
 loadVaultInfo();
 loadConfig(); // header shows the active model without opening the panel
+loadHealth(); // a chat/embedder/reranker server that isn't up says so, once, here
 // Land on chat — it's the primary surface. The tab handler does the rest.
 document.querySelector('.tab[data-tab="chat"]').click();
