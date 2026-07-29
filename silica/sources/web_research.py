@@ -4,13 +4,14 @@
 """`/web-search` — agentic web-research loop → cited findings note in the Inbox.
 
 ADR-0015 staged acquisition: Silica may *fetch* on request but never *decides*
-what enters the vault. The loop is constrained to the single `web_search` tool
-(it physically cannot write to the vault); its output is one findings note in
-the Inbox, with sources cited. The note enters the vault only via /nucleate.
+what enters the vault. The loop is constrained to `web_search` (find pages) and
+`web_fetch` (read one); it physically cannot write to the vault. Its output is
+one findings note in the Inbox, with sources cited. The note enters the vault
+only via /nucleate.
 
-`web_search` is `sensitive=True` (ADR-0009): the main agent's default toolset
-excludes it, so it is reachable only here, where web_research() names it
-explicitly in AgentConstraints.
+Both tools are `sensitive=True` (ADR-0009): the main agent's default toolset
+excludes them, so they are reachable only where named explicitly in
+AgentConstraints — here, and in fetch_to_inbox() for `/fetch`.
 """
 from __future__ import annotations
 
@@ -25,12 +26,19 @@ from silica.agent.loop import run_agent
 from silica.config import CONFIG
 from silica.kernel.write.templates import slugify
 from silica.tools import tool
+
+# Importing the module runs its @tool decorator, which is what puts web_fetch in
+# TOOLS for the AgentConstraints below to name. Bound as a module, not as the
+# function, so fetch_to_inbox() resolves the attribute at call time.
+from silica.sources import web_fetch as _web_fetch  # noqa: F401
 from pydantic import BaseModel
 
 _TAVILY_URL = "https://api.tavily.com/search"
 _MAX_RESULTS = 5            # ponytail: module constant; per-query result cap
 _HTTP_TIMEOUT = 30
-_DEFAULT_MAX_SEARCHES = 12
+# Fetches spend iterations too, so the budget covers both calls. The flag is
+# still --max-searches: renaming a user-facing flag buys nothing.
+_DEFAULT_MAX_SEARCHES = 16
 
 _RESEARCH_SYSTEM_PROMPT = """You are a focused web-research agent. Given a \
 concept, research it on the web and write a findings note.
@@ -38,11 +46,14 @@ concept, research it on the web and write a findings note.
 Method (iterative deepening):
 1. Decompose the concept into what you need to know.
 2. Call `web_search(query)` for the most important sub-question.
-3. Read the results, identify gaps and adjacent areas of knowledge.
-4. Search again only where a gap remains. STOP when you have enough — one \
+3. When a result looks like it actually answers the question, call \
+`web_fetch(url)` and read the page. A search snippet is not the article. One \
+fetch of a good source beats three more searches.
+4. Identify gaps and adjacent areas of knowledge.
+5. Search again only where a gap remains. STOP when you have enough — one \
 search if the concept is trivial, up to ~8-10 if it is genuinely complex. Do \
 not pad with redundant searches.
-5. When done, reply with NO tool call — your final message IS the note body.
+6. When done, reply with NO tool call — your final message IS the note body.
 
 The note body must be markdown prose synthesising what you found, with inline \
 citations like [1], [2] tied to specific sources, and end with a section:
@@ -116,7 +127,7 @@ def web_research(
         model=CONFIG.model,
         tool_progress_callback=tool_progress_callback,
         constraints=AgentConstraints(
-            tools=("web_search",), max_iterations=max_searches
+            tools=("web_search", "web_fetch"), max_iterations=max_searches
         ),
     )
 
@@ -177,9 +188,16 @@ def _collect_sources(messages: list[dict]) -> list[tuple[str, str]]:
     for m in messages:
         if m.get("role") != "tool":
             continue
+        content = m.get("content") or ""
         try:
-            items = json.loads(m.get("content") or "")
+            items = json.loads(content)
         except (ValueError, TypeError):
+            # web_fetch returns prose, not JSON. Its first line names the final
+            # URL after redirects, which is what a citation should point at.
+            head = content.split("\n", 1)[0]
+            if head.startswith("Source: ") and head[8:].strip():
+                url = head[8:].strip()
+                seen.setdefault(url, url)
             continue
         if not isinstance(items, list):
             continue

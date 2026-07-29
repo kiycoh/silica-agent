@@ -138,7 +138,7 @@ def test_web_research_keeps_model_sources_section(tmp_vault, monkeypatch):
     assert body.count("## Sources") == 1  # not doubled
 
 
-def test_web_research_constrains_loop_to_web_search(tmp_vault, monkeypatch):
+def test_web_research_constrains_loop_to_search_and_fetch(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
     captured = _patch_run_agent(
         monkeypatch,
@@ -148,8 +148,53 @@ def test_web_research_constrains_loop_to_web_search(tmp_vault, monkeypatch):
 
     wr.web_research("x", max_searches=7)
 
-    assert captured["constraints"].tools == ("web_search",)
+    assert captured["constraints"].tools == ("web_search", "web_fetch")
     assert captured["constraints"].max_iterations == 7
+
+
+def test_web_research_prompt_tells_the_model_to_fetch():
+    assert "web_fetch" in wr._RESEARCH_SYSTEM_PROMPT
+
+
+def test_collect_sources_picks_up_a_fetched_url():
+    """web_fetch returns prose, not JSON; its Source: line is the citation."""
+    messages = [
+        {"role": "tool", "content": json.dumps(
+            [{"title": "T1", "url": "https://a.test", "content": "c"}])},
+        {"role": "tool", "content": "Source: https://b.test/article\n\nBody text."},
+    ]
+    assert wr._collect_sources(messages) == [
+        ("https://a.test", "T1"),
+        ("https://b.test/article", "https://b.test/article"),
+    ]
+
+
+def test_collect_sources_ignores_prose_without_a_source_line():
+    messages = [{"role": "tool", "content": "just some text\nno header"}]
+    assert wr._collect_sources(messages) == []
+
+
+def test_main_agent_default_toolset_excludes_web_fetch():
+    from unittest.mock import patch
+    from types import SimpleNamespace
+    from silica.agent.loop import run_agent
+
+    assert "web_fetch" in TOOLS  # registered transitively by importing wr
+
+    captured = {}
+
+    def fake_call_llm(model, messages, tools=None, cancel=None):
+        captured["tools"] = tools
+        return SimpleNamespace(
+            assistant_message={"role": "assistant", "content": "ok"},
+            tool_calls=[], text="ok", reasoning=None, usage={},
+        )
+
+    with patch("silica.agent.loop.call_llm", fake_call_llm):
+        run_agent(messages=[{"role": "user", "content": "hi"}], model="m")
+
+    names = {t["function"]["name"] for t in (captured["tools"] or [])}
+    assert "web_fetch" not in names
 
 
 def test_web_research_no_findings_raises_and_writes_nothing(tmp_vault, monkeypatch):
