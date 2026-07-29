@@ -726,3 +726,69 @@ def test_cooccur_bm25_lengths_are_per_store_and_current(tmp_path, monkeypatch):
     st.upsert_note("bulk", _nodes(filler=30000))
     ranked_after = _rank_cooccur_from_profile(st, profile, k=10, blocked=set(), scope=None)
     assert [p for p, _s in ranked_after] == ["long", "short"]
+
+
+def _old_rank_bm25(cooccur_store, profile, *, k, blocked, scope):
+    """Note-major BM25 reference: the shape `_rank_cooccur_from_profile` had
+    before it went stem-major, with the BM25 tf term inlined.
+
+    The stem-major rewrite memoizes the length norm per note instead of
+    recomputing it once per candidate, so this reference is what pins that the
+    memo returns the same number the inline expression did.
+    """
+    from silica.kernel.recall.relatedness import BM25_B, BM25_K1
+
+    if not profile:
+        return None
+    idf = _concept_idf(cooccur_store, set(profile), scope=scope)
+    lens, avgdl = cooccur_store.doc_lengths()
+    note_scores: dict[str, float] = {}
+    for path in cooccur_store.paths():
+        if path in blocked or not _path_in_scope(path, scope):
+            continue
+        norm = BM25_K1 * (1.0 - BM25_B + BM25_B * (lens.get(path, 0) or 1) / avgdl)
+        overlap = 0.0
+        nodes = cooccur_store.note_nodes(path)
+        for stem, weight in profile.items():
+            if not weight:
+                continue
+            tf = nodes.get(stem)
+            if tf:
+                overlap += weight * (tf * (BM25_K1 + 1.0) / (tf + norm)) * idf.get(stem, 0.0)
+        if overlap > 0.0:
+            note_scores[path] = overlap
+    if not note_scores:
+        return None
+    return sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+
+
+def test_rank_cooccur_bm25_reference_equivalence_across_a_varied_store(tmp_path, monkeypatch):
+    """The BM25 arm survives the stem-major rewrite bit-for-bit.
+
+    Twelve notes of unequal length so the per-note length norm actually varies —
+    a memo that leaked one note's norm onto another would move the scores here.
+    """
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "cooccur_bm25", True)
+    st = _dozen_notes_store(tmp_path)
+    profile = _main_profile()
+
+    for scope, blocked in ((None, set()), ("folder", set()), (None, {"root1", "root4"})):
+        new = _rank_cooccur_from_profile(st, profile, k=100, blocked=blocked, scope=scope)
+        old = _old_rank_bm25(st, profile, k=100, blocked=blocked, scope=scope)
+        assert new is not None
+        assert new == old, f"bm25 mismatch at scope={scope!r} blocked={blocked!r}"
+
+
+def test_rank_cooccur_skips_zero_weight_stems_like_the_note_major_form(tmp_path):
+    """A zero-weight profile stem contributes nothing and cannot resurrect a
+    note that matches on nothing else — the `if not weight` guard moved from the
+    inner loop to the outer one, so it needs its own pin."""
+    st = _dozen_notes_store(tmp_path)
+    profile = dict(_main_profile())
+    profile[_snowball("eta")] = 0.0  # only root6 carries it, and nothing else
+
+    ranked = _rank_cooccur_from_profile(st, profile, k=100, blocked=set(), scope=None)
+    assert "root6" not in [p for p, _s in ranked]
+    assert ranked == _old_rank_cooccur_from_profile(st, profile, k=100, blocked=set(), scope=None)

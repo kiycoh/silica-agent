@@ -292,38 +292,59 @@ def _rank_cooccur_from_profile(
 
     bm25 = bool(getattr(CONFIG, "cooccur_bm25", False))
     idf = _concept_idf(cooccur_store, set(profile), scope=scope)
-    # Candidate set = union of the query stems' postings (Task 3.4): only notes
-    # sharing at least one profile stem can score > 0, so this yields the same
-    # note_scores as a full-notes scan without visiting notes that can't match.
     postings = cooccur_store.stem_postings()
     lens, avgdl = cooccur_store.doc_lengths() if bm25 else ({}, 1.0)
-    candidates: set[str] = set()
-    for stem in profile:
-        plist = postings.get(stem)
-        if plist:
-            candidates.update(plist)
+
+    # Accumulate over the inverted index, stem-major: walk each profile stem's
+    # posting list once and add its term to the notes that actually appear in it.
+    #
+    # This used to run note-major — build the candidate union, then for every
+    # candidate re-scan every profile stem and test `path in plist`. That is
+    # O(|candidates| x |profile|) with a `postings.get(stem)` inside the inner
+    # loop, so the same posting list was fetched once per candidate. Profiled on
+    # a 718-note vault with expand=True: 113M dict.get calls over 40 queries,
+    # 0.52s each, and the report's per-note loop over it took 129s. Stem-major
+    # visits only the (stem, note) pairs that contribute — the non-matches, which
+    # were the overwhelming majority of the work, are never enumerated.
+    #
+    # Bit-identical, not merely equivalent: `profile` is the outer loop in both
+    # forms, so each note still receives its terms in profile order and the
+    # float summation never reassociates. The per-term expression is kept
+    # verbatim for the same reason.
     note_scores: dict[str, float] = {}
-    for path in candidates:
-        if path in blocked or not in_folder(path, scope):
+    norms: dict[str, float] = {}      # BM25 length norm per note, computed once
+    allowed: dict[str, bool] = {}     # blocked/in_folder verdict per note, once
+    for stem, weight in profile.items():
+        if not weight:
             continue
-        # Length normalisation depends on the document alone, so it is hoisted out
-        # of the stem loop (this is why the measured cost is +0.7ms per endpoint).
-        # `or 1`: a candidate always has a posting, hence a positive length — the
-        # fallback only guards an incoherent store, where a 0 would collapse norm
-        # to K1*(1-B) and hand that note the top score.
-        norm = (BM25_K1 * (1.0 - BM25_B + BM25_B * (lens.get(path, 0) or 1) / avgdl)
-                if bm25 else 0.0)
-        overlap = 0.0
-        for stem, weight in profile.items():
-            if not weight:
+        plist = postings.get(stem)
+        if not plist:
+            continue
+        for path, tf in plist.items():
+            ok = allowed.get(path)
+            if ok is None:
+                ok = path not in blocked and in_folder(path, scope)
+                allowed[path] = ok
+            if not ok:
                 continue
-            plist = postings.get(stem)
-            if plist and path in plist:
-                tf = plist[path]
-                term = tf * (BM25_K1 + 1.0) / (tf + norm) if bm25 else tf
-                overlap += weight * term * idf.get(stem, 0.0)
-        if overlap > 0.0:
-            note_scores[path] = overlap
+            if bm25:
+                # Length normalisation depends on the document alone, so it is
+                # memoized per note. `or 1`: a candidate always has a posting,
+                # hence a positive length — the fallback only guards an
+                # incoherent store, where a 0 would collapse norm to K1*(1-B)
+                # and hand that note the top score.
+                norm = norms.get(path)
+                if norm is None:
+                    norm = BM25_K1 * (1.0 - BM25_B + BM25_B * (lens.get(path, 0) or 1) / avgdl)
+                    norms[path] = norm
+                term = tf * (BM25_K1 + 1.0) / (tf + norm)
+            else:
+                term = tf
+            note_scores[path] = note_scores.get(path, 0.0) + weight * term * idf.get(stem, 0.0)
+
+    # A note whose terms all cancelled to zero never scored an overlap — the
+    # note-major form dropped it with `if overlap > 0.0`, so drop it here too.
+    note_scores = {p: s for p, s in note_scores.items() if s > 0.0}
     if not note_scores:
         return None
     ranked = sorted(note_scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
