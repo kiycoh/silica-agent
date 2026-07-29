@@ -209,9 +209,19 @@ def _signatures(entry: dict) -> str:
     read), no `private` modifier token anywhere in the declaration prefix
     (Java — catches `private void f()` and the legal-but-reordered
     `static private void f()` alike). A member whose own declaring class was
-    filtered out is dropped too, tracked by name as symbols are walked in
-    document order, so a private inner class never leaks its public methods
-    reparented onto the outer class.
+    filtered out is dropped too, tracked by bare name as symbols are walked
+    in document order (`ModuleSkeleton.symbols` guarantees a class always
+    precedes its own members — base.py, and every walker's class handler
+    appends the class before recursing into its body), so a private inner
+    class never leaks its public methods reparented onto the outer class.
+
+    `hidden` is keyed by bare name, the only key `parent` ever carries, so a
+    survivor re-opens its own name the moment it is emitted: two unrelated
+    classes that happen to share a simple name (`Outer.Builder` filtered,
+    `Other.Builder` public, both named "Builder") must not let the first
+    poison the second's members. Document order makes this safe: by the time
+    a later same-named class is read, any of the first one's still-hidden
+    descendants have already been resolved.
 
     Known limitation: this cannot filter a private C++ member. `codeast/c.py`
     never records the `access_specifier` node (`private:` is a class-body
@@ -230,6 +240,7 @@ def _signatures(entry: dict) -> str:
         if parent in hidden or underscored or private:
             hidden.add(name)
             continue
+        hidden.discard(name)  # a later same-named symbol that survives re-opens the name
         lines.append(("  " if parent else "") + sig)
     return "\n".join(lines)
 

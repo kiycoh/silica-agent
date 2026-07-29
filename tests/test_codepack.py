@@ -349,3 +349,26 @@ def test_private_inner_class_hides_its_own_public_members():
     assert "public class Outer" in sigs
     assert "public void shown()" in sigs
     assert "leaked" not in sigs
+
+
+def test_same_named_class_in_a_different_scope_is_not_poisoned():
+    # Round-2 review finding: `hidden` is keyed by bare name (the only key
+    # `parent` ever carries), so a filtered `Outer.Builder` must not also
+    # hide the unrelated, public `Other.Builder`'s own members. Document
+    # order (a class always precedes its own members) is what makes this
+    # safe: `Builder` is re-opened the moment the second, surviving `Builder`
+    # is itself emitted, before its own children are read.
+    entry = {
+        "symbols": [
+            {"kind": "class", "name": "Outer", "parent": "", "signature": "public class Outer", "doc": ""},
+            {"kind": "class", "name": "Builder", "parent": "Outer", "signature": "private class Builder", "doc": ""},
+            {"kind": "method", "name": "step1", "parent": "Builder", "signature": "public void step1()", "doc": ""},
+            {"kind": "method", "name": "topMethod", "parent": "Outer", "signature": "public void topMethod()", "doc": ""},
+            {"kind": "class", "name": "Other", "parent": "", "signature": "public class Other", "doc": ""},
+            {"kind": "class", "name": "Builder", "parent": "Other", "signature": "public class Builder", "doc": ""},
+            {"kind": "method", "name": "step2", "parent": "Builder", "signature": "public void step2()", "doc": ""},
+        ]
+    }
+    sigs = codepack._signatures(entry)
+    assert "step1" not in sigs               # Outer.Builder is private: dropped with its child
+    assert "public void step2()" in sigs     # Other.Builder is public: its child must survive
