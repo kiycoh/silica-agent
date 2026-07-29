@@ -352,17 +352,28 @@ def code_pack(vault: Path | str, target: str,
     fan_in = graph.fan_in(path) if graph is not None else 0
     importers = [(p, p) for p in (graph.importers(path) if graph is not None else [])]
     external = [(d, d) for d in entry.get("external", [])]
+    used = len(chunks[0]) + 1  # + the trailing newline the pack always ends with
+    stop = False
     for name, entries in (
         ("hierarchy", _hierarchy(graph, path, entry)),
         ("neighborhood", _neighborhood(graph, path, entry, source)),
         ("external", external),
         ("importers", importers),
     ):
-        if not entries:
-            continue
         header = f"## {name}" + (f" (fan-in {fan_in})" if name == "importers" else "")
-        chunks.append(header + "\n" + "\n".join(line for _, line in entries))
-        sections[name] = [label for label, _ in entries]
+        emitted: list[str] = []
+        for label, block in entries:
+            # a chunk costs "\n\n" + header + "\n" the first time, "\n" after
+            cost = len(block) + (len(header) + 3 if not emitted else 1)
+            if stop or used + cost > budget_chars:
+                stop = True   # dropped is a suffix: a later small entry never jumps the queue
+                dropped.append(f"{name}: {label}")
+                continue
+            used += cost
+            emitted.append(block)
+            sections.setdefault(name, []).append(label)
+        if emitted:
+            chunks.append(header + "\n" + "\n".join(emitted))
     return {
         "text": "\n\n".join(chunks) + "\n",
         "sections": sections,

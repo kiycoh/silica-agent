@@ -388,3 +388,25 @@ def test_section_order_is_fixed(repo):
                          text.index("## neighborhood"), text.index("## external"),
                          text.index("## importers"))]
     assert order == sorted(order)
+
+
+def test_fill_stops_at_the_first_entry_that_does_not_fit(repo):
+    full = codepack.code_pack(repo, TARGET)
+    budget = len(full["text"]) - 30
+    tight = codepack.code_pack(repo, TARGET, budget_chars=budget)
+
+    assert tight["target_mode"] == "verbatim"   # the target still fits whole
+    assert tight["truncated"] is False          # truncated is about the target, not the sections
+    assert len(tight["text"]) <= budget
+    assert tight["dropped"] == ["importers: src/main/java/app/Launcher.java"]
+    assert "importers" not in tight["sections"]
+    assert tight["sections"]["neighborhood"] == full["sections"]["neighborhood"]
+
+
+def test_dropped_is_a_suffix_of_the_entry_order(repo):
+    full = codepack.code_pack(repo, TARGET)
+    order = [f"{sec}: {label}"
+             for sec in ("hierarchy", "neighborhood", "external", "importers")
+             for label in full["sections"].get(sec, [])]
+    tight = codepack.code_pack(repo, TARGET, budget_chars=len(GAME_MODEL) + 60)
+    assert tight["dropped"] == order[len(order) - len(tight["dropped"]):]
