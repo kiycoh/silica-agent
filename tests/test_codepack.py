@@ -127,3 +127,25 @@ def test_degrades_outside_a_git_repo(tmp_path, monkeypatch):
 def test_unreadable_target_raises(repo):
     with pytest.raises(ValueError):
         codepack.code_pack(repo, "src/main/java/game/Ghost.java")
+
+
+def test_target_over_budget_falls_back_to_outline(repo):
+    pack = codepack.code_pack(repo, TARGET, budget_chars=120)
+    assert pack["target_mode"] == "outline"
+    assert pack["truncated"] is True
+    assert "public class GameModel extends Entity" in pack["text"]
+    assert "public void tick()" in pack["text"]
+    assert "pos = new Vec2(1, 2);" not in pack["text"]  # bodies are gone
+
+
+def test_outline_is_served_even_when_it_busts_the_budget(repo):
+    pack = codepack.code_pack(repo, TARGET, budget_chars=10)
+    assert pack["target_mode"] == "outline"
+    assert "public class GameModel extends Entity" in pack["text"]  # never less than the target
+
+
+def test_no_symbols_means_no_outline_to_fall_back_to(repo, monkeypatch):
+    _write(repo, "notes.txt", "x" * 500)
+    pack = codepack.code_pack(repo, "notes.txt", budget_chars=50)
+    assert pack["target_mode"] == "verbatim"  # an empty outline is worse than a long file
+    assert "xxx" in pack["text"]

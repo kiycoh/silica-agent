@@ -24,6 +24,34 @@ from silica.kernel.recall import paths as _paths
 BUDGET_CHARS = 24000
 
 
+def _outline(entry: dict, skip: str = "") -> str:
+    """Signatures of a file, one per line, methods indented. This is the
+    "everything around it" half of D5, and the fallback when the target itself
+    is too big to serve whole."""
+    head = skip.split(".", 1)[0]
+    lines: list[str] = []
+    for s in entry.get("symbols", []):
+        name, parent = s.get("name", ""), s.get("parent", "")
+        qual = f"{parent}.{name}" if parent else name
+        if skip and (qual == skip or ("." not in skip and head in (name, parent))):
+            continue
+        doc = f"  # {s['doc']}" if s.get("doc") else ""
+        lines.append(("  " if parent else "") + s.get("signature", "") + doc)
+    return "\n".join(lines)
+
+
+def _target_block(source: str, entry: dict, budget_chars: int) -> tuple[str, str]:
+    """(body, mode). Verbatim when it fits, otherwise the outline. An empty
+    outline (no graph, unsupported language) is not an improvement, so the
+    truncated source stays: never serve less than the target (spec section 6)."""
+    if len(source) <= budget_chars:
+        return source.rstrip("\n"), "verbatim"
+    outline = _outline(entry)
+    if not outline:
+        return source.rstrip("\n"), "verbatim"
+    return outline, "outline"
+
+
 def code_pack(vault: Path | str, target: str,
               budget_chars: int = BUDGET_CHARS) -> dict:
     """Context pack for `target` ("path", "path#Class" or "path#Class.member").
@@ -52,7 +80,7 @@ def code_pack(vault: Path | str, target: str,
         if not entry:
             dropped.append(f"neighborhood: {path} is not in the code graph")
 
-    body, mode = source.rstrip("\n"), "verbatim"
+    body, mode = _target_block(source, entry, budget_chars)
     chunks = [f"## target {path} @ {head_ref} mode: {mode}\n{body}"]
     sections: dict[str, list[str]] = {"target": [path]}
     return {
