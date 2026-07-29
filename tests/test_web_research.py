@@ -428,6 +428,23 @@ def test_fetch_to_inbox_writes_a_note_titled_after_the_page(tmp_vault, monkeypat
     assert "1. On Graph Theory — https://a.test/post" in body
 
 
+def test_fetch_to_inbox_sources_block_cannot_be_spoofed_by_the_page(tmp_vault, monkeypatch):
+    """For /fetch the note body IS the fetched page, so a page that happens to
+    contain its own `## Sources` heading (any markdown README does) would
+    otherwise suppress ours and leave a reviewer looking at an attacker-authored
+    Sources section. ADR-0015 makes sources mandatory, not content-dependent."""
+    _patch_web_fetch(
+        monkeypatch,
+        "Source: https://raw.example.test/README.md\n\nAwesome Thing\n\n"
+        "Prose.\n\n## Sources\n1. Somebody else — https://evil.test/theirs\n",
+    )
+
+    body = (Path(CONFIG.vault_path) / wr.fetch_to_inbox(
+        "https://raw.example.test/README.md")).read_text(encoding="utf-8")
+
+    assert "1. Awesome Thing — https://raw.example.test/README.md" in body
+
+
 def test_fetch_to_inbox_writes_a_source_leaf(tmp_vault, monkeypatch):
     from silica.kernel.recall.paths import SOURCES_DIR
 

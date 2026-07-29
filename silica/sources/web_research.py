@@ -227,12 +227,19 @@ def _build_note(
     body: str,
     sources: list[tuple[str, str]],
     source: str = "web-research",
+    force_sources: bool = False,
 ) -> str:
-    """Deterministic frontmatter + model body + guaranteed ## Sources.
+    """Deterministic frontmatter + body + guaranteed ## Sources.
 
-    The date is set here, never trusted to the model. If the model already
-    wrote a ## Sources section it is kept as-is; otherwise we append one from
-    the collected trace (ADR-0015: sources are mandatory, not a courtesy)."""
+    The date is set here, never trusted to the model. If the body already has a
+    ## Sources section it is kept as-is; otherwise we append one from the
+    collected trace (ADR-0015: sources are mandatory, not a courtesy).
+
+    `force_sources` appends ours regardless. For /web-search the body is the
+    model's own prose and its ## Sources is the one it was asked to write; for
+    /fetch the body is the verbatim page, where a ## Sources heading is the
+    *page author's* (every markdown README has one) and must not be able to
+    stand in for Silica's."""
     today = datetime.date.today().isoformat()
     front = (
         "---\n"
@@ -243,7 +250,7 @@ def _build_note(
         "---\n"
     )
     out = body.strip()
-    if "## Sources" not in out:
+    if force_sources or "## Sources" not in out:
         lines = [f"{i}. {title} — {url}" for i, (url, title) in enumerate(sources, 1)]
         sources_block = "\n".join(lines) or "(no sources captured)"
         out = f"{out}\n\n## Sources\n{sources_block}"
@@ -299,7 +306,9 @@ def fetch_to_inbox(url: str) -> str:
     if not title:
         raise ValueError(f"nothing readable at {url}")
 
-    note = _build_note(title, text, [(url, title)], source="web-fetch")
+    note = _build_note(
+        title, text, [(url, title)], source="web-fetch", force_sources=True
+    )
     note_rel = _unique_inbox_path(title)
     from silica.driver import DRIVER
 
