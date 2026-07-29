@@ -149,3 +149,22 @@ def test_no_symbols_means_no_outline_to_fall_back_to(repo, monkeypatch):
     pack = codepack.code_pack(repo, "notes.txt", budget_chars=50)
     assert pack["target_mode"] == "verbatim"  # an empty outline is worse than a long file
     assert "xxx" in pack["text"]
+
+
+def test_outline_skip_bare_name_only_drops_the_addressed_symbol():
+    # skip="Foo" must drop the top-level symbol named Foo and its own
+    # members, but an unrelated method that merely shares the name Foo
+    # (here, a member of a different class, Bar.Foo) must survive.
+    entry = {
+        "symbols": [
+            {"kind": "class", "name": "Foo", "parent": "", "signature": "class Foo", "doc": ""},
+            {"kind": "method", "name": "bar", "parent": "Foo", "signature": "void bar()", "doc": ""},
+            {"kind": "class", "name": "Bar", "parent": "", "signature": "class Bar", "doc": ""},
+            {"kind": "method", "name": "Foo", "parent": "Bar", "signature": "void Foo()", "doc": ""},
+        ]
+    }
+    outline = codepack._outline(entry, skip="Foo")
+    assert "class Foo" not in outline
+    assert "void bar()" not in outline
+    assert "class Bar" in outline
+    assert "void Foo()" in outline  # unrelated Bar.Foo(), not a member of Foo

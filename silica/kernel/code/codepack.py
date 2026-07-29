@@ -33,7 +33,8 @@ def _outline(entry: dict, skip: str = "") -> str:
     for s in entry.get("symbols", []):
         name, parent = s.get("name", ""), s.get("parent", "")
         qual = f"{parent}.{name}" if parent else name
-        if skip and (qual == skip or ("." not in skip and head in (name, parent))):
+        if skip and (qual == skip or ("." not in skip
+                and (parent == head or (parent == "" and name == head)))):
             continue
         doc = f"  # {s['doc']}" if s.get("doc") else ""
         lines.append(("  " if parent else "") + s.get("signature", "") + doc)
@@ -43,7 +44,8 @@ def _outline(entry: dict, skip: str = "") -> str:
 def _target_block(source: str, entry: dict, budget_chars: int) -> tuple[str, str]:
     """(body, mode). Verbatim when it fits, otherwise the outline. An empty
     outline (no graph, unsupported language) is not an improvement, so the
-    truncated source stays: never serve less than the target (spec section 6)."""
+    full source is served verbatim instead: never serve less than the target
+    (spec section 6)."""
     if len(source) <= budget_chars:
         return source.rstrip("\n"), "verbatim"
     outline = _outline(entry)
