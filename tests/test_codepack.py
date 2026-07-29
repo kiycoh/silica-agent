@@ -144,7 +144,7 @@ def test_outline_is_served_even_when_it_busts_the_budget(repo):
     assert "public class GameModel extends Entity" in pack["text"]  # never less than the target
 
 
-def test_no_symbols_means_no_outline_to_fall_back_to(repo, monkeypatch):
+def test_no_symbols_means_no_outline_to_fall_back_to(repo):
     _write(repo, "notes.txt", "x" * 500)
     pack = codepack.code_pack(repo, "notes.txt", budget_chars=50)
     assert pack["target_mode"] == "verbatim"  # an empty outline is worse than a long file
@@ -502,10 +502,12 @@ def test_external_and_importers_sections(repo):
 
 def test_section_order_is_fixed(repo):
     text = codepack.code_pack(repo, TARGET)["text"]
-    order = [i for i in (text.index("## target"), text.index("## hierarchy"),
-                         text.index("## neighborhood"), text.index("## external"),
-                         text.index("## importers"))]
-    assert order == sorted(order)
+    headers = ["## target", "## hierarchy", "## neighborhood", "## external", "## importers"]
+    # .find, not .index: a section that legitimately went empty should fail as
+    # a missing header, not as an opaque ValueError from inside the fixture.
+    order = [(h, text.find(h)) for h in headers]
+    assert [h for h, at in order if at < 0] == []
+    assert [at for _, at in order] == sorted(at for _, at in order)
 
 
 def test_fill_stops_at_the_first_entry_that_does_not_fit(repo):
@@ -653,3 +655,119 @@ def test_tool_reports_missing_vault_instead_of_serving_the_cwd(monkeypatch):
     assert res["status"] == "error"
     assert "vault" in res["message"]
     assert TARGET not in res["message"]
+
+
+def test_supertypes_keeps_a_base_the_signature_cuts_short():
+    # A declaration line wrapped after the dot leaves a trailing separator.
+    # The last-segment rule reduced it to the empty string and dropped a base
+    # that is right there in the text.
+    assert codepack._supertypes("public class A extends B.") == ["B"]
+    assert codepack._supertypes("class A : public ns::") == ["ns"]
+
+
+def test_a_cpp_type_alias_is_not_masked_as_an_import():
+    # `using Alias = Neighbor;` is a real use of Neighbor and often the only
+    # place it is named, so masking it hid that neighbour completely. A plain
+    # using-declaration still names its target the way an import does.
+    src = "using Vec = geom::Vector;\nusing std::string;\nint n;\n"
+    body = codepack._mask_imports(src)
+    assert body.splitlines()[0] == "using Vec = geom::Vector;"
+    assert body.splitlines()[1].strip() == ""
+    assert len(body) == len(src)  # offsets preserved
+
+
+def test_python_symbol_named_private_is_not_read_as_a_modifier():
+    # `private` is a modifier token in Java, not in Python, where it can only
+    # be the symbol's own name. A public function must not vanish over it.
+    py = {"language": "python", "symbols": [
+        {"kind": "function", "name": "private", "parent": "",
+         "signature": "def private()", "doc": ""}]}
+    assert codepack._signatures(py) == "def private()"
+    java = {"language": "java", "symbols": [
+        {"kind": "method", "name": "f", "parent": "",
+         "signature": "private void f()", "doc": ""}]}
+    assert codepack._signatures(java) == ""
+
+
+def test_symbol_source_has_no_selector_table_for_c_and_cpp():
+    # C and C++ names sit inside `declarator`, so there is no selector table
+    # and a whole-file pack is the honest degrade (D4).
+    src = "struct Foo {\n    int x;\n};\n"
+    assert codepack._symbol_source(src, "c", "Foo") is None
+    assert codepack._symbol_source(src, "cpp", "Foo") is None
+    assert codepack._symbol_source(src, "", "Foo") is None
+
+
+def test_symbol_source_resolves_javascript_through_the_typescript_table():
+    src = "function alpha() {\n  return 1;\n}\n\nfunction beta() {\n  return 2;\n}\n"
+    picked = codepack._symbol_source(src, "javascript", "beta")
+    assert picked == "function beta() {\n  return 2;\n}"
+
+
+class _FakeGraph:
+    """Stand-in for a CodeGraph: `_neighborhood` only ever reads `.files`."""
+
+    def __init__(self, files: dict) -> None:
+        self.files = files
+
+
+def _pyfile(*names: str) -> dict:
+    return {"language": "python", "imports": [],
+            "symbols": [{"kind": "function", "name": n, "parent": "",
+                         "signature": f"def {n}()", "doc": ""} for n in names]}
+
+
+def test_neighborhood_breaks_an_equal_offset_tie_by_path():
+    # Both neighbours are first named by the SAME token, so the offset cannot
+    # order them and the path sort has to; otherwise the order is whatever the
+    # import list happened to be, and the pack stops being deterministic.
+    graph = _FakeGraph({"z/late.py": _pyfile("shared"), "a/early.py": _pyfile("shared")})
+    entry = {"language": "python", "imports": ["z/late.py", "a/early.py"], "symbols": []}
+    out = codepack._neighborhood(graph, "main.py", entry, "shared()\n")
+    assert [label for label, _ in out] == ["a/early.py", "z/late.py"]
+
+
+def test_neighborhood_drops_a_neighbour_with_nothing_public_to_show():
+    graph = _FakeGraph({"helper.py": _pyfile("_internal")})
+    entry = {"language": "python", "imports": ["helper.py"], "symbols": []}
+    source = "helper.run()\n"
+    # mentioned (by its stem) but every symbol it declares is private, so
+    # there is no block to emit and the entry is skipped, not emitted empty.
+    assert codepack._neighborhood(graph, "main.py", entry, source) == []
+    graph.files["helper.py"]["symbols"].append(
+        {"kind": "function", "name": "run", "parent": "", "signature": "def run()", "doc": ""})
+    assert [label for label, _ in
+            codepack._neighborhood(graph, "main.py", entry, source)] == ["helper.py"]
+
+
+def test_empty_sections_are_absent_rather_than_emitted_empty(repo):
+    # Hud imports nothing and nothing imports it, so neither header may appear:
+    # an empty section is budget spent to say nothing.
+    pack = codepack.code_pack(repo, "src/main/java/game/Hud.java")
+    assert "## external" not in pack["text"]
+    assert "## importers" not in pack["text"]
+    assert "external" not in pack["sections"]
+    assert "importers" not in pack["sections"]
+
+
+def test_tool_reports_a_whitespace_only_vault_as_missing(monkeypatch):
+    from silica.tools.codedocs_tool import silica_code_pack
+
+    monkeypatch.setattr("silica.config.CONFIG.vault_path", "   ")
+    res = silica_code_pack(target=TARGET)
+    assert res["status"] == "error"
+    assert "vault" in res["message"]
+    assert TARGET not in res["message"]  # not misreported as a bad target
+
+
+def test_tool_reports_an_unreadable_code_graph_instead_of_raising(repo, monkeypatch):
+    # load_codegraph's store-write path raises OSError, not ValueError. The
+    # wrapper caught only ValueError, so an unwritable store crashed the tool.
+    from silica.tools.codedocs_tool import silica_code_pack
+
+    monkeypatch.setattr("silica.config.CONFIG.vault_path", str(repo))
+    monkeypatch.setattr(codegraph, "load_codegraph",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("store is read-only")))
+    res = silica_code_pack(target=TARGET)
+    assert res["status"] == "error"
+    assert "read-only" in res["message"]

@@ -197,7 +197,11 @@ def _supertypes(signature: str) -> list[str]:
             # enclosing type.
             idents = [i for i in _IDENT.findall(part) if i not in _ACCESS]
             if idents:
-                base = _QUALIFIER.split(idents[0])[-1]
+                # Empty segments dropped, so a name the signature cuts short
+                # (`extends B.`, a declaration wrapped after the dot) still
+                # yields `B` instead of nothing.
+                segments = [seg for seg in _QUALIFIER.split(idents[0]) if seg]
+                base = segments[-1] if segments else ""
                 if base and base not in out:
                     out.append(base)
     return out
@@ -265,11 +269,15 @@ def _signatures(entry: dict) -> str:
     show every member, public or not."""
     lines: list[str] = []
     hidden: set[str] = set()
+    # Python has no `private` modifier: it spells private with the underscore
+    # rule above, so there the token can only be a symbol's own name, and
+    # hiding a public function over what it is called is wrong.
+    modifiers = (entry.get("language") or "") != "python"
     for s in entry.get("symbols", []):
         name, parent = s.get("name", ""), s.get("parent", "")
         sig = s.get("signature", "")
         underscored = name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
-        private = "private" in sig.split("(", 1)[0].split()
+        private = modifiers and "private" in sig.split("(", 1)[0].split()
         if parent in hidden or underscored or private:
             hidden.add(name)
             continue
@@ -281,7 +289,10 @@ def _signatures(entry: dict) -> str:
 # An import/include line always names the file it resolves to, so searching
 # it unmasked would make every import a "mention" by definition and the
 # filter below would exclude nothing.
-_IMPORT_START = re.compile(r"^[ \t]*(?:import|from|#include|using)\b")
+# `using` names another file in C++ (`using std::string;`) EXCEPT when it
+# declares a type alias (`using Alias = Neighbor;`), which is a real use and
+# often the only place a neighbour is named. Masking it hid that neighbour.
+_IMPORT_START = re.compile(r"^[ \t]*(?:(?:import|from|#include)\b|using\b(?![^=;]*=))")
 _OPEN, _CLOSE = "([{", ")]}"
 
 
@@ -438,8 +449,10 @@ def code_pack(vault: Path | str, target: str,
     body, mode = _target_block(source, entry, selector, budget_chars - overhead, dropped)
     chunks = [f"## target {path} @ {head_ref} mode: {mode}\n{body}"]
     sections: dict[str, list[str]] = {"target": [path]}
-    fan_in = graph.fan_in(path) if graph is not None else 0
-    importers = [(p, p) for p in (graph.importers(path) if graph is not None else [])]
+    # one scan of the graph, not two: `fan_in` is defined as len(importers)
+    importer_paths = graph.importers(path) if graph is not None else []
+    fan_in = len(importer_paths)
+    importers = [(p, p) for p in importer_paths]
     external = [(d, d) for d in entry.get("external", [])]
     used = len(chunks[0]) + 1  # + the trailing newline the pack always ends with
     stop = False

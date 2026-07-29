@@ -97,11 +97,17 @@ def silica_code_pack(target: str, budget_chars: int = 24000) -> dict:
     declared facts around it, inside a character budget.
 
     Pass a repo-relative path, optionally narrowed with '#Class' or
-    '#Class.member'. You get back the target verbatim, its declared supertypes
+    '#Class.member'. You get back the target itself, its declared supertypes
     and the repo classes that extend it, the public signatures of the files it
     can see (resolved imports, plus same-package siblings in Java) filtered to
     the ones it actually names, its external dependencies, and the files that
     import it.
+
+    `target_mode` says how the target itself came back. "verbatim" is the whole
+    file. A selector that resolves gives "symbol": that declaration whole, the
+    rest of the file as a signature outline. A file too big for the budget with
+    no selector gives "outline": signatures only. `truncated` is true for both
+    degrades, so check it before treating the target as complete source.
 
     This is a closure, not a search: no ranking, no embeddings, no language
     server. The same repo state gives the same bytes. Use it before rewriting
@@ -120,11 +126,13 @@ def silica_code_pack(target: str, budget_chars: int = 24000) -> dict:
     from silica.config import CONFIG
     from silica.kernel.code import codepack
 
-    vault = getattr(CONFIG, "vault_path", "") or ""
+    vault = str(getattr(CONFIG, "vault_path", "") or "").strip()
     if not vault:
         return {"status": "error", "message": "no vault configured"}
     try:
         pack = codepack.code_pack(vault, target, budget_chars)
-    except ValueError as e:
+    except (ValueError, OSError) as e:
+        # OSError: loading the code graph can write its store, and an
+        # unwritable store is a tool-level error, not a crash of the caller.
         return {"status": "error", "message": str(e)}
     return {"status": "ok", **pack}
