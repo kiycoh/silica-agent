@@ -41,11 +41,73 @@ def _outline(entry: dict, skip: str = "") -> str:
     return "\n".join(lines)
 
 
-def _target_block(source: str, entry: dict, budget_chars: int) -> tuple[str, str]:
-    """(body, mode). Verbatim when it fits, otherwise the outline. An empty
-    outline (no graph, unsupported language) is not an improvement, so the
-    full source is served verbatim instead: never serve less than the target
-    (spec section 6)."""
+# Declaration node types per family, the same sets the codeast walkers use.
+# C and C++ are absent on purpose: their names sit inside `declarator`, so a
+# whole-file pack is the honest degrade (D4).
+# ponytail: add the C/C++ declarator walk only if a real C target asks for it
+_DECL_NODES: dict[str, tuple[str, ...]] = {
+    "python": ("class_definition", "function_definition"),
+    "java": ("class_declaration", "interface_declaration", "enum_declaration",
+             "record_declaration", "annotation_type_declaration",
+             "method_declaration", "constructor_declaration"),
+    "typescript": ("class_declaration", "abstract_class_declaration",
+                   "interface_declaration", "function_declaration",
+                   "method_definition"),
+}
+_DECL_NODES["javascript"] = _DECL_NODES["typescript"]
+
+
+def _find_decl(node, src: bytes, kinds: tuple[str, ...], name: str):
+    """First declaration node of `kinds` whose `name` field reads `name`."""
+    for i in range(node.named_child_count):
+        child = node.named_child(i)
+        if child.type in kinds:
+            field = child.child_by_field_name("name")
+            if field is not None and src[field.start_byte:field.end_byte].decode(
+                    "utf-8", errors="replace") == name:
+                return child
+        found = _find_decl(child, src, kinds, name)
+        if found is not None:
+            return found
+    return None
+
+
+def _symbol_source(source: str, language: str, selector: str) -> str | None:
+    """Verbatim declaration text for "Class", "Class.member" or a top-level
+    name. Reparses this one file: no offset is persisted, so Symbol and
+    STORE_VERSION stay untouched (D7). None when the family has no selector
+    table or the name is not there."""
+    kinds = _DECL_NODES.get(language or "")
+    if not kinds:
+        return None
+    try:
+        from tree_sitter_language_pack import get_parser
+        src = source.encode("utf-8")
+        node = get_parser(language).parse(src).root_node
+    except Exception:
+        return None
+    outer, _, inner = selector.partition(".")
+    node = _find_decl(node, src, kinds, outer)
+    if node is not None and inner:
+        node = _find_decl(node, src, kinds, inner)
+    if node is None:
+        return None
+    return src[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+
+
+def _target_block(source: str, entry: dict, selector: str, budget_chars: int,
+                  dropped: list[str]) -> tuple[str, str]:
+    """(body, mode). Verbatim when it fits, the selected symbol plus the rest
+    as an outline when a selector resolves, the file outline otherwise. An
+    empty outline is not an improvement, so the truncated source stays: never
+    serve less than the target (spec section 6)."""
+    if selector:
+        picked = _symbol_source(source, entry.get("language") or "", selector)
+        if picked is not None:
+            rest = _outline(entry, skip=selector)
+            tail = f"\n\n-- rest of file, outline --\n{rest}" if rest else ""
+            return picked.rstrip("\n") + tail, "symbol"
+        dropped.append(f"target: selector '{selector}' not found, whole file served")
     if len(source) <= budget_chars:
         return source.rstrip("\n"), "verbatim"
     outline = _outline(entry)
@@ -82,7 +144,7 @@ def code_pack(vault: Path | str, target: str,
         if not entry:
             dropped.append(f"neighborhood: {path} is not in the code graph")
 
-    body, mode = _target_block(source, entry, budget_chars)
+    body, mode = _target_block(source, entry, selector, budget_chars, dropped)
     chunks = [f"## target {path} @ {head_ref} mode: {mode}\n{body}"]
     sections: dict[str, list[str]] = {"target": [path]}
     return {

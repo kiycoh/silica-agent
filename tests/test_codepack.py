@@ -168,3 +168,34 @@ def test_outline_skip_bare_name_only_drops_the_addressed_symbol():
     assert "void bar()" not in outline
     assert "class Bar" in outline
     assert "void Foo()" in outline  # unrelated Bar.Foo(), not a member of Foo
+
+
+def test_selector_serves_one_method_verbatim_and_the_rest_as_outline(repo):
+    pack = codepack.code_pack(repo, f"{TARGET}#GameModel.tick")
+    assert pack["target_mode"] == "symbol"
+    assert pack["truncated"] is True
+    assert "pos = new Vec2(1, 2);" in pack["text"]          # the selected body, verbatim
+    assert "-- rest of file, outline --" in pack["text"]
+    assert "public class GameModel extends Entity" in pack["text"]
+    assert pack["text"].count("public void tick()") == 1    # not repeated in the outline
+
+
+def test_selector_on_a_class_serves_the_whole_class(repo):
+    pack = codepack.code_pack(repo, "src/main/java/util/Vec2.java#Vec2")
+    assert pack["target_mode"] == "symbol"
+    assert "public int len()" in pack["text"]
+    assert "return 0;" in pack["text"]
+
+
+def test_unknown_selector_degrades_to_the_whole_file(repo):
+    pack = codepack.code_pack(repo, f"{TARGET}#GameModel.nosuch")
+    assert pack["target_mode"] == "verbatim"
+    assert any("nosuch" in d for d in pack["dropped"])
+
+
+def test_python_top_level_function_selector(repo):
+    _write(repo, "tool.py", "import os\n\n\ndef alpha():\n    return os.sep\n\n\ndef beta():\n    return 2\n")
+    pack = codepack.code_pack(repo, "tool.py#alpha")
+    assert pack["target_mode"] == "symbol"
+    assert "return os.sep" in pack["text"]
+    assert "return 2" not in pack["text"]
