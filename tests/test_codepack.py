@@ -372,3 +372,19 @@ def test_same_named_class_in_a_different_scope_is_not_poisoned():
     sigs = codepack._signatures(entry)
     assert "step1" not in sigs               # Outer.Builder is private: dropped with its child
     assert "public void step2()" in sigs     # Other.Builder is public: its child must survive
+
+
+def test_external_and_importers_sections(repo):
+    pack = codepack.code_pack(repo, TARGET)
+    assert "## external\njava.util" in pack["text"]
+    assert pack["sections"]["external"] == ["java.util"]
+    assert "## importers (fan-in 1)\nsrc/main/java/app/Launcher.java" in pack["text"]
+    assert pack["sections"]["importers"] == ["src/main/java/app/Launcher.java"]
+
+
+def test_section_order_is_fixed(repo):
+    text = codepack.code_pack(repo, TARGET)["text"]
+    order = [i for i in (text.index("## target"), text.index("## hierarchy"),
+                         text.index("## neighborhood"), text.index("## external"),
+                         text.index("## importers"))]
+    assert order == sorted(order)

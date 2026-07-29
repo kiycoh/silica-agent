@@ -349,13 +349,19 @@ def code_pack(vault: Path | str, target: str,
     body, mode = _target_block(source, entry, selector, budget_chars, dropped)
     chunks = [f"## target {path} @ {head_ref} mode: {mode}\n{body}"]
     sections: dict[str, list[str]] = {"target": [path]}
+    fan_in = graph.fan_in(path) if graph is not None else 0
+    importers = [(p, p) for p in (graph.importers(path) if graph is not None else [])]
+    external = [(d, d) for d in entry.get("external", [])]
     for name, entries in (
         ("hierarchy", _hierarchy(graph, path, entry)),
         ("neighborhood", _neighborhood(graph, path, entry, source)),
+        ("external", external),
+        ("importers", importers),
     ):
         if not entries:
             continue
-        chunks.append(f"## {name}\n" + "\n".join(line for _, line in entries))
+        header = f"## {name}" + (f" (fan-in {fan_in})" if name == "importers" else "")
+        chunks.append(header + "\n" + "\n".join(line for _, line in entries))
         sections[name] = [label for label, _ in entries]
     return {
         "text": "\n\n".join(chunks) + "\n",
