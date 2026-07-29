@@ -16,6 +16,7 @@ about to rewrite, signatures for everything around it (D5).
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from silica.kernel.code import codegraph
@@ -121,6 +122,67 @@ def _target_block(source: str, entry: dict, selector: str, budget_chars: int,
     return outline, "outline"
 
 
+# Each `extends`/`implements` clause is captured up to the next such keyword
+# (or the end of the signature): a plain `[^{]+` is greedy and lets `extends`
+# swallow a trailing `implements` clause whole, losing its bases.
+_JAVA_SUPER = re.compile(
+    r"\b(?:extends|implements)\s+((?:(?!\bextends\b|\bimplements\b)[^{])+)"
+)
+_PY_BASES = re.compile(r"\bclass\s+\w+\s*\(([^)]*)\)")
+_CPP_BASES = re.compile(r"\b(?:class|struct)\s+\w+\s*:\s*([^{]+)")
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_ACCESS = frozenset({"public", "private", "protected", "virtual"})
+
+
+def _supertypes(signature: str) -> list[str]:
+    """Declared bases of a class signature. The hierarchy is already in the
+    store: `signature` is the declaration line verbatim, in all four families
+    (spec section 1), so this is a regex and not an index."""
+    groups = [m.group(1) for m in _JAVA_SUPER.finditer(signature)]
+    for rx in (_PY_BASES, _CPP_BASES):
+        m = rx.search(signature)
+        if m:
+            groups.append(m.group(1))
+    out: list[str] = []
+    for group in groups:
+        for part in group.split(","):
+            if "=" in part:
+                continue  # a Python keyword argument (metaclass=...), not a base
+            # first identifier only: it drops C++ access keywords and Java
+            # generic parameters (Base<T> is a dependency on Base, not on T)
+            idents = [i for i in _IDENT.findall(part) if i not in _ACCESS]
+            if idents and idents[0] not in out:
+                out.append(idents[0])
+    return out
+
+
+def _hierarchy(graph, path: str, entry: dict) -> list[tuple[str, str]]:
+    """(label, line) pairs: the declared bases of each top-level class in the
+    target, then every class in the repo that declares one of them."""
+    out: list[tuple[str, str]] = []
+    own: list[str] = []
+    for s in entry.get("symbols", []):
+        if s.get("kind") != "class" or s.get("parent"):
+            continue
+        own.append(s.get("name", ""))
+        bases = _supertypes(s.get("signature", ""))
+        if bases:
+            out.append((s["name"], f"{s['name']} extends {', '.join(bases)}"))
+    if graph is None or not own:
+        return out
+    for p in sorted(graph.files):
+        if p == path:
+            continue
+        for s in graph.files[p].get("symbols", []):
+            if s.get("kind") != "class":
+                continue
+            for base in _supertypes(s.get("signature", "")):
+                if base in own:
+                    label = f"{p}#{s.get('name', '')}"
+                    out.append((label, f"{base} <- {label}"))
+    return out
+
+
 def code_pack(vault: Path | str, target: str,
               budget_chars: int = BUDGET_CHARS) -> dict:
     """Context pack for `target` ("path", "path#Class" or "path#Class.member").
@@ -152,6 +214,11 @@ def code_pack(vault: Path | str, target: str,
     body, mode = _target_block(source, entry, selector, budget_chars, dropped)
     chunks = [f"## target {path} @ {head_ref} mode: {mode}\n{body}"]
     sections: dict[str, list[str]] = {"target": [path]}
+    for name, entries in (("hierarchy", _hierarchy(graph, path, entry)),):
+        if not entries:
+            continue
+        chunks.append(f"## {name}\n" + "\n".join(line for _, line in entries))
+        sections[name] = [label for label, _ in entries]
     return {
         "text": "\n\n".join(chunks) + "\n",
         "sections": sections,

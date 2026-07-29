@@ -201,6 +201,29 @@ def test_python_top_level_function_selector(repo):
     assert "return 2" not in pack["text"]
 
 
+def test_hierarchy_lists_declared_bases_and_repo_subtypes(repo):
+    pack = codepack.code_pack(repo, TARGET)
+    assert "GameModel extends Entity" in pack["text"]
+    assert pack["sections"]["hierarchy"] == ["GameModel"]
+
+    sub = codepack.code_pack(repo, "src/main/java/game/Entity.java")
+    assert f"Entity <- {TARGET}#GameModel" in sub["text"]
+    assert sub["sections"]["hierarchy"] == [f"{TARGET}#GameModel"]
+
+
+def test_supertypes_across_families():
+    assert codepack._supertypes("public class A extends B implements C, D<E>") == ["B", "C", "D"]
+    assert codepack._supertypes("class A(B, C, metaclass=M)") == ["B", "C"]
+    assert codepack._supertypes("class A : public B, private C") == ["B", "C"]
+    assert codepack._supertypes("public class A") == []
+
+
+def test_hierarchy_section_is_absent_when_empty(repo):
+    pack = codepack.code_pack(repo, "src/main/java/game/Hud.java")
+    assert "## hierarchy" not in pack["text"]
+    assert "hierarchy" not in pack["sections"]
+
+
 def test_selector_prefers_the_shallowest_match_over_a_nested_shadow():
     # A nested class named GameModel (inside Wrapper) shadows the real,
     # top-level GameModel in document order. The selector must resolve to
