@@ -112,3 +112,63 @@ def test_validated_reports_dns_failure(monkeypatch):
     monkeypatch.setattr(wf.socket, "getaddrinfo", boom)
     with pytest.raises(ValueError, match="cannot resolve"):
         wf._validated("https://nx.evil.test/")
+
+
+# --- extraction -------------------------------------------------------------
+
+_PAGE = """<html><head><title>Real Title</title>
+<style>body{color:red}</style></head>
+<body>
+  <nav>Home Login Signup</nav>
+  <header>Site banner</header>
+  <article><p>First paragraph.</p><p>Second   paragraph &amp; more.</p></article>
+  <form><input name="q"></form>
+  <footer>Copyright notice</footer>
+  <script>var tracking = 1;</script>
+</body></html>"""
+
+
+def test_extract_keeps_prose_and_title():
+    out = wf._extract_text(_PAGE)
+    assert "Real Title" in out
+    assert "First paragraph." in out
+    assert "Second paragraph & more." in out  # entities decoded, runs collapsed
+
+
+def test_extract_drops_boilerplate_tags():
+    out = wf._extract_text(_PAGE)
+    for noise in ("color:red", "Home Login", "Site banner", "Copyright notice",
+                  "var tracking"):
+        assert noise not in out
+
+
+def test_extract_separates_block_elements():
+    # open and close both emit a break, so blocks land one blank line apart
+    assert wf._extract_text("<p>one</p><p>two</p>") == "one\n\ntwo"
+
+
+def test_extract_collapses_blank_runs():
+    assert wf._extract_text("<p>a</p><div></div><div></div><div></div><p>b</p>") == "a\n\nb"
+
+
+def test_extract_survives_unbalanced_tags():
+    # a stray close tag must not drive the skip counter negative and swallow
+    # the rest of the page
+    out = wf._extract_text("</script><p>visible</p>")
+    assert "visible" in out
+
+
+def test_extract_of_empty_html_is_empty():
+    assert wf._extract_text("") == ""
+
+
+# --- truncation -------------------------------------------------------------
+
+def test_truncate_is_a_noop_under_the_limit():
+    assert wf._truncate("short", limit=100) == "short"
+
+
+def test_truncate_marks_the_cut():
+    out = wf._truncate("x" * 500, limit=100)
+    assert out.startswith("x" * 100)
+    assert "truncated at 100 characters" in out

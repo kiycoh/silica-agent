@@ -20,7 +20,12 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+from html.parser import HTMLParser
 from urllib.parse import urlsplit
+
+# ~7.5k tokens of a 60k default context budget. A LinkedIn guest page is 374 KB
+# raw; without this ceiling one fetch eats the window.
+_MAX_CHARS = 30_000
 
 _SCHEMES = ("http", "https")
 
@@ -87,3 +92,68 @@ def _validated(url: str) -> None:
         ip = ipaddress.ip_address(info[4][0])
         if not ip.is_global:
             raise ValueError(f"refusing non-global address {ip} for host {host!r}")
+
+
+_SKIP_TAGS = frozenset({
+    "script", "style", "noscript", "template", "svg", "iframe",
+    "nav", "header", "footer", "form", "aside",
+})
+_BREAK_TAGS = frozenset({
+    "p", "div", "br", "li", "tr", "td", "th", "section", "article",
+    "blockquote", "pre", "title", "h1", "h2", "h3", "h4", "h5", "h6",
+})
+
+
+class _TextExtractor(HTMLParser):
+    """Collect visible text, skipping boilerplate containers.
+
+    ponytail: stdlib html.parser, not trafilatura. Measured on four real pages
+    both cut raw HTML by 10x to 16x and trafilatura is only 1.05x to 1.5x
+    tighter; lxml plus trafilatura is a heavy transitive tree for roughly 30%
+    fewer boilerplate tokens. Revisit if that boilerplate measurably pollutes
+    nucleated notes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip = 0
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag in _SKIP_TAGS:
+            self._skip += 1
+        elif tag in _BREAK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in _SKIP_TAGS:
+            # clamped: real pages ship stray close tags, and a negative counter
+            # would swallow everything after one
+            self._skip = max(0, self._skip - 1)
+        elif tag in _BREAK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip:
+            self.parts.append(data)
+
+
+def _extract_text(html: str) -> str:
+    """HTML to readable plain text: drop boilerplate, collapse whitespace."""
+    parser = _TextExtractor()
+    parser.feed(html)
+    parser.close()
+    lines: list[str] = []
+    for raw in "".join(parser.parts).splitlines():
+        line = " ".join(raw.split())
+        # keep at most one blank line between blocks, and none at the top
+        if line or (lines and lines[-1]):
+            lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _truncate(text: str, limit: int = _MAX_CHARS) -> str:
+    """Hard ceiling with a visible marker, so the model knows it saw a prefix."""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}\n\n[truncated at {limit} characters]"
