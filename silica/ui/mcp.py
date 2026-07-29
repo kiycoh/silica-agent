@@ -45,6 +45,9 @@ CORE_TOOLS = (
     "silica_flag_note",
 )
 
+# MCP behavior hints: everything we serve is read-only except these three.
+WRITE_TOOLS = frozenset({"silica_write_note", "silica_patch_note", "silica_flag_note"})
+
 
 def exposed_tools(all_tools: bool = False) -> dict[str, Any]:
     """The registry slice served over MCP: Tool objects keyed by name."""
@@ -86,6 +89,10 @@ def run_mcp(all_tools: bool = False) -> int:
                 name=t.name,
                 description=t.description,
                 inputSchema=t.json_schema()["function"]["parameters"],
+                annotations=types.ToolAnnotations(
+                    readOnlyHint=t.name not in WRITE_TOOLS,
+                    idempotentHint=t.name not in WRITE_TOOLS,
+                ),
             )
             for t in tools.values()
         ]

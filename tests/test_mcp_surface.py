@@ -20,6 +20,16 @@ def test_core_tools_resolve_and_are_agent_visible():
         assert params.get("type") == "object"
 
 
+def test_write_tools_are_the_only_non_readonly_hints():
+    from silica.ui.mcp import WRITE_TOOLS
+
+    # A new mutating tool served without joining WRITE_TOOLS would be
+    # advertised to MCP clients as read-only — catch the drift here.
+    assert WRITE_TOOLS <= set(CORE_TOOLS)
+    for name in WRITE_TOOLS:
+        assert any(k in name for k in ("write", "patch", "flag"))
+
+
 def test_all_surface_matches_agent_loop_filter():
     from silica.tools import TOOLS
 
