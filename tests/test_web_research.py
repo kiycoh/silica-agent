@@ -179,7 +179,11 @@ def test_main_agent_default_toolset_excludes_web_fetch():
     from types import SimpleNamespace
     from silica.agent.loop import run_agent
 
-    assert "web_fetch" in TOOLS  # registered transitively by importing wr
+    # "web_fetch" in TOOLS alone doesn't pin edit 3a: tests/test_web_fetch.py
+    # imports the module at collection time too, so TOOLS would be populated
+    # even without wr's own import. Assert the attribute wr._web_fetch itself
+    # carries, which only holds if web_research.py did the import (edit 3a).
+    assert wr._web_fetch.web_fetch.__name__ == "web_fetch"
 
     captured = {}
 
