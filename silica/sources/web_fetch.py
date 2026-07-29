@@ -112,6 +112,12 @@ class _TextExtractor(HTMLParser):
     tighter; lxml plus trafilatura is a heavy transitive tree for roughly 30%
     fewer boilerplate tokens. Revisit if that boilerplate measurably pollutes
     nucleated notes.
+
+    Second ceiling: html.parser treats `<script>` and `<style>` as CDATA, so an
+    unclosed or truncated one swallows every byte after it with no error and
+    no truncation marker. A real HTML5 tokenizer (lxml/html5lib) recovers from
+    unclosed CDATA where html.parser cannot; that recovery is the concrete
+    reason to pay for that dependency, if this ever bites on real pages.
     """
 
     def __init__(self) -> None:
