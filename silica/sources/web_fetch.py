@@ -310,7 +310,7 @@ def _youtube_transcript(url: str) -> str:
             [
                 exe, "--skip-download", "--write-auto-sub", "--write-sub",
                 "--sub-lang", _YT_SUB_LANGS, "--sub-format", "vtt",
-                "--no-playlist", "-o", str(out), "--", url,
+                "--no-playlist", "--playlist-items", "1", "-o", str(out), "--", url,
             ],
             capture_output=True,
             text=True,

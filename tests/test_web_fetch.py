@@ -384,6 +384,28 @@ def test_youtube_returns_the_transcript(monkeypatch):
     assert "second line & more" in out
 
 
+def test_youtube_channel_or_playlist_url_is_bounded_to_one_item(monkeypatch):
+    """A channel (`/@someone`) or playlist URL passes `host_matches` exactly
+    like a watch URL. `--no-playlist` only suppresses expansion when the URL
+    is a video *inside* a playlist, not when the URL *is* the collection, so
+    `--playlist-items 1` must be present to keep yt-dlp bounded to a single
+    item instead of enumerating the whole channel/playlist."""
+    monkeypatch.setattr(wf.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+    captured = {}
+
+    def fake_run(argv, **kw):
+        captured["argv"] = argv
+        out = Path(argv[argv.index("-o") + 1])
+        out.with_suffix(".en.vtt").write_text(_VTT, encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(wf.subprocess, "run", fake_run)
+    wf.web_fetch("https://www.youtube.com/@someone")
+    argv = captured["argv"]
+    assert "--playlist-items" in argv
+    assert argv[argv.index("--playlist-items") + 1] == "1"
+
+
 def test_youtube_without_subtitles_reports_the_stderr_tail(monkeypatch):
     _fake_ytdlp(monkeypatch, writes=False, stderr="ERROR: no subtitles available")
     with pytest.raises(ValueError, match="no subtitles available"):
