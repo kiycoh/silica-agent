@@ -20,18 +20,25 @@ from silica.tools import tool
 # Read / Discovery
 # ---------------------------------------------------------------------------
 
+# One cap for every listing that grows with the vault. ponytail: flat cap
+# defends the context window (a 1000-note vault ≈ 20k tokens uncapped); no
+# paging — narrowing by folder, or acting on a sample, covers the real uses.
+_FILES_CAP = 200
+
+
 class SearchArgs(BaseModel):
     query: str = Field(description="Text to search for in note names in the vault")
 
 @tool(SearchArgs, cls="atomic")
 def silica_search(query: str) -> list:
-    """Search for notes by NAME/title match. Returns the names of matching notes.
+    """Search for notes by NAME/title match. Returns the paths of matching notes.
 
-    For text inside note bodies use silica_search_context; for meaning-based
-    search when you don't know the exact words use silica_semantic_search.
+    A note's wikilink name is its filename without the extension. For text
+    inside note bodies use silica_search_context; for meaning-based search when
+    you don't know the exact words use silica_semantic_search.
     """
     refs = DRIVER.search_names(query)
-    return [{"name": r.name, "path": r.path} for r in refs]
+    return [r.path for r in refs]
 
 
 class SearchContextArgs(BaseModel):
@@ -115,7 +122,7 @@ class LinksArgs(BaseModel):
 def silica_links(name: str) -> list:
     """Lists outgoing links from a note (connected notes)."""
     refs = DRIVER.links(name)
-    return [{"name": r.name, "path": r.path} for r in refs]
+    return [r.path for r in refs]
 
 
 class BacklinksArgs(BaseModel):
@@ -125,17 +132,26 @@ class BacklinksArgs(BaseModel):
 def silica_backlinks(name: str) -> list:
     """Lists incoming links (backlinks) pointing to a note."""
     refs = DRIVER.backlinks(name)
-    return [{"name": r.name, "path": r.path} for r in refs]
+    return [r.path for r in refs]
 
 
 class EmptyArgs(BaseModel):
     pass
 
 @tool(EmptyArgs, cls="atomic")
-def silica_orphans() -> list:
-    """Lists orphan notes (notes with no incoming links) in the vault."""
+def silica_orphans() -> dict:
+    """Lists orphan notes (notes with no incoming links) in the vault.
+
+    Returns {"total": N, "orphans": [path, ...]} capped at 200 entries — a
+    neglected vault is mostly orphans, so the count is the answer to "how many"
+    and the sample is enough to start linking.
+    """
     refs = DRIVER.orphans()
-    return [{"name": r.name, "path": r.path} for r in refs]
+    paths = [r.path for r in refs]
+    out: dict = {"total": len(paths), "orphans": paths[:_FILES_CAP]}
+    if len(paths) > _FILES_CAP:
+        out["truncated"] = True
+    return out
 
 
 @tool(EmptyArgs, cls="atomic")
@@ -152,18 +168,14 @@ def silica_unresolved() -> list:
 class ListFilesArgs(BaseModel):
     folder: str = Field(default="", description="Optional folder path to filter results")
 
-# ponytail: flat cap defends the context window (a 1000-note vault ≈ 20k tokens
-# uncapped); no paging — narrowing by folder covers the real use cases.
-_FILES_CAP = 200
-
-
 @tool(ListFilesArgs, cls="atomic")
 def silica_files(folder: str = "") -> dict:
     """Lists the notes in the vault and the source files under a folder.
 
-    Returns {"total": N, "files": [{name, path}, ...]} for markdown notes, plus
-    "code": [repo-relative path, ...] with the ingestible source files under
-    `folder` (empty folder= lists notes only). A folder of code is NOT empty
+    Returns {"total": N, "files": [vault-relative path, ...]} for markdown
+    notes, plus "code": [repo-relative path, ...] with the ingestible source
+    files under `folder` (empty folder= lists notes only). A note's wikilink
+    name is its filename without the extension. A folder of code is NOT empty
     just because it holds no .md — feed the "code" paths to /nucleate to stage
     a skeleton stub per file. Both listings are capped at 200 entries: when
     "truncated" is true, narrow with folder= instead of re-calling. For a bare
@@ -171,7 +183,10 @@ def silica_files(folder: str = "") -> dict:
     block already in context, without any call.
     """
     refs = DRIVER.list_files(folder)
-    files = [{"name": r.name, "path": r.path} for r in refs]
+    # ponytail: bare paths, not {name, path} dicts — NoteRef.name is the
+    # filename without its extension, so the dict shipped every note's name
+    # twice (48% of this payload, ~2.5k tokens at the 200-entry cap).
+    files = [r.path for r in refs]
     result: dict = {"total": len(files), "files": files[:_FILES_CAP]}
     if len(files) > _FILES_CAP:
         result["truncated"] = True
@@ -236,7 +251,7 @@ def silica_inbox_ls() -> list:
     ask the user to run `/convert <path>` first, then work on the resulting .md.
     """
     refs = DRIVER.list_inbox_files()
-    return [{"name": r.name, "path": r.path} for r in refs]
+    return [r.path for r in refs]
 
 
 # ---------------------------------------------------------------------------
