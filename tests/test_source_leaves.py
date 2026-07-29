@@ -185,12 +185,13 @@ def test_wired_before_archive(monkeypatch, tmp_vault):
 def test_web_research_leaf_from_tool_trace(tmp_vault):
     from silica.sources.web_research import _write_leaf
 
-    messages = [
-        {"role": "system", "content": "prompt"},
-        {"role": "tool", "content": '[{"title": "T", "url": "u", "content": "excerpt one"}]'},
-        {"role": "tool", "content": '[{"title": "U", "url": "v", "content": "excerpt two"}]'},
+    # The trace is the tool results themselves, recorded at emission — not the
+    # message history, which run_agent's compaction sweep rewrites in place.
+    results = [
+        '[{"title": "T", "url": "u", "content": "excerpt one"}]',
+        '[{"title": "U", "url": "v", "content": "excerpt two"}]',
     ]
-    _write_leaf("Inbox/topic.md", messages)
+    _write_leaf("Inbox/topic.md", results)
 
     leaf = _vault_file("sources/topic.md").read_text(encoding="utf-8")
     assert "excerpt one" in leaf and "excerpt two" in leaf
@@ -200,7 +201,7 @@ def test_web_research_leaf_from_tool_trace(tmp_vault):
 def test_web_research_no_trace_no_leaf(tmp_vault):
     from silica.sources.web_research import _write_leaf
 
-    _write_leaf("Inbox/topic.md", [{"role": "system", "content": "prompt"}])
+    _write_leaf("Inbox/topic.md", [])
     assert not _vault_file("sources/topic.md").exists()
 
 
