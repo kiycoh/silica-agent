@@ -257,19 +257,22 @@ def _build_note(
     return f"{front}\n{out}\n"
 
 
-def _unique_inbox_path(concept: str) -> str:
+def _unique_inbox_path(concept: str, fallback: str = "web-research") -> str:
     """`<inbox>/<slug>.md`, with a numeric suffix on collision in the Inbox OR
     in sources/. _write_leaf names the leaf after this same basename, so a
     basename that is merely free in the Inbox is not enough: a leaf can
     outlive its note past /nucleate, and reusing that basename would silently
     attach a stale, unrelated leaf to the new note (DRIVER.create raises
     FileExistsError there, which _write_leaf swallows as best-effort). Check
-    both up front so the note and its future leaf are always in lockstep."""
+    both up front so the note and its future leaf are always in lockstep.
+
+    `fallback` names the note when the title slugifies to nothing (CJK, emoji,
+    pure punctuation), so each command squats only its own namespace."""
     from silica.kernel.recall.paths import SOURCES_DIR
     from silica.kernel.vault_manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
-    slug = slugify(concept) or "web-research"
+    slug = slugify(concept) or fallback
     vault = Path(CONFIG.vault_path)
     basename = f"{slug}.md"
     n = 2
@@ -309,7 +312,7 @@ def fetch_to_inbox(url: str) -> str:
     note = _build_note(
         title, text, [(url, title)], source="web-fetch", force_sources=True
     )
-    note_rel = _unique_inbox_path(title)
+    note_rel = _unique_inbox_path(title, fallback="web-fetch")
     from silica.driver import DRIVER
 
     DRIVER.create(note_rel, note)

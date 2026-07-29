@@ -1244,6 +1244,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         return ""  # fully handled inline — sentinel: nothing for the agent
 
     if cmd == "/web-search":
+        from rich.markup import escape
+
         from silica.sources.web_research import web_research, _DEFAULT_MAX_SEARCHES
         from silica.ui.renderer import make_progress_callback
         args = parts[1:]
@@ -1257,12 +1259,22 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 concept, max_searches=max_searches,
                 tool_progress_callback=make_progress_callback(),
             )
-            CONSOLE.print(f"  Findings → [bold]{note_rel}[/]  (review, then /nucleate to bring it in)")
+            # escape(), not markup=False: a note title Rich reads as a tag gets
+            # silently eaten (the user is told a path that is not the file's
+            # name), and a URL carrying `[/x]` raises MarkupError straight out
+            # of the except that exists to report the failure. Escaping only the
+            # interpolated value keeps the styling on the rest of the line.
+            CONSOLE.print(
+                f"  Findings → [bold]{escape(note_rel)}[/]"
+                "  (review, then /nucleate to bring it in)"
+            )
         except Exception as e:  # missing key, no findings, convergence guard, network
-            CONSOLE.print(f"  [yellow]web-search failed: {e}[/]")
+            CONSOLE.print(f"  [yellow]web-search failed: {escape(str(e))}[/]")
         return ""  # fully handled inline — sentinel: nothing for the agent
 
     if cmd == "/fetch":
+        from rich.markup import escape
+
         from silica.sources.web_research import fetch_to_inbox
         url = " ".join(parts[1:]).strip()
         if not url:
@@ -1270,9 +1282,12 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
         try:
             note_rel = fetch_to_inbox(url)
-            CONSOLE.print(f"  Fetched → [bold]{note_rel}[/]  (review, then /nucleate to bring it in)")
+            CONSOLE.print(
+                f"  Fetched → [bold]{escape(note_rel)}[/]"
+                "  (review, then /nucleate to bring it in)"
+            )
         except Exception as e:  # SSRF guard, bot wall, missing yt-dlp, network
-            CONSOLE.print(f"  [yellow]fetch failed: {e}[/]")
+            CONSOLE.print(f"  [yellow]fetch failed: {escape(str(e))}[/]")
         return ""  # fully handled inline — sentinel: nothing for the agent
 
     if cmd == "/report":

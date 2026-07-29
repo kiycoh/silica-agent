@@ -445,6 +445,14 @@ def test_fetch_to_inbox_sources_block_cannot_be_spoofed_by_the_page(tmp_vault, m
     assert "1. Awesome Thing — https://raw.example.test/README.md" in body
 
 
+def test_fetch_to_inbox_falls_back_to_its_own_namespace(tmp_vault, monkeypatch):
+    """A title that slugifies to nothing must not land on web-research.md and
+    push the other command's next note to `web-research 2.md`."""
+    _patch_web_fetch(monkeypatch, "Source: https://a.test/p\n\n***\n\nBody.")
+
+    assert wr.fetch_to_inbox("https://a.test/p") == f"{CONFIG.inbox_dir}/web-fetch.md"
+
+
 def test_fetch_to_inbox_writes_a_source_leaf(tmp_vault, monkeypatch):
     from silica.kernel.recall.paths import SOURCES_DIR
 
@@ -495,3 +503,57 @@ def test_fetch_to_inbox_does_not_attach_a_stale_leaf_after_nucleate(tmp_vault, m
     content = leaf.read_text(encoding="utf-8")
     assert "Page B body." in content
     assert "Page A body." not in content
+
+
+# --- the CLI lines, which interpolate untrusted text into Rich markup --------
+
+
+def _run_cli(cmd: str) -> str:
+    """Dispatch one REPL command, returning what the user would see."""
+    from silica import cli
+    from silica.ui.console import CONSOLE
+
+    with CONSOLE.capture() as capture:
+        assert cli._expand_workflow_shortcut(cmd) == ""  # handled inline
+    return capture.get()
+
+
+def test_fetch_failure_line_survives_a_url_that_looks_like_rich_markup(
+    tmp_vault, monkeypatch
+):
+    """A URL carrying `[/x]` used to raise MarkupError out of the very except
+    that exists to report the failure, so the user got a traceback."""
+    import silica.sources.web_fetch as wf
+
+    def boom(url):
+        raise ValueError(f"cannot resolve {url!r}: nope")
+
+    monkeypatch.setattr(wf, "web_fetch", boom)
+
+    out = _run_cli("/fetch https://a.test/[/x]")
+    assert "fetch failed" in out
+    assert "[/x]" in out  # shown verbatim, not swallowed as a closing tag
+
+
+def test_fetch_success_line_shows_the_real_path(tmp_vault, monkeypatch):
+    """slugify strips `\\ / : * ? " < > |` but not brackets, so a page titled
+    `[bold red]Foo` yields a note_rel whose markup Rich would silently eat,
+    telling the user a path that is not the file's name."""
+    _patch_web_fetch(monkeypatch, "Source: https://a.test/p\n\n[bold red]Foo\n\nBody.")
+
+    out = _run_cli("/fetch https://a.test/p")
+    assert "[bold red]Foo.md" in out
+
+
+def test_web_search_failure_line_survives_rich_markup(tmp_vault, monkeypatch):
+    """The identical defect two lines away in the sibling command."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
+
+    def boom(*a, **kw):
+        raise ValueError("no findings for 'x [/y] z'")
+
+    monkeypatch.setattr(wr, "web_research", boom)
+
+    out = _run_cli('/web-search "x"')
+    assert "web-search failed" in out
+    assert "[/y]" in out
