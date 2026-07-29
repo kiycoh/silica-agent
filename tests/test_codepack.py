@@ -259,33 +259,25 @@ def test_hierarchy_lists_declared_bases_and_repo_subtypes(repo):
     assert sub["sections"]["hierarchy"] == [f"{TARGET}#GameModel"]
 
 
-def test_supertypes_across_families():
-    assert codepack._supertypes("public class A extends B implements C, D<E>") == ["B", "C", "D"]
-    assert codepack._supertypes("class A(B, C, metaclass=M)") == ["B", "C"]
-    assert codepack._supertypes("class A : public B, private C") == ["B", "C"]
-    assert codepack._supertypes("public class A") == []
-    assert codepack._supertypes("public class A implements C, D") == ["C", "D"]
-    assert codepack._supertypes("public class A extends B") == ["B"]
-    assert codepack._supertypes("public class Foo extends Base<T>") == ["Base"]
-
-
-def test_supertypes_does_not_split_nested_generic_commas():
-    # A multi-parameter generic base's inner commas are not base separators:
-    # `HashMap<K, V>` is one base, not two.
-    assert codepack._supertypes("public class Foo extends HashMap<K, V>") == ["HashMap"]
-    assert codepack._supertypes("class A extends B<C, D> implements E") == ["B", "E"]
-    assert codepack._supertypes("class A(B[C, D])") == ["B"]
-    assert codepack._supertypes("struct A : public B<C, D>") == ["B"]
-
-
-def test_supertypes_uses_the_last_dotted_segment():
-    # A qualified base name is a dependency on the class it names, not on its
-    # package/enclosing-type prefix.
-    assert codepack._supertypes("public class Foo extends com.example.Base") == ["Base"]
-    assert codepack._supertypes("public class A extends Map.Entry") == ["Entry"]
-
-
-def test_supertypes_never_fabricates_a_base():
+# One pure function, one table: each comment heads the regression its rows pin.
+@pytest.mark.parametrize("signature, expected", [
+    # the four families, as declared
+    ("public class A extends B implements C, D<E>", ["B", "C", "D"]),
+    ("class A(B, C, metaclass=M)", ["B", "C"]),
+    ("class A : public B, private C", ["B", "C"]),
+    ("public class A", []),
+    ("public class A implements C, D", ["C", "D"]),
+    ("public class A extends B", ["B"]),
+    ("public class Foo extends Base<T>", ["Base"]),
+    # a multi-parameter generic base's inner commas are not base separators:
+    # `HashMap<K, V>` is one base, not two
+    ("public class Foo extends HashMap<K, V>", ["HashMap"]),
+    ("class A extends B<C, D> implements E", ["B", "E"]),
+    ("class A(B[C, D])", ["B"]),
+    ("struct A : public B<C, D>", ["B"]),
+    # a qualified base names the class, not its package or enclosing type
+    ("public class Foo extends com.example.Base", ["Base"]),
+    ("public class A extends Map.Entry", ["Entry"]),
     # Review finding 1, two independent fabrications in one function.
     # (a) the C++ base regex ran on every family with no discriminator and
     #     `[^{]+` ran to end of line, so a Python declaration line with a
@@ -293,29 +285,31 @@ def test_supertypes_never_fabricates_a_base():
     # (b) `_IDENT` had no `:`, so `std::runtime_error` tokenized as two
     #     identifiers and the first-identifier rule picked the NAMESPACE,
     #     losing every real base and inventing one that does not exist.
-    assert codepack._supertypes("class Config:  # noqa: D101") == []
-    assert codepack._supertypes("class Alone:  # a plain marker class") == []
-    assert codepack._supertypes("class Plain:") == []
-    assert codepack._supertypes("class MyError : public std::runtime_error") == ["runtime_error"]
-    assert codepack._supertypes("class Two : public ns::A, public ns::B") == ["A", "B"]
-
-
-def test_supertypes_reads_a_division_inside_a_template_argument():
-    # A bare `/` is division, not a comment. Excluding the character rather
+    ("class Config:  # noqa: D101", []),
+    ("class Alone:  # a plain marker class", []),
+    ("class Plain:", []),
+    ("class MyError : public std::runtime_error", ["runtime_error"]),
+    ("class Two : public ns::A, public ns::B", ["A", "B"]),
+    # a bare `/` is division, not a comment. Excluding the character rather
     # than the `//` and `/*` tokens cut the closing `>` off the template span,
     # so the generic strip could not fire and the surviving comma split one
-    # base into two: the fabrication this whole function exists to prevent.
-    assert codepack._supertypes("class A : public Matrix<int, N/2>") == ["Matrix"]
-    assert codepack._supertypes("class A : public Matrix<W/2, H/2>") == ["Matrix"]
-    assert codepack._supertypes(
-        "class A : public Array<T, SIZE/2>, public Base") == ["Array", "Base"]
-
-
-def test_supertypes_cuts_a_trailing_comment_in_every_family():
-    assert codepack._supertypes("class A : public B // note") == ["B"]
-    assert codepack._supertypes("class A : public B /* note */") == ["B"]
-    # the Java clause is cut too: without it `D` and `E` read as declared bases
-    assert codepack._supertypes("class A extends B implements C // see D, E") == ["B", "C"]
+    # base into two: the fabrication this function exists to prevent.
+    ("class A : public Matrix<int, N/2>", ["Matrix"]),
+    ("class A : public Matrix<W/2, H/2>", ["Matrix"]),
+    ("class A : public Array<T, SIZE/2>, public Base", ["Array", "Base"]),
+    # a trailing comment is cut in every family; without it the Java clause
+    # reads `D` and `E` as declared bases
+    ("class A : public B // note", ["B"]),
+    ("class A : public B /* note */", ["B"]),
+    ("class A extends B implements C // see D, E", ["B", "C"]),
+    # a declaration wrapped after the separator leaves it trailing. The
+    # last-segment rule reduced that to "" and dropped a base right there in
+    # the text.
+    ("public class A extends B.", ["B"]),
+    ("class A : public ns::", ["ns"]),
+])
+def test_supertypes(signature, expected):
+    assert codepack._supertypes(signature) == expected
 
 
 def test_hierarchy_section_is_absent_when_empty(repo):
@@ -655,14 +649,6 @@ def test_tool_reports_missing_vault_instead_of_serving_the_cwd(monkeypatch):
     assert res["status"] == "error"
     assert "vault" in res["message"]
     assert TARGET not in res["message"]
-
-
-def test_supertypes_keeps_a_base_the_signature_cuts_short():
-    # A declaration line wrapped after the dot leaves a trailing separator.
-    # The last-segment rule reduced it to the empty string and dropped a base
-    # that is right there in the text.
-    assert codepack._supertypes("public class A extends B.") == ["B"]
-    assert codepack._supertypes("class A : public ns::") == ["ns"]
 
 
 def test_a_cpp_type_alias_is_not_masked_as_an_import():

@@ -25,38 +25,49 @@ from silica.kernel.recall import paths as _paths
 BUDGET_CHARS = 24000
 
 
-def _outline(entry: dict, skip: str = "") -> str:
+def _emit(entry: dict, drop, doc: bool = False) -> str:
     """Signatures of a file, one per line, methods indented. This is the
     "everything around it" half of D5, and the fallback when the target itself
     is too big to serve whole.
 
-    `skip` drops the addressed symbol AND everything declared inside it, at any
-    depth: the same transitive rule `_signatures` applies to a filtered-out
-    class. A one-level skip re-parented an inner class's methods onto the outer
-    class (false, and a duplicate of text already served verbatim above the
-    outline) or left them as orphan indented lines with no owner at all.
+    `drop(sym, name, parent)` decides what this caller hides. Whatever it hides
+    also hides everything declared inside it, at any depth. A one-level rule
+    re-parented an inner class's methods onto the outer class (false, and for
+    the outline a duplicate of text already served verbatim above it) or left
+    them as orphan indented lines with no owner at all.
 
-    `skipped` is keyed by bare name, the only key `parent` ever carries, so a
+    `hidden` is keyed by bare name, the only key `parent` ever carries, so a
     survivor re-opens its own name the moment it is emitted: two unrelated
-    classes can share a simple name (`Outer.Builder` skipped, `Other.Builder`
+    classes can share a simple name (`Outer.Builder` hidden, `Other.Builder`
     kept) and the first must not silence the second's members. Document order
-    makes this safe, since `ModuleSkeleton.symbols` always emits a class
-    before its own members."""
-    head = skip.split(".", 1)[0]
+    makes this safe, since `ModuleSkeleton.symbols` always emits a class before
+    its own members (base.py, and every walker's class handler appends the
+    class before recursing into its body)."""
     lines: list[str] = []
-    skipped: set[str] = set()
+    hidden: set[str] = set()
     for s in entry.get("symbols", []):
         name, parent = s.get("name", ""), s.get("parent", "")
-        qual = f"{parent}.{name}" if parent else name
-        addressed = bool(skip) and (qual == skip or ("." not in skip
-                and (parent == head or (parent == "" and name == head))))
-        if addressed or (parent and parent in skipped):
-            skipped.add(name)
+        if (parent and parent in hidden) or drop(s, name, parent):
+            hidden.add(name)
             continue
-        skipped.discard(name)  # a later same-named symbol that survives re-opens the name
-        doc = f"  # {s['doc']}" if s.get("doc") else ""
-        lines.append(("  " if parent else "") + s.get("signature", "") + doc)
+        hidden.discard(name)  # a later same-named symbol that survives re-opens the name
+        note = f"  # {s['doc']}" if doc and s.get("doc") else ""
+        lines.append(("  " if parent else "") + s.get("signature", "") + note)
     return "\n".join(lines)
+
+
+def _outline(entry: dict, skip: str = "") -> str:
+    """The target's own signatures, minus `skip` (the symbol already served
+    verbatim above the outline) and everything declared inside it. `skip` is a
+    bare name or `Parent.name`."""
+    head = skip.split(".", 1)[0]
+
+    def addressed(s, name, parent):
+        qual = f"{parent}.{name}" if parent else name
+        return bool(skip) and (qual == skip or ("." not in skip
+                and (parent == head or (parent == "" and name == head))))
+
+    return _emit(entry, addressed, doc=True)
 
 
 # Declaration node types per family, the same sets the codeast walkers use.
@@ -171,9 +182,7 @@ def _supertypes(signature: str) -> list[str]:
     """Declared bases of a class signature. The hierarchy is already in the
     store: `signature` is the declaration line verbatim, in all four families
     (spec section 1), so this is a regex and not an index."""
-    comment = _COMMENT.search(signature)
-    if comment:
-        signature = signature[:comment.start()]
+    signature = _COMMENT.split(signature, 1)[0]
     groups = [m.group(1) for m in _JAVA_SUPER.finditer(signature)]
     for rx in (_PY_BASES, _CPP_BASES):
         m = rx.search(signature)
@@ -240,50 +249,33 @@ def _hierarchy(graph, path: str, entry: dict) -> list[tuple[str, str]]:
 
 
 def _signatures(entry: dict) -> str:
-    """Public signatures of a neighbour file, methods indented. Public is
-    spelled per family: no leading underscore (Python, TS; dunder names
-    excepted, since a constructor is exactly the contract a port needs to
-    read), no `private` modifier token anywhere in the declaration prefix
-    (Java — catches `private void f()` and the legal-but-reordered
-    `static private void f()` alike). A member whose own declaring class was
-    filtered out is dropped too, tracked by bare name as symbols are walked
-    in document order (`ModuleSkeleton.symbols` guarantees a class always
-    precedes its own members — base.py, and every walker's class handler
-    appends the class before recursing into its body), so a private inner
-    class never leaks its public methods reparented onto the outer class.
-
-    `hidden` is keyed by bare name, the only key `parent` ever carries, so a
-    survivor re-opens its own name the moment it is emitted: two unrelated
-    classes that happen to share a simple name (`Outer.Builder` filtered,
-    `Other.Builder` public, both named "Builder") must not let the first
-    poison the second's members. Document order makes this safe: by the time
-    a later same-named class is read, any of the first one's still-hidden
-    descendants have already been resolved.
+    """Public signatures of a neighbour file. Public is spelled per family: no
+    leading underscore (Python, TS; dunder names excepted, since a constructor
+    is exactly the contract a port needs to read), no `private` modifier token
+    anywhere in the declaration prefix (Java, which catches `private void f()`
+    and the legal-but-reordered `static private void f()` alike). A private
+    inner class takes its own public methods down with it, via the transitive
+    rule in `_emit`.
 
     Known limitation: this cannot filter a private C++ member. `codeast/c.py`
     never records the `access_specifier` node (`private:` is a class-body
     section label, a sibling of the members it governs, not a per-member
     modifier token), so a private C++ method's `signature` looks identical to
-    a public one. Teaching codeast about access specifiers is out of scope —
-    `codeast.Symbol` must not change — so C++ neighbour signatures currently
-    show every member, public or not."""
-    lines: list[str] = []
-    hidden: set[str] = set()
+    a public one. Teaching codeast about access specifiers is out of scope,
+    since `codeast.Symbol` must not change, so C++ neighbour signatures
+    currently show every member, public or not."""
     # Python has no `private` modifier: it spells private with the underscore
     # rule above, so there the token can only be a symbol's own name, and
     # hiding a public function over what it is called is wrong.
     modifiers = (entry.get("language") or "") != "python"
-    for s in entry.get("symbols", []):
-        name, parent = s.get("name", ""), s.get("parent", "")
-        sig = s.get("signature", "")
-        underscored = name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
-        private = modifiers and "private" in sig.split("(", 1)[0].split()
-        if parent in hidden or underscored or private:
-            hidden.add(name)
-            continue
-        hidden.discard(name)  # a later same-named symbol that survives re-opens the name
-        lines.append(("  " if parent else "") + sig)
-    return "\n".join(lines)
+
+    def private(s, name, parent):
+        prefix = s.get("signature", "").split("(", 1)[0].split()
+        underscored = name.startswith("_") and not (
+            name.startswith("__") and name.endswith("__"))
+        return underscored or (modifiers and "private" in prefix)
+
+    return _emit(entry, private)
 
 
 # An import/include line always names the file it resolves to, so searching
@@ -347,14 +339,13 @@ def _first_mention(source: str, path: str, entry: dict) -> int | None:
     stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
     if stem not in ("__init__", "index"):
         names.add(stem)
-    best: int | None = None
-    for name in names:
-        if not name:
-            continue
-        m = re.search(rf"\b{re.escape(name)}\b", source)
-        if m is not None and (best is None or m.start() < best):
-            best = m.start()
-    return best
+    # One alternation, one scan: the leftmost match IS the earliest mention, so
+    # this replaces a search per name plus a running minimum. Alternation
+    # backtracks, so a name that prefixes another (`Vec` before `Vec2`) still
+    # matches at the same offset the longer one does.
+    alt = "|".join(re.escape(n) for n in sorted(names) if n)
+    m = re.search(rf"\b(?:{alt})\b", source) if alt else None
+    return m.start() if m is not None else None
 
 
 def _neighborhood(graph, path: str, entry: dict,
@@ -437,22 +428,16 @@ def code_pack(vault: Path | str, target: str,
         if not entry:
             dropped.append(f"note: {path} is not in the code graph")
 
-    # `_target_block` bounds the target against the budget on its own, but it
-    # only sees the body: the header line and the pack's own trailing newline
-    # (added below, at `used`'s seed) are overhead that its comparison must
-    # also account for, or a larger budget can select verbatim over an
-    # outline that would have fit inside it (spec section 6 exempts the
-    # target from the fill's per-entry check, not from the budget itself).
-    # "verbatim" (not "symbol"/"outline") is the longest mode word, so sizing
-    # the header on it is the conservative bound in every mode.
+    # `_target_block` only sees the body, so the header line and the pack's own
+    # trailing newline have to come out of its budget too, or a larger budget
+    # can select verbatim over an outline that would have fit inside it.
+    # "verbatim" is the longest mode word, so sizing on it bounds every mode.
     overhead = len(f"## target {path} @ {head_ref} mode: verbatim\n") + 1
     body, mode = _target_block(source, entry, selector, budget_chars - overhead, dropped)
     chunks = [f"## target {path} @ {head_ref} mode: {mode}\n{body}"]
     sections: dict[str, list[str]] = {"target": [path]}
-    # one scan of the graph, not two: `fan_in` is defined as len(importers)
-    importer_paths = graph.importers(path) if graph is not None else []
-    fan_in = len(importer_paths)
-    importers = [(p, p) for p in importer_paths]
+    # one scan of the graph, not two: `fan-in` is defined as len(importers)
+    importers = [(p, p) for p in (graph.importers(path) if graph is not None else [])]
     external = [(d, d) for d in entry.get("external", [])]
     used = len(chunks[0]) + 1  # + the trailing newline the pack always ends with
     stop = False
@@ -462,7 +447,9 @@ def code_pack(vault: Path | str, target: str,
         ("external", external),
         ("importers", importers),
     ):
-        header = f"## {name}" + (f" (fan-in {fan_in})" if name == "importers" else "")
+        # len(entries), not len(emitted): the count is the repo-wide total even
+        # when the budget trimmed the list printed underneath it.
+        header = f"## {name}" + (f" (fan-in {len(entries)})" if name == "importers" else "")
         emitted: list[str] = []
         for label, block in entries:
             # a chunk costs "\n\n" + header + "\n" the first time, "\n" after
