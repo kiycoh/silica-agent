@@ -440,3 +440,46 @@ def test_a_pathologically_small_budget_still_serves_the_target(repo):
     pack = codepack.code_pack(repo, TARGET, budget_chars=1)
     assert pack["text"]
     assert "GameModel" in pack["text"]
+
+
+def test_golden_pack_byte_for_byte(repo):
+    pack = codepack.code_pack(repo, TARGET)
+    expected = f"""## target {TARGET} @ {pack['head_ref']} mode: verbatim
+package game;
+
+import java.util.List;
+import util.Vec2;
+
+public class GameModel extends Entity {{
+    private Vec2 pos;
+
+    public void tick() {{
+        pos = new Vec2(1, 2);
+    }}
+}}
+
+## hierarchy
+GameModel extends Entity
+
+## neighborhood
+src/main/java/util/Vec2.java
+public class Vec2
+  public Vec2(int x, int y)
+  public int len()
+src/main/java/game/Entity.java
+public class Entity
+  public void update()
+
+## external
+java.util
+
+## importers (fan-in 1)
+src/main/java/app/Launcher.java
+"""
+    assert pack["text"] == expected
+
+
+def test_two_calls_are_identical(repo):
+    a = codepack.code_pack(repo, TARGET)
+    b = codepack.code_pack(repo, TARGET)
+    assert a == b
