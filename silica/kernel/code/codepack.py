@@ -204,22 +204,52 @@ def _hierarchy(graph, path: str, entry: dict) -> list[tuple[str, str]]:
 
 def _signatures(entry: dict) -> str:
     """Public signatures of a neighbour file, methods indented. Public is
-    spelled per family: no leading underscore (Python, TS), no `private`
-    modifier (Java, C++). Dunder names survive, since a constructor is exactly
-    the contract a port needs to read."""
+    spelled per family: no leading underscore (Python, TS; dunder names
+    excepted, since a constructor is exactly the contract a port needs to
+    read), no `private` modifier token anywhere in the declaration prefix
+    (Java — catches `private void f()` and the legal-but-reordered
+    `static private void f()` alike). A member whose own declaring class was
+    filtered out is dropped too, tracked by name as symbols are walked in
+    document order, so a private inner class never leaks its public methods
+    reparented onto the outer class.
+
+    Known limitation: this cannot filter a private C++ member. `codeast/c.py`
+    never records the `access_specifier` node (`private:` is a class-body
+    section label, a sibling of the members it governs, not a per-member
+    modifier token), so a private C++ method's `signature` looks identical to
+    a public one. Teaching codeast about access specifiers is out of scope —
+    `codeast.Symbol` must not change — so C++ neighbour signatures currently
+    show every member, public or not."""
     lines: list[str] = []
+    hidden: set[str] = set()
     for s in entry.get("symbols", []):
-        name, sig = s.get("name", ""), s.get("signature", "")
-        if (name.startswith("_") and not name.endswith("__")) or sig.startswith("private "):
+        name, parent = s.get("name", ""), s.get("parent", "")
+        sig = s.get("signature", "")
+        underscored = name.startswith("_") and not (name.startswith("__") and name.endswith("__"))
+        private = "private" in sig.split("(", 1)[0].split()
+        if parent in hidden or underscored or private:
+            hidden.add(name)
             continue
-        lines.append(("  " if s.get("parent") else "") + sig)
+        lines.append(("  " if parent else "") + sig)
     return "\n".join(lines)
 
 
+# An import/include line always names the file it resolves to, so searching
+# it unmasked would make every import a "mention" by definition and the
+# filter below would exclude nothing. Blanked to same-length spaces (not
+# deleted) so byte offsets elsewhere in the source stay valid: ordering by
+# "first real use" still means position in the actual file.
+_IMPORT_LINE = re.compile(r"^[ \t]*(?:import|from|#include|using)\b.*$", re.MULTILINE)
+
+
 def _first_mention(source: str, path: str, entry: dict) -> int | None:
-    """Offset of the first place the target names this file: any top-level
-    symbol name, or the file stem. None means it is never named, so it is not
-    a neighbour. The filter took the median neighbourhood from 9 to 3 and the
+    """Offset of the first place `source` names this file: any top-level
+    symbol name, or the file stem. `source` is expected to already have its
+    import/include lines masked to blanks (see `_neighborhood`) — otherwise
+    an import's own line always matches its own target, and the filter that
+    is supposed to separate real uses from bare imports never excludes
+    anything. None means it is never named outside an import, so it is not a
+    neighbour. The filter took the median neighbourhood from 9 to 3 and the
     median pack from 6588 to 2351 characters (spec section 2)."""
     names = {s.get("name", "") for s in entry.get("symbols", []) if not s.get("parent")}
     stem = path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
@@ -240,7 +270,14 @@ def _neighborhood(graph, path: str, entry: dict,
     """(label, block) pairs: resolved imports first, then package siblings,
     each group by first mention with the path as the tiebreak (spec section 4).
     An import crosses a package boundary, so it is a contract you cannot see by
-    opening the folder next door; a sibling is one `ls` away."""
+    opening the folder next door; a sibling is one `ls` away.
+
+    Mentions are searched for over `source` with its own import/include lines
+    masked to same-length blanks first: an import line always names the file
+    it imports, so searching the raw source would make the mention filter
+    vacuous for group 1 (every import "mentions itself"). Same-length blanks
+    keep the rest of the offsets meaningful, so `sorted(ranked)` still orders
+    by real position in the file."""
     if graph is None:
         return []
     imports = [p for p in entry.get("imports", []) if p != path and p in graph.files]
@@ -255,11 +292,12 @@ def _neighborhood(graph, path: str, entry: dict,
             if p != path and p not in imports
             and p.rpartition("/")[0] == folder and e.get("language") == "java"
         )
+    body = _IMPORT_LINE.sub(lambda m: " " * len(m.group(0)), source)
     out: list[tuple[str, str]] = []
     for group in (imports, siblings):
         ranked = []
         for p in group:
-            at = _first_mention(source, p, graph.files[p])
+            at = _first_mention(body, p, graph.files[p])
             if at is not None:
                 ranked.append((at, p))
         for _, p in sorted(ranked):

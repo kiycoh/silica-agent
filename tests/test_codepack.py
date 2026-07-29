@@ -276,11 +276,21 @@ def test_neighborhood_has_imports_first_then_mentioned_package_siblings(repo):
 
 
 def test_python_siblings_never_enter_even_when_mentioned(repo):
+    # Minor A: pkg/b.py needs a real import too (pkg/c.py), so the
+    # neighbourhood section actually exists and is non-empty. Without that,
+    # `pack["sections"].get("neighborhood", [])` returns `[]` whether the
+    # feature works or does not exist at all, and the assertion below cannot
+    # discriminate between the two.
     _write(repo, "pkg/__init__.py", "")
     _write(repo, "pkg/a.py", "def alpha():\n    return 1\n")
-    _write(repo, "pkg/b.py", "# alpha is named here but never imported\ndef beta():\n    return 2\n")
+    _write(repo, "pkg/c.py", "def gamma():\n    return 3\n")
+    _write(repo, "pkg/b.py",
+           "from pkg.c import gamma\n"
+           "# alpha is named here but never imported\n"
+           "def beta():\n    return gamma() + 2\n")
     pack = codepack.code_pack(repo, "pkg/b.py")
-    assert "pkg/a.py" not in pack["sections"].get("neighborhood", [])
+    assert pack["sections"]["neighborhood"] == ["pkg/c.py"]  # the real import enters
+    assert "pkg/a.py" not in pack["sections"]["neighborhood"]
 
 
 def test_private_members_stay_out_of_neighbour_signatures(repo):
@@ -291,3 +301,51 @@ def test_private_members_stay_out_of_neighbour_signatures(repo):
     pack = codepack.code_pack(repo, TARGET)
     assert "public void shown()" in pack["text"]
     assert "hidden" not in pack["text"]
+
+
+def test_import_never_used_in_body_is_not_a_neighbor(repo):
+    # Finding 1: an import line always names the file it imports, so the
+    # mention filter must not count the import line itself as a mention —
+    # otherwise every resolved import survives regardless of real use.
+    src = GAME_MODEL.replace("import util.Vec2;\n", "import util.Vec2;\nimport app.Launcher;\n")
+    _write(repo, TARGET, src)
+    _write(repo, "src/main/java/app/Launcher.java", LAUNCHER)
+    pack = codepack.code_pack(repo, TARGET)
+    # Vec2 is used in the body (not just imported): still a neighbour.
+    assert "src/main/java/util/Vec2.java" in pack["sections"]["neighborhood"]
+    # Launcher is imported but never named anywhere outside the import line.
+    assert "src/main/java/app/Launcher.java" not in pack["sections"]["neighborhood"]
+
+
+def test_private_modifier_order_does_not_leak_the_member():
+    # Finding 2: `private` is a legal Java modifier in any order relative to
+    # `static`/`final`; a bare `sig.startswith("private ")` check misses it.
+    entry = {
+        "symbols": [
+            {"kind": "class", "name": "Widget", "parent": "", "signature": "public class Widget", "doc": ""},
+            {"kind": "method", "name": "shown", "parent": "Widget", "signature": "public void shown()", "doc": ""},
+            {"kind": "method", "name": "reordered", "parent": "Widget",
+             "signature": "static private void reordered()", "doc": ""},
+        ]
+    }
+    sigs = codepack._signatures(entry)
+    assert "public void shown()" in sigs
+    assert "reordered" not in sigs
+
+
+def test_private_inner_class_hides_its_own_public_members():
+    # Minor C: a public method of a class that was itself filtered out (here,
+    # a private inner class) must not be reparented onto the outer class —
+    # it must be dropped along with its declaring class.
+    entry = {
+        "symbols": [
+            {"kind": "class", "name": "Outer", "parent": "", "signature": "public class Outer", "doc": ""},
+            {"kind": "class", "name": "Inner", "parent": "Outer", "signature": "private class Inner", "doc": ""},
+            {"kind": "method", "name": "leaked", "parent": "Inner", "signature": "public void leaked()", "doc": ""},
+            {"kind": "method", "name": "shown", "parent": "Outer", "signature": "public void shown()", "doc": ""},
+        ]
+    }
+    sigs = codepack._signatures(entry)
+    assert "public class Outer" in sigs
+    assert "public void shown()" in sigs
+    assert "leaked" not in sigs
