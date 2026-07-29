@@ -23,9 +23,26 @@ import socket
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
+import httpx
+from pydantic import BaseModel
+
+from silica.tools import tool
+
 # ~7.5k tokens of a 60k default context budget. A LinkedIn guest page is 374 KB
 # raw; without this ceiling one fetch eats the window.
 _MAX_CHARS = 30_000
+_MAX_REDIRECTS = 3
+_HTTP_TIMEOUT = 30
+# A bare httpx user agent collects more 403s than a browser string does, and
+# the 401/403/429 branch below is how we surface the ones that remain.
+_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
+}
+_TEXT_TYPES = ("text/", "application/xhtml", "application/xml", "application/json")
 
 _SCHEMES = ("http", "https")
 
@@ -163,3 +180,66 @@ def _truncate(text: str, limit: int = _MAX_CHARS) -> str:
     if len(text) <= limit:
         return text
     return f"{text[:limit].rstrip()}\n\n[truncated at {limit} characters]"
+
+
+def _render(url: str, text: str) -> str:
+    """Header line plus body.
+
+    `Source:` carries the final URL after redirects, so a citation points at
+    what was actually read, and web_research can lift it out of the tool trace.
+    """
+    return f"Source: {url}\n\n{text}"
+
+
+def _raise_for_status(resp: httpx.Response, url: str) -> None:
+    """401, 403 and 429 are the failures a direct fetcher actually meets, and
+    they mean different things to the caller. Distinct messages, not one
+    generic HTTPStatusError."""
+    if resp.status_code in (401, 403):
+        raise ValueError(
+            f"{resp.status_code} at {url}: the site refuses unauthenticated "
+            "reads (bot wall or paywall). Try a different source."
+        )
+    if resp.status_code == 429:
+        raise ValueError(
+            f"429 at {url}: rate limited. Back off, or use a different source."
+        )
+    resp.raise_for_status()
+
+
+def _fetch(url: str) -> tuple[httpx.Response, str]:
+    """GET with redirects followed by hand, revalidating every hop.
+
+    Open WebUI validates the first URL and then hands it to a client that
+    follows redirects itself, so a perfectly global URL can 302 into link-local
+    space. Following them here closes that.
+    """
+    for _ in range(_MAX_REDIRECTS + 1):
+        _validated(url)
+        resp = httpx.get(
+            url, follow_redirects=False, timeout=_HTTP_TIMEOUT, headers=_HEADERS
+        )
+        if not resp.is_redirect or resp.next_request is None:
+            _raise_for_status(resp, url)
+            return resp, url
+        url = str(resp.next_request.url)
+    raise ValueError(f"more than {_MAX_REDIRECTS} redirects, giving up at {url}")
+
+
+class WebFetchArgs(BaseModel):
+    url: str
+
+
+@tool(WebFetchArgs, cls="atomic", sensitive=True)
+def web_fetch(url: str) -> str:
+    """Read one web page and return its text, boilerplate stripped and
+    truncated. Call this on a promising search result instead of guessing from
+    its snippet. The first line is `Source: <url>`, which is what to cite."""
+    resp, final_url = _fetch(url)
+    ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
+    if ctype and not ctype.startswith(_TEXT_TYPES):
+        raise ValueError(f"refusing to read {ctype} content at {final_url}")
+    # ponytail: no charset sniffing, httpx already decoded from the header.
+    body = resp.text
+    text = _extract_text(body) if ("html" in ctype or not ctype) else body
+    return _render(final_url, _truncate(text))

@@ -172,3 +172,151 @@ def test_truncate_marks_the_cut():
     out = wf._truncate("x" * 500, limit=100)
     assert out.startswith("x" * 100)
     assert "truncated at 100 characters" in out
+
+
+# --- the fetch loop ---------------------------------------------------------
+
+import httpx
+from types import SimpleNamespace
+
+from silica.tools import TOOLS
+
+
+class _Resp:
+    """Minimal stand-in for httpx.Response."""
+
+    def __init__(self, status=200, text="", ctype="text/html", location=None):
+        self.status_code = status
+        self.text = text
+        self.headers = {"content-type": ctype} if ctype else {}
+        self.is_redirect = location is not None
+        self.next_request = SimpleNamespace(url=location) if location else None
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                f"status {self.status_code}", request=None, response=None
+            )
+
+
+def _serve(monkeypatch, *responses, allow_all_dns=True):
+    """Queue responses for successive httpx.get calls; record requested URLs."""
+    seen: list[str] = []
+    queue = list(responses)
+
+    def fake_get(url, **kw):
+        seen.append(url)
+        assert kw.get("follow_redirects") is False, "redirects must be manual"
+        return queue.pop(0)
+
+    monkeypatch.setattr(wf.httpx, "get", fake_get)
+    if allow_all_dns:
+        monkeypatch.setattr(
+            wf.socket, "getaddrinfo",
+            lambda host, port, *a, **kw: [(2, 1, 6, "", ("93.184.216.34", port))],
+        )
+    return seen
+
+
+def test_web_fetch_registered_and_sensitive():
+    assert "web_fetch" in TOOLS
+    assert TOOLS["web_fetch"].sensitive is True
+
+
+def test_web_fetch_returns_extracted_text_under_a_source_header(monkeypatch):
+    _serve(monkeypatch, _Resp(text="<html><body><p>Hello world.</p></body></html>"))
+    out = wf.web_fetch("https://example.com/a")
+    assert out.splitlines()[0] == "Source: https://example.com/a"
+    assert "Hello world." in out
+
+
+def test_web_fetch_follows_redirects_and_reports_the_final_url(monkeypatch):
+    seen = _serve(
+        monkeypatch,
+        _Resp(status=302, location="https://example.com/final"),
+        _Resp(text="<p>arrived</p>"),
+    )
+    out = wf.web_fetch("https://example.com/start")
+    assert seen == ["https://example.com/start", "https://example.com/final"]
+    assert out.splitlines()[0] == "Source: https://example.com/final"
+
+
+def test_web_fetch_revalidates_every_redirect_hop(monkeypatch):
+    """A global first hop must not launder a redirect into link-local space."""
+    seen: list[str] = []
+
+    def fake_get(url, **kw):
+        seen.append(url)
+        return _Resp(status=302, location="http://169.254.169.254/latest/meta-data/")
+
+    def fake_dns(host, port, *a, **kw):
+        ip = "169.254.169.254" if host == "169.254.169.254" else "93.184.216.34"
+        return [(2, 1, 6, "", (ip, port))]
+
+    monkeypatch.setattr(wf.httpx, "get", fake_get)
+    monkeypatch.setattr(wf.socket, "getaddrinfo", fake_dns)
+
+    with pytest.raises(ValueError, match="non-global"):
+        wf.web_fetch("https://example.com/redirector")
+    assert seen == ["https://example.com/redirector"]  # second hop never issued
+
+
+def test_web_fetch_caps_the_redirect_chain(monkeypatch):
+    hop = _Resp(status=302, location="https://example.com/next")
+    _serve(monkeypatch, *[hop] * (wf._MAX_REDIRECTS + 1))
+    with pytest.raises(ValueError, match="redirects"):
+        wf.web_fetch("https://example.com/loop")
+
+
+def test_web_fetch_403_says_bot_wall(monkeypatch):
+    _serve(monkeypatch, _Resp(status=403))
+    with pytest.raises(ValueError, match="403"):
+        wf.web_fetch("https://example.com/paywalled")
+
+
+def test_web_fetch_429_says_rate_limited(monkeypatch):
+    _serve(monkeypatch, _Resp(status=429))
+    with pytest.raises(ValueError, match="rate limited"):
+        wf.web_fetch("https://example.com/busy")
+
+
+def test_web_fetch_500_still_raises(monkeypatch):
+    _serve(monkeypatch, _Resp(status=500))
+    with pytest.raises(httpx.HTTPStatusError):
+        wf.web_fetch("https://example.com/broken")
+
+
+def test_web_fetch_refuses_binary_content(monkeypatch):
+    _serve(monkeypatch, _Resp(ctype="application/pdf", text="%PDF-1.7"))
+    with pytest.raises(ValueError, match="application/pdf"):
+        wf.web_fetch("https://example.com/paper.pdf")
+
+
+def test_web_fetch_passes_plain_text_through_unparsed(monkeypatch):
+    _serve(monkeypatch, _Resp(ctype="text/plain", text="a <b> c"))
+    out = wf.web_fetch("https://example.com/robots.txt")
+    assert "a <b> c" in out  # not run through the HTML parser
+
+
+def test_web_fetch_truncates_long_pages(monkeypatch):
+    _serve(monkeypatch, _Resp(text="<p>" + ("word " * 40_000) + "</p>"))
+    out = wf.web_fetch("https://example.com/long")
+    assert "[truncated at" in out
+    assert len(out) < wf._MAX_CHARS + 200
+
+
+def test_web_fetch_rejects_a_private_target_before_any_request(monkeypatch):
+    called = {"n": 0}
+
+    def fake_get(url, **kw):
+        called["n"] += 1
+        return _Resp()
+
+    monkeypatch.setattr(wf.httpx, "get", fake_get)
+    monkeypatch.setattr(
+        wf.socket, "getaddrinfo",
+        lambda host, port, *a, **kw: [(2, 1, 6, "", ("127.0.0.1", port))],
+    )
+    with pytest.raises(ValueError, match="non-global"):
+        wf.web_fetch("http://localhost:8080/admin")
+    assert called["n"] == 0
