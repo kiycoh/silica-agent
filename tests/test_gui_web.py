@@ -225,6 +225,48 @@ def test_chat_streams_events_and_appends_the_user_message(client, monkeypatch):
     assert any(m["role"] == "user" and m["content"] == "hi there" for m in server.messages)
 
 
+def test_inline_slash_command_reports_its_own_result_not_an_error(client, monkeypatch):
+    """/fetch (like /web-search and /convert) does the whole job inside the
+    workflow expansion and returns "" — the REPL's "nothing left for the agent"
+    sentinel. The GUI read that "" as "not available in this session", so the
+    browser was told the command failed while the note was already on disk and
+    the success line had gone to the server's own stdout."""
+    tc, server = client
+    import silica.sources.web_research as wr
+
+    monkeypatch.setattr(wr, "fetch_to_inbox", lambda url: "Inbox/Example Domain.md")
+
+    events = _read_sse(tc.post("/chat", json={"text": "/fetch https://example.test/"}))
+    done = events[-1]
+    assert done["type"] == "done"
+    assert "Inbox/Example Domain.md" in done["answer"]
+
+
+def test_inline_slash_command_reports_its_failure_too(client, monkeypatch):
+    """Truthfully: a fetch that raises must surface as the failure it was, not
+    as a silent success and not as 'not available in this session'."""
+    tc, server = client
+    import silica.sources.web_research as wr
+
+    def boom(url):
+        raise ValueError("403 at https://example.test/: bot wall")
+
+    monkeypatch.setattr(wr, "fetch_to_inbox", boom)
+
+    events = _read_sse(tc.post("/chat", json={"text": "/fetch https://example.test/"}))
+    done = events[-1]
+    assert done["type"] == "done"
+    assert "fetch failed" in done["answer"] and "bot wall" in done["answer"]
+
+
+def test_an_unknown_slash_command_is_still_reported_as_unavailable(client):
+    """The `None` verdict (no dispatcher recognises it) must keep its error."""
+    tc, _ = client
+    events = _read_sse(tc.post("/chat", json={"text": "/definitely-not-a-command"}))
+    assert events[-1]["type"] == "error"
+    assert "not available in this session" in events[-1]["error"]
+
+
 def test_run_turn_yields_raw_dicts_not_sse_frames(client, monkeypatch):
     """The transport-neutral core: raw wire dicts, no `data: ` framing, ending
     in one `done` dict. This is what both `--gui` (SSE) and `connect` (WS) wrap."""

@@ -145,22 +145,6 @@ def _list_sessions() -> list[dict]:
     return out
 
 
-def _agent_message_for(text: str) -> str | None:
-    """Map raw input to the agent-turn message, or None if it's not a chat turn.
-
-    Plain text -> itself. A `/command` is expanded the same way the REPL does;
-    `""` means the REPL handled it inline (nothing for the agent).
-    """
-    from silica.cli import _expand_workflow_shortcut
-
-    if not text.startswith("/"):
-        return text
-    expanded = _expand_workflow_shortcut(text)
-    if expanded is not None:
-        return expanded or None
-    return None  # direct web commands are intercepted before this now
-
-
 import html as _html
 import re
 from urllib.parse import quote as _quote
@@ -528,16 +512,26 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
         # workflow expansion. Asking the same handler the REPL asks is the point:
         # the hand-kept list of "web commands" that used to gate this drifted, and
         # /lexical /wiki /graph /map /find /vault fell through it into an error.
+        agent_msg = text
         if text.startswith("/"):
-            from silica.cli import _handle_direct_shortcut
+            from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
             from silica.ui.console import CONSOLE
 
-            def _run_direct():
+            def _run_slash():
+                # Both dispatchers print their result to CONSOLE and both can do
+                # real work, so both run under the capture and off the loop
+                # thread. The expansion is not a pure string builder: /fetch,
+                # /web-search and /convert do the whole job inside it and return
+                # "" to say the REPL has nothing left for the agent. Reading
+                # that "" as "not available" was reporting failure for work that
+                # had already written notes to disk, with the success line going
+                # to the server's stdout where no browser user can see it.
                 with CONSOLE.capture() as capture:
                     handled = _handle_direct_shortcut(text, messages)
-                return handled, capture.get()
+                    expanded = None if handled else _expand_workflow_shortcut(text)
+                return handled or expanded == "", expanded, capture.get()
 
-            handled, captured_out = await asyncio.to_thread(_run_direct)
+            handled, expanded, captured_out = await asyncio.to_thread(_run_slash)
 
             if handled:
                 # Appended only once the verdict is in: a False falls through to
@@ -557,10 +551,10 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
                 }
                 return
 
-        agent_msg = _agent_message_for(text)
-        if agent_msg is None:
-            yield {"type": "error", "error": f"'{text}' not available in this session"}
-            return
+            if expanded is None:
+                yield {"type": "error", "error": f"'{text}' not available in this session"}
+                return
+            agent_msg = expanded
 
         msg = {"role": "user", "content": agent_msg}
         if text.startswith("/"):
