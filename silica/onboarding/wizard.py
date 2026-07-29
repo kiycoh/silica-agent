@@ -394,6 +394,21 @@ def _run_wizard_inner(
         ):
             updates.pop(key, None)
         _section("model", "Chat provider", 2, total())
+        # A model configured elsewhere (usually the global ~/.silica/.env)
+        # survives a per-vault re-run: one Enter keeps it instead of re-asking
+        # provider, model, and key every time init runs in a new vault.
+        current = os.getenv("SILICA_MODEL", "")
+        if current:
+            answer = ""
+            while answer not in ("y", "yes", "n", "no"):
+                answer = _ask(
+                    input_fn,
+                    f"Chat model already configured ({current}) — keep it? [y/n]",
+                    "y",
+                ).lower()
+            if answer in ("y", "yes"):
+                state["provider"] = SilicaConfig().provider
+                return True
         from silica.agent.providers import PROVIDER_PRESETS
         provider = ""
         while provider not in ("lmstudio", "ollama", "custom", *_HOSTED):

@@ -7,6 +7,14 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _fresh_setup_env(monkeypatch):
+    # Importing silica.config preloads the dev checkout's .env (SILICA_MODEL
+    # included) into os.environ. These tests simulate fresh setups, where no
+    # chat model is configured yet; the keep-current shortcut has its own test.
+    monkeypatch.delenv("SILICA_MODEL", raising=False)
+
+
 class TestMergeEnv:
     def test_updates_managed_key_in_place(self):
         from silica.onboarding.wizard import merge_env
@@ -128,6 +136,38 @@ class TestRunWizard:
         assert "SILICA_PROVIDER=lmstudio" in content
         assert "SILICA_MODEL=test-model" in content
         assert "OPENROUTER_API_KEY" not in content
+
+    def test_configured_model_kept_with_one_enter(self, monkeypatch, tmp_path):
+        # A model already configured (the global ~/.silica/.env) survives a
+        # per-vault re-run: Enter keeps it, no provider/model/key re-asking.
+        import silica.onboarding.wizard as wizard
+
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        env_path = tmp_path / ".env"
+        env_path.write_text("SILICA_MODEL=openrouter/foo/bar\nSILICA_PROVIDER=openrouter\n")
+
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        env = dict(os.environ)
+        env["SILICA_MODEL"] = "openrouter/foo/bar"
+        env["SILICA_PROVIDER"] = "openrouter"
+        monkeypatch.setattr(wizard.os, "environ", env)
+
+        answers = [
+            "",          # setup mode → essential
+            str(vault),  # vault path
+            "",          # force language? → Enter
+            "",          # keep configured chat model? → default y
+            "n",         # high-value gate → skip
+            "",          # write → y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        content = env_path.read_text()
+        assert "SILICA_MODEL=openrouter/foo/bar" in content
+        assert "SILICA_PROVIDER=openrouter" in content
 
     def test_custom_provider_flow_writes_base_url_and_key(self, monkeypatch, tmp_path):
         import silica.onboarding.wizard as wizard
