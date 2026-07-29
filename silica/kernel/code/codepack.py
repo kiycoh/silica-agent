@@ -147,13 +147,16 @@ _JAVA_SUPER = re.compile(
     r"\b(?:extends|implements)\s+((?:(?!\bextends\b|\bimplements\b)[^{])+)"
 )
 _PY_BASES = re.compile(r"\bclass\s+\w+\s*\(([^)]*)\)")
-# The base list stops at a comment introducer as well as at the body brace.
-# This regex is applied to every family (there is no language field here), and
-# a Python declaration line is stored verbatim including its trailing comment,
-# so `class Config:  # noqa: D101` would otherwise read `noqa` as a declared
-# base. Fabricating a base is worse than missing one: a porting agent acts on
-# it. `#` covers Python and the preprocessor, `/` covers `//` and `/*`.
-_CPP_BASES = re.compile(r"\b(?:class|struct)\s+\w+\s*:\s*([^{/#]+)")
+_CPP_BASES = re.compile(r"\b(?:class|struct)\s+\w+\s*:\s*([^{]+)")
+# A trailing comment is cut off the signature once, before any of the three
+# patterns above run, rather than excluded inside each of them. A declaration
+# line is stored verbatim including its comment, so `class Config:  # noqa`
+# would otherwise read `noqa` as a declared base, and `implements B // see C, D`
+# would read `D`. Fabricating a base is worse than missing one: a porting agent
+# acts on it. Matching the comment TOKENS and not the characters matters: a
+# bare `/` is division, and excluding the character would cut the closing `>`
+# off `Array<T, SIZE/2>`, leaving the comma to split one base into two.
+_COMMENT = re.compile(r"//|/\*|#")
 # Dots and colons included so a qualified name (`com.example.Base`,
 # `Map.Entry`, `std::runtime_error`) is captured whole and reduced to its last
 # segment, rather than tokenized into a package/namespace head that the
@@ -168,6 +171,9 @@ def _supertypes(signature: str) -> list[str]:
     """Declared bases of a class signature. The hierarchy is already in the
     store: `signature` is the declaration line verbatim, in all four families
     (spec section 1), so this is a regex and not an index."""
+    comment = _COMMENT.search(signature)
+    if comment:
+        signature = signature[:comment.start()]
     groups = [m.group(1) for m in _JAVA_SUPER.finditer(signature)]
     for rx in (_PY_BASES, _CPP_BASES):
         m = rx.search(signature)
@@ -293,14 +299,22 @@ def _mask_imports(source: str) -> str:
     and for the parenthesized Python form. So the mask runs on while the
     brackets opened on the import line are still unbalanced, and stops on the
     first line that closes them. Counting brackets is a heuristic, and a
-    deliberately cheap one: over-masking costs a neighbour, which is a poorer
-    pack, while the alternative is a parse per neighbour."""
+    deliberately cheap one: the alternative is a parse per neighbour.
+
+    A blank line ends the run unconditionally, because no import statement
+    spans one. Without that stop an unbalanced bracket the counter cannot
+    close (`import os  # TODO(alice`) masks to end of file, and since a
+    neighbour that is never mentioned is never a candidate, the whole
+    neighbourhood would vanish with nothing in `dropped` to say why."""
     lines = source.split("\n")
     depth, masking = 0, False
     for i, line in enumerate(lines):
-        if not masking and _IMPORT_START.match(line):
-            masking, depth = True, 0
         if not masking:
+            if not _IMPORT_START.match(line):
+                continue
+            masking, depth = True, 0
+        elif not line.strip():
+            masking, depth = False, 0
             continue
         depth += sum(line.count(c) for c in _OPEN) - sum(line.count(c) for c in _CLOSE)
         lines[i] = " " * len(line)

@@ -300,6 +300,24 @@ def test_supertypes_never_fabricates_a_base():
     assert codepack._supertypes("class Two : public ns::A, public ns::B") == ["A", "B"]
 
 
+def test_supertypes_reads_a_division_inside_a_template_argument():
+    # A bare `/` is division, not a comment. Excluding the character rather
+    # than the `//` and `/*` tokens cut the closing `>` off the template span,
+    # so the generic strip could not fire and the surviving comma split one
+    # base into two: the fabrication this whole function exists to prevent.
+    assert codepack._supertypes("class A : public Matrix<int, N/2>") == ["Matrix"]
+    assert codepack._supertypes("class A : public Matrix<W/2, H/2>") == ["Matrix"]
+    assert codepack._supertypes(
+        "class A : public Array<T, SIZE/2>, public Base") == ["Array", "Base"]
+
+
+def test_supertypes_cuts_a_trailing_comment_in_every_family():
+    assert codepack._supertypes("class A : public B // note") == ["B"]
+    assert codepack._supertypes("class A : public B /* note */") == ["B"]
+    # the Java clause is cut too: without it `D` and `E` read as declared bases
+    assert codepack._supertypes("class A extends B implements C // see D, E") == ["B", "C"]
+
+
 def test_hierarchy_section_is_absent_when_empty(repo):
     pack = codepack.code_pack(repo, "src/main/java/game/Hud.java")
     assert "## hierarchy" not in pack["text"]
@@ -400,6 +418,21 @@ def test_multi_line_python_import_is_masked_whole():
     assert body.index("def use():") == src.index("def use():")
     entry = {"symbols": [{"name": "alpha", "parent": ""}, {"name": "beta", "parent": ""}]}
     assert codepack._first_mention(body, "pkg/mod.py", entry) is None
+
+
+def test_an_unclosable_bracket_does_not_mask_the_rest_of_the_file():
+    # The bracket counter cannot close a `(` opened inside a comment, so the
+    # run used to reach end of file: every candidate then had no mention, the
+    # whole neighbourhood vanished, and nothing landed in `dropped` to say why,
+    # because an entry that never enters the fill loop is never recorded.
+    # A blank line ends the run, since no import statement spans one.
+    src = "import os  # TODO(alice\n\n\ndef real():\n    return Helper()\n"
+    body = codepack._mask_imports(src)
+    assert len(body) == len(src)
+    assert body.strip() != ""                          # not the whole file
+    assert body.index("def real():") == src.index("def real():")
+    entry = {"symbols": [{"name": "Helper", "parent": ""}]}
+    assert codepack._first_mention(body, "pkg/helper.py", entry) is not None
 
 
 def test_private_modifier_order_does_not_leak_the_member():
