@@ -329,6 +329,23 @@ def _announce_code_lane() -> None:
         CONSOLE.print(f"  [yellow]⚠ {warn}[/]")
 
 
+def _int_flag(args: list[str], flag: str, default: int) -> int:
+    """`--flag=N` out of args; keeps the default when absent or not a number."""
+    raw = next((a[len(flag):] for a in args if a.startswith(flag)), None)
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+
+
+# The three index refreshes differ only in tool and result label.
+_REFRESH = {
+    "/embed": ("silica_embed_refresh", ""),
+    "/cooccur": ("silica_cooccurrence_refresh", " (co-occurrence)"),
+    "/lexical": ("silica_lexical_refresh", " (lexical)"),
+}
+
+
 def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
     """Execute read-only commands directly without an LLM round-trip.
 
@@ -478,69 +495,24 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             pass
         return True
 
-    if cmd == "/embed":
+    if cmd in _REFRESH:
+        tool, label = _REFRESH[cmd]
         folder = ""
-        force = False
         for part in parts[1:]:
-            if part == "--force":
-                force = True
-            elif part.startswith("--folder="):
+            if part.startswith("--folder="):
                 folder = part[len("--folder="):]
             elif not part.startswith("-"):
                 folder = part
-        result = TOOLS["silica_embed_refresh"].run(folder=folder, force=force)
+        result = TOOLS[tool].run(folder=folder, force="--force" in parts[1:])
         try:
             parsed = json.loads(result)
             if "error" in parsed:
                 CONSOLE.print(f"  [red]Error:[/] {parsed['error']}")
             else:
-                CONSOLE.print(f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / {parsed.get('total_notes', '?')} notes")
-            if parsed.get("read_errors"):
-                CONSOLE.print(f"  [yellow]Read errors:[/] {parsed['read_errors']}")
-        except Exception:
-            CONSOLE.print(result)
-        return True
-
-    if cmd == "/cooccur":
-        folder = ""
-        force = False
-        for part in parts[1:]:
-            if part == "--force":
-                force = True
-            elif part.startswith("--folder="):
-                folder = part[len("--folder="):]
-            elif not part.startswith("-"):
-                folder = part
-        result = TOOLS["silica_cooccurrence_refresh"].run(folder=folder, force=force)
-        try:
-            parsed = json.loads(result)
-            if "error" in parsed:
-                CONSOLE.print(f"  [red]Error:[/] {parsed['error']}")
-            else:
-                CONSOLE.print(f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / {parsed.get('total_notes', '?')} notes (co-occurrence)")
-            if parsed.get("read_errors"):
-                CONSOLE.print(f"  [yellow]Read errors:[/] {parsed['read_errors']}")
-        except Exception:
-            CONSOLE.print(result)
-        return True
-
-    if cmd == "/lexical":
-        folder = ""
-        force = False
-        for part in parts[1:]:
-            if part == "--force":
-                force = True
-            elif part.startswith("--folder="):
-                folder = part[len("--folder="):]
-            elif not part.startswith("-"):
-                folder = part
-        result = TOOLS["silica_lexical_refresh"].run(folder=folder, force=force)
-        try:
-            parsed = json.loads(result)
-            if "error" in parsed:
-                CONSOLE.print(f"  [red]Error:[/] {parsed['error']}")
-            else:
-                CONSOLE.print(f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / {parsed.get('total_notes', '?')} notes (lexical)")
+                CONSOLE.print(
+                    f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / "
+                    f"{parsed.get('total_notes', '?')} notes{label}"
+                )
             if parsed.get("read_errors"):
                 CONSOLE.print(f"  [yellow]Read errors:[/] {parsed['read_errors']}")
         except Exception:
@@ -615,17 +587,9 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         return True
 
     if cmd == "/find":
-        k = 5
-        tokens: list[str] = []
-        for part in parts[1:]:
-            if part.startswith("--k="):
-                try:
-                    k = int(part[4:])
-                except ValueError:
-                    pass
-            else:
-                tokens.append(part)  # preserve original case
-        query = " ".join(tokens)
+        k = _int_flag(parts[1:], "--k=", 5)
+        # original case preserved — raw_input, not the lowered cmd
+        query = " ".join(p for p in parts[1:] if not p.startswith("-"))
         if not query:
             CONSOLE.print("  Usage: /find <query> [--k=N]")
             return True
@@ -1283,17 +1247,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         from silica.sources.web_research import web_research, _DEFAULT_MAX_SEARCHES
         from silica.ui.renderer import make_progress_callback
         args = parts[1:]
-        max_searches = _DEFAULT_MAX_SEARCHES
-        positional = []
-        for arg in args:
-            if arg.startswith("--max-searches="):
-                try:
-                    max_searches = int(arg[len("--max-searches="):])
-                except ValueError:
-                    pass
-            elif not arg.startswith("-"):
-                positional.append(arg)
-        concept = " ".join(positional).strip()
+        max_searches = _int_flag(args, "--max-searches=", _DEFAULT_MAX_SEARCHES)
+        concept = " ".join(a for a in args if not a.startswith("-")).strip()
         if not concept:
             return 'Error: /web-search requires a concept. Usage: /web-search "<concept>" [--max-searches=N]'
 
@@ -1310,7 +1265,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
     if cmd == "/report":
         args = parts[1:]
         folder = ""
-        top_k = 10
+        top_k = _int_flag(args, "--top-k=", 10)
         with_embeddings = False
         # Off by default like --embeddings: the co-occurrence delta runs a
         # per-note expanded ranking, the report's other expensive pass. Without
@@ -1321,11 +1276,6 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         for arg in args:
             if arg.startswith("--folder="):
                 folder = arg[len("--folder="):]
-            elif arg.startswith("--top-k="):
-                try:
-                    top_k = int(arg[len("--top-k="):])
-                except ValueError:
-                    pass
             elif arg in ("--embeddings", "--with-embeddings"):
                 with_embeddings = True
             elif arg in ("--cooccurrence", "--with-cooccurrence"):
@@ -1517,16 +1467,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         )
 
     if cmd == "/quiz":
-        n = 10
-        targets = []
-        for arg in parts[1:]:
-            if arg.startswith("--n="):
-                try:
-                    n = int(arg[len("--n="):])
-                except ValueError:
-                    pass
-            elif not arg.startswith("-"):
-                targets.append(arg)
+        n = _int_flag(parts[1:], "--n=", 10)
+        targets = [a for a in parts[1:] if not a.startswith("-")]
         if targets:
             source = "from " + ", ".join(f"`{t}`" for t in targets)
             pick = "Read the note(s) (list a folder's notes first)."
@@ -1555,16 +1497,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         )
 
     if cmd == "/relate":
-        n = 8
-        targets = []
-        for arg in parts[1:]:
-            if arg.startswith("--n="):
-                try:
-                    n = int(arg[len("--n="):])
-                except ValueError:
-                    pass
-            elif not arg.startswith("-"):
-                targets.append(arg)
+        n = _int_flag(parts[1:], "--n=", 8)
+        targets = [a for a in parts[1:] if not a.startswith("-")]
         if not targets:
             return "Error: /relate requires a note. Usage: /relate <note> [--n=8]"
         target = targets[0]
