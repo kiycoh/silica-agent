@@ -41,3 +41,37 @@ def test_meter_off_is_noop(monkeypatch):
     llm._meter.clear()
     llm.LLMResponse(usage={"prompt_tokens": 999, "completion_tokens": 999})
     assert not llm._meter
+
+
+# --- Chat-turn prompt floor -------------------------------------------------
+# The fixed prefix resent on every LLM call of an interactive turn. Measured
+# 2026-07-28 against a real metered turn: ~9.6k tokens, of which the two
+# deterministic parts pinned here are ~9.2k (tool schemas 8.2k, system prompt
+# 0.95k). The rest (_vault_scope, build_vault_map) is vault-dependent, so it
+# can't be pinned. Tokens are approximated as chars/4 — the same proxy
+# cli._count_context_tokens falls back to, and it reproduced the metered split
+# exactly. Without this a +30% prompt lands silently on every call.
+CHAT_PREFIX_TOKENS = 9_193
+CHAT_PREFIX_TOLERANCE = 0.10
+
+
+def test_chat_prefix_token_floor():
+    import json
+
+    import silica.cli  # noqa: F401 — registers the full toolset
+    from silica.agent.constraints import chat_tools
+    from silica.prompts import system_prompt
+    from silica.tools import TOOLS
+
+    schemas = json.dumps(
+        [TOOLS[n].json_schema() for n in chat_tools()], ensure_ascii=False
+    )
+    tokens = (len(schemas) + len(system_prompt())) // 4
+
+    lo = int(CHAT_PREFIX_TOKENS * (1 - CHAT_PREFIX_TOLERANCE))
+    hi = int(CHAT_PREFIX_TOKENS * (1 + CHAT_PREFIX_TOLERANCE))
+    assert lo <= tokens <= hi, (
+        f"chat prefix is {tokens} tok, pinned at {CHAT_PREFIX_TOKENS} "
+        f"±{CHAT_PREFIX_TOLERANCE:.0%} — every LLM call of every turn pays it. "
+        "If the change is intentional, re-measure and move the constant."
+    )
