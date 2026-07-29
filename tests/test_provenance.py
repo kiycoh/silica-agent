@@ -88,12 +88,12 @@ def test_append_record_no_vault_path_returns_false(monkeypatch):
 
 def test_append_record_survives_unwritable_store(tmp_path, monkeypatch):
     """Best-effort: an I/O failure on write must not raise."""
-    import silica.kernel.write.provenance as prov_mod
+    import silica.kernel.recall.paths as paths_mod
 
     def _boom(*a, **k):
         raise OSError("disk full")
 
-    monkeypatch.setattr(Path, "write_text", _boom)
+    monkeypatch.setattr(paths_mod, "atomic_write_bytes", _boom)
     ok = append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
     assert ok is False
 
@@ -263,3 +263,23 @@ def test_read_records_caller_cannot_poison_the_memo(tmp_path):
     first.append({"source": "ghost.md"})
 
     assert [r["source"] for r in read_records(vault_path=str(tmp_path))] == ["a.md"]
+
+
+def test_append_is_atomic_a_failed_write_keeps_the_prior_ledger(tmp_path, monkeypatch):
+    """A crash mid-rewrite must not truncate the store.
+
+    This ledger is authoritative — run_id/sha history is not reconstructible
+    from the vault, and read_records quarantines a truncated file — so a torn
+    write silently loses every prior record.
+    """
+    import os
+
+    append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
+    store = tmp_path / DEFAULT_PROVENANCE_FILENAME
+    before = store.read_bytes()
+
+    monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError("disk full")))
+    assert append_record("b.md", "sha2", "r2", ["N2"], vault_path=str(tmp_path)) is False
+
+    assert store.read_bytes() == before
+    assert list(tmp_path.iterdir()) == [store]  # no tmp leftovers

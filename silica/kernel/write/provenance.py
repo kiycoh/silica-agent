@@ -176,8 +176,14 @@ def append_record(
         ):
             return False
         existing.append(record)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Atomic: this ledger is authoritative (run_id/sha history is not
+        # reconstructible from the vault) and read_records quarantines a
+        # truncated file, so a torn rewrite would silently lose the history.
+        from silica.kernel.recall.paths import atomic_write_bytes
+
+        atomic_write_bytes(
+            path, json.dumps(existing, indent=2, ensure_ascii=False).encode("utf-8")
+        )
     except Exception as exc:
         logger.debug("provenance: append failed (non-fatal): %s", exc)
         return False
