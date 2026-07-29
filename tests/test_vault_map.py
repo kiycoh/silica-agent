@@ -140,3 +140,40 @@ def test_contested_line_absent_when_no_contested_notes(tmp_vault, tmp_path):
 
     assert out is not None
     assert "contested notes" not in out
+
+
+def test_degraded_map_warns_once(tmp_path, monkeypatch, caplog):
+    """A block that fails open must not degrade the session self-model in
+    silence: DEBUG was the only trace before."""
+    import silica.kernel.recall.vault_map as vm
+
+    store = CooccurStore(path=tmp_path / "cooccur.json")
+    build_index([("ml/embeddings.md", "Embeddings",
+                  "Embeddings map tokens to vectors. Vector search over embeddings.")],
+                store=store)
+    monkeypatch.setattr(store, "top_stems", lambda n: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(vm, "_warned", set())
+
+    with caplog.at_level("WARNING"):
+        assert build_vault_map(store=store) is not None
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1
+    assert "vocabulary" in warnings[0].getMessage()
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        build_vault_map(store=store)
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+
+def test_total_failure_warns_instead_of_looking_like_an_empty_vault(monkeypatch, caplog):
+    import silica.kernel.recall.vault_map as vm
+
+    class Boom:
+        def __len__(self): raise RuntimeError("index unreadable")
+
+    monkeypatch.setattr(vm, "_warned", set())
+    with caplog.at_level("WARNING"):
+        assert build_vault_map(store=Boom()) is None
+    assert any("no self-model" in r.getMessage()
+               for r in caplog.records if r.levelname == "WARNING")

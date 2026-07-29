@@ -21,6 +21,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_warned: set[str] = set()
+
+
+def _warn_once(kind: str, msg: str, *args) -> None:
+    """Report a degraded map once per kind, then at DEBUG.
+
+    Every block below fails open by design, and the whole builder returns None
+    on failure — which `_inject_vault_map` cannot distinguish from an empty
+    vault, so it injects nothing and the session silently starts without its
+    self-model. This is the one line that says so. Once per kind and not per
+    call because the GUI rebuilds the map every turn.
+    """
+    if kind in _warned:
+        logger.debug(msg, *args)
+        return
+    _warned.add(kind)
+    logger.warning(msg, *args)
+
 
 def build_vault_map(
     *,
@@ -41,7 +59,7 @@ def build_vault_map(
             return None
 
         lines: list[str] = ["## Vault map  (corpus snapshot at session start)"]
-
+        skipped: list[str] = []
 
         # A single vault pass: refs feeds both the folders block and the
         # contested scan (one list_files call, not two).
@@ -51,6 +69,7 @@ def build_vault_map(
 
             refs = DRIVER.list_files()
         except Exception as e:  # best-effort
+            skipped.append("list_files")
             logger.debug("build_vault_map: list_files failed: %s", e)
 
         # Note count + top folders
@@ -69,6 +88,7 @@ def build_vault_map(
                         + ", ".join(f"{f} ({c})" for f, c in top)
                     )
         except Exception as e:  # best-effort
+            skipped.append("folders")
             logger.debug("build_vault_map: folders block skipped: %s", e)
 
         # Contested notes (spec-hermes-coherence §1 leftover): frontmatter
@@ -103,6 +123,7 @@ def build_vault_map(
                     "silica_timeline for chronology/ordering questions"
                 )
         except Exception as e:  # best-effort
+            skipped.append("contested")
             logger.debug("build_vault_map: contested block skipped: %s", e)
 
         # Top clusters (Louvain over the concept graph; each community is
@@ -130,6 +151,7 @@ def build_vault_map(
                         "- Top clusters: " + ", ".join(cluster_labels)
                     )
         except Exception as e:  # networkx missing or empty graph → skip
+            skipped.append("cluster")
             logger.debug("build_vault_map: cluster block skipped: %s", e)
 
         # Core vocabulary
@@ -138,6 +160,7 @@ def build_vault_map(
             if stems:
                 lines.append("- Core vocabulary: " + ", ".join(stems))
         except Exception as e:
+            skipped.append("vocabulary")
             logger.debug("build_vault_map: vocabulary block skipped: %s", e)
 
         # Hub notes — proxy: notes that touch the most distinct concepts
@@ -153,6 +176,7 @@ def build_vault_map(
                     "- Hub notes: " + ", ".join(f"[[{h}]]" for h in hub_names)
                 )
         except Exception as e:
+            skipped.append("hub")
             logger.debug("build_vault_map: hub block skipped: %s", e)
 
         # Tail of log.md — the agent sees what happened recently without
@@ -165,13 +189,35 @@ def build_vault_map(
                 lines.append("- Recent log:")
                 lines.extend(f"  {ln}" for ln in recent)
         except Exception as e:
+            skipped.append("log")
             logger.debug("build_vault_map: log block skipped: %s", e)
 
-        # Only the header → nothing useful: behave like an empty vault.
+        # Only the header → nothing useful: behave like an empty vault. The
+        # cooccur index is non-empty here (checked above), so this is a
+        # degraded build, not an empty vault: it always has a cause in
+        # `skipped`, and the warning below names it.
         if len(lines) == 1:
+            _warn_once(
+                "empty",
+                "vault map came back empty over a non-empty index (%s failed) — "
+                "the session starts with no self-model; run `silica doctor`",
+                ", ".join(skipped) or "no block succeeded",
+            )
             return None
+        if skipped:
+            _warn_once(
+                "partial",
+                "vault map is partial, %d block(s) skipped (%s) — run at DEBUG "
+                "for the cause",
+                len(skipped), ", ".join(skipped),
+            )
         return "\n".join(lines)
 
     except Exception as e:  # ponytail: the map must never break the session
-        logger.debug("build_vault_map: failed (non-fatal): %s", e)
+        _warn_once(
+            "failed",
+            "vault map failed (%s) — the session starts with no self-model; "
+            "run `silica doctor`", e,
+        )
+        logger.debug("build_vault_map: failed (non-fatal)", exc_info=True)
         return None
