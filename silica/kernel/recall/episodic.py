@@ -94,32 +94,43 @@ def _normalize(text: str) -> str:
 # key-discipline block — LoCoMo smoke 2026-07-18 showed the instruction being
 # ignored with the clean key in view. Folding these at lookup time makes the
 # variant MATCH the clean head so supersede chains stay whole.
+# ponytail: English marker stems only, so a non-English store folds none of
+# them (`utente.lavoro_aggiornato` keeps its marker and starts its own chain).
+# Far milder than the stemmer bug it sits next to: this splits only the keys
+# the model decorates, not every plural. Translate the set per store language
+# if a non-English store shows marker-suffixed duplicate heads.
 _CHANGE_MARKER_STEMS = frozenset({"reinforc", "reaffirm", "updat", "new", "chang"})
 _VERSION_TOKEN_RE = re.compile(r"v\d+$")
 
 
-def normalize_key(key: str) -> str:
+def normalize_key(key: str, *, lang: str = "english") -> str:
     """Canonical `entity.attribute` form for MATCHING: casefold, then
     snowball-stem every `_`-token of every `.` segment, dropping change-marker
     tokens (`_reinforced`/`_update`/`.new`/`v2` — the change belongs in the
     text, supersede encodes it). Merges morphological key drift
     (`model_kits.gifts` == `model_kit.gift`); semantic synonyms stay distinct.
     Stored keys are never rewritten — this is lookup identity only.
+
+    `lang` is the store's frozen key language (EpisodicStore._freeze_lang).
+    The default is english because the STRUCTURAL callers below
+    (`enforce_key_schema`'s prefixes, `key_tokens`) match against the
+    `user.`/`assistant.` grammar the prompt mandates in English regardless of
+    the vault's prose language. Only capture, which decides which keys merge,
+    passes the store's own language: an italian store stemmed as english
+    leaves `utente.auto.modello` and `.modelli` distinct, so the supersede
+    chain splits and recall returns both values of one attribute.
     """
-    # ponytail: lang hardcoded to english — the distiller prompt shapes keys
-    # as English-style slugs; non-English-keyed stores under-merge. Upgrade
-    # path: a per-store language knob, when a non-English store shows drift.
     from silica.kernel.text.text import stem_word
 
     segs: list[str] = []
     for seg in key.casefold().split("."):
-        toks = [stem_word(t, lang="english") for t in seg.split("_") if t]
+        toks = [stem_word(t, lang=lang) for t in seg.split("_") if t]
         kept = [t for t in toks
                 if t not in _CHANGE_MARKER_STEMS and not _VERSION_TOKEN_RE.fullmatch(t)]
         if kept:
             segs.append("_".join(kept))
     if not segs:  # a key that is nothing but markers: fall back unfiltered
-        return ".".join("_".join(stem_word(t, lang="english") for t in s.split("_") if t)
+        return ".".join("_".join(stem_word(t, lang=lang) for t in s.split("_") if t)
                         for s in key.casefold().split(".") if s.strip("_"))
     return ".".join(segs)
 
@@ -233,6 +244,7 @@ class EpisodicStore:
         self.path = path if path is not None else store_path()
         self.next_id = 1
         self.facts: list[Fact] = []
+        self.lang: str | None = None  # frozen key-stemming language, see _freeze_lang
         self._key_vecs: dict[str, list[float]] = {}  # spaced key -> vec (snap cache)
         self._load()
 
@@ -246,6 +258,7 @@ class EpisodicStore:
         try:
             doc = json.loads(self.path.read_text(encoding="utf-8"))
             self.next_id = int(doc.get("next_id", 1))
+            self.lang = doc.get("lang") or None
             self.facts = _FACTS_ADAPTER.validate_python(doc.get("facts", []))
         except Exception:
             from silica.kernel.recall.paths import quarantine
@@ -256,11 +269,13 @@ class EpisodicStore:
     def save(self) -> None:
         from silica.kernel.recall.paths import atomic_write_bytes
 
-        doc = {
+        doc: dict = {
             "schema_version": SCHEMA_VERSION,
             "next_id": self.next_id,
-            "facts": [f.model_dump(exclude_none=False) for f in self.facts],
         }
+        if self.lang:  # absent until the first capture pins it
+            doc["lang"] = self.lang
+        doc["facts"] = [f.model_dump(exclude_none=False) for f in self.facts]
         atomic_write_bytes(self.path, json.dumps(doc, ensure_ascii=False).encode("utf-8"))
 
     # ------------------------------------------------------------------
@@ -290,7 +305,9 @@ class EpisodicStore:
         # match variant arrivals. On a legacy collision (two live heads with
         # the same canonical form) the later chain wins the lookup; TTL
         # retires the other.
-        heads = {normalize_key(f.key): f for f in self.facts if f.status == "live"}
+        lang = self._freeze_lang([(r.get("text") or "") for r in facts])
+        heads = {normalize_key(f.key, lang=lang): f
+                 for f in self.facts if f.status == "live"}
         created: list[Fact] = []
         folded = 0
         for raw in facts:
@@ -302,7 +319,7 @@ class EpisodicStore:
                 shaped = enforce_key_schema(key, schema)
                 folded += shaped != key
                 key = shaped
-            nkey = normalize_key(key)
+            nkey = normalize_key(key, lang=lang)
             head = heads.get(nkey)
             if head is None and snap_tau > 0 and embedder is not None:
                 head = self._snap_head(key, heads, embedder, snap_tau)
@@ -318,7 +335,7 @@ class EpisodicStore:
             if head is not None:
                 fact.supersedes = head.id
                 head.status = "superseded"
-                old_nkey = normalize_key(head.key)
+                old_nkey = normalize_key(head.key, lang=lang)
                 if old_nkey != nkey and heads.get(old_nkey) is head:
                     del heads[old_nkey]  # snap join: retire the stale lookup
             self.facts.append(fact)
@@ -334,6 +351,26 @@ class EpisodicStore:
         if folded:
             logger.debug("episodic capture: %d key(s) schema-folded", folded)
         self.save()
+
+    def _freeze_lang(self, incoming: list[str]) -> str:
+        """Pin the store's key-stemming language on first capture, from the
+        facts' own prose (`text` is verbatim in the source language, the
+        distiller prompt never constrains the KEY to English).
+
+        Frozen rather than re-detected, on the `cooccurrence_lang` precedent:
+        the stemmer decides which keys MATCH, so letting detection drift as
+        the store grows would silently re-partition live supersede chains
+        mid-life. Delete `episodic.json` to re-pin. A store written before
+        this existed pins on its next capture; english stores land on
+        "english" and keep their exact identity.
+        """
+        if self.lang:
+            return self.lang
+        from silica.kernel.text import language
+
+        sample = " ".join([*(f.text for f in self.facts), *incoming])[:4000]
+        self.lang = language.detect(sample) if sample.strip() else "english"
+        return self.lang
 
     def _snap_head(self, key: str, heads: dict[str, Fact], embedder,
                    tau: float) -> Fact | None:

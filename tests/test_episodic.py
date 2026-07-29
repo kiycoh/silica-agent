@@ -696,3 +696,46 @@ def test_capture_schema_converges_raw_variant_onto_existing_chain(tmp_path):
     assert len(facts) == 1
     assert facts[0].runs == ["run_1", "run_2"]
 
+
+
+def test_store_freezes_key_language_and_merges_non_english_variants(tmp_path):
+    """The defect this fixes: an Italian store stemmed as English left
+    `modello`/`modelli` distinct, so the supersede chain split and recall
+    returned both values of one attribute."""
+    store = _store(tmp_path)
+    store.capture([{"key": "utente.auto.modello", "text": "La mia auto è una Panda"}],
+                  run_id="run_1", seen="2026-07-14")
+    assert store.lang == "italian"
+
+    store.capture([{"key": "utente.auto.modelli", "text": "Ho cambiato, ora è una Punto"}],
+                  run_id="run_2", seen="2026-07-15")
+
+    live = store.live_facts()
+    assert len(live) == 1, [f.key for f in live]
+    assert live[0].text == "Ho cambiato, ora è una Punto"
+    assert live[0].supersedes is not None
+
+    # frozen on disk, so lookup identity cannot drift as the store grows
+    doc = json.loads((tmp_path / "episodic.json").read_text(encoding="utf-8"))
+    assert doc["lang"] == "italian"
+    assert EpisodicStore(path=tmp_path / "episodic.json").lang == "italian"
+
+
+def test_english_store_keeps_its_identity(tmp_path):
+    store = _store(tmp_path)
+    store.capture([{"key": "user.car.model", "text": "My car is a Panda, a small city car"}],
+                  run_id="run_1", seen="2026-07-14")
+    assert store.lang == "english"
+    store.capture([{"key": "user.car.models", "text": "I switched, it is a Punto now"}],
+                  run_id="run_2", seen="2026-07-15")
+    assert len(store.live_facts()) == 1
+
+
+def test_frozen_language_survives_a_later_switch(tmp_path):
+    """Re-detecting per capture would re-partition live chains mid-life."""
+    store = _store(tmp_path)
+    store.capture([{"key": "user.car.model", "text": "My car is a small red city car"}],
+                  run_id="run_1", seen="2026-07-14")
+    store.capture([{"key": "utente.cane.nome", "text": "Il mio cane si chiama Tom"}],
+                  run_id="run_2", seen="2026-07-15")
+    assert store.lang == "english"
