@@ -319,7 +319,10 @@ def test_fetch_to_inbox_writes_a_note_titled_after_the_page(tmp_vault, monkeypat
     assert "tags: [inbox, web-fetch]" in body
     assert f"fetched: {today}" in body
     assert "Body prose here." in body
-    assert "https://a.test/post" in body  # the ADR-0015 sources guarantee
+    # the ADR-0015 sources guarantee: a ## Sources block naming this URL, not
+    # merely the URL appearing somewhere in the fetched text we echo verbatim
+    assert "## Sources" in body
+    assert "1. On Graph Theory — https://a.test/post" in body
 
 
 def test_fetch_to_inbox_writes_a_source_leaf(tmp_vault, monkeypatch):
@@ -353,3 +356,22 @@ def test_fetch_to_inbox_propagates_the_fetch_error(tmp_vault, monkeypatch):
         wr.fetch_to_inbox("https://a.test/post")
     inbox = Path(CONFIG.vault_path) / CONFIG.inbox_dir
     assert not inbox.exists() or not list(inbox.glob("*.md"))
+
+
+def test_fetch_to_inbox_does_not_attach_a_stale_leaf_after_nucleate(tmp_vault, monkeypatch):
+    """A note's sources/ leaf outlives /nucleate consuming the note itself
+    (by design). A later /fetch that happens to produce the same title must
+    not inherit that unrelated, stale leaf for its own new note."""
+    from silica.kernel.recall.paths import SOURCES_DIR
+
+    _patch_web_fetch(monkeypatch, "Source: https://a.test/first\n\nSame Title\n\nPage A body.")
+    note_a = wr.fetch_to_inbox("https://a.test/first")
+    (Path(CONFIG.vault_path) / note_a).unlink()  # simulate /nucleate consuming the note
+
+    _patch_web_fetch(monkeypatch, "Source: https://b.test/second\n\nSame Title\n\nPage B body.")
+    note_b = wr.fetch_to_inbox("https://b.test/second")
+
+    leaf = Path(CONFIG.vault_path) / SOURCES_DIR / note_b.rsplit("/", 1)[-1]
+    content = leaf.read_text(encoding="utf-8")
+    assert "Page B body." in content
+    assert "Page A body." not in content

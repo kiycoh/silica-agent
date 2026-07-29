@@ -236,17 +236,25 @@ def _build_note(
 
 
 def _unique_inbox_path(concept: str) -> str:
-    """`<inbox>/<slug>.md`, with a numeric suffix on filename collision."""
+    """`<inbox>/<slug>.md`, with a numeric suffix on collision in the Inbox OR
+    in sources/. _write_leaf names the leaf after this same basename, so a
+    basename that is merely free in the Inbox is not enough: a leaf can
+    outlive its note past /nucleate, and reusing that basename would silently
+    attach a stale, unrelated leaf to the new note (DRIVER.create raises
+    FileExistsError there, which _write_leaf swallows as best-effort). Check
+    both up front so the note and its future leaf are always in lockstep."""
+    from silica.kernel.recall.paths import SOURCES_DIR
     from silica.kernel.vault_manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
     slug = slugify(concept) or "web-research"
-    candidate = f"{inbox}/{slug}.md"
+    vault = Path(CONFIG.vault_path)
+    basename = f"{slug}.md"
     n = 2
-    while (Path(CONFIG.vault_path) / candidate).exists():
-        candidate = f"{inbox}/{slug} {n}.md"
+    while (vault / inbox / basename).exists() or (vault / SOURCES_DIR / basename).exists():
+        basename = f"{slug} {n}.md"
         n += 1
-    return candidate
+    return f"{inbox}/{basename}"
 
 
 def _title_of(text: str) -> str:
