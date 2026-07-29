@@ -79,11 +79,29 @@ def assert_reranker_live(config) -> None:
     rr = get_reranker(config)
     if rr is None:
         return
-    if rr.scores("ping", ["pong"]) is None:
+    # Probe at PRODUCTION size, not "ping"/"pong". A served reranker rejects
+    # per-request work that exceeds its physical batch (llama.cpp: 500 over
+    # -ub, default 512 tokens) while still answering a tiny probe, so a
+    # toy pair certifies a server that will abstain on every real call. Silica
+    # sends _WINDOW_CHARS query + _WINDOW_CHARS document; probe exactly that.
+    # Distinct pseudo-words, never a repeated phrase: BPE compresses repetition
+    # so hard that "lorem ipsum" x N fits a batch that real prose blows past
+    # (measured: 800+800 chars of vault text = 540-651 tokens, ~2.6 chars/token).
+    # The probe has to be as token-dense as the content, or it certifies nothing.
+    import itertools
+    import string
+
+    from silica.kernel.recall.rerank import _WINDOW_CHARS
+
+    words = ("".join(t) for t in itertools.product(string.ascii_lowercase, repeat=3))
+    probe_text = " ".join(itertools.islice(words, _WINDOW_CHARS))[:_WINDOW_CHARS]
+    if rr.scores(probe_text, [probe_text]) is None:
         raise SystemExit(
-            "reranker configured but not responding (server down?): it would "
-            "silently abstain and fake rerank == embed-only. Start the reranker "
-            "or pass --no-rerank.")
+            "reranker configured but not answering a production-sized pair "
+            f"({_WINDOW_CHARS}-char query x {_WINDOW_CHARS}-char document): it "
+            "would silently abstain and fake rerank == embed-only. If the server "
+            "is up, its batch is too small (llama.cpp: -b/-ub >= -c). Otherwise "
+            "start the reranker or pass --no-rerank.")
 
 
 def warn_unpinned_provider(model: str, provider_pin: str | None) -> None:
