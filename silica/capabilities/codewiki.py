@@ -304,7 +304,7 @@ def run_wiki(vault, config, folder: str | None = None,
     from silica.kernel.write import frontmatter
     from silica.kernel.code import gitstate
     from silica.kernel.recall import paths
-    from silica.kernel.code.codedocs import CHANGE_STRUCTURAL, stale_docs
+    from silica.kernel.code.codedocs import CHANGE_STRUCTURAL, invalidate_snapshot, snapshot
     from silica.kernel.code.codegraph import load_codegraph
     from silica.kernel.code.codewiki import (
         build_digests, cross_edges, edges_ref, partition, render_mermaid,
@@ -352,7 +352,7 @@ def run_wiki(vault, config, folder: str | None = None,
     # make the result unreachable (regen is already decided on those paths)
     structurally_stale: set[str] = set()
     if not (force or overview_only):
-        structurally_stale = {d.note_path for d in stale_docs(vault)
+        structurally_stale = {d.note_path for d in snapshot(vault)
                               if d.change_level == CHANGE_STRUCTURAL}
 
     written: list[str] = []
@@ -372,6 +372,7 @@ def run_wiki(vault, config, folder: str | None = None,
     def _commit(rel: str, content: str) -> bool:
         res = commit_derived(rel, content)
         if res.get("status") == "committed":
+            invalidate_snapshot(vault)   # the page just re-stamped code_ref
             return True
         failed.append({"path": rel, "reason": res.get("reason", "unknown")})
         return False

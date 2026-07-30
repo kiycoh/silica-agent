@@ -333,6 +333,21 @@ def test_conventions_wiki_dir_parsed(tmp_path):
     assert _parse_conventions({}).wiki_dir == ""
 
 
+def test_page_write_invalidates_the_stale_snapshot(wiki_env):
+    """A /wiki page write stamps code_ref frontmatter: the cache must not
+    keep a pre-write answer about the very notes just re-badged."""
+    root, vault, fake = wiki_env
+    from silica.kernel.code import codedocs
+
+    cache = codedocs._snapshot_path(vault)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text('{"head": "poison", "docs": []}', encoding="utf-8")
+
+    result = run_wiki(vault, config=None)
+    assert result["written"]
+    assert not cache.exists()
+
+
 def test_conventions_wiki_dir_rejects_escape(tmp_path):
     # vault.yaml is user-authored: traversal/absolute paths must never reach
     # the write path (they would scatter notes outside the vault)
