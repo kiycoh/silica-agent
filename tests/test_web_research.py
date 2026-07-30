@@ -1,8 +1,8 @@
 """web_search tool + web_research orchestrator (ADR-0015 staged acquisition).
 
 No real network (httpx.post is monkeypatched) and no real LLM (run_agent is
-monkeypatched). Asserts: Tavily request shape, compact result mapping, missing
-key error, sensitivity, and (later tasks) the inbox findings note.
+monkeypatched). Asserts: Tavily request shape, the keyless DuckDuckGo default,
+compact result mapping, sensitivity, and the inbox findings note.
 """
 from __future__ import annotations
 
@@ -24,8 +24,62 @@ def test_web_search_registered_and_sensitive():
     assert TOOLS["web_search"].sensitive is True
 
 
-def test_web_search_missing_key_raises(monkeypatch):
+_DDG_HTML = """
+<div class="result results_links web-result">
+  <a rel="nofollow" class="result__a"
+     href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.test%2Fpage&amp;rut=abc">Title <b>One</b></a>
+  <a class="result__snippet" href="//duckduckgo.com/l/?uddg=x">Snippet <b>text</b> one.</a>
+</div>
+<div class="result result--ad">
+  <a rel="nofollow" class="result__a"
+     href="https://duckduckgo.com/y.js?ad_domain=x&amp;u3=enc">Ad title</a>
+  <a class="result__snippet">Buy stuff.</a>
+</div>
+"""
+
+
+class _FakeDDGResp:
+    status_code = 200
+    text = _DDG_HTML
+
+    def raise_for_status(self):
+        return self
+
+
+def test_web_search_without_key_uses_duckduckgo(monkeypatch):
+    """No key is not an error: the default backend scrapes DDG's HTML endpoint,
+    unwraps the redirect hrefs, and drops the ad (whose href has no uddg)."""
     monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+    seen = {}
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        seen["url"] = url
+        seen["data"] = data
+        seen["headers"] = headers
+        return _FakeDDGResp()
+
+    monkeypatch.setattr(wr.httpx, "post", fake_post)
+
+    items = json.loads(wr.web_search("graph theory"))
+
+    assert seen["url"] == wr._DDG_URL
+    assert seen["data"]["q"] == "graph theory"
+    assert "Mozilla" in seen["headers"]["User-Agent"]  # browser UA, not httpx's
+    assert items == [
+        {"title": "Title One", "url": "https://a.test/page", "content": "Snippet text one."}
+    ]
+
+
+def test_web_search_ddg_challenge_names_the_tavily_escape_hatch(monkeypatch):
+    """DDG answers rate-limit challenges with 202, which raise_for_status would
+    wave through as success; the error must tell the user their way out."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+
+    class _Challenged(_FakeDDGResp):
+        status_code = 202
+        text = "prove you are human"
+
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
     with pytest.raises(ValueError, match="TAVILY"):
         wr.web_search("anything")
 
@@ -314,19 +368,17 @@ def test_web_research_no_findings_raises_and_writes_nothing(tmp_vault, monkeypat
     assert not inbox.exists() or not list(inbox.glob("*.md"))
 
 
-def test_web_research_missing_key_raises_before_loop(tmp_vault, monkeypatch):
+def test_web_research_runs_without_a_key(tmp_vault, monkeypatch):
+    """No Tavily key no longer fails fast: web_search falls back to DDG."""
     monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+    _patch_run_agent(
+        monkeypatch,
+        body="Findings.",
+        tool_results=[[{"title": "T", "url": "https://a.test", "content": "c"}]],
+    )
 
-    called = {"run": False}
-
-    def fake_run_agent(*a, **k):
-        called["run"] = True
-        return "x"
-
-    monkeypatch.setattr(wr, "run_agent", fake_run_agent)
-    with pytest.raises(ValueError, match="TAVILY"):
-        wr.web_research("x")
-    assert called["run"] is False  # fail fast, no loop, no note
+    note_rel = wr.web_research("x")
+    assert (Path(CONFIG.vault_path) / note_rel).exists()
 
 
 def test_web_research_empty_body_raises_and_writes_nothing(tmp_vault, monkeypatch):
@@ -425,6 +477,28 @@ def test_fetch_to_inbox_writes_a_note_titled_after_the_page(tmp_vault, monkeypat
     # the ADR-0015 sources guarantee: a ## Sources block naming this URL, not
     # merely the URL appearing somewhere in the fetched text we echo verbatim
     assert "## Sources" in body
+    assert "1. On Graph Theory — https://a.test/post" in body
+
+
+def test_fetch_to_inbox_assumes_https_for_a_bare_domain(tmp_vault, monkeypatch):
+    """`/fetch en.wikipedia.org/wiki/X` is how humans type URLs. The scheme is
+    inferred here at the user-facing seam, so the strict guard in web_fetch
+    still validates the full https form (and agent calls stay strict)."""
+    import silica.sources.web_fetch as wf
+    seen = {}
+
+    def fake(url):
+        seen["url"] = url
+        return "Source: https://a.test/post\n\nOn Graph Theory\n\nBody."
+
+    monkeypatch.setattr(wf, "web_fetch", fake)
+
+    body = (Path(CONFIG.vault_path) / wr.fetch_to_inbox("a.test/post")).read_text(
+        encoding="utf-8"
+    )
+
+    assert seen["url"] == "https://a.test/post"
+    # the citation carries the URL actually fetched, not the schemeless input
     assert "1. On Graph Theory — https://a.test/post" in body
 
 

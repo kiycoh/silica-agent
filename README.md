@@ -217,6 +217,9 @@ Merges and splits redirect every incoming link automatically, so a refactor leav
 **Research straight into the vault.**<br/>
 `/web-search "<topic>"` pulls cited findings into the inbox, reading the pages it finds rather than skimming snippets. `/fetch <url>` reads a single page (or a YouTube transcript) straight into the inbox. `/convert <file>` transcodes PDFs into Markdown drafts. Fetching is direct, with no third-party reader in the path, and nothing from the web reaches your notes until you nucleate it.
 
+**When the vault does not have it.**<br/>
+If every search a turn ran came back empty, Silica says so instead of answering thin, and names `/web`. Typing it is the consent: the answer comes from the web, with citations appended from the pages that were actually opened rather than from what the model claims it read. That turn writes nothing. `/keep` saves it to the inbox when it was worth keeping.
+
 ---
 
 ## How an answer is grounded
@@ -369,6 +372,8 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `/nucleate <file...> [--target=DIR]` | Notes/PDFs/Notebooks via the gate; code as skeletons |
 | `/organize "<intent>" [--scope=DIR] [--file=tax.yaml] [--apply]` | Classify and move notes into a taxonomy |
 | `/curate [--apply]` · `/dedup` · `/refine` · `/enrich` | Plan and run autolink, MinHash LSH dedup, and enrichment |
+| `/web [keywords]` | Answer from the web, cited from the pages opened; writes nothing. Bare `/web` re-asks your last question |
+| `/keep` | Save the last `/web` answer as a cited note in the Inbox |
 | `/web-search "<topic>" [--max-searches=N]` | Research on the web → cited findings note in Inbox |
 | `/fetch <url>` | Read one page or YouTube transcript → verbatim note in Inbox |
 | `/convert <file...>` | Transcode non-markdown files (PDFs) into markdown drafts |
@@ -412,7 +417,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `SILICA_EMBEDDING_MODEL` | Embedding model for semantic tasks (default `qwen3-embedding-4b`) |
 | `SILICA_BACKEND` | `fs` (default, headless). The Obsidian bridge installs `ws` live at dial-in |
 | `SILICA_GIT_COMMIT` | Git safety net for writes (`off`, `auto`) |
-| `SILICA_TAVILY_API_KEY` | Enables `/web-search` |
+| `SILICA_TAVILY_API_KEY` | Optional: switches `/web-search` to Tavily. Without it, search scrapes DuckDuckGo directly, no key needed |
 | `SILICA_WORKER_MODEL` | Sub-agent worker model, used for dedup and refinement |
 
 ---

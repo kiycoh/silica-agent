@@ -24,9 +24,12 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
+from silica.agent.constraints import web_turn_constraints
 from silica.agent.loop import run_agent
+from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
 from silica.config import CONFIG
 from silica.kernel.recall.mindmap import note_resolver
+from silica.sources.web_research import WebTurn
 from silica.ui.web.callback import event_to_json
 
 logger = logging.getLogger(__name__)
@@ -491,7 +494,7 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
     running, so we signal cancel and defer the release to the worker's exit, so
     no second turn overlaps a zombie still mutating `messages`.
     """
-    from silica.cli import _compact_context, _update_context_tokens
+    from silica.cli import _compact_context, _expand_web_turn, _update_context_tokens
 
     global _busy, current_cancel, current_task, _collapsed
     if not _busy:  # direct callers (tests, future WS) that didn't pre-claim
@@ -513,7 +516,13 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
         # the hand-kept list of "web commands" that used to gate this drifted, and
         # /lexical /wiki /graph /map /find /vault fell through it into an error.
         agent_msg = text
-        if text.startswith("/"):
+        # /web comes first: it is neither direct nor a workflow expansion but an
+        # agent turn with web-only tools. A usage error raises ValueError, which
+        # the except below turns into the single error event.
+        web = _expand_web_turn(text, messages) if text.startswith("/") else None
+        if web is not None:
+            agent_msg = web[1]
+        elif text.startswith("/"):
             from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
             from silica.ui.console import CONSOLE
 
@@ -561,9 +570,18 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
             msg["origin"] = "cli"
         messages.append(msg)
 
+        # Both wrappers forward every event to `cb` untouched: WebTurn records the
+        # trace the citations are built from, RecallWatch counts recall misses for
+        # the thin-coverage hint.
+        watch = WebTurn(web[0], cb) if web else RecallWatch(cb)
+
         sentinel = object()
         task = asyncio.create_task(
-            asyncio.to_thread(run_agent, messages, CONFIG.model, cb, cancel_token=current_cancel)
+            asyncio.to_thread(
+                run_agent, messages, CONFIG.model, watch,
+                cancel_token=current_cancel,
+                constraints=web_turn_constraints() if web else None,
+            )
         )
         current_task = task
         task.add_done_callback(lambda t: q.put_nowait(sentinel))
@@ -575,19 +593,26 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
             yield item
 
         answer = await task  # re-raises if run_agent failed
+        if web:
+            # Before _linkify and before the compaction sweep: the Sources block
+            # belongs to what the user sees AND to what the history carries.
+            answer = watch.attribute(answer, messages)
         _update_context_tokens(messages)
         _collapsed = _compact_context(messages, _collapsed)
         # note_resolver reads the DRIVER graph — with the ws backend installed
         # (silica connect) a driver call on the loop thread deadlocks (`_rpc`
         # blocks the very loop that must send the frame), so render off-loop.
         html = await asyncio.to_thread(lambda: _linkify(answer, note_resolver()))
-        yield {
+        done = {
             "type": "done",
             "answer": answer,
             "html": html,
             "context_tokens": CONFIG.context_tokens,
             "max_context_tokens": CONFIG.max_context_tokens,
         }
+        if not web and watch.thin:
+            done["hint"] = THIN_COVERAGE_HINT  # muted line under the answer
+        yield done
     except Exception as exc:  # never leave the UI stuck on the spinner
         logger.exception("web turn failed")
         yield {"type": "error", "error": str(exc)}

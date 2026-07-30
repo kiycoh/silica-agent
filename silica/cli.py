@@ -18,8 +18,9 @@ from typing import NamedTuple
 
 from silica.ui.style import FlatMarkdown
 
-from silica.agent.constraints import AgentConstraints, chat_tools
+from silica.agent.constraints import AgentConstraints, chat_tools, web_turn_constraints
 from silica.agent.loop import run_agent
+from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
 from silica.config import CONFIG
 from silica.prompts import system_prompt
 from silica.ui.console import CONSOLE
@@ -34,6 +35,7 @@ import silica.tools.wrapped  # noqa: F401
 import silica.tools.codedocs_tool  # noqa: F401
 import silica.tools.delegate_tool  # noqa: F401
 import silica.sources.web_research  # noqa: F401  (registers the web_search and web_fetch tools)
+from silica.sources.web_research import WebTurn
 
 logger = logging.getLogger(__name__)
 
@@ -871,6 +873,21 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             CONSOLE.print('  Run [bold]/curate --apply[/] to execute, or ask e.g. "apply only dedup".')
         return True
 
+    if cmd == "/keep":
+        from rich.markup import escape
+
+        from silica.sources.web_research import keep_last
+
+        try:
+            note_rel = keep_last()
+            CONSOLE.print(
+                f"  Kept → [bold]{escape(note_rel)}[/]"
+                "  (review, then /nucleate to bring it in)"
+            )
+        except Exception as e:  # empty slot, name collision, write refused
+            CONSOLE.print(f"  [yellow]keep failed: {escape(str(e))}[/]")
+        return True
+
     return False
 
 
@@ -982,6 +999,51 @@ def _save_or_readonly_clause(save_path: str) -> str:
             f"the entire body, plus a one-line title."
         )
     return "READ-ONLY: do not create, edit, patch, or move any note."
+
+
+_WEB_USAGE = (
+    "/web has nothing to search for. Usage: /web <keywords>, or a bare /web "
+    "right after a question to answer that question from the web."
+)
+
+
+def _expand_web_turn(user_input: str, messages: list[dict]) -> tuple[str, str] | None:
+    """`/web [keywords]` — the consent turn. Returns (question, instruction).
+
+    None when the input is not `/web`. Raises ValueError (usage) when there are
+    neither keywords nor a prior question to escalate.
+
+    Deliberately NOT a direct handler: run_agent appends the assistant and tool
+    turns to the shared `messages` itself, so a handler running its own loop and
+    then reporting the answer would append that answer a second time — the GUI's
+    generic direct-command wrapper renders it as a fenced text block, which is
+    how a web answer would arrive both as markdown and as a code block.
+    """
+    parts = user_input.strip().split()
+    if not parts or parts[0].lower() != "/web":
+        return None  # "/web-search" is its own command and must not match here
+    question = " ".join(parts[1:]).strip()
+    if not question:
+        # Bare /web: the question is already in the history, no pending state
+        # needed. `origin` marks CLI-expanded directives — re-asking one of those
+        # on the web would escalate a harness instruction, not a human question.
+        question = next(
+            (
+                m["content"] for m in reversed(messages)
+                if m.get("role") == "user" and not m.get("origin") and m.get("content")
+            ),
+            "",
+        )
+        if not question:
+            raise ValueError(_WEB_USAGE)
+    return question, (
+        f"Answer this from the web, not from the vault: {question}\n"
+        "Use `web_search` to find pages and `web_fetch` to read the ones that look "
+        "like they answer it — a search snippet is not the article. Then answer in "
+        "prose, and say plainly that the answer comes from the web rather than from "
+        "the user's own notes. Do not write a Sources section: the citations are "
+        "appended mechanically from the pages you actually opened."
+    )
 
 
 def _expand_workflow_shortcut(user_input: str) -> str | None:
@@ -1850,6 +1912,19 @@ def main():
             user_input = expanded
             is_directive = True
 
+        # /web — the consent turn: a normal agent turn with web-only tools and
+        # citations built from the tool trace. Checked before the slash handler,
+        # since it rewrites the input into an ordinary agent instruction.
+        web: tuple[str, str] | None = None
+        try:
+            web = _expand_web_turn(user_input, messages)
+        except ValueError as e:
+            CONSOLE.print(f"  [yellow]{e}[/]")
+            continue
+        if web is not None:
+            user_input = web[1]
+            is_directive = True
+
         # Handle slash commands
         if user_input.startswith("/"):
             cmd = user_input.strip().lower()
@@ -1890,18 +1965,29 @@ def main():
             msg["origin"] = "cli"
         messages.append(msg)
 
+        # Both wrappers forward every event to the renderer untouched: WebTurn
+        # records the trace the citations are built from, RecallWatch counts
+        # recall misses for the thin-coverage hint.
+        watch = WebTurn(web[0], callback) if web else RecallWatch(callback)
+
         try:
             answer = run_agent(
                 messages,
                 model=CONFIG.model,
-                tool_progress_callback=callback,
-                constraints=AgentConstraints(tools=chat_tools()),
+                tool_progress_callback=watch,
+                constraints=(
+                    web_turn_constraints() if web else AgentConstraints(tools=chat_tools())
+                ),
             )
+            if web:
+                answer = watch.attribute(answer, messages)
             if answer:
                 CONSOLE.print()
                 CONSOLE.print("[role.assistant]⏺ silica[/]")
                 CONSOLE.print(FlatMarkdown(answer))
                 CONSOLE.print()
+            if not web and watch.thin:
+                CONSOLE.print(f"  [dim]{THIN_COVERAGE_HINT}[/]\n")
             # run_agent already appended the final assistant message to the
             # history — re-appending `answer` here would store it twice.
             _update_context_tokens(messages)

@@ -65,6 +65,22 @@ COMMANDS: tuple[Command, ...] = (
         ),
     ),
     Command(
+        name="/web",
+        group="workflow",
+        usage="[keywords]",
+        summary="answer from the web instead of the vault, cited; bare /web re-asks your last question",
+        examples=(
+            "/web graph rewiring benchmarks",
+            "/web",
+        ),
+    ),
+    Command(
+        name="/keep",
+        group="direct",
+        usage="",
+        summary="save the last /web answer as a cited note in the Inbox (then /nucleate)",
+    ),
+    Command(
         name="/fetch",
         group="direct",
         usage="<url>",

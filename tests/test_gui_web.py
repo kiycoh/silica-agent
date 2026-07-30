@@ -118,7 +118,7 @@ def test_index_cache_busts_churning_assets(client):
 
 
 def _repl_dispatched_commands() -> set[str]:
-    """Command names the REPL's two dispatchers recognise, read off their source.
+    """Command names the REPL's three dispatchers recognise, read off their source.
 
     ponytail: a source-level lint, because the direct handler does the work inline
     (calling it to ask "do you know /embed?" would rebuild an index). It breaks if
@@ -128,12 +128,21 @@ def _repl_dispatched_commands() -> set[str]:
     import inspect
     import re
 
-    from silica.cli import _REFRESH, _expand_workflow_shortcut, _handle_direct_shortcut
+    from silica.cli import (
+        _REFRESH,
+        _expand_web_turn,
+        _expand_workflow_shortcut,
+        _handle_direct_shortcut,
+    )
 
     src = inspect.getsource(_handle_direct_shortcut) + inspect.getsource(_expand_workflow_shortcut)
     return set(re.findall(r'cmd (?:==|in \()\s*"(/[a-z-]+)"', src)) | set(
         re.findall(r'"(/[a-z-]+)"\)', src)
-    ) | set(_REFRESH)  # the three index refreshes dispatch off a dict, not the chain
+    ) | set(_REFRESH) | set(  # the three index refreshes dispatch off a dict
+        # The web-escalation expander matches on parts[0], not on a `cmd ==`
+        # chain, and names only the commands it owns: take every literal.
+        re.findall(r'"(/[a-z-]+)"', inspect.getsource(_expand_web_turn))
+    )
 
 
 def test_every_advertised_command_is_dispatchable_by_the_gui():
@@ -257,6 +266,78 @@ def test_inline_slash_command_reports_its_failure_too(client, monkeypatch):
     done = events[-1]
     assert done["type"] == "done"
     assert "fetch failed" in done["answer"] and "bot wall" in done["answer"]
+
+
+def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypatch):
+    """/web is NOT a direct command: it runs the agent with web-only tools, so the
+    answer arrives as markdown (not a fenced text block) and carries the Sources
+    block built from the trace. A direct handler here would append the captured
+    answer a second time."""
+    tc, server = client
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None,
+                       constraints=None, **kw):
+        assert constraints.tools == ("web_search", "web_fetch")
+        tool_progress_callback(ToolCompleteEvent(
+            name="web_search", args={"query": "q"}, call_id="c1",
+            result=json.dumps([{"title": "Rewiring", "url": "https://a.test/rw"}]),
+            duration_s=0.0, iteration=1,
+        ))
+        messages.append({"role": "assistant", "content": "From the web: it swaps edges."})
+        return "From the web: it swaps edges."
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+
+    done = _read_sse(tc.post("/chat", json={"text": "/web graph rewiring"}))[-1]
+    assert done["type"] == "done"
+    assert "```text" not in done["answer"]  # not the direct-command wrapper
+    assert "## Sources (web)" in done["answer"]
+    assert "https://a.test/rw" in done["answer"]
+    # history carries what the user saw
+    assert server.messages[-1]["content"] == done["answer"]
+
+
+def test_bare_web_without_a_question_yields_one_usage_error(client):
+    tc, _ = client
+    events = _read_sse(tc.post("/chat", json={"text": "/web"}))
+    assert events[-1]["type"] == "error"
+    assert "Usage: /web" in events[-1]["error"]
+
+
+def test_done_carries_the_hint_when_every_recall_missed(client, monkeypatch):
+    """The thin-coverage hint is an optional field on the existing done event."""
+    tc, server = client
+    from silica.agent.recall_watch import THIN_COVERAGE_HINT
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        tool_progress_callback(ToolCompleteEvent(
+            name="silica_recall", args={}, call_id="c1",
+            result=json.dumps({"notes": [], "facts": 0}), duration_s=0.0, iteration=1,
+        ))
+        messages.append({"role": "assistant", "content": "I have nothing on that."})
+        return "I have nothing on that."
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+
+    done = _read_sse(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
+    assert done["hint"] == THIN_COVERAGE_HINT
+
+
+def test_a_turn_that_found_notes_carries_no_hint(client, monkeypatch):
+    tc, server = client
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        tool_progress_callback(ToolCompleteEvent(
+            name="silica_recall", args={}, call_id="c1",
+            result=json.dumps({"notes": ["Concepts/RAG.md"]}), duration_s=0.0, iteration=1,
+        ))
+        messages.append({"role": "assistant", "content": "You wrote about it."})
+        return "You wrote about it."
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+
+    done = _read_sse(tc.post("/chat", json={"text": "what about RAG?"}))[-1]
+    assert "hint" not in done
 
 
 def test_an_unknown_slash_command_is_still_reported_as_unavailable(client):
@@ -673,6 +754,22 @@ def test_fence_gets_pygments_spans():
     assert 'language-python' in html
     # unknown language degrades to a plain escaped fence
     assert "<span" not in _linkify("```nolang\nx\n```", _fake_resolve)
+
+
+def test_command_output_fence_is_the_class_the_stylesheet_wraps():
+    """The ```text fence a slash command's output is wrapped in must land on the
+    one class app.css lets wrap. Both halves are needed: the fence renders to
+    `language-text`, and that selector carries pre-wrap. Miss either and the
+    tail of a message runs off the right edge, which is how /fetch's yt-dlp
+    error hid the pip command it prescribes."""
+    from pathlib import Path
+
+    from silica.ui.web.server import _linkify
+
+    assert 'class="language-text"' in _linkify("```text\nFetched\n```", _fake_resolve)
+    css = (Path(__file__).parent.parent / "silica/ui/web/static/app.css").read_text()
+    rule = css.split("pre code.language-text {")[1].split("}")[0]
+    assert "white-space: pre-wrap" in rule
 
 
 def test_asset_endpoint_serves_vault_images_and_closes_traversal(client, tmp_vault):

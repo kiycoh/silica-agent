@@ -728,6 +728,14 @@ details.side-section:hover>summary.side-title {
   border-color: var(--line-2);
 }
 
+/* thin-coverage hint: every vault search this turn came back empty. Muted on
+   purpose — it reports, it does not ask. */
+.turn-hint {
+  margin-top: 0.6rem;
+  color: var(--ash-dim);
+  font-size: 12px;
+}
+
 /* sources footer — notes this turn touched, click opens the drawer */
 .sources {
   display: flex;
@@ -935,6 +943,16 @@ details.side-section:hover>summary.side-title {
 :is(.msg, #note-body, #peek-body) pre code {
   background: none;
   padding: 0;
+}
+
+/* A slash command's own output is wrapped in a ```text fence to borrow the mono
+   grid, but it is prose, not code: it has to wrap instead of hiding its tail
+   behind the scrollbar. /fetch's yt-dlp error was losing the pip command it
+   prescribes off the right edge, which is the one part worth reading. Real code
+   blocks keep overflow-x, where a hard wrap would corrupt the listing. */
+:is(.msg, #note-body, #peek-body) pre code.language-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 :is(.msg, #note-body, #peek-body) a {

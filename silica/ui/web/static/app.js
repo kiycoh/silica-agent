@@ -341,6 +341,14 @@ async function runTurn(fetchPromise, pendingLabel = "working") {
         curText.el.innerHTML = ev.html || escapeHtml(ev.answer || "");
       }
       close(""); // collapse any open thinking, end all segments
+      if (ev.hint) {
+        // Informational only: every recall call this turn came back empty. It
+        // arms nothing — /web works the same with or without it.
+        const h = document.createElement("div");
+        h.className = "turn-hint";
+        h.textContent = ev.hint;
+        flow.appendChild(h);
+      }
       setCtxTokens(ev.context_tokens, ev.max_context_tokens);
       peekDone(ev); // card gets the canonical OFM render
       announce("response ready");

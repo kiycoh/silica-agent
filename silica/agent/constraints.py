@@ -50,6 +50,16 @@ _CHAT_EXCLUDED = frozenset({
 })
 
 
+def web_turn_constraints() -> AgentConstraints:
+    """`/web` — the consented web turn: the two web tools and nothing else.
+
+    16 is the twin of `_DEFAULT_MAX_SEARCHES` in silica/sources/web_research.py.
+    Duplicated rather than imported: the import direction is sources -> agent, so
+    this module must not read that one.
+    """
+    return AgentConstraints(tools=("web_search", "web_fetch"), max_iterations=16)
+
+
 def chat_tools() -> tuple[str, ...]:
     """Toolset for the interactive chat loop: everything except batch maintenance.
 
