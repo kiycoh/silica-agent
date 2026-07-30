@@ -26,8 +26,16 @@ logger = logging.getLogger(__name__)
 # ponytail: perception-grid winners as plain defaults; promote to CONFIG only
 # when a real vault needs different values.
 DEFAULT_K = 15
-WINDOW_CHARS = 3000
-DEFAULT_WINDOWS = 1  # multi-window spec 2026-07-15: moves only after the grid decides
+# Window grid decided 2026-07-30 (bench/window_sweep_150.json + the paired A/B in
+# bench/ab_win_*.metrics.json). 3x1000 beats the old 1x3000 on answer accuracy:
+# 0.520 vs 0.427 over the same 150 LME questions and the SAME retrieved blocks
+# (rerank carries its own _WINDOW_CHARS, so the render window cannot move
+# ranking), McNemar exact p=0.0336, 26 questions won against 12 lost. Uniform
+# NARROWING was the losing move — every 1xN cell below 3000 lost gold and cost
+# 12-28pp on some question type; splitting the same budget across more windows
+# is what wins. k stays 15: probe_recall_rank showed the rank tail carries gold.
+WINDOW_CHARS = 1000
+DEFAULT_WINDOWS = 3
 FACTS_K = 10
 
 

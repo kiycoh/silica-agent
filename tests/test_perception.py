@@ -139,8 +139,9 @@ def test_perceive_multi_window_excerpt_joins_with_elision_marker(tmp_path, monke
     assert len(ex) <= 2 * 150 + len("\n[…]\n")
 
 
-def test_perceive_default_single_window_is_unchanged(tmp_path, monkeypatch):
-    # windows=1 (the default) must keep the prompt surface byte-identical:
+def test_single_window_arm_emits_no_elision_marker(tmp_path, monkeypatch):
+    # windows=1 is no longer the default (see the defaults test below), but the
+    # single-window contract still holds for the eval arms that request it:
     # no marker, excerpt == best_window of the body.
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", TWO_FACT_BODY)
@@ -149,10 +150,21 @@ def test_perceive_default_single_window_is_unchanged(tmp_path, monkeypatch):
     from silica.kernel.recall.rerank import best_window
 
     p = perceive("when is my yoga class?", now="2026-05-01", k=1,
-                 window_chars=150, use_embedder=False)
+                 window_chars=150, windows=1, use_embedder=False)
     b = p.blocks[0]
     assert "[…]" not in b.excerpt
     assert b.excerpt == best_window(b.body, "when is my yoga class?", 150)
+
+
+def test_render_defaults_are_the_decided_window_grid():
+    """The 3x1000 grid is a measured decision, not a preference: it beat 1x3000
+    on answer accuracy 0.520 vs 0.427 over 150 paired LME questions (McNemar
+    p=0.0336, bench/ab_win_*.metrics.json). Pinned so a silent revert to a wide
+    single window has to break a test and re-argue the measurement."""
+    from silica.kernel.recall import perception
+
+    assert (perception.DEFAULT_WINDOWS, perception.WINDOW_CHARS) == (3, 1000)
+    assert perception.DEFAULT_K == 15  # probe_recall_rank: the rank tail carries gold
 
 
 def test_perceive_multi_window_short_body_passes_whole(tmp_path, monkeypatch):
