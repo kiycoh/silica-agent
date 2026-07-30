@@ -19,11 +19,12 @@
 </p>
 
 
-<h3 align="center">Point Silica at a folder of notes or at a codebase.<br/>Ask it anything. Every write is verified or reverted.</h3>
+<h3 align="center">Every other tool reads your notes.<br/>Silica is the one that answers for them.</h3>
 
 <p align="center">
-It answers from what you <i>actually</i> have instead of guessing, and it re-reads every edit it makes to<br/>
-confirm the edit held. Local-first. Your files stay plain markdown, readable with or without it.
+Point it at a folder of markdown or at a codebase. It grows the vault, links it, dedups it,<br/>
+audits it, and answers from it. Every write it makes is re-read afterwards, and reverted if it<br/>
+broke something. Local-first. Your files stay plain markdown, readable with or without it.
 </p>
 
 <p align="center">
@@ -34,6 +35,7 @@ confirm the edit held. Local-first. Your files stay plain markdown, readable wit
 
 <p align="center">
   <a href="#why-silica">Why Silica</a> &nbsp;•&nbsp;
+  <a href="#compared-to-the-alternatives">Compared</a> &nbsp;•&nbsp;
   <a href="#install">Install</a> &nbsp;•&nbsp;
   <a href="#four-ways-in">Drivers</a> &nbsp;•&nbsp;
   <a href="#what-you-can-do">Features</a> &nbsp;•&nbsp;
@@ -49,7 +51,19 @@ confirm the edit held. Local-first. Your files stay plain markdown, readable wit
 
 ## Why Silica
 
-Most "chat with your notes" tools hand a free-running agent the keys and hope for the best. The damage is quiet: a merge orphans a note, a rewrite breaks a link, and you find out three weeks later. Silica is built the other way around.
+### The problem
+
+Two things go wrong the moment you give an assistant access to what you know.
+
+**It answers from somewhere other than your material.** The model's own memory, a plausible paraphrase, a note that stopped being true a year ago. The answer reads the same either way, so you cannot tell which one you got.
+
+**It edits your material and nobody checks the edit.** A merge orphans a note, a rewrite breaks a link, a cleanup flattens a distinction you cared about. Nothing fails loudly. You find out three weeks later, if at all.
+
+**And it never has to live with the mess.** A vault decays on its own: the same idea captured five times, notes nothing points at any more, links to a file that moved, a subsystem documented against a commit from three months ago. An assistant that only reads has no stake in any of that.
+
+The usual remedy makes all three worse: the tool copies your notes into a store of its own. Now the thing being answered from is not the thing on your disk, and you cannot open it to check.
+
+Silica takes the opposite position. **The vault is the product, not the transcript.** Your folder of markdown is the database, Silica is answerable for the state it is in, and every write it makes passes a gate that re-reads what it just wrote.
 
 🛡️ &nbsp;**A bad edit gets rolled back, not discovered later.**<br/>
 Every write is re-read and checked after it lands. If it broke vault coherence, it is reverted automatically. If you simply changed your mind, `/undo` takes back one note and `/revert` takes back an entire run.
@@ -67,6 +81,48 @@ Local models (LM Studio, Ollama) are first-class. With no embedding model at all
 Your vault stays a folder of plain markdown files. Open it in Obsidian, in any editor, or in nothing at all. Silica is a layer on top, never a container around it.
 
 <sub><b>New to this?</b> A "vault" is just a folder of markdown (<code>.md</code>) files. If you already use Obsidian, that folder is your Obsidian vault, and Silica works on it directly.</sub>
+
+---
+
+## Compared to the alternatives
+
+> Everyone else either only reads your material, or owns a copy of it you cannot read. Silica is the one that treats your own file tree as the database, and puts a compiler-style gate in front of every change to it.
+
+The two nearest neighbors are worth naming. [Basic Memory](https://github.com/basicmachines-co/basic-memory) is the substrate twin: markdown on your disk, wikilinks, MCP, same AGPL license. [LLM Wiki](https://github.com/nashsu/llm_wiki) is the closest in ambition: a desktop app that compiles your documents into a wiki and keeps it current.
+
+| | **Silica** | **Basic Memory** | **LLM Wiki** |
+| :--- | :--- | :--- | :--- |
+| Where the knowledge lives | your folder of `.md` | your folder of `.md` | a generated `wiki/` of markdown, beside sources kept immutable |
+| After a write lands | re-read and checked, reverted on mismatch | written, then indexed | a `Lint` pass on demand, plus a review queue for what the model flagged |
+| Undoing a bad edit | `/undo` per note, `/revert` per run, optional git commit per write | your own version control; point-in-time restore is a paid cloud tier | not a documented feature; deleting a source cascades cleanup of the pages it produced |
+| Merge, split, rename | incoming wikilinks redirected atomically, no orphan left behind | the file moves, the links pointing at it are yours to fix | dead wikilinks pruned when a source is deleted |
+| With no model available | retrieval degrades to deterministic legs and keeps answering | keyword search stays, semantic needs an embedder | keyword and graph search stay, ingest needs an LLM |
+| Codebases | same vault, same gate, staleness checked against git | notes only | documents only |
+| Refusal rate published | yes, 94.4% and 89.7% correct abstention next to 78% accuracy | not published | not published |
+| Hosting | local, AGPL, nothing above it | local AGPL, plus a paid cloud tier | local, GPL-3.0 desktop app |
+
+**The rest of the field.** Memory agents (Mem0, Zep, Letta, Cognee, Supermemory) ingest your material into a store of their own; Letta is the only one with rollback, and none of them verifies a write after it lands. Repo wiki agents (DeepWiki, OpenWiki, GitNexus, [Graphify](https://github.com/safishamsi/graphify)) read a codebase and emit an artifact next to it: good maps, read-only by design, and they never curate a human's notes. Graph frameworks (GraphRAG, LightRAG, HippoRAG, Graphiti) build an index, not a folder you can still open in a text editor.
+
+### What only Silica does
+
+- **Verify or revert on the memory substrate itself.** 2026 produced an entire memory-poisoning literature proposing exactly this loop, stage the write, validate it, commit or roll back: Cordon, MOSS, MemLineage, MemAudit, SMSR. Every one of them is a research prototype. Silica ships the loop: one FSM entry point, a post-write re-read, an automatic revert on mismatch, `/undo` and `/revert` behind that. Read the [scope of the claim](#how-the-guardrail-works) before leaning on it.
+- **A core that survives with no models at all.** The co-occurrence concept graph, the BM25 leg, and MinHash dedup need no embedder, and a leg with nothing useful to say abstains instead of poisoning the pool. Competitor cores are LLM-mandatory by construction, and the incentive runs that way: their business is the model call.
+- **Notes and code as one substrate, behind one gate.** The split in the field is clean and nobody crosses it. Memory agents never touch a codebase; wiki agents never curate a human's notes.
+- **Graph-safe mutation of links a human wrote.** Obsidian redirects links but has no agent driving it. Agents have no human link graph to keep intact. Silica has both.
+- **Abstention as a published number.** Mem0's own 2026 benchmark write-up concedes the market underreports it. Silica prints correct refusals next to accuracy, and ships the [unflattering rows](#measured) unedited.
+
+### What Silica did not invent
+
+Credit where it is owed. Each of these arrived before Silica, and each is here because it earns its place, not because it is new:
+
+- **Plain markdown, local-first, AGPL.** Basic Memory got there too, same license. It is the entry ticket to this category, and Silica pays it in full: no tier above the local one, no feature held back for a cloud plan.
+- **A knowledge graph with community detection and an interactive view.** Graphify, GitNexus, LLM Wiki, and GraphRAG all ship one. What Silica adds is that the graph is not only a picture: the same co-occurrence structure is a retrieval leg, and it keeps working when there is no embedder.
+- **Atomic notes that link themselves.** A-MEM's thesis, and Obsidian plugins have done it for years. The part that is Silica's is what happens next: those links survive a merge, a split, and a rename without leaving an orphan.
+- **Noticing that documentation went stale against the code.** Fiberplane's Drift ships the same reformat-immune AST fingerprint, Swimm sells it, OpenWiki runs it on a schedule. Silica runs it inside the vault that also holds your notes, and `/impact`, from a diff back to the notes it invalidates, is the piece almost nobody replicates.
+- **Typed relations between notes.** Graphiti has them, with per-edge validity intervals Silica does not model. Silica computes them on demand over notes you wrote, rather than freezing them into a store at ingest.
+- **An MCP server and local models.** Table stakes, and Silica treats them as such: four drivers, one gate, no privileged client.
+
+**On the numbers.** Silica does not claim state of the art, and the [figures below](#measured) say why: 2 of the 10 LoCoMo conversations, judged by a local-grade model. They are not comparable to what vendors report. They are something vendor numbers usually are not, which is re-runnable on your own machine, against the product path, with the harness in [`evals/`](evals/).
 
 ---
 
@@ -197,7 +253,7 @@ SILICA_VAULT = "/path/to/your/vault"
 Drop raw clippings, drafts, PDFs, or Jupyter Notebooks (`.ipynb`) in a folder. `/nucleate Inbox/*` distills each one into an atomic note, checks it against what you already have so you do not end up with a fifth copy of the same idea, and files it. Hand it twenty files at once and each one still goes through the same gate.
 
 **Ask your notes instead of your memory.**<br/>
-`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz [note]`. All read-only, all grounded in the vault. Untargeted `/quiz` targets notes you previously missed, updating retrieval weights over time.
+`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz [note]`. All read-only, all grounded in the vault. Graded answers are logged, so untargeted `/quiz` draws from the notes you have missed before: what you did not know comes back, what you already knew does not.
 
 **Visualize structure and schema.**<br/>
 `/diagram "<topic>"` generates Mermaid flowcharts, mindmaps, sequence, or class diagrams. `/schematize "<topic>"` generates structured breakdown tables. Pass `--save=<path>` to persist them directly into your notes.
@@ -417,7 +473,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `SILICA_EMBEDDING_MODEL` | Embedding model for semantic tasks (default `qwen3-embedding-4b`) |
 | `SILICA_BACKEND` | `fs` (default, headless). The Obsidian bridge installs `ws` live at dial-in |
 | `SILICA_GIT_COMMIT` | Git safety net for writes (`off`, `auto`) |
-| `SILICA_TAVILY_API_KEY` | Optional: switches `/web-search` to Tavily. Without it, search scrapes DuckDuckGo directly, no key needed |
+| `SILICA_TAVILY_API_KEY` | Optional: a backstop for `/web-search`, used only when DuckDuckGo rate-limits us. Search scrapes DuckDuckGo first either way, no key needed |
 | `SILICA_WORKER_MODEL` | Sub-agent worker model, used for dedup and refinement |
 
 ---
@@ -427,6 +483,8 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 Everything under **Available now** ships in the current release. Everything below it does not.
 
 **Available now.** Note nucleation, structural audit, semantic and embedder-free search, graph-safe refactor / dedup / merge, graph and mind-map export, codebase skeletons with git-backed `/stale` and `/impact`, the code wiki, layered `/undo` and `/revert`, the git safety net, the MCP server, and the Claude Code plugin.
+
+**Next, and it is the one that decides the rest.** Silica maintains the vault when you ask it to: `/curate`, `/organize`, `/stale`, `/report`. Being answerable for a folder means noticing without being asked, so scheduled upkeep is the next work: a watch on the folder, an audit that runs on its own, and a queue of changes waiting for your yes rather than surprising you with a diff. Until that ships, read the claim at the top of this file as on demand.
 
 **In progress.** Richer codebase coverage across more languages, PDF/DOCX/TXT nucleation, the live Obsidian bridge, and the crash harness backing the guardrail.
 

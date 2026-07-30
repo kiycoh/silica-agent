@@ -1552,8 +1552,9 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             f"note(s) for each. Output in chat: a comparison table (one column per subject, "
             f"dimensions as rows), then a short similarities/differences rundown. If any involved "
             f"note carries `contested: true`, or the notes contradict each other, call that out "
-            f"explicitly.\n"
-            f"READ-ONLY: do not create, edit, patch, or move any note."
+            f"explicitly. A contradiction the reader confirms is worth recording: offer to run "
+            f"silica_flag_note on the note that is wrong, and only run it once they say so.\n"
+            f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
         )
 
     if cmd == "/quiz":
@@ -1583,7 +1584,11 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             f"When the reader replies, grade each answer, cite each source note as a "
             f"[[wikilink]], then call silica_record_quiz once with one entry per question "
             f"({{path, correct}}). Grade an unanswered or skipped question as incorrect.\n"
-            f"READ-ONLY: do not create, edit, patch, or move any note."
+            f"A wrong answer is the reader's miss, not the note's fault, and needs nothing "
+            f"beyond the grade. If grading instead exposes a fault in the note itself (it "
+            f"states something wrong, or contradicts another note you read), offer to record "
+            f"that with silica_flag_note, and only run it once the reader says so.\n"
+            f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
         )
 
     if cmd == "/relate":
@@ -1602,8 +1607,9 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             f"contradicts, sibling, example-of, depends-on, alternative-to. Why is one line grounded "
             f"in the notes. Link is [[the neighbor]] if already linked, else 'latent'. Cite every "
             f"neighbor as a [[wikilink]]. If a neighbor is `contested: true` or contradicts the "
-            f"target, flag it.\n"
-            f"READ-ONLY: do not create, edit, patch, or move any note."
+            f"target, say so in the Why column, and offer to record the contradiction with "
+            f"silica_flag_note; only run it once the reader says so.\n"
+            f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
         )
 
     if cmd == "/schematize":
