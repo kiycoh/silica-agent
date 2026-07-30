@@ -63,6 +63,20 @@ def silica_search(query: str) -> dict:
             f"{len(ranked)} notes matched; showing the {_SEARCH_CAP} closest name "
             "matches. Narrow the query, or use silica_semantic_search to rank by meaning."
         )
+
+    # Stale flags (spec-stale-triggers §3): read-only peek, so a search never
+    # pays the git walk; at worst the first search after a commit has no flags.
+    try:
+        from silica.config import CONFIG
+        from silica.kernel.code import codedocs
+
+        m = codedocs.peek(CONFIG.vault_path)
+        flagged = {p: lvl for p in out["paths"]
+                   if (lvl := codedocs.peek_level(m, p))}
+        if flagged:
+            out["stale"] = flagged
+    except Exception:
+        pass  # flags are an aid, never a reason a search fails
     return out
 
 
@@ -104,9 +118,27 @@ def silica_search_context(query: str) -> dict:
         key=lambda hs: (-len(hs), q not in hs[0].ref.name.casefold(), hs[0].ref.path),
     )
     kept = ranked[:_CONTEXT_MAX_NOTES]
+
+    # Stale flags (spec-stale-triggers §3): one peek for the whole call, read-only
+    # so search never pays the git walk. `peek()` itself never raises by contract;
+    # this try/except guards the imports and honors the soft-failure rule (§5)
+    # regardless.
+    try:
+        from silica.config import CONFIG
+        from silica.kernel.code import codedocs
+
+        stale_map = codedocs.peek(CONFIG.vault_path)
+    except Exception:
+        stale_map = {}
+        codedocs = None  # peek import itself failed: no flags this call
+
     out: dict = {
         "hits": [
-            {"name": h.ref.name, "path": h.ref.path, "line": h.line, "snippet": h.snippet}
+            {"name": h.ref.name, "path": h.ref.path, "line": h.line,
+             "snippet": h.snippet,
+             **({"stale": lvl} if stale_map and codedocs
+                and (lvl := codedocs.peek_level(stale_map, h.ref.path or ""))
+                else {})}
             for hs in kept for h in hs[:_CONTEXT_LINES_PER_NOTE]
         ],
         "notes_matched": len(by_note),
