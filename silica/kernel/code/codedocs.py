@@ -366,9 +366,22 @@ def read_warning(vault: Path | str, data: dict, repo_root: Path | str | None = N
         # is fully determined by its (code_ref, path) pairs, so no note path is
         # needed to find its entries. The missing-path leg above stays live and
         # uncached: the loud case is never frozen.
+        #
+        # Two different vault notes can share a code_ref (notes.py stamps
+        # code_ref = HEAD, so every note written between two commits shares
+        # one) and document an overlapping path, so the snapshot can hold
+        # more than one StaleDoc for the SAME (recorded, path) pair — one per
+        # note that documents it. Only one entry per path may survive here,
+        # or `len(stale)` overcounts relative to the `changed` path list it is
+        # reported alongside. Keep the first match per path (order follows
+        # `docs`, the note's own documented paths, matching what the old
+        # direct `_stale_for_note(root, "", data, ...)` call iterated).
         docset = set(docs)
-        stale = [d for d in snapshot(vault, repo_root=root)
-                 if d.recorded_ref == recorded and d.code_path in docset]
+        found: dict[str, StaleDoc] = {}
+        for d in snapshot(vault, repo_root=root):
+            if d.recorded_ref == recorded and d.code_path in docset:
+                found.setdefault(d.code_path, d)
+        stale = [found[p] for p in docs if p in found]
         if not stale:
             return ""
         level, _ = note_verdict(stale)

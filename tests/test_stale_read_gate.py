@@ -105,3 +105,57 @@ def test_warm_read_warning_matches_cold_and_skips_the_walk(tmp_path, monkeypatch
     warm = codedocs.read_warning(vault, data, repo_root=tmp_path)
     assert warm == cold
     assert calls["n"] == 0
+
+
+def test_read_warning_git_leg_pins_the_full_banner(tmp_path):
+    """Full-string pin on the (previously untested) git-staleness leg: the
+    single-note case must produce the exact same banner byte-for-byte, so a
+    future change to the count or the path list fails loudly."""
+    _repo(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "m.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    ref0 = _commit(tmp_path)
+    vault = tmp_path / "docs"
+    vault.mkdir()
+    (vault / "m.md").write_text(
+        f"---\ndocuments:\n  - src/m.py\ncode_ref: {ref0}\n---\n\nbody\n",
+        encoding="utf-8")
+    (tmp_path / "src" / "m.py").write_text("def f(x):\n    return x\n", encoding="utf-8")
+    _commit(tmp_path, "structural change")
+
+    data = {"documents": ["src/m.py"], "code_ref": ref0}
+    warning = codedocs.read_warning(vault, data, repo_root=tmp_path)
+    assert warning == (
+        f"[stale] structural change in 1 documented path(s) since code_ref "
+        f"{ref0[:8]} (src/m.py). Verify against the source before trusting this."
+    )
+
+
+def test_read_warning_counts_only_the_reading_notes_own_paths(tmp_path):
+    """Two notes share the same code_ref and both document src/m.py (the
+    normal case: notes.py stamps code_ref = HEAD, so every note written
+    between two commits shares a ref, per codedocs.py's own by_ref grouping).
+    Reading the note that documents ONLY src/m.py must report 1 stale path,
+    not 2 — the other note's entry for the same path must not leak in."""
+    _repo(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "m.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    (tmp_path / "src" / "n.py").write_text("def g():\n    return 1\n", encoding="utf-8")
+    ref0 = _commit(tmp_path)
+    vault = tmp_path / "docs"
+    vault.mkdir()
+    (vault / "a.md").write_text(
+        f"---\ndocuments:\n  - src/m.py\n  - src/n.py\ncode_ref: {ref0}\n---\n\nbody\n",
+        encoding="utf-8")
+    (vault / "b.md").write_text(
+        f"---\ndocuments:\n  - src/m.py\ncode_ref: {ref0}\n---\n\nbody\n",
+        encoding="utf-8")
+    (tmp_path / "src" / "m.py").write_text("def f(x):\n    return x\n", encoding="utf-8")
+    _commit(tmp_path, "structural change")
+
+    data_b = {"documents": ["src/m.py"], "code_ref": ref0}
+    warning = codedocs.read_warning(vault, data_b, repo_root=tmp_path)
+    assert warning == (
+        f"[stale] structural change in 1 documented path(s) since code_ref "
+        f"{ref0[:8]} (src/m.py). Verify against the source before trusting this."
+    )
