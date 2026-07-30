@@ -277,11 +277,15 @@ def snapshot(vault: Path | str, repo_root: Path | str | None = None) -> list[Sta
     docs = stale_docs(vault, repo_root=root)
     try:
         cache.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache.parent / (cache.name + ".tmp")
+        # Per-pid temp name: two writers (e.g. the MCP server and a CLI run)
+        # never share a temp file, so neither can publish the other's
+        # partial/interleaved bytes. Each writer's os.replace is then
+        # independently atomic; whichever finishes last simply wins cleanly.
+        tmp = cache.parent / (cache.name + f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps({"head": head,
                                    "docs": [_doc_to_json(d) for d in docs]}),
                        encoding="utf-8")
-        os.replace(tmp, cache)  # concurrent writers race benignly: last wins
+        os.replace(tmp, cache)
     except Exception:
         pass  # a cache-write failure must never fail the hosting operation
     return docs

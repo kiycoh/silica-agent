@@ -243,14 +243,22 @@ def tmp_vault(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_stale_snapshot(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Redirect the stale-snapshot cache to a per-test tmp path.
+    """Redirect the stale-snapshot cache to a per-test tmp path, keyed on vault.
 
-    read_warning/stale_count warm the snapshot on any documents: note; without
-    this, every such test would write the developer's real ~/.silica index.
-    One file per test regardless of vault: the HEAD key keeps cross-vault
-    reads correct (a different repo's HEAD never matches).
+    Intent is for read_warning/stale_count (future tasks) to warm this
+    snapshot on any documents: note; without this fixture, any such test
+    would write the developer's real ~/.silica index. Keying the stub on
+    `vault` (not one fixed filename) matters because two vaults can share a
+    single repo root — e.g. a codebase-mode `<repo>/.silica` vault and a
+    docs vault both resolve to the same HEAD — so a fixed filename would let
+    snapshot(vault_a) leak into peek(vault_b) as a false green. The cache
+    lives in a subdirectory so it can never collide with a vault rooted at
+    tmp_path itself.
     """
+    import hashlib
     from silica.kernel.code import codedocs
-    monkeypatch.setattr(codedocs, "_snapshot_path",
-                        lambda vault: tmp_path / "stale_snapshot.json",
-                        raising=False)   # order-safe: a no-op until Step 4 lands
+    monkeypatch.setattr(
+        codedocs, "_snapshot_path",
+        lambda vault: (tmp_path / "stale-cache"
+                       / (hashlib.sha1(str(vault).encode()).hexdigest()[:8] + ".json")),
+    )

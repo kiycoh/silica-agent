@@ -72,6 +72,24 @@ def test_peek_reads_the_warm_cache(tmp_path):
     assert codedocs.peek(vault, repo_root=tmp_path) == {"m.md": "structural"}
 
 
+def test_peek_structural_wins_regardless_of_order(tmp_path):
+    """A note with paths at both levels reports structural, in either order."""
+    vault = _fixture(tmp_path)
+    codedocs.snapshot(vault, repo_root=tmp_path)   # warms the cache with a real HEAD key
+    f = codedocs._snapshot_path(vault)
+    raw = json.loads(f.read_text(encoding="utf-8"))
+    cosmetic = {"note_path": "m.md", "change_level": "cosmetic"}
+    structural = {"note_path": "m.md", "change_level": "structural"}
+
+    raw["docs"] = [cosmetic, structural]
+    f.write_text(json.dumps(raw), encoding="utf-8")
+    assert codedocs.peek(vault, repo_root=tmp_path) == {"m.md": "structural"}
+
+    raw["docs"] = [structural, cosmetic]
+    f.write_text(json.dumps(raw), encoding="utf-8")
+    assert codedocs.peek(vault, repo_root=tmp_path) == {"m.md": "structural"}
+
+
 def test_peek_never_recomputes(tmp_path):
     vault = _fixture(tmp_path)
     codedocs.snapshot(vault, repo_root=tmp_path)
