@@ -65,7 +65,7 @@ coverage.xml
 .run/
 tests/fixtures/synthetic_vault/*
 .import_linter_cache/
-.grimp_cache
+.grimp_cache/
 
 # Editors & IDEs
 .vscode/

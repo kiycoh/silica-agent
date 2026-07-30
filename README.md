@@ -98,7 +98,7 @@ The two nearest neighbors are worth naming. [Basic Memory](https://github.com/ba
 | Merge, split, rename | incoming wikilinks redirected atomically, no orphan left behind | the file moves, the links pointing at it are yours to fix | dead wikilinks pruned when a source is deleted |
 | With no model available | retrieval degrades to deterministic legs and keeps answering | keyword search stays, semantic needs an embedder | keyword and graph search stay, ingest needs an LLM |
 | Codebases | same vault, same gate, staleness checked against git | notes only | documents only |
-| Refusal rate published | yes, 94.4% and 89.7% correct abstention next to 78% accuracy | not published | not published |
+| Refusal rate published | yes, 94.4% and 89.7% correct abstention next to 82% accuracy | not published | not published |
 | Hosting | local, AGPL, nothing above it | local AGPL, plus a paid cloud tier | local, GPL-3.0 desktop app |
 
 **The rest of the field.** Memory agents (Mem0, Zep, Letta, Cognee, Supermemory) ingest your material into a store of their own; Letta is the only one with rollback, and none of them verifies a write after it lands. Repo wiki agents (DeepWiki, OpenWiki, GitNexus, [Graphify](https://github.com/safishamsi/graphify)) read a codebase and emit an artifact next to it: good maps, read-only by design, and they never curate a human's notes. Graph frameworks (GraphRAG, LightRAG, HippoRAG, Graphiti) build an index, not a folder you can still open in a text editor.
@@ -128,11 +128,23 @@ Credit where it is owed. Each of these arrived before Silica, and each is here b
 
 ## Install
 
+Reading a vault needs no model and no API key, so the shortest way in is to hand your folder of notes to an agent you already run and ask it something:
+
+```bash
+silica setup claude             # or: setup codex, setup opencode
+```
+
+That writes the MCP server into your client's own config (backed up first, `--dry-run` to preview) and your assistant can search, recall, and read your notes from the next session on. Nothing is configured, nothing is asked.
+
+Writing notes needs a model. That is what the wizard is for:
+
 ```bash
 uv tool install silica-agent    # or: pipx install silica-agent
 silica init                     # interactive setup: vault, model, embeddings
 silica                          # start the interactive session
 ```
+
+If a provider key is already exported in your shell (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY`), Silica picks a model for it and `silica init` stops asking which one.
 
 `silica` curates the folder you launch it in (the repository root, when that folder is inside one). Your settings live in `~/.silica/.env` and follow you between folders; a `.env` in the project overrides them there.
 
@@ -208,7 +220,17 @@ A live bridge into the Obsidian desktop app: Silica reads and writes the vault y
 
 ### 4. Agent memory &nbsp;·&nbsp; `silica mcp`
 
-Silica serves your vault over stdio to any MCP client, so an assistant recalls your real notes and real decisions before it answers. One command line, `uvx --from 'silica-agent[mcp]' silica mcp`, wired three ways.
+Silica serves your vault over stdio to any MCP client, so an assistant recalls your real notes and real decisions before it answers. One command line, `uvx --from 'silica-agent[mcp]' silica mcp`, and no model or API key on the read path: search, recall, and note reading run on the vault alone.
+
+`silica setup <client>` writes that line into the client's config for you, with the resolved vault path filled in:
+
+```bash
+silica setup claude      # delegates to `claude mcp add`
+silica setup codex       # ~/.codex/config.toml
+silica setup opencode    # ~/.config/opencode/opencode.json
+```
+
+It backs the file up before touching it, leaves an existing `silica` entry alone, and takes `--dry-run` to print the block instead, or `--config <path>` for a project-local file.
 
 **Claude Code.** This repo is also a plugin, so the server and the recall/capture skill arrive together:
 
@@ -216,6 +238,11 @@ Silica serves your vault over stdio to any MCP client, so an assistant recalls y
 claude plugin marketplace add kiycoh/silica-agent
 claude plugin install silica@silica
 ```
+
+<details>
+<summary><b>The same blocks by hand</b></summary>
+
+<br/>
 
 **Codex** (`~/.codex/config.toml`):
 
@@ -244,6 +271,8 @@ SILICA_VAULT = "/path/to/your/vault"
 ```
 
 `SILICA_VAULT` is optional: without it Silica serves the default vault at `~/.silica/vault`. An MCP client starts the server with its own environment, so any other setting the tools need (embedding endpoint, model) belongs in that same `env` block rather than in a shell profile.
+
+</details>
 
 ---
 
@@ -310,7 +339,7 @@ Every number below comes from the harness in [`evals/`](evals/), run against the
 
 | What was measured | Result | Sample |
 | :--- | :--- | :--- |
-| **LoCoMo**, questions the memory can answer | **77.7%** and **78.0%** accuracy | conv-26 (152 q) and conv-47 (150 q) |
+| **LoCoMo**, questions the memory can answer | **82.1%** and **83.2%** accuracy | conv-26 (152 q) and conv-47 (150 q) |
 | **LoCoMo**, questions it should refuse | **94.4%** and **89.7%** correct abstention | 47 q and 40 q |
 | **MuSiQue** multi-hop retrieval | **61.3%** recall@10, **0.83** MRR | 50 questions over an 11,654-note vault |
 | **Link recall** on a real vault: wikilinks stripped, then recovered | **68.8%** of the human's own links found again | 1,196 links across 393 notes |
