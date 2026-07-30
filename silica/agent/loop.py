@@ -128,6 +128,31 @@ def repair_tool_call_history(messages: list[dict]) -> int:
     return inserted
 
 
+def identical_prior_calls(messages: list[dict], name: str, args_str: str) -> int:
+    """How many times (name, args) already appears as an assistant tool_call.
+
+    Reuse probe: a result the chat computed, spent, and now asks for again. Reads
+    the history instead of a counter so it spans turns (the caller accumulates
+    `messages`), and `args_str` must be the canonical json.dumps(sort_keys=True)
+    form since providers echo their own spacing back.
+    """
+    n = 0
+    for m in messages:
+        if m.get("role") != "assistant":
+            continue
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            if fn.get("name") != name:
+                continue
+            try:
+                prior = json.loads(fn.get("arguments") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if json.dumps(prior, sort_keys=True) == args_str:
+                n += 1
+    return n
+
+
 def run_agent(
     messages: list[dict],
     model: str,
@@ -303,6 +328,16 @@ def run_agent(
             # Key representing the specific tool call + args
             args_str = json.dumps(tc.args, sort_keys=True)
             tool_key = (tc.name, args_str)
+
+            # Reuse probe. The current call is already in `messages` (:270), so
+            # >1 means this exact result was produced earlier in the chat and is
+            # being recomputed — either a plain re-ask or compaction's read_stub
+            # telling the model to re-call. Grep "reuse-probe" over a session log
+            # to size the waste before caching anything.
+            _seen = identical_prior_calls(messages, tc.name, args_str)
+            if _seen > 1:
+                logger.info("reuse-probe: %s recomputed (call #%d) with identical args: %s",
+                            tc.name, _seen, args_str[:200])
 
             failed = False
             if tc.name not in allowed:
