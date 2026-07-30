@@ -621,7 +621,9 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             CONSOLE.print("  No vault configured; /stale needs a .silica vault in a git repo.")
             return True
         show_all = "--all" in parts[1:]
-        stale = codedocs.stale_docs(Path(vault))
+        # /stale is the manual refresh valve: drop the cache, recompute, rewrite.
+        codedocs.invalidate_snapshot(Path(vault))
+        stale = codedocs.snapshot(Path(vault))
         by_note: dict[str, list] = {}
         for sd in stale:
             by_note.setdefault(sd.note_path, []).append(sd)

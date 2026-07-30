@@ -107,3 +107,34 @@ def test_patch_merges_into_an_existing_binding(vault):
     head = (vault / "N.md").read_text(encoding="utf-8").split("\n---\n")[0]
     assert 'documents:\n  - "src"\n  - "src/m.py"' in head
     assert head.count("documents:") == 1
+
+
+def test_stamp_write_invalidates_the_snapshot(vault, tmp_path):
+    """Re-badging a note must not leave a false stale entry in the cache."""
+    from silica.kernel.code import codedocs
+
+    cache = codedocs._snapshot_path(vault)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text('{"head": "x", "docs": []}', encoding="utf-8")
+
+    res = silica_write_note(path="Plain.md", body="no binding here")
+    assert res.get("success"), res
+    assert cache.exists()                 # plain writes do not touch the cache
+
+    res = silica_write_note(path="B.md", body="why", documents=["src/m.py"])
+    assert res.get("success"), res
+    assert not cache.exists()             # the stamp path unlinks it
+
+
+def test_patch_stamp_invalidates_the_snapshot(vault, tmp_path):
+    from silica.kernel.code import codedocs
+
+    silica_write_note(path="N.md", body="prose")
+    cache = codedocs._snapshot_path(vault)
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text('{"head": "x", "docs": []}', encoding="utf-8")
+
+    res = silica_patch_note(name="N.md", heading="Why", snippet="the reason",
+                            source_basename="chat", documents=["src/m.py"])
+    assert "error" not in res, res
+    assert not cache.exists()

@@ -120,6 +120,13 @@ def silica_patch_note(
             except Exception as e:
                 return {"error": f"Failed to bind documents on '{name}': {e}"}
 
+            try:
+                from silica.config import CONFIG
+                from silica.kernel.code import codedocs
+                codedocs.invalidate_snapshot(CONFIG.vault_path)
+            except Exception:
+                pass  # cache hygiene must never fail the write
+
         # Record the resulting on-disk content as a restore point.
         checkpoint_depth = None
         try:
@@ -282,6 +289,14 @@ def silica_write_note(
             ref = DRIVER.create(path, content)
         except Exception as e:
             return {"error": f"Failed to create note '{path}': {e}"}
+
+        if docs:
+            try:
+                from silica.config import CONFIG
+                from silica.kernel.code import codedocs
+                codedocs.invalidate_snapshot(CONFIG.vault_path)
+            except Exception:
+                pass  # cache hygiene must never fail the write
 
         checkpoint_depth = None
         try:
