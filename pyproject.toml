@@ -40,15 +40,17 @@ dependencies = [
   # speaks. Unpinned, the mismatch parsed nothing and every code note came out empty.
   "tree-sitter-language-pack>=1.13",
   "yake>=0.7.3",
-  "scipy>=1.17.1",
-  "mdit-py-plugins>=0.6.1",
-  "latex2mathml>=3.81.0",
 ]
 
 [project.optional-dependencies]
-# Opt-in localhost web GUI (`silica --gui`); python-multipart backs the drop-zone upload:
-gui = ["fastapi", "uvicorn", "python-multipart"]
-dev = ["pytest>=8.0", "mypy>=1.10", "import-linter>=2.0"]
+# Opt-in localhost web GUI (`silica --gui`); python-multipart backs the drop-zone
+# upload, mdit-py-plugins + latex2mathml render math in the transcript. All four
+# are imported only by silica.ui.web.server, which is reachable only behind the
+# lazy `from silica.ui.web import serve`:
+gui = ["fastapi", "uvicorn", "python-multipart", "mdit-py-plugins>=0.6.1", "latex2mathml>=3.81.0"]
+# scipy is dev-only: no product code imports it (PageRank runs on numpy), but the
+# eval harness under evals/ uses scipy.stats (binomtest, spearmanr) for its gates.
+dev = ["pytest>=8.0", "mypy>=1.10", "import-linter>=2.0", "scipy>=1.17.1"]
 connect = [
     "websockets>=16.0",
 ]

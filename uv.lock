@@ -3686,10 +3686,8 @@ name = "silica-agent"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
-    { name = "latex2mathml" },
     { name = "litellm" },
     { name = "markdown-it-py" },
-    { name = "mdit-py-plugins" },
     { name = "networkx" },
     { name = "numpy" },
     { name = "openai" },
@@ -3699,8 +3697,6 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "snowballstemmer" },
     { name = "stop-words" },
     { name = "tree-sitter" },
@@ -3711,7 +3707,9 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "fastapi" },
+    { name = "latex2mathml" },
     { name = "mcp" },
+    { name = "mdit-py-plugins" },
     { name = "mineru", extra = ["pipeline"] },
     { name = "python-multipart" },
     { name = "sentence-transformers" },
@@ -3726,9 +3724,13 @@ dev = [
     { name = "import-linter" },
     { name = "mypy" },
     { name = "pytest" },
+    { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 gui = [
     { name = "fastapi" },
+    { name = "latex2mathml" },
+    { name = "mdit-py-plugins" },
     { name = "python-multipart" },
     { name = "uvicorn" },
 ]
@@ -3748,11 +3750,11 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'gui'" },
     { name = "httpx" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.0" },
-    { name = "latex2mathml", specifier = ">=3.81.0" },
+    { name = "latex2mathml", marker = "extra == 'gui'", specifier = ">=3.81.0" },
     { name = "litellm" },
     { name = "markdown-it-py" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0" },
-    { name = "mdit-py-plugins", specifier = ">=0.6.1" },
+    { name = "mdit-py-plugins", marker = "extra == 'gui'", specifier = ">=0.6.1" },
     { name = "mineru", extras = ["pipeline"], marker = "extra == 'pdf'", specifier = ">=3.4.4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
     { name = "networkx", specifier = ">=3" },
@@ -3766,7 +3768,7 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'gui'" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich" },
-    { name = "scipy", specifier = ">=1.17.1" },
+    { name = "scipy", marker = "extra == 'dev'", specifier = ">=1.17.1" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0" },
     { name = "silica-agent", extras = ["connect", "gui", "mcp", "pdf", "rerank"], marker = "extra == 'all'" },
     { name = "six", marker = "extra == 'pdf'" },

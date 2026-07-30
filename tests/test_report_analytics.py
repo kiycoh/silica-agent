@@ -63,9 +63,42 @@ def test_analytics_true_restores_full_report():
     assert r.god_nodes                                # god-nodes computed
     assert r.bridges                                  # cross-cluster bridges
     assert any(c.cohesion > 0.0 for c in r.clusters)  # per-cluster cohesion computed
-    # PageRank actually runs (scipy is a declared dependency). Guards against the
-    # silent-swallow regression where a missing backend left pagerank_map all-zero.
+    # PageRank actually runs. Guards against the silent-swallow regression where a
+    # missing backend left pagerank_map all-zero.
     assert any(v > 0.0 for v in r.pagerank_map.values())
+
+
+def test_pagerank_satisfies_its_own_equation():
+    """_pagerank replaced nx.pagerank (scipy-only) with a numpy power iteration.
+
+    scipy is gone, so there is no second implementation to diff against: check the
+    fixed point instead. A vector that sums to 1 and satisfies
+    x = alpha * (P^T x + dangling mass) + (1 - alpha) / n IS the PageRank vector.
+    """
+    import networkx as nx
+
+    from silica.kernel.report.graph_report.compute import _pagerank
+
+    G = nx.star_graph(20)                      # one hub, 20 leaves
+    G = nx.disjoint_union(G, nx.path_graph(5))  # a second component
+    G.add_nodes_from(["orphan"])                # dangling node, no edges
+    G.add_edge(0, 0)                            # a self-link
+
+    pr = _pagerank(G, tol=1e-12)  # tight tol: the default stop rule leaves ~n*tol slack
+    alpha, n = 0.85, G.number_of_nodes()
+    assert abs(sum(pr.values()) - 1.0) < 1e-9
+
+    # A self-link counts once, matching the adjacency nx builds (and _pagerank's).
+    deg = {v: sum(1 for u in G[v] if u != v) + (1 if G.has_edge(v, v) else 0) for v in G}
+    dang = sum(pr[v] for v in G if deg[v] == 0)
+    for v in G:
+        inflow = sum(pr[u] / deg[u] for u in G[v] if u != v)
+        if G.has_edge(v, v):
+            inflow += pr[v] / deg[v]
+        assert abs(pr[v] - (alpha * (inflow + dang / n) + (1 - alpha) / n)) < 1e-6, v
+
+    assert max(pr, key=pr.get) == 0            # the hub wins
+    assert pr["orphan"] == min(pr.values())    # the orphan loses
 
 
 def test_triage_note_reads_are_analytics_only(monkeypatch):
