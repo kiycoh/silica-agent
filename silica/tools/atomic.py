@@ -29,33 +29,95 @@ _FILES_CAP = 200
 class SearchArgs(BaseModel):
     query: str = Field(description="Text to search for in note names in the vault")
 
+# Same unbounded shape as search_context, one level down: substring-over-names
+# means a short query answers with the vault ("e" measured 575 paths / 41k chars
+# on a 719-note vault). A name lookup that returns 500 names has answered
+# nothing, so rank by how well the name matches and keep the head.
+_SEARCH_CAP = 40
+
+
 @tool(SearchArgs, cls="atomic")
-def silica_search(query: str) -> list:
+def silica_search(query: str) -> dict:
     """Search for notes by NAME/title match. Returns the paths of matching notes.
 
     A note's wikilink name is its filename without the extension. For text
     inside note bodies use silica_search_context; for meaning-based search when
     you don't know the exact words use silica_semantic_search.
+
+    Returns {paths, matched}: closest name match first, `truncated` when capped.
     """
     refs = DRIVER.search_names(query)
-    return [r.path for r in refs]
+    q = query.casefold()
+
+    def rank(ref) -> tuple:
+        name = ref.name.casefold()
+        # 0/1/2: exact, prefix, substring. Then shorter name (a 6-char hit on
+        # an 8-char name is a better answer than on an 80-char one), then path.
+        tier = 0 if name == q else (1 if name.startswith(q) else 2)
+        return (tier, len(name), ref.path)
+
+    ranked = sorted(refs, key=rank)
+    out: dict = {"paths": [r.path for r in ranked[:_SEARCH_CAP]], "matched": len(ranked)}
+    if len(ranked) > _SEARCH_CAP:
+        out["truncated"] = (
+            f"{len(ranked)} notes matched; showing the {_SEARCH_CAP} closest name "
+            "matches. Narrow the query, or use silica_semantic_search to rank by meaning."
+        )
+    return out
 
 
 class SearchContextArgs(BaseModel):
     query: str = Field(description="Text to search for within the content of vault notes")
 
+
+# A literal grep over every body is unbounded by nature: one Hit per matching
+# LINE, so a short query returns the vault. Measured on a 719-note vault:
+# "OSI" → 529 hits / 170k chars in a single payload, "e" → 14535 hits. The
+# window is the scarce resource, so rank by hit density (the note that mentions
+# the term 40 times is the one meant; the 190 notes mentioning it once are not)
+# and keep the top slice. ponytail: density, not the reranker — this is the
+# deterministic literal leg, and putting a model in it buys ranking at the cost
+# of reproducibility and a "reranker down" failure mode. Meaning-based ranking
+# already has a tool: silica_semantic_search.
+_CONTEXT_MAX_NOTES = 12
+_CONTEXT_LINES_PER_NOTE = 3
+
+
 @tool(SearchContextArgs, cls="atomic")
-def silica_search_context(query: str) -> list:
+def silica_search_context(query: str) -> dict:
     """Search note BODIES for exact text; returns snippets with line numbers.
 
     Use to find literal mentions of a term. When the exact wording is unknown,
     use silica_semantic_search instead; to match note titles use silica_search.
+
+    Returns {hits, notes_matched}: densest notes first, 3 snippets each at most,
+    `truncated` when capped.
     """
-    hits = DRIVER.search_context(query)
-    return [
-        {"name": h.ref.name, "path": h.ref.path, "line": h.line, "snippet": h.snippet}
-        for h in hits
-    ]
+    by_note: dict[str, list] = {}
+    for h in DRIVER.search_context(query):
+        by_note.setdefault(h.ref.path or h.ref.name, []).append(h)
+
+    q = query.casefold()
+    ranked = sorted(
+        by_note.values(),
+        # path last: a stable tiebreak, so the same query answers the same way.
+        key=lambda hs: (-len(hs), q not in hs[0].ref.name.casefold(), hs[0].ref.path),
+    )
+    kept = ranked[:_CONTEXT_MAX_NOTES]
+    out: dict = {
+        "hits": [
+            {"name": h.ref.name, "path": h.ref.path, "line": h.line, "snippet": h.snippet}
+            for hs in kept for h in hs[:_CONTEXT_LINES_PER_NOTE]
+        ],
+        "notes_matched": len(by_note),
+    }
+    if len(kept) < len(by_note) or any(len(hs) > _CONTEXT_LINES_PER_NOTE for hs in kept):
+        out["truncated"] = (
+            f"{len(by_note)} notes matched; showing the {len(kept)} densest, up to "
+            f"{_CONTEXT_LINES_PER_NOTE} lines each. Narrow the query, or use "
+            "silica_semantic_search to rank by meaning."
+        )
+    return out
 
 
 class ReadNoteArgs(BaseModel):

@@ -359,6 +359,8 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
             continue
         excerpt = ("\n[…]\n".join(best_windows(body, query, window_chars, windows))
                    if query else body[:window_chars])
+        if not excerpt.strip():
+            continue  # empty body renders as a bare "[#n | evidence]" header, zero content
         blocks.append(NoteBlock(path=path, date=date, evidence=evidence,
                                 body=body, excerpt=excerpt, contested=contested))
     # Correction loop: contested notes are demoted behind clean ones (stable),

@@ -325,16 +325,21 @@ def silica_recall(query: str, k: int = 15) -> dict[str, Any]:
     personal facts (episodic lane) first. Use this when ANSWERING a question
     from vault memory INSTEAD of stitching search results and note reads
     together yourself; for a bare ranked list use silica_semantic_search.
-    Returns {context, notes, facts}: answer from `context`; `notes` lists the
-    contributing paths (verify details with silica_read_note when needed).
+    Returns {context, notes, partial, facts}: answer from `context`; re-read
+    only the notes named in `partial`, the rest arrived whole.
     """
     import datetime
 
     from silica.kernel.recall.perception import perceive
 
     p = perceive(query, now=datetime.date.today().isoformat(), k=k)
+    # render(windowed=True) emits b.excerpt, so a note whose window IS its body
+    # was delivered complete — measured: 3 of 9 calls in a chat were re-reads of
+    # notes recall had already handed over whole.
     return {"query": query, "context": p.render(),
-            "notes": [b.path for b in p.blocks], "facts": len(p.fact_hits)}
+            "notes": [b.path for b in p.blocks],
+            "partial": [b.path for b in p.blocks if b.excerpt.strip() != b.body.strip()],
+            "facts": len(p.fact_hits)}
 
 
 class TimelineArgs(BaseModel):

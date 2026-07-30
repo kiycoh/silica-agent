@@ -262,6 +262,20 @@ def test_unreadable_paths_are_skipped_rank_stays_dense(tmp_path, monkeypatch):
     assert "[#1 | dated 2026-01-01]" in p.render()
 
 
+def test_empty_bodied_note_is_dropped_not_rendered_as_a_bare_header(tmp_path, monkeypatch):
+    """A retrieved note with no body used to occupy a "[#n | ...]" header and
+    nothing else — measured on a real vault as rank 15 of a k=15 recall."""
+    _bind(tmp_path / "v", monkeypatch)
+    _write("sessions/hollow.md", "2026-01-01", "   \n\n")
+    _write("sessions/a.md", "2026-02-02", "alpha body")
+    from silica.kernel.recall.perception import perceive
+
+    p = perceive("anything", now="2026-05-01", use_embedder=False,
+                 paths=["sessions/hollow", "sessions/a"])
+    assert [b.path for b in p.blocks] == ["sessions/a"]
+    assert "[#2" not in p.render()  # ranks stay dense, no empty trailing block
+
+
 def test_silica_recall_tool_returns_context_and_paths(tmp_path, monkeypatch):
     _bind(tmp_path / "v", monkeypatch)
     _write("sessions/a.md", "2026-01-01", LONG_BODY)
