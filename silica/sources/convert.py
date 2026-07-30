@@ -5,17 +5,23 @@
 
 A plain function, not a `SourceAdapter`: `/convert` exposes it and `/nucleate`
 calls it as the fallback when no source adapter claims a file. Dispatch is by
-extension; PDF is the only converter today, provider-selectable via
-`CONFIG.pdf_provider` (ADR-0011): `mineru` default (heavyweight CLI, best
-fidelity, downloads models on first run), `docling` (permissive, keeps
-figures/tables and heading structure), `opendataloader` (Java-backed, strong on
-complex tables and multi-column reading order, needs a JVM). All open-source
-under permissive licences; `mineru` installs via the `silica-agent[pdf]` extra, the
-alternatives are installed manually. The default preserves heading structure so
-book segmentation (below) has headings to split on instead of falling back to
-blind size-cutting.
+extension: PDF plus every other format MuPDF opens (`DOC_EXTS` — DOCX, EPUB,
+XPS, MOBI, FB2).
 
-Both PDF providers return `(markdown, images_dir)`; the rest of the pipeline
+For PDF the converter is selectable via `CONFIG.pdf_provider` (ADR-0011):
+`pymupdf` default (pymupdf4llm, ~60 MB installed, no torch and no JVM, but no
+OCR), `mineru` (heavyweight CLI, best fidelity and the only OCR path, downloads
+models on first run), `docling` (MIT but pulls torch + CUDA), `opendataloader`
+(Apache-2.0, strong on complex tables and multi-column reading order, needs a
+JVM). Only `pymupdf` opens the non-PDF formats, so those bypass the seam.
+`pymupdf4llm` is a base dependency; the alternatives install via the
+`silica-agent[pdf]` extra or by hand.
+
+`pymupdf4llm` is pinned `<1` on purpose: from 1.27.2 it hard-depends on
+`pymupdf-layout`, which is Polyform Noncommercial and cannot ship as a
+dependency of an AGPL package.
+
+Every provider returns `(markdown, images_dir)`; the rest of the pipeline
 (sanitize → copy images flat into the vault → rewrite image links to Obsidian
 embeds → write the note to the inbox) is shared and provider-agnostic.
 """
@@ -68,19 +74,26 @@ _MINERU_NOISE_RE = re.compile(
 _MINERU_ERR_RE = re.compile(r"error|exception|traceback", re.IGNORECASE)
 
 
-def convert(target: str, dest_dir: str = "") -> list[str]:
-    """Convert a non-`.md` file into one or more `.md` notes in the inbox.
+# Formats MuPDF opens beyond PDF. `.txt`/`.md` are absent on purpose: ProseAdapter
+# already claims them, and round-tripping plain text through a page renderer would
+# hard-wrap it at the page width.
+_PYMUPDF_ONLY_EXTS = (".docx", ".epub", ".xps", ".mobi", ".fb2")
+DOC_EXTS = (".pdf", *_PYMUPDF_ONLY_EXTS)
 
-    Returns the list of created note paths. A small PDF is a single note; a
-    book-sized PDF is split into chapter/size-bounded segments (see
+
+def convert(target: str, dest_dir: str = "") -> list[str]:
+    """Convert a non-`.md` document into one or more `.md` notes in the inbox.
+
+    Returns the list of created note paths. A small document is a single note; a
+    book-sized one is split into chapter/size-bounded segments (see
     ``split_markdown``) so RECON — which caps concepts PER FILE — sees book
-    units, not the whole book collapsed into one note. Dispatch by extension;
-    unknown extension → ``ValueError``. Side artifacts (PDF figures) go to
-    ``<dest_dir>/Images`` when given, else ``<inbox>/Images``.
+    units, not the whole book collapsed into one note. Dispatch by extension
+    over ``DOC_EXTS``; anything else → ``ValueError``. Side artifacts (extracted
+    figures) go to ``<dest_dir>/Images`` when given, else ``<inbox>/Images``.
     """
-    if Path(target).suffix.lower() != ".pdf":
+    if Path(target).suffix.lower() not in DOC_EXTS:
         raise ValueError(f"no converter for {Path(target).suffix.lower() or 'this file type'}")
-    return _pdf_to_md(target, dest_dir)
+    return _doc_to_md(target, dest_dir)
 
 
 def _split_on_headings(md: str) -> list[str]:
@@ -191,16 +204,29 @@ def _respace_prose(md: str) -> str:
     return "".join(out)
 
 
-def _pdf_to_md(target: str, dest_dir: str) -> list[str]:
+def _doc_to_md(target: str, dest_dir: str) -> list[str]:
     src = _resolve_input(target)
-    provider = _PDF_PROVIDERS.get(CONFIG.pdf_provider)
-    if provider is None:
+    # The provider seam is PDF-only — mineru/docling/opendataloader all take a
+    # PDF and nothing else, so DOCX/EPUB/… go straight to pymupdf.
+    if src.suffix.lower() != ".pdf":
+        provider = _via_pymupdf
+    elif CONFIG.pdf_provider in _PDF_PROVIDERS:
+        provider = _PDF_PROVIDERS[CONFIG.pdf_provider]
+    else:
         raise ValueError(
             f"unknown pdf_provider {CONFIG.pdf_provider!r} "
             f"(known: {', '.join(_PDF_PROVIDERS)})"
         )
     with tempfile.TemporaryDirectory() as tmp:
         md_text, images_src = provider(src, Path(tmp))
+        if not md_text.strip():
+            # Silence here would write an empty inbox note and call it success.
+            # The usual cause is a scan with no text layer, and pymupdf — the
+            # default — has no OCR at all, so name the provider that does.
+            raise ValueError(
+                f"no text extracted from {src.name} — a scanned document needs OCR: "
+                "`pip install 'silica-agent[pdf]'` and set SILICA_PDF_PROVIDER=mineru"
+            )
         # Copy only images the markdown references: mineru dumps every crop it
         # detects (477 files for a 200-page book, 19 referenced) — the rest
         # would land in the vault as orphans.
@@ -238,6 +264,43 @@ def _pdf_to_md(target: str, dest_dir: str) -> list[str]:
 # TODO(real-api): each provider's third-party call surface is only exercised by
 # hand-faked modules in tests/test_convert.py — a library rename would drift the
 # fakes and pass silently. Add a real-install smoke test to catch API drift.
+
+def _via_pymupdf(src: Path, workdir: Path) -> tuple[str, Path]:
+    """Default provider — pymupdf4llm: no torch, no JVM, ~60 MB installed.
+
+    The only provider that opens the non-PDF `DOC_EXTS`, and the only one in the
+    base install. It has no OCR: a scan with no text layer yields nothing, which
+    `_doc_to_md`'s empty guard turns into an error naming mineru.
+    """
+    try:
+        import contextlib
+        import io
+
+        import pymupdf
+        # pymupdf4llm prints a "consider pymupdf_layout" advert to stdout at
+        # import; that package is Polyform Noncommercial, so the advice is one
+        # we cannot take and the line is pure noise in the TUI.
+        with contextlib.redirect_stdout(io.StringIO()):
+            import pymupdf4llm
+    except ImportError:
+        raise ValueError(
+            "pymupdf4llm not installed — `pip install 'pymupdf4llm>=0.3.4,<1'`, "
+            "or set SILICA_PDF_PROVIDER to mineru/docling/opendataloader"
+        ) from None
+
+    doc = pymupdf.open(src)
+    images = workdir / "images"
+    images.mkdir(parents=True, exist_ok=True)
+    # The embedded outline beats font-size guessing wherever it exists: 23
+    # headings vs 12 on an 19-entry probe paper, matching mineru exactly. But
+    # TocHeaders REPLACES the font heuristic rather than backing it up, so on a
+    # document with no outline it collapsed 10 headings to 1 — hence the guard.
+    hdr = pymupdf4llm.TocHeaders(doc) if doc.get_toc() else None
+    md = pymupdf4llm.to_markdown(
+        doc, hdr_info=hdr, write_images=True, image_path=str(images), image_format="png"
+    )
+    return md, images
+
 
 def _pdf_via_docling(src: Path, workdir: Path) -> tuple[str, Path]:
     try:
@@ -356,6 +419,7 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
 
 
 _PDF_PROVIDERS = {
+    "pymupdf": _via_pymupdf,
     "docling": _pdf_via_docling,
     "mineru": _pdf_via_mineru,
     "opendataloader": _pdf_via_opendataloader,

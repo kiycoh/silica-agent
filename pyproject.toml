@@ -40,6 +40,13 @@ dependencies = [
   # speaks. Unpinned, the mismatch parsed nothing and every code note came out empty.
   "tree-sitter-language-pack>=1.13",
   "yake>=0.7.3",
+  # Default document→Markdown converter (PDF/DOCX/EPUB/XPS/MOBI/FB2). 3 packages,
+  # ~60 MB, no torch and no JVM, so it can live in the base install where mineru
+  # (3.8 GB of torch+CUDA) cannot. Capped below 1.0: from 1.27.2 it hard-depends
+  # on pymupdf-layout, which is Polyform Noncommercial and would put a
+  # non-commercial restriction on an AGPL package. The cap costs borderless-table
+  # detection; lift it only if silica ever stops being distributed.
+  "pymupdf4llm>=0.3.4,<1",
 ]
 
 [project.optional-dependencies]
@@ -62,11 +69,12 @@ mcp = ["mcp>=1.0"]
 # downloads ~2GB of weights on first rerank, so it stays opt-in like [pdf].
 # SILICA_RERANK_BASE_URL still overrides it with a served endpoint.
 rerank = ["sentence-transformers>=3.0"]
-# mineru is the default PDF→Markdown provider but pulls torch/transformers (and
-# downloads models on first run), so it is opt-in via this extra (`pip install
-# silica[pdf]`) to keep the base install lean. The [pipeline] extra matches the
-# CLI's `-b pipeline` backend. docling / opendataloader are installed manually if
-# chosen. See SILICA_PDF_PROVIDER.
+# mineru is the OCR provider: the default (pymupdf4llm, a base dependency) reads
+# text layers only, so a scanned document needs this extra. It pulls
+# torch/transformers and downloads models on first run — 3.8 GB against the
+# default's 60 MB — which is why it is opt-in (`pip install silica-agent[pdf]`).
+# The [pipeline] extra matches the CLI's `-b pipeline` backend. docling /
+# opendataloader are installed manually if chosen. See SILICA_PDF_PROVIDER.
 pdf = [
     "mineru[pipeline]>=3.4.4",
     # mineru 3.4.4 packaging bug: its vendored pytorchocr imports `six`
@@ -254,6 +262,6 @@ ignore_missing_imports = false
 module = [
     "yaml", "yaml.*", "networkx", "networkx.*",
     # PDF providers (mineru via the [pdf] extra; docling/opendataloader manual):
-    "docling.*", "docling_core.*", "opendataloader_pdf",
+    "docling.*", "docling_core.*", "opendataloader_pdf", "pymupdf4llm",
 ]
 ignore_missing_imports = true

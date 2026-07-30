@@ -25,6 +25,95 @@ def test_unknown_extension_raises(target):
         conv.convert(target)
 
 
+@pytest.mark.parametrize("ext", conv.DOC_EXTS)
+def test_every_doc_ext_reaches_the_converter(ext, tmp_vault):
+    """Dispatch accepts the extension — it fails later, on the missing file."""
+    with pytest.raises(ValueError, match="file not found"):
+        conv.convert(f"ghost{ext}")
+
+
+# --- pymupdf provider (default; real library, no fakes) ---------------------
+
+def _pdf_bytes(pages: list[str], toc: list | None = None) -> bytes:
+    """A real one-column PDF, one page per string, optionally with an outline."""
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open()
+    for text in pages:
+        doc.new_page().insert_text((72, 72), text, fontsize=11)
+    if toc:
+        doc.set_toc(toc)
+    return doc.tobytes()
+
+
+def test_pymupdf_is_the_default_provider():
+    assert SilicaConfig().pdf_provider == "pymupdf"
+
+
+def test_pymupdf_converts_a_real_pdf(tmp_vault, monkeypatch):
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+    (Path(CONFIG.vault_path) / "paper.pdf").write_bytes(_pdf_bytes(["Hello vault"]))
+
+    body = _inbox_note(conv.convert("paper.pdf")[0]).read_text(encoding="utf-8")
+    assert "Hello vault" in body
+
+
+def test_pymupdf_uses_the_embedded_outline_for_headings(tmp_vault, monkeypatch):
+    """The PDF's own outline beats font-size guessing (23 headings vs 12 on a
+    probe paper). Without it TocHeaders would collapse everything to one."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+    pdf = _pdf_bytes(
+        ["Chapter One body", "Chapter Two body"],
+        toc=[[1, "Chapter One", 1], [1, "Chapter Two", 2]],
+    )
+    (Path(CONFIG.vault_path) / "book.pdf").write_bytes(pdf)
+
+    body = _inbox_note(conv.convert("book.pdf")[0]).read_text(encoding="utf-8")
+    assert "# Chapter One" in body and "# Chapter Two" in body
+
+
+def test_pymupdf_without_outline_still_produces_text(tmp_vault, monkeypatch):
+    """No outline → no TocHeaders; the font heuristic must stay in charge."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+    (Path(CONFIG.vault_path) / "plain.pdf").write_bytes(_pdf_bytes(["Body with no outline"]))
+
+    body = _inbox_note(conv.convert("plain.pdf")[0]).read_text(encoding="utf-8")
+    assert "Body with no outline" in body
+
+
+def test_docx_bypasses_the_pdf_provider_seam(tmp_vault, monkeypatch):
+    """mineru/docling/opendataloader only take PDFs, so a non-PDF must reach
+    pymupdf whatever SILICA_PDF_PROVIDER says — here mineru, whose subprocess
+    would explode if it were called."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "mineru")
+    monkeypatch.setattr(conv.subprocess, "run", _never_called)
+    calls: list[Path] = []
+    monkeypatch.setattr(
+        conv, "_via_pymupdf", lambda src, wd: (calls.append(src) or ("# Doc\n\nbody", wd))
+    )
+    tmp_vault.note("memo.docx", "x")
+
+    conv.convert("memo.docx")
+    assert [p.name for p in calls] == ["memo.docx"]
+
+
+def _never_called(*a, **k):
+    raise AssertionError("PDF provider called for a non-PDF input")
+
+
+def test_empty_extraction_raises_pointing_at_ocr(tmp_vault, monkeypatch):
+    """A scan with no text layer yields nothing; writing an empty inbox note and
+    calling it success is the failure mode this guard exists to prevent."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+    # setitem, not setattr: the PDF path resolves the provider through the
+    # registry dict, which holds its own reference to the function.
+    monkeypatch.setitem(conv._PDF_PROVIDERS, "pymupdf", lambda src, wd: ("   \n\n", wd))
+    tmp_vault.note("scan.pdf", "x")
+
+    with pytest.raises(ValueError, match="no text extracted.*mineru"):
+        conv.convert("scan.pdf")
+    assert not (Path(CONFIG.vault_path) / CONFIG.inbox_dir / "scan.md").exists()
+
+
 # --- shared pipeline (exercised via the docling fake) -----------------------
 #
 # TODO(real-api): the fakes here hand-mirror the docling / opendataloader APIs
