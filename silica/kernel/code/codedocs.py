@@ -13,6 +13,8 @@ central index. All git access goes through gitstate and degrades soft.
 """
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -208,6 +210,124 @@ def _stale_for_note(root: Path, note_path: str, data: dict,
                 )
             )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Snapshot: stale_docs() cached on HEAD (spec-stale-triggers §1)
+# ---------------------------------------------------------------------------
+# Staleness is created by exactly one event: HEAD moving. One cached answer,
+# keyed on the HEAD sha, lets every surface read the same result for the price
+# of one `git rev-parse` per call and one full recompute per HEAD move.
+
+
+def _snapshot_path(vault: Path | str) -> Path:
+    """Cache file location; a function so tests redirect it (conftest)."""
+    return paths.index_dir_for(str(vault)) / "stale_snapshot.json"
+
+
+def _doc_to_json(d: StaleDoc) -> dict:
+    return {
+        "note_path": d.note_path,
+        "code_path": d.code_path,
+        "recorded_ref": d.recorded_ref,
+        "current_ref": d.current_ref,
+        "intervening": [{"sha": c.sha, "committed_at": c.committed_at,
+                         "subject": c.subject} for c in d.intervening],
+        "change_level": d.change_level,
+        "details": list(d.details),
+    }
+
+
+def _doc_from_json(raw: dict) -> StaleDoc:
+    return StaleDoc(
+        note_path=raw["note_path"],
+        code_path=raw["code_path"],
+        recorded_ref=raw["recorded_ref"],
+        current_ref=raw["current_ref"],
+        intervening=[CommitInfo(sha=c["sha"], committed_at=c["committed_at"],
+                                subject=c["subject"])
+                     for c in raw.get("intervening", [])],
+        change_level=raw.get("change_level", CHANGE_STRUCTURAL),
+        details=list(raw.get("details", [])),
+    )
+
+
+def snapshot(vault: Path | str, repo_root: Path | str | None = None) -> list[StaleDoc]:
+    """stale_docs() served from the HEAD-keyed cache; recomputes on a miss.
+
+    Warming entry point (read gate, digest, /wiki, /stale): a miss pays the
+    full vault walk once, then every consumer reads the same answer until the
+    next HEAD move. Key is HEAD only: uncommitted working-tree edits shifting
+    a stale path between cosmetic and structural are a declared residue.
+    """
+    vault = Path(vault)
+    root = Path(repo_root) if repo_root else paths.repo_root_for(vault)
+    if root is None:
+        return []
+    head = gitstate.head_ref(root)
+    if not head:
+        return []
+    cache = _snapshot_path(vault)
+    try:
+        raw = json.loads(cache.read_text(encoding="utf-8"))
+        if raw.get("head") == head:
+            return [_doc_from_json(d) for d in raw.get("docs", [])]
+    except Exception:
+        pass  # missing, corrupt, or unreadable: recompute and rewrite below
+    docs = stale_docs(vault, repo_root=root)
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache.parent / (cache.name + ".tmp")
+        tmp.write_text(json.dumps({"head": head,
+                                   "docs": [_doc_to_json(d) for d in docs]}),
+                       encoding="utf-8")
+        os.replace(tmp, cache)  # concurrent writers race benignly: last wins
+    except Exception:
+        pass  # a cache-write failure must never fail the hosting operation
+    return docs
+
+
+def peek(vault: Path | str, repo_root: Path | str | None = None) -> dict[str, str]:
+    """note_path -> change_level from the cache, read-only. NEVER recomputes.
+
+    Hot paths (recall tools, curation guard) call only this: a search never
+    pays the walk; at worst the first search after a commit ships without
+    flags. Structural wins when a note has paths at both levels.
+    """
+    try:
+        vault = Path(vault)
+        root = Path(repo_root) if repo_root else paths.repo_root_for(vault)
+        if root is None:
+            return {}
+        head = gitstate.head_ref(root)
+        if not head:
+            return {}
+        raw = json.loads(_snapshot_path(vault).read_text(encoding="utf-8"))
+        if raw.get("head") != head:
+            return {}
+        out: dict[str, str] = {}
+        for d in raw.get("docs", []):
+            if out.get(d["note_path"]) != CHANGE_STRUCTURAL:
+                out[d["note_path"]] = d.get("change_level", CHANGE_STRUCTURAL)
+        return out
+    except Exception:
+        return {}
+
+
+def invalidate_snapshot(vault: Path | str) -> None:
+    """Unlink the cache. Called by the write paths that stamp documents:/
+    code_ref, so re-badging a note does not leave a false stale entry until
+    the next HEAD move."""
+    try:
+        _snapshot_path(vault).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def peek_level(peek_map: dict[str, str], path: str) -> str | None:
+    """Level for a payload path. Peek keys end in .md (StaleDoc.note_path);
+    store-keyspace paths (embed/cooccur/recall) do not — normalize here."""
+    return peek_map.get(path if path.endswith(".md") else path + ".md")
 
 
 def read_warning(vault: Path | str, data: dict, repo_root: Path | str | None = None) -> str:

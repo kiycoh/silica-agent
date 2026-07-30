@@ -239,3 +239,18 @@ def tmp_vault(tmp_path, monkeypatch):
 
     yield _VaultHelper()
     silica.driver._driver = None  # reset after test
+
+
+@pytest.fixture(autouse=True)
+def _isolate_stale_snapshot(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect the stale-snapshot cache to a per-test tmp path.
+
+    read_warning/stale_count warm the snapshot on any documents: note; without
+    this, every such test would write the developer's real ~/.silica index.
+    One file per test regardless of vault: the HEAD key keeps cross-vault
+    reads correct (a different repo's HEAD never matches).
+    """
+    from silica.kernel.code import codedocs
+    monkeypatch.setattr(codedocs, "_snapshot_path",
+                        lambda vault: tmp_path / "stale_snapshot.json",
+                        raising=False)   # order-safe: a no-op until Step 4 lands
