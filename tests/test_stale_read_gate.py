@@ -74,3 +74,34 @@ def test_read_tool_leaves_plain_notes_untouched():
 
     content = "# just a note\n\nno frontmatter here\n"
     assert atomic._with_stale_banner(content) == content
+
+
+def test_warm_read_warning_matches_cold_and_skips_the_walk(tmp_path, monkeypatch):
+    """Same banner from the cache as from the walk, and the cache is really hit."""
+    _repo(tmp_path)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "m.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    ref0 = _commit(tmp_path)
+    vault = tmp_path / "docs"
+    vault.mkdir()
+    (vault / "m.md").write_text(
+        f"---\ndocuments:\n  - src/m.py\ncode_ref: {ref0}\n---\n\nbody\n",
+        encoding="utf-8")
+    (tmp_path / "src" / "m.py").write_text("def f(x):\n    return x\n", encoding="utf-8")
+    _commit(tmp_path, "c2")
+
+    data = {"documents": ["src/m.py"], "code_ref": ref0}
+    cold = codedocs.read_warning(vault, data, repo_root=tmp_path)   # warms the cache
+    assert cold.startswith("[stale]") and "src/m.py" in cold
+
+    calls = {"n": 0}
+    orig = codedocs.gitstate.paths_touched_since
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return orig(*a, **k)
+
+    monkeypatch.setattr(codedocs.gitstate, "paths_touched_since", counting)
+    warm = codedocs.read_warning(vault, data, repo_root=tmp_path)
+    assert warm == cold
+    assert calls["n"] == 0

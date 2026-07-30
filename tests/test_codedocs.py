@@ -212,3 +212,17 @@ def test_head_stamped_ref_is_not_stale_until_the_path_moves(tmp_path):
     assert codedocs.stale_docs(vault, repo_root=tmp_path) == []
     _commit(tmp_path, "src/m.py", "v2\n", "c3")              # now the path moved
     assert [d.code_path for d in codedocs.stale_docs(vault, repo_root=tmp_path)] == ["src/m.py"]
+
+
+def test_stale_count_serves_from_snapshot(tmp_path, monkeypatch):
+    _init_repo(tmp_path)
+    ref0 = _commit(tmp_path, "src/m.py", "v1\n", "c1")
+    vault = tmp_path / "docs"
+    vault.mkdir()
+    _write_note(vault, "m.md", ["src/m.py"], ref0)
+    _commit(tmp_path, "src/m.py", "v2\n", "c2")
+
+    from silica.kernel.recall import paths as kpaths
+    monkeypatch.setattr(kpaths, "repo_root_for", lambda v: tmp_path)
+    assert codedocs.stale_count(vault) == len(codedocs.stale_docs(vault))
+    assert codedocs._snapshot_path(vault).exists()   # the count warmed the cache

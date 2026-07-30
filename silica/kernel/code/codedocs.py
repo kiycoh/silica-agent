@@ -362,9 +362,13 @@ def read_warning(vault: Path | str, data: dict, repo_root: Path | str | None = N
         recorded = str(data.get("code_ref") or "").strip()
         if not recorded:
             return ""
-        latest = gitstate.latest_shas(root, sorted(docs))
-        touched = {recorded: gitstate.paths_touched_since(root, recorded, sorted(docs))}
-        stale = _stale_for_note(root, "", data, latest, touched)
+        # Staleness leg from the shared snapshot (spec §2). A note's staleness
+        # is fully determined by its (code_ref, path) pairs, so no note path is
+        # needed to find its entries. The missing-path leg above stays live and
+        # uncached: the loud case is never frozen.
+        docset = set(docs)
+        stale = [d for d in snapshot(vault, repo_root=root)
+                 if d.recorded_ref == recorded and d.code_path in docset]
         if not stale:
             return ""
         level, _ = note_verdict(stale)
@@ -376,8 +380,9 @@ def read_warning(vault: Path | str, data: dict, repo_root: Path | str | None = N
 
 
 def stale_count(vault: Path | str) -> int:
-    """Count of stale (note, path) pairs. Soft-zero on any failure / no git."""
+    """Count of stale (note, path) pairs, served from the shared snapshot.
+    Soft-zero on any failure / no git."""
     try:
-        return len(stale_docs(vault))
+        return len(snapshot(vault))
     except Exception:
         return 0
