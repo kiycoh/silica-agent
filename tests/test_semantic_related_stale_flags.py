@@ -56,3 +56,43 @@ def test_peek_failure_never_fails_the_search(monkeypatch):
 
     monkeypatch.setattr(codedocs, "peek", boom)
     assert graph.silica_semantic_search("q")["results"]
+
+
+def _related_result(path, origin="vault", score=0.9):
+    # silica_related's result dict also reads r.evidence, unlike the facade
+    # search results above.
+    return SimpleNamespace(path=path, name=path.rsplit("/", 1)[-1],
+                           score=score, origin=origin, evidence=["embed:0.9"])
+
+
+def test_related_flags_stale_vault_result_not_memory_lane(tmp_path, monkeypatch):
+    """silica_related must get the same stale-flag treatment as
+    silica_semantic_search. Fails if the **_stale_entry(...) spread were
+    ever dropped from silica_related's result-dict comprehension."""
+    from silica.kernel.recall.embed import EmbedStore
+    from silica.kernel.recall.cooccurrence import CooccurStore
+    import silica.kernel.recall.relatedness as relatedness_mod
+
+    # Non-empty stores so silica_related doesn't take the empty-index early
+    # return; related_notes itself is stubbed below, so their content is
+    # otherwise irrelevant.
+    es = EmbedStore(path=tmp_path / "e.json")
+    es.upsert("wiki/m", "m", [1.0, 0.0])
+    monkeypatch.setattr("silica.kernel.recall.embed.get_store", lambda: es)
+    monkeypatch.setattr(
+        "silica.kernel.recall.cooccurrence.get_cooccur_store",
+        lambda **_: CooccurStore(path=tmp_path / "c.json", lang="english"),
+    )
+    monkeypatch.setattr(
+        "silica.driver.DRIVER",
+        SimpleNamespace(read_note=lambda note: (_ for _ in ()).throw(KeyError(note))),
+    )
+
+    results = [_related_result("wiki/m"), _related_result("mem/x", origin="memory")]
+    monkeypatch.setattr(relatedness_mod, "related_notes", lambda *a, **k: results)
+    monkeypatch.setattr(codedocs, "peek", lambda v: {"wiki/m.md": "structural"})
+
+    out = graph.silica_related("wiki/m", k=5)
+    by_path = {r["path"]: r for r in out["results"]}
+    assert by_path["wiki/m"]["stale"] == "structural"
+    assert "stale" not in by_path["mem/x"]
