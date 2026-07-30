@@ -7,6 +7,7 @@ from types import SimpleNamespace as NS
 from silica.agent.compaction import (
     MIN_COLLAPSE_CHARS,
     generic_projection,
+    read_projection,
     read_stub,
     eager_stub,
     compact_read_history,
@@ -131,6 +132,102 @@ def test_skips_already_collapsed_before_boundary():
     # Message 2 is already in collapsed set; should not be re-processed.
     assert collapsed == {2}
     assert m[2]["content"] == "x" * 300  # unchanged — guard prevented re-stubbing
+
+
+def test_read_projection_keeps_paths_elides_the_fat_field():
+    """The point of the projection: a recall's `notes` survive, its body doesn't."""
+    out = read_projection(json.dumps({
+        "query": "chemistry",
+        "context": "y" * 40_000,
+        "notes": ["Chem/Bonds.md", "Chem/Orbitals.md"],
+        "facts": 2,
+    }))
+    assert "Chem/Bonds.md" in out and "Chem/Orbitals.md" in out
+    assert "context=<40000 chars>" in out
+    assert "facts=2" in out
+    assert "y" * 200 not in out
+
+
+def test_read_projection_ignores_non_json_bodies():
+    assert read_projection("# A note body\n\nprose") == ""
+
+
+def test_read_stub_carries_the_projection():
+    out = read_stub("silica_recall", '{"query": "x"}', json.dumps({"notes": ["A.md"]}))
+    assert "kept: notes=[\"A.md\"]" in out
+
+
+def _rw_msgs(second_call: tuple[str, str]):
+    """Read Foo, then make `second_call` — used to drive the invalidation pass."""
+    big = "x" * 300
+    name, arguments = second_call
+    return [
+        {"role": "user", "content": "hi"},                                                # 0
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "a", "type": "function",
+             "function": {"name": "silica_read_note", "arguments": '{"name": "Foo"}'}}]},  # 1
+        {"role": "tool", "tool_call_id": "a", "content": big},                             # 2
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "b", "type": "function",
+             "function": {"name": name, "arguments": arguments}}]},                        # 3
+        {"role": "tool", "tool_call_id": "b", "content": big},                             # 4
+    ]
+
+
+_RW_TOOLS = {
+    "silica_read_note": NS(collapse="lazy"),
+    "silica_related": NS(collapse="lazy"),
+    "silica_patch_note": NS(collapse="eager"),
+}
+
+
+def test_stale_read_collapses_under_budget():
+    """A read whose note was patched afterwards is wrong, so budget is irrelevant."""
+    m = _rw_msgs(("silica_patch_note", '{"name": "Foo", "snippet": "..."}'))
+    collapsed = compact_read_history(
+        m, set(), prompt_tokens=1, budget=10**9, floor_turns=99, tools=_RW_TOOLS
+    )
+    assert collapsed == {2}
+    assert "stale" in m[2]["content"]
+    assert m[2]["tool_call_id"] == "a"   # pairing preserved
+
+
+def test_stale_matches_a_path_write_against_a_name_read():
+    m = _rw_msgs(("silica_write_note", '{"path": "Sub/Foo.md", "body": "..."}'))
+    tools = {**_RW_TOOLS, "silica_write_note": NS(collapse="eager")}
+    collapsed = compact_read_history(
+        m, set(), prompt_tokens=1, budget=10**9, floor_turns=99, tools=tools
+    )
+    assert collapsed == {2}
+
+
+def test_superseded_read_collapses_and_keeps_the_later_copy():
+    m = _rw_msgs(("silica_read_note", '{"name": "Foo"}'))
+    collapsed = compact_read_history(
+        m, set(), prompt_tokens=1, budget=10**9, floor_turns=99, tools=_RW_TOOLS
+    )
+    assert collapsed == {2}
+    assert "superseded" in m[2]["content"]
+    assert m[4]["content"] == "x" * 300  # the latest read survives
+
+
+def test_a_different_read_of_the_same_note_supersedes_nothing():
+    """silica_related(Foo) answers another question than silica_read_note(Foo)."""
+    m = _rw_msgs(("silica_related", '{"note": "Foo"}'))
+    collapsed = compact_read_history(
+        m, set(), prompt_tokens=1, budget=10**9, floor_turns=99, tools=_RW_TOOLS
+    )
+    assert collapsed == set()
+    assert m[2]["content"] == "x" * 300
+
+
+def test_mutating_a_different_note_leaves_the_read_alone():
+    m = _rw_msgs(("silica_patch_note", '{"name": "Bar", "snippet": "..."}'))
+    collapsed = compact_read_history(
+        m, set(), prompt_tokens=1, budget=10**9, floor_turns=99, tools=_RW_TOOLS
+    )
+    assert collapsed == set()
+    assert m[2]["content"] == "x" * 300
 
 
 def test_skips_unknown_tool_not_in_registry():
