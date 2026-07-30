@@ -445,6 +445,20 @@ def test_gold_in_context_recorded_per_question(tmp_path, monkeypatch):
     assert doc["metrics"]["gold_in_context_mean"] == 1.0
 
 
+def test_retrieval_only_records_gold_in_context_llm_free(tmp_path, monkeypatch):
+    """--retrieval-only scores the rendered payload without touching an LLM."""
+    def no_llm(*a, **kw):
+        raise AssertionError("retrieval-only must not call an LLM")
+    monkeypatch.setattr(llm_mod, "call_llm", no_llm)
+    doc = runner.run([_instance()], tmp_path / "run", model="stub", judge_model="stub",
+                     k=10, stuff=True, use_embedder=False, retrieval_only=True,
+                     limit=None, verbose=False)
+    row = doc["questions"][0]
+    assert row["gold_in_context"] is True   # "Zephyr" is in s1
+    assert row["correct"] is None           # still never judged
+    assert doc["metrics"]["gold_in_context_mean"] == 1.0
+
+
 def test_personal_memory_block_precedes_sessions(tmp_path, monkeypatch):
     # Layout fix (post-mortem 2026-07-14): the facts block is the densest
     # evidence and must open the context, not trail 10 long session notes.
@@ -642,3 +656,43 @@ def test_distill_passes_episodic_key_vocabulary(tmp_path, monkeypatch):
     substrate = seen_kwargs.get("substrate") or ""
     assert "## Episodic keys" in substrate
     assert "user.car.model" in substrate
+
+
+def test_aggregate_separates_asked_from_graded_and_counts_judge_failures():
+    """A judge failure (correct=None, no error, but a real response) shrinks the
+    accuracy denominator while carrying no `error`, so error_n cannot see it.
+    Reporting only the asked count printed "0.7778 (n=40)" for a run whose real
+    denominator was 36 — read as a 12pp product regression that never happened."""
+    from evals.longmemeval.runner import aggregate
+
+    rows = [
+        {"question_id": "a", "question_type": "t", "abstention": False,
+         "correct": True, "session_recall": None, "response": "x", "error": None},
+        {"question_id": "b", "question_type": "t", "abstention": False,
+         "correct": None, "session_recall": None, "response": "answered", "error": None},
+        {"question_id": "c", "question_type": "t", "abstention": False,
+         "correct": None, "session_recall": None, "response": "", "error": "boom"},
+        {"question_id": "d", "question_type": "t", "abstention": True,
+         "correct": True, "session_recall": None, "response": "x", "error": None},
+        {"question_id": "e", "question_type": "t", "abstention": True,
+         "correct": None, "session_recall": None, "response": "answered", "error": None},
+    ]
+    m = aggregate(rows)
+    assert m["answerable_n"] == 3 and m["answerable_graded_n"] == 1
+    assert m["abstention_n"] == 2 and m["abstention_graded_n"] == 1
+    assert m["judge_fail_n"] == 2          # b and e; the errored row c is not one
+    assert m["by_type"]["t"]["graded_n"] == 1
+
+
+def test_retrieval_only_rows_are_not_counted_as_judge_failures():
+    """--retrieval-only leaves every row correct=None with no response by
+    design; counting those as judge failures would report a clean run as
+    catastrophically ungradable."""
+    from evals.longmemeval.runner import aggregate
+
+    rows = [{"question_id": str(i), "question_type": "t", "abstention": False,
+             "correct": None, "session_recall": 1.0, "response": "", "error": None}
+            for i in range(5)]
+    m = aggregate(rows)
+    assert m["judge_fail_n"] == 0
+    assert m["answerable_n"] == 5 and m["answerable_graded_n"] == 0

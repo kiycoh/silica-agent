@@ -203,6 +203,31 @@ def test_run_question_session_recall_via_session_map(monkeypatch):
     assert row["sessions"] == 3
 
 
+def test_run_question_retrieval_only_records_gold_in_context(monkeypatch):
+    """--retrieval-only scores the rendered payload (LLM-free), not just paths."""
+    from silica.kernel.recall import perception
+
+    monkeypatch.setattr(perception, "perceive",
+                        lambda *a, **kw: SimpleNamespace(
+                            blocks=[SimpleNamespace(path="memory/Puppy")],
+                            fact_chains=[], fact_hits=[],
+                            render=lambda **k: "Ann adopted a beagle puppy"))
+    kw = dict(model="stub", judge_model="stub", k=2, stuff=False,
+              use_embedder=False, use_rerank=False, retrieval_only=True,
+              distill=False, episodic_ttl=0, flat_context=False, facts_last=False,
+              windows=None, window_chars=None, now="2023-05-09",
+              speakers=("Ann", "Bob"))
+    hit = runner.run_question({"question": "q?", "answer": "beagle puppy",
+                               "evidence": ["D1:1"], "category": 4},
+                              "conv-t_q0", {}, **kw)
+    miss = runner.run_question({"question": "q?", "answer": "siamese kitten",
+                                "evidence": ["D1:1"], "category": 4},
+                               "conv-t_q1", {}, **kw)
+    assert hit["gold_in_context"] is True
+    assert miss["gold_in_context"] is False
+    assert hit["correct"] is None   # retrieval-only still never judges
+
+
 def _scripted_run_agent(script):
     """Fake run_agent: fires ToolCompleteEvents from `script` (list of
     (name, args, result_json, iteration)) then returns script's answer."""

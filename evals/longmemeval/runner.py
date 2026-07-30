@@ -446,16 +446,21 @@ def run_instance(inst: dict, run_root: Path, *, model: str, judge_model: str,
 
     gold_in_ctx: bool | None = None
     err: str | None = None
+    # Facts first (post-mortem 2026-07-14): the block is the densest evidence
+    # and the answer model misses it when it trails long session notes.
+    # ``facts_last`` / ``flat_context`` are the legacy layout A/B arms.
+    # Rendered and scored before the answer branch: render() and
+    # _gold_in_context are both local, so the LLM-free loop gets a
+    # payload-level metric instead of only path-based session_recall, which
+    # miscounts whenever assembly rekeys a block to its head member's path.
+    context = p.render(facts_first=not facts_last, windowed=not flat_context)
+    if not is_abs:
+        gold_in_ctx = _gold_in_context(inst["answer"], context)
+
     if retrieval_only:
-        # LLM-free loop: measure session_recall only, no answer/judge cost.
+        # LLM-free loop: no answer/judge cost.
         response, correct = "", None
     else:
-        # Facts first (post-mortem 2026-07-14): the block is the densest evidence
-        # and the answer model misses it when it trails long session notes.
-        # ``facts_last`` / ``flat_context`` are the legacy layout A/B arms.
-        context = p.render(facts_first=not facts_last, windowed=not flat_context)
-        if not is_abs:
-            gold_in_ctx = _gold_in_context(inst["answer"], context)
         # Per-question guard mirrors LoCoMo (post-mortem: a baseline died at
         # 9/585 on one transient OpenRouter APIError): a flaky answer/judge call
         # becomes an error row (correct=None, surfaced via error_n), never a
@@ -506,19 +511,38 @@ def aggregate(rows: list[dict]) -> dict:
         vals = [r["session_recall"] for r in subset if r["session_recall"] is not None]
         return round(sum(vals) / len(vals), 4) if vals else None
 
+    def graded_n(subset: list[dict]) -> int:
+        return sum(1 for r in subset if r["correct"] is not None)
+
     answerable = [r for r in rows if not r["abstention"]]
+    abstention = [r for r in rows if r["abstention"]]
     by_type: dict[str, dict] = {}
     for qt in sorted({r["question_type"] for r in answerable}):
         sub = [r for r in answerable if r["question_type"] == qt]
-        by_type[qt] = {"n": len(sub), "accuracy": acc(sub), "session_recall": sr(sub)}
+        by_type[qt] = {"n": len(sub), "graded_n": graded_n(sub),
+                       "accuracy": acc(sub), "session_recall": sr(sub)}
     recalls = [r["session_recall"] for r in rows if r["session_recall"] is not None]
     eph = [r["ephemeral_hit"] for r in rows if r.get("ephemeral_hit") is not None]
     gic = [r["gold_in_context"] for r in rows if r.get("gold_in_context") is not None]
+    # `*_n` is the ASKED count; `*_graded_n` is the accuracy denominator. They
+    # diverge whenever a row scores correct=None, and judge() returns None on a
+    # persistently empty reply (a judge failure carries no `error`, so error_n
+    # cannot see it). Reporting only the asked count printed "0.7778 (n=40)"
+    # for a LoCoMo run whose real denominator was 36 — a 12pp "regression" that
+    # was six lost judgements, read as a product change (2026-07-30).
     return {
         "overall_accuracy": acc(answerable),
         "answerable_n": len(answerable),
-        "abstention_accuracy": acc([r for r in rows if r["abstention"]]),
-        "abstention_n": sum(r["abstention"] for r in rows),
+        "answerable_graded_n": graded_n(answerable),
+        "abstention_accuracy": acc(abstention),
+        "abstention_n": len(abstention),
+        "abstention_graded_n": graded_n(abstention),
+        # correct=None with no `error` but WITH a response = the judge failed,
+        # not the answer. The response guard is load-bearing: --retrieval-only
+        # leaves every row correct=None by design, and an errored answer has no
+        # response either, so both would otherwise read as judge failures.
+        "judge_fail_n": sum(1 for r in rows if r["correct"] is None
+                            and not r.get("error") and (r.get("response") or "").strip()),
         "by_type": by_type,
         "session_recall_mean": round(sum(recalls) / len(recalls), 4) if recalls else None,
         "ephemeral_hit_mean": round(sum(eph) / len(eph), 4) if eph else None,

@@ -652,12 +652,17 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
             else:
                 ephemeral_hit = _ephemeral_hit(p.fact_chains, gold_sessions)
 
+        # Render (and score the payload) before the answer branch: render() and
+        # _gold_in_context are both local, so --retrieval-only gets a
+        # payload-level metric instead of only path-based session_recall, which
+        # miscounts whenever assembly rekeys a block to its head member's path.
+        context = p.render(facts_first=not facts_last, windowed=not flat_context)
+        if not is_abs:
+            gold_in_ctx = _gold_in_context(gold, context)
+
         if retrieval_only:
             response = ""
         else:
-            context = p.render(facts_first=not facts_last, windowed=not flat_context)
-            if not is_abs:
-                gold_in_ctx = _gold_in_context(gold, context)
             # Per-question guard: one flaky provider response must become an
             # error row, not kill the whole run (post-mortem: baseline died at
             # 9/585 on a transient OpenRouter APIError). Same isolation the
@@ -966,8 +971,15 @@ def _print_summary(doc: dict) -> None:
     m, cfg = doc["metrics"], doc["config"]
     print(f"\nlocomo — answer={cfg['answer_model']} judge={cfg['judge_model']} "
           f"retrieval={cfg['retrieval']}")
-    print(f"  overall accuracy   {m['overall_accuracy']}  (n={m['answerable_n']})")
-    print(f"  adversarial        {m['abstention_accuracy']}  (n={m['abstention_n']})")
+    print(f"  overall accuracy   {m['overall_accuracy']}  "
+          f"(graded {m.get('answerable_graded_n', m['answerable_n'])}/{m['answerable_n']})")
+    print(f"  adversarial        {m['abstention_accuracy']}  "
+          f"(graded {m.get('abstention_graded_n', m['abstention_n'])}/{m['abstention_n']})")
+    if m.get("judge_fail_n"):
+        # Never silent: an ungraded row shrinks the denominator, and a judge
+        # failure carries no `error`, so error_n alone cannot surface it.
+        print(f"  JUDGE FAILURES     {m['judge_fail_n']}  "
+              "(answered but ungradable — accuracy is over a shrunken denominator)")
     if m["session_recall_mean"] is not None:
         print(f"  session recall     {m['session_recall_mean']}")
     if m.get("ephemeral_hit_mean") is not None:
