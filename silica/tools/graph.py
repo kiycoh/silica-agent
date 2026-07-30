@@ -257,6 +257,28 @@ def silica_backlink(new_titles: list[str], neighbourhood: list[str]) -> dict[str
     return {"added": total, "notes_modified": len(added_map), "details": added_map}
 
 
+def _stale_entry(stale_map: dict[str, str], r) -> dict:
+    """{"stale": level} for a flagged result, {} otherwise. Memory-lane
+    results are another vault (ADR-0019): never annotated, like cluster."""
+    if r.origin == "memory" or not stale_map:
+        return {}
+    from silica.kernel.code import codedocs
+
+    lvl = codedocs.peek_level(stale_map, r.path)
+    return {"stale": lvl} if lvl else {}
+
+
+def _peek_stale() -> dict[str, str]:
+    """The stale peek map for the active vault; {} on any failure (spec §5)."""
+    try:
+        from silica.config import CONFIG
+        from silica.kernel.code import codedocs
+
+        return codedocs.peek(CONFIG.vault_path)
+    except Exception:
+        return {}
+
+
 def _facade_search(text: str, k: int) -> dict[str, Any]:
     """Fused embeddings + co-occurrence search for a fresh text, then reranked.
 
@@ -273,6 +295,7 @@ def _facade_search(text: str, k: int) -> dict[str, Any]:
     results, _query_vec = facade_retrieve(text, k=k)
     if results is None:
         return {"error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
+    stale_map = _peek_stale()
     return {
         "results": [
             {
@@ -282,6 +305,7 @@ def _facade_search(text: str, k: int) -> dict[str, Any]:
                 # Origin marker (ADR-0019): only when the note is NOT in the
                 # active vault, so single-vault payloads stay unchanged.
                 **({"origin": "memory"} if r.origin == "memory" else {}),
+                **_stale_entry(stale_map, r),
             }
             for r in results
         ]
@@ -448,6 +472,7 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
     # distance = a missing link worth creating; distance 1 = already linked.
     # Omitted entirely when the wikilink graph is unavailable.
     dists = graph_distances(query_path)
+    stale_map = _peek_stale()
     out: dict[str, Any] = {
         "note": note,
         "results": [
@@ -467,6 +492,7 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
                     else {}
                 ),
                 **({"origin": "memory"} if r.origin == "memory" else {}),
+                **_stale_entry(stale_map, r),
             }
             for r in results
         ],
