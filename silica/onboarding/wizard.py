@@ -602,7 +602,10 @@ def _run_wizard_inner(
             return False
         updates.pop("SILICA_TAVILY_API_KEY", None)
         key = _ask(
-            input_fn, "Tavily API key — enables /web-search [Enter = skip]", secret=True
+            input_fn,
+            "Tavily API key — /web-search backstop when DuckDuckGo rate-limits "
+            "[Enter = skip]",
+            secret=True,
         )
         if key:
             updates["SILICA_TAVILY_API_KEY"] = key

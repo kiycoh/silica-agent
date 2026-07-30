@@ -151,6 +151,25 @@ def test_an_empty_trace_says_so_rather_than_citing_nothing():
     assert "(no sources captured)" in out
 
 
+def test_a_fallback_lane_is_named_under_the_sources_block(monkeypatch):
+    """/web is where a challenged primary lane is felt first, so the answer the
+    user reads carries the same lane line the kept note does."""
+    turn = _turn_with_trace(results=[_HITS])
+    monkeypatch.setattr(wr, "_LANES", ["mojeek", "wikipedia", "wikipedia"])
+
+    out = turn.attribute("Answer.", [])
+
+    block = out.split("## Sources (web)", 1)[1]
+    assert "Search lanes: mojeek 1, wikipedia 2." in block
+
+
+def test_a_healthy_turn_carries_no_lane_line(monkeypatch):
+    turn = _turn_with_trace(results=[_HITS])
+    monkeypatch.setattr(wr, "_LANES", ["duckduckgo", "duckduckgo"])
+
+    assert "Search lanes" not in turn.attribute("Answer.", [])
+
+
 def test_the_block_lands_in_the_history_too():
     """History must carry what the user saw: the next turn reads the citations."""
     turn = _turn_with_trace(results=[_HITS])

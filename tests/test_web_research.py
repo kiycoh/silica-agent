@@ -1,8 +1,10 @@
 """web_search tool + web_research orchestrator (ADR-0015 staged acquisition).
 
-No real network (httpx.post is monkeypatched) and no real LLM (run_agent is
-monkeypatched). Asserts: Tavily request shape, the keyless DuckDuckGo default,
-compact result mapping, sensitivity, and the inbox findings note.
+No real network (the _no_network fixture below fails any unstubbed httpx call)
+and no real LLM (run_agent is monkeypatched). Asserts: the DuckDuckGo primary
+lane, the Mojeek, Tavily and Wikipedia backstops behind it, the lane line that
+names a fallback on the note, compact result mapping, sensitivity, and the inbox
+findings note.
 """
 from __future__ import annotations
 
@@ -10,11 +12,25 @@ import datetime
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 
 from silica.config import CONFIG
 from silica.sources import web_research as wr
 from silica.tools import TOOLS
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """Every lane is a stub or an error. Mojeek scrapes with httpx.get, so a
+    test that stubs only httpx.post would reach the real Mojeek from a
+    challenged DDG — the fixture turns that into a failure, not a slow pass."""
+
+    def boom(url, *a, **kw):
+        raise AssertionError(f"test reached the network: {url}")
+
+    monkeypatch.setattr(wr.httpx, "get", boom)
+    monkeypatch.setattr(wr.httpx, "post", boom)
 
 
 # --- web_search tool --------------------------------------------------------
@@ -70,46 +86,245 @@ def test_web_search_without_key_uses_duckduckgo(monkeypatch):
     ]
 
 
-def test_web_search_ddg_challenge_names_the_tavily_escape_hatch(monkeypatch):
-    """DDG answers rate-limit challenges with 202, which raise_for_status would
-    wave through as success; the error must tell the user their way out."""
+class _Challenged(_FakeDDGResp):
+    """DDG's rate-limit answer: 202, which raise_for_status waves through as
+    success, with a bare JavaScript shell for a body."""
+
+    status_code = 202
+    text = "prove you are human"
+
+
+# Mojeek's results list, plus a chrome list carrying an <h2> anchor of its own:
+# the parser is anchored on ul.results-standard, so the chrome must not become a
+# hit. Selectors per searxng's mojeek engine (see _mojeek_search).
+_MOJEEK_HTML = """
+<ul class="nav-standard">
+  <li><h2><a href="https://www.mojeek.com/about/">About Mojeek</a></h2></li>
+</ul>
+<ul class="results-standard">
+  <li>
+    <h2><a href="https://m1.test/page">Mojeek <b>One</b></a></h2>
+    <a class="ob" href="https://m1.test/page">m1.test/page</a>
+    <p class="s">Snippet one &amp; a bit.</p>
+  </li>
+  <li>
+    <h2><a href="https://m2.test/">Mojeek Two</a></h2>
+    <a class="ob" href="https://m2.test/">m2.test</a>
+    <p class="s">Snippet two.</p>
+  </li>
+</ul>
+"""
+
+
+class _FakeMojeekResp:
+    status_code = 200
+    text = _MOJEEK_HTML
+
+
+class _MojeekCaptcha:
+    """Mojeek's challenge: HTTP *200* with a captcha page, so the status code
+    cannot be the guard (measured 2026-07-30, every UA tried)."""
+
+    status_code = 200
+    text = '<html><head><title>Captcha</title></head><body>...</body></html>'
+
+
+def _fake_get(resp):
+    def fake_get(url, params=None, headers=None, timeout=None, follow_redirects=None):
+        assert url == wr._MOJEEK_URL
+        assert params == {"q": "graph theory"}
+        return resp
+
+    return fake_get
+
+
+def test_web_search_falls_back_to_mojeek_when_ddg_challenges(monkeypatch):
+    """The keyless default keeps the open web when DDG challenges: Mojeek is its
+    own crawl with its own rate limits, so it is tried before the encyclopedia."""
     monkeypatch.setattr(CONFIG, "tavily_api_key", "")
-
-    class _Challenged(_FakeDDGResp):
-        status_code = 202
-        text = "prove you are human"
-
     monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
+    monkeypatch.setattr(wr.httpx, "get", _fake_get(_FakeMojeekResp()))
+    monkeypatch.setattr(wr._web_fetch, "_fetch", _wikipedia_must_not_run)
+
+    items = json.loads(wr.web_search("graph theory"))
+
+    assert items == [
+        {"title": "Mojeek One", "url": "https://m1.test/page",
+         "content": "Snippet one & a bit."},
+        {"title": "Mojeek Two", "url": "https://m2.test/", "content": "Snippet two."},
+    ]
+
+
+def test_mojeek_runs_ahead_of_a_set_key(monkeypatch):
+    """Same posture as DDG-first: a keyless lane on its own index beats billing a
+    vendor, so a healthy Mojeek means Tavily is never posted to."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k-123")
+    posted = []
+
+    def fake_post(url, **kw):
+        posted.append(url)
+        return _Challenged()  # only DDG should be posted to at all
+
+    monkeypatch.setattr(wr.httpx, "post", fake_post)
+    monkeypatch.setattr(wr.httpx, "get", _fake_get(_FakeMojeekResp()))
+
+    items = json.loads(wr.web_search("graph theory"))
+
+    assert posted == [wr._DDG_URL]
+    assert [i["url"] for i in items] == ["https://m1.test/page", "https://m2.test/"]
+
+
+def test_mojeek_parse_does_not_depend_on_anchor_order(monkeypatch):
+    """searxng's selectors say the title anchor is a sibling of the url anchor
+    but not which comes first, and that is not verifiable from a captcha'd IP —
+    so the parser takes the url from whichever anchor leads and the title only
+    from the one inside the <h2>, and holds either way round."""
+    swapped = _MOJEEK_HTML.replace(
+        '<h2><a href="https://m1.test/page">Mojeek <b>One</b></a></h2>\n'
+        '    <a class="ob" href="https://m1.test/page">m1.test/page</a>',
+        '<a class="ob" href="https://m1.test/page">m1.test/page</a>\n'
+        '    <h2><a href="https://m1.test/page">Mojeek <b>One</b></a></h2>',
+    )
+    assert swapped != _MOJEEK_HTML  # the replace matched
+
+    class _Swapped(_FakeMojeekResp):
+        text = swapped
+
+    monkeypatch.setattr(wr.httpx, "get", _fake_get(_Swapped()))
+
+    assert wr._mojeek_search("graph theory")[0] == {
+        "title": "Mojeek One",
+        "url": "https://m1.test/page",
+        "content": "Snippet one & a bit.",
+    }
+
+
+def test_mojeek_captcha_and_empty_page_both_raise(monkeypatch):
+    """A 200 captcha and a 200 whose markup no longer parses must both raise: a
+    silent [] would spend the loop's whole budget on a lane that stopped
+    answering and never reach the ones that still do."""
+    monkeypatch.setattr(wr.httpx, "get", _fake_get(_MojeekCaptcha()))
+    with pytest.raises(ValueError, match="challenged"):
+        wr._mojeek_search("graph theory")
+
+    class _Renamed(_FakeMojeekResp):
+        text = _MOJEEK_HTML.replace("results-standard", "results-v2")
+
+    monkeypatch.setattr(wr.httpx, "get", _fake_get(_Renamed()))
+    with pytest.raises(ValueError, match="no parseable results"):
+        wr._mojeek_search("graph theory")
+
+
+class _FakeWPResp:
+    def json(self):
+        return {
+            "query": {
+                "search": [
+                    {"title": "Graph theory",
+                     "snippet": 'a <span class="searchmatch">graph</span> is a &amp; b'},
+                    {"title": "PageRank", "snippet": "link analysis"},
+                ]
+            }
+        }
+
+
+def test_web_search_falls_back_to_wikipedia_when_ddg_challenges(monkeypatch):
+    """Measured: DDG 202s from the third consecutive query and 20s of backoff
+    does not clear it, while the loop is budgeted for 8-10. A challenge must
+    degrade the lane, not end the research turn. Keyless with Mojeek challenged
+    too, the encyclopedia is what is left."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
+    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _MojeekCaptcha())
+    seen = []
+
+    def fake_fetch(url, headers=None):
+        seen.append((url, headers))
+        return _FakeWPResp(), url
+
+    monkeypatch.setattr(wr._web_fetch, "_fetch", fake_fetch)
+
+    items = json.loads(wr.web_search("graph theory"))
+
+    assert seen[0][0].startswith("https://en.wikipedia.org/w/api.php?")
+    assert "list=search" in seen[0][0] and "srsearch=graph+theory" in seen[0][0]
+    assert "silica-agent" in seen[0][1]["User-Agent"]  # Wikimedia UA policy
+    assert items == [
+        {"title": "Graph theory",
+         "url": "https://en.wikipedia.org/wiki/Graph_theory",
+         "content": "a graph is a & b"},
+        {"title": "PageRank",
+         "url": "https://en.wikipedia.org/wiki/PageRank",
+         "content": "link analysis"},
+    ]
+
+
+def test_web_search_double_failure_names_the_tavily_escape_hatch(monkeypatch):
+    """When the fallback is down too, the surfaced error is DDG's, the
+    one that tells the user their way out, and Wikipedia's would bury it."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
+    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _MojeekCaptcha())
+
+    def boom(*a, **k):
+        raise ValueError("cannot resolve 'en.wikipedia.org'")
+
+    monkeypatch.setattr(wr._web_fetch, "_fetch", boom)
     with pytest.raises(ValueError, match="TAVILY"):
         wr.web_search("anything")
 
 
-def test_web_search_posts_and_returns_compact_results(monkeypatch):
+class _FakeTavilyResp:
+    def raise_for_status(self):
+        return self
+
+    def json(self):
+        return {
+            "results": [
+                {"title": "T1", "url": "https://a.test", "content": "c1", "score": 0.9},
+                {"title": "T2", "url": "https://b.test", "content": "c2"},
+            ]
+        }
+
+
+def test_web_search_prefers_ddg_over_tavily_when_a_key_is_set(monkeypatch):
+    """A key is a backstop, not a switch: DDG is the primary lane, so a healthy
+    DDG answers and Tavily is never billed."""
     monkeypatch.setattr(CONFIG, "tavily_api_key", "k-123")
-    seen = {}
+    posted = []
 
-    class _FakeResp:
-        def raise_for_status(self):
-            return self
-
-        def json(self):
-            return {
-                "results": [
-                    {"title": "T1", "url": "https://a.test", "content": "c1", "score": 0.9},
-                    {"title": "T2", "url": "https://b.test", "content": "c2"},
-                ]
-            }
-
-    def fake_post(url, json=None, timeout=None):
-        seen["url"] = url
-        seen["body"] = json
-        seen["timeout"] = timeout
-        return _FakeResp()
+    def fake_post(url, **kw):
+        posted.append(url)
+        return _FakeDDGResp()
 
     monkeypatch.setattr(wr.httpx, "post", fake_post)
 
-    out = wr.web_search("graph theory")
-    items = json.loads(out)
+    items = json.loads(wr.web_search("graph theory"))
+
+    assert posted == [wr._DDG_URL]
+    assert [i["url"] for i in items] == ["https://a.test/page"]
+
+
+def test_web_search_posts_to_tavily_when_ddg_challenges(monkeypatch):
+    """With a key, Tavily takes over from a challenged DDG once the keyless
+    Mojeek lane is challenged too, and still ahead of the Wikipedia lane, which
+    stays the last resort."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k-123")
+    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _MojeekCaptcha())
+    seen = {}
+
+    def fake_post(url, json=None, data=None, headers=None, timeout=None):
+        if url == wr._DDG_URL:
+            return _Challenged()
+        seen["url"] = url
+        seen["body"] = json
+        seen["timeout"] = timeout
+        return _FakeTavilyResp()
+
+    monkeypatch.setattr(wr.httpx, "post", fake_post)
+    monkeypatch.setattr(wr._web_fetch, "_fetch", _wikipedia_must_not_run)
+
+    items = json.loads(wr.web_search("graph theory"))
 
     assert seen["url"] == wr._TAVILY_URL
     assert seen["body"]["api_key"] == "k-123"
@@ -119,6 +334,32 @@ def test_web_search_posts_and_returns_compact_results(monkeypatch):
         {"title": "T1", "url": "https://a.test", "content": "c1"},
         {"title": "T2", "url": "https://b.test", "content": "c2"},
     ]
+
+
+def test_web_search_falls_through_tavily_to_wikipedia(monkeypatch):
+    """A key that is expired or a Tavily outage must not end the turn: the
+    keyless lane is still there behind it."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k-123")
+    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _MojeekCaptcha())
+
+    def fake_post(url, **kw):
+        if url == wr._DDG_URL:
+            return _Challenged()
+        raise httpx.HTTPError("tavily 401")
+
+    monkeypatch.setattr(wr.httpx, "post", fake_post)
+    monkeypatch.setattr(wr._web_fetch, "_fetch", lambda url, headers=None: (_FakeWPResp(), url))
+
+    items = json.loads(wr.web_search("graph theory"))
+
+    assert [i["url"] for i in items] == [
+        "https://en.wikipedia.org/wiki/Graph_theory",
+        "https://en.wikipedia.org/wiki/PageRank",
+    ]
+
+
+def _wikipedia_must_not_run(url, headers=None):
+    raise AssertionError(f"Wikipedia lane ran while Tavily was available: {url}")
 
 
 # --- web_research orchestrator ----------------------------------------------
@@ -213,6 +454,65 @@ def test_web_research_constrains_loop_to_search_and_fetch(tmp_vault, monkeypatch
 
     assert captured["constraints"].tools == ("web_search", "web_fetch")
     assert captured["constraints"].max_iterations == 7
+
+
+def _patch_run_agent_calling_web_search(monkeypatch, calls):
+    """Fake run_agent that goes through the real web_search, so the lanes on the
+    note are the ones that actually answered rather than a hand-set list."""
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, constraints=None, **kw):
+        for _ in range(calls):
+            wr.web_search("graph theory")
+        return "Findings [1]."
+
+    monkeypatch.setattr(wr, "run_agent", fake_run_agent)
+
+
+def test_web_research_note_names_the_lanes_that_answered(tmp_vault, monkeypatch):
+    """The loud half: a note whose sources came from a fallback says which lane
+    and how many calls, so a thin answer is legible as a challenged primary lane
+    rather than as a thin web."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
+    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _FakeMojeekResp())
+    _patch_run_agent_calling_web_search(monkeypatch, calls=2)
+
+    body = (Path(CONFIG.vault_path) / wr.web_research("graph theory")).read_text(
+        encoding="utf-8"
+    )
+
+    assert "Search lanes: mojeek 2. DuckDuckGo was challenged" in body
+
+
+def test_web_research_note_stays_quiet_when_ddg_answered(tmp_vault, monkeypatch):
+    """No banner on a healthy note: the line is the fallback's, not a status
+    report on every turn."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _FakeDDGResp())
+    _patch_run_agent_calling_web_search(monkeypatch, calls=2)
+
+    body = (Path(CONFIG.vault_path) / wr.web_research("graph theory")).read_text(
+        encoding="utf-8"
+    )
+
+    assert "Search lanes" not in body
+
+
+def test_lane_line_is_per_turn_not_cumulative(tmp_vault, monkeypatch):
+    """A second turn must not inherit the first one's lanes: web_research clears
+    the record before the loop, so a recovered DDG stops reporting a fallback."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
+    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _FakeMojeekResp())
+    _patch_run_agent_calling_web_search(monkeypatch, calls=1)
+    wr.web_research("graph theory")
+
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _FakeDDGResp())
+    body = (Path(CONFIG.vault_path) / wr.web_research("second turn")).read_text(
+        encoding="utf-8"
+    )
+
+    assert "Search lanes" not in body
 
 
 def test_web_research_prompt_tells_the_model_to_fetch():

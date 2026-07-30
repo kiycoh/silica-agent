@@ -13,17 +13,24 @@ Both tools are `sensitive=True` (ADR-0009): the main agent's default toolset
 excludes them, so they are reachable only where named explicitly in
 AgentConstraints — here, and in fetch_to_inbox() for `/fetch`.
 
-`web_search` needs no key: the default backend scrapes DuckDuckGo's HTML
+`web_search` needs no key: the primary backend scrapes DuckDuckGo's HTML
 endpoint with httpx + stdlib html.parser (same posture as web_fetch — no
-vendor sees the query). Setting SILICA_TAVILY_API_KEY switches it to Tavily.
+vendor sees the query). DDG starts challenging after a couple of queries, so
+Mojeek (its own index, also keyless), then Tavily (when SILICA_TAVILY_API_KEY
+is set), then a Wikipedia search keep a capped loop moving. A key is a
+backstop, not a switch: DDG still runs first, and both keyless lanes run ahead
+of it. Which lanes answered is named on the note (`_lane_line`), so a turn that
+never reached the open web says so instead of reading as a thin answer.
 """
 from __future__ import annotations
 
 import datetime
 import json
+import re
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
 
@@ -42,6 +49,9 @@ from pydantic import BaseModel
 
 _TAVILY_URL = "https://api.tavily.com/search"
 _DDG_URL = "https://html.duckduckgo.com/html/"
+_MOJEEK_URL = "https://www.mojeek.com/search"
+_WP_SITE = "https://en.wikipedia.org"
+_WP_TAG_RE = re.compile(r"<[^>]+>")
 _MAX_RESULTS = 5            # ponytail: module constant; per-query result cap
 _HTTP_TIMEOUT = 30
 # Fetches spend iterations too, so the budget covers both calls. The flag is
@@ -77,13 +87,60 @@ class WebSearchArgs(BaseModel):
     query: str
 
 
+# Which lane answered each web_search call of the current turn, in call order.
+# Per-process and per-turn: web_research() and WebTurn() clear it before the loop
+# starts, and _lane_line() reads it after. Kept beside the tool rather than
+# threaded through its return value: the payload shape is the model's contract,
+# and a lane is the *user's* business, not the model's.
+_LANES: list[str] = []
+
+
 @tool(WebSearchArgs, cls="atomic", sensitive=True)
 def web_search(query: str) -> str:
     """Search the web for a single query. Returns a JSON list of
     {title, url, content} results. Use iteratively to research a concept."""
-    key = (CONFIG.tavily_api_key or "").strip()
-    compact = _tavily_search(query, key) if key else _ddg_search(query)
+    try:
+        compact = _ddg_search(query)
+        _LANES.append("duckduckgo")
+    except ValueError as ddg_err:
+        # DDG is the primary lane and runs first even when a key is set: it is
+        # the whole web, and no vendor sees the query. The backstops only run
+        # when it challenges us, best first — Mojeek ahead of a set key for the
+        # same reason DDG leads (its own crawl, keyless, no vendor account), and
+        # the encyclopedia last because one encyclopedia is not the web.
+        key = (CONFIG.tavily_api_key or "").strip()
+        backstops = [(_mojeek_search, "mojeek"), (_wikipedia_search, "wikipedia")]
+        if key:
+            backstops.insert(1, (lambda q: _tavily_search(q, key), "tavily"))
+        for backstop, lane in backstops:
+            try:
+                compact = backstop(query)
+            except Exception:
+                continue
+            _LANES.append(lane)
+            break
+        else:
+            # The DDG message is the one that names the escape hatch, so a
+            # total failure surfaces that one rather than a backstop's.
+            raise ddg_err from None
     return json.dumps(compact, ensure_ascii=False)
+
+
+def _lane_line() -> str:
+    """One line naming the lanes that answered, empty while DDG answered alone.
+
+    The loud half of the fallback. A note whose citations are five wikipedia.org
+    URLs looks like a thin answer; this says it was a challenged primary lane,
+    and the per-lane counts say how much of the note came from where. Silent
+    otherwise: a banner on every healthy note is noise nobody reads.
+    """
+    if not _LANES or set(_LANES) == {"duckduckgo"}:
+        return ""
+    counts: dict[str, int] = {}
+    for lane in _LANES:
+        counts[lane] = counts.get(lane, 0) + 1
+    named = ", ".join(f"{lane} {n}" for lane, n in counts.items())
+    return f"Search lanes: {named}. DuckDuckGo was challenged; these answered instead."
 
 
 def _tavily_search(query: str, key: str) -> list[dict[str, str]]:
@@ -154,7 +211,7 @@ class _DDGParser(HTMLParser):
 
 
 def _ddg_search(query: str) -> list[dict[str, str]]:
-    """Keyless default: scrape DuckDuckGo's HTML endpoint, stdlib parser only.
+    """Primary lane: scrape DuckDuckGo's HTML endpoint, stdlib parser only.
     Same local-first trade as web_fetch — no third party sees the query, and in
     exchange rate limits are ours to surface, not a vendor's to hide."""
     resp = httpx.post(
@@ -166,7 +223,8 @@ def _ddg_search(query: str) -> list[dict[str, str]]:
     if resp.status_code != 200:  # DDG answers challenges with 202, not an error
         raise ValueError(
             f"DuckDuckGo answered HTTP {resp.status_code} (rate-limited or "
-            "challenged); retry later or set SILICA_TAVILY_API_KEY to use Tavily."
+            "challenged); retry later or set SILICA_TAVILY_API_KEY so Tavily "
+            "can take over when this happens."
         )
     parser = _DDGParser()
     parser.feed(resp.text)
@@ -174,6 +232,147 @@ def _ddg_search(query: str) -> list[dict[str, str]]:
         {"title": r["title"].strip(), "url": r["url"], "content": r["content"].strip()}
         for r in parser.results
         if r["url"]
+    ][:_MAX_RESULTS]
+
+
+class _MojeekParser(HTMLParser):
+    """Scraper for mojeek.com/search: hits live in `<ul class="results-standard">`,
+    one `<li>` each, with `<h2><a href>Title</a></h2>`, a second anchor to the
+    same target and a `<p class="s">` snippet.
+
+    Anchored on the results list, so a renamed class yields zero results rather
+    than harvesting the chrome — `_mojeek_search` turns that emptiness into a
+    raise, and the next lane answers.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.results: list[dict[str, str]] = []
+        self._depth = 0  # nesting inside the results <ul>; 0 means outside
+        self._in_h2 = False
+        self._field: str | None = None  # "title" | "content" while inside its tag
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        a = dict(attrs)
+        cls = (a.get("class") or "").split()
+        if tag == "ul":
+            if "results-standard" in cls:
+                self._depth = 1
+            elif self._depth:
+                self._depth += 1  # a nested list inside a hit, not a new one
+        elif not self._depth:
+            return
+        elif tag == "li" and self._depth == 1:
+            self.results.append({"title": "", "url": "", "content": ""})
+        elif not self.results:
+            return
+        elif tag == "h2":
+            self._in_h2 = True
+        elif tag == "a":
+            href = a.get("href") or ""
+            if href.startswith("http"):
+                # Both anchors of a hit point at the target; the title is only
+                # ever the one inside the <h2> (the other renders the bare URL).
+                self.results[-1]["url"] = self.results[-1]["url"] or href
+                if self._in_h2:
+                    self._field = "title"
+        elif tag == "p" and "s" in cls:
+            self._field = "content"
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "ul" and self._depth:
+            self._depth -= 1
+        elif tag == "h2":
+            self._in_h2 = False
+            self._field = None
+        elif tag in ("a", "p"):
+            self._field = None
+
+    def handle_data(self, data: str) -> None:
+        if self._field and self.results:
+            self.results[-1][self._field] += data
+
+
+def _mojeek_search(query: str) -> list[dict[str, str]]:
+    """Second keyless lane: Mojeek's own crawl, scraped like DDG.
+
+    Keeps a challenged keyless default on the open web instead of dropping
+    straight to one encyclopedia. Independent index and independent rate limits,
+    which is the whole point of putting it here rather than a second DDG
+    endpoint (measured 2026-07-30: html.duckduckgo.com 202s while
+    lite.duckduckgo.com answers, but both are DDG's to challenge at once).
+
+    Mojeek challenges with a *200* whose title is Captcha, so the status code
+    cannot be the guard, and an unparseable page raises rather than returning []:
+    a silent empty list would burn the loop's whole budget on a lane that stopped
+    working, never reaching the ones that still do.
+
+    ponytail: selectors mirror searxng's mojeek engine (AGPL, scrapes this same
+    markup in production) because this IP is captcha'd on every query, UA and
+    cookie jar regardless, so they are not verified against a live answer here.
+    Re-check them the first time this lane returns nothing on a working IP.
+    """
+    resp = httpx.get(
+        _MOJEEK_URL,
+        params={"q": query},
+        headers=_web_fetch._HEADERS,
+        timeout=_HTTP_TIMEOUT,
+        follow_redirects=True,
+    )
+    if resp.status_code != 200 or "<title>Captcha" in resp.text:
+        raise ValueError(f"Mojeek answered HTTP {resp.status_code} (challenged).")
+    parser = _MojeekParser()
+    parser.feed(resp.text)
+    hits = [
+        {"title": r["title"].strip(), "url": r["url"], "content": r["content"].strip()}
+        for r in parser.results
+        if r["url"]
+    ][:_MAX_RESULTS]
+    if not hits:
+        raise ValueError("Mojeek returned a page with no parseable results.")
+    return hits
+
+
+def _wikipedia_search(query: str) -> list[dict[str, str]]:
+    """Last-resort lane for when DuckDuckGo challenges us and Tavily is absent
+    or down.
+
+    Measured 2026-07-30: DDG answers 202 from the third consecutive query and
+    stays there: 3s, 8s and 20s of backoff all came back 202, and
+    lite.duckduckgo.com was challenged on the same IP, while the loop above is
+    budgeted for 8 to 10 searches. Without a fallback the keyless default dies
+    partway through its own default workload, and the 202 body is a bare
+    JavaScript shell with no challenge to answer.
+
+    ponytail: one encyclopedia is not the web, and en.wikipedia.org is
+    hardcoded rather than following the vault's language. This is a lane that
+    keeps a capped loop moving, not a second search engine — that is what the
+    Mojeek lane above it is for. Every URL it returns says wikipedia.org and
+    `_lane_line` counts the calls it answered, so a note that leaned on it says
+    so twice over.
+    """
+    q = urlencode(
+        {
+            "action": "query",
+            "format": "json",
+            "formatversion": "2",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": _MAX_RESULTS,
+        }
+    )
+    resp, _ = _web_fetch._fetch(
+        f"{_WP_SITE}{_web_fetch._WP_API_PATH}?{q}", headers=_web_fetch._WP_HEADERS
+    )
+    return [
+        {
+            "title": h["title"],
+            "url": f"{_WP_SITE}/wiki/{quote(h['title'].replace(' ', '_'))}",
+            # snippets are HTML: <span class="searchmatch"> around each hit
+            "content": unescape(_WP_TAG_RE.sub("", h.get("snippet", ""))).strip(),
+        }
+        for h in resp.json().get("query", {}).get("search", [])
+        if h.get("title")
     ][:_MAX_RESULTS]
 
 
@@ -202,6 +401,7 @@ def web_research(
     # carries the untruncated result and a stable call id, and loop.py emits it
     # before the eager projection and before any later sweep can touch it.
     trace: dict[str, str] = {}
+    _LANES.clear()  # lanes are per turn; see _lane_line
 
     def _record(event) -> None:
         if isinstance(event, ToolCompleteEvent) and isinstance(event.result, str):
@@ -225,7 +425,7 @@ def web_research(
         )
 
     results = list(trace.values())
-    note = _build_note(concept, body, _collect_sources(results))
+    note = _build_note(concept, body, _collect_sources(results), lanes=_lane_line())
     note_rel = _unique_inbox_path(concept)
     from silica.driver import DRIVER
 
@@ -235,9 +435,11 @@ def web_research(
 
 
 # The last consented /web turn, waiting for /keep: (question, prose, sources,
-# raw trace). Per-process, one deep — a second /web overwrites it, /keep clears
-# it. Deliberately no history: a queue of unkept answers is a second inbox.
-_LAST_WEB_TURN: tuple[str, str, list[tuple[str, str]], list[str]] | None = None
+# raw trace, lane line). Per-process, one deep — a second /web overwrites it,
+# /keep clears it. Deliberately no history: a queue of unkept answers is a
+# second inbox. The lane line is stashed with the rest because _LANES has moved
+# on by the time /keep runs.
+_LAST_WEB_TURN: tuple[str, str, list[tuple[str, str]], list[str], str] | None = None
 
 
 class WebTurn:
@@ -253,6 +455,7 @@ class WebTurn:
         self.question = question
         self._inner = inner
         self._trace: dict[str, str] = {}
+        _LANES.clear()  # lanes are per turn; see _lane_line
 
     def __call__(self, event) -> None:
         if isinstance(event, ToolCompleteEvent) and isinstance(event.result, str):
@@ -277,9 +480,12 @@ class WebTurn:
             return answer  # cancelled or capped: nothing to cite, nothing to keep
         raw = list(self._trace.values())
         sources = _collect_sources(raw)
-        _LAST_WEB_TURN = (self.question, answer, sources, raw)
+        lanes = _lane_line()
+        _LAST_WEB_TURN = (self.question, answer, sources, raw, lanes)
         lines = [f"{i}. {title} — {url}" for i, (url, title) in enumerate(sources, 1)]
         block = "## Sources (web)\n" + ("\n".join(lines) or "(no sources captured)")
+        if lanes:
+            block = f"{block}\n\n{lanes}"
         out = f"{answer.rstrip()}\n\n{block}"
         if messages and messages[-1].get("role") == "assistant":
             messages[-1]["content"] = out
@@ -300,8 +506,10 @@ def keep_last() -> str:
 
     if _LAST_WEB_TURN is None:
         raise ValueError("nothing to keep: run /web first")
-    question, body, sources, raw = _LAST_WEB_TURN
-    note = _build_note(question, body, sources, source="web", force_sources=True)
+    question, body, sources, raw, lanes = _LAST_WEB_TURN
+    note = _build_note(
+        question, body, sources, source="web", force_sources=True, lanes=lanes
+    )
     note_rel = _unique_inbox_path(question, fallback="web")
     from silica.driver import DRIVER
 
@@ -374,6 +582,7 @@ def _build_note(
     sources: list[tuple[str, str]],
     source: str = "web-research",
     force_sources: bool = False,
+    lanes: str = "",
 ) -> str:
     """Deterministic frontmatter + body + guaranteed ## Sources.
 
@@ -400,6 +609,10 @@ def _build_note(
         lines = [f"{i}. {title} — {url}" for i, (url, title) in enumerate(sources, 1)]
         sources_block = "\n".join(lines) or "(no sources captured)"
         out = f"{out}\n\n## Sources\n{sources_block}"
+    if lanes:
+        # Under the citations, whether the model wrote them or we appended them:
+        # the line qualifies the sources, so it belongs with them.
+        out = f"{out}\n\n{lanes}"
     return f"{front}\n{out}\n"
 
 

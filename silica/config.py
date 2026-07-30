@@ -269,8 +269,8 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_PDF_OCR_LANG", "en,it,fr,de,es")
     )
 
-    # Tavily API key for /web-search. Empty → /web-search errors clearly and
-    # writes no note. The only new config this feature adds.
+    # Tavily API key: the /web-search backstop when DuckDuckGo challenges us.
+    # Empty is fine — DuckDuckGo is the primary lane and needs no key.
     tavily_api_key: str = field(
         default_factory=lambda: os.getenv("SILICA_TAVILY_API_KEY", "")
         or os.getenv("TAVILY_API_KEY", "")

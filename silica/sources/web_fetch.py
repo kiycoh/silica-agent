@@ -27,7 +27,7 @@ import tempfile
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 
 import httpx
 from pydantic import BaseModel
@@ -48,6 +48,17 @@ _YT_DOMAINS: tuple[str, ...] = ("youtube.com", "youtu.be")
 # `-` (0x2D) sorts before `.` (0x2E).
 _YT_SUB_LANGS = "en.*,it.*"
 _YT_TIMEOUT = 120
+_WP_DOMAINS: tuple[str, ...] = ("wikipedia.org",)
+_WP_PREFIX = "/wiki/"
+_WP_API_PATH = "/w/api.php"
+_WP_MATH_MAXLEN = 3
+# Wikimedia's user-agent policy asks for a descriptive agent with a contact URL
+# and throttles generic browser strings, so the API branch does not send
+# _HEADERS. Their own docs call the browser-string case "discouraged".
+_WP_HEADERS = {
+    "User-Agent": "silica-agent (https://github.com/kiycoh/silica-agent)",
+    "Accept": "application/json",
+}
 # A bare httpx user agent collects more 403s than a browser string does, and
 # the 401/403/429 branch below is how we surface the ones that remain.
 _HEADERS = {
@@ -227,7 +238,7 @@ def _raise_for_status(resp: httpx.Response, url: str) -> None:
     resp.raise_for_status()
 
 
-def _fetch(url: str) -> tuple[httpx.Response, str]:
+def _fetch(url: str, headers: dict[str, str] = _HEADERS) -> tuple[httpx.Response, str]:
     """GET with redirects followed by hand, revalidating every hop.
 
     Open WebUI validates the first URL and then hands it to a client that
@@ -237,13 +248,79 @@ def _fetch(url: str) -> tuple[httpx.Response, str]:
     for _ in range(_MAX_REDIRECTS + 1):
         _validated(url)
         resp = httpx.get(
-            url, follow_redirects=False, timeout=_HTTP_TIMEOUT, headers=_HEADERS
+            url, follow_redirects=False, timeout=_HTTP_TIMEOUT, headers=headers
         )
         if not resp.is_redirect or resp.next_request is None:
             _raise_for_status(resp, url)
             return resp, url
         url = str(resp.next_request.url)
     raise ValueError(f"more than {_MAX_REDIRECTS} redirects, giving up at {url}")
+
+
+def _strip_mathml(extract: str) -> str:
+    """Drop the exploded MathML that `explaintext` leaves beside every formula.
+
+    TextExtracts strips tags from the rendered `<math>` element, so a formula
+    arrives twice: first its presentation MathML, one glyph per indented line
+    (`P` / `R` / `(` / `E` / `)`), then the readable
+    `{\\displaystyle PR(E).}`. Measured on PageRank, Transformer and Maxwell's
+    equations the glyph lines are 40-47% of the extract, and those articles run
+    60k to 122k chars against a 30k ceiling: the junk is being truncated in
+    ahead of the prose.
+
+    Indented AND at most three characters is the whole rule. Prose survives it
+    (Wikipedia indents inline fragments by one space, MathML by two or more),
+    and so do the indented pseudocode blocks, which a plain drop-every-indented
+    -line rule ate. ponytail: about a dozen multi-glyph operator labels per
+    article ("masked tokens", "otherwise") ride through. A longer cut buys 0.6%
+    and starts eating real lines, so it stays at three.
+    """
+    return "\n".join(
+        line
+        for line in extract.splitlines()
+        if not (line.startswith("  ") and len(line.strip()) <= _WP_MATH_MAXLEN)
+    )
+
+
+def _wikipedia_extract(url: str) -> str | None:
+    """Article plaintext from the MediaWiki API instead of the rendered page.
+
+    Wikipedia is the one site where _extract_text is measurably poor. On
+    /wiki/PageRank the HTML path returns 30k chars that stop 14 sections in and
+    spend their tail on the footer navbox, while `prop=extracts` returns the
+    whole 60k-char article and nothing else: no nav, no image captions, no
+    navbox. Keyless, and the host carries the language, so it.wikipedia.org
+    answers in Italian. Prose comes out identical to the HTML path minus the
+    `[6]` reference markers; display math arrives doubled and
+    `_strip_mathml` keeps the readable half.
+
+    None means "not a plain article", and the caller reads the HTML instead:
+    a query string (`?action=history`), an empty title, or a page the API has
+    no extract for (Special:Random, a red link). Errors are not swallowed --
+    a 429 from the API raises like any other fetch.
+    """
+    parts = urlsplit(url)
+    if parts.query or not parts.path.startswith(_WP_PREFIX):
+        return None
+    title = unquote(parts.path[len(_WP_PREFIX):])
+    if not title:
+        return None
+    query = urlencode(
+        {
+            "action": "query",
+            "format": "json",
+            "formatversion": "2",  # pages as a list, not keyed by pageid
+            "prop": "extracts",
+            "explaintext": "1",
+            "exsectionformat": "wiki",  # `== Heading ==`, pinned: the default
+            "redirects": "1",           # /wiki/Page_rank -> PageRank
+            "titles": title,
+        }
+    )
+    api = f"{parts.scheme}://{parts.hostname}{_WP_API_PATH}?{query}"
+    resp, _ = _fetch(api, headers=_WP_HEADERS)
+    pages = resp.json().get("query", {}).get("pages") or [{}]
+    return _strip_mathml(pages[0].get("extract", "")).strip() or None
 
 
 class WebFetchArgs(BaseModel):
@@ -257,6 +334,12 @@ def web_fetch(url: str) -> str:
     its snippet. The first line is `Source: <url>`, which is what to cite."""
     if host_matches(url, *_YT_DOMAINS):
         return _youtube_transcript(url)
+    if host_matches(url, *_WP_DOMAINS):
+        # Cites the requested URL, not the redirect target: it is what resolves
+        # in a browser, and the anchor in /wiki/PageRank#History survives it.
+        extract = _wikipedia_extract(url)
+        if extract:
+            return _render(url, _truncate(extract))
     resp, final_url = _fetch(url)
     ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
     if ctype and not ctype.startswith(_TEXT_TYPES):

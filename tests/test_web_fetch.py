@@ -193,12 +193,17 @@ from silica.tools import TOOLS
 class _Resp:
     """Minimal stand-in for httpx.Response."""
 
-    def __init__(self, status=200, text="", ctype="text/html", location=None):
+    def __init__(self, status=200, text="", ctype="text/html", location=None,
+                 payload=None):
         self.status_code = status
         self.text = text
         self.headers = {"content-type": ctype} if ctype else {}
         self.is_redirect = location is not None
         self.next_request = SimpleNamespace(url=location) if location else None
+        self._payload = payload
+
+    def json(self):
+        return self._payload
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -464,6 +469,134 @@ def test_youtube_userinfo_on_a_real_host_does_not_reach_ytdlp(monkeypatch):
     monkeypatch.setattr(wf.subprocess, "run", boom)
     with pytest.raises(ValueError, match="credentials"):
         wf.web_fetch("https://x@youtube.com/watch?v=abc")
+
+
+# --- Wikipedia ---------------------------------------------------------------
+
+
+def _wp_page(**page) -> dict:
+    return {"batchcomplete": True, "query": {"pages": [page]}}
+
+
+def test_wikipedia_reads_the_api_instead_of_the_rendered_page(monkeypatch):
+    seen = _serve(
+        monkeypatch,
+        _Resp(ctype="application/json", payload=_wp_page(title="PageRank",
+                                                         extract="== History ==\nProse.")),
+    )
+    out = wf.web_fetch("https://en.wikipedia.org/wiki/PageRank")
+    assert seen[0].startswith("https://en.wikipedia.org/w/api.php?")
+    assert "titles=PageRank" in seen[0]
+    assert "explaintext=1" in seen[0] and "redirects=1" in seen[0]
+    # The citation stays the human-resolvable article URL, not the API call.
+    assert out.splitlines()[0] == "Source: https://en.wikipedia.org/wiki/PageRank"
+    assert "Prose." in out
+
+
+def test_wikipedia_title_is_percent_decoded_before_it_is_a_parameter(monkeypatch):
+    """`/wiki/Cura%C3%A7ao` must reach the API as the title `Curaçao`, urlencoded
+    once. Passing the raw path through double-encodes it into a missing page."""
+    seen = _serve(
+        monkeypatch,
+        _Resp(payload=_wp_page(title="Curaçao", extract="An island.")),
+    )
+    out = wf.web_fetch("https://en.wikipedia.org/wiki/Cura%C3%A7ao")
+    assert "titles=Cura%C3%A7ao" in seen[0]
+    assert "An island." in out
+
+
+def test_wikipedia_language_comes_from_the_host(monkeypatch):
+    seen = _serve(monkeypatch, _Resp(payload=_wp_page(extract="Un'isola.")))
+    wf.web_fetch("https://it.wikipedia.org/wiki/Cura%C3%A7ao")
+    assert seen[0].startswith("https://it.wikipedia.org/w/api.php?")
+
+
+def test_wikipedia_sends_a_descriptive_user_agent_not_a_browser_string(monkeypatch):
+    """Wikimedia's UA policy throttles generic browser strings, and `_HEADERS`
+    is one. Only this branch opts out, so pin it."""
+    sent: list[dict] = []
+
+    def fake_get(url, **kw):
+        sent.append(kw.get("headers") or {})
+        return _Resp(payload=_wp_page(extract="Prose."))
+
+    monkeypatch.setattr(wf.httpx, "get", fake_get)
+    monkeypatch.setattr(
+        wf.socket, "getaddrinfo",
+        lambda host, port, *a, **kw: [(2, 1, 6, "", ("93.184.216.34", port))],
+    )
+    wf.web_fetch("https://en.wikipedia.org/wiki/PageRank")
+    assert "silica-agent" in sent[0]["User-Agent"]
+    assert "Mozilla" not in sent[0]["User-Agent"]
+
+
+def test_wikipedia_missing_page_falls_back_to_the_rendered_page(monkeypatch):
+    """A red link or a Special: page has no extract. The article HTML is still
+    worth reading, so the branch declines instead of failing the fetch."""
+    seen = _serve(
+        monkeypatch,
+        _Resp(payload=_wp_page(title="Nope", missing=True)),
+        _Resp(text="<html><body><p>Rendered instead.</p></body></html>"),
+    )
+    out = wf.web_fetch("https://en.wikipedia.org/wiki/Nope")
+    assert "/w/api.php?" in seen[0]
+    assert seen[1] == "https://en.wikipedia.org/wiki/Nope"
+    assert "Rendered instead." in out
+
+
+def test_wikipedia_non_article_url_never_calls_the_api(monkeypatch):
+    """`?action=history`, `/w/index.php?title=`, and the bare host are not
+    articles; `prop=extracts` would answer about the wrong thing or not at
+    all."""
+    for url in (
+        "https://en.wikipedia.org/wiki/PageRank?action=history",
+        "https://en.wikipedia.org/w/index.php?title=PageRank&oldid=1",
+        "https://en.wikipedia.org/",
+    ):
+        seen = _serve(monkeypatch, _Resp(text="<p>page</p>"))
+        out = wf.web_fetch(url)
+        assert seen == [url], url
+        assert "page" in out
+
+
+def test_wikipedia_api_rate_limit_is_not_swallowed(monkeypatch):
+    """The fallback covers "not an article", not "the API said no": a 429 that
+    silently became an HTML fetch would hide that we are being throttled."""
+    _serve(monkeypatch, _Resp(status=429))
+    with pytest.raises(ValueError, match="rate limited"):
+        wf.web_fetch("https://en.wikipedia.org/wiki/PageRank")
+
+
+# Shape taken verbatim from the live /wiki/PageRank extract: the presentation
+# MathML one glyph per line at indent 2+, then the LaTeX, and around it prose
+# that Wikipedia indents by exactly one space.
+_WP_MATH = """The PageRank of E is denoted by
+\x20\x20
+\x20\x20\x20\x20
+\x20\x20\x20\x20\x20\x20\x20\x20P
+\x20\x20\x20\x20\x20\x20\x20\x20R
+\x20\x20\x20\x20\x20\x20\x20\x20(
+\x20\x20\x20\x20\x20\x20\x20\x20E
+\x20\x20\x20\x20\x20\x20\x20\x20)
+\x20\x20\x20\x20{\\displaystyle PR(E).}
+ are the pages under consideration,
+\x20\x20\x20\x20\x20\x20\x20\x20z[t] <- encoder.embedding(t) + positional(t)
+"""
+
+
+def test_wikipedia_extract_drops_exploded_mathml_and_keeps_the_latex(monkeypatch):
+    """`explaintext` ships each formula twice: unreadable glyph-per-line MathML
+    and then the LaTeX. Measured 40-47% of a math article, truncated in ahead of
+    its prose. Prose and indented pseudocode must survive the cut."""
+    _serve(monkeypatch, _Resp(ctype="application/json",
+                              payload=_wp_page(title="PageRank", extract=_WP_MATH)))
+    out = wf.web_fetch("https://en.wikipedia.org/wiki/PageRank")
+
+    assert "{\\displaystyle PR(E).}" in out
+    assert "are the pages under consideration," in out
+    assert "z[t] <- encoder.embedding(t) + positional(t)" in out  # long, so kept
+    assert "\nP\n" not in out and "\n(\n" not in out
+    assert not [ln for ln in out.splitlines() if ln.strip() in ("P", "R", "(", ")", "E")]
 
 
 # --- the `Source: ` seam, producer to consumer -------------------------------
