@@ -479,6 +479,19 @@ class ProgressLedger:
         except Exception:
             pass
 
+        # Recall failures: the notes the reader keeps getting wrong. Same
+        # worklist an untargeted /quiz picks from; the digest only says it is
+        # non-empty, so the signal reaches the human without running a report.
+        try:
+            from silica.kernel.report import quiz
+
+            weak = quiz.weakest(3)
+            if weak:
+                names = ", ".join(w["path"] for w in weak)
+                parts.append(f"WEAK RECALL: {names} -> run /quiz to review")
+        except Exception:
+            pass
+
         # Correction loop: notes flagged wrong/stale in use, surfaced for a
         # human to resolve. The register is a rebuildable index; re-read each
         # note to show the live reason and self-heal entries no longer contested.
