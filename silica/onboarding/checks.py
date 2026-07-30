@@ -44,8 +44,9 @@ def check_chat_model(config: SilicaConfig) -> CheckResult:
     if not config.model.strip():
         return CheckResult(
             "chat model", "fail",
-            "SILICA_MODEL is not set",
-            "run `silica init`",
+            "SILICA_MODEL is not set, and no provider key is exported",
+            "run `silica init` — or serve the vault read-only with `silica mcp`, "
+            "whose recall tools need no model",
         )
     key_env = PROVIDER_PRESETS.get(config.provider, {}).get("api_key_env")
     if key_env and not os.getenv(key_env):

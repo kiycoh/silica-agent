@@ -46,17 +46,65 @@ PROVIDER_PREFIXES = frozenset({
     "openai", "groq", "deepseek", "mistral", "xai", "custom",
 })
 
+# Hosted providers in fallback order: (API key env var, model ids best first).
+# Two readers, one table — `model_from_env` takes the head of the first entry
+# whose key is exported, the wizard offers the whole list as a pick-list. Lives
+# here rather than beside PROVIDER_PRESETS because config is imported on every
+# path, including the ones that must not pay for the openai SDK.
+# ponytail: a hand-kept list goes stale as vendors ship — that is the ceiling,
+# and the wizard's `other` entry is the escape hatch. Upgrade path if it rots:
+# fetch /models from the provider instead of hardcoding.
+HOSTED_PROVIDERS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "openrouter": ("OPENROUTER_API_KEY", (
+        "openrouter/deepseek/deepseek-v4-flash",
+        "openrouter/anthropic/claude-sonnet-5",
+        "openrouter/google/gemini-3.5-flash",
+        "openrouter/mistralai/mistral-small-2603",
+    )),
+    "gemini": ("GEMINI_API_KEY", ("gemini/gemini-2.5-flash",)),
+    "openai": ("OPENAI_API_KEY", ("openai/gpt-4o",)),
+    "groq": ("GROQ_API_KEY", ("groq/llama-3.3-70b-versatile",)),
+    "deepseek": ("DEEPSEEK_API_KEY", ("deepseek/deepseek-chat",)),
+    "mistral": ("MISTRAL_API_KEY", ("mistral/mistral-large-latest",)),
+    "xai": ("XAI_API_KEY", ("xai/grok-2-latest",)),
+}
+
+
+def model_from_env() -> tuple[str, str]:
+    """Resolve the chat model: (model id, source env var).
+
+    SILICA_MODEL wins. Failing that, the first hosted provider whose API key is
+    already exported answers for it — a user who has OPENROUTER_API_KEY in their
+    shell should not have to name a model before silica will run. Returns
+    ("", "") when nothing answers, which keeps the fail-fast for a bare install.
+
+    Env keys only: probing a local endpoint from here would put an HTTP call on
+    every config load. SILICA_PROVIDER set means the user pinned an endpoint
+    (custom, ollama, ...) and a hosted guess would contradict it, so the chain
+    stands down.
+    """
+    explicit = os.getenv("SILICA_MODEL", "").strip()
+    if explicit:
+        return explicit, "SILICA_MODEL"
+    if os.getenv("SILICA_PROVIDER"):
+        return "", ""
+    for key_env, models in HOSTED_PROVIDERS.values():
+        if os.getenv(key_env):
+            return models[0], key_env
+    return "", ""
+
 
 @dataclass
 class SilicaConfig:
     """Runtime configuration singleton."""
 
-    # LLM provider — litellm model string. Empty by default (fail-fast):
-    # the REPL points the user to `silica init` instead of assuming a
-    # hosted model whose API key was never mentioned.
+    # LLM provider — litellm model string. SILICA_MODEL, else derived from
+    # whichever provider key is already exported (see model_from_env), else
+    # empty: the REPL then points the user to `silica init` rather than assume
+    # a hosted model whose API key was never mentioned.
     # Examples: "openrouter/anthropic/claude-sonnet-4-20250514", "qwen3-30b"
     model: str = field(
-        default_factory=lambda: os.getenv("SILICA_MODEL", "")
+        default_factory=lambda: model_from_env()[0]
     )
 
     # Provider preset name (derived from model prefix by default, or overridden)
@@ -246,25 +294,27 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_INBOX_DIR", "Inbox")
     )
 
-    # PDF→Markdown converter (ADR-0011 provider seam), all permissively licensed:
-    # "mineru" (default, OCR/layout CLI, best fidelity, heaviest — downloads models
-    # on first run), "docling" (MIT, keeps figures/tables AND heading structure),
-    # or "opendataloader" (Apache-2.0, strong on complex tables and multi-column
-    # reading order, needs a JVM). Default preserves heading structure so book
-    # segmentation has headings to split on. mineru installs via the `silica-agent[pdf]`
-    # extra; docling/opendataloader are installed manually. An unmet provider
-    # errors clearly.
+    # PDF→Markdown converter (ADR-0011 provider seam):
+    # "pymupdf" (default, AGPL, in the base install — 60 MB, no torch and no JVM,
+    # reads the PDF outline for headings, but NO OCR), "mineru" (best fidelity and
+    # the only OCR path; 3.8 GB of torch+CUDA plus model downloads, via the
+    # `silica-agent[pdf]` extra), "docling" (MIT but its PDF pipeline hard-imports
+    # docling-ibm-models, so torch is unavoidable), or "opendataloader"
+    # (Apache-2.0, strong on complex tables and multi-column reading order, needs
+    # a JVM). Non-PDF formats (DOCX/EPUB/…) always use pymupdf — the others only
+    # take PDFs. An unmet provider errors clearly.
     pdf_provider: str = field(
-        default_factory=lambda: os.getenv("SILICA_PDF_PROVIDER", "mineru")
+        default_factory=lambda: os.getenv("SILICA_PDF_PROVIDER", "pymupdf")
     )
 
     # OCR languages for PDF conversion, comma-separated (split at point of use).
     # Only docling consumes it: mineru 3.x has no latin-script language option
-    # (its default `ch` models cover latin) and opendataloader only OCRs in its
-    # generative `hybrid` mode, which we never enable. Default keeps docling's
-    # European coverage and adds Italian; all latin-script languages share one
-    # EasyOCR model, so the list is cheap. Language detection can't replace
-    # this: for a scanned PDF there is no text to detect from until OCR runs.
+    # (its default `ch` models cover latin), opendataloader only OCRs in its
+    # generative `hybrid` mode, which we never enable, and pymupdf has no OCR at
+    # all. Default keeps docling's European coverage and adds Italian; all
+    # latin-script languages share one EasyOCR model, so the list is cheap.
+    # Language detection can't replace this: for a scanned PDF there is no text
+    # to detect from until OCR runs.
     pdf_ocr_lang: str = field(
         default_factory=lambda: os.getenv("SILICA_PDF_OCR_LANG", "en,it,fr,de,es")
     )

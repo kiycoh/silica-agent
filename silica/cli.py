@@ -1783,7 +1783,7 @@ def _resolve_context_budget() -> None:
 
 
 def _dispatch_subcommand(args: list[str]) -> int | None:
-    """Handle `silica doctor` / `silica init` / `silica connect` / `silica mcp` / `silica update`.
+    """Handle `silica doctor` / `init` / `setup` / `connect` / `mcp` / `update`.
 
     Returns an exit code, or None when no subcommand matched (→ REPL).
     Lazy imports keep REPL startup unchanged. Module attributes (not `from`
@@ -1802,6 +1802,9 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     if args[:1] == ["init"]:
         import silica.onboarding.wizard as wizard_mod
         return wizard_mod.run_wizard(advanced="--advanced" in args[1:])
+    if args[:1] == ["setup"]:
+        import silica.onboarding.setup_client as setup_mod
+        return setup_mod.run_setup(args[1:])
     if args[:1] == ["connect"]:
         # Dispatch runs before main()'s setup (unlike --gui) — do it here.
         _activate_repo_mode()

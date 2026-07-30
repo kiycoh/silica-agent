@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from silica.config import USER_ENV, SilicaConfig
+from silica.config import HOSTED_PROVIDERS, USER_ENV, SilicaConfig, model_from_env
 from silica.kernel.code import gitstate
 from silica.kernel.vault_manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
@@ -22,24 +22,23 @@ from silica.ui.style import GLYPHS
 # line seeded from .env.example, not just rewrite an already-active key.
 _KEY_RE = re.compile(r"^\s*#?\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
 
-# (key env var, model pick-list, key prompt) per hosted preset. First entry is
-# what Enter accepts; `other` is appended by _pick so any id stays reachable.
-# ponytail: a hand-kept list goes stale as vendors ship — that is the ceiling,
-# and `other` is the escape hatch. Upgrade path if it rots: fetch /models from
-# the provider (OpenRouter and OpenAI both expose one) instead of hardcoding.
+# Human label for each hosted key prompt. The env var and the model pick-list
+# come from config.HOSTED_PROVIDERS, which the no-model fallback chain reads
+# too — one table, so a model id added for the wizard is also a model the
+# chain can pick up. First entry is what Enter accepts; `other` is appended by
+# _pick so any id stays reachable.
+_KEY_PROMPTS = {
+    "openrouter": "OpenRouter API key",
+    "gemini": "Google Gemini API key",
+    "openai": "OpenAI API key",
+    "groq": "Groq API key",
+    "deepseek": "DeepSeek API key",
+    "mistral": "Mistral API key",
+    "xai": "xAI (Grok) API key",
+}
 _HOSTED = {
-    "openrouter": ("OPENROUTER_API_KEY", [
-        "openrouter/deepseek/deepseek-v4-flash",
-        "openrouter/anthropic/claude-sonnet-5",
-        "openrouter/google/gemini-3.5-flash",
-        "openrouter/mistralai/mistral-small-2603",
-    ], "OpenRouter API key"),
-    "gemini": ("GEMINI_API_KEY", ["gemini/gemini-2.5-flash"], "Google Gemini API key"),
-    "openai": ("OPENAI_API_KEY", ["openai/gpt-4o"], "OpenAI API key"),
-    "groq": ("GROQ_API_KEY", ["groq/llama-3.3-70b-versatile"], "Groq API key"),
-    "deepseek": ("DEEPSEEK_API_KEY", ["deepseek/deepseek-chat"], "DeepSeek API key"),
-    "mistral": ("MISTRAL_API_KEY", ["mistral/mistral-large-latest"], "Mistral API key"),
-    "xai": ("XAI_API_KEY", ["xai/grok-2-latest"], "xAI (Grok) API key"),
+    name: (key_env, list(models), _KEY_PROMPTS[name])
+    for name, (key_env, models) in HOSTED_PROVIDERS.items()
 }
 
 # Worker (sub-agent) suggestions: small and cheap, the job is dedup/refine, not
@@ -396,17 +395,28 @@ def _run_wizard_inner(
         _section("model", "Chat provider", 2, total())
         # A model configured elsewhere (usually the global ~/.silica/.env)
         # survives a per-vault re-run: one Enter keeps it instead of re-asking
-        # provider, model, and key every time init runs in a new vault.
-        current = os.getenv("SILICA_MODEL", "")
+        # provider, model, and key every time init runs in a new vault. With
+        # SILICA_MODEL unset the same Enter accepts whatever the fallback chain
+        # derives from an exported provider key, so a user who already has one
+        # answers zero questions here.
+        current, source = model_from_env()
         if current:
+            derived = source != "SILICA_MODEL"
+            origin = f"from {source}" if derived else "already configured"
             answer = ""
             while answer not in ("y", "yes", "n", "no"):
                 answer = _ask(
                     input_fn,
-                    f"Chat model already configured ({current}) — keep it? [y/n]",
+                    f"Chat model {current} ({origin}) — keep it? [y/n]",
                     "y",
                 ).lower()
             if answer in ("y", "yes"):
+                # A derived model lives only as long as that key stays exported:
+                # pin it so the vault still works from a fresh shell. An explicit
+                # SILICA_MODEL is left where it is, so it keeps following the
+                # user between folders instead of being copied per vault.
+                if derived:
+                    updates["SILICA_MODEL"] = current
                 state["provider"] = SilicaConfig().provider
                 return True
         from silica.agent.providers import PROVIDER_PRESETS
@@ -617,10 +627,11 @@ def _run_wizard_inner(
         updates.pop("SILICA_PDF_PROVIDER", None)
         updates.pop("SILICA_PDF_OCR_LANG", None)
         answer = None
-        while answer not in ("", "mineru", "docling", "opendataloader"):
+        while answer not in ("", "pymupdf", "mineru", "docling", "opendataloader"):
             answer = _ask(
                 input_fn,
-                "PDF converter — mineru, docling, or opendataloader [Enter = mineru]",
+                "PDF converter — pymupdf, mineru, docling, or opendataloader "
+                "[Enter = pymupdf; mineru is the only one with OCR]",
             ).lower()
         if answer:
             updates["SILICA_PDF_PROVIDER"] = answer
