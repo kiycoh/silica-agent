@@ -105,3 +105,16 @@ def test_unquizzed_vault_scores_exactly_as_before():
         _quiz_override={},
     )
     assert r.attention_candidates[0].score == 10.0  # (9+1)/(1+0)
+
+
+def test_digest_surfaces_weak_notes(log, tmp_path):
+    """A missed note reaches the human through the run digest, not only /graph."""
+    import silica.kernel.progress as _mod
+    _mod._RUNS_DIR = tmp_path
+
+    p = _mod.ProgressLedger.new(mode="chat", inputs={})
+    assert "WEAK RECALL" not in p.digest()  # nothing graded yet: nothing to say
+
+    quiz.record([{"path": "Concepts/RAG.md", "correct": False}])
+    d = p.digest()
+    assert "WEAK RECALL" in d and "Concepts/RAG.md" in d

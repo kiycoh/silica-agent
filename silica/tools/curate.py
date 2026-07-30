@@ -37,13 +37,28 @@ from silica.tools import tool
 # ---------------------------------------------------------------------------
 
 def _read_body(path: str) -> str:
-    """Note body, or "" on any error (a missing note simply yields no excerpt)."""
+    """Note body, or "" on any error (a missing note simply yields no excerpt).
+
+    Stale guard (spec-stale-triggers §4): curation reads bypass the read-gate
+    banner, so a stale doc note gets one prefix line here, served from the
+    read-only peek. Annotate only — the model decides, nothing blocks."""
     try:
         from silica.driver import DRIVER
 
-        return DRIVER.read_note(path).content or ""
+        content = DRIVER.read_note(path).content or ""
     except Exception:
         return ""
+    try:
+        from silica.config import CONFIG
+        from silica.kernel.code import codedocs
+
+        lvl = codedocs.peek_level(codedocs.peek(CONFIG.vault_path), path)
+        if lvl and content:
+            return (f"[stale] {lvl}: verify against the source before "
+                    f"reusing claims\n\n{content}")
+    except Exception:
+        pass  # the guard is an aid; the read succeeds without it
+    return content
 
 
 def _orphan_candidates(path: str, k: int = 5) -> list[dict]:
