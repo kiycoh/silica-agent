@@ -59,19 +59,29 @@ class Perception:
     fact_chains: list = field(default_factory=list)  # per-hit supersede chain (episodic.Fact)
     blocks: list[NoteBlock] = field(default_factory=list)
 
-    def render(self, *, facts_first: bool = True, windowed: bool = True) -> str:
+    def render(self, *, facts_first: bool = True, windowed: bool = True,
+               stale: dict[str, str] | None = None) -> str:
         """The context string. Defaults are the validated perception; the flags
-        exist as A/B arms for the eval harness (legacy layouts)."""
+        exist as A/B arms for the eval harness (legacy layouts).
+
+        `stale` maps note_path (.md-suffixed, codedocs.peek's shape) to change
+        level; a matching block's header gains a stale:<level> token, because
+        the model answers from this string and a side map alone never reaches
+        it."""
         parts: list[str] = []
         for rank, b in enumerate(self.blocks, 1):
+            # block paths are store-keyspace (no .md); peek keys carry .md
+            lvl = (stale.get(b.path) or stale.get(b.path + ".md")) if stale else None
             if windowed:
                 head = f"[#{rank}" + (f" | {b.evidence}" if b.evidence else "")
                 head += (f" | dated {b.date}" if b.date else "")
-                head += (f" | contested: {b.contested}" if b.contested else "") + "]"
+                head += (f" | contested: {b.contested}" if b.contested else "")
+                head += (f" | stale:{lvl}" if lvl else "") + "]"
                 parts.append(f"{head}\n{b.excerpt}")
             else:
                 marks = ([f"dated {b.date}"] if b.date else []) \
-                    + ([f"contested: {b.contested}"] if b.contested else [])
+                    + ([f"contested: {b.contested}"] if b.contested else []) \
+                    + ([f"stale:{lvl}"] if lvl else [])
                 head = f"[{' | '.join(marks)}]\n" if marks else ""
                 parts.append(f"{head}{b.body}")
         ctx = "\n\n---\n\n".join(parts)

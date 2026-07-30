@@ -356,14 +356,22 @@ def silica_recall(query: str, k: int = 15) -> dict[str, Any]:
 
     from silica.kernel.recall.perception import perceive
 
+    from silica.kernel.code import codedocs
+
     p = perceive(query, now=datetime.date.today().isoformat(), k=k)
+    stale_map = _peek_stale()
+    flagged = {b.path: lvl for b in p.blocks
+               if (lvl := codedocs.peek_level(stale_map, b.path))}
     # render(windowed=True) emits b.excerpt, so a note whose window IS its body
     # was delivered complete — measured: 3 of 9 calls in a chat were re-reads of
     # notes recall had already handed over whole.
-    return {"query": query, "context": p.render(),
-            "notes": [b.path for b in p.blocks],
-            "partial": [b.path for b in p.blocks if b.excerpt.strip() != b.body.strip()],
-            "facts": len(p.fact_hits)}
+    out = {"query": query, "context": p.render(stale=stale_map or None),
+           "notes": [b.path for b in p.blocks],
+           "partial": [b.path for b in p.blocks if b.excerpt.strip() != b.body.strip()],
+           "facts": len(p.fact_hits)}
+    if flagged:
+        out["stale"] = flagged
+    return out
 
 
 class TimelineArgs(BaseModel):
