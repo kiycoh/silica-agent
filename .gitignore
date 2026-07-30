@@ -65,6 +65,7 @@ coverage.xml
 .run/
 tests/fixtures/synthetic_vault/*
 .import_linter_cache/
+.grimp_cache
 
 # Editors & IDEs
 .vscode/
@@ -107,6 +108,8 @@ agentdb.rvf
 evals/golden/metrics.json
 evals/*/metrics.*.json
 bench/
+# downloaded benchmark corpora (LongMemEval s is 265 MB)
+data/
 
 # Generated Files & Reports
 graph.html
