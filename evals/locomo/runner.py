@@ -510,9 +510,12 @@ def answer_question_agent(model: str, question: str, now: str,
             messages, model, tool_progress_callback=_collect,
             constraints=AgentConstraints(tools=_READONLY_TOOLS,
                                          max_iterations=_AGENT_MAX_ITERATIONS),
-            # Greedy decoding: single-run agent A/Bs must measure the lever, not
-            # provider sampling (audit lane 2.2). The product loop defaults to
-            # the provider temperature; only the eval path pins it.
+            # Greedy decoding narrows sampling but does NOT buy determinism, and
+            # a single-run agent A/B is not safe on that assumption: measured on
+            # openrouter/deepseek, one fixed conversation at temperature=0.0 ran
+            # 24/27/31 tool calls across three repeats (13/25/35 on the other
+            # arm). Read agent-side deltas smaller than that spread as noise
+            # until repeated. The product loop leaves the provider default.
             temperature=0.0)
     except Exception as e:   # includes the loop's 3-strike RuntimeError
         response, err = "", f"{type(e).__name__}: {e}"
