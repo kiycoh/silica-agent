@@ -211,6 +211,17 @@ class SilicaConfig:
     episodic_embed_snap_tau: float = field(
         default_factory=lambda: float(os.getenv("SILICA_EPISODIC_EMBED_SNAP_TAU", "0"))
     )
+    # Relevance floor on the episodic embed leg (cosine). Without one, top-k
+    # over `score > 0` ships the whole store on every query: measured on a
+    # 11-fact store, "pasta recipe with tomatoes" recalled the same 10
+    # AI-history facts as an on-topic query, ~520 tokens of noise per recall.
+    # Calibration knob: 0.5 separates this embedder's off-topic ceiling (0.464
+    # over 5 unrelated queries) from its true matches (0.598, 0.833). A
+    # different embedder shifts the whole band — re-measure before trusting it.
+    # 0 = off (pre-floor behavior).
+    episodic_recall_floor: float = field(
+        default_factory=lambda: float(os.getenv("SILICA_EPISODIC_RECALL_FLOOR", "0.5"))
+    )
 
     # Driver backend: "fs" (default, filesystem-native, headless) or "ws" (the
     # Obsidian bridge plugin over a loopback WebSocket, PROTOCOL.md — installed

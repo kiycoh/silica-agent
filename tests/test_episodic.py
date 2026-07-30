@@ -282,10 +282,36 @@ def test_recall_ranks_by_embedding_when_vectors_exist(tmp_path):
                    {"key": "user.city", "text": "Vivo a Torino"}],
                   run_id="r1", seen="2026-07-14", embedder=_E())
 
+    # floor=0 isolates the ranking assertion; the floor itself is covered below.
     hits = store.recall("come si chiama il mio cane", query_vec=[1.0, 0.0],
-                        k=2, now="2026-07-14")
+                        k=2, now="2026-07-14", floor=0.0)
     assert [h.fact.key for h in hits] == ["user.dog.name", "user.city"]
     assert hits[0].score > hits[1].score
+
+
+def test_recall_floor_drops_off_topic_facts_on_the_embed_leg(tmp_path):
+    """Without a floor, `score > 0` never rejects a cosine, so top-k ships the
+    whole store on every query (measured: an 11-fact store returned the same 10
+    facts for "pasta recipe with tomatoes" as for an on-topic question)."""
+    store = _store(tmp_path)
+
+    class _E:
+        def embed(self, texts):
+            return [[1.0, 0.1] if "cane" in t else [0.1, 1.0] for t in texts]
+
+    store.capture([{"key": "user.dog.name", "text": "Il mio cane si chiama Tom"},
+                   {"key": "user.city", "text": "Vivo a Torino"}],
+                  run_id="r1", seen="2026-07-14", embedder=_E())
+
+    hits = store.recall("come si chiama il mio cane", query_vec=[1.0, 0.0],
+                        k=5, now="2026-07-14", floor=0.5)
+    assert [h.fact.key for h in hits] == ["user.dog.name"]  # 0.0995 cosine cut
+    # An off-topic query clears nothing, so perceive() emits no facts block.
+    assert store.recall("qualcosa di totalmente altro", query_vec=[0.0, 0.0],
+                        k=5, now="2026-07-14", floor=0.5) == []
+    # The lexical leg keeps its own scale: a 2-term query matching 1 term is 0.5.
+    assert store.recall("cane Torino", query_vec=None, k=5,
+                        now="2026-07-14", floor=0.5)
 
 
 def test_recall_lexical_fallback_without_vectors_and_live_only(tmp_path):

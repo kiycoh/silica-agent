@@ -451,18 +451,30 @@ class EpisodicStore:
     # ------------------------------------------------------------------
 
     def recall(self, query_text: str, query_vec: list[float] | None = None, *,
-               k: int = 10, now: str, ttl_days: int | None = None) -> list["FactHit"]:
+               k: int = 10, now: str, ttl_days: int | None = None,
+               floor: float | None = None) -> list["FactHit"]:
         """Top-k LIVE facts for a query. Never mutates the store.
 
         A fact is scored by the embed leg (cosine) when both vectors exist,
         else lexically (token overlap with text + key segments). The two never
         fuse. `now` filters chains whose head is past TTL without deleting —
         sweep at digest time is the only deleter.
+
+        `floor` (None = CONFIG.episodic_recall_floor, 0 = off) is the relevance
+        cut on the EMBED leg only: cosine over a normalized embedder is
+        essentially never negative, so `score > 0` is not a floor and top-k
+        degenerates to "the whole store, every query". The lexical leg keeps
+        `> 0` because its overlap ratio is a different scale — a two-term query
+        matching one term scores 0.5 there, which is a hit, not noise.
         """
         if ttl_days is None:
             from silica.config import CONFIG
 
             ttl_days = int(getattr(CONFIG, "episodic_ttl_days", 90))
+        if floor is None:
+            from silica.config import CONFIG
+
+            floor = float(getattr(CONFIG, "episodic_recall_floor", 0.5))
         q_tokens = _tokens(query_text)
         hits: list[FactHit] = []
         for fact in self.live_facts():
@@ -470,11 +482,14 @@ class EpisodicStore:
                 continue
             if query_vec is not None and fact.vec:
                 score = _cosine(query_vec, fact.vec)
+                if score < floor:
+                    continue
             else:
                 f_tokens = _tokens(fact.text) | _tokens(fact.key.replace(".", " "))
                 score = len(q_tokens & f_tokens) / len(q_tokens) if q_tokens else 0.0
-            if score > 0.0:
-                hits.append(FactHit(fact=fact, score=score))
+                if score <= 0.0:
+                    continue
+            hits.append(FactHit(fact=fact, score=score))
         hits.sort(key=lambda h: h.score, reverse=True)
         return hits[:k]
 
