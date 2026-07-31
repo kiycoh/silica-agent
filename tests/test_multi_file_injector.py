@@ -136,6 +136,14 @@ class TestT1MultiFileInit:
         f1_tasks = [tid for tid in task_ids if tid.startswith("f1_")]
         assert f1_tasks, f"No f1_* tasks found in {task_ids}"
 
+    def test_missing_target_dir_rejected_before_the_fsm_runs(self):
+        """No target → {TARGET}/{HUB_NAME} render literally; fail before the run."""
+        with patch("silica.router.orchestrator.InjectorFSM") as mock_fsm_cls:
+            from silica.tools.composed import silica_run_injector
+            result = silica_run_injector(inbox_files=["Inbox/a.md"], target_dir="  ")
+        assert "target_dir" in result["error"]
+        assert mock_fsm_cls.call_count == 0
+
     def test_silica_run_injector_single_fsm_for_multiple_files(self):
         """silica_run_injector no longer fans out to N separate FSMs."""
         with patch("silica.router.orchestrator.InjectorFSM") as mock_fsm_cls:

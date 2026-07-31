@@ -68,6 +68,17 @@ def silica_run_injector(
         )
         return {"error": f"Not ingestible as-is: {', '.join(unclaimed)}. {hint}"}
 
+    # A target folder is not optional: the distiller prompt interpolates it into
+    # {TARGET} and derives {HUB_NAME} from it, so an empty one renders the two
+    # placeholders literally. The model then obeys "hub MUST be exactly
+    # {HUB_NAME}" to the letter and every op comes back with hub="{HUB_NAME}"
+    # and path="/<title>.md" — all rejected by lint, after a full LLM run, and
+    # the hub auto-creator drops a junk `{HUB_NAME}.md` in the vault root. The
+    # CLI always resolves a target before dispatching (cli.py:1226); this guard
+    # covers the agent-tool path, whose contract already says to pass one.
+    if not target_dir.strip():
+        return {"error": "No target_dir specified. Pick the vault folder for these notes and pass it as target_dir."}
+
     coordinator = Coordinator(
         inbox_files=files,
         target_dir=target_dir,
