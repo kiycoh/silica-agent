@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -54,6 +55,40 @@ def _ready(base_url: str) -> bool:
         return False
 
 
+# The cause is rarely on the last line: llama.cpp prints "cleaning up before
+# exit" after the error that killed it. Show the error lines when there are any.
+_ERROR_LINE = re.compile(r"\b(error|failed|cannot|no such|denied|refused)\b", re.I)
+
+# What the user loses when this endpoint never comes up. The whole point of the
+# module is that silent degradation looks like success, so the failure names it.
+_DEGRADES_TO = {
+    "embeddings": "retrieval falls back to co-occurrence — recall drops",
+    "rerank": "the rerank pass is skipped — worse ordering, no error",
+    "chat": "no chat provider — silica cannot answer at all",
+}
+
+
+def _fail(label: str, headline: str, log_path: Path) -> bool:
+    """Report a server that never came up: what broke, why, what it costs."""
+    from silica.ui.console import CONSOLE
+
+    # info, not warning: the WARNING handler writes to stderr too, and the red
+    # block below is the loud channel — a warning here just prints it twice.
+    logger.info("%s: %s — see %s", label, headline, log_path)
+    CONSOLE.print(f"  [red]✗ {label}: {headline}[/]")
+    try:  # the log's own error lines are the actual cause (bad model path, OOM…)
+        lines = [ln for ln in log_path.read_text(errors="replace").splitlines() if ln.strip()]
+    except OSError:
+        lines = []
+    hits = [ln for ln in lines if _ERROR_LINE.search(ln)]
+    for line in (hits or lines)[-3:]:
+        CONSOLE.print(f"    [dim]{line[:200]}[/]")
+    if label in _DEGRADES_TO:
+        CONSOLE.print(f"  [yellow]→ {_DEGRADES_TO[label]}.[/]")
+    CONSOLE.print(f"  [dim]Full log: {log_path}[/]")
+    return False
+
+
 def ensure(label: str, base_url: str, command: str) -> bool:
     """True when `base_url` is serving; spawns `command` and waits when it is not.
 
@@ -79,7 +114,7 @@ def ensure(label: str, base_url: str, command: str) -> bool:
     with open(log_path, "ab") as log:
         # start_new_session: the server is a daemon the next silica run should
         # find already up, so it must outlive this process and ignore its Ctrl-C.
-        subprocess.Popen(  # noqa: S602 — the command comes from the user's own .env
+        proc = subprocess.Popen(  # noqa: S602 — the command comes from the user's own .env
             command, shell=True, stdout=log, stderr=subprocess.STDOUT,
             start_new_session=True,
         )
@@ -89,15 +124,17 @@ def ensure(label: str, base_url: str, command: str) -> bool:
             logger.info("%s ready at %s", label, base_url)
             CONSOLE.print(f"  [dim]{label} ready.[/]")
             return True
+        # A missing model file kills llama-server in under a second; without this
+        # silica would poll a corpse for the whole timeout. Only a *failing* exit
+        # counts: `lms server start` returns 0 immediately and leaves the daemon
+        # loading behind it, so a clean exit still means "keep waiting".
+        code = proc.poll()
+        if code not in (None, 0):
+            return _fail(label, f"server exited with code {code}", log_path)
         time.sleep(0.25)
-    logger.warning(
-        "%s did not come up within %.0fs — see %s", label, _READY_TIMEOUT, log_path
+    return _fail(
+        label, f"did not come up within {_READY_TIMEOUT:.0f}s", log_path
     )
-    CONSOLE.print(
-        f"  [yellow]{label} did not come up within {_READY_TIMEOUT:.0f}s[/] "
-        f"[dim]— see {log_path}[/]"
-    )
-    return False
 
 
 def ensure_local_servers(config=None) -> None:

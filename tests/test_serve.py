@@ -51,6 +51,23 @@ def test_waits_for_load_not_just_for_the_port(tmp_path, monkeypatch):
     assert serve.ensure("test", url, "false")
 
 
+def test_dead_server_fails_fast_and_loud(tmp_path, monkeypatch, capsys):
+    """A bad model path kills llama-server at once — don't poll a corpse for 180s,
+    and don't let the user find out later from quietly worse answers."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(serve, "_READY_TIMEOUT", 30.0)
+    started = time.monotonic()
+
+    cmd = "echo 'failed to open GGUF file' >&2; exit 1"
+    assert not serve.ensure("embeddings", f"http://127.0.0.1:{_free_port()}/v1", cmd)
+
+    assert time.monotonic() - started < 5
+    out = capsys.readouterr().out
+    assert "exited with code 1" in out
+    assert "failed to open GGUF file" in out  # the cause, not just a log path
+    assert "co-occurrence" in out  # what it costs the user
+
+
 def test_remote_url_is_left_alone():
     assert serve.ensure("chat", "https://api.openai.com/v1", "false")
     assert not serve.is_local("https://api.openai.com/v1")
