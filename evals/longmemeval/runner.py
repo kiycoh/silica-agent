@@ -321,7 +321,7 @@ def _gold_in_context(gold: str, context: str) -> bool | None:
 # --- Answer + judge ----------------------------------------------------------
 
 def answer_question(model: str, question: str, question_date: str, context: str) -> str:
-    from silica.agent.llm import call_llm
+    from evals.oracle import cached_text
 
     system = (
         "You are a helpful assistant answering from your memory of past "
@@ -335,15 +335,15 @@ def answer_question(model: str, question: str, question_date: str, context: str)
     user = f"Memory:\n{context}\n\nQuestion: {question}"
     # temperature=0: a byte-identical prompt flipped correct->wrong across
     # runs at the provider default — single-run A/Bs need greedy decoding.
-    resp = call_llm(model, [{"role": "system", "content": system},
-                            {"role": "user", "content": user}], max_tokens=512,
-                    temperature=0.0)
-    return (resp.text or "").strip()
+    # Cached (evals.oracle): an unchanged cell repays neither tokens nor noise.
+    return cached_text(model, [{"role": "system", "content": system},
+                               {"role": "user", "content": user}],
+                       max_tokens=512, temperature=0.0)
 
 
 def judge(model: str, qtype: str, question: str, gold: str, response: str,
           is_abs: bool = False) -> bool | None:
-    from silica.agent.llm import call_llm
+    from evals.oracle import cached_text
 
     if is_abs:
         label, closing = "Incorrect Answer", "Did the model correctly abstain?"
@@ -358,25 +358,20 @@ def judge(model: str, qtype: str, question: str, gold: str, response: str,
         f"Model Response: {response}\n\n"
         f"{closing} Answer yes or no only."
     )
-    import time
-
     # 256, not 8: openrouter can route to a reasoning-enabled backend that
     # burns budget before emitting text — an empty reply would silently score
     # "no", and 64 proved too small for deepseek-v4-flash routing.
-    # Empty completions are also transient provider drops (HTTP-200-no-text,
-    # not an exception, so call_llm's own retry never fires) — retry with
-    # backoff before declaring a judge failure; same lesson as factscore._llm.
-    for attempt in range(3):
-        resp = call_llm(model, [{"role": "user", "content": prompt}],
-                        max_tokens=256, temperature=0.0)
-        text = (resp.text or "").strip().lower()
-        if text:
-            return "yes" in text
-        time.sleep(1.0 * (attempt + 1))
-    # A persistently degenerate/empty judge reply (reasoning burn past 64
-    # tokens, refusal, content filter) is a JUDGE failure, not a silica miss —
-    # None excludes it from accuracy rather than scoring it wrong (audit 1.1).
-    return None
+    # Empty-retry and the verdict cache live in evals.oracle: the first
+    # non-empty verdict per unique request is frozen, so a rerun of an
+    # unchanged cell repays neither tokens nor provider nondeterminism.
+    text = cached_text(model, [{"role": "user", "content": prompt}],
+                       max_tokens=256, temperature=0.0).lower()
+    if not text:
+        # A persistently degenerate/empty judge reply (reasoning burn past 64
+        # tokens, refusal, content filter) is a JUDGE failure, not a silica miss —
+        # None excludes it from accuracy rather than scoring it wrong (audit 1.1).
+        return None
+    return "yes" in text
 
 
 # --- Run ---------------------------------------------------------------------

@@ -62,7 +62,12 @@ _EMBED_MODELS = [
 # in-process [rerank] extra picks its own weights.
 _RERANK_MODELS = ["bge-reranker-v2-m3-Q8_0", "bge-reranker-v2-m3"]
 
-_EMBED_KEYS = ("SILICA_EMBEDDING_MODEL", "SILICA_EMBEDDING_BASE_URL", "SILICA_EMBEDDING_API_KEY")
+_EMBED_KEYS = ("SILICA_EMBEDDING_MODEL", "SILICA_EMBEDDING_BASE_URL", "SILICA_EMBEDDING_API_KEY",
+               "SILICA_EMBEDDING_SERVE_CMD")
+
+# Suggested autostart command per local runtime (see onboarding/serve.py). Asked
+# once here so no later run has to remember to start the server by hand.
+_SERVE_CMDS = {"lmstudio": "lms server start", "ollama": "ollama serve"}
 
 
 class BackRequested(Exception):
@@ -187,6 +192,31 @@ def _pick(
     while required and not model:
         model = _ask(input_fn, other_prompt)
     return model
+
+
+def _ask_serve_cmd(
+    input_fn: Callable[[str], str],
+    updates: dict[str, str],
+    key: str,
+    base_url: str,
+    suggested: str,
+) -> None:
+    """Ask how to start a local endpoint, so no later run has to be asked at all.
+
+    Only for a loopback URL — a hosted endpoint is nobody's to start. Blank
+    answer means "I start it myself" and writes nothing.
+    """
+    from silica.onboarding.serve import is_local
+
+    if not is_local(base_url):
+        return
+    cmd = _ask(
+        input_fn,
+        "Command that starts it, run when the port is closed (blank = you start it)",
+        suggested,
+    )
+    if cmd:
+        updates[key] = cmd
 
 
 def _ollama_installed_models() -> list[str]:
@@ -532,6 +562,10 @@ def _run_wizard_inner(
             updates["SILICA_EMBEDDING_API_KEY"] = _ask(
                 input_fn, "Embedding API key", defaults.embedding_api_key
             )
+        _ask_serve_cmd(
+            input_fn, updates, "SILICA_EMBEDDING_SERVE_CMD",
+            updates["SILICA_EMBEDDING_BASE_URL"], _SERVE_CMDS.get(provider, ""),
+        )
         return True
 
     def step_rerank() -> bool:
@@ -645,7 +679,8 @@ def _run_wizard_inner(
         # Only for a reranker the user already serves; all three keys or none.
         if not state["advanced"]:
             return False
-        for key in ("SILICA_RERANK_BASE_URL", "SILICA_RERANK_MODEL", "SILICA_RERANK_API_KEY"):
+        for key in ("SILICA_RERANK_BASE_URL", "SILICA_RERANK_MODEL", "SILICA_RERANK_API_KEY",
+                    "SILICA_RERANK_SERVE_CMD"):
             updates.pop(key, None)
         answer = ""
         while answer not in ("y", "yes", "n", "no"):
@@ -665,6 +700,10 @@ def _run_wizard_inner(
             )
             updates["SILICA_RERANK_API_KEY"] = _ask(
                 input_fn, "Reranker API key", "lm-studio", secret=True
+            )
+            _ask_serve_cmd(
+                input_fn, updates, "SILICA_RERANK_SERVE_CMD",
+                updates["SILICA_RERANK_BASE_URL"], "",
             )
         return True
 

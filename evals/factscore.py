@@ -61,23 +61,15 @@ _VERDICT_RE = re.compile(r"^\s*(\d+)\s*[:.)]\s*(yes|no)\b", re.M | re.I)
 
 
 def _llm(model: str, prompt: str, max_tokens: int) -> str:
-    import time
+    # Empty-retry and the content-addressed cache live in evals.oracle: an
+    # HTTP-200 completion with empty text is a transient provider drop
+    # (retried there, never cached — under concurrency it used to silently
+    # exclude ~half the notes), and a repeated decompose/verify call is
+    # served frozen. temperature=0: same single-run A/B rule as the judges.
+    from evals.oracle import cached_text
 
-    from silica.agent.llm import call_llm
-
-    # An HTTP-200 completion with empty text is not an exception, so
-    # call_llm's transient-retry never sees it; under concurrency this
-    # provider drops enough empties to silently exclude ~half the notes.
-    # Retry the empty as a transient — it clears on the next attempt.
-    # temperature=0: same single-run A/B comparability rule as the QA judges.
-    for attempt in range(3):
-        resp = call_llm(model, [{"role": "user", "content": prompt}],
-                        max_tokens=max_tokens, temperature=0.0)
-        text = (resp.text or "").strip()
-        if text:
-            return text
-        time.sleep(1.0 * (attempt + 1))
-    return ""
+    return cached_text(model, [{"role": "user", "content": prompt}],
+                       max_tokens=max_tokens, temperature=0.0)
 
 
 def decompose(model: str, text: str) -> list[str] | None:

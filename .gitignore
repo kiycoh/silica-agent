@@ -105,6 +105,7 @@ agentdb.rvf
 *.rvf.lock
 
 # Evals & Benchmarks
+evals/.oracle/
 evals/golden/metrics.json
 evals/*/metrics.*.json
 bench/

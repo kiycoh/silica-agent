@@ -7,7 +7,7 @@ from __future__ import annotations
 import httpx
 
 from silica.kernel.recall.rerank import _best_window, rerank_related
-from silica.agent.providers import LocalReranker, Reranker, get_reranker
+from silica.agent.providers import FallbackReranker, LocalReranker, Reranker, get_reranker
 
 
 class _Fake:
@@ -208,7 +208,11 @@ def test_get_reranker_disabled_without_config_or_extra(monkeypatch):
     assert get_reranker(_NoCfg()) is None
 
 
-def test_get_reranker_enabled_with_config():
+def test_get_reranker_enabled_with_config(monkeypatch):
+    """Config alone (no [rerank] extra) → a plain served Reranker, no fallback
+    to wrap it in."""
+    _extra(monkeypatch, False)
+
     class _Cfg:
         rerank_base_url = "http://x/v1"
         rerank_model = "bge-reranker"
@@ -225,15 +229,34 @@ def test_get_reranker_falls_back_to_local_when_extra_installed(monkeypatch):
     assert isinstance(rr, LocalReranker)
 
 
-def test_served_endpoint_wins_over_local(monkeypatch):
-    """A configured endpoint keeps priority (the eval harness pins llama-server)."""
+def test_served_endpoint_and_extra_wraps_in_fallback(monkeypatch):
+    """Both a configured endpoint (default: local llama-server) and the extra
+    installed → wrap in FallbackReranker, so a down endpoint degrades to the
+    in-process cross-encoder per call instead of losing the pass entirely."""
     _extra(monkeypatch, True)
 
     class _Cfg:
         rerank_base_url = "http://x/v1"
         rerank_model = "bge-reranker"
         rerank_api_key = "k"
-    assert isinstance(get_reranker(_Cfg()), Reranker)
+    rr = get_reranker(_Cfg())
+    assert isinstance(rr, FallbackReranker)
+    assert isinstance(rr.primary, Reranker) and rr.primary.url == "http://x/v1/rerank"
+    assert isinstance(rr.secondary, LocalReranker)
+
+
+def test_fallback_reranker_prefers_primary_when_up():
+    primary = _Fake([0.1, 0.9])
+    secondary = _Fake([0.5, 0.5])
+    rr = FallbackReranker(primary, secondary)
+    assert rr.scores("q", ["a", "b"]) == [0.1, 0.9]
+
+
+def test_fallback_reranker_uses_secondary_when_primary_abstains():
+    primary = _Fake(None)
+    secondary = _Fake([0.5, 0.5])
+    rr = FallbackReranker(primary, secondary)
+    assert rr.scores("q", ["a", "b"]) == [0.5, 0.5]
 
 
 def test_local_reranker_scores_in_input_order(monkeypatch):

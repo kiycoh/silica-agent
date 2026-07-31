@@ -750,12 +750,23 @@ class InjectorFSM(BaseFSM[InjectorState]):
         return self._run_loop()
 
     def _run_loop(self) -> dict[str, Any]:
+        cancelled = False
         try:
             return super()._run_loop()
+        except KeyboardInterrupt:
+            # Ctrl+C means "stop writing to my vault", so the finally below must
+            # stay pure cleanup. _boundary_anneal is not cleanup: it sweeps the
+            # deferred store and creates notes, so it used to land a whole batch
+            # of writes ~30s AFTER the user interrupted — including bundles
+            # deferred by earlier runs — and none of them journalled for /revert
+            # (CLEANUP never ran). The bundles keep, so the next run recovers them.
+            cancelled = True
+            raise
         finally:
             if getattr(self, "_prefetcher", None) is not None:
                 self._prefetcher.shutdown()
-            self._boundary_anneal()
+            if not cancelled:
+                self._boundary_anneal()
             self._flush_indexes()
 
     def _on_step_error(self, exc: Exception) -> bool:

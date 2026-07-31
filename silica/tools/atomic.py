@@ -10,6 +10,8 @@ From SILICA.md §4.2:
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 from silica.driver import DRIVER
@@ -259,6 +261,68 @@ def silica_unresolved() -> list:
 # List files
 # ---------------------------------------------------------------------------
 
+def _natural_key(path: str) -> list:
+    """Sort key that reads embedded runs of digits as numbers.
+
+    Plain lexicographic order interleaves "Lezione 10" between 1 and 2, and the
+    injector ingests a folder in listing order: lesson 10's concepts would land
+    before lesson 2 defines them. re.split alternates non-digit/digit, so the
+    element at a given index always has the same type across paths.
+    """
+    import re
+
+    return [int(t) if t.isdigit() else t.lower() for t in re.split(r"(\d+)", path)]
+
+
+def notes_under(folder: str) -> list[str]:
+    """Vault-relative `.md` paths under `folder`, natural-sorted. "" ⇒ the vault.
+
+    The one answer to "which notes does this folder hold?", because neither
+    half of the codebase could give it for an inbox folder: `list_files` reads
+    the note index, which skips the inbox on purpose (drafts must not reach the
+    graph, embeddings or co-occurrence), and `sources.registry.expand_folder`
+    answers only for the code lane off a git-backed census — a plain Obsidian
+    vault is no repo, so it returns [] for every folder in it. Between the two a
+    folder argument had no listing at all, and the only caller left to produce
+    one was an LLM guessing filenames.
+    """
+    from silica.kernel.recall.paths import in_folder
+    from silica.kernel.vault_manifest import active_inbox_dir
+
+    scope = _vault_rel(folder)
+    # list_files(folder) pre-filters loosely (startswith); in_folder tightens it
+    # so a Foo/ argument never leaks into a sibling FooBar/.
+    paths = [r.path for r in DRIVER.list_files(scope) if in_folder(r.path, scope)]
+    if not paths and scope:
+        inbox = active_inbox_dir()
+        if inbox and in_folder(scope, inbox):
+            # .md only: the unconverted files (PDFs) are silica_inbox_ls's job,
+            # and a converted folder's Images/ leaves outnumber its notes 70:1.
+            paths = [
+                r.path for r in DRIVER.list_inbox_files()
+                if r.path.endswith(".md") and in_folder(r.path, scope)
+            ]
+    return sorted(paths, key=_natural_key)
+
+
+def _vault_rel(path: str) -> str:
+    """`path` as a vault-relative posix path; already-relative input passes through.
+
+    Users do paste absolute vault paths at /nucleate, and every listing below is
+    keyed vault-relative. A path outside the vault is returned as given: it
+    matches nothing, which is the honest answer for it.
+    """
+    from silica.config import CONFIG
+
+    p = Path(path.strip())
+    if p.is_absolute():
+        try:
+            return p.resolve().relative_to(Path(CONFIG.vault_path).resolve()).as_posix()
+        except (ValueError, OSError):
+            pass
+    return path.replace("\\", "/").strip("/")
+
+
 class ListFilesArgs(BaseModel):
     folder: str = Field(default="", description="Optional folder path to filter results")
 
@@ -268,19 +332,20 @@ def silica_files(folder: str = "") -> dict:
 
     Returns {"total": N, "files": [vault-relative path, ...]} for markdown
     notes, plus "code": [repo-relative path, ...] with the ingestible source
-    files under `folder` (empty folder= lists notes only). A note's wikilink
-    name is its filename without the extension. A folder of code is NOT empty
+    files under `folder` (empty folder= lists notes only). An inbox folder is
+    listed too — its notes are kept out of the vault index, not missing — but
+    only its .md: unconverted files there (PDFs etc.) need `/convert` first.
+    A note's wikilink name is its filename without the extension. A folder of code is NOT empty
     just because it holds no .md — feed the "code" paths to /nucleate to stage
     a skeleton stub per file. Both listings are capped at 200 entries: when
     "truncated" is true, narrow with folder= instead of re-calling. For a bare
     count ("how many notes?") use the returned "total" — or the '## Vault map'
     block already in context, without any call.
     """
-    refs = DRIVER.list_files(folder)
     # ponytail: bare paths, not {name, path} dicts — NoteRef.name is the
     # filename without its extension, so the dict shipped every note's name
     # twice (48% of this payload, ~2.5k tokens at the 200-entry cap).
-    files = [r.path for r in refs]
+    files = notes_under(folder)
     result: dict = {"total": len(files), "files": files[:_FILES_CAP]}
     if len(files) > _FILES_CAP:
         result["truncated"] = True

@@ -216,6 +216,54 @@ def test_nucleate_folder_of_code_stages_a_stub_per_file(repo_vault):
     assert (vault / "controller" / "Web.md").is_file()
 
 
+def test_nucleate_folder_of_notes_resolves_without_the_agent(repo_vault, stub_coordinator):
+    """A folder of notes expands here, deterministically.
+
+    `expand_folder` reads a git-backed census of the code lane, so it is blind to
+    a plain Obsidian vault, and the note index skips the inbox — the folder used
+    to reach the agent as a bare name with no listing behind it, and the model
+    answered with filenames it had invented.
+    """
+    _, vault = repo_vault
+    folder = vault / "Inbox" / "machine_learning"
+    folder.mkdir(parents=True)
+    for n in (1, 2, 10):
+        (folder / f"Lezione {n}.md").write_text(f"lezione {n}\n", encoding="utf-8")
+    (folder / "slides.pdf").write_bytes(b"%PDF-1.4\n")  # unconverted: not a note
+
+    msg = _expand_workflow_shortcut(
+        "/nucleate Inbox/machine_learning --target=Concepts/AI"
+    )
+    assert msg == ""  # handled inline — nothing punted to the agent
+    assert stub_coordinator[0]["inbox_files"] == [
+        "Inbox/machine_learning/Lezione 1.md",
+        "Inbox/machine_learning/Lezione 2.md",
+        "Inbox/machine_learning/Lezione 10.md",
+    ]
+
+
+def test_nucleate_absolute_folder_path_resolves_too(repo_vault, stub_coordinator):
+    """Users paste the absolute vault path; every listing below is vault-relative."""
+    _, vault = repo_vault
+    folder = vault / "Inbox" / "ml"
+    folder.mkdir(parents=True)
+    (folder / "a.md").write_text("a\n", encoding="utf-8")
+
+    msg = _expand_workflow_shortcut(f'/nucleate "{folder}" --target=Concepts/AI')
+    assert msg == ""
+    assert stub_coordinator[0]["inbox_files"] == ["Inbox/ml/a.md"]
+
+
+def test_nucleate_empty_folder_still_falls_back_to_the_agent(repo_vault):
+    """No listing found is not the same as a listing of nothing: the raw line
+    still goes to the agent, which may read an intent the flag parser could not."""
+    _, vault = repo_vault
+    (vault / "Inbox" / "vuota").mkdir(parents=True)
+
+    msg = _expand_workflow_shortcut("/nucleate Inbox/vuota --target=Concepts/AI")
+    assert msg is not None and "silica_run_injector" in msg
+
+
 def test_nucleate_run_is_revertable(repo_vault):
     """The terminal lane skips the FSM, which is where journalling lived — so
     without its own run these writes were the only ones /revert could not see."""

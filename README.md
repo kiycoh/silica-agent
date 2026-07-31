@@ -75,7 +75,7 @@ Before answering, Silica reads the actual shape of your vault: its hubs, its clu
 Silica calculates graph metrics to uncover structural hubs, bridge notes, and clusters. It links distant concepts that are hard to connect manually, surfacing them through interactive visual maps and graph audits.
 
 💻 &nbsp;**It runs on your machine.**<br/>
-Local models (LM Studio, Ollama) are first-class. With no embedding model at all, relatedness degrades to a deterministic local graph instead of failing.
+Local models (LM Studio, Ollama) are first-class. Give an endpoint its start command once (`SILICA_EMBEDDING_SERVE_CMD`, `SILICA_RERANK_SERVE_CMD`, `SILICA_PROVIDER_SERVE_CMD`) and Silica starts that server itself whenever it finds it down, waiting for the model to load. With no embedding model at all, relatedness degrades to a deterministic local graph instead of failing.
 
 📂 &nbsp;**Nothing is locked in.**<br/>
 Your vault stays a folder of plain markdown files. Open it in Obsidian, in any editor, or in nothing at all. Silica is a layer on top, never a container around it.

@@ -1114,6 +1114,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         from silica.sources.convert import convert
         from silica.kernel.write.undo_journal import get_undo_journal
         from silica.sources.registry import adapter_for, expand_folder, folder_rel, stage
+        from silica.tools.atomic import notes_under
 
         enabled = get_active_manifest().sources
         # A folder argument is the common way to say "this subsystem": expand it
@@ -1123,10 +1124,21 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         expanded: list[str] = []
         run_root: dict[str, str] = {}
         for f in files:
-            group = expand_folder(f, enabled) if adapter_for(f, enabled=enabled) is None else []
+            adapter = adapter_for(f, enabled=enabled)
+            group = expand_folder(f, enabled) if adapter is None else []
             if group:
                 CONSOLE.print(f"  {f}: [bold]{len(group)}[/] source file(s)")
+                # run_root is the code lane's destination naming, so it stays
+                # keyed on code files only.
                 run_root.update(dict.fromkeys(group, folder_rel(f) or ""))
+            elif adapter is None:
+                # A folder of notes. `expand_folder` cannot see one (git-backed
+                # census, and a plain vault is no repo), so this used to fall
+                # through to the agent fallback below with nothing but the
+                # folder name — a listing an LLM had to guess at.
+                group = notes_under(f)
+                if group:
+                    CONSOLE.print(f"  {f}: [bold]{len(group)}[/] note(s)")
             expanded.extend(group or [f])
         files = expanded
 
@@ -1782,6 +1794,12 @@ def _resolve_context_budget() -> None:
         CONFIG.max_context_tokens = window
 
 
+def _ensure_servers() -> None:
+    """Start the local model servers named in the env. No-op when none are."""
+    from silica.onboarding.serve import ensure_local_servers
+    ensure_local_servers()
+
+
 def _dispatch_subcommand(args: list[str]) -> int | None:
     """Handle `silica doctor` / `init` / `setup` / `connect` / `mcp` / `update`.
 
@@ -1794,6 +1812,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         return update_mod.update(check_only="--check" in args[1:])
     if args[:1] == ["doctor"]:
         import silica.onboarding.checks as checks
+        _ensure_servers()  # report the state after the autostart, not before it
         results = checks.run_checks(CONFIG)
         checks.render_report(results)
         # --live: opt-in real completion (costs a token on hosted providers).
@@ -1813,6 +1832,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         apply_manifest_to_config()
         _resolve_context_budget()
         _setup_logging(debug="--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging)
+        _ensure_servers()
         import silica.ui.connect as connect_mod
         return connect_mod.run_connect()
     if args[:1] == ["mcp"]:
@@ -1827,6 +1847,7 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
             _activate_repo_mode()
             from silica.kernel.vault_manifest import apply_manifest_to_config
             apply_manifest_to_config()
+            _ensure_servers()
         logging.basicConfig(stream=sys.stderr, level=logging.WARNING)
         import silica.ui.mcp as mcp_mod
         return mcp_mod.run_mcp(all_tools="--all" in args[1:])
@@ -1860,6 +1881,7 @@ def main():
     _resolve_context_budget()
     debug_mode = "--verbose" in sys.argv or "-v" in sys.argv or CONFIG.debug_logging
     _setup_logging(debug=debug_mode)
+    _ensure_servers()
 
     # --gui: serve the localhost web GUI instead of the REPL (config/model/logging
     # already applied above). Blocks on uvicorn until Ctrl-C. Needs the [gui] extra.
@@ -1916,7 +1938,18 @@ def main():
 
         # Expand workflow shortcuts (/report, /nucleate etc.) into agent-directed messages
         is_directive = False
-        expanded = _expand_workflow_shortcut(user_input)
+        try:
+            expanded = _expand_workflow_shortcut(user_input)
+        except KeyboardInterrupt:
+            # /nucleate drives the whole FSM inline on this thread. Without this
+            # the Ctrl+C escapes main() and kills the REPL with a raw traceback —
+            # the __main__ guard at the bottom never runs, since the installed
+            # entry point is the `silica = silica.cli:main` console script.
+            # Not "use /revert": an interrupted run that committed nothing has no
+            # journalled inverses, so last_active_run() would walk back to an
+            # EARLIER run and undo that one instead.
+            CONSOLE.print("\n  [dim](interrupted — chunks that already committed stay in the vault)[/]")
+            continue
         if expanded is not None:
             if not expanded:
                 continue  # shortcut fully handled inline (e.g. /nucleate of code files)

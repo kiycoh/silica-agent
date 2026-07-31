@@ -679,6 +679,7 @@ class TestRunWizard:
             "",          # high-value gate → default y
             "",          # configure embeddings? → default y
             "",          # "use nomic-embed-text at ...?" → default y
+            "",          # autostart command → Enter accepts the lmstudio default
             "",          # in-process reranker? → default n
             "",          # write → y
         ]
@@ -714,6 +715,7 @@ class TestRunWizard:
             "",          # embedding model → Enter accepts default
             "",          # embedding base URL → Enter accepts pre-filled local
             "",          # embedding API key → Enter accepts default
+            "",          # autostart command → Enter accepts the lmstudio default
             "",          # in-process reranker? → default n
             "",          # write → y
         ]
@@ -913,6 +915,7 @@ class TestWizardModes:
             "",              # high-value gate → default y
             "",              # configure embeddings? → y
             "",              # use candidate? → y
+            "",              # autostart command → Enter accepts the lmstudio default
             "",              # in-process reranker? → default n
             "",              # write → y
         ]
@@ -974,7 +977,7 @@ class TestWizardModes:
             "skip", "",       # embeddings, in-process reranker
             "", "", "", "",   # worker, git, tavily, pdf
             "y",              # external reranker → yes
-            "", "", "",       # URL, model, key → defaults
+            "", "", "", "",   # URL, model, key, autostart command → defaults
             "",               # write
         ]
         rc = self._run(answers)

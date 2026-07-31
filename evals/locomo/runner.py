@@ -445,17 +445,17 @@ _CONTRACT_CLOSE = (
 
 def answer_question(model: str, question: str, now: str, context: str,
                     speakers: tuple[str, str]) -> str:
-    from silica.agent.llm import call_llm
+    from evals.oracle import cached_text
 
     system = (_CONTRACT_OPEN.format(a=speakers[0], b=speakers[1], now=now)
               + _ONESHOT_DELIVERY + _CONTRACT_CLOSE)
     user = f"Memory:\n{context}\n\nQuestion: {question}"
     # temperature=0: same rationale as the LME harness — single-run A/Bs need
     # greedy decoding (a byte-identical prompt flipped verdicts otherwise).
-    resp = call_llm(model, [{"role": "system", "content": system},
-                            {"role": "user", "content": user}], max_tokens=512,
-                    temperature=0.0)
-    return (resp.text or "").strip()
+    # Cached (evals.oracle): an unchanged cell repays neither tokens nor noise.
+    return cached_text(model, [{"role": "system", "content": system},
+                               {"role": "user", "content": user}],
+                       max_tokens=512, temperature=0.0)
 
 
 # --- Agent answer (e2e read path) --------------------------------------------
@@ -570,10 +570,17 @@ def _agent_aggregate(rows: list[dict]) -> dict | None:
     # hides an inflation that lands entirely on abstention accuracy (audit 1.2).
     exhausted_by_type = Counter(r["question_type"] for r in agent_rows
                                 if r.get("budget_exhausted"))
+    # Adoption: the questions answered without ever touching the vault, and
+    # how those scored — every retrieval metric is invisible on rows the
+    # agent never retrieved for. chained_n = rows that composed >=2 calls.
+    no_tool = [r for r in agent_rows if not r.get("tools_used")]
     return {
         "iterations_mean": round(sum(r["iterations"] for r in agent_rows)
                                  / len(agent_rows), 2),
         "tool_calls": dict(dist.most_common()),
+        "no_tool_n": len(no_tool),
+        "no_tool_correct_n": sum(bool(r.get("correct")) for r in no_tool),
+        "chained_n": sum(len(r.get("tools_used") or []) >= 2 for r in agent_rows),
         "budget_exhausted_n": sum(bool(r.get("budget_exhausted")) for r in agent_rows),
         "budget_exhausted_by_type": dict(exhausted_by_type),
         "error_n": sum(bool(r.get("error")) for r in agent_rows),

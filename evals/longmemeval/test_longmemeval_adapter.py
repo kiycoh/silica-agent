@@ -582,7 +582,9 @@ def test_judge_retries_empty_reply_before_none(monkeypatch):
     calls.clear()
     monkeypatch.setattr("silica.agent.llm.call_llm",
                         lambda *a, **k: _types.SimpleNamespace(text=""))
-    assert runner.judge("m", "multi-session", "q", "gold", "resp") is None
+    # q2, not q: the phase-1 verdict is frozen in the oracle cache, and the
+    # identical request would be served from it without reaching call_llm.
+    assert runner.judge("m", "multi-session", "q2", "gold", "resp") is None
 
 
 def test_pipeline_routes_abs_question_to_abstention_rubric(tmp_path, monkeypatch):

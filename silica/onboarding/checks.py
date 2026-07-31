@@ -153,22 +153,32 @@ def check_vault(config: SilicaConfig) -> CheckResult:
 
 
 def check_embeddings(config: SilicaConfig) -> CheckResult:
-    # Never "fail": relatedness degrades to the co-occurrence leg by design.
-    url = f"{config.embedding_base_url.rstrip('/')}/models"
+    """Report the embeddings leg's actual state.
+
+    Probes with a real /v1/embeddings call rather than comparing against the
+    /models id list: llama-server (the default local runtime) reports the
+    loaded gguf's file PATH as that id, not a friendly name, and ignores the
+    requested `model` field on a single-model server — a literal id match
+    false-positives on every llama-server setup even though embeddings work
+    fine. Never "fail": relatedness degrades to the co-occurrence leg by design.
+    """
+    url = f"{config.embedding_base_url.rstrip('/')}/embeddings"
     try:
-        data = httpx.get(url, timeout=_HTTP_TIMEOUT).json()
+        resp = httpx.post(
+            url,
+            json={"model": config.embedding_model, "input": ["ping"]},
+            timeout=_HTTP_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data") or []
+        if not data or not data[0].get("embedding"):
+            raise ValueError("no embedding vector in response")
     except Exception:
         return CheckResult(
             "embeddings", "warn",
-            f"{config.embedding_base_url} unreachable",
-            "dedup routing and /find need embeddings; relatedness falls back to co-occurrence",
-        )
-    ids = {m.get("id", "") for m in data.get("data", [])}
-    if config.embedding_model not in ids:
-        return CheckResult(
-            "embeddings", "warn",
-            f"model `{config.embedding_model}` not listed at {config.embedding_base_url}",
-            "load the embedding model, or update SILICA_EMBEDDING_MODEL",
+            f"{config.embedding_base_url} unreachable or rejected `{config.embedding_model}`",
+            "load the embedding model, or update SILICA_EMBEDDING_MODEL "
+            "(dedup routing and /find fall back to co-occurrence)",
         )
     return CheckResult(
         "embeddings", "ok",
@@ -193,6 +203,15 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
             )
             resp.raise_for_status()
         except Exception:
+            # get_reranker (agent/providers.py) falls back to the in-process
+            # extra per call when this endpoint is down — report that fallback
+            # rather than a bare "unreachable" that reads as rerank being off.
+            if has_local_rerank():
+                return CheckResult(
+                    "rerank", "warn",
+                    f"{config.rerank_base_url} unreachable — using in-process fallback ({LOCAL_RERANK_MODEL})",
+                    "start the reranker to use it instead of the in-process cross-encoder",
+                )
             return CheckResult(
                 "rerank", "warn",
                 f"{config.rerank_base_url} unreachable",

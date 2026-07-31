@@ -359,8 +359,12 @@ class SilicaConfig:
     )
 
     # Embedding model — used by silica/kernel/recall/embed.py (Phase 3)
-    # Default is LM Studio's id for qwen3-embedding-4b, the local setup this is
-    # developed against. Example alternatives: "qwen3-embedding-8b" (LM Studio),
+    # Default targets a local llama-server (`llama-server -m ... --embedding`) or
+    # LM Studio, whichever answers at the URL below — both speak the same
+    # OpenAI-compatible /v1/embeddings shape, and a single-model server ignores
+    # the `model` field anyway. "text-embedding-qwen3-embedding-4b" is LM
+    # Studio's id for qwen3-embedding-4b; the id is cosmetic when llama-server is
+    # what's actually listening. Example alternatives: "qwen3-embedding-8b",
     # "text-embedding-3-small" (OpenAI), "nomic-embed-text" (Ollama).
     embedding_model: str = field(
         default_factory=lambda: os.getenv(
@@ -368,28 +372,31 @@ class SilicaConfig:
         )
     )
 
-    # Base URL for the embeddings endpoint (defaults to the same LM Studio endpoint)
+    # Base URL for the embeddings endpoint — a local llama-server or LM Studio
+    # instance by default.
     embedding_base_url: str = field(
         default_factory=lambda: os.getenv("SILICA_EMBEDDING_BASE_URL", "http://localhost:1234/v1")
     )
 
-    # API key for embeddings endpoint (usually same as chat, or "lm-studio" for local)
+    # API key for embeddings endpoint (local runtimes ignore it; any non-empty
+    # value satisfies the OpenAI SDK)
     embedding_api_key: str = field(
         default_factory=lambda: os.getenv("SILICA_EMBEDDING_API_KEY", "lm-studio")
     )
 
     # Cross-encoder reranker: the precision pass over the fused candidate pool.
-    # Leave these EMPTY for the normal path — `pip install silica-agent[rerank]` then
-    # runs the cross-encoder in-process (see providers.LocalReranker), because no
-    # local LLM runtime (LM Studio, Ollama) can serve one. Set both to point at a
-    # served /rerank endpoint instead (llama.cpp --reranking, Infinity, Jina,
-    # Cohere); that wins over the in-process path. With neither the extra nor an
-    # endpoint, rerank is disabled (a no-op that preserves the pool's order).
+    # Neither LM Studio nor Ollama can serve one (it scores a [query, document]
+    # pair jointly, not an embedding), so the default here is a local llama-server
+    # started with --reranking. get_reranker (agent/providers.py) tries it first
+    # and falls back automatically, per call, to the in-process cross-encoder
+    # from `pip install silica-agent[rerank]` when it's down — set both empty to
+    # skip straight to that path, or leave the extra uninstalled too to disable
+    # reranking outright (a no-op that preserves the pool's order).
     rerank_base_url: str = field(
-        default_factory=lambda: os.getenv("SILICA_RERANK_BASE_URL", "")
+        default_factory=lambda: os.getenv("SILICA_RERANK_BASE_URL", "http://localhost:1235/v1")
     )
     rerank_model: str = field(
-        default_factory=lambda: os.getenv("SILICA_RERANK_MODEL", "")
+        default_factory=lambda: os.getenv("SILICA_RERANK_MODEL", "bge-reranker-v2-m3-Q8_0")
     )
     rerank_api_key: str = field(
         default_factory=lambda: os.getenv("SILICA_RERANK_API_KEY", "lm-studio")

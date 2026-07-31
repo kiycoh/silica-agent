@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 
+import httpx
 import pytest
 
 from silica.config import SilicaConfig
@@ -175,35 +176,58 @@ class TestCheckEmbeddings:
     def test_unreachable_warns_never_fails(self, monkeypatch):
         import silica.onboarding.checks as checks
 
-        def boom(url, timeout):
+        def boom(url, json, timeout):
             raise checks.httpx.ConnectError("refused")
 
-        monkeypatch.setattr(checks.httpx, "get", boom)
+        monkeypatch.setattr(checks.httpx, "post", boom)
         r = checks.check_embeddings(_cfg())
         assert r.status == "warn"
         assert "co-occurrence" in r.hint
 
-    def test_model_not_listed_warns(self, monkeypatch):
+    def test_model_rejected_warns(self, monkeypatch):
         import silica.onboarding.checks as checks
 
         class FakeResp:
-            def json(self):
-                return {"data": [{"id": "other-model"}]}
+            def raise_for_status(self):
+                raise httpx.HTTPStatusError(
+                    "400", request=httpx.Request("POST", "http://x"),
+                    response=httpx.Response(400, request=httpx.Request("POST", "http://x")),
+                )
 
-        monkeypatch.setattr(checks.httpx, "get", lambda url, timeout: FakeResp())
+        monkeypatch.setattr(checks.httpx, "post", lambda url, json, timeout: FakeResp())
         r = checks.check_embeddings(_cfg(embedding_model="test-embed"))
         assert r.status == "warn"
         assert "test-embed" in r.detail
 
-    def test_model_listed_ok(self, monkeypatch):
+    def test_successful_probe_is_ok(self, monkeypatch):
         import silica.onboarding.checks as checks
 
         class FakeResp:
-            def json(self):
-                return {"data": [{"id": "test-embed"}]}
+            def raise_for_status(self):
+                pass
 
-        monkeypatch.setattr(checks.httpx, "get", lambda url, timeout: FakeResp())
+            def json(self):
+                return {"data": [{"embedding": [0.1, 0.2]}]}
+
+        monkeypatch.setattr(checks.httpx, "post", lambda url, json, timeout: FakeResp())
         r = checks.check_embeddings(_cfg(embedding_model="test-embed"))
+        assert r.status == "ok"
+
+    def test_probe_ignores_a_file_path_model_id(self, monkeypatch):
+        """llama-server reports the loaded gguf's path as its /models id and
+        ignores the requested `model` field on a single-model server — the
+        probe must not depend on the two agreeing."""
+        import silica.onboarding.checks as checks
+
+        class FakeResp:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"data": [{"embedding": [0.1, 0.2]}]}
+
+        monkeypatch.setattr(checks.httpx, "post", lambda url, json, timeout: FakeResp())
+        r = checks.check_embeddings(_cfg(embedding_model="text-embedding-qwen3-embedding-4b"))
         assert r.status == "ok"
 
 

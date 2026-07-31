@@ -631,23 +631,46 @@ class LocalReranker:
             return None
 
 
-def get_reranker(config: Any) -> Reranker | LocalReranker | None:
-    """Return a reranker: a served /rerank endpoint if configured, else in-process
-    if the [rerank] extra is installed, else None (disabled).
+class FallbackReranker:
+    """Prefers a served /rerank endpoint, degrades to the in-process cross-encoder
+    per call when it's down, rather than losing the pass entirely.
 
-    The endpoint wins when set so the eval harness keeps pinning its own llama-server.
+    Needed because config now defaults `rerank_base_url`/`rerank_model` to a local
+    llama-server — a static "endpoint wins when configured" priority (the old
+    get_reranker behaviour) would silently strand anyone who installed
+    `silica-agent[rerank]` but isn't running that server: Reranker.scores() would
+    abstain every call instead of LocalReranker ever getting a turn. Trying the
+    served endpoint first and falling back on its own abstention (None) needs no
+    separate liveness probe and can't race a check-then-call gap the way a
+    probe-first design would.
+    """
+
+    def __init__(self, primary: Reranker, secondary: LocalReranker):
+        self.primary = primary
+        self.secondary = secondary
+
+    def scores(self, query: str, documents: list[str]) -> list[float] | None:
+        scores = self.primary.scores(query, documents)
+        return scores if scores is not None else self.secondary.scores(query, documents)
+
+
+def get_reranker(config: Any) -> Reranker | LocalReranker | FallbackReranker | None:
+    """Return a reranker: a served /rerank endpoint (config defaults to a local
+    llama-server) when it answers, else the in-process cross-encoder if the
+    [rerank] extra is installed, else None (disabled).
     """
     base_url = getattr(config, "rerank_base_url", "")
     model = getattr(config, "rerank_model", "")
-    if base_url and model:
-        return Reranker(
-            base_url=base_url,
-            model=model,
-            api_key=getattr(config, "rerank_api_key", ""),
-        )
-    if not has_local_rerank():
-        return None
-    return LocalReranker(model=model or LOCAL_RERANK_MODEL)
+    served = Reranker(
+        base_url=base_url, model=model, api_key=getattr(config, "rerank_api_key", ""),
+    ) if (base_url and model) else None
+    if served is not None and has_local_rerank():
+        return FallbackReranker(served, LocalReranker(model=model or LOCAL_RERANK_MODEL))
+    if served is not None:
+        return served
+    if has_local_rerank():
+        return LocalReranker(model=model or LOCAL_RERANK_MODEL)
+    return None
 
 
 def get_provider(config: Any, role: str = "router") -> OpenAICompatibleProvider | OllamaNativeProvider:

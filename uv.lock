@@ -3784,7 +3784,7 @@ requires-dist = [
     { name = "latex2mathml", marker = "extra == 'gui'", specifier = ">=3.81.0" },
     { name = "litellm" },
     { name = "markdown-it-py" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0,<2" },
     { name = "mdit-py-plugins", marker = "extra == 'gui'", specifier = ">=0.6.1" },
     { name = "mineru", extras = ["pipeline"], marker = "extra == 'pdf'", specifier = ">=3.4.4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
