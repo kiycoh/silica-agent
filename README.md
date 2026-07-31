@@ -9,6 +9,7 @@
   <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/v/silica-agent.svg" alt="PyPI" /></a>
   <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/dm/silica-agent.svg" alt="PyPI Downloads" /></a>
   <a href="https://github.com/kiycoh/silica-agent/releases"><img src="https://img.shields.io/github/v/release/kiycoh/silica-agent?display_name=tag" alt="GitHub release" /></a>
+  <a href="https://deepwiki.com/kiycoh/silica-agent"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
   <a href="https://github.com/kiycoh/silica-agent/blob/main/pyproject.toml#L13"><img src="https://img.shields.io/badge/python-%3E%3D3.11-blue?logo=python&logoColor=white" alt="Python >=3.11" /></a>
   <br/>
   <a href="#readme"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Platform" /></a>
@@ -31,6 +32,16 @@ broke something. Local-first. Your files stay plain markdown, readable with or w
   <b>78%</b> answerable accuracy and <b>~90%</b> correct refusals on LoCoMo &nbsp;·&nbsp;
   <b>100%</b> write integrity across a real 758-note vault<br/>
   <sub><a href="#measured">how these were measured</a></sub>
+</p>
+
+
+<p align="center">
+  <img src="assets/demo-test.gif" alt="Silica answering, auditing, writing to and reverting a real vault" width="900" />
+</p>
+
+<p align="center">
+  <sub>A real 708-note vault, adopted as-is. An answer grounded in it, a structural audit of it,<br/>
+  a write to it, and the same write taken back out.</sub>
 </p>
 
 ---
