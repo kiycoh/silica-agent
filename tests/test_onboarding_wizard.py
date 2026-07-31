@@ -1060,3 +1060,25 @@ class TestAskSecret:
         assert result == "sk-or-verysecret-a1b2"   # empty input keeps the default
         assert "verysecret" not in prompts[0]       # secret never echoed
         assert "a1b2" in prompts[0]                 # last-4 hint shown
+
+
+class TestUnindexableDocs:
+    def test_finds_docs_the_markdown_index_cannot_read(self, tmp_path):
+        from silica.onboarding.wizard import unindexable_docs
+
+        (tmp_path / "notes.md").write_text("indexed", encoding="utf-8")
+        (tmp_path / "cover.png").write_bytes(b"not a document")
+        (tmp_path / "paper.pdf").write_bytes(b"%PDF-1.4")
+        sub = tmp_path / "Inbox"
+        sub.mkdir()
+        (sub / "book.EPUB").write_bytes(b"epub")
+
+        found = {p.name for p in unindexable_docs(tmp_path)}
+        assert found == {"paper.pdf", "book.EPUB"}   # recursive, case-insensitive
+
+    def test_walk_is_bounded(self, tmp_path):
+        from silica.onboarding.wizard import unindexable_docs
+
+        for i in range(30):
+            (tmp_path / f"f{i:02d}.pdf").write_bytes(b"%PDF-1.4")
+        assert unindexable_docs(tmp_path, cap=10) != unindexable_docs(tmp_path)

@@ -315,6 +315,48 @@ def _ask_local_model(
     return model
 
 
+# ponytail: bounded walk — a repo-mode vault can be a source tree with
+# node_modules, and init must not stall counting files it will only mention.
+_DOC_SCAN_CAP = 20_000
+
+
+def unindexable_docs(vault: Path, cap: int = _DOC_SCAN_CAP) -> list[Path]:
+    """Documents present in the vault that the index cannot read.
+
+    The index is markdown-only (`fs_backend._build_index` skips every non-`.md`
+    file), so a vault of PDFs answers every question with nothing until
+    `/convert` turns them into notes. Onboarding is the one place that sees the
+    vault before the user asks their first question, so it is where the gap gets
+    named.
+    """
+    from silica.sources.convert import DOC_EXTS
+
+    out: list[Path] = []
+    for i, p in enumerate(vault.rglob("*")):
+        if i >= cap:
+            break
+        if p.suffix.lower() in DOC_EXTS and p.is_file():
+            out.append(p)
+    return out
+
+
+def _warn_unindexable(vault: Path) -> None:
+    """One line naming the documents `/convert` still has to bring in."""
+    docs = unindexable_docs(vault)
+    if not docs:
+        return
+    names = ", ".join(p.name for p in docs[:3])
+    more = f" (+{len(docs) - 3} more)" if len(docs) > 3 else ""
+    CONSOLE.print(
+        f"  [yellow]{GLYPHS['warn']} {len(docs)} document(s) the index cannot read: "
+        f"[/][dim]{names}{more}[/]"
+    )
+    CONSOLE.print(
+        "  [dim]The vault is markdown-only. Run [/][bold]/convert <file>[/]"
+        "[dim], then [/][bold]/nucleate[/][dim] on the result.[/]"
+    )
+
+
 def _run_wizard_inner(
     input_fn: Callable[[str], str],
     env_path: Path,
@@ -412,6 +454,7 @@ def _run_wizard_inner(
                         f"conventions:\n  language: {lang_answer}\n",
                         encoding="utf-8",
                     )
+        _warn_unindexable(repo_vault if use_repo_mode else resolved)
         return True
 
     def step_provider() -> bool:
