@@ -82,8 +82,10 @@ def _lang_prefer(language: str) -> str:
     return (
         "## What language to reply in\n"
         f"Reply in {language} by default, including when the turn is a slash-command "
-        "or a button press with no natural language of its own. Switch to the user's "
-        "language only if their most recent message is clearly written in a different one."
+        "or a button press with no natural language of its own, and even when the notes, "
+        "the vault map, and the rest of this conversation are in a different language. "
+        "Switch to the user's language only if their most recent message is clearly "
+        "written in a different one."
     )
 
 

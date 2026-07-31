@@ -22,7 +22,7 @@ from silica.agent.constraints import AgentConstraints, chat_tools, web_turn_cons
 from silica.agent.loop import run_agent
 from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
 from silica.config import CONFIG
-from silica.prompts import system_prompt
+from silica.prompts import _lang_prefer, system_prompt
 from silica.ui.console import CONSOLE
 from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
@@ -135,6 +135,11 @@ def _fresh_messages() -> list[dict]:
     messages: list[dict] = [{"role": "system", "content": system_prompt(reply)}]
     messages.append({"role": "system", "content": _vault_scope()})
     _inject_vault_map(messages)
+    # The vault map is the vault's own language. On a vault whose notes are not
+    # in `reply`, that bulk drowns the language rule sitting in message 0, and
+    # the model answers in the notes' language. Restate it last, closest to the
+    # user turn.
+    messages.append({"role": "system", "content": _lang_prefer(reply)})
     _update_context_tokens(messages)
     return messages
 
