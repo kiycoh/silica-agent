@@ -22,7 +22,7 @@
 <h3 align="center">Every other tool reads your notes.<br/>Silica is the one that answers for them.</h3>
 
 <p align="center">
-Point it at a folder of markdown or at a codebase. It grows the vault, links it, dedups it,<br/>
+Point it at a folder of docs or at a codebase. It grows the vault, links it, dedups it,<br/>
 audits it, and answers from it. Every write it makes is re-read afterwards, and reverted if it<br/>
 broke something. Local-first. Your files stay plain markdown, readable with or without it.
 </p>
@@ -33,20 +33,6 @@ broke something. Local-first. Your files stay plain markdown, readable with or w
   <sub><a href="#measured">how these were measured</a></sub>
 </p>
 
-<p align="center">
-  <a href="#why-silica">Why Silica</a> &nbsp;•&nbsp;
-  <a href="#compared-to-the-alternatives">Compared</a> &nbsp;•&nbsp;
-  <a href="#install">Install</a> &nbsp;•&nbsp;
-  <a href="#four-ways-in">Drivers</a> &nbsp;•&nbsp;
-  <a href="#what-you-can-do">Features</a> &nbsp;•&nbsp;
-  <a href="#how-an-answer-is-grounded">Grounding</a> &nbsp;•&nbsp;
-  <a href="#measured">Measured</a> &nbsp;•&nbsp;
-  <a href="#point-it-at-code">Codebase</a> &nbsp;•&nbsp;
-  <a href="#how-the-guardrail-works">Guardrails</a> &nbsp;•&nbsp;
-  <a href="#command-reference">Commands</a> &nbsp;•&nbsp;
-  <a href="#configuration">Config</a>
-</p>
-
 ---
 
 ## Why Silica
@@ -55,30 +41,15 @@ broke something. Local-first. Your files stay plain markdown, readable with or w
 
 Two things go wrong the moment you give an assistant access to what you know.
 
-**It answers from somewhere other than your material.** The model's own memory, a plausible paraphrase, a note that stopped being true a year ago. The answer reads the same either way, so you cannot tell which one you got.
+1. **It answers from somewhere other than your material.** The model's own memory, a plausible paraphrase, a note that stopped being true a year ago. The answer reads the same either way, so you cannot tell which one you got.
 
-**It edits your material and nobody checks the edit.** A merge orphans a note, a rewrite breaks a link, a cleanup flattens a distinction you cared about. Nothing fails loudly. You find out three weeks later, if at all.
+2. **It edits your material and nobody checks the edit.** A merge orphans a note, a rewrite breaks a link, a cleanup flattens a distinction you cared about. Nothing fails loudly. You find out three weeks later, if at all.
 
-**And it never has to live with the mess.** A vault decays on its own: the same idea captured five times, notes nothing points at any more, links to a file that moved, a subsystem documented against a commit from three months ago. An assistant that only reads has no stake in any of that.
+- **And it never has to live with the mess.** A vault decays on its own: the same idea captured five times, notes nothing points at any more, links to a file that moved, a subsystem documented against a commit from three months ago. An assistant that only reads has no stake in any of that.
 
-The usual remedy makes all three worse: the tool copies your notes into a store of its own. Now the thing being answered from is not the thing on your disk, and you cannot open it to check.
+***The usual remedy makes all three worse:*** the tool copies your notes into a store of its own. Now the thing being answered from is not the thing on your disk, and you cannot open it to check.
 
-Silica takes the opposite position. **The vault is the product, not the transcript.** Your folder of markdown is the database, Silica is answerable for the state it is in, and every write it makes passes a gate that re-reads what it just wrote.
-
-🛡️ &nbsp;**A bad edit gets rolled back, not discovered later.**<br/>
-Every write is re-read and checked after it lands. If it broke vault coherence, it is reverted automatically. If you simply changed your mind, `/undo` takes back one note and `/revert` takes back an entire run.
-
-🧠 &nbsp;**Answers come from your material.**<br/>
-Before answering, Silica reads the actual shape of your vault: its hubs, its clusters, and the notes nearest to your question. Contradictions between notes are surfaced, not smoothed over.
-
-🌐 &nbsp;**Hidden connections surfaced visually.**<br/>
-Silica calculates graph metrics to uncover structural hubs, bridge notes, and clusters. It links distant concepts that are hard to connect manually, surfacing them through interactive visual maps and graph audits.
-
-💻 &nbsp;**It runs on your machine.**<br/>
-Local models (LM Studio, Ollama) are first-class. Give an endpoint its start command once (`SILICA_EMBEDDING_SERVE_CMD`, `SILICA_RERANK_SERVE_CMD`, `SILICA_PROVIDER_SERVE_CMD`) and Silica starts that server itself whenever it finds it down, waiting for the model to load. With no embedding model at all, relatedness degrades to a deterministic local graph instead of failing.
-
-📂 &nbsp;**Nothing is locked in.**<br/>
-Your vault stays a folder of plain markdown files. Open it in Obsidian, in any editor, or in nothing at all. Silica is a layer on top, never a container around it.
+Silica takes the opposite position. **The vault is the product, not the transcript.** Your folder of markdown is the database, Silica is answerable for the state it is in, and every write it makes passes a gate that re-reads what it just wrote. It runs on your machine: local models (LM Studio, Ollama) are first-class, and giving an endpoint its start command once (`SILICA_EMBEDDING_SERVE_CMD`, `SILICA_RERANK_SERVE_CMD`, `SILICA_PROVIDER_SERVE_CMD`) is enough for Silica to bring that server up itself whenever it finds it down.
 
 <sub><b>New to this?</b> A "vault" is just a folder of markdown (<code>.md</code>) files. If you already use Obsidian, that folder is your Obsidian vault, and Silica works on it directly.</sub>
 
@@ -106,23 +77,14 @@ The two nearest neighbors are worth naming. [Basic Memory](https://github.com/ba
 ### What only Silica does
 
 - **Verify or revert on the memory substrate itself.** 2026 produced an entire memory-poisoning literature proposing exactly this loop, stage the write, validate it, commit or roll back: Cordon, MOSS, MemLineage, MemAudit, SMSR. Every one of them is a research prototype. Silica ships the loop: one FSM entry point, a post-write re-read, an automatic revert on mismatch, `/undo` and `/revert` behind that. Read the [scope of the claim](#how-the-guardrail-works) before leaning on it.
-- **A core that survives with no models at all.** The co-occurrence concept graph, the BM25 leg, and MinHash dedup need no embedder, and a leg with nothing useful to say abstains instead of poisoning the pool. Competitor cores are LLM-mandatory by construction, and the incentive runs that way: their business is the model call.
+- **A core that survives with no models at all.** The co-occurrence concept graph, the BM25 leg, and MinHash dedup need no embedder. Competitor cores are LLM-mandatory by construction, and the incentive runs that way: their business is the model call.
 - **Notes and code as one substrate, behind one gate.** The split in the field is clean and nobody crosses it. Memory agents never touch a codebase; wiki agents never curate a human's notes.
 - **Graph-safe mutation of links a human wrote.** Obsidian redirects links but has no agent driving it. Agents have no human link graph to keep intact. Silica has both.
 - **Abstention as a published number.** Mem0's own 2026 benchmark write-up concedes the market underreports it. Silica prints correct refusals next to accuracy, and ships the [unflattering rows](#measured) unedited.
 
 ### What Silica did not invent
 
-Credit where it is owed. Each of these arrived before Silica, and each is here because it earns its place, not because it is new:
-
-- **Plain markdown, local-first, AGPL.** Basic Memory got there too, same license. It is the entry ticket to this category, and Silica pays it in full: no tier above the local one, no feature held back for a cloud plan.
-- **A knowledge graph with community detection and an interactive view.** Graphify, GitNexus, LLM Wiki, and GraphRAG all ship one. What Silica adds is that the graph is not only a picture: the same co-occurrence structure is a retrieval leg, and it keeps working when there is no embedder.
-- **Atomic notes that link themselves.** A-MEM's thesis, and Obsidian plugins have done it for years. The part that is Silica's is what happens next: those links survive a merge, a split, and a rename without leaving an orphan.
-- **Noticing that documentation went stale against the code.** Fiberplane's Drift ships the same reformat-immune AST fingerprint, Swimm sells it, OpenWiki runs it on a schedule. Silica runs it inside the vault that also holds your notes, and `/impact`, from a diff back to the notes it invalidates, is the piece almost nobody replicates.
-- **Typed relations between notes.** Graphiti has them, with per-edge validity intervals Silica does not model. Silica computes them on demand over notes you wrote, rather than freezing them into a store at ingest.
-- **An MCP server and local models.** Table stakes, and Silica treats them as such: four drivers, one gate, no privileged client.
-
-**On the numbers.** Silica does not claim state of the art, and the [figures below](#measured) say why: 2 of the 10 LoCoMo conversations, judged by a local-grade model. They are not comparable to what vendors report. They are something vendor numbers usually are not, which is re-runnable on your own machine, against the product path, with the harness in [`evals/`](evals/).
+Credit where it is owed. **Plain markdown, local-first, AGPL** is the entry ticket to this category and Basic Memory got there too; Silica pays it in full, with no tier above the local one. **A graph with community detection and an interactive view** ships in Graphify, GitNexus, LLM Wiki, and GraphRAG; what Silica adds is that the same co-occurrence structure is also a retrieval leg. **Self-linking atomic notes** are A-MEM's thesis, and old news in Obsidian plugins; Silica's part is that those links survive a merge, a split, and a rename. **Staleness against the code** is Fiberplane Drift's reformat-immune AST fingerprint, Swimm sells it, OpenWiki schedules it; Silica runs it inside the vault that also holds your notes, and `/impact`, from a diff back to the notes it invalidates, is the piece almost nobody replicates. **Typed relations** are Graphiti's, with per-edge validity intervals Silica does not model, computed here on demand rather than frozen at ingest. **An MCP server and local models** are table stakes: four drivers, one gate, no privileged client.
 
 ---
 
@@ -134,7 +96,7 @@ Reading a vault needs no model and no API key, so the shortest way in is to hand
 silica setup claude             # or: setup codex, setup opencode
 ```
 
-That writes the MCP server into your client's own config (backed up first, `--dry-run` to preview) and your assistant can search, recall, and read your notes from the next session on. Nothing is configured, nothing is asked.
+That writes the MCP server into your client's own config, and your assistant can search, recall, and read your notes from the next session on. Nothing else is configured, nothing is asked.
 
 Writing notes needs a model. That is what the wizard is for:
 
@@ -284,26 +246,10 @@ Drop raw clippings, drafts, PDFs, or Jupyter Notebooks (`.ipynb`) in a folder. `
 **Ask your notes instead of your memory.**<br/>
 `/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz [note]`. All read-only, all grounded in the vault. Graded answers are logged, so untargeted `/quiz` draws from the notes you have missed before: what you did not know comes back, what you already knew does not.
 
-**Visualize structure and schema.**<br/>
-`/diagram "<topic>"` generates Mermaid flowcharts, mindmaps, sequence, or class diagrams. `/schematize "<topic>"` generates structured breakdown tables. Pass `--save=<path>` to persist them directly into your notes.
-
-**Surface relationships and reading paths.**<br/>
-`/relate <note>` builds a typed relationship matrix (prerequisite, elaborates, contradicts, sibling, depends-on) to neighboring notes. `/path "Note A" "Note B"` computes the shortest reading path across wikilinks and co-occurrence graphs.
-
-**Track contested claims and project plans.**<br/>
-`/contested` lists notes flagged with `contested: true` and their unresolved contradictions. `/plans` groups active project notes by status (`todo`, `in-progress`, `blocked`, `done`).
-
-**Reorganize by intent.**<br/>
-`/organize "group by project"` classifies and moves notes into a taxonomy. `/curate` plans autolink, dedup (embedder-free MinHash LSH), and cleanup work; `--apply` runs it. Staged batch transformations can be reviewed with `/review` and flushed safely.
-
-**Refactor without breaking links.**<br/>
-Merges and splits redirect every incoming link automatically, so a refactor leaves no broken reference and no orphan behind.
-
-**Research straight into the vault.**<br/>
-`/web-search "<topic>"` pulls cited findings into the inbox, reading the pages it finds rather than skimming snippets. `/fetch <url>` reads a single page (or a YouTube transcript) straight into the inbox. `/convert <file>` transcodes PDFs into Markdown drafts. Fetching is direct, with no third-party reader in the path, and nothing from the web reaches your notes until you nucleate it.
-
 **When the vault does not have it.**<br/>
-If every search a turn ran came back empty, Silica says so instead of answering thin, and names `/web`. Typing it is the consent: the answer comes from the web, with citations appended from the pages that were actually opened rather than from what the model claims it read. That turn writes nothing. `/keep` saves it to the inbox when it was worth keeping.
+If every search a turn ran came back empty, Silica says so instead of answering thin, and names `/web`. Typing it is the consent: the answer comes from the web, with citations appended from the pages that were actually opened rather than from what the model claims it read. Fetching is direct, with no third-party reader in the path. That turn writes nothing; `/keep` saves it to the inbox when it was worth keeping, and `/web-search "<topic>"` does the same in bulk for a whole question.
+
+Reorganizing by intent, typed relation maps, reading paths, diagrams, contested claims, dedup, and the rest are in the [command reference](#command-reference).
 
 ---
 
@@ -335,7 +281,7 @@ The lexical leg is dotted because it is exactly that: optional. Build it with `/
 
 ## Measured
 
-Every number below comes from the harness in [`evals/`](evals/), run against the product path rather than a benchmark-only shortcut. Samples are small and the judge is a local-grade model, so read them as evidence you can re-run, not as leaderboard entries.
+Every number below comes from the harness in [`evals/`](evals/), run against the product path rather than a benchmark-only shortcut. Silica does not claim state of the art, and these say why: the samples are small, the judge is a local-grade model, and LoCoMo here is 2 of its 10 conversations. They are not comparable to what vendors report. They are something vendor numbers usually are not, which is re-runnable on your own machine.
 
 | What was measured | Result | Sample |
 | :--- | :--- | :--- |
@@ -361,7 +307,7 @@ uv run python -m evals.locomo --data locomo10.json --run-root RUN_DIR \
 
 ## See your vault
 
-Both views render the structure your notes already have. Both run locally, and both work without an embedder: the deterministic co-occurrence graph still yields clusters and relatedness.
+Both views render the structure your notes already have, locally, off the same co-occurrence graph the retrieval legs use.
 
 | View | What it gives you |
 | :--- | :--- |
@@ -416,12 +362,12 @@ You already let deterministic tools reject and rewrite your work every day. You 
 
 ### Design contracts
 
-Silica is not a free-form agent. Every vault mutation passes through a finite-state machine that enforces these:
+Silica is not a free-form agent. Every vault mutation passes through a finite-state machine, and these are the invariants it enforces:
 
 - **Single entry point.** All nucleation flows through the Injector FSM. There is no side channel that writes to the vault.
-- **Verify or revert.** Every write is re-read and checked afterwards. A mismatch (`VerifyMismatchError`) rolls the write back.
-- **Graph-safe moves.** Renames, merges, and splits redirect incoming links atomically. No operation leaves a broken reference or an orphan.
-- **Zero-trust ingress.** External content such as web search results can only land in `Inbox/`. Nothing reaches the vault without explicit human staging and FSM review.
+- **Verify or revert.** A post-write mismatch raises `VerifyMismatchError` and rolls the write back.
+- **Graph-safe moves.** Renames, merges, and splits redirect incoming links atomically.
+- **Zero-trust ingress.** External content such as web search results can only land in `Inbox/`, and reaches the vault only through explicit staging and FSM review.
 - **Layered rollback.** `/undo` (per note), `/revert` (per run), and optional `SILICA_GIT_COMMIT=auto` stack as independent safety nets.
 
 <p align="center">
@@ -513,7 +459,7 @@ Everything under **Available now** ships in the current release. Everything belo
 
 **Available now.** Note nucleation, structural audit, semantic and embedder-free search, graph-safe refactor / dedup / merge, graph and mind-map export, codebase skeletons with git-backed `/stale` and `/impact`, the code wiki, layered `/undo` and `/revert`, the git safety net, the MCP server, and the Claude Code plugin.
 
-**Next, and it is the one that decides the rest.** Silica maintains the vault when you ask it to: `/curate`, `/organize`, `/stale`, `/report`. Being answerable for a folder means noticing without being asked, so scheduled upkeep is the next work: a watch on the folder, an audit that runs on its own, and a queue of changes waiting for your yes rather than surprising you with a diff. Until that ships, read the claim at the top of this file as on demand.
+**Next, and it is the one that decides the rest.** Upkeep runs when you ask for it (`/curate`, `/organize`, `/stale`, `/report`). Being answerable for a folder means noticing without being asked, so the next work is scheduled upkeep: a folder watch, an audit that runs on its own, and a queue of changes waiting for your yes. Until it ships, read the claim at the top of this file as on demand.
 
 **In progress.** Richer codebase coverage across more languages, PDF/DOCX/TXT nucleation, the live Obsidian bridge, and the crash harness backing the guardrail.
 
@@ -539,4 +485,4 @@ Issues and pull requests welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for set
 
 ## License
 
-**GNU Affero General Public License v3.0.** Strong copyleft. Incorporate any portion of Silica and that work becomes a derivative that must itself be AGPL-3.0, with complete corresponding source offered to everyone who uses it. **§13** extends this to network use: running a modified version as a hosted service obliges you to provide source to your users. There is no permissive fallback. See [LICENSE](LICENSE) for the full text.
+**GNU Affero General Public License v3.0.** Strong copyleft, no permissive fallback: anything incorporating Silica must itself be AGPL-3.0 with complete corresponding source offered to its users, and **§13** extends that to network use, so a modified version run as a hosted service owes source to the people using it. Full text in [LICENSE](LICENSE).
