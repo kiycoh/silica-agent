@@ -808,7 +808,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         res = revert_run(run_id)
         stale = len(res.get("stale", []))
         line = (
-            f"  Revert {run_id[:8]}…: {len(res['reverted'])} reverted, "
+            f"  Revert {run_id[:8]}…: {len(res['reverted'])} writes reverted, "
             f"{len(res['skipped'])} skipped (modified), "
             f"{stale} stale (vault changed), {len(res['errors'])} errors."
         )
