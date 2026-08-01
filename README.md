@@ -20,16 +20,16 @@
 </p>
 
 
-<h3 align="center">Every other tool reads your notes.<br/>Silica is the one that answers for them.</h3>
+<h3 align="center">Throw everything you know at it. It keeps the vault from rotting,<br/>answers out of your own files, and tells you when the answer isn't there.</h3>
 
 <p align="center">
-Point it at a folder of docs or at a codebase. It grows the vault, links it, dedups it,<br/>
-audits it, and answers from it. Every write it makes is re-read afterwards, and reverted if it<br/>
-broke something. Local-first. Your files stay plain markdown, readable with or without it.
+Point it at a folder of docs or at a codebase, one vault holds both. It links what it adds,<br/>
+dedups the repeats, and audits what rotted. Every write is re-read afterwards, and reverted<br/>
+if it broke something. Local-first. Your files stay plain markdown, readable with or without it.
 </p>
 
 <p align="center">
-  <b>78%</b> answerable accuracy and <b>~90%</b> correct refusals on LoCoMo &nbsp;·&nbsp;
+  <b>82.1%</b> answerable accuracy and <b>~90%</b> correct refusals on LoCoMo &nbsp;·&nbsp;
   <b>100%</b> write integrity across a real 758-note vault<br/>
   <sub><a href="#measured">how these were measured</a></sub>
 </p>
@@ -80,7 +80,7 @@ The two nearest neighbors are worth naming. [Basic Memory](https://github.com/ba
 | Merge, split, rename | incoming wikilinks redirected atomically, no orphan left behind | the file moves, the links pointing at it are yours to fix | dead wikilinks pruned when a source is deleted |
 | With no model available | retrieval degrades to deterministic legs and keeps answering | keyword search stays, semantic needs an embedder | keyword and graph search stay, ingest needs an LLM |
 | Codebases | same vault, same gate, staleness checked against git | notes only | documents only |
-| Refusal rate published | yes, 94.4% and 89.7% correct abstention next to 82% accuracy | not published | not published |
+| Refusal rate published | yes, 94.4% and 89.7% correct abstention next to 82.1% and 83.2% accuracy | not published | not published |
 | Hosting | local, AGPL, nothing above it | local AGPL, plus a paid cloud tier | local, GPL-3.0 desktop app |
 
 **The rest of the field.** Memory agents (Mem0, Zep, Letta, Cognee, Supermemory) ingest your material into a store of their own; Letta is the only one with rollback, and none of them verifies a write after it lands. Repo wiki agents (DeepWiki, OpenWiki, GitNexus, [Graphify](https://github.com/safishamsi/graphify)) read a codebase and emit an artifact next to it: good maps, read-only by design, and they never curate a human's notes. Graph frameworks (GraphRAG, LightRAG, HippoRAG, Graphiti) build an index, not a folder you can still open in a text editor.
