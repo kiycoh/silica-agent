@@ -39,27 +39,33 @@ Enter
 Sleep 2s
 Type "silica"
 Enter
-Sleep 18s
+Sleep 15s
 
 # 2. The answer names the note it came from, in a vault written in another language.
 # The answer runs ~64 lines against a ~29 line viewport, so scroll back to its
 # head and walk down. One scroll unit is one line.
 Type "what do my notes say about the Atkinson and Shiffrin memory model?"
 Enter
-Sleep 30s
+Sleep 23s
 ScrollUp 40
-Sleep 4s
+Sleep 6s
 ScrollDown 13
-Sleep 4s
+Sleep 6s
 ScrollDown 13
-Sleep 4s
+Sleep 6s
 ScrollDown 16
-Sleep 2s
+Sleep 3s
 
 # 3. Answerable for the state of the folder, not just a reader of it.
 Type "/report"
 Enter
-Sleep 36s
+Sleep 20s
+ScrollUp 40
+Sleep 6s
+ScrollDown 13
+Sleep 6s
+ScrollDown 13
+Sleep 3s
 
 # 4. It writes to real files.
 Type "/curate Giurisprudenza --apply"
