@@ -742,7 +742,7 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
         ingest_mode: str = "distill", answer_mode: str = "oneshot",
         timeline: bool = False, improve: bool = False, assemble: bool = False,
         lexical: bool = False, data_path: str | Path | None = None,
-        primary_metric: str = "overall_accuracy",
+        primary_metric: str = "overall_accuracy", supersede_tau: float = 0.0,
         verbose: bool = False, out: Path | None = None) -> dict:
     from silica.config import CONFIG
     from silica.kernel.recall import perception
@@ -815,6 +815,12 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
         # silica_recall reads CONFIG (no per-call TTL): mirror --episodic-ttl,
         # the same seam the slice parameterizes (0 = never expire, LoCoMo span).
         CONFIG.episodic_ttl_days = episodic_ttl
+    # Capture-time gate pinned OFF: every frozen baseline under bench/ predates
+    # it, so inheriting the shipped 0.70 would silently make re-runs
+    # incomparable. Arms that WANT the gate set it around this call (the A/B
+    # driver does); the harness itself never inherits it.
+    old_supersede = CONFIG.episodic_supersede_tau
+    CONFIG.episodic_supersede_tau = float(supersede_tau)
     try:
         _run_conversations(data, rows, doc, run_root=run_root, model=model,
                            judge_model=judge_model, k=k, stuff=stuff,
@@ -831,6 +837,7 @@ def run(data: list[dict], run_root: Path, *, model: str, judge_model: str, k: in
                            assemble=assemble, lexical=lexical)
     finally:
         CONFIG.episodic_ttl_days = old_ttl
+        CONFIG.episodic_supersede_tau = old_supersede
     doc.pop("partial", None)
     doc["metrics"] = _metrics(rows)
     return doc

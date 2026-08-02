@@ -214,6 +214,16 @@ def enforce_key_schema(key: str, schema) -> str:
     return ".".join(segs)
 
 
+# Calibration hook (COOCCUR_GATE_PROBE idiom): harnesses set it to capture each
+# snap fire as {"key", "head_key", "cos", "tau"}; production leaves it None.
+SNAP_PROBE: Callable[[dict], None] | None = None
+
+# Same idiom for the supersede gate: every measured gate decision as {"key",
+# "cos", "action" ("supersede"|"fork"), "tau", "head_seen", "seen"}. Abstains
+# (missing vec, embedder down) are not emitted — they are legacy behavior.
+GATE_PROBE: Callable[[dict], None] | None = None
+
+
 def _snap_entity(key: str) -> tuple:
     """Entity namespace of a key, the HARD constraint of the snap fallback:
     cosine may never merge across entities (same attribute of two people
@@ -351,6 +361,7 @@ class EpisodicStore:
 
     def capture(self, facts: list[dict], *, run_id: str, seen: str,
                 embedder=None, schema=None, snap_tau: float = 0.0,
+                supersede_tau: float = 0.0,
                 vault: str | None = None,
                 notes: list[str] | None = None) -> None:
         """Merge distiller ephemerals into the store. Mechanical, no LLM.
@@ -360,10 +371,22 @@ class EpisodicStore:
         New/changed facts are embedded when `embedder` is served; embedding
         failure is silent (recall falls back to lexical).
 
+        `supersede_tau` > 0 arms the supersede gate: the same-key supersede
+        only proceeds when TEXT cosine(arrival, head) >= supersede_tau; below,
+        the arrival forks a sibling live chain under the same key — a slotty
+        key ("event_date" refilled each session) degrades to append-only
+        instead of burying distinct facts as fake history. The gate compares
+        against the one fact legacy would bury (the latest head), not the whole
+        sibling family: a genuine update of an OLDER sibling forks instead of
+        chaining to it — both stay live, only the chain link is lost.
+        Abstains to legacy supersede when either vector is unavailable.
+
         `snap_tau` > 0 arms the fallback of the matcher cascade (canonical
         keys, fase 1/2): a coined key with no exact canonical match joins the
-        nearest live head by KEY-embedding cosine >= snap_tau. 0 (default)
-        is bit-identical to the pre-cascade store.
+        nearest live head by KEY-embedding cosine >= snap_tau. 0 is
+        bit-identical to the pre-cascade store and is what CONFIG ships: the
+        snap audit refuted every candidate tau on the shipped key schema (see
+        config.py, and bench/snap_replay.py to re-run it).
 
         `schema` (ADR-0021): an `EpisodicKeySchema` shapes stored keys via
         `enforce_key_schema` before merge; None means no enforcement —
@@ -379,6 +402,7 @@ class EpisodicStore:
                  for f in self.facts if f.status == "live"}
         created: list[Fact] = []
         folded = 0
+        gate_vecs: dict[str, list[float]] = {}  # arrival-text vec cache, reused as fact.vec
         for raw in facts:
             key = (raw.get("key") or "").strip()
             text = (raw.get("text") or "").strip()
@@ -397,6 +421,16 @@ class EpisodicStore:
                 if run_id not in head.runs:
                     head.runs.append(run_id)
                 continue
+            if head is not None and supersede_tau > 0:
+                cos = self._gate_cos(text, head, embedder, gate_vecs)
+                if cos is not None:
+                    action = "supersede" if cos >= supersede_tau else "fork"
+                    if GATE_PROBE is not None:
+                        GATE_PROBE({"key": key, "cos": round(cos, 4),
+                                    "action": action, "tau": supersede_tau,
+                                    "head_seen": head.first_seen, "seen": seen})
+                    if action == "fork":
+                        head = None  # sibling chain; the old head stays live
             fid = f"f_{self.next_id:04d}"
             self.next_id += 1
             fact = Fact(id=fid, key=key, text=text, first_seen=seen, last_seen=seen,
@@ -410,10 +444,14 @@ class EpisodicStore:
             self.facts.append(fact)
             heads[nkey] = fact
             created.append(fact)
-        if embedder is not None and created:
+        for fact in created:  # gate already embedded these arrivals — reuse
+            if fact.text in gate_vecs:
+                fact.vec = list(gate_vecs[fact.text])
+        pending = [f for f in created if not f.vec]
+        if embedder is not None and pending:
             try:
-                vecs = embedder.embed([f.text for f in created])
-                for fact, vec in zip(created, vecs):
+                vecs = embedder.embed([f.text for f in pending])
+                for fact, vec in zip(pending, vecs):
                     fact.vec = list(vec)
             except Exception as e:
                 logger.debug("episodic capture: embedding skipped (%s)", e)
@@ -440,6 +478,28 @@ class EpisodicStore:
         sample = " ".join([*(f.text for f in self.facts), *incoming])[:4000]
         self.lang = language.detect(sample) if sample.strip() else "english"
         return self.lang
+
+    def _gate_cos(self, text: str, head: Fact, embedder,
+                  cache: dict[str, list[float]]) -> float | None:
+        """TEXT cosine between an arrival and the head it would bury; None =
+        abstain (either vector unavailable), which falls back to the legacy
+        supersede. TEXT, not key: the value difference IS the referent signal
+        here — the inversion of _snap_head's key-only rule, measured in
+        bench/supersede_gate_probe.py."""
+        if embedder is None or not head.vec:
+            return None
+        if text not in cache:
+            # ponytail: one embed round trip per gated arrival, cached per
+            # capture and reused as the fact's own vec, so the token count is
+            # unchanged — only the request count rises, and only on collisions.
+            # Batch the gated arrivals up front if a hosted embedder makes the
+            # round trips hurt.
+            try:
+                cache[text] = list(embedder.embed([text])[0])
+            except Exception as e:
+                logger.debug("episodic gate: embedding skipped (%s)", e)
+                return None
+        return _cosine(cache[text], head.vec)
 
     def _snap_head(self, key: str, heads: dict[str, Fact], embedder,
                    tau: float) -> Fact | None:
@@ -472,7 +532,12 @@ class EpisodicStore:
             c = _cosine(kv, self._key_vecs[spaced[h.key]])
             if c > best_cos:
                 best, best_cos = h, c
-        return best if best_cos >= tau else None
+        if best_cos < tau:
+            return None
+        if SNAP_PROBE is not None:
+            SNAP_PROBE({"key": key, "head_key": best.key,
+                        "cos": round(best_cos, 4), "tau": tau})
+        return best
 
     # ------------------------------------------------------------------
     # TTL sweep
@@ -626,16 +691,18 @@ def capture_from_distill(result: dict, *, run_id: str, seen: str,
             schema = load_manifest(episodic_home()).conventions.episodic_keys
         except Exception:
             pass
-        snap_tau = 0.0
+        snap_tau = supersede_tau = 0.0
         try:
             from silica.config import CONFIG
 
             snap_tau = float(getattr(CONFIG, "episodic_embed_snap_tau", 0.0))
+            supersede_tau = float(getattr(CONFIG, "episodic_supersede_tau", 0.0))
         except Exception:
             pass
         EpisodicStore().capture(ephemerals, run_id=run_id, seen=seen,
                                 embedder=embedder, schema=schema,
-                                snap_tau=snap_tau, vault=vault, notes=notes)
+                                snap_tau=snap_tau, supersede_tau=supersede_tau,
+                                vault=vault, notes=notes)
     except Exception as e:
         logger.warning("episodic capture failed (ingest continues): %s", e)
 

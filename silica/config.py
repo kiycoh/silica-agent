@@ -262,12 +262,62 @@ class SilicaConfig:
         default_factory=lambda: int(os.getenv("SILICA_EPISODIC_NUCLEATION_RUNS", "3"))
     )
     # Canonical-keys matcher cascade (fase 2): capture-time embed-snap
-    # threshold on KEY embeddings, 0 = off. Probe-gated on LoCoMo
-    # (bench/locomo_embed_identity_gates.md, tau window ~0.80-0.85); a nonzero
-    # default requires the harness A/B to promote it.
+    # threshold on KEY embeddings. STAYS 0 (off): the 2026-08-02 snap audit
+    # (bench/snap_replay.py, bench/snap_band_conv26.json) refuted both candidate
+    # taus by replaying conv-26's frozen arrival stream and reading every fire.
+    # 0.83 beats 0.80 (of the 15 merges only 0.80 makes, ~13 are wrong and the
+    # single cross-person merge is among them), but 0.83 is not safe either: of
+    # its 56 fires, 18 are four PING-PONG pairs where two facts supersede each
+    # other in turn (event_date <-> event_topic alternates 8 times), and 21 fire
+    # below the separation probe's own min-gold of 0.8528, merging attribute
+    # against attribute (pets_dog_oliver -> pets_cat_bailey_addition).
+    # Why the probe's 0.7374/0.8528 valley did not transfer: it was measured on
+    # person-first keys (`melanie.family.pic`), while real stores key
+    # `user.melanie.*` and `assistant.session_N.*`. The shared prefix inflates
+    # every pairwise cosine, so a tau calibrated on one schema means nothing on
+    # the other. Re-measure the valley on the shipped schema before any retry,
+    # and fix the two guards first (see episodic._snap_entity / _snap_head).
     episodic_embed_snap_tau: float = field(
         default_factory=lambda: float(os.getenv("SILICA_EPISODIC_EMBED_SNAP_TAU", "0"))
     )
+    # Supersede gate (key-collision diagnosis 2026-08-02): minimum TEXT cosine
+    # between a same-key arrival and the live head it would bury for the
+    # supersede to proceed; below it the arrival FORKS a sibling live chain
+    # instead, so distinct facts sharing a slotty key ("event_date" holding
+    # five different events) stop erasing each other. 0 = off (always
+    # supersede, the pre-gate behavior). The probe
+    # (bench/supersede_gate_probe.json, 1081 pairs) and the mid-band hand-label
+    # (bench/supersede_gate_midband_labels.json) size the tau: genuine updates
+    # sit >= ~0.83, collisions center at 0.53, and the 0.55-0.70 band is ~56%
+    # collision with no internal separation — so if it is ever armed the tau
+    # belongs at the band's TOP, i.e. 0.70. A false fork costs one near-duplicate live fact; a
+    # missed fork fabricates a retraction, so the asymmetry picks the
+    # aggressive end. Replay evidence (bench/snap_replay.py --gate-tau): on
+    # conv-26 live facts go 107 → 134, rescuing 27 of 29 burials while keeping
+    # 2 real supersedes; on the worst store 20 → 190, rescuing 170 while
+    # keeping 20 genuine update chains. Known miss: event_date school→workshop
+    # scores 0.771 and still buries — the residue needs the distiller's key
+    # contract, not a lower tau. Band is qwen3-embedding-4b-relative;
+    # re-measure before trusting under another embedder. Gate abstains (legacy
+    # supersede) when either vector is unavailable.
+    # SHIPS OFF, deliberately. The answer-path A/B (bench/gate_answer_ab.py,
+    # conv-26, 199 questions, episodic block only) came back NULL: 52.8% ->
+    # 53.8%, discordant 14/12, McNemar exact p=0.845. The gate demonstrably
+    # fixes store integrity (it stops fabricated retractions) but buys nothing
+    # measurable on the product metric, so it stays behind the flag until
+    # something moves. Post-hoc and uncorrected, therefore only a hypothesis for
+    # the re-run: single-hop rose (discordant 10/2, p=0.039, the predicted
+    # direction since one buried fact is exactly what those questions need)
+    # while abstention (0/3) and open-domain (0/4) fell, consistent with more
+    # live facts giving the model more material to over-answer from.
+    # Before arming: re-run the A/B across more conversations (n=1 here against
+    # the 17 stores the collision scan covered) and watch abstention.
+    # evals/locomo/runner.py pins this to 0 regardless, so frozen baselines stay
+    # comparable even if the default moves.
+    episodic_supersede_tau: float = field(
+        default_factory=lambda: float(os.getenv("SILICA_EPISODIC_SUPERSEDE_TAU", "0"))
+    )
+
     # Relevance floor on the episodic embed leg (cosine). Without one, top-k
     # over `score > 0` ships the whole store on every query: measured on a
     # 11-fact store, "pasta recipe with tomatoes" recalled the same 10
