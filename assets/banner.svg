@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="Silica. Throw everything you know at it. It keeps the vault from rotting, answers out of your own files, and tells you when the answer isn't there.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 300" width="1200" height="300" role="img" aria-label="Silica. You cannot safely delegate writes to an LLM on a corpus you mean to keep. Silica exists to make that delegation safe.">
   <title>Silica</title>
 
   <defs>
@@ -5192,15 +5192,14 @@
       <path d="M44.8 -62.2Q44.4 -61.3 43.5 -61.3Q42.9 -61.3 41.8 -62.2Q40.8 -63.2 39.1 -64.3Q37.3 -65.4 34.7 -66.3Q32.1 -67.3 28.2 -67.3Q24.4 -67.3 21.4 -66.2Q18.5 -65.1 16.5 -63.2Q14.6 -61.3 13.5 -58.8Q12.5 -56.3 12.5 -53.6Q12.5 -50 14 -47.6Q15.6 -45.2 18.1 -43.6Q20.6 -42 23.7 -40.8Q26.9 -39.7 30.2 -38.6Q33.6 -37.5 36.8 -36.2Q40 -34.9 42.5 -32.9Q45 -30.9 46.5 -27.9Q48 -25 48 -20.7Q48 -16.2 46.5 -12.3Q45 -8.3 42.1 -5.5Q39.2 -2.6 35 -0.9Q30.8 0.8 25.4 0.8Q18.4 0.8 13.3 -1.7Q8.2 -4.2 4.5 -8.5L5.9 -10.7Q6.5 -11.4 7.2 -11.4Q7.7 -11.4 8.4 -10.8Q9.1 -10.2 10.1 -9.3Q11.1 -8.5 12.5 -7.4Q13.9 -6.4 15.8 -5.5Q17.6 -4.7 20 -4.1Q22.4 -3.5 25.5 -3.5Q29.7 -3.5 33 -4.7Q36.2 -6 38.5 -8.2Q40.8 -10.4 42 -13.4Q43.2 -16.4 43.2 -19.9Q43.2 -23.7 41.7 -26.1Q40.2 -28.5 37.7 -30.1Q35.1 -31.8 32 -32.9Q28.8 -34 25.5 -35Q22.1 -36.1 18.9 -37.4Q15.8 -38.7 13.2 -40.7Q10.8 -42.7 9.2 -45.7Q7.7 -48.8 7.7 -53.3Q7.7 -56.9 9.1 -60.2Q10.4 -63.5 13 -66Q15.6 -68.5 19.4 -70Q23.2 -71.5 28.2 -71.5Q33.6 -71.5 38 -69.8Q42.4 -68 46 -64.5Z M85.1 0H80V-70.8H85.1Z M160.7 -4.4V0H122V-70.8H127.2V-4.4Z M193.7 0H188.6V-70.8H193.7Z M281.7 -11.9Q282.2 -11.9 282.6 -11.6L284.6 -9.4Q282.4 -7.1 279.8 -5.2Q277.2 -3.3 274.1 -2Q271.1 -0.7 267.4 0.1Q263.7 0.8 259.3 0.8Q251.9 0.8 245.8 -1.8Q239.7 -4.4 235.3 -9.1Q230.9 -13.8 228.5 -20.5Q226 -27.2 226 -35.4Q226 -43.5 228.5 -50.1Q231 -56.8 235.5 -61.5Q240 -66.3 246.3 -68.9Q252.6 -71.5 260.2 -71.5Q267.5 -71.5 273.1 -69.3Q278.7 -67 283.3 -63L281.8 -60.7Q281.4 -60.1 280.5 -60.1Q279.9 -60.1 278.5 -61.2Q277.2 -62.3 274.8 -63.6Q272.4 -65 268.8 -66.1Q265.2 -67.2 260.2 -67.2Q253.8 -67.2 248.5 -65Q243.2 -62.8 239.4 -58.7Q235.5 -54.6 233.4 -48.7Q231.2 -42.8 231.2 -35.4Q231.2 -27.9 233.4 -22Q235.6 -16.1 239.4 -12Q243.2 -8 248.4 -5.8Q253.5 -3.6 259.6 -3.6Q263.4 -3.6 266.3 -4.1Q269.3 -4.6 271.8 -5.6Q274.3 -6.6 276.5 -8.1Q278.6 -9.5 280.7 -11.5Q280.9 -11.7 281.2 -11.8Q281.4 -11.9 281.7 -11.9Z M352.4 -25.7 338 -61.5Q337.2 -63.2 336.6 -65.7Q336.2 -64.5 335.9 -63.4Q335.6 -62.3 335.2 -61.4L320.8 -25.7ZM368.1 0H364.1Q363.4 0 363 -0.4Q362.5 -0.8 362.2 -1.4L354 -21.9H319.2L310.9 -1.4Q310.7 -0.8 310.2 -0.4Q309.7 0 309 0H305.1L334.1 -70.8H339.1Z"/>
     </g>
 
-    <!-- three beats, one line each: what you hand it, what it stops from
-         happening, and what it does when it has nothing to answer with.
+    <!-- the claim on two lines, then what Silica is for on the third.
          Sized so the longest line keeps ~15% of the column in reserve, since
          this is live text and a machine without Inter falls back wider. -->
     <text font-family="'Inter','Segoe UI',Helvetica,Arial,sans-serif"
           font-size="26" font-weight="400" fill="#a8adc9">
-      <tspan x="380" y="174">Throw everything you know at it. It keeps the vault</tspan>
-      <tspan x="380" y="208">from rotting, answers out of your own files,</tspan>
-      <tspan x="380" y="242">and tells you when the answer isn't there.</tspan>
+      <tspan x="380" y="174">You cannot safely delegate writes to an LLM</tspan>
+      <tspan x="380" y="208">on a corpus you mean to keep.</tspan>
+      <tspan x="380" y="242">Silica exists to make that delegation safe.</tspan>
     </text>
 
     <rect x="0.5" y="0.5" width="1199" height="299" rx="16" fill="none"

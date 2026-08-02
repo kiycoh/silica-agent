@@ -20,12 +20,19 @@
 </p>
 
 
-<h3 align="center">Throw everything you know at it. It keeps the vault from rotting,<br/>answers out of your own files, and tells you when the answer isn't there.</h3>
+<h3 align="center">You cannot safely delegate writes to an LLM on a corpus<br/>you mean to keep. Silica exists to make that delegation safe.</h3>
 
 <p align="center">
-Point it at a folder of docs or at a codebase, one vault holds both. It links what it adds,<br/>
-dedups the repeats, and audits what rotted. Every write is re-read afterwards, and reverted<br/>
-if it broke something. Local-first. Your files stay plain markdown, readable with or without it.
+On facts absent from its training data, hallucination has a statistical floor (<a href="https://arxiv.org/abs/2509.04664">OpenAI</a>),<br/>
+and a personal vault is made of exactly those facts. Left editing over a long workflow, even<br/>
+frontier models corrupt a quarter of a document (<a href="https://arxiv.org/abs/2604.15597">Microsoft</a>). And in a linked vault the<br/>
+damage compounds: today's unchecked edit is retrieved as tomorrow's ground truth.
+</p>
+
+<p align="center">
+Silica is the transactional write path for a folder of markdown: the model proposes, a parser<br/>
+and an FSM verify and execute, and every write is re-read after it lands, reverted if it broke<br/>
+something. Notes or a codebase, one vault holds both. Local-first, readable with or without it.
 </p>
 
 <p align="center">
@@ -50,25 +57,55 @@ if it broke something. Local-first. Your files stay plain markdown, readable wit
 
 ### The problem
 
-Two things go wrong the moment you give an assistant access to what you know.
+**Errors enter by construction.** On facts with no learnable pattern, a model's hallucination rate has a statistical lower bound: it cannot fall below the share of facts seen only once in training ([Kalai et al., 2025](https://arxiv.org/abs/2509.04664)). A personal vault is the limiting case of that theorem. Your decisions, your meetings, your half-finished ideas are not rare in the training data, they are absent from it. This is not a bug the next model release fixes.
 
-1. **It answers from somewhere other than your material.** The model's own memory, a plausible paraphrase, a note that stopped being true a year ago. The answer reads the same either way, so you cannot tell which one you got.
+**Errors compound.** Microsoft's DELEGATE-52 benchmark left documents in a model's care across long editing workflows: even frontier models corrupted an average of 25% of the content, in sparse, severe errors that land silently, and the damage grows with document size, interaction length, and distractor files ([Laban et al., 2026](https://arxiv.org/abs/2604.15597)).
 
-2. **It edits your material and nobody checks the edit.** A merge orphans a note, a rewrite breaks a link, a cleanup flattens a distinction you cared about. Nothing fails loudly. You find out three weeks later, if at all.
+**Errors propagate.** A vault is not a pile of independent files, it is a linked graph that gets retrieved from. The hallucination written today is the ground truth recalled tomorrow: the model links to it, derives notes from it, answers out of it. Corruption does not stay where it landed.
 
-- **And it never has to live with the mess.** A vault decays on its own: the same idea captured five times, notes nothing points at any more, links to a file that moved, a subsystem documented against a commit from three months ago. An assistant that only reads has no stake in any of that.
+**And the two obvious outs are not outs.** Keep the assistant read-only and the vault rots on its own: the same idea captured five times, notes nothing points at any more, links to a file that moved, a subsystem documented against a commit from three months ago. Read-only also leaves the answering problem intact, the model still answers from its own memory or a stale note, and the answer reads the same either way. Or take the usual remedy, a tool that copies your notes into a store of its own: now the corpus being corrupted is one you cannot even open to check.
 
-***The usual remedy makes all three worse:*** the tool copies your notes into a store of its own. Now the thing being answered from is not the thing on your disk, and you cannot open it to check.
-
-Silica takes the opposite position. **The vault is the product, not the transcript.** Your folder of markdown is the database, Silica is answerable for the state it is in, and every write it makes passes a gate that re-reads what it just wrote. It runs on your machine: local models (LM Studio, Ollama) are first-class, and giving an endpoint its start command once (`SILICA_EMBEDDING_SERVE_CMD`, `SILICA_RERANK_SERVE_CMD`, `SILICA_PROVIDER_SERVE_CMD`) is enough for Silica to bring that server up itself whenever it finds it down.
+Silica takes the opposite position. **The vault is the product, not the transcript.** Your folder of markdown is the database, Silica is answerable for the state it is in, and every write it makes passes a gate that re-reads what it just wrote. It runs on your machine, and local models (LM Studio, Ollama) are first-class.
 
 <sub><b>New to this?</b> A "vault" is just a folder of markdown (<code>.md</code>) files. If you already use Obsidian, that folder is your Obsidian vault, and Silica works on it directly.</sub>
 
 ---
 
-## Compared to the alternatives
+## How the guardrail works
 
-> Everyone else either only reads your material, or owns a copy of it you cannot read. Silica is the one that treats your own file tree as the database, and puts a compiler-style gate in front of every change to it.
+Code already survived this exact failure mode: software absorbs model-written changes because nothing lands unparsed. Compilers, type checkers, and test gates mechanically check what the model writes, and you let them reject and rewrite your work every day. Vaults had no equivalent. Silica puts an LLM's edits behind the same kind of guardrail:
+
+| You already let a tool… | to guard against… | Silica does the same by… |
+| :--- | :--- | :--- |
+| a **compiler** reject source that will not build | syntax and type errors | an FSM refusing to commit a note that fails its structural checks |
+| a **test suite** block a merge that breaks behavior | regressions | a post-write verify gate that reverts any edit which breaks vault coherence |
+| **git** roll back a bad commit | losing history | `/undo` and `/revert` rolling back per note or per run |
+| a **formatter** rewrite your code without asking | drift and inconsistency | graph-safe refactors that redirect links so a merge never orphans a note |
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/pipeline.svg" alt="Silica vault pipeline mapped onto a software engineering pipeline" width="880" />
+</p>
+
+### Design contracts
+
+Silica is not a free-form agent. Every vault mutation passes through a finite-state machine, and these are the invariants it enforces:
+
+- **Single entry point.** All nucleation flows through the Injector FSM. There is no side channel that writes to the vault.
+- **Verify or revert.** A post-write mismatch raises `VerifyMismatchError` and rolls the write back.
+- **Graph-safe moves.** Renames, merges, and splits redirect incoming links atomically.
+- **Zero-trust ingress.** External content such as web search results can only land in `Inbox/`, and reaches the vault only through explicit staging and FSM review.
+- **Machine memory only by promotion.** What Silica learns from its own sessions becomes episodic facts outside the vault, never notes. It enters the vault only when you promote it, through the same gate as everything else.
+- **Layered rollback.** `/undo` (per note), `/revert` (per run), and optional `SILICA_GIT_COMMIT=auto` stack as independent safety nets.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/architecture.svg" alt="Silica architectural schematic" width="880" />
+</p>
+
+> **Scope of the claim.** The guardrail is enforced today on the normal write path. It is not yet crash-verified: a harness that kills the process mid-write to prove the invariants survive failure is [in progress](#status). Read it as enforced control flow, not as a proof under adversarial faults. Back your vault up before letting any tool rewrite it, and keep git as the byte-level backstop.
+
+---
+
+## Compared to the alternatives
 
 The two nearest neighbors are worth naming. [Basic Memory](https://github.com/basicmachines-co/basic-memory) is the substrate twin: markdown on your disk, wikilinks, MCP, same AGPL license. [LLM Wiki](https://github.com/nashsu/llm_wiki) is the closest in ambition: a desktop app that compiles your documents into a wiki and keeps it current.
 
@@ -87,7 +124,7 @@ The two nearest neighbors are worth naming. [Basic Memory](https://github.com/ba
 
 ### What only Silica does
 
-- **Verify or revert on the memory substrate itself.** 2026 produced an entire memory-poisoning literature proposing exactly this loop, stage the write, validate it, commit or roll back: Cordon, MOSS, MemLineage, MemAudit, SMSR. Every one of them is a research prototype. Silica ships the loop: one FSM entry point, a post-write re-read, an automatic revert on mismatch, `/undo` and `/revert` behind that. Read the [scope of the claim](#how-the-guardrail-works) before leaning on it.
+- **Verify or revert on the memory substrate itself.** 2026 produced an entire memory-poisoning literature proposing exactly [the loop above](#how-the-guardrail-works), stage the write, validate it, commit or roll back: Cordon, MOSS, MemLineage, MemAudit, SMSR. Every one of them is a research prototype. Silica ships it, scope of the claim included.
 - **A core that survives with no models at all.** The co-occurrence concept graph, the BM25 leg, and MinHash dedup need no embedder. Competitor cores are LLM-mandatory by construction, and the incentive runs that way: their business is the model call.
 - **Notes and code as one substrate, behind one gate.** The split in the field is clean and nobody crosses it. Memory agents never touch a codebase; wiki agents never curate a human's notes.
 - **Graph-safe mutation of links a human wrote.** Obsidian redirects links but has no agent driving it. Agents have no human link graph to keep intact. Silica has both.
@@ -260,6 +297,9 @@ Drop raw clippings, drafts, PDFs, or Jupyter Notebooks (`.ipynb`) in a folder. `
 **When the vault does not have it.**<br/>
 If every search a turn ran came back empty, Silica says so instead of answering thin, and names `/web`. Typing it is the consent: the answer comes from the web, with citations appended from the pages that were actually opened rather than from what the model claims it read. Fetching is direct, with no third-party reader in the path. That turn writes nothing; `/keep` saves it to the inbox when it was worth keeping, and `/web-search "<topic>"` does the same in bulk for a whole question.
 
+**See the structure your notes already have.**<br/>
+`/graph out.html` renders the vault as an interactive page, notes as nodes, communities colored and named, no server needed. `/map <note>` grows a radial mind-map out from a single note, written as an Obsidian canvas plus an SVG. Both local, both drawn from the same co-occurrence graph retrieval uses.
+
 Reorganizing by intent, typed relation maps, reading paths, diagrams, contested claims, dedup, and the rest are in the [command reference](#command-reference).
 
 ---
@@ -316,17 +356,6 @@ uv run python -m evals.locomo --data locomo10.json --run-root RUN_DIR \
 
 ---
 
-## See your vault
-
-Both views render the structure your notes already have, locally, off the same co-occurrence graph the retrieval legs use.
-
-| View | What it gives you |
-| :--- | :--- |
-| **`/graph out.html`** | An interactive page: notes as nodes, links as edges, communities colored and named automatically so the clusters read at a glance. Opens in any browser, no server needed. |
-| **`/map <note>`** | A radial mind-map grown out from a single note, written as `maps/<stem>.canvas` (opens natively in Obsidian) plus an SVG. Laid out by community so nodes never overlap. |
-
----
-
 ## Point it at code
 
 Set `SILICA_VAULT` to a repository instead of a note folder and Silica keeps a human-readable map of the code under `docs/silica/`, kept honest against git.
@@ -353,39 +382,6 @@ flowchart TD
 <sub>A reformat is not a documentation debt. Only a real shape change is, and that is the difference `/stale` is built to make. `/impact` cuts the same question the other way: from a diff to the notes that document those files, plus their 1-hop neighbors.</sub>
 
 One artifact, two readers: a human reads it as a current map of the repository, and a coding agent reads it over the [MCP server](#4-agent-memory--silica-mcp) to ground its work in the real structure instead of re-deriving it every session.
-
----
-
-## How the guardrail works
-
-You already let deterministic tools reject and rewrite your work every day. You do not trust those tools, you trust the guardrail they enforce. Silica puts an LLM's edits behind the same kind of guardrail:
-
-| You already let a tool… | to guard against… | Silica does the same by… |
-| :--- | :--- | :--- |
-| a **compiler** reject source that will not build | syntax and type errors | an FSM refusing to commit a note that fails its structural checks |
-| a **test suite** block a merge that breaks behavior | regressions | a post-write verify gate that reverts any edit which breaks vault coherence |
-| **git** roll back a bad commit | losing history | `/undo` and `/revert` rolling back per note or per run |
-| a **formatter** rewrite your code without asking | drift and inconsistency | graph-safe refactors that redirect links so a merge never orphans a note |
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/pipeline.svg" alt="Silica vault pipeline mapped onto a software engineering pipeline" width="880" />
-</p>
-
-### Design contracts
-
-Silica is not a free-form agent. Every vault mutation passes through a finite-state machine, and these are the invariants it enforces:
-
-- **Single entry point.** All nucleation flows through the Injector FSM. There is no side channel that writes to the vault.
-- **Verify or revert.** A post-write mismatch raises `VerifyMismatchError` and rolls the write back.
-- **Graph-safe moves.** Renames, merges, and splits redirect incoming links atomically.
-- **Zero-trust ingress.** External content such as web search results can only land in `Inbox/`, and reaches the vault only through explicit staging and FSM review.
-- **Layered rollback.** `/undo` (per note), `/revert` (per run), and optional `SILICA_GIT_COMMIT=auto` stack as independent safety nets.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/architecture.svg" alt="Silica architectural schematic" width="880" />
-</p>
-
-> **Scope of the claim.** The guardrail is enforced today on the normal write path. It is not yet crash-verified: a harness that kills the process mid-write to prove the invariants survive failure is [in progress](#status). Read it as enforced control flow, not as a proof under adversarial faults. Back your vault up before letting any tool rewrite it, and keep git as the byte-level backstop.
 
 ---
 
@@ -419,6 +415,8 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `/web-search "<topic>" [--max-searches=N]` | Research on the web → cited findings note in Inbox |
 | `/fetch <url>` | Read one page or YouTube transcript → verbatim note in Inbox |
 | `/convert <file...>` | Transcode non-markdown files (PDFs) into markdown drafts |
+| `/promote [<key>]` | List what session memory keeps repeating, promote one chain into a note through the gate |
+| `/episodes [--save=<path>]` | Show what session memory holds, dated and grouped by key; writes nothing unless you name a path |
 
 **Indexes** `/embed` · `/cooccur` (embedder-free) · `/lexical` (BM25 and fuzzy)
 
@@ -444,6 +442,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `/vault [path]` | Show active vault or switch to another path for this session |
 | `/help` · `/model` · `/tools` | Display help, current LLM model limits, or registered toolset |
 | `/verbose` · `/thinking` · `/clear` · `/exit` | Cycle tool progress, toggle CoT reasoning, clear history, or exit |
+| `/incognito` | Stop capturing the session you are in (capture is opt-in to begin with) |
 
 ---
 
@@ -457,6 +456,7 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 | `SILICA_PROVIDER` | `lmstudio` or `openrouter` |
 | `SILICA_VAULT` | Vault path, adopted as-is. The working directory wins over this value unless it is exported in the environment (`SILICA_VAULT=... silica`, or an MCP client's `env` block). Reads cover the whole folder; writes are confined by `write_dir` in `vault.yaml` (a source tree declares `docs/silica`, a note folder writes in place) |
 | `SILICA_EMBEDDING_MODEL` | Embedding model for semantic tasks (default `qwen3-embedding-4b`) |
+| `SILICA_PROVIDER_SERVE_CMD` | Start command for the model endpoint; when set, Silica brings the server up itself whenever it finds it down. Same for `SILICA_EMBEDDING_SERVE_CMD` and `SILICA_RERANK_SERVE_CMD` |
 | `SILICA_BACKEND` | `fs` (default, headless). The Obsidian bridge installs `ws` live at dial-in |
 | `SILICA_GIT_COMMIT` | Git safety net for writes (`off`, `auto`) |
 | `SILICA_TAVILY_API_KEY` | Optional: a backstop for `/web-search`, used only when DuckDuckGo rate-limits us. Search scrapes DuckDuckGo first either way, no key needed |
@@ -470,7 +470,7 @@ Everything under **Available now** ships in the current release. Everything belo
 
 **Available now.** Note nucleation, structural audit, semantic and embedder-free search, graph-safe refactor / dedup / merge, graph and mind-map export, codebase skeletons with git-backed `/stale` and `/impact`, the code wiki, layered `/undo` and `/revert`, the git safety net, the MCP server, and the Claude Code plugin.
 
-**Next, and it is the one that decides the rest.** Upkeep runs when you ask for it (`/curate`, `/organize`, `/stale`, `/report`). Being answerable for a folder means noticing without being asked, so the next work is scheduled upkeep: a folder watch, an audit that runs on its own, and a queue of changes waiting for your yes. Until it ships, read the claim at the top of this file as on demand.
+**Next, and it is the one that decides the rest.** Upkeep runs when you ask for it (`/curate`, `/organize`, `/stale`, `/report`). Being answerable for a folder means noticing without being asked, so the next work is scheduled upkeep: a folder watch, an audit that runs on its own, and a queue of changes waiting for your yes. Until it ships, Silica keeps the vault from rotting on demand, not on its own.
 
 **In progress.** Richer codebase coverage across more languages, PDF/DOCX/TXT nucleation, the live Obsidian bridge, and the crash harness backing the guardrail.
 
@@ -480,6 +480,8 @@ Everything under **Available now** ships in the current release. Everything belo
 
 ## References
 
+* **[Why Language Models Hallucinate](https://arxiv.org/abs/2509.04664)** (arXiv:2509.04664, 2025)
+* **[LLMs Corrupt Your Documents When You Delegate](https://arxiv.org/abs/2604.15597)** (arXiv:2604.15597, 2026)
 * **[From Agent Loops to Structured Graphs: A Scheduler-Theoretic Framework for LLM Agent Execution](https://arxiv.org/abs/2604.11378)** (arXiv:2604.11378, 2026)
 * **[Goal-Autopilot: A Verifiable Anti-Fabrication Firewall for Unattended Long-Horizon Agents](https://arxiv.org/abs/2606.11688)** (arXiv:2606.11688, 2026)
 * **[Is Your Agent Playing Dead? Deployed LLM Agents Exhibit Constraint-Evasive Fabrication and Thanatosis](https://arxiv.org/abs/2606.14831)** (arXiv:2606.14831, 2026)
