@@ -21,7 +21,7 @@ import typing
 from typing import TYPE_CHECKING
 
 from silica.router import orchestrator as orch
-from silica.kernel.prep_delegation import run_distiller
+from silica.kernel.prep_delegation import payload_inbox_text, run_distiller
 
 if TYPE_CHECKING:
     from silica.router.orchestrator import InjectorFSM
@@ -470,7 +470,13 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
 
 def handle_sanitize(fsm: "InjectorFSM") -> None:
     with orch.phase(fsm, fsm._chunk_task_id("sanitize"), "sanitize"):
-        res = orch.silica_sanitize(fsm._chunk_ctx["distiller_output_path"])
+        # The chunk's own inbox text anchors verbatim-body escape repair:
+        # doublings the source contains survive, everything else collapses.
+        # The full chunk is a superset of any steer-retry payload — a
+        # superset only errs toward preserving, the safe direction.
+        source = payload_inbox_text(fsm._chunks[fsm._current_chunk_idx])
+        res = orch.silica_sanitize(fsm._chunk_ctx["distiller_output_path"],
+                                   verbatim_source=source or None)
         if "error" in res:
             fsm._progress_note(fsm._chunk_task_id("sanitize"), "sanitize", "failed", error=res["error"])
             raise RuntimeError(f"Sanitize failed: {res['error']}")

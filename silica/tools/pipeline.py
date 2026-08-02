@@ -233,9 +233,13 @@ def silica_payload(recon_report_path: str, max_concepts: int = 7, max_bytes: int
 
 class SanitizeArgs(BaseModel):
     distiller_output_path: str = Field(description="Path to the raw distiller output JSON file")
+    verbatim_source: str | None = Field(
+        default=None,
+        description="The chunk's own inbox text; anchors verbatim-body escape repair per-site")
 
 @tool(SanitizeArgs, cls="composed", internal=True)
-def silica_sanitize(distiller_output_path: str) -> dict[str, Any]:
+def silica_sanitize(distiller_output_path: str,
+                    verbatim_source: str | None = None) -> dict[str, Any]:
     """Validates and sanitizes the JSON returned by Distiller workers."""
     from silica.kernel.text.sanitize import parse_json, normalize_ops
 
@@ -252,9 +256,10 @@ def silica_sanitize(distiller_output_path: str) -> dict[str, Any]:
 
     # Normalize op content: strip .md from wikilinks, etc.
     if isinstance(parsed_obj, list):
-        parsed_obj = normalize_ops(parsed_obj)
+        parsed_obj = normalize_ops(parsed_obj, verbatim_source=verbatim_source)
     elif isinstance(parsed_obj, dict) and "updates" in parsed_obj:
-        parsed_obj["updates"] = normalize_ops(parsed_obj["updates"])
+        parsed_obj["updates"] = normalize_ops(parsed_obj["updates"],
+                                              verbatim_source=verbatim_source)
 
     # Axis enforcement (Layer 2): demote ops whose linked_axis is not in main_thematic_axes.
     # Only activates when the distiller actually emitted axes — graceful degradation otherwise.

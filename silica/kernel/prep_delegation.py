@@ -167,9 +167,15 @@ def _payload_sample_text(payload: dict, limit: int | None = 4000) -> str:
             if excerpt:
                 parts.append(excerpt)
                 total += len(excerpt)
-                if total >= limit:
+                if limit is not None and total >= limit:
                     return "\n".join(parts)[:limit]
     return "\n".join(parts)
+
+
+def payload_inbox_text(payload: dict) -> str:
+    """The chunk's full inbox text — the source the sanitize step anchors
+    verbatim-body escape repair on (sanitize.normalize_ops verbatim_source)."""
+    return _payload_sample_text(payload, limit=None)
 
 
 # Per-string cap when echoing a rejected op back to the model: enough to

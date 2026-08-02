@@ -70,17 +70,33 @@ def repair_code_span_newlines(text: str) -> str:
 # through JSON: there is no escaping to do out there, so the second backslash
 # is the model over-escaping the very sequence it was told to copy verbatim
 # (measured on the body pass: 12 bodies out of 12).
-# ponytail: two known ceilings, both left standing. LaTeX `\\` as a line break
-# immediately followed by a letter collapses too (it almost always carries a
-# space or a bracket, so it survives), and a source genuinely discussing double
-# escaping loses its doubling. Repairing against the excerpt at validate time
-# removes both, at the cost of covering the extractive lane only.
+# With the source in hand the decision is per-site: a doubling the source
+# itself contains (a LaTeX `\\` row break glued to a letter, prose genuinely
+# discussing double escaping) is the model copying faithfully — kept. Any
+# other doubling is over-escape — collapsed. Callers with no source in scope
+# keep the blanket collapse, former ceilings included.
+# ponytail: the needle is searched across the WHOLE source, so a doubling
+# that excerpt A contains preserves an identical over-escape in a body drawn
+# from excerpt B of the same chunk — per-op excerpt attribution if that ever
+# bites.
 _OVER_ESCAPED_RE = re.compile(r"\\\\(?=[A-Za-z])")
+_WORD_AFTER_RE = re.compile(r"[A-Za-z]+")
 
 
-def collapse_over_escaped_backslashes(text: str) -> str:
-    """`\\\\top` -> `\\top` in text that was never JSON-escaped."""
-    return _OVER_ESCAPED_RE.sub(r"\\", text)
+def collapse_over_escaped_backslashes(text: str, source: str | None = None) -> str:
+    """`\\\\top` -> `\\top` in text that was never JSON-escaped.
+
+    With `source`, collapse only the sites whose doubled form (`\\\\` + the
+    following word) the source does not itself contain."""
+    if source is None:
+        return _OVER_ESCAPED_RE.sub(r"\\", text)
+
+    def _site(m: re.Match) -> str:
+        word = _WORD_AFTER_RE.match(m.string, m.end())
+        needle = m.group(0) + (word.group(0) if word else "")
+        return m.group(0) if needle in source else "\\"
+
+    return _OVER_ESCAPED_RE.sub(_site, text)
 
 
 def collapse_nested_wikilinks(text: str) -> str:
@@ -111,7 +127,7 @@ def _strip_md_ext(text: str) -> str:
 VERBATIM_BODY = "_verbatim_body"
 
 
-def normalize_ops(ops: list) -> list:
+def normalize_ops(ops: list, *, verbatim_source: str | None = None) -> list:
     """Post-process a list of op dicts to fix common distiller output errors.
 
     Applied normalizations:
@@ -119,6 +135,10 @@ def normalize_ops(ops: list) -> list:
     2. Strip filesystem-illegal characters from `title` when present.
     3. Undo JSON double-escaping in prose — skipped for VERBATIM_BODY ops,
        where the text never travelled through JSON to begin with.
+
+    `verbatim_source` is the chunk's own inbox text; when given, the
+    over-escape collapse on VERBATIM_BODY ops anchors per-site on it instead
+    of collapsing blanket.
     """
     if not isinstance(ops, list):
         return ops
@@ -140,7 +160,8 @@ def normalize_ops(ops: list) -> list:
                 parts = val.split("```")
                 for i in range(0, len(parts), 2):  # prose parts only
                     if verbatim:
-                        parts[i] = collapse_over_escaped_backslashes(parts[i])
+                        parts[i] = collapse_over_escaped_backslashes(
+                            parts[i], source=verbatim_source)
                     elif "\\n" in parts[i]:  # never inside math spans
                         parts[i] = replace_outside_math(parts[i], "\\n", "\n")
                     # After the expansion, never before: the expansion would

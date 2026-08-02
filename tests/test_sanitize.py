@@ -446,6 +446,42 @@ def test_external_body_collapses_over_escaped_backslashes():
         "Nelle regex \\b non è un carattere, e \\t lo è, come $A^\\top$.")
 
 
+def test_external_body_source_anchored_repair_keeps_genuine_doublings():
+    # The blanket collapse had two known ceilings: a LaTeX `\\` row break
+    # glued to a letter collapsed too, and a source genuinely discussing
+    # double escaping lost its doubling. With the source excerpt in hand the
+    # decision is per-site: a doubling the source itself contains is the
+    # model copying faithfully — kept; any other doubling is over-escape.
+    src = ("Matrice: $\\begin{matrix} a \\\\b \\end{matrix}$.\n"
+           'In C una newline si scrive "\\\\n" nel sorgente.\n'
+           "La trasposta è $A^\\top$.")
+    body = ("Matrice: $\\begin{matrix} a \\\\b \\end{matrix}$. "
+            'In C una newline si scrive "\\\\n". La trasposta è $A^\\\\top$.')
+    raw = (
+        '{"updates":[{"op":"write","path":"X.md","snippet_ref":1}]}\n'
+        '\n'
+        '===SILICA-BODY 1===\n'
+        + body
+    )
+    parsed, _ = parse_json(raw)
+    out = normalize_ops(parsed["updates"], verbatim_source=src)[0]["snippet"]
+    assert out == ("Matrice: $\\begin{matrix} a \\\\b \\end{matrix}$. "
+                   'In C una newline si scrive "\\\\n". La trasposta è $A^\\top$.')
+
+
+def test_collapse_with_source_decides_per_site():
+    from silica.kernel.text.sanitize import collapse_over_escaped_backslashes
+
+    # same doubled word, present in the source → kept; absent → collapsed
+    assert collapse_over_escaped_backslashes(
+        "resta \\\\beta e cade \\\\top",
+        source="il sorgente contiene \\\\beta e \\top",
+    ) == "resta \\\\beta e cade \\top"
+    # no source → blanket collapse, byte-identical to the old behavior
+    assert collapse_over_escaped_backslashes(
+        "resta \\\\beta e cade \\\\top") == "resta \\beta e cade \\top"
+
+
 def test_external_body_collapse_spares_latex_breaks_and_fenced_code():
     # `\\` as a LaTeX line break carries a space or a bracket, not a letter.
     # Inside a fence a doubled backslash is source: C's "\\n" is an escaped
