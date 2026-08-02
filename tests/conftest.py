@@ -69,6 +69,21 @@ def _isolate_cooccurrence_index(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.fixture(autouse=True)
+def _isolate_distill_cache(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect the distiller reply cache to a per-test tmp path.
+
+    Any test driving run_distiller with the cache armed would otherwise write
+    the developer's real ~/.silica/cache/distill, and a stored reply would
+    then replay into an unrelated test on the next run. The flag is cleared
+    suite-wide too, so a developer's .env cannot decide whether a test that
+    distills twice sees one call or two; tests that want the cache set it.
+    """
+    import silica.kernel.distill_cache as cache_mod
+    monkeypatch.delenv("SILICA_DISTILL_CACHE", raising=False)
+    monkeypatch.setattr(cache_mod, "cache_root", lambda: tmp_path / "distill_cache")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_episodic_store(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect the default episodic store to a per-test tmp path.
 

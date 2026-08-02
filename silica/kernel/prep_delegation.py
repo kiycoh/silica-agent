@@ -507,6 +507,7 @@ def run_distiller(
     """
     from silica.agent.providers import get_provider
     from silica.config import CONFIG
+    from silica.kernel import distill_cache
     from silica.kernel.context_builder import build_context
     from silica.kernel.write.ops import DistillerOutput, DistillerStructure
     from silica.kernel.text.sanitize import parse_json
@@ -565,6 +566,37 @@ def run_distiller(
         {"role": "user", "content": user_parts},
     ]
 
+    # Cache lookup before the budget arithmetic: sizing the output asks the
+    # live provider for its window, so a hit that ran after it would pay a
+    # network round trip to replay a stored reply. Fingerprints only under the
+    # flag: entry_key serializes the full context payload, a per-note cost the
+    # default-off live path must not pay.
+    cache_ns = cache_key = None
+    if distill_cache.enabled():
+        cache_ns = distill_cache.prompt_fingerprint(prompt_text)
+        cache_key = distill_cache.entry_key({
+            "messages": messages,
+            "schema": "structure" if (two_pass or structure_only) else "full",
+            "two_pass": two_pass,
+            "escalate": escalate,
+            "model": (CONFIG.distill_escalation_model if escalate
+                      else CONFIG.worker_model) or CONFIG.model,
+            # ponytail: max_tokens deliberately out of the key. It is derived
+            # from live provider limits, so including it would turn an
+            # unreachable provider into a cache miss instead of a replay. Put
+            # it in the key if an arm ever needs to vary the output budget on
+            # purpose.
+        })
+        if (hit := distill_cache.load(cache_ns, cache_key)) is not None:
+            logger.info("Distiller reply replayed from cache (p%s)", cache_ns)
+            return hit
+
+    # Only a complete reply may enter the cache. A salvaged prefix, a length-
+    # truncated generation, a bodyless stitch or a fallback-served call is a
+    # recovery input: storing one replays the loss on every later run of the
+    # arm, silently, which is worse than no cache at all.
+    cache_ok = True
+
     logger.info("Calling Distiller LLM%s", " (escalated)" if escalate else "")
 
     # #2: size the output budget to the real prompt + model context window
@@ -604,6 +636,7 @@ def run_distiller(
     deadline = float(os.getenv("DISTILLER_TIMEOUT", "300"))
 
     def _llm(msgs: list[dict], response_schema):
+        nonlocal cache_ok
         try:
             provider = get_provider(CONFIG, role="escalation" if escalate else "worker")
             return _call_with_deadline(lambda: provider.call_llm(
@@ -616,6 +649,10 @@ def run_distiller(
                 openrouter_provider=None if escalate else CONFIG.openrouter_provider_distiller,
             ), deadline)
         except Exception as e:
+            # The reply now comes from the router model, not the worker the
+            # cache key names: replaying it would blend two models' corpora
+            # under one key.
+            cache_ok = False
             logger.warning("Distiller provider call failed, falling back to litellm: %s", e)
             from silica.agent.llm import call_llm
             return _call_with_deadline(lambda: call_llm(
@@ -631,6 +668,10 @@ def run_distiller(
         messages,
         DistillerStructure if (two_pass or structure_only) else DistillerOutput,
     )
+
+    if getattr(response, "finish_reason", None) == "length":
+        # Even a prefix that still parses is a truncation: the tail is lost.
+        cache_ok = False
 
     raw_output = response.text or ""
     if not raw_output.strip():
@@ -651,6 +692,7 @@ def run_distiller(
                 len(salvaged["updates"]),
             )
             parsed = salvaged
+            cache_ok = False
         else:
             return {"error": f"Distiller output JSON parse failed: {e}", "raw": raw_output[:500]}
 
@@ -670,6 +712,17 @@ def run_distiller(
                 "body pass failed (%s) — %d op(s) left bodyless; the validate "
                 "floor rejects them downstream, ephemerals survive",
                 e, len(body_ops))
+        if any(not op.get(_BODY_FIELD.get(op.get("op"), "snippet"))
+               for op in body_ops):
+            # A missing ===SILICA-BODY N=== block left an op bodyless; the
+            # floor would reject that op again on every replay.
+            cache_ok = False
 
     logger.info("Distiller produced %d updates", len(parsed["updates"]))
+    # Successes only, and complete ones only: error paths returned already,
+    # and cache_ok gates out salvaged/truncated/bodyless/fallback replies.
+    # cache_key doubles as the enabled() witness — it exists only under the
+    # flag, so a mid-run flag flip cannot store under a key never computed.
+    if cache_key is not None and cache_ok:
+        distill_cache.store(cache_ns, cache_key, parsed)
     return parsed
