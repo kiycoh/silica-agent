@@ -62,6 +62,7 @@ ALLOWED = {
     "tools/runners.py":             "pairwise cosine dedup windows (silica_dedup)",
     "tools/curate.py":              "constructs stores to inject into the facade (orphan candidates)",
     "onboarding/checks.py":         "metadata-only read via the public frozen_lang accessor (doctor language check), no store construction, not relatedness ranking",
+    "kernel/report/graph_report/compute.py": "store-file stat only (_index_path, for the report memo's freshness key), no store construction, not relatedness ranking",
 }
 
 

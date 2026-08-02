@@ -33,6 +33,39 @@ from silica.kernel.report.graph_report.models import (
 
 logger = logging.getLogger(__name__)
 
+# Epoch-keyed memo for compute_report — see the comment inside it. The epoch
+# lives INSIDE the key: freshness checked against a separate global raced under
+# the MCP server's one-thread-per-request dispatch (a slow analytics pass could
+# store its stale report after a newer epoch had cleared the memo). A key that
+# names its own epoch cannot be served stale; entries from older epochs are
+# swept on the next miss so they cannot pile up.
+_report_memo: dict[tuple, VaultReport] = {}
+
+
+def _index_stores_sig(with_embeddings: bool, with_cooccurrence: bool) -> tuple:
+    """(mtime_ns, size) of the index-side stores these flags pull in.
+
+    They live in ~/.silica/index/, outside the vault walk `vault_epoch`
+    hashes, so a re-embed or a co-occurrence refresh changes the report
+    without touching any note. Absent file or failed stat -> None slot: still
+    a stable key, and it moves the moment the file appears.
+    """
+    files = []
+    if with_embeddings:
+        from silica.kernel.recall.embed import _index_path
+        files.append(_index_path())
+    if with_cooccurrence:
+        from silica.kernel.recall.cooccurrence import _index_path as _cooccur_path
+        files.append(_cooccur_path())
+    sig = []
+    for p in files:
+        try:
+            st = p.stat()
+            sig.append((st.st_mtime_ns, st.st_size))
+        except OSError:
+            sig.append(None)
+    return tuple(sig)
+
 
 def compute_report(
     folder: str = "",
@@ -67,6 +100,32 @@ def compute_report(
         edge_graph,
         structural_gaps,
     )
+
+    # Memoized on the vault's file-state epoch: silica_graph_explain calls this
+    # with analytics=True on EVERY invocation, and a full analytics pass reads
+    # every body + runs PageRank and betweenness — seconds on a real vault, to
+    # answer a question about one note. Any file change bumps the epoch; the
+    # override seams (tests, custom feeds) bypass the memo entirely.
+    # ponytail: quiz/contested stores can move without a file change, so those
+    # report sections can lag one epoch; split their keys if it ever bites.
+    overrides = (_nodes_edges_override, _cooccur_store_override,
+                 _mtimes_override, _quiz_override)
+    memo_key = None
+    if all(o is None for o in overrides):
+        from silica.kernel.recall.paths import vault_epoch
+
+        if epoch := vault_epoch():
+            memo_key = (epoch,
+                        _index_stores_sig(with_embeddings, with_cooccurrence),
+                        folder, top_k, analytics, with_embeddings,
+                        with_cooccurrence)
+            if (hit := _report_memo.get(memo_key)) is not None:
+                return hit
+            # Miss: sweep entries from other epochs. A concurrent slow pass
+            # may still store under its own (older) epoch key afterwards —
+            # unreadable by construction, swept on the next miss.
+            for k in [k for k in _report_memo if k[0] != epoch]:
+                del _report_memo[k]
 
     if _nodes_edges_override is not None:
         nodes, edges = _nodes_edges_override
@@ -470,6 +529,11 @@ def compute_report(
     }
     report.totals = totals
 
+    if memo_key is not None:
+        # Callers treat VaultReport as read-only (its fields are "read-only
+        # signals" by contract); a caller that mutates one would poison the
+        # memo for the rest of the epoch.
+        _report_memo[memo_key] = report
     return report
 
 

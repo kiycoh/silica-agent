@@ -98,6 +98,57 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
     # re-produceable; upgrade if a real loss is ever traced here.
 
 
+def vault_epoch(vault: str | None = None) -> str:
+    """Cheap validity signature of a vault's current file state, or "".
+
+    One stat walk — sorted (path, mtime_ns, size) folded into a hash: the memo
+    key for vault-wide derivatives (report, graph payload, timeline). Any
+    create, edit, delete or move changes it, out-of-band ones included, since
+    this observes the disk and not an index. Size rides along so an
+    mtime-preserving restore (rsync -a, Syncthing) still bumps it.
+
+    Deliberately NOT debounced: a cached epoch would vouch for a vault it has
+    not looked at, and an edit inside the window would serve a pre-edit
+    derivative as fresh. The stat walk is the whole price (~10 ms per 1k
+    notes). Returns "" when no signature can be taken (unbound vault): ""
+    means "do not memoize", never "nothing changed".
+
+    Deliberately driver-free: the graph viewer split forbids this chain from
+    reaching the agent layer, and a stat walk needs nothing above stdlib.
+    """
+    import hashlib
+
+    raw = vault or getattr(CONFIG, "vault_path", "") or ""
+    if not str(raw).strip():
+        return ""  # unbound — Path("") would silently mean the CWD
+    root = Path(raw)
+    if not root.is_dir():
+        return ""
+    try:
+        ignored = ignore_matcher(root)
+        h = hashlib.sha1(str(root).encode("utf-8"))
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(
+                d for d in dirnames if not d.startswith(".") and not ignored(d)
+            )
+            for fn in sorted(filenames):
+                if not fn.endswith(".md"):
+                    continue
+                p = Path(dirpath) / fn
+                try:
+                    st = p.stat()
+                except OSError:
+                    continue  # deleted mid-walk: absent, like the sweep treats it
+                h.update(
+                    f"{p.relative_to(root)}\x00{st.st_mtime_ns}\x00{st.st_size}\x00"
+                    .encode("utf-8", errors="replace")
+                )
+        return h.hexdigest()
+    except Exception as e:
+        logger.debug("vault_epoch unavailable (%s)", e)
+        return ""
+
+
 def quarantine(path: Path) -> Path | None:
     """Rename a corrupt state file aside — never clobbered, never deleted.
 

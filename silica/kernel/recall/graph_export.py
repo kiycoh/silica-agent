@@ -500,6 +500,9 @@ def ctx_from_report(report) -> dict[str, dict]:
     return ctx
 
 
+_distance_graph_memo: dict[tuple[str, str], object] = {}  # (epoch, folder) -> nx.Graph
+
+
 def graph_distances(source: str, *, folder: str = "") -> dict[str, int] | None:
     """BFS hop distances from `source` over the resolved wikilink graph.
 
@@ -507,15 +510,31 @@ def graph_distances(source: str, *, folder: str = "") -> dict[str, int] | None:
     or None when the graph is unavailable or `source` is not in it. The
     structural complement of a semantic score: high similarity + absent/large
     distance = a missing link worth creating; distance 1 = already linked.
-    ponytail: full snapshot + BFS per call; cache per run if it shows hot.
+
+    The BFS-ready graph is memoized on the vault's file-state epoch: every
+    silica_related call pays one of these, and building the decorated
+    node/edge payload dominated it. A hit costs one vault stat walk (~10 ms
+    per 1k notes) instead of the full build; the BFS reads the cached graph,
+    never mutates it.
+    # ponytail: the memo pins one whole nx.Graph per (epoch, folder) in RAM
+    # for the epoch's lifetime; evict on size if a huge vault ever minds.
     """
     try:
         import networkx as nx
 
-        nodes, edges = build_graph_data(folder=folder)
+        from silica.kernel.recall.paths import vault_epoch
+
+        epoch = vault_epoch()
+        G = _distance_graph_memo.get((epoch, folder)) if epoch else None
+        if G is None:
+            nodes, edges = build_graph_data(folder=folder)
+            G = edge_graph(nodes, edges)
+            if epoch:
+                for k in [k for k in _distance_graph_memo if k[0] != epoch]:
+                    del _distance_graph_memo[k]
+                _distance_graph_memo[(epoch, folder)] = G
     except Exception:
         return None
-    G = edge_graph(nodes, edges)
     src = source if source in G else source + ".md"
     if src not in G:
         src = source.removesuffix(".md")

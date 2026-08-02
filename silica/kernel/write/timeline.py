@@ -22,6 +22,51 @@ from silica.kernel.write import frontmatter
 from silica.kernel.recall.paths import SOURCES_DIR
 
 
+_rows_memo: dict[str, tuple[str, list[tuple[str, str, str]]]] = {}  # vault -> (epoch, rows)
+
+
+def _all_rows(vault: Path) -> list[tuple[str, str, str]]:
+    """Every dated (date, label, stem) row of `vault`, unfiltered.
+
+    Memoized on the vault's file-state epoch: the walk YAML-parses every
+    note, and the MCP tool re-runs it per query.
+    """
+    from silica.kernel.recall.paths import ignore_matcher, vault_epoch
+
+    epoch = vault_epoch(str(vault))
+    if epoch:
+        hit = _rows_memo.get(str(vault))
+        if hit is not None and hit[0] == epoch:
+            return hit[1]
+
+    ignored = ignore_matcher(vault)
+    rows: list[tuple[str, str, str]] = []
+    for f in sorted(vault.rglob("*.md")):
+        parts = f.relative_to(vault).parts
+        if any(p.startswith(".") for p in parts):
+            continue  # .obsidian, .trash, .silica
+        if any(ignored(p) for p in parts[:-1]):
+            continue  # .silicaignore / NOISE_DIRS: node_modules under a repo vault
+        if parts[0] == SOURCES_DIR:
+            continue  # verbatim leaves: reachable only via ## Sources links (§2)
+        try:
+            data, _raw, _body = frontmatter.split(f.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            # One non-UTF-8 note (a latin-1 file, an embedded binary blob)
+            # must skip that file, never take the whole timeline down.
+            continue
+        date = (data or {}).get("date")
+        if not date:
+            continue
+        label = str((data or {}).get("session_id") or f.stem)
+        rows.append((str(date)[:10], label, f.stem))
+
+    if epoch:
+        _rows_memo.clear()
+        _rows_memo[str(vault)] = (epoch, rows)
+    return rows
+
+
 def timeline(vault: Path, start: str = "", end: str = "", limit: int = 50) -> dict:
     """Dated notes of `vault`, chronological. Rows are (date, label, stem).
 
@@ -30,26 +75,11 @@ def timeline(vault: Path, start: str = "", end: str = "", limit: int = 50) -> di
     default) and `dropped` reports how many older rows were cut.
     `total_dated` counts the in-range dated notes before the cut.
     """
-    rows: list[tuple[str, str, str]] = []
-    for f in sorted(vault.rglob("*.md")):
-        parts = f.relative_to(vault).parts
-        if any(p.startswith(".") for p in parts):
-            continue  # .obsidian, .trash, .silica
-        if parts[0] == SOURCES_DIR:
-            continue  # verbatim leaves: reachable only via ## Sources links (§2)
-        try:
-            data, _raw, _body = frontmatter.split(f.read_text(encoding="utf-8"))
-        except OSError:
-            continue
-        date = (data or {}).get("date")
-        if not date:
-            continue
-        date = str(date)[:10]  # day precision: keeps datetime values inside inclusive bounds
-        if (start and date < start) or (end and date > end):
-            continue
-        label = str((data or {}).get("session_id") or f.stem)
-        rows.append((date, label, f.stem))
-
+    rows = [
+        r for r in _all_rows(vault)
+        # day precision: keeps datetime values inside inclusive bounds
+        if not (start and r[0] < start) and not (end and r[0] > end)
+    ]
     rows.sort(key=lambda r: (r[0], r[2]))  # date asc; stem tie-break for determinism
     total = len(rows)
     dropped = max(0, total - max(limit, 0))

@@ -59,3 +59,12 @@ def test_sources_and_hidden_excluded(tmp_path):
     _note(tmp_path / "kept.md", date="2026-01-02")
     t = timeline(tmp_path)
     assert [r[2] for r in t["rows"]] == ["kept"] and t["total_dated"] == 1
+
+
+def test_one_undecodable_note_skips_not_crashes(tmp_path):
+    (tmp_path / "good.md").write_text("---\ndate: 2026-01-02\n---\nbody\n",
+                                      encoding="utf-8")
+    (tmp_path / "latin.md").write_bytes(b"---\ndate: 2026-01-03\n---\ncaf\xe9\n")
+
+    out = timeline(tmp_path)
+    assert [r[2] for r in out["rows"]] == ["good"]  # skipped, not fatal
