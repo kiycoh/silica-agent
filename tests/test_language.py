@@ -37,6 +37,20 @@ def test_detect_spanish():
     assert language.detect(ES) == "spanish"
 
 
+def test_detect_russian():
+    # Cyrillic: zero tokens under a latin-only token regex, so russian could
+    # never win detection and a russian store silently froze as english.
+    ru = ("Кошка сидит на столе и дом очень красивый, но не так легко "
+          "найти правильную дорогу к вокзалу.")
+    assert language.detect(ru) == "russian"
+
+
+def test_detect_arabic():
+    ar = ("القطة على الطاولة والبيت جميل جدا ولكن ليس من السهل أن تجد "
+          "الطريق الصحيح إلى المحطة.")
+    assert language.detect(ar) == "arabic"
+
+
 def test_detect_empty_string_is_english():
     assert language.detect("") == "english"
 

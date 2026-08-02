@@ -31,7 +31,11 @@ SNOWBALL_TO_ISO: dict[str, str] = {
     "russian": "ru", "spanish": "es", "swedish": "sv",
 }
 
-_TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ]+")
+# Letters of any script — [a-zA-ZÀ-ÿ] silently blinded detect() to cyrillic
+# and arabic (russian/arabic in SNOWBALL_TO_ISO were unreachable: zero tokens
+# -> zero stopword hits -> english), and split romanian ș/ț and hungarian ő/ű
+# words, which sit outside Latin-1.
+_TOKEN_RE = re.compile(r"[^\W\d_]+")
 
 # Loaded stopword sets, cached per Snowball language name.
 _stopwords_cache: dict[str, frozenset[str]] = {}
