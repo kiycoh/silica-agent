@@ -291,16 +291,23 @@ def _resolve_scope(graph, all_subs, folder: str, root):
     return None, False
 
 
-def run_wiki(vault, config, folder: str | None = None,
+def run_wiki(config, folder: str | None = None,
              overview_only: bool = False, force: bool = False) -> dict:
     """Five-stage /wiki pipeline. Deterministic stages 0-1 and 4; one worker
     LLM call per regenerating subsystem (stage 2) plus one for the overview
     (stage 3). Sequential calls in v1.
+
+    The vault is read from the global CONFIG, never taken as an argument:
+    every write below goes through the globally-configured DRIVER, so a vault
+    argument naming a different tree silently landed wiki notes in the
+    configured vault (observed live: an e2e run scoped to a scratch vault
+    wrote into the personal one). No parameter, no mismatch to guard.
     # ponytail: sequential LLM calls; capability-seam batching if a big repo is slow
     """
     from pathlib import Path
 
     from silica.agent.commit import commit_derived
+    from silica.config import CONFIG
     from silica.kernel.write import frontmatter
     from silica.kernel.code import gitstate
     from silica.kernel.recall import paths
@@ -311,7 +318,11 @@ def run_wiki(vault, config, folder: str | None = None,
     )
     from silica.kernel.vault_manifest import load_manifest
 
-    vault = Path(vault)
+    if not (CONFIG.vault_path or "").strip():
+        return {"status": "error",
+                "reason": "no vault bound — bind the vault before running /wiki",
+                "written": [], "skipped": [], "failed": [], "parse_errors": 0}
+    vault = Path(CONFIG.vault_path)
     root = paths.repo_root_for(vault)
     if root is None:
         return {"status": "no_repo", "written": [], "skipped": [], "failed": [],
@@ -321,6 +332,7 @@ def run_wiki(vault, config, folder: str | None = None,
     if graph is None:
         return {"status": "no_repo", "written": [], "skipped": [], "failed": [],
                 "parse_errors": 0}
+
     all_subs = partition(graph)
     if not all_subs:
         # No supported source files (code lane parses py/ts/js only). Abort

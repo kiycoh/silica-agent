@@ -173,7 +173,7 @@ def test_no_supported_source_aborts_before_llm(tmp_path, monkeypatch):
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault))
     silica.driver._driver = None
     try:
-        result = run_wiki(vault, config=None)
+        result = run_wiki(config=None)
     finally:
         silica.driver._driver = None
 
@@ -184,7 +184,7 @@ def test_no_supported_source_aborts_before_llm(tmp_path, monkeypatch):
 
 def test_first_run_builds_everything(wiki_env):
     root, vault, fake = wiki_env
-    result = run_wiki(vault, config=None)
+    result = run_wiki(config=None)
     assert result["status"] == "ok" and result["failed"] == []
     arch = vault / "ARCHITECTURE.md"
     note = vault / "subsystems" / "(root).md"
@@ -196,23 +196,23 @@ def test_first_run_builds_everything(wiki_env):
 
 def test_second_run_on_still_repo_skips_llm(wiki_env):
     root, vault, fake = wiki_env
-    run_wiki(vault, config=None)
+    run_wiki(config=None)
     fake.messages = None
-    result = run_wiki(vault, config=None)
+    result = run_wiki(config=None)
     assert result["written"] == []
     assert fake.messages is None            # no LLM call on a still repo
 
 
 def test_body_only_call_change_triggers_regen(wiki_env):
     root, vault, fake = wiki_env
-    run_wiki(vault, config=None)
+    run_wiki(config=None)
     # body-only edit: remove the imported call (import stays, call goes:
     # import set and signatures identical)
     (root / "pkg" / "core.py").write_text(
         '"""Core module."""\nfrom pkg.util import helper\n\n\n'
         "def main():\n    pass\n\n\n"
         'if __name__ == "__main__":\n    main()\n', encoding="utf-8")
-    result = run_wiki(vault, config=None)
+    result = run_wiki(config=None)
     assert any(p.endswith("(root).md") for p in result["written"])
     # the regen write channel must not let the nucleate hub fallback inject a
     # junk "subsystems" hub note (or anything else) into the vault
@@ -227,11 +227,11 @@ def test_regen_may_shrink_and_drop_links(wiki_env):
     fake._text = ('{"content": "Long behavioral prose about the subsystem '
                   'with a [[kernel]] link and considerably more detail padding '
                   'so that the rewrite below shrinks far under any ratio."}')
-    run_wiki(vault, config=None)
+    run_wiki(config=None)
     (root / "pkg" / "core.py").write_text(
         '"""Core module."""\n\n\ndef main():\n    pass\n', encoding="utf-8")
     fake._text = '{"content": "Tiny note."}'
-    result = run_wiki(vault, config=None)
+    result = run_wiki(config=None)
     assert any(p.endswith("(root).md") for p in result["written"])
     assert result["failed"] == []
     assert "Tiny note." in (vault / "subsystems" / "(root).md").read_text(encoding="utf-8")
@@ -244,11 +244,11 @@ def test_scoped_run_keeps_other_subsystems_in_overview(wiki_env):
         '"""Sub module."""\n\n\ndef work():\n    pass\n', encoding="utf-8")
     _git(root, "add", "-A")
     _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "sub")
-    run_wiki(vault, config=None)
+    run_wiki(config=None)
     (root / "pkg" / "sub" / "mod.py").write_text(
         '"""Sub module."""\n\n\ndef work():\n    pass\n\n\ndef more():\n    pass\n',
         encoding="utf-8")
-    result = run_wiki(vault, config=None, folder="sub")
+    result = run_wiki(config=None, folder="sub")
     assert any(p.endswith("sub.md") for p in result["written"])
     # overview regen was grounded on ALL subsystems, not just the scoped one
     assert "[[(root)]]" in fake.messages[1]["content"]
@@ -259,23 +259,23 @@ def test_scope_accepts_paths_not_just_subsystem_keys(wiki_env):
     (root / "pkg" / "sub").mkdir()
     (root / "pkg" / "sub" / "mod.py").write_text(
         '"""Sub module."""\n\n\ndef work():\n    pass\n', encoding="utf-8")
-    run_wiki(vault, config=None)
+    run_wiki(config=None)
 
     # absolute, repo-relative, /-rooted-as-in-the-vault, repo-name-prefixed, key
     for scope in (str(root / "pkg" / "sub"), "pkg/sub", "./pkg/sub",
                   "/pkg/sub", f"{root.name}/pkg/sub", "sub"):
-        result = run_wiki(vault, config=None, folder=scope, force=True)
+        result = run_wiki(config=None, folder=scope, force=True)
         assert result["status"] == "ok", scope
         assert any(p.endswith("sub.md") for p in result["written"]), scope
 
     # the repo root is not a subsystem: it means "no scoping", not an error
-    assert run_wiki(vault, config=None, folder=str(root),
+    assert run_wiki(config=None, folder=str(root),
                     force=True)["status"] == "ok"
     # source_root folder (e.g. "pkg") also means unscoped full run across all subsystems
-    res_source_root = run_wiki(vault, config=None, folder="pkg", force=True)
+    res_source_root = run_wiki(config=None, folder="pkg", force=True)
     assert res_source_root["status"] == "ok"
     # a folder with no indexed source under it still fails loudly
-    assert run_wiki(vault, config=None,
+    assert run_wiki(config=None,
                     folder="/nowhere/at/all")["status"] == "error"
 
 
@@ -288,10 +288,10 @@ def test_scope_synthesizes_a_subsystem_for_a_deep_folder(wiki_env):
     (deep / "svc.py").write_text(
         '"""Manager service."""\nfrom pkg.util import helper\n\n\n'
         "def serve():\n    helper()\n", encoding="utf-8")
-    run_wiki(vault, config=None)                       # partition-only baseline
+    run_wiki(config=None)                       # partition-only baseline
     assert not (vault / "subsystems" / "manager.md").exists()
 
-    result = run_wiki(vault, config=None, folder="pkg/a/b/manager")
+    result = run_wiki(config=None, folder="pkg/a/b/manager")
     assert result["status"] == "ok" and result["failed"] == []
     note = vault / "subsystems" / "manager.md"
     assert note.is_file()
@@ -308,19 +308,21 @@ def test_scope_synthesizes_a_subsystem_for_a_deep_folder(wiki_env):
 
 def test_whitespace_only_note_body_does_not_crash(wiki_env):
     root, vault, fake = wiki_env
-    run_wiki(vault, config=None)
+    run_wiki(config=None)
     note = vault / "subsystems" / "(root).md"
     content = note.read_text(encoding="utf-8")
     head, sep, _ = content.partition("\n---\n")
     note.write_text(head + sep + "   ", encoding="utf-8")   # frontmatter kept, prose blanked
-    result = run_wiki(vault, config=None, overview_only=True)
+    result = run_wiki(config=None, overview_only=True)
     assert result["status"] == "ok"
 
 
 def test_no_repo_degrades_soft(tmp_path, monkeypatch):
+    import silica.config
     from silica.kernel.recall import paths as kpaths
+    monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(tmp_path))
     monkeypatch.setattr(kpaths, "repo_root_for", lambda v: None)
-    assert run_wiki(tmp_path, config=None)["status"] == "no_repo"
+    assert run_wiki(config=None)["status"] == "no_repo"
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +345,7 @@ def test_page_write_invalidates_the_stale_snapshot(wiki_env):
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text('{"head": "poison", "docs": []}', encoding="utf-8")
 
-    result = run_wiki(vault, config=None)
+    result = run_wiki(config=None)
     assert result["written"]
     assert not cache.exists()
 
@@ -354,3 +356,20 @@ def test_conventions_wiki_dir_rejects_escape(tmp_path):
     from silica.kernel.vault_manifest import _parse_conventions
     for bad in ("../elsewhere", "a/../../b", "/abs/path", "C:/win", "..\\up"):
         assert _parse_conventions({"conventions": {"wiki_dir": bad}}).wiki_dir == "", bad
+
+
+def test_unbound_vault_refuses_instead_of_writing_elsewhere(wiki_env, monkeypatch):
+    """run_wiki writes through the global DRIVER, so it reads its target from
+    CONFIG and takes no vault argument (a vault argument naming a different
+    tree used to land wiki notes in the configured vault — seen live with an
+    e2e run scoped to a scratch vault). The one failure mode left is no vault
+    bound at all, and that must abort before the first LLM call."""
+    root, vault, fake = wiki_env
+    import silica.config
+
+    monkeypatch.setattr(silica.config.CONFIG, "vault_path", "")
+    res = run_wiki(config=None, force=True)
+    assert res["status"] == "error"
+    assert "no vault bound" in res["reason"]
+    assert res["written"] == []
+    assert fake.messages is None  # aborted before any LLM call

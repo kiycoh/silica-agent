@@ -534,7 +534,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         overview_only = "--overview-only" in args
         force = "--force" in args
         from silica.capabilities.codewiki import run_wiki
-        result = run_wiki(CONFIG.vault_path, CONFIG, folder=folder,
+        result = run_wiki(CONFIG, folder=folder,
                           overview_only=overview_only, force=force)
         if result["status"] == "no_repo":
             CONSOLE.print("  [yellow]wiki: vault is not inside a git repo, nothing to describe.[/]")
