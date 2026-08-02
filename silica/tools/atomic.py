@@ -116,8 +116,12 @@ def silica_search_context(query: str) -> dict:
     q = query.casefold()
     ranked = sorted(
         by_note.values(),
+        # note_matches is the note's TRUE occurrence count: the backend caps
+        # materialized Hits per note, so len(hs) saturates at the cap and would
+        # tie every heavy note. 0 means the backend didn't count — fall back.
         # path last: a stable tiebreak, so the same query answers the same way.
-        key=lambda hs: (-len(hs), q not in hs[0].ref.name.casefold(), hs[0].ref.path),
+        key=lambda hs: (-(hs[0].note_matches or len(hs)),
+                        q not in hs[0].ref.name.casefold(), hs[0].ref.path),
     )
     kept = ranked[:_CONTEXT_MAX_NOTES]
 

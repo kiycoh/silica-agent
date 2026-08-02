@@ -116,6 +116,11 @@ class Hit:
     ref: NoteRef
     line: int = 0
     snippet: str = ""
+    # Total occurrences of the query in this note's body — the density signal.
+    # Backends cap how many Hits they materialize per note, so len(hits) alone
+    # saturates at the cap and cannot rank two heavy notes. 0 = not measured
+    # (backends without the counter): consumers fall back to len(hits).
+    note_matches: int = 0
 
 
 @dataclass

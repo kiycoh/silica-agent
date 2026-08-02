@@ -178,3 +178,47 @@ def test_links_resolve_every_ref_shape(tmp_path):
         assert [r.name for r in backend.backlinks(ref)] == ["Note"], ref
 
     assert backend.links("Nonexistent") == []
+
+
+def test_reads_that_iterate_serialize_against_index_mutation(temp_vault):
+    """The MCP server dispatches each request on its own thread; a write's
+    _patch_index interleaving with a search iterating _notes/_graph raised
+    "dictionary changed size during iteration". The index lock is the fix:
+    while a mutator holds it, an iterating read must wait, not interleave."""
+    import threading
+
+    backend = ObsidianFSBackend(str(temp_vault))
+    backend._ensure_index()
+
+    done = threading.Event()
+
+    def _search():
+        backend.search_context("links")
+        done.set()
+
+    with backend._index_lock:              # simulate a mutator mid-flight
+        t = threading.Thread(target=_search, daemon=True)
+        t.start()
+        assert not done.wait(0.2)          # the read is queued, not interleaved
+    assert done.wait(2)                    # lock released -> read completes
+    t.join(2)
+
+
+def test_search_context_caps_per_note_and_batch_agrees(temp_vault):
+    """A broad query must not materialize one Hit per matching line ("e" made
+    14535 once): per-note cap at the level the tool layer can still rank by,
+    and the batch variant stays byte-for-byte with the single one."""
+    from silica.driver.fs_backend import _MAX_HITS_PER_NOTE
+
+    lines = "\n".join(f"needle line {i}" for i in range(_MAX_HITS_PER_NOTE + 15))
+    (temp_vault / "Dense.md").write_text(f"# Dense\n\n{lines}\n", encoding="utf-8")
+
+    backend = ObsidianFSBackend(str(temp_vault))
+    hits = backend.search_context("needle")
+    assert len(hits) == _MAX_HITS_PER_NOTE
+
+    batch = backend.search_context_batch(["needle", "line 3"])
+    assert [(h.ref.path, h.line) for h in batch["needle"]] == \
+        [(h.ref.path, h.line) for h in hits]
+    assert [(h.ref.path, h.line) for h in batch["line 3"]] == \
+        [(h.ref.path, h.line) for h in backend.search_context("line 3")]

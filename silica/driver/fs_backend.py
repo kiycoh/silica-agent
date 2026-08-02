@@ -14,8 +14,10 @@ Note:
 """
 from __future__ import annotations
 
+import functools
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,29 @@ from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import ignore_matcher, is_source_leaf
 logger = logging.getLogger(__name__)
 
+# Per-note Hit ceiling for content search. The tool layer renders at most 3
+# snippets per note and ranks notes by hit count; 20 saturates that ranking
+# while bounding a pathological query at 20·N Hits instead of lines·N.
+_MAX_HITS_PER_NOTE = 20
+
+
+def _locked(method):
+    """Serialize this method against index mutation.
+
+    The MCP server dispatches every request on its own thread, so a write's
+    `_patch_index` can interleave with a search iterating `self._notes` or
+    `self._graph` — "dictionary changed size during iteration" on a normal
+    concurrent session. One reentrant lock over mutators and the readers that
+    iterate; reentrant because readers call `_ensure_index` which may rebuild.
+    # ponytail: one global lock, not per-structure — split it only if MCP
+    # profiling ever shows read contention.
+    """
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._index_lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
 
 class ObsidianFSBackend(GraphIndexMixin):
     """ObsidianDriver implementation using direct filesystem access."""
@@ -50,7 +75,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         if not vault_path:
             raise ValueError("FS backend requires a valid vault_path")
         self.vault_path = Path(vault_path).resolve()
-        
+        self._index_lock = threading.RLock()
+
         # In-memory index
         self._notes: dict[str, NoteRef] = {}          # path -> NoteRef
         self._notes_by_name: dict[str, list[NoteRef]] = {}  # lower_name -> list of NoteRefs
@@ -80,12 +106,14 @@ class ObsidianFSBackend(GraphIndexMixin):
     # Indexing (in-memory graph)
     # ------------------------------------------------------------------
 
+    @_locked
     def _ensure_index(self):
         if self._needs_reindex:
             self._rebuild_index()
 
     _ensure_graph = _ensure_index  # mixin hook (tests call _ensure_index directly)
 
+    @_locked
     def _resolve_target(self, target: str, source_path: str = "") -> NoteRef | None:
         """Resolve a link target to an existing NoteRef or None if unresolved.
 
@@ -151,6 +179,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             sorted_refs = sorted(refs, key=lambda r: (r.path.count("/"), r.path.lower()))
             return sorted_refs[0]
 
+    @_locked
     def _rebuild_index(self):
         logger.debug("Rebuilding FS graph index...")
         self._notes.clear()
@@ -256,6 +285,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         rel_norm = os.path.normcase(rel_path.replace("\\", "/").strip("/"))
         return rel_norm == inbox_norm or rel_norm.startswith(inbox_norm + "/")
 
+    @_locked
     def _patch_index(self, rel_path: str, content: str | None) -> None:
         """Incrementally update the graph index for a single changed path.
 
@@ -381,6 +411,7 @@ class ObsidianFSBackend(GraphIndexMixin):
     # Discovery / Read
     # ------------------------------------------------------------------
 
+    @_locked
     def search_names(self, query: str) -> list[NoteRef]:
         """Search vault note names matching query.
 
@@ -397,8 +428,18 @@ class ObsidianFSBackend(GraphIndexMixin):
                 results.append(ref)
         return results
 
+    @_locked
     def search_context(self, query: str) -> list[Hit]:
-        """Search vault content with line-level context snippets."""
+        """Search vault content with line-level context snippets.
+
+        Two bounds keep a broad query ("e" produced 14535 Hits) from
+        materializing the whole vault: a whole-body substring pre-check, so a
+        non-matching note costs one scan and zero per-line allocations, and a
+        per-note hit cap on the MATERIALIZED Hits. Density ranking does not
+        ride on the capped list: every Hit carries `note_matches`, the note's
+        true occurrence count, so two notes both capped at the limit still
+        rank by how much they actually match.
+        """
         self._ensure_index()
         query_lower = query.lower()
         results = []
@@ -409,20 +450,29 @@ class ObsidianFSBackend(GraphIndexMixin):
             path = self.vault_path / ref.path
             try:
                 content = self._read_cached(path)
+                lower = content.lower()  # lower() never adds/removes newlines
+                if query_lower not in lower:
+                    continue
+                matches = lower.count(query_lower)  # true density, one C pass
                 lines = content.splitlines()
-                for i, line in enumerate(lines):
-                    if query_lower in line.lower():
-                        # Extract a snippet around the match
+                note_hits = 0
+                for i, line_lower in enumerate(lower.splitlines()):
+                    if query_lower in line_lower:
                         results.append(Hit(
                             ref=ref,
                             line=i + 1,
-                            snippet=line.strip()
+                            snippet=lines[i].strip(),
+                            note_matches=matches,
                         ))
+                        note_hits += 1
+                        if note_hits >= _MAX_HITS_PER_NOTE:
+                            break
             except Exception:
                 continue
 
         return results
 
+    @_locked
     def search_context_batch(self, queries: list[str]) -> dict[str, list[Hit]]:
         """Batch of search_context: one vault sweep instead of one per query.
 
@@ -448,16 +498,28 @@ class ObsidianFSBackend(GraphIndexMixin):
             path = self.vault_path / ref.path
             try:
                 content = self._read_cached(path)
+                lower = content.lower()
+                # Same bounds as search_context (parity by construction):
+                # body-level pre-check per query, per-note cap per query.
+                live = [(q, ql) for q, ql in queries_lower if ql in lower]
+                if not live:
+                    continue
                 lines = content.splitlines()
-                lines_lower = [line.lower() for line in lines]
-                for q, q_lower in queries_lower:
+                lines_lower = lower.splitlines()
+                for q, q_lower in live:
+                    matches = lower.count(q_lower)
+                    note_hits = 0
                     for i, line_lower in enumerate(lines_lower):
                         if q_lower in line_lower:
                             results[q].append(Hit(
                                 ref=ref,
                                 line=i + 1,
-                                snippet=lines[i].strip()
+                                snippet=lines[i].strip(),
+                                note_matches=matches,
                             ))
+                            note_hits += 1
+                            if note_hits >= _MAX_HITS_PER_NOTE:
+                                break
             except Exception:
                 continue
 
@@ -523,6 +585,22 @@ class ObsidianFSBackend(GraphIndexMixin):
     # Graph
     # ------------------------------------------------------------------
 
+    @_locked
+    def graph_data(self) -> tuple[dict, set, Any]:
+        """Locked override of the mixin's accessor, returning copies.
+
+        The mixin hands out live references to `_notes`/`_unresolved_links`/
+        `_graph`; consumers (graph_export, mindmap) iterate them long after
+        the lock would have been released, while an MCP write thread runs
+        `_patch_index` — the same "dictionary changed size during iteration"
+        the method-level lock exists to close. Shallow copies decouple the
+        iteration from the index; NoteRefs stay shared, which readers treat
+        as immutable.
+        """
+        self._ensure_index()
+        return dict(self._notes), set(self._unresolved_links), self._graph.copy()
+
+    @_locked
     def links(self, ref: NoteRef | str) -> list[NoteRef]:
         """Outgoing links from a note."""
         self._ensure_index()
@@ -543,6 +621,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 
         return results
 
+    @_locked
     def backlinks(self, ref: NoteRef | str) -> list[NoteRef]:
         """Incoming links to a note."""
         self._ensure_index()
@@ -551,11 +630,13 @@ class ObsidianFSBackend(GraphIndexMixin):
             return []
         return [self._node_ref(s) for s in self._graph.predecessors(path)]
 
+    @_locked
     def orphans(self) -> list[NoteRef]:
         """Notes with no incoming links."""
         self._ensure_index()
         return [self._graph.nodes[n]["ref"] for n, d in self._graph.in_degree() if d == 0]
 
+    @_locked
     def unresolved(self) -> list[Link]:
         """Unresolved wikilinks in the vault."""
         self._ensure_index()
@@ -564,6 +645,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             results.append(Link(source=self._node_ref(s), target=t.removesuffix(".md")))
         return results
 
+    @_locked
     def graph_snapshot(self, refs: list[NoteRef] | None = None) -> GraphSnapshot:
         """Graph snapshot for non-regression gating.
 
@@ -928,6 +1010,7 @@ class ObsidianFSBackend(GraphIndexMixin):
     # Advanced
     # ------------------------------------------------------------------
 
+    @_locked
     def list_files(self, folder: str = "") -> list[NoteRef]:
         """List all markdown files, optionally filtered by folder.
 
