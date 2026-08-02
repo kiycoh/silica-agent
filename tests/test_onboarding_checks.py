@@ -50,16 +50,18 @@ class TestCheckChatModel:
 
 
 class TestCheckChatEndpoint:
-    def test_no_model_skips_with_warn(self):
+    def test_no_model_skips_as_unknown(self):
+        """Nothing was probed, so nothing is known — a skip is not a warning."""
         from silica.onboarding.checks import check_chat_endpoint
         r = check_chat_endpoint(_cfg(model=""))
-        assert r.status == "warn"
+        assert r.status == "unknown"
         assert "skipped" in r.detail
 
     def test_openrouter_not_probed(self):
+        """"ok" would claim the endpoint is live; the check never asked it."""
         from silica.onboarding.checks import check_chat_endpoint
         r = check_chat_endpoint(_cfg(model="openrouter/openai/gpt-4o-mini"))
-        assert r.status == "ok"
+        assert r.status == "unknown"
         assert "not probed" in r.detail
 
     def test_lmstudio_unreachable_fails(self, monkeypatch):
@@ -77,7 +79,7 @@ class TestCheckChatEndpoint:
         import silica.onboarding.checks as checks
 
         class FakeResp:
-            pass
+            status_code = 200
 
         monkeypatch.setattr(checks.httpx, "get", lambda url, timeout: FakeResp())
         r = checks.check_chat_endpoint(_cfg(model="qwen3-30b"))
@@ -88,9 +90,12 @@ class TestCheckChatEndpoint:
 
         captured: dict = {}
 
+        class FakeResp:
+            status_code = 200
+
         def fake_get(url, timeout):
             captured["url"] = url
-            return object()
+            return FakeResp()
 
         monkeypatch.setattr(checks.httpx, "get", fake_get)
         r = checks.check_chat_endpoint(_cfg(model="ollama/llama3.2:3b"))
@@ -188,6 +193,8 @@ class TestCheckEmbeddings:
         import silica.onboarding.checks as checks
 
         class FakeResp:
+            status_code = 400
+
             def raise_for_status(self):
                 raise httpx.HTTPStatusError(
                     "400", request=httpx.Request("POST", "http://x"),
@@ -203,6 +210,8 @@ class TestCheckEmbeddings:
         import silica.onboarding.checks as checks
 
         class FakeResp:
+            status_code = 200
+
             def raise_for_status(self):
                 pass
 
@@ -220,6 +229,8 @@ class TestCheckEmbeddings:
         import silica.onboarding.checks as checks
 
         class FakeResp:
+            status_code = 200
+
             def raise_for_status(self):
                 pass
 
@@ -565,9 +576,11 @@ class TestOllamaContextCheck:
     def test_roomy_window_is_ok(self, monkeypatch):
         assert self._check(32768, monkeypatch).status == "ok"
 
-    def test_unknown_window_warns_with_pull_hint(self, monkeypatch):
+    def test_unreadable_window_is_unknown_with_a_pull_hint(self, monkeypatch):
+        """The check could not read the window; it is not reporting a problem
+        with the window, so it must not spend a warning line on it."""
         r = self._check(0, monkeypatch)
-        assert r.status == "warn"
+        assert r.status == "unknown"
         assert "llama3.2:3b" in r.hint  # the ollama/ prefix is stripped for the pull command
 
     def test_registered_only_for_ollama(self, monkeypatch):
@@ -641,3 +654,19 @@ class TestOwnSessionCapture:
 
         assert result.status == "ok"
         assert "episodic" in result.detail.lower()
+
+
+def test_check_quarantine_sees_cross_vault_state_in_home(tmp_path, monkeypatch):
+    """undo_journal.db and checkpoints live at ~/.silica, not under the vault:
+    their quarantined copies were invisible to the only surface that reports
+    quarantines."""
+    import silica.onboarding.checks as checks
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    silica_home = tmp_path / ".silica"
+    silica_home.mkdir()
+    (silica_home / "undo_journal.db.corrupt.20260802T000000").write_bytes(b"x")
+
+    r = checks.check_quarantine(_cfg())
+    assert r.status == "warn"
+    assert "undo_journal" in r.detail

@@ -32,12 +32,23 @@ _HTTP_TIMEOUT = 3.0
 _MIN_OLLAMA_WINDOW = 8192
 
 
+# A local server that is still loading answers 503 on every path, so the socket
+# accepting proves nothing. Any other status means something served the request.
+_LOADING = 503
+
+
 @dataclass(frozen=True)
 class CheckResult:
     name: str
-    status: Literal["ok", "warn", "fail"]
+    status: Literal["ok", "warn", "fail", "unknown"]
     detail: str
     hint: str = ""
+
+
+# `unknown` is deliberately distinct from `ok`: when a check cannot read the
+# state it must say so softly, not imply the thing is live. Folding the two
+# together is how a run reported "rerank ready" and marked rerank unreachable in
+# the same session. It is not a failure either — nothing is known to be broken.
 
 
 def check_chat_model(config: SilicaConfig) -> CheckResult:
@@ -60,7 +71,10 @@ def check_chat_model(config: SilicaConfig) -> CheckResult:
 
 def check_chat_endpoint(config: SilicaConfig) -> CheckResult:
     if not config.model.strip():
-        return CheckResult("chat endpoint", "warn", "skipped — no model configured")
+        # Not probed because there was nothing to probe: a skip, not a
+        # fallback. Warning on it every run trains the operator to skim the
+        # column where a real degradation appears.
+        return CheckResult("chat endpoint", "unknown", "skipped — no model configured")
     if config.provider in ("lmstudio", "ollama"):
         base_url = PROVIDER_PRESETS[config.provider]["base_url"]
     elif config.provider == "custom":
@@ -73,16 +87,22 @@ def check_chat_endpoint(config: SilicaConfig) -> CheckResult:
             )
     else:
         return CheckResult(
-            "chat endpoint", "ok", f"{config.provider} (hosted, not probed)"
+            "chat endpoint", "unknown", f"{config.provider} (hosted, not probed)"
         )
     label = {"lmstudio": "LM Studio", "ollama": "Ollama"}.get(config.provider, "the endpoint")
     try:
-        httpx.get(f"{base_url.rstrip('/')}/models", timeout=_HTTP_TIMEOUT)
+        resp = httpx.get(f"{base_url.rstrip('/')}/models", timeout=_HTTP_TIMEOUT)
     except Exception:
         return CheckResult(
             "chat endpoint", "fail",
             f"{base_url} unreachable",
             f"start {label}, or switch provider with `silica init`",
+        )
+    if resp.status_code == _LOADING:
+        return CheckResult(
+            "chat endpoint", "unknown",
+            f"{base_url} answering but still loading the model",
+            "re-run `silica doctor` once the server reports ready",
         )
     return CheckResult("chat endpoint", "ok", f"{base_url} reachable")
 
@@ -100,7 +120,9 @@ def check_ollama_context(config: SilicaConfig) -> CheckResult:
     window, _ = model_limits(config.provider, config.model)
     if not window:
         return CheckResult(
-            "ollama context", "warn",
+            # The check could not read the window. Nothing is known to be
+            # wrong, and the detail already says "unknown".
+            "ollama context", "unknown",
             f"{config.model} — window unknown (model not pulled, or Ollama unreachable)",
             f"`ollama pull {config.model.removeprefix('ollama/')}`, then re-run `silica doctor`",
         )
@@ -169,6 +191,15 @@ def check_embeddings(config: SilicaConfig) -> CheckResult:
             json={"model": config.embedding_model, "input": ["ping"]},
             timeout=_HTTP_TIMEOUT,
         )
+        if resp.status_code == _LOADING:
+            # Still loading its weights (llama-server answers 503 on every
+            # path meanwhile). The warn below would send the operator to edit
+            # a config that is correct — this is a transient, not a rejection.
+            return CheckResult(
+                "embeddings", "unknown",
+                f"{config.embedding_base_url} answering but still loading the model",
+                "re-run `silica doctor` once the server reports ready",
+            )
         resp.raise_for_status()
         data = resp.json().get("data") or []
         if not data or not data[0].get("embedding"):
@@ -201,6 +232,14 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
                 json={"model": config.rerank_model, "query": "ping", "documents": ["ping"]},
                 timeout=_HTTP_TIMEOUT,
             )
+            if resp.status_code == _LOADING:
+                # Still loading its weights. "unreachable" would send the
+                # operator to start a server that is already starting.
+                return CheckResult(
+                    "rerank", "unknown",
+                    f"{config.rerank_base_url} answering but still loading the model",
+                    "re-run `silica doctor` once the reranker reports ready",
+                )
             resp.raise_for_status()
         except Exception:
             # get_reranker (agent/providers.py) falls back to the in-process
@@ -402,6 +441,9 @@ def check_quarantine(config: SilicaConfig) -> CheckResult:
 
     roots = [Path(p) for p in (config.vault_path,) if p]
     roots.append(index_dir_for(config.vault_path or ""))
+    # ~/.silica holds cross-vault state (undo_journal.db, checkpoints): its
+    # quarantined copies were invisible to doctor, the only surface for them.
+    roots.append(Path.home() / ".silica")
     found = [p.name for r in roots if r.exists() for p in sorted(r.glob("*.corrupt.*"))]
     if found:
         return CheckResult(
@@ -482,7 +524,11 @@ def has_failures(results: list[CheckResult]) -> bool:
     return any(r.status == "fail" for r in results)
 
 
-_STATUS_GLYPH = {"ok": ("✓", "green"), "warn": ("⚠", "yellow"), "fail": ("✗", "red")}
+# `?` and not `⚠`: a warning says a fallback was taken, unknown says nothing
+# could be read. Give them the same glyph and the real warnings drown, which is
+# the whole reason routine lines must not shout.
+_STATUS_GLYPH = {"ok": ("✓", "green"), "warn": ("⚠", "yellow"),
+                 "fail": ("✗", "red"), "unknown": ("?", "dim")}
 
 
 def render_report(results: list[CheckResult]) -> None:
