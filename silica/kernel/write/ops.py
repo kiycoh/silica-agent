@@ -188,3 +188,30 @@ class DistillerOutput(BaseModel):
     ephemerals: list[EphemeralFact] = Field(default_factory=list)
 
 
+class StructureOp(BaseModel):
+    """Wire schema for the two-pass structure call: Op minus every body field,
+    so constrained decoding cannot put prose inside a JSON string. Decode-only —
+    the stitched dicts are consumed through Op/parse_ops as usual. No move
+    fields: the distiller never plans moves (organize pipeline does)."""
+    op: OpType
+    heading: str
+    source_basename: str
+    path: str | None = None
+    title: str | None = None
+    hub: str | None = None
+    tags: list[str] | None = None
+    related: list[str] | None = None
+    concepts: list[str] | None = None
+    reason: str | None = None
+    linked_axis: str | None = None
+    parent: str | None = None
+    contested_by: str | None = None
+    valid_from: str | None = None
+
+
+class DistillerStructure(BaseModel):
+    main_thematic_axes: list[str] = Field(default_factory=list)
+    updates: list[StructureOp]
+    ephemerals: list[EphemeralFact] = Field(default_factory=list)
+
+

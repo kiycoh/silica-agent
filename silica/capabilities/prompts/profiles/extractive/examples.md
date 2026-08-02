@@ -24,7 +24,7 @@
   ]
 }
 
-### Example Output (NO prose, NO markdown fences — JSON, then the Body Appendix):
+### Example Output (NO prose, NO markdown fences — JSON only, body inline):
 {
   "main_thematic_axes": ["Elena's hobbies and classes", "family relationships", "conversational logistics"],
   "updates": [
@@ -37,7 +37,7 @@
       "hub": "{HUB_NAME}",
       "linked_axis": "Elena's hobbies and classes",
       "concepts": ["pottery class", "community center", "beginners course"],
-      "snippet_ref": 1
+      "snippet": "Elena: I finally signed up for the pottery class at the community center! It starts May 20th, every Tuesday evening.\nElena: No, she teaches the advanced one. Mine is the beginners course with Mr. Alvarez."
     },
     {
       "heading": "greetings",
@@ -51,11 +51,8 @@
     {"key": "elena.pottery_class.teacher", "text": "Elena's beginners pottery class is taught by Mr. Alvarez"}
   ]
 }
-===SILICA-BODY 1===
-Elena: I finally signed up for the pottery class at the community center! It starts May 20th, every Tuesday evening.
-Elena: No, she teaches the advanced one. Mine is the beginners course with Mr. Alvarez.
-
-Note what this body IS and IS NOT:
+Note what this `snippet` IS and IS NOT:
+- The body goes INLINE in the JSON, with `\n` between copied lines.
 - Each line is an EXACT substring of the excerpt — copied, not reworded. Sam's question was dropped (no durable fact); the two Elena turns were kept whole.
 - The body keeps "May 20th" verbatim; the absolute date 2026-05-20 appears ONLY in `ephemerals`, never in the body.
 - No `[[wikilinks]]`, no summary line, no attribution stripped. A body like "Elena signed up for a beginners pottery class starting May 20th" would be REJECTED — it rewords instead of copying.

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import typing
 from pathlib import Path
 
@@ -29,7 +30,7 @@ _ANTI_SLOP_PATH = _PROMPT_PATH.parent / "_anti_slop.txt"
 # profiles/<name>/{rubric,quality,examples}.md. `default` reproduces the
 # pre-split prompt bit-identically.
 _PROFILES_DIR = _PROMPT_PATH.parent / "profiles"
-_LENS_FRAGMENTS = ("rubric", "quality", "examples")
+_LENS_FRAGMENTS = ("rubric", "quality", "examples", "ephemeral_routing")
 
 
 def _load_prompt() -> str:
@@ -91,12 +92,13 @@ def active_distill_profile() -> str:
 
 
 def render_prompt(target: str, hub: str | None = None, source_text: str = "",
-                  session_date: str = "", language: str | None = None) -> str:
+                  session_date: str = "", language: str | None = None,
+                  profile: str | None = None) -> str:
     """Render the distiller prompt with TARGET/LANGUAGE/MAX_TAGS substitution.
 
     The prompt = fixed contract + profile lens (see `_splice_lens`). Profile
-    precedence: SILICA_DISTILL_PROFILE env > `conventions.distill_profile`
-    > "default".
+    precedence: explicit `profile` arg (per-run, e.g. /promote) >
+    SILICA_DISTILL_PROFILE env > `conventions.distill_profile` > "default".
 
     `session_date` (F2a): the date the SOURCE session/document happened — not
     necessarily today (eval passes simulated time; dated documents pass their
@@ -122,7 +124,7 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
     from silica.kernel.vault_manifest import get_active_manifest
 
     conventions = get_active_manifest().conventions
-    profile = active_distill_profile()
+    profile = profile or active_distill_profile()
     body = _splice_lens(_load_prompt(), profile)
     body = body.replace("{TARGET}", target)
     if hub:
@@ -360,6 +362,82 @@ def salvage_distiller_json(raw: str) -> dict | None:
     return {"main_thematic_axes": axes if isinstance(axes, list) else [], "updates": updates}
 
 
+# Backslash escapes that constrained decoding CANNOT protect: `\b \f \n \r \t`
+# are valid JSON escapes that silently decode to control characters (`"\top"`
+# becomes TAB + "op"). Every other single backslash is invalid JSON, so the
+# grammar forces the model to double it. Bodies must be grounded in the inbox
+# excerpts (anti-hallucination contract), so a clean excerpt cannot seed a
+# hazardous body.
+_ESCAPE_HAZARD_RE = re.compile(r"\\[bfnrt]")
+
+
+def needs_body_pass(payload: dict) -> bool:
+    """True when a chunk's excerpts can seed silent JSON-escape corruption."""
+    for batch in payload.get("batches") or []:
+        for concept in batch.get("concepts") or []:
+            if _ESCAPE_HAZARD_RE.search(concept.get("inbox_excerpt") or ""):
+                return True
+    return False
+
+
+_STRUCTURE_NOTE = (
+    "\n\nSTRUCTURE PASS: do NOT write note bodies in this response — the "
+    "output schema carries no snippet/content field. Emit the ops, skips and "
+    "ephemerals only; bodies are requested separately."
+)
+
+
+def _body_ops(parsed: dict) -> list[dict]:
+    """The pass-1 ops that carry a body, in output order (= body numbering)."""
+    return [op for op in parsed.get("updates") or []
+            if isinstance(op, dict)
+            and op.get("op") in ("write", "patch", "overwrite")]
+
+
+def _body_pass_instruction(ops: list[dict]) -> str:
+    """The pass-2 user turn. Short by design: the full contract is already in
+    the conversation prefix (continuation), so only the numbering and the
+    verbatim rule need stating."""
+    listing = "\n".join(
+        f"{i}. {op.get('op')} → {op.get('path')} (heading: {op.get('heading')!r})"
+        for i, op in enumerate(ops, 1)
+    )
+    return (
+        "Now write the note bodies for the ops you planned. For each op in "
+        "the list below, in order, emit exactly one block:\n\n"
+        "===SILICA-BODY N===\n<body for op N>\n\n"
+        "N is the op's number in the list. Output ONLY the blocks — no JSON, "
+        "no prose before the first marker, nothing after the last body.\n"
+        "Body text is copied to the note file as-is: literal single "
+        "backslashes (\\frac stays \\frac, never \\\\frac), real line breaks, "
+        "never \\n escapes. Every body rule from the contract still applies "
+        "(prose language, wikilinks without .md, no self-links, no "
+        "descriptive summaries).\n\n" + listing
+    )
+
+
+# overwrite carries its body in `content`; write/patch in `snippet`.
+_BODY_FIELD = {"overwrite": "content"}
+
+
+def _stitch_bodies(parsed: dict, raw: str) -> None:
+    """Resolve pass-2 `===SILICA-BODY N===` blocks into the pass-1 ops.
+
+    A missing block leaves the op bodyless: the validate floor rejects it
+    downstream (fail closed, same path as a dangling snippet_ref)."""
+    from silica.kernel.text.sanitize import extract_body_appendix
+
+    _, bodies = extract_body_appendix(raw)
+    for i, op in enumerate(_body_ops(parsed), 1):
+        body = bodies.get(i)
+        if body:
+            op[_BODY_FIELD.get(op.get("op"), "snippet")] = body
+        else:
+            logger.warning(
+                "body pass: no ===SILICA-BODY %d=== block for %s — left empty",
+                i, op.get("path") or op.get("heading") or "?")
+
+
 def _call_with_deadline(fn, seconds: float):
     """Run fn() under a wall-clock deadline; raise TimeoutError past it.
 
@@ -385,8 +463,18 @@ def run_distiller(
     session_date: str = "",
     language: str | None = None,
     escalate: bool = False,
+    profile: str | None = None,
+    structure_only: bool = False,
 ) -> dict:
-    """Call the Distiller LLM (single-turn) for one payload chunk.
+    """Call the Distiller LLM for one payload chunk.
+
+    Single call by default. When the chunk's excerpts can seed silent
+    JSON-escape corruption (needs_body_pass) and the profile is prose-class,
+    the call splits in two: a structure pass under constrained decode (schema
+    without body fields), then a body pass as a same-conversation continuation
+    where prose travels outside JSON entirely — verbatim backslashes, real
+    line breaks. SILICA_DISTILL_TWO_PASS=0 forces single-call everywhere
+    (re-admits the corruption class on hazard chunks).
 
     Args:
         payload: the payload dict (schema_version + batches)
@@ -396,6 +484,11 @@ def run_distiller(
         steer_context: corrective steering note injected when re-attempting after
             rejection (Phase 6). States why the previous output was rejected.
         escalate: route this call to the escalation model (steer retries; Tier 2 cascade).
+        profile: per-run distill profile override (e.g. "promotion" for
+            /promote); None follows env/manifest resolution.
+        structure_only: never run the body pass and use the body-less schema —
+            for callers that discard note bodies (the episodic drain keeps only
+            ephemerals), so no body tokens are ever paid for.
 
     Returns:
         parsed dict with {"updates": [...]} or {"error": ...}
@@ -403,12 +496,25 @@ def run_distiller(
     from silica.agent.providers import get_provider
     from silica.config import CONFIG
     from silica.kernel.context_builder import build_context
-    from silica.kernel.write.ops import DistillerOutput
+    from silica.kernel.write.ops import DistillerOutput, DistillerStructure
+    from silica.kernel.write.validate import EXTRACTIVE_PROFILES
     from silica.kernel.text.sanitize import parse_json
+
+    _profile = profile or active_distill_profile()
+    # Extractive-class runs stay single-call: every body line must be a
+    # verbatim span of the excerpt, so a control-char corruption breaks the
+    # substring match and the validator rejects it — that class fails closed.
+    two_pass = (
+        not structure_only
+        and os.getenv("SILICA_DISTILL_TWO_PASS", "1") != "0"
+        and _profile not in EXTRACTIVE_PROFILES
+        and needs_body_pass(payload)
+    )
 
     prompt_text = render_prompt(target=target, hub=hub,
                                 source_text=_payload_sample_text(payload),
-                                session_date=session_date, language=language)
+                                session_date=session_date, language=language,
+                                profile=profile)
     # Assemble context through the context assembler (Phase 2 rails).
     # Only ledger_digest + the checkpoint payload reach the model — no other
     # vault content is forwarded here.
@@ -436,6 +542,9 @@ def run_distiller(
     ]
     if steer_section:
         user_parts.append({"type": "text", "text": steer_section})
+    if two_pass or structure_only:
+        # Trailing part: the cached prefix (template + ctx) stays byte-identical.
+        user_parts.append({"type": "text", "text": _STRUCTURE_NOTE})
     messages = [
         {"role": "system", "content": [
             {"type": "text", "text": prompt_text, "cache_control": {"type": "ephemeral"}}
@@ -480,28 +589,35 @@ def run_distiller(
     )
 
     deadline = float(os.getenv("DISTILLER_TIMEOUT", "300"))
-    try:
-        provider = get_provider(CONFIG, role="escalation" if escalate else "worker")
-        response = _call_with_deadline(lambda: provider.call_llm(
-            messages=messages,
-            tools=None,
-            response_schema=DistillerOutput,
-            max_tokens=max_tokens,
-            # The distiller pin is tied to the worker model's provider routing;
-            # an escalated call must not inherit it.
-            openrouter_provider=None if escalate else CONFIG.openrouter_provider_distiller,
-        ), deadline)
-    except Exception as e:
-        logger.warning("Distiller provider call failed, falling back to litellm: %s", e)
-        from silica.agent.llm import call_llm
-        response = _call_with_deadline(lambda: call_llm(
-            model=(CONFIG.distill_escalation_model or CONFIG.model) if escalate else CONFIG.model,
-            messages=messages,
-            tools=None,
-            max_tokens=max_tokens,
-            response_format=DistillerOutput,
-            openrouter_provider=None if escalate else CONFIG.openrouter_provider_distiller,
-        ), deadline)
+
+    def _llm(msgs: list[dict], response_schema):
+        try:
+            provider = get_provider(CONFIG, role="escalation" if escalate else "worker")
+            return _call_with_deadline(lambda: provider.call_llm(
+                messages=msgs,
+                tools=None,
+                response_schema=response_schema,
+                max_tokens=max_tokens,
+                # The distiller pin is tied to the worker model's provider routing;
+                # an escalated call must not inherit it.
+                openrouter_provider=None if escalate else CONFIG.openrouter_provider_distiller,
+            ), deadline)
+        except Exception as e:
+            logger.warning("Distiller provider call failed, falling back to litellm: %s", e)
+            from silica.agent.llm import call_llm
+            return _call_with_deadline(lambda: call_llm(
+                model=(CONFIG.distill_escalation_model or CONFIG.model) if escalate else CONFIG.model,
+                messages=msgs,
+                tools=None,
+                max_tokens=max_tokens,
+                response_format=response_schema,
+                openrouter_provider=None if escalate else CONFIG.openrouter_provider_distiller,
+            ), deadline)
+
+    response = _llm(
+        messages,
+        DistillerStructure if (two_pass or structure_only) else DistillerOutput,
+    )
 
     raw_output = response.text or ""
     if not raw_output.strip():
@@ -527,6 +643,20 @@ def run_distiller(
 
     if not isinstance(parsed, dict) or "updates" not in parsed:
         return {"error": "Distiller output missing 'updates' key", "raw": raw_output[:500]}
+
+    if two_pass and (body_ops := _body_ops(parsed)):
+        follow_up = messages + [
+            {"role": "assistant", "content": raw_output},
+            {"role": "user", "content": _body_pass_instruction(body_ops)},
+        ]
+        try:
+            second = _llm(follow_up, None)
+            _stitch_bodies(parsed, second.text or "")
+        except Exception as e:
+            logger.warning(
+                "body pass failed (%s) — %d op(s) left bodyless; the validate "
+                "floor rejects them downstream, ephemerals survive",
+                e, len(body_ops))
 
     logger.info("Distiller produced %d updates", len(parsed["updates"]))
     return parsed

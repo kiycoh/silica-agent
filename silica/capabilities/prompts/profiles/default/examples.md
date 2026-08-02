@@ -40,7 +40,7 @@
   ]
 }
 
-### Example Output (NO prose, NO markdown fences — JSON, then the Body Appendix):
+### Example Output (NO prose, NO markdown fences — JSON only, bodies inline):
 {
   "main_thematic_axes": ["gradient-based optimization", "neural network training", "Python ML tooling"],
   "updates": [
@@ -51,7 +51,7 @@
       "source_basename": "Lecture 04.md",
       "linked_axis": "neural network training",
       "concepts": ["backpropagation", "loss gradient", "chain rule", "gradient descent"],
-      "snippet_ref": 1
+      "snippet": "- Formal definition: backpropagation computes the gradient of the loss function with respect to the weights via the chain rule, applied recursively from the output layer back to the input.\n- Gradient formula for weight $w_{ij}^{(l)}$: $\\frac{\\partial \\mathcal{L}}{\\partial w_{ij}^{(l)}} = \\delta_j^{(l)} \\cdot a_i^{(l-1)}$"
     },
     {
       "heading": "Optimization Algorithms: Adam Optimizer",
@@ -62,7 +62,7 @@
       "hub": "{HUB_NAME}",
       "linked_axis": "gradient-based optimization",
       "concepts": ["adam optimizer", "stochastic optimization", "adaptive momentum", "RMSProp", "AdaGrad"],
-      "snippet_ref": 2
+      "snippet": "Adam (Adaptive Moment Estimation) is a stochastic optimization algorithm that combines the advantages of AdaGrad and RMSProp by maintaining moving averages of both the gradient (first moment) and its square (second moment).\n\n- Typical hyperparameters: $\\beta_1 = 0.9$, $\\beta_2 = 0.999$, $\\epsilon = 10^{-8}$"
     },
     {
       "heading": "PIL",
@@ -72,13 +72,7 @@
     }
   ]
 }
-===SILICA-BODY 1===
-- Formal definition: backpropagation computes the gradient of the loss function with respect to the weights via the chain rule, applied recursively from the output layer back to the input.
-- Gradient formula for weight $w_{ij}^{(l)}$: $\frac{\partial \mathcal{L}}{\partial w_{ij}^{(l)}} = \delta_j^{(l)} \cdot a_i^{(l-1)}$
-===SILICA-BODY 2===
-Adam (Adaptive Moment Estimation) is a stochastic optimization algorithm that combines the advantages of AdaGrad and RMSProp by maintaining moving averages of both the gradient (first moment) and its square (second moment).
-
-- Typical hyperparameters: $\beta_1 = 0.9$, $\beta_2 = 0.999$, $\epsilon = 10^{-8}$
+Note the `snippet` strings: line breaks are `\n`, and every LaTeX backslash is DOUBLED (`\\frac`, `\\beta_1`, `\\epsilon`) so it survives JSON decoding. A single-backslash `\frac` would decode to a form feed followed by `rac` — silently corrupted, no error.
 
 ### Example with `parent` field (only when ## Related Notes lists a valid parent candidate):
 Suppose `## Related Notes (candidates)` contains:
@@ -94,6 +88,6 @@ The distiller MAY emit:
   "hub": "{HUB_NAME}",
   "parent": "Neural Networks",
   "linked_axis": "neural network training",
-  "snippet_ref": 1
+  "snippet": "- Backpropagation computes the gradient of the loss function via the chain rule, layer by layer from output to input."
 }
-(with the body in `===SILICA-BODY 1===` as usual). `parent` MUST be a bare title from the candidates list. Omit it entirely if no candidate is a meaningful parent — the system falls back to hub automatically.
+`parent` MUST be a bare title from the candidates list. Omit it entirely if no candidate is a meaningful parent — the system falls back to hub automatically.

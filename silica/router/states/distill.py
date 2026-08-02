@@ -295,6 +295,7 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
         substrate=substrate,
         session_date=_doc_date(fsm, idx) or fsm.progress.started_at[:10],
         language=fsm.context.get(f"file_{fi}_language"),
+        profile=getattr(fsm, "distill_profile", None),
     )
 
 
@@ -523,6 +524,9 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         payload_paths=payload_paths,
         target_dir=fsm.target_dir,
         hub=fsm.hub,
+        # Same profile as the prompt: an extractive run judged by the default
+        # floor would reject its own (correct) verbatim output.
+        profile=getattr(fsm, "distill_profile", None),
     )
 
     if "error" in res:

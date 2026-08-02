@@ -143,6 +143,100 @@ def test_anneal_retry_keeps_grounding_parity_with_persisted_payloads(tmp_vault, 
     assert bundle.get("payloads") == payloads      # evidence survives the re-put
 
 
+def test_anneal_steer_validates_on_the_same_evidence_that_rejected(tmp_vault, tmp_path, monkeypatch):
+    # Finding 2, steer edition: _steer_bundle used to validate the escalation
+    # model's "fix" with EMPTY payloads, so a hallucinated op sailed through the
+    # weaker gate. Measured live: a promotion bundle came back as an invented
+    # encyclopedia note (in Danish) with zero facts from the source. The fix
+    # must pass the bundle's persisted payloads, same as silica_deferred_retry.
+    from silica.tools import pipeline
+
+    tmp_vault.note("Reti/Reti.md", "# Reti\n")
+    store = _park(monkeypatch, tmp_path)
+    payloads = [{"batches": [{"inbox_file": "inbox/c.md", "concepts": [
+        {"name": "Broker", "inbox_excerpt": "solo Broker è definito qui"},
+    ]}]}]
+    store.put(
+        "ggg7", "inbox/c.md", "Reti", None,
+        [{"op": "write", "heading": "Broker", "source_basename": "c.md",
+          "path": "Reti/Broker.md", "title": "Broker", "snippet": "corto"}],
+        rejection_reasons={"Reti/Broker.md": "snippet too short"},
+        phase="VALIDATE",
+        payloads=payloads,
+    )
+
+    class _Resp:  # the model pivots to a concept the evidence never grounded
+        text = orjson.dumps([{
+            "op": "write", "heading": "Ghost", "source_basename": "c.md",
+            "path": "Reti/Ghost.md", "title": "Ghost", "snippet": LONG,
+        }]).decode()
+
+    class _Provider:
+        def call_llm(self, messages, tools=None, **kw):
+            return _Resp()
+
+    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _Provider())
+
+    res = pipeline.silica_anneal(steer=True)
+
+    [row] = res["results"]
+    assert row["steer"]["status"] == "no_fix", row
+    assert res["written"] == 0
+    assert store.get("ggg7") is not None  # still parked, never written
+    import pytest as _pytest
+    from silica.driver import DRIVER
+    with _pytest.raises(Exception):
+        DRIVER.read_note("Reti/Ghost.md")
+
+
+def test_anneal_steer_offers_and_honors_the_body_appendix(tmp_vault, tmp_path, monkeypatch):
+    """The steer turn is free text (no constrained decode), so it is the one
+    seam where the Body Appendix is executable: bodies outside the JSON keep
+    single backslashes, and a repair cannot JSON-corrupt a healthy body. The
+    prompt must OFFER the format (a model won't invent it), and the parse
+    chain must honor it end-to-end."""
+    from silica.tools import pipeline
+
+    tmp_vault.note("Reti/Reti.md", "# Reti\n")
+    store = _park(monkeypatch, tmp_path)
+    store.put(
+        "hhh8", "inbox/e.md", "Reti", None,
+        [{"op": "write", "heading": "Broker", "source_basename": "e.md",
+          "path": "Reti/Broker.md", "title": "Broker", "snippet": "corto"}],
+        rejection_reasons={"Reti/Broker.md": "snippet too short"},
+        phase="VALIDATE",
+    )
+
+    prompts = []
+    body = LONG + "\nVincolo: $\\top \\neq \\frac{1}{2}$."
+
+    class _Resp:
+        text = (
+            orjson.dumps([{
+                "op": "write", "heading": "Broker", "source_basename": "e.md",
+                "path": "Reti/Broker.md", "title": "Broker", "snippet_ref": 1,
+            }]).decode()
+            + "\n===SILICA-BODY 1===\n" + body
+        )
+
+    class _Provider:
+        def call_llm(self, messages, tools=None, **kw):
+            prompts.append(messages[0]["content"])
+            return _Resp()
+
+    monkeypatch.setattr("silica.agent.providers.get_provider",
+                        lambda *a, **k: _Provider())
+
+    res = pipeline.silica_anneal(steer=True)
+
+    assert "===SILICA-BODY" in prompts[0]
+    assert res["written"] == 1
+    from silica.driver import DRIVER
+    note = DRIVER.read_note("Reti/Broker.md").content
+    assert "$\\top \\neq \\frac{1}{2}$" in note
+    assert "\t" not in note
+
+
 def test_anneal_retry_without_payloads_keeps_legacy_behavior(tmp_vault, tmp_path, monkeypatch):
     # Old bundles (pre-schema) carry no payloads: retry still validates
     # payload-free, so they are not bricked by the schema addition.

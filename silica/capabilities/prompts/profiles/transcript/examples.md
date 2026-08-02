@@ -24,7 +24,7 @@
   ]
 }
 
-### Example Output (NO prose, NO markdown fences — JSON, then the Body Appendix):
+### Example Output (NO prose, NO markdown fences — JSON only, body inline):
 {
   "main_thematic_axes": ["Elena's hobbies and classes", "family relationships", "conversational logistics"],
   "updates": [
@@ -37,7 +37,7 @@
       "hub": "{HUB_NAME}",
       "linked_axis": "Elena's hobbies and classes",
       "concepts": ["pottery class", "community center", "beginners course"],
-      "snippet_ref": 1
+      "snippet": "- Elena signed up for the beginners pottery class at the community center, starting 2026-05-20 (\"May 20th\"), held every Tuesday evening.\n- The class is taught by Mr. Alvarez. Elena's sister teaches the advanced course at the same center, not Elena's."
     },
     {
       "heading": "greetings",
@@ -51,11 +51,7 @@
     {"key": "elena.pottery_class.teacher", "text": "Elena's beginners pottery class is taught by Mr. Alvarez"}
   ]
 }
-===SILICA-BODY 1===
-- Elena signed up for the beginners pottery class at the community center, starting 2026-05-20 ("May 20th"), held every Tuesday evening.
-- The class is taught by Mr. Alvarez. Elena's sister teaches the advanced course at the same center, not Elena's.
-
-Note what the example does NOT do: the body never says "Elena and Sam discussed a pottery class" — it carries the facts themselves, attributed. Time-bound personal details also went to `ephemerals` under stable `entity.attribute` keys.
+Note what the example does NOT do: the body never says "Elena and Sam discussed a pottery class" — it carries the facts themselves, attributed, INLINE in `snippet` with `\n` line breaks and `\"` for quotes. Time-bound personal details also went to `ephemerals` under stable `entity.attribute` keys.
 
 ### Example with `parent` field (only when ## Related Notes lists a valid parent candidate):
 Suppose `## Related Notes (candidates)` contains:

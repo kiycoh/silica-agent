@@ -48,12 +48,33 @@ def same_file_key(path: str) -> str:
 MIN_WRITE_SNIPPET_CHARS = 275
 
 
-def min_write_snippet_chars() -> int:
-    """Effective write-body floor: env override else the compiled default, read
-    at call time. Single source so the expand recovery uses the SAME floor the
-    gate enforces — they used to diverge (expand cleared bodies at 100 while the
-    gate could want more, so expanded notes stayed thin, audit finding 1)."""
-    return int(os.getenv("SILICA_MIN_WRITE_SNIPPET_CHARS", str(MIN_WRITE_SNIPPET_CHARS)))
+# Extractive bodies are verbatim-selected spans, grounded by construction; a
+# short durable fact is real content, not the prose-placeholder the default
+# floor guards against.
+EXTRACTIVE_MIN_SNIPPET_CHARS = 40
+
+# Profiles whose bodies are SELECTED verbatim, not authored: extractivity is
+# enforced and the lower floor applies. "promotion" copies lines from an
+# episodic chain render; same contract, different lens.
+EXTRACTIVE_PROFILES = frozenset({"extractive", "promotion"})
+
+
+def min_write_snippet_chars(profile: str | None = None) -> int:
+    """Effective write-body floor for the run's profile, read at call time.
+    Single source so the expand recovery uses the SAME floor the gate enforces
+    — they used to diverge (expand cleared bodies at 100 while the gate could
+    want more, so expanded notes stayed thin, audit finding 1).
+
+    Two independent levers, one per body kind: SILICA_MIN_WRITE_SNIPPET_CHARS
+    pins the AUTHORING floor (default profile), SILICA_EXTRACTIVE_MIN_SNIPPET_CHARS
+    the verbatim-selection one. Measured live: a single shared env pin, set for
+    authoring, reached a promotion run and rejected its verbatim body at
+    '0 < 275'."""
+    if profile in EXTRACTIVE_PROFILES:
+        return int(os.getenv("SILICA_EXTRACTIVE_MIN_SNIPPET_CHARS",
+                             str(EXTRACTIVE_MIN_SNIPPET_CHARS)))
+    return int(os.getenv("SILICA_MIN_WRITE_SNIPPET_CHARS",
+                         str(MIN_WRITE_SNIPPET_CHARS)))
 
 
 # --- meta-description shape gate (audit 2026-07-23, finding 1) ---------------
@@ -144,12 +165,18 @@ def validate_operations(
     future_ref_whitelist: list[str] | None = None,
     cleared_links_out: list | None = None,
     ungrounded_out: list | None = None,
+    profile: str | None = None,
 ) -> tuple[list[Op], list[Rejection]]:
     """Validates operations against payloads and target_dir using DRIVER.
 
     ungrounded_out (optional): collects warn-only span-grounding hits —
     write/patch ops whose math/code spans can't be located in their source
     excerpt (fabrication candidates). Never causes a rejection.
+
+    profile (optional): the RUN's distill profile. When set it decides the
+    extractive enforcement and the snippet floor instead of the process-global
+    resolution — a /promote run judges its ops as extractive while a
+    concurrent /nucleate keeps the default gate.
     """
     from silica.kernel.write.ops_io import parse_ops
     from silica.kernel.vault_manifest import active_write_dir, within
@@ -419,8 +446,9 @@ def validate_operations(
 
     from silica.kernel.prep_delegation import active_distill_profile
 
+    _profile = profile or active_distill_profile()
     _extract_enforce = (os.getenv("SILICA_EXTRACTIVE_ENFORCE") == "1"
-                        or active_distill_profile() == "extractive")
+                        or _profile in EXTRACTIVE_PROFILES)
 
     def _extractive_reject(op: Op) -> str | None:
         """Under the extractive distill profile a write/patch body must be
@@ -667,7 +695,7 @@ def validate_operations(
             # a durable fact can live in a legitimately short turn — a 60-char
             # verbatim fact is real content, not the prose-placeholder this gate
             # guards against — so the extractive arm sets a lower floor.
-            _min_snippet = min_write_snippet_chars()
+            _min_snippet = min_write_snippet_chars(_profile)
             if body_len < _min_snippet:
                 rejected_ops.append(Rejection(
                     op=op,

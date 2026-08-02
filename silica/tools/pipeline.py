@@ -281,6 +281,7 @@ class ValidateOpsArgs(BaseModel):
     target_dir: str = Field(default="", description="Target folder in the vault")
     hub: str = Field(default="", description="Hub note name")
     future_ref_whitelist: list[str] = Field(default_factory=list, description="Optional whitelist of future reference note names")
+    profile: str | None = Field(default=None, description="Per-run distill profile (None = process-global resolution)")
 
 @tool(ValidateOpsArgs, cls="composed", internal=True)
 def silica_validate_ops(
@@ -289,6 +290,7 @@ def silica_validate_ops(
     target_dir: str = "",
     hub: str = "",
     future_ref_whitelist: list[str] | None = None,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Pre-write gate: checks structural validity and applies rejection threshold (10%).
 
@@ -327,6 +329,7 @@ def silica_validate_ops(
         future_ref_whitelist=future_ref_whitelist,
         cleared_links_out=cleared_links,
         ungrounded_out=ungrounded,
+        profile=profile,
     )
 
     total = len(ops)
@@ -590,7 +593,13 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
         "Each op below is echoed with the exact reason it was rejected. Fix ONLY\n"
         "what the reason requires — keep the content otherwise identical — and\n"
         "return the corrected ops as a JSON array in the same op schema. Omit an\n"
-        "op only if it is unfixable.\n\nREJECTED OPS:\n"
+        "op only if it is unfixable.\n"
+        "For bodies containing LaTeX, code or Windows paths, carry the body\n"
+        "OUTSIDE the JSON: set \"snippet_ref\": N in the op and append, after\n"
+        "the array, one block per ref:\n"
+        "===SILICA-BODY N===\n"
+        "<body, verbatim, literal single backslashes, real line breaks>\n"
+        "This avoids JSON-escape corruption (\"\\top\" decodes to a TAB).\n\nREJECTED OPS:\n"
         + _orjson.dumps(feedback, option=_orjson.OPT_INDENT_2).decode()
     )
     try:
@@ -607,7 +616,12 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
     fixed = [op for op in fixed if op.op != OpType.skip]
     if not fixed:
         return {"status": "no_fix"}
-    validated, still = validate_operations(fixed, [], target_dir, hub=hub)
+    # The bundle's ORIGINAL payloads, same as silica_deferred_retry (audit
+    # finding 2): an empty list re-admits the fix on strictly weaker validation
+    # — measured live, a hallucinated op with zero grounded facts sailed
+    # through and landed in the vault.
+    validated, still = validate_operations(
+        fixed, bundle.get("payloads") or [], target_dir, hub=hub)
     if not validated:
         return {"status": "no_fix", "still_rejected": len(still)}
     txn = build_txn(validated)

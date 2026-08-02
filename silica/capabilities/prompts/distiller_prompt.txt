@@ -71,7 +71,7 @@ The excerpts are already extracted by the Router via the recon + distiller_paylo
 
 {LENS_RUBRIC}
 ## Ephemeral Facts (episodic routing)
-Facts about the user or their immediate context that are personal, time-bound, or thematically inert (names, dates, preferences, current status) do not belong in notes. Emit them in a top-level `"ephemerals"` array as `{"key": ..., "text": ...}` where `key` is a canonical `entity.attribute` slug — lowercase, dot-separated, `user.` prefix for facts about the user (e.g. `user.dog.name`) — and `text` is the fact verbatim in the source language. Do not invent facts; omit the field entirely when there is nothing ephemeral.
+{LENS_EPHEMERAL_ROUTING}
 
 When the excerpt is a dialogue, ALSO capture the specific facts the ASSISTANT stated that the user may later ask back (recommendations made, schedules/rotas, names, colors, prices, itineraries, generated content details). Key them under the subject entity with an `assistant.` prefix when the assistant is the source (e.g. `assistant.recipe.oven_temp`, `assistant.itinerary.day1.city`). A detail the assistant produced is as recallable as one the user said — losing it is distill-loss.
 
@@ -91,7 +91,7 @@ When a `## Episodic keys` section is present in your context, it lists the live 
 ## JSON Output Encoding Rules (CRITICAL — violations cause immediate rejection)
 - **Wikilinks**: NEVER include the `.md` extension inside `[[...]]`. Write `[[Note Title]]` not `[[Note Title.md]]` or `[[path/to/Note.md]]`. The `related` array and all body text follow the same rule.
 - **Vault vocabulary**: when a `## Vault vocabulary` section is present in your context, prefer those exact terms for note titles, headings and `concepts` keyphrases instead of coining synonyms — the vault already names these ideas.
-- **Note body goes OUTSIDE the JSON (Body Appendix)**: NEVER put the note body in a `"snippet"` (or `"content"`) JSON string. In the JSON, reference the body with an integer `"snippet_ref": N`; write the body itself verbatim in the Body Appendix (see Output Schema). Because the body is not a JSON string, you NEVER escape backslashes: write LaTeX and code with literal single backslashes exactly as they must appear in the file — `\top`, `\neq`, `\frac`, `\mathbb`, `\boldsymbol`, and matrix/aligned row breaks as `\\`. Use real line breaks, not `\n`.
+- **Note body goes INLINE in the JSON**: put the note body in the `"snippet"` JSON string (`"content"` for overwrite ops), correctly escaped: line breaks as `\n`, and every literal backslash DOUBLED. LaTeX and code are the danger zone — write `\\top`, `\\neq`, `\\frac`, `\\mathbb`, `\\boldsymbol`, and matrix/aligned row breaks as `\\\\`. A single backslash before `t`, `n`, `f`, `b`, or `r` is a valid JSON escape that silently decodes to a control character (`"\top"` becomes a TAB followed by `op`), destroying the formula with no error — double it.
 - **No self-referential links**: the `snippet` or `content` of a note for concept X must NOT contain `[[X]]` (a link back to itself). Self-links are meaningless in Obsidian's graph and will be stripped by the autolink gate anyway.
 - **Tag limit**: include at most **{MAX_TAGS} tags** per note. If the inbox excerpt suggests more, keep the {MAX_TAGS} most specific/relevant ones and discard the rest.
 
@@ -123,21 +123,19 @@ Every `write` and `patch` op SHOULD carry a `"concepts"` array: 3–8 normalized
 - Omit `concepts` for `skip` ops.
 
 ## Output Schema
-Respond with ONLY the JSON object below, immediately followed by the Body Appendix. No prose preamble. No markdown fences (no ```json). Nothing after the closing brace EXCEPT the `===SILICA-BODY N===` appendix blocks.
+Respond with ONLY the JSON object below. No prose preamble. No markdown fences (no ```json). Nothing after the closing brace.
 
 Your JSON MUST contain `"main_thematic_axes"` (3–5 short strings naming the pillars ACTUALLY discussed in the inbox excerpts) BEFORE `"updates"`. Populate the axes FIRST, reasoning from the excerpt bodies — NOT from isolated acronyms, wikilinks, or frontmatter.
 
-### Body Appendix (where note bodies go)
-Every `write`/`patch` op carries its body OUTSIDE the JSON. In the op, set `"snippet_ref": N` (N = 1, 2, 3… unique per op). `skip` ops have no body and no ref. After the JSON, append one block per ref:
+### Body Appendix (accepted alternative — only if your runtime allows text after the JSON)
+If, and only if, you are able to emit free text after the closing brace, you MAY carry bodies OUTSIDE the JSON instead of inline: in the op set `"snippet_ref": N` (N = 1, 2, 3… unique per op) instead of `"snippet"`, and after the JSON append one block per ref:
 
 ```
 <the JSON object>
 ===SILICA-BODY 1===
 <body for snippet_ref 1, verbatim, single backslashes, real line breaks>
-===SILICA-BODY 2===
-<body for snippet_ref 2, verbatim>
 ```
 
-Each `===SILICA-BODY N===` MUST be alone on its own line. The body text between markers is copied to the note as-is — do not JSON-escape anything in it. The wikilink rule (no `.md`), no-self-link rule, and {LANGUAGE}-prose requirement all still apply to body text.
+Each `===SILICA-BODY N===` MUST be alone on its own line; body text between markers is copied to the note as-is, with NO JSON escaping (literal single backslashes, real line breaks). Never mix formats in one op — `snippet` OR `snippet_ref` — and a `snippet_ref` without its matching body block yields an empty body and a rejected op. When in doubt, use inline `snippet`. The wikilink rule (no `.md`), no-self-link rule, and {LANGUAGE}-prose requirement apply to bodies in both formats.
 
 {LENS_EXAMPLES}
