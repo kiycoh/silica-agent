@@ -85,7 +85,7 @@ def _patch_fsm_seams(monkeypatch):
                         lambda steer=False, limit=0: {"bundles": 1, "written": 1,
                                                       "still_deferred": 0})
     monkeypatch.setattr(runner, "_clear_fsm_state", lambda: None)
-    monkeypatch.setattr(runner, "_wipe_index_namespace", lambda: None)
+    monkeypatch.setattr(runner, "_wipe_index_namespace", lambda vault: None)
 
 
 def test_fsm_ingest_fresh_runs_sequentially_and_writes_marker(tmp_path, monkeypatch):
@@ -111,19 +111,41 @@ def test_fsm_ingest_reuse_accepts_complete_marker_only(tmp_path, monkeypatch):
     _patch_fsm_seams(monkeypatch)
     vault = tmp_path / "conv-t"
     vault.mkdir()
-    # Complete + consistent marker: zero Coordinator calls.
+    fields = runner.corpus_fields(_fsm_inst(), distill=True, key_schema=False)
+    # Complete + consistent marker, stamped by this run's levers: zero calls.
     (vault / "fsm_ingest.json").write_text(json.dumps(
         {"complete": True, "sessions": ["session_1", "session_2"],
-         "anneal": {"still_deferred": 0}, "reused": False}), encoding="utf-8")
+         "fields": fields, "anneal": {"still_deferred": 0}, "reused": False}),
+        encoding="utf-8")
     marker = runner.fsm_ingest_conversation(vault, _fsm_inst(), reuse=True,
                                             key_schema=False)
     assert marker["reused"] is True
     assert _StubCoordinator.calls == []
     # Stale marker (session list mismatch): re-ingest from scratch.
     (vault / "fsm_ingest.json").write_text(json.dumps(
-        {"complete": True, "sessions": ["session_1"]}), encoding="utf-8")
+        {"complete": True, "sessions": ["session_1"], "fields": fields}),
+        encoding="utf-8")
     marker = runner.fsm_ingest_conversation(vault, _fsm_inst(), reuse=True,
                                             key_schema=False)
+    assert marker["reused"] is False
+    assert len(_StubCoordinator.calls) == 2
+
+
+def test_fsm_ingest_refuses_a_marker_built_by_another_lens(tmp_path, monkeypatch):
+    """A complete marker with the right sessions is still not this run's
+    baseline if the corpus was distilled under a different prompt or model.
+    Reusing it reports someone else's ingest as a frozen arm."""
+    _patch_fsm_seams(monkeypatch)
+    vault = tmp_path / "conv-t"
+    vault.mkdir()
+    fields = runner.corpus_fields(_fsm_inst(), distill=True, key_schema=False)
+    (vault / "fsm_ingest.json").write_text(json.dumps(
+        {"complete": True, "sessions": ["session_1", "session_2"],
+         "fields": {**fields, "lens_fp": "0123456789ab"}}), encoding="utf-8")
+
+    marker = runner.fsm_ingest_conversation(vault, _fsm_inst(), reuse=True,
+                                            key_schema=False)
+
     assert marker["reused"] is False
     assert len(_StubCoordinator.calls) == 2
 

@@ -139,18 +139,37 @@ def _note(session_id: str, date: str, date_time: str, body: str) -> str:
 
 # --- Conversation vault ------------------------------------------------------
 
+def corpus_fields(inst: dict, *, distill: bool, key_schema: bool) -> dict:
+    """Every input that decides what the session notes hold — see the LME
+    twin. Adding a field invalidates every corpus frozen before it existed."""
+    from silica.config import CONFIG
+
+    return {
+        "version": 1,
+        "distill": bool(distill),
+        "key_schema": bool(key_schema),
+        "lens_fp": _shared.lens_fingerprint(profile=None, distill=distill),
+        "worker_model": (CONFIG.worker_model or CONFIG.model) if distill else "",
+        "sessions": len(conversation_sessions(inst["conversation"])),
+    }
+
+
 def load_conversation_vault(vault: Path, inst: dict, distill: bool = False,
-                            reuse: bool = False) -> dict[str, dict]:
+                            reuse: bool = False,
+                            key_schema: bool = False) -> dict[str, dict]:
     """Write one note per session; return {rel: {session_id, date}}.
 
     Same contract as the LME loader: ``distill`` routes each session through
     the Silica distiller (episodic capture keyed run_id=session, seen=date);
     ``reuse`` adopts an already-populated vault as-is (frozen corpus — the
-    distiller re-rolls every note per run, which confounds cross-run A/Bs)."""
+    distiller re-rolls every note per run, which confounds cross-run A/Bs), but
+    only when its stamp matches this run field for field and it still holds the
+    notes it claims. Anything else re-ingests from zero."""
     sess_dir = vault / "sessions"
-    if reuse and sess_dir.is_dir():
-        existing = sorted(sess_dir.glob("s*.md"))
-        if existing:
+    fields = corpus_fields(inst, distill=distill, key_schema=key_schema)
+    if reuse:
+        existing = sorted(sess_dir.glob("s*.md")) if sess_dir.is_dir() else []
+        if _shared.corpus_reusable(vault, fields, present=len(existing)):
             from silica.kernel.write import frontmatter
 
             index = {}
@@ -159,6 +178,16 @@ def load_conversation_vault(vault: Path, inst: dict, distill: bool = False,
                 index[f"sessions/{f.stem}"] = {"session_id": data.get("session_id", ""),
                                                "date": data.get("date", "")}
             return index
+        if existing:
+            logger.warning("corpus stamp missing or mismatched for %s — "
+                           "re-ingesting from scratch", vault.name)
+    # From zero, always: leftover notes from a longer previous corpus would
+    # stay in the haystack, and its vectors in the index namespace.
+    if sess_dir.is_dir():
+        import shutil
+
+        shutil.rmtree(sess_dir, ignore_errors=True)
+        _shared.wipe_index_namespace(vault)
     sess_dir.mkdir(parents=True, exist_ok=True)
     index = {}
     for i, (n, date_time, turns) in enumerate(conversation_sessions(inst["conversation"])):
@@ -169,6 +198,7 @@ def load_conversation_vault(vault: Path, inst: dict, distill: bool = False,
         body = distill_session(sid, date, excerpt) if distill else excerpt
         _write_note(rel, _note(sid, date, date_time, body))
         index[rel.removesuffix(".md")] = {"session_id": sid, "date": date}
+    _shared.write_corpus_stamp(vault, fields, present=len(index))
     return index
 
 
@@ -228,14 +258,10 @@ def _clear_fsm_state() -> None:
     reset_manifest_cache()
 
 
-def _wipe_index_namespace() -> None:
-    """Drop this vault's ~/.silica/index/<digest>/ (embeddings, cooccur,
-    deferred bundles) so a from-scratch re-ingest starts clean."""
-    import shutil
-
-    from silica.kernel.recall import paths as kpaths
-
-    shutil.rmtree(kpaths.index_dir(), ignore_errors=True)
+def _wipe_index_namespace(vault: Path) -> None:
+    """Drop ``vault``'s ~/.silica/index/<digest>/ so a from-scratch re-ingest
+    starts clean. Shared with the LME loader's stamp-mismatch path."""
+    _shared.wipe_index_namespace(vault)
 
 
 def _ingest_failed(result: dict) -> bool:
@@ -265,16 +291,22 @@ def fsm_ingest_conversation(vault: Path, inst: dict, *, reuse: bool,
     sessions = conversation_sessions(inst["conversation"])
     sids = [f"session_{n}" for n, _, _ in sessions]
 
+    # The FSM corpus is decided by the same levers as the loader's, so it is
+    # stamped with the same fields. The old check read `complete` and the
+    # session list only, which adopts a corpus ingested under another prompt
+    # or another worker model as if it were this run's baseline.
+    fields = corpus_fields(inst, distill=True, key_schema=key_schema)
     if reuse and marker_path.is_file():
         try:
             marker = json.loads(marker_path.read_text(encoding="utf-8"))
         except Exception:
             marker = {}
-        if marker.get("complete") and marker.get("sessions") == sids:
+        if (marker.get("complete") and marker.get("sessions") == sids
+                and marker.get("fields") == fields):
             marker["reused"] = True
             return marker
-        logger.warning("fsm marker stale or partial for %s — re-ingesting from scratch",
-                       vault.name)
+        logger.warning("fsm marker stale, partial or built by another lens for %s — "
+                       "re-ingesting from scratch", vault.name)
 
     # Never reuse a partial ingest: wipe the vault and its index namespace.
     import shutil
@@ -283,7 +315,7 @@ def fsm_ingest_conversation(vault: Path, inst: dict, *, reuse: bool,
     if key_schema:
         (vault / "vault.yaml").write_text(
             "conventions:\n  episodic_keys: {}\n", encoding="utf-8")
-    _wipe_index_namespace()
+    _wipe_index_namespace(vault)
     _clear_fsm_state()
 
     (vault / "inbox").mkdir(exist_ok=True)
@@ -330,6 +362,7 @@ def fsm_ingest_conversation(vault: Path, inst: dict, *, reuse: bool,
         "complete": True,
         "reused": False,
         "sessions": sids,
+        "fields": fields,
         "partial_sessions": partial_sids,
         "date": datetime.date.today().isoformat(),
         "anneal": {k: anneal.get(k) for k in ("bundles", "written", "still_deferred")},
@@ -909,6 +942,9 @@ def _run_conversations(data, rows, doc, *, run_root, model, judge_model, k,
             session_map = {rel: {e["session_id"]} for rel, e in index.items()
                            if e.get("session_id")}
         if not stuff:
+            # force=False is safe even when the loader silently re-ingested on
+            # a stamp mismatch: that path wipes the index namespace first, so
+            # an incremental refresh over an empty index is a full rebuild.
             build_indexes(embed=use_embedder, force=not fsm_reused)
             if lexical:
                 # This vault's lexical index must be live, else --lexical is a

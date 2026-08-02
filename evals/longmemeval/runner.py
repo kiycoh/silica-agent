@@ -258,19 +258,40 @@ def bind_vault(vault: Path) -> None:
     cooc_mod.clear()
 
 
+def corpus_fields(inst: dict, *, distill: bool, key_schema: bool) -> dict:
+    """Every input that decides what the session notes hold. Adding a field
+    invalidates every corpus frozen before it existed, which is the intent:
+    the alternative is silently reusing one built under a lever this run does
+    not set."""
+    from silica.config import CONFIG
+
+    return {
+        "version": 1,
+        "distill": bool(distill),
+        "key_schema": bool(key_schema),
+        "lens_fp": _shared.lens_fingerprint(profile=None, distill=distill),
+        "worker_model": (CONFIG.worker_model or CONFIG.model) if distill else "",
+        "sessions": len(inst["haystack_sessions"]),
+    }
+
+
 def load_question_vault(vault: Path, inst: dict, distill: bool = False,
-                        reuse: bool = False) -> dict[str, dict]:
+                        reuse: bool = False, key_schema: bool = False) -> dict[str, dict]:
     """Write one note per haystack session; return {rel: {session_id, date}}.
 
     ``distill`` routes each session through the Silica distiller (mem0-comparable
     ingest) instead of storing the verbatim transcript. ``reuse`` adopts an
     already-populated vault as-is (frozen corpus: the distiller is LLM-driven and
-    re-rolls every note per run, which confounds any A/B across runs) — no
-    distiller call, notes untouched, index rebuilt from note frontmatter."""
+    re-rolls every note per run, which confounds any A/B across runs) — but only
+    when its stamp matches this run field for field and it still holds the notes
+    it claims. Anything else re-ingests from zero: a corpus built under another
+    prompt, another model, or a killed ingest is not the baseline it looks like.
+    """
     sess_dir = vault / "sessions"
-    if reuse and sess_dir.is_dir():
-        existing = sorted(sess_dir.glob("s*.md"))
-        if existing:
+    fields = corpus_fields(inst, distill=distill, key_schema=key_schema)
+    if reuse:
+        existing = sorted(sess_dir.glob("s*.md")) if sess_dir.is_dir() else []
+        if _shared.corpus_reusable(vault, fields, present=len(existing)):
             from silica.kernel.write import frontmatter
 
             index = {}
@@ -279,6 +300,16 @@ def load_question_vault(vault: Path, inst: dict, distill: bool = False,
                 index[f"sessions/{f.stem}"] = {"session_id": data.get("session_id", ""),
                                                "date": data.get("date", "")}
             return index
+        if existing:
+            logger.warning("corpus stamp missing or mismatched for %s — "
+                           "re-ingesting from scratch", vault.name)
+    # From zero, always: leftover notes from a longer previous corpus would
+    # stay in the haystack, and its vectors in the index namespace.
+    if sess_dir.is_dir():
+        import shutil
+
+        shutil.rmtree(sess_dir, ignore_errors=True)
+        _shared.wipe_index_namespace(vault)
     sess_dir.mkdir(parents=True, exist_ok=True)
     sids = inst.get("haystack_session_ids") or []
     dates = inst.get("haystack_dates") or []
@@ -292,6 +323,7 @@ def load_question_vault(vault: Path, inst: dict, distill: bool = False,
         body = distill_session(sid, date, excerpt) if distill else excerpt
         _write_note(rel, _frontmatter_note(sid, date, body))
         index[rel.removesuffix(".md")] = {"session_id": sid, "date": date}
+    _shared.write_corpus_stamp(vault, fields, present=len(index))
     return index
 
 
@@ -410,9 +442,12 @@ def run_instance(inst: dict, run_root: Path, *, model: str, judge_model: str,
             "conventions:\n  episodic_keys: {}\n", encoding="utf-8")
     bind_vault(vault)
 
-    index = load_question_vault(vault, inst, distill=distill, reuse=reuse)
+    index = load_question_vault(vault, inst, distill=distill, reuse=reuse,
+                                key_schema=key_schema)
     if not stuff:
         # Reused corpus -> incremental refresh (no-op on unchanged notes).
+        # Safe even when the loader re-ingested on a stamp mismatch: that path
+        # wipes the index namespace, so the incremental leg rebuilds it whole.
         build_indexes(embed=use_embedder, force=not reuse)
 
     # Retrieval + context assembly are the PRODUCT path (perception promotion,

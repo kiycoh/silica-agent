@@ -57,6 +57,80 @@ def embedding_model(config, live: bool) -> str | None:
     return getattr(config, "embedding_model", None) if live else None
 
 
+# --- Frozen-corpus checkpoint ------------------------------------------------
+#
+# `--reuse-vaults` used to mean "the session directory exists", which adopts a
+# corpus distilled under a different prompt or model, or an ingest killed
+# halfway, and then reports it as a frozen baseline. The stamp records the
+# fields that decided the corpus plus the note count it claims to hold; reuse
+# demands an exact match on all of them and re-ingests from zero otherwise.
+# No partial resume and no migration on purpose: a corpus that half matches is
+# not a corpus, and re-running the ingest is cheaper than a wrong number.
+
+_STAMP_NAME = "corpus.json"
+
+
+def lens_fingerprint(profile: str | None, distill: bool = True) -> str:
+    """Name the distiller lens that produced a corpus.
+
+    Rendered with the per-session placeholders fixed, so the fingerprint moves
+    when the prompt template or the profile moves and stays put when only the
+    session date does. A verbatim arm never calls the distiller, so it has no
+    lens and no prompt edit can invalidate its corpus.
+    """
+    if not distill:
+        return ""
+    from silica.kernel import distill_cache, prep_delegation
+
+    return distill_cache.prompt_fingerprint(
+        prep_delegation.render_prompt(target="sessions", profile=profile))
+
+
+def write_corpus_stamp(vault: Path, fields: dict, *, present: int) -> None:
+    """Record how this corpus was built, next to the corpus itself."""
+    import json
+
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    vault.mkdir(parents=True, exist_ok=True)
+    blob = json.dumps({"fields": fields, "notes": present}, indent=2, sort_keys=True)
+    atomic_write_bytes(vault / _STAMP_NAME, blob.encode("utf-8"))
+
+
+def wipe_index_namespace(vault: Path) -> None:
+    """Drop ``vault``'s ~/.silica/index/<digest>/ (embeddings, cooccur,
+    episodic, deferred bundles) so a from-scratch re-ingest starts clean.
+    Rebuilding notes without this leaves the previous corpus's vectors behind
+    and the arm measures a blend of the two.
+
+    The vault is an argument and not `index_dir()` on purpose: resolving it
+    from the ambient CONFIG makes a destructive rmtree depend on whether the
+    caller happened to bind a vault first, and an adapter test that calls a
+    loader directly would delete the developer's real index.
+    """
+    import shutil
+
+    from silica.kernel.recall import paths as kpaths
+
+    shutil.rmtree(kpaths.index_dir_for(str(vault)), ignore_errors=True)
+
+
+def corpus_reusable(vault: Path, fields: dict, *, present: int) -> bool:
+    """True only when the stamp matches this run field for field AND still
+    holds the number of notes it claims. The count is the invariant the old
+    `is_dir()` check had no way to see: a killed ingest leaves the fields
+    right and the notes missing."""
+    import json
+
+    try:
+        stamp = json.loads((vault / _STAMP_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(stamp, dict):
+        return False
+    return stamp.get("fields") == fields and stamp.get("notes") == present
+
+
 # --- Lever liveness (fail fast, never fake a null A/B) -----------------------
 
 def assert_lexical_live() -> None:
