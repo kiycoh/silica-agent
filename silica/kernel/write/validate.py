@@ -168,6 +168,7 @@ def validate_operations(
     cleared_links_out: list | None = None,
     ungrounded_out: list | None = None,
     profile: str | None = None,
+    normalized_out: dict | None = None,
 ) -> tuple[list[Op], list[Rejection]]:
     """Validates operations against payloads and target_dir using DRIVER.
 
@@ -179,6 +180,13 @@ def validate_operations(
     extractive enforcement and the snippet floor instead of the process-global
     resolution — a /promote run judges its ops as extractive while a
     concurrent /nucleate keeps the default gate.
+
+    normalized_out (optional): counts the malformed-but-unambiguous ops this
+    call repaired, keyed by pattern. A reject total says nothing an author can
+    act on; "nine of ten repairs were a path rebuilt from the title" names the
+    prompt rule to change. Repairs already happened and only reached a debug
+    log — this is the same set, counted. Absent keys mean no repair of that
+    kind, never a zero row.
     """
     from silica.kernel.write.ops_io import parse_ops
     from silica.kernel.vault_manifest import active_write_dir, within
@@ -188,6 +196,10 @@ def validate_operations(
     # Vault write boundary (`write_dir` in vault.yaml); "" ⇒ the whole vault, so
     # a vault that declares nothing behaves exactly as before.
     write_root = active_write_dir()
+
+    def _repaired(pattern: str) -> None:
+        if normalized_out is not None:
+            normalized_out[pattern] = normalized_out.get(pattern, 0) + 1
 
     # Sanitize filesystem-illegal characters (e.g. ':') from path filenames.
     # When a write op carries a `title` field, rebuild the path from title so
@@ -199,6 +211,7 @@ def validate_operations(
                 new_path = f"{target_dir.rstrip('/')}/{clean_title}.md"
                 if new_path != op.path:
                     logger.debug("validate: title-derived path '%s' → '%s'", op.path, new_path)
+                    _repaired("title_path")
                     op.path = new_path
 
         # A NEW note's location is Silica's own filing decision, so a write
@@ -210,6 +223,7 @@ def validate_operations(
         if write_root and op.op == OpType.write and op.path and not within(op.path, write_root):
             rebased = write_root + "/" + op.path.replace("\\", "/").strip("/")
             logger.debug("validate: write_dir rebase '%s' → '%s'", op.path, rebased)
+            _repaired("write_dir_rebase")
             op.path = rebased
 
         if op.path:
@@ -219,6 +233,7 @@ def validate_operations(
             if sanitized != filename:
                 new_path = (os.path.join(folder, sanitized) if folder else sanitized).replace("\\", "/")
                 logger.debug("validate: sanitized path '%s' → '%s'", op.path, new_path)
+                _repaired("path_slugify")
                 op.path = new_path
 
     valid_concepts: dict[str, set[str]] = {}

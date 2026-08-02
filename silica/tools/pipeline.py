@@ -325,6 +325,7 @@ def silica_validate_ops(
     cleared_parents: list[dict] = []
     cleared_links: list[dict] = []
     ungrounded: list[dict] = []
+    normalized: dict[str, int] = {}
     validated_ops, rejected_ops = validate_operations(
         ops,
         payloads,
@@ -335,6 +336,7 @@ def silica_validate_ops(
         cleared_links_out=cleared_links,
         ungrounded_out=ungrounded,
         profile=profile,
+        normalized_out=normalized,
     )
 
     total = len(ops)
@@ -362,6 +364,10 @@ def silica_validate_ops(
         "cleared_parents": cleared_parents,
         "cleared_links": cleared_links,
         "ungrounded": ungrounded,
+        # Malformed-but-unambiguous ops repaired rather than rejected, per
+        # pattern. The reject total says an op failed; this says which prompt
+        # rule the model keeps missing.
+        "normalized": normalized,
     }
 
 
