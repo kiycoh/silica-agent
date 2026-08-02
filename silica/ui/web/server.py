@@ -95,6 +95,21 @@ def _reset_session() -> None:
     current_session_id = None  # next turn opens a new file
 
 
+def _capture_own_session() -> None:
+    """Flush the live conversation to the capture WAL, if capture is on.
+
+    The server owns the session, so the two moments it can see a conversation
+    end are a new chat and its own shutdown. A closed tab is neither; the next
+    one of these catches its content (accepted ceiling, spec §10).
+    `capture_session` is opt-in and fail-open in itself — a capture bug can
+    never break the GUI from here.
+    """
+    from silica.capture import capture_session
+
+    capture_session(messages, session_id=current_session_id or uuid.uuid4().hex[:12],
+                    driver="gui")
+
+
 def _session_title(msgs: list[dict]) -> str:
     for m in msgs:
         if m.get("role") == "user" and m.get("content"):
@@ -1177,6 +1192,7 @@ def load_session(payload: dict):
 
 @app.post("/reset")
 def reset():
+    _capture_own_session()
     _reset_session()
     return {"ok": True, "vault": CONFIG.vault_path}
 
@@ -1264,4 +1280,7 @@ def serve(port: int = 8765) -> None:
     print_banner()
     CONSOLE.print(f"  [dim]GUI live at[/] [cyan]http://127.0.0.1:{port}[/]\n")
 
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    try:
+        uvicorn.run(app, host="127.0.0.1", port=port)
+    finally:
+        _capture_own_session()  # last chance: this conversation ends with the server

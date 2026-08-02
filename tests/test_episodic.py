@@ -271,6 +271,67 @@ def test_nucleation_candidates_count_distinct_runs_across_chain(tmp_path):
     assert c.since == "2026-06-10"
 
 
+def test_a_promoted_chain_leaves_the_candidate_queue(tmp_path):
+    """Promotion is the exit from the queue: the note exists, stop suggesting it."""
+    store = _store(tmp_path)
+    for rid in ("r1", "r2", "r3"):
+        store.capture([{"key": "user.dog.name", "text": "Tom"}], run_id=rid,
+                      seen="2026-06-10")
+
+    (head,) = store.live_facts()
+    head.promoted = "Concepts/Dog.md"
+    store.save()
+
+    reloaded = EpisodicStore(path=tmp_path / "episodic.json")
+    assert reloaded.live_facts()[0].promoted == "Concepts/Dog.md"
+    assert reloaded.nucleation_candidates(min_runs=3) == []
+
+
+def test_promotion_stub_survives_the_payload_window_whole(tmp_path):
+    """Regression, measured live: with `## <key>` headings per attribute, the
+    payload builder's heading-section match reduced the excerpt to ONE
+    attribute's line — the distiller never saw the entity, emitted empty
+    bodies, and every /promote ended no_ops. The stub must reach the distiller
+    whole, whatever concept the keyphrase extractor picks."""
+    from silica.kernel.recall.episodic import entity_key, promotion_stub
+    from silica.kernel.text.payload import extract_excerpt_from_content
+
+    store = _store(tmp_path)
+    store.capture([{"key": "user.dog.name", "text": "Rex"}], run_id="r1", seen="2026-06-10")
+    store.capture([{"key": "user.dog.breed", "text": "pastore tedesco"}], run_id="r1", seen="2026-06-10")
+
+    heads = sorted(store.live_facts(), key=lambda f: f.key)
+    stub = promotion_stub(heads, store=store)
+
+    for concept in ("user.dog.name", "user.dog.breed", "Rex"):
+        excerpt = extract_excerpt_from_content(stub, concept, 450)
+        assert "Rex" in excerpt and "pastore tedesco" in excerpt, (
+            f"concept {concept!r} windowed the stub down to: {excerpt!r}"
+        )
+
+
+def test_promotion_stub_carries_the_chain_and_its_provenance(tmp_path):
+    """What /promote feeds the gate: current value, dated history, provenance."""
+    from silica.kernel.recall.episodic import promotion_stub
+
+    store = _store(tmp_path)
+    store.capture([{"key": "user.dog.name", "text": "Rex"}], run_id="r1", seen="2026-06-10")
+    store.capture([{"key": "user.dog.name", "text": "Rex"}], run_id="r2", seen="2026-06-20")
+    store.capture([{"key": "user.dog.name", "text": "Tom"}], run_id="r3", seen="2026-07-01")
+
+    (head,) = store.live_facts()
+    text = promotion_stub([head], store=store)
+
+    front, body = text.split("---\n")[1], text.split("---\n")[2]
+    assert "episodic_key: user.dog" in front       # the entity is the note
+    assert "episodic_attributes: user.dog.name" in front
+    assert "first_seen: 2026-06-10" in front  # the chain's oldest, not the head's
+    assert "last_seen: 2026-07-01" in front
+    assert "sessions: 3" in front
+    assert "Tom" in body
+    assert "Rex" in body and "2026-06-10" in body  # superseded history survives
+
+
 def test_recall_ranks_by_embedding_when_vectors_exist(tmp_path):
     store = _store(tmp_path)
 
@@ -395,6 +456,23 @@ def test_config_episodic_fields_env_overrides(monkeypatch):
     assert cfg.episodic_nucleation_runs == 5
 
 
+def test_a_store_written_before_the_provenance_stamps_loads_unchanged(tmp_path):
+    """`vault`/`notes` are additive: pre-phase-E stores must still open."""
+    path = tmp_path / "episodic.json"
+    path.write_text(json.dumps({
+        "schema_version": 1,
+        "next_id": 2,
+        "facts": [{"id": "f_0001", "key": "user.city", "text": "Torino",
+                   "first_seen": "2026-07-01", "last_seen": "2026-07-01",
+                   "runs": ["r1"]}],
+    }), encoding="utf-8")
+
+    (fact,) = EpisodicStore(path=path).live_facts()
+
+    assert fact.vault is None
+    assert fact.notes == []
+
+
 def test_capture_from_distill_routes_ephemerals_and_never_raises(tmp_path, monkeypatch):
     from silica.kernel.recall import episodic
 
@@ -431,7 +509,7 @@ def test_digest_sweeps_and_lists_nucleation_candidates(tmp_path, monkeypatch):
 
     text = ProgressLedger.new(mode="test").digest()
     assert ("episodic candidate: user.dog.name (3 runs since "
-            f"{today}) -> consider promoting to a note") in text
+            f"{today}) -> /promote user.dog.name") in text
     # Sweep ran: the 2020 chain evaporated from the persisted store.
     assert {f.key for f in EpisodicStore(path=tmp_path / "episodic.json").facts} == {"user.dog.name"}
 

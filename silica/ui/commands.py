@@ -45,6 +45,20 @@ COMMANDS: tuple[Command, ...] = (
         ),
     ),
     Command(
+        name="/promote",
+        group="workflow",
+        usage="[<key>]",
+        summary="session memory → a note: list what keeps recurring, promote one through the gate",
+        examples=("/promote", "/promote user.dog.name"),
+    ),
+    Command(
+        name="/episodes",
+        group="direct",
+        usage="[--save=<path>]",
+        summary="show what session memory holds: live chains, dated, grouped by key; writes nothing",
+        examples=("/episodes", "/episodes --save=~/episodes.md"),
+    ),
+    Command(
         name="/convert",
         group="direct",
         usage="<file...> [--target=DIR]",
@@ -340,6 +354,13 @@ COMMANDS: tuple[Command, ...] = (
         group="system",
         usage="",
         summary="toggle display of the reasoning block",
+        repl_only=True,
+    ),
+    Command(
+        name="/incognito",
+        group="system",
+        usage="",
+        summary="toggle capture of this session off",
         repl_only=True,
     ),
     Command(

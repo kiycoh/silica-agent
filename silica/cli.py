@@ -12,8 +12,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shlex
 import sys
+import uuid
 from typing import NamedTuple
 
 from silica.ui.style import FlatMarkdown
@@ -773,6 +775,53 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         )
         return True
 
+    if cmd == "/episodes":
+        from rich.markup import escape
+
+        from silica.kernel.recall.episodic import EpisodicStore, FactHit, render
+
+        store = EpisodicStore()
+        heads = sorted(store.live_facts(), key=lambda f: f.key)
+        if not heads:
+            CONSOLE.print("  No episodic memory yet — nothing has been captured.")
+            return True
+        body = "\n\n".join(
+            f"## {h.key}\n" + render([FactHit(fact=h, score=1.0)], store=store)
+            for h in heads
+        )
+        CONSOLE.print(escape(body))
+        # ponytail: `--save=` splits on whitespace like its sibling direct
+        # commands, so a path with spaces needs a rename; shlex it if that bites.
+        save = next((a[len("--save="):] for a in parts[1:] if a.startswith("--save=")), "")
+        if save:
+            from pathlib import Path
+
+            out = Path(save).expanduser().resolve()
+            # Empty until a vault is adopted, and Path("") resolves to the cwd:
+            # no vault means nothing to fall inside, not "everything under here".
+            raw_vault = (CONFIG.vault_path or "").strip()
+            vault = Path(raw_vault).expanduser().resolve() if raw_vault else None
+            if vault is not None and out.is_relative_to(vault):
+                # The one door in stays the gate: an episodic render dropped
+                # into the vault would be an unreviewed note that indexes,
+                # links and gets recalled — the echo channel, by hand.
+                CONSOLE.print(
+                    "  [yellow]Not inside the vault.[/] Session memory becomes a "
+                    "note through [bold]/promote <key>[/]; save this render "
+                    "somewhere else."
+                )
+                return True
+            try:
+                out.parent.mkdir(parents=True, exist_ok=True)
+                out.write_text(f"# Episodes\n\n{body}\n", encoding="utf-8")
+            except OSError as e:
+                # The REPL calls this handler outside any try: a directory, a
+                # read-only mount or a bad name would end the session.
+                CONSOLE.print(f"  [yellow]save failed: {escape(str(e))}[/]")
+                return True
+            CONSOLE.print(f"  Saved → [bold]{escape(str(out))}[/]")
+        return True
+
     if cmd == "/undo":
         from silica.driver import DRIVER
         from silica.kernel.write.checkpoints import get_checkpoint_store
@@ -1053,6 +1102,332 @@ def _expand_web_turn(user_input: str, messages: list[dict]) -> tuple[str, str] |
     )
 
 
+def _stage_envelope(body: str, stem: str, inbox: str) -> str:
+    """Put one rendered conversation in the vault inbox for the FSM.
+
+    The WAL lives outside the vault on purpose, but the FSM reads its sources
+    through the driver, vault-relative (`to_vault_relative`), so the drain
+    stages the rendered prose the way /web stages its findings: zero-trust
+    ingress lands in the inbox, the gate decides what survives. The staged file
+    is discarded by `_discard_staged` once the run is over, so the conversation
+    never becomes a vault resident. Returns the vault-relative staged path.
+    """
+    from silica.driver import DRIVER
+
+    rel = f"{inbox}/{stem}.md"
+    DRIVER.upsert(rel, body)
+    return rel
+
+
+def _episodic_distill(content: str, envelope: dict, *, run_id: str,
+                      target: str) -> bool:
+    """Harvest facts from one of Silica's own sessions. Writes no note.
+
+    Machine memory enters the vault only by explicit promotion, so this branch
+    keeps the distiller and throws its note body away: `ephemerals` is the whole
+    harvest, and it lands in the episodic store like any other run's. Nothing is
+    staged either — the transcript never becomes a vault file, not even one that
+    gets deleted afterwards.
+    ponytail: linear, no FSM — no chunk steering, no per-chunk retry, no write
+    gate, because nothing is written. A failure leaves the envelope pending and
+    the next drain repeats the call.
+    """
+    from silica.kernel import prep_delegation
+    from silica.kernel.partition import partition_by_concepts
+    from silica.kernel.recall.episodic import (
+        EpisodicStore,
+        capture_from_distill,
+        key_vocabulary_section,
+    )
+    from silica.kernel.recall.paths import vault_digest
+    from silica.kernel.text.keyphrase import extract_keyphrases
+    from silica.kernel.text.payload import build_concept_entry
+
+    concepts = [c.phrase for c in
+                extract_keyphrases(content, lang=CONFIG.cooccurrence_lang)]
+    if not concepts:
+        return True  # a conversation with nothing to name has nothing to remember
+    # Assembled here rather than through build_payload, which reads its source
+    # back through the driver — i.e. would require this conversation to be a
+    # vault file first. No collision search either: the vault is not the
+    # destination, so the hits would only plan note edits this branch discards.
+    payload = {"schema_version": 1, "batches": [{
+        "inbox_file": f"{run_id}.md",
+        "concepts": [
+            build_concept_entry(name=c, inbox_content=content, collision=None,
+                                in_new_concepts=True, window=450)
+            for c in sorted(concepts)
+        ],
+    }]}
+    seen = (envelope.get("captured_at") or "")[:10]
+    ok = True
+    for chunk in partition_by_concepts(payload, 7) or [payload]:
+        # ADR-0021: the established keys, so the distiller reuses them instead
+        # of coining a synonym per session — a chain that never lands twice on
+        # the same key never reaches min_runs, and the promotion queue stays
+        # empty by construction. Re-read per chunk: the previous chunk's facts
+        # are already in the store. Only this section, never build_substrate:
+        # the vault's related notes have no business in a machine-memory prompt.
+        result = prep_delegation.run_distiller(
+            payload=chunk, target=target, session_date=seen,
+            substrate=key_vocabulary_section(EpisodicStore()),
+            # This lane keeps only ephemerals — never generate note bodies.
+            structure_only=True,
+        )
+        if result.get("error"):
+            logger.warning("drain: episodic distill failed (%s)", result["error"])
+            ok = False
+            continue
+        # The run id is the envelope name: one session is one run, which is
+        # exactly the unit `nucleation_candidates` counts. Note attribution is
+        # session-level on purpose — every fact of an envelope carries the same
+        # list. ponytail: per-fact attribution if the graph overlay gets noisy.
+        capture_from_distill(result, run_id=run_id, seen=seen,
+                             vault=vault_digest(CONFIG.vault_path),
+                             notes=list(envelope.get("notes_touched") or []))
+    return ok
+
+
+def _discard_staged(rel: str) -> None:
+    """Remove a staged transcript from the vault, wherever the run left it.
+
+    A successful FSM run archives the source into `done/`, so both paths are
+    tried: the point is that no conversation text stays in the vault after the
+    drain, archived or not.
+    """
+    from pathlib import Path as _Path
+
+    from silica.driver import DRIVER
+
+    for candidate in (rel, f"done/{_Path(rel).name}"):
+        try:
+            DRIVER.delete(candidate)
+        except Exception:
+            continue
+
+
+# Terminal FSM verdicts that leave nothing to retry: notes written, nothing
+# worth writing, or this source already committed by an earlier run. Anything
+# else — "partial", "failed", or no verdict at all — keeps the envelope pending.
+# The FSM's verdict is the criterion, not `context["error"]`: best-effort phases
+# record an error and carry on to Success (orchestrator._on_step_error).
+_DRAIN_SETTLED = {"Success", "no_ops", "already_nucleated"}
+
+
+def _drain_wal() -> str:
+    """`/nucleate` with no argument: drain this vault's capture WAL.
+
+    A batch at a time (`collect`'s cap), so a 500-conversation import backlog
+    becomes deliberate, resumable runs instead of one LLM bill.
+    """
+    import silica.capture as capture
+
+    vault = CONFIG.vault_path.strip()
+    if not vault:
+        return "No vault is configured, so there is nothing to drain. Say so in one line."
+
+    capture.housekeep(vault)
+    envelopes, remaining = capture.collect(vault)
+    if not envelopes:
+        CONSOLE.print("  nothing captured to drain.")
+        return ""
+
+    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.sources.transcript import render
+    inbox = active_inbox_dir() or "Inbox"
+    staged: dict = {}
+    episodic = 0
+    for env_path in envelopes:
+        try:
+            envelope = json.loads(env_path.read_text(encoding="utf-8"))
+            body = render(envelope)
+            # Own sessions never take the note path (spec §11), so they are
+            # never staged: no vault write, nothing to undo afterwards.
+            rel = ("" if not body or envelope.get("source") == "silica"
+                   else _stage_envelope(body, env_path.stem, inbox))
+        except Exception as exc:
+            logger.warning("drain: unreadable envelope %s (%s)", env_path.name, exc)
+            capture.mark_failed(env_path)
+            continue
+        if not body:
+            capture.mark_processed(env_path)  # nothing said, nothing to keep
+            continue
+        if rel:
+            staged[env_path] = rel
+            continue
+        episodic += 1
+        if _episodic_distill(body, envelope, run_id=env_path.stem, target=inbox):
+            capture.mark_processed(env_path)
+        else:
+            remaining += 1  # pending: the next drain repeats the call
+    if episodic:
+        CONSOLE.print(f"  drain: {episodic} session(s) → episodic memory")
+    if not staged:
+        if not episodic:
+            CONSOLE.print("  nothing captured to drain.")
+        elif remaining:
+            CONSOLE.print(f"  {remaining} envelope(s) still pending, run /nucleate again")
+        return ""
+
+    files = list(staged.values())
+    try:
+        target_dir = _pick_target_folder(files)
+    except Exception as exc:
+        logger.debug("drain: auto-target pick failed (non-fatal): %s", exc)
+        target_dir = "Sessions"
+    CONSOLE.print(f"  drain: {len(files)} conversation(s) → [bold]{target_dir}[/]")
+
+    from silica.router.coordinator import Coordinator
+    try:
+        result = Coordinator(inbox_files=files, target_dir=target_dir).run()
+    finally:
+        # Unstaging is not part of the happy path: a crash or a Ctrl+C must not
+        # leave a raw conversation sitting in a committable vault.
+        for rel in staged.values():
+            _discard_staged(rel)
+    # ponytail: batch-level outcome — one failed chunk leaves the whole batch
+    # pending, and the next run re-drains it (the FSM's own dedup absorbs the
+    # repeat). Per-envelope status if a mixed batch ever costs a real re-run.
+    ok = result.get("final_status") in _DRAIN_SETTLED
+    for env_path in staged:
+        if ok:
+            capture.mark_processed(env_path)
+
+    status = result.get("final_status") or result.get("error") or "done"
+    left = remaining + (0 if ok else len(staged))
+    tail = f" — {left} envelope(s) still pending, run /nucleate again" if left else ""
+    CONSOLE.print(f"  drain finished: [bold]{status}[/]{tail}")
+    return ""
+
+
+def _promote(args: list[str]) -> str:
+    """`/promote [<key>]` — the consent bridge out of episodic memory.
+
+    Bare: list what the store thinks is worth keeping. With a key: render that
+    chain into a stub and send it through the ordinary nucleate gate, which is
+    the point — machine memory earns a note the same way any other source does.
+    """
+    from silica.kernel.recall.episodic import EpisodicStore, entity_key
+
+    store = EpisodicStore()
+    keys = [a for a in args if not a.startswith("-")]
+    if not keys:
+        candidates = store.nucleation_candidates()
+        if not candidates:
+            CONSOLE.print(
+                "  No episodic candidates yet — nothing has come up in enough "
+                "sessions to be worth a note."
+            )
+            return ""
+        groups: dict[str, list] = {}
+        for c in candidates:
+            groups.setdefault(entity_key(c.key), []).append(c)
+        CONSOLE.print(f"  {len(groups)} episodic candidate(s):")
+        for ent, members in sorted(groups.items()):
+            attrs = " · ".join(f"{m.key.rsplit('.', 1)[-1]}={m.text}" for m in members)
+            # ponytail: the busiest attribute stands for the entity. The union
+            # of run ids would need every chain re-walked for one console line.
+            runs = max(m.run_count for m in members)
+            since = min(m.since for m in members)
+            CONSOLE.print(f"  · [bold]{ent}[/] — {runs} runs since {since}: {attrs}")
+        CONSOLE.print("  Promote one with [bold]/promote <key>[/].")
+        return ""
+
+    from silica.driver import DRIVER
+    from silica.kernel.recall.episodic import promotion_stub
+    from silica.kernel.vault_manifest import active_inbox_dir
+
+    # The key names an attribute, the promotion writes the entity it belongs to:
+    # `user.dog.name` and `user.dog.breed` are one note about one dog.
+    key = keys[0]
+    entity = entity_key(key)
+    heads = sorted((f for f in store.live_facts() if entity_key(f.key) == entity),
+                   key=lambda f: f.key)
+    if not heads:
+        CONSOLE.print(
+            f"  No live episodic chain for [bold]{key}[/] — run /promote to list them."
+        )
+        return ""
+    done = next((h for h in heads if h.promoted), None)
+    if done is not None:
+        CONSOLE.print(
+            f"  [bold]{entity}[/] is already promoted to {done.promoted} — edit that "
+            "note, or /nucleate it again to refresh it."
+        )
+        return ""
+
+    inbox = active_inbox_dir() or "Inbox"
+    # The key is model-authored (distiller output), and here it names a file:
+    # keep it to one path segment so no key can stage outside the inbox.
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", entity).strip(".-") or "episodic"
+    rel = f"{inbox}/{stem}.md"
+    DRIVER.upsert(rel, promotion_stub(heads, store=store))
+    try:
+        target_dir = _pick_target_folder([rel])
+    except Exception as exc:
+        # No invented folder: the stub is already in the inbox, so the user
+        # finishes it with the ordinary verb rather than losing the render.
+        logger.debug("/promote: auto-target pick failed: %s", exc)
+        CONSOLE.print(
+            f"  Could not pick a folder. The stub is at [bold]{rel}[/] — "
+            f"run /nucleate {rel} --target=<folder>."
+        )
+        return ""
+
+    from silica.router.coordinator import Coordinator
+
+    CONSOLE.print(f"  promote: [bold]{entity}[/] → {target_dir}")
+    # episodic_capture off: the stub is a render of the store, so distilling it
+    # back in would nest the chain inside itself once per promotion.
+    # promotion lens: the stub is finished verbatim content — the default
+    # authoring lens + 275-char floor rejected every real promotion (55/155/34
+    # chars, all no_ops), and the extractive lens skipped every fact as
+    # "time-bound personal" (the ingest-direction diversion). The promotion
+    # lens selects verbatim, one note per entity, and never re-emits
+    # ephemerals; the gate enforces extractivity at the lower floor.
+    result = Coordinator(inbox_files=[rel], target_dir=target_dir,
+                         episodic_capture=False,
+                         distill_profile="promotion").run()
+    status = result.get("final_status") or result.get("error") or "done"
+    # The FSM names the note, so the ledger CLEANUP appends is the only place
+    # the path can be read back from. Last record wins: a re-promotion of the
+    # same key overwrites the stamp with the newer note.
+    from pathlib import Path
+
+    from silica.kernel.write.provenance import read_records
+
+    notes = list((read_records(Path(rel).name) or [{}])[-1].get("notes") or [])
+    # CLEANUP's record lists the run's hub note first ("Life/Life"): the stamp
+    # must name the note that holds the facts, not the folder's MOC.
+
+    hub_stem = Path(target_dir.rstrip("/")).name
+    entity_notes = [n for n in notes
+                    if Path(n).name.removesuffix(".md") != hub_stem]
+    notes = entity_notes or notes
+    if notes:
+        # Re-read: another chunk of the run may have written this store, so the
+        # pre-run snapshot in `store` is stale and saving it would erase that.
+        ids = [h.id for h in heads]
+        store = EpisodicStore()
+        # By chain, not by id: the run may have superseded a fact being
+        # promoted, and the stamp belongs to the chain, so it follows the head.
+        head_of = {link.id: f for f in store.live_facts() for link in store.chain(f)}
+        stamped = {head_of[i].id: head_of[i] for i in ids if i in head_of}
+        for head in stamped.values():
+            head.promoted = notes[0]
+        if not stamped:
+            CONSOLE.print(f"  wrote {notes[0]}, but the chains for [bold]{entity}[/] "
+                          "are gone from the store — not stamped.")
+            return ""
+        store.save()
+        CONSOLE.print(
+            f"  promoted: [bold]{entity}[/] ({len(stamped)} chain(s)) → {notes[0]}")
+    else:
+        CONSOLE.print(f"  promote finished: [bold]{status}[/] — nothing written, "
+                      "the chain stays in the queue.")
+    return ""
+
+
 def _expand_workflow_shortcut(user_input: str) -> str | None:
     """Expand workflow shortcuts (e.g. /report, /nucleate) into agent-directed messages.
 
@@ -1098,8 +1473,13 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
     cmd = parts[0].lower()
 
+    if cmd == "/promote":
+        return _promote(parts[1:])
+
     if cmd == "/nucleate":
         args = parts[1:]
+        if not args:
+            return _drain_wal()
         files: list[str] = []
         target_dir = ""
         hub = ""
@@ -1815,6 +2195,34 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     if args[:1] == ["update"]:
         import silica.update as update_mod
         return update_mod.update(check_only="--check" in args[1:])
+    if args[:1] == ["capture"]:
+        # Claude Code hook producer. No vault bootstrap: the vault comes from
+        # the hook's own cwd (walk-up), not from this process's config, and
+        # the whole point is to stay silent and fast inside someone else's
+        # session. Fail-open covers the import too, not just the body.
+        try:
+            import silica.capture as capture_mod
+            return capture_mod.run_capture(sys.stdin.read())
+        except Exception:
+            return 0
+    if args[:1] == ["import"]:
+        import silica.capture as capture_mod
+        target = next((a for a in args[1:] if not a.startswith("-")), "")
+        vault = CONFIG.vault_path.strip()
+        if not target or not vault:
+            CONSOLE.print(
+                "  usage: [bold]silica import <export.zip|conversations.json|"
+                "~/.claude/projects>[/] (needs a configured vault)")
+            return 1
+        try:
+            created, skipped = capture_mod.run_import(target, vault)
+        except (OSError, ValueError) as exc:
+            CONSOLE.print(f"  [yellow]import failed: {exc}[/]")
+            return 1
+        CONSOLE.print(
+            f"  imported [bold]{created}[/] conversation(s), skipped {skipped} "
+            f"— run [bold]/nucleate[/] to distill them (10 per run)")
+        return 0
     if args[:1] == ["doctor"]:
         import silica.onboarding.checks as checks
         _ensure_servers()  # report the state after the autostart, not before it
@@ -1917,6 +2325,14 @@ def main():
     session = build_session()
     messages = _fresh_messages()
     collapsed: set[int] = set()  # message indices already elided by compaction
+    # This session's own identity, for the capture lane. Random, not a clock:
+    # two silica processes started in the same second share the same vault WAL,
+    # and a deterministic name would have one overwrite the other's envelope.
+    # capture_session is opt-in and fail-open in itself, so both call sites
+    # below are the bare call — no wrapper, nothing to guard.
+    from silica.capture import capture_session
+    session_id = uuid.uuid4().hex[:12]
+    incognito = False
 
     from silica.ui.renderer import make_progress_callback
     callback = make_progress_callback()
@@ -1977,7 +2393,20 @@ def main():
         # Handle slash commands
         if user_input.startswith("/"):
             cmd = user_input.strip().lower()
+            if cmd == "/incognito":
+                incognito = not incognito
+                CONSOLE.print(
+                    "  [dim]incognito: this session will not be captured[/]"
+                    if incognito else "  [dim]incognito off: capture resumed[/]"
+                )
+                continue
+
             if cmd == "/clear":
+                # Before the wipe: /clear destroys this conversation, so the
+                # session's own end envelope will not contain it.
+                if not incognito:
+                    capture_session(messages, session_id=session_id, driver="tui",
+                                    event="session_clear")
                 CONSOLE.clear()
                 print_home()
                 messages[:] = _fresh_messages()
@@ -2048,6 +2477,10 @@ def main():
             callback.close()
             logger.exception("Agent error")
             CONSOLE.print(f"\n  [bold red]Error:[/] {e}\n")
+
+    # Every exit from the REPL passes here: /exit, Ctrl+D, Ctrl+C at the prompt.
+    if not incognito:
+        capture_session(messages, session_id=session_id, driver="tui")
 
 
 if __name__ == "__main__":

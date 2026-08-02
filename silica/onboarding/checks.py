@@ -412,6 +412,55 @@ def check_quarantine(config: SilicaConfig) -> CheckResult:
     return CheckResult("quarantine", "ok", "no quarantined state")
 
 
+HOOK_SNIPPET = """\
+"hooks": {
+  "SessionEnd": [{"hooks": [{"type": "command", "command": "silica capture"}]}],
+  "PreCompact": [{"hooks": [{"type": "command", "command": "silica capture"}]}]
+}"""
+
+
+def check_capture_hook(config: SilicaConfig) -> CheckResult:
+    """Session capture is opt-in and hand-registered: say so when it is absent.
+
+    Silica never edits `.claude/settings.json` itself — a tool that rewrites
+    another tool's config is a support burden, and the hook is three lines.
+    """
+    vault = config.vault_path.strip()
+    candidates = [Path.home() / ".claude" / "settings.json"]
+    if vault:
+        candidates += [Path(vault) / ".claude" / name
+                       for name in ("settings.json", "settings.local.json")]
+    for path in candidates:
+        try:
+            if "silica capture" in path.read_text(encoding="utf-8"):
+                return CheckResult("session capture", "ok", f"hook registered in {path}")
+        except OSError:
+            continue
+    return CheckResult(
+        "session capture", "warn",
+        "no `silica capture` hook — sessions are not captured",
+        f"add to .claude/settings.json:\n{HOOK_SNIPPET}",
+    )
+
+
+def check_session_capture(config: SilicaConfig) -> CheckResult:
+    """Silica's own conversations: opt-in, and never notes.
+
+    Off is a legitimate choice, so this never warns — it only says the knob
+    exists, and where the memory goes when it is on.
+    """
+    if getattr(config, "capture_sessions", False):
+        return CheckResult(
+            "own sessions", "ok",
+            "captured to the WAL; /nucleate distills them into episodic memory",
+        )
+    return CheckResult(
+        "own sessions", "ok", "not captured",
+        "set SILICA_CAPTURE_SESSIONS=true to remember your own sessions "
+        "(facts only, never notes — promotion is what writes to the vault)",
+    )
+
+
 def run_checks(config: SilicaConfig) -> list[CheckResult]:
     return [
         check_chat_model(config),
@@ -424,6 +473,8 @@ def run_checks(config: SilicaConfig) -> list[CheckResult]:
         check_embeddings(config),
         check_rerank(config),
         check_quarantine(config),
+        check_capture_hook(config),
+        check_session_capture(config),
     ]
 
 

@@ -1420,12 +1420,42 @@ def test_fsm_seen_default_is_ingest_day(mock_run_distiller):
     assert captured["seen"] == fsm.progress.started_at[:10]
 
 
+@patch("silica.router.states.distill.orch.CONFIG.distill_concurrency", 1)
+@patch("silica.router.states.distill.run_distiller")
+def test_fsm_can_run_without_feeding_the_episodic_store(mock_run_distiller):
+    """/promote distills a RENDER of episodic memory. Capturing that back into
+    the store nests the chain inside itself: measured on a real run, one
+    promotion turned the head into a summary of its own history."""
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir", episodic_capture=False)
+    fsm._chunks = [{"chunk_id": 0, "concepts": ["a"]}]
+    fsm._current_chunk_idx = 0
+    fsm.state = InjectorState.DELEGATE
+    mock_run_distiller.return_value = {"updates": []}
+
+    calls = []
+
+    with patch.object(fsm, "_make_tmp", return_value="tmp.json"), \
+         patch("silica.kernel.recall.episodic.capture_from_distill",
+               side_effect=lambda *a, **kw: calls.append(kw)):
+        fsm.step()
+
+    assert calls == []
+
+
 def test_coordinator_forwards_seen_override():
     from silica.router.coordinator import Coordinator
 
     coord = Coordinator(inbox_files=["Inbox/test.md"], target_dir="TargetDir",
                         seen_override="2023-05-08")
     assert coord.fsm.seen_override == "2023-05-08"
+
+
+def test_coordinator_forwards_the_episodic_capture_switch():
+    from silica.router.coordinator import Coordinator
+
+    coord = Coordinator(inbox_files=["Inbox/test.md"], target_dir="TargetDir",
+                        episodic_capture=False)
+    assert coord.fsm.episodic_capture is False
 
 
 def test_best_effort_states_from_recipe():

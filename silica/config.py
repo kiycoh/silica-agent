@@ -243,6 +243,15 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_MEMORY_VAULT", "")
     )
 
+    # Capture of Silica's OWN sessions (capture.py), default off: opting in
+    # deposits each conversation in the WAL, from which /nucleate distills
+    # facts into the episodic store. Machine memory never becomes a note by
+    # itself — promotion is the only path into the vault. /incognito turns it
+    # off for the running session without touching this.
+    capture_sessions: bool = field(
+        default_factory=lambda: os.getenv("SILICA_CAPTURE_SESSIONS", "False").lower() in ("true", "1", "t")
+    )
+
     # Episodic memory lane (kernel/episodic.py): wall-clock TTL in days from a
     # fact chain's last_seen (0 = never expire), and the distinct-run count at
     # which a key becomes a nucleation candidate in the digest.

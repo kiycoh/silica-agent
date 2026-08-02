@@ -36,6 +36,8 @@ class Coordinator:
         resume_run_id: str | None = None,
         seen_override: str | None = None,
         keep_sources: bool = False,
+        episodic_capture: bool = True,
+        distill_profile: str | None = None,
         config: Any = CONFIG,
         cancel_token: "threading.Event | None" = None,
     ):
@@ -52,6 +54,8 @@ class Coordinator:
             resume_run_id=resume_run_id,
             seen_override=seen_override,
             keep_sources=keep_sources,
+            episodic_capture=episodic_capture,
+            distill_profile=distill_profile,
         )
 
     def run(self) -> dict[str, Any]:

@@ -474,7 +474,7 @@ class ProgressLedger:
             for c in store.nucleation_candidates():
                 parts.append(
                     f"episodic candidate: {c.key} ({c.run_count} runs since "
-                    f"{c.since}) -> consider promoting to a note"
+                    f"{c.since}) -> /promote {c.key}"
                 )
         except Exception:
             pass

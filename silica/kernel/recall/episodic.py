@@ -42,6 +42,15 @@ class Fact(BaseModel):
     runs: list[str] = Field(default_factory=list)
     supersedes: str | None = None
     status: str = "live"
+    # Provenance of a fact captured from one of Silica's own sessions: the
+    # vault's digest12 and the notes that session touched. Additive and
+    # optional — stores written before phase E load unchanged, and facts from
+    # the note path (or an eval store) simply carry neither.
+    vault: str | None = None
+    notes: list[str] = Field(default_factory=list)
+    # Set on the chain HEAD by `/promote`: the vault note this chain became.
+    # Also the queue's exit condition — a promoted chain stops being suggested.
+    promoted: str | None = None
     # ponytail: inline float list, not npz packing — the store is TTL-bounded
     # to hundreds of facts; the 10k scaling fix targeted note stores. Pack npz
     # like note stores if a store ever holds ~10^3+ facts or load/save drags.
@@ -172,6 +181,16 @@ def _snap_entity(key: str) -> tuple:
     return (segs[0],)
 
 
+def entity_key(key: str) -> str:
+    """Dotted entity namespace of a key — the unit a promotion writes.
+
+    `user.dog.name` and `user.dog.breed` are two attributes of one dog: one note
+    about the dog beats two notes about its fields, and the fields alone are too
+    thin to clear the write gate.
+    """
+    return ".".join(_snap_entity(key))
+
+
 def key_tokens(key: str) -> set[str]:
     """Stemmed tokens of a key, entity prefix dropped: the shared alphabet
     of the eval key-drift/clustering probes."""
@@ -283,7 +302,9 @@ class EpisodicStore:
     # ------------------------------------------------------------------
 
     def capture(self, facts: list[dict], *, run_id: str, seen: str,
-                embedder=None, schema=None, snap_tau: float = 0.0) -> None:
+                embedder=None, schema=None, snap_tau: float = 0.0,
+                vault: str | None = None,
+                notes: list[str] | None = None) -> None:
         """Merge distiller ephemerals into the store. Mechanical, no LLM.
 
         Same key + same normalized text reinforces (last_seen, runs); same key
@@ -331,7 +352,7 @@ class EpisodicStore:
             fid = f"f_{self.next_id:04d}"
             self.next_id += 1
             fact = Fact(id=fid, key=key, text=text, first_seen=seen, last_seen=seen,
-                        runs=[run_id])
+                        runs=[run_id], vault=vault, notes=list(notes or []))
             if head is not None:
                 fact.supersedes = head.id
                 head.status = "superseded"
@@ -509,6 +530,8 @@ class EpisodicStore:
             min_runs = int(getattr(CONFIG, "episodic_nucleation_runs", 3))
         out: list[NucleationCandidate] = []
         for head in self.live_facts():
+            if head.promoted:
+                continue  # already a note: the suggestion is spent
             links = self.chain(head)
             runs = {r for f in links for r in f.runs}
             if len(runs) >= min_runs:
@@ -525,7 +548,9 @@ class EpisodicStore:
         return [f for f in self.facts if f.status == "live"]
 
 
-def capture_from_distill(result: dict, *, run_id: str, seen: str) -> None:
+def capture_from_distill(result: dict, *, run_id: str, seen: str,
+                         vault: str | None = None,
+                         notes: list[str] | None = None) -> None:
     """Route a distiller result's `ephemerals` into the default store.
 
     Failures here must never fail the ingest: log + continue. The embedder is
@@ -562,7 +587,7 @@ def capture_from_distill(result: dict, *, run_id: str, seen: str) -> None:
             pass
         EpisodicStore().capture(ephemerals, run_id=run_id, seen=seen,
                                 embedder=embedder, schema=schema,
-                                snap_tau=snap_tau)
+                                snap_tau=snap_tau, vault=vault, notes=notes)
     except Exception as e:
         logger.warning("episodic capture failed (ingest continues): %s", e)
 
@@ -579,6 +604,40 @@ def render(hits: list[FactHit], *, store: EpisodicStore) -> str:
                 f"  (previously: {older.text}, {older.first_seen} to {newer.first_seen})"
             )
     return "\n".join(lines)
+
+
+def promotion_stub(heads: list[Fact], *, store: EpisodicStore) -> str:
+    """Markdown source for `/promote`: one entity, one section per attribute.
+
+    The stub is an ordinary inbox file from there on — same FSM, same dedup,
+    same write gate. The frontmatter says where the material came from so the
+    resulting note is not mistaken for something the user wrote. Per attribute
+    it would be a two-line note the gate rejects as a placeholder; the entity
+    is the smallest thing worth a note.
+    """
+    chains = {h.id: store.chain(h) for h in heads}
+    links = [f for c in chains.values() for f in c]
+    runs = {r for f in links for r in f.runs}
+    # Bold, NOT a `##` heading: the payload builder's heading-section match
+    # would window the excerpt down to one attribute's line, and the distiller
+    # would never see the entity (measured: empty bodies, every /promote
+    # no_ops). A bold line is body text, so the window carries the stub whole.
+    body = "\n\n".join(
+        f"**{h.key}**\n" + render([FactHit(fact=h, score=1.0)], store=store)
+        for h in heads
+    )
+    return (
+        "---\n"
+        f"episodic_key: {entity_key(heads[0].key)}\n"
+        f"episodic_attributes: {', '.join(h.key for h in heads)}\n"
+        f"first_seen: {min(f.first_seen for f in links)}\n"
+        f"last_seen: {max(h.last_seen for h in heads)}\n"
+        f"sessions: {len(runs)}\n"
+        "---\n\n"
+        f"# {entity_key(heads[0].key)}\n\n"
+        + body
+        + "\n"
+    )
 
 
 def episodic_home() -> Path:

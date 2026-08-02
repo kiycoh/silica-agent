@@ -445,16 +445,17 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
 
         # Episodic lane: route personal/ephemeral facts to the short-term
         # store. Never fails the ingest (capture_from_distill swallows).
-        from silica.kernel.recall.episodic import capture_from_distill
-        capture_from_distill(
-            chunk_result,
-            run_id=fsm.progress.run_id,
-            # Deliberately the ingest day, not the doc date: episodic TTL
-            # keys off `seen`, and a backdated doc would expire on arrival.
-            # seen_override is the one bench exception (LoCoMo e2e leg):
-            # sessions carry historical dates temporal questions depend on.
-            seen=fsm.seen_override or fsm.progress.started_at[:10],
-        )
+        if getattr(fsm, "episodic_capture", True):
+            from silica.kernel.recall.episodic import capture_from_distill
+            capture_from_distill(
+                chunk_result,
+                run_id=fsm.progress.run_id,
+                # Deliberately the ingest day, not the doc date: episodic TTL
+                # keys off `seen`, and a backdated doc would expire on arrival.
+                # seen_override is the one bench exception (LoCoMo e2e leg):
+                # sessions carry historical dates temporal questions depend on.
+                seen=fsm.seen_override or fsm.progress.started_at[:10],
+            )
 
         distiller_path = fsm._make_tmp(chunk_result)
         fsm._chunk_ctx["distiller_output_path"] = distiller_path

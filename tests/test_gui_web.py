@@ -1152,3 +1152,44 @@ def test_degree_map_is_populated_without_analytics(tmp_vault):
     # …while betweenness, the analytics-only sibling, is still zero-filled here.
     assert not any(cheap.betweenness_map.values())
     assert compute_report(analytics=True).degree_map == cheap.degree_map
+
+
+class TestOwnSessionCapture:
+    """The GUI flushes its conversation where the server can see the end of it."""
+
+    @pytest.fixture(autouse=True)
+    def _opt_in(self, client, tmp_path, monkeypatch):
+        import silica.kernel.recall.paths as paths
+        from silica.config import CONFIG
+
+        monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path / "silica-home")
+        monkeypatch.setattr(CONFIG, "capture_sessions", True)
+        _, server = client
+        server.messages.extend([
+            {"role": "user", "content": "does the GUI capture its own chats?"},
+            {"role": "assistant", "content": "Only when you opt in. " * 20},
+        ])
+
+    def _envelopes(self):
+        from silica.config import CONFIG
+        from silica.kernel.recall.paths import inbox_dir_for
+        d = inbox_dir_for(CONFIG.vault_path)
+        return sorted(p.name for p in d.glob("*.json")) if d.is_dir() else []
+
+    def test_a_new_chat_flushes_the_one_being_replaced(self, client):
+        tc, _ = client
+
+        assert tc.post("/reset").status_code == 200
+
+        assert len(self._envelopes()) == 1
+
+    def test_shutting_the_server_down_flushes_the_live_chat(self, client, monkeypatch):
+        _, server = client
+        monkeypatch.setattr(server, "_reset_session", lambda: None)  # keep the history
+        import uvicorn
+        monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: None)
+        monkeypatch.setattr(server, "print_banner", lambda: None, raising=False)
+
+        server.serve(port=0)
+
+        assert len(self._envelopes()) == 1

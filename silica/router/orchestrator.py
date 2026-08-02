@@ -229,6 +229,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
         resume_run_id: str | None = None,
         seen_override: str | None = None,
         keep_sources: bool = False,
+        episodic_capture: bool = True,
+        distill_profile: str | None = None,
     ):
         # Normalize to a list. inbox_files takes precedence; inbox_file is a
         # compat shim inserted at position 0 if not already present.
@@ -257,6 +259,17 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # --keep-sources. Conversation captures (seen_override set) always
         # leave a leaf — their source is ephemeral, otherwise lost.
         self.keep_sources = keep_sources
+
+        # Off for /promote: that run distills a render of the episodic store,
+        # so capturing its output back would nest the chain inside itself.
+        self.episodic_capture = episodic_capture
+
+        # Per-RUN distill profile, prompt and gate together (None = the
+        # process-global resolution: SILICA_DISTILL_PROFILE > manifest).
+        # /promote runs "extractive": a promotion stub is finished verbatim
+        # content, and the default authoring lens + 275-char floor rejects
+        # every honest distillation of it.
+        self.distill_profile = distill_profile
 
         self.state = InjectorState.INIT
         self.context: dict[str, Any] = {}

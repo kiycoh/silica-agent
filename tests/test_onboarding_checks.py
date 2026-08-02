@@ -496,7 +496,7 @@ def test_render_report_does_not_eat_bracketed_text(capsys):
 
 
 class TestAggregation:
-    def test_run_checks_returns_all_eight(self, monkeypatch, tmp_path):
+    def test_run_checks_returns_every_check(self, monkeypatch, tmp_path):
         import silica.onboarding.checks as checks
 
         def boom(url, timeout):
@@ -507,7 +507,8 @@ class TestAggregation:
         results = checks.run_checks(_cfg(vault_path=str(tmp_path)))
         assert [r.name for r in results] == [
             "chat model", "chat endpoint", "vault", "vault manifest",
-            "language", "embeddings", "rerank", "quarantine",
+            "language", "embeddings", "rerank", "quarantine", "session capture",
+            "own sessions",
         ]
 
     def test_check_quarantine_surfaces_corrupt_files(self, tmp_path):
@@ -581,3 +582,62 @@ class TestOllamaContextCheck:
         assert "ollama context" in [
             r.name for r in checks.run_checks(_cfg(model="ollama/llama3.2:3b"))
         ]
+
+
+class TestCaptureHook:
+    """`silica doctor` tells you when session capture is not wired up."""
+
+    def _config(self, vault):
+        from silica.config import SilicaConfig
+        return SilicaConfig(vault_path=str(vault))
+
+    def test_missing_hook_is_a_warning_carrying_the_snippet(self, tmp_path, monkeypatch):
+        from silica.onboarding.checks import check_capture_hook
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        result = check_capture_hook(self._config(vault))
+
+        assert result.status == "warn"
+        assert "silica capture" in result.hint
+        assert "SessionEnd" in result.hint
+
+    def test_registered_hook_passes(self, tmp_path, monkeypatch):
+        import json
+
+        from silica.onboarding.checks import check_capture_hook
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        vault = tmp_path / "vault"
+        (vault / ".claude").mkdir(parents=True)
+        (vault / ".claude" / "settings.json").write_text(json.dumps({
+            "hooks": {"SessionEnd": [
+                {"hooks": [{"type": "command", "command": "silica capture"}]}]}
+        }), encoding="utf-8")
+
+        assert check_capture_hook(self._config(vault)).status == "ok"
+
+
+class TestOwnSessionCapture:
+    """The knob for Silica's own sessions is off by default, and says so."""
+
+    def _config(self, **kw):
+        from silica.config import SilicaConfig
+        return SilicaConfig(**kw)
+
+    def test_the_knob_being_off_is_a_hint_not_a_failure(self):
+        from silica.onboarding.checks import check_session_capture
+
+        result = check_session_capture(self._config(capture_sessions=False))
+
+        assert result.status == "ok"  # off is a valid choice, not a defect
+        assert "SILICA_CAPTURE_SESSIONS" in result.hint
+
+    def test_opted_in_says_where_the_facts_go(self):
+        from silica.onboarding.checks import check_session_capture
+
+        result = check_session_capture(self._config(capture_sessions=True))
+
+        assert result.status == "ok"
+        assert "episodic" in result.detail.lower()

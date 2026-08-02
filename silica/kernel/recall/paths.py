@@ -348,8 +348,26 @@ def index_dir_for(vault: str) -> Path:
     vault = (vault or "").strip()
     if not vault:
         return base
-    digest = hashlib.sha1(str(Path(vault).resolve()).encode("utf-8")).hexdigest()[:12]
-    return base / digest
+    return base / vault_digest(vault)
+
+
+def vault_digest(vault: str) -> str:
+    """The per-vault namespace key: sha1 of the resolved vault path, 12 chars.
+
+    One scheme shared by every per-vault runtime directory (index, capture
+    WAL), so a namespace computed by one seam is readable by the others.
+    """
+    return hashlib.sha1(str(Path(vault).resolve()).encode("utf-8")).hexdigest()[:12]
+
+
+def inbox_dir_for(vault: str) -> Path:
+    """Per-vault capture WAL: ~/.silica/inbox/<digest12>/.
+
+    Out of the vault on purpose: raw transcripts are private conversation data
+    and must never sit inside a committable repo, out of the note scanner, and
+    out of Obsidian's index.
+    """
+    return _SILICA_HOME / "inbox" / vault_digest(vault)
 
 
 def index_dir() -> Path:
