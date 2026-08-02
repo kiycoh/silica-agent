@@ -52,6 +52,37 @@ _DEGENERATE_RUN_RE = re.compile(r'([^\n\d#*_=~`-])\1{4,}')
 _NESTED_WIKILINK_RE = re.compile(r'\[{3,}|\]{3,}')
 
 
+# An inline code span holding nothing but a line break: `\n` written as the
+# subject of a sentence, emitted as a real break instead. Nobody writes that on
+# purpose, so it is corruption recognisable without asking the model anything.
+# Blockquote markers count as nothing: a break mid-quote resumes with `> `.
+# Deliberately not "any newline inside a code span" — over the 718-note vault
+# that reading pairs 375 unrelated backticks and welds real lines together.
+_CODE_SPAN_NEWLINE_RE = re.compile(r"`[^\S\n]*\n[ \t]*(?:>[ \t]*)*`")
+
+
+def repair_code_span_newlines(text: str) -> str:
+    """Turn a code span that contains only a line break back into `\\n`."""
+    return _CODE_SPAN_NEWLINE_RE.sub(lambda _m: "`\\n`", text)
+
+
+# A doubled backslash right before a letter, in text that never travelled
+# through JSON: there is no escaping to do out there, so the second backslash
+# is the model over-escaping the very sequence it was told to copy verbatim
+# (measured on the body pass: 12 bodies out of 12).
+# ponytail: two known ceilings, both left standing. LaTeX `\\` as a line break
+# immediately followed by a letter collapses too (it almost always carries a
+# space or a bracket, so it survives), and a source genuinely discussing double
+# escaping loses its doubling. Repairing against the excerpt at validate time
+# removes both, at the cost of covering the extractive lane only.
+_OVER_ESCAPED_RE = re.compile(r"\\\\(?=[A-Za-z])")
+
+
+def collapse_over_escaped_backslashes(text: str) -> str:
+    """`\\\\top` -> `\\top` in text that was never JSON-escaped."""
+    return _OVER_ESCAPED_RE.sub(r"\\", text)
+
+
 def collapse_nested_wikilinks(text: str) -> str:
     """Collapse [[[[X]]]] (and deeper) down to a single [[X]] wikilink."""
     return _NESTED_WIKILINK_RE.sub(lambda m: m.group(0)[:2], text)
@@ -73,12 +104,21 @@ def _strip_md_ext(text: str) -> str:
     )
 
 
+# Marks an op whose body reached us outside the JSON string — body appendix or
+# body pass. Such a body was never escaped, so it needs no unescaping either:
+# a `\n` in it is the escape sequence as subject, written on purpose. Set by
+# the two producers of external bodies, consumed and removed here.
+VERBATIM_BODY = "_verbatim_body"
+
+
 def normalize_ops(ops: list) -> list:
     """Post-process a list of op dicts to fix common distiller output errors.
 
     Applied normalizations:
     1. Strip .md extension from wikilinks in `snippet`, `content`, and `related`.
     2. Strip filesystem-illegal characters from `title` when present.
+    3. Undo JSON double-escaping in prose — skipped for VERBATIM_BODY ops,
+       where the text never travelled through JSON to begin with.
     """
     if not isinstance(ops, list):
         return ops
@@ -89,19 +129,24 @@ def normalize_ops(ops: list) -> list:
             cleaned.append(op)
             continue
         op = dict(op)  # shallow copy — don't mutate in place
+        verbatim = bool(op.pop(VERBATIM_BODY, False))
 
         for field in ("snippet", "content"):
             if isinstance(op.get(field), str):
                 val = op[field]
                 val = val.rstrip()
-                while val.endswith("\\n"):
+                while not verbatim and val.endswith("\\n"):
                     val = val[:-2].rstrip()
-                if "\\n" in val:
-                    parts = val.split("```")
-                    for i in range(len(parts)):
-                        if i % 2 == 0:  # prose part — but never inside math spans
-                            parts[i] = replace_outside_math(parts[i], "\\n", "\n")
-                    val = "```".join(parts)
+                parts = val.split("```")
+                for i in range(0, len(parts), 2):  # prose parts only
+                    if verbatim:
+                        parts[i] = collapse_over_escaped_backslashes(parts[i])
+                    elif "\\n" in parts[i]:  # never inside math spans
+                        parts[i] = replace_outside_math(parts[i], "\\n", "\n")
+                    # After the expansion, never before: the expansion would
+                    # turn the repaired `\n` straight back into a line break.
+                    parts[i] = repair_code_span_newlines(parts[i])
+                val = "```".join(parts)
                 val = strip_degenerate_runs(val)
                 val = collapse_nested_wikilinks(val)
                 op[field] = _strip_md_ext(val)
@@ -162,6 +207,7 @@ def _resolve_op_refs(op, bodies: dict[int, str]) -> None:
             ref = op.pop(ref_key)
             if isinstance(ref, int) and ref in bodies:
                 op[field] = bodies[ref]
+                op[VERBATIM_BODY] = True
             else:
                 # Dangling ref: the model emitted `snippet_ref: N` but never wrote
                 # the matching `===SILICA-BODY N===` block. Leaving `field` empty

@@ -1638,10 +1638,16 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         from silica.router.coordinator import Coordinator
 
         CONSOLE.print(f"  nucleate: {len(md_files)} file(s) → [bold]{target_dir}[/]")
-        result = Coordinator(
-            inbox_files=md_files, target_dir=target_dir, hub=hub or None,
-            keep_sources=keep_sources,
-        ).run()
+        try:
+            result = Coordinator(
+                inbox_files=md_files, target_dir=target_dir, hub=hub or None,
+                keep_sources=keep_sources,
+            ).run()
+        except ValueError as exc:
+            # A path outside the vault (or any other rejected argument) is user
+            # error, not a crash: the REPL keeps the session.
+            CONSOLE.print(f"  [yellow]nucleate: {exc}[/]")
+            return ""
         status = result.get("final_status") or result.get("error") or "done"
         failed = result.get("failed_chunks") or []
         extra = f" — {len(failed)} chunk(s) failed" if failed else ""

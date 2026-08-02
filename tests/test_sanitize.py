@@ -142,6 +142,85 @@ def test_normalize_ops_removes_trailing_literal_newlines():
     assert result[0]["snippet"] == "Some text."
 
 
+def test_normalize_ops_repairs_newline_inside_code_span():
+    # The body pass writes prose outside JSON, where no grammar constrains the
+    # model: `\n` as the *subject* of a sentence comes back as a real line
+    # break. A code span holding nothing but a line break is not markdown
+    # anyone writes — it is that corruption, and it is repairable in place.
+    ops = [{
+        "op": "write",
+        "path": "notes/B.md",
+        "heading": "B",
+        "source_basename": "inbox.md",
+        "snippet": "Il tokenizer divide il buffer sul letterale `\n`.",
+    }]
+    result = normalize_ops(ops)
+    assert result[0]["snippet"] == "Il tokenizer divide il buffer sul letterale `\\n`."
+
+
+def test_normalize_ops_code_span_survives_the_literal_newline_expansion():
+    # Single-call path: the JSON decodes to a well-formed `\n` span, and it is
+    # the prose expansion itself that breaks it. The repair has to run after
+    # that expansion, or the two steps cancel out.
+    ops = [{
+        "op": "write",
+        "path": "notes/B.md",
+        "heading": "B",
+        "source_basename": "inbox.md",
+        "snippet": "Prosa con \\n qui, e il letterale `\\n` come soggetto.",
+    }]
+    result = normalize_ops(ops)
+    snip = result[0]["snippet"]
+    assert "Prosa con \n qui" in snip           # prose \n -> real newline
+    assert "il letterale `\\n` come soggetto" in snip  # code span kept intact
+
+
+def test_normalize_ops_code_span_repair_spares_fenced_blocks():
+    # Inside a fence a backtick is code, not markup: a JS template literal
+    # holding one line break is legitimate source and must survive verbatim.
+    ops = [{
+        "op": "write",
+        "path": "notes/B.md",
+        "heading": "B",
+        "source_basename": "inbox.md",
+        "snippet": "Il separatore `\n` a capo.\n\n```js\nconst s = `\n`;\n```",
+    }]
+    result = normalize_ops(ops)
+    snip = result[0]["snippet"]
+    assert "Il separatore `\\n` a capo." in snip   # prose span repaired
+    assert "const s = `\n`;" in snip               # fenced source untouched
+
+
+def test_normalize_ops_code_span_repair_ignores_spans_with_content():
+    # Deliberately narrow: only a whitespace-only span is unambiguous
+    # corruption. Two stray backticks with prose between them are a pairing the
+    # scanner must not act on, or a repair would weld two lines together.
+    body = "Usa il carattere ` per il codice\ne poi il carattere ` di nuovo."
+    ops = [{
+        "op": "write",
+        "path": "notes/B.md",
+        "heading": "B",
+        "source_basename": "inbox.md",
+        "snippet": body,
+    }]
+    assert normalize_ops(ops)[0]["snippet"] == body
+
+
+def test_normalize_ops_repairs_code_span_broken_across_a_blockquote():
+    # Observed shape: the break lands mid-blockquote, so the model resumes the
+    # next line with its `> ` marker. Still whitespace plus quote markup, still
+    # nothing anyone writes inside a code span.
+    ops = [{
+        "op": "write",
+        "path": "notes/B.md",
+        "heading": "B",
+        "source_basename": "inbox.md",
+        "snippet": "> - Il tokenizer divide il buffer sul letterale `\n> `.",
+    }]
+    result = normalize_ops(ops)
+    assert result[0]["snippet"] == "> - Il tokenizer divide il buffer sul letterale `\\n`."
+
+
 def test_slugify_normalizes_whitespace():
     assert slugify("Performance\nElement") == "Performance Element"
     assert slugify("Performance\r\nElement  negli   agenti") == "Performance Element negli agenti"
@@ -319,3 +398,65 @@ def test_parse_json_top_level_list_of_ops_with_bodies():
     parsed, _ = parse_json(raw)
     assert parsed[0]["snippet"] == "corpo"
 
+
+
+def test_external_body_keeps_a_bare_literal_newline_through_normalize():
+    # A body carried outside the JSON was never escaped, so every `\n` in it is
+    # the escape sequence as subject, written on purpose. The prose expansion
+    # exists to undo JSON double-escaping and has nothing to undo here.
+    body = "Il campo si chiude su \\n, senza backtick attorno."
+    raw = (
+        '{"updates":[{"op":"write","path":"X.md","snippet_ref":1}]}\n'
+        '\n'
+        '===SILICA-BODY 1===\n'
+        + body
+    )
+    parsed, _ = parse_json(raw)
+    assert normalize_ops(parsed["updates"])[0]["snippet"] == body
+
+
+def test_external_body_keeps_a_trailing_literal_newline():
+    # Same reasoning at the end of the body: the trailing-`\n` strip removes a
+    # JSON artefact, and a verbatim body has no JSON artefacts to remove.
+    body = "Il campo si chiude sul letterale \\n"
+    raw = (
+        '{"updates":[{"op":"write","path":"X.md","snippet_ref":1}]}\n'
+        '\n'
+        '===SILICA-BODY 1===\n'
+        + body
+    )
+    parsed, _ = parse_json(raw)
+    assert normalize_ops(parsed["updates"])[0]["snippet"] == body
+
+
+def test_external_body_collapses_over_escaped_backslashes():
+    # Measured live on the body pass (12 bodies out of 12): outside JSON the
+    # model doubles the backslash of the very escapes it was asked to copy
+    # verbatim. Outside JSON there is no escaping to do, so `\\` before a
+    # letter is over-escaping by construction.
+    body = "Nelle regex \\\\b non è un carattere, e \\\\t lo è, come $A^\\\\top$."
+    raw = (
+        '{"updates":[{"op":"write","path":"X.md","snippet_ref":1}]}\n'
+        '\n'
+        '===SILICA-BODY 1===\n'
+        + body
+    )
+    parsed, _ = parse_json(raw)
+    assert normalize_ops(parsed["updates"])[0]["snippet"] == (
+        "Nelle regex \\b non è un carattere, e \\t lo è, come $A^\\top$.")
+
+
+def test_external_body_collapse_spares_latex_breaks_and_fenced_code():
+    # `\\` as a LaTeX line break carries a space or a bracket, not a letter.
+    # Inside a fence a doubled backslash is source: C's "\\n" is an escaped
+    # backslash, not an over-escaped newline.
+    body = ("Matrice: $\\begin{matrix} a \\\\ b \\end{matrix}$ e riga \\\\ dopo.\n"
+            "```c\nprintf(\"riga\\\\n\");\n```")
+    raw = (
+        '{"updates":[{"op":"write","path":"X.md","snippet_ref":1}]}\n'
+        '\n'
+        '===SILICA-BODY 1===\n'
+        + body
+    )
+    parsed, _ = parse_json(raw)
+    assert normalize_ops(parsed["updates"])[0]["snippet"] == body

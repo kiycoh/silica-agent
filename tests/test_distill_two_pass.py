@@ -226,14 +226,17 @@ class TestTwoPass:
 
 
 class TestGates:
-    def test_extractive_class_profiles_never_split(self, distill_env):
-        """Extractive bodies are verbatim spans: a control-char corruption
-        breaks the substring match and the validator rejects the op — that
-        class fails closed, so it keeps the cheap single call."""
-        fake, _ = distill_env(HAZARD, [FULL_JSON], profile="promotion")
+    def test_extractive_class_profiles_split_on_hazard_too(self, distill_env):
+        """They used to stay single-call on the claim that a corrupted body
+        breaks the verbatim substring match and the validator rejects it.
+        Measured false for the newline class: the expansion splits the body
+        line in two and BOTH halves are still substrings of the source, so the
+        floor passes it. No fail-closed, no exception."""
+        fake, _ = distill_env(HAZARD, [STRUCTURE_JSON, BODY_BLOCKS],
+                              profile="promotion")
 
-        assert len(fake.calls) == 1
-        assert fake.calls[0]["response_schema"].__name__ == "DistillerOutput"
+        assert len(fake.calls) == 2
+        assert fake.calls[0]["response_schema"].__name__ == "DistillerStructure"
 
     def test_the_kill_switch_forces_single_call(self, distill_env, monkeypatch):
         monkeypatch.setenv("SILICA_DISTILL_TWO_PASS", "0")
@@ -253,3 +256,38 @@ class TestGates:
         assert fake.calls[0]["response_schema"].__name__ == "DistillerStructure"
         assert result["ephemerals"] == [
             {"key": "user.course.topic", "text": "gradients"}]
+
+
+class TestBodiesSurviveSanitize:
+    """The body pass hands prose to SANITIZE, which was built for JSON prose."""
+
+    def test_a_bare_literal_newline_survives_normalize_ops(self, distill_env):
+        """`\\n` as the subject of a sentence: the body never went through JSON,
+        so there is no double-escaping for the prose expansion to undo — and
+        expanding anyway is silent, unrecoverable corruption."""
+        from silica.kernel.text.sanitize import normalize_ops
+
+        body = "Il tokenizer divide il buffer sul letterale \\n, e si ferma."
+        _, result = distill_env(
+            HAZARD, [STRUCTURE_JSON, f"===SILICA-BODY 1===\n{body}"])
+
+        assert normalize_ops(result["updates"])[0]["snippet"] == body
+
+    def test_an_extractive_body_keeps_its_escape_and_stays_verbatim(
+            self, distill_env):
+        """What the split buys the extractive lane: the selected span reaches
+        the note exactly as selected, so the verbatim floor compares it against
+        the source it was taken from — not against an expanded rewrite of it."""
+        from silica.kernel.text.sanitize import normalize_ops
+        from silica.kernel.write.provenance import nonextractive_lines
+
+        excerpt = ("Il tokenizer divide il buffer sul letterale \\n "
+                   "e si ferma esattamente lì, senza guardare oltre.")
+        _, result = distill_env(
+            _payload(excerpt),
+            [STRUCTURE_JSON, f"===SILICA-BODY 1===\n{excerpt}"],
+            profile="promotion")
+
+        body = normalize_ops(result["updates"])[0]["snippet"]
+        assert body == excerpt
+        assert nonextractive_lines(body, excerpt) == []

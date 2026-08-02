@@ -409,8 +409,13 @@ def _body_pass_instruction(ops: list[dict]) -> str:
         "N is the op's number in the list. Output ONLY the blocks — no JSON, "
         "no prose before the first marker, nothing after the last body.\n"
         "Body text is copied to the note file as-is: literal single "
-        "backslashes (\\frac stays \\frac, never \\\\frac), real line breaks, "
-        "never \\n escapes. Every body rule from the contract still applies "
+        "backslashes (\\frac stays \\frac, never \\\\frac), and real line "
+        "breaks where you mean a new line — never \\n standing in for one. "
+        "That rule is about layout, not content: when the source discusses an "
+        "escape sequence itself (\\n, \\t, \\r, \\b, \\f as the subject), copy "
+        "the two characters verbatim, backslash included. `splits on \\n` must "
+        "not become `splits on ` followed by a line break. "
+        "Every body rule from the contract still applies "
         "(prose language, wikilinks without .md, no self-links, no "
         "descriptive summaries).\n\n" + listing
     )
@@ -425,13 +430,14 @@ def _stitch_bodies(parsed: dict, raw: str) -> None:
 
     A missing block leaves the op bodyless: the validate floor rejects it
     downstream (fail closed, same path as a dangling snippet_ref)."""
-    from silica.kernel.text.sanitize import extract_body_appendix
+    from silica.kernel.text.sanitize import VERBATIM_BODY, extract_body_appendix
 
     _, bodies = extract_body_appendix(raw)
     for i, op in enumerate(_body_ops(parsed), 1):
         body = bodies.get(i)
         if body:
             op[_BODY_FIELD.get(op.get("op"), "snippet")] = body
+            op[VERBATIM_BODY] = True
         else:
             logger.warning(
                 "body pass: no ===SILICA-BODY %d=== block for %s — left empty",
@@ -469,12 +475,12 @@ def run_distiller(
     """Call the Distiller LLM for one payload chunk.
 
     Single call by default. When the chunk's excerpts can seed silent
-    JSON-escape corruption (needs_body_pass) and the profile is prose-class,
-    the call splits in two: a structure pass under constrained decode (schema
-    without body fields), then a body pass as a same-conversation continuation
-    where prose travels outside JSON entirely — verbatim backslashes, real
-    line breaks. SILICA_DISTILL_TWO_PASS=0 forces single-call everywhere
-    (re-admits the corruption class on hazard chunks).
+    JSON-escape corruption (needs_body_pass), the call splits in two: a
+    structure pass under constrained decode (schema without body fields), then
+    a body pass as a same-conversation continuation where prose travels outside
+    JSON entirely — verbatim backslashes, real line breaks. Every profile,
+    extractive included. SILICA_DISTILL_TWO_PASS=0 forces single-call
+    everywhere (re-admits the corruption class on hazard chunks).
 
     Args:
         payload: the payload dict (schema_version + batches)
@@ -497,17 +503,18 @@ def run_distiller(
     from silica.config import CONFIG
     from silica.kernel.context_builder import build_context
     from silica.kernel.write.ops import DistillerOutput, DistillerStructure
-    from silica.kernel.write.validate import EXTRACTIVE_PROFILES
     from silica.kernel.text.sanitize import parse_json
 
     _profile = profile or active_distill_profile()
-    # Extractive-class runs stay single-call: every body line must be a
-    # verbatim span of the excerpt, so a control-char corruption breaks the
-    # substring match and the validator rejects it — that class fails closed.
+    # Extractive-class runs used to be excluded here, on the claim that a
+    # corrupted body breaks the verbatim substring match so the validator
+    # rejects it. Measured false for the newline class: the expansion splits
+    # the line in two and both halves remain substrings of the source, so the
+    # floor passes it silently. Extractive is in fact where verbatim transport
+    # matters most — a selected span must reach the note as selected.
     two_pass = (
         not structure_only
         and os.getenv("SILICA_DISTILL_TWO_PASS", "1") != "0"
-        and _profile not in EXTRACTIVE_PROFILES
         and needs_body_pass(payload)
     )
 
