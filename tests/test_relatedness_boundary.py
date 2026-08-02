@@ -46,6 +46,7 @@ ALLOWED = {
     "kernel/recall/mindmap.py":            "constructs stores to inject into the facade (mindmap latent leg)",
     "kernel/recall/memory_lane.py":        "constructs the memory-lane store pair to inject into the facade (ADR-0019), never ranks",
     "kernel/recall/vault_map.py":          "session-start vault map via CooccurStore (to_networkx/node_label, top_stems), not relatedness ranking",
+    "kernel/recall/sync.py":               "index maintenance (invocation-time sweep: build/refresh/prune entries), never ranks",
     "kernel/organize/classify.py":           "L1 tokenizer/concept matching, not relatedness ranking",
     "kernel/text/keyphrase.py":          "pairwise cosine (candidate phrase vs document theme) for concept reranking, not note ranking",
     "kernel/recall/episodic.py":           "pairwise cosine on its own fact vecs (episodic recall scoring), not note relatedness ranking",

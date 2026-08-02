@@ -128,137 +128,6 @@ def _refresh_cooccurrence_for_ops(
     return len(notes)
 
 
-# Drift above this many notes is treated as a stale/cold index (not crash-drift):
-# the reconcile warns and defers to an explicit /embed rather than embedding a
-# large batch implicitly at run start.
-_RECONCILE_CAP = 500
-# A live vault view missing more than this fraction of a populated store smells
-# like a misconfig/partial-read, not mass deletion. ponytail: a flat ratio;
-# swap for a delete-journal or two-scan confirmation if false skips ever bite.
-_PRUNE_RATIO_CEILING = 0.5
-
-
-def _safe_to_prune(orphaned: set[str], live: set[str], store_len: int) -> bool:
-    """Trust the live vault view enough to prune against it only if it is
-    non-empty and accounts for most of the store. An empty view (wrong vault
-    path) or a half-missing one (partial fs read) is a bug, not deletions —
-    refuse and defer to an explicit /embed. A small floor lets tiny vaults,
-    which churn proportionally more, still self-heal. Prune damage is
-    recoverable (vectors re-derive from the still-present bodies); we just
-    never risk it on an untrustworthy view.
-    """
-    if not orphaned or not live:
-        return False
-    return len(orphaned) <= max(20, _PRUNE_RATIO_CEILING * store_len)
-
-
-def _prune_orphans(store: Any, live: set[str], delete: Callable[[str], None], label: str) -> int:
-    """Drop index entries whose note was deleted out-of-band (Obsidian, ``rm``).
-
-    The PRUNE leg shared by the embed and co-occurrence reconciles. Free (no
-    embedder/LLM) so it is unbounded — but guarded by ``_safe_to_prune`` against
-    a bogus live view that would wipe a good index. Returns the prune count.
-    """
-    have = set(store.paths())
-    orphaned = have - live
-    if not orphaned:
-        return 0
-    if not _safe_to_prune(orphaned, live, len(have)):
-        logger.warning(
-            "%s index has %d/%d entries absent from vault — run /%s to reconcile; "
-            "skipping auto-prune (stale/partial view)",
-            label, len(orphaned), len(have), label,
-        )
-        return 0
-    for p in orphaned:
-        delete(p)
-    store.save()
-    logger.info("%s reconcile pruned %d note(s) deleted out-of-band", label, len(orphaned))
-    return len(orphaned)
-
-
-def _reconcile_embed_index(*, folder: str = "") -> int:
-    """Repair embed-index drift before a run reads the index (Fix A safety net).
-
-    Two directions, both best-effort: PRUNE (see ``_prune_orphans``) then ADD —
-    embed notes present on disk but missing from the index (crash-drift or a
-    note written while the embedder was down). ADD is bounded by
-    ``_RECONCILE_CAP``: embedding costs API calls, so mass-drift defers to an
-    explicit /embed rather than an implicit whole-vault build.
-    A cold/empty index is left to an explicit /embed. Returns the number of
-    notes re-embedded (adds); prunes are logged, not returned.
-    """
-    try:
-        from silica.agent.providers import get_embedder
-        from silica.kernel.recall.embed import build_index, get_store
-        from silica.kernel.text.media import strip_images
-
-        store = get_store()
-        if len(store) == 0:
-            return 0  # cold index — an explicit /embed owns the full build
-
-        have = set(store.paths())
-        live: set[str] = set()
-        missing: list[tuple[str, str]] = []
-        for ref in DRIVER.list_files(folder or ""):
-            idx_path = (ref.path or ref.name).removesuffix(".md")
-            if not idx_path:
-                continue
-            live.add(idx_path)
-            if idx_path not in have:
-                missing.append((idx_path, ref.name or idx_path))
-
-        # PRUNE first (free): notes deleted from the vault out-of-band.
-        _prune_orphans(store, live, store.delete, "embed")
-
-        # ADD (capped): notes on disk but not yet embedded.
-        if not missing:
-            return 0
-        if len(missing) > _RECONCILE_CAP:
-            logger.warning(
-                "embed index drift %d > cap %d — run /embed to rebuild; skipping reconcile",
-                len(missing), _RECONCILE_CAP,
-            )
-            return 0
-        embedder = get_embedder(CONFIG)
-        notes: list[tuple[str, str, str]] = []
-        for idx_path, name in missing:
-            try:
-                body = strip_images(DRIVER.read_note(idx_path + ".md").content or "")
-            except Exception:
-                continue
-            notes.append((idx_path, name, body))
-        if notes:
-            build_index(embedder, notes, store=store)  # embeds the missing + saves
-        return len(notes)
-    except Exception as e:
-        logger.debug("embed reconcile skipped (%s)", e)
-        return 0
-
-
-def _prune_cooccur_orphans(*, folder: str = "") -> int:
-    """Drop co-occurrence nodes+edges whose note was deleted out-of-band.
-
-    The embedder-free twin of the PRUNE leg above: same guard, same chokepoint.
-    Free (no LLM/embedder), so it runs every run start. Returns the prune count.
-    """
-    try:
-        from silica.kernel.recall.cooccurrence import get_cooccur_store
-
-        store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        if not store.paths():
-            return 0  # unseeded — an explicit /cooccur owns the first build
-        live = {
-            (ref.path or ref.name).removesuffix(".md")
-            for ref in DRIVER.list_files(folder or "")
-        }
-        live.discard("")
-        return _prune_orphans(store, live, store.delete_note, "cooccur")  # delete_note also prunes edges
-    except Exception as e:
-        logger.debug("cooccur reconcile skipped (%s)", e)
-        return 0
-
-
 def _commit_docs_for_ops(
     ops: list,
     committed_paths: set,
@@ -736,11 +605,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
             source=self.inbox_file, vault=getattr(CONFIG, "vault_path", None) or None
         )
 
-        # Fix A: repair index drift before this run reads the indexes — crash-drift
-        # (embed adds) and out-of-band deletions (embed + cooccur prunes). No-op/
-        # sub-ms when in sync; the prunes are free (no embedder/LLM).
-        _reconcile_embed_index()
-        _prune_cooccur_orphans()
+        # Fix A: repair index drift before this run reads the indexes — crash
+        # drift and out-of-band creates/edits/deletes (kernel/recall/sync.py).
+        # No-op/sub-ms when in sync.
+        from silica.kernel.recall.sync import sweep
+        sweep(force=True)
 
         # Per-file pipeline: start at the first uncommitted file (committed
         # files are skipped entirely — no recon/embedding spent on them).
@@ -819,7 +688,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         dirty index file once instead of per note (1.17s/note at 10k). Gated on
         the dirty flags so a run that wrote nothing (or had the embedder down)
         never rewrites the index. Runs in the _run_loop finally so it fires on
-        success, error, and Ctrl+C; a hard kill is repaired by the reconcile.
+        success, error, and Ctrl+C; a hard kill is repaired by the index sweep.
         """
         ctx = getattr(self, "context", {})
         if ctx.get("_embed_dirty"):

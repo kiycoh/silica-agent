@@ -122,6 +122,11 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     from silica.kernel.recall.memory_lane import memory_stores
     from silica.kernel.recall.relatedness import related_notes_for_query
     from silica.kernel.recall.rerank import rerank_related
+    from silica.kernel.recall.sync import sweep
+
+    # Out-of-band freshness: hand-edits (Obsidian, rm, git) land in the
+    # indexes before this query reads them. Debounced, never raises.
+    sweep()
 
     embed_store = get_store()
     try:

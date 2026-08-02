@@ -31,6 +31,21 @@ def _no_recon_embedder(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _disable_index_sweep(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disable the invocation-time index sweep and sandbox its stamp sidecar.
+
+    facade_retrieve and the injector sweep the vault's derived indexes
+    (kernel/recall/sync.py) before reading them; in tests that would stat
+    stub drivers and write the developer's real ~/.silica/index stamp file.
+    Tests that exercise the sweep re-enable CONFIG.index_sweep explicitly
+    (tests/test_index_sync.py)."""
+    monkeypatch.setattr("silica.config.CONFIG.index_sweep", False)
+    import silica.kernel.recall.sync as sync_mod
+    monkeypatch.setattr(sync_mod, "_stamps_path", lambda: tmp_path / "sync_stamps.json")
+    monkeypatch.setattr(sync_mod, "_last_sweep", 0.0)
+
+
+@pytest.fixture(autouse=True)
 def _isolate_embed_legacy_path(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Guard against the real ~/.silica/index/embeddings.json leaking into tests
     via the legacy-migration fallback. Any test that redirects _index_path to a

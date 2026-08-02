@@ -445,6 +445,14 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_COOCCUR_BM25", "False").lower() in ("true", "1", "t")
     )
 
+    # Invocation-time index sweep (kernel/recall/sync.py): detect out-of-band
+    # note edits/creates/deletes before the indexes are read. Off = you own
+    # index freshness via explicit /embed, /cooccur, /lexical (eval harnesses
+    # that need byte-identical retrieval across runs set this off).
+    index_sweep: bool = field(
+        default_factory=lambda: os.getenv("SILICA_INDEX_SWEEP", "True").lower() in ("true", "1", "t")
+    )
+
     # Salience gate (Phase 2.05): concept kept only if cosine(concept, doc_centroid) >= threshold
     sim_threshold_theme: float = field(
         default_factory=lambda: float(os.getenv("SILICA_SIM_THRESHOLD_THEME", "0.35"))
