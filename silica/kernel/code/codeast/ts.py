@@ -36,7 +36,7 @@ def _first_line(doc: str) -> str:
 
 def _import_names(node, src: bytes, aliases: dict[str, str], module: str) -> None:
     """Local name -> module specifier for every binding an import introduces.
-    # ponytail: a renamed import ({a as b}) resolves on the local name; the
+    # a renamed import ({a as b}) resolves on the local name; the
     # callee then reads as `b`, which is what the call site spells anyway
     """
     for i in range(node.named_child_count):

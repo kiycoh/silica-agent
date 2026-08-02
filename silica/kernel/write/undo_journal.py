@@ -22,7 +22,7 @@ class UndoJournalStore:
     def __init__(self, path: Path | str | None = None):
         self._path = Path(path) if path else _DEFAULT_JOURNAL_PATH
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        # ponytail: WAL + per-thread connections; sqlite's busy_timeout serialises
+        # WAL + per-thread connections; sqlite's busy_timeout serialises
         # writers, so no app-level lock. A thread's conn is closed only by GC when
         # the thread dies — fine for the GUI's small to_thread pool.
         self._local = threading.local()

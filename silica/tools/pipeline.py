@@ -630,7 +630,7 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
         from silica.tools.wrapped import silica_restore
         silica_restore(txn_id=txn.id, inverses=[i.model_dump() for i in txn.inverses])
         return {"status": "write_failed"}
-    # ponytail: written ops are dropped from the bundle by heading match only —
+    # written ops are dropped from the bundle by heading match only —
     # an op the model renamed stays parked and re-anneals (writes are idempotent
     # via block_present), which is the safe direction.
     for op in validated:

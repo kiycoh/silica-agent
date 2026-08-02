@@ -220,7 +220,7 @@ class ToolCall:
 # Single point: every provider path constructs an LLMResponse, so recording in
 # __post_init__ captures all of them with zero wiring. atexit dumps a sorted
 # table. Off = one bool check, no stack-walk.
-# ponytail: profiling aid, not a live endpoint — dump on process exit only.
+# profiling aid, not a live endpoint — dump on process exit only.
 _METER_ON = os.getenv("SILICA_TOKEN_METER") == "1"
 _meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0, 0])  # site -> [calls, prompt, completion, cached]
 

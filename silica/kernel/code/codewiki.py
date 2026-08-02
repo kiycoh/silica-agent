@@ -22,7 +22,8 @@ from silica.kernel.code.codegraph import CodeGraph
 
 _EXCLUDED_TOP = {"tests", "test", "docs"}
 _ROOT_KEY = "(root)"   # synthetic subsystem for loose files under the source root
-# ponytail: single source root in v1; multi-package monorepo deferred, seam here
+# ponytail: single source root in v1; the seam takes additional roots when a
+# real multi-package monorepo target arrives
 
 
 @dataclass(frozen=True)
@@ -495,7 +496,9 @@ def edges_ref(edges: list[tuple[str, str, int, int]]) -> str:
 _FLOW_DEPTH = 6
 _FLOWS_PER_ENTRY = 3
 _FLOW_BRANCHING = 2
-# ponytail: file-level flows via bounded BFS; symbol-level processes stay a seam
+# ponytail: file-level flows via bounded BFS; symbol-level processes stay a
+# seam — open it if a real repo's wiki flow sections misread control flow at
+# file granularity
 
 
 def call_adjacency(graph: CodeGraph) -> dict[str, list[str]]:

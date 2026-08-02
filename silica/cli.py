@@ -91,7 +91,7 @@ def _inject_vault_map(messages: list[dict]) -> None:
     CoALA recall: loads the corpus self-model into working memory at session
     start so the agent doesn't rediscover the vault via tools. The map is a
     startup snapshot; this session's writes already live in working memory.
-    # ponytail: recomputed once per session; no storage/refresh.
+    # recomputed once per session; no storage/refresh.
     """
     try:
         from silica.kernel.recall.vault_map import build_vault_map
@@ -1325,7 +1325,7 @@ def _promote(args: list[str]) -> str:
         CONSOLE.print(f"  {len(groups)} episodic candidate(s):")
         for ent, members in sorted(groups.items()):
             attrs = " · ".join(f"{m.key.rsplit('.', 1)[-1]}={m.text}" for m in members)
-            # ponytail: the busiest attribute stands for the entity. The union
+            # the busiest attribute stands for the entity. The union
             # of run ids would need every chain re-walked for one console line.
             runs = max(m.run_count for m in members)
             since = min(m.since for m in members)
@@ -2158,7 +2158,7 @@ def _autolaunch_wizard_if_unconfigured() -> None:
     import silica.onboarding.wizard as wizard_mod
     if wizard_mod.run_wizard() != 0:
         return  # aborted / failed → no re-exec, fall back to the hint
-    # ponytail: re-exec rather than reload — CONFIG is a module-level singleton
+    # re-exec rather than reload — CONFIG is a module-level singleton
     # imported by value across the codebase, so reassigning it wouldn't reach
     # those aliases. execve inherits the wizard's os.environ updates; the guard
     # env var stops an infinite relaunch if config still doesn't resolve.

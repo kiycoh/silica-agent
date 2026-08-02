@@ -121,7 +121,7 @@ def warn_unpinned_provider(model: str, provider_pin: str | None) -> None:
 
 
 if __name__ == "__main__":
-    # ponytail: smallest check that the provenance block is well-formed and the
+    # smallest check that the provenance block is well-formed and the
     # dataset hash actually reflects file content.
     import json
     import tempfile

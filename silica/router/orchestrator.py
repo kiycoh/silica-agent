@@ -898,7 +898,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             fi, _ = self._chunk_flat_to_fi_ci.get(idx, (0, 0))
             if fi not in committed:
                 return idx
-            # ponytail: defensive. Committed files are pruned before PAYLOAD (the sole
+            # defensive. Committed files are pruned before PAYLOAD (the sole
             # writer of _chunks), so their chunks never enter this list and this skip
             # rarely fires — kept as a guard against that invariant drifting.
             logger.info("Skipping already-committed file %d chunk %d", fi, idx)

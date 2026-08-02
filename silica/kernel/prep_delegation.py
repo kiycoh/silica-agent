@@ -146,18 +146,18 @@ def render_prompt(target: str, hub: str | None = None, source_text: str = "",
         "{CAPTURE_RULES}\n",
         f"## Vault capture rules\n{rules}\n\n" if rules else "",
     )
-    if _ANTI_SLOP_PATH.exists():  # ponytail: optional fragment, missing file must not break nucleation
+    if _ANTI_SLOP_PATH.exists():  # optional fragment, missing file must not break nucleation
         body += "\n\n" + _ANTI_SLOP_PATH.read_text(encoding="utf-8")
     return body
 
 
-def _payload_sample_text(payload: dict, limit: int = 4000) -> str:
+def _payload_sample_text(payload: dict, limit: int | None = 4000) -> str:
     """Concatenate inbox excerpts from the payload as a source-language sample.
 
     Used only when `conventions.language` is unset — detecting the dominant
     language of the batch's own inbox content is cheap and enough signal for
     the {LANGUAGE} placeholder; capped early so we never build a huge string
-    for a single detect() call.
+    for a single detect() call. `limit=None` returns everything.
     """
     parts: list[str] = []
     total = 0

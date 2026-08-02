@@ -52,7 +52,7 @@ _DDG_URL = "https://html.duckduckgo.com/html/"
 _MOJEEK_URL = "https://www.mojeek.com/search"
 _WP_SITE = "https://en.wikipedia.org"
 _WP_TAG_RE = re.compile(r"<[^>]+>")
-_MAX_RESULTS = 5            # ponytail: module constant; per-query result cap
+_MAX_RESULTS = 5            # ponytail: per-query cap; promote to CONFIG if a real query needs more
 _HTTP_TIMEOUT = 30
 # Fetches spend iterations too, so the budget covers both calls. The flag is
 # still --max-searches: renaming a user-facing flag buys nothing.

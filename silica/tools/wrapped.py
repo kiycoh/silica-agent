@@ -265,7 +265,7 @@ def silica_restore(txn_id: str, inverses: list[dict]) -> dict[str, Any]:
 
             elif inv.kind == InverseOpKind.move_back:
                 # Undo a move: send the note from where it landed back to origin.
-                # ponytail: if a new note now occupies `path`, DRIVER.move raises
+                # if a new note now occupies `path`, DRIVER.move raises
                 # and we route it to errors — same collision stance as the FSM's
                 # in-run rollback; no silent overwrite.
                 if inv.to_path:

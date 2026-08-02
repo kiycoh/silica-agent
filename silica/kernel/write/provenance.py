@@ -355,7 +355,7 @@ def ungrounded_spans(body: str, source: str) -> list[str]:
     if "```" in source:
         spans += _FENCE_RE.findall(body)
     if "$" in source:
-        # ponytail: "$" also matches currency; acceptable for a warn-only gate
+        # "$" also matches currency; acceptable for a warn-only gate
         rest = _FENCE_RE.sub("", body)
         spans += _DISPLAY_MATH_RE.findall(rest)
         spans += _INLINE_MATH_RE.findall(_DISPLAY_MATH_RE.sub("", rest))

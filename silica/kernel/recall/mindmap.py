@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 # terms of these: distance ≥ hypot(W, H) ⇒ the two boxes' AABBs are disjoint.
 BOX_W = 220.0
 BOX_H = 64.0
-# ponytail: shrinking these is the ONLY compactness knob. _DIAG is the spacing
+# shrinking these is the ONLY compactness knob. _DIAG is the spacing
 # unit every ring radius is a multiple of, so smaller boxes scale the whole
 # layout tighter with wedge angles and ring count untouched; non-overlap still
 # holds by construction (distance >= hypot(W,H), recomputed from the new size).

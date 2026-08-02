@@ -206,7 +206,7 @@ def distill_session(session_id: str, date: str, excerpt: str) -> str:
         result = prep_delegation.run_distiller(
             payload, target="sessions", substrate=_episodic_keys_substrate(),
             session_date=date)
-    except Exception as e:  # ponytail: distiller hiccup -> keep the session verbatim
+    except Exception as e:  # distiller hiccup -> keep the session verbatim
         logger.warning("distiller failed for session %s: %s — keeping verbatim", session_id, e)
         return excerpt
     # Episodic lane: session id is the run_id, the SESSION date is `seen`
@@ -221,7 +221,7 @@ def distill_session(session_id: str, date: str, excerpt: str) -> str:
     # Meta-description guard (post-mortem 2026-07-14): a snippet that DESCRIBES
     # the conversation instead of carrying its facts is distill-loss — drop it;
     # with nothing left the verbatim fallback keeps every detail.
-    # ponytail: opening-line denylist; false positives just fall back to verbatim.
+    # opening-line denylist; false positives just fall back to verbatim.
     bodies = [b for b in bodies if b and not _META_BODY_RE.search(b[:160])]
     body = "\n\n".join(bodies)
     if not body:

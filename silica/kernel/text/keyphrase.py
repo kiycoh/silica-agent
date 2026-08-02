@@ -268,7 +268,7 @@ def extract_keyphrases(
     return _cutoff(body, ranked)
 
 
-if __name__ == "__main__":  # ponytail: self-check, no framework
+if __name__ == "__main__":  # self-check, no framework
     txt = ("La discesa del gradiente ottimizza la funzione di perdita aggiornando "
            "i pesi della rete neurale a ogni iterazione del training. " * 3)
     from silica.kernel.text.overlay import DomainOverlay as _DO

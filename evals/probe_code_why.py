@@ -184,7 +184,7 @@ QUESTIONS: list[dict] = [
 
 
 # --- Working-tree tools (both arms) -------------------------------------------
-# ponytail: python walk, not `grep -r`. One dependency fewer, and the exclusion
+# python walk, not `grep -r`. One dependency fewer, and the exclusion
 # set is the load-bearing part (the gate vault must be unreachable), which is
 # easier to state in code than to keep correct across grep's --exclude-dir flags.
 

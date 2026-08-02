@@ -169,13 +169,15 @@ def clamp_max_tokens(provider: str, model: str, requested: int | None, input_cha
     """
     # ponytail: 32768 default keeps the OpenRouter pool wide — cheap endpoints
     # advertise smaller output caps and get dropped above this. 256k measured
-    # bad, 32768 measured good; in-between never A/B'd. Override via MAX_TOKENS.
+    # bad, 32768 measured good; in-between never A/B'd. Override via MAX_TOKENS;
+    # sweep the in-between only if real runs start finishing at this ceiling
+    # (finish_reason=length on distill).
     want = requested if requested is not None else int(os.getenv("MAX_TOKENS", "32768"))
     window, out_cap = model_limits(provider, model)
     if out_cap:
         want = min(want, out_cap)
     if window:
-        # ponytail: floor 1024 keeps the request well-formed when input nearly
+        # floor 1024 keeps the request well-formed when input nearly
         # fills the window; compaction is the real defense at that point.
         want = min(want, max(window - input_chars // 3, 1024))
     return want
@@ -401,7 +403,7 @@ class OllamaNativeProvider:
         # fixed shape, not Ollama's 0.8 sampling default.
         if temperature is None and response_schema is not None:
             temperature = 0.0
-        # ponytail: openrouter_provider is an OpenRouter routing pin, inert here.
+        # openrouter_provider is an OpenRouter routing pin, inert here.
         return call_llm(
             model=f"ollama/{self.model}",
             messages=[_to_wire(m) for m in messages],

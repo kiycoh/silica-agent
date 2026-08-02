@@ -344,7 +344,7 @@ def web_fetch(url: str) -> str:
     ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
     if ctype and not ctype.startswith(_TEXT_TYPES):
         raise ValueError(f"refusing to read {ctype} content at {final_url}")
-    # ponytail: no charset sniffing, httpx already decoded from the header.
+    # no charset sniffing, httpx already decoded from the header.
     body = resp.text
     text = _extract_text(body) if ("html" in ctype or not ctype) else body
     return _render(final_url, _truncate(text))

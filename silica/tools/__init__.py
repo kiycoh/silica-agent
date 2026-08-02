@@ -65,7 +65,7 @@ class Tool:
         self.cls = cls  # "atomic" | "composed" | "wrapped"
         self.collapse = collapse  # "lazy" | "eager" | "never"
         self.summarize = summarize
-        # ponytail: classified once at definition; the default toolset filters
+        # classified once at definition; the default toolset filters
         # on this so a sensitive tool can never leak into the main agent by
         # mere registration. New sensitive tools are covered automatically.
         self.sensitive = sensitive

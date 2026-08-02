@@ -73,7 +73,7 @@ def code_note_dest(rel_path: str, root: str = "", repo_name: str = "code") -> tu
 
 @lru_cache(maxsize=8)
 def _repo_files(root_str: str, code_ref: str) -> frozenset[str]:
-    # ponytail: cache the git file-list per (repo, HEAD) so nucleating a whole
+    # cache the git file-list per (repo, HEAD) so nucleating a whole
     # codebase resolves imports against one scan; code_ref keys the refresh.
     return frozenset(supported_files(Path(root_str)))
 

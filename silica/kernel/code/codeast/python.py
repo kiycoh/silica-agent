@@ -202,7 +202,7 @@ def _py_constant(node, src: bytes, symbols: list[Symbol]) -> None:
     tables are contract, and the comment blocks that explain them were landing
     in the digest with nothing to attach to: a paragraph about an RRF damping
     constant, and no `_RRF_K = 60` anywhere in sight.
-    # ponytail: name + truncated value; the explaining comment stays in the
+    # name + truncated value; the explaining comment stays in the
     # module_comments block rather than being re-homed onto the symbol
     """
     assign = node

@@ -44,7 +44,9 @@ def same_file_key(path: str) -> str:
 # Lowered 400→275 (2026-07-27) to match the value actually run against real
 # vaults: 400 also deferred short-but-complete notes, which cost a round trip.
 # ponytail: length is a proxy for "content, not a description of it" — a true
-# shape check needs semantic judgment, not a regex; left as the worker-model lever.
+# shape check needs semantic judgment, not a regex; left as the worker-model
+# lever. Build it only with an eval that catches what the floor misses (a
+# description of content that still clears the char floor).
 MIN_WRITE_SNIPPET_CHARS = 275
 
 

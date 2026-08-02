@@ -356,7 +356,7 @@ def silica_curate(
     For selection beyond kind/path (ordinals, "all but X"), dry-run first
     (apply=False), read the returned plan, then pass explicit `targets`.
     """
-    # ponytail: the plan is re-derived on every call, so a subset apply after a
+    # the plan is re-derived on every call, so a subset apply after a
     # dry-run replans against the current vault (already true today between
     # /curate and /curate --apply). No plan persistence.
     report = compute_report(

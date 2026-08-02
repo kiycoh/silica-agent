@@ -315,7 +315,7 @@ def _ask_local_model(
     return model
 
 
-# ponytail: bounded walk — a repo-mode vault can be a source tree with
+# bounded walk — a repo-mode vault can be a source tree with
 # node_modules, and init must not stall counting files it will only mention.
 _DOC_SCAN_CAP = 20_000
 

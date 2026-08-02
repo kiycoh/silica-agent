@@ -342,7 +342,7 @@ def silica_files(folder: str = "") -> dict:
     count ("how many notes?") use the returned "total" — or the '## Vault map'
     block already in context, without any call.
     """
-    # ponytail: bare paths, not {name, path} dicts — NoteRef.name is the
+    # bare paths, not {name, path} dicts — NoteRef.name is the
     # filename without its extension, so the dict shipped every note's name
     # twice (48% of this payload, ~2.5k tokens at the 200-entry cap).
     files = notes_under(folder)
@@ -350,7 +350,7 @@ def silica_files(folder: str = "") -> dict:
     if len(files) > _FILES_CAP:
         result["truncated"] = True
         result["hint"] = "Listing capped at 200 entries; pass folder= to narrow."
-    # ponytail: folder-scoped only — a bare call would dump a whole repo into
+    # folder-scoped only — a bare call would dump a whole repo into
     # the context window, and the vault map already covers "what is here".
     if folder:
         from silica.sources.registry import expand_folder

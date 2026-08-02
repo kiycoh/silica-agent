@@ -79,7 +79,9 @@ def why_for(
     # ponytail: iter_documenting_notes rglobs the whole vault per call, same as
     # /stale. Add an index only if the gate's latency numbers show it matters.
     # ponytail: containment only. Rolling up along imports (a path's importers)
-    # is a graph, not a tree, and codegraph already holds it — not v1.
+    # is a graph, not a tree, and codegraph already holds it — add the import
+    # rollup if a real repo's shared utilities (documented only via their
+    # importers) read as uncovered here.
     best: dict[str, tuple[WhyNote, str]] = {}   # note_path -> (hit, code_ref)
     for note_path, data, body in codedocs.iter_documenting_notes(vault):
         hook = next((ln.strip() for ln in (body or "").splitlines() if ln.strip()), "")

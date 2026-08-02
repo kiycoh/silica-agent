@@ -213,7 +213,7 @@ def build_vault_map(
             )
         return "\n".join(lines)
 
-    except Exception as e:  # ponytail: the map must never break the session
+    except Exception as e:  # the map must never break the session
         _warn_once(
             "failed",
             "vault map failed (%s) — the session starts with no self-model; "
