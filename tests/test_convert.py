@@ -45,7 +45,10 @@ def _pdf_bytes(pages: list[str], toc: list | None = None) -> bytes:
     return doc.tobytes()
 
 
-def test_pymupdf_is_the_default_provider():
+def test_pymupdf_is_the_default_provider(monkeypatch):
+    # config.py loads ~/.silica/.env into os.environ at import, so the field's
+    # default_factory reads the developer's own pin unless it is cleared here.
+    monkeypatch.delenv("SILICA_PDF_PROVIDER", raising=False)
     assert SilicaConfig().pdf_provider == "pymupdf"
 
 
