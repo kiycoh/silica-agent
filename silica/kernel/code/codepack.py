@@ -12,7 +12,10 @@ codegraph._serialize.
 The asymmetry that makes the pack worth its budget: verbatim only what you are
 about to rewrite, signatures for everything around it (D5).
 
-# ponytail: kill by 2026-10-28 if unused; exposed via `silica mcp --all` only
+# ponytail: kill by 2026-10-28 if unused. Exposure (verified 2026-08-02): in
+# the chat agent's DEFAULT toolset (constraints.chat_tools — not excluded) and
+# behind `silica mcp --all`. Not hidden, so absence of use by the kill date is
+# real disuse, not lack of surface.
 """
 from __future__ import annotations
 

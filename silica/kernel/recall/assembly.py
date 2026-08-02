@@ -119,7 +119,11 @@ def squash(
     return blocks
 
 
-ASSEMBLY_BUDGET_CHARS = 12000  # ponytail: placeholder ceiling, tuned in A/B
+# ponytail: never swept — the Arm-1 A/B (conv-26, 2026-07-21) ran at this one
+# value and --assemble stayed default-off, so the ceiling is a guess that only
+# matters under the flag. Sweep it inside the Arm-1 widening run (more
+# conversations + LME) if --assemble is ever considered for promotion.
+ASSEMBLY_BUDGET_CHARS = 12000
 
 
 @dataclass
