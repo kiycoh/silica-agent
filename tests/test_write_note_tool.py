@@ -100,3 +100,28 @@ def test_template_none_keeps_body_frontmatter(vault):
     head = landed.split("\n---\n")[0]
     assert "tags:\n  - mine" in head and "AI: true" in head
     assert landed.count("---\n") == 2
+
+
+def test_a_failed_checkpoint_is_visible_not_silent(vault, monkeypatch, caplog):
+    """Undo is best-effort, but the MCP surface advertises writes as
+    non-destructive on the strength of /undo — so a write that has no restore
+    point must say so in its result instead of reporting business as usual."""
+    import logging
+
+    monkeypatch.setattr(
+        "silica.kernel.write.checkpoints.get_checkpoint_store",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db locked")))
+    with caplog.at_level(logging.WARNING, logger="silica.tools.notes"):
+        res = silica_write_note(path="CS/Orphan.md", body="No restore point.")
+
+    assert res.get("success"), res                    # the write itself lands
+    assert res["checkpoint_ok"] is False
+    assert res["checkpoint_depth"] is None
+    assert any("no restore point" in r.message for r in caplog.records)
+
+
+def test_a_clean_checkpoint_reports_ok(vault):
+    res = silica_write_note(path="CS/Kept.md", body="With restore point.")
+    assert res.get("success"), res
+    assert res["checkpoint_ok"] is True
+    assert res["checkpoint_depth"] is not None

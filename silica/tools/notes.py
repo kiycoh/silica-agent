@@ -8,6 +8,7 @@ counterparts of the batch pipeline in silica.tools.pipeline.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -15,6 +16,8 @@ from pydantic import BaseModel, Field
 from silica.driver import DRIVER
 from silica.tools import tool
 from silica.kernel.write.ops import Op, OpType
+
+logger = logging.getLogger(__name__)
 
 
 _DOCUMENTS_FIELD = Field(
@@ -129,15 +132,21 @@ def silica_patch_note(
 
         # Record the resulting on-disk content as a restore point.
         checkpoint_depth = None
+        checkpoint_ok = False
         try:
             new_content = DRIVER.read_note(path).content
             checkpoint_depth = get_checkpoint_store().push(path, prior_content, new_content)
-        except Exception:
+            checkpoint_ok = True
+        except Exception as e:
             # A patch that succeeded must not be reported as failed just because
-            # the undo bookkeeping hiccuped; undo is best-effort.
-            pass
+            # the undo bookkeeping hiccuped; undo is best-effort. But the MCP
+            # surface advertises these writes as non-destructive on the strength
+            # of /undo, so a missing restore point has to be visible, not silent.
+            logger.warning("checkpoint push failed for '%s': %s — /undo has no "
+                           "restore point for this write", path, e)
 
-    return {**result, "note": name, "path": path, "checkpoint_depth": checkpoint_depth}
+    return {**result, "note": name, "path": path,
+            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
 
 
 class FlagNoteArgs(BaseModel):
@@ -197,13 +206,16 @@ def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[s
         pass  # digest index is best-effort; the note's frontmatter is the truth
 
     checkpoint_depth = None
+    checkpoint_ok = False
     try:
         checkpoint_depth = get_checkpoint_store().push(path, prior_content, new_content)
-    except Exception:
-        pass
+        checkpoint_ok = True
+    except Exception as e:
+        logger.warning("checkpoint push failed for '%s': %s — /undo has no "
+                       "restore point for this write", path, e)
 
     return {"note": name, "path": path, "contested": not clear,
-            "checkpoint_depth": checkpoint_depth}
+            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
 
 
 class WriteNoteArgs(BaseModel):
@@ -299,9 +311,13 @@ def silica_write_note(
                 pass  # cache hygiene must never fail the write
 
         checkpoint_depth = None
+        checkpoint_ok = False
         try:
             checkpoint_depth = get_checkpoint_store().push(path, "", content)
-        except Exception:
-            pass
+            checkpoint_ok = True
+        except Exception as e:
+            logger.warning("checkpoint push failed for '%s': %s — /undo has no "
+                           "restore point for this write", path, e)
 
-    return {"op": "write", "success": True, "path": ref.path or path, "checkpoint_depth": checkpoint_depth}
+    return {"op": "write", "success": True, "path": ref.path or path,
+            "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
