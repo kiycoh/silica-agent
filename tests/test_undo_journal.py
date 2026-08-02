@@ -70,13 +70,24 @@ def test_write_new_note_yields_delete_inverse(tmp_vault):
 
 
 def test_corrupt_journal_is_quarantined_and_usable(tmp_path):
-    """A corrupt db must not brick startup: quarantine it and start fresh."""
+    """A corrupt db must not brick startup: quarantine it and start fresh.
+
+    Timestamped like every other quarantine (the flat `.corrupt` rename let a
+    second corruption overwrite the first preserved copy, and doctor's
+    `*.corrupt.*` glob never matched it)."""
     dbpath = tmp_path / "j.db"
     dbpath.write_bytes(b"not a sqlite database at all -- garbage bytes")
     store = UndoJournalStore(dbpath)          # must not raise
     run_id = store.start_run("inbox/x.md")    # must be usable
     assert run_id
-    assert dbpath.with_suffix(".corrupt").exists()
+    assert len(list(tmp_path.glob("*.corrupt.*"))) == 1
+
+    # A second corruption preserves a second copy, never clobbers the first.
+    store._local.conn.close()
+    store._local.conn = None
+    dbpath.write_bytes(b"garbage again")
+    UndoJournalStore(dbpath).start_run("inbox/y.md")
+    assert len(list(tmp_path.glob("*.corrupt.*"))) == 2
 
 
 def test_revert_restores_unmodified_notes_and_skips_modified(tmp_vault, tmp_path):

@@ -283,3 +283,31 @@ def test_append_is_atomic_a_failed_write_keeps_the_prior_ledger(tmp_path, monkey
 
     assert store.read_bytes() == before
     assert list(tmp_path.iterdir()) == [store]  # no tmp leftovers
+
+
+def test_concurrent_appends_lose_no_records(tmp_path, monkeypatch):
+    """read->append->replace was atomic per write but not per window: two
+    parallel nucleate workers each rewrote the ledger from their own read and
+    the last one won. The lease serializes the window."""
+    import threading
+
+    from silica.kernel.write import provenance
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    barrier = threading.Barrier(8)
+
+    def _append(i):
+        barrier.wait()
+        provenance.append_record(
+            source=f"inbox/s{i}.md", sha256=f"sha{i}", run_id=f"run{i}",
+            notes=[f"N{i}.md"], vault_path=str(vault))
+
+    threads = [threading.Thread(target=_append, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+
+    records = provenance.read_records(vault_path=str(vault))
+    assert len(records) == 8

@@ -169,21 +169,27 @@ def append_record(
     }
 
     try:
-        existing = read_records(vault_path=vault_path)
-        if any(
-            r.get("source") == source and r.get("sha256") == sha256 and r.get("run_id") == run_id
-            for r in existing
-        ):
-            return False
-        existing.append(record)
-        # Atomic: this ledger is authoritative (run_id/sha history is not
-        # reconstructible from the vault) and read_records quarantines a
-        # truncated file, so a torn rewrite would silently lose the history.
+        # The write is atomic but read→append→replace is not: two concurrent
+        # appends (parallel nucleate workers) would each rewrite the whole
+        # ledger from their own read and the last one wins, silently dropping
+        # the other's record. The lease serializes the whole window.
         from silica.kernel.recall.paths import atomic_write_bytes
+        from silica.kernel.workqueue import path_lease
 
-        atomic_write_bytes(
-            path, json.dumps(existing, indent=2, ensure_ascii=False).encode("utf-8")
-        )
+        with path_lease(str(path)):
+            existing = read_records(vault_path=vault_path)
+            if any(
+                r.get("source") == source and r.get("sha256") == sha256 and r.get("run_id") == run_id
+                for r in existing
+            ):
+                return False
+            existing.append(record)
+            # Atomic: this ledger is authoritative (run_id/sha history is not
+            # reconstructible from the vault) and read_records quarantines a
+            # truncated file, so a torn rewrite would silently lose the history.
+            atomic_write_bytes(
+                path, json.dumps(existing, indent=2, ensure_ascii=False).encode("utf-8")
+            )
     except Exception as exc:
         logger.debug("provenance: append failed (non-fatal): %s", exc)
         return False

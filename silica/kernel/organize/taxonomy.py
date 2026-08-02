@@ -106,11 +106,16 @@ class Taxonomy(BaseModel):
         return cls.model_validate(data)
 
     def to_yaml(self, path: Path) -> None:
-        """Serialise to a YAML file, creating parent dirs as needed."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        doc = self.model_dump()
-        with open(path, "w", encoding="utf-8") as fh:
-            yaml.dump(doc, fh, allow_unicode=True, sort_keys=False, default_flow_style=False)
+        """Serialise to a YAML file, creating parent dirs as needed.
+
+        Atomic: this file is read back by every organize run (`from_yaml`), so
+        a torn write would lose the accumulated taxonomy, not one run's output.
+        """
+        from silica.kernel.recall.paths import atomic_write_bytes
+
+        doc = yaml.dump(self.model_dump(), allow_unicode=True, sort_keys=False,
+                        default_flow_style=False)
+        atomic_write_bytes(path, doc.encode("utf-8"))
 
 
 # ---------------------------------------------------------------------------

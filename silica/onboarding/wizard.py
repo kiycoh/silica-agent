@@ -792,7 +792,10 @@ def _run_wizard_inner(
     else:
         example = _find_env_example(repo_root)
         base = example.read_text(encoding="utf-8") if example else ""
-    env_path.write_text(merge_env(base, updates))
+    # Atomic: a crash mid-write here would truncate the live .env — every API
+    # key the user has — not just the values being merged.
+    from silica.kernel.recall.paths import atomic_write_bytes
+    atomic_write_bytes(env_path, merge_env(base, updates).encode("utf-8"))
     CONSOLE.print(f"  [green]{GLYPHS['ok']} Wrote {env_path}[/]")
 
     # Doctor checks against the values just chosen.

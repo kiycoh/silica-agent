@@ -40,10 +40,11 @@ class UndoJournalStore:
             if conn is not None:
                 conn.close()
                 self._local.conn = None
-            try:
-                self._path.replace(self._path.with_suffix(".corrupt"))
-            except OSError:
-                pass
+            # paths.quarantine: timestamped, never clobbered — the flat
+            # ".corrupt" rename here overwrote the previous preserved copy on
+            # the second corruption, and doctor's *.corrupt.* glob never saw it.
+            from silica.kernel.recall.paths import quarantine
+            quarantine(self._path)
             for suffix in ("-wal", "-shm"):
                 # a stale WAL sidecar must not be replayed into the fresh db
                 Path(str(self._path) + suffix).unlink(missing_ok=True)

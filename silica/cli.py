@@ -1688,7 +1688,11 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             node.pop(leaf, None)
         else:
             node[leaf] = val
-        mf.write_text(_yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        # Atomic: a torn vault.yaml parses as defaults, and default write_dir=""
+        # is the whole vault root — the exact boundary this file exists to set.
+        from silica.kernel.recall.paths import atomic_write_bytes
+        atomic_write_bytes(mf, _yaml.safe_dump(
+            data, allow_unicode=True, sort_keys=False).encode("utf-8"))
         reset_manifest_cache()
         CONSOLE.print(f"  {key} = {raw} → {mf.name} (comments in the file are not preserved)")
         return ""

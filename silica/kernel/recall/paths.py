@@ -18,6 +18,7 @@ import contextlib
 import hashlib
 import logging
 import os
+import shutil
 import tempfile
 from collections.abc import Callable
 from datetime import datetime
@@ -49,15 +50,45 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
 
     For derived indexes and bundles rewritten in place — a crash or full
     disk mid-write must leave the previous file intact, not a truncated one.
+
+    Three edges beyond the naive tmp+replace (each one a fielded failure in
+    graphify's sibling helper): resolve symlinks first so the tmp lands on the
+    destination's filesystem and the write goes THROUGH the link instead of
+    replacing it; preserve an existing destination's mode instead of leaving
+    mkstemp's 0600; and when os.replace hits a locked destination (Windows:
+    antivirus or an open reader) retry briefly — the hold is transient — and
+    only then degrade to copy2, which is NOT atomic (it truncates before it
+    copies), so the degradation is logged instead of silently voiding the
+    guarantee this function is named after.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".")
+    real = Path(os.path.realpath(path))
+    real.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=real.parent, prefix=real.name + ".")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        with contextlib.suppress(OSError):
+            os.chmod(tmp, os.stat(real).st_mode & 0o7777)
+        try:
+            os.replace(tmp, real)
+        except PermissionError:
+            import time
+            for _ in range(3):
+                time.sleep(0.05)
+                try:
+                    os.replace(tmp, real)
+                    break
+                except PermissionError:
+                    continue
+            else:
+                logger.warning(
+                    "atomic_write_bytes: %s still locked after retries — "
+                    "falling back to a non-atomic copy (torn-write window "
+                    "while the copy runs)", real)
+                shutil.copy2(tmp, real)
+                os.unlink(tmp)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
