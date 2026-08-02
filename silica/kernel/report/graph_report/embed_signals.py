@@ -139,14 +139,16 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
     curator feeds both bands to the ternary dedup judge, which reads the two
     bodies — so these still get judged, never mechanically merged.
 
-    ponytail: O(n^2) over 64-slot signatures after one O(n) signing pass. Fine
-    to a few thousand notes; add the LSH banding named in minhash_dedup's header
-    if a larger vault ever makes /curate feel slow.
+    Band-LSH after one O(n) signing pass: only pairs sharing a signature band
+    are verified (the all-pairs loop this replaced was interpreted O(n^2) and
+    took /curate to minutes at a few thousand notes). The sweep is now
+    probabilistic — pairs sitting exactly at the threshold have ~11% miss odds
+    (see banded_duplicate_pairs) — which the judge-not-merge contract absorbs.
     """
     from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.write import frontmatter
-    from silica.kernel.report.minhash_dedup import estimate_jaccard, minhash_signature
+    from silica.kernel.report.minhash_dedup import banded_duplicate_pairs, minhash_signature
 
     threshold = getattr(CONFIG, "minhash_dup_threshold", 0.6)
     sigs: dict[str, tuple[int, ...]] = {}
@@ -168,13 +170,8 @@ def _minhash_duplicate_pairs(report: VaultReport) -> list[DuplicatePair]:
         if sig:
             sigs[nid] = sig
 
-    keys = sorted(sigs)
-    out: list[DuplicatePair] = []
-    for i, a in enumerate(keys):
-        for b in keys[i + 1:]:
-            score = estimate_jaccard(sigs[a], sigs[b])
-            if score >= threshold:
-                out.append(DuplicatePair(source=a, target=b, score=round(score, 4)))
+    out = [DuplicatePair(source=a, target=b, score=round(score, 4))
+           for a, b, score in banded_duplicate_pairs(sigs, threshold=threshold)]
     out.sort(key=_pair_key)
     return out
 

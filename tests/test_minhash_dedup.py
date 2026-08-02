@@ -118,3 +118,55 @@ def test_embedder_free_pass_returns_nothing_when_no_near_dup() -> None:
     corpus = {"notes/attention.md": "Transformers use self-attention over input tokens."}
 
     assert _embedder_free_near_dups(chunk, corpus, threshold=0.3) == []
+
+
+class TestBandedPairs:
+    """The LSH sweep must agree with the brute-force scan it replaced.
+
+    Everything here is deterministic: fixed permutation seed, fixed texts,
+    fixed band split — so exact agreement is assertable, no tolerance."""
+
+    CORPUS = {
+        "a": "the quick brown fox jumps over the lazy dog in the garden",
+        "a2": "the quick brown fox jumps over the lazy dog in the yard",
+        "b": "an entirely different sentence about vector databases",
+        "b2": "an entirely different sentence about vector databases too",
+        "c": "nothing shares shingles with this one: zyx wvu tsr qpo",
+        "empty": "",
+    }
+
+    def _brute(self, sigs, threshold):
+        from silica.kernel.report.minhash_dedup import estimate_jaccard
+
+        keys = [k for k in sorted(sigs) if sigs[k]]
+        out = []
+        for i, a in enumerate(keys):
+            for b in keys[i + 1:]:
+                s = estimate_jaccard(sigs[a], sigs[b])
+                if s >= threshold:
+                    out.append((a, b, s))
+        return sorted(out, key=lambda t: (-t[2], t[0], t[1]))
+
+    def test_matches_the_all_pairs_scan(self):
+        from silica.kernel.report.minhash_dedup import (
+            banded_duplicate_pairs, minhash_signature)
+
+        sigs = {k: minhash_signature(t) for k, t in self.CORPUS.items()}
+        for threshold in (0.5, 0.6, 0.7):
+            assert banded_duplicate_pairs(sigs, threshold=threshold) == \
+                self._brute(sigs, threshold)
+
+    def test_empty_and_singleton_corpora(self):
+        from silica.kernel.report.minhash_dedup import (
+            banded_duplicate_pairs, minhash_signature)
+
+        assert banded_duplicate_pairs({}) == []
+        assert banded_duplicate_pairs(
+            {"only": minhash_signature("some text here")}) == []
+
+    def test_optimal_bands_divide_the_signature(self):
+        from silica.kernel.report.minhash_dedup import _optimal_bands
+
+        for threshold in (0.5, 0.6, 0.7, 0.85):
+            b, r = _optimal_bands(64, threshold)
+            assert b * r <= 64 and b >= 1 and r >= 1

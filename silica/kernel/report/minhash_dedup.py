@@ -10,12 +10,12 @@ concepts so COLLISION does not silently let duplicates land in the vault.
 
 MinHash idea ported from Graphify (github.com/safishamsi/graphify, MIT,
 Copyright (c) 2026 Safi Shamsi). Their `_minhash.py` is a vectorised
-datasketch-compatible drop-in with band-LSH for codebase-scale all-pairs dedup;
-this is the pure-stdlib slice Silica needs for one-query-vs-vault lookups.
-
-# ponytail: O(n) scan over the corpus. Corpus signatures are memoized per run
-# via near_duplicates(sig_cache=...); what stays deferred is LSH banding to skip
-# the full scan — add it only past ~10^4 notes or if this lands on a hot path.
+datasketch-compatible drop-in with band-LSH for codebase-scale all-pairs dedup.
+Two slices live here: the one-query-vs-vault lookup (`near_duplicates`, O(n)
+scan, signatures memoized per run) and the all-pairs maintenance sweep
+(`banded_duplicate_pairs`), which buckets by signature bands so only pairs
+sharing a band are verified — the all-pairs loop it replaced was interpreted
+O(n^2) and took /curate to minutes at a few thousand notes.
 """
 from __future__ import annotations
 
@@ -117,3 +117,88 @@ def near_duplicates(
     ]
     hits.sort(key=lambda kv: kv[1], reverse=True)
     return hits
+
+
+def _integrate(f, lo: float, hi: float) -> float:
+    """Midpoint rule, 10 slices — the collision-probability curves are smooth.
+    Ports graphify's `_lsh_integrate` (their reason for hand-rolling: importing
+    scipy.integrate for this costs a full scipy load at import time)."""
+    n = 10
+    w = (hi - lo) / n
+    return sum(f(lo + (i + 0.5) * w) for i in range(n)) * w
+
+
+@lru_cache(maxsize=None)
+def _optimal_bands(num_perm: int, threshold: float) -> tuple[int, int]:
+    """(bands, rows) minimizing false positives + false negatives at threshold.
+
+    The datasketch parameter search: for each split of the signature into
+    b bands of r rows, a pair with true Jaccard s shares a band with
+    probability 1-(1-s^r)^b; integrate the miss mass above the threshold and
+    the hit mass below it, keep the split with the least total error. Fixed
+    (b, r) instead would under-recall right at the threshold, which for a
+    dedup sweep is exactly where the interesting pairs sit.
+    """
+    best, best_err = (num_perm, 1), float("inf")
+    for b in range(1, num_perm + 1):
+        r = num_perm // b
+        fp = _integrate(lambda s: 1.0 - (1.0 - s**r) ** b, 0.0, threshold)
+        fn = _integrate(lambda s: (1.0 - s**r) ** b, threshold, 1.0)
+        if (err := fp + fn) < best_err:
+            best, best_err = (b, r), err
+    return best
+
+
+def banded_duplicate_pairs(
+    sigs: dict[str, Signature],
+    *,
+    threshold: float = 0.7,
+) -> list[tuple[str, str, float]]:
+    """All near-duplicate pairs above threshold, via band-LSH.
+
+    Bucket every signature by its bands, verify with estimate_jaccard only the
+    pairs that share at least one bucket. Work is O(n·bands) + verification of
+    the candidate pairs, instead of the n^2/2 all-pairs scan. Degenerate case
+    (everything near-identical) verifies O(n^2) pairs — but then the OUTPUT is
+    O(n^2), so no algorithm does better.
+
+    PROBABILISTIC, unlike the all-pairs scan it replaced: a pair whose true
+    similarity sits exactly at the threshold is caught with probability
+    1-(1-s^r)^b (~89% at num_perm=64, t=0.6), rising steeply above it. The
+    misses concentrate AT the threshold — acceptable here because every pair
+    feeds a ternary judge, not a mechanical merge, and a missed borderline
+    pair resurfaces on a later sweep with fresh signatures.
+
+    Returns [(a, b, score)] with a < b, sorted (-score, a, b).
+    """
+    keys = [k for k in sorted(sigs) if sigs[k]]
+    if len(keys) < 2:
+        return []
+    num_perm = len(sigs[keys[0]])
+    bands, rows = _optimal_bands(num_perm, round(threshold, 4))
+
+    buckets: dict[tuple[int, Signature], list[str]] = {}
+    for k in keys:
+        sig = sigs[k]
+        if len(sig) != num_perm:
+            continue  # a mixed-width signature can never match slot-for-slot
+        for i in range(bands):
+            band = sig[i * rows: (i + 1) * rows]
+            buckets.setdefault((i, band), []).append(k)
+
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str, float]] = []
+    for members in buckets.values():
+        if len(members) < 2:
+            continue
+        for i, a in enumerate(members):
+            for b in members[i + 1:]:
+                pair = (a, b) if a < b else (b, a)
+                if pair in seen:
+                    continue
+                seen.add(pair)
+                score = estimate_jaccard(sigs[pair[0]], sigs[pair[1]])
+                if score >= threshold:
+                    out.append((pair[0], pair[1], score))
+    out.sort(key=lambda t: (-t[2], t[0], t[1]))
+    return out
