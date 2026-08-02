@@ -20,13 +20,14 @@
 </p>
 
 
-<h3 align="center">You cannot safely delegate writes to an LLM on a corpus<br/>you mean to keep. Silica exists to make that delegation safe.</h3>
+<h3 align="center">
+You cannot safely delegate writes to an LLM on a corpus you mean to keep.<br/>
+Silica exists to make that delegation safe.
+</h3>
 
 <p align="center">
-On facts absent from its training data, hallucination has a statistical floor (<a href="https://arxiv.org/abs/2509.04664">OpenAI</a>),<br/>
-and a personal vault is made of exactly those facts. Left editing over a long workflow, even<br/>
-frontier models corrupt a quarter of a document (<a href="https://arxiv.org/abs/2604.15597">Microsoft</a>). And in a linked vault the<br/>
-damage compounds: today's unchecked edit is retrieved as tomorrow's ground truth.
+On facts absent from its training data, hallucination has a statistical floor (<a href="https://arxiv.org/abs/2509.04664">OpenAI</a>), and a personal vault is made of exactly those facts.<br/>
+Left editing over long workflows, even frontier models corrupt a quarter of a document (<a href="https://arxiv.org/abs/2604.15597">Microsoft</a>). And in a growing knowledge base, the damage compounds: today's unchecked edit is retrieved as tomorrow's ground truth.
 </p>
 
 <p align="center">
@@ -47,7 +48,7 @@ something. Notes or a codebase, one vault holds both. Local-first, readable with
 </p>
 
 <p align="center">
-  <sub>A real 708-note vault, adopted as-is. An answer grounded in it, a structural audit of it,<br/>
+  <sub>A real 710-note vault, adopted as-is. An answer grounded in it, a structural audit of it,<br/>
   a write to it, and the same write taken back out.</sub>
 </p>
 
