@@ -103,3 +103,26 @@ def test_empty_seeds_returns_empty():
     neighbors_of, body_of = _fixture()
     res = assemble([], neighbors_of=neighbors_of, body_of=body_of)
     assert res.blocks == []
+
+
+def test_a_periphery_neighbour_never_leads_a_seed_in_a_hub_block():
+    """Seed rank and periphery rank are separate spaces both starting at 0.
+    Comparing them raw let periphery rank 0 sort before seed rank 1 and become
+    members[0] — the member downstream attribution reads. Seeds first, always."""
+    units = [
+        Unit(path="seed-late", text="seed body", is_seed=True, rank=1),
+        Unit(path="peri-early", text="peri body", is_seed=False, rank=0),
+    ]
+    hub_of = {"seed-late": "Hub", "peri-early": "Hub"}
+    blocks = squash(units, hub_of, {})
+    assert len(blocks) == 1
+    assert blocks[0].members[0] == "seed-late"
+
+
+def test_a_periphery_only_block_never_outranks_a_seed_block():
+    units = [
+        Unit(path="seed", text="seed body", is_seed=True, rank=3),
+        Unit(path="peri", text="peri body", is_seed=False, rank=0),
+    ]
+    blocks = squash(units, {"seed": None, "peri": None}, {})
+    assert [b.members[0] for b in blocks] == ["seed", "peri"]

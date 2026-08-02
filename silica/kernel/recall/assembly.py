@@ -34,24 +34,66 @@ class Truncation:
 
 
 def fill_budget(
-    seeds: list[Unit], periphery: list[Unit], *, budget: int
+    seeds: list[Unit], periphery: list[Unit], *, budget: int,
+    cost_of: Callable[[Unit, list[Unit]], int] | None = None,
 ) -> tuple[list[Unit], Truncation]:
     """Seeds first (never trimmed), then periphery by ascending rank until the
-    char ceiling. Metering is by len(text) — chars, no tokenizer (spec Dec. 4).
+    char ceiling. Metering is chars, no tokenizer (spec Dec. 4).
+
+    `cost_of(unit, kept)` is what admitting `unit` ADDS to the assembled text
+    given what is already kept — not len(text): squash() wraps a breadcrumb, a
+    "# Hub" header and blank-line separators around a block, relevel_headers
+    grows the body itself, and the block wrapper is paid once per hub, so the
+    marginal cost of a unit depends on whether a co-hub sibling is already in.
+    `assemble` passes a kept-aware closure over `rendered_cost`; the len(text)
+    default is for callers that meter raw bodies on purpose.
     """
-    kept: list[Unit] = list(seeds)
-    used = sum(len(u.text) for u in kept)
+    cost = cost_of or (lambda u, kept: len(u.text))
+    kept: list[Unit] = []
+    used = 0
+    for u in seeds:  # never trimmed; charged in order so co-hub seeds share a wrapper
+        used += cost(u, kept)
+        kept.append(u)
     dropped: list[str] = []
     for u in sorted(periphery, key=lambda x: x.rank):
-        if used + len(u.text) <= budget:
+        c = cost(u, kept)
+        if used + c <= budget:
             kept.append(u)
-            used += len(u.text)
+            used += c
         else:
             dropped.append(u.path)
     return kept, Truncation(kept=len(kept), dropped=dropped)
 
 
 _ATX = re.compile(r"^(#{1,6})(\s)", re.MULTILINE)
+
+
+def rendered_cost(unit: Unit, *, hub: str | None, crumb: str) -> int:
+    """Upper bound on the chars `unit` contributes to the assembled text.
+
+    Reserve the wrapper before measuring the payload, never after. Metered as
+    len(text) the rendered block always exceeded the ceiling, by an amount that
+    grew with member count and heading density: squash() adds a breadcrumb
+    line, a "# Hub" header, a blank line between every member, and
+    relevel_headers adds one "#" per ATX heading in the body itself.
+
+    The crumb and header are BLOCK wrapper — squash() emits them once per hub
+    group, not once per member — so callers admitting a unit into a hub whose
+    wrapper is already paid must pass hub=None, crumb="" and add only the
+    member separator (see `assemble`). Charging the wrapper per member
+    over-reserved by (members-1) wrappers per group, quietly evicting
+    periphery that fit.
+
+    Still an upper bound rather than the exact figure: a lone member is never
+    releveled and pays no header, but is charged both here. Over-reserving
+    keeps the rendered text under the ceiling; under-reserving is the defect
+    this closes.
+    """
+    body = relevel_headers(unit.text, 1)  # >= len(text) on either branch
+    wrapper = len(crumb) + 2 if crumb else 0
+    if hub:
+        wrapper += len(hub) + 6  # "# " + hub + blank lines around the header
+    return len(body) + wrapper
 
 
 @dataclass
@@ -86,9 +128,16 @@ def squash(
     one level down, in rank order, breadcrumbed. A lone member (or hub=None): its
     own block, breadcrumb-prefixed, text unchanged (the degenerate case — spec
     1.3 "a single seed means no squash").
+
+    Seeds always order before periphery: the two arrive in separate rank
+    spaces (seed rank and prank both start at 0), so comparing raw ranks
+    across them would let a periphery neighbour lead a hub block — and the
+    lead member is what downstream attribution reads. Separate lanes never
+    compete on the same number.
     """
+    order_of = {u.path: (not u.is_seed, u.rank) for u in units}
     by_hub: dict[str | None, list[Unit]] = {}
-    for u in sorted(units, key=lambda x: x.rank):
+    for u in sorted(units, key=lambda x: order_of[x.path]):
         by_hub.setdefault(hub_of.get(u.path), []).append(u)
 
     blocks: list[AssembledBlock] = []
@@ -113,9 +162,9 @@ def squash(
                     text=(f"{crumb}\n\n" if crumb else "") + m.text,
                     members=[m.path],
                 ))
-    # Stable order: by the best (lowest) member rank so ranking intent survives.
-    rank_of = {u.path: u.rank for u in units}
-    blocks.sort(key=lambda b: min(rank_of[p] for p in b.members))
+    # Stable order: by the best member — seeds first, then lowest rank — so
+    # ranking intent survives and a periphery-only block never outranks a seed.
+    blocks.sort(key=lambda b: min(order_of[p] for p in b.members))
     return blocks
 
 
@@ -208,8 +257,23 @@ def assemble(
                                       is_seed=False, rank=prank))
                 prank += 1
 
-    kept, trunc = fill_budget(seeds, periphery, budget=budget)
-    hub_of = {u.path: neighbors_of(u.path).parent for u in kept}
-    crumb_of = {u.path: _breadcrumb(u.path, neighbors_of) for u in kept}
+    # Hubs and breadcrumbs first: the budget cannot charge for what squash()
+    # wraps around a unit until it knows the wrapper. neighbors_of is cached
+    # for this call, so covering every candidate costs no extra reads.
+    candidates = seeds + periphery
+    hub_of = {u.path: neighbors_of(u.path).parent for u in candidates}
+    crumb_of = {u.path: _breadcrumb(u.path, neighbors_of) for u in candidates}
+
+    def _marginal_cost(u: Unit, kept: list[Unit]) -> int:
+        # The block wrapper (breadcrumb + "# Hub" header) is per HUB GROUP:
+        # the first admitted member of a hub pays it, siblings admitted after
+        # add their releveled body plus the blank-line separator only.
+        hub = hub_of.get(u.path)
+        if hub is not None and any(hub_of.get(k.path) == hub for k in kept):
+            return len(relevel_headers(u.text, 1)) + 2
+        return rendered_cost(u, hub=hub, crumb=crumb_of.get(u.path, ""))
+
+    kept, trunc = fill_budget(seeds, periphery, budget=budget,
+                              cost_of=_marginal_cost)
     blocks = squash(kept, hub_of, crumb_of)
     return AssemblyResult(blocks=blocks, truncation=trunc)
