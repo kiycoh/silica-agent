@@ -22,7 +22,9 @@ import json
 import logging
 import re
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
+from typing import Callable
 
 from pydantic import BaseModel, Field, TypeAdapter
 
@@ -98,18 +100,64 @@ def _normalize(text: str) -> str:
     return "".join(out)
 
 
-# Change-marker token stems: models bake the CHANGE into the key
+# Change-marker WORDS per language: models bake the CHANGE into the key
 # ("aspiration_reinforced", "job_update", "trip.new") despite the prompt's
 # key-discipline block — LoCoMo smoke 2026-07-18 showed the instruction being
 # ignored with the clean key in view. Folding these at lookup time makes the
 # variant MATCH the clean head so supersede chains stay whole.
-# ponytail: English marker stems only, so a non-English store folds none of
-# them (`utente.lavoro_aggiornato` keeps its marker and starts its own chain).
-# Far milder than the stemmer bug it sits next to: this splits only the keys
-# the model decorates, not every plural. Translate the set per store language
-# if a non-English store shows marker-suffixed duplicate heads.
-_CHANGE_MARKER_STEMS = frozenset({"reinforc", "reaffirm", "updat", "new", "chang"})
+# Words, not stems: _marker_stems derives the match set through the store's
+# own stemmer, so one representative word covers its morphological family
+# (nuovo/nuova/nuovi/nuove -> "nuov") and the entries stay reviewable by a
+# speaker instead of encoding snowball internals by hand.
+# Single-token entries only, chosen against noun collisions (over-folding
+# buries facts — the key-collision defect, probe 2026-08-02): dutch drops
+# `nieuw` (nieuws = news folds into it; `nieuwe` is safe), french drops
+# `nouvelle` (nouvelles = news), da/no/sv drop the neuter `nyt`/`nytt`
+# (nytte/nytta = benefit, nyttig = useful). Romanian keeps `nou` accepting
+# the nouă=nine ambiguity — new-fem decorations vastly outnumber spelled-out
+# numerals in keys, the same trade english "new" already makes.
+# ponytail: hand-kept lists for the SNOWBALL_TO_ISO languages minus arabic
+# (no confident single-token markers — several candidates are ambiguous
+# nouns unvowelled, e.g. معدل modified/rate). An uncovered language falls
+# back to the english WORDS stemmed with the store's own stemmer, so
+# english-decorated keys still fold — today's behavior. Upgrade path: ask
+# the worker model once at _freeze_lang time and persist the list in the
+# store file.
+_CHANGE_MARKER_WORDS: dict[str, tuple[str, ...]] = {
+    "english":    ("reinforced", "reaffirmed", "updated", "new", "changed"),
+    "danish":     ("forstærket", "genbekræftet", "opdateret", "ny", "ændret"),
+    "dutch":      ("versterkt", "herbevestigd", "bijgewerkt", "nieuwe",
+                   "veranderd", "gewijzigd"),
+    "finnish":    ("päivitetty", "uusi", "muutettu"),
+    "french":     ("renforcé", "réaffirmé", "actualisé", "nouveau", "changé",
+                   "modifié"),
+    "german":     ("verstärkt", "bekräftigt", "aktualisiert", "neu",
+                   "geändert", "modifiziert"),
+    "hungarian":  ("frissített", "új", "megváltozott", "módosított"),
+    "italian":    ("rinforzato", "riaffermato", "aggiornato", "nuovo",
+                   "cambiato", "modificato"),
+    "norwegian":  ("forsterket", "oppdatert", "ny", "endret"),
+    "portuguese": ("reforçado", "reafirmado", "atualizado", "novo", "mudado",
+                   "alterado", "modificado"),
+    "romanian":   ("reafirmat", "actualizat", "nou", "schimbat", "modificat"),
+    "russian":    ("обновлено", "обновлённый", "обновленный", "новый",
+                   "изменено", "изменённый", "измененный"),
+    "spanish":    ("reforzado", "reafirmado", "actualizado", "nuevo",
+                   "cambiado", "modificado"),
+    "swedish":    ("förstärkt", "återbekräftad", "uppdaterad", "ny", "ändrad"),
+}
 _VERSION_TOKEN_RE = re.compile(r"v\d+$")
+
+
+@lru_cache(maxsize=None)
+def _marker_stems(lang: str) -> frozenset[str]:
+    """Marker stems for `lang`, derived through the same stemmer that
+    normalize_key applies to key tokens — marker and token can only match
+    if both pass through the store's own stemmer."""
+    from silica.kernel.text.text import stem_word
+
+    words = _CHANGE_MARKER_WORDS.get(lang) or _CHANGE_MARKER_WORDS["english"]
+    return frozenset(stem_word(w, lang=lang) for w in words)
 
 
 def normalize_key(key: str, *, lang: str = "english") -> str:
@@ -135,7 +183,7 @@ def normalize_key(key: str, *, lang: str = "english") -> str:
     for seg in key.casefold().split("."):
         toks = [stem_word(t, lang=lang) for t in seg.split("_") if t]
         kept = [t for t in toks
-                if t not in _CHANGE_MARKER_STEMS and not _VERSION_TOKEN_RE.fullmatch(t)]
+                if t not in _marker_stems(lang) and not _VERSION_TOKEN_RE.fullmatch(t)]
         if kept:
             segs.append("_".join(kept))
     if not segs:  # a key that is nothing but markers: fall back unfiltered

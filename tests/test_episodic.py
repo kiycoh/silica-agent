@@ -554,6 +554,76 @@ def test_normalize_key_folds_change_marker_tokens():
     assert normalize_key("new") != ""
 
 
+def test_normalize_key_folds_change_markers_per_language():
+    # A store frozen non-english decorates keys in its own language
+    # (`utente.lavoro_aggiornato`); the marker set must fold per language or
+    # every decorated key starts a parallel chain (the key-collision defect,
+    # mirrored: here the chain SPLITS instead of burying).
+    from silica.kernel.recall.episodic import normalize_key
+
+    cases = [
+        ("danish",     "bruger.job_opdateret",           "bruger.job"),
+        ("dutch",      "gebruiker.baan_bijgewerkt",      "gebruiker.baan"),
+        ("dutch",      "gebruiker.nieuwe_baan",          "gebruiker.baan"),
+        ("finnish",    "käyttäjä.työ_päivitetty",        "käyttäjä.työ"),
+        ("french",     "utilisateur.travail_modifié",    "utilisateur.travail"),
+        ("german",     "benutzer.job_aktualisiert",      "benutzer.job"),
+        ("hungarian",  "felhasználó.munka_frissített",   "felhasználó.munka"),
+        ("italian",    "utente.lavoro_aggiornato",       "utente.lavoro"),
+        ("norwegian",  "bruker.jobb_oppdatert",          "bruker.jobb"),
+        ("portuguese", "usuário.trabalho_atualizado",    "usuário.trabalho"),
+        ("romanian",   "utilizator.loc_actualizat",      "utilizator.loc"),
+        ("romanian",   "utilizator.adresa_nouă",         "utilizator.adresa"),
+        ("russian",    "пользователь.работа_обновлена",  "пользователь.работа"),
+        ("spanish",    "usuario.trabajo_actualizado",    "usuario.trabajo"),
+        ("swedish",    "användare.jobb_uppdaterad",      "användare.jobb"),
+    ]
+    for lang, decorated, clean in cases:
+        assert normalize_key(decorated, lang=lang) == normalize_key(clean, lang=lang), \
+            f"{lang}: {decorated} must fold to {clean}"
+    # all-marker keys must not normalize to empty in any language
+    assert normalize_key("nuovo", lang="italian") != ""
+    assert normalize_key("новый", lang="russian") != ""
+
+
+def test_normalize_key_language_markers_never_eat_real_nouns():
+    # The dangerous direction: a marker stem that collides with a common
+    # attribute noun folds that noun out of every key (nieuws = news, not
+    # "new"; nytta/nytte = benefit; nouvelles = news). These must survive.
+    from silica.kernel.recall.episodic import normalize_key
+
+    cases = [
+        ("english",   "user.news_source",          "user.source"),
+        ("dutch",     "gebruiker.nieuws_bron",     "gebruiker.bron"),
+        ("french",    "utilisateur.nouvelles_pref", "utilisateur.pref"),
+        ("swedish",   "användare.nytta_poäng",     "användare.poäng"),
+        ("norwegian", "bruker.nyttig_info",        "bruker.info"),
+        ("danish",    "bruger.nytte_score",        "bruger.score"),
+    ]
+    for lang, key, over_folded in cases:
+        assert normalize_key(key, lang=lang) != normalize_key(over_folded, lang=lang), \
+            f"{lang}: the first token of {key} must survive folding"
+
+
+def test_marker_stems_english_is_byte_identical_to_the_old_set():
+    # The word list replaced a hand-kept stem set; english identity is pinned
+    # so existing english stores keep their exact supersede-chain matching.
+    from silica.kernel.recall.episodic import _marker_stems
+
+    assert _marker_stems("english") == frozenset(
+        {"reinforc", "reaffirm", "updat", "new", "chang"})
+
+
+def test_marker_stems_uncovered_language_falls_back_to_english_words():
+    # An uncovered snowball language stems the ENGLISH word list with its own
+    # stemmer — marker and key token go through the same stemmer, so a store
+    # whose model decorates in english still folds.
+    from silica.kernel.recall.episodic import normalize_key
+
+    assert (normalize_key("user.job_updated", lang="estonian")
+            == normalize_key("user.job", lang="estonian"))
+
+
 def test_capture_change_marker_variant_supersedes_clean_head(tmp_path):
     # aspiration_reinforced arriving after aspiration must extend the SAME
     # chain, not open a parallel one.
