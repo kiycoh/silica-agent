@@ -19,6 +19,8 @@ module loads without the [mcp] extra.
 """
 from __future__ import annotations
 
+import os
+import signal
 import sys
 from typing import Any
 
@@ -47,6 +49,25 @@ CORE_TOOLS = (
 
 # MCP behavior hints: everything we serve is read-only except these three.
 WRITE_TOOLS = frozenset({"silica_write_note", "silica_patch_note", "silica_flag_note"})
+
+# All four hints, always. Per the MCP spec an omitted hint defaults to the
+# permissive reading — destructiveHint and openWorldHint both default TRUE — so
+# setting only two advertised every journaled, revertible write as destructive
+# and the whole closed-world vault as open-world. Hosts gate destructive tools
+# harder, which bought extra confirmation prompts for nothing, and open-world
+# was simply false: no tool here reaches outside the vault.
+_READ_ONLY = dict(readOnlyHint=True, destructiveHint=False,
+                  idempotentHint=True, openWorldHint=False)
+# Additive, not destructive: every write goes through the undo journal
+# (ADR-0002) and `/undo` reverses it, and none of the three is idempotent —
+# re-running appends again.
+_ADDITIVE = dict(readOnlyHint=False, destructiveHint=False,
+                 idempotentHint=False, openWorldHint=False)
+
+
+def tool_annotations(name: str) -> dict:
+    """The four behaviour hints for one served tool."""
+    return dict(_ADDITIVE if name in WRITE_TOOLS else _READ_ONLY)
 
 
 def exposed_tools(all_tools: bool = False) -> dict[str, Any]:
@@ -89,10 +110,7 @@ def run_mcp(all_tools: bool = False) -> int:
                 name=t.name,
                 description=t.description,
                 inputSchema=t.json_schema()["function"]["parameters"],
-                annotations=types.ToolAnnotations(
-                    readOnlyHint=t.name not in WRITE_TOOLS,
-                    idempotentHint=t.name not in WRITE_TOOLS,
-                ),
+                annotations=types.ToolAnnotations(**tool_annotations(t.name)),
             )
             for t in tools.values()
         ]
@@ -118,5 +136,15 @@ def run_mcp(all_tools: bool = False) -> int:
         "(Ctrl+C to stop)",
         file=sys.stderr,
     )
+    # Ctrl+C exits now, not on the third press. The SDK reads stdin through
+    # anyio's to_thread.run_sync, which parks a *non-daemon* worker thread in a
+    # blocking readline(): graceful cancellation cannot return while that thread
+    # sits there, and interpreter shutdown then deadlocks joining it. Left alone
+    # that costs three presses (cancel, KeyboardInterrupt traceback, break the
+    # join) and an abort. Claiming SIGINT here also keeps asyncio's runner off
+    # it, since the runner only installs its own handler over the default one.
+    # Hard exit is safe: vault writes land through atomic_write_bytes, so the
+    # worst case is a stray temp file, never a torn note.
+    signal.signal(signal.SIGINT, lambda *_: (sys.stderr.flush(), os._exit(0)))
     anyio.run(_serve)
     return 0

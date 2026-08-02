@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import json
 import re
+import signal
+import subprocess
+import sys
 from pathlib import Path
 
 from silica.ui.mcp import CORE_TOOLS, exposed_tools
@@ -30,6 +33,45 @@ def test_write_tools_are_the_only_non_readonly_hints():
         assert any(k in name for k in ("write", "patch", "flag"))
 
 
+def test_every_served_tool_sets_all_four_hints():
+    """An omitted hint is not "unspecified" to a host: the MCP spec defaults
+    destructiveHint and openWorldHint to TRUE. Setting two of four advertised
+    journaled, revertible writes as destructive and a closed-world vault as
+    open-world."""
+    from silica.ui.mcp import tool_annotations
+
+    for name in CORE_TOOLS:
+        hints = tool_annotations(name)
+        assert set(hints) == {"readOnlyHint", "destructiveHint",
+                              "idempotentHint", "openWorldHint"}, name
+        assert hints["openWorldHint"] is False, name
+        assert hints["destructiveHint"] is False, name
+
+
+def test_write_tools_are_additive_and_reads_are_idempotent():
+    from silica.ui.mcp import WRITE_TOOLS, tool_annotations
+
+    for name in WRITE_TOOLS:
+        hints = tool_annotations(name)
+        assert hints["readOnlyHint"] is False, name
+        # Re-running a write appends again; only reads are idempotent.
+        assert hints["idempotentHint"] is False, name
+    for name in set(CORE_TOOLS) - WRITE_TOOLS:
+        hints = tool_annotations(name)
+        assert hints["readOnlyHint"] is True and hints["idempotentHint"] is True, name
+
+
+def test_the_hint_dicts_are_not_shared_between_tools():
+    """Returned per call, so a caller mutating one tool's hints cannot rewrite
+    the advertised contract of every other tool in the process."""
+    from silica.ui.mcp import tool_annotations
+
+    first = tool_annotations("silica_recall")
+    first["openWorldHint"] = True
+
+    assert tool_annotations("silica_recall")["openWorldHint"] is False
+
+
 def test_all_surface_matches_agent_loop_filter():
     from silica.tools import TOOLS
 
@@ -55,3 +97,31 @@ def test_plugin_manifest_launches_silica_mcp():
         (ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
     )
     assert marketplace["plugins"][0]["name"] == plugin["name"]
+
+
+def test_one_sigint_stops_the_server():
+    # The stdio transport parks a non-daemon worker thread in a blocking
+    # readline(), so without run_mcp's own SIGINT handler a graceful shutdown
+    # deadlocks and the server needs three Ctrl+C and dies on an abort.
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import sys; from silica.ui.mcp import run_mcp; sys.exit(run_mcp())"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    try:
+        # Handshake first: a reply on stdout is the only proof the loop is up
+        # and parked on the next stdin read. The stderr banner prints before
+        # anyio.run, so signalling on it races the event loop's own setup.
+        proc.stdin.write(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "clientInfo": {"name": "test", "version": "0"}},
+        }).encode() + b"\n")
+        proc.stdin.flush()
+        assert proc.stdout.readline(), f"no initialize reply, rc={proc.poll()}"
+        proc.send_signal(signal.SIGINT)
+        assert proc.wait(timeout=10) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        for pipe in (proc.stdin, proc.stdout, proc.stderr):
+            pipe.close()
