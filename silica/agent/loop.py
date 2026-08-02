@@ -94,6 +94,42 @@ def _is_tool_failure(result: Any) -> bool:
 ToolProgressCallback = Callable[[RenderEvent], None] | None
 
 
+# How many steps from the wall the model is told about it. Silent above this:
+# a budget line on every iteration is noise the model learns to skip, and the
+# number only changes the right move once finishing IS the right move.
+BUDGET_NOTICE_AT = 2
+
+_FINAL_TURN_INSTRUCTION = (
+    "The tool phase of this turn is over and no tools are available now. "
+    "Answer from what you already have: report what you found, and name any "
+    "note you created or edited. Do not request, announce, or simulate another "
+    "tool call. If the work is incomplete, say plainly what is missing."
+)
+
+
+def _budget_notice(iteration: int, max_iterations: int) -> dict | None:
+    """Tell the model how much of the loop is left, at the point where the
+    answer changes.
+
+    The loop used to stop dead at the cap having never told the model a cap
+    existed, so it could spend its last steps opening work it had no room to
+    close. Silent while there is room; a system notice near the wall, on the
+    same channel as the convergence guard so tool results stay contiguous.
+    """
+    remaining = max_iterations - iteration
+    if remaining > BUDGET_NOTICE_AT:
+        return None
+    return {
+        "role": "system",
+        "content": (
+            f"Budget: {remaining} tool step(s) remain in this turn. Prefer to "
+            f"finish now and report what you have, including anything already "
+            f"written. Use another tool only when it is strictly required to "
+            f"complete work you have already started."
+        ),
+    }
+
+
 def repair_tool_call_history(messages: list[dict]) -> int:
     """Ensure every assistant `tool_calls` block is answered by a tool result.
 
@@ -198,6 +234,8 @@ def run_agent(
     # mid-dispatch can leave an assistant tool_calls block with unanswered ids;
     # the first call_llm below would then 400 the whole session. Self-heal on entry.
     repair_tool_call_history(messages)
+    # ponytail: a single meter for every tool. Split retrieval from writes if a
+    # turn is ever seen spending its whole allowance on reads, or vice versa.
 
     iteration = 0
     max_iterations = (
@@ -252,6 +290,25 @@ def run_agent(
     if tool_progress_callback is not None and constraints is None:
         _llm_kwargs["on_delta"] = _stream_delta
 
+    def _interruptible_llm(kwargs: dict):
+        """One call_llm on a *daemon* thread — see the comment in the loop
+        body for why (Ctrl+C delivery, no shutdown join, retry abandonment).
+        Caller clears `_abandon` first; this always sets it on the way out so
+        an orphaned worker stops retrying and streaming."""
+        _future: _cf.Future = _cf.Future()
+
+        def _llm_worker(k=dict(kwargs)):
+            try:
+                _future.set_result(call_llm(effective_model, messages, **k))
+            except BaseException as e:
+                _future.set_exception(e)
+
+        threading.Thread(target=_llm_worker, daemon=True, name="llm-call").start()
+        try:
+            return _future.result()
+        finally:
+            _abandon.set()
+
     while iteration < max_iterations:
         if cancel_token is not None and cancel_token.is_set():
             logger.info("Agent loop cancelled at iteration %d", iteration)
@@ -277,19 +334,7 @@ def run_agent(
                 _abandon.clear()
                 _llm_kwargs["tools"] = schemas
                 _llm_kwargs["cancel"] = _abandon
-                _future: _cf.Future = _cf.Future()
-
-                def _llm_worker(kwargs=dict(_llm_kwargs)):
-                    try:
-                        _future.set_result(call_llm(effective_model, messages, **kwargs))
-                    except BaseException as e:
-                        _future.set_exception(e)
-
-                threading.Thread(target=_llm_worker, daemon=True, name="llm-call").start()
-                try:
-                    resp = _future.result()
-                finally:
-                    _abandon.set()
+                resp = _interruptible_llm(_llm_kwargs)
         finally:
             _emit(ThinkingEndEvent(iteration=iteration))
         messages.append(resp.assistant_message)
@@ -438,7 +483,37 @@ def run_agent(
         # require the tool messages contiguous immediately after the assistant).
         messages.extend(pending_notices)
 
+        notice = _budget_notice(iteration, max_iterations)
+        if notice is not None:
+            messages.append(notice)
+
         # Loop continues: re-call LLM with tool results
 
     logger.warning("Agent loop hit max iterations (%d)", max_iterations)
-    return "(silica: maximum iterations reached)"
+    # One last turn with the tools removed, rather than discarding the whole
+    # turn. Everything the model found or wrote is still in `messages`; asking
+    # for it back costs one call and turns a completed write reported as
+    # "maximum iterations reached" into an actual answer. Same discipline as
+    # every other call this function makes: cancellation honoured, the
+    # worker-slot cap held, the daemon-thread pattern kept (a bare in-thread
+    # call here would trap the turn's LAST Ctrl+C in a C-level recv()), and
+    # `_abandon` cleared so the TUI still streams this closing answer.
+    if cancel_token is not None and cancel_token.is_set():
+        logger.info("Agent loop cancelled before the final turn")
+        return "(silica: cancelled)"
+    messages.append({"role": "system", "content": _FINAL_TURN_INSTRUCTION})
+    _emit(ThinkingStartEvent(iteration=iteration))
+    try:
+        slot = worker_slot() if constraints is not None else nullcontext()
+        with slot:
+            _abandon.clear()
+            final_kwargs = dict(_llm_kwargs)
+            final_kwargs["tools"] = None   # removed, not merely discouraged
+            final_kwargs["cancel"] = _abandon
+            final = _interruptible_llm(final_kwargs)
+    except Exception as e:
+        logger.warning("Forced final turn failed (%s)", e)
+        return "(silica: maximum iterations reached)"
+    finally:
+        _emit(ThinkingEndEvent(iteration=iteration))
+    return (final.text or "").strip() or "(silica: maximum iterations reached)"

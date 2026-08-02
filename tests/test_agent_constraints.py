@@ -107,11 +107,15 @@ def test_model_override_used():
 
 def test_iteration_cap_overridden():
     calls = [0]
+    tool_phase = [0]
 
     def fake_call_llm(model, messages, tools=None, cancel=None):
         calls[0] += 1
+        if tools is not None:
+            tool_phase[0] += 1
         # Always emit a tool call so the loop keeps going until the cap.
-        return _resp(tool_calls=[_tc("allowed_tool", f"c{calls[0]}")])
+        return _resp(tool_calls=[_tc("allowed_tool", f"c{calls[0]}")],
+                     text="what I found so far")
 
     _install_tool("allowed_tool", lambda: "ok")
 
@@ -122,8 +126,11 @@ def test_iteration_cap_overridden():
             constraints=AgentConstraints(tools=("allowed_tool",), model="worker", max_iterations=2),
         )
 
-    assert calls[0] == 2
-    assert result == "(silica: maximum iterations reached)"
+    # The cap bounds the TOOL phase; exhaustion then spends one tool-less turn
+    # rather than discarding whatever the turn accomplished.
+    assert tool_phase[0] == 2
+    assert calls[0] == 3
+    assert result == "what I found so far"
 
 
 def test_no_constraints_unchanged():
