@@ -37,21 +37,46 @@ logger = logging.getLogger(__name__)
 
 # Cluster colors: one distinct, vivid hue per community — the color encodes
 # Louvain membership (real structure), so it must be unique per community and
-# stable for a given id. Golden-angle hue rotation from brand cyan spreads hues
-# evenly for any count; fixed high saturation + mid lightness keep them vivid and
-# guarantee no color is ever black or white.
+# stable for a given id. Hues are confined to the arc of the mascot's body,
+# its blue pole (212 deg) through to its warm magenta one (306 deg); the
+# previous golden-angle walk covered the whole wheel and so emitted green,
+# chartreuse and orange, hues that appear nowhere in the mark. The arc stops
+# short of cyan deliberately: the mascot's body contains no cyan, only its eye
+# does, and here cyan is already spoken for by _EDGE_COLOR_SIMILAR — a k-NN
+# mesh that outnumbers the wikilinks two to one and swallowed any node sharing
+# its hue. Ending at 212 rather than 186 puts the nearest community 0.087 away
+# from that mesh in OKLab instead of 0.042.
+#
+# Within the arc a golden-ratio sequence keeps consecutive ids far apart and
+# lightness alternates between two bands, which buys back most of what the
+# shorter arc costs: minimum pairwise dE across 12 communities is 0.023 against
+# 0.029 for the full wheel. Neither is a real number to lean on. The arc is not
+# what limits color-as-identity, count is — past roughly ten communities both
+# sets fall below the perceptual floor, so read the labels, not the hues.
+_COMMUNITY_ARC = (212.0, 306.0)
+_COMMUNITY_LIGHTNESS = (0.70, 0.54)
+_GOLDEN_RATIO_INV = 0.6180339887
+
+
 def _community_color(i: int) -> str:
-    hue = (187.0 + i * 137.508) % 360.0          # 187° = brand cyan; 137.508° = golden angle
-    r, g, b = colorsys.hls_to_rgb(hue / 360.0, 0.56, 0.72)
+    lo, hi = _COMMUNITY_ARC
+    hue = lo + ((i * _GOLDEN_RATIO_INV) % 1.0) * (hi - lo)
+    light = _COMMUNITY_LIGHTNESS[i % 2]
+    r, g, b = colorsys.hls_to_rgb(hue / 360.0, light, 0.66)
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
-_EDGE_COLOR_EXTRACTED = "#8f8f8f"   # phosphor gray — resolved links
-_EDGE_COLOR_AMBIGUOUS = "#ff2a2a"   # hazard red — unresolved (warning semantics)
+# Neutrals are unlit blue-violet rather than gray: the mascot has no gray facet.
+# Each replaces a gray at its exact relative luminance, so nothing gets lighter
+# or darker, only warmer. Ambiguous stays red on purpose — an alarm that matches
+# the brand stops reading as an alarm — but off the neon and into the same
+# lightness band as everything it sits beside.
+_EDGE_COLOR_EXTRACTED = "#8a8da6"   # unlit blue-violet — resolved links
+_EDGE_COLOR_AMBIGUOUS = "#e2544f"   # alarm red, deliberately outside the arc
 _EDGE_COLOR_SIMILAR   = "#00a5e1"   # brand azure — embedding k-NN (semantic map)
-_NODE_DEFAULT_COLOR = {"background": "#5c5c5c", "border": "#8f8f8f",
-                       "highlight": {"background": "#8f8f8f", "border": "#eaeaea"}}
-_NODE_GHOST_COLOR   = {"background": "#161616", "border": "#5c5c5c",
-                       "highlight": {"background": "#262626", "border": "#8f8f8f"}}
+_NODE_DEFAULT_COLOR = {"background": "#565a77", "border": "#8a8da6",
+                       "highlight": {"background": "#8a8da6", "border": "#EBEFF8"}}
+_NODE_GHOST_COLOR   = {"background": "#171424", "border": "#565a77",
+                       "highlight": {"background": "#26223d", "border": "#8a8da6"}}
 
 
 def _infer_type(path: str) -> str:
@@ -121,7 +146,7 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
             "group": -1,
             "color": dict(_NODE_DEFAULT_COLOR),
             "path":  path,
-            "font":  {"color": "#e7ebf1", "size": 13},
+            "font":  {"color": "#EBEFF8", "size": 13},
             "size":  16,
         })
 
@@ -168,7 +193,7 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
                 "group":        -1,
                 "color":        dict(_NODE_GHOST_COLOR),
                 "path":         "",
-                "font":         {"color": "#8a93a3", "size": 11},
+                "font":         {"color": "#8E99B0", "size": 11},
                 "size":         10,
                 "borderWidth":  2,
                 "borderDashes": True,
@@ -299,7 +324,7 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
             node["color"] = {
                 "background": color,
                 "border":     color,
-                "highlight":  {"background": color, "border": "#e7ebf1"},
+                "highlight":  {"background": color, "border": "#EBEFF8"},
             }
 
     # Fetch community labels from the co-occurrence index; degrade to {} on any failure.

@@ -1526,9 +1526,11 @@ function renderMermaid(root) {
         startOnLoad: false, theme: "dark", suppressErrorRendering: true,
         fontFamily: "Martian Mono, ui-monospace, monospace",
         themeVariables: {
-          darkMode: true, background: "#0A0D14",
-          primaryColor: "#161B27", primaryTextColor: "#E8ECF5",
-          primaryBorderColor: "#38425A", lineColor: "#8B95AC",
+          // roles map 1:1 onto app.css tokens: --void, --slate-2, --frost,
+          // --line-2, --ash. They were still the palette from two revisions ago.
+          darkMode: true, background: "#0D0917",
+          primaryColor: "#1F243A", primaryTextColor: "#EBEFF8",
+          primaryBorderColor: "#3B4662", lineColor: "#8E99B0",
         },
       });
       resolve();

@@ -17,8 +17,8 @@ _CAPTION = f"v{_VERSION.split('+')[0]} · Your personal note curator agent"
 # Inlined from docs/assets/sili_compressed.txt (gitignored — a disk read would
 # come up empty on any machine but the author's).
 _MASCOT = (
-    "    ██▄█▄█",
-    "    █▄██▄█",
+    "    ▄█▄▄█▄",
+    "    ████▄█",
     "   ▀ ▀██▀ ▀",
     "       ▀",
 )

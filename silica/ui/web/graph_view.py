@@ -132,12 +132,12 @@ def render_html(
         f'<label class="filter-row" style="margin-top:4px" title="Embedding k-NN — notes pulled together by semantic similarity">'
         f'<input type="checkbox" id="cb-similar" checked onchange="updateEdgeFilter()">'
         f'<div class="dot-edge" style="background:#00a5e1"></div>Similar'
-        f'<span style="color:#5c5c5c;font-size:11px;margin-left:auto">{n_similar}</span>'
+        f'<span style="color:#565a77;font-size:11px;margin-left:auto">{n_similar}</span>'
         f'</label>'
     ) if n_similar else ""
 
     discourse_badge = (
-        f'<div style="font-size:11px;color:#8f8f8f;letter-spacing:.04em;margin-bottom:6px">'
+        f'<div style="font-size:11px;color:#8a8da6;letter-spacing:.04em;margin-bottom:6px">'
         f'discourse: <span style="color:#c9a227;font-weight:600">{html.escape(discourse)}</span></div>'
         if discourse else ""
     )
@@ -166,16 +166,19 @@ def render_html(
   <title>{title}</title>
   {f'<script>{lib_js}</script>' if lib_js else '<script src="' + _VIS_JS_URL + '"></script>'}
   <style>
-    /* Palette mirrors the app shell: blue-black substrate, iced cyan accent,
-       amber for caution. Community hues stay data-driven. Type: Lexend, inlined
+    /* Palette mirrors the app shell: crystal substrate travelling blue to
+       violet the way the mascot is shaded, iced cyan accent, amber for
+       caution. Community hues stay data-driven. Type: Lexend, inlined
        as a data: URI because this file must stay self-contained for file:// use.
-       Keep these tokens in sync with static/app.css. */
+       Keep these tokens in sync with static/app.css — this block had already
+       drifted a generation behind it (--ash-dim was still #757F99, which fails
+       4.5:1 on --slate-2). */
     {_vendored_font_face()}
     :root{{
-      --void:#080B11;--slate:#0D1119;--slate-2:#1E2536;
-      --line:#283043;--line-2:#3B4661;
-      --frost:#EBEFF8;--text:#BAC4D8;--ash:#8E99B0;--ash-dim:#757F99;
-      --accent:#35C6E8;--warn:#E0A93B;
+      --void:#0D0917;--slate:#120E21;--slate-2:#1F243A;
+      --line:#292F45;--line-2:#3B4662;
+      --frost:#EBEFF8;--text:#BAC4D8;--ash:#8E99B0;--ash-dim:#838DA7;
+      --accent:#35C6E8;--violet:#5B4BD6;--warn:#E0A93B;
       --sans:"Lexend",system-ui,sans-serif;
     }}
     *{{box-sizing:border-box;margin:0;padding:0;border-radius:0}}
@@ -287,21 +290,21 @@ def render_html(
       <div class="section-title" style="margin-bottom:8px">Edge types</div>
       <label class="filter-row">
         <input type="checkbox" id="cb-extracted" checked onchange="updateEdgeFilter()">
-        <div class="dot-edge" style="background:#8f8f8f"></div>
+        <div class="dot-edge" style="background:#8a8da6"></div>
         Resolved
-        <span style="color:#5c5c5c;font-size:11px;margin-left:auto">{n_extracted}</span>
+        <span style="color:#565a77;font-size:11px;margin-left:auto">{n_extracted}</span>
       </label>
       <label class="filter-row" style="margin-top:4px">
         <input type="checkbox" id="cb-ambiguous" onchange="updateEdgeFilter()">
-        <div class="dot-edge" style="background:#ff2a2a"></div>
+        <div class="dot-edge" style="background:#e2544f"></div>
         Unresolved
-        <span style="color:#5c5c5c;font-size:11px;margin-left:auto">{n_ambiguous}</span>
+        <span style="color:#565a77;font-size:11px;margin-left:auto">{n_ambiguous}</span>
       </label>
       <label class="filter-row" style="margin-top:4px" title="Well-formed areas with no links between them — a bridge could go here">
         <input type="checkbox" id="cb-gaps" checked onchange="updateEdgeFilter()">
         <div class="dot-edge" style="background:#c9a227"></div>
         Structural gaps
-        <span style="color:#5c5c5c;font-size:11px;margin-left:auto">{n_gaps}</span>
+        <span style="color:#565a77;font-size:11px;margin-left:auto">{n_gaps}</span>
       </label>
       {similar_row}
     </div>
@@ -309,13 +312,13 @@ def render_html(
     <div>
       <div class="section-title" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between">
         Communities
-        <span id="sort-communities" style="color:#8f8f8f;cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
+        <span id="sort-communities" style="color:#8a8da6;cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
               onclick="toggleCommunitySort()" title="sort by size">size &#8595;</span>
       </div>
       {discourse_badge}
       <div id="legend-box">
 {legend_items}      <div class="legend-item active" id="legend-all" onclick="filterCommunity(-2)">
-          <span class="dot" style="background:#5c5c5c"></span>Show all
+          <span class="dot" style="background:#565a77"></span>Show all
         </div>
       </div>
     </div>
@@ -323,7 +326,7 @@ def render_html(
     <div>
       <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
         Forces
-        <span style="color:#8f8f8f;cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
+        <span style="color:#8a8da6;cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
               onclick="resetForces()" title="back to auto-scaled defaults">reset</span>
       </div>
       <div class="force-row">Repel<span class="fv" id="fv-repel">1.0&times;</span></div>
@@ -420,9 +423,11 @@ let showSimilar = true;
 function nodeColor(n) {{
   // ponytail: solid darken-to-background dim; switch to rgba() only if visual
   // verification shows 3d-force-graph honours per-node alpha.
-  if (n._dim) return '#1c1c1c';
-  if (n.type === 'ghost') return '#4a4a4a';   // muted gray — dimmed, never black
-  return (n.color && n.color.background) || '#566076';
+  // Neutrals are blue-violet, never gray: the mascot has no gray facet, only
+  // unlit ones. Each value below holds the luminance of the gray it replaces.
+  if (n._dim) return '#1d192f';
+  if (n.type === 'ghost') return '#484867';   // unlit, never black
+  return (n.color && n.color.background) || '#565a77';
 }}
 
 // --- Density-aware forces ---------------------------------------------------
@@ -439,12 +444,12 @@ const BASE_DIST = 30 * FORCE_SCALE;
 const COOLDOWN_TICKS = 100 + Math.min(200, Math.round(RAW_NODES.length / 10));
 
 const Graph = new ForceGraph3D(document.getElementById("graph"))
-  .backgroundColor("#0A0D14")
+  .backgroundColor("#0D0917")   // --void
   .graphData({{ nodes: RAW_NODES, links: RAW_EDGES }})
   .linkSource("from").linkTarget("to")
   .nodeLabel("label").nodeVal("size")
   .nodeColor(nodeColor)
-  .linkColor(l => l._dim ? '#141414' : ((l.color && l.color.color) || "#8f8f8f"))
+  .linkColor(l => l._dim ? '#141221' : ((l.color && l.color.color) || "#8a8da6"))
   // Perf on big vaults (1200+ notes): linkWidth>0 makes every edge a cylinder
   // mesh and arrows add a cone per edge — thousands of meshes. Width 0 ⇒ cheap
   // GL lines; no arrows; fewer sphere segments; finite cooldown so the sim
