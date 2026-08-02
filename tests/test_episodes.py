@@ -8,7 +8,14 @@ Nothing is written unless the user names a path with `--save=`.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
+
+# Rich style codes. Assertions on printed paths have to drop these: a wrapped
+# line closes and reopens its style at the seam, landing escapes inside the
+# very string under test.
+_PLAIN = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def test_episodes_is_advertised_as_a_direct_command():
@@ -141,6 +148,11 @@ class TestSave:
         text = out.read_text(encoding="utf-8")
         assert "user.dog.name" in text
         assert "Tom" in text and "Rex" in text
-        # unwrapped: the console hard-wraps long paths at the terminal width
-        printed = capsys.readouterr().out.replace("\n", "")
+        # Unwrapped AND de-styled: the console hard-wraps a long path at the
+        # terminal width, and rich closes then reopens the bold run across the
+        # seam, so the path arrives as "…episod\x1b[0m\x1b[1mes.md". Stripping
+        # only the newline left the escapes in the middle of the path and the
+        # assertion failed at 80 columns while passing at 200 — a test that
+        # depended on the width of whoever ran it.
+        printed = _PLAIN.sub("", capsys.readouterr().out).replace("\n", "")
         assert str(out) in printed  # says where it went

@@ -34,6 +34,15 @@ logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 
+# Below this TEXT cosine to the fact it buried, a supersede is read as a
+# collision: a different referent dropped into a reused key rather than an
+# update of the same one. The line comes from the supersede-gate sizing
+# (bench/supersede_gate_probe.py): genuine updates cluster at >= ~0.83,
+# collisions around 0.53, and a hand-labelled 0.55-0.70 band showed no internal
+# separation, so it sits at the band's top. It classifies a report and gates
+# nothing — `burial_stats(tau=)` moves it for a caller comparing two prompts.
+COLLISION_COS = 0.70
+
 
 class Fact(BaseModel):
     id: str
@@ -53,6 +62,12 @@ class Fact(BaseModel):
     # Set on the chain HEAD by `/promote`: the vault note this chain became.
     # Also the queue's exit condition — a promoted chain stops being suggested.
     promoted: str | None = None
+    # TEXT cosine to the fact this arrival superseded, or None when nothing was
+    # buried (a new key) or nothing could be measured (no embedder, no stored
+    # vector). An observation only: it is written after the decision and never
+    # changes it. Low means a different referent was dropped into a reused slot
+    # — the burial the distiller's key discipline cannot be talked out of.
+    supersede_cos: float | None = None
     # ponytail: inline float list, not npz packing — the store is TTL-bounded
     # to hundreds of facts; the 10k scaling fix targeted note stores. Pack npz
     # like note stores if a store ever holds ~10^3+ facts or load/save drags.
@@ -401,6 +416,7 @@ class EpisodicStore:
         heads = {normalize_key(f.key, lang=lang): f
                  for f in self.facts if f.status == "live"}
         created: list[Fact] = []
+        buried: list[tuple[Fact, Fact]] = []  # (arrival, the head it superseded)
         folded = 0
         gate_vecs: dict[str, list[float]] = {}  # arrival-text vec cache, reused as fact.vec
         for raw in facts:
@@ -436,6 +452,7 @@ class EpisodicStore:
             fact = Fact(id=fid, key=key, text=text, first_seen=seen, last_seen=seen,
                         runs=[run_id], vault=vault, notes=list(notes or []))
             if head is not None:
+                buried.append((fact, head))
                 fact.supersedes = head.id
                 head.status = "superseded"
                 old_nkey = normalize_key(head.key, lang=lang)
@@ -455,9 +472,35 @@ class EpisodicStore:
                     fact.vec = list(vec)
             except Exception as e:
                 logger.debug("episodic capture: embedding skipped (%s)", e)
+        # After the batch embed, so measuring a burial costs no extra request:
+        # both vectors are already in hand. Absent either one the supersede is
+        # simply unmeasured, which burial_stats reports rather than guesses.
+        for arrival, head in buried:
+            if arrival.vec and head.vec:
+                arrival.supersede_cos = _cosine(arrival.vec, head.vec)
         if folded:
             logger.debug("episodic capture: %d key(s) schema-folded", folded)
         self.save()
+
+    def burial_stats(self, tau: float = COLLISION_COS) -> dict:
+        """How much of this store's history is loss rather than update.
+
+        Counts supersedes, splits the measured ones at `tau`, and reports the
+        rest as `unmeasured` instead of folding them into either side: no
+        embedder means no signal, and calling that an update would report a
+        clean store exactly where nothing was checked. `collision_rate` is
+        over the measured supersedes only, None when there are none.
+        """
+        cosines = [f.supersede_cos for f in self.facts if f.supersedes]
+        measured = [c for c in cosines if c is not None]
+        collisions = sum(1 for c in measured if c < tau)
+        return {
+            "supersedes": len(cosines),
+            "collisions": collisions,
+            "updates": len(measured) - collisions,
+            "unmeasured": len(cosines) - len(measured),
+            "collision_rate": (collisions / len(measured)) if measured else None,
+        }
 
     def _freeze_lang(self, incoming: list[str]) -> str:
         """Pin the store's key-stemming language on first capture, from the
