@@ -1104,6 +1104,276 @@ def note(path: str = ""):
     return {"title": _clean_name(canon), "html": html}
 
 
+# --- context explorer (GET /context) -----------------------------------------
+# One blocking call, all of it deterministic and LLM-free. Measured on a
+# 718-note vault, warm: related 0.01s, concepts(note=) 0.06s, outline/links/
+# unresolved 0.00s. The first call in a fresh process pays ~0.9s to load the
+# co-occurrence store — once, in a long-lived server. So: no progressive fill,
+# no client-side hybrid, one endpoint that returns the whole drawer.
+
+# Below this a note reads faster whole than as an extract, so the snippets
+# section is dropped rather than duplicating the reader.
+_SNIPPET_MIN_BODY = 700
+_SNIPPET_CUT = 140
+_H2 = re.compile(r"^##\s+(.+?)\s*$", re.M)
+# Lines that say nothing as a one-line extract: headings, lists, quotes,
+# callouts, tables, fences, images.
+_NOT_PROSE = re.compile(r"^\s*(?:[-*+>#|]|\d+[.)]\s|```|~~~|!\[|\[!)")
+_SENTENCE_END = re.compile(r"(?<=[.!?])(?:\s|$)")
+# A related note this far away (or unreachable) is a link that does not exist
+# yet; distance 1 means it is already linked and belongs under Related instead.
+_SUGGEST_MIN_DIST = 3
+
+
+def _lead_prose(chunk: str) -> str:
+    """The first run of plain prose in a chunk, as one line."""
+    run: list[str] = []
+    for line in chunk.splitlines():
+        if not line.strip() or _NOT_PROSE.match(line):
+            if run:
+                break
+            continue
+        run.append(line.strip())
+    return " ".join(run)
+
+
+def _first_sentence(text: str, limit: int = _SNIPPET_CUT) -> str:
+    """First sentence, trimmed to `limit` on a word boundary.
+    ponytail: regex sentence split, so `e.g.` cuts early — a snippet, not a quote."""
+    text = " ".join(text.split())
+    if not text:
+        return ""
+    m = _SENTENCE_END.search(text)
+    out = text[: m.start()] if m else text
+    if len(out) > limit:
+        out = out[:limit].rsplit(" ", 1)[0] + "…"
+    return out
+
+
+def _key_snippets(body: str) -> list[dict]:
+    """First sentence of the body plus the first sentence of each `##` section,
+    at most three — a probe into the note, not a second reader."""
+    if len(body) < _SNIPPET_MIN_BODY:
+        return []
+    parts: list[tuple[str, str]] = []
+    head, last = "", 0
+    for m in _H2.finditer(body):
+        parts.append((head, body[last:m.start()]))
+        head, last = m.group(1), m.end()
+    parts.append((head, body[last:]))
+
+    out: list[dict] = []
+    for heading, chunk in parts:
+        text = _first_sentence(_lead_prose(chunk))
+        if text:
+            out.append({"heading": heading, "text": text})
+        if len(out) == 3:
+            break
+    return out
+
+
+def _row(path: str) -> dict:
+    return {"name": _clean_name(path), "path": path}
+
+
+def _note_concepts(target: str, k: int = 18) -> list[dict]:
+    from silica.tools.graph import silica_concepts
+
+    try:
+        return silica_concepts(note=target, k=k).get("concepts") or []
+    except Exception:
+        logger.debug("context: concepts failed for %s", target, exc_info=True)
+        return []
+
+
+def _unresolved_links() -> list:
+    from silica.driver import get_driver
+
+    try:
+        return get_driver().unresolved()
+    except Exception:
+        logger.debug("context: unresolved() failed", exc_info=True)
+        return []
+
+
+def _ghost_context(name: str) -> dict:
+    """An unresolved wikilink as a subject of its own.
+
+    Today a ghost node carries path "" (graph_export.py), so clicking one used to
+    post an empty path and open nothing. It has no body to read and no reader
+    mode — what it does have is a name, the notes that invoke it, and their
+    merged concepts, which is exactly the material for deciding whether to write
+    it.
+    """
+    from collections import Counter
+
+    stem = _clean_name(name).lower()
+    invokers = sorted({
+        link.source.path for link in _unresolved_links()
+        if _clean_name(link.target).lower() == stem and link.source.path
+    })
+    merged: Counter = Counter()
+    for src in invokers[:12]:  # ponytail: cap the fan-in; a 12-note cloud is already dense
+        for c in _note_concepts(src, k=12):
+            merged[c["concept"]] += c.get("weight", 1)
+    return {
+        "title": _clean_name(name),
+        "path": "",
+        "ghost": True,
+        "snippets": [],
+        "concepts": [{"concept": c, "weight": w} for c, w in merged.most_common(18)],
+        "related": {"frontmatter": [], "outgoing": [], "backlinks": [_row(p) for p in invokers]},
+        "suggested": [],
+        "hint": "",
+    }
+
+
+def _suggested(canon: str, related: list[dict], linked: set[str], resolve) -> list[dict]:
+    """How this note SHOULD be connected, in two flavours.
+
+    - ghost: a wikilink leaving this note whose target does not exist. The note
+      already claims the connection; only the file is missing.
+    - note: a computed relative that scores high and sits far away (or
+      unreachable) in the wikilink graph — "a missing link worth creating", per
+      silica_related's own docstring. distance 1 is already linked, so it is
+      Related's business, not this section's.
+
+    Structural GAPs stay out on purpose: they are hub-to-hub by construction, so
+    the section would be empty on every note that is not a hub.
+    """
+    out = [
+        {"name": _clean_name(link.target), "path": "", "kind": "ghost",
+         "why": "linked from here, never written"}
+        for link in _unresolved_links()
+        if link.source.path == canon
+    ]
+    for r in related:
+        dist = r.get("distance")
+        # The recall stores key on cooccur_key (path minus .md), the wikilink
+        # graph on the full path — resolve back, or `linked` never matches and
+        # the click target is a path the drawer cannot open.
+        rpath = resolve(r["path"]) or r["path"]
+        if rpath in linked or rpath == canon or (dist is not None and dist < _SUGGEST_MIN_DIST):
+            continue
+        out.append({
+            "name": r.get("name") or _clean_name(rpath), "path": rpath, "kind": "note",
+            "why": ("unreachable" if dist is None else f"{dist} hops away")
+                   + f" · score {r.get('score', 0):.2f}",
+        })
+        if len(out) >= 8:
+            break
+    return out
+
+
+@app.get("/context")
+def context(path: str = "", name: str = "", ghost: bool = False):
+    """Everything deterministic the vault knows about one note, in one call.
+
+    Sections: key snippets (what it says), concepts (what it is about), related
+    (how it IS connected), suggested (how it SHOULD be). Zero LLM calls — every
+    number here is index lookup, so the drawer is a read, not a turn. Graceful
+    on miss, like /note: never 500.
+    """
+    from silica.driver import get_driver
+    from silica.driver.base import NoteRef
+    from silica.tools.graph import silica_related
+
+    if ghost or (not path and name):
+        return _ghost_context(name or path)
+
+    resolve = note_resolver()
+    canon = resolve(path)
+    if not canon:
+        return {"title": path, "path": path, "ghost": False, "error": "note not found in vault."}
+
+    driver = get_driver()
+    try:
+        content = driver.read_note(NoteRef(name=_clean_name(canon), path=canon)).content
+    except Exception:
+        content = ""
+    props, body = _split_frontmatter(content)
+
+    def _refs(fn) -> list[dict]:
+        # Resolved only. DRIVER.links() also returns a synthesised ref for every
+        # UNRESOLVED wikilink (path "<Target>.md", a file that does not exist),
+        # and listing those here would put a dead row under "how it IS
+        # connected" — they belong under suggested, as links worth writing.
+        try:
+            return [_row(p) for r in fn(canon) if (p := resolve(r.path or ""))]
+        except Exception:
+            logger.debug("context: %s failed for %s", fn.__name__, canon, exc_info=True)
+            return []
+
+    outgoing = _refs(driver.links)
+    backlinks = _refs(driver.backlinks)
+
+    # frontmatter `related:` is a hand-written claim, so it is shown as written
+    # and resolved only for the click target; an unresolvable entry still lists.
+    fm_raw = (props or {}).get("related") or []
+    if not isinstance(fm_raw, (list, tuple)):
+        fm_raw = [fm_raw]
+    frontmatter = [
+        {"name": _clean_name(str(v)), "path": resolve(str(v)) or ""}
+        for v in fm_raw if v
+    ]
+
+    try:
+        rel_out = silica_related(note=canon, k=12)
+    except Exception:
+        logger.debug("context: related failed for %s", canon, exc_info=True)
+        rel_out = {}
+    rel = rel_out.get("results") or []
+
+    linked = {r["path"] for r in outgoing} | {r["path"] for r in backlinks}
+    # Whether the semantic leg contributed is READ OFF the ranking's own
+    # provenance — every result names the metric that proposed it (embed:0.83,
+    # cooccur:w9, edge:0.57). Asking the embed store directly would reach past
+    # the relatedness facade for a fact the facade already reports.
+    embed_ran = any(
+        str(e).startswith("embed:") for r in rel for e in (r.get("evidence") or [])
+    )
+
+    return {
+        "title": _clean_name(canon),
+        "path": canon,
+        "ghost": False,
+        "snippets": _key_snippets(body),
+        "concepts": _note_concepts(canon),
+        "related": {"frontmatter": frontmatter, "outgoing": outgoing, "backlinks": backlinks},
+        "suggested": _suggested(canon, rel, linked, resolve),
+        # Without embeddings `related` ranks on co-occurrence alone, and the
+        # section looks thin for a reason the reader cannot see from here.
+        # silica_related's own hint wins when it has one — it knows more about
+        # why it came back empty than an inference from the evidence can.
+        "hint": rel_out.get("hint") or ("" if embed_ran else
+                "no embedding index — relatedness is co-occurrence only "
+                "(run /embed to add the semantic half)"),
+    }
+
+
+@app.get("/concept")
+def concept(term: str = "", k: int = 20):
+    """The notes that carry one concept — the click target of the context
+    drawer's cloud, which lights them all in the graph at once. Paths are
+    resolved back to graph keys so the ids match the nodes the viewer holds."""
+    from silica.tools.graph import silica_concepts
+
+    resolve = note_resolver()
+    try:
+        res = silica_concepts(term=term, k=k)
+    except Exception as exc:
+        logger.debug("concept: lookup failed for %s", term, exc_info=True)
+        return {"term": term, "notes": [], "error": str(exc)}
+    return {
+        "term": term,
+        "concept": res.get("concept") or term,
+        "notes": [
+            p for n in (res.get("notes") or [])
+            if (p := resolve(n.get("path", "")) or n.get("path", ""))
+        ],
+    }
+
+
 @app.get("/asset")
 def asset(path: str = ""):
     """Vault-relative attachment for the note drawer, `<img>`-only by contract.

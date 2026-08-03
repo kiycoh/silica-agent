@@ -599,7 +599,10 @@ document.querySelectorAll(".card").forEach((el) => {{
   el.addEventListener("click", () => {{
     focusNode(el.dataset.id);
     if (window.parent !== window) {{
-      window.parent.postMessage({{ type: "silica-open-note", path: el.dataset.id }}, "*");
+      // A card click means "what is this, and what is around it" — the host's
+      // context drawer, same contract as a graph node click. Naming a note (a
+      // wikilink, the file tree) is what opens the reader.
+      window.parent.postMessage({{ type: "silica-open-context", path: el.dataset.id }}, "*");
     }}
   }});
 }});
