@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 from rich.padding import Padding
-from rich.table import Table
 from rich.text import Text
 
 from silica import __version__ as _VERSION
@@ -14,14 +13,11 @@ from silica.ui.theme import BRAND_CYAN, BRAND_INDIGO
 
 _CAPTION = f"v{_VERSION.split('+')[0]} · Your personal note curator agent"
 
-# Inlined from docs/assets/sili_compressed.txt (gitignored — a disk read would
-# come up empty on any machine but the author's).
-_MASCOT = (
-    "    ▄█▄▄█▄",
-    "    ████▄█",
-    "   ▀ ▀██▀ ▀",
-    "       ▀",
-)
+# No mascot glyph here. Sili is a faceted crystal whose identity is its colour
+# split and its single lit eye, and neither survives block characters: at every
+# size a terminal banner can afford (4-8 rows) it renders as a lump. It shows in
+# full colour where a raster is possible — the GUI's empty state and the browser
+# tab — and the terminal keeps the wordmark, which was drawn for this width.
 
 # Hand-drawn wordmark — thin rounded line-art, deliberately not a figlet font
 # (generator fonts like ANSI Shadow are everywhere; bespoke glyphs are not).
@@ -64,11 +60,5 @@ def print_banner() -> None:
         return
     wordmark = _painted(_ART)
     wordmark.append("\n")
-    wordmark.append(_CAPTION, style="dim")  # caption rides under the wordmark, right column
-    mascot_w = max(len(ln) for ln in _MASCOT)
-    if CONSOLE.width >= mascot_w + 3 + len(_CAPTION):
-        grid = Table.grid(padding=(0, 3))  # logo left column, wordmark right column
-        grid.add_row(_painted(_MASCOT), wordmark)
-        CONSOLE.print(Padding(grid, (0, 0, 0, 2)))
-    else:
-        CONSOLE.print(Padding(wordmark, (0, 0, 0, 2)))
+    wordmark.append(_CAPTION, style="dim")  # caption rides under the wordmark
+    CONSOLE.print(Padding(wordmark, (0, 0, 0, 2)))

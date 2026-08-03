@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Re-inline assets/sili_max.svg into both README banners.
+"""Re-derive everything downstream of the mascot: the two README banners and the
+web GUI's two rasters.
 
 An SVG loaded as an image (which is what the README does, through GitHub's camo
 proxy) runs in secure static mode and cannot fetch external resources, so
@@ -7,6 +8,11 @@ proxy) runs in secure static mode and cannot fetch external resources, so
 inside each banner as a copy. Run this after editing the mascot:
 
     python3 assets/build_banners.py
+
+The GUI takes the raster and not the vector: sili_max.svg is a 5109-path trace
+weighing 1.8 MB, against 27 KB for the WebP that renders identically at the size
+the empty state actually shows it. Needs Pillow, which is not a silica
+dependency — this script is run by hand, on the one machine that edits the art.
 """
 
 import re
@@ -14,6 +20,11 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 MASCOT = "sili_max.svg"
+# raster source for the GUI, and the file sili_max.svg was traced from
+MASCOT_PNG = "sili_mascot.png"
+STATIC = HERE.parent / "silica" / "ui" / "web" / "static"
+# (file, width) — 360 for the chat empty state, 64 for the browser tab
+RASTERS = (("sili.webp", 360), ("sili-icon.webp", 64))
 # the mascot carries its own colour now, so neither banner repaints it: the
 # old ink swap would flatten every facet into one silhouette
 BANNERS = ("banner.svg", "banner-light.svg")
@@ -53,7 +64,20 @@ def mascot_block() -> str:
     )
 
 
+def build_rasters() -> None:
+    """Export the GUI's WebPs from the mascot PNG, alpha kept."""
+    from PIL import Image
+
+    src = Image.open(HERE / MASCOT_PNG).convert("RGBA")
+    for name, width in RASTERS:
+        out = STATIC / name
+        height = round(src.height * width / src.width)
+        src.resize((width, height), Image.LANCZOS).save(out, "WEBP", quality=90, method=6)
+        print(f"{name}: {width}x{height} ({out.stat().st_size // 1024} KB)")
+
+
 def main() -> None:
+    build_rasters()
     block = mascot_block()
     for name in BANNERS:
         path = HERE / name
