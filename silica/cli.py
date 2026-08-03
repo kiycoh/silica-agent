@@ -830,7 +830,12 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         from silica.kernel.write.checkpoints import get_checkpoint_store
 
         store = get_checkpoint_store()
-        note_path = parts[1] if len(parts) > 1 else store.most_recent_path()
+        # Everything after the command IS the path: `parts` is a plain whitespace
+        # split, so `/undo silica/Verdetto reranker.md` used to look up
+        # "silica/Verdetto" and report nothing to undo. Note names with spaces are
+        # the common case in a vault, and the web GUI's per-note revert sends this.
+        rest = raw_input.strip().split(maxsplit=1)
+        note_path = rest[1].strip() if len(rest) > 1 else store.most_recent_path()
         if not note_path:
             CONSOLE.print("  Nothing to undo — no patches recorded in this session.")
             return True
