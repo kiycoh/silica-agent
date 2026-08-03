@@ -116,7 +116,8 @@ def test_execute_one_overwrite(vault):
     content = DRIVER.read_note("Concepts/Existing.md").content
     assert "Fully rewritten." in content
     assert "Body." not in content
-    assert content.startswith("---\nAI: true\n---\n")
+    # The driver seam stamps the OKF `type` when the block does not declare one.
+    assert content.startswith("---\nAI: true\ntype: Note\n---\n")
     assert "seed" not in content  # explicit block replaces the prior one wholesale
 
 

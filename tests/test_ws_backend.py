@@ -131,7 +131,9 @@ class StubPluginServer:
             ref = fs.create(path, params["content"])
             return {"name": ref.name, "path": ref.path}
         if method == "overwrite":
-            fs.overwrite(params["path"], params["content"])
+            # Verbatim, like the real plugin: the Obsidian side is a dumb pipe
+            # and does no stamping of its own (the WS backend already did it).
+            fs._overwrite_raw(params["path"], params["content"])
             return {"ok": True}
         if method == "append":
             fs.append(self._ref(params["path"]), params["content"])

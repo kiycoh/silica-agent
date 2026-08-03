@@ -39,6 +39,7 @@ from silica.driver.base import (
 from silica.kernel.link.ast import extract_links
 from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import is_source_leaf
+from silica.kernel.write.notetype import stamp_type
 from silica.kernel.write.ops import InverseOp, InverseOpKind
 
 logger = logging.getLogger(__name__)
@@ -411,12 +412,24 @@ class ObsidianWSBackend(GraphIndexMixin):
     # ------------------------------------------------------------------
 
     def create(self, path: str, content: str) -> NoteRef:
+        content = stamp_type(path, content)   # OKF §4.1 `type`, if absent
         data = self._rpc("create", path=path, content=content)
         ref = NoteRef(name=data["name"], path=data["path"])
         self._patch_graph_add(ref.path, ref, content)
         return ref
 
     def overwrite(self, path: str, content: str) -> NoteRef:
+        return self._overwrite_raw(path, stamp_type(path, content))  # OKF §4.1 `type`
+
+    def _overwrite_raw(self, path: str, content: str) -> NoteRef:
+        """Write bytes as given. Rollback only: a restore is not an authored
+        write, so it must not acquire the derived `type` stamp that overwrite()
+        applies — undo has to return the prior bytes exactly.
+
+        ponytail: private, so the tool-level content undo (tools/wrapped.py)
+        still goes through the public seam and re-stamps a pre-backfill note.
+        Promote to a Protocol verb only if that divergence ever bites.
+        """
         self._rpc("overwrite", path=path, content=content)
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
         ref = NoteRef(name=name, path=path)
@@ -549,7 +562,7 @@ class ObsidianWSBackend(GraphIndexMixin):
             kind = getattr(inv, "kind", None)
             prior = getattr(inv, "prior_content", None)
             if kind == InverseOpKind.restore_version and prior is not None:
-                self.overwrite(inv.path, prior)
+                self._overwrite_raw(inv.path, prior)
         for path in txn.created_paths:
             try:
                 self.delete(path)
