@@ -79,6 +79,34 @@ def stamp_type(path: str, content: str) -> str:
     return content[:end] + f"\ntype: {derive_type(path, content)}" + content[end:]
 
 
+# OKF §5.2 `verified`. The actor prefix is what separates a person vouching for
+# a note from a pipeline re-running over it; only the former carries authority.
+HUMAN_ACTOR_PREFIX = "human:"
+
+
+def verified_entries(data: dict | None) -> list[dict]:
+    """The `verified` entries of a note's frontmatter, always as a list.
+
+    §5.2 is a MUST on readers: a single `{by, at}` mapping means a one-element
+    list. Hand-edited frontmatter is where this field comes from, and a person
+    writing one verification writes the mapping, not a list of one.
+    """
+    raw = (data or {}).get("verified")
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, list):
+        return [e for e in raw if isinstance(e, dict)]
+    return []
+
+
+def is_human_verified(data: dict | None) -> bool:
+    """True when a person vouched for this note (`verified[].by: human:…`)."""
+    return any(
+        str(e.get("by") or "").strip().lower().startswith(HUMAN_ACTOR_PREFIX)
+        for e in verified_entries(data)
+    )
+
+
 @dataclass(frozen=True)
 class Violation:
     """One note failing one §11 clause."""

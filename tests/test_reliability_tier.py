@@ -54,6 +54,33 @@ def test_broken_yaml_ranks_lowest():
     assert reliability_tier("---\ntags: [unclosed\n---\n\n# X\n") == TIER_DISTILLED
 
 
+# --- verified (OKF §5.2): the way back from the AI stamp ---------------------
+
+VERIFIED = AGENT.replace(
+    "AI: true",
+    "AI: true\nverified:\n  by: human:alessandro\n  at: 2026-08-03",
+)
+
+
+def test_human_verification_restores_the_tier_the_ai_stamp_cost():
+    """A legacy note the agent patched reads as agent-authored until a person
+    vouches for it. That is what `verified` is for."""
+    assert reliability_tier(AGENT) == TIER_DISTILLED
+    assert reliability_tier(VERIFIED) == TIER_HUMAN
+
+
+def test_a_machine_verifier_does_not_promote():
+    """A pipeline re-reading its own output is not a second opinion."""
+    machine = VERIFIED.replace("human:alessandro", "process:nucleate")
+    assert reliability_tier(machine) == TIER_DISTILLED
+
+
+def test_human_verified_note_outranks_a_grounded_agent_note():
+    """The gate for this lane, stated as a test."""
+    assert merge_rank(VERIFIED) > merge_rank(GROUNDED)
+    assert reliability_tier(GROUNDED) == TIER_GROUNDED
+
+
 # --- merge_rank --------------------------------------------------------------
 
 def test_terse_human_note_beats_verbose_agent_note():

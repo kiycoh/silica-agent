@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from silica.kernel.write.notetype import (
     derive_type,
+    is_human_verified,
     okf_conformance,
     stamp_type,
+    verified_entries,
 )
 
 PLAIN = "---\ntitle: X\n---\n\nBody.\n"
@@ -78,6 +80,30 @@ def test_stamp_preserves_the_rest_of_the_frontmatter_byte_for_byte():
     fm = "---\ntitle: X\ntags: [a, b]\nAI: true\n---\n\nB\n"
     out = stamp_type("notes/x.md", fm)
     assert out.replace("\ntype: Note", "") == fm
+
+
+# --- verified (§5.2) ---------------------------------------------------------
+
+def test_a_bare_mapping_reads_as_one_entry():
+    """§5.2 MUST: a single {by, at} is a one-element list to a reader."""
+    entry = {"by": "human:alessandro", "at": "2026-08-03"}
+    assert verified_entries({"verified": entry}) == [entry]
+    assert verified_entries({"verified": [entry]}) == [entry]
+
+
+def test_absent_or_malformed_verified_is_no_entries():
+    assert verified_entries({}) == []
+    assert verified_entries(None) == []
+    assert verified_entries({"verified": "yesterday"}) == []
+    assert verified_entries({"verified": ["yesterday"]}) == []
+
+
+def test_only_a_human_actor_counts_as_verification():
+    assert is_human_verified({"verified": {"by": "human:alessandro"}})
+    assert is_human_verified({"verified": {"by": "HUMAN:Alessandro"}})
+    assert not is_human_verified({"verified": {"by": "process:nucleate"}})
+    assert not is_human_verified({"verified": {"at": "2026-08-03"}})
+    assert not is_human_verified({})
 
 
 # --- okf_conformance ---------------------------------------------------------
