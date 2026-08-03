@@ -423,6 +423,67 @@ def nonextractive_lines(body: str, source: str) -> list[str]:
     return out
 
 
+# Keyed attribution (OKF §5.1). One `## Sources` block covers a whole note, so
+# a note patched from three transcripts says only "these three fed me" — never
+# which line came from which. A footnote marker per grounded line closes that,
+# and the label is the join key rather than the position: agents reorder lists,
+# and a positional reference would silently re-point.
+_FOOTNOTE_LABEL_RE = re.compile(r"[^A-Za-z0-9_-]+")
+_SECTION_STOP_RE = re.compile(r"^#{1,6}\s+(Sources|Superseded)\b", re.IGNORECASE)
+
+
+def footnote_label(source_basename: str) -> str:
+    """The footnote label for a source leaf: its id, made markdown-safe.
+
+    Derived from the leaf's `source_id` (the basename), so the label a reader
+    sees and the leaf a consumer resolves are the same key.
+    """
+    return _FOOTNOTE_LABEL_RE.sub("-", source_basename.removesuffix(".md")).strip("-")
+
+
+def attribute_lines(note: str, source: str, label: str) -> str:
+    """Mark every line of *note* that is verbatim from *source* with `[^label]`.
+
+    The same span test the extractive invariant uses (`nonextractive_lines`),
+    read the other way round: there it names the lines that failed, here the
+    ones that passed. Left alone: the frontmatter block, headings, blank and
+    short lines, fenced code (a marker inside a fence would corrupt the code
+    it attributes), everything from `## Sources` or `## Superseded` onward, and
+    any line already carrying this label — re-running over a note is a no-op.
+    """
+    from silica.kernel.write import frontmatter
+
+    if not label or not source.strip():
+        return note
+    _data, raw_fm, body = frontmatter.split(note)
+    head = note[: len(note) - len(body)] if raw_fm is not None else ""
+    src = _norm_extract(source)
+    marker = f"[^{label}]"
+    lines = body.splitlines()
+    out: list[str] = []
+    marked = False
+    fenced = False
+    for i, raw in enumerate(lines):
+        if _SECTION_STOP_RE.match(raw):
+            out.extend(lines[i:])
+            break
+        if raw.lstrip().startswith("```"):
+            fenced = not fenced
+            out.append(raw)
+            continue
+        line = _WIKILINK_RE.sub(r"\1", _LEADING_MARKER_RE.sub("", raw))
+        norm = _norm_extract(line)
+        if (fenced or raw.lstrip().startswith("#") or marker in raw
+                or len(norm) < _EXTRACTIVE_MIN_CHARS or norm not in src):
+            out.append(raw)
+            continue
+        out.append(raw.rstrip() + marker)
+        marked = True
+    if not marked:
+        return note
+    return head + "\n".join(out) + ("\n" if body.endswith("\n") else "")
+
+
 def content_sha256(source_path: str) -> str:
     """SHA-256 hex digest of a source file's content.
 

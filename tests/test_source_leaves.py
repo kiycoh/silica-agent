@@ -276,3 +276,31 @@ def test_autolink_title_index_invisible(tmp_vault):
     titles = build_title_index(get_driver().list_files())
     assert not any("uniqueleaf" in t.lower() for t in titles)
     assert any("neural" in t.lower() for t in titles)
+
+
+def test_grounded_lines_carry_the_leaf_id_and_its_definition(tmp_vault):
+    """Keyed attribution (OKF §5.1): the label joins the line to the leaf."""
+    verbatim = "the twentieth of May at the community center downtown"
+    tmp_vault.note("Inbox/src.md", f"---\ndate: 2026-03-01\n---\nElena starts {verbatim}.\n")
+    tmp_vault.note("Concepts/A.md", f"# A\n\n{verbatim}\n")
+    fsm = _fsm([_entry("src.md", "write", "Concepts/A")], keep_sources=True)
+
+    finalize._write_source_leaf(fsm, "Inbox/src.md")
+
+    note = _vault_file("Concepts/A.md").read_text(encoding="utf-8")
+    assert f"{verbatim}[^src]" in note        # the claim carries the key
+    assert "[^src]: [[src]]" in note          # the key resolves to the leaf
+    assert "## Sources" in note and "[[src]]" in note
+
+
+def test_a_note_with_no_verbatim_line_gets_no_footnote(tmp_vault):
+    """No dangling `[^id]`, and no definition for a marker that was never emitted."""
+    tmp_vault.note("Inbox/src.md", "---\ndate: 2026-03-01\n---\nverbatim source words\n")
+    tmp_vault.note("Concepts/A.md", "# A\n\nSomething the source never said at all.\n")
+    fsm = _fsm([_entry("src.md", "write", "Concepts/A")], keep_sources=True)
+
+    finalize._write_source_leaf(fsm, "Inbox/src.md")
+
+    note = _vault_file("Concepts/A.md").read_text(encoding="utf-8")
+    assert "[^src]" not in note
+    assert "## Sources" in note and "[[src]]" in note   # the block still lands

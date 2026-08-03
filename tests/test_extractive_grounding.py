@@ -118,3 +118,70 @@ def test_short_verbatim_floor_is_env_lowerable(tmp_vault, monkeypatch):
     validated, rejected2 = validate_operations([_write_op(short)], _payload(excerpt), "mem")
     assert not any("snippet too short" in r.reason for r in rejected2)  # lowered floor admits it
     assert any(o.path == "mem/Elena's pottery class.md" for o in validated)
+
+
+# ---------------------------------------------------------------------------
+# Keyed attribution (OKF §5.1): which line came from which source
+# ---------------------------------------------------------------------------
+
+# A real span of _EXCERPT — the invariant is verbatim selection, so a
+# paraphrase here would test nothing the extractive gate would ever see.
+_VERBATIM = "signed up for the beginners pottery class at the community center downtown"
+
+def test_a_grounded_line_carries_the_leaf_id_as_its_label():
+    from silica.kernel.write.provenance import attribute_lines, footnote_label
+
+    label = footnote_label("session_1.md")
+    assert label == "session_1"
+    note = f"---\ntype: Note\n---\n\n# Pottery\n\n{_VERBATIM}\n"
+    out = attribute_lines(note, _EXCERPT, label)
+    assert f"{_VERBATIM}[^session_1]" in out
+    assert out.startswith("---\ntype: Note\n---\n")   # frontmatter untouched
+    assert "# Pottery[^session_1]" not in out          # headings are not claims
+
+
+def test_a_line_the_source_does_not_contain_stays_unmarked():
+    from silica.kernel.write.provenance import attribute_lines
+
+    note = "# Pottery\n\nElena took up competitive freediving last winter.\n"
+    assert attribute_lines(note, _EXCERPT, "session_1") == note
+
+
+def test_attribution_is_idempotent():
+    from silica.kernel.write.provenance import attribute_lines
+
+    note = f"# Pottery\n\n{_VERBATIM}\n"
+    once = attribute_lines(note, _EXCERPT, "session_1")
+    assert attribute_lines(once, _EXCERPT, "session_1") == once
+    assert once.count("[^session_1]") == 1
+
+
+def test_a_second_source_adds_its_own_label_to_its_own_line():
+    """The point of keying: three transcripts, three labels, one per claim."""
+    from silica.kernel.write.provenance import attribute_lines
+
+    other = "Elena also adopted a tabby cat she named Biscotto in June."
+    second = "adopted a tabby cat she named Biscotto in June"
+    note = f"# Elena\n\n{_VERBATIM}\n{second}\n"
+    out = attribute_lines(attribute_lines(note, _EXCERPT, "session_1"), other, "session_2")
+    assert f"{_VERBATIM}[^session_1]" in out
+    assert f"{second}[^session_2]" in out
+    assert "[^session_2]" not in out.split("\n")[2]   # not on the pottery line
+
+
+def test_sources_and_superseded_blocks_are_left_alone():
+    from silica.kernel.write.provenance import attribute_lines
+
+    note = f"# Pottery\n\n{_VERBATIM}\n\n## Sources\n[[session_1]]\n"
+    out = attribute_lines(note, _EXCERPT, "session_1")
+    assert out.endswith("## Sources\n[[session_1]]\n")
+    assert f"{_VERBATIM}[^session_1]" in out
+
+
+def test_fenced_code_is_never_marked():
+    """A marker inside a fence would corrupt the code it attributes."""
+    from silica.kernel.write.provenance import attribute_lines
+
+    src = "run the command uv run pytest --maxfail=1 to reproduce the failure"
+    note = "# How\n\n```bash\nuv run pytest --maxfail=1 to reproduce the failure\n```\n"
+    assert attribute_lines(note, src, "session_1") == note

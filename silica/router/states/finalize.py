@@ -288,7 +288,11 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         from silica.kernel.write.contested import append_before_superseded
         from silica.kernel.write.ops import InverseOp, InverseOpKind
         from silica.kernel.recall.paths import SOURCES_DIR
-        from silica.kernel.write.provenance import source_valid_from
+        from silica.kernel.write.provenance import (
+            attribute_lines,
+            footnote_label,
+            source_valid_from,
+        )
 
         basename = os.path.basename(source_file)
         leaf_rel = f"{SOURCES_DIR}/{basename}"
@@ -325,6 +329,18 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             e.path for e in fsm.manifest.entries
             if e.source_basename == basename and e.op in ("write", "patch")
         })
+        # Keyed per-claim attribution (OKF §5.1): the leaf body is the only copy
+        # of what this source actually said, and here is the one place it sits
+        # beside the notes it produced. Lines that are verbatim from it get the
+        # leaf's own id as a footnote label, so a note fed by three transcripts
+        # says which line came from which instead of just naming all three.
+        leaf_body = ""
+        try:
+            _d, _r, leaf_body = frontmatter.split(orch.DRIVER.read_note(leaf_rel).content or "")
+        except Exception:
+            leaf_body = ""
+        label = footnote_label(basename)
+
         for rel in notes:
             note_path = f"{rel}.md"  # manifest paths carry no .md
             try:
@@ -333,13 +349,18 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                 continue
             if f"[[{leaf_stem}]]" in prior:
                 continue  # already linked — idempotent on re-ingest
+            attributed = attribute_lines(prior, leaf_body, label)
+            # The definition rides the Sources block and only when a line was
+            # actually marked, so a note never carries a dangling `[^id]`.
+            note = f"[^{label}]: [[{leaf_stem}]]\n" if attributed != prior else ""
             # New block, or one more link appended below an existing block.
             # Routed through append_before_superseded: blocks used to land at
             # EOF by construction, which stopped being safe once a note can
             # end with a `## Superseded` section.
             head = f"\n{_SOURCES_MARKER}\n" if _SOURCES_MARKER not in prior else ""
             orch.DRIVER.overwrite(
-                note_path, append_before_superseded(prior, f"{head}[[{leaf_stem}]]\n")
+                note_path,
+                append_before_superseded(attributed, f"{head}[[{leaf_stem}]]\n{note}"),
             )
             fsm._run_inverses.append(
                 (note_path,
