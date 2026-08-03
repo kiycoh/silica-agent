@@ -518,8 +518,8 @@ class TestAggregation:
         results = checks.run_checks(_cfg(vault_path=str(tmp_path)))
         assert [r.name for r in results] == [
             "chat model", "chat endpoint", "vault", "vault manifest",
-            "language", "embeddings", "rerank", "quarantine", "session capture",
-            "own sessions",
+            "language", "embeddings", "rerank", "quarantine", "OKF §11",
+            "session capture", "own sessions",
         ]
 
     def test_check_quarantine_surfaces_corrupt_files(self, tmp_path):
@@ -530,6 +530,23 @@ class TestAggregation:
         result = check_quarantine(_cfg(vault_path=str(tmp_path)))
         assert result.status == "warn"
         assert "provenance.json.corrupt.20260710T120000" in result.detail
+
+    def test_check_okf_reports_the_census(self, tmp_path):
+        """Doctor renders the §11 walker: silent when the vault is a bundle."""
+        from silica.onboarding.checks import check_okf
+
+        (tmp_path / "clean.md").write_text("---\ntype: Note\n---\n\nB\n", encoding="utf-8")
+        assert check_okf(_cfg(vault_path=str(tmp_path))).status == "ok"
+
+        # Plain markdown (a repo-mode README) is counted, never warned about.
+        (tmp_path / "README.md").write_text("# Just prose\n", encoding="utf-8")
+        assert check_okf(_cfg(vault_path=str(tmp_path))).status == "ok"
+
+        (tmp_path / "legacy.md").write_text("---\ntitle: X\n---\n\nB\n", encoding="utf-8")
+        result = check_okf(_cfg(vault_path=str(tmp_path)))
+        assert result.status == "warn"
+        assert "legacy.md" in result.detail and "§11.2" in result.detail
+        assert "backfill_notetype" in result.hint
 
     def test_has_failures(self):
         from silica.onboarding.checks import CheckResult, has_failures

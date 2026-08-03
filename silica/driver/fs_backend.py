@@ -42,6 +42,7 @@ from silica.kernel.write import frontmatter as fm
 from silica.kernel.link import ofm
 from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import ignore_matcher, is_source_leaf
+from silica.kernel.write.notetype import stamp_type
 logger = logging.getLogger(__name__)
 
 # Per-note Hit ceiling for content search. The tool layer renders at most 3
@@ -746,6 +747,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             raise FileExistsError(f"Note already exists: {rel_path}")
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
+        content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
         full_path.write_text(content, encoding="utf-8")
         self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
@@ -762,6 +764,14 @@ class ObsidianFSBackend(GraphIndexMixin):
         in FS mode, so overwrite and patch rollback via versions is a no-op
         (see restore()). For write-op rollback, created_paths is used instead.
         """
+        return self._overwrite_raw(path, content, stamp=True)
+
+    def _overwrite_raw(self, path: str, content: str, stamp: bool = False) -> NoteRef:
+        """The write itself. `stamp=False` writes the bytes as given — for
+        callers replaying content that already exists (a rollback, or the WS
+        stub emulating the Obsidian plugin, which is a verbatim pipe and does
+        no stamping of its own).
+        """
         p = Path(path)
         if p.is_absolute():
             try:
@@ -775,6 +785,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         if not full_path.exists():
             raise RuntimeError(f"Cannot overwrite non-existent file: {path}")
 
+        if stamp:
+            content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
         full_path.write_text(content, encoding="utf-8")
         self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")

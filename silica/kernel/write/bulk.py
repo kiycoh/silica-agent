@@ -32,6 +32,7 @@ from __future__ import annotations
 from silica.driver import DRIVER
 from silica.kernel.write import templates
 from silica.kernel.write.merge import three_way_merge
+from silica.kernel.write.notetype import stamp_type
 from silica.kernel.write.ops import Op, OpType, FailedOp, BulkResult
 
 
@@ -62,7 +63,13 @@ def _verify_landed(op: Op, path: str, intended: str | None) -> str | None:
         landed = DRIVER.read_note(path).content or ""
     except RuntimeError as e:
         return f"post-write verify: read-back failed: {e}"
-    if intended is not None and landed.strip() != intended.strip():
+    # The DRIVER stamps the OKF `type` when absent (notetype.stamp_type at the
+    # create/overwrite seam), so a body composed without one lands with one.
+    # Normalising BOTH sides through that same pure, idempotent function keeps
+    # the comparison byte-exact without assuming which side already carries the
+    # field — a real altered payload still differs, and one that changed a
+    # derivation signal differs in the stamp too.
+    if intended is not None and stamp_type(path, landed).strip() != stamp_type(path, intended).strip():
         return "post-write verify: content mismatch (backend altered payload)"
     return None
 

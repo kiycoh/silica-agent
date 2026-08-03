@@ -1,0 +1,126 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Alessandro Carosia
+
+"""notetype — the OKF `type` field, derived and censused.
+
+Open Knowledge Format v0.2 (§4.1) requires every note to declare a `type`.
+Silica never asked the user for one, so it is derived here from signals the
+kernel already keys on (source-leaf path, code bindings, plan status) and
+stamped at the driver seam when the field is absent. Presence wins: a human-
+or agent-authored `type` is never overwritten — §4.1 tolerates unknown types,
+so the user's own vocabulary stays conformant.
+
+`okf_conformance()` is the read side: it walks a vault and reports the three
+§11 clauses (parseable frontmatter, non-empty `type`, no reserved `index`/
+`log` note names). `silica doctor` renders it; `scripts/backfill_notetype.py`
+closes the legacy gap once.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from silica.kernel.write import frontmatter
+
+# The four values derive_type can produce. Free-form per §4.1 — this is
+# Silica's vocabulary, not the spec's.
+SOURCE, CODE, PLAN, NOTE = "Source", "Code", "Plan", "Note"
+
+# §11.3 binds these names to a bundle-level index/changelog when present. The
+# vault generates neither, so a note carrying the name is a collision to rename
+# by hand.
+RESERVED_NAMES = frozenset({"index", "log"})
+
+
+def derive_type(path: str, content: str) -> str:
+    """The OKF `type` for a note, from signals the vault already carries.
+
+    Precedence is by strength of evidence: a path under `sources/` is a leaf
+    whatever its frontmatter says, code bindings outrank a plan status, and
+    everything without a signal is a plain Note.
+    """
+    from silica.kernel.plans import VALID_STATUS
+    from silica.kernel.recall.paths import is_source_leaf
+
+    if is_source_leaf(path):
+        return SOURCE
+    data, _raw, _body = frontmatter.split(content)
+    data = data or {}
+    if data.get("documents") or data.get("code_ref"):
+        return CODE
+    if str(data.get("status") or "").strip() in VALID_STATUS:
+        return PLAN
+    return NOTE
+
+
+_TYPE_KEY_RE = re.compile(r"^type:\s", re.MULTILINE)
+
+
+def stamp_type(path: str, content: str) -> str:
+    """Insert a derived `type` into a frontmatter block that lacks the field.
+
+    String-level, like `templates.ensure_ai_flag`: the rest of the user's
+    frontmatter stays byte-for-byte intact. No-ops when there is no
+    frontmatter block (adding one to a plain-markdown note is the user's call,
+    and the walker censuses it), when the YAML is unparseable (stamping into
+    it would corrupt it further), and when `type` is already present.
+    """
+    if not content.startswith("---\n"):
+        return content
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return content  # unterminated frontmatter — the walker flags it
+    if _TYPE_KEY_RE.search(content[4:end]):
+        return content
+    data, _raw, _body = frontmatter.split(content)
+    if data is None:
+        return content
+    return content[:end] + f"\ntype: {derive_type(path, content)}" + content[end:]
+
+
+@dataclass(frozen=True)
+class Violation:
+    """One note failing one §11 clause."""
+    path: str
+    clause: str   # "11.1" | "11.2" | "11.3"
+    detail: str
+
+
+def okf_conformance(vault: Path | str) -> list[Violation]:
+    """Census a vault against OKF §11. Empty list ⇒ the vault IS a bundle.
+
+    Walks the filesystem rather than DRIVER: doctor is routinely handed a
+    vault that is not the active one (the init wizard does exactly that),
+    and the DRIVER global is bound to the active vault only.
+    """
+    from silica.kernel.recall.paths import ignore_matcher
+
+    vault = Path(vault)
+    if not vault.is_dir():
+        return []
+    ignored = ignore_matcher(vault)
+    out: list[Violation] = []
+    for f in sorted(vault.rglob("*.md")):
+        parts = f.relative_to(vault).parts
+        if any(p.startswith(".") for p in parts):
+            continue  # .obsidian, .trash, .silica
+        if any(ignored(p) for p in parts[:-1]):
+            continue  # .silicaignore / NOISE_DIRS: node_modules under a repo vault
+        rel = f.relative_to(vault).as_posix()
+        if f.stem.lower() in RESERVED_NAMES:
+            out.append(Violation(rel, "11.3", f"reserved note name `{f.stem}` — rename by hand"))
+        try:
+            data, raw, _body = frontmatter.split(f.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            out.append(Violation(rel, "11.1", "unreadable file"))
+            continue
+        # split() returns raw=None for "no block at all" and data=None for
+        # "block present, YAML broken" — different repairs, so different lines.
+        if raw is None:
+            out.append(Violation(rel, "11.1", "no frontmatter block"))
+        elif data is None:
+            out.append(Violation(rel, "11.1", "frontmatter is not parseable YAML"))
+        elif not str(data.get("type") or "").strip():
+            out.append(Violation(rel, "11.2", "missing `type`"))
+    return out

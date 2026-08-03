@@ -454,6 +454,43 @@ def check_quarantine(config: SilicaConfig) -> CheckResult:
     return CheckResult("quarantine", "ok", "no quarantined state")
 
 
+def check_okf(config: SilicaConfig) -> CheckResult:
+    """Open Knowledge Format §11: the vault IS a bundle, or it says why not.
+
+    Only what the user can act on raises the status. A file with no frontmatter
+    at all (§11.1) is counted and reported but stays `ok`: Silica's write path
+    never produces one, and in repo mode the vault is a source tree whose
+    README and prompt templates are markdown by right — warning about those
+    every run would be noise nobody can clear.
+    """
+    from silica.kernel.write.notetype import okf_conformance
+
+    vault = config.vault_path.strip()
+    if not vault:
+        return CheckResult("OKF §11", "ok", "no vault — nothing to census")
+    violations = okf_conformance(vault)
+    if not violations:
+        return CheckResult("OKF §11", "ok", "conformant bundle")
+    by_clause: dict[str, int] = {}
+    for v in violations:
+        by_clause[v.clause] = by_clause.get(v.clause, 0) + 1
+    detail = ", ".join(f"§{c}: {n}" for c, n in sorted(by_clause.items()))
+    actionable = [v for v in violations if v.clause != "11.1"]
+    if not actionable:
+        return CheckResult("OKF §11", "ok", f"typed bundle, {detail} without frontmatter")
+    hint = ""
+    if any(v.clause == "11.2" for v in actionable):
+        hint = "run `uv run python scripts/backfill_notetype.py` to stamp the missing types"
+    if any(v.clause == "11.3" for v in actionable):
+        hint = (hint + "; " if hint else "") + "rename any `index`/`log` note by hand"
+    sample = ", ".join(v.path for v in actionable[:3])
+    return CheckResult(
+        "OKF §11", "warn",
+        f"{len(actionable)} non-conformant note(s) — {detail} (e.g. {sample})",
+        hint,
+    )
+
+
 HOOK_SNIPPET = """\
 "hooks": {
   "SessionEnd": [{"hooks": [{"type": "command", "command": "silica capture"}]}],
@@ -519,6 +556,7 @@ def run_checks(config: SilicaConfig) -> list[CheckResult]:
         check_embeddings(config),
         check_rerank(config),
         check_quarantine(config),
+        check_okf(config),
         check_capture_hook(config),
         check_session_capture(config),
     ]
