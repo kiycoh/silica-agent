@@ -119,6 +119,64 @@ def test_export_graph_raises_when_vendored_asset_missing(monkeypatch, tmp_path):
         gv.export_graph(output_path=str(tmp_path / "g.html"))
 
 
+def test_both_renderer_bundles_are_vendored():
+    """Both bundles ship: WebGL (3d-force-graph) and 2D canvas (force-graph).
+
+    The 2D half is not `numDimensions(2)` on the 3D bundle — it is a second
+    library, so it is a second packaging risk. This is the presence test.
+    """
+    import silica.ui.web.graph_view as gv
+
+    js = gv._vendored_lib_js()
+    assert "ForceGraph3D" in js          # WebGL UMD export
+    assert len(js) > 500_000             # both bundles, not one
+
+
+def test_vendored_bundles_missing_is_loud(monkeypatch, tmp_path):
+    """Either asset missing is a RuntimeError naming it, never a CDN fallback."""
+    import silica.ui.web.graph_view as gv
+
+    monkeypatch.setattr(gv, "_VENDORED_BUNDLES", ("force-graph.min.js", "nope.min.js"))
+    with pytest.raises(RuntimeError, match="nope.min.js"):
+        gv._vendored_lib_js()
+
+
+def test_export_graph_ships_the_2d_3d_switch(monkeypatch, tmp_path):
+    """One document, both renderers, switched in place.
+
+    /graph regenerates everything per request (cooccurrence + kNN + Louvain), so
+    the switch must rebuild from the RAW_NODES already in the page and never
+    reload the iframe.
+    """
+    import silica.kernel.recall.graph_export as ge
+    import silica.ui.web.graph_view as gv
+
+    monkeypatch.setattr(gv, "_vendored_lib_js", lambda: "/*JS*/")
+    monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
+        [{"id": "a.md", "label": "a", "type": "note", "group": -1,
+          "color": {"background": "#4d5575"}, "path": "a.md", "size": 16}],
+        [],
+    ))
+    monkeypatch.setattr(ge, "detect_communities", lambda nodes, edges: [])
+    monkeypatch.setattr(ge, "knn_edges", lambda nodes, k=6: [])
+
+    out = tmp_path / "g.html"
+    gv.export_graph(output_path=str(out))
+    html = out.read_text(encoding="utf-8")
+
+    assert 'id="mode-toggle"' in html            # the HUD control
+    assert 'data-mode="2d"' in html and 'data-mode="3d"' in html
+    assert "new ForceGraph(el)" in html          # 2D canvas branch
+    assert "new ForceGraph3D(el)" in html        # WebGL branch
+    assert "nodeCanvasObject" in html            # 2D labels, the point of the mode
+    assert "silica-graph-mode" in html           # last-used mode persists
+    assert "centerAt" in html                    # 2D fly-to
+    # The switch rebuilds in place from the data already in the page. Only the
+    # explicit HUD refresh button may reload — one occurrence, and not in setMode.
+    assert html.count("location.reload()") == 1
+    assert "location.reload" not in html.split("function setMode")[1].split("\n}")[0]
+
+
 def test_graph_view_import_is_gui_free():
     """Importing the viewer must not require the optional [gui] extra (FastAPI).
 

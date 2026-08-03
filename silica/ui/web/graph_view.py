@@ -1,17 +1,24 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Graph viewer — the 3d-force-graph HTML emitter for the vault wikilink graph.
+"""Graph viewer — the force-graph HTML emitter for the vault wikilink graph.
 
 Split out of `silica.kernel.recall.graph_export` (which keeps the deterministic *data*
 role: build_graph_data / detect_communities). This module owns only the viewer:
 it turns nodes/edges/communities into a fully self-contained HTML file.
 
-The JS bundle is *vendored* (silica/ui/web/static/3d-force-graph.min.js, pinned
-to v1.80.0) and inlined into every emitted file — the artifact opens offline,
-with no network at render time. `render_html` keeps an empty-`lib_js` CDN
-fallback for direct/test callers, but `export_graph` (the production path) always
-inlines the vendored bundle and raises loudly if the asset is missing.
+TWO renderers ship in every document: `3d-force-graph` (WebGL) and `force-graph`
+(2D canvas), switched at runtime from the HUD. Not `numDimensions(2)` on the 3D
+bundle — the point of 2D is readable node text, which canvas gives and a
+flattened WebGL scene does not. They are kapsule siblings and share nearly the
+whole chainable API, so `buildGraph()` is one builder with four branches.
+
+Both bundles are *vendored* (silica/ui/web/static/, pinned to
+3d-force-graph@1.80.0 and force-graph@1.51.2) and inlined into every emitted
+file — the artifact opens offline, with no network at render time. `render_html`
+keeps an empty-`lib_js` CDN fallback for direct/test callers, but `export_graph`
+(the production path) always inlines the vendored bundles and raises loudly if
+either asset is missing.
 """
 from __future__ import annotations
 
@@ -25,25 +32,37 @@ from silica.kernel.recall.graph_export import Community
 
 logger = logging.getLogger(__name__)
 
-_VIS_JS_URL = "https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/3d-force-graph.min.js"
+_VIS_JS_URLS = (
+    "https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/3d-force-graph.min.js",
+    "https://cdn.jsdelivr.net/npm/force-graph@1.51.2/dist/force-graph.min.js",
+)
+
+# Both renderers, in load order: WebGL first (the default mode), canvas second.
+_VENDORED_BUNDLES = ("3d-force-graph.min.js", "force-graph.min.js")
 
 
 def _vendored_lib_js() -> str:
-    """Read the vendored 3d-force-graph bundle shipped under ui/web/static/.
+    """Read the vendored renderer bundles shipped under ui/web/static/.
 
-    Raises a clear RuntimeError if the asset is absent (a packaging bug). We do
-    NOT fall back to render_html's empty-lib_js CDN <script src>: that would
+    Returns both concatenated (they are independent UMD modules exporting
+    `ForceGraph3D` and `ForceGraph`), so callers keep one `lib_js` string.
+
+    Raises a clear RuntimeError if either asset is absent (a packaging bug). We
+    do NOT fall back to render_html's empty-lib_js CDN <script src>: that would
     silently reintroduce the network dependency this split removed and hide the
     bug. Keep the trust-boundary failure loud.
     """
-    res = importlib.resources.files("silica.ui.web") / "static" / "3d-force-graph.min.js"
-    if not res.is_file():
-        raise RuntimeError(
-            "graph_export: vendored 3d-force-graph.min.js is missing from "
-            "silica/ui/web/static/ — packaging bug. Reinstall silica or re-vendor "
-            "the asset (pinned v1.80.0)."
-        )
-    return res.read_text(encoding="utf-8")
+    out = []
+    for name in _VENDORED_BUNDLES:
+        res = importlib.resources.files("silica.ui.web") / "static" / name
+        if not res.is_file():
+            raise RuntimeError(
+                f"graph_export: vendored {name} is missing from silica/ui/web/static/ "
+                "— packaging bug. Reinstall silica or re-vendor the assets (pinned "
+                "3d-force-graph@1.80.0, force-graph@1.51.2)."
+            )
+        out.append(res.read_text(encoding="utf-8"))
+    return ";\n".join(out)
 
 
 def _vendored_font_face() -> str:
@@ -164,7 +183,8 @@ def render_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
-  {f'<script>{lib_js}</script>' if lib_js else '<script src="' + _VIS_JS_URL + '"></script>'}
+  {f'<script>{lib_js}</script>' if lib_js
+    else "".join(f'<script src="{u}"></script>' for u in _VIS_JS_URLS)}
   <style>
     /* Palette mirrors the app shell: crystal substrate travelling blue to
        violet the way the mascot is shaded, iced cyan accent, amber for
@@ -225,6 +245,11 @@ def render_html(
     #hud{{position:absolute;top:10px;right:10px;z-index:5;width:216px;max-height:calc(100% - 20px);
           display:flex;flex-direction:column;gap:12px;padding:12px;overflow-y:auto;
           background:rgba(10,13,20,.92);border:1px solid var(--line-2)}}
+    /* The embedding page's note drawer overlays this frame's right edge, where
+       the HUD lives, and the drawer is translucent — so the legend showed
+       through the note you were reading. The frame cannot see that drawer, so
+       the parent tells it. */
+    body.host-drawer-open #hud{{display:none}}
     #drawer{{width:260px;flex-shrink:0;background:var(--slate);border-left:1px solid var(--line);
              padding:18px 16px;overflow-y:auto;display:none;flex-direction:column;gap:12px}}
     #drawer.open{{display:flex}}
@@ -259,6 +284,14 @@ def render_html(
                 color:var(--ash);margin-top:6px}}
     .force-row .fv{{color:var(--ash-dim);font-size:11px}}
     .force-slider{{width:100%;accent-color:var(--accent);cursor:pointer;margin-top:2px}}
+    /* renderer switch — two halves of one control, so it reads as "one of these
+       two", not as two independent buttons */
+    .seg{{display:flex;border:1px solid var(--line-2);background:var(--slate-2)}}
+    .seg button{{flex:1;padding:6px 4px;background:none;border:none;cursor:pointer;
+                 font-family:var(--sans);font-size:11px;letter-spacing:.06em;
+                 text-transform:uppercase;color:var(--ash-dim)}}
+    .seg button:hover{{color:var(--frost)}}
+    .seg button.active{{background:var(--line);color:var(--frost)}}
   </style>
 </head>
 <body>
@@ -324,6 +357,14 @@ def render_html(
     </div>
 
     <div>
+      <div class="section-title" style="margin-bottom:6px">Renderer</div>
+      <div class="seg" id="mode-toggle">
+        <button type="button" data-mode="3d" onclick="setMode('3d')">3D</button>
+        <button type="button" data-mode="2d" onclick="setMode('2d')">2D &middot; text</button>
+      </div>
+    </div>
+
+    <div>
       <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
         Forces
         <span style="color:#8a8da6;cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
@@ -338,7 +379,7 @@ def render_html(
     </div>
 
     <div style="display:flex;gap:6px">
-      <div class="btn" style="flex:1" onclick="Graph.zoomToFit(400)">&#8862; Fit graph</div>
+      <div class="btn" style="flex:1" onclick="Graph.zoomToFit(400, 40)">&#8862; Fit graph</div>
       <div class="btn" title="rebuild from the vault (e.g. after editing notes outside silica)"
            onclick="location.reload()">&#8635;</div>
     </div>
@@ -388,27 +429,38 @@ RAW_EDGES.forEach(e => {{
   (neighbors[e.to]   = neighbors[e.to]   || new Set()).add(e.from);
 }});
 
-let focusId = null;
+let focusIds = [];  // the focused set; [] = nothing focused
 
-// Highlight a node and its 1-hop neighbours; dim everything else. Refresh via
-// the accessor re-pass idiom (same trick applyFilters uses for visibility) so
-// the physics layout is untouched.
-function applyFocus(id) {{
-  focusId = id;
-  const nb = neighbors[id] || new Set();
-  RAW_NODES.forEach(n => {{ n._dim = id != null && n.id !== id && !nb.has(n.id); }});
-  RAW_EDGES.forEach(e => {{ e._dim = id != null && e.from !== id && e.to !== id; }});
-  Graph.nodeColor(Graph.nodeColor());
-  Graph.linkColor(Graph.linkColor());
+// Highlight a SET of nodes and their 1-hop neighbours; dim everything else.
+// A set, not one id: the context drawer lights every note carrying a concept,
+// and a single-node focus is just the one-element case. Refresh via the
+// accessor re-pass idiom (same trick applyFilters uses for visibility) so the
+// physics layout is untouched.
+function applyFocus(ids) {{
+  focusIds = (ids == null ? [] : [].concat(ids)).filter(id => NODE_BY_ID[id]);
+  const on = new Set(focusIds);
+  // Lit = the focused nodes plus their 1-hop neighbours; an edge stays lit when
+  // EITHER endpoint is focused (neighbour-to-neighbour edges dim, as before).
+  const lit = new Set(focusIds);
+  focusIds.forEach(id => (neighbors[id] || new Set()).forEach(nb => lit.add(nb)));
+  RAW_NODES.forEach(n => {{ n._dim = on.size > 0 && !lit.has(n.id); }});
+  RAW_EDGES.forEach(e => {{ e._dim = on.size > 0 && !on.has(e.from) && !on.has(e.to); }});
+  refreshPaint();
 }}
 
+// Undim AND reframe — the background click means "show me everything again".
 function clearFocus() {{
-  focusId = null;
-  RAW_NODES.forEach(n => {{ n._dim = false; }});
-  RAW_EDGES.forEach(e => {{ e._dim = false; }});
+  applyFocus(null);
+  Graph.zoomToFit(600, 40);
+}}
+
+// Re-pass the colour accessors so the renderer repaints without touching the
+// simulation. 2D also needs nodeCanvasObject re-passed — the canvas draw reads
+// _dim itself, and force-graph caches nothing per node between frames, so a
+// plain redraw suffices there; the re-pass is what schedules it.
+function refreshPaint() {{
   Graph.nodeColor(Graph.nodeColor());
   Graph.linkColor(Graph.linkColor());
-  Graph.zoomToFit(600);
 }}
 
 let activeCommunity = -2;
@@ -438,33 +490,127 @@ function nodeColor(n) {{
 // baseline, so the auto-scaling stays authoritative as the vault grows.
 const AVG_DEG = RAW_NODES.length ? 2 * RAW_EDGES.length / RAW_NODES.length : 0;
 const FORCE_SCALE = Math.min(4, Math.max(1, Math.sqrt(AVG_DEG / 2)));
-const BASE_CHARGE = -60 * FORCE_SCALE * FORCE_SCALE;
-const BASE_DIST = 30 * FORCE_SCALE;
+// Same auto-scaled baseline in both modes; only the per-mode constants differ.
+// 2D has one dimension fewer to disperse into, so at the same charge the plane
+// packs tighter than the sphere: repulsion and rest length are opened up until
+// x1 reads the same in both. (Tuned by eye — that IS what "looks right" means.)
+const CHARGE_2D_K = 1.8, DIST_2D_K = 1.5;
+const baseCharge = () => -60 * FORCE_SCALE * FORCE_SCALE * (is2D() ? CHARGE_2D_K : 1);
+const baseDist   = () => 30 * FORCE_SCALE * (is2D() ? DIST_2D_K : 1);
 // Fixed 100 ticks never let a big graph unfold; scale settle time with size.
 const COOLDOWN_TICKS = 100 + Math.min(200, Math.round(RAW_NODES.length / 10));
 
-const Graph = new ForceGraph3D(document.getElementById("graph"))
-  .backgroundColor("#0D0917")   // --void
-  .graphData({{ nodes: RAW_NODES, links: RAW_EDGES }})
-  .linkSource("from").linkTarget("to")
-  .nodeLabel("label").nodeVal("size")
-  .nodeColor(nodeColor)
-  .linkColor(l => l._dim ? '#141221' : ((l.color && l.color.color) || "#8a8da6"))
-  // Perf on big vaults (1200+ notes): linkWidth>0 makes every edge a cylinder
-  // mesh and arrows add a cone per edge — thousands of meshes. Width 0 ⇒ cheap
-  // GL lines; no arrows; fewer sphere segments; finite cooldown so the sim
-  // settles and stops reflowing instead of re-laying-out every frame.
-  .linkWidth(0)
-  // Structural gaps have no dash in WebGL — mark them by motion instead: amber
-  // particles stream along the absent bridge. Only for GAP links, and they stop
-  // when the link is dimmed (node focus) so focus mode stays quiet.
-  .linkDirectionalParticles(l => l.type === "GAP" && !l._dim ? 2 : 0)
-  .linkDirectionalParticleColor(() => "{_EDGE_COLOR_GAP}")
-  .linkDirectionalParticleWidth(2)
-  .nodeResolution(6)
-  .cooldownTicks(COOLDOWN_TICKS)
-  .nodeVisibility(n => !n._hidden)
-  .linkVisibility(l => !l._hidden);
+// --- 2D labels: node radius + zoom LOD --------------------------------------
+// Base size is whatever the smallest real note got (16 today, or 16+40*b once
+// betweenness sizing runs); anything above it is a node that stands out, and
+// those are the ones worth a label before you have zoomed in.
+const BASE_SIZE = RAW_NODES.reduce(
+  (m, n) => n.type === "ghost" ? m : Math.min(m, n.size || 16), Infinity);
+const NODE_REL_SIZE = 1.5;  // r = sqrt(val) * this — 16 => 6px, a 56 hub => 11px
+const nodeRadius = n => Math.sqrt(Math.max(0, n.size || 16)) * NODE_REL_SIZE;
+
+// Circle + text. Below ~0.6 zoom only dots (at that scale the text is a smear
+// and the labels outnumber the pixels); 0.6-1.5 the standouts; above 1.5 all of
+// them. Font size divides by the zoom so text keeps a constant SCREEN size.
+function drawNode(n, ctx, scale) {{
+  const r = nodeRadius(n);
+  ctx.beginPath();
+  ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+  ctx.fillStyle = nodeColor(n);
+  ctx.fill();
+  if (n._dim || scale < 0.6) return;                       // dimmed: dot only
+  if (scale < 1.5 && (n.size || 16) <= BASE_SIZE) return;  // mid zoom: standouts
+  ctx.font = (11 / scale) + 'px Lexend, system-ui, sans-serif';
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = n.type === "ghost" ? "#838DA7" : "#EBEFF8";  // --ash-dim / --frost
+  ctx.fillText(n.label, n.x, n.y + r + 2 / scale);
+}}
+
+// Hit area follows the circle, not the label: clicking the text of a dense
+// cluster would otherwise pick whichever node's label happened to be on top.
+function paintNodeArea(n, color, ctx) {{
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(n.x, n.y, nodeRadius(n) + 2, 0, 2 * Math.PI);
+  ctx.fill();
+}}
+
+// --- the renderer, either dimension ----------------------------------------
+// /graph regenerates the whole document per request (cooccurrence refresh + kNN
+// + Louvain), so the switch must never reload: it destroys the instance and
+// rebuilds from the RAW_NODES/RAW_EDGES already in the page. The two libs are
+// kapsule siblings — one builder, four branches (fly-to, sphere detail, link
+// width, labels), everything else shared.
+const MODE_KEY = "silica-graph-mode";
+let mode = "3d";
+try {{ if (localStorage.getItem(MODE_KEY) === "2d") mode = "2d"; }} catch (e) {{}}
+const is2D = () => mode === "2d";
+
+let Graph = null;
+let fitPending = false;  // one-shot zoomToFit after a rebuild
+
+function buildGraph() {{
+  const el = document.getElementById("graph");
+  if (Graph) {{
+    try {{ Graph._destructor(); }} catch (e) {{}}  // kapsule teardown (frees the GL ctx)
+    el.innerHTML = "";
+  }}
+  const G = is2D() ? new ForceGraph(el) : new ForceGraph3D(el);
+  G.backgroundColor("#0D0917")   // --void
+    .graphData({{ nodes: RAW_NODES, links: RAW_EDGES }})
+    .linkSource("from").linkTarget("to")
+    .nodeVal("size")
+    .nodeColor(nodeColor)
+    .linkColor(l => l._dim ? '#141221' : ((l.color && l.color.color) || "#8a8da6"))
+    // Structural gaps have no dash in WebGL — mark them by motion instead: amber
+    // particles stream along the absent bridge. Only for GAP links, and they stop
+    // when the link is dimmed (node focus) so focus mode stays quiet. Same
+    // binding in both libs, so the gaps read the same either way.
+    .linkDirectionalParticles(l => l.type === "GAP" && !l._dim ? 2 : 0)
+    .linkDirectionalParticleColor(() => "{_EDGE_COLOR_GAP}")
+    .linkDirectionalParticleWidth(2)
+    .cooldownTicks(COOLDOWN_TICKS)
+    .nodeVisibility(n => !n._hidden)
+    .linkVisibility(l => !l._hidden)
+    .onNodeClick(node => {{ selectNode(node); applyFocus(node.id); }})
+    .onBackgroundClick(() => {{ closeDrawer(); clearFocus(); }})
+    .onEngineStop(() => {{ if (fitPending) {{ fitPending = false; G.zoomToFit(400, 40); }} }});
+
+  if (is2D()) {{
+    // Width 0 is invisible on canvas (GL draws a 1px line for it, 2D draws
+    // nothing), and the labels ARE the point here, so pay for them.
+    G.linkWidth(1)
+      .nodeRelSize(NODE_REL_SIZE)
+      .nodeCanvasObject(drawNode)
+      .nodePointerAreaPaint(paintNodeArea);
+  }} else {{
+    // Perf on big vaults (1200+ notes): linkWidth>0 makes every edge a cylinder
+    // mesh and arrows add a cone per edge — thousands of meshes. Width 0 ⇒ cheap
+    // GL lines; no arrows; fewer sphere segments; finite cooldown so the sim
+    // settles and stops reflowing instead of re-laying-out every frame.
+    G.linkWidth(0).nodeResolution(6).nodeLabel("label");
+  }}
+  return G;
+}}
+
+// Switching preserves everything that is not the camera: edge filters, the
+// community filter, the focused set and the search box all live outside the
+// instance. The camera cannot be preserved — there is no sane mapping from a 3D
+// camera to a 2D pan/zoom — so it refits once the new layout settles.
+function setMode(m) {{
+  if (m === mode && Graph) return;
+  const rebuild = Graph !== null;   // a switch always refits; a first build may not
+  mode = m;
+  try {{ localStorage.setItem(MODE_KEY, m); }} catch (e) {{}}
+  document.querySelectorAll("#mode-toggle button")
+    .forEach(b => b.classList.toggle("active", b.dataset.mode === m));
+  fitPending = fitPending || rebuild;
+  Graph = buildGraph();
+  applyForces(false);      // sim restarts at full alpha — no reheat needed
+  applyFilters();
+  applyFocus(focusIds);
+}}
 
 // Slider multipliers persist across sessions; the baseline is never persisted
 // (recomputed from the current graph each load).
@@ -476,9 +622,9 @@ try {{
 
 function applyForces(reheat) {{
   // distanceMax bounds both over-dispersion and per-tick cost on big graphs.
-  Graph.d3Force("charge").strength(BASE_CHARGE * forceMul.repel)
+  Graph.d3Force("charge").strength(baseCharge() * forceMul.repel)
     .distanceMax(600 * FORCE_SCALE);
-  Graph.d3Force("link").distance(BASE_DIST * forceMul.dist);
+  Graph.d3Force("link").distance(baseDist() * forceMul.dist);
   // Center capped at 1: d3 forceCenter shifts positions directly, >1 oscillates.
   Graph.d3Force("center").strength(Math.min(1, forceMul.center));
   if (reheat) Graph.d3ReheatSimulation();
@@ -515,7 +661,12 @@ function resetForces() {{
 }}
 
 syncForceUI();
-applyForces(false); // sim just started at full alpha, no reheat needed
+// First build: the mode comes from localStorage (3D on a fresh profile), and
+// setMode owns the whole bring-up — instance, forces, filters, focus. A 2D
+// first paint has no default camera worth keeping, so it refits; 3D keeps the
+// lib's own initial framing.
+fitPending = is2D();
+setMode(mode);
 
 function applyFilters() {{
   RAW_NODES.forEach(n => {{
@@ -644,10 +795,15 @@ function onSearchKey(e) {{
   else if (e.key === "Escape")    {{ document.getElementById("search").value = ""; renderResults(""); }}
 }}
 
-// Fly the camera to a node along its outward radial, looking at it. Coords
-// (node.x/y/z) exist once the layout has run (cooldownTicks); before that they
-// default to 0 and the camera simply recentres — harmless.
+// Fly to a node: a camera move in 3D, a pan + zoom in 2D. Coords (node.x/y/z)
+// exist once the layout has run (cooldownTicks); before that they default to 0
+// and the view simply recentres — harmless.
 function focusNode(node) {{
+  if (is2D()) {{
+    Graph.centerAt(node.x || 0, node.y || 0, 900);
+    Graph.zoom(2.5, 900);
+    return;
+  }}
   const r = Math.hypot(node.x || 0, node.y || 0, node.z || 0) || 1;
   const k = 1 + 90 * 3 / r;
   Graph.cameraPosition(
@@ -657,10 +813,18 @@ function focusNode(node) {{
 }}
 
 function selectNode(node) {{
-  // Embedded in the web-UI iframe: hand off to the parent's note drawer instead
-  // of opening this internal metadata drawer (avoids two stacked drawers).
+  // Embedded in the web-UI iframe: hand off to the parent's drawer instead of
+  // opening this internal metadata drawer (avoids two stacked drawers). A graph
+  // click means "what is this, and what is around it", so it opens the parent's
+  // CONTEXT mode, not the reader. Ghost nodes ride the same message: they have
+  // no path, and context is the only mode that can say anything about them.
   if (window.parent !== window) {{
-    window.parent.postMessage({{ type: "silica-open-note", path: node.path }}, "*");
+    window.parent.postMessage({{
+      type:  "silica-open-context",
+      path:  node.path || "",
+      name:  node.label || "",
+      ghost: node.type === "ghost",
+    }}, "*");
     return;
   }}
   document.getElementById("drawer-title").textContent = node.label;
@@ -685,11 +849,10 @@ function selectNode(node) {{
   document.getElementById("drawer").classList.add("open");
 }}
 
-// Direct clicks in the 3D view get the same dim-non-neighbours treatment as
-// tree/search picks, but skip focusNode's camera fly — the user is already
-// looking at this spot, recentring would just be jarring.
-Graph.onNodeClick(node => {{ selectNode(node); applyFocus(node.id); }});
-Graph.onBackgroundClick(() => {{ closeDrawer(); clearFocus(); }});
+// (Direct clicks in the view get the same dim-non-neighbours treatment as
+// tree/search picks, but skip focusNode's fly — the user is already looking at
+// this spot, recentring would just be jarring. Bound in buildGraph, so a mode
+// switch rebinds them.)
 
 // The embedding page (chat + note-panel) tells us which note is open
 // elsewhere — e.g. a link followed inside the note panel itself — so the
@@ -698,12 +861,21 @@ window.addEventListener("message", e => {{
   if (e.data && e.data.type === "silica-focus-path") {{
     applyFocus(NODE_BY_ID[e.data.path] ? e.data.path : null);
   }}
+  // Same, for a SET of notes: the context drawer's concept cloud lights every
+  // note carrying the clicked concept at once.
+  if (e.data && e.data.type === "silica-focus-paths") {{
+    applyFocus(e.data.paths || []);
+  }}
   // The explore toolbar's note search asks us to *locate* a note: fly the
   // camera to it and dim to its neighbourhood, without opening the drawer
   // (selectNode would) — the user is searching the cloud, not inspecting yet.
   if (e.data && e.data.type === "silica-goto-path") {{
     const n = NODE_BY_ID[e.data.path];
     if (n) {{ focusNode(n); applyFocus(n.id); }}
+  }}
+  // The note drawer covers this frame's right edge, which is where the HUD is.
+  if (e.data && e.data.type === "silica-host-drawer") {{
+    document.body.classList.toggle("host-drawer-open", !!e.data.open);
   }}
 }});
 

@@ -170,7 +170,7 @@ class TestRenderSanity:
         """Fit graph button should call Graph.zoomToFit, not network.fit."""
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
-        assert "Graph.zoomToFit(400)" in html
+        assert "Graph.zoomToFit(400, 40)" in html
         assert "network.fit(" not in html
 
     def test_node_visibility_accessor(self, small_graph):
@@ -261,14 +261,18 @@ class TestSearchResultsFlyTo:
         html = render_html(nodes, edges, lib_js="// dummy")
         assert "onSearchKey(" in html
 
-    def test_embedded_node_click_posts_open_note_to_parent(self, small_graph):
+    def test_embedded_node_click_posts_open_context_to_parent(self, small_graph):
         """When embedded in the web-UI iframe, a node click hands off to the
-        parent's note drawer instead of opening the internal metadata drawer."""
+        parent's drawer instead of opening the internal metadata drawer — and to
+        its CONTEXT mode: pointing at a node asks "what is this", where naming a
+        note (a wikilink, the file tree) asks to read it. A ghost node rides the
+        same message, since it has no path and no reader."""
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
         assert "window.parent !== window" in html
         assert "postMessage" in html
-        assert "silica-open-note" in html
+        assert "silica-open-context" in html
+        assert 'ghost: node.type === "ghost"' in html
 
 
 class TestFocusDim:
@@ -297,14 +301,15 @@ class TestFocusDim:
     def test_clear_focus_zooms_to_fit(self, small_graph):
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
-        assert "Graph.zoomToFit(600)" in html
+        assert "Graph.zoomToFit(600, 40)" in html
 
     def test_direct_node_click_dims_without_camera_fly(self, small_graph):
-        """Clicking a node in the 3D view itself dims non-neighbours like tree/search
-        picks, but must NOT call focusNode — the user is already looking at the spot."""
+        """Clicking a node in the view itself dims non-neighbours like tree/search
+        picks, but must NOT call focusNode — the user is already looking at the
+        spot. Bound inside buildGraph, so a 2D/3D switch rebinds it."""
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
-        assert "Graph.onNodeClick(node => {" in html
+        assert ".onNodeClick(node => {" in html
         assert "selectNode(node); applyFocus(node.id);" in html
 
     def test_parent_can_sync_focus_by_path(self, small_graph):
@@ -382,3 +387,23 @@ class TestBigVaultPerfKnobs:
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
         assert ".nodeResolution(" in html
+
+
+# ---------------------------------------------------------------------------
+# The host page's note drawer overlays this frame's right edge, where the HUD
+# sits, and the drawer is translucent. Both halves of the fix live inside an
+# f-string template, so a brace-escaping slip would drop them silently and the
+# legend would read through the open note again.
+# ---------------------------------------------------------------------------
+
+class TestHostDrawerHidesTheHud:
+    def test_css_rule_survives_the_template(self, small_graph):
+        nodes, edges = small_graph
+        html = render_html(nodes, edges, lib_js="")
+        assert "body.host-drawer-open #hud{display:none}" in html
+
+    def test_listener_toggles_the_class(self, small_graph):
+        nodes, edges = small_graph
+        html = render_html(nodes, edges, lib_js="")
+        assert 'e.data.type === "silica-host-drawer"' in html
+        assert 'classList.toggle("host-drawer-open", !!e.data.open)' in html
