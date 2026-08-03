@@ -2243,7 +2243,7 @@ body.dragging #drop-hint {
   width: min(240px, 40vw);
   aspect-ratio: 519 / 650;
   background: url("/static/sili.webp") center / contain no-repeat;
-  filter: drop-shadow(0 8px 46px rgba(53, 198, 232, .16));
+  filter: drop-shadow(0 4px 14px rgba(53, 198, 232, .24));
 }
 
 #log:empty::after {
