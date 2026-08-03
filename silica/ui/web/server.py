@@ -210,6 +210,28 @@ def _embed_img(target: str, alias: str) -> str:
     return f'<img src="{_html.escape(src, quote=True)}" alt="{_html.escape(alt, quote=True)}"{width}>'
 
 
+_RAW_IMG_SRC = re.compile(r"""(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2""", re.IGNORECASE | re.DOTALL)
+
+
+def _rewrite_raw_img_src(html: str) -> str:
+    """Route a raw-HTML ``<img src="assets/x.png">`` through /asset.
+
+    markdown-it's commonmark preset passes raw HTML through, and the image
+    rewrite in _render only reaches markdown-native ``![alt](path)`` tokens. A
+    note written for GitHub uses the HTML form instead, so its src arrived
+    intact and the browser resolved it against the page origin: the drawer
+    404'd on every such image and showed the alt text in a box. Absolute,
+    external, anchor and data: URLs pass untouched, same rule as the token
+    path."""
+    def sub(m: "re.Match[str]") -> str:
+        src = m.group(3)
+        if not src or src.startswith(("http://", "https://", "data:", "/", "#")):
+            return m.group(0)
+        return f"{m.group(1)}{m.group(2)}/asset?path={_quote(src)}{m.group(2)}"
+
+    return _RAW_IMG_SRC.sub(sub, html)
+
+
 def _linkify_text(text: str, resolve) -> str:
     """Turn resolvable note refs in one plain-text run into `.note-link` anchors.
 
@@ -403,10 +425,17 @@ def _linkify(text: str, resolve=None) -> str:
     tokens = md.parse(text)
     _ofm_blocks(tokens)
     for tok in tokens:
+        if tok.type == "html_block":
+            tok.content = _rewrite_raw_img_src(tok.content)
+            continue
         if tok.type != "inline" or not tok.children:
             continue
         new = []
         for child in tok.children:
+            if child.type == "html_inline":
+                child.content = _rewrite_raw_img_src(child.content)
+                new.append(child)
+                continue
             if child.type == "image":
                 # vault-relative image: route through /asset (absolute/external
                 # and data: URLs pass untouched)

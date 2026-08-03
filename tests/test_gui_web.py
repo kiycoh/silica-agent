@@ -746,6 +746,28 @@ def test_markdown_relative_image_src_routes_through_asset():
     assert 'src="https://x.io/p.png"' in html
 
 
+def test_raw_html_relative_image_src_routes_through_asset():
+    # A note written for GitHub uses <img src="..."> rather than ![alt](...), and
+    # commonmark passes that through untouched — so the browser resolved it
+    # against the page origin and every such image 404'd in the drawer.
+    from silica.ui.web.server import _linkify
+
+    html = _linkify('<p align="center"><img src="assets/demo.gif" alt="demo" width="900" /></p>', _fake_resolve)
+    assert 'src="/asset?path=assets/demo.gif"' in html
+
+    # inline, single-quoted, and the three forms that must NOT be rewritten
+    html = _linkify(
+        "text <img src='img/a b.png'> and "
+        '<img src="https://x.io/p.png"> and <img src="/asset?path=already.png"> and '
+        '<img src="data:image/png;base64,AA">',
+        _fake_resolve,
+    )
+    assert "src='/asset?path=img/a%20b.png'" in html
+    assert 'src="https://x.io/p.png"' in html
+    assert 'src="/asset?path=already.png"' in html
+    assert 'src="data:image/png;base64,AA"' in html
+
+
 def test_fence_gets_pygments_spans():
     from silica.ui.web.server import _linkify
 
