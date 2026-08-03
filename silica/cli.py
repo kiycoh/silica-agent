@@ -267,7 +267,10 @@ def resolve_cwd_vault(cwd, home=None):
     - inside a git repo → the repo root (one project is one vault, from any of
       its subdirectories);
     - anywhere else → cwd itself;
-    - $HOME itself → None: a vault is a folder of notes, not everything you own.
+    - $HOME or the filesystem root → None: a vault is a folder of notes, not
+      everything you own. The root is not reachable by launching a shell there
+      but a GUI client can spawn a stdio server with cwd ``/``, and indexing
+      the whole disk is never what that meant.
 
     Adoption of the returned path (a pre-existing ``docs/silica`` under it still
     wins for back-compat) belongs to ``resolve_vault_switch``; where writes may
@@ -277,7 +280,7 @@ def resolve_cwd_vault(cwd, home=None):
     from silica.kernel.code import gitstate
 
     cwd = Path(cwd).resolve()
-    if cwd == Path(home or Path.home()).resolve():
+    if cwd == Path(home or Path.home()).resolve() or cwd == Path(cwd.anchor):
         return None
     root = gitstate.find_repo_root(cwd)
     if root is None:

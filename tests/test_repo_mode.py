@@ -110,6 +110,12 @@ def test_home_itself_is_never_the_vault(tmp_path):
     assert resolve_cwd_vault(tmp_path, home=tmp_path) is None
 
 
+def test_filesystem_root_is_never_the_vault(tmp_path):
+    # No shell starts there, but a GUI client can spawn a stdio MCP server with
+    # cwd `/`, and indexing the whole disk is never what that meant.
+    assert resolve_cwd_vault(Path(Path.cwd().anchor), home=tmp_path) is None
+
+
 def test_a_pre_write_dir_layout_migrates_on_launch(tmp_path, monkeypatch, vault_env):
     # The vault Silica opens is the repo you launched in, whatever it finds
     # underneath. A vault from before the write boundary keeps its notes and

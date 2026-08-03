@@ -233,7 +233,9 @@ A live bridge into the Obsidian desktop app: Silica reads and writes the vault y
 
 Silica serves your vault over stdio to any MCP client, so an assistant recalls your real notes and real decisions before it answers. One command line, `uvx --from 'silica-agent[mcp]' silica mcp`, and no model or API key on the read path: search, recall, and note reading run on the vault alone.
 
-`silica setup <client>` writes that line into the client's config for you, with the resolved vault path filled in:
+The vault is the folder the client was started in, the way a coding agent already works: open a project, get that project's vault. No path is written into the config, so the same entry serves every project.
+
+`silica setup <client>` writes that line into the client's config for you:
 
 ```bash
 silica setup claude      # delegates to `claude mcp add`
@@ -261,9 +263,6 @@ claude plugin install silica@silica
 [mcp_servers.silica]
 command = "uvx"
 args = ["--from", "silica-agent[mcp]", "silica", "mcp"]
-
-[mcp_servers.silica.env]
-SILICA_VAULT = "/path/to/your/vault"
 ```
 
 **opencode** (`opencode.json`):
@@ -274,14 +273,13 @@ SILICA_VAULT = "/path/to/your/vault"
     "silica": {
       "type": "local",
       "command": ["uvx", "--from", "silica-agent[mcp]", "silica", "mcp"],
-      "enabled": true,
-      "environment": { "SILICA_VAULT": "/path/to/your/vault" }
+      "enabled": true
     }
   }
 }
 ```
 
-`SILICA_VAULT` is optional: without it Silica serves the default vault at `~/.silica/vault`. An MCP client starts the server with its own environment, so any other setting the tools need (embedding endpoint, model) belongs in that same `env` block rather than in a shell profile.
+Add `SILICA_VAULT` to the entry (an `env` table for Codex, `environment` for opencode) only to override the working directory and serve one fixed vault everywhere, which is what a headless run like a cron unit wants. An MCP client starts the server with its own environment, so any other setting the tools need (embedding endpoint, model) belongs in that same block rather than in a shell profile.
 
 </details>
 
@@ -359,7 +357,7 @@ uv run python -m evals.locomo --data locomo10.json --run-root RUN_DIR \
 
 ## Point it at code
 
-Set `SILICA_VAULT` to a repository instead of a note folder and Silica keeps a human-readable map of the code under `docs/silica/`, kept honest against git.
+Point Silica at a repository instead of a note folder, by launching it there or setting `SILICA_VAULT`, and it keeps a human-readable map of the code under `docs/silica/`, kept honest against git.
 
 - **`/nucleate <file>`** extracts a shallow AST skeleton with tree-sitter (signatures, structure, imports) and turns it into a markdown note, stamped with the commit it was verified against.
 - **`/wiki`** grows that into a behavioral wiki: an `ARCHITECTURE.md` plus one note per subsystem.

@@ -4,14 +4,7 @@ from __future__ import annotations
 import json
 import tomllib
 
-import pytest
-
 from silica.onboarding import setup_client
-
-
-@pytest.fixture(autouse=True)
-def _vault(monkeypatch, tmp_path):
-    monkeypatch.setattr(setup_client.CONFIG, "vault_path", str(tmp_path / "vault"))
 
 
 def test_codex_appends_block(tmp_path):
@@ -24,7 +17,24 @@ def test_codex_appends_block(tmp_path):
     # The [mcp] extra is the point of the block, and rich markup eats it if the
     # payload is ever printed or written through a markup-enabled path.
     assert parsed["mcp_servers"]["silica"]["args"] == ["--from", "silica-agent[mcp]", "silica", "mcp"]
-    assert parsed["mcp_servers"]["silica"]["env"]["SILICA_VAULT"].endswith("vault")
+
+
+def test_no_client_gets_a_pinned_vault(tmp_path):
+    """The generated config must not carry SILICA_VAULT.
+
+    The server resolves the vault from the working directory its client spawns
+    it in, so a pin written once at setup time would serve that one vault to
+    every project the user ever opens.
+    """
+    toml_cfg = tmp_path / "config.toml"
+    setup_client.run_setup(["codex", "--config", str(toml_cfg)])
+    assert "SILICA_VAULT" not in toml_cfg.read_text(encoding="utf-8")
+
+    json_cfg = tmp_path / "opencode.json"
+    setup_client.run_setup(["opencode", "--config", str(json_cfg)])
+    assert "SILICA_VAULT" not in json_cfg.read_text(encoding="utf-8")
+
+    assert "SILICA_VAULT" not in _printed(["claude", "--dry-run"])
 
 
 def test_codex_is_idempotent(tmp_path):

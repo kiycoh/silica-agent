@@ -23,7 +23,6 @@ from pathlib import Path
 
 from rich.markup import escape
 
-from silica.config import CONFIG
 from silica.ui.console import CONSOLE
 
 # Everything this module prints carries a payload full of square brackets: the
@@ -37,6 +36,15 @@ from silica.ui.console import CONSOLE
 # install step of its own, which is the whole point of the generated block.
 MCP_COMMAND = ["uvx", "--from", "silica-agent[mcp]", "silica", "mcp"]
 
+# No SILICA_VAULT in the generated block, deliberately. All three clients are
+# CLIs launched from a project and spawn the stdio server with that working
+# directory, which is already the answer (`cli.resolve_cwd_vault`), so the
+# server serves the project you opened — the Claude Code model, one vault per
+# place. Writing the vault that happened to be active at `silica setup` time
+# would pin it into every project afterwards, which is what `_activate_repo_mode`
+# warns against. A fixed vault is still expressible: export SILICA_VAULT, or add
+# the env block by hand to the file this wrote.
+
 CLIENTS = ("claude", "codex", "opencode")
 
 
@@ -45,17 +53,6 @@ def _default_path(client: str) -> Path:
     if client == "codex":
         return home / ".codex" / "config.toml"
     return home / ".config" / "opencode" / "opencode.json"
-
-
-def _vault() -> str:
-    """Absolute vault path for the generated env block, or "" to omit it.
-
-    An MCP client starts the server from its own working directory, so a
-    relative path (or none at all, which resolves to ~/.silica/vault) would
-    point somewhere the user did not mean.
-    """
-    raw = CONFIG.vault_path.strip()
-    return str(Path(raw).expanduser().resolve()) if raw else ""
 
 
 def _backup(path: Path) -> Path:
@@ -77,16 +74,12 @@ def _report(path: Path, block: str, dry_run: bool, backup: Path | None) -> int:
 
 
 def _codex_block() -> str:
-    vault = _vault()
     args = ", ".join(f'"{a}"' for a in MCP_COMMAND[1:])
-    block = (
+    return (
         "\n[mcp_servers.silica]\n"
         f'command = "{MCP_COMMAND[0]}"\n'
         f"args = [{args}]\n"
     )
-    if vault:
-        block += f'\n[mcp_servers.silica.env]\nSILICA_VAULT = "{vault}"\n'
-    return block
 
 
 def _setup_codex(path: Path, dry_run: bool) -> int:
@@ -134,9 +127,6 @@ def _setup_opencode(path: Path, dry_run: bool) -> int:
             CONSOLE.print(f"  [dim]silica is already configured in {escape(str(path))} — nothing to do[/]")
             return 0
     entry: dict = {"type": "local", "command": MCP_COMMAND, "enabled": True}
-    vault = _vault()
-    if vault:
-        entry["environment"] = {"SILICA_VAULT": vault}
     data.setdefault("mcp", {})["silica"] = entry
     block = json.dumps(data, indent=2) + "\n"
     if dry_run:
@@ -154,12 +144,14 @@ def _setup_claude(dry_run: bool) -> int:
     so writing the file by hand would be a second implementation to keep in sync
     with theirs. When the CLI is absent, printing the command is still the whole
     answer.
+
+    User scope, not the `local` default: the entry names no vault, so the one
+    registration serves every project (each resolving its own vault from the cwd
+    Claude spawns the server in). Per-project scope would mean re-running this
+    in each repo to say the same thing.
     """
-    vault = _vault()
-    cmd = ["claude", "mcp", "add", "--transport", "stdio", "silica"]
-    if vault:
-        cmd += ["--env", f"SILICA_VAULT={vault}"]
-    cmd += ["--", *MCP_COMMAND]
+    cmd = ["claude", "mcp", "add", "--scope", "user",
+           "--transport", "stdio", "silica", "--", *MCP_COMMAND]
     printable = " ".join(cmd)
     if dry_run or not shutil.which("claude"):
         if not dry_run:
@@ -173,7 +165,7 @@ def _setup_claude(dry_run: bool) -> int:
     if result.returncode != 0:
         CONSOLE.print(f"  [red]✗[/] `{escape(printable)}` failed")
         return result.returncode
-    CONSOLE.print("  [green]✓[/] registered with Claude Code")
+    CONSOLE.print("  [green]✓[/] registered with Claude Code (user scope: every project, vault from its folder)")
     CONSOLE.print(
         "  [dim]for the recall/capture skill too: "
         "claude plugin marketplace add kiycoh/silica-agent && "
