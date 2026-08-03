@@ -16,6 +16,7 @@
   <a href="#readme"><img src="https://img.shields.io/badge/local--first-100%25%20offline-2ea44f" alt="Local-first" /></a>
   <a href="#readme"><img src="https://img.shields.io/badge/MCP-FastMCP%20stdio-6366f1" alt="MCP" /></a>
   <a href="https://obsidian.md"><img src="https://img.shields.io/badge/Obsidian-Native-7a46e6" alt="Obsidian Native" /></a>
+  <a href="https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md"><img src="https://img.shields.io/badge/OKF-v0.2-4285f4" alt="Open Knowledge Format v0.2" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/kiycoh/silica-agent" alt="License" /></a>
 </p>
 
@@ -106,9 +107,24 @@ Silica is not a free-form agent. Every vault mutation passes through a finite-st
 
 ---
 
+## The pattern, and the format
+
+Silica did not invent the artifact it curates. In April 2026 Andrej Karpathy wrote down the [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) pattern: keep the raw sources immutable, have the model compile them into a cross-linked markdown wiki, and have it maintain that wiki instead of rediscovering everything on every question. What a retrieval system would go looking for at query time is already synthesized, and the model does the bookkeeping a person will not: *"LLMs don't get bored, don't forget to update a cross-reference, and can touch 15 files in one pass."*
+
+Two months later Google Cloud published the [Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing), "an open specification that formalizes the LLM-wiki pattern into a portable, interoperable format": a directory of markdown files with YAML frontmatter, with no schema registry, no central authority, and no required tooling. [v0.2](https://cloud.google.com/blog/products/data-analytics/okf-v0-2-adds-trust-signals) added what an agent-maintained corpus needs before anyone can trust it: provenance, trust, lifecycle, and attestation.
+
+Silica is that pattern with a gate in front of it, and the vault it curates is an OKF bundle as it stands:
+
+- **[§11](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md#11-conformance) conformance by construction, not by export.** Every note declares a `type`. Silica derives it from signals the kernel already keys on (a path under `sources/`, a code binding, a plan status) and stamps it at the single write seam, so there is no export step and no second copy of your notes. A `type` you wrote yourself is never overwritten, and §4.1 tolerates a vocabulary the spec has never heard of, so your own stays conformant. `silica doctor` censuses the vault against the three §11 clauses, and a one-shot backfill closes the gap on notes that predate the field.
+- **§5.2 `verified`, the way back to the human tier.** Silica flags what it wrote, and a note it once touched used to rank as agent-authored forever after. A `verified:` entry naming a person restores the human trust tier. A machine actor does not qualify: a pipeline re-reading its own output is not a second opinion, and letting one count would hand the agent a lever on its own authority.
+
+**What conformance covers.** The notes the vault owns. Silica does not force frontmatter onto markdown it did not write, because in a repository a `README` is markdown by right, and it does not generate the optional `index.md` and `log.md` bundle files.
+
+---
+
 ## Compared to the alternatives
 
-The two nearest neighbors are worth naming. [Basic Memory](https://github.com/basicmachines-co/basic-memory) is the substrate twin: markdown on your disk, wikilinks, MCP, same AGPL license. [LLM Wiki](https://github.com/nashsu/llm_wiki) is the closest in ambition: a desktop app that compiles your documents into a wiki and keeps it current.
+The two nearest neighbors are worth naming. [Basic Memory](https://github.com/basicmachines-co/basic-memory) is the substrate twin: markdown on your disk, wikilinks, MCP, same AGPL license. [LLM Wiki](https://github.com/nashsu/llm_wiki) is the closest in ambition: a desktop app built on [the same pattern](#the-pattern-and-the-format), which compiles your documents into a wiki and keeps it current.
 
 | | **Silica** | **Basic Memory** | **LLM Wiki** |
 | :--- | :--- | :--- | :--- |
@@ -133,7 +149,7 @@ The two nearest neighbors are worth naming. [Basic Memory](https://github.com/ba
 
 ### What Silica did not invent
 
-Credit where it is owed. **Plain markdown, local-first, AGPL** is the entry ticket to this category and Basic Memory got there too; Silica pays it in full, with no tier above the local one. **A graph with community detection and an interactive view** ships in Graphify, GitNexus, LLM Wiki, and GraphRAG; what Silica adds is that the same co-occurrence structure is also a retrieval leg. **Self-linking atomic notes** are A-MEM's thesis, and old news in Obsidian plugins; Silica's part is that those links survive a merge, a split, and a rename. **Staleness against the code** is Fiberplane Drift's reformat-immune AST fingerprint, Swimm sells it, OpenWiki schedules it; Silica runs it inside the vault that also holds your notes, and `/impact`, from a diff back to the notes it invalidates, is the piece almost nobody replicates. **Typed relations** are Graphiti's, with per-edge validity intervals Silica does not model, computed here on demand rather than frozen at ingest. **An MCP server and local models** are table stakes: four drivers, one gate, no privileged client.
+Credit where it is owed. **The wiki pattern itself** is Karpathy's and **the format that carries it** is Google's OKF, as [above](#the-pattern-and-the-format); what Silica adds is the gate in front of both, and it is the only part of this section it claims. **Plain markdown, local-first, AGPL** is the entry ticket to this category and Basic Memory got there too; Silica pays it in full, with no tier above the local one. **A graph with community detection and an interactive view** ships in Graphify, GitNexus, LLM Wiki, and GraphRAG; what Silica adds is that the same co-occurrence structure is also a retrieval leg. **Self-linking atomic notes** are A-MEM's thesis, and old news in Obsidian plugins; Silica's part is that those links survive a merge, a split, and a rename. **Staleness against the code** is Fiberplane Drift's reformat-immune AST fingerprint, Swimm sells it, OpenWiki schedules it; Silica runs it inside the vault that also holds your notes, and `/impact`, from a diff back to the notes it invalidates, is the piece almost nobody replicates. **Typed relations** are Graphiti's, with per-edge validity intervals Silica does not model, computed here on demand rather than frozen at ingest. **An MCP server and local models** are table stakes: four drivers, one gate, no privileged client.
 
 ---
 
@@ -486,6 +502,12 @@ Everything under **Available now** ships in the current release. Everything belo
 * **[Is Your Agent Playing Dead? Deployed LLM Agents Exhibit Constraint-Evasive Fabrication and Thanatosis](https://arxiv.org/abs/2606.14831)** (arXiv:2606.14831, 2026)
 * **[Reliable Graph-RAG for Codebases: AST-Derived Graphs vs LLM-Extracted Knowledge Graphs](https://arxiv.org/abs/2601.08773)** (arXiv:2601.08773, 2026)
 * **[Predicting new research directions in materials science using large language models and concept graphs](https://doi.org/10.1038/s42256-026-01206-y)** (*Nature Machine Intelligence*, 2026)
+
+The lineage of the artifact itself, as described in [The pattern, and the format](#the-pattern-and-the-format):
+
+* **[LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)** (Andrej Karpathy, April 2026), the pattern Silica extends
+* **[Introducing the Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)** (McVeety and Hormati, Google Cloud, June 2026)
+* **[OKF v0.2 specification](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)** ([GoogleCloudPlatform/knowledge-catalog](https://github.com/GoogleCloudPlatform/knowledge-catalog), Apache-2.0)
 
 Silica's embedder-free near-duplicate detection (`/dedup`) is inspired by and ports the MinHash design from [Graphify](https://github.com/safishamsi/graphify).
 
