@@ -461,6 +461,28 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_RERANK_API_KEY", "lm-studio")
     )
 
+    # Speech-to-text behind the web GUI's dictation button — any OpenAI-compatible
+    # /audio/transcriptions endpoint (whisper.cpp's whisper-server,
+    # faster-whisper-server, OpenAI itself). Next port after embeddings (1234) and
+    # rerank (1235). Empty turns the button off outright.
+    stt_base_url: str = field(
+        default_factory=lambda: os.getenv("SILICA_STT_BASE_URL", "http://localhost:1236/v1")
+    )
+    # Cosmetic against whisper.cpp, which serves whatever model it was started
+    # with; a hosted endpoint needs the real id.
+    stt_model: str = field(
+        default_factory=lambda: os.getenv("SILICA_STT_MODEL", "whisper-1")
+    )
+    # whisper-server assumes English when a request names no language, so a vault
+    # dictated in any other one comes back translated instead of transcribed.
+    # "auto" asks it to detect; a fixed code ("it", "en") is steadier on short clips.
+    stt_lang: str = field(
+        default_factory=lambda: os.getenv("SILICA_STT_LANG", "auto")
+    )
+    stt_api_key: str = field(
+        default_factory=lambda: os.getenv("SILICA_STT_API_KEY", "lm-studio")
+    )
+
     # Cosine similarity thresholds for dedup routing (Phase 5)
     # score >= sim_threshold_high → strong duplicate → patch existing note
     # score <= sim_threshold_low  → clearly new concept → write new note

@@ -1215,3 +1215,80 @@ class TestOwnSessionCapture:
         server.serve(port=0)
 
         assert len(self._envelopes()) == 1
+
+
+# --- dictation ---------------------------------------------------------------
+# The browser records and converts; the server's whole job is to know whether an
+# endpoint is there and to forward one WAV to it. Both halves are guarded here
+# because the failure mode is silent: an unreachable endpoint that answers 200
+# would put an empty string in the composer and look like a bad microphone.
+
+
+def test_stt_status_reports_an_unconfigured_endpoint(client, monkeypatch):
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_base_url", "", raising=False)
+    body = app.get("/stt").json()
+    assert body["ok"] is False
+    assert "SILICA_STT_BASE_URL" in body["detail"]
+
+
+def test_stt_status_probes_the_endpoint_rather_than_trusting_the_setting(client, monkeypatch):
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    from silica.onboarding import serve
+
+    monkeypatch.setattr(serve, "ready", lambda url: False)
+    body = app.get("/stt").json()
+    assert body["ok"] is False
+    assert "localhost:9" in body["detail"]
+
+    monkeypatch.setattr(serve, "ready", lambda url: True)
+    assert app.get("/stt").json()["ok"] is True
+
+
+def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch):
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(server.CONFIG, "stt_lang", "it", raising=False)
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {"text": "  ciao mondo  "}
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, files, data, headers):
+            seen["url"] = url
+            seen["lang"] = data.get("language")
+            seen["bytes"] = files["file"][1]
+            return _Resp()
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFfake", "audio/wav")})
+    assert resp.json() == {"text": "ciao mondo"}
+    assert seen["url"] == "http://localhost:9/v1/audio/transcriptions"
+    # whisper-server assumes English without this, so a silently dropped language
+    # would come back as a translation of an Italian vault
+    assert seen["lang"] == "it"
+    assert seen["bytes"] == b"RIFFfake"
+
+
+def test_stt_rejects_an_empty_recording(client, monkeypatch):
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    assert app.post("/stt", files={"audio": ("clip.wav", b"", "audio/wav")}).status_code == 400

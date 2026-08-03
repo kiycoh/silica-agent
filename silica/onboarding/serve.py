@@ -35,8 +35,9 @@ def is_local(base_url: str) -> bool:
     return url.hostname in _LOCAL_HOSTS
 
 
-def _ready(base_url: str) -> bool:
-    """True when the endpoint answers as a *loaded* server.
+def ready(base_url: str) -> bool:
+    """True when the endpoint answers as a *loaded* server. Public: the web GUI
+    asks it the same question before offering dictation.
 
     Deliberately not a port check: llama.cpp starts the HTTP server before it
     loads the model and answers 503 "Loading model" on every path meanwhile
@@ -65,6 +66,7 @@ _DEGRADES_TO = {
     "embeddings": "retrieval falls back to co-occurrence — recall drops",
     "rerank": "the rerank pass is skipped — worse ordering, no error",
     "chat": "no chat provider — silica cannot answer at all",
+    "stt": "the web GUI's dictation button stays off",
 }
 
 
@@ -101,7 +103,7 @@ def ensure(label: str, base_url: str, command: str) -> bool:
     """
     if not base_url or not is_local(base_url):
         return True
-    if _ready(base_url):
+    if ready(base_url):
         return True
     from silica.ui.console import CONSOLE
 
@@ -120,7 +122,7 @@ def ensure(label: str, base_url: str, command: str) -> bool:
         )
     deadline = time.monotonic() + _READY_TIMEOUT
     while time.monotonic() < deadline:
-        if _ready(base_url):
+        if ready(base_url):
             logger.info("%s ready at %s", label, base_url)
             CONSOLE.print(f"  [dim]{label} ready.[/]")
             return True
@@ -150,6 +152,7 @@ def ensure_local_servers(config=None) -> None:
         ("chat", "SILICA_PROVIDER_SERVE_CMD", lambda: _chat_base_url(cfg)),
         ("embeddings", "SILICA_EMBEDDING_SERVE_CMD", lambda: cfg.embedding_base_url),
         ("rerank", "SILICA_RERANK_SERVE_CMD", lambda: cfg.rerank_base_url),
+        ("stt", "SILICA_STT_SERVE_CMD", lambda: cfg.stt_base_url),
     ):
         command = os.getenv(key, "").strip()
         if command:

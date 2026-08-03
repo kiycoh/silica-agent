@@ -1252,6 +1252,69 @@ def health():
     ]
 
 
+# 60s of 16 kHz mono 16-bit PCM is 1.92 MB; the cap is generous enough for the
+# recorder's own ceiling and still refuses a body that was never a clip.
+_STT_MAX_BYTES = 8 * 1024 * 1024
+
+
+@app.get("/stt")
+def stt_status():
+    """Whether dictation can work — asked before the browser requests the mic.
+
+    A probe, not a config flag: stt_base_url has a default, so "configured" and
+    "listening" are different questions and only the second one is useful. Shares
+    ensure_local_servers' readiness check, which knows that llama.cpp-family
+    servers answer 503 while they load and that an open port therefore lies.
+    """
+    from silica.onboarding.serve import ready
+
+    url = CONFIG.stt_base_url
+    if not url:
+        return {"ok": False, "url": "", "detail": "SILICA_STT_BASE_URL is empty"}
+    if ready(url):
+        return {"ok": True, "url": url, "detail": ""}
+    return {"ok": False, "url": url, "detail": f"nothing is answering at {url}"}
+
+
+@app.post("/stt")
+async def stt(audio: UploadFile = File(...)):
+    """Proxy one recorded clip to the transcription endpoint.
+
+    The browser sends 16 kHz mono WAV. MediaRecorder can only produce webm/opus,
+    and whisper.cpp's server reads WAV unless it was built with ffmpeg, so the
+    conversion happens in app.js, where it costs no dependency on either side.
+    """
+    import httpx
+
+    if not CONFIG.stt_base_url:
+        raise HTTPException(503, "no transcription endpoint configured")
+    clip = await audio.read()
+    if not clip:
+        raise HTTPException(400, "empty recording")
+    if len(clip) > _STT_MAX_BYTES:
+        raise HTTPException(413, f"recording over {_STT_MAX_BYTES // (1024 * 1024)} MB")
+    form = {"model": CONFIG.stt_model, "response_format": "json"}
+    if CONFIG.stt_lang:
+        form["language"] = CONFIG.stt_lang
+    try:
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{CONFIG.stt_base_url.rstrip('/')}/audio/transcriptions",
+                files={"file": ("clip.wav", clip, "audio/wav")},
+                data=form,
+                headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
+            )
+    except Exception as exc:
+        raise HTTPException(502, f"transcription endpoint unreachable: {exc}") from exc
+    if resp.status_code != 200:
+        raise HTTPException(502, f"transcription failed ({resp.status_code}): {resp.text[:200]}")
+    try:
+        text = (resp.json().get("text") or "").strip()
+    except Exception as exc:
+        raise HTTPException(502, f"transcription endpoint returned no JSON: {exc}") from exc
+    return {"text": text}
+
+
 @app.get("/config")
 def get_config():
     """Session config for the header panel: the active model (read-only — Silica
