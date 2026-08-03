@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>silica</title>
+  <link rel="icon" type="image/webp" href="/static/sili-icon.webp" />
   <link rel="stylesheet" href="/static/app.css" />
 </head>
 <body>
@@ -20,6 +21,19 @@
     <div class="spacer"></div>
     <div class="ctx-tokens" id="ctx-tokens" title="context window usage" aria-hidden="true"></div>
     <button id="model-btn" class="ghost" title="session config" aria-label="session config" aria-haspopup="dialog" aria-expanded="false"><span id="model-name">model</span></button>
+    <button id="help-btn" class="ghost" title="keyboard shortcuts and what this app can do" aria-label="help" aria-haspopup="dialog" aria-expanded="false">?</button>
+    <div id="help-panel" hidden role="dialog" aria-label="help">
+      <div class="sp-title">keyboard</div>
+      <div class="hp-row"><kbd>&#8629;</kbd><span>send the message</span></div>
+      <div class="hp-row"><kbd>&#8679; &#8629;</kbd><span>new line instead of sending</span></div>
+      <div class="hp-row"><kbd>/</kbd><span>open the command palette, then <kbd>&#8593;</kbd><kbd>&#8595;</kbd> to pick</span></div>
+      <div class="hp-row"><kbd>esc</kbd><span>close the note drawer or an open panel</span></div>
+      <div class="sp-title">the vault</div>
+      <div class="hp-row"><span class="hp-what">drop a file</span><span>anywhere on the window to nucleate it into Inbox/</span></div>
+      <div class="hp-row"><span class="hp-what">click SILICA</span><span>starts a new chat; the old one stays in History</span></div>
+      <div class="hp-row"><span class="hp-what">every write</span><span>gets a card in the transcript with its own revert</span></div>
+      <div class="hp-row"><span class="hp-what">the mic</span><span>dictates into the message; needs a local transcription endpoint</span></div>
+    </div>
     <button id="note-last" class="ghost" title="reopen last note" aria-label="reopen last note">
       <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; color:var(--accent);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
       <span></span>
@@ -43,12 +57,16 @@
           <div class="stat"><div class="val" id="stat-notes">&mdash;</div><div class="lbl">Notes</div></div>
           <div class="stat"><div class="val" id="stat-links">&mdash;</div><div class="lbl">Links</div></div>
           <div class="stat"><div class="val" id="stat-clusters">&mdash;</div><div class="lbl">Clusters</div></div>
-          <div class="stat"><div class="val warn" id="stat-unresolved">&mdash;</div><div class="lbl">Unresolved</div></div>
+          <div class="stat" title="unresolved wikilinks: targets that do not exist yet"><div class="val warn" id="stat-unresolved">&mdash;</div><div class="lbl">Broken</div></div>
         </div>
+        <!-- boot health: configuration that is still true ten minutes in, so it
+             stays here instead of flashing over the composer as a toast -->
+        <div id="boot-notices" hidden></div>
       </div>
 
       <div class="side-section">
-        <input id="side-search" type="text" placeholder="search notes + chats&hellip;" autocomplete="off" />
+        <input id="side-search" type="text" placeholder="filter names of notes + chats&hellip;" autocomplete="off" aria-label="filter notes and chats by name" />
+        <div id="side-search-status" hidden aria-live="polite"></div>
       </div>
 
       <details class="side-section" id="side-files" open>
@@ -66,49 +84,7 @@
     </aside>
 
     <section id="view-chat" class="view active">
-      <div id="log" aria-label="conversation transcript" data-caption="vault ready · type below, or drop a file to nucleate" data-intro="
-              ▒▒▒                ░░                   ░░░░
-             ▒▒▒▒▒▒           ░░░░░░░░            ░░░░░▒▒░
-             ▒▒▒▓▓▒▒▒      ░░░░░░▒░▒▒░░░       ░░▒▒░░░▒▓▒▒
-            ▒▒▒▒▓▓▓▓▒  ░░░░░░░░░▒▒░░▒▒▒▒░░░   ░░▒▒▒░░▒▓▓▒▒
-           ▒▒▒▒▒▒▓▓▒▒░░░░░░░░░░▒▒▒▒░▒▒▒▒▒▒▒░░ ░▒▓▒▒▒▓▓▓▓▓▒
-           ▒▒▒▓▓▒▒▒░░░░░░░░░░░░▒▒▒▒░▒▒▒▒▒▒▒▒▒▒░▒▒▒▒▓▓▓▓▓▓▒
-            ▒▒▓▓░░░░░░░░░░▒▒▒▒▒▒░▒▒▒░▒▒▒▒▒▒▒▓▓▒▒▒▒▓▓▒▒▓▓▒▒
-              ░░░░░░░░░▒▒▒▒░▒▒▒▒▒▒▒░░▒▒▒▒▒░▒▒▓▒▒▒▓▓▓▒▒▒▒
-             ░░░░░░░░▒▒▒░░░▒▒▒▒▒▒▒▒▒░░▒▒▒░░▒▒▒▓▒▒▒▒▒▒▒
-    ▒      ░░░▒░░░▒▒░▒▒░░░▒▒▒▒▒▒▒▒▒▒▒░▓▒▒▒▒▒▒▒▒▓▓▓▓▓▓▒▒░
-    ▒▒    ░░░░░░░▒▓▓▓▒░▒▒▒▒▒▒▒▒▒▒▒▒▒░░▓▓▓▓▒▒▒▒▒▓▓▓▓▓▓▓▒▒
-         ░░░░░░░▒▓▓▓▓▓▒░░░▒▒▒▒▒▒▒▒▒░░░▒▓▓▓▓▓▓▒▒▒▓▓▒▒▓▓▒▒░
-  ░     ░░░░░░░▒▓▒▓▓▓▓▓▒▒░▒▒▒▒▒▒▒▒░░▒▓▓▓▓▓▓▓▓▓▓▓▒▓▓▓▓▓▒▒░
-░░░░░   ░░░░▒▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒░▒▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒▓▓▓▓▒▒░
- ░░░   ░░▒░▓▓▓▒▒░░▒▓▒▒▒▒▒▒▒▒▒▒▒░▓▓▒░░░▒▒▓▓▓▓▒▓▓▓▒▒▒▒▓▒▒▒░░
-       ░▒▒▒▓▓▒░░░░░▒▒▒▒▒▒▒▒▒▒▒▒░▓▒░░░░░░▒▓▓▓▒▓▓▓▒▒▒▒▒▒▒▒▒░
-       ░▒░▒▓▓▒░░░░░▒▒▒▒▒▒▒▒▒▒▒▒░▓▒░░░░░░▒▓▓▓▓▒▓▓▓▒▒▒▒▒▒▒▒░
-      ░▒▒░▓▓▓▒░░░░░▒▒▒▒▒▒▒▒▒▒▒▒░▓▓▒░░░░▒▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒░
-      ░▒▓▒▒▒▓▓▓▓▒▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒░▒▓▓▒▒▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░
-       ▒▒▓▓▓▒▒▓▓▒▒▒▒▒▒▓▓▓▓▓▓▓▓▒▒▒▒▒▒▓▓▓▓▒▒▒░▒▒▒▒▒▓▓▓▓▓▓▓▒░   ░░
-        ░▒▓▓▓▓▒▒▒▒▒▒▒▒▒▓█▓▒▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒░░▒▒▒▒▓▓▓▓▓▓▓▒    ▒▒░
-         ▒▒▓▓▒▒▓▓▒▒▒▒▒▒▒▒▒▒▒░▒▒▒▒▒▒▒▒▒▒▒▒▒░▒▒▒▒▓▓▓▓▓▓▓▒     ▒▒▒
-    ▒▒▒   ▒▒▓▒▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░▒▓▓▒▒▓▓▓▓▓▒     ▒
-           ▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░░▒▒▒▒▒▒░░▒▒▒▓▓▓▓▒▒▒▒▒░░     ░
-        ▒▒▓▓▒▒▒▓▓▓▒▒▒░░░▒▒░░░░░░░░░░░░▒▒░▒▒▒▓▓▓▓▓▓▒▓▒▒▒▒▒░    ░
-       ░▒▓▓▓▓▒▒▒▓▓▒▒▒▒▒░░░░░░░░░░░░░▒▒▒░▒▒▒▒▓▓▓▓▓▓▒▓▓▒▒▒▒▒░
-░░   ░░▒▒▓▓▓▓▒▓▒▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░▒▒▒▒▒▓▓▓▓▓▓▓▓▒▒▒▒▒▒░░   ▓
-    ░░▒▒▒▒▓▓▓▒▓▓▒░▒▒▒░░░░░░░░░░░░░░░░░▒░░░░░▒▒▓▓▓▓▒▓▓▓▒▒▒▒▒▒░░
-   ░░░░▒▒▓▓▒▓▒▓▓▓▒░▒░░░░░░░░░░░░░░░░░▒▒▒▒▒▒▒▒▒▒▓▓▓▓▒▒▒▒▒▒▒▒░░░░
-   ░▒▒░▒▒▒▒▒▒▒▒▓▓▓▒░░░░░░░░░░░░░░░░▒▒▒▒▒▒▒▒▒▒▓▒▓▓▓▓▓▒▒▒▒▒▒▒▒▒░░
-   ░░░▒▒▒░░   ▒▓▓▓▓▒▒▒░░░░░░░░░░▒▒▒▒▒▒▒▒▒▒▒▒▓▒░▒▓▓▓▒ ░▒▒▒▒▒░░░░
-   ░░░░░░░    ▒▒▓▓▓▒▒▒▒▒▒░░░░▒▒▒▒▒▒▒▒▒▒▒▒▒▒▓▒░▒▒░▒▒▒  ░░▒▒▒░░░
-          ░░   ▒▒▒▓▒▓▒▒▓▓▒▒▒▒▒▒▒▒▓▓▒▒▒▒▒▒▓▒▒░░▒▒▒▒░     ░░░░░░
-         ▒▒▒░  ▒▒▒▒▒▒▓▓▓▓▓▓▒▒▒▒▒▓▓▓▓▒▒▒▓▓▒▒▒▒▒▒▒▒░░   ▒▒
-          ▒▒    ▒▒▓▒▒▓▓▓▓▓▓▓▒▒▒▓▓▓▒▓▒░▒▒▒▒▒▒▒▒▓▓▒░   ▒▒▒
-              ▓▓ ▒▒▓▓▒▒▓▓▒▒▓▒▒▒▒▓▓▓▓░░▒▒▒▒░▒▒▒▒░░     ▒▒
-                  ▒▒▒▓▒▒▒▓▓▓▒▒▓▓▓▓▓▒▒▒▒▒░░░░░░░   ▓
-               ▒▒  ▒▒▒  ▒▒▒▒▒▒▒▒▒▒▒░▒▒░░░   ░░  ░░
-                      ░   ░░▒▒▒▒▒▒░░░░░   ░     ░░
-                      ░░    ░░▒░▒░░░
-                              ░░░░   ░░░
-                                    ░▒▒░"></div>
+      <div id="log" aria-label="conversation transcript" data-caption="vault ready · type below, or drop a file to nucleate"></div>
       <div id="attachments" hidden></div>
       <div id="quick-actions">
         <button type="button" class="qa" data-action="attach">nucleate a file</button>
@@ -117,18 +93,23 @@
         <button type="button" class="qa" data-action="graph">explore graph</button>
       </div>
       <form id="composer">
-        <div class="commands" id="commands" hidden></div>
-        <input id="nucleate-file" type="file" multiple hidden />
-        <button type="button" id="attach" title="attach files (pdf, code, notes…)">+</button>
-        <textarea id="input" rows="1" aria-label="message silica" placeholder="message silica…  (⏎ send, ⇧⏎ newline)"></textarea>
-        <button type="submit" id="send">send</button>
+        <div class="composer-shell">
+          <div class="commands" id="commands" hidden></div>
+          <input id="nucleate-file" type="file" multiple hidden />
+          <button type="button" id="attach" title="attach files (pdf, code, notes…)">+</button>
+          <button type="button" class="mic" data-for="input" title="dictate into the message" aria-label="dictate into the message">
+            <svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+          </button>
+          <textarea id="input" rows="1" aria-label="message silica" placeholder="message silica…  (⏎ send, ⇧⏎ newline)"></textarea>
+          <button type="submit" id="send">send</button>
+        </div>
       </form>
     </section>
 
     <section id="view-graph" class="view">
       <div id="graph-bar">
         <div class="gmode-tabs">
-          <button type="button" class="active" data-gmode="graph" title="wikilink structure + semantic k-NN overlay — toggle the layers in the HUD">network</button>
+          <button type="button" class="active" data-gmode="graph" title="wikilink structure + semantic k-NN overlay; toggle the layers in the HUD">network</button>
           <button type="button" data-gmode="map" title="radial map rooted on one note">map</button>
         </div>
 
@@ -155,7 +136,7 @@
       <div id="map-picker" hidden>
         <div class="map-picker-inner">
           <div class="map-picker-title">Pick a note to map</div>
-          <div class="map-picker-hint">its most-connected notes — or search above, or pick any note from FILES</div>
+          <div class="map-picker-hint">its most-connected notes, or search above, or pick any note from FILES</div>
           <div id="map-picker-list"></div>
         </div>
       </div>
@@ -174,7 +155,8 @@
       </div>
       <div id="metrics-loading" class="frame-loading" hidden>
         <div class="spinner"></div>
-        <div>Measuring the vault. A full report takes a moment.</div>
+        <div class="fl-msg">Measuring the vault. A full report takes a moment.</div>
+        <button type="button" id="metrics-cancel" class="fl-cancel">cancel</button>
       </div>
       <div id="metrics-body"></div>
     </section>
@@ -184,27 +166,46 @@
     <div id="note-resize" title="drag to resize"></div>
     <header>
       <span id="note-title"></span>
-      <button id="note-summarize" class="ghost" title="summarize this note in chat">
-        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>
-      </button>
-      <button id="note-explain" class="ghost" title="explain this note's topic, grounded in the vault">
-        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-      </button>
-      <button id="note-quiz" class="ghost" title="quiz yourself on this note">
-        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
-      </button>
-      <button id="note-relate" class="ghost" title="map how this note relates to its neighbors">
-        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
-      </button>
-      <button id="note-map" class="ghost" title="open in map view">
-        <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>
-      </button>
-      <button id="note-close" class="ghost" title="close">&#10005;</button>
+      <!-- The drawer is two readings of the same note: what it SAYS (note) and
+           where it SITS (context). A segmented control, because they are two
+           states of one surface, not two places to go. -->
+      <div id="note-mode" role="group" aria-label="drawer mode">
+        <button type="button" data-mode="context" title="concepts, connections and what is missing">context</button>
+        <button type="button" data-mode="note" class="active" title="read the note">note</button>
+      </div>
+      <button id="note-close" class="ghost" title="close" aria-label="close this note">&#10005;</button>
     </header>
-    <details id="note-mini-map">
-      <summary>map preview</summary>
-      <iframe id="note-mini-map-frame" title="note map preview"></iframe>
-    </details>
+    <!-- The five actions ARE the specific idea of this drawer, and as five 14px
+         stroke icons in a cramped header they were decodable only by hover: a
+         target ring meant "quiz" and three circles meant "relate". Labelled, on
+         their own row, they also stop announcing as "button, button, button". -->
+    <div id="note-actions">
+      <button id="note-summarize" class="na" aria-label="summarize this note in chat">
+        <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>
+        summarize
+      </button>
+      <button id="note-explain" class="na" aria-label="explain this note's topic, grounded in the vault">
+        <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        explain
+      </button>
+      <button id="note-quiz" class="na" aria-label="quiz yourself on this note">
+        <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+        quiz me
+      </button>
+      <button id="note-relate" class="na" aria-label="map how this note relates to its neighbours">
+        <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+        relate
+      </button>
+      <button id="note-map" class="na" aria-label="open this note in map view">
+        <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21"></polygon><line x1="9" y1="3" x2="9" y2="18"></line><line x1="15" y1="6" x2="15" y2="21"></line></svg>
+        map
+      </button>
+    </div>
+    <!-- context mode. Sections are built in JS from /context; only the shell
+         lives here. (The old <details> map preview is gone: a whole server-side
+         map render to answer "what is around this note", which Related answers
+         better at zero cost — and the map button still reaches the real map.) -->
+    <div id="note-context" hidden></div>
     <div id="note-body"></div>
   </aside>
 
@@ -212,15 +213,32 @@
     <div id="peek" hidden>
       <header>
         <span id="peek-title"></span>
-        <button id="peek-open-chat" class="ghost" title="continue in chat — full transcript">open in chat</button>
+        <button id="peek-open-chat" class="ghost" title="continue in chat, full transcript">open in chat</button>
         <button id="peek-close" class="ghost" title="dismiss">&#10005;</button>
       </header>
       <div id="peek-body"></div>
     </div>
     <form id="dock-composer">
-      <textarea id="dock-input" rows="1" aria-label="ask the vault from here" placeholder="ask the vault from here…  (⏎ send, ⇧⏎ newline)"></textarea>
-      <button type="submit" id="dock-send">send</button>
+      <div class="composer-shell">
+        <button type="button" class="mic" data-for="dock-input" title="dictate into the message" aria-label="dictate into the message">
+          <svg aria-hidden="true" focusable="false" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+        </button>
+        <textarea id="dock-input" rows="1" aria-label="ask the vault from here" placeholder="ask the vault from here…  (⏎ send, ⇧⏎ newline)"></textarea>
+        <button type="submit" id="dock-send">send</button>
+      </div>
     </form>
+  </div>
+
+  <!-- dictation without a transcription endpoint: configuration, not an event,
+       so it is a dialog you close rather than a toast that expires -->
+  <div id="stt-panel" hidden role="dialog" aria-label="dictation is not available">
+    <div class="sp-title">dictation is off</div>
+    <p id="stt-why"></p>
+    <p>It needs a transcription endpoint on this machine. Any OpenAI-compatible one works:</p>
+    <pre>SILICA_STT_BASE_URL=http://localhost:1236/v1
+SILICA_STT_SERVE_CMD="whisper-server -m ggml-base.bin --port 1236"</pre>
+    <p>With the second one set, silica starts the server itself on the next launch and waits for it to load.</p>
+    <button type="button" id="stt-close" class="ghost">close</button>
   </div>
 
   <div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>

@@ -74,6 +74,54 @@
   --sans: "Lexend", system-ui, sans-serif;
   /* the sidebar's width, so #dock's left inset cannot drift from it */
   --side-w: 264px;
+
+  /* The transcript's two objects. The four surface steps above sit 1.04-1.28:1
+     from each other, which was survivable while every turn was a flat band and
+     is not survivable now: a bubble that does not step off its floor is a
+     rectangle. So the chat floor drops to --void and these two rise off it.
+       --sheet  1.28:1 on --void, and still 4.63:1 under --ash-dim, which is
+                where the role byline and the turn hint sit.
+       --bubble 1.53:1 on --void, plus a --line-2 hairline for the edge.
+     Both computed, not eyeballed. */
+  --sheet: #20233C;
+  --bubble: #2A3050;
+
+  /* Soft where you read, rigid where you scan. --r is for the transcript's
+     objects and the controls you aim at; the compartment chrome (header strip,
+     file tree, tables, hairline grids) keeps the 90-degree corner it was built
+     on. `* { border-radius: 0 }` below still holds, so every corner here is
+     opted into by name and nothing rounds by accident. */
+  --r: 14px;
+  --r-sm: 8px;
+
+  /* One easing, one duration. Everything was .1s linear, and linear at 100ms is
+     the single loudest cheap tell in the file: it reads as a state swap rather
+     than as movement. Exponential ease-out from an already-visible default. */
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --dur: .18s;
+  /* offset + soft blur, never a zero-offset halo */
+  --lift: 0 10px 28px -12px rgba(0, 0, 0, .7);
+
+  /* Glass, in two kinds, because only one of them is glass.
+     --chrome-glass is for header and sidebar. Both sit in normal flow with
+     nothing scrolling behind them, so backdrop-filter there would composite a
+     layer to blur a flat fill: pure cost, zero effect. What makes them read as
+     glass is that the page wash below travels, so a translucent fill genuinely
+     changes colour across its own width. No filter, no GPU work.
+     --glass is for the surfaces that really do overlay something — the note
+     drawer, the explore dock, the header dropdowns, the slash palette, toasts.
+     There the blur has something to distort, so it is a real one.
+     Alpha is not free but it is nearly free here: the palette is dark enough
+     that translucency barely moves contrast. Measured on the worst pairs,
+     --ash-dim on chrome goes 5.70:1 -> 5.56:1, and --ash on the drawer over a
+     bubble goes 5.36:1 -> 5.14:1. Both still clear AA with room. */
+  --chrome-glass: rgba(18, 14, 33, .88);
+  /* --slate */
+  --glass: rgba(32, 35, 60, .78);
+  /* --sheet */
+  --glass-blur: blur(20px) saturate(1.3);
+  /* The lit top edge that says "pane of something", not "translucent box". */
+  --glass-edge: inset 0 1px 0 rgba(235, 239, 248, .07);
 }
 
 /* Supported floor: 900px. Below it the three-column shell compresses rather
@@ -124,7 +172,18 @@ html,
 body {
   margin: 0;
   height: 100%;
-  background: var(--void);
+  /* The wash moved up here from #view-chat, and it moved because the chrome now
+     shows it: a translucent header over a flat fill is a tint, over a travelling
+     one it is glass. Two poles instead of one violet, taken from the mascot's
+     own body — blue on its lit half, magenta on its far one. Cyan is left out
+     on purpose: in the mark it is only the eye, and in the app it is only what
+     you can click, so it never becomes atmosphere. Fixed attachment, so the
+     poles stay put and no scroll repaints them. */
+  background:
+    radial-gradient(58rem 30rem at 3% -3rem, rgba(43, 111, 212, .34), transparent 70%),
+    radial-gradient(54rem 27rem at 99% -2rem, rgba(186, 58, 168, .26), transparent 70%),
+    var(--void);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--sans);
   font-weight: 400;
@@ -152,8 +211,16 @@ header {
   position: relative;
   /* anchor for the session-config dropdown */
   border-bottom: 1px solid var(--line-2);
-  background: var(--slate);
-  transition: padding-right .14s linear;
+  background: var(--chrome-glass);
+  /* Animating padding is a layout animation, and here that is the point: the
+     padding IS what keeps the header's right edge glued to the drawer's leading
+     edge while it slides. Snapping it (which is what #view-chat does, one row
+     below, and for a good reason) would leave 630px of empty chrome exposed for
+     the length of the slide. Measured rather than argued: the close transition
+     runs the same property with nothing else happening and costs 12 layouts /
+     1.0ms. The 129 layouts on open are the note rendering into the drawer, not
+     this line. */
+  transition: padding-right var(--dur) var(--ease);
   /* match drawer animation */
 }
 
@@ -177,7 +244,7 @@ header>* {
   cursor: pointer;
   background: transparent;
   color: var(--frost);
-  transition: color .1s linear;
+  transition: color var(--dur) var(--ease);
 }
 
 /* the iridescence is a hover reward, not a resting state: as a permanent
@@ -246,7 +313,7 @@ header>* {
   border: none;
   padding: 0.65rem 0.9rem;
   cursor: pointer;
-  transition: color .1s linear, background-color .1s linear;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
 .tab {
@@ -307,16 +374,28 @@ header>* {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 25ch;
-  /* adattarsi alla lunghezza del nome della nota fino ad un certo numero di caratteri */
+  /* grow with the note's name, but stop before it crowds the rest of the strip */
 }
 
 #note-last>span:not(:empty) {
   margin-left: 6px;
 }
 
+/* the one control that matters while a turn is running, so it stops being a
+   ghost among ghosts and reads as a button for as long as it is on screen */
 #stop {
-  color: var(--accent);
-  border-left: 1px solid var(--line);
+  align-self: center;
+  margin: 0 0.6rem;
+  padding: 0.4rem 0.75rem;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  border-radius: var(--r-sm);
+}
+
+#stop:hover {
+  color: var(--void);
+  background: var(--warn);
 }
 
 main {
@@ -325,11 +404,12 @@ main {
   display: flex;
 }
 
-/* the chat view IS the reading surface, so the tint lives here and not on #log:
-   on #log it collapsed to a box around the mascot whenever the transcript was
-   empty. */
+/* The chat view is the FLOOR, not the reading surface: the sheet and the bubble
+   are, and they need something to sit on. That floor is now transparent so the
+   body's wash carries through it — one atmosphere behind chrome and transcript
+   alike, instead of a violet one here and a blue-magenta one either side of it. */
 #view-chat {
-  background: var(--page);
+  background: transparent;
   /* The inset SNAPS, deliberately: unlike the header, this element holds the
      whole transcript, and animating its padding would reflow every message on
      every frame of the drawer's slide. One reflow, not eight. */
@@ -364,10 +444,10 @@ body.note-open #view-chat {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--line-2);
-  background: var(--slate);
+  background: var(--chrome-glass);
   overflow-y: auto;
   overflow-x: hidden;
-  transition: flex-basis .12s linear;
+  transition: flex-basis var(--dur) var(--ease);
   scrollbar-width: none;
 }
 
@@ -439,23 +519,30 @@ details.side-section:hover>summary.side-title {
   margin-bottom: 0.6rem;
 }
 
-/* razor-thin dividing lines: 1px gap over a line-colored backdrop */
+/* One row, not a 2x2 board. These four numbers are ambient vault state, and at
+   26px over two rows they took ~140px off the top of the column — more vertical
+   space than the file tree they sit above, for the information in the sidebar
+   that is read least. Razor-thin dividing lines: 1px gap over a line-colored
+   backdrop. */
 .stat-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 1px;
   background: var(--line);
   border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  overflow: hidden;
 }
 
 .stat {
   background: var(--slate-2);
-  padding: 0.55rem 0.4rem;
+  padding: 0.4rem 0.25rem;
   text-align: center;
+  min-width: 0;
 }
 
 .stat .val {
-  font-size: 26px;
+  font-size: 16px;
   font-weight: 600;
   letter-spacing: -0.02em;
   color: var(--frost);
@@ -467,11 +554,73 @@ details.side-section:hover>summary.side-title {
 }
 
 .stat .lbl {
-  font-size: 9px;
+  font-size: 8px;
   color: var(--ash-dim);
-  margin-top: 2px;
-  letter-spacing: 0.1em;
+  margin-top: 1px;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- boot notices: configuration, parked where it stays readable ------------ */
+#boot-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.notice {
+  position: relative;
+  padding: 0.5rem 1.6rem 0.55rem 0.6rem;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.notice-text {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* the fix is usually a config blob: keep it selectable, cap how much it takes */
+.notice-hint {
+  margin-top: 0.3rem;
+  color: var(--ash-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  max-height: 5.5rem;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.notice-x {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  background: transparent;
+  border: none;
+  color: var(--ash-dim);
+  font-size: 11px;
+  line-height: 1;
+  padding: 0.2rem 0.25rem;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.notice-x:hover {
+  color: var(--frost);
+  background: var(--line);
+}
+
+.notice-x:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
 }
 
 #side-search {
@@ -481,13 +630,14 @@ details.side-section:hover>summary.side-title {
   background: var(--slate-2);
   color: var(--frost);
   border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
   padding: 0.45rem 0.6rem;
-  transition: border-color .1s linear;
+  transition: border-color var(--dur) var(--ease);
 }
 
 #side-search:focus {
   outline: none;
-  border-color: var(--frost);
+  border-color: var(--ash-dim);
 }
 
 #side-search::placeholder {
@@ -521,7 +671,7 @@ details.side-section:hover>summary.side-title {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--ash-dim);
-  transition: color .1s linear;
+  transition: color var(--dur) var(--ease);
 }
 
 #tree-collapse:hover {
@@ -573,19 +723,21 @@ details.side-section:hover>summary.side-title {
   margin-left: 12px;
 }
 
+/* selection reads from the fill, not from a coloured rule down the left edge:
+   a 2px accent bar on every hovered row was the loudest thing in the column */
 .tree-note {
   color: var(--ash);
   cursor: pointer;
-  padding: 1px 6px;
-  border-left: 2px solid transparent;
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 
 .tree-note:hover {
   background: var(--slate-2);
-  border-left-color: var(--accent);
   color: var(--frost);
 }
 
@@ -613,16 +765,16 @@ details.side-section:hover>summary.side-title {
 }
 
 .session {
-  padding: 0.4rem 0.5rem;
+  padding: 0.4rem 0.55rem;
   cursor: pointer;
   color: var(--ash);
   font-size: 13px;
   flex-shrink: 0;
-  border-left: 2px solid transparent;
+  border-radius: var(--r-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: color .1s linear, background-color .1s linear;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
 .session:hover {
@@ -630,10 +782,10 @@ details.side-section:hover>summary.side-title {
   background: var(--slate-2);
 }
 
+/* the open chat is the one filled row in the list — same idiom as the tree */
 .session.active {
   color: var(--frost);
-  border-left-color: var(--accent);
-  background: var(--slate-2);
+  background: var(--line);
 }
 
 #sessions-more {
@@ -678,68 +830,104 @@ details.side-section:hover>summary.side-title {
 
 .msg {
   display: block;
-  padding: 1.7rem 2rem;
+  padding: 0.45rem 2rem;
+  animation: msg-in var(--dur) var(--ease);
 }
 
-/* Sided transcript, Claude-style: one shared measure, inside which your turn is
-   a tinted block hugging its own text against the right edge while the answer
-   runs the full width. The padding here IS the measure, so the block can align
-   to the column edge and not to the pane edge. */
+.msg:first-child {
+  padding-top: 1.6rem;
+}
+
+.msg:last-child {
+  padding-bottom: 1.4rem;
+}
+
+/* Sided transcript: one shared measure, inside which your turn is a bubble
+   hugging its own text against the right edge while the answer runs the full
+   width as a sheet. The padding here IS the measure, so the bubble can align to
+   the column edge and not to the pane edge. */
 .msg.user {
   padding-inline: max(2rem, calc(50% - 23rem));
 }
 
-.msg.user>.role {
-  text-align: right;
+.msg.user>.body {
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  padding: 0.7rem 1rem;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto 0;
+  color: var(--frost);
 }
 
-.msg.user>.body {
-  background: var(--slate);
-  border: 1px solid var(--line);
-  padding: 0.7rem 0.9rem;
-  width: fit-content;
-  margin-inline: auto 0;
+/* The answer is a sheet, not a hug-content bubble, and that is a constraint
+   rather than a preference: it carries code fences, tables, MathML, mermaid,
+   the thinking block and the sources footer. Shrink-wrapping that content puts
+   a 90-character code line in a bubble the width of the sentence above it. */
+.msg.silica>.body {
+  background: var(--sheet);
+  border-radius: var(--r);
+  padding: 1.1rem 1.3rem;
 }
 
 /* one measure in rem, not ch: ch resolves against each element's own font-size,
-   so an 11px label and 15px prose would centre on two different widths and the
-   byline would sit indented from the paragraph under it. 38rem is ~74 chars. */
+   so an 11px label and 16px prose would centre on two different widths and the
+   footer would sit indented from the paragraph above it. 46rem holds ~73
+   characters of prose once the sheet's own padding is taken out. */
 .msg>.role,
 .msg>.body {
-  max-width: 48rem;
+  max-width: 46rem;
   margin-inline: auto;
 }
 
+/* Whose turn it is is now carried by the shape, so the byline stops saying it a
+   second time. It stays in the DOM for the screen reader, which has no bubble
+   to look at. */
 .msg .role {
-  color: var(--ash-dim);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  margin-bottom: 0.5rem;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .msg .body {
   min-width: 0;
   overflow-wrap: break-word;
   position: relative;
+  font-size: 16px;
+  line-height: 1.72;
 }
 
-/* per-message copy button — hover-revealed, top-right corner of the body */
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* per-message copy button — hover-revealed, inset into the sheet's own padding
+   so it never sits on the rounded corner or on the first line of the answer */
 .copy-btn {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: 0.5rem;
+  right: 0.55rem;
   font-family: var(--sans);
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   background: var(--slate-2);
   color: var(--ash);
-  border: 1px solid var(--line);
-  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.2rem 0.5rem;
   cursor: pointer;
   opacity: 0;
-  transition: opacity .1s linear, color .1s linear, border-color .1s linear;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
 .msg:hover .copy-btn {
@@ -751,6 +939,51 @@ details.side-section:hover>summary.side-title {
   border-color: var(--line-2);
 }
 
+/* A failed turn, where it failed. Amber like every other caution in this
+   palette, and carrying the only thing the user actually wants at that moment. */
+.turn-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  padding: 0.65rem 0.8rem;
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  border-radius: var(--r-sm);
+}
+
+.te-msg {
+  flex: 1;
+  min-width: 12rem;
+  font-size: 13px;
+  color: var(--frost);
+}
+
+.te-retry {
+  flex-shrink: 0;
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--void);
+  background: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.te-retry:hover {
+  background: var(--frost);
+  border-color: var(--frost);
+}
+
+.te-retry:focus-visible {
+  outline: 1px solid var(--frost);
+  outline-offset: 2px;
+}
+
 /* thin-coverage hint: every vault search this turn came back empty. Muted on
    purpose — it reports, it does not ask. */
 .turn-hint {
@@ -760,6 +993,12 @@ details.side-section:hover>summary.side-title {
 }
 
 /* sources footer — notes this turn touched, click opens the drawer */
+.writes+.sources {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0.5rem;
+}
+
 .sources {
   display: flex;
   flex-wrap: wrap;
@@ -780,11 +1019,6 @@ details.side-section:hover>summary.side-title {
   gap: 0.4rem;
 }
 
-/* the vault changed: name it in caution amber, the palette's only alarm */
-.sgroup:is(.written, .moved, .deleted)>.sources-label {
-  color: var(--warn);
-}
-
 .sources-label {
   color: var(--ash-dim);
   font-size: 10px;
@@ -795,7 +1029,8 @@ details.side-section:hover>summary.side-title {
 
 .sources .note-link {
   font-size: 12px;
-  padding: 0.05rem 0.35rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
   background: var(--slate-2);
   border-bottom-color: var(--line-2);
 }
@@ -804,28 +1039,124 @@ details.side-section:hover>summary.side-title {
   border-bottom-color: var(--accent);
 }
 
-/* A deleted note keeps its chip as a record but has nothing to open: same shape
-   as a live chip, struck through, no pointer — the .note-link.broken convention
-   applied to a note that is gone rather than never written. */
-.note-gone {
-  font-size: 12px;
-  padding: 0.05rem 0.35rem;
+/* --- write cards: the vault changed, and that is an object, not a chip -------
+   The product's claim is that delegating a write is safe. A write used to say so
+   with a 12px chip in a row of identical chips, next to an outlined button that
+   was the quietest element in its own footer — the highest-stakes moment in the
+   app rendered as its cheapest. Each change now carries its own surface, its own
+   operation label in the palette's caution amber, and its own way back. */
+.writes {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.4rem;
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.wcard {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 0.55rem 0.5rem 0.75rem;
   background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+.wc-op {
+  flex-shrink: 0;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--warn);
+}
+
+.wc-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--frost);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wc-path.wc-open {
+  cursor: pointer;
+}
+
+.wc-path.wc-open:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.wc-act {
+  flex-shrink: 0;
+  font-family: var(--sans);
+  font-size: 11px;
+  color: var(--ash);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.28rem 0.7rem;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.wc-act:hover {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+
+.wc-act:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.wc-act:disabled {
   color: var(--ash-dim);
-  text-decoration: line-through;
+  border-color: var(--line);
   cursor: default;
+}
+
+.wcard.reverting {
+  opacity: 0.6;
+}
+
+/* A write that failed its lint and self-reverted used to leave no trace in the
+   footer at all — its refs were dropped, so the turn went quiet about a note it
+   had just tried to change. It says so now, in the palette's neutral rather than
+   its caution: nothing happened to the vault, which is the reassuring half. */
+.wcard.failed {
+  background: transparent;
+  border-style: dashed;
+}
+
+.wcard.failed .wc-op,
+.wcard.failed .wc-path {
+  color: var(--ash);
+}
+
+.wc-note {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--ash-dim);
 }
 
 /* The turn wrote something, so the way back is offered at the moment it matters
    instead of being a command the user has to know exists. */
 .undo-turn {
+  align-self: flex-start;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--ash);
   background: transparent;
   border: 1px solid var(--line-2);
-  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.6rem;
 }
 
 .undo-turn:hover {
@@ -950,17 +1281,19 @@ details.side-section:hover>summary.side-title {
 :is(.msg, #note-body, #peek-body) pre {
   overflow-x: auto;
   background: var(--void);
-  padding: 0.6rem;
+  padding: 0.75rem 0.85rem;
   border: 1px solid var(--line);
+  border-radius: var(--r-sm);
 }
 
 :is(.msg, #note-body, #peek-body) code {
   font-family: var(--mono);
-  font-size: 0.92em;
+  font-size: 0.88em;
   /* code keeps the grid font */
   color: var(--frost);
   background: var(--slate-2);
-  padding: 0 3px;
+  border-radius: 4px;
+  padding: 0.1em 0.32em;
 }
 
 :is(.msg, #note-body, #peek-body) pre code {
@@ -991,7 +1324,9 @@ details.side-section:hover>summary.side-title {
 
 :is(.msg, #note-body, #peek-body) img {
   max-width: 100%;
+  height: auto;
   border: 1px solid var(--line);
+  border-radius: var(--r-sm);
 }
 
 /* pygments fences — restrained syntax scheme mapped onto the site palette:
@@ -1031,9 +1366,10 @@ details.side-section:hover>summary.side-title {
 }
 
 :is(.msg, #note-body, #peek-body) .callout {
-  border-left: 2px solid var(--accent);
+  border-left: 1px solid var(--accent);
+  border-radius: var(--r-sm);
   background: var(--slate-2);
-  padding: 0.5rem 0.7rem;
+  padding: 0.6rem 0.8rem;
   color: var(--frost);
   font-style: normal;
 }
@@ -1110,7 +1446,7 @@ details.side-section:hover>summary.side-title {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-size: 10px;
-  transition: color .1s linear;
+  transition: color var(--dur) var(--ease);
 }
 
 .thinking summary::-webkit-details-marker {
@@ -1149,20 +1485,25 @@ details.side-section:hover>summary.side-title {
   border-left: 1px solid var(--line-2);
 }
 
+/* The stack used to be inverted: running was the dimmest thing on screen, done
+   was near-white, and error wore --accent — the exact cyan of #send and of every
+   note-link, so a rejected write read as a hyperlink. Now the step happening NOW
+   is the loud one, finished steps recede, and failure is the palette's caution
+   amber, which is what the toasts already used for the same condition. */
 .tool {
-  color: var(--ash);
+  color: var(--frost);
   font-size: 12px;
-  transition: color .1s linear;
+  transition: color var(--dur) var(--ease);
   overflow-wrap: anywhere;
   /* tool lines now carry a vault path as their target */
 }
 
 .tool.done {
-  color: var(--frost);
+  color: var(--ash);
 }
 
 .tool.error {
-  color: var(--accent);
+  color: var(--warn);
 }
 
 /* in-flight (no done/error class yet) breathes so it never looks hung */
@@ -1177,13 +1518,14 @@ details.side-section:hover>summary.side-title {
   width: 100%;
   max-height: 250px;
   overflow-y: auto;
-  background: var(--slate);
-  border: 1px solid var(--line);
-  border-radius: 0;
-  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.2);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--lift), var(--glass-edge);
   display: flex;
   flex-direction: column;
-  padding: 4px;
+  padding: 5px;
   margin-bottom: 8px;
   z-index: 100;
 }
@@ -1192,48 +1534,101 @@ details.side-section:hover>summary.side-title {
   display: none !important;
 }
 
-.cmd-item {
+/* `.commands button` in the shared chrome rule above is (0,1,1) and beats a bare
+   `.cmd-item`, which is how the palette kept inheriting the uppercase. */
+.commands .cmd-item {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: 10px;
   padding: 8px 12px;
   cursor: pointer;
-  border-radius: 0;
+  border-radius: var(--r-sm);
   color: var(--ash);
   text-align: left;
   border: none;
   background: transparent;
-  font-family: var(--font-mono);
+  /* was var(--font-mono), which is not a token in this file and silently fell
+     back to the inherited face */
+  font-family: var(--sans);
   font-size: 13px;
+  text-transform: none;
+  letter-spacing: normal;
 }
 
-.cmd-item:hover,
-.cmd-item.sel {
+.commands .cmd-item:hover,
+.commands .cmd-item.sel {
   background: var(--slate-2);
   color: var(--frost);
 }
 
-.cmd-item .cmd-name {
+.commands .cmd-item .cmd-name {
+  font-family: var(--mono);
   color: var(--accent);
-  font-weight: bold;
+  font-weight: 600;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.cmd-item .cmd-summary {
+/* The palette used to inherit the chrome buttons' uppercase + wide tracking, so
+   a 90-character description was SHOUTED and then cut mid-word ("SURFACES
+   CONTRADI…"). The affordance built to relieve recall could not finish its own
+   sentence. Sentence case, and two lines to land it. */
+.commands .cmd-item .cmd-summary {
   font-size: 12px;
   color: var(--ash-dim);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
+/* The composer used to be a footer bar: a rule across the pane, a field, and a
+   button, three siblings at pane width under a transcript capped at the reading
+   measure. The two columns disagreed by ~380px, and they started disagreeing at
+   the first message, because the centred-island rule below only applied while
+   the log was empty. Now the island is the permanent state and the bar is gone:
+   one object, on the transcript's measure, holding its own controls. */
 #composer,
 #dock-composer {
   display: flex;
-  gap: 0;
-  padding: 0.7rem 1rem 0.9rem;
-  border-top: 1px solid var(--line-2);
+  padding: 0.5rem 2rem 1.1rem;
   position: relative;
+}
+
+.composer-shell {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.35rem;
+  width: 100%;
+  max-width: 46rem;
+  margin-inline: auto;
+  padding: 0.3rem;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--glass-edge);
+  position: relative;
+  /* anchor for the slash-command popup */
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+
+.composer-shell:focus-within {
+  border-color: var(--ash-dim);
+  box-shadow: var(--lift);
+}
+
+/* the transcript reads as passing under the composer instead of stopping at a
+   hairline. Chat only: the dock draws on its own strip, which already has one. */
+#composer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 2rem;
+  background: linear-gradient(to top, var(--void), transparent);
+  pointer-events: none;
 }
 
 #input,
@@ -1241,13 +1636,12 @@ details.side-section:hover>summary.side-title {
   flex: 1;
   resize: none;
   font-family: var(--sans);
-  font-size: 14px;
-  background: var(--slate-2);
+  font-size: 15px;
+  line-height: 1.5;
+  background: transparent;
   color: var(--frost);
-  border: 1px solid var(--line-2);
-  border-right: none;
-  padding: 0.6rem;
-  transition: border-color .1s linear;
+  border: none;
+  padding: 0.45rem 0.35rem;
   max-height: 40vh;
   overflow-y: auto;
   scrollbar-width: none;
@@ -1259,10 +1653,11 @@ details.side-section:hover>summary.side-title {
   display: none;
 }
 
+/* the shell carries the focus ring for the whole object (:focus-within), so the
+   field itself must not draw a second one inside it */
 #input:focus,
 #dock-input:focus {
   outline: none;
-  border-color: var(--frost);
 }
 
 #input::placeholder,
@@ -1289,7 +1684,8 @@ details.side-section:hover>summary.side-title {
   background: var(--slate-2);
   color: var(--frost);
   border: 1px solid var(--line-2);
-  padding: 0.3rem 0.5rem;
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
   font-family: var(--sans);
   font-size: 12px;
 }
@@ -1308,32 +1704,136 @@ details.side-section:hover>summary.side-title {
   color: var(--accent);
 }
 
-#attach {
-  align-self: stretch;
-  background: var(--slate-2);
+:is(#attach, .mic) {
+  align-self: flex-end;
+  background: transparent;
   color: var(--ash-dim);
-  border: 1px solid var(--line-2);
-  border-right: none;
-  padding: 0 0.9rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
   font-size: 18px;
   line-height: 1;
+  flex-shrink: 0;
   cursor: pointer;
-  transition: color .1s linear, border-color .1s linear;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
-#attach:hover {
+:is(#attach, .mic):hover {
   color: var(--accent);
-  border-color: var(--frost);
+  background: var(--line);
 }
 
-#attach:active {
+:is(#attach, .mic):active {
   transform: translateY(1px);
 }
 
-#attach:focus-visible {
+:is(#attach, .mic):focus-visible {
   outline: none;
-  border-color: var(--frost);
+  border-color: var(--accent);
   color: var(--frost);
+}
+
+/* --- dictation ------------------------------------------------------------- */
+.mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Whisper transcribes in one batch, so there is no partial text to show while
+   you talk: the button has to carry the whole state itself. Amber for recording
+   and not the accent, because the accent means "you can press this" and this one
+   is already pressed — the same rule that de-inverted .tool. */
+.mic.recording {
+  color: var(--warn);
+  background: rgba(224, 169, 59, .12);
+  animation: mic-pulse 1.6s var(--ease) infinite;
+}
+
+.mic.busy {
+  color: var(--accent);
+  cursor: progress;
+  animation: mic-pulse 1s linear infinite;
+}
+
+@keyframes mic-pulse {
+  50% {
+    opacity: .45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .mic.recording,
+  .mic.busy {
+    animation: none;
+  }
+}
+
+/* Dictation needs an endpoint most installs do not have, and that is a fact
+   about the configuration rather than an event — so it gets a dialog you close,
+   not a toast that expires. Centred over the composer, which is where the button
+   that opened it lives, and one panel serves both composers. */
+#stt-panel {
+  position: fixed;
+  left: 50%;
+  bottom: 7rem;
+  transform: translateX(-50%);
+  z-index: 130;
+  width: min(430px, 92vw);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--lift), var(--glass-edge);
+  padding: 0 0 0.8rem;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+#stt-panel p {
+  margin: 0.7rem 0.9rem 0;
+}
+
+#stt-panel pre {
+  margin: 0.6rem 0.9rem 0;
+  padding: 0.6rem 0.7rem;
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--ash);
+  white-space: pre-wrap;
+  /* break-word, not break-all: these are commands meant to be read and retyped,
+     and break-all split ggml-base.bin across two lines mid-filename */
+  overflow-wrap: break-word;
+}
+
+#stt-panel #stt-why {
+  color: var(--warn);
+}
+
+#stt-close {
+  margin: 0.8rem 0.9rem 0;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+/* Translucency is a preference the OS can withdraw, and every surface above has
+   an opaque twin one line away. Chrome's own fill is the token's colour at
+   alpha 1; the overlays fall back to the plane they used before the glass. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --chrome-glass: var(--slate);
+    --glass: var(--sheet);
+    --glass-blur: none;
+    --glass-edge: 0 0 0 0 transparent;
+  }
 }
 
 #send,
@@ -1345,8 +1845,10 @@ details.side-section:hover>summary.side-title {
   font-size: 13px;
   font-weight: 600;
   border: 1px solid var(--accent);
-  padding: 0.6rem 1.2rem;
-  align-self: stretch;
+  border-radius: var(--r-sm);
+  padding: 0.5rem 1rem;
+  align-self: flex-end;
+  flex-shrink: 0;
 }
 
 #send:hover,
@@ -1394,6 +1896,32 @@ details.side-section:hover>summary.side-title {
 
 .frame-loading[hidden] {
   display: none;
+}
+
+/* A 20s indeterminate wait with no exit is a trap, not a state. The previous
+   report stays underneath at reduced opacity, so cancelling puts the user back
+   exactly where they were rather than on a blank pane. */
+.fl-cancel {
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ash);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0.3rem 0.9rem;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.fl-cancel:hover {
+  color: var(--frost);
+  border-color: var(--ash-dim);
+}
+
+.fl-cancel:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .spinner {
@@ -1505,7 +2033,7 @@ details.side-section:hover>summary.side-title {
   padding: 0.45rem 0.6rem;
   height: 31px;
   width: 100%;
-  transition: border-color .1s linear;
+  transition: border-color var(--dur) var(--ease);
 }
 
 #graph-bar input:focus {
@@ -1697,34 +2225,32 @@ body.dragging #drop-hint {
   animation: caret-blink 1.1s steps(1, end) infinite;
 }
 
-/* empty state — mascot ASCII art (docs/assets/silica_hires.txt) + caption instead of a
-   blank void; the caption lives in data-caption so the server can set it */
+/* empty state — the mascot + caption instead of a blank void; the caption lives
+   in data-caption so the server can set it */
 #log:empty {
   justify-content: center;
   align-items: center;
 }
 
-/* stack art + caption, centered */
+/* Sili, in colour. This was block-glyph ASCII of the previous mascot, and the
+   current one cannot be that: it is a faceted crystal whose whole identity is a
+   blue-to-magenta split and one lit cyan eye, and a monochrome cell grid keeps
+   neither. 27 KB of WebP against 174 KB for one of the two fonts already here.
+   The glow is a drop-shadow on the alpha, so it hugs the silhouette instead of
+   boxing it, and it is static — no repaint, no animation, no filter per frame. */
 #log:empty::before {
-  content: attr(data-intro);
-  font-family: var(--mono);
-  /* block-glyph art needs the fixed cell grid */
-  white-space: pre;
-  color: var(--ash-dim);
-  /* shrink via font-size only, never line-height, so the cell aspect ratio
-     holds. Above ~7px Chrome's subpixel rendering gives the block glyphs
-     visible blue/orange fringing. */
-  font-size: 6px;
-  line-height: 1;
-  text-align: left;
-  /* left, not center: centering aligns each row by its own width and skews the shape */
+  content: "";
+  width: min(240px, 40vw);
+  aspect-ratio: 519 / 650;
+  background: url("/static/sili.webp") center / contain no-repeat;
+  filter: drop-shadow(0 8px 46px rgba(53, 198, 232, .16));
 }
 
 #log:empty::after {
   content: attr(data-caption);
-  color: var(--ash-dim);
-  margin-top: 1.4rem;
-  font-size: 13px;
+  color: var(--ash);
+  margin-top: 2rem;
+  font-size: 14px;
 }
 
 /* --- note panel (right overlay drawer; read-only note view) ----------------- */
@@ -1774,10 +2300,17 @@ body.dragging #drop-hint {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: var(--slate);
+  /* Chrome glass, not the blurring kind, and measured rather than assumed: the
+     drawer never overlays the transcript, because body.note-open insets
+     #view-chat by exactly its width. What sits behind it is the page wash, a
+     smooth gradient, and blurring a smooth gradient returns the gradient. So it
+     takes the translucent fill (which does show the wash travel across it) and
+     skips the filter that would cost a composited layer for nothing. */
+  background: var(--chrome-glass);
   border-left: 1px solid var(--line-2);
+  box-shadow: -18px 0 40px -20px rgba(0, 0, 0, .8), var(--glass-edge);
   transform: translateX(100%);
-  transition: transform .14s linear;
+  transition: transform var(--dur) var(--ease);
 }
 
 #note-panel.open {
@@ -1799,8 +2332,21 @@ body.dragging #drop-hint {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 0.9rem;
+  /* Same band as the app header, so the two strips meet flush instead of
+     stepping. It has to track --header-h and not a constant: the header WRAPS to
+     two rows when the drawer is open on a narrow window, which is exactly when
+     these two sit side by side. Measured before this line: 70px against 41.5px.
+     --header-h is already maintained live by the toast positioning. */
+  min-height: var(--header-h, 3rem);
   border-bottom: 1px solid var(--line);
-  background: var(--slate-2);
+  /* No fill of its own. This strip sits at the top of the window right next to
+     the app header, and an opaque --slate-2 here put the two side by side on
+     different planes — measured (31,36,58) against the header's (16,12,30).
+     Transparent means it IS the panel's material, which is the header's
+     material, so the top of the window reads as one bar. The hairline below
+     still separates it from the note, exactly as the app header is separated
+     from what it sits over. */
+  background: transparent;
 }
 
 #note-title {
@@ -1821,6 +2367,7 @@ body.dragging #drop-hint {
   padding: 0.35rem 0.5rem;
   font-size: 10px;
   border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
   background: var(--slate);
 }
 
@@ -1829,18 +2376,99 @@ body.dragging #drop-hint {
   background: var(--slate-2);
 }
 
+/* The drawer's five actions, labelled, on their own row. Quiet chips: the note
+   is the protagonist, these are what you can do to it. They wrap rather than
+   compress, so the narrow end of the drawer gets two rows instead of five
+   squeezed icons. */
+#note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.6rem 1.3rem;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.na {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--ash);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0.32rem 0.75rem;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.na svg {
+  color: var(--ash-dim);
+  transition: color var(--dur) var(--ease);
+}
+
+.na:hover {
+  color: var(--frost);
+  border-color: var(--ash-dim);
+  background: var(--slate-2);
+}
+
+.na:hover svg {
+  color: var(--accent);
+}
+
+.na:active {
+  transform: translateY(1px);
+}
+
+.na:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* a ghost has no note to summarize, explain or map — the actions say so */
+.na:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.na:disabled:hover {
+  color: var(--ash);
+  border-color: var(--line-2);
+  background: transparent;
+}
+
+.na:disabled:hover svg {
+  color: var(--ash-dim);
+}
+
 #note-body {
-  padding: 0.9rem 1.1rem;
+  padding: 1.1rem 1.3rem 2rem;
   overflow-y: auto;
+  font-size: 16px;
+  line-height: 1.72;
 }
 
 #note-body :first-child {
   margin-top: 0;
 }
 
+/* A note written for GitHub centres its header with <div align="center">, and in
+   a 630px drawer that turns the whole intro into centred prose with a ragged
+   left edge. The drawer reads left-aligned, whatever the file was formatted
+   for. Presentational attribute only, so a real centred block (display math,
+   a mermaid figure) keeps its own alignment. */
+#note-body [align="center"],
+#note-body [align="center"] * {
+  text-align: start;
+}
+
 /* frontmatter properties box — native <details>, same collapse idiom as .thinking */
 details.fm {
   border: 1px solid var(--line);
+  border-radius: var(--r-sm);
   background: var(--slate-2);
   margin-bottom: 0.9rem;
   font-size: 12px;
@@ -1854,7 +2482,7 @@ details.fm summary {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  transition: color .1s linear;
+  transition: color var(--dur) var(--ease);
 }
 
 details.fm summary::-webkit-details-marker {
@@ -1912,44 +2540,281 @@ details.fm summary:hover {
   font-size: 12px;
 }
 
-/* note drawer mini-map — native <details>, same collapse idiom as .thinking */
-#note-mini-map {
-  border-bottom: 1px solid var(--line);
+/* --- drawer mode switch + context mode --------------------------------------
+   The drawer is two readings of one note: what it SAYS (the reader) and where
+   it SITS (context). A segmented control, because those are two states of one
+   surface. Context itself is four deterministic sections — snippets, concepts,
+   how it IS connected, how it SHOULD be — on the same 1px-compartment grid as
+   the rest of the app. The only thing that varies typographically is the
+   concept cloud's size, and there the size IS the data. */
+#note-mode {
+  display: flex;
+  flex-shrink: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  overflow: hidden;
 }
 
-#note-mini-map summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 0.5rem 1.1rem;
-  color: var(--ash-dim);
+#note-mode button {
+  font-family: var(--sans);
   font-size: 10px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  transition: color .1s linear;
+  color: var(--ash-dim);
+  background: var(--slate);
+  border: none;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
-#note-mini-map summary::-webkit-details-marker {
-  display: none;
-}
-
-#note-mini-map:not([open]) summary::before {
-  content: "▸ ";
-}
-
-#note-mini-map[open] summary::before {
-  content: "▾ ";
-}
-
-#note-mini-map summary:hover {
+#note-mode button:hover:not(:disabled) {
   color: var(--frost);
 }
 
-#note-mini-map-frame {
-  width: 100%;
-  height: 240px;
-  border: none;
-  background: var(--void);
+#note-mode button.active {
+  background: var(--line);
+  color: var(--frost);
+}
+
+#note-mode button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#note-mode button:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -2px;
+}
+
+#note-context {
+  padding: 1.1rem 1.3rem 2rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.4rem;
+}
+
+#note-context[hidden] {
+  display: none;
+}
+
+/* waiting / empty / error: one muted line, never a skeleton flash */
+#note-context.cx-wait {
   display: block;
+  color: var(--ash-dim);
+  font-size: 13px;
+}
+
+.cx-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.cx-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ash-dim);
+}
+
+.cx-sub {
+  font-size: 11px;
+  color: var(--ash-dim);
+  margin-top: -0.2rem;
+}
+
+.cx-hint {
+  font-size: 12px;
+  color: var(--warn);
+  background: var(--slate-2);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--warn);
+  padding: 0.5rem 0.7rem;
+}
+
+/* a snippet is a probe into the note, so it is typeset as prose, not as chrome */
+.cx-snip {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  padding: 0.35rem 0 0.35rem 0.7rem;
+  border-left: 1px solid var(--line-2);
+}
+
+.cx-snip-h {
+  display: block;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ash-dim);
+  margin-bottom: 0.15rem;
+}
+
+.cx-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.55rem;
+}
+
+.cx-concept {
+  font-family: var(--sans);
+  line-height: 1.3;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  padding: 0.1rem 0;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.cx-concept:hover {
+  color: var(--frost);
+  border-bottom-color: var(--accent);
+}
+
+.cx-concept.lit {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.cx-concept:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cx-group {
+  font-size: 11px;
+  color: var(--ash-dim);
+  margin-top: 0.4rem;
+}
+
+.cx-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.28rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.cx-row:last-child {
+  border-bottom: none;
+}
+
+/* the tail of a long list — same native <details> collapse idiom as .fm */
+.cx-more summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.35rem 0;
+  font-size: 11px;
+  color: var(--ash-dim);
+  transition: color var(--dur) var(--ease);
+}
+
+.cx-more summary::-webkit-details-marker {
+  display: none;
+}
+
+.cx-more:not([open]) summary::before {
+  content: "▸ ";
+}
+
+.cx-more[open] summary::before {
+  content: "▾ ";
+}
+
+.cx-more summary:hover {
+  color: var(--frost);
+}
+
+.cx-more summary:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.cx-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: 13px;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--dur) var(--ease);
+}
+
+.cx-name:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.cx-name:disabled {
+  color: var(--ash-dim);
+  cursor: default;
+}
+
+.cx-why {
+  flex: 1 1 auto;
+  font-size: 11px;
+  color: var(--ash-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cx-open,
+.cx-do,
+.cx-write {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-family: var(--sans);
+  color: var(--ash-dim);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.cx-open {
+  font-size: 11px;
+  line-height: 1;
+  padding: 0.22rem 0.42rem;
+}
+
+.cx-do {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.22rem 0.6rem;
+}
+
+.cx-write {
+  align-self: flex-start;
+  margin-left: 0;
+  font-size: 12px;
+  padding: 0.4rem 0.9rem;
+}
+
+.cx-open:hover,
+.cx-do:hover,
+.cx-write:hover {
+  color: var(--frost);
+  border-color: var(--accent);
+  background: var(--slate-2);
+}
+
+:is(.cx-open, .cx-do, .cx-write):focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* --- bottom dock (graph/map): ask-from-here composer + rendered answer card -- */
@@ -1966,10 +2831,24 @@ details.fm summary:hover {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  background: var(--slate);
-  border-top: 1px solid var(--line-2);
-  transition: right .14s linear, left .12s linear;
+  justify-content: flex-end;
+  /* No strip. The composer hovers over the graph exactly as it does over the
+     transcript, and the card beside it is a card, so neither needs a bar drawn
+     behind it. The consequence is that this box is now invisible but still
+     hit-testable across the full width of the view, which would eat clicks on
+     the graph underneath it — hence pointer-events, restored on the two things
+     that are actually there. */
+  pointer-events: none;
+  transition: right var(--dur) var(--ease), left var(--dur) var(--ease);
   /* match drawer + sidebar */
+}
+
+#dock .composer-shell,
+#peek {
+  pointer-events: auto;
+  /* the graph is a bright, busy canvas: without a shadow the composer reads as
+     painted onto it rather than held above it */
+  box-shadow: var(--lift);
 }
 
 body.sidebar-collapsed #dock {
@@ -1980,8 +2859,17 @@ body.note-open #dock {
   right: var(--note-w, 630px);
 }
 
+/* the answer card is now a free-standing card on the same measure as the
+   composer under it, not the top half of a docked strip */
 #peek {
-  border-bottom: 1px solid var(--line);
+  width: min(46rem, calc(100% - 4rem));
+  margin: 0 auto 0.55rem;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  overflow: hidden;
+  /* let the header's fill respect the top corners; #peek-body scrolls itself */
 }
 
 #peek>header {
@@ -2008,6 +2896,7 @@ body.note-open #dock {
   padding: 0.35rem 0.5rem;
   font-size: 10px;
   border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
   background: var(--slate);
 }
 
@@ -2032,7 +2921,7 @@ body.note-open #dock {
 
 #dock-composer {
   border-top: none;
-  /* #dock's own border-top (or the card's bottom rule) separates */
+  /* nothing to separate from: the shell carries its own edge */
 }
 
 /* --- notifications: hairline status strip (bottom-right). Two levels only —
@@ -2041,29 +2930,67 @@ body.note-open #dock {
    gaps: a failed background fetch is now visible instead of a stale "—". */
 #toasts {
   position: fixed;
+  /* Under the header, not over the composer. Bottom-right put a 360px strip
+     across #send at every width the composer's own 46rem measure left room for,
+     so the app's resting state was a diagnostic covering its primary control.
+     --header-h is measured live, because the strip wraps to two rows when the
+     drawer is open on a narrow window. Inset by the drawer the same way #dock
+     is, so the two never stack. */
+  top: calc(var(--header-h, 3rem) + 0.75rem);
   right: 1rem;
-  bottom: 1rem;
   z-index: 120;
   /* above drawer (50), drop-hint (100), scanline (90) */
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  max-width: min(360px, 90vw);
+  max-width: min(300px, 90vw);
   pointer-events: none;
+  transition: right var(--dur) var(--ease);
+}
+
+body.note-open #toasts {
+  right: calc(var(--note-w, 630px) + 1rem);
+}
+
+/* the roll-up: older toasts collapse behind it rather than stacking */
+.toast-more {
+  align-self: flex-end;
+  pointer-events: auto;
+  font-family: var(--sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ash);
+  background: var(--slate);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+
+.toast-more:hover {
+  color: var(--frost);
+  border-color: var(--ash-dim);
 }
 
 .toast {
   pointer-events: auto;
-  background: var(--slate-2);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
   color: var(--frost);
   border: 1px solid var(--line-2);
-  border-left: 2px solid var(--accent);
+  border-left: 1px solid var(--accent);
+  border-radius: var(--r-sm);
   padding: 0.5rem 0.7rem;
   font-size: 12px;
   letter-spacing: 0.02em;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  animation: toast-in .12s linear;
+  animation: toast-in var(--dur) var(--ease);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
 }
 
 .toast.error {
@@ -2115,13 +3042,16 @@ body.note-open #dock {
   position: absolute;
   top: 100%;
   right: 0;
-  z-index: 60;
-  /* above the note drawer header (50) */
+  /* 130 clears #toasts (120): the strip now lives in this same top-right corner,
+     and a panel the user just opened outranks a transient notification. */
+  z-index: 130;
   width: min(320px, 90vw);
-  background: var(--slate);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--line-2);
   border-top: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border-radius: 0 0 var(--r) var(--r);
+  box-shadow: var(--lift), var(--glass-edge);
 }
 
 .sp-title {
@@ -2131,6 +3061,94 @@ body.note-open #dock {
   font-size: 10px;
   padding: 0.6rem 0.8rem;
   border-bottom: 1px solid var(--line-2);
+}
+
+/* --- help panel: the app's only answer to "what can I do here" -------------- */
+#help-btn {
+  font-size: 13px;
+  border-left: 1px solid var(--line);
+  min-width: 2.6rem;
+  justify-content: center;
+}
+
+#help-panel {
+  display: block;
+  /* beats `header > * { display:flex }`; [hidden] still wins */
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 130;
+  /* same corner as #toasts (120), same rule: the deliberate panel wins */
+  width: min(390px, 92vw);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-top: none;
+  border-radius: 0 0 var(--r) var(--r);
+  box-shadow: var(--lift), var(--glass-edge);
+}
+
+#help-panel .sp-title {
+  border-top: 1px solid var(--line);
+}
+
+#help-panel .sp-title:first-child {
+  border-top: none;
+}
+
+.hp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.45rem 0.8rem;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.hp-row kbd {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--frost);
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+}
+
+.hp-row>span:last-child {
+  color: var(--ash);
+}
+
+.hp-row .hp-what {
+  flex-shrink: 0;
+  min-width: 6.5rem;
+  color: var(--frost);
+}
+
+/* --- sidebar filter status: the filter says what it did --------------------- */
+#side-search-status {
+  margin-top: 0.45rem;
+  font-size: 11px;
+  color: var(--ash-dim);
+  line-height: 1.5;
+}
+
+#side-search-status.empty {
+  color: var(--ash);
+}
+
+#side-search-status .linklike {
+  display: block;
+  padding: 0.25rem 0 0;
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 11px;
+}
+
+#side-search-status .linklike:hover {
+  color: var(--frost);
 }
 
 
@@ -2196,7 +3214,12 @@ body.note-open #dock {
   padding: 0 1rem 0.2rem;
   max-height: 6rem;
   overflow: hidden;
-  transition: max-height .18s linear, opacity .18s linear, padding .18s linear;
+  /* max-height + padding is a layout animation on purpose: the row has to
+     collapse to nothing and give its space back to the transcript, which
+     transform and opacity cannot do. It fires once per session, when the first
+     message lands, and measures 12 layouts / 1.5ms. grid-template-rows would
+     buy an inner wrapper and the same layout pass. */
+  transition: max-height var(--dur) var(--ease), opacity var(--dur) var(--ease), padding var(--dur) var(--ease);
 }
 
 #view-chat:not(:has(#log:empty)) #quick-actions {
@@ -2208,14 +3231,15 @@ body.note-open #dock {
 
 .qa {
   font-family: var(--sans);
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  letter-spacing: 0.02em;
   color: var(--ash);
   background: var(--slate-2);
   border: 1px solid var(--line-2);
-  padding: 0.4rem 0.8rem;
+  border-radius: 999px;
+  padding: 0.42rem 0.95rem;
   cursor: pointer;
-  transition: color .1s linear, border-color .1s linear;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
 .qa:hover {
@@ -2239,7 +3263,7 @@ body.note-open #dock {
 #view-chat:has(#log:empty) {
   justify-content: center;
   align-items: center;
-  gap: 0.75rem;
+  gap: 1.4rem;
 }
 
 #view-chat:has(#log:empty) #log {
@@ -2247,21 +3271,24 @@ body.note-open #dock {
   /* shrink to the mascot; never stretch the empty transcript */
 }
 
+/* The composer is on the measure in BOTH states now, so idle no longer has to
+   resize it — that switch was the whole defect. Idle only centres the chips
+   under the art and drops the scrim, since nothing scrolls under the composer
+   when the transcript is empty. */
+/* align-items:center above makes every child shrink to its own content, which
+   collapsed the composer to the width of its placeholder. The shell already
+   carries the measure, so the row just has to span the pane and let it centre. */
 #view-chat:has(#log:empty) :is(#quick-actions, #composer) {
-  width: min(680px, 90%);
-  /* a centered island, not an edge-to-edge bar */
+  align-self: stretch;
 }
 
 #view-chat:has(#log:empty) #quick-actions {
   justify-content: center;
-  /* chips centered under the art */
-  padding: 0;
+  padding: 0 2rem;
 }
 
-#view-chat:has(#log:empty) #composer {
-  border-top: none;
-  /* floating: the input control carries its own border */
-  padding: 0;
+#view-chat:has(#log:empty) #composer::before {
+  display: none;
 }
 
 /* honor reduced-motion for the animated bits added/kept here */
@@ -2270,11 +3297,14 @@ body.note-open #dock {
   .caret,
   .tool:not(.done):not(.error),
   .spinner,
-  .toast {
+  .toast,
+  .msg {
     animation: none !important;
   }
 
-  #quick-actions {
+  #quick-actions,
+  #note-panel,
+  .composer-shell {
     transition: none;
   }
 }
@@ -2343,20 +3373,20 @@ body.note-open #dock {
   flex: 1;
   overflow-y: auto;
   padding: 1rem;
-  /* the ask-from-here dock floats over this view like it does over the graph —
-     leave it room, or the last card scrolls under the composer */
-  padding-bottom: 5.5rem;
+  /* the ask-from-here dock no longer reaches this view, so the 5.5rem it used to
+     reserve for the composer is now just a hole under the last card */
+  padding-bottom: 1.5rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  transition: opacity 0.15s;
+  transition: opacity var(--dur) var(--ease);
   /* refetch holds the previous render at reduced opacity — no skeleton flash */
 }
 
 /* hero: the one number the view leads with. Proportional figures on purpose —
    tabular-nums makes a display-size number read loose. */
 .mhero {
-  padding: 1.1rem 1.2rem;
+  padding: 1.2rem 1.35rem;
 }
 
 .hero-lbl {
@@ -2401,6 +3431,8 @@ body.note-open #dock {
   gap: 1px;
   background: var(--line);
   border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
   flex-shrink: 0;
 }
 
@@ -2421,6 +3453,7 @@ body.note-open #dock {
 
 .mcard {
   border: 1px solid var(--line);
+  border-radius: var(--r);
   background: var(--page);
   padding: 0.85rem 0.9rem 0.9rem;
   min-width: 0;
@@ -2667,6 +3700,7 @@ body.note-open #dock {
   padding: 0.4rem 0.9rem;
   background: var(--slate-2);
   border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
   color: var(--text);
   font-family: var(--sans);
   font-size: 12px;

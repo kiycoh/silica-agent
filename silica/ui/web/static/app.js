@@ -17,16 +17,44 @@ let activeTab = "chat";
 const srStatus = $("#sr-status");
 const toasts = $("#toasts");
 function announce(msg) { if (srStatus) srStatus.textContent = msg; }
+// Cap the visible stack. Two diagnostics fire on every load and an error turn
+// stacked five, ~300px of grey boxes sitting on top of #send — so whatever you
+// had just done, the screen closed on a debug message covering the primary
+// control. Older ones roll up behind a "+N" the user can expand.
+const TOAST_MAX = 2;
+
+function rollUpToasts() {
+  const all = [...toasts.querySelectorAll(".toast")];
+  const overflow = Math.max(0, all.length - TOAST_MAX);
+  all.forEach((t, i) => { t.hidden = i < overflow; });
+  let more = toasts.querySelector(".toast-more");
+  if (!overflow) { if (more) more.remove(); return; }
+  if (!more) {
+    more = document.createElement("button");
+    more.type = "button";
+    more.className = "toast-more";
+    // recompute on click: the stack keeps changing under this handler
+    more.addEventListener("click", () => {
+      toasts.querySelectorAll(".toast").forEach((t) => { t.hidden = false; });
+      more.remove();
+    });
+  }
+  toasts.prepend(more);
+  more.textContent = `+${overflow} more`;
+}
+
 function notify(msg, level = "error") {
   announce(msg);
-  if ([...toasts.children].some((t) => t.textContent === msg)) return; // dedupe visible
+  if ([...toasts.querySelectorAll(".toast")].some((t) => t.textContent === msg)) return; // dedupe visible
   const t = document.createElement("div");
   t.className = "toast " + level;
   t.textContent = msg;
-  const kill = () => t.remove();
+  t.title = msg; // CSS clamps the box to 3 lines; the full text stays reachable
+  const kill = () => { t.remove(); rollUpToasts(); };
   t.addEventListener("click", kill);
   toasts.appendChild(t);
   setTimeout(kill, level === "error" ? 6000 : 3000);
+  rollUpToasts();
 }
 
 function bubble(role) {
@@ -36,6 +64,82 @@ function bubble(role) {
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
   return el.querySelector(".body");
+}
+
+// One vault change as an object that stays in the transcript: what happened, to
+// which note, and the way back out of it. `effect` is written | moved | deleted |
+// failed. The card owns its own revert, so you undo the write you are looking at
+// rather than the whole turn.
+const WRITE_COPY = {
+  written: { label: "written", act: "revert", hint: "restore this note to its state before the turn" },
+  moved: { label: "moved", act: "revert", hint: "move this note back" },
+  deleted: { label: "deleted", act: "restore", hint: "bring this note back" },
+  failed: { label: "not written", act: null, hint: "" },
+};
+
+function writeCard(ref, effect, verb) {
+  const copy = WRITE_COPY[effect] || WRITE_COPY.written;
+  const card = document.createElement("div");
+  card.className = "wcard " + effect;
+  const op = document.createElement("span");
+  op.className = "wc-op";
+  op.textContent = copy.label;
+  const path = document.createElement("span");
+  // A deleted note has no page to open, and a failed write may have created
+  // nothing at all: keep the path as a record, drop the click, or it routes to
+  // /note and answers "not found in vault".
+  // `wc-open`, not `note-link`: a card's path is the thing that changed, not a
+  // citation, and borrowing the chip's class also borrowed its cyan underline —
+  // which `:is(.msg, #note-body, …) .note-link` carries at ID specificity, so no
+  // amount of class stacking could take it back off. The delegated open-note
+  // handler matches both classes.
+  const openable = effect !== "deleted" && effect !== "failed";
+  path.className = "wc-path" + (openable ? " wc-open" : "");
+  if (openable) path.dataset.path = ref;
+  path.textContent = ref;
+  path.title = ref;
+  card.append(op, path);
+  if (!copy.act) {
+    const n = document.createElement("span");
+    n.className = "wc-note";
+    n.textContent = verb ? `${verb} failed · vault unchanged` : "vault unchanged";
+    card.appendChild(n);
+    return card;
+  }
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "wc-act";
+  b.textContent = copy.act;
+  b.title = copy.hint;
+  b.addEventListener("click", () => {
+    b.disabled = true;
+    card.classList.add("reverting");
+    send("/undo " + ref);
+  });
+  card.appendChild(b);
+  return card;
+}
+
+// Raw exception text used to land in the transcript as the agent's own speech:
+// "HTTPError 502 … (request id 4f2a-9c11-bd03)". Say what happened and what to do
+// about it, in the product's own language. The original text is never discarded —
+// it stays on the element's title, because the person debugging this needs it.
+const ERROR_PLAIN = [
+  [/\b(50[0-9]|timeout|timed out|connection|ECONNREFUSED|unreachable)\b/i,
+    "the model endpoint didn't answer. Try again, or check the endpoint under the model button."],
+  [/\b(401|403|unauthorized|forbidden|api[_ -]?key)\b/i,
+    "the provider rejected the credentials. Check the API key for this endpoint."],
+  [/\b(429|rate limit)\b/i, "the provider is rate-limiting. Wait a moment and try again."],
+  [/lint failed/i, "the write was rolled back because the note would have broken a vault rule. The vault is unchanged."],
+  [/not found in vault|no such note/i, "that note isn't in the vault under that name."],
+  [/context length|too many tokens|max_tokens/i,
+    "the conversation outgrew the model's context. Start a new chat, or narrow the question."],
+];
+
+function plainError(raw) {
+  const s = String(raw || "");
+  for (const [re, msg] of ERROR_PLAIN) if (re.test(s)) return msg;
+  return s;
 }
 
 function escapeHtml(s) {
@@ -132,7 +236,9 @@ function setSendDisabled(v) {
   $("#dock-send").disabled = v;
 }
 
-async function runTurn(fetchPromise, pendingLabel = "working") {
+// `retry` re-runs the exact same turn. It is a callback rather than the text so
+// that /find, the dock and a nucleate-and-ask all retry the thing THEY sent.
+async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   if (streaming) return;
   streaming = true;
   stopBtn.hidden = false;
@@ -158,7 +264,12 @@ async function runTurn(fetchPromise, pendingLabel = "working") {
   // A ref is only recorded once its tool SUCCEEDS: a failed write must not be
   // reported as written, in the one place the user looks to trust the agent.
   const touched = new Map();
-  const claimed = {};  // call id → { refs, effect }, held until tool_done
+  // ref → the verb that failed. A write that fails lints and self-reverts used to
+  // leave NOTHING behind: its refs were dropped, so the footer showed no chip and
+  // the only trace was a tool line with a raw exception in it. "the vault did not
+  // change" is a result the user needs stated, not inferred from an absence.
+  const failed = new Map();
+  const claimed = {};  // call id → { refs, effect, verb }, held until tool_done
   let curText = null;   // open markdown segment { el, raw }
   let curTools = null;  // open group of consecutive tools
   let curThink = null;  // open thinking block { details, body, raw }
@@ -242,38 +353,46 @@ async function runTurn(fetchPromise, pendingLabel = "working") {
     caret.remove(); // no-op if a rerender already detached it
     freezePeek(); // done or aborted — stop mirroring, keep the preview up
     if (curThink) curThink.details.open = false; // aborted mid-thought — still collapse
-    if (touched.size) {
-      // Grouped by what the turn DID, not merged into one "sources" row: a note
-      // the agent deleted is not a citation, and a write is the whole point of
-      // the product. Mutations first — that is the part worth checking.
-      const s = document.createElement("div");
-      s.className = "sources";
-      for (const effect of ["written", "moved", "deleted", "read"]) {
-        const refs = [...touched].filter(([, e]) => e === effect).map(([r]) => r);
-        if (!refs.length) continue;
-        const g = document.createElement("div");
-        g.className = "sgroup " + effect;
-        g.innerHTML = `<span class="sources-label">${effect}</span>`;
-        for (const ref of refs) {
-          const c = document.createElement("span");
-          // A deleted note has no page to open: keep the chip as a record, drop
-          // the click, or it routes to /note and answers "not found in vault".
-          c.className = effect === "deleted" ? "note-gone" : "note-link";
-          if (effect !== "deleted") c.dataset.path = ref; // delegated click → note drawer
-          c.textContent = ref.split("/").pop().replace(/\.md$/, "");
-          g.appendChild(c);
-        }
-        s.appendChild(g);
-      }
-      if ([...touched.values()].some((e) => e !== "read")) {
+    // A mutation is an object, a read is a citation, and they no longer share a
+    // row of identical chips. The product's whole claim is that a write to your
+    // vault is safe to delegate, and a write used to announce itself as a 12px
+    // chip with a small outlined button beside it — the least prominent thing in
+    // its own footer. Each one now gets a card it can carry a state on, and its
+    // own revert, so you undo the write you are looking at rather than the turn.
+    const mutations = [...touched].filter(([, e]) => e !== "read");
+    if (mutations.length || failed.size) {
+      const w = document.createElement("div");
+      w.className = "writes";
+      for (const [ref, effect] of mutations) w.appendChild(writeCard(ref, effect, null));
+      for (const [ref, verb] of failed) w.appendChild(writeCard(ref, "failed", verb));
+      // One button for the whole turn stays, but only when there is more than one
+      // card: with a single write, per-card revert already says it better.
+      if (mutations.length > 1) {
         const u = document.createElement("button");
         u.type = "button";
         u.className = "undo-turn";
-        u.textContent = "undo this turn";
-        u.title = "run /undo — rolls back this turn's vault writes";
+        u.textContent = `revert all ${mutations.length} changes`;
+        u.title = "run /undo for every note this turn touched";
         u.addEventListener("click", () => { u.disabled = true; send("/undo"); });
-        s.appendChild(u);
+        w.appendChild(u);
       }
+      flow.appendChild(w);
+    }
+    const reads = [...touched].filter(([, e]) => e === "read").map(([r]) => r);
+    if (reads.length) {
+      const s = document.createElement("div");
+      s.className = "sources";
+      const g = document.createElement("div");
+      g.className = "sgroup read";
+      g.innerHTML = '<span class="sources-label">read</span>';
+      for (const ref of reads) {
+        const c = document.createElement("span");
+        c.className = "note-link";
+        c.dataset.path = ref; // delegated click → note drawer
+        c.textContent = ref.split("/").pop().replace(/\.md$/, "");
+        g.appendChild(c);
+      }
+      s.appendChild(g);
       flow.appendChild(s);
     }
     const answer = texts.map((t) => t.raw).join("\n\n").trim();
@@ -308,7 +427,7 @@ async function runTurn(fetchPromise, pendingLabel = "working") {
       toolsGroup().appendChild(t);
       curTools.appendChild(caret);
       toolEls[ev.id] = t;
-      claimed[ev.id] = { refs: ev.notes || [], effect: ev.effect || "read" };
+      claimed[ev.id] = { refs: ev.notes || [], effect: ev.effect || "read", verb: ev.name };
     } else if (ev.type === "tool_done") {
       const t = toolEls[ev.id];
       if (t) { t.className = "tool done"; t.textContent = "✓ " + (t.dataset.label || ev.name); }
@@ -321,7 +440,15 @@ async function runTurn(fetchPromise, pendingLabel = "working") {
       }
     } else if (ev.type === "tool_error") {
       const t = toolEls[ev.id];
-      if (t) { t.className = "tool error"; t.textContent = "✗ " + (t.dataset.label || ev.name) + " — " + ev.error; }
+      if (t) {
+        t.className = "tool error";
+        t.textContent = "✗ " + (t.dataset.label || ev.name) + " · " + plainError(ev.error);
+        t.title = ev.error; // the raw text stays reachable for whoever is debugging
+      }
+      const f = claimed[ev.id];
+      // Still not claimed as written — but now recorded as a mutation that did
+      // NOT land, so the turn can say so in the footer instead of going quiet.
+      if (f && f.effect !== "read") for (const r of f.refs) if (!touched.has(r)) failed.set(r, f.verb || "write");
       delete claimed[ev.id]; // it failed: do not claim its notes
     } else if (ev.type === "batch") {
       const t = document.createElement("div");
@@ -354,27 +481,49 @@ async function runTurn(fetchPromise, pendingLabel = "working") {
       announce("response ready");
     } else if (ev.type === "error") {
       close("");
-      peekError(ev.error);
-      notify("response failed: " + ev.error);
-      const t = document.createElement("div");
-      t.className = "tool error";
-      t.textContent = "error: " + ev.error;
-      flow.appendChild(t);
+      peekError(plainError(ev.error));
+      // The error belongs where it happened, not in a corner: it used to render
+      // as a raw exception line attributed to the agent as speech AND as a toast
+      // over the send button, and neither offered a way to try again — so a
+      // failed turn ended the conversation and took the typed question with it.
+      const box = document.createElement("div");
+      box.className = "turn-error";
+      const msg = document.createElement("div");
+      msg.className = "te-msg";
+      msg.textContent = plainError(ev.error);
+      msg.title = ev.error; // raw text stays reachable
+      box.appendChild(msg);
+      if (retry) {
+        const r = document.createElement("button");
+        r.type = "button";
+        r.className = "te-retry";
+        r.textContent = "try again";
+        r.addEventListener("click", () => {
+          if (streaming) return;
+          box.remove();
+          retry();
+        });
+        box.appendChild(r);
+      }
+      flow.appendChild(box);
+      announce("the turn failed: " + plainError(ev.error));
     }
     log.scrollTop = log.scrollHeight;
   }
 }
 
-function send(text) {
+function send(text, replay = false) {
   if (!text.trim() || streaming) return;
-  bubble("user").textContent = text;
+  // A retry re-runs the turn but must not stack a second copy of your question
+  // in the transcript: the bubble from the first attempt is still there.
+  if (!replay) bubble("user").textContent = text;
   const find = text.trim().match(/^\/find\s*(.*)$/);
   if (find) { runFind(find[1]); return; }
   runTurn(fetch("/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
-  }));
+  }), "working", () => send(text, true));
 }
 
 // /find bypasses the agent entirely — same "direct tool, no LLM" pattern as
@@ -467,7 +616,8 @@ function renderCommands(q) {
     const el = document.createElement("button");
     el.className = "cmd-item" + (i === cmdSelIdx ? " sel" : "");
     el.type = "button";
-    el.innerHTML = `<span class="cmd-name">${c.name}</span> <span class="cmd-summary">${escapeHtml(c.usage ? c.usage + " — " + c.summary : c.summary)}</span>`;
+    el.innerHTML = `<span class="cmd-name">${c.name}</span><span class="cmd-summary">${escapeHtml(c.usage ? c.usage + " · " + c.summary : c.summary)}</span>`;
+    el.title = c.usage ? c.usage + " · " + c.summary : c.summary;
     el.addEventListener("click", () => pickCommand(c));
     box.appendChild(el);
   });
@@ -616,6 +766,33 @@ function applySidebarFilter() {
                 (!q && !sessionsExpanded && +el.dataset.idx >= SESSION_CAP);
   });
   $("#sessions-more").hidden = !!q || sessionsExpanded || sessionCount <= SESSION_CAP;
+
+  // Say what the filter did. It used to empty both lists in silence, so a real
+  // zero and a typo rendered pixel-identical and the only way to learn which was
+  // to clear the field. It also only ever matched names, never note bodies, and
+  // the placeholder never said so — hence the offer to ask the vault instead.
+  const notes = $("#tree").querySelectorAll(".tree-note:not([hidden])").length;
+  const chats = $("#sessions").querySelectorAll(".session:not([hidden])").length;
+  const box = $("#side-search-status");
+  box.hidden = !q;
+  if (!q) return;
+  if (notes || chats) {
+    box.textContent = `${notes} note${notes === 1 ? "" : "s"}, ${chats} chat${chats === 1 ? "" : "s"} by name`;
+    box.classList.remove("empty");
+  } else {
+    box.textContent = `no name matches "${$("#side-search").value.trim()}".`;
+    box.classList.add("empty");
+    const ask = document.createElement("button");
+    ask.type = "button";
+    ask.className = "linklike";
+    ask.textContent = "search inside the notes";
+    ask.addEventListener("click", () => {
+      input.value = "/find " + $("#side-search").value.trim();
+      input.focus();
+      autoGrow(input);
+    });
+    box.appendChild(ask);
+  }
 }
 $("#side-search").addEventListener("input", applySidebarFilter);
 
@@ -684,18 +861,24 @@ async function openSession(id) {
 // when the vault might actually have changed (graphStale), not on every switch
 // back into the tab. A turn that writes notes sets graphStale = true.
 let graphStale = true;
-$(".tabs").addEventListener("click", (e) => {
-  const tab = e.target.dataset.tab;
-  if (!tab) return;
+// Switching tabs is a function, not only a click: a synthetic .click() bubbles
+// to the document's outside-click handler, which closes the note drawer. Every
+// caller that needs the drawer to survive the switch (the context drawer's
+// concept cloud, its suggested rows) calls this instead.
+function showTab(tab) {
   activeTab = tab;
   if (tab === "chat") closePeek(); // stream visible → card redundant
-  $("#dock").hidden = tab === "chat"; // ask-from-here strip lives on graph + map
+  $("#dock").hidden = tab !== "graph"; // ask-from-here lives on the graph + map only
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $("#view-chat").classList.toggle("active", tab === "chat");
   $("#view-graph").classList.toggle("active", tab === "graph");
   $("#view-metrics").classList.toggle("active", tab === "metrics");
   if (tab === "graph") setGraphMode(graphMode); // load the active mode's content
   if (tab === "metrics") loadMetrics();
+}
+$(".tabs").addEventListener("click", (e) => {
+  const tab = e.target.dataset.tab;
+  if (tab) showTab(tab);
 });
 
 // --- explore tab: network graph | radial map ---------------------------------
@@ -741,7 +924,8 @@ $("#graph-bar").addEventListener("click", (e) => {
 // loader then and re-sync the focus dim state after a (re)load.
 $("#graph-frame").addEventListener("load", () => {
   $("#graph-loading").hidden = true;
-  if (lastNotePath) focusGraphNode(lastNotePath);
+  replayGraphFocus(); // re-sync whatever is focused after a (re)load
+  syncDrawerToViews(); // ditto for the drawer, which hides this frame's HUD
 });
 $("#map-frame").addEventListener("load", () => { $("#map-loading").hidden = true; });
 
@@ -767,26 +951,37 @@ let metricsStale = true;
 let metricsLoading = false;
 let metricsDepth = "structural";
 
+let metricsAbort = null;
+
 async function loadMetrics(force = false, proposals = false) {
   if (metricsLoading) return;
   if (!metricsStale && !force && !(proposals && metricsDepth !== "full")) return;
   metricsLoading = true;
   const body = $("#metrics-body");
   const loading = $("#metrics-loading");
-  loading.querySelector("div:last-child").textContent = proposals
+  // `.fl-msg`, not `div:last-child`: the overlay now ends with a cancel button,
+  // so the positional selector matched nothing and this line threw before the
+  // overlay was ever shown — the whole metrics load failed silently.
+  loading.querySelector(".fl-msg").textContent = proposals
     ? "Running the co-occurrence delta over every note."
     : "Measuring the vault.";
   loading.hidden = false;
   body.style.opacity = body.childElementCount ? "0.45" : ""; // hold the last render, no skeleton flash
+  // A full report takes ~20s behind an indeterminate spinner, with no way out
+  // short of switching tab and hoping. The previous render stays underneath at
+  // reduced opacity, so cancelling leaves you exactly where you were.
+  metricsAbort = new AbortController();
   try {
-    const data = await (await fetch("/metrics" + (proposals ? "?proposals=1" : ""))).json();
+    const data = await (await fetch("/metrics" + (proposals ? "?proposals=1" : ""),
+                                    { signal: metricsAbort.signal })).json();
     if (data.error) { notify("metrics unavailable: " + data.error); return; }
     metricsDepth = data.depth || "structural";
     renderMetrics(data);
     metricsStale = false;
-  } catch {
-    notify("couldn't measure the vault");
+  } catch (e) {
+    if (e.name !== "AbortError") notify("couldn't measure the vault");
   } finally {
+    metricsAbort = null;
     metricsLoading = false;
     loading.hidden = true;
     body.style.opacity = "";
@@ -795,12 +990,13 @@ async function loadMetrics(force = false, proposals = false) {
 
 $("#metrics-refresh").addEventListener("click", () => loadMetrics(true, metricsDepth === "full"));
 
-// Clicking any row that names a note opens it in the drawer — the metrics are
-// only useful if the note they point at is one click away.
+// Clicking any row that names a note opens its context — the metrics are only
+// useful if the note they point at is one click away, and a metrics row is a
+// measurement about a note's PLACE in the vault, which is what context answers.
 $("#metrics-body").addEventListener("click", (e) => {
   if (e.target.id === "metrics-proposals") { loadMetrics(true, true); return; }
   const row = e.target.closest("[data-path]");
-  if (row && row.dataset.path) openNote(row.dataset.path);
+  if (row && row.dataset.path) openContext({ path: row.dataset.path });
 });
 
 const mkEl = (tag, cls, text) => {
@@ -1021,13 +1217,13 @@ function renderMetrics(d) {
   const e = d.energy || { total: 0, terms: [] };
   const full = d.depth === "full";
   const hv = mkEl("div", "hero-val", (e.total > 0 ? "+" : "") + e.total.toFixed(2));
-  head.appendChild(mkEl("div", "hero-lbl", "E(vault) — lattice energy"));
+  head.appendChild(mkEl("div", "hero-lbl", "E(vault) · lattice energy"));
   head.appendChild(hv);
   head.appendChild(mkEl("p", "hero-sub",
     "Lower is more coherent. A thermometer, not a target: read it to compare runs, "
     + "never descend it. "
     + (full
-      ? "Measured at full depth — comparable only to other full-depth readings."
+      ? "Measured at full depth: comparable only to other full-depth readings."
       : "Structural depth: integration deficits are not measured, so this is not "
         + "comparable to a full-depth E.")));
   if (d.discourse_state) {
@@ -1104,7 +1300,7 @@ function renderMetrics(d) {
         `${nfmt(rest.length)} smaller areas hold the other `
         + `${nfmt(rest.reduce((s, c) => s + c.size, 0))} notes`));
     }
-  } else mEmpty(cl, "No communities yet — link some notes.");
+  } else mEmpty(cl, "No communities yet. Link some notes.");
   grid.appendChild(cl);
 
   // --- degree distribution ---------------------------------------------------
@@ -1172,7 +1368,7 @@ function renderMetrics(d) {
     tc.appendChild(mTable(
       [{ key: "k", label: "Signal" }, { key: "v", label: "Notes", num: true }],
       [
-        ...tiers.map((t) => ({ k: "Tier — " + t.label, v: nfmt(t.value) })),
+        ...tiers.map((t) => ({ k: "Tier · " + t.label, v: nfmt(t.value) })),
         { k: "Carrying a claim stamp", v: `${nfmt(tp.stamped)} / ${nfmt(tp.notes_scanned)}` },
         { k: "With a Superseded section", v: nfmt(tp.superseded_sections) },
         { k: "Merged away", v: nfmt(tp.superseded_notes) },
@@ -1231,7 +1427,7 @@ function renderMetrics(d) {
       d.orphans.map((o) => ({ ...o, _path: o.path }))));
     const more = mMore(d.orphans.length, T.orphans || 0, "orphans");
     if (more) orph.appendChild(more);
-  } else mEmpty(orph, "None — every note is reachable.");
+  } else mEmpty(orph, "None. Every note is reachable.");
   grid.appendChild(orph);
 
   const dg = mCard("Unresolved links", "wikilink targets that don't exist yet");
@@ -1242,7 +1438,7 @@ function renderMetrics(d) {
     ));
     const more = mMore(d.dangling.length, T.dangling_links || 0, "targets");
     if (more) dg.appendChild(more);
-  } else mEmpty(dg, "None — every wikilink resolves.");
+  } else mEmpty(dg, "None. Every wikilink resolves.");
   grid.appendChild(dg);
 
   const at = mCard("Attention", "idle × missed in recall ÷ how well linked");
@@ -1280,7 +1476,7 @@ function renderMetrics(d) {
   // The co-occurrence leg runs one expanded ranking per note, so it is minutes
   // on a real vault. Asked for, never assumed.
   if (!full) {
-    const ask = mCard("Proposals", "co-occurrence delta — not yet measured");
+    const ask = mCard("Proposals", "co-occurrence delta, not yet measured");
     ask.classList.add("proposed");
     ask.appendChild(mkEl("p", "mempty",
       "Autolink candidates, stale links, missing hubs and integration deficits "
@@ -1504,11 +1700,40 @@ function setNoteW(w) {
 // 1-hop neighbours go full-opacity, everything else dims. No-op harmlessly if
 // a tab was never opened (contentWindow still exists, message just has no
 // listener yet).
-function focusGraphNode(path) {
+function postToViews(msg) {
   for (const id of ["#graph-frame", "#map-frame"]) {
     const frame = $(id);
-    if (frame.contentWindow) frame.contentWindow.postMessage({ type: "silica-focus-path", path }, "*");
+    if (frame.contentWindow) frame.contentWindow.postMessage(msg, "*");
   }
+}
+// The last focus INTENT, replayed whenever a view (re)loads. A frame that is
+// still loading drops the message, and /graph is rebuilt on every entry into
+// the explore tab — so "light these notes" issued from the chat tab used to be
+// posted into a loading iframe and then overwritten by the load handler.
+let graphFocus = [];
+function focusGraphNode(path) {
+  graphFocus = path ? [path] : [];
+  replayGraphFocus();
+}
+// Same, for a SET: a concept lights every note that carries it.
+function focusGraphNodes(paths) {
+  graphFocus = paths || [];
+  replayGraphFocus();
+}
+// Both shapes, in order: the radial map only speaks the single-path message,
+// the graph speaks both and the set arrives second, so it wins there.
+function replayGraphFocus() {
+  postToViews({ type: "silica-focus-path", path: graphFocus[0] || null });
+  if (graphFocus.length > 1) postToViews({ type: "silica-focus-paths", paths: graphFocus });
+}
+
+// Explore does not inset for the drawer the way chat does — the graph keeps its
+// full width and the drawer overlays it, so the frame's own HUD sits under a
+// translucent panel and reads through the note. The frame cannot see the
+// drawer, so tell it. Replayed on frame load like the focus state, because
+// /graph is rebuilt on every entry into the tab.
+function syncDrawerToViews() {
+  postToViews({ type: "silica-host-drawer", open: document.body.classList.contains("note-open") });
 }
 
 // Mermaid is a 3.5MB vendored bundle, so it loads on demand — only the first
@@ -1540,16 +1765,46 @@ function renderMermaid(root) {
   mermaidLoad.then(() => mermaid.run({ nodes: blocks }).catch(() => {}));
 }
 
-// Below this width the shell cannot hold the sidebar, a readable transcript and
-// the drawer at once: at 900px an open 55vw drawer left 141px of prose. Two panes
-// is the answer, so the sidebar yields — via the real `sidebar-collapsed` class,
-// so #sidebar-toggle keeps telling the truth — and comes back with the note,
-// unless the user had collapsed it themselves.
-const NARROW_W = 1100;
+// The transcript is what the drawer exists to serve, so it gets a floor and the
+// two panes beside it negotiate around it.
+//
+// The old rule was a fixed 1100px breakpoint, and it made the layout NON-MONOTONIC:
+// below 1100 the sidebar yielded, but at 1200 it stayed (264px) while the drawer
+// kept its full 630, leaving 306px of log — measured at 21 characters of prose per
+// line, worse than at the 900px floor. The window got bigger and the transcript got
+// smaller. 1280 and 1366 are the two commonest laptop widths after 1440, so the
+// broken band was the common case.
+const MIN_PROSE = 560;   // px of transcript that must survive, ~47ch of prose once
+                         // the sheet's and the row's padding come out of it
+const MIN_DRAWER = 320;  // below this the drawer stops being worth its own pane
+const SIDE_W = 264;      // must match --side-w
 let sidebarYielded = false;
 
+// What the drawer may take before the transcript drops below its floor.
+function drawerBudget(sidebarOn) {
+  return window.innerWidth - (sidebarOn ? SIDE_W : 0) - MIN_PROSE;
+}
+
+// Single owner of the open-drawer layout: decides whether the sidebar can stay,
+// then sizes the drawer to whatever is left over the floor. Runs on open, on
+// resize and after a drag, so the same window can no longer sit in two different
+// layouts depending on the order those happened in.
+function fitPanes() {
+  if (!document.body.classList.contains("note-open")) return;
+  const userCollapsed = document.body.classList.contains("sidebar-collapsed") && !sidebarYielded;
+  if (!userCollapsed) {
+    if (drawerBudget(true) >= MIN_DRAWER) restoreYieldedSidebar();
+    else yieldSidebarToDrawer();
+  }
+  const sidebarOn = !document.body.classList.contains("sidebar-collapsed");
+  const want = parseInt(localStorage.getItem("note-width"), 10) || 630;
+  const w = Math.max(MIN_DRAWER, Math.min(want, drawerBudget(sidebarOn)));
+  notePanel.style.width = w + "px";
+  setNoteW(w);
+}
+
 function yieldSidebarToDrawer() {
-  if (window.innerWidth > NARROW_W || document.body.classList.contains("sidebar-collapsed")) return;
+  if (document.body.classList.contains("sidebar-collapsed")) return;
   document.body.classList.add("sidebar-collapsed");
   sidebarYielded = true;
 }
@@ -1560,47 +1815,297 @@ function restoreYieldedSidebar() {
   sidebarYielded = false;
 }
 
+// The drawer has two readings of the same note. `note` is the reader, exactly as
+// before. `context` is what the vault knows about it — concepts, how it IS
+// connected, how it SHOULD be — all deterministic, one blocking /context call.
+//
+// The click contract: naming a note means "I want to read it", so a wikilink and
+// the file tree always land in the reader, even when the drawer is already in
+// context. Pointing at a node means "what is this", so the graph, the map and
+// the metrics rows land in context.
+let drawerMode = "note";
+let ghostName = null; // set while the drawer holds an unresolved link, which has no reader
+
+function syncDrawerMode() {
+  document.querySelectorAll("#note-mode button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === drawerMode);
+    // A ghost has no file to read; the reader half stops being an offer.
+    if (b.dataset.mode === "note") b.disabled = !!ghostName;
+  });
+  // The five actions act on the SELECTED NOTE, so they survive the mode switch
+  // — but a ghost has no note to act on, and an enabled button that does
+  // nothing is the same silent no-op this drawer exists to fix.
+  document.querySelectorAll("#note-actions .na").forEach((b) => { b.disabled = !!ghostName; });
+  $("#note-body").hidden = drawerMode !== "note";
+  $("#note-context").hidden = drawerMode !== "context";
+}
+
+// Shared tail of both openers: raise the panel and let fitPanes negotiate the
+// widths. Kept in one place so the two modes cannot drift apart on layout.
+function showDrawer(title) {
+  $("#note-title").textContent = title || "";
+  notePanel.classList.add("open");
+  notePanel.setAttribute("aria-hidden", "false");
+  document.body.classList.add("note-open"); // dock + chat inset to the drawer's edge
+  syncDrawerToViews();
+  fitPanes(); // owns the sidebar decision AND the drawer width, in that order
+  $("#note-last").querySelector("span").textContent = title || "";
+}
+
 async function openNote(path) {
   if (!path) return;
   lastNotePath = path;
   lastViewedPath = path;
+  ghostName = null;
+  drawerMode = "note";
+  syncDrawerMode();
   focusGraphNode(path);
-  $("#note-mini-map").open = false; // reset: reload lazily if reopened for the new note
-  $("#note-mini-map-frame").src = "";
   try {
     const r = await fetch("/note?path=" + encodeURIComponent(path));
     const data = await r.json();
-    $("#note-title").textContent = data.title || "";
     $("#note-body").innerHTML = data.html || "";
     renderMermaid($("#note-body"));
     $("#note-body").scrollTop = 0;
-    notePanel.classList.add("open");
-    notePanel.setAttribute("aria-hidden", "false");
-    document.body.classList.add("note-open"); // dock + chat inset to the drawer's edge
-    yieldSidebarToDrawer();
-    const btn = $("#note-last");
-    btn.querySelector("span").textContent = data.title || path;
+    showDrawer(data.title || path);
   } catch { notify("couldn't open that note"); }
 }
+
+// `target` is {path} for a real note, or {name, ghost:true} for an unresolved
+// wikilink — which has no body, no reader, and one action: write it.
+async function openContext(target) {
+  const path = target.path || "";
+  const ghost = !!target.ghost || !path;
+  if (!path && !target.name) return;
+  ghostName = ghost ? (target.name || path) : null;
+  if (!ghost) { lastNotePath = path; lastViewedPath = path; }
+  drawerMode = "context";
+  syncDrawerMode();
+  focusGraphNode(ghost ? null : path);
+  const box = $("#note-context");
+  box.textContent = "reading the vault…";
+  box.className = "cx-wait";
+  showDrawer(ghost ? (target.name || "") : (path.split("/").pop().replace(/\.md$/, "")));
+  try {
+    const q = ghost
+      ? "ghost=1&name=" + encodeURIComponent(target.name || "")
+      : "path=" + encodeURIComponent(path);
+    const data = await (await fetch("/context?" + q)).json();
+    box.className = "";
+    renderContext(data);
+    box.scrollTop = 0;
+    showDrawer(data.title || target.name || path);
+  } catch {
+    box.className = "cx-wait";
+    box.textContent = "couldn't read that note's context";
+  }
+}
+
+$("#note-mode").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-mode]");
+  if (!b || b.disabled || b.dataset.mode === drawerMode) return;
+  if (b.dataset.mode === "note") openNote(lastNotePath || lastViewedPath);
+  else openContext({ path: lastNotePath || lastViewedPath });
+});
+
 function closeNote() {
   notePanel.classList.remove("open");
   notePanel.setAttribute("aria-hidden", "true");
   document.body.classList.remove("note-open");
+  syncDrawerToViews();
   restoreYieldedSidebar();
   lastNotePath = null; // lastViewedPath survives — the header button can reopen
+  ghostName = null;
   focusGraphNode(null);
 }
 $("#note-last").addEventListener("click", () => {
   if (lastViewedPath) openNote(lastViewedPath);
 });
 
-// Mini-map: load only when expanded (native <details>), so a plain note read
-// never pays for a /map render.
-$("#note-mini-map").addEventListener("toggle", function () {
-  if (this.open && lastNotePath) {
-    $("#note-mini-map-frame").src = "/map?note=" + encodeURIComponent(lastNotePath);
+// --- context mode rendering --------------------------------------------------
+// Built from DOM nodes, never innerHTML: every string here is vault data.
+function cxSection(title, sub) {
+  const sec = mkEl("div", "cx-sec");
+  sec.appendChild(mkEl("div", "cx-label", title));
+  if (sub) sec.appendChild(mkEl("div", "cx-sub", sub));
+  return sec;
+}
+
+// A note row. The name opens that note's CONTEXT — which is what makes the
+// drawer navigable, and the graph mirrors each hop. The small icon opens the
+// READER, for when you meant "let me actually read this one".
+function cxRow(r, why) {
+  const row = mkEl("div", "cx-row");
+  const name = mkEl("button", "cx-name", r.name || r.path);
+  name.type = "button";
+  if (r.path) name.addEventListener("click", () => openContext({ path: r.path }));
+  else { name.disabled = true; name.title = "not a note in this vault"; }
+  row.appendChild(name);
+  if (why) row.appendChild(mkEl("span", "cx-why", why));
+  if (r.path) {
+    const open = mkEl("button", "cx-open", "↗");
+    open.type = "button";
+    open.title = "read this note";
+    open.setAttribute("aria-label", "read " + (r.name || r.path));
+    open.addEventListener("click", () => openNote(r.path));
+    row.appendChild(open);
   }
-});
+  return row;
+}
+
+// Row lists get a floor of five and a native <details> for the tail. Five rows
+// are enough to see what kind of neighbourhood a note sits in; the rest is one
+// click away when the question is "all of them". <details> because the browser
+// already owns this toggle — no open/closed state to keep in JS, and it
+// survives a re-render by simply not existing across one.
+const CX_VISIBLE = 5;
+function cxList(sec, items, make) {
+  items.slice(0, CX_VISIBLE).forEach((it) => sec.appendChild(make(it)));
+  const rest = items.slice(CX_VISIBLE);
+  if (!rest.length) return;
+  const more = mkEl("details", "cx-more");
+  more.appendChild(mkEl("summary", null, rest.length + " more"));
+  rest.forEach((it) => more.appendChild(make(it)));
+  sec.appendChild(more);
+}
+
+// Weight drives font size — but the RAMP is scaled by how far the weights
+// actually spread. A plain min-max map puts weight 1 at the floor and weight 2
+// at the ceiling, so a trivial 2:1 difference reads as loud as a 20:1 one. The
+// full 12→20px ramp is spent only at a 4x spread or more; a flat cloud stays
+// flat rather than pretending to a hierarchy the data does not have.
+function cxCloud(concepts) {
+  const box = mkEl("div", "cx-cloud");
+  const ws = concepts.map((c) => c.weight || 1);
+  const max = Math.max(...ws), min = Math.min(...ws);
+  const span = max > min ? Math.min(1, Math.log2(max / min) / 2) : 0;
+  for (const c of concepts) {
+    const b = mkEl("button", "cx-concept", c.concept);
+    b.type = "button";
+    const t = max > min ? ((c.weight || 1) - min) / (max - min) : 0;
+    b.style.fontSize = (12 + Math.round(t * span * 8)) + "px";
+    b.title = "weight " + (c.weight || 1) + " — light its notes in the graph";
+    b.addEventListener("click", () => lightConcept(c.concept, b));
+    box.appendChild(b);
+  }
+  return box;
+}
+
+// A concept is a set of notes, so it focuses a set. Clicked from chat it also
+// switches to explore first — there is nothing to see otherwise.
+async function lightConcept(term, btn) {
+  document.querySelectorAll(".cx-concept.lit").forEach((e) => e.classList.remove("lit"));
+  btn.classList.add("lit");
+  if (activeTab !== "graph") showTab("graph");
+  try {
+    const d = await (await fetch("/concept?term=" + encodeURIComponent(term))).json();
+    if (!d.notes || !d.notes.length) { notify("no notes carry “" + term + "”"); return; }
+    focusGraphNodes(d.notes);
+  } catch { notify("couldn't resolve that concept"); }
+}
+
+// Suggested rows never write. They prefill a chat turn and hand it back to you,
+// so the write still goes through the agent's gate — validate, checkpoint, undo
+// journal — instead of a drawer button reaching the disk on its own.
+function prefillChat(text) {
+  showTab("chat");
+  const box = $("#input");
+  box.value = text;
+  box.focus();
+  box.dispatchEvent(new Event("input")); // let the autosize/palette hooks see it
+}
+
+// Two notes can share a name (A/Cell and B/Cell). Two rows both reading "Cell"
+// are not a list, they are a coin flip — so any name that repeats in this
+// drawer carries its path instead.
+function disambiguator(groups) {
+  // Distinct PATHS per name, not occurrences: a mutual link puts the same note
+  // under both "links to" and "linked from", and that is one note, not two.
+  const paths = {};
+  for (const g of groups) for (const r of g || []) (paths[r.name] ||= new Set()).add(r.path || r.name);
+  return (r) => (paths[r.name] && paths[r.name].size > 1 && r.path
+    ? { ...r, name: r.path.replace(/\.md$/, "") }
+    : r);
+}
+
+function renderContext(data) {
+  const box = $("#note-context");
+  box.textContent = "";
+  if (data.error) {
+    box.className = "cx-wait";
+    box.textContent = data.error;
+    return;
+  }
+  const rel = data.related || {};
+  const has = (a) => a && a.length;
+  const label = disambiguator([rel.frontmatter, rel.outgoing, rel.backlinks, data.suggested]);
+
+  if (data.ghost) {
+    const s = cxSection("unresolved link",
+      "no file carries this name yet — these notes already point at it");
+    box.appendChild(s);
+  }
+  if (data.hint) box.appendChild(mkEl("div", "cx-hint", data.hint));
+
+  if (has(data.snippets)) {
+    const s = cxSection("key snippets");
+    for (const sn of data.snippets) {
+      const row = mkEl("div", "cx-snip");
+      if (sn.heading) row.appendChild(mkEl("span", "cx-snip-h", sn.heading));
+      row.appendChild(mkEl("span", "cx-snip-t", sn.text));
+      s.appendChild(row);
+    }
+    box.appendChild(s);
+  }
+
+  if (has(data.concepts)) {
+    const s = cxSection("concepts", "click one to light its notes in the graph");
+    s.appendChild(cxCloud(data.concepts));
+    box.appendChild(s);
+  }
+
+  const relRows = [
+    ["related:", rel.frontmatter], ["links to", rel.outgoing], ["linked from", rel.backlinks],
+  ].filter(([, v]) => has(v));
+  if (relRows.length) {
+    const s = cxSection("connected", "how this note IS connected today");
+    for (const [groupLabel, rows] of relRows) {
+      s.appendChild(mkEl("div", "cx-group", groupLabel));
+      cxList(s, rows, (r) => cxRow(label(r)));
+    }
+    box.appendChild(s);
+  }
+
+  if (data.ghost) {
+    const s = cxSection("missing");
+    const b = mkEl("button", "cx-write", "write this note");
+    b.type = "button";
+    b.addEventListener("click", () => prefillChat(
+      'Write the note "' + data.title + '". It is already linked from ' +
+      (rel.backlinks || []).map((r) => '"' + r.name + '"').join(", ") +
+      ", so ground it in what those notes already say."));
+    s.appendChild(b);
+    box.appendChild(s);
+  } else if (has(data.suggested)) {
+    const s = cxSection("suggested next", "how it SHOULD be connected — a click drafts the turn");
+    cxList(s, data.suggested, (sg) => {
+      const row = cxRow(label(sg), sg.why);
+      const act = mkEl("button", "cx-do", sg.kind === "ghost" ? "write" : "link");
+      act.type = "button";
+      act.addEventListener("click", () => prefillChat(sg.kind === "ghost"
+        ? 'Write the note "' + sg.name + '", which "' + data.title + '" already links to.'
+        : 'Check whether "' + data.title + '" and "' + sg.name + '" belong linked, and if ' +
+          "they do, add the wikilink in whichever direction reads right."));
+      row.appendChild(act);
+      return row;
+    });
+    box.appendChild(s);
+  }
+
+  if (!box.childElementCount) {
+    box.className = "cx-wait";
+    box.textContent = "nothing indexed for this note yet — run /report or /embed to build the graph";
+  }
+}
 
 // "map" button in the drawer header — jump to explore's map mode, rooted here.
 // Capture the path FIRST: the programmatic tab .click() bubbles to the document
@@ -1695,10 +2200,24 @@ if (savedNoteWidth) notePanel.style.width = Math.min(NOTE_MAX_W, Math.max(NOTE_M
 // little and the drawer covered #stop and #dock-send on every fresh profile.
 const syncNoteW = () => setNoteW(Math.round(notePanel.getBoundingClientRect().width));
 syncNoteW();
-// The drawer's max-width is viewport-relative, so its rendered width changes with
-// the window. --note-w drives the header and dock insets, so it has to follow or
-// they reserve the wrong gap and the drawer covers #stop / #dock-send again.
-window.addEventListener("resize", syncNoteW);
+// Toasts now hang under the header instead of over the composer, so they need its
+// REAL height: the strip wraps to two rows when the drawer is open on a narrow
+// window, and a hardcoded offset would put them on top of it there.
+const headerEl = document.querySelector("header");
+// Unrounded: this also sets the note drawer's title strip, so that the two bands
+// across the top of the window meet flush. Math.round turned a 36.5px header
+// into a 37px strip beside it, and half a pixel of step is still a step. The
+// toast offset that first needed this value does not care about the fraction.
+const syncHeaderH = () => document.documentElement.style.setProperty(
+  "--header-h", headerEl.getBoundingClientRect().height + "px");
+syncHeaderH();
+new ResizeObserver(syncHeaderH).observe(headerEl);
+// The drawer's width is viewport-relative, so it changes with the window.
+// --note-w drives the header and dock insets, so it has to follow or they reserve
+// the wrong gap and the drawer covers #stop / #dock-send again. fitPanes() is the
+// one that re-negotiates against the prose floor; syncNoteW is the fallback for a
+// resize with the drawer closed.
+window.addEventListener("resize", () => { fitPanes(); syncNoteW(); });
 let resizingNote = false; // guards the outside-click-closes handler below: a drag
                            // that ends outside #note-panel fires a "click" there too
 $("#note-resize").addEventListener("mousedown", (e) => {
@@ -1706,7 +2225,10 @@ $("#note-resize").addEventListener("mousedown", (e) => {
   resizingNote = true;
   const startX = e.clientX, startWidth = notePanel.getBoundingClientRect().width;
   const onMove = (e2) => {
-    const w = Math.min(NOTE_MAX_W, Math.max(NOTE_MIN_W, startWidth + (startX - e2.clientX)));
+    // The drag is clamped by the same prose floor the automatic fit obeys, so a
+    // user cannot hand-drag the transcript down to four words a line either.
+    const cap = Math.max(MIN_DRAWER, drawerBudget(!document.body.classList.contains("sidebar-collapsed")));
+    const w = Math.min(NOTE_MAX_W, cap, Math.max(NOTE_MIN_W, startWidth + (startX - e2.clientX)));
     notePanel.style.width = w + "px";
     // Read the rendered width, not the requested one: max-width can clamp the
     // drawer on a narrow window, and --note-w must never disagree with it.
@@ -1732,17 +2254,22 @@ document.addEventListener("click", (e) => {
   // dismiss the explore note-search dropdown on any click outside it (a result
   // click runs its own handler first, so pickNote still fires)
   if (!e.target.closest("#node-search-wrap")) closeNodeResults();
-  const link = e.target.closest(".note-link");
+  const link = e.target.closest(".note-link, .wc-open");
   if (link) { e.preventDefault(); openNote(link.dataset.path); return; }
   if (notePanel.classList.contains("open") &&
       !e.target.closest("#note-panel") && !e.target.closest("#sidebar") &&
       !e.target.closest("#dock") && !e.target.closest("#note-last")) closeNote();
 });
 $("#note-close").addEventListener("click", closeNote);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeNote(); });
+// (Escape is handled once, at the bottom of this file, in priority order.)
 // Graph node clicks (in the iframe) post a message up when embedded.
 window.addEventListener("message", (e) => {
-  if (e.data && e.data.type === "silica-open-note") openNote(e.data.path);
+  if (!e.data) return;
+  if (e.data.type === "silica-open-note") openNote(e.data.path);
+  // Graph nodes and map cards point rather than name, so they open context.
+  // A ghost node arrives with no path at all — context is the only mode that
+  // can say anything about an unresolved link.
+  if (e.data.type === "silica-open-context") openContext(e.data);
 });
 
 // --- session bootstrap (re-render server-side history; never resets on load) -
@@ -1810,19 +2337,225 @@ $("#sp-thinking").addEventListener("change", async (e) => {
     });
   } catch { notify("couldn't update thinking"); e.target.checked = !want; }
 });
+$("#metrics-cancel").addEventListener("click", () => {
+  if (metricsAbort) metricsAbort.abort();
+});
+
+// --- help panel -------------------------------------------------------------
+// There was no help surface anywhere in the app: no shortcut list, no tour, no
+// docs link, and twelve buttons whose only label was a `title`. This is the
+// smallest thing that answers "what can I do here" without leaving the window.
+const helpPanel = $("#help-panel");
+const helpBtn = $("#help-btn");
+function closeHelpPanel() {
+  helpPanel.hidden = true;
+  helpBtn.setAttribute("aria-expanded", "false");
+}
+helpBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  const opening = helpPanel.hidden;
+  closeSessionPanel(); // one panel at a time, they share the header's right edge
+  helpPanel.hidden = !opening;
+  helpBtn.setAttribute("aria-expanded", opening ? "true" : "false");
+});
+
 document.addEventListener("click", (e) => {
   if (!sessionPanel.hidden && !e.target.closest("#session-panel") && !e.target.closest("#model-btn"))
     closeSessionPanel();
+  if (!helpPanel.hidden && !e.target.closest("#help-panel") && !e.target.closest("#help-btn"))
+    closeHelpPanel();
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSessionPanel(); });
+// --- dictation: microphone → 16 kHz mono WAV → /stt --------------------------
+// Whisper transcribes a clip in one pass, so there is no live partial text to
+// stream in and the button has to carry the state on its own: idle, recording,
+// transcribing. The WAV conversion happens here rather than on the server
+// because MediaRecorder can only produce webm/opus, whisper.cpp's server reads
+// WAV unless it was built with ffmpeg, and converting in the browser costs a
+// dependency on neither side.
+const sttPanel = $("#stt-panel");
+// A recording nobody stopped is otherwise a twenty-minute upload and a wait to
+// match, so the take ends itself.
+const MIC_MAX_MS = 60000;
+
+function showSttPanel(why) {
+  $("#stt-why").textContent = why;
+  sttPanel.hidden = false;
+}
+$("#stt-close").addEventListener("click", () => { sttPanel.hidden = true; });
+
+// A success is cached for the page's life; a failure is not. Someone who reads
+// the panel, starts whisper-server and clicks again should get a microphone,
+// not the same panel until they reload.
+let sttProbe = null;
+async function sttAvailable() {
+  if (sttProbe) return sttProbe;
+  const answer = await fetch("/stt")
+    .then((r) => r.json())
+    .catch(() => ({ ok: false, detail: "the silica server did not answer" }));
+  if (answer.ok) sttProbe = answer;
+  return answer;
+}
+
+// Canonical 44-byte header + PCM16, written out by hand: the alternative is a
+// dependency for twenty lines of byte-poking.
+function wavFromPcm(samples, rate) {
+  const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const ascii = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  ascii(0, "RIFF"); view.setUint32(4, 36 + samples.length * 2, true); ascii(8, "WAVE");
+  ascii(12, "fmt "); view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);   // PCM
+  view.setUint16(22, 1, true);   // mono
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);   // block align
+  view.setUint16(34, 16, true);  // bits
+  ascii(36, "data"); view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return new Blob([view.buffer], { type: "audio/wav" });
+}
+
+// Resample and downmix in one render pass. Hand-rolling either would be a worse
+// filter than the one the browser already ships.
+async function toWav16k(blob) {
+  const ctx = new AudioContext();
+  let decoded;
+  try { decoded = await ctx.decodeAudioData(await blob.arrayBuffer()); }
+  finally { ctx.close(); }
+  const off = new OfflineAudioContext(1, Math.ceil(decoded.duration * 16000), 16000);
+  const src = off.createBufferSource();
+  src.buffer = decoded;
+  src.connect(off.destination);
+  src.start();
+  return wavFromPcm((await off.startRendering()).getChannelData(0), 16000);
+}
+
+// Whisper mishears proper nouns and invents punctuation, and what lands here can
+// become a write to the vault, so the text goes in for review and never sends
+// itself. At the cursor, so dictating into a half-typed message works.
+function insertAtCursor(box, text) {
+  if (!text) { notify("nothing was transcribed", "info"); return; }
+  const at = box.selectionStart ?? box.value.length;
+  const before = box.value.slice(0, at);
+  const after = box.value.slice(box.selectionEnd ?? at);
+  const sep = before && !/\s$/.test(before) ? " " : "";
+  box.value = before + sep + text + after;
+  const caret = (before + sep + text).length;
+  box.setSelectionRange(caret, caret);
+  box.focus();
+  box.dispatchEvent(new Event("input", { bubbles: true })); // autogrow + send state
+}
+
+function attachMic(box, btn) {
+  let rec = null;
+  let chunks = [];
+  let cap = null;
+  const stop = () => { if (rec && rec.state !== "inactive") rec.stop(); };
+
+  btn.addEventListener("click", async () => {
+    if (rec) { stop(); return; } // the second click ends the take
+    const avail = await sttAvailable();
+    if (!avail.ok) {
+      showSttPanel(avail.detail || "no transcription endpoint is answering");
+      return;
+    }
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      // Denied, or no device at all: the browser's to fix, not silica's.
+      notify("no microphone: " + plainError((err && err.message) || err));
+      return;
+    }
+    chunks = [];
+    rec = new MediaRecorder(stream);
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    rec.onstop = async () => {
+      clearTimeout(cap);
+      // Release the device, which is also what drops the browser's own
+      // recording indicator — leaving it lit would say silica is still listening.
+      stream.getTracks().forEach((t) => t.stop());
+      rec = null;
+      btn.classList.remove("recording");
+      if (!chunks.length) return;
+      btn.classList.add("busy");
+      announce("transcribing");
+      try {
+        const wav = await toWav16k(new Blob(chunks, { type: chunks[0].type }));
+        const form = new FormData();
+        form.append("audio", wav, "clip.wav");
+        const resp = await fetch("/stt", { method: "POST", body: form });
+        const body = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(body.detail || resp.statusText);
+        insertAtCursor(box, (body.text || "").trim());
+      } catch (err) {
+        notify("dictation failed: " + plainError((err && err.message) || err));
+      } finally {
+        btn.classList.remove("busy");
+      }
+    };
+    rec.start();
+    btn.classList.add("recording");
+    announce("recording, click again to stop");
+    cap = setTimeout(stop, MIC_MAX_MS);
+  });
+}
+
+document.querySelectorAll(".mic").forEach((b) => {
+  const box = document.getElementById(b.dataset.for);
+  if (box) attachMic(box, b);
+});
+
+// One Escape handler for the whole app: there used to be two independent ones,
+// so a single press with a panel open over a note closed both at once.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!sttPanel.hidden) { sttPanel.hidden = true; return; }
+  if (!helpPanel.hidden) { closeHelpPanel(); return; }
+  if (!sessionPanel.hidden) { closeSessionPanel(); return; }
+  closeNote();
+});
 
 // --- boot health: the doctor's non-ok rows as toasts -------------------------
 // The TUI logs a degraded embedder/reranker to stderr; the browser sees none of
 // that, so without this a server left down just makes recall quietly worse.
+// Boot health is CONFIGURATION, not an event: it is equally true a second after
+// load and ten minutes in. As toasts these fired on every single load, stacked
+// over whatever the user was reading, and one of them is a five-line JSON hooks
+// blob — so the app's resting state was a debug message. They live in the
+// sidebar now, where they stay legible and dismissible for as long as they are
+// true, and the toast strip goes back to meaning "something just happened".
 async function loadHealth() {
+  const box = $("#boot-notices");
   try {
-    for (const r of await (await fetch("/health")).json())
-      notify(r.name + ": " + r.detail + (r.hint ? " — " + r.hint : ""));
+    const rows = await (await fetch("/health")).json();
+    box.innerHTML = "";
+    for (const r of rows) {
+      const n = document.createElement("div");
+      n.className = "notice";
+      const t = document.createElement("div");
+      t.className = "notice-text";
+      t.textContent = r.name + ": " + r.detail;
+      n.appendChild(t);
+      if (r.hint) {
+        const h = document.createElement("div");
+        h.className = "notice-hint";
+        h.textContent = r.hint;
+        n.appendChild(h);
+      }
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "notice-x";
+      x.setAttribute("aria-label", "dismiss this notice");
+      x.textContent = "✕";
+      x.addEventListener("click", () => { n.remove(); box.hidden = !box.childElementCount; });
+      n.appendChild(x);
+      box.appendChild(n);
+      announce(r.name + ": " + r.detail);
+    }
+    box.hidden = !rows.length;
   } catch { /* the page works without the report; don't toast about the toast */ }
 }
 
