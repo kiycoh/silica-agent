@@ -467,11 +467,15 @@ def check_capture_hook(config: SilicaConfig) -> CheckResult:
     Silica never edits `.claude/settings.json` itself — a tool that rewrites
     another tool's config is a support burden, and the hook is three lines.
     """
+    # Claude Code resolves project settings from the session's cwd, not from
+    # the vault: for an adopted source tree the two differ, and looking only
+    # under the vault warned about a hook that was registered and firing.
+    roots = [Path.home(), Path.cwd()]
     vault = config.vault_path.strip()
-    candidates = [Path.home() / ".claude" / "settings.json"]
     if vault:
-        candidates += [Path(vault) / ".claude" / name
-                       for name in ("settings.json", "settings.local.json")]
+        roots.append(Path(vault))
+    candidates = [root / ".claude" / name for root in roots
+                  for name in ("settings.json", "settings.local.json")]
     for path in candidates:
         try:
             if "silica capture" in path.read_text(encoding="utf-8"):

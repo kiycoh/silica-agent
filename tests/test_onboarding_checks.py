@@ -631,6 +631,25 @@ class TestCaptureHook:
 
         assert check_capture_hook(self._config(vault)).status == "ok"
 
+    def test_hook_in_the_project_cwd_counts(self, tmp_path, monkeypatch):
+        """An adopted source tree is the Claude Code project; the vault is not."""
+        import json
+
+        from silica.onboarding.checks import check_capture_hook
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        project = tmp_path / "repo"
+        (project / ".claude").mkdir(parents=True)
+        (project / ".claude" / "settings.json").write_text(json.dumps({
+            "hooks": {"SessionEnd": [
+                {"hooks": [{"type": "command", "command": "silica capture"}]}]}
+        }), encoding="utf-8")
+        monkeypatch.chdir(project)
+
+        assert check_capture_hook(self._config(vault)).status == "ok"
+
 
 class TestOwnSessionCapture:
     """The knob for Silica's own sessions is off by default, and says so."""
