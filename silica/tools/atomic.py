@@ -434,20 +434,17 @@ def silica_graph_path(source: str, target: str, max_paths: int = 1) -> dict:
     Uses the undirected view of the resolved (EXTRACTED) wikilink graph.
     """
     import networkx as nx
-    from silica.kernel.recall.graph_export import build_graph_data
+    from silica.kernel.recall.graph_export import build_graph_data, edge_graph
 
     try:
         nodes, edges = build_graph_data(folder="")
     except Exception as exc:
         return {"error": f"Failed to build graph: {exc}"}
 
-    real_ids: set[str] = {n["id"] for n in nodes if n.get("type") != "ghost"}
-
-    G = nx.Graph()
-    G.add_nodes_from(real_ids)
-    for e in edges:
-        if e.get("type") == "EXTRACTED" and e["from"] in real_ids and e["to"] in real_ids:
-            G.add_edge(e["from"], e["to"])
+    # edge_graph is the shared builder; it also inserts nodes sorted, so tied
+    # shortest paths come back in the same order every process.
+    G = edge_graph(nodes, edges)
+    real_ids: set[str] = set(G.nodes())
 
     # Resolve source/target: accept path or name substring match
     def _resolve(query: str) -> str | None:

@@ -9,6 +9,11 @@ and FS backends: triggers the driver index via graph_snapshot(), then reads
 _graph / _unresolved_links / _notes directly to avoid O(N) subprocess calls on
 the CLI backend.
 
+Two partitions live here and never mix (ADR-0023): detect_communities is Louvain
+over the wikilinks (structural, node["group"]) and detect_semantic_partition is
+Louvain over the embedding k-NN (semantic, node["sgroup"]). Same algorithm, same
+labeller, separate fields, colour keys and persisted ids.
+
 Community detection via networkx.algorithms.community.louvain_communities
 (built-in since networkx >= 3.0, already declared in pyproject.toml).
 Degrades gracefully to no-community mode if unavailable.
@@ -31,6 +36,21 @@ class Community:
     label: str
     color: str
     size: int
+
+
+@dataclass
+class Zone:
+    """A cluster of the SEMANTIC partition — Louvain over the embedding k-NN.
+
+    A separate type from Community on purpose (ADR-0023): the two partitions
+    coexist, never substitute, and share neither colour key nor id space. A
+    function taking `list[Zone]` cannot be handed communities by accident.
+    """
+    id: int
+    label: str
+    color: str
+    size: int
+
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +81,23 @@ _GOLDEN_RATIO_INV = 0.6180339887
 def _community_color(i: int) -> str:
     lo, hi = _COMMUNITY_ARC
     hue = lo + ((i * _GOLDEN_RATIO_INV) % 1.0) * (hi - lo)
+    light = _COMMUNITY_LIGHTNESS[i % 2]
+    r, g, b = colorsys.hls_to_rgb(hue / 360.0, light, 0.66)
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+
+
+# Zones walk the same brand arc — the mascot's hues are the only ones this
+# product paints — but never the same KEY: the phase shift puts zone i half an
+# arc away from community i, so the two partitions cannot be read off one
+# swatch (ADR-0023: no shared colour key). Lightness bands are shared, because a
+# zone hue also lands on a node dot when the zone layer is on and the dot has to
+# stay legible on --void.
+_ZONE_PHASE = 0.5
+
+
+def _zone_color(i: int) -> str:
+    lo, hi = _COMMUNITY_ARC
+    hue = lo + ((i * _GOLDEN_RATIO_INV + _ZONE_PHASE) % 1.0) * (hi - lo)
     light = _COMMUNITY_LIGHTNESS[i % 2]
     r, g, b = colorsys.hls_to_rgb(hue / 360.0, light, 0.66)
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
@@ -269,43 +306,86 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     return edges
 
 
-def edge_graph(nodes: list[dict], edges: list[dict], *, directed: bool = False):
-    """nx graph over EXTRACTED edges between non-ghost nodes.
+def edge_graph(
+    nodes: list[dict], edges: list[dict], *, directed: bool = False,
+    edge_type: str = "EXTRACTED",
+):
+    """nx graph over one edge type, between non-ghost nodes.
 
     The one builder every consumer of the driver graph shares (communities,
     distances, canvas metrics, the vault report) — they all filtered the same
     way by hand. `G.nodes()` is the real-id set, so callers need not recompute it.
+
+    `edge_type` selects the layer: EXTRACTED (wikilinks) is the structural
+    default every existing caller keeps; SIMILAR (embedding k-NN) is the
+    semantic partition's substrate. One parameter, not a second builder, so the
+    node set and the sorted insertion order below stay shared between them.
+
+    Nodes go in SORTED. `G.nodes()` order is insertion order, and Louvain is a
+    greedy local-move heuristic: it shuffles that list with its seeded RNG, so a
+    different starting order lands on a different local optimum. Feeding it a set
+    made the order hash-dependent, hence per-process, and E(vault) drifted on an
+    unchanged vault (cohesion moved in the third decimal, cluster sizes by ~5%).
     """
     import networkx as nx
 
     real = {n["id"] for n in nodes if n.get("type") != "ghost"}
     G = nx.DiGraph() if directed else nx.Graph()
-    G.add_nodes_from(real)
+    G.add_nodes_from(sorted(real))
     for e in edges:
-        if e.get("type") == "EXTRACTED" and e.get("from") in real and e.get("to") in real:
+        if e.get("type") == edge_type and e.get("from") in real and e.get("to") in real:
             G.add_edge(e["from"], e["to"])
     return G
 
 
-def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
-    """Louvain community detection on the EXTRACTED (wikilink) edges, in-place.
+def _louvain_partition(
+    nodes: list[dict], edges: list[dict], edge_type: str
+) -> list[set[str]]:
+    """Louvain over one edge layer, size-descending. [] when it cannot run.
 
-    Assigns node["group"] (int) and node["color"]. Ghost nodes keep group == -1.
-
-    Returns a list of Community objects with topic labels where available.
+    The ordering rule both partitions share — see detect_communities for why the
+    id must be a function of the partition rather than of Louvain's return order.
     """
     from networkx.algorithms.community import louvain_communities
 
-    G = edge_graph(nodes, edges)
+    G = edge_graph(nodes, edges, edge_type=edge_type)
 
     if G.number_of_edges() == 0:
-        logger.info("graph_export: no EXTRACTED edges — community detection skipped.")
+        logger.info("graph_export: no %s edges — partition skipped.", edge_type)
         return []
 
     try:
         communities = louvain_communities(G, seed=42)
     except Exception as exc:
         logger.warning("graph_export: louvain_communities raised %s: %s", type(exc).__name__, exc)
+        return []
+
+    return sorted(communities, key=lambda c: (-len(c), min(c)))
+
+
+def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
+    """Louvain community detection on the EXTRACTED (wikilink) edges, in-place.
+
+    The STRUCTURAL partition — the vault as you linked it. Its semantic sibling
+    is detect_semantic_partition, and the two never mix (ADR-0023): this one
+    owns node["group"], node["color"] and the `clusters_ctx.json` id space, and
+    reads nothing the other writes.
+
+    Assigns node["group"] (int) and node["color"]. Ghost nodes keep group == -1.
+
+    Returns a list of Community objects with topic labels where available.
+    """
+    # The id must be a function of the PARTITION, not of the order louvain
+    # happened to return it in. Sorting `edge_graph`'s node list already froze
+    # WHICH partition we land on, but `louvain_communities` returns its list of
+    # sets in an order that still varies per process: three runs on an unchanged
+    # vault gave the same sizes and labels with the 78-member community numbered
+    # 60, 61, 60. That id is not cosmetic — `_community_color` is keyed on it, so
+    # a community changed colour between two runs of the same vault, and
+    # `clusters_ctx.json` persists `cluster_id` for readers in other processes.
+    # Largest first, ties broken by the smallest member id: total, content-only.
+    communities = _louvain_partition(nodes, edges, "EXTRACTED")
+    if not communities:
         return []
 
     node_to_comm: dict[str, int] = {
@@ -336,7 +416,10 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
     except Exception:
         labels = {}
 
-    logger.info("graph_export: %d communities across %d nodes.", len(communities), G.number_of_nodes())
+    logger.info(
+        "graph_export: %d communities across %d nodes.",
+        len(communities), sum(len(c) for c in communities),
+    )
 
     return [
         Community(
@@ -346,6 +429,169 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
             size=len(comm),
         )
         for i, comm in enumerate(communities)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# The semantic partition (ADR-0023)
+#
+# Louvain over the SIMILAR (embedding k-NN) edges: notes grouped by what they
+# are about, not by what you linked. It never substitutes for the structural
+# community — the two are not nested on a real vault (14 of 78 wikilink
+# clusters split across k-NN boundaries), so folding one into the other under a
+# single name would make a cluster's meaning unreadable. Separate node field,
+# separate colour key, separate persisted id space.
+# ---------------------------------------------------------------------------
+
+
+def semantic_snapshot_path() -> Path:
+    # Function, not constant: resolves per current vault; tests monkeypatch it.
+    from silica.kernel.recall import paths
+
+    return paths.index_dir() / "semantic_partition.json"
+
+
+def load_semantic_snapshot() -> tuple[dict[int, set[str]], int]:
+    """Last generation's clusters and the id high-water mark, or ({}, 0).
+
+    A cache under P2, never source of truth: deleting the file is always legal,
+    the partition recomputes and the ids simply restart. It exists only as the
+    MEMORY the inheritance reads — the partition itself is not stable enough to
+    persist as data (removing one note moved 53 of 681 notes on the real vault).
+    """
+    import orjson
+
+    try:
+        raw = orjson.loads(semantic_snapshot_path().read_bytes())
+        clusters = {int(k): set(v) for k, v in (raw.get("clusters") or {}).items()}
+        return clusters, int(raw.get("next_id", 0))
+    except Exception:
+        return {}, 0
+
+
+def save_semantic_snapshot(clusters: dict[int, list[str]], next_id: int) -> None:
+    import orjson
+
+    from silica.kernel.recall.paths import vault_epoch
+
+    try:
+        p = semantic_snapshot_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(orjson.dumps({
+            # Stamped with the vault state it was taken from — the inheritance
+            # does not check it, it is there so a stale snapshot can be told
+            # apart from a fresh one when reading the file by hand.
+            "epoch": vault_epoch(),
+            "next_id": next_id,
+            # Keys stringified here, parsed back with int() on load: orjson
+            # refuses int keys outright, and this write is inside a
+            # best-effort try — so the raise would have been swallowed and the
+            # snapshot would silently never exist (ids restarting every run).
+            "clusters": {str(k): v for k, v in clusters.items()},
+        }))
+    except Exception as e:
+        logger.debug("graph_export: semantic snapshot save skipped (%s)", e)
+
+
+def inherit_ids(
+    partition: list[set[str]], prev: dict[int, set[str]], next_id: int
+) -> tuple[list[int], int]:
+    """Ids for a fresh partition: each cluster keeps its predecessor's.
+
+    A cluster inherits the id of the previous-generation cluster it shares the
+    most members with; each predecessor is claimed at most once, and clusters
+    with no predecessor take ids that have never been handed out (the high-water
+    mark, not max-of-current — a colour must not be recycled onto an unrelated
+    cluster the generation after its own disappeared).
+
+    Without this the ids track Louvain's size ordering, which is not stable: the
+    partition is a global function of every vector, so one note added or removed
+    can lawfully reshuffle it and every colour in the view jumps.
+
+    ponytail: greedy by descending overlap, not optimal bipartite matching.
+    Ties go to the earlier cluster then the lower id, so it stays deterministic;
+    upgrade to scipy's linear_sum_assignment if two clusters ever visibly swap.
+    """
+    pairs = sorted(
+        (
+            (len(members & pmembers), i, pid)
+            for i, members in enumerate(partition)
+            for pid, pmembers in prev.items()
+            if members & pmembers
+        ),
+        key=lambda t: (-t[0], t[1], t[2]),
+    )
+    inherited: dict[int, int] = {}
+    claimed: set[int] = set()
+    for _overlap, i, pid in pairs:
+        if i in inherited or pid in claimed:
+            continue
+        inherited[i] = pid
+        claimed.add(pid)
+
+    ids: list[int] = []
+    for i in range(len(partition)):
+        if i in inherited:
+            ids.append(inherited[i])
+        else:
+            ids.append(next_id)
+            next_id += 1
+    return ids, next_id
+
+
+def detect_semantic_partition(nodes: list[dict], edges: list[dict]) -> list[Zone]:
+    """Louvain on the SIMILAR (k-NN) edges, in-place — the SEMANTIC partition.
+
+    Assigns node["sgroup"] (int, -1 for ghosts and for notes with no vector) and
+    touches node["group"]/node["color"] never. Returns the zones, size-descending,
+    with ids inherited from the previous generation so the colours hold still.
+
+    Degrades to [] with sgroup == -1 everywhere when the vault has no embed
+    index: absent, never a community in disguise.
+    """
+    for node in nodes:
+        node["sgroup"] = -1
+
+    partition = _louvain_partition(nodes, edges, "SIMILAR")
+    if not partition:
+        return []
+
+    prev, next_id = load_semantic_snapshot()
+    ids, next_id = inherit_ids(partition, prev, next_id)
+
+    zone_of: dict[str, int] = {
+        node_id: ids[i] for i, comm in enumerate(partition) for node_id in comm
+    }
+    for node in nodes:
+        node["sgroup"] = zone_of.get(node["id"], -1)
+
+    # Same labeller as the communities — the c-TF-IDF is a function of the
+    # member set, not of which partition produced it. Keyed by INDEX, so it maps
+    # through `ids` before it can be read as a zone label.
+    from silica.kernel.recall.cooccurrence import get_cooccur_store
+    try:
+        labels = get_cooccur_store().community_labels([set(c) for c in partition])
+    except Exception:
+        labels = {}
+
+    save_semantic_snapshot(
+        {ids[i]: sorted(comm) for i, comm in enumerate(partition)}, next_id
+    )
+    logger.info(
+        "graph_export: %d semantic zones across %d nodes.",
+        len(partition), sum(len(c) for c in partition),
+    )
+
+    return [
+        Zone(
+            id=ids[i],
+            # "Zone N", never "Cluster N": the fallback label is a surface too,
+            # and it says which partition it came from.
+            label=labels.get(i, f"Zone {ids[i]}"),
+            color=_zone_color(ids[i]),
+            size=len(comm),
+        )
+        for i, comm in enumerate(partition)
     ]
 
 
