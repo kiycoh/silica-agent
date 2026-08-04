@@ -35,6 +35,7 @@ class AgentConstraints:
 # to being visible in chat, which costs tokens but never breaks — the safe
 # direction. Revisit if this grows past ~20 entries.
 _CHAT_EXCLUDED = frozenset({
+    "silica_aliases",            # /aliases
     "silica_anneal",             # vault-wide maintenance pass, FSM-driven
     "silica_deferred_list",      # deferred-ops bookkeeping, surfaced by the FSM
     "silica_deferred_flush",

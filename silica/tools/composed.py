@@ -61,6 +61,10 @@ from silica.tools.graph import (  # noqa: F401
     silica_semantic_search,
     silica_vault_report,
 )
+from silica.tools.aliases import (  # noqa: F401
+    AliasesArgs,
+    silica_aliases,
+)
 from silica.tools.curate import (  # noqa: F401
     CurateArgs,
     silica_curate,

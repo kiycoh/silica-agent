@@ -1012,6 +1012,36 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             CONSOLE.print('  Run [bold]/curate --apply[/] to execute, or ask e.g. "apply only dedup".')
         return True
 
+    if cmd == "/aliases":
+        apply = any(p == "--apply" for p in parts[1:])
+        positional = [p for p in parts[1:] if not p.startswith("-")]
+        folder = " ".join(positional)
+        scope = folder or "(vault)"
+        mode = "applying" if apply else "dry-run (nothing is written)"
+        CONSOLE.print(f"  Alias consolidation on [bold]{scope}[/] — {mode}…")
+        res = json.loads(TOOLS["silica_aliases"].run(apply=apply, folder=folder))
+        if "error" in res:
+            CONSOLE.print(f"  [yellow]{res['error']}[/]")
+            return True
+        groups = res.get("groups", {})
+        if not groups:
+            CONSOLE.print("  No alias groups survived the gate.")
+            return True
+        for canonical, variants in sorted(groups.items()):
+            CONSOLE.print(f"  · [bold]{canonical}[/] ← {', '.join(variants)}")
+        dropped = res.get("dropped", 0)
+        if dropped:
+            CONSOLE.print(f"  ({dropped} proposed variant(s) dropped by the ambiguity gate)")
+        if apply:
+            written = res.get("written", {})
+            n = sum(written.values())
+            CONSOLE.print(f"  Applied — [bold]{n}[/] alias(es) written into {len(written)} note(s).")
+            for it in res.get("skipped", []):
+                CONSOLE.print(f"  [yellow]skipped {it['note']}: {it['reason']}[/]")
+        else:
+            CONSOLE.print("  Run [bold]/aliases --apply[/] to write them into frontmatter.")
+        return True
+
     if cmd == "/keep":
         from rich.markup import escape
 

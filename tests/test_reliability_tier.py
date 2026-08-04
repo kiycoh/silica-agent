@@ -205,3 +205,73 @@ def test_fsm_dedup_never_marks_a_source_document(tmp_vault):
 
     assert res["status"] == "committed", res
     assert "superseded_by" not in tmp_vault.read(inbox)
+
+def test_fsm_dedup_keeps_the_absorbed_concept_as_an_alias(tmp_vault):
+    """The complement of test_merge_marks_the_loser: with no loser note, the
+    absorbed concept's heading survives as a frontmatter alias on the winner.
+
+    Without it the spelling is discarded at the merge, and every later mention
+    of 'Dosaggio' stays unlinked while the concept it names lives in Warfarin.
+    """
+    from unittest.mock import patch
+
+    from silica.capabilities.dedup import DedupDecision, run_dedup
+    from silica.config import SilicaConfig
+    from silica.kernel.link.autolink import autolink, build_alias_map
+    from silica.kernel.workqueue import WorkItem
+
+    tmp_vault.note("Farmacologia/Farmacologia.md", "# Farmacologia\n")
+    winner = tmp_vault.note("Farmacologia/Warfarin.md", HUMAN)
+
+    item = WorkItem(
+        kind="dedup",
+        target_path="Farmacologia/Warfarin.md",
+        context={"concept": "Dosaggio", "excerpt": "Testo grezzo.",
+                 "candidate": "Warfarin", "hub": "Farmacologia",
+                 "inbox_file": "Inbox/appunti.md"},
+        reason="borderline_similarity score=0.78",
+    )
+    decision = DedupDecision(verdict="duplicate", rationale="same claim",
+                             addition="Dettaglio nuovo.")
+    with patch("silica.capabilities.dedup._decide_dedup", return_value=decision):
+        res = run_dedup(item, SilicaConfig())
+
+    assert res["status"] == "committed", res
+    content = tmp_vault.read(winner)
+    data, _, _ = frontmatter.split(content)
+    assert data["aliases"] == ["Dosaggio"]
+    assert "Dettaglio nuovo" in content       # the merge itself still landed
+
+    # and the point of recording it: the spelling now links to the note
+    aliases = build_alias_map([("Warfarin", ["Dosaggio"])], ["Warfarin"])
+    linked, added = autolink("Il dosaggio va calcolato.", ["Warfarin"], aliases=aliases)
+    assert "[[Warfarin|dosaggio]]" in linked and added == ["Warfarin"]
+
+
+def test_dedup_does_not_alias_a_concept_that_is_the_winner_title(tmp_vault):
+    """Same name on both sides is not a second spelling: no alias, no write."""
+    from unittest.mock import patch
+
+    from silica.capabilities.dedup import DedupDecision, run_dedup
+    from silica.config import SilicaConfig
+    from silica.kernel.workqueue import WorkItem
+
+    tmp_vault.note("Farmacologia/Farmacologia.md", "# Farmacologia\n")
+    winner = tmp_vault.note("Farmacologia/Warfarin.md", HUMAN)
+
+    item = WorkItem(
+        kind="dedup",
+        target_path="Farmacologia/Warfarin.md",
+        context={"concept": "warfarin", "excerpt": "Testo grezzo.",
+                 "candidate": "Warfarin", "hub": "Farmacologia",
+                 "inbox_file": "Inbox/appunti.md"},
+        reason="borderline_similarity score=0.78",
+    )
+    decision = DedupDecision(verdict="duplicate", rationale="same claim",
+                             addition="Dettaglio nuovo.")
+    with patch("silica.capabilities.dedup._decide_dedup", return_value=decision):
+        res = run_dedup(item, SilicaConfig())
+
+    assert res["status"] == "committed", res
+    data, _, _ = frontmatter.split(tmp_vault.read(winner))
+    assert "aliases" not in (data or {})

@@ -224,6 +224,38 @@ def dedup_supersede_bounds(loser_path: str, *, hub: str | None = None) -> Capabi
     )
 
 
+def dedup_alias_bounds(winner_path: str, *, hub: str | None = None) -> CapabilityBounds:
+    """Alias bounds: one `overwrite` of the note a merge just absorbed INTO.
+
+    Sibling of dedup_supersede_bounds on the other side of the merge. Same
+    reason for existing separately from dedup_bounds: the content is
+    framework-computed (one frontmatter alias key), while dedup_bounds guards a
+    model-authored body and must stay patch-only, or a merge could rewrite the
+    note it was supposed to append to.
+    """
+    winner_key = _norm_path(winner_path)
+    return CapabilityBounds(
+        name="dedup_alias",
+        allowed_ops=frozenset({OpType.overwrite}),
+        target_predicate=lambda p: _norm_path(p) == winner_key,
+        forbidden_paths=frozenset({hub} if hub else set()),
+    )
+
+
+def alias_consolidation_bounds(canonical_path: str) -> CapabilityBounds:
+    """One `overwrite` of the note gaining framework-computed `aliases:` keys.
+
+    Same envelope shape as dedup_alias_bounds, own name for log attribution:
+    this write comes from the /aliases consolidation pass, not from a merge.
+    """
+    canonical_key = _norm_path(canonical_path)
+    return CapabilityBounds(
+        name="alias_consolidation",
+        allowed_ops=frozenset({OpType.overwrite}),
+        target_predicate=lambda p: _norm_path(p) == canonical_key,
+    )
+
+
 def _single_write_bounds(spoke_path: str, name: str, *, hub: str | None) -> CapabilityBounds:
     """One-note write envelope: a single `write` of the framework-derived
     `spoke_path`, hub never touchable. `name` sets log attribution."""

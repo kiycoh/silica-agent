@@ -255,6 +255,13 @@ COMMANDS: tuple[Command, ...] = (
         summary="curate the vault: plan autolink/orphan/dedup/refine work (dry-run; --apply executes)",
     ),
     Command(
+        name="/aliases",
+        group="direct",
+        usage="[folder] [--apply]",
+        summary="propose frontmatter aliases for note titles (abbreviations, spellings); dry-run, --apply writes",
+        examples=("/aliases", "/aliases Concepts/AI --apply"),
+    ),
+    Command(
         name="/refine",
         group="direct",
         usage="[folder]",

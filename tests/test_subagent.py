@@ -79,14 +79,24 @@ def test_dedup_merge_builds_single_patch_under_leash():
         res = run_dedup(_item(), CONFIG)
 
     assert res["status"] == "committed"
-    # commit_ops called with exactly one patch op + a dedup leash on the candidate.
-    ops_arg = commit.call_args.args[0]
+    # The merge itself: exactly one patch op + a dedup leash on the candidate.
+    # It is call [0] because a duplicate verdict now also records the absorbed
+    # concept's spelling as an alias, in a second, separately-leashed write.
+    merge = commit.call_args_list[0]
+    ops_arg = merge.args[0]
     assert len(ops_arg) == 1
     assert ops_arg[0].op == OpType.patch
     assert ops_arg[0].path == "Concepts/Gradient Descent.md"
-    bounds = commit.call_args.kwargs["bounds"]
+    bounds = merge.kwargs["bounds"]
     assert bounds.name == "dedup"
     assert OpType.patch in bounds.allowed_ops and OpType.overwrite not in bounds.allowed_ops
+
+    # The alias write never travels on the merge's leash: its own envelope
+    # permits overwrite, and only of the note that absorbed the concept.
+    alias = commit.call_args_list[1]
+    assert alias.args[0][0].op == OpType.overwrite
+    assert alias.kwargs["bounds"].name == "dedup_alias"
+    assert alias.kwargs["bounds"].allowed_ops == frozenset({OpType.overwrite})
 
 
 def test_dedup_no_merge_when_not_duplicate():

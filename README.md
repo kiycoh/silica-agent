@@ -430,6 +430,7 @@ One artifact, two readers: a human reads it as a current map of the repository, 
 | `/nucleate <file...> [--target=DIR]` | Notes/PDFs/Notebooks via the gate; code as skeletons |
 | `/organize "<intent>" [--scope=DIR] [--file=tax.yaml] [--apply]` | Classify and move notes into a taxonomy |
 | `/curate [--apply]` · `/dedup` · `/refine` · `/enrich` | Plan and run autolink, MinHash LSH dedup, and enrichment |
+| `/aliases [folder] [--apply]` | Propose frontmatter aliases for note titles (abbreviations, spellings); autolink then resolves them |
 | `/web [keywords]` | Answer from the web, cited from the pages opened; writes nothing. Bare `/web` re-asks your last question |
 | `/keep` | Save the last `/web` answer as a cited note in the Inbox |
 | `/web-search "<topic>" [--max-searches=N]` | Research on the web → cited findings note in Inbox |

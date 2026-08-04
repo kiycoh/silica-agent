@@ -241,6 +241,54 @@ def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
         logger.debug("dedup: superseded_by mark failed (non-fatal): %s", e)
 
 
+def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None:
+    """Keep the surface form of a concept that was merged away.
+
+    The complement of _mark_merge_loser: there the loser is a real note and
+    survives with a superseded_by pointer, so its title stays in the title
+    index. Here the loser is an incoming concept that was never written, and
+    without this its heading is discarded at the merge — every later mention of
+    that spelling stays unlinked and the concept quietly splits in two. Recorded
+    as a frontmatter alias, so autolink resolves the spelling onto the note that
+    absorbed it (build_alias_map + autolink(aliases=...)).
+
+    Best-effort, like its sibling: a committed merge is not reported failed over
+    a bookkeeping key. An alias that collides with a real note title is dropped
+    downstream by build_alias_map, so no read is spent proving it here.
+    """
+    concept = (ctx.get("concept") or "").strip()
+    winner_title = os.path.basename(winner_path).removesuffix(".md")
+    if not concept or concept.lower() == winner_title.lower():
+        return
+    try:
+        from silica.agent.bounds import dedup_alias_bounds
+        from silica.kernel.write.frontmatter import add_alias
+
+        prior = read_or_skip(winner_path)[0] or ""
+        aliased = add_alias(prior, concept)
+        if aliased == prior:
+            return
+        res = commit_ops(
+            [Op(
+                op=OpType.overwrite,
+                heading=concept,
+                source_basename=os.path.basename(winner_path),
+                path=winner_path,
+                content=aliased,
+                base_content=prior,
+                reason=f"dedup merge: '{concept}' kept as alias",
+            )],
+            target_dir=os.path.dirname(winner_path),
+            bounds=dedup_alias_bounds(winner_path, hub=hub),
+        )
+        # commit_ops reports refusal in its status, it does not raise: without
+        # this line a bounds rejection would be indistinguishable from success.
+        if res.get("status") != "committed":
+            logger.debug("dedup: alias not recorded (%s)", res.get("status"))
+    except Exception as e:
+        logger.debug("dedup: alias record failed (non-fatal): %s", e)
+
+
 def _route_verdict(
     item: WorkItem, ctx: dict, decision: DedupDecision, config: Any
 ) -> dict[str, Any]:
@@ -294,7 +342,12 @@ def _route_verdict(
     if result.get("status") == "committed":
         _clean_twin_bundle(ctx)
         if decision.verdict == "duplicate":
-            _mark_merge_loser(ctx, candidate_path)
+            if ctx.get("loser_path"):
+                _mark_merge_loser(ctx, candidate_path)
+            else:
+                # No loser note: the absorbed side is an incoming concept, and
+                # its heading is the only record that this spelling exists.
+                _record_absorbed_alias(ctx, candidate_path, hub)
         if decision.verdict == "contradicts":
             # Without this the judge's contradictions never reach the run
             # digest worklist: only silica_flag_note used to feed the register,
