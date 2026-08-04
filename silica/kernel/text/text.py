@@ -45,6 +45,26 @@ _URL_RE = re.compile(r"(?:https?://|www\.)[^\s)>\]]+", re.I)
 # metadata, never prose. Length ≥4 avoids clipping any legit `^` use (math
 # superscripts live inside $…$ and are already gone via strip_math).
 _BLOCK_ID_RE = re.compile(r"\^[A-Za-z0-9]{4,}")
+# Wikilink syntax is markup, not prose. UNWRAPPED, not removed: `[[a|b]]` and
+# `[[a#h]]` become `a b` / `a h`, i.e. exactly the words `_TOKEN_RE` already
+# extracted from the raw form. Token-level callers (co-occurrence, classify)
+# therefore keep a byte-identical token set and no index needs rebuilding —
+# only phrase-level callers change, and they are the ones that were broken:
+# `extract_keyphrases` keeps YAKE n-grams verbatim, so it was emitting
+# concepts like `decidibilità]]` and `equazione di ricorrenza|equazioni…]]`.
+# `!?` covers non-image transclusions; image embeds are gone by strip_images.
+# The replacement is space-PADDED: adjacent links (`[[a|x]][[b|y]]`, real in the
+# vault) used to be separated by the `]][[` that the tokenizer discarded, so an
+# unpadded unwrap glued `x` and `y` into one token.
+_WIKILINK_RE = re.compile(r"!?\[\[([^\[\]]*?)\]\]")
+_WIKILINK_SEP_RE = re.compile(r"[|#]")
+# Same disease, other syntax: `_URL_RE` deletes the target of `[text](url)` and
+# leaves the scaffolding, so keyphrase emitted `maltego]( )`. Unwrapped to text
+# AND target, for the same reason `[[a|b]]` keeps both: dropping the target lost
+# real words on 5 vault notes (a relative `](Trasformata di Fourier veloce.md)`
+# is prose, not chrome) and would have forced a co-occurrence rebuild. Runs
+# before _URL_RE, which then deletes the target when it IS a bare URL.
+_MD_LINK_RE = re.compile(r"\[([^\[\]]*?)\]\(([^()]*)\)")
 
 _SENTENCE_SPLIT = re.compile(r"[.!?;\n]+")
 _TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ]+")
@@ -96,12 +116,17 @@ def clean_body(text: str, *, fences: bool) -> str:
     keyphrase and prose-vault co-occurrence strip code (fenced + inline) so
     identifiers never become nodes; a code vault keeps them — identifiers ARE
     the graph signal of code notes. URLs (incl. schemeless www.) and
-    Obsidian/Excalidraw block-ref ids are always stripped.
+    Obsidian/Excalidraw block-ref ids are always stripped. Wikilink syntax is
+    unwrapped to its words (see _WIKILINK_RE), never dropped.
     """
     if not text:
         return ""
     _data, _fm, body = frontmatter.split(text)
-    body = _BLOCK_ID_RE.sub(" ", _URL_RE.sub(" ", strip_math(strip_images(body))))
+    body = _WIKILINK_RE.sub(
+        lambda m: f" {_WIKILINK_SEP_RE.sub(' ', m.group(1))} ", strip_images(body)
+    )
+    body = _MD_LINK_RE.sub(r" \1 \2 ", body)
+    body = _BLOCK_ID_RE.sub(" ", _URL_RE.sub(" ", strip_math(body)))
     if fences:
         body = _INLINE_CODE_RE.sub(" ", _FENCE_RE.sub(" ", body))
     return body

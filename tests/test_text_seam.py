@@ -84,6 +84,41 @@ def test_classify_stems_match_cooccur_nodes_on_dirty_body():
     assert not any(s.startswith(("frac", "nabla", "png", "plot")) for s in stems)
 
 
+def test_wikilinks_unwrap_to_words_without_moving_tokens():
+    """C1: `[[a|b]]` is markup, so it must not reach a phrase-level consumer as
+    syntax — keyphrase kept YAKE n-grams verbatim and emitted `decidibilità]]`.
+    Unwrapping (not dropping) is what keeps the token-level consumers frozen:
+    `_TOKEN_RE` already yielded `a` and `b` from the raw form, so the
+    co-occurrence node set must come out byte-identical to the pre-fix one.
+    """
+    from silica.kernel.recall.cooccurrence import build_contribution
+    from silica.kernel.text.text import clean_body
+
+    body = (
+        "La [[Decidibilità]] separa i [[linguaggi context-free|linguaggi CF]] "
+        "dal resto, vedi [[Analisi asintotica#Ricorrenze]] e ![[Teorema di Rice]]. "
+        # adjacent links with nothing between them: `]][[` used to do the
+        # separating, so an unpadded unwrap glued the two aliases into one token
+        "Algoritmi [[Analisi asintotica|asintoticamente]][[Efficienza| efficienti]]. "
+        # markdown link: _URL_RE deletes the target and used to leave `]( )`
+        "Vedi [Maltego](https://example.com/x) e [Ricorrenze](Analisi asintotica.md)."
+    )
+    out = clean_body(body, fences=True)
+    assert "[[" not in out and "]]" not in out and "|" not in out, out
+    assert "](" not in out, "markdown link scaffolding must not survive either"
+    assert "Maltego" in out and "example.com" not in out, "text kept, URL target dropped"
+    assert "Analisi asintotica.md" in out, "a relative target is prose, keep its words"
+    assert "Decidibilità" in out and "linguaggi context-free" in out
+    assert "linguaggi CF" in out, "the alias is prose too, not just the target"
+    assert "Ricorrenze" in out, "a heading anchor names something; keep its word"
+
+    # The frozen half: same nodes as the raw body would have produced, because
+    # unwrapping yields exactly the words the tokenizer already found.
+    raw_nodes = set(build_contribution("", body, lang="italian")["nodes"])
+    unwrapped_nodes = set(build_contribution("", out, lang="italian")["nodes"])
+    assert raw_nodes == unwrapped_nodes, raw_nodes ^ unwrapped_nodes
+
+
 def test_moc_heading_uses_kernel_language_detection():
     """C1: the MOC writer routes through language.detect — the private
     marker regex missed Italian prose outside its hardcoded word list."""
