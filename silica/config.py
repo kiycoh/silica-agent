@@ -417,6 +417,18 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_SHOW_BANNER", "True").lower() in ("true", "1", "t")
     )
 
+    # Graph viewer: the drifting particles on the GAP and SIMILAR edges (both
+    # renderers), and the crystal rig in 3D — flat shading, the two lights, the
+    # camera-following fog. Off in either case is the bundle's own default, and
+    # off costs nothing: particles alone hold the canvas awake at IDLE_FPS
+    # forever, which on a settled graph is the largest standing cost in that view.
+    graph_particles: bool = field(
+        default_factory=lambda: os.getenv("SILICA_GRAPH_PARTICLES", "True").lower() in ("true", "1", "t")
+    )
+    graph_shading: bool = field(
+        default_factory=lambda: os.getenv("SILICA_GRAPH_SHADING", "True").lower() in ("true", "1", "t")
+    )
+
     # Embedding model — used by silica/kernel/recall/embed.py (Phase 3)
     # Default targets a local llama-server (`llama-server -m ... --embedding`) or
     # LM Studio, whichever answers at the URL below — both speak the same

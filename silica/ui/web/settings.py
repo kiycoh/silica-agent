@@ -174,6 +174,10 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 "keep a transcript of each session"),
             Row("SILICA_MAX_CONTEXT", "max_context_tokens", "max context", "int",
                 "tokens before the transcript is compacted"),
+            Row("SILICA_GRAPH_PARTICLES", "graph_particles", "graph particles", "toggle",
+                "drifting dots along gap and similarity edges · off is quieter and cheaper"),
+            Row("SILICA_GRAPH_SHADING", "graph_shading", "3d graph shading", "toggle",
+                "faceted nodes, crystal light and depth fog · off is the plain renderer"),
         ),
     }
 

@@ -2827,6 +2827,12 @@ async function stCommit(row, input, rowEl) {
     stNote(rowEl, "good", `✓ saved to ${data.path} · re-indexed${n === "" ? "" : " " + n} notes`);
   }
   if (row.key === "SILICA_MODEL" || row.key === "SILICA_PROVIDER") loadConfig();
+  // The graph document bakes these in at render time, so the change only lands
+  // on a rebuild. Stale it, and rebuild now if that view is the one on screen.
+  if (row.key === "SILICA_GRAPH_PARTICLES" || row.key === "SILICA_GRAPH_SHADING") {
+    graphStale = true;
+    if (activeTab === "graph" && graphMode === "graph") setGraphMode("graph");
+  }
   if (row.key === "SILICA_VAULT") { loadVault(); loadVaultInfo(); loadSessions(); }
 }
 

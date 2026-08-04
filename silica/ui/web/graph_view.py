@@ -28,7 +28,15 @@ import json
 import logging
 from pathlib import Path
 
-from silica.kernel.recall.graph_export import Community, Zone
+# The edge colours ride along so each legend swatch and the edges it stands for
+# cannot drift apart: they were two literals of the same hex until one moved.
+from silica.kernel.recall.graph_export import (
+    _EDGE_COLOR_AMBIGUOUS,
+    _EDGE_COLOR_EXTRACTED,
+    _EDGE_COLOR_SIMILAR,
+    Community,
+    Zone,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +161,7 @@ def render_html(
     similar_row = (
         f'<label class="filter-row" style="margin-top:4px" title="Embedding k-NN — notes pulled together by semantic similarity">'
         f'<input type="checkbox" id="cb-similar" checked onchange="updateEdgeFilter()">'
-        f'<div class="dot-edge" style="background:#00a5e1"></div>Similar'
+        f'<div class="dot-edge" style="background:{_EDGE_COLOR_SIMILAR}"></div>Similar'
         f'<span style="color:#565a77;font-size:11px;margin-left:auto">{n_similar}</span>'
         f'</label>'
     ) if n_similar else ""
@@ -199,11 +207,12 @@ def render_html(
         f'<div class="section-title" style="margin-bottom:6px" '
         f'title="Louvain over the embedding k-NN, not over your wikilinks: notes grouped by what '
         f'they are about. A different partition from Communities above — the two are not nested, '
-        f'so a note can be coloured by one zone and sit inside the region of another, pulled '
-        f'there by wikilinks the embeddings do not see. In 3D the regions are colours and labels '
-        f'only; the hulls are drawn on the 2D canvas.">Semantic zones</div>'
-        f'<label class="filter-row" title="Colour the notes by their semantic zone and draw a '
-        f'hull around each. While this is on, colour means zone, not community.">'
+        f'so a note can sit inside the region of one zone while its colour says it belongs to a '
+        f'community that crosses the boundary. In 3D the zones are names only; the hulls are '
+        f'drawn on the 2D canvas.">Semantic zones</div>'
+        f'<label class="filter-row" title="Draw a hull and a name around each semantic zone. Note '
+        f'colour does not change: it always means community, so the two partitions can be read '
+        f'against each other in one frame.">'
         f'<input type="checkbox" id="cb-zones" onchange="updateZoneFilter()">'
         f'<span class="dot" style="background:{zones[0].color if zones else "#565a77"};'
         f'opacity:.5"></span>Show zones'
@@ -219,6 +228,14 @@ def render_html(
     ) if zones else ""
 
     tree_html = render_tree(nodes)
+
+    # Two display settings, baked in at render time rather than read from the
+    # frame: /graph regenerates the whole document per request anyway, so there
+    # is nothing here for a live toggle to be live *against*.
+    from silica.config import CONFIG
+
+    particles_js = "true" if CONFIG.graph_particles else "false"
+    shading_js = "true" if CONFIG.graph_shading else "false"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -243,6 +260,7 @@ def render_html(
       --frost:#EBEFF8;--text:#BAC4D8;--ash:#8E99B0;--ash-dim:#838DA7;
       --accent:#35C6E8;--violet:#5B4BD6;--warn:#E0A93B;
       --sans:"Lexend",system-ui,sans-serif;
+      --lift:0 10px 28px -12px rgba(0,0,0,.7);
     }}
     *{{box-sizing:border-box;margin:0;padding:0;border-radius:0}}
     html{{scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}}
@@ -299,6 +317,13 @@ def render_html(
     .zone-label{{position:absolute;top:0;left:0;display:none;white-space:nowrap;
                  font-size:13px;font-weight:600;letter-spacing:.06em;
                  text-shadow:0 0 10px var(--void),0 0 4px var(--void),0 0 2px var(--void)}}
+    /* Note names in 3D. Below the zone names, which name a whole region and must
+       win where the two overlap. The halo is the same trick: the canvas behind a
+       label is whatever colour the cluster happens to be. */
+    #node-labels{{position:absolute;inset:0;z-index:3;pointer-events:none;overflow:hidden}}
+    .node-label{{position:absolute;top:0;left:0;display:none;white-space:nowrap;
+                 font-size:11px;color:var(--frost);
+                 text-shadow:0 0 6px var(--void),0 0 3px var(--void),0 0 1px var(--void)}}
     .btn{{padding:8px 10px;background:var(--slate-2);border:1px solid var(--line-2);
            color:var(--ash);font-family:var(--sans);font-size:12px;cursor:pointer;text-align:center;
            text-transform:uppercase;letter-spacing:.06em}}
@@ -358,6 +383,29 @@ def render_html(
                  text-transform:uppercase;color:var(--ash-dim)}}
     .seg button:hover{{color:var(--frost)}}
     .seg button.active{{background:var(--line);color:var(--frost)}}
+    /* 3D hover. `.float-tooltip-kap` is the bundle's own element — the class
+       comes from its float-tooltip dependency, NOT the `.graph-tooltip` the
+       docs mention, which is why this is pinned to the vendored version and
+       why it shouts: the bundle ships its own stylesheet. What it ships is
+       #eee sans-serif on a 60% black 3px-rounded box, three decisions this app
+       does not make anywhere else. Squared off, moved onto the raised plane
+       with its hairline, and typeset like the rest of the chrome.
+       `transform` is deliberately NOT overridden: the bundle rewrites it every
+       frame with a computed percentage that keeps the tooltip on screen near
+       the edges, and a fixed translate would throw that away. */
+    .float-tooltip-kap{{background:var(--slate-2)!important;
+                    border:1px solid var(--line-2)!important;
+                    border-radius:0!important;padding:7px 10px!important;
+                    font-family:var(--sans)!important;font-size:12px!important;
+                    color:var(--frost)!important;box-shadow:var(--lift)!important}}
+    .g3d-tip{{display:flex;flex-direction:column;gap:3px;text-align:left}}
+    .g3d-tip b{{font-weight:600;color:var(--frost)}}
+    /* the one place uppercase is allowed: a chrome micro-label, never prose */
+    .g3d-tip i{{font-style:normal;font-size:10px;color:var(--ash-dim);
+                text-transform:uppercase;letter-spacing:.14em}}
+    /* The second partition gets its own line and the word ZONE, and nothing
+       else: dimming it to rank it below the community was measured at 3.23:1
+       on --slate-2, under the 4.5:1 a 10px label owes. The prefix ranks it. */
   </style>
 </head>
 <body>
@@ -390,30 +438,52 @@ def render_html(
        positioning path serves both renderers, and the vendored 3d bundle
        exposes no THREE to build a sprite with anyway. -->
   <div id="zone-labels"></div>
+  <!-- Note names in 3D ride the same DOM path as the zone names above, for the
+       same reason: one positioning routine serves both renderers, and there is
+       no THREE to build a sprite with. 2D keeps painting its labels on canvas —
+       there the zoom IS the level of detail, and the canvas draw is cheaper. -->
+  <div id="node-labels"></div>
   <div id="focus-bar"></div>
   <div id="hud">
+    <!-- Renderer first: it is the only control that changes what every other
+         row in this panel means (the rings below are a 2D-only channel), so it
+         reads before them, not after. -->
+    <div>
+      <div class="section-title" style="margin-bottom:6px">Renderer</div>
+      <div class="seg" id="mode-toggle">
+        <button type="button" data-mode="3d" onclick="setMode('3d')">3D</button>
+        <button type="button" data-mode="2d" onclick="setMode('2d')">2D</button>
+      </div>
+    </div>
+
     <div>
       <div class="section-title" style="margin-bottom:8px">Edge types</div>
       <label class="filter-row" title="A [[wikilink]] whose target file exists.">
         <input type="checkbox" id="cb-extracted" checked onchange="updateEdgeFilter()">
-        <div class="dot-edge" style="background:#8a8da6"></div>
+        <div class="dot-edge" style="background:{_EDGE_COLOR_EXTRACTED}"></div>
         Resolved
         <span style="color:#565a77;font-size:11px;margin-left:auto">{n_extracted}</span>
       </label>
       <label class="filter-row" style="margin-top:4px" title="A [[wikilink]] pointing at a name no file carries — the link is written, the note is not.">
         <input type="checkbox" id="cb-ambiguous" onchange="updateEdgeFilter()">
-        <div class="dot-edge" style="background:#e2544f"></div>
+        <div class="dot-edge" style="background:{_EDGE_COLOR_AMBIGUOUS}"></div>
         Unresolved
         <span style="color:#565a77;font-size:11px;margin-left:auto">{n_ambiguous}</span>
       </label>
       <label class="filter-row" style="margin-top:4px" title="Well-formed areas with no links between them — a bridge could go here">
         <input type="checkbox" id="cb-gaps" checked onchange="updateEdgeFilter()">
-        <div class="dot-edge" style="background:#c9a227"></div>
+        <div class="dot-edge" style="background:{_EDGE_COLOR_GAP}"></div>
         Structural gaps
         <span style="color:#565a77;font-size:11px;margin-left:auto">{n_gaps}</span>
       </label>
       {similar_row}
     </div>
+
+    <!-- The semantic partition sits directly under the edge types because it is
+         read against them: the zones are Louvain over the SIMILAR edges listed
+         one row up, and the structural Communities further down are Louvain over
+         the resolved ones. Each grouping now touches the edge set it came from. -->
+    {zone_section}
 
     <!-- Colour already carries the community, so node STATE rides a second
          channel: a ring. Only the two states that had no marking at all get
@@ -446,16 +516,6 @@ def render_html(
 {legend_items}      <div class="legend-item active" id="legend-all" onclick="filterCommunity(-2)">
           <span class="dot" style="background:#565a77"></span>Show all
         </div>
-      </div>
-    </div>
-
-    {zone_section}
-
-    <div>
-      <div class="section-title" style="margin-bottom:6px">Renderer</div>
-      <div class="seg" id="mode-toggle">
-        <button type="button" data-mode="3d" onclick="setMode('3d')">3D</button>
-        <button type="button" data-mode="2d" onclick="setMode('2d')">2D</button>
       </div>
     </div>
 
@@ -511,8 +571,11 @@ const COMM_LABELS = {comm_labels_json};
 // The semantic partition: node.sgroup -> zone. Disjoint from node.group in every
 // way that matters — different edges, different ids, different colours.
 const ZONES = {zones_json};
-const ZONE_COLOR = {{}};
-ZONES.forEach(z => {{ ZONE_COLOR[z.id] = z.color; }});
+// Only the label is indexed. There was a ZONE_COLOR map beside it, read by
+// nodeColor alone; now that the notes keep their community colour it has no
+// reader left — the hulls and the zone names take z.color straight off ZONES.
+const ZONE_LABEL = {{}};
+ZONES.forEach(z => {{ ZONE_LABEL[z.id] = z.label; }});
 
 const outDeg = {{}}, inDeg = {{}};
 RAW_EDGES.forEach(e => {{
@@ -632,10 +695,13 @@ function nodeColor(n) {{
   // unlit ones. Each value below holds the luminance of the gray it replaces.
   if (n._dim) return '#1d192f';
   if (n.type === 'ghost') return '#484867';   // unlit, never black
-  // Colour is ONE channel and the vault has two partitions, so it carries one
-  // at a time and the HUD says which: with the zone layer on it is the semantic
-  // one, otherwise the structural community. Never a blend of the two.
-  if (showZones && n.sgroup >= 0) return ZONE_COLOR[n.sgroup] || '#565a77';
+  // The node's colour is the STRUCTURAL community, always, whatever else is on
+  // screen. It used to hand the channel over to the semantic partition while
+  // the zone layer was up, which read as a bug and was one: ADR-0023 says the
+  // two partitions "coesistono e non si sostituiscono mai" and "non condividono
+  // ne' chiave colore ne' spazio di id", and a channel that swaps between them
+  // is a substitution by definition. The semantic layer owns the hulls and the
+  // names; it does not get to repaint the notes.
   return (n.color && n.color.background) || '#565a77';
 }}
 
@@ -702,25 +768,91 @@ const FORCE_SCALE = Math.min(4, Math.max(1, Math.sqrt(AVG_DEG / 2)));
 const CHARGE_2D_K = 1.8, DIST_2D_K = 1.5;
 const baseCharge = () => -60 * FORCE_SCALE * FORCE_SCALE * (is2D() ? CHARGE_2D_K : 1);
 const baseDist   = () => 30 * FORCE_SCALE * (is2D() ? DIST_2D_K : 1);
-// Fixed 100 ticks never let a big graph unfold; scale the tick budget with size.
+// --- When the layout is allowed to stop ------------------------------------
+// A tick COUNT is the wrong gate and was measurably too small. d3 decays alpha
+// by a fixed 2.28% per tick regardless of graph size, so it reaches the 0.001
+// that d3 itself calls converged at tick 300, always. The old budget
+// (100 + min(200, N/10)) gave 155 ticks on a 550-note vault: alpha 0.028, still
+// 28x above convergence. The view froze on a layout that was genuinely half
+// unfolded — not a perception problem, an arithmetic one.
 //
-// Most of that budget is spent before the first paint. Both libs advance the
-// layout exactly one tick per RENDERED frame, so settle time is
-// tick-budget / frame-rate: the slower renderer takes proportionally longer to
-// reach the same layout, and on a real GPU the 2D canvas (1147 arcs + labels +
-// 4566 strokes per frame, all CPU) is the slower one by a wide margin. That is
-// the whole reason 2D feels sluggish to settle next to 3D; the initial node
-// positions have nothing to do with it (measured: a 2D layout started from
-// scratch and one started from the collapsed 3D projection both settled in
-// 3650ms, because both burn the same fixed tick count).
+// So hand the gate to the physics. Both bundles already check it and neither
+// had it switched on (d3AlphaMin defaults to 0 = disabled):
 //
-// warmupTicks runs the same tick() in a plain loop with nothing painted. Same
-// total ticks, same forces, same result — measured bit-identical at 1412 mean
-// radius / 307.8 mean edge length — reached 2.2x sooner, and the last stretch
-// still animates so the unfolding is not lost.
-const TOTAL_TICKS = 100 + Math.min(200, Math.round(RAW_NODES.length / 10));
-const WARMUP_TICKS = Math.round(TOTAL_TICKS * 0.7);   // unpainted, blocking
-const COOLDOWN_TICKS = TOTAL_TICKS - WARMUP_TICKS;    // painted, animated
+//   ++cntTicks > cooldownTicks || now - startTickTime > cooldownTime
+//     || d3AlphaMin > 0 && forceLayout.alpha() < d3AlphaMin   ->  onEngineStop
+//
+// cooldownTicks and cooldownTime both go to Infinity on purpose. Alpha decays
+// deterministically, so it ALWAYS converges; a tick or wall-clock ceiling can
+// no longer protect against anything, it can only re-introduce the early cut
+// through a second door. (cooldownTime's 15s default would have done exactly
+// that on the slower renderer.)
+const ALPHA_MIN = 0.001;      // d3's own convergence point, reached at tick ~300
+
+// warmupTicks runs the same tick() in a plain loop with nothing painted, and
+// consumes the SAME alpha schedule — the bundle's warmup loop carries the
+// d3AlphaMin check too. So warmup and the animated tail split one 300-tick
+// budget, and the split is what you actually watch.
+//
+// Split per renderer, because the two pay completely different prices for a
+// painted tick: both libs advance the layout exactly one tick per RENDERED
+// frame, and the 2D canvas (553 arcs + labels + 4566 strokes per frame, all
+// CPU) runs that at roughly 19 ticks/s against WebGL's 60. An even split makes
+// 2D take three times as long to settle for the identical layout. Weighting the
+// warmup by the renderer buys back a comparable settle time in both.
+const WARMUP_TICKS = () => is2D() ? 240 : 150;
+
+// --- Layout cache: pay the 300 ticks once, not once per load ----------------
+// The honest gate above costs about twice the ticks of the wrong one. Cached
+// positions hand that back from the second load on: seed x/y/z from the last
+// settled layout and raise the decay so the sim only has to rerelax, ~66 ticks,
+// which the warmup then swallows whole. The graph opens already settled.
+//
+// One slot per renderer, holding its own fingerprint — a slot per fingerprint
+// would accumulate a dead entry for every force-slider position ever dragged.
+// The fingerprint covers the node set AND the force multipliers: a layout
+// settled under different forces is not this layout.
+const LAYOUT_KEY = "silica-graph-layout";
+const FAST_DECAY = 0.1;   // alpha 1 -> ALPHA_MIN in ~66 ticks
+const NODE_FP = (() => {{
+  let h = RAW_NODES.length;
+  for (const n of RAW_NODES)
+    for (let i = 0; i < n.id.length; i++) h = (h * 31 + n.id.charCodeAt(i)) | 0;
+  return h;
+}})();
+const layoutFp = () => NODE_FP + ":" + forceMul.repel.toFixed(3) + ":" +
+  forceMul.dist.toFixed(3) + ":" + forceMul.center.toFixed(2);
+
+// True when the positions were seeded, i.e. the sim only has to rerelax.
+function loadLayout() {{
+  let saved = null;
+  try {{ saved = JSON.parse(localStorage.getItem(LAYOUT_KEY + "-" + mode)); }} catch (e) {{}}
+  if (!saved || saved.fp !== layoutFp() || !saved.pos) return false;
+  // Positions are keyed by id, not by index: a vault that gained a note between
+  // two loads has a different fingerprint anyway, but by-index would silently
+  // scatter every node past the insertion point if that ever stopped holding.
+  let hit = 0;
+  RAW_NODES.forEach(n => {{
+    const p = saved.pos[n.id];
+    if (!p) return;
+    n.x = p[0]; n.y = p[1]; n.z = p[2];
+    hit++;
+  }});
+  return hit === RAW_NODES.length;
+}}
+
+function saveLayout() {{
+  const pos = {{}};
+  // Rounded to whole graph units: the layout is thousands of units across, the
+  // decimals are noise, and they triple the size of what goes into storage.
+  RAW_NODES.forEach(n => {{
+    pos[n.id] = [Math.round(n.x || 0), Math.round(n.y || 0), Math.round(n.z || 0)];
+  }});
+  try {{
+    localStorage.setItem(LAYOUT_KEY + "-" + mode,
+                         JSON.stringify({{ fp: layoutFp(), pos: pos }}));
+  }} catch (e) {{ /* quota or blocked storage -> next load just re-settles */ }}
+}}
 
 // --- 2D labels: node radius + zoom LOD --------------------------------------
 // Base size is whatever the smallest real note got (16 today, or 16+40*b once
@@ -771,6 +903,146 @@ function paintNodeArea(n, color, ctx) {{
   ctx.fill();
 }}
 
+// --- Edge weight: what you wrote outranks what was inferred -----------------
+// Every edge already declares its own opacity and width (graph_export), and
+// both were dead: the 3D branch drew every link at the bundle's flat 0.2 and
+// the 2D branch at a flat width of 1. So the two layers that matter most —
+// 1341 wikilinks you wrote and 2718 similarities a model guessed — arrived on
+// screen at identical weight, separated by hue alone.
+//
+// The alpha lives in the colour string because that is the only per-link seam
+// the 3D bundle has: linkOpacity is global, but it MULTIPLIES the alpha it
+// parses out of an rgba(), so setting it to 1 makes the per-edge alpha the
+// final word. 2D reads the same string straight into strokeStyle.
+const LINK_ALPHA_2D = 0.55;   // see the comment on its use below
+const EDGE_FALLBACK = "{_EDGE_COLOR_EXTRACTED}";
+
+// Memoised because 2D calls this for every visible link on every frame, and
+// building the string costs ~1ms per frame across 4.6k edges — measured, not
+// assumed. An edge's colour depends on nothing but its own (fixed) data, its
+// dim state and the renderer, so those two are the whole cache key.
+function linkPaint(l) {{
+  const key = (l._dim ? "d" : "") + (is2D() ? "2" : "3");
+  if (l.__paintKey === key) return l.__paint;
+  let out;
+  if (l._dim) out = "#141221";
+  else {{
+    const c = l.color || {{}};
+    const n = parseInt((c.color || EDGE_FALLBACK).slice(1), 16);
+    // 2D stacks every edge on one flat plane with no depth to thin the far ones
+    // out, so the same alphas that read as structure in 3D read as a mat there.
+    // One scale factor rather than a second table: the RANK is what is worth
+    // preserving between the two views, not the absolute values.
+    const a = (c.opacity == null ? 0.6 : c.opacity) * (is2D() ? LINK_ALPHA_2D : 1);
+    out = "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," +
+          (n & 255) + "," + a.toFixed(3) + ")";
+  }}
+  l.__paintKey = key; l.__paint = out;
+  return out;
+}}
+
+// --- 3D: the same crystal the mark is cut from ------------------------------
+// PARTICLES/SHADING come from the settings panel (Display). Both off is the
+// bundle's own look: smooth lit spheres, no fog, still edges.
+const PARTICLES = {particles_js};
+const SHADING = {shading_js};
+// Everything here is a bundle default undone. Out of the box the scene is lit
+// by a GRAY ambient at full strength plus a white key, the spheres are smooth-
+// shaded, and there is no fog — which is a fine neutral rig for a demo and the
+// wrong one for this palette. A substrate built as blue-black crystal, lit flat
+// by an office light, renders as plastic beads: that, not the library, is what
+// made this view read as a stock 3D graph while the rest of the app did not.
+//
+// No THREE global exists to build with (see the DOM label layers below for the
+// same constraint). It is not needed: the bundle hands out the scene, and every
+// constructor this wants is reachable from an object already inside it.
+// Vendored+pinned bundles are what makes that safe to lean on.
+const CRYSTAL = {{
+  // Ambient MULTIPLIES each node's own colour, so this is the one value that
+  // can silently destroy the community channel: a saturated violet here turned
+  // every community violet, and a bright one flattened the facets back into
+  // spheres. Low enough that lit and unlit facets separate, unsaturated enough
+  // that the hue survives into the unlit half.
+  ambient: 0x9B93C6, ambientI: 1.05,
+  key: 0xDCE8FF, keyI: 2.40,      // cool key, off-axis so facets split
+  fogNear: 0.45, fogFar: 2.10,    // as fractions of the camera's distance
+  fov: 42,                        // 50 is the wide-angle look; this is a lens
+}};
+
+// Re-facet after every wholesale material rebuild. refreshPaint triggers one on
+// every focus change (see its comment), so this cannot be a one-shot. The flag
+// rides on the material itself: a rebuilt material simply arrives without one,
+// which makes the repeat cost a 1150-entry loop that writes nothing.
+// __threeObj is the bundle's own per-node handle — 18x cheaper than walking the
+// scene, which also carries ~2700 particle meshes that want none of this.
+function faceteNodes() {{
+  let Color = null;
+  for (const n of RAW_NODES) {{
+    const m = n.__threeObj && n.__threeObj.material;
+    if (!m) continue;
+    if (!Color) Color = m.color.constructor;
+    if (m.__silica) continue;
+    // A 6-segment sphere stops pretending to be round and becomes a facet
+    // cluster. The geometry never changed; it just stopped being smoothed.
+    m.flatShading = true;
+    m.needsUpdate = true;
+    m.__silica = 1;
+  }}
+  return Color;
+}}
+
+function styleScene() {{
+  if (!SHADING || is2D() || !Graph || !Graph.scene) return;
+  const sc = Graph.scene();
+  const Color = faceteNodes();
+  if (!Color) return;
+  // Per-light flags, not one scene-level one. The bundle populates its scene
+  // lazily: at construction and immediately after graphData it holds only the
+  // background mesh, and the lights and the node Group appear some frames
+  // later. A single "already styled" mark set the moment the nodes showed up
+  // could therefore land in a window where the lights had not, and then said
+  // done forever — which is exactly what it did. Flagging each light drops the
+  // ordering assumption: one that arrives late, or gets replaced, is styled on
+  // the next frame instead of never. Direct children only, so this is four
+  // entries rather than a walk over ~3900 meshes.
+  for (const o of sc.children) {{
+    if (!o.isLight || o.__silica) continue;
+    if (o.type === "AmbientLight") {{
+      o.color = new Color(CRYSTAL.ambient); o.intensity = CRYSTAL.ambientI;
+    }} else if (o.type === "DirectionalLight") {{
+      o.color = new Color(CRYSTAL.key); o.intensity = CRYSTAL.keyI;
+      o.position.set(0.55, 1, 0.75);
+    }} else continue;
+    o.__silica = 1;
+  }}
+  if (sc.__silicaLit) return;
+  // Linear fog, not exponential. Exponential density is anchored to world units,
+  // and the camera here travels three orders of magnitude between a fitted vault
+  // and a single note: one density either does nothing up close or swallows the
+  // whole graph the moment you pull back — which is exactly what it did. Linear
+  // near/far ride the camera instead, so the depth cue reads the same at every
+  // zoom. No Fog constructor is reachable (no instance exists to borrow one
+  // from), but the renderer reads the shape, not the class.
+  sc.fog = {{ isFog: true, isFogExp2: false, name: "",
+             color: new Color(0x0D0917), near: 1, far: 2 }};   // --void
+  const cam = Graph.camera();
+  cam.fov = CRYSTAL.fov;
+  cam.updateProjectionMatrix();
+  sc.__silicaLit = 1;
+}}
+
+// Per frame, beside the label layers: the fog slab has to follow the camera or
+// it is just a fixed band the graph flies through.
+function fogStep() {{
+  if (!SHADING || is2D() || !Graph || !Graph.scene) return;
+  const sc = Graph.scene();
+  if (!sc.fog) return;
+  const p = Graph.camera().position;
+  const d = Math.hypot(p.x, p.y, p.z);
+  sc.fog.near = d * CRYSTAL.fogNear;
+  sc.fog.far = d * CRYSTAL.fogFar;
+}}
+
 // --- the renderer, either dimension ----------------------------------------
 // /graph regenerates the whole document per request (cooccurrence refresh + kNN
 // + Louvain), so the switch must never reload: it destroys the instance and
@@ -795,15 +1067,20 @@ let fitPending = false;  // one-shot zoomToFit after a rebuild
 // view, and it is pure waste: nothing on screen changes.
 //
 // So: full rate while the layout settles, the camera tweens or the pointer is
-// over the graph; IDLE_FPS when only the gap particles still move; nothing when
-// even those are off. The failure mode is chosen — a missed wake signal leaves
-// the loop running, i.e. exactly today's behaviour, never a frozen view.
+// over the graph; IDLE_FPS when only particles still move; nothing when even
+// those are off. The failure mode is chosen — a missed wake signal leaves the
+// loop running, i.e. exactly today's behaviour, never a frozen view.
 const IDLE_FPS = 20;
 const WAKE_MS = 1200;   // trackball inertia keeps the camera moving after pointerup
 let awakeUntil = 0, simRunning = true, idleTick = null, sleepTimer = null;
 
-const gapsMoving = () =>
-  showGaps && RAW_EDGES.some(e => e.type === "GAP" && !e._dim && !e._hidden);
+// Both particle layers keep the canvas awake, so both have to be asked. The
+// similarity layer is on by default, which means the idle tick now effectively
+// always runs — that is the price of the drift, and it is the reason the drift
+// rides the 20fps budget instead of the full frame rate.
+const particlesMoving = () => PARTICLES && RAW_EDGES.some(e =>
+  !e._dim && !e._hidden &&
+  ((e.type === "GAP" && showGaps) || (e.type === "SIMILAR" && showSimilar)));
 
 function renderBudget() {{
   if (!Graph) return;
@@ -812,7 +1089,7 @@ function renderBudget() {{
   Graph.pauseAnimation();
   // resumeAnimation() runs one cycle synchronously and re-arms rAF;
   // pauseAnimation() cancels the re-arm. Net effect: exactly one frame.
-  if (gapsMoving()) idleTick = setInterval(
+  if (particlesMoving()) idleTick = setInterval(
     () => {{ Graph.resumeAnimation(); Graph.pauseAnimation(); }}, 1000 / IDLE_FPS);
 }}
 
@@ -835,37 +1112,72 @@ function buildGraph() {{
     el.innerHTML = "";
   }}
   const G = is2D() ? new ForceGraph(el) : new ForceGraph3D(el);
-  // Before graphData, not after: the layout consumes warmupTicks when the data
-  // lands, so a later call in the chain would be read one rebuild too late.
-  G.warmupTicks(WARMUP_TICKS)
+  // Seeded positions and the decay that goes with them, decided before the data
+  // lands: on a cache hit the whole rerelaxation fits inside the warmup, so the
+  // graph appears already settled instead of unfolding a layout you have
+  // watched unfold before.
+  const seeded = loadLayout();
+  G.warmupTicks(WARMUP_TICKS())
+    .d3AlphaMin(ALPHA_MIN)
+    .d3AlphaDecay(seeded ? FAST_DECAY : 0.0228)
+    .cooldownTicks(Infinity)   // alpha is the gate; see ALPHA_MIN
+    .cooldownTime(Infinity)
     .backgroundColor("#0D0917")   // --void
-    .graphData({{ nodes: RAW_NODES, links: RAW_EDGES }})
     .linkSource("from").linkTarget("to")
     .nodeVal("size")
     .nodeColor(nodeColor)
-    .linkColor(l => l._dim ? '#141221' : ((l.color && l.color.color) || "#8a8da6"))
+    .linkColor(linkPaint)
     // Structural gaps have no dash in WebGL — mark them by motion instead: amber
-    // particles stream along the absent bridge. Only for GAP links, and they stop
-    // when the link is dimmed (node focus) so focus mode stays quiet. Same
-    // binding in both libs, so the gaps read the same either way.
-    .linkDirectionalParticles(l => l.type === "GAP" && !l._dim ? 2 : 0)
-    .linkDirectionalParticleColor(() => "{_EDGE_COLOR_GAP}")
-    .linkDirectionalParticleWidth(2)
-    .cooldownTicks(COOLDOWN_TICKS)
+    // particles stream along the absent bridge. The similarity layer gets the
+    // same treatment at a fraction of the weight: one particle instead of two,
+    // pre-dimmed almost into the background, and six times the speed, so two
+    // thousand of them read as a faint drift through the semantic neighbourhood
+    // rather than as two thousand moving dots. Both stop when the link is dimmed
+    // or filtered out, so focus mode stays quiet and unticking Similar takes its
+    // meshes with it. Same binding in both libs, so the layers read the same
+    // either way.
+    .linkDirectionalParticles(l => (!PARTICLES || l._dim || l._hidden) ? 0
+      : l.type === "GAP" ? 2 : l.type === "SIMILAR" ? 1 : 0)
+    .linkDirectionalParticleSpeed(l => l.type === "SIMILAR" ? 0.06 : 0.01)
+    .linkDirectionalParticleColor(l => l.type === "SIMILAR"
+      ? "{_EDGE_COLOR_SIMILAR_PARTICLE}" : "{_EDGE_COLOR_GAP}")
+    .linkDirectionalParticleWidth(l => l.type === "SIMILAR" ? 1.5 : 2)
     .nodeVisibility(n => !n._hidden)
     .linkVisibility(l => !l._hidden)
     .onNodeClick(node => {{ selectNode(node); applyFocus(node.id); }})
     .onBackgroundClick(() => {{ closeDrawer(); clearFocus(); }})
+    // The alpha gate and a drag deadlock each other. Both bundles reheat a drag
+    // the d3 way — d3AlphaTarget(0.3).resetCountdown() on every drag event — but
+    // alpha only climbs toward that target INSIDE tick(), and tick() is exactly
+    // what the gate refuses to run while alpha still sits at the settled value
+    // it stopped on. So the engine stops again on the same frame, forever. The
+    // grabbed node still follows the pointer (both libs write its position
+    // directly), which is why the symptom is one node moving through a graph
+    // that has stopped answering. Lift the gate for the drag and let alpha do
+    // what it was going to do; dragend puts the gate back, alphaTarget returns
+    // to 0, and the layout settles into onEngineStop as usual.
+    .onNodeDrag(() => {{
+      if (simRunning) return;
+      simRunning = true;
+      G.d3AlphaMin(0);
+      renderBudget();   // a still pointer stops waking the loop mid-drag
+    }})
+    .onNodeDragEnd(() => G.d3AlphaMin(ALPHA_MIN))
     .onEngineStop(() => {{
       simRunning = false;
+      saveLayout();
+      measureGraphRadius();   // the label thresholds are a fraction of it
       if (fitPending) {{ fitPending = false; G.zoomToFit(400, 40); wake(600); }}
       else renderBudget();
     }});
 
   if (is2D()) {{
     // Width 0 is invisible on canvas (GL draws a 1px line for it, 2D draws
-    // nothing), and the labels ARE the point here, so pay for them.
-    G.linkWidth(1)
+    // nothing), and the labels ARE the point here, so pay for them. Width is
+    // per-edge because on canvas it is free, and it is the second half of the
+    // rank the alpha starts: a wikilink is both stronger and thicker than the
+    // similarity that a model proposed beside it.
+    G.linkWidth(l => l.width || 1)
       .nodeRelSize(NODE_REL_SIZE)
       .nodeCanvasObject(drawNode)
       .nodePointerAreaPaint(paintNodeArea)
@@ -877,8 +1189,52 @@ function buildGraph() {{
     // mesh and arrows add a cone per edge — thousands of meshes. Width 0 ⇒ cheap
     // GL lines; no arrows; fewer sphere segments; finite cooldown so the sim
     // settles and stops reflowing instead of re-laying-out every frame.
-    G.linkWidth(0).nodeResolution(6).nodeLabel("label");
+    G.linkWidth(0).nodeResolution(6)
+      // 1 so the per-edge alpha in linkPaint is the final opacity rather than
+      // being scaled by a second global. The bundle's default 0.2 is what put
+      // every link at the same weight in the first place.
+      .linkOpacity(1)
+      // The bundle's own onboarding line, bottom centre of every scene it has
+      // ever rendered. It is the single most recognisable thing about the
+      // library, it teaches three mouse bindings nobody needed taught, and it
+      // is not written in this app's voice.
+      .showNavInfo(false)
+      // 0.75 is the default, and at 0.75 every node shows through every other
+      // one: the cluster reads as gas. Solid nodes plus the fog below carry the
+      // depth instead, which is the reading that was wanted all along.
+      .nodeOpacity(0.96)
+      // The default tooltip is the bare label in the library's own black
+      // rounded box. This one is a Silica compartment (see .float-tooltip-kap)
+      // and it answers the question the hover is actually asking at a distance
+      // the note labels do not reach: which cluster is this, and is it special.
+      //
+      // The community comes first because that is what the node's colour means,
+      // always. The zone is APPENDED when its layer is up, never substituted:
+      // in 3D there are no hulls to carry it (onRenderFramePre is 2D-only), so
+      // without this the semantic layer would be floating names and nothing an
+      // individual note could be checked against.
+      // The zone gets its OWN line rather than joining the first: community
+      // labels already contain " · " inside themselves, so appending to them
+      // produced "etica · sistemi · zone: etica · morale", one run with no seam
+      // where the second partition starts.
+      .nodeLabel(n => {{
+        const bits = [];
+        if (COMM_LABELS[n.group]) bits.push(COMM_LABELS[n.group]);
+        const st = nodeState(n);
+        if (st !== "note") bits.push(st);
+        const zone = (showZones && n.sgroup >= 0) ? ZONE_LABEL[n.sgroup] : null;
+        return '<div class="g3d-tip"><b>' + escHtml(n.label) + '</b>' +
+          (bits.length ? '<i>' + escHtml(bits.join(" · ")) + '</i>' : '') +
+          (zone ? '<i>zone ' + escHtml(zone) + '</i>' : '') + '</div>';
+      }});
   }}
+  // Forces before the data, and the data last of all. The warmup loop runs the
+  // moment graphData lands, so anything set afterwards shapes only the animated
+  // tail: with the tuned forces arriving late, the bulk of the layout was being
+  // built by d3's untouched defaults and then nudged at low alpha. Widening the
+  // warmup made that worse, which is how it surfaced.
+  applyForces(false, G);
+  G.graphData({{ nodes: RAW_NODES, links: RAW_EDGES }});
   return G;
 }}
 
@@ -903,8 +1259,9 @@ function setMode(m) {{
   computeFilters();
   computeFocus(focusIds);
   simRunning = true;
-  Graph = buildGraph();
-  applyForces(false);      // sim restarts at full alpha — no reheat needed
+  Graph = buildGraph();    // owns the forces now: they must precede graphData
+  styleScene();            // first frame already lit; a no-op if 2D
+  syncZoneLoop();          // the note-name layer is 3D-only, so the mode owns it
   renderBudget();
 }}
 
@@ -916,14 +1273,24 @@ try {{
   Object.assign(forceMul, JSON.parse(localStorage.getItem(FORCES_KEY)) || {{}});
 }} catch (e) {{ /* corrupt or blocked storage -> auto defaults */ }}
 
-function applyForces(reheat) {{
+// G is passed explicitly during a build, where the instance is not yet the
+// global one: the forces have to be in place before graphData runs the warmup.
+function applyForces(reheat, G) {{
+  G = G || Graph;
   // distanceMax bounds both over-dispersion and per-tick cost on big graphs.
-  Graph.d3Force("charge").strength(baseCharge() * forceMul.repel)
+  G.d3Force("charge").strength(baseCharge() * forceMul.repel)
     .distanceMax(600 * FORCE_SCALE);
-  Graph.d3Force("link").distance(baseDist() * forceMul.dist);
+  G.d3Force("link").distance(baseDist() * forceMul.dist);
   // Center capped at 1: d3 forceCenter shifts positions directly, >1 oscillates.
-  Graph.d3Force("center").strength(Math.min(1, forceMul.center));
-  if (reheat) {{ Graph.d3ReheatSimulation(); simRunning = true; renderBudget(); }}
+  G.d3Force("center").strength(Math.min(1, forceMul.center));
+  // A slider moves an already-settled layout, so the reheat is a perturbation,
+  // not a cold start: the fast decay is the right budget for it, and without it
+  // dragging a slider would cost the full 300-tick schedule every time.
+  if (reheat) {{
+    G.d3AlphaDecay(FAST_DECAY).d3ReheatSimulation();
+    simRunning = true;
+    renderBudget();
+  }}
 }}
 
 // Log-scale track for the multiplier sliders: x1 sits mid-track and the
@@ -957,12 +1324,6 @@ function resetForces() {{
 }}
 
 syncForceUI();
-// First build: the mode comes from localStorage (3D on a fresh profile), and
-// setMode owns the whole bring-up — instance, forces, filters, focus. A 2D
-// first paint has no default camera worth keeping, so it refits; 3D keeps the
-// lib's own initial framing.
-fitPending = is2D();
-setMode(mode);
 
 // Same split as computeFocus/applyFocus: flags on the shared objects here,
 // repaint only when there is no rebuild coming to read them for free.
@@ -1173,18 +1534,116 @@ function positionZoneLabels() {{
   }});
 }}
 
+// --- Note names in 3D -------------------------------------------------------
+// 2D paints its labels on the canvas and gates them on the ZOOM: dots below
+// 0.6, the standouts up to 1.5, everything above it. 3D has no zoom scalar, so
+// the same idea rides the only distance it does have — camera to node. Move in,
+// names appear; the reading is identical, the quantity is not a guess.
+//
+// DOM, like the zone names above, and for the same two reasons: the bundle
+// hands out no THREE to build a sprite with, and one positioning routine is
+// enough. The cost is bounded by a fixed pool of divs rather than by the vault:
+// 553 absolutely-positioned elements written every frame is a real bill, and
+// past the first few dozen the names overlap into a smear anyway.
+const LABEL_POOL = 60;
+const labelEls = [];
+function buildNodeLabels() {{
+  const layer = document.getElementById("node-labels");
+  if (!layer || labelEls.length) return;
+  for (let i = 0; i < LABEL_POOL; i++) {{
+    const el = document.createElement("div");
+    el.className = "node-label";
+    layer.appendChild(el);
+    labelEls.push(el);
+  }}
+}}
+
+// The thresholds are in graph units and have to scale with the layout, which is
+// thousands of units across on a big vault and hundreds on a small one. Mean
+// distance from the centroid is that scale, recomputed whenever the layout
+// settles rather than per frame.
+let GRAPH_R = 0;
+function measureGraphRadius() {{
+  let x = 0, y = 0, z = 0, n = 0;
+  RAW_NODES.forEach(p => {{ if (p.x != null) {{ x += p.x; y += p.y; z += p.z || 0; n++; }} }});
+  if (!n) return;
+  x /= n; y /= n; z /= n;
+  let sum = 0;
+  RAW_NODES.forEach(p => {{
+    if (p.x == null) return;
+    sum += Math.hypot(p.x - x, p.y - y, (p.z || 0) - z);
+  }});
+  GRAPH_R = sum / n;
+}}
+
+function positionNodeLabels() {{
+  if (!labelEls.length) return;
+  const cam = !is2D() && Graph.camera && Graph.camera();
+  // 2D draws its own labels on the canvas; showing these there would double
+  // every name. Same for notes-off, where there is nothing to name.
+  if (!cam || !cam.position || !showNotes || !GRAPH_R) {{
+    labelEls.forEach(el => {{ el.style.display = "none"; }});
+    return;
+  }}
+  const far = 3.0 * GRAPH_R;    // beyond this, no name at all
+  const near = 1.2 * GRAPH_R;   // inside this, every note gets one
+  const p = cam.position;
+  const cand = [];
+  for (const n of RAW_NODES) {{
+    if (n._hidden || n._dim || n.x == null) continue;
+    const d = Math.hypot(n.x - p.x, n.y - p.y, (n.z || 0) - p.z);
+    if (d > far) continue;
+    // Between near and far only the standouts, exactly the rule 2D applies
+    // between zoom 0.6 and 1.5. Ghosts are names nothing carries; they are
+    // already the most numerous thing in the frame and stay unnamed.
+    if (d > near && ((n.size || 16) <= BASE_SIZE || n.type === "ghost")) continue;
+    if (!inFrontOfCamera(n)) continue;
+    cand.push([d, n]);
+  }}
+  // Nearest first, then the pool cuts the tail: when more notes qualify than
+  // there are slots, the ones you flew towards are the ones that get named.
+  cand.sort((a, b) => a[0] - b[0]);
+  const shown = Math.min(cand.length, LABEL_POOL);
+  for (let i = 0; i < shown; i++) {{
+    const d = cand[i][0], n = cand[i][1];
+    const el = labelEls[i];
+    const s = Graph.graph2ScreenCoords(n.x, n.y, n.z || 0);
+    if (el._id !== n.id) {{ el.textContent = n.label; el._id = n.id; }}
+    el.style.display = "block";
+    // Fade with distance so names arrive instead of popping. Floored, because a
+    // label at 5% is a smudge, not a word.
+    el.style.opacity = Math.max(0.35, Math.min(1, 1.15 - d / far));
+    el.style.color = n.type === "ghost" ? "#838DA7" : "#EBEFF8";
+    el.style.transform =
+      "translate(" + s.x + "px," + s.y + "px) translate(-50%,6px)";
+  }}
+  for (let i = shown; i < labelEls.length; i++) labelEls[i].style.display = "none";
+}}
+
 // Its own rAF, not the render budget's: a camera orbit moves the labels without
-// the simulation running, and this loop only writes transforms on a handful of
-// divs — nothing is rendered. It exists only while the layer is on.
+// the simulation running, and this loop only writes transforms on a bounded set
+// of divs — nothing is rendered. It exists only while a layer that needs it is
+// on. One loop drives both layers, so a 3D graph with zones up pays for one.
 let zoneRaf = null;
+const labelsWanted = () => showZones || !is2D();
 function syncZoneLoop() {{
-  if (showZones && zoneRaf === null) {{
-    const step = () => {{ positionZoneLabels(); zoneRaf = requestAnimationFrame(step); }};
+  if (labelsWanted() && zoneRaf === null) {{
+    const step = () => {{
+      positionZoneLabels();
+      positionNodeLabels();
+      // Both 3D-only and both cheap. styleScene is here rather than wired to
+      // each rebuild site because the rebuilds are the bundle's, not ours, and
+      // land whenever it decides: a frame is the one moment we know they have.
+      styleScene();
+      fogStep();
+      zoneRaf = requestAnimationFrame(step);
+    }};
     zoneRaf = requestAnimationFrame(step);
-  }} else if (!showZones && zoneRaf !== null) {{
+  }} else if (!labelsWanted() && zoneRaf !== null) {{
     cancelAnimationFrame(zoneRaf);
     zoneRaf = null;
     positionZoneLabels();   // one last pass to hide them
+    positionNodeLabels();
   }}
 }}
 
@@ -1193,13 +1652,28 @@ function updateZoneFilter() {{
   const cbNodes = document.getElementById("cb-zone-nodes");
   if (cbZones) showZones = cbZones.checked;
   if (cbNodes) showNotes = cbNodes.checked;
+  // No refreshPaint: toggling zones no longer touches a single node's colour,
+  // and in 3D that call rebuilds the material of every node and every link (see
+  // its comment). applyFilters already re-passes the visibility accessors and
+  // wakes the renderer, which is all the hull layer needs to appear.
   applyFilters();
-  refreshPaint();   // the colour channel just changed which partition it carries
   syncZoneLoop();
   updateFocusBar();
 }}
 
 buildZoneLabels();
+buildNodeLabels();
+
+// First build: the mode comes from localStorage (3D on a fresh profile), and
+// setMode owns the whole bring-up — instance, forces, filters, focus. A 2D
+// first paint has no default camera worth keeping, so it refits; 3D keeps the
+// lib's own initial framing.
+//
+// It runs down here, after both label layers exist, because setMode starts the
+// label loop: the loop's own state is declared above in this section, and a
+// bring-up from further up the file would read it before it is initialised.
+fitPending = is2D();
+setMode(mode);
 
 function filterCommunity(cid) {{
   activeCommunity = cid;
@@ -1444,7 +1918,22 @@ document.addEventListener("keydown", e => {{
 </html>"""
 
 
-_EDGE_COLOR_GAP = "#c9a227"  # dim amber — "a bridge could go here, and doesn't"
+_EDGE_COLOR_GAP = "#E0A93B"  # --warn — "a bridge could go here, and doesn't"
+
+# The similarity particles, pre-dimmed rather than made transparent. There are
+# five gap links and roughly two thousand similar ones, so the same particle
+# treatment would drown the frame; the effect has to survive at a fortieth of
+# the weight. Alpha is not available to do that dimming: 3d-force-graph builds
+# each photon as a mesh whose material takes a THREE.Color, which discards the
+# alpha channel outright. So the colour is blended against the void here, once,
+# and both renderers get an opaque colour that already looks faint.
+#
+# It is derived UPWARD from the line, not downward. The line is _EDGE_COLOR_SIMILAR
+# at opacity 0.35, which over --void lands at about #08405E; a particle at or
+# below that is a moving dot you cannot see. This sits a step above it — the same
+# azure blended at 0.65 — which is the whole budget the effect gets: enough that
+# the drift registers, not enough that two thousand of them become the subject.
+_EDGE_COLOR_SIMILAR_PARTICLE = "#056E9A"  # one step up from the line's apparent #08405E
 
 
 def _gap_edges(nodes: list[dict], edges: list[dict], top_k: int = 5) -> list[dict]:
@@ -1466,7 +1955,11 @@ def _gap_edges(nodes: list[dict], edges: list[dict], top_k: int = 5) -> list[dic
             "from":  hub_a,
             "to":    hub_b,
             "type":  "GAP",
-            "color": {"color": _EDGE_COLOR_GAP},
+            # Five of them against four thousand others: a gap can afford to be
+            # the most opaque and the widest thing on screen, because there is
+            # never enough of it to crowd anything.
+            "color": {"color": _EDGE_COLOR_GAP, "opacity": 0.95},
+            "width": 2.0,
             "score": score,
         }
         for i, (ca, cb, hub_a, hub_b, ie, score, _dens) in enumerate(

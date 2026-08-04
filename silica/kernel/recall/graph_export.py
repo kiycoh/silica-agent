@@ -102,11 +102,17 @@ def _zone_color(i: int) -> str:
     r, g, b = colorsys.hls_to_rgb(hue / 360.0, light, 0.66)
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
-# Neutrals are unlit blue-violet rather than gray: the mascot has no gray facet.
-# Each replaces a gray at its exact relative luminance, so nothing gets lighter
-# or darker, only warmer. Ambiguous stays red on purpose — an alarm that matches
-# the brand stops reading as an alarm — but off the neon and into the same
-# lightness band as everything it sits beside.
+# Edge colours. Only ONE layer is vivid, the inferred one; the written links are
+# the unlit blue-violet gray they have always been. They carry arrows, width and
+# the most opacity, so they never needed a hue to rank first, and two saturated
+# meshes stacked on one frame is how both stop being legible. Neutrals are unlit
+# blue-violet rather than gray: the mascot has no gray facet, and each replaces a
+# gray at its exact relative luminance, so nothing gets lighter or darker, only
+# warmer.
+#
+# Ambiguous stays red on purpose — an alarm that matches the brand stops reading
+# as an alarm — but off the neon and into the same lightness band as its
+# neighbours.
 _EDGE_COLOR_EXTRACTED = "#8a8da6"   # unlit blue-violet — resolved links
 _EDGE_COLOR_AMBIGUOUS = "#e2544f"   # alarm red, deliberately outside the arc
 _EDGE_COLOR_SIMILAR   = "#00a5e1"   # brand azure — embedding k-NN (semantic map)
@@ -207,9 +213,12 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
             "from":   src,
             "to":     tgt,
             "type":   "EXTRACTED",
-            "color":  {"color": _EDGE_COLOR_EXTRACTED, "opacity": 0.6},
+            # opacity and width are the RANK, and the viewer honours both. A
+            # wikilink is the strongest thing in the graph because it is the only
+            # edge a person actually wrote; everything else is inferred.
+            "color":  {"color": _EDGE_COLOR_EXTRACTED, "opacity": 0.72},
             "arrows": {"to": {"enabled": True, "scaleFactor": 0.6}},
-            "width":  1.5,
+            "width":  1.6,
         })
         edge_idx += 1
 
@@ -244,7 +253,7 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
                 "from":   src,
                 "to":     ghost_id,
                 "type":   "AMBIGUOUS",
-                "color":  {"color": _EDGE_COLOR_AMBIGUOUS, "opacity": 0.4},
+                "color":  {"color": _EDGE_COLOR_AMBIGUOUS, "opacity": 0.55},
                 "arrows": {"to": {"enabled": True, "scaleFactor": 0.5}},
                 "width":  1.0,
                 "dashes": [4, 4],
@@ -298,8 +307,19 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
                 "from":  p[0],
                 "to":    p[1],
                 "type":  "SIMILAR",
+                # 0.35, where this layer has always drawn. It dropped to 0.26
+                # while the wikilinks were vivid too and the two meshes were
+                # fighting; with the written links back to gray there is nothing
+                # to stay out of the way of, and at 0.26 the k-NN reads as haze
+                # rather than as lines. The rank still holds — a wikilink is
+                # 0.72 and nearly three times the width.
                 "color": {"color": _EDGE_COLOR_SIMILAR, "opacity": 0.35},
-                "width": round(1.0 + 2.0 * score, 2),
+                # Width still carries the similarity score, but inside a band
+                # that ends BELOW a wikilink's 1.6. It used to run to 3.0, so
+                # the strongest inferred edges drew wider than every written one
+                # — the rank exactly inverted — which went unnoticed while the
+                # viewer ignored width entirely.
+                "width": round(0.5 + 0.6 * score, 2),
                 "score": round(score, 4),
             })
             idx += 1

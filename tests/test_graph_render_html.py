@@ -378,10 +378,31 @@ class TestBigVaultPerfKnobs:
         html = render_html(nodes, edges, lib_js="// dummy")
         assert "linkDirectionalArrowLength" not in html
 
-    def test_finite_cooldown(self, small_graph):
+    def test_layout_stops_on_alpha_not_on_a_tick_count(self, small_graph):
+        """The freeze gate is the physics, never a counted budget.
+
+        A tick count was the original gate and it cut the layout off at alpha
+        0.028, twenty-eight times above the 0.001 d3 calls converged: the view
+        froze on a half-unfolded graph. Both ceilings are deliberately infinite
+        — alpha decays deterministically, so it always converges, and either
+        ceiling can only re-introduce the early cut through another door.
+        """
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
-        assert ".cooldownTicks(" in html
+        assert ".d3AlphaMin(ALPHA_MIN)" in html
+        assert "const ALPHA_MIN = 0.001" in html
+        assert ".cooldownTicks(Infinity)" in html
+        assert ".cooldownTime(Infinity)" in html
+
+    def test_forces_are_set_before_the_data_lands(self, small_graph):
+        """graphData runs the warmup loop, so late forces shape only the tail.
+
+        With the tuned forces applied after graphData, the bulk of the layout
+        was being built by d3's untouched defaults.
+        """
+        nodes, edges = small_graph
+        html = render_html(nodes, edges, lib_js="// dummy")
+        assert html.index("applyForces(false, G)") < html.index("G.graphData(")
 
     def test_low_node_resolution(self, small_graph):
         nodes, edges = small_graph
@@ -407,3 +428,57 @@ class TestHostDrawerHidesTheHud:
         html = render_html(nodes, edges, lib_js="")
         assert 'e.data.type === "silica-host-drawer"' in html
         assert 'classList.toggle("host-drawer-open", !!e.data.open)' in html
+
+
+class TestDragReheat:
+    """d3AlphaMin gates tick(), and alpha only rises inside tick().
+
+    So a settled graph could never answer a drag: the bundles reheat with
+    d3AlphaTarget(0.3).resetCountdown(), the gate saw the old alpha and stopped
+    the engine on the same frame, and only the grabbed node moved. The pair of
+    handlers below is the whole fix — lifting the gate without restoring it
+    would leave the layout running forever instead.
+    """
+
+    def test_drag_lifts_the_alpha_gate_and_dragend_puts_it_back(self, small_graph):
+        nodes, edges = small_graph
+        html = render_html(nodes, edges, lib_js="")
+        assert ".onNodeDrag(" in html
+        assert "G.d3AlphaMin(0);" in html
+        assert ".onNodeDragEnd(() => G.d3AlphaMin(ALPHA_MIN))" in html
+
+
+# ---------------------------------------------------------------------------
+# Display settings baked in at render time (settings.py Display section). The
+# flags are read from CONFIG when the document is built, so a change only lands
+# on the next /graph request — which is what makes these two constants the whole
+# contract between the panel and the viewer.
+# ---------------------------------------------------------------------------
+
+class TestGraphEffectToggles:
+    def test_on_by_default(self, small_graph, monkeypatch):
+        from silica.config import CONFIG
+
+        # Set, not assumed: CONFIG is read live, so a machine whose panel (or
+        # SILICA_GRAPH_PARTICLES) has the effects off failed this on the default
+        # rather than on the render.
+        nodes, edges = small_graph
+        monkeypatch.setattr(CONFIG, "graph_particles", True)
+        monkeypatch.setattr(CONFIG, "graph_shading", True)
+        html = render_html(nodes, edges, lib_js="")
+        assert "const PARTICLES = true;" in html
+        assert "const SHADING = true;" in html
+
+    def test_off_reaches_the_gates(self, small_graph, monkeypatch):
+        from silica.config import CONFIG
+
+        nodes, edges = small_graph
+        monkeypatch.setattr(CONFIG, "graph_particles", False)
+        monkeypatch.setattr(CONFIG, "graph_shading", False)
+        html = render_html(nodes, edges, lib_js="")
+        assert "const PARTICLES = false;" in html
+        assert "const SHADING = false;" in html
+        # The constants are only worth anything if the three call sites read them.
+        assert "(!PARTICLES || l._dim || l._hidden) ? 0" in html
+        assert "PARTICLES && RAW_EDGES.some" in html
+        assert html.count("if (!SHADING || is2D()") == 2
