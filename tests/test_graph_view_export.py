@@ -171,9 +171,11 @@ def test_export_graph_ships_the_2d_3d_switch(monkeypatch, tmp_path):
     assert "nodeCanvasObject" in html            # 2D labels, the point of the mode
     assert "silica-graph-mode" in html           # last-used mode persists
     assert "centerAt" in html                    # 2D fly-to
-    # The switch rebuilds in place from the data already in the page. Only the
-    # explicit HUD refresh button may reload — one occurrence, and not in setMode.
-    assert html.count("location.reload()") == 1
+    # The switch rebuilds in place from the data already in the page. Two
+    # reloads are allowed and neither is the switch: the explicit HUD refresh
+    # button, and the <head> theme resolver when the OS palette moves under a
+    # standalone file (embedded, the parent pins ?theme= and never reaches it).
+    assert html.count("location.reload()") == 2
     assert "location.reload" not in html.split("function setMode")[1].split("\n}")[0]
 
 

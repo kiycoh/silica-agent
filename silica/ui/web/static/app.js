@@ -918,6 +918,33 @@ $(".tabs").addEventListener("click", (e) => {
   if (tab) showTab(tab);
 });
 
+// --- theme ------------------------------------------------------------------
+// The palette itself is CSS, and the <head> script owns resolving "auto" — this
+// is only the two things CSS cannot reach. The iframes get the resolved value
+// on their URL rather than inheriting it, because they are separate documents
+// with their own <head> script and no way to read this one's :root. Mermaid
+// gets a repaint because a rendered diagram is baked SVG.
+const liveTheme = () => document.documentElement.dataset.theme || "dark";
+
+function applyThemePref(pref) {
+  document.documentElement.dataset.themePref = pref;
+  document.documentElement.__silicaPaintTheme?.();
+}
+
+// One watcher for both ways the theme moves: the settings row writes the
+// preference, and the OS moving under an "auto" preference fires the <head>
+// script's own listener. Both land on data-theme, so that is the only thing
+// worth watching — and watching the result rather than the causes is what keeps
+// this from needing a second call site every time a new one appears.
+new MutationObserver(() => {
+  repaintMermaid();
+  graphStale = true;
+  if (activeTab === "graph") {
+    setGraphMode(graphMode);
+    if (graphMode === "map" && mapRootedPath) rootMap(mapRootedPath);
+  }
+}).observe(document.documentElement, { attributeFilter: ["data-theme"] });
+
 // --- explore tab: network graph | radial map ---------------------------------
 // Two modes in one view, one toolbar. "graph" is one build (wikilink structure
 // + semantic k-NN overlay, layers toggled in the frame's HUD); "map" is a radial
@@ -945,7 +972,7 @@ function setGraphMode(m) {
     $("#map-loading").hidden = true;
     if (graphStale) {
       $("#graph-loading").hidden = false;
-      $("#graph-frame").src = "/graph?t=" + Date.now();
+      $("#graph-frame").src = "/graph?theme=" + liveTheme() + "&t=" + Date.now();
       graphStale = false;
     }
   }
@@ -1596,7 +1623,8 @@ function rootMap(path) {
   $("#map-picker").hidden = true;
   $("#map-frame").hidden = false;
   $("#map-loading").hidden = false;
-  $("#map-frame").src = "/map?note=" + encodeURIComponent(path) + "&t=" + Date.now();
+  $("#map-frame").src = "/map?note=" + encodeURIComponent(path)
+    + "&theme=" + liveTheme() + "&t=" + Date.now();
   closeNodeResults();
 }
 
@@ -1813,29 +1841,72 @@ function syncDrawerToViews() {
 // time an opened note actually contains a ```mermaid fence. Render failures
 // leave the fence as plain text (suppressErrorRendering).
 let mermaidLoad = null;
+
+// Read the palette instead of restating it. The old block carried five hex
+// literals copied out of app.css, and by the time anyone looked they were two
+// revisions stale — which is the failure mode a second theme turns from a
+// blemish into a wrong-coloured diagram on a white page. getComputedStyle on
+// :root returns whichever ramp is live, so this cannot drift from either.
+// `base` in both themes, never "dark"/"default". Mermaid derives a theme object
+// on the first initialize() and a later one does not rebuild it: switching
+// theme:"dark" -> theme:"default" re-rendered every diagram in mermaid's own
+// lavender defaults with our themeVariables sitting in the live config, ignored.
+// `base` is the theme that exists to be driven entirely by those variables, so
+// nothing has to be re-derived and there is one code path instead of two.
+function mermaidConfig() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n) => cs.getPropertyValue(n).trim();
+  const light = document.documentElement.dataset.theme === "light";
+  return {
+    startOnLoad: false, suppressErrorRendering: true, theme: "base",
+    fontFamily: "Martian Mono, ui-monospace, monospace",
+    themeVariables: {
+      darkMode: !light,
+      background: v("--void"),
+      primaryColor: v("--slate-2"),
+      primaryTextColor: v("--frost"),
+      primaryBorderColor: v("--line-2"),
+      lineColor: v("--ash"),
+      // base derives the rest from these four, and derives them wrong when the
+      // ramp is not a neutral gray: naming them is cheaper than correcting it.
+      secondaryColor: v("--slate"),
+      tertiaryColor: v("--sheet"),
+      mainBkg: v("--slate-2"),
+      textColor: v("--text"),
+    },
+  };
+}
+
 function renderMermaid(root) {
   const blocks = root.querySelectorAll("pre.mermaid");
   if (!blocks.length) return;
+  // Keep the source: mermaid.run() replaces the fence's text with an <svg>, so
+  // without this a repaint has nothing left to re-render from.
+  blocks.forEach((b) => { if (!b.dataset.mmd) b.dataset.mmd = b.textContent; });
   mermaidLoad ||= new Promise((resolve) => {
     const s = document.createElement("script");
     s.src = "/static/mermaid.min.js";
-    s.onload = () => {
-      mermaid.initialize({
-        startOnLoad: false, theme: "dark", suppressErrorRendering: true,
-        fontFamily: "Martian Mono, ui-monospace, monospace",
-        themeVariables: {
-          // roles map 1:1 onto app.css tokens: --void, --slate-2, --frost,
-          // --line-2, --ash. They were still the palette from two revisions ago.
-          darkMode: true, background: "#0D0917",
-          primaryColor: "#1F243A", primaryTextColor: "#EBEFF8",
-          primaryBorderColor: "#3B4662", lineColor: "#8E99B0",
-        },
-      });
-      resolve();
-    };
+    s.onload = () => { mermaid.initialize(mermaidConfig()); resolve(); };
     document.head.appendChild(s);
   });
   mermaidLoad.then(() => mermaid.run({ nodes: blocks }).catch(() => {}));
+}
+
+// A diagram is baked SVG, so it does not follow a token swap the way the rest
+// of the page does — every rendered fence has to be rewound to its source and
+// drawn again. Nothing to do if the bundle was never loaded.
+function repaintMermaid() {
+  if (!mermaidLoad) return;
+  mermaidLoad.then(() => {
+    mermaid.initialize(mermaidConfig());
+    const done = document.querySelectorAll("pre.mermaid[data-processed]");
+    if (!done.length) return;
+    done.forEach((b) => {
+      b.removeAttribute("data-processed");
+      b.textContent = b.dataset.mmd || "";
+    });
+    mermaid.run({ nodes: done }).catch(() => {});
+  });
 }
 
 // The transcript is what the drawer exists to serve, so it gets a floor and the
@@ -2836,6 +2907,7 @@ async function stCommit(row, input, rowEl) {
   if (row.key === "SILICA_MODEL" || row.key === "SILICA_PROVIDER") loadConfig();
   // The graph document bakes these in at render time, so the change only lands
   // on a rebuild. Stale it, and rebuild now if that view is the one on screen.
+  if (row.key === "SILICA_THEME") applyThemePref((data.values || {})[row.key] || value);
   if (row.key === "SILICA_GRAPH_PARTICLES" || row.key === "SILICA_GRAPH_SHADING") {
     graphStale = true;
     if (activeTab === "graph" && graphMode === "graph") setGraphMode("graph");

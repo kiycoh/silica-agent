@@ -1334,3 +1334,87 @@ def test_stt_rejects_an_empty_recording(client, monkeypatch):
     app, server = client
     monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
     assert app.post("/stt", files={"audio": ("clip.wav", b"", "audio/wav")}).status_code == 400
+
+
+# --- theme -------------------------------------------------------------------
+# The palette is CSS and needs no test. What does is the seam that decides WHICH
+# palette: a preference the server stamps, a resolution only the browser can do,
+# and three documents that have to agree across two iframe boundaries.
+
+def test_index_stamps_the_configured_theme_preference(client, monkeypatch):
+    """The server ships the preference, never the resolution.
+
+    A theme resolved server-side cannot answer "auto", and one resolved only in
+    JS after load flashes the wrong palette for a frame. So `/` carries
+    SILICA_THEME through to the attribute the <head> script reads.
+    """
+    app, server = client
+    for pref in ("light", "dark", "auto"):
+        monkeypatch.setattr(server.CONFIG, "theme", pref, raising=False)
+        assert f'data-theme-pref="{pref}"' in app.get("/").text
+
+    # An unknown value degrades to auto rather than stamping something the CSS
+    # has no block for, which would silently pin the app to dark.
+    monkeypatch.setattr(server.CONFIG, "theme", "sepia", raising=False)
+    assert 'data-theme-pref="auto"' in app.get("/").text
+
+
+def test_theme_is_an_admitted_setting(tmp_path, monkeypatch):
+    """Reachable from the panel, and only as the three values CSS implements.
+
+    resolve_env_path is redirected because apply() persists: without it this
+    test writes SILICA_THEME into whichever .env the developer is actually
+    using, and pins their app to whatever the assertion happened to pass.
+    """
+    from silica.ui.web import settings as st
+
+    monkeypatch.setattr(
+        "silica.onboarding.wizard.resolve_env_path", lambda: tmp_path / ".env")
+    monkeypatch.delenv("SILICA_THEME", raising=False)
+    monkeypatch.setattr(st, "SHELL_ENV", {})
+
+    row = next(r for r in st.sections()["Display"] if r.key == "SILICA_THEME")
+    assert row.kind == "enum" and row.options == ("auto", "dark", "light")
+    assert st.apply("SILICA_THEME", "light")["ok"] is True
+    assert "SILICA_THEME=light" in (tmp_path / ".env").read_text()
+
+
+def test_the_graph_document_carries_both_palettes(tmp_path, monkeypatch):
+    """/graph is a standalone document with no stylesheet to link to.
+
+    It ships both ramps and resolves between them itself — ?theme= when the app
+    embeds it, the OS when it is opened off disk — so a light session cannot end
+    at the iframe boundary.
+    """
+    import silica.kernel.recall.graph_export as ge
+    from silica.ui.web import graph_view as gv
+
+    monkeypatch.setattr(ge, "build_graph_data", lambda folder="": (
+        [{"id": "a.md", "label": "a", "type": "note"}], []))
+    monkeypatch.setattr(ge, "detect_communities", lambda nodes, edges: [])
+    monkeypatch.setattr(ge, "knn_edges", lambda nodes, k=6: [])
+
+    out = tmp_path / "g.html"
+    gv.export_graph(output_path=str(out))
+    html = out.read_text(encoding="utf-8")
+
+    assert ':root[data-theme="light"]' in html      # the second ramp
+    assert 'get("theme")' in html                   # the app pins it
+    assert "prefers-color-scheme: light" in html    # file:// falls back to the OS
+    # The canvas cannot read a CSS token, so it carries its own pair.
+    assert "const LIGHT =" in html and "const GP =" in html
+
+
+def test_community_colour_has_a_paper_band():
+    """Same hue and the same golden-ratio walk, a different lightness band.
+
+    The dark band is picked to survive a near-black floor; reusing it on paper
+    puts every community dot at roughly the contrast of the page it sits on.
+    """
+    from silica.kernel.recall.graph_export import _community_color, _zone_color
+
+    for i in range(6):
+        assert _community_color(i) != _community_color(i, on_paper=True)
+        assert _zone_color(i) != _zone_color(i, on_paper=True)
+    # and the two partitions still do not share a colour key (ADR-0023)
+    assert _community_color(3, on_paper=True) != _zone_color(3, on_paper=True)

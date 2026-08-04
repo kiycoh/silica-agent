@@ -24,6 +24,8 @@
 }
 
 :root {
+  color-scheme: dark;
+
   /* surfaces, blue-black crystal, never pure black. Four steps spread far
      enough apart to read as separate planes: the answer sits up on --page,
      your own turn and all the chrome recede to --slate, controls rise to
@@ -104,7 +106,7 @@
   --ease: cubic-bezier(.2, .8, .2, 1);
   --dur: .18s;
   /* offset + soft blur, never a zero-offset halo */
-  --lift: 0 10px 28px -12px rgba(0, 0, 0, .7);
+  --lift: 0 10px 28px -12px rgb(var(--shadow-rgb) / .7);
 
   /* Glass, in two kinds, because only one of them is glass.
      --chrome-glass is for header and sidebar. Both sit in normal flow with
@@ -126,6 +128,135 @@
   --glass-blur: blur(20px) saturate(1.3);
   /* The lit top edge that says "pane of something", not "translucent box". */
   --glass-edge: inset 0 1px 0 rgba(235, 239, 248, .07);
+
+  /* Two jobs --void used to do alone. They are the same colour here and only
+     here: in the dark palette "deeper" and "the ink that survives a vivid fill"
+     both resolve to the floor, so the split costs nothing and reads the same.
+     In light they diverge hard — a code well has to be a step DOWN from the
+     paper while text on a teal chip has to be white — and one token cannot be
+     both. Naming them now is what lets the light block below stay a pure
+     value swap instead of a second set of rules.
+       --well     inset surfaces: code blocks, the .env sample in the stt panel.
+       --on-vivid foreground on --accent / --warn / --frost fills. */
+  --well: #0D0917;
+  --on-vivid: #0D0917;
+
+  /* the page wash's two poles — see html,body */
+  --wash-a: rgba(43, 111, 212, .34);
+  --wash-b: rgba(186, 58, 168, .26);
+
+  /* Shadow, scrim and glow do not follow the surfaces: they all reverse
+     direction between the two themes, and each reverses differently.
+       --shadow-rgb  the ink a cast shadow is made of. Channels, not a colour,
+                     so each shadow keeps its own alpha. Warm-black in light,
+                     because a neutral black shadow on warm paper reads as dirt.
+       --scrim       what a modal puts between you and the app. Dark in both
+                     themes: on paper a scrim still has to darken, only less.
+                     One token for the backdrop and the sheet inside it — they
+                     were .66 and .72, a difference nobody has ever seen.
+       --drop-scrim  the full-bleed drop target, which is the opposite case: it
+                     nearly hides the app, so in light it goes to paper, not ink.
+       --art-glow    the halo under the mascot on the empty transcript. Cyan on
+                     crystal; on paper a cyan halo is a printing error, so light
+                     gets contact shadow instead of emission.
+       --brand-sweep the logotype's hover sweep, sampled off the mark. Light
+                     needs its own stops: the mascot's cyan on white is 1.9:1. */
+  --shadow-rgb: 0 0 0;
+  --scrim: rgba(13, 9, 23, .70);
+  --drop-scrim: rgba(10, 13, 20, .88);
+  --art-glow: rgba(53, 198, 232, .16);
+  --brand-sweep: linear-gradient(115deg, #35C6E8 0%, #5B4BD6 46%, #983A94 100%);
+}
+
+/* --- light: the same room, lit --------------------------------------------
+   Warm paper, and warm on purpose. The crystal palette is the mark's own
+   substrate and it has no light half to invert into; a cool white would have
+   read as the dark theme with the lamp turned up, which is the one thing a
+   second theme must not do. So light is a different material — laid paper, a
+   toned desk under it, deep teal where the dark theme is emissive cyan.
+
+   The ramp is not the dark one flipped. Flipping it puts the reading surface
+   at the bottom and the chrome above it, and on paper that is backwards: the
+   answer sheet is the whitest thing on the desk, everything else is a tone off
+   it. So the ORDER is preserved semantically, not numerically — the answer
+   still sits on the brightest plane, your own turn and the chrome still recede
+   — while the direction of "recede" flips from darker to more toned.
+
+   The steps are wider than the first pass had them, and the widening was
+   measured, not felt: on crystal --bubble sits 1.53:1 off the floor, and the
+   first light ramp gave it 1.11:1 — a difference that survives on a screen and
+   dies on paper, where the whole range between the floor and white is 1.16:1
+   wide to begin with. Anything that has to read as an OBJECT (the two turns, a
+   code well) now takes a real share of that range instead of an even slice.
+
+   Every ink below clears 4.5:1 on all seven surfaces, computed, worst pair
+   --ash-dim on --bubble at 4.71:1. --accent lands on a deep teal rather than
+   the mascot's cyan because cyan cannot clear 4.5:1 on paper at any useful
+   saturation; it keeps the hue and gives up the glow, which is the honest
+   trade and not a compromise worth hiding. */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --void: #EFEAE0;
+  /* the desk: app floor, iframe backing, full-bleed overlays */
+  --well: #E0D8C6;
+  /* Inset: code blocks. A full step below --slate-2 rather than beside it —
+     on crystal a code well is --void and a callout --slate-2, four steps
+     apart, and the first light pass landed them 1.01:1 from each other, so a
+     fenced block and a callout became the same object. */
+  --slate: #F5F1E9;
+  /* chrome: header, sidebar */
+  --page: #FFFDF9;
+  /* the reading surface */
+  --slate-2: #E9E2D4;
+  /* raised chips, inputs, hover, inline code. Toned, not brighter: on paper a
+     control reads as pressed into the sheet, and there is nothing above white
+     to raise it to. */
+  --line: #D9D1C0;
+  --line-2: #C6BCA8;
+
+  --frost: #1A1815;
+  --text: #3A362F;
+  --ash: #5B554B;
+  --ash-dim: #615B4F;
+  --on-vivid: #FFFFFF;
+
+  --accent: #096275;
+  /* the eye, on paper. 6.96:1 on the sheet, 4.87:1 on the deepest plane */
+  --violet: #4B3BC0;
+  --warn: #7A5305;
+
+  --sheet: #FFFFFF;
+  /* the answer, printed */
+  --bubble: #E1D7C1;
+  /* your own turn, written. Toned rather than raised — see the ramp note */
+
+  /* Shadow on paper is contact, not glow: shorter throw, warm-black, and a
+     hairline of real edge under it, because at these alphas a blur alone
+     disappears against a white sheet. */
+  --lift: 0 8px 20px -12px rgba(58, 44, 20, .34);
+
+  /* Glass over paper is thinner than glass over crystal — a heavy translucent
+     white is just a lighter white. Alpha goes up so the fill still reads as a
+     pane, and the lit edge inverts: on a dark palette the edge is where light
+     catches, on a light one it is where the pane's own thickness shows. */
+  --chrome-glass: rgba(247, 244, 238, .90);
+  --glass: rgba(255, 255, 255, .86);
+  --glass-edge: inset 0 1px 0 rgba(255, 255, 255, .9), inset 0 -1px 0 rgba(58, 44, 20, .05);
+
+  /* Same two poles, an eighth of the strength. Enough that the header's
+     translucency has something to travel across — which is the whole reason
+     the wash exists — and not enough to tint the paper. */
+  --wash-a: rgba(43, 111, 212, .10);
+  --wash-b: rgba(186, 58, 168, .07);
+
+  --shadow-rgb: 58 44 20;
+  --scrim: rgba(48, 38, 22, .34);
+  --drop-scrim: rgba(247, 244, 238, .93);
+  --art-glow: rgba(58, 44, 20, .13);
+  /* Same three stops, walked down into the paper's contrast range. The mark's
+     own hues, at the lightness a white page can hold them at. */
+  --brand-sweep: linear-gradient(115deg, #096275 0%, #4B3BC0 46%, #7A2A78 100%);
 }
 
 /* Supported floor: 900px. Below it the three-column shell compresses rather
@@ -182,10 +313,13 @@ body {
      own body — blue on its lit half, magenta on its far one. Cyan is left out
      on purpose: in the mark it is only the eye, and in the app it is only what
      you can click, so it never becomes atmosphere. Fixed attachment, so the
-     poles stay put and no scroll repaints them. */
+     poles stay put and no scroll repaints them.
+     The two poles are tokens because light keeps the same geometry at a
+     fraction of the strength: on paper the same alphas are a stain, and a
+     warm-white desk with a cool cast at the top edge is daylight on it. */
   background:
-    radial-gradient(58rem 30rem at 3% -3rem, rgba(43, 111, 212, .34), transparent 70%),
-    radial-gradient(54rem 27rem at 99% -2rem, rgba(186, 58, 168, .26), transparent 70%),
+    radial-gradient(58rem 30rem at 3% -3rem, var(--wash-a), transparent 70%),
+    radial-gradient(54rem 27rem at 99% -2rem, var(--wash-b), transparent 70%),
     var(--void);
   background-attachment: fixed;
   color: var(--text);
@@ -259,7 +393,7 @@ header>* {
      this is the single place the whole mascot appears in the app, and it is
      the sweep across its body. Stops are sampled, not picked: the eye
      (--accent), the banner's glow (--violet), the warm pole (#983A94). */
-  background: linear-gradient(115deg, #35C6E8 0%, #5B4BD6 46%, #983A94 100%);
+  background: var(--brand-sweep);
   background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -398,7 +532,7 @@ header>* {
 }
 
 #stop:hover {
-  color: var(--void);
+  color: var(--on-vivid);
   background: var(--warn);
 }
 
@@ -423,9 +557,19 @@ main {
    open note hid the right part of every transcript line — and with it the tail of
    #composer, including #send. header and #dock already reserved this exact gap;
    the reading surface was the one that did not. */
-body.note-open #view-chat {
+body.note-open #view-chat,
+body.note-open #view-metrics {
   padding-right: var(--note-w, 630px);
 }
+
+/* Metrics joined that rule for the same reason chat did, one theme later. The
+   drawer is translucent, which is only safe over something that does not
+   scroll behind it — header, dock and chat all reserve the gap, #view-graph is
+   the deliberate exception (it hides its own HUD instead, see
+   syncDrawerToViews). Metrics reserved nothing, so an open note sat over live
+   cards and read their numbers through itself. Invisible on crystal, where the
+   bleed-through is dark on dark; on paper it is dark text on white glass, and
+   the first light build showed it immediately. */
 
 .view {
   flex: 1;
@@ -977,7 +1121,7 @@ details.side-section:hover>summary.side-title {
   font-family: var(--sans);
   font-size: 12px;
   font-weight: 600;
-  color: var(--void);
+  color: var(--on-vivid);
   background: var(--warn);
   border: 1px solid var(--warn);
   border-radius: var(--r-sm);
@@ -1296,7 +1440,7 @@ details.side-section:hover>summary.side-title {
 
 :is(.msg, #note-body, #peek-body) pre {
   overflow-x: auto;
-  background: var(--void);
+  background: var(--well);
   padding: 0.75rem 0.85rem;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
@@ -1372,7 +1516,7 @@ details.side-section:hover>summary.side-title {
 
 /* --- OFM sugar (highlight, tags, callouts, tasks, mermaid) ------------------ */
 :is(.msg, #note-body, #peek-body) mark {
-  background: rgba(0, 165, 225, 0.28);
+  background: color-mix(in srgb, var(--accent) 26%, transparent);
   color: var(--frost);
   padding: 0 2px;
 }
@@ -1817,7 +1961,7 @@ details.side-section:hover>summary.side-title {
    is already pressed — the same rule that de-inverted .tool. */
 .mic.recording {
   color: var(--warn);
-  background: rgba(224, 169, 59, .12);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
   animation: mic-pulse 1.6s var(--ease) infinite;
 }
 
@@ -1869,7 +2013,7 @@ details.side-section:hover>summary.side-title {
 #stt-panel pre {
   margin: 0.6rem 0.9rem 0;
   padding: 0.6rem 0.7rem;
-  background: var(--void);
+  background: var(--well);
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   font-family: var(--mono);
@@ -1896,8 +2040,15 @@ details.side-section:hover>summary.side-title {
 /* Translucency is a preference the OS can withdraw, and every surface above has
    an opaque twin one line away. Chrome's own fill is the token's colour at
    alpha 1; the overlays fall back to the plane they used before the glass. */
+/* Both selectors, and the second one is not decoration: :root[data-theme] outranks
+   a bare :root no matter where it sits in the file, so with only the first line
+   here a light session kept its translucent chrome and the preference did
+   nothing. An accessibility opt-out that silently applies to one theme is worse
+   than none — it reads as honoured. */
 @media (prefers-reduced-transparency: reduce) {
-  :root {
+
+  :root,
+  :root[data-theme="light"] {
     --chrome-glass: var(--slate);
     --glass: var(--sheet);
     --glass-blur: none;
@@ -1908,7 +2059,7 @@ details.side-section:hover>summary.side-title {
 #send,
 #dock-send {
   background: var(--accent);
-  color: var(--void);
+  color: var(--on-vivid);
   text-transform: none;
   letter-spacing: 0.01em;
   font-size: 13px;
@@ -1924,7 +2075,7 @@ details.side-section:hover>summary.side-title {
 #dock-send:hover {
   background: var(--frost);
   border-color: var(--frost);
-  color: var(--void);
+  color: var(--on-vivid);
 }
 
 /* One turn at a time server-side, so the button recedes to a chip for the length
@@ -2056,7 +2207,7 @@ details.side-section:hover>summary.side-title {
 .gmode-tabs button.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: var(--void);
+  color: var(--on-vivid);
   font-weight: 700;
 }
 
@@ -2259,7 +2410,7 @@ details.side-section:hover>summary.side-title {
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(10, 13, 20, 0.88);
+  background: var(--drop-scrim);
   color: var(--accent);
   border: 2px dashed var(--accent);
   font-size: 1.2rem;
@@ -2319,7 +2470,7 @@ body.dragging #drop-hint {
   width: min(240px, 40vw, 32vh);
   aspect-ratio: 519 / 650;
   background: url("/static/sili.webp") center / contain no-repeat;
-  filter: drop-shadow(0 8px 46px rgba(53, 198, 232, .16));
+  filter: drop-shadow(0 8px 46px var(--art-glow));
 }
 
 #log:empty::after {
@@ -2384,7 +2535,7 @@ body.dragging #drop-hint {
      skips the filter that would cost a composited layer for nothing. */
   background: var(--chrome-glass);
   border-left: 1px solid var(--line-2);
-  box-shadow: -18px 0 40px -20px rgba(0, 0, 0, .8), var(--glass-edge);
+  box-shadow: -18px 0 40px -20px rgb(var(--shadow-rgb) / .8), var(--glass-edge);
   transform: translateX(100%);
   transition: transform var(--dur) var(--ease);
 }
@@ -3061,7 +3212,7 @@ body.note-open #toasts {
   font-size: 12px;
   letter-spacing: 0.02em;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 12px rgb(var(--shadow-rgb) / .35);
   animation: toast-in var(--dur) var(--ease);
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -3389,6 +3540,25 @@ body.note-open #toasts {
   --c-ord-2: #0288a3;
   --c-ord-1: #006f85;
   --c-track: #005768;
+}
+
+/* Light reverses the ordinal ramp's DIRECTION, not just its values. On crystal
+   a bar recedes by getting darker, toward the floor; on paper it recedes by
+   getting lighter, toward the sheet. Reusing the dark ramp here would have put
+   the most emphatic tier on the faintest fill and read the chart backwards.
+   Computed against --page again, same method:
+     accent #0E7A93 4.89:1, amber #8A6008 5.50:1 — still cool/warm, so the
+       diverging scale keeps its two arms and the zero rule stays neutral.
+     ordinal .49/.62/.73 lightness, ΔCR 1.43/1.41 per step, monotone.
+     the track lands at 1.31:1 on --page: visible as an unfilled measure,
+       quiet enough that a row of them is not a second chart. */
+:root[data-theme="light"] {
+  --c-accent: #0E7A93;
+  --c-amber: #8A6008;
+  --c-ord-3: #0E7A93;
+  --c-ord-2: #3595AB;
+  --c-ord-1: #63B0C1;
+  --c-track: #CFE3E9;
 }
 
 /* .frame-loading is inset:0, so the view has to be its containing block —
@@ -3853,7 +4023,7 @@ body.note-open #toasts {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(13, 9, 23, 0.66);
+  background: var(--scrim);
 }
 
 #st-modal {
@@ -3914,7 +4084,7 @@ body.note-open #toasts {
   padding: 0.5rem 1rem;
   font-size: 11px;
   color: var(--warn);
-  background: rgba(224, 169, 59, 0.08);
+  background: color-mix(in srgb, var(--warn) 9%, transparent);
   border-bottom: 1px solid var(--line);
 }
 
@@ -4241,7 +4411,7 @@ body.note-open #toasts {
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
-  background: rgba(13, 9, 23, 0.72);
+  background: var(--scrim);
 }
 
 #st-sheet[hidden] {

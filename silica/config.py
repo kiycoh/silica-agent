@@ -429,6 +429,12 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_GRAPH_SHADING", "True").lower() in ("true", "1", "t")
     )
 
+    # Web UI palette: "auto" follows the OS, "dark" and "light" pin it. Only the
+    # browser can answer "auto", so the server ships the preference and a script
+    # in <head> resolves it to a concrete data-theme before first paint. The
+    # terminal UI has its own palette and does not read this.
+    theme: str = field(default_factory=lambda: os.getenv("SILICA_THEME", "auto").lower())
+
     # Embedding model — used by silica/kernel/recall/embed.py (Phase 3)
     # Default targets a local llama-server (`llama-server -m ... --embedding`) or
     # LM Studio, whichever answers at the URL below — both speak the same

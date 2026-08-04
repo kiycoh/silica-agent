@@ -172,6 +172,9 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 "tried in order when a pdf has no text layer"),
         ),
         "Display": (
+            Row("SILICA_THEME", "theme", "theme", "enum",
+                "auto follows your system · dark is the crystal, light is warm paper",
+                options=("auto", "dark", "light")),
             Row("SILICA_SHOW_THINKING", "show_thinking", "thinking", "toggle",
                 "show the model's reasoning as it works"),
             Row("SILICA_SHOW_BANNER", "show_banner", "banner", "toggle",

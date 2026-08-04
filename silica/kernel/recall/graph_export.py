@@ -36,6 +36,7 @@ class Community:
     label: str
     color: str
     size: int
+    color_paper: str = ""   # the same community on a light floor
 
 
 @dataclass
@@ -45,11 +46,17 @@ class Zone:
     A separate type from Community on purpose (ADR-0023): the two partitions
     coexist, never substitute, and share neither colour key nor id space. A
     function taking `list[Zone]` cannot be handed communities by accident.
+
+    `color_paper` is the same zone on a light floor. It rides on the zone rather
+    than being derived in the viewer because the phase shift that keeps zone i
+    away from community i lives here, and a viewer recomputing it would be a
+    second place for ADR-0023's "no shared colour key" to break.
     """
     id: int
     label: str
     color: str
     size: int
+    color_paper: str = ""
 
 
 logger = logging.getLogger(__name__)
@@ -75,13 +82,21 @@ logger = logging.getLogger(__name__)
 # sets fall below the perceptual floor, so read the labels, not the hues.
 _COMMUNITY_ARC = (212.0, 306.0)
 _COMMUNITY_LIGHTNESS = (0.70, 0.54)
+# The same two-band alternation, reflected for a paper floor. Only the bands
+# move: the arc, the golden-ratio walk and the saturation are what make two
+# communities tell apart, and none of them cares which way the floor goes.
+# Chosen the same way the dark pair was, by measuring against the floor they
+# land on — 4.93:1 to 11.11:1 across the arc on the light --void, against
+# 3.07:1 to 8.59:1 for the dark pair on the dark one.
+_COMMUNITY_LIGHTNESS_ON_PAPER = (0.42, 0.30)
 _GOLDEN_RATIO_INV = 0.6180339887
 
 
-def _community_color(i: int) -> str:
+def _community_color(i: int, on_paper: bool = False) -> str:
     lo, hi = _COMMUNITY_ARC
     hue = lo + ((i * _GOLDEN_RATIO_INV) % 1.0) * (hi - lo)
-    light = _COMMUNITY_LIGHTNESS[i % 2]
+    bands = _COMMUNITY_LIGHTNESS_ON_PAPER if on_paper else _COMMUNITY_LIGHTNESS
+    light = bands[i % 2]
     r, g, b = colorsys.hls_to_rgb(hue / 360.0, light, 0.66)
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
@@ -95,10 +110,11 @@ def _community_color(i: int) -> str:
 _ZONE_PHASE = 0.5
 
 
-def _zone_color(i: int) -> str:
+def _zone_color(i: int, on_paper: bool = False) -> str:
     lo, hi = _COMMUNITY_ARC
     hue = lo + ((i * _GOLDEN_RATIO_INV + _ZONE_PHASE) % 1.0) * (hi - lo)
-    light = _COMMUNITY_LIGHTNESS[i % 2]
+    bands = _COMMUNITY_LIGHTNESS_ON_PAPER if on_paper else _COMMUNITY_LIGHTNESS
+    light = bands[i % 2]
     r, g, b = colorsys.hls_to_rgb(hue / 360.0, light, 0.66)
     return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
 
@@ -116,9 +132,29 @@ def _zone_color(i: int) -> str:
 _EDGE_COLOR_EXTRACTED = "#8a8da6"   # unlit blue-violet — resolved links
 _EDGE_COLOR_AMBIGUOUS = "#e2544f"   # alarm red, deliberately outside the arc
 _EDGE_COLOR_SIMILAR   = "#00a5e1"   # brand azure — embedding k-NN (semantic map)
+
+# The paper set. Every one of these is drawn ON the floor and read AGAINST it,
+# so a light floor needs its own values or the whole mesh disappears — an edge
+# is one or two pixels wide and has no second channel to fall back on. The
+# ranking between the three layers is what is preserved, not the values: the
+# written links stay the quiet neutral, ambiguous stays the alarm outside the
+# arc, and similar stays the one vivid layer. Each is the same hue walked down
+# into the range paper can hold, which for a hairline means roughly half the
+# lightness of its crystal twin.
+_EDGE_COLOR_EXTRACTED_PAPER = "#6f7287"
+_EDGE_COLOR_AMBIGUOUS_PAPER = "#b3211b"
+_EDGE_COLOR_SIMILAR_PAPER   = "#0079a4"
+
 _NODE_DEFAULT_COLOR = {"background": "#565a77", "border": "#8a8da6",
+                       "background_paper": "#6b6f8c",
                        "highlight": {"background": "#8a8da6", "border": "#EBEFF8"}}
+# Ghost is the one node that does not simply invert. On crystal it is the
+# darkest thing on screen — "unlit, never black" — and the paper equivalent of
+# unlit is not a dark dot but a pale one: 468 near-black dots on a white field
+# would read as the loudest layer in the view, which is the opposite of what a
+# ghost is. So it goes the other way, to the faintest thing the floor can hold.
 _NODE_GHOST_COLOR   = {"background": "#171424", "border": "#565a77",
+                       "background_paper": "#c9c4d6",
                        "highlight": {"background": "#26223d", "border": "#8a8da6"}}
 
 
@@ -216,7 +252,8 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
             # opacity and width are the RANK, and the viewer honours both. A
             # wikilink is the strongest thing in the graph because it is the only
             # edge a person actually wrote; everything else is inferred.
-            "color":  {"color": _EDGE_COLOR_EXTRACTED, "opacity": 0.72},
+            "color":  {"color": _EDGE_COLOR_EXTRACTED,
+                       "paper": _EDGE_COLOR_EXTRACTED_PAPER, "opacity": 0.72},
             "arrows": {"to": {"enabled": True, "scaleFactor": 0.6}},
             "width":  1.6,
         })
@@ -253,7 +290,8 @@ def build_graph_data(folder: str = "") -> tuple[list[dict], list[dict]]:
                 "from":   src,
                 "to":     ghost_id,
                 "type":   "AMBIGUOUS",
-                "color":  {"color": _EDGE_COLOR_AMBIGUOUS, "opacity": 0.55},
+                "color":  {"color": _EDGE_COLOR_AMBIGUOUS,
+                           "paper": _EDGE_COLOR_AMBIGUOUS_PAPER, "opacity": 0.55},
                 "arrows": {"to": {"enabled": True, "scaleFactor": 0.5}},
                 "width":  1.0,
                 "dashes": [4, 4],
@@ -313,7 +351,8 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
                 # to stay out of the way of, and at 0.26 the k-NN reads as haze
                 # rather than as lines. The rank still holds — a wikilink is
                 # 0.72 and nearly three times the width.
-                "color": {"color": _EDGE_COLOR_SIMILAR, "opacity": 0.35},
+                "color": {"color": _EDGE_COLOR_SIMILAR,
+                          "paper": _EDGE_COLOR_SIMILAR_PAPER, "opacity": 0.35},
                 # Width still carries the similarity score, but inside a band
                 # that ends BELOW a wikilink's 1.6. It used to run to 3.0, so
                 # the strongest inferred edges drew wider than every written one
@@ -421,9 +460,12 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
         node["group"] = comm_id
         if comm_id >= 0:
             color = _community_color(comm_id)
+            paper = _community_color(comm_id, on_paper=True)
             node["color"] = {
                 "background": color,
                 "border":     color,
+                # the same community, at the lightness the light floor holds
+                "background_paper": paper,
                 "highlight":  {"background": color, "border": "#EBEFF8"},
             }
 
@@ -446,6 +488,7 @@ def detect_communities(nodes: list[dict], edges: list[dict]) -> list[Community]:
             id=i,
             label=labels.get(i, f"Cluster {i}"),
             color=_community_color(i),
+            color_paper=_community_color(i, on_paper=True),
             size=len(comm),
         )
         for i, comm in enumerate(communities)
@@ -609,6 +652,7 @@ def detect_semantic_partition(nodes: list[dict], edges: list[dict]) -> list[Zone
             # and it says which partition it came from.
             label=labels.get(i, f"Zone {ids[i]}"),
             color=_zone_color(ids[i]),
+            color_paper=_zone_color(ids[i], on_paper=True),
             size=len(comm),
         )
         for i, comm in enumerate(partition)

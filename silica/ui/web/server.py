@@ -1782,10 +1782,17 @@ def index():
     # The big vendored bundles keep their long-lived cache — only these churn.
     import hashlib
 
+    from silica.config import CONFIG
+
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     for asset in ("app.js", "app.css"):
         ver = hashlib.sha256((STATIC_DIR / asset).read_bytes()).hexdigest()[:8]
         html = html.replace(f"/static/{asset}", f"/static/{asset}?v={ver}")
+    # The preference, not the resolution: "auto" is a question only the browser
+    # can answer, and the inline script in <head> answers it before first paint.
+    # Stamping it server-side is what keeps a light session from flashing dark.
+    pref = CONFIG.theme if CONFIG.theme in ("auto", "dark", "light") else "auto"
+    html = html.replace('data-theme-pref="auto"', f'data-theme-pref="{pref}"')
     return HTMLResponse(html)
 
 

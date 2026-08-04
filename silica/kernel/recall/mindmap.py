@@ -43,6 +43,7 @@ _DIAG = math.hypot(BOX_W, BOX_H)
 
 # Muted slate for community-less nodes (group == -1) — never black/white.
 _MUTED = "#5a6372"
+_MUTED_PAPER = "#7d8496"   # the same no-community slate, read against paper
 
 
 @dataclass
@@ -92,12 +93,16 @@ class MapMaterials:
     link_context: object | None = None    # (parent_id, child_id) -> anchor line | None
 
 
-def node_color(community: int) -> str:
-    """Community colour, shared with /graph; muted slate for -1 (no community)."""
+def node_color(community: int, on_paper: bool = False) -> str:
+    """Community colour, shared with /graph; muted slate for -1 (no community).
+
+    `on_paper` picks the light-floor band. Both are emitted onto every card so
+    the map can switch theme without a rebuild — see render_map_svg.
+    """
     if community < 0:
-        return _MUTED
+        return _MUTED_PAPER if on_paper else _MUTED
     from silica.kernel.recall.graph_export import _community_color
-    return _community_color(community)
+    return _community_color(community, on_paper=on_paper)
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +576,7 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
     deg_max = max((n.degree for n in mv.nodes), default=0)
     for n in mv.nodes:
         color = node_color(n.community)
+        color_paper = node_color(n.community, on_paper=True)
         rx, ry = n.x - BOX_W / 2, n.y - BOX_H / 2
         root_cls = " root" if n.hop == 0 else ""
         title_esc = html.escape(n.title)
@@ -579,7 +585,8 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
         # degree (relative to the map's own hub). Visual weight only — box
         # geometry is fixed, so the layout's non-overlap guarantee holds.
         t = (n.degree / deg_max) if deg_max else 0.0
-        style = f"--fo:{0.12 + 0.14 * t:.3f};--sw:{1.2 + 1.6 * t:.2f}"
+        style = (f"--fo:{0.12 + 0.14 * t:.3f};--sw:{1.2 + 1.6 * t:.2f};"
+                 f"--c:{color};--cp:{color_paper}")
         tip = html.escape("\n".join(
             s for s in (n.title, n.subtitle or "", f"{n.degree} links") if s
         ))
@@ -587,8 +594,7 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
             f'<g class="card{root_cls}" data-id="{html.escape(n.id, quote=True)}" '
             f'style="{style}" transform="translate({rx:.1f},{ry:.1f})">'
             f'<title>{tip}</title>'
-            f'<rect class="frame" width="{BOX_W}" height="{BOX_H}" rx="10" '
-            f'fill="{color}" stroke="{color}"/>'
+            f'<rect class="frame" width="{BOX_W}" height="{BOX_H}" rx="10"/>'
             f'<foreignObject x="14" y="0" width="{BOX_W - 28}" height="{BOX_H}">'
             f'<div xmlns="http://www.w3.org/1999/xhtml" class="card-body">'
             f'<div class="card-title">{title_esc}</div>{sub_html}</div>'
@@ -599,11 +605,33 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}</title>
+<!-- ?theme= when the app embeds this; the OS when it is opened on its own.
+     Same contract as /graph — see graph_view.render_html. -->
+<script>
+  (function () {{
+    var q = new URLSearchParams(location.search).get("theme");
+    var mq = window.matchMedia("(prefers-color-scheme: light)");
+    var pinned = q === "light" || q === "dark";
+    document.documentElement.dataset.theme = pinned ? q : (mq.matches ? "light" : "dark");
+    if (!pinned) mq.addEventListener("change", function () {{ location.reload(); }});
+  }})();
+</script>
 <style>
   :root{{
+    color-scheme:dark;
     --void:#0A0D14;--slate-2:#161B27;--line:#232A3A;--line-2:#38425A;
     --frost:#E8ECF5;--ash:#8B95AC;--ash-dim:#566076;--cyan:#00A5E1;
+    --card-shadow:rgba(0,0,0,.55);
     --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
+  }}
+  /* Warm paper, the app shell's ramp — see static/app.css for how the values
+     were derived. Restated rather than imported because this document is
+     emitted standalone and has no stylesheet to link to. */
+  :root[data-theme="light"]{{
+    color-scheme:light;
+    --void:#EFEAE0;--slate-2:#E9E2D4;--line:#D9D1C0;--line-2:#C6BCA8;
+    --frost:#1A1815;--ash:#5B554B;--ash-dim:#615B4F;--cyan:#096275;
+    --card-shadow:rgba(58,44,20,.22);
   }}
   *{{box-sizing:border-box}}
   html,body{{margin:0;height:100%;background:var(--void);overflow:hidden;
@@ -622,8 +650,10 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
   .card{{cursor:pointer;transition:opacity .15s ease}}
   .card.dim{{opacity:.3}}
   /* --fo/--sw are set inline per card: degree-scaled wash + border weight. */
-  .card .frame{{fill-opacity:var(--fo,.15);stroke-opacity:1;stroke-width:var(--sw,1.5);
-                filter:drop-shadow(0 2px 6px rgba(0,0,0,.55))}}
+  .card .frame{{fill:var(--c);stroke:var(--c);
+                fill-opacity:var(--fo,.15);stroke-opacity:1;stroke-width:var(--sw,1.5);
+                filter:drop-shadow(0 2px 6px var(--card-shadow))}}
+  :root[data-theme="light"] .card .frame{{fill:var(--cp,var(--c));stroke:var(--cp,var(--c))}}
   .card:hover .frame{{fill-opacity:calc(var(--fo,.15) + .09)}}
   .card.root .frame{{stroke:var(--cyan);stroke-opacity:1;stroke-width:2.5}}
   .card-body{{font-family:var(--mono);height:100%;display:flex;flex-direction:column;
@@ -653,8 +683,8 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
       <path d="M0,0 L10,5 L0,10 z" fill="var(--cyan)" fill-opacity=".8"/>
     </marker>
     <radialGradient id="halo-grad" cx="50%" cy="50%" r="50%">
-      <stop offset="0%" stop-color="#22D3EE" stop-opacity=".4"/>
-      <stop offset="100%" stop-color="#22D3EE" stop-opacity="0"/>
+      <stop offset="0%" stop-color="var(--cyan)" stop-opacity=".4"/>
+      <stop offset="100%" stop-color="var(--cyan)" stop-opacity="0"/>
     </radialGradient>
   </defs>
   <g id="scene">

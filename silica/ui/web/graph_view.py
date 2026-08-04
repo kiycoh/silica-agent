@@ -32,8 +32,11 @@ from pathlib import Path
 # cannot drift apart: they were two literals of the same hex until one moved.
 from silica.kernel.recall.graph_export import (
     _EDGE_COLOR_AMBIGUOUS,
+    _EDGE_COLOR_AMBIGUOUS_PAPER,
     _EDGE_COLOR_EXTRACTED,
+    _EDGE_COLOR_EXTRACTED_PAPER,
     _EDGE_COLOR_SIMILAR,
+    _EDGE_COLOR_SIMILAR_PAPER,
     Community,
     Zone,
 )
@@ -161,16 +164,16 @@ def render_html(
     similar_row = (
         f'<label class="filter-row" style="margin-top:4px" title="Embedding k-NN — notes pulled together by semantic similarity">'
         f'<input type="checkbox" id="cb-similar" checked onchange="updateEdgeFilter()">'
-        f'<div class="dot-edge" style="background:{_EDGE_COLOR_SIMILAR}"></div>Similar'
-        f'<span style="color:#565a77;font-size:11px;margin-left:auto">{n_similar}</span>'
+        f'<div class="dot-edge" style="--c:{_EDGE_COLOR_SIMILAR};--cp:{_EDGE_COLOR_SIMILAR_PAPER}"></div>Similar'
+        f'<span class="ct">{n_similar}</span>'
         f'</label>'
     ) if n_similar else ""
 
     discourse_badge = (
-        f'<div style="font-size:11px;color:#8a8da6;letter-spacing:.04em;margin-bottom:6px" '
+        f'<div style="font-size:11px;color:var(--ash);letter-spacing:.04em;margin-bottom:6px" '
         f'title="Shape of the wikilink graph: how much of the vault sits in the largest connected '
         f'component and how evenly the clusters split it.">'
-        f'discourse: <span style="color:#c9a227;font-weight:600">{html.escape(discourse)}</span></div>'
+        f'discourse: <span style="color:var(--warn);font-weight:600">{html.escape(discourse)}</span></div>'
         if discourse else ""
     )
 
@@ -181,8 +184,8 @@ def render_html(
     # bridging action. The amber GAP overlay and its checkbox stay: that IS a key.
     legend_items = "".join(
         f'<div class="legend-item" data-community="{c.id}" data-size="{c.size}" onclick="filterCommunity({c.id})">'
-        f'<span class="dot" style="background:{c.color}"></span>{html.escape(c.label)} '
-        f'<span style="color:#5a6372;font-size:11px;margin-left:auto">{c.size}</span>'
+        f'<span class="dot" style="--c:{c.color};--cp:{c.color_paper or c.color}"></span>{html.escape(c.label)} '
+        f'<span class="ct">{c.size}</span>'
         f'</div>\n'
         # Biggest first: the legend is read top-down, and the clusters that
         # carry the vault are the ones worth seeing without scrolling.
@@ -194,7 +197,8 @@ def render_html(
     ).replace("</", "<\\/")
 
     zones_json = json.dumps(
-        [{"id": z.id, "label": z.label, "color": z.color, "size": z.size} for z in zones],
+        [{"id": z.id, "label": z.label, "color": z.color,
+          "color_paper": z.color_paper or z.color, "size": z.size} for z in zones],
         ensure_ascii=False,
     ).replace("</", "<\\/")
 
@@ -214,9 +218,9 @@ def render_html(
         f'colour does not change: it always means community, so the two partitions can be read '
         f'against each other in one frame.">'
         f'<input type="checkbox" id="cb-zones" onchange="updateZoneFilter()">'
-        f'<span class="dot" style="background:{zones[0].color if zones else "#565a77"};'
-        f'opacity:.5"></span>Show zones'
-        f'<span style="color:#565a77;font-size:11px;margin-left:auto">{len(zones)}</span>'
+        f'<span class="dot" style="--c:{zones[0].color if zones else "#565a77"};'
+        f'--cp:{(zones[0].color_paper or zones[0].color) if zones else "#6b6f8c"};opacity:.5"></span>Show zones'
+        f'<span class="ct">{len(zones)}</span>'
         f'</label>'
         f'<label class="filter-row" style="margin-top:4px" title="Untick to leave the zones alone '
         f'in the frame — the macro read of the vault, with the individual notes and their edges '
@@ -243,6 +247,23 @@ def render_html(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
+  <!-- Which palette, decided before anything paints. Two callers, two answers:
+       embedded in the app the parent puts ?theme= on the src, because the app's
+       own preference (auto/dark/light) has already been resolved there and the
+       two surfaces must not disagree across an iframe boundary; opened straight
+       off disk there is no parent, so the OS answers. The reload is for that
+       second case only — the app never reaches it, since changing the theme
+       there rebuilds this document anyway. -->
+  <script>
+    (function () {{
+      var q = new URLSearchParams(location.search).get("theme");
+      var mq = window.matchMedia("(prefers-color-scheme: light)");
+      var pinned = q === "light" || q === "dark";
+      document.documentElement.dataset.theme =
+        pinned ? q : (mq.matches ? "light" : "dark");
+      if (!pinned) mq.addEventListener("change", function () {{ location.reload(); }});
+    }})();
+  </script>
   {f'<script>{lib_js}</script>' if lib_js
     else "".join(f'<script src="{u}"></script>' for u in _VIS_JS_URLS)}
   <style>
@@ -255,12 +276,32 @@ def render_html(
        4.5:1 on --slate-2). */
     {_vendored_font_face()}
     :root{{
+      color-scheme:dark;
       --void:#0D0917;--slate:#120E21;--slate-2:#1F243A;
       --line:#292F45;--line-2:#3B4662;
       --frost:#EBEFF8;--text:#BAC4D8;--ash:#8E99B0;--ash-dim:#838DA7;
       --accent:#35C6E8;--violet:#5B4BD6;--warn:#E0A93B;
       --sans:"Lexend",system-ui,sans-serif;
       --lift:0 10px 28px -12px rgba(0,0,0,.7);
+      /* HUD and focus bar float over the canvas, so their fill is the floor at
+         near-opacity, not a surface step: whatever the graph paints has to stop
+         at their edge. --g-* are the canvas's own neutrals, declared here so
+         the legend swatches and the renderer read one source. */
+      --hud-fill:rgba(10,13,20,.92);
+      --g-ghost:#484867;--g-fallback:#565a77;
+    }}
+    /* Light: same ramp as the app shell, same warm paper, same reasoning — see
+       static/app.css. Kept in sync by hand because this file must stay
+       self-contained for file:// export; the app's block is the original. */
+    :root[data-theme="light"]{{
+      color-scheme:light;
+      --void:#EFEAE0;--slate:#F5F1E9;--slate-2:#E9E2D4;
+      --line:#D9D1C0;--line-2:#C6BCA8;
+      --frost:#1A1815;--text:#3A362F;--ash:#5B554B;--ash-dim:#615B4F;
+      --accent:#096275;--violet:#4B3BC0;--warn:#7A5305;
+      --lift:0 8px 20px -12px rgba(58,44,20,.34);
+      --hud-fill:rgba(245,241,233,.95);
+      --g-ghost:#C9C4D6;--g-fallback:#6B6F8C;
     }}
     *{{box-sizing:border-box;margin:0;padding:0;border-radius:0}}
     html{{scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}}
@@ -297,7 +338,21 @@ def render_html(
     /* Node-state legend: the ring is the swatch, so the legend looks like what
        drawNode paints. border-radius must be restated — the reset zeroes it. */
     .ring{{width:9px;height:9px;flex-shrink:0;border:1.5px solid;border-radius:50%}}
-    .ct{{color:#565a77;font-size:11px;margin-left:auto}}
+    .ct{{color:var(--ash-dim);font-size:11px;margin-left:auto}}
+    /* Swatches carry both values and CSS picks the live one. The alternative
+       was a script rewriting inline styles after the theme resolves, i.e. a
+       second copy of the palette that can disagree with the canvas.
+       :where() on the theme prefix is load-bearing, not style: an unwrapped
+       :root[data-theme=…] .dot scores three class-level selectors and beats
+       .dot.ghost, which paints the ghost swatch --ash-dim on paper and nothing
+       like what the canvas draws. Zeroed, the theme rule sits at .dot's own
+       weight and wins on order, while the two state swatches below still win
+       on specificity — which is the cascade this actually wants. */
+    .dot,.dot-edge{{background:var(--c,var(--ash-dim))}}
+    :where(:root[data-theme="light"]) .dot,
+    :where(:root[data-theme="light"]) .dot-edge{{background:var(--cp,var(--c,var(--ash-dim)))}}
+    .dot.ghost{{background:var(--g-ghost)}}
+    .dot.all{{background:var(--g-fallback)}}
     /* Focus banner — top-right, tucked left of whatever owns that corner: the
        HUD (216px) when the drawer is shut, the drawer's edge when it is open,
        so the open note's title reads directly above it. A filtered graph that
@@ -305,7 +360,7 @@ def render_html(
     #focus-bar{{position:absolute;top:10px;right:236px;z-index:5;display:none;
                 max-width:min(420px,calc(100% - 250px));padding:6px 10px;
                 font-size:11px;color:var(--ash);letter-spacing:.04em;
-                background:rgba(10,13,20,.92);border:1px solid var(--line-2);
+                background:var(--hud-fill);border:1px solid var(--line-2);
                 white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
     #focus-bar b{{color:var(--frost);font-weight:600}}
     #focus-bar .esc{{color:var(--ash-dim)}}
@@ -335,7 +390,7 @@ def render_html(
     /* HUD — floating legend/filter panel anchored to the graph itself */
     #hud{{position:absolute;top:10px;right:10px;z-index:5;width:216px;max-height:calc(100% - 20px);
           display:flex;flex-direction:column;gap:12px;padding:12px;overflow-y:auto;
-          background:rgba(10,13,20,.92);border:1px solid var(--line-2)}}
+          background:var(--hud-fill);border:1px solid var(--line-2)}}
     /* The embedding page's note drawer overlays this frame's right edge, where
        the HUD lives, and the drawer is translucent — so the legend showed
        through the note you were reading. The frame cannot see that drawer, so
@@ -460,21 +515,21 @@ def render_html(
       <div class="section-title" style="margin-bottom:8px">Edge types</div>
       <label class="filter-row" title="A [[wikilink]] whose target file exists.">
         <input type="checkbox" id="cb-extracted" checked onchange="updateEdgeFilter()">
-        <div class="dot-edge" style="background:{_EDGE_COLOR_EXTRACTED}"></div>
+        <div class="dot-edge" style="--c:{_EDGE_COLOR_EXTRACTED};--cp:{_EDGE_COLOR_EXTRACTED_PAPER}"></div>
         Resolved
-        <span style="color:#565a77;font-size:11px;margin-left:auto">{n_extracted}</span>
+        <span class="ct">{n_extracted}</span>
       </label>
       <label class="filter-row" style="margin-top:4px" title="A [[wikilink]] pointing at a name no file carries — the link is written, the note is not.">
         <input type="checkbox" id="cb-ambiguous" onchange="updateEdgeFilter()">
-        <div class="dot-edge" style="background:{_EDGE_COLOR_AMBIGUOUS}"></div>
+        <div class="dot-edge" style="--c:{_EDGE_COLOR_AMBIGUOUS};--cp:{_EDGE_COLOR_AMBIGUOUS_PAPER}"></div>
         Unresolved
-        <span style="color:#565a77;font-size:11px;margin-left:auto">{n_ambiguous}</span>
+        <span class="ct">{n_ambiguous}</span>
       </label>
       <label class="filter-row" style="margin-top:4px" title="Well-formed areas with no links between them — a bridge could go here">
         <input type="checkbox" id="cb-gaps" checked onchange="updateEdgeFilter()">
-        <div class="dot-edge" style="background:{_EDGE_COLOR_GAP}"></div>
+        <div class="dot-edge" style="--c:{_EDGE_COLOR_GAP};--cp:{_EDGE_COLOR_GAP_PAPER}"></div>
         Structural gaps
-        <span style="color:#565a77;font-size:11px;margin-left:auto">{n_gaps}</span>
+        <span class="ct">{n_gaps}</span>
       </label>
       {similar_row}
     </div>
@@ -494,13 +549,13 @@ def render_html(
     <div id="state-legend">
       <div class="section-title" style="margin-bottom:6px" title="What each node IS, on a channel the community colour is not using.">Node state</div>
       <div class="filter-row" title="Betweenness in the top tenth of the notes that have any — the crossings the vault routes through.">
-        <span class="ring" style="border-color:#35C6E8"></span>Hub<span class="ct" id="st-hub"></span>
+        <span class="ring" style="border-color:var(--accent)"></span>Hub<span class="ct" id="st-hub"></span>
       </div>
       <div class="filter-row" title="The note exists and no resolved wikilink points at it. Reachable from the file tree, unreachable from the vault.">
-        <span class="ring" style="border-color:#838DA7"></span>Orphan<span class="ct" id="st-orphan"></span>
+        <span class="ring" style="border-color:var(--ash-dim)"></span>Orphan<span class="ct" id="st-orphan"></span>
       </div>
       <div class="filter-row" title="Something links here and no file carries the name. Already unlit and undersized in the view, so it takes no ring.">
-        <span class="dot" style="background:#484867;border-radius:50%"></span>Ghost<span class="ct" id="st-ghost"></span>
+        <span class="dot ghost" style="border-radius:50%"></span>Ghost<span class="ct" id="st-ghost"></span>
       </div>
     </div>
 
@@ -508,13 +563,13 @@ def render_html(
       <div class="section-title" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between"
            title="Louvain over the resolved wikilinks — the structural partition, the vault as you linked it. Not the semantic zones: the two groupings are independent and share no colour.">
         Communities
-        <span id="sort-communities" style="color:#8a8da6;cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
+        <span id="sort-communities" style="color:var(--ash);cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
               onclick="toggleCommunitySort()" title="sort by size">size &#8595;</span>
       </div>
       {discourse_badge}
       <div id="legend-box">
 {legend_items}      <div class="legend-item active" id="legend-all" onclick="filterCommunity(-2)">
-          <span class="dot" style="background:#565a77"></span>Show all
+          <span class="dot all"></span>Show all
         </div>
       </div>
     </div>
@@ -522,7 +577,7 @@ def render_html(
     <div>
       <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
         Forces
-        <span style="color:#8a8da6;cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
+        <span style="color:var(--ash);cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
               onclick="resetForces()" title="back to auto-scaled defaults">reset</span>
       </div>
       <div class="force-row">Repel<span class="fv" id="fv-repel">1.0&times;</span></div>
@@ -576,6 +631,10 @@ const ZONES = {zones_json};
 // reader left — the hulls and the zone names take z.color straight off ZONES.
 const ZONE_LABEL = {{}};
 ZONES.forEach(z => {{ ZONE_LABEL[z.id] = z.label; }});
+// The zone's hue for the live floor. Both rides on the zone (see Zone in
+// graph_export) because the phase shift that keeps zone i off community i is
+// declared there, and recomputing it here would be a second place to break it.
+const zoneColor = z => (LIGHT && z.color_paper) || z.color;
 
 const outDeg = {{}}, inDeg = {{}};
 RAW_EDGES.forEach(e => {{
@@ -677,6 +736,31 @@ function refreshPaint() {{
   wake(120);
 }}
 
+// --- the canvas's own palette ----------------------------------------------
+// CSS tokens stop at the edge of the canvas: a WebGL material and a 2D
+// fillStyle both need a literal, and both are set on a hot path where reading
+// getComputedStyle per node is not an option. So the two sets live here, picked
+// once at load. Every value is the light twin of the one beside it, chosen
+// against the floor it lands on rather than by inverting a channel.
+const LIGHT = document.documentElement.dataset.theme === "light";
+const GP = LIGHT ? {{
+  dim: '#DCD5C7',          // a node filtered out of focus: toward the paper
+  ghost: '#C9C4D6',        // unresolved link — the faintest thing the floor holds
+  fallback: '#6B6F8C',     // no community
+  label: '#1A1815', ghostLabel: '#615B4F',
+  linkDim: '#E5DFD2',
+  bg: '#EFEAE0', bgHex: 0xEFEAE0,
+  ringHub: '#096275', ringOrphan: '#615B4F',
+}} : {{
+  dim: '#1d192f',
+  ghost: '#484867',        // unlit, never black
+  fallback: '#565a77',
+  label: '#EBEFF8', ghostLabel: '#838DA7',
+  linkDim: '#141221',
+  bg: '#0D0917', bgHex: 0x0D0917,
+  ringHub: '#35C6E8', ringOrphan: '#838DA7',
+}};
+
 let activeCommunity = -2;
 let showExtracted = true;
 let showAmbiguous = false;
@@ -693,8 +777,8 @@ function nodeColor(n) {{
   // verification shows 3d-force-graph honours per-node alpha.
   // Neutrals are blue-violet, never gray: the mascot has no gray facet, only
   // unlit ones. Each value below holds the luminance of the gray it replaces.
-  if (n._dim) return '#1d192f';
-  if (n.type === 'ghost') return '#484867';   // unlit, never black
+  if (n._dim) return GP.dim;
+  if (n.type === 'ghost') return GP.ghost;
   // The node's colour is the STRUCTURAL community, always, whatever else is on
   // screen. It used to hand the channel over to the semantic partition while
   // the zone layer was up, which read as a bug and was one: ADR-0023 says the
@@ -702,7 +786,8 @@ function nodeColor(n) {{
   // ne' chiave colore ne' spazio di id", and a channel that swaps between them
   // is a substitution by definition. The semantic layer owns the hulls and the
   // names; it does not get to repaint the notes.
-  return (n.color && n.color.background) || '#565a77';
+  const c = n.color || {{}};
+  return (LIGHT ? c.background_paper || c.background : c.background) || GP.fallback;
 }}
 
 // --- Node state = a ring, on a channel colour is not already using ----------
@@ -739,7 +824,7 @@ function nodeState(n) {{
 // (its own unlit colour, a smaller radius, a dimmer label) and there are 468 of
 // them in a 682-note vault — a fourth marker on the most numerous state turns
 // the whole view into an alarm about links you have not written yet.
-const STATE_RING = {{ hub: "#35C6E8", orphan: "#838DA7" }};
+const STATE_RING = {{ hub: GP.ringHub, orphan: GP.ringOrphan }};
 
 // Counts never change (the states come from the exported data), so this runs
 // once at load, not per repaint.
@@ -890,7 +975,7 @@ function drawNode(n, ctx, scale) {{
   ctx.font = (11 / scale) + 'px Lexend, system-ui, sans-serif';
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  ctx.fillStyle = n.type === "ghost" ? "#838DA7" : "#EBEFF8";  // --ash-dim / --frost
+  ctx.fillStyle = n.type === "ghost" ? GP.ghostLabel : GP.label;
   ctx.fillText(n.label, n.x, n.y + r + 2 / scale);
 }}
 
@@ -915,7 +1000,7 @@ function paintNodeArea(n, color, ctx) {{
 // parses out of an rgba(), so setting it to 1 makes the per-edge alpha the
 // final word. 2D reads the same string straight into strokeStyle.
 const LINK_ALPHA_2D = 0.55;   // see the comment on its use below
-const EDGE_FALLBACK = "{_EDGE_COLOR_EXTRACTED}";
+const EDGE_FALLBACK = LIGHT ? "{_EDGE_COLOR_EXTRACTED_PAPER}" : "{_EDGE_COLOR_EXTRACTED}";
 
 // Memoised because 2D calls this for every visible link on every frame, and
 // building the string costs ~1ms per frame across 4.6k edges — measured, not
@@ -925,10 +1010,11 @@ function linkPaint(l) {{
   const key = (l._dim ? "d" : "") + (is2D() ? "2" : "3");
   if (l.__paintKey === key) return l.__paint;
   let out;
-  if (l._dim) out = "#141221";
+  if (l._dim) out = GP.linkDim;
   else {{
     const c = l.color || {{}};
-    const n = parseInt((c.color || EDGE_FALLBACK).slice(1), 16);
+    const hex = (LIGHT ? c.paper || c.color : c.color) || EDGE_FALLBACK;
+    const n = parseInt(hex.slice(1), 16);
     // 2D stacks every edge on one flat plane with no depth to thin the far ones
     // out, so the same alphas that read as structure in 3D read as a mat there.
     // One scale factor rather than a second table: the RANK is what is worth
@@ -957,7 +1043,21 @@ const SHADING = {shading_js};
 // same constraint). It is not needed: the bundle hands out the scene, and every
 // constructor this wants is reachable from an object already inside it.
 // Vendored+pinned bundles are what makes that safe to lean on.
-const CRYSTAL = {{
+//
+// Two rigs, because light is not the same scene with the background swapped.
+// The community colours already dropped ~28 lightness points to survive a paper
+// floor (_COMMUNITY_LIGHTNESS_ON_PAPER), and a multiplying ambient at crystal
+// strength takes them the rest of the way to mud. So on paper the ambient rises
+// toward white and the key comes down: the facets still split, but the light
+// falling on them is a room's, not a lamp inside the stone. Fog travels with
+// the floor either way — it is the same depth cue, sold into white instead of
+// out of black.
+const CRYSTAL = LIGHT ? {{
+  ambient: 0xEFEAE0, ambientI: 1.55,
+  key: 0xFFF6E4, keyI: 1.35,      // warm key, matching the paper it lands on
+  fogNear: 0.55, fogFar: 2.30,    // paper fog swallows less: white on white
+  fov: 42,
+}} : {{
   // Ambient MULTIPLIES each node's own colour, so this is the one value that
   // can silently destroy the community channel: a saturated violet here turned
   // every community violet, and a bright one flattened the facets back into
@@ -1024,7 +1124,7 @@ function styleScene() {{
   // zoom. No Fog constructor is reachable (no instance exists to borrow one
   // from), but the renderer reads the shape, not the class.
   sc.fog = {{ isFog: true, isFogExp2: false, name: "",
-             color: new Color(0x0D0917), near: 1, far: 2 }};   // --void
+             color: new Color(GP.bgHex), near: 1, far: 2 }};
   const cam = Graph.camera();
   cam.fov = CRYSTAL.fov;
   cam.updateProjectionMatrix();
@@ -1122,7 +1222,7 @@ function buildGraph() {{
     .d3AlphaDecay(seeded ? FAST_DECAY : 0.0228)
     .cooldownTicks(Infinity)   // alpha is the gate; see ALPHA_MIN
     .cooldownTime(Infinity)
-    .backgroundColor("#0D0917")   // --void
+    .backgroundColor(GP.bg)
     .linkSource("from").linkTarget("to")
     .nodeVal("size")
     .nodeColor(nodeColor)
@@ -1140,7 +1240,8 @@ function buildGraph() {{
       : l.type === "GAP" ? 2 : l.type === "SIMILAR" ? 1 : 0)
     .linkDirectionalParticleSpeed(l => l.type === "SIMILAR" ? 0.06 : 0.01)
     .linkDirectionalParticleColor(l => l.type === "SIMILAR"
-      ? "{_EDGE_COLOR_SIMILAR_PARTICLE}" : "{_EDGE_COLOR_GAP}")
+      ? (LIGHT ? "{_EDGE_COLOR_SIMILAR_PARTICLE_PAPER}" : "{_EDGE_COLOR_SIMILAR_PARTICLE}")
+      : (LIGHT ? "{_EDGE_COLOR_GAP_PAPER}" : "{_EDGE_COLOR_GAP}"))
     .linkDirectionalParticleWidth(l => l.type === "SIMILAR" ? 1.5 : 2)
     .nodeVisibility(n => !n._hidden)
     .linkVisibility(l => !l._hidden)
@@ -1464,7 +1565,7 @@ function drawZones(ctx) {{
     if (!members) return;
     ctx.save();
     ctx.globalAlpha = ZONE_ALPHA;
-    ctx.fillStyle = z.color;
+    ctx.fillStyle = zoneColor(z);
     ctx.beginPath();
     members.forEach(n => {{
       ctx.moveTo(n.x + R, n.y);
@@ -1489,7 +1590,7 @@ function buildZoneLabels() {{
   const layer = document.getElementById("zone-labels");
   if (!layer || !ZONES.length) return;
   layer.innerHTML = ZONES.map(z =>
-    '<div class="zone-label" data-id="' + z.id + '" style="color:' + z.color + '">' +
+    '<div class="zone-label" data-id="' + z.id + '" style="color:' + zoneColor(z) + '">' +
     escHtml(z.label) + '</div>').join("");
   layer.querySelectorAll(".zone-label").forEach(el => {{ zoneEls[el.dataset.id] = el; }});
 }}
@@ -1613,7 +1714,7 @@ function positionNodeLabels() {{
     // Fade with distance so names arrive instead of popping. Floored, because a
     // label at 5% is a smudge, not a word.
     el.style.opacity = Math.max(0.35, Math.min(1, 1.15 - d / far));
-    el.style.color = n.type === "ghost" ? "#838DA7" : "#EBEFF8";
+    el.style.color = n.type === "ghost" ? GP.ghostLabel : GP.label;
     el.style.transform =
       "translate(" + s.x + "px," + s.y + "px) translate(-50%,6px)";
   }}
@@ -1935,6 +2036,15 @@ _EDGE_COLOR_GAP = "#E0A93B"  # --warn — "a bridge could go here, and doesn't"
 # the drift registers, not enough that two thousand of them become the subject.
 _EDGE_COLOR_SIMILAR_PARTICLE = "#056E9A"  # one step up from the line's apparent #08405E
 
+# The paper pair. Same derivation, opposite direction: a photon that cannot use
+# alpha has to be blended against the floor it will sit on, and on paper that
+# blend goes toward white. The similar particle is _EDGE_COLOR_SIMILAR_PAPER
+# blended one step DOWN from its line's apparent value, because on a light floor
+# a faint dot is a dark one — the reverse of the crystal case above and the
+# reason this is a second constant rather than the same value reused.
+_EDGE_COLOR_GAP_PAPER = "#7A5305"              # --warn, on paper
+_EDGE_COLOR_SIMILAR_PARTICLE_PAPER = "#5CA8C4"
+
 
 def _gap_edges(nodes: list[dict], edges: list[dict], top_k: int = 5) -> list[dict]:
     """Top structural gaps as overlay edges between two area hubs.
@@ -1958,7 +2068,8 @@ def _gap_edges(nodes: list[dict], edges: list[dict], top_k: int = 5) -> list[dic
             # Five of them against four thousand others: a gap can afford to be
             # the most opaque and the widest thing on screen, because there is
             # never enough of it to crowd anything.
-            "color": {"color": _EDGE_COLOR_GAP, "opacity": 0.95},
+            "color": {"color": _EDGE_COLOR_GAP,
+                      "paper": _EDGE_COLOR_GAP_PAPER, "opacity": 0.95},
             "width": 2.0,
             "score": score,
         }
