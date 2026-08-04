@@ -94,6 +94,10 @@
   --r: 14px;
   --r-sm: 8px;
 
+  /* The reading measure. Transcript and composer share it so a turn and the box
+     you answer it in line up on the same two edges; changing it here moves both. */
+  --measure: 58rem;
+
   /* One easing, one duration. Everything was .1s linear, and linear at 100ms is
      the single loudest cheap tell in the file: it reads as a state swap rather
      than as movement. Exponential ease-out from an already-visible default. */
@@ -845,18 +849,24 @@ details.side-section:hover>summary.side-title {
 /* Sided transcript: one shared measure, inside which your turn is a bubble
    hugging its own text against the right edge while the answer runs the full
    width as a sheet. The padding here IS the measure, so the bubble can align to
-   the column edge and not to the pane edge. */
+   the column edge and not to the pane edge — and it is THE SAME measure the
+   answer uses, or the two right edges disagree by 12rem and the bubble reads as
+   centred (i.e. as neither side of the conversation). */
 .msg.user {
-  padding-inline: max(2rem, calc(50% - 23rem));
+  padding-inline: max(2rem, calc(50% - var(--measure) / 2));
 }
 
+/* Capped below the measure on purpose: a long question that filled the column
+   edge to edge became a box the exact size of the answer's sheet, and "who is
+   talking" went back to being a colour difference. The gutter it leaves on the
+   left is the signal. */
 .msg.user>.body {
   background: var(--bubble);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
   padding: 0.7rem 1rem;
   width: fit-content;
-  max-width: 100%;
+  max-width: min(100%, 42rem);
   margin-inline: auto 0;
   color: var(--frost);
 }
@@ -873,11 +883,13 @@ details.side-section:hover>summary.side-title {
 
 /* one measure in rem, not ch: ch resolves against each element's own font-size,
    so an 11px label and 16px prose would centre on two different widths and the
-   footer would sit indented from the paragraph above it. 46rem holds ~73
-   characters of prose once the sheet's own padding is taken out. */
+   footer would sit indented from the paragraph above it. --measure holds ~92
+   characters of prose once the sheet's own padding is taken out — wider than
+   the classic 66, because this transcript is as much table and code fence as
+   it is prose, and those were the things being squeezed. */
 .msg>.role,
 .msg>.body {
-  max-width: 46rem;
+  max-width: var(--measure);
   margin-inline: auto;
 }
 
@@ -1255,9 +1267,13 @@ details.side-section:hover>summary.side-title {
   font-style: italic;
 }
 
+/* A rule is a section break, so it gets more air than the 0.75em paragraph
+   rhythm around it — at the UA default 0.5em it read as a stray hairline
+   between two paragraphs rather than as a division. */
 :is(.msg, #note-body, #peek-body) hr {
   border: none;
   border-top: 1px solid var(--line);
+  margin: 1.6em 0;
 }
 
 :is(.msg, #note-body, #peek-body) table {
@@ -1446,6 +1462,11 @@ details.side-section:hover>summary.side-title {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-size: 10px;
+  /* 10px of uppercase text is a ~12px-tall pointer target; the padding is the
+     hit area, not decoration. fit-content keeps it on the label so a stray
+     click beside the trace does not collapse it. */
+  padding: 0.25rem 0;
+  width: fit-content;
   transition: color var(--dur) var(--ease);
 }
 
@@ -1600,7 +1621,7 @@ details.side-section:hover>summary.side-title {
   align-items: flex-end;
   gap: 0.35rem;
   width: 100%;
-  max-width: 46rem;
+  max-width: var(--measure);
   margin-inline: auto;
   padding: 0.3rem;
   background: var(--glass);
@@ -1616,6 +1637,54 @@ details.side-section:hover>summary.side-title {
 .composer-shell:focus-within {
   border-color: var(--ash-dim);
   box-shadow: var(--lift);
+}
+
+/* Who answers you, under the box you write in. The line takes the bottom
+   breathing room the composer used to hold alone, so the pane keeps its height.
+   The box mirrors #composer (measure + its 2rem gutters, border-box) so the
+   right edge lands on the send button's, at every width. */
+#view-chat #composer {
+  padding-bottom: 0.45rem;
+}
+
+#chat-models {
+  display: flex;
+  justify-content: flex-end;
+  align-items: baseline;
+  gap: 0.35rem;
+  width: 100%;
+  max-width: calc(var(--measure) + 4rem);
+  margin-inline: auto;
+  padding: 0 2.3rem 0.9rem;
+  background: none;
+  border: 0;
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1;
+  color: var(--ash-dim);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+
+#chat-models:hover,
+#chat-models:focus-visible {
+  color: var(--text);
+}
+
+.cm-lbl {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 9px;
+}
+
+.cm-val {
+  color: var(--text);
+}
+
+/* the pairs read as pairs: the gap between model and worker is wider than the
+   one between a label and its value */
+.cm-val + .cm-lbl {
+  margin-left: 0.5rem;
 }
 
 /* the transcript reads as passing under the composer instead of stopping at a
@@ -2230,6 +2299,10 @@ body.dragging #drop-hint {
 #log:empty {
   justify-content: center;
   align-items: center;
+  /* the glow below is a 46px drop-shadow, and #log scrolls, so it was clipped to
+     the log's box — which idle shrinks to the art + caption. That clip was the
+     square edge around the mascot. Nothing scrolls in an empty transcript. */
+  overflow: visible;
 }
 
 /* Sili, in colour. This was block-glyph ASCII of the previous mascot, and the
@@ -2240,7 +2313,10 @@ body.dragging #drop-hint {
    boxing it, and it is static — no repaint, no animation, no filter per frame. */
 #log:empty::before {
   content: "";
-  width: min(240px, 40vw);
+  /* 32vh caps the height at ~40vh through the aspect ratio: the log no longer
+     clips (see above), so on a short viewport the art would otherwise ride up
+     over the top bar instead of shrinking. */
+  width: min(240px, 40vw, 32vh);
   aspect-ratio: 519 / 650;
   background: url("/static/sili.webp") center / contain no-repeat;
   filter: drop-shadow(0 8px 46px rgba(53, 198, 232, .16));
@@ -2862,7 +2938,7 @@ body.note-open #dock {
 /* the answer card is now a free-standing card on the same measure as the
    composer under it, not the top half of a docked strip */
 #peek {
-  width: min(46rem, calc(100% - 4rem));
+  width: min(var(--measure), calc(100% - 4rem));
   margin: 0 auto 0.55rem;
   background: var(--glass);
   backdrop-filter: var(--glass-blur);
@@ -2931,7 +3007,7 @@ body.note-open #dock {
 #toasts {
   position: fixed;
   /* Under the header, not over the composer. Bottom-right put a 360px strip
-     across #send at every width the composer's own 46rem measure left room for,
+     across #send at every width the composer's own --measure left room for,
      so the app's resting state was a diagnostic covering its primary control.
      --header-h is measured live, because the strip wraps to two rows when the
      drawer is open on a narrow window. Inset by the drawer the same way #dock
@@ -3018,40 +3094,15 @@ body.note-open #toasts {
   border: 0;
 }
 
-/* --- session config panel: header dropdown, model read-only + thinking toggle.
-   Progressive disclosure — hidden behind the model button, no chrome until
-   opened. Absolute inside the (now positioned) header. */
-#model-btn {
+/* --- settings button: the gear alone. It carried the model name until the name
+   moved under the composer, where the conversation it describes is. */
+#settings-btn {
   border-left: 1px solid var(--line);
-  max-width: 22ch;
-  overflow: hidden;
 }
 
-#model-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-transform: none;
-  /* a model id keeps its own casing */
-  letter-spacing: 0.02em;
-}
-
-#session-panel {
-  display: block;
-  /* beats `header > * { display:flex }`; [hidden] still wins */
-  position: absolute;
-  top: 100%;
-  right: 0;
-  /* 130 clears #toasts (120): the strip now lives in this same top-right corner,
-     and a panel the user just opened outranks a transient notification. */
-  z-index: 130;
-  width: min(320px, 90vw);
-  background: var(--glass);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--line-2);
-  border-top: none;
-  border-radius: 0 0 var(--r) var(--r);
-  box-shadow: var(--lift), var(--glass-edge);
+#settings-btn svg {
+  flex-shrink: 0;
+  opacity: 0.75;
 }
 
 .sp-title {
@@ -3152,56 +3203,6 @@ body.note-open #toasts {
 }
 
 
-.sp-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.8rem;
-  padding: 0.5rem 0.8rem;
-  border-bottom: 1px solid var(--line);
-}
-
-.sp-key {
-  color: var(--ash-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 10px;
-  flex-shrink: 0;
-}
-
-.sp-val {
-  color: var(--frost);
-  font-family: var(--mono);
-  /* a model/provider id is a technical token — grid font */
-  font-size: 11px;
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.8rem;
-  padding: 0.6rem 0.8rem;
-  cursor: pointer;
-  color: var(--ash);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 10px;
-}
-
-.sp-toggle:hover {
-  color: var(--frost);
-}
-
-.sp-toggle input {
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
 /* --- quick-action launch pad: shown only on an empty chat, collapsed out by
    the first message. Flat square chips, native Silica actions. Identity note:
    the composer group SNAPS between states (no soft glide) — the grid is rigid
@@ -3229,26 +3230,83 @@ body.note-open #toasts {
   padding-bottom: 0;
 }
 
+/* one track, one moving pill. The segments are transparent and the pill is the
+   only painted surface, so exactly one of them can ever look chosen — four
+   independently-styled chips could not make that promise. The row wraps rather
+   than scrolls: a scrolling track cut "organize" in half at a 496px pane with
+   nothing to say it had more, and the pill is placed from measured rects, so
+   following a second row costs it one translate axis. */
+.qa-track {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: 2px;
+  /* the pill is a full row tall, so a wrapped row needs the track's own inset
+     twice over between rows or the pill would graze its neighbour */
+  row-gap: 6px;
+  padding: 3px;
+  max-width: 100%;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--glass-edge);
+}
+
+/* anchored at the track's padding-box origin and moved from measured rects, so
+   the padding, the border and the centring of a wrapped row stay out of the
+   arithmetic entirely. Height comes from JS too: it spans the whole row, so it
+   reads as a lens sliding along the track rather than a box drawn per segment. */
+#qa-pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+  width: 0;
+  height: 0;
+  border-radius: var(--r);
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  pointer-events: none;
+  /* width is a layout property on purpose: the segments have different widths,
+     and the usual scaleX dodge would stretch the radius the pill shares with
+     the track into ovals — the one thing this shape must not do. It is one
+     out-of-flow childless element, so nothing else re-lays out: measured at
+     13-14 layouts per move, the same band as the two other deliberate layout
+     animations in this file, and that count includes the composer's autoGrow. */
+  transition: transform var(--dur) var(--ease), width var(--dur) var(--ease);
+}
+
 .qa {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
   font-family: var(--sans);
   font-size: 12px;
   letter-spacing: 0.02em;
   color: var(--ash);
-  background: var(--slate-2);
-  border: 1px solid var(--line-2);
-  border-radius: 999px;
-  padding: 0.42rem 0.95rem;
+  background: none;
+  border: 0;
+  border-radius: var(--r);
+  padding: 0.42rem 0.85rem;
   cursor: pointer;
-  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+  transition: color var(--dur) var(--ease);
 }
 
-.qa:hover {
+.qa svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+.qa:hover,
+.qa[aria-pressed="true"] {
   color: var(--frost);
-  border-color: var(--accent);
-}
-
-.qa:active {
-  transform: translateY(1px);
 }
 
 .qa:focus-visible {
@@ -3278,7 +3336,7 @@ body.note-open #toasts {
 /* align-items:center above makes every child shrink to its own content, which
    collapsed the composer to the width of its placeholder. The shell already
    carries the measure, so the row just has to span the pane and let it centre. */
-#view-chat:has(#log:empty) :is(#quick-actions, #composer) {
+#view-chat:has(#log:empty) :is(#quick-actions, #composer, #chat-models) {
   align-self: stretch;
 }
 
@@ -3303,6 +3361,7 @@ body.note-open #toasts {
   }
 
   #quick-actions,
+  #qa-pill,
   #note-panel,
   .composer-shell {
     transition: none;
@@ -3564,6 +3623,13 @@ body.note-open #toasts {
   overflow-x: auto;
 }
 
+/* an action cell: tight against the right edge, and never the column that grows */
+.chart td.act {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .chart tr.clickable {
   cursor: pointer;
 }
@@ -3768,4 +3834,486 @@ body.note-open #toasts {
   padding-top: 4px;
   border-top: 1px solid var(--line);
   margin-top: 3px;
+}
+
+/* --- settings ---------------------------------------------------------------
+   The one surface you come to on purpose and leave when you are done, so it is
+   a modal with a backdrop rather than a fourth header dropdown: eight sections
+   and a search field are not a thing to read out of the corner of the header.
+
+   Fluid without a breakpoint. This file has none by decision — the shell
+   compresses, it never reorganises — and the settings panel must not be the
+   first. `.st-body` wraps, the nav asks for 11rem and grows by 1, the panel
+   asks for 24rem and grows by 999: on one line the nav sits at its basis and
+   the panel takes the rest. Narrower than their sum and the panel wraps below,
+   which leaves the nav alone on its line, where it grows to full width and its
+   tabs — wrapping by the same rule — lay themselves out as a horizontal strip.
+   One set of rules, two layouts, no width query. */
+#st-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(13, 9, 23, 0.66);
+}
+
+#st-modal {
+  position: fixed;
+  z-index: 201;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(58rem, 94vw);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  /* you read here — the radius is for reading surfaces and aim targets */
+  border-radius: var(--r);
+  box-shadow: var(--lift), var(--glass-edge);
+}
+
+#st-modal[hidden] {
+  display: none;
+}
+
+#st-modal>header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome-glass);
+  transition: none;
+}
+
+.st-head {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10px;
+  color: var(--ash-dim);
+}
+
+/* where a write actually lands, said once at the top instead of on every row */
+.st-env {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ash-dim);
+}
+
+#st-close {
+  padding: 0.2rem 0.5rem;
+}
+
+.st-banner {
+  flex: 0 0 auto;
+  padding: 0.5rem 1rem;
+  font-size: 11px;
+  color: var(--warn);
+  background: rgba(224, 169, 59, 0.08);
+  border-bottom: 1px solid var(--line);
+}
+
+.st-body {
+  display: flex;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+#st-nav {
+  flex: 1 1 11rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 0.5rem;
+  padding: 0.8rem;
+  background: var(--chrome-glass);
+  border-right: 1px solid var(--line);
+}
+
+#st-search {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: 12px;
+  background: var(--slate-2);
+  color: var(--frost);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.6rem;
+  transition: border-color var(--dur) var(--ease);
+}
+
+#st-search:focus {
+  outline: none;
+  border-color: var(--ash-dim);
+}
+
+#st-search::placeholder {
+  color: var(--ash-dim);
+}
+
+#st-tabs {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+}
+
+.st-tab {
+  flex: 1 1 7rem;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--ash);
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.st-tab:hover {
+  color: var(--frost);
+  background: var(--slate-2);
+}
+
+.st-tab.active {
+  color: var(--accent);
+  background: var(--slate-2);
+  border-color: var(--line-2);
+}
+
+.st-tab:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+#st-panel {
+  flex: 999 1 24rem;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0 1.1rem 1.4rem;
+}
+
+.st-section[hidden] {
+  display: none;
+}
+
+.st-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10px;
+  color: var(--ash-dim);
+  padding: 1.1rem 0 0.5rem;
+}
+
+.st-section-title .st-btn {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* Two columns while there is room for both, one when there is not — auto-fit
+   does that on its own, so the row needs no width query either. */
+.st-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  align-items: center;
+  gap: 0.35rem 1.2rem;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.st-row[hidden] {
+  display: none;
+}
+
+.st-label {
+  min-width: 0;
+}
+
+.st-name {
+  display: block;
+  color: var(--frost);
+  font-size: 12px;
+}
+
+.st-help {
+  color: var(--ash-dim);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 0.1rem;
+}
+
+.st-warn {
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 0.2rem;
+}
+
+.st-ctl {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.st-ctl input[type="text"],
+.st-ctl select {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  /* a model id, a url and a path are technical tokens — grid font */
+  font-size: 11px;
+  background: var(--slate-2);
+  color: var(--frost);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0.5rem;
+  transition: border-color var(--dur) var(--ease);
+}
+
+.st-ctl select {
+  font-family: var(--sans);
+  cursor: pointer;
+}
+
+.st-ctl input[type="text"]:focus,
+.st-ctl select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.st-ctl input[type="text"]:read-only {
+  color: var(--ash);
+  cursor: default;
+}
+
+.st-ctl input[type="text"]:disabled,
+.st-ctl select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.st-ctl input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.st-ro,
+.st-ctl-text {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ash);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.st-ctl-text.up {
+  color: var(--accent);
+}
+
+.st-ctl-text.down {
+  color: var(--ash-dim);
+}
+
+.st-check-fail .st-ctl-text,
+.st-check-warn .st-ctl-text {
+  color: var(--warn);
+}
+
+.st-check-ok .st-ctl-text {
+  color: var(--accent);
+}
+
+/* the outcome of the last write to THIS row, under both columns */
+.st-note {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ash-dim);
+}
+
+.st-note:empty {
+  display: none;
+}
+
+.st-note.good {
+  color: var(--accent);
+}
+
+.st-note.bad {
+  color: var(--warn);
+}
+
+.st-note-line,
+.st-empty {
+  font-size: 11px;
+  color: var(--ash-dim);
+  padding: 0.6rem 0;
+  line-height: 1.5;
+}
+
+.st-empty {
+  color: var(--ash);
+  font-size: 12px;
+}
+
+.st-empty[hidden] {
+  display: none;
+}
+
+.st-btn {
+  flex: 0 0 auto;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--frost);
+  font-family: var(--sans);
+  font-size: 11px;
+  padding: 0.35rem 0.7rem;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.st-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.st-btn.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.st-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.st-btn:focus-visible,
+.st-eye:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.st-eye {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  color: var(--ash);
+  font-size: 12px;
+  line-height: 1;
+  padding: 0.3rem 0.35rem;
+  cursor: pointer;
+}
+
+.st-eye:hover {
+  color: var(--frost);
+  border-color: var(--line-2);
+}
+
+/* Confirmations and the bug report live INSIDE the modal, so the focus trap
+   keeps holding and Escape has one obvious next step. */
+#st-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: rgba(13, 9, 23, 0.72);
+}
+
+#st-sheet[hidden] {
+  display: none;
+}
+
+.st-sheet-inner {
+  width: min(32rem, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  background: var(--sheet);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--lift);
+  padding: 1.1rem;
+}
+
+.st-sheet-title {
+  color: var(--frost);
+  font-size: 13px;
+  margin-bottom: 0.6rem;
+}
+
+.st-sheet-text {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  /* the copy is written with its own line breaks, and they carry the argument */
+  white-space: pre-line;
+}
+
+.st-sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.1rem;
+}
+
+.st-bug {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.st-bug-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 10px;
+  color: var(--ash-dim);
+  margin-top: 0.5rem;
+}
+
+.st-bug textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--slate-2);
+  color: var(--frost);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.5rem 0.6rem;
+  font-family: var(--sans);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.st-bug textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.st-bug .st-bug-payload {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ash);
 }

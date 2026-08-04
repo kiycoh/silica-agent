@@ -57,6 +57,11 @@ function notify(msg, level = "error") {
   rollUpToasts();
 }
 
+// Name what a tool acted on. The verb alone ("write note") never told the user
+// which file the agent touched in their own vault. One formatter, so a replayed
+// transcript reads exactly like the stream that produced it.
+const toolLabel = (t) => (t.target ? `${t.name} "${t.target}"` : t.name);
+
 function bubble(role) {
   const el = document.createElement("div");
   el.className = "msg " + (role === "user" ? "user" : "silica");
@@ -164,7 +169,7 @@ function addCopyBtn(bodyEl, getText) {
 }
 
 // ponytail: lazy live markdown for the streaming turn — headings, bold, italic,
-// inline + fenced code, bullet/ordered lists, links. Re-parses the whole segment
+// inline + fenced code, bullet/ordered lists, links, rules, GFM tables. Re-parses the whole segment
 // on every delta (O(n²) over the turn, fine at KB scale; parse from the last
 // block boundary if very long turns ever stutter). The server re-renders
 // the canonical answer (wikilinks, callouts, mermaid) on `done` for uninterrupted
@@ -190,10 +195,33 @@ function mdLite(src) {
   const out = [];
   let i = 0, list = null;
   const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
-  const isBlock = (l) => /^```|^#{1,6}\s|^\s*[-*]\s|^\s*\d+\.\s/.test(l);
+  const HR = /^ {0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/;
+  // A GFM delimiter row: pipes, colons, spaces, and at least one dash.
+  const DELIM = /^\s*\|?[\s:|-]*-[\s:|-]*$/;
+  const isBlock = (l) => /^```|^#{1,6}\s|^\s*[-*]\s|^\s*\d+\.\s|^\s*\|/.test(l) || HR.test(l);
   while (i < lines.length) {
     const line = lines[i];
     if (!line.trim()) { closeList(); i++; continue; }
+    if (HR.test(line)) { closeList(); out.push("<hr>"); i++; continue; }
+    // GFM table: a piped header row whose next line is the delimiter. Checked
+    // before the paragraph branch, or the whole grid collapses into one <p> of
+    // pipes — which is what every tool-interrupted turn was showing, since only
+    // uninterrupted turns get upgraded to the server render.
+    // ponytail: no escaped `\|` inside a cell, no per-column alignment. Both are
+    // in the server render; add here if a live table ever needs them.
+    if (/^\s*\|/.test(line) && DELIM.test(lines[i + 1] || "")) {
+      closeList();
+      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(cells(lines[i++]));
+      const tr = (cs, tag) => `<tr>${cs.map((c) => `<${tag}>${inline(c)}</${tag}>`).join("")}</tr>`;
+      out.push(
+        `<table><thead>${tr(head, "th")}</thead><tbody>${rows.map((r) => tr(r, "td")).join("")}</tbody></table>`
+      );
+      continue;
+    }
     if (/^```/.test(line)) {
       closeList();
       const buf = []; i++;
@@ -211,7 +239,14 @@ function mdLite(src) {
       out.push(`<li>${inline(item[1])}</li>`); i++; continue;
     }
     closeList();
-    const para = [];
+    // The current line always goes in, even when isBlock() calls it a block. A
+    // table header whose delimiter row has not streamed in yet lands here: it is
+    // a block by isBlock(), so an empty paragraph would leave `i` untouched and
+    // the outer loop would spin forever, growing `out` until the tab threw
+    // "RangeError: Invalid array length" — which killed the SSE reader and ate
+    // the rest of the answer. Consuming one line per pass is what guarantees the
+    // parser terminates, whatever the half-arrived block looks like.
+    const para = [lines[i++]];
     while (i < lines.length && lines[i].trim() && !isBlock(lines[i])) para.push(lines[i++]);
     out.push(`<p>${para.map(inline).join("<br>")}</p>`);
   }
@@ -234,6 +269,9 @@ function setCtxTokens(used, max) {
 function setSendDisabled(v) {
   $("#send").disabled = v;
   $("#dock-send").disabled = v;
+  // Both edges of a turn in one place: an open settings panel locks itself while
+  // a response runs and unlocks when it ends, rather than waiting for a 409.
+  stSetBusy(v);
 }
 
 // `retry` re-runs the exact same turn. It is a callback rather than the text so
@@ -420,9 +458,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     } else if (ev.type === "tool_start") {
       const t = document.createElement("div");
       t.className = "tool";
-      // Name what it acted on. The verb alone ("write note") never told the user
-      // which file the agent touched in their own vault.
-      t.dataset.label = ev.target ? `${ev.name} "${ev.target}"` : ev.name;
+      t.dataset.label = toolLabel(ev);
       t.textContent = "» " + t.dataset.label + " …";
       toolsGroup().appendChild(t);
       curTools.appendChild(caret);
@@ -580,6 +616,7 @@ fetch("/commands").then(r => r.json()).then(data => allCommands = data || []).ca
 
 function renderCommands(q) {
   const box = $("#commands");
+  syncQuick(); // every path that changes the box comes through here
   if (!q.startsWith("/")) {
     box.hidden = true;
     return;
@@ -1185,6 +1222,14 @@ function mTable(cols, rows) {
     if (r._path) { tr.dataset.path = r._path; tr.classList.add("clickable"); }
     if (r._title) tr.title = r._title;
     for (const c of cols) {
+      // An action column builds its own cell: a measurement can carry the move
+      // it suggests, and the row click keeps meaning "open that note".
+      if (c.el) {
+        const td = mkEl("td", "act");
+        td.appendChild(c.el(r));
+        tr.appendChild(td);
+        continue;
+      }
       const td = mkEl("td", c.num ? "num" : null, String(r[c.key] ?? ""));
       // Text columns are clamped to keep the card from growing a scrollbar; the
       // full value has to stay reachable, so it rides the cell's own tooltip.
@@ -1200,6 +1245,26 @@ function mTable(cols, rows) {
 }
 
 const nfmt = (n) => (typeof n === "number" ? n.toLocaleString() : String(n));
+
+// The one action a metrics row carries: a gap names two areas, and the move it
+// suggests is a write, so it drafts the turn and the agent's gate still owns the
+// write. The turn has to leave room for "there is no bridge here" — the gap is a
+// shape in the link graph, not evidence that the two areas belong connected.
+// stopPropagation: the row itself is clickable and means "open that note".
+function mBridgeBtn(a, b) {
+  const btn = mkEl("button", "cx-do", "bridge");
+  btn.type = "button";
+  btn.title = "draft a note that connects these two areas";
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    prefillChat(
+      'Nothing links "' + a + '" and "' + b + '", the hubs of two areas ' +
+      "of the vault that stand apart. Read both, and if a real connection exists, " +
+      "write the note that states it and link it to each side. If there isn't one, " +
+      "say so instead of inventing it.");
+  });
+  return btn;
+}
 
 // A cut list must never read as the whole list.
 function mMore(shown, total, noun) {
@@ -1394,6 +1459,10 @@ function renderMetrics(d) {
   }
 
   // --- structural gaps + bridges ---------------------------------------------
+  // The gap list used to sit in the graph's HUD, next to the colour keys, where
+  // a worklist reads as a legend entry. A gap is a fact about the vault, so it
+  // belongs on the surface that measures the vault — and here it can carry the
+  // ranking (size × size ÷ links) the HUD had no room for.
   const gp = mCard("Structural gaps", "well-formed areas with few links between them");
   if (d.gaps?.length) {
     // Sizes, not the absent-link fraction: that fraction reads 99.7-100% on
@@ -1402,10 +1471,11 @@ function renderMetrics(d) {
     // sizes on the row the order is readable instead of asserted.
     gp.appendChild(mTable(
       [{ key: "pair", label: "Area hubs" }, { key: "sizes", label: "Notes", num: true },
-       { key: "inter_edges", label: "Links", num: true }],
+       { key: "inter_edges", label: "Links", num: true },
+       { label: "", el: (r) => mBridgeBtn(r._a, r._b) }],
       d.gaps.map((g) => ({
         pair: g.a + " ↮ " + g.b, sizes: `${g.size_a} × ${g.size_b}`,
-        inter_edges: g.inter_edges,
+        inter_edges: g.inter_edges, _path: g.a_path, _a: g.a, _b: g.b,
       })),
     ));
   } else mEmpty(gp, "No gaps measured.");
@@ -1635,6 +1705,7 @@ const attachEls = $("#attachments");
 function renderAttachments() {
   attachEls.innerHTML = "";
   attachEls.hidden = staged.length === 0;
+  syncQuick(); // staged files are what the next message does
   staged.forEach((f, i) => {
     const chip = document.createElement("span");
     chip.className = "chip";
@@ -1694,6 +1765,7 @@ let lastViewedPath = null; // survives close — feeds the header reopen button
 // The dock inset and the drawer width must agree; CSS reads it as --note-w.
 function setNoteW(w) {
   document.documentElement.style.setProperty("--note-w", w + "px");
+  syncDrawerToViews(); // the frame parks its focus bar against the drawer's edge
 }
 
 // Mirror the open note onto the graph + map iframes: the matching node + its
@@ -1733,7 +1805,8 @@ function replayGraphFocus() {
 // drawer, so tell it. Replayed on frame load like the focus state, because
 // /graph is rebuilt on every entry into the tab.
 function syncDrawerToViews() {
-  postToViews({ type: "silica-host-drawer", open: document.body.classList.contains("note-open") });
+  const open = document.body.classList.contains("note-open");
+  postToViews({ type: "silica-host-drawer", open, width: open ? notePanel.offsetWidth : 0 });
 }
 
 // Mermaid is a 3.5MB vendored bundle, so it loads on demand — only the first
@@ -2086,7 +2159,13 @@ function renderContext(data) {
     s.appendChild(b);
     box.appendChild(s);
   } else if (has(data.suggested)) {
-    const s = cxSection("suggested next", "how it SHOULD be connected — a click drafts the turn");
+    // The subtitle says the METHOD, not the effect. Two machines feed this list
+    // and neither is a model: ghost rows come from wikilinks you already wrote,
+    // note rows from embedding + co-occurrence distance (each row's `why` says
+    // which). Naming the machine is what lets you weigh a suggestion instead of
+    // reading it as a recommendation.
+    const s = cxSection("suggested next",
+      "no LLM — links you wrote + embedding/co-occurrence; a click drafts the turn");
     cxList(s, data.suggested, (sg) => {
       const row = cxRow(label(sg), sg.why);
       const act = mkEl("button", "cx-do", sg.kind === "ghost" ? "write" : "link");
@@ -2280,63 +2359,118 @@ async function loadVault() {
     setCtxTokens(r.headers.get("X-Silica-Context-Tokens"), r.headers.get("X-Silica-Max-Context-Tokens"));
     const msgs = await r.json();
     log.innerHTML = "";
+    // One reply is ONE bubble. The model's text arrives split around its own
+    // tool calls, so the history holds several assistant messages per turn —
+    // rendering each as its own bubble made a single answer read as three
+    // separate replies, with the steps between them missing entirely.
+    let turn = null;
     for (const m of msgs) {
-      const b = bubble(m.role === "user" ? "user" : "silica");
-      if (m.role === "user") b.textContent = m.content;
-      else { b.innerHTML = m.html || escapeHtml(m.content); addCopyBtn(b, () => m.content); }
+      if (m.role === "user") { turn = null; bubble("user").textContent = m.content; continue; }
+      if (!turn) {
+        turn = { body: bubble("silica"), raw: [] };
+        const t = turn;
+        addCopyBtn(t.body, () => t.raw.join("\n\n"));
+      }
+      // Thinking first, then what it produced — the order the stream had. It
+      // replays collapsed: the live block is open only while it is the tail.
+      if (m.thinking) {
+        const d = document.createElement("details");
+        d.className = "thinking";
+        d.innerHTML = '<summary>thinking</summary><div class="thinking-body"></div>';
+        d.querySelector(".thinking-body").textContent = m.thinking;
+        turn.body.appendChild(d);
+      }
+      if (m.content) {
+        const seg = document.createElement("div");
+        seg.className = "stream-text";
+        seg.innerHTML = m.html || escapeHtml(m.content);
+        turn.body.appendChild(seg);
+        turn.raw.push(m.content);
+      }
+      if (m.tools && m.tools.length) {
+        const g = document.createElement("div");
+        g.className = "tools";
+        for (const t of m.tools) {
+          const d = document.createElement("div");
+          d.className = "tool " + (t.error ? "error" : "done");
+          d.textContent = (t.error ? "✗ " : "✓ ") + toolLabel(t);
+          g.appendChild(d);
+        }
+        turn.body.appendChild(g);
+      }
     }
+    log.scrollTop = log.scrollHeight;
   } catch { notify("couldn't load the conversation"); }
 }
 // --- quick-action launch pad (empty chat only; CSS collapses it on first turn).
-// Command chips prefill the composer (the user reviews + hits enter); action
-// chips fire directly.
+// A segmented control, not four buttons: the pill says what the next message
+// will do. It is DERIVED, never stored — from the command already in the box,
+// or from files waiting to be nucleated — so a segment cannot claim a mode the
+// composer isn't in. Picking a segment only prefills; the user still hits enter.
+const qaTrack = $(".qa-track");
+const qaPill = $("#qa-pill");
+
+function syncQuick() {
+  const cmd = (input.value.match(/^\/[a-z-]+/) || [""])[0];
+  const want = staged.length ? "/nucleate" : cmd; // staged files outrank a typed command
+  const segs = Array.from(qaTrack.querySelectorAll(".qa"));
+  const on = segs.find((b) => b.dataset.action === want) || segs[0]; // unknown command → ask
+  segs.forEach((b) => b.setAttribute("aria-pressed", String(b === on)));
+  // The pill sits at the track's padding-box origin, so the offset is just the
+  // segment's rect minus that origin (clientLeft/Top are the track's border).
+  // Both axes: the track wraps on a narrow pane and centres each row, so the
+  // segments move vertically AND horizontally under it.
+  const a = on.getBoundingClientRect(), t = qaTrack.getBoundingClientRect();
+  const x = a.left - t.left - qaTrack.clientLeft, y = a.top - t.top - qaTrack.clientTop;
+  // Vertically the pill is the full height of its ROW of the track, not of the
+  // segment: it has to read as a lens sliding along the container. The inset is
+  // measured off the first segment (always on row one), never hardcoded.
+  const pad = segs[0].getBoundingClientRect().top - t.top - qaTrack.clientTop;
+  qaPill.style.width = on.offsetWidth + "px";
+  qaPill.style.height = on.offsetHeight + 2 * pad + "px";
+  qaPill.style.transform = `translate(${x}px, ${y - pad}px)`;
+}
+
 $("#quick-actions").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
   const a = btn.dataset.action;
-  if (a === "attach") $("#attach").click();
-  else if (a === "graph") document.querySelector('.tab[data-tab="graph"]').click();
-  else { input.value = a + " "; input.focus(); autoGrow(input); renderCommands(input.value); }
+  input.value = input.value.replace(/^\/[a-z-]*\s*/, ""); // swap the command, keep the text
+  if (a) input.value = a + " " + input.value;
+  input.focus();
+  autoGrow(input);
+  renderCommands(input.value); // syncQuick runs from here
 });
 
-// --- session config panel (header) — model read-only (Silica has no runtime
-// model-switch op, mirroring the TUI's display-only /model) + the live thinking
-// toggle (/thinking). Progressive disclosure: nothing until the model chip is
-// clicked.
-const sessionPanel = $("#session-panel");
-const modelBtn = $("#model-btn");
-let configLoaded = false;
+syncQuick();
+// Lexend loads async and the segments get wider when it lands; the track also
+// re-wraps whenever the sidebar or the drawer renegotiates the pane. Both are
+// resizes of the track, so one observer covers them.
+new ResizeObserver(syncQuick).observe(qaTrack);
+
+// --- the chat's model line ---------------------------------------------------
+// Its own cheap read, kept separate from /settings: that one probes four
+// endpoints for their model lists, and the line must not wait seconds to say
+// which model answers you.
+//
+// The worker half only appears when there IS a second model: it defaults to
+// empty and every call site falls back to the chat model, so printing the same
+// name twice would claim two models where one is configured.
 async function loadConfig() {
   try {
     const c = await (await fetch("/config")).json();
-    $("#model-name").textContent = c.model ? c.model.split("/").pop() : "no model";
-    $("#sp-model").textContent = c.model || "(not configured)";
-    $("#sp-provider").textContent = c.provider || "—";
-    $("#sp-ctx").textContent = c.context_window ? (c.context_window / 1000).toFixed(0) + "k tokens" : "—";
-    $("#sp-thinking").checked = !!c.show_thinking;
-    configLoaded = true;
+    const short = (m) => (m || "").split("/").pop();
+    const box = $("#chat-models");
+    box.textContent = "";
+    const pair = (lbl, val) => {
+      box.appendChild(mkEl("span", "cm-lbl", lbl));
+      box.appendChild(mkEl("span", "cm-val", val));
+    };
+    pair("model", c.model ? short(c.model) : "no model");
+    if (c.worker_model && c.worker_model !== c.model) pair("worker", short(c.worker_model));
   } catch { notify("couldn't load session config"); }
 }
-function closeSessionPanel() {
-  sessionPanel.hidden = true;
-  modelBtn.setAttribute("aria-expanded", "false");
-}
-modelBtn.addEventListener("click", (e) => {
-  e.stopPropagation(); // don't let the outside-click handler below re-close it
-  const opening = sessionPanel.hidden;
-  sessionPanel.hidden = !opening;
-  modelBtn.setAttribute("aria-expanded", opening ? "true" : "false");
-  if (opening && !configLoaded) loadConfig();
-});
-$("#sp-thinking").addEventListener("change", async (e) => {
-  const want = e.target.checked;
-  try {
-    await fetch("/config", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ show_thinking: want }),
-    });
-  } catch { notify("couldn't update thinking"); e.target.checked = !want; }
-});
+$("#chat-models").addEventListener("click", () => openSettings());
 $("#metrics-cancel").addEventListener("click", () => {
   if (metricsAbort) metricsAbort.abort();
 });
@@ -2354,14 +2488,11 @@ function closeHelpPanel() {
 helpBtn.addEventListener("click", (e) => {
   e.stopPropagation();
   const opening = helpPanel.hidden;
-  closeSessionPanel(); // one panel at a time, they share the header's right edge
   helpPanel.hidden = !opening;
   helpBtn.setAttribute("aria-expanded", opening ? "true" : "false");
 });
 
 document.addEventListener("click", (e) => {
-  if (!sessionPanel.hidden && !e.target.closest("#session-panel") && !e.target.closest("#model-btn"))
-    closeSessionPanel();
   if (!helpPanel.hidden && !e.target.closest("#help-panel") && !e.target.closest("#help-btn"))
     closeHelpPanel();
 });
@@ -2508,13 +2639,521 @@ document.querySelectorAll(".mic").forEach((b) => {
   if (box) attachMic(box, b);
 });
 
+// --- settings ----------------------------------------------------------------
+// Rows are built from /settings, never hardcoded here: the table lives in
+// silica/ui/web/settings.py, so what the panel offers and what the server will
+// accept are the same list. Saving is per row — no save button, no dirty state,
+// no exit dialog. Toggles and pick-lists apply at once, text fields on blur or
+// Enter (the browser's own `change`), never on every keystroke.
+const stModal = $("#st-modal");
+const stBackdrop = $("#st-backdrop");
+const stSheet = $("#st-sheet");
+const stPanel = $("#st-panel");
+const stTabs = $("#st-tabs");
+const stSearch = $("#st-search");
+const settingsBtn = $("#settings-btn");
+const ST_EXTRA = ["Endpoints", "Diagnostics", "About"];
+const stState = { data: null, section: "Session", controls: [], uid: 0 };
+
+// A key is shown as its own head and tail: enough to tell an OpenRouter key from
+// a stale one without putting the secret on screen.
+function maskKey(v) {
+  if (!v) return "";
+  return v.length <= 12 ? "•".repeat(8) : v.slice(0, 5) + "••••" + v.slice(-4);
+}
+
+function stEl(tag, cls, text) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function stSectionEl(name) {
+  const s = stEl("section", "st-section");
+  s.dataset.section = name;
+  s.appendChild(stEl("div", "st-section-title", name));
+  return s;
+}
+
+function stNote(rowEl, cls, text) {
+  const note = rowEl.querySelector(".st-note");
+  note.className = "st-note " + cls;
+  note.textContent = text;
+}
+
+function stValueOf(row, input) {
+  return row.kind === "toggle" ? String(input.checked) : input.value;
+}
+
+function stRevert(row, input) {
+  const prev = input.dataset.prev || "";
+  if (row.kind === "toggle") input.checked = prev === "true";
+  else input.value = prev;
+}
+
+// One control per kind. Every list row is an <input list> with a <datalist>
+// rather than a dropdown: _endpoint_model_ids returns [] on any error, so the
+// list is empty exactly when the endpoint is down — which is the moment you
+// opened this panel to fix it. A datalist degrades to a text field on its own.
+function stBuildControl(row, rowEl, labelEl) {
+  if (row.kind === "readonly") return stEl("span", "st-ro", row.value || "—");
+  const id = `st-c${++stState.uid}`;
+  labelEl.setAttribute("for", id);
+  let input;
+  if (row.kind === "toggle") {
+    input = stEl("input");
+    input.type = "checkbox";
+    input.checked = row.value === "true";
+  } else if (row.kind === "enum") {
+    input = stEl("select");
+    const opts = row.options.includes(row.value) || !row.value
+      ? row.options : [row.value, ...row.options];
+    for (const o of opts) input.appendChild(new Option(o, o));
+    input.value = row.value;
+  } else {
+    input = stEl("input");
+    input.type = "text";
+    input.spellcheck = false;
+    input.autocomplete = "off";
+    if (row.kind === "int") input.inputMode = "numeric";
+    input.value = row.kind === "secret" ? maskKey(row.value) : row.value;
+    if (row.options.length) {
+      const dl = stEl("datalist");
+      dl.id = id + "-list";
+      for (const o of row.options) dl.appendChild(new Option(o, o));
+      input.setAttribute("list", dl.id);
+      rowEl.appendChild(dl);
+    }
+  }
+  input.id = id;
+  input.dataset.prev = stValueOf(row, input);
+  if (row.locked) {
+    input.disabled = true;
+    input.dataset.locked = "1";
+  }
+  input.addEventListener("change", () => stCommit(row, input, rowEl));
+  stState.controls.push({ row, input });
+  return input;
+}
+
+function stRowEl(row) {
+  const el = stEl("div", "st-row");
+  el.dataset.key = row.key;
+  el.dataset.search = `${row.label} ${row.help} ${row.key}`.toLowerCase();
+  const label = stEl("div", "st-label");
+  const name = stEl("label", "st-name", row.label);
+  label.appendChild(name);
+  if (row.help) label.appendChild(stEl("div", "st-help", row.help));
+  if (row.warn) label.appendChild(stEl("div", "st-warn", "⚠ " + row.warn));
+  el.appendChild(label);
+
+  const ctl = stEl("div", "st-ctl");
+  const input = stBuildControl(row, el, name);
+  ctl.appendChild(input);
+  // A key already set is shown masked and read-only: the eye is how you say
+  // "I mean to replace this", so a mask can never be saved as a value.
+  if (row.kind === "secret" && row.value && !row.locked) {
+    const eye = stEl("button", "st-eye", "👁");
+    eye.type = "button";
+    eye.title = "reveal and replace";
+    eye.setAttribute("aria-label", `reveal ${row.label}`);
+    input.readOnly = true;
+    eye.addEventListener("click", () => {
+      input.readOnly = false;
+      input.value = row.value;
+      input.dataset.prev = row.value;
+      eye.remove();
+      input.focus();
+    });
+    ctl.appendChild(eye);
+  }
+  el.appendChild(ctl);
+
+  const note = stEl("div", "st-note");
+  if (row.locked) note.textContent = `🔒 defined in the environment (${row.key})`;
+  else if (row.kind === "secret" && row.value) note.textContent = "set · reveal to replace";
+  el.appendChild(note);
+  return el;
+}
+
+// Every control bound to a key this write touched, resynced: `thinking` is both
+// the session's live toggle and a display preference, and a provider change
+// drags the model and the base url with it.
+function stSyncKey(key, value) {
+  for (const { row, input } of stState.controls) {
+    if (row.key !== key) continue;
+    row.value = value;
+    if (row.kind === "toggle") input.checked = value === "true";
+    else if (row.kind === "secret") input.value = input.readOnly ? maskKey(value) : value;
+    else input.value = value;
+    input.dataset.prev = stValueOf(row, input);
+  }
+}
+
+async function stCommit(row, input, rowEl) {
+  const value = stValueOf(row, input);
+  if (value === input.dataset.prev) return;
+  if (row.warn && !(await stConfirmRow(row, value))) {
+    stRevert(row, input);
+    stNote(rowEl, "", "");
+    return;
+  }
+  stNote(rowEl, "pending", "saving…");
+  let resp = null, data = null;
+  try {
+    resp = await fetch(row.confirm ? "/settings/confirm" : "/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: row.key, value }),
+    });
+    data = await resp.json();
+  } catch { /* falls through to the failure branch */ }
+  if (!resp || !resp.ok || (data && data.ok === false)) {
+    const why = (data && (data.detail || data.error)) || "could not save";
+    stNote(rowEl, "bad", "✕ " + why);
+    stRevert(row, input);
+    if (resp && resp.status === 409) stSetBusy(true);
+    return;
+  }
+  const keys = Object.keys(data.values || {});
+  stNote(rowEl, "good", keys.length > 1
+    ? `✓ ${keys.length} keys saved to ${data.path}`
+    : `✓ saved to ${data.path}`);
+  for (const [k, v] of Object.entries(data.values || {})) stSyncKey(k, v);
+  for (const n of data.notes || []) notify(n, "info");
+  if (data.reindex) {
+    const n = data.reindex.indexed ?? data.reindex.embedded ?? "";
+    stNote(rowEl, "good", `✓ saved to ${data.path} · re-indexed${n === "" ? "" : " " + n} notes`);
+  }
+  if (row.key === "SILICA_MODEL" || row.key === "SILICA_PROVIDER") loadConfig();
+  if (row.key === "SILICA_VAULT") { loadVault(); loadVaultInfo(); loadSessions(); }
+}
+
+// --- sheets: confirmations and the bug report, inside the modal so the focus
+// trap keeps holding.
+let stSheetResolve = null;
+function openSheet(title, body, actions) {
+  $("#st-sheet-title").textContent = title;
+  const bodyEl = stSheet.querySelector(".st-sheet-body");
+  const actEl = stSheet.querySelector(".st-sheet-actions");
+  bodyEl.innerHTML = "";
+  actEl.innerHTML = "";
+  bodyEl.appendChild(body);
+  for (const [label, fn, kind] of actions) {
+    const b = stEl("button", "st-btn " + (kind || ""), label);
+    b.type = "button";
+    b.addEventListener("click", () => fn());
+    actEl.appendChild(b);
+  }
+  stSheet.hidden = false;
+  actEl.querySelector("button").focus();
+}
+
+function closeSheet(answer) {
+  stSheet.hidden = true;
+  const resolve = stSheetResolve;
+  stSheetResolve = null;
+  if (resolve) resolve(!!answer);
+}
+
+// The consequence, named, before the change happens — and the button says what
+// it will do, not "ok".
+const ST_CONFIRM = {
+  SILICA_VAULT: (row, value) => [
+    "switch vault?",
+    `silica will read and write ${value} instead.\nevery index is rebuilt for the new folder.`,
+    "switch",
+  ],
+  SILICA_EMBEDDING_MODEL: (row) => [
+    "change the embedding model?",
+    `the vectors already stored were produced by ${row.value || "another model"}.\n` +
+    "new queries cannot be compared against them.\n" +
+    "repairing this means a full re-index, which takes a while on a large vault.",
+    "change and re-index",
+  ],
+  SILICA_EMBEDDING_BASE_URL: (row) => [
+    "change where embeddings come from?",
+    "a different server means different vectors, even under the same model name.\n" +
+    "repairing this means a full re-index.",
+    "change and re-index",
+  ],
+  SILICA_COOCCURRENCE_LANG: () => [
+    "change the vault language?",
+    "the language is frozen per vault. changing it after notes exist\n" +
+    "makes old keywords disagree with new ones.",
+    "change",
+  ],
+};
+
+function stConfirmRow(row, value) {
+  const build = ST_CONFIRM[row.key] || (() => [`change ${row.label}?`, row.warn, "change"]);
+  const [title, body, ok] = build(row, value);
+  const el = stEl("p", "st-sheet-text", body);
+  return new Promise((resolve) => {
+    stSheetResolve = resolve;
+    openSheet(title, el, [
+      ["cancel", () => closeSheet(false)],
+      [ok, () => closeSheet(true), "primary"],
+    ]);
+  });
+}
+
+// --- the three sections that are not config rows ------------------------------
+const ST_DOT = { ok: "●", warn: "◐", fail: "○", unknown: "○" };
+
+function stInfoRow(host, label, value, cls) {
+  const el = stEl("div", "st-row" + (cls ? " " + cls : ""));
+  el.dataset.search = `${label} ${value}`.toLowerCase();
+  el.appendChild(stEl("div", "st-label", label));
+  el.appendChild(stEl("div", "st-ctl-text", value));
+  host.appendChild(el);
+  return el;
+}
+
+async function renderEndpoints(host) {
+  host.querySelectorAll(".st-row, .st-note-line").forEach((e) => e.remove());
+  host.appendChild(stEl("div", "st-note-line",
+    "reachability is checked with a real request, not an open port"));
+  let rows = [];
+  try { rows = await (await fetch("/endpoints")).json(); }
+  catch { host.appendChild(stEl("div", "st-note-line", "could not probe the endpoints")); return; }
+  for (const e of rows) {
+    const row = stEl("div", "st-row");
+    row.dataset.search = `${e.label} ${e.url} endpoint`.toLowerCase();
+    const label = stEl("div", "st-label");
+    label.appendChild(stEl("span", "st-name", e.label));
+    label.appendChild(stEl("div", "st-help", e.url || "not configured"));
+    row.appendChild(label);
+    const state = stEl("div", "st-ctl-text " + (e.up ? "up" : "down"));
+    state.textContent = e.up
+      ? `● up${e.models ? ` · ${e.models} model${e.models === 1 ? "" : "s"}` : ""}`
+      : `○ down${e.command || !e.local ? "" : " · no start command set"}`;
+    row.appendChild(state);
+    const note = stEl("div", "st-note");
+    if (e.command) note.textContent = `start command read-only · edit ${e.command_key} in the .env`;
+    row.appendChild(note);
+    if (!e.up && e.local && e.command) {
+      const start = stEl("button", "st-btn", "start");
+      start.type = "button";
+      start.addEventListener("click", async () => {
+        start.disabled = true;
+        note.className = "st-note pending";
+        note.textContent = `starting ${e.label}… loading a model takes a while`;
+        let out = null;
+        try {
+          out = await (await fetch("/endpoints/start", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ label: e.label }),
+          })).json();
+        } catch { /* reported below */ }
+        if (out && out.ok) renderEndpoints(host);
+        else {
+          note.className = "st-note bad";
+          note.textContent = (out && out.error)
+            || `${e.label} did not come up · see ${out ? out.log : "~/.silica/logs"}`;
+          start.disabled = false;
+        }
+      });
+      state.appendChild(start);
+    }
+    host.appendChild(row);
+  }
+}
+
+async function renderDiagnostics(host) {
+  host.querySelectorAll(".st-row, .st-note-line").forEach((e) => e.remove());
+  let rows = [];
+  try { rows = await (await fetch("/health?all=1")).json(); }
+  catch { host.appendChild(stEl("div", "st-note-line", "could not run the checks")); return; }
+  if (!rows.length) { host.appendChild(stEl("div", "st-note-line", "everything checks out")); return; }
+  for (const r of rows) {
+    const el = stInfoRow(host, r.name, `${ST_DOT[r.status] || "○"} ${r.detail}`, "st-check-" + r.status);
+    if (r.hint) el.appendChild(stEl("div", "st-note", r.hint));
+  }
+}
+
+function renderAbout(host, data) {
+  host.querySelectorAll(".st-row, .st-note-line").forEach((e) => e.remove());
+  stInfoRow(host, "version", `silica ${data.version}`);
+  stInfoRow(host, "updates", data.behind
+    ? `${data.behind} commit${data.behind === 1 ? "" : "s"} behind · update with \`silica update\``
+    : "up to date");
+  const row = stEl("div", "st-row");
+  row.dataset.search = "report a bug issue github";
+  row.appendChild(stEl("div", "st-label", "report a bug"));
+  const btn = stEl("button", "st-btn st-safe", "report a bug");
+  btn.type = "button";
+  btn.addEventListener("click", () => openBugReport(data.issues_url));
+  const ctl = stEl("div", "st-ctl");
+  ctl.appendChild(btn);
+  row.appendChild(ctl);
+  host.appendChild(row);
+}
+
+// The attached payload is built by the server, not read off this panel: the API
+// key fields are one querySelector away from here, and an issue is public.
+async function openBugReport(fallbackUrl) {
+  let data = { payload: "", issues_url: fallbackUrl };
+  try { data = await (await fetch("/bug_report")).json(); } catch { /* file it bare */ }
+  const body = stEl("div", "st-bug");
+  body.appendChild(stEl("label", "st-bug-label", "what happened?"));
+  const what = stEl("textarea", "st-bug-what");
+  what.rows = 4;
+  what.placeholder = "what you did, what you expected, what happened instead";
+  body.appendChild(what);
+  body.appendChild(stEl("label", "st-bug-label", "this will be attached · edit it if you like"));
+  const payload = stEl("textarea", "st-bug-payload");
+  payload.rows = 8;
+  payload.value = data.payload;
+  body.appendChild(payload);
+  body.appendChild(stEl("div", "st-note-line",
+    "your vault path is shortened to ~ · api keys are never included"));
+  openSheet("report a bug", body, [
+    ["cancel", () => closeSheet(false)],
+    ["open on github ↗", () => {
+      const title = (what.value.trim().split("\n")[0] || "bug report").slice(0, 80);
+      const text = `${what.value.trim()}\n\n\`\`\`\n${payload.value}\n\`\`\`\n`;
+      window.open(
+        `${data.issues_url}?title=${encodeURIComponent(title)}&body=${encodeURIComponent(text)}`,
+        "_blank", "noopener");
+      closeSheet(true);
+    }, "primary"],
+  ]);
+  what.focus();
+}
+
+// --- render, filter, open, close ---------------------------------------------
+function stRender(data) {
+  stState.data = data;
+  stState.controls = [];
+  stPanel.innerHTML = "";
+  stTabs.innerHTML = "";
+  $("#st-env").textContent = data.env_path;
+  for (const section of data.sections) {
+    const el = stSectionEl(section.name);
+    for (const row of section.rows) el.appendChild(stRowEl(row));
+    stPanel.appendChild(el);
+  }
+  for (const name of ST_EXTRA) stPanel.appendChild(stSectionEl(name));
+  stPanel.appendChild(stEl("div", "st-empty"));
+  for (const name of [...data.sections.map((s) => s.name), ...ST_EXTRA]) {
+    const b = stEl("button", "st-tab", name);
+    b.type = "button";
+    b.dataset.section = name;
+    b.addEventListener("click", () => stShow(name));
+    stTabs.appendChild(b);
+  }
+  renderAbout(stPanel.querySelector('[data-section="About"]'), data);
+  renderEndpoints(stPanel.querySelector('[data-section="Endpoints"]'));
+  const diagnostics = stPanel.querySelector('[data-section="Diagnostics"]');
+  // The checks are a snapshot of a machine that keeps changing — starting the
+  // server this panel just told you was down is the whole point.
+  const recheck = stEl("button", "st-btn st-safe", "recheck");
+  recheck.type = "button";
+  recheck.addEventListener("click", () => renderDiagnostics(diagnostics));
+  diagnostics.querySelector(".st-section-title").appendChild(recheck);
+  renderDiagnostics(diagnostics);
+  stShow(stState.section);
+  stSetBusy(data.busy || streaming);
+}
+
+function stShow(name) {
+  stState.section = name;
+  stSearch.value = "";
+  stFilter();
+  stPanel.scrollTop = 0;
+}
+
+// The search reaches every section at once — the rows are already in the DOM,
+// so it needs no index and no second surface.
+function stFilter() {
+  const q = stSearch.value.trim().toLowerCase();
+  let hits = 0;
+  for (const section of stPanel.querySelectorAll(".st-section")) {
+    let any = 0;
+    for (const row of section.querySelectorAll(".st-row")) {
+      const hit = !q || (row.dataset.search || "").includes(q);
+      row.hidden = !hit;
+      if (hit) any++;
+    }
+    section.hidden = q ? !any : section.dataset.section !== stState.section;
+    if (!section.hidden) hits += any;
+  }
+  const empty = stPanel.querySelector(".st-empty");
+  empty.hidden = !(q && !hits);
+  empty.textContent = `no setting matches "${q}"`;
+  for (const b of stTabs.querySelectorAll(".st-tab"))
+    b.classList.toggle("active", !q && b.dataset.section === stState.section);
+}
+
+// One rule, not a list of which rows a turn happens to read: that list would rot
+// at the first new tool and no test would catch it.
+function stSetBusy(busy) {
+  $("#st-busy").hidden = !busy;
+  // `.st-safe` reads and writes nothing — rechecking the diagnostics or filing a
+  // bug is exactly what you want to do while a turn is misbehaving.
+  for (const el of stPanel.querySelectorAll("input, select, .st-btn:not(.st-safe), .st-eye")) {
+    if (el.dataset.locked === "1") continue;
+    el.disabled = !!busy;
+  }
+}
+
+function stTrapFocus(e) {
+  if (e.key !== "Tab" || stModal.hidden) return;
+  const scope = stSheet.hidden ? stModal : stSheet;
+  const focusable = [...scope.querySelectorAll(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+  )].filter((el) => el.offsetParent !== null && !el.closest("[hidden]"));
+  if (!focusable.length) return;
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+}
+
+async function openSettings() {
+  stBackdrop.hidden = false;
+  stModal.hidden = false;
+  settingsBtn.setAttribute("aria-expanded", "true");
+  stPanel.innerHTML = "";
+  stPanel.appendChild(stEl("div", "st-note-line", "reading your configuration…"));
+  stSearch.focus();
+  try {
+    stRender(await (await fetch("/settings")).json());
+  } catch {
+    stPanel.innerHTML = "";
+    stPanel.appendChild(stEl("div", "st-note-line", "could not read the settings"));
+  }
+}
+
+function closeSettings() {
+  if (!stSheet.hidden) closeSheet(false);
+  stModal.hidden = true;
+  stBackdrop.hidden = true;
+  settingsBtn.setAttribute("aria-expanded", "false");
+  // Always the gear, not wherever focus happened to be: it is the control the
+  // modal came out of, and it is where a keyboard user expects to land back.
+  settingsBtn.focus();
+}
+
+settingsBtn.addEventListener("click", () => {
+  if (stModal.hidden) openSettings(); else closeSettings();
+});
+$("#st-close").addEventListener("click", closeSettings);
+stBackdrop.addEventListener("click", closeSettings);
+stSearch.addEventListener("input", stFilter);
+document.addEventListener("keydown", stTrapFocus);
+
 // One Escape handler for the whole app: there used to be two independent ones,
 // so a single press with a panel open over a note closed both at once.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  // The settings modal is the only surface with a backdrop: whatever is under
+  // it is unreachable, so it answers first, and its own sheet before it.
+  if (!stSheet.hidden) { closeSheet(); return; }
+  if (!stModal.hidden) { closeSettings(); return; }
   if (!sttPanel.hidden) { sttPanel.hidden = true; return; }
   if (!helpPanel.hidden) { closeHelpPanel(); return; }
-  if (!sessionPanel.hidden) { closeSessionPanel(); return; }
   closeNote();
 });
 

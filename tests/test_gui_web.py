@@ -117,6 +117,22 @@ def test_index_cache_busts_churning_assets(client):
     assert "/static/app.js\"" not in html, "unversioned app.js reference still present"
 
 
+def test_quick_action_segments_name_real_commands():
+    """The launch pad prefills the composer, so a stale segment would hand the
+    user a command the turn answers 'not available' to."""
+    import re
+
+    from silica.ui.commands import COMMANDS
+    from silica.ui.web import server
+
+    html = (Path(server.__file__).parent / "static" / "index.html").read_text()
+    pad = html.split('id="quick-actions"')[1].split("</div>")[0]
+    offered = set(re.findall(r'data-action="(/[a-z-]+)"', pad))
+    live = {c.name for c in COMMANDS if not c.repl_only}
+    assert offered, "no command segments found in the quick-action pad"
+    assert offered <= live, f"quick actions offer dead commands: {offered - live}"
+
+
 def _repl_dispatched_commands() -> set[str]:
     """Command names the REPL's three dispatchers recognise, read off their source.
 

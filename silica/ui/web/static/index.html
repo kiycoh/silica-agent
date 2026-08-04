@@ -20,7 +20,12 @@
     </nav>
     <div class="spacer"></div>
     <div class="ctx-tokens" id="ctx-tokens" title="context window usage" aria-hidden="true"></div>
-    <button id="model-btn" class="ghost" title="session config" aria-label="session config" aria-haspopup="dialog" aria-expanded="false"><span id="model-name">model</span></button>
+    <!-- the gear alone: which model answers you is a fact about the conversation,
+         so it reads under the composer (#chat-models) where the conversation is,
+         not in a toolbar of icons -->
+    <button id="settings-btn" class="ghost" title="settings" aria-label="settings" aria-haspopup="dialog" aria-expanded="false">
+      <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6 1.65 1.65 0 0 0 10 3.09V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+    </button>
     <button id="help-btn" class="ghost" title="keyboard shortcuts and what this app can do" aria-label="help" aria-haspopup="dialog" aria-expanded="false">?</button>
     <div id="help-panel" hidden role="dialog" aria-label="help">
       <div class="sp-title">keyboard</div>
@@ -33,19 +38,17 @@
       <div class="hp-row"><span class="hp-what">click SILICA</span><span>starts a new chat; the old one stays in History</span></div>
       <div class="hp-row"><span class="hp-what">every write</span><span>gets a card in the transcript with its own revert</span></div>
       <div class="hp-row"><span class="hp-what">the mic</span><span>dictates into the message; needs a local transcription endpoint</span></div>
+      <!-- the two renderer buttons are labelled 3D and 2D and nothing else; what
+           separates them lives here, not in a longer button -->
+      <div class="sp-title">explore</div>
+      <div class="hp-row"><span class="hp-what">3D</span><span>spatial layout of the whole vault, no node labels</span></div>
+      <div class="hp-row"><span class="hp-what">2D</span><span>readable node labels, and the semantic zones are drawn as hulls</span></div>
     </div>
     <button id="note-last" class="ghost" title="reopen last note" aria-label="reopen last note">
       <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0; color:var(--accent);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
       <span></span>
     </button>
     <button id="stop" class="ghost" hidden aria-label="stop the current response">&#9632; stop</button>
-    <div id="session-panel" hidden role="dialog" aria-label="session config">
-      <div class="sp-title">session</div>
-      <div class="sp-row"><span class="sp-key">model</span><span class="sp-val" id="sp-model">&mdash;</span></div>
-      <div class="sp-row"><span class="sp-key">provider</span><span class="sp-val" id="sp-provider">&mdash;</span></div>
-      <div class="sp-row"><span class="sp-key">context</span><span class="sp-val" id="sp-ctx">&mdash;</span></div>
-      <label class="sp-toggle"><span>thinking</span><input type="checkbox" id="sp-thinking" /></label>
-    </div>
   </header>
 
   <main>
@@ -56,7 +59,7 @@
         <div class="stat-grid">
           <div class="stat"><div class="val" id="stat-notes">&mdash;</div><div class="lbl">Notes</div></div>
           <div class="stat"><div class="val" id="stat-links">&mdash;</div><div class="lbl">Links</div></div>
-          <div class="stat"><div class="val" id="stat-clusters">&mdash;</div><div class="lbl">Clusters</div></div>
+          <div class="stat" title="Louvain communities over the resolved wikilinks: the structural partition. The graph's semantic zones are a different grouping and are counted there."><div class="val" id="stat-clusters">&mdash;</div><div class="lbl">Clusters</div></div>
           <div class="stat" title="unresolved wikilinks: targets that do not exist yet"><div class="val warn" id="stat-unresolved">&mdash;</div><div class="lbl">Broken</div></div>
         </div>
         <!-- boot health: configuration that is still true ten minutes in, so it
@@ -86,11 +89,24 @@
     <section id="view-chat" class="view active">
       <div id="log" aria-label="conversation transcript" data-caption="vault ready · type below, or drop a file to nucleate"></div>
       <div id="attachments" hidden></div>
+      <!-- one control, not four chips: the pill marks what the NEXT message will
+           do. It follows the composer's leading command, so a segment can never
+           claim a mode the box isn't in. "ask" is the resting state and the way
+           back out of a prefilled command. -->
       <div id="quick-actions">
-        <button type="button" class="qa" data-action="attach">nucleate a file</button>
-        <button type="button" class="qa" data-action="/report">report</button>
-        <button type="button" class="qa" data-action="/organize">organize</button>
-        <button type="button" class="qa" data-action="graph">explore graph</button>
+        <div class="qa-track" role="group" aria-label="what your next message does">
+          <span id="qa-pill" aria-hidden="true"></span>
+          <button type="button" class="qa" data-action="" aria-pressed="true" title="plain question, answered from the vault">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.5 9.9 9.9 0 0 1-4.2-.9L3 20l1.9-4.6A8.4 8.4 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.5 8.5 0 0 1 21 11.5z"></path></svg>ask</button>
+          <button type="button" class="qa" data-action="/nucleate" aria-pressed="false" title="bring files into the vault: name a path, use + below, or just drop them here">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="12" y1="18" x2="12" y2="12"></line><line x1="9" y1="15" x2="15" y2="15"></line></svg>nucleate a file</button>
+          <button type="button" class="qa" data-action="/fetch" aria-pressed="false" title="read one URL (a YouTube link gives its transcript) into the inbox">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"></path><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"></path></svg>fetch a link</button>
+          <button type="button" class="qa" data-action="/report" aria-pressed="false" title="structural audit of the vault">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="20" x2="6" y2="13"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="18" y1="20" x2="18" y2="9"></line></svg>report</button>
+          <button type="button" class="qa" data-action="/organize" aria-pressed="false" title="classify and reorganize notes by a taxonomy you describe">
+            <svg aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>organize</button>
+        </div>
       </div>
       <form id="composer">
         <div class="composer-shell">
@@ -104,17 +120,22 @@
           <button type="submit" id="send">send</button>
         </div>
       </form>
+      <!-- who answers you, under the thing you are writing to. A session fact,
+           not a per-message one: the worker model runs distilling and prep, so
+           stamping it on a turn would say something false. Click → settings,
+           which is where the old header chip used to lead. -->
+      <button type="button" id="chat-models" title="which models this session uses · click to open settings"></button>
     </section>
 
     <section id="view-graph" class="view">
       <div id="graph-bar">
         <div class="gmode-tabs">
-          <button type="button" class="active" data-gmode="graph" title="wikilink structure + semantic k-NN overlay; toggle the layers in the HUD">network</button>
+          <button type="button" class="active" data-gmode="graph" title="wikilink structure + semantic k-NN overlay; toggle the layers in the HUD">graph</button>
           <button type="button" data-gmode="map" title="radial map rooted on one note">map</button>
         </div>
 
-        <!-- network + map modes: fuzzy note search. Pick → fly the graph camera
-             (network) or root the radial map (map). Index built from the tree. -->
+        <!-- graph + map modes: fuzzy note search. Pick → fly the graph camera
+             (graph) or root the radial map (map). Index built from the tree. -->
         <div id="node-search-wrap" class="gbar-controls">
           <label class="gbar-f gbar-grow"><span class="gbar-lbl">find a note</span>
             <input id="node-search" type="text" placeholder="type a note name…" autocomplete="off" /></label>
@@ -239,6 +260,37 @@
 SILICA_STT_SERVE_CMD="whisper-server -m ggml-base.bin --port 1236"</pre>
     <p>With the second one set, silica starts the server itself on the next launch and waits for it to load.</p>
     <button type="button" id="stt-close" class="ghost">close</button>
+  </div>
+
+  <!-- settings. A modal rather than another header dropdown: this is the one
+       surface in the app you come to on purpose and leave when you are done,
+       and it holds a nav of eight sections. Rows are built in JS from
+       /settings — the table lives in silica/ui/web/settings.py, so the panel
+       and the writer cannot disagree about what a setting is. -->
+  <div id="st-backdrop" hidden></div>
+  <div id="st-modal" hidden role="dialog" aria-modal="true" aria-label="settings">
+    <header>
+      <span class="st-head">settings</span>
+      <span class="st-env" id="st-env"></span>
+      <button type="button" id="st-close" class="ghost" title="close" aria-label="close settings">&#10005;</button>
+    </header>
+    <div id="st-busy" class="st-banner" hidden>a response is running &middot; settings apply once it finishes</div>
+    <div class="st-body">
+      <nav id="st-nav" aria-label="settings sections">
+        <input id="st-search" type="text" placeholder="search settings&hellip;" autocomplete="off" aria-label="search settings" />
+        <div id="st-tabs"></div>
+      </nav>
+      <div id="st-panel" tabindex="-1"></div>
+    </div>
+    <!-- confirmations and the bug report are sheets INSIDE the modal, so the
+         focus trap keeps holding while one is open -->
+    <div id="st-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="st-sheet-title">
+      <div class="st-sheet-inner">
+        <div class="st-sheet-title" id="st-sheet-title"></div>
+        <div class="st-sheet-body"></div>
+        <div class="st-sheet-actions"></div>
+      </div>
+    </div>
   </div>
 
   <div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
