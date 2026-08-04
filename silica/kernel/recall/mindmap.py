@@ -10,16 +10,24 @@ materialise a MapView (an Obsidian `.canvas` file and the web GUI's static SVG)
 show the *identical* map and cannot diverge.
 
 Complementary to `graph_export` (which draws the flat whole-vault network): `/graph`
-is the network, `/map <note>` is a rooted, radial tree.
+is the network, `/map <note>` is a rooted association field.
 
-Layout is deterministic (same input → same positions, no `random`, no physics) and
-non-overlap is guaranteed *by construction*: every pair of node centres ends up at
-euclidean distance ≥ hypot(W, H), which is a sufficient condition for two equal
-axis-aligned boxes never to overlap.
+Both polar coordinates carry data (viewers read display distance as semantic
+distance — the distance-similarity metaphor — so they had better agree):
+radius is the association cost to the root (weighted shortest path: wikilink
+hop = 1.0, latent tie = 1/normalised strength), and angular neighbours are
+ordered by embedding similarity inside each community wedge.
+
+Layout is deterministic (same input → same positions, no `random`, no physics)
+and non-overlap is guaranteed by placement order: nodes are placed
+closest-first and each slides outward along its own angle until it clears
+every already-placed card (exact AABB check against the fixed box size).
 """
 from __future__ import annotations
 
+import heapq
 import math
+import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
@@ -47,6 +55,8 @@ class MapNode:
     community: int   # global Louvain membership (reused from graph_export); -1 = none
     hop: int         # 0 = root, 1, 2
     subtitle: str | None = None
+    cost: float = 0.0    # association cost to the root (radius input); 0 = root
+    degree: int = 0      # global wikilink degree — landmark salience, not layout
 
 
 @dataclass
@@ -69,12 +79,17 @@ class MapMaterials:
     """Everything build_mapview needs, injectable so tests need no live vault.
 
     `graph` is an undirected view of the wikilink graph (ids carry `.md`).
-    `latent` is the already-normalised relatedness leg: (id_with_md, title, weight).
+    `latent` is the relatedness leg in fused-ranking order: (id_with_md, title,
+    strength) where strength is a native 0-1 signal (embed cosine / edge
+    Jaccard), NOT the RRF score — the radius consumes it as 1/strength.
     """
     graph: object                         # nx.Graph-like: supports `in` and .neighbors()
     titles: dict[str, str]                # id -> display title
     community_of: dict[str, int]          # id -> global community (missing ⇒ -1)
     latent: list[tuple[str, str, float]] = field(default_factory=list)
+    latent_evidence: dict[str, str] = field(default_factory=dict)  # id -> display "why"
+    sim: object | None = None             # (id, id) -> cosine, or None to abstain
+    link_context: object | None = None    # (parent_id, child_id) -> anchor line | None
 
 
 def node_color(community: int) -> str:
@@ -123,56 +138,162 @@ def _select(
     *,
     max_nodes: int,
     hops: int,
-) -> dict[str, tuple[int, str | None]]:
+) -> tuple[dict[str, tuple[int, str | None]], set[str]]:
     """Pick the capped node set: root + wikilink BFS + latent, priority-ordered.
 
-    Returns selected: id -> (hop, parent). Priority tiers (kept top `max_nodes`):
-    root, wikilink hop-1, wikilink hop-2, latent — so wikilink hop-1 always
-    outranks latent neighbours.
+    Returns (selected, latent_only): selected is id -> (hop, parent);
+    latent_only are the ids that entered through the latent leg alone.
+    Priority tiers (kept top `max_nodes`): root, wikilink hop-1, deeper
+    wikilink hops, then latent in list order — `materials.latent` arrives in
+    fused-ranking order, so the index IS the selection priority (the per-item
+    strength is a radius signal, not a ranking one).
     """
     reached = _bfs(root, materials.graph, hops=hops)
-    candidates: list[tuple[int, float, str]] = []  # (tier, -weight, id) sort key
+    candidates: list[tuple[int, float, str]] = []  # (tier, rank, id) sort key
 
     for nid, (hop, _parent) in reached.items():
         if nid == root:
             continue
         tier = 1 if hop == 1 else 2  # hop-1 outranks all deeper wikilink hops
-        candidates.append((tier, -1.0, nid))
+        candidates.append((tier, 0.0, nid))
 
-    for lid, _title, score in materials.latent:
+    for i, (lid, _title, _strength) in enumerate(materials.latent):
         if lid == root or lid in reached:
             continue
-        candidates.append((3, -float(score), lid))
+        candidates.append((3, float(i), lid))
 
     candidates.sort()
     kept = {root}
-    for _tier, _negw, nid in candidates[: max(0, max_nodes - 1)]:
+    for _tier, _rank, nid in candidates[: max(0, max_nodes - 1)]:
         kept.add(nid)
 
     selected: dict[str, tuple[int, str | None]] = {root: (0, None)}
+    latent_only: set[str] = set()
     for nid in kept:
         if nid == root:
             continue
         if nid in reached:
             selected[nid] = reached[nid]
         else:
-            selected[nid] = (1, root)  # latent neighbours hang off the root at hop 1
-    return selected
+            selected[nid] = (1, root)  # latent neighbours hang off the root
+            latent_only.add(nid)
+    return selected, latent_only
 
 
 # ---------------------------------------------------------------------------
-# Radial wedge layout (deterministic; the only new algorithmic piece)
+# Radial association layout (deterministic; the only new algorithmic piece)
 # ---------------------------------------------------------------------------
 
-def _layout(nodes: list[MapNode], parent: dict[str, str | None]) -> None:
+def _similarity_chain(members: list[MapNode], sim: object | None) -> list[MapNode]:
+    """Greedy nearest-neighbour ordering: each next node is the one most
+    similar to the last placed, so angular neighbours are semantic ones.
+    Falls back to id order when there is no similarity signal."""
+    rest = sorted(members, key=lambda n: n.id)
+    if sim is None or len(rest) < 3:
+        return rest
+    out = [rest.pop(0)]
+    while rest:
+        rest.sort(key=lambda n: (-sim(out[-1].id, n.id), n.id))
+        out.append(rest.pop(0))
+    return out
+
+
+def _wedge_order(by_comm: dict[int, list[MapNode]], sim: object | None) -> list[int]:
+    """Communities as an angular sequence: largest first, then greedy by mean
+    cross-similarity, so related communities share a wedge border."""
+    comms = sorted(by_comm)
+    if sim is None or len(comms) < 3:
+        return comms
+
+    def cross(a: int, b: int) -> float:
+        vals = [sim(x.id, y.id) for x in by_comm[a] for y in by_comm[b]]
+        return sum(vals) / len(vals) if vals else 0.0
+
+    rest = sorted(comms, key=lambda c: (-len(by_comm[c]), c))
+    out = [rest.pop(0)]
+    while rest:
+        rest.sort(key=lambda c: (-cross(out[-1], c), c))
+        out.append(rest.pop(0))
+    return out
+
+
+# A wikilink's cost band. The floor is the map's anchor (the tightest tie of
+# either kind costs exactly 1.0); the ceiling stays under 2.0 so ONE wikilink,
+# however loose, never costs more than two tight ones — the written link keeps
+# its structural rank over any chain that replaces it.
+_WIKI_COST_SPAN = 0.9
+
+
+def _association_costs(
+    root: str, edges: list[MapEdge], ids: set[str], sim: object | None = None
+) -> dict[str, float]:
+    """Weighted shortest-path cost root → every selected node (Dijkstra).
+
+    Edge costs. Latent: s_max/s, where s_max is the best latent strength on the
+    map — the strongest inferred tie costs exactly one tight wikilink. Wikilink:
+    1.0 + span·(1 − t), where t is the pair's embedding similarity min-max
+    normalised over the map's own wikilinks. Both legs are normalised WITHIN the
+    map because embed cosine and edge Jaccard share a 0-1 range but not a
+    calibration; only their ratios are trusted.
+
+    Flat 1.0 without a similarity signal — which is also what kept hub roots
+    degenerate: a root whose neighbours fill the node cap put every one of them
+    at cost 1.0, so radius carried nothing and the collision slide (alphabetical)
+    decided the spread. Similarity is what makes the band continuous there.
+    """
+    latent_s = [e.weight for e in edges if e.kind == "latent" and e.weight > 0]
+    s_max = max(latent_s) if latent_s else 1.0
+
+    wiki_sim: dict[int, float] = {}
+    if sim is not None:
+        for i, e in enumerate(edges):
+            if e.kind == "wikilink":
+                wiki_sim[i] = sim(e.src, e.dst)
+    lo, hi = (min(wiki_sim.values()), max(wiki_sim.values())) if wiki_sim else (0.0, 0.0)
+
+    def wiki_cost(i: int) -> float:
+        if i not in wiki_sim or hi <= lo:
+            return 1.0
+        t = (wiki_sim[i] - lo) / (hi - lo)
+        return 1.0 + _WIKI_COST_SPAN * (1.0 - t)
+
+    adj: dict[str, list[tuple[str, float]]] = defaultdict(list)
+    for i, e in enumerate(edges):
+        w = wiki_cost(i) if e.kind == "wikilink" else s_max / max(float(e.weight), 1e-6)
+        adj[e.src].append((e.dst, w))
+        adj[e.dst].append((e.src, w))
+
+    dist = {root: 0.0}
+    heap: list[tuple[float, str]] = [(0.0, root)]   # node id breaks ties ⇒ deterministic
+    while heap:
+        d, u = heapq.heappop(heap)
+        if d > dist.get(u, math.inf):
+            continue
+        for v, w in sorted(adj[u]):
+            nd = d + w
+            if nd < dist.get(v, math.inf) - 1e-12:
+                dist[v] = nd
+                heapq.heappush(heap, (nd, v))
+
+    far = max(dist.values(), default=0.0) + 1.0     # disconnected safety: park at the rim
+    for nid in ids:
+        dist.setdefault(nid, far)
+    return dist
+
+
+def _layout(nodes: list[MapNode], *, costs: dict[str, float], sim: object | None = None) -> None:
     """Place nodes radially, mutating each node's x/y. Root stays at (0, 0).
 
-    360° is partitioned into one wedge per community present, width ∝ the
-    community's node count. hop-1 sit on ring r1, hop-2 on ring r2, each spread
-    across their community's wedge (hop-2 ordered by their parent's angle so
-    children trail their parents — ponytail: the spec's "fan centred on parent"
-    degrades to within-wedge ordering, which keeps every node inside its own
-    community wedge). Radii are scaled so no two boxes overlap.
+    Angle: 360° is partitioned into one contiguous wedge per community, width
+    ∝ the community's node count; wedges and the siblings inside them are
+    ordered by similarity chains (see _wedge_order/_similarity_chain), so
+    angular proximity reads as semantic proximity.
+
+    Radius: association cost mapped into a radial band — closer to the root ⇒
+    more strongly tied. Non-overlap is guaranteed by placement order: nodes
+    are placed cheapest-first and each slides outward along its own angle
+    until it clears every already-placed card (exact AABB test), so a node
+    only ever moves AWAY from its data-given radius, never inward.
     """
     non_root = [n for n in nodes if n.hop > 0]
     if not non_root:
@@ -183,60 +304,44 @@ def _layout(nodes: list[MapNode], parent: dict[str, str | None]) -> None:
         by_comm[n.community].append(n)
 
     total = len(non_root)
-    wedge: dict[int, tuple[float, float]] = {}
+    order = _wedge_order(by_comm, sim)
+    angle: dict[str, float] = {}
     cursor = 0.0
-    for c in sorted(by_comm):                       # sorted ⇒ deterministic
+    for c in order:
         width = 2 * math.pi * len(by_comm[c]) / total
-        wedge[c] = (cursor, cursor + width)
+        members = _similarity_chain(by_comm[c], sim)
+        slot = width / len(members)
+        for i, n in enumerate(members):
+            angle[n.id] = cursor + (i + 0.5) * slot
         cursor += width
 
-    # Two rings only: hop-1 inner, everything deeper on the outer ring.
-    def _ring(hop: int) -> int:
-        return 1 if hop == 1 else 2
+    cmin = min(costs[n.id] for n in non_root)
+    cmax = max(costs[n.id] for n in non_root)
+    # More nodes ⇒ a wider band, capped: the band buys radial fidelity and pays
+    # in card legibility (the viewBox fits the whole map, so a wider band shrinks
+    # every card). Measured on a 34-node hub map, cost↔radius correlation vs the
+    # map's outer radius: ×2.5→.88/892, ×3→.91/958, ×4→.97/1146, ×6.8→1.00/1787.
+    # ×3 is the knee — the text is still readable and the gradient still reads.
+    spread = _DIAG * min(3.0, max(2.0, total / 5.0))
 
-    angle: dict[str, float] = {}
-    slots: dict[int, list[float]] = {1: [], 2: []}  # slot widths per ring, for min-gap
+    def desired(c: float) -> float:
+        t = (c - cmin) / (cmax - cmin) if cmax > cmin else 0.0
+        return _DIAG + t * spread                   # _DIAG floor clears the root box
 
-    # Ring 1 first (hop-1), so ring-2 can be ordered by their parent's angle.
-    for c in sorted(by_comm):
-        start, end = wedge[c]
-        ring1 = sorted((n for n in by_comm[c] if _ring(n.hop) == 1), key=lambda n: n.id)
-        if ring1:
-            slot = (end - start) / len(ring1)
-            slots[1].append(slot)
-            for i, n in enumerate(ring1):
-                angle[n.id] = start + (i + 0.5) * slot
-
-    for c in sorted(by_comm):
-        start, end = wedge[c]
-        center = (start + end) / 2
-        ring2 = sorted(
-            (n for n in by_comm[c] if _ring(n.hop) == 2),
-            key=lambda n: (angle.get(parent.get(n.id) or "", center), n.id),
-        )
-        if ring2:
-            slot = (end - start) / len(ring2)
-            slots[2].append(slot)
-            for i, n in enumerate(ring2):
-                angle[n.id] = start + (i + 0.5) * slot
-
-    def ring_radius(ring: int) -> float:
-        count = sum(1 for n in non_root if _ring(n.hop) == ring)
-        r = _DIAG                                   # root ↔ ring-1 spacing floor
-        if count >= 2 and slots[ring]:
-            min_gap = min(slots[ring])              # ≤ π when count ≥ 2 ⇒ sin > 0
-            r = max(r, _DIAG / (2 * math.sin(min_gap / 2)))
-        return r
-
-    r1 = ring_radius(1)
-    r2 = max(ring_radius(2), r1 + _DIAG)            # outer ring clears the inner by ≥ diag
-    radius = {1: r1, 2: r2}
-
-    for n in non_root:
+    placed = [n for n in nodes if n.hop == 0]       # the root blocks the centre
+    step = _DIAG / 3
+    for n in sorted(non_root, key=lambda m: (costs[m.id], m.id)):
         a = angle[n.id]
-        r = radius[_ring(n.hop)]
-        n.x = r * math.cos(a)
-        n.y = r * math.sin(a)
+        ca, sa = math.cos(a), math.sin(a)
+        r = desired(costs[n.id])
+        guard = 0
+        while guard < 2000 and any(
+            abs(r * ca - p.x) < BOX_W and abs(r * sa - p.y) < BOX_H for p in placed
+        ):
+            r += step
+            guard += 1
+        n.x, n.y = r * ca, r * sa
+        placed.append(n)
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +357,14 @@ def build_mapview(
 ) -> MapView:
     """Build a MapView rooted on `root` from injected materials (pure)."""
     root = _with_md(root)
-    selected = _select(root, materials, max_nodes=max_nodes, hops=hops)
+    selected, latent_only = _select(root, materials, max_nodes=max_nodes, hops=hops)
+    graph = materials.graph
+
+    def _degree(nid: str) -> int:
+        try:
+            return len(list(graph.neighbors(nid))) if nid in graph else 0
+        except Exception:
+            return 0
 
     parent = {nid: p for nid, (_hop, p) in selected.items()}
     nodes: list[MapNode] = []
@@ -267,16 +379,15 @@ def build_mapview(
                 community=materials.community_of.get(nid, -1),
                 hop=hop,
                 subtitle=nid.rsplit("/", 1)[0] if "/" in nid else None,
+                degree=_degree(nid),
             )
         )
-    _layout(nodes, parent)
 
     ids = {n.id for n in nodes}
     edges: list[MapEdge] = []
     seen_pairs: set[tuple[str, str]] = set()
 
     # Wikilink edges: any graph edge among the selected nodes (tree + cross-branch).
-    graph = materials.graph
     for u in ids:
         if u not in graph:
             continue
@@ -290,7 +401,7 @@ def build_mapview(
             edges.append(MapEdge(src=key[0], dst=key[1], kind="wikilink", weight=1.0))
 
     # Latent edges: root → each surviving latent neighbour not already wiki-linked.
-    for lid, _title, score in materials.latent:
+    for lid, _title, strength in materials.latent:
         lid = _with_md(lid)
         if lid not in ids or lid == root:
             continue
@@ -298,8 +409,27 @@ def build_mapview(
         if key in seen_pairs:
             continue
         seen_pairs.add(key)
-        edges.append(MapEdge(src=root, dst=lid, kind="latent", weight=float(score)))
+        edges.append(MapEdge(src=root, dst=lid, kind="latent", weight=float(strength)))
 
+    costs = _association_costs(root, edges, ids, materials.sim)
+    for n in nodes:
+        n.cost = costs[n.id]
+
+    # Subtitle = the WHY of the relation, when the materials can supply it:
+    # the anchor line for wikilinks, the leg evidence for latent ties. The
+    # folder path (set above) stays as the fallback and as the root's own.
+    for n in nodes:
+        if n.hop == 0:
+            continue
+        if n.id in latent_only:
+            n.subtitle = materials.latent_evidence.get(n.id) or n.subtitle
+        elif materials.link_context is not None:
+            p = parent.get(n.id)
+            ctx = materials.link_context(p, n.id) if p else None
+            if ctx:
+                n.subtitle = ctx
+
+    _layout(nodes, costs=costs, sim=materials.sim)
     return MapView(root=root, nodes=nodes, edges=edges)
 
 
@@ -380,10 +510,12 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
     """Render a MapView as a self-contained, interactive SVG page.
 
     Consumes the precomputed positions (no force layout ⇒ cannot diverge from the
-    canvas). Cards carry a community wash + full-strength community border;
-    wikilink edges are solid
-    curves with an arrowhead on true parent→child hops (same-ring wikilinks and
-    all latent edges stay arrowless — they aren't "downstream" relationships).
+    canvas). Radius encodes association strength (closer = stronger tie), so the
+    guide circles mark the nearest/mid/farthest association distance actually on
+    the map. Cards carry a community wash + community border whose weight scales
+    with the note's wikilink degree (hubs read as landmarks); wikilink edges are
+    solid curves with an arrowhead on true parent→child hops (same-tier wikilinks
+    and all latent edges stay arrowless — they aren't "downstream" relationships).
     Pan/zoom/click-to-focus are plain SVG + vanilla JS (no new dependency),
     mirroring the dim-on-focus idiom already shipped for /graph.
     """
@@ -398,15 +530,14 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
     vb_w = (max(xs) - min(xs)) + 2 * pad
     vb_h = (max(ys) - min(ys)) + 2 * pad
 
-    # Every node at a given hop sits on the exact same radius (see _layout), so
-    # any representative node gives the ring's true radius — a real structural
-    # readout, not a decorative circle.
-    ring_r = {n.hop: math.hypot(n.x, n.y) for n in mv.nodes if n.hop in (1, 2)}
+    # Radius is data (association cost), so the guides mark the real extremes:
+    # nearest node, farthest node, and the midpoint between them.
+    rs = sorted(math.hypot(n.x, n.y) for n in mv.nodes if n.hop > 0)
+    guide_rs = sorted({rs[0], (rs[0] + rs[-1]) / 2, rs[-1]}) if rs else []
     guide_svg = "".join(
-        f'<circle class="ring-guide" cx="0" cy="0" r="{r:.1f}"/>'
-        for r in sorted(set(ring_r.values()))
+        f'<circle class="ring-guide" cx="0" cy="0" r="{r:.1f}"/>' for r in guide_rs
     )
-    halo_r = min(70.0, ring_r.get(1, 110.0) * 0.55)
+    halo_r = min(70.0, (rs[0] if rs else 200.0) * 0.55)
 
     edge_svg = []
     for e in mv.edges:
@@ -437,15 +568,25 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
         )
 
     node_svg = []
+    deg_max = max((n.degree for n in mv.nodes), default=0)
     for n in mv.nodes:
         color = node_color(n.community)
         rx, ry = n.x - BOX_W / 2, n.y - BOX_H / 2
         root_cls = " root" if n.hop == 0 else ""
         title_esc = html.escape(n.title)
         sub_html = f'<div class="card-sub">{html.escape(n.subtitle)}</div>' if n.subtitle else ""
+        # Landmark salience: border weight + wash track the note's wikilink
+        # degree (relative to the map's own hub). Visual weight only — box
+        # geometry is fixed, so the layout's non-overlap guarantee holds.
+        t = (n.degree / deg_max) if deg_max else 0.0
+        style = f"--fo:{0.12 + 0.14 * t:.3f};--sw:{1.2 + 1.6 * t:.2f}"
+        tip = html.escape("\n".join(
+            s for s in (n.title, n.subtitle or "", f"{n.degree} links") if s
+        ))
         node_svg.append(
             f'<g class="card{root_cls}" data-id="{html.escape(n.id, quote=True)}" '
-            f'transform="translate({rx:.1f},{ry:.1f})">'
+            f'style="{style}" transform="translate({rx:.1f},{ry:.1f})">'
+            f'<title>{tip}</title>'
             f'<rect class="frame" width="{BOX_W}" height="{BOX_H}" rx="10" '
             f'fill="{color}" stroke="{color}"/>'
             f'<foreignObject x="14" y="0" width="{BOX_W - 28}" height="{BOX_H}">'
@@ -480,9 +621,10 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
   .edge.dim{{opacity:.1}}
   .card{{cursor:pointer;transition:opacity .15s ease}}
   .card.dim{{opacity:.3}}
-  .card .frame{{fill-opacity:.15;stroke-opacity:1;stroke-width:1.5;
+  /* --fo/--sw are set inline per card: degree-scaled wash + border weight. */
+  .card .frame{{fill-opacity:var(--fo,.15);stroke-opacity:1;stroke-width:var(--sw,1.5);
                 filter:drop-shadow(0 2px 6px rgba(0,0,0,.55))}}
-  .card:hover .frame{{fill-opacity:.24}}
+  .card:hover .frame{{fill-opacity:calc(var(--fo,.15) + .09)}}
   .card.root .frame{{stroke:var(--cyan);stroke-opacity:1;stroke-width:2.5}}
   .card-body{{font-family:var(--mono);height:100%;display:flex;flex-direction:column;
               justify-content:center;gap:3px;pointer-events:none;overflow:hidden}}
@@ -501,6 +643,7 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
   .legend-row{{display:flex;align-items:center;gap:7px}}
   .swatch{{width:20px;height:0;border-top:2px solid var(--cyan)}}
   .swatch.dashed{{border-top-style:dashed;border-color:var(--ash-dim)}}
+  .legend-hint{{font-size:10px;color:var(--ash-dim);letter-spacing:.02em}}
 </style>
 </head>
 <body>
@@ -526,6 +669,8 @@ def render_map_svg(mv: MapView, title: str = "Mindmap") -> str:
   <div id="legend">
     <div class="legend-row"><span class="swatch"></span>wikilink</div>
     <div class="legend-row"><span class="swatch dashed"></span>related (≈)</div>
+    <div class="legend-hint">closer = stronger tie</div>
+    <div class="legend-hint">bolder = more linked</div>
   </div>
 </div>
 <script>
@@ -706,8 +851,6 @@ def reading_path(
 
     prev: dict[str, tuple[str | None, str]] = {src: (None, "start")}
     if weighted:
-        import heapq
-
         dist = {src: 0.0}
         heap: list[tuple[float, str]] = [(0.0, src)]  # node id breaks ties ⇒ deterministic
         while heap:
@@ -744,8 +887,106 @@ def reading_path(
     return steps
 
 
+_WIKILINK_ALIAS = re.compile(r"\[\[([^\]|]+)\|([^\]]+)\]\]")
+_WIKILINK = re.compile(r"\[\[([^\]]+)\]\]")
+
+
+def _unwrap_line(line: str) -> str:
+    """A body line stripped to prose: wikilinks unwrapped (alias wins), bold
+    and backtick markers removed, list/heading markers dropped, whitespace
+    collapsed."""
+    s = _WIKILINK_ALIAS.sub(r"\2", line)
+    s = _WIKILINK.sub(r"\1", s)
+    s = re.sub(r"\*\*|`", "", s)
+    return " ".join(s.strip().lstrip("#>*- \t").split())
+
+
+def _clean_snippet(line: str, limit: int = 96) -> str:
+    s = _unwrap_line(line)
+    return s if len(s) <= limit else s[: limit - 1].rstrip() + "…"
+
+
+def _anchor_snippet(line: str, names: set[str]) -> str:
+    """The learnable part of an anchor line. When the line opens by restating
+    the linked title ("X (…): why…"), keep the part after the colon — the card
+    already shows the title; the explanation is the payload."""
+    full = _unwrap_line(line)
+    head, sep, tail = full.partition(":")
+    if sep and tail.strip() and any(nm in head.lower() for nm in names):
+        full = tail.strip()
+    return _clean_snippet(full)
+
+
+def _embed_sim():
+    """(id, id) -> stored-vector cosine, or None when the embed index is empty.
+
+    Ids carry .md, store keys don't — bridged through cooccur_key like
+    knn_edges. Vectors are cached per id; a missing vector abstains with 0.0.
+    """
+    try:
+        from silica.kernel.recall.cooccurrence import cooccur_key
+        from silica.kernel.recall.embed import _cosine, get_store
+
+        store = get_store()
+        if len(store) == 0:
+            return None
+    except Exception:
+        return None
+
+    cache: dict[str, list[float] | None] = {}
+
+    def _vec(nid: str):
+        if nid not in cache:
+            cache[nid] = store.get_vec(cooccur_key(nid))
+        return cache[nid]
+
+    def sim(a: str, b: str) -> float:
+        va, vb = _vec(a), _vec(b)
+        return _cosine(va, vb) if va is not None and vb is not None else 0.0
+
+    return sim
+
+
+def _link_context_fn(titles: dict[str, str]):
+    """(parent_id, child_id) -> the cleaned body line where one wikilinks the
+    other, or None. Checks the parent's body first, then the child's (the BFS
+    parent is traversal order, not authorship — either side may hold the link).
+    Bodies are read lazily through the driver, one read per note per map.
+    """
+    from silica.driver import get_driver
+
+    drv = get_driver()
+    bodies: dict[str, str] = {}
+
+    def _body(nid: str) -> str:
+        if nid not in bodies:
+            try:
+                bodies[nid] = drv.read_note(nid).content
+            except Exception:
+                bodies[nid] = ""
+        return bodies[nid]
+
+    def ctx(parent_id: str, child_id: str) -> str | None:
+        for host, other in ((parent_id, child_id), (child_id, parent_id)):
+            text = _body(host)
+            if not text:
+                continue
+            stem = other.rsplit("/", 1)[-1].removesuffix(".md").lower()
+            names = {stem, (titles.get(other) or "").lower()} - {""}
+            for line in text.splitlines():
+                low = line.lower()
+                if "[[" in low and any(nm in low for nm in names):
+                    snippet = _anchor_snippet(line, names)
+                    if snippet:
+                        return snippet
+        return None
+
+    return ctx
+
+
 def gather_materials(root: str, *, latent_k: int = 10) -> MapMaterials:
-    """Collect wikilink graph, titles, global communities, and the latent leg."""
+    """Collect wikilink graph, titles, global communities, the latent leg, and
+    the two evidence closures (embedding similarity, wikilink anchor lines)."""
     from silica.kernel.recall.graph_export import build_graph_data, detect_communities
     from silica.kernel.recall.relatedness import related_notes
 
@@ -756,17 +997,33 @@ def gather_materials(root: str, *, latent_k: int = 10) -> MapMaterials:
     community_of = {n["id"]: n.get("group", -1) for n in nodes}
 
     latent: list[tuple[str, str, float]] = []
+    latent_evidence: dict[str, str] = {}
     try:
         embed_store, cooccur_store = _load_stores()
         for r in related_notes(
             _with_md(root), embed_store=embed_store, cooccur_store=cooccur_store, k=latent_k
         ):
-            latent.append((_with_md(r.path), r.name, r.score))
+            lid = _with_md(r.path)
+            # Radius wants a native 0-1 strength, not the RRF score (ordering
+            # only). Cooccur-only rows carry no such signal: park them just
+            # under the weakest scored one — they are the ranking's tail anyway.
+            native = [v for v in (r.embed_score, r.edge_score) if v]
+            latent.append((lid, r.name, max(native) if native else 0.0))
+            latent_evidence[lid] = "≈ " + " ".join(r.evidence)
     except Exception:
         latent = []
+    if latent:
+        floor = min((s for _, _, s in latent if s > 0), default=0.3) * 0.9
+        latent = [(lid, t, s if s > 0 else floor) for lid, t, s in latent]
 
     return MapMaterials(
-        graph=undirected, titles=titles, community_of=community_of, latent=latent
+        graph=undirected,
+        titles=titles,
+        community_of=community_of,
+        latent=latent,
+        latent_evidence=latent_evidence,
+        sim=_embed_sim(),
+        link_context=_link_context_fn(titles),
     )
 
 
