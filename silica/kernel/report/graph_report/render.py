@@ -103,6 +103,10 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add(f"Discourse shape: **{r.discourse_state}**.")
     add("")
     health = []
+    if t.get("components", 0) > 1:
+        health.append(
+            f"{t['components']} disconnected islands (no reading path between them)"
+        )
     if t.get("orphans"):
         health.append(f"{t['orphans']} orphans (no incoming links)")
     if t.get("dangling_links"):

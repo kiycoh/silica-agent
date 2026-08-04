@@ -432,6 +432,16 @@ def compute_report(
     )
 
     # ------------------------------------------------------------------
+    # Fragmentation: connected components of the wikilink layer. Catches what
+    # the orphan signal can't — a linked clique detached from the rest counts
+    # as one island. Metric only; bridging stays a human decision.
+    # ------------------------------------------------------------------
+    import networkx as nx
+    n_components = (
+        nx.number_connected_components(G_und) if G_und.number_of_nodes() else 0
+    )
+
+    # ------------------------------------------------------------------
     # Dangling (unresolved wikilinks aggregated by target name)
     # ------------------------------------------------------------------
     # edge target is "__unresolved__<name>" from graph_export
@@ -522,6 +532,7 @@ def compute_report(
         "superseded_sections": (temporal.superseded_sections if temporal else 0),
         "source_drift": len(source_drift),
         "orphans": len(orphans),
+        "components": n_components,
         "clusters": len(clusters),
         "structural_gaps": len(structural_gaps_list),
         "code_files_documented": (report.code_coverage.documented if report.code_coverage else 0),

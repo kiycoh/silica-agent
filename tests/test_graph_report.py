@@ -630,3 +630,21 @@ def test_betweenness_map_zero_without_analytics(synthetic_graph):
     # exactly like pagerank_map on this path.
     assert set(r.betweenness_map) == {"A", "B", "C", "D", "E", "F"}
     assert all(v == 0.0 for v in r.betweenness_map.values())
+
+
+def test_fragmentation_components_counted(report):
+    # {A,B,C,D,E} form one island; F (its only edge is unresolved) is the
+    # second. AMBIGUOUS edges never stitch components together.
+    assert report.totals["components"] == 2
+
+
+def test_fragmentation_surfaces_in_health(report):
+    assert "2 disconnected islands" in to_markdown(report)
+
+
+def test_single_component_stays_out_of_health():
+    nodes = [_make_node(n, n, group=0) for n in "AB"]
+    edges = [_make_edge("e0", "A", "B")]
+    r = compute_report(_nodes_edges_override=(nodes, edges))
+    assert r.totals["components"] == 1
+    assert "disconnected islands" not in to_markdown(r)
