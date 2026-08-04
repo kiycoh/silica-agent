@@ -2,9 +2,32 @@
 
 Single static page. No build step, no framework, no dependencies.
 
-- `index.html` — everything (HTML + inline CSS + inline JS)
-- `fonts/martian-mono-latin.woff2` — self-hosted variable font (latin subset, ~23 KB, one request)
-- `favicon.svg`, `vercel.json`
+- `index.html`, the markup with the direction contract as the opening comment
+- `style.css`, the whole design system
+- `fonts/archivo-latin.woff2`, display and text face (variable, wght 100-900, wdth 62-125%)
+- `fonts/martian-mono-latin.woff2`, every recorded value: paths, ops, verdicts, numbers
+- `demo.webm` / `demo.mp4` / `demo-poster.webp`, the real 710-note vault run, transcoded from `assets/demo-test.gif`
+- `gui.webp` and `sili.webp`, the web GUI screenshot and the mascot, resized from `assets/`
+- `silica-favicon.svg`, `silica-logo.svg`, `vercel.json`
+
+The page is a ledger: a left rail carries the op key, a hairline rule runs the height of each
+entry, and one cyan-to-indigo gradient (the spine) draws itself down that rule as you scroll,
+through a CSS scroll-driven animation with no JavaScript. Everything shown is real and copyable.
+
+## Regenerating the media
+
+```bash
+ffmpeg -y -ss 2.4 -i assets/demo-test.gif -c:v libvpx-vp9 -crf 36 -b:v 0 -row-mt 1 \
+  -pix_fmt yuv420p -an web/demo.webm
+ffmpeg -y -ss 2.4 -i assets/demo-test.gif -c:v libx264 -crf 30 -preset slow \
+  -pix_fmt yuv420p -movflags +faststart -an web/demo.mp4
+ffmpeg -y -i assets/demo-test.gif -vf "select=eq(n\,1100)" -vsync 0 -frames:v 1 \
+  -c:v libwebp -quality 88 web/demo-poster.webp
+```
+
+`-ss 2.4` drops the empty terminal at the head of the recording. Frame 1100 is the poster
+because it holds the whole thesis in one still: `/curate --apply` landing, then `/revert`
+taking it back out.
 
 ## Deploy to Vercel
 
@@ -13,7 +36,7 @@ cd web
 vercel --prod      # or: drag this folder into the Vercel dashboard
 ```
 
-Vercel auto-detects it as a static site; `vercel.json` only sets long cache headers on the font/icon.
+Vercel auto-detects it as a static site; `vercel.json` only sets cache headers.
 
 ## Local preview
 
