@@ -523,6 +523,46 @@ def _fuse(
     return out[:k]
 
 
+def neighbours_above(query_path: str, floor: float) -> list[str] | None:
+    """Note names within cosine `floor` of an INDEXED note; None ⇒ can't answer.
+
+    Score-gated, not rank-gated, so it does not go through fusion: the caller
+    (AUTOLINK's relevance gate) needs "everything relevant enough", and a top-k
+    would silently drop relevant titles on a large vault. Lives here anyway
+    because it IS a relatedness query, and the legs are the facade's to touch.
+
+    None is the abstention — no embed index, or this note has no vector yet — and
+    is distinct from `[]`, which means the vault holds nothing close enough.
+    Callers must keep the two apart: one is "gate unavailable, don't narrow",
+    the other is "gate says nothing".
+    """
+    if floor <= 0:
+        return None
+    try:
+        from silica.kernel.recall.cooccurrence import cooccur_key
+        from silica.kernel.recall.embed import get_store
+
+        store = get_store()
+        if len(store) == 0:
+            return None
+        key = cooccur_key(query_path)
+        vec = store.get_vec(key)
+        if not vec:
+            return None
+        # Exclude by the STORE's key, not the raw path: the store drops `.md`
+        # (cooccur_key), so a raw-path exclude never matches and the query note
+        # comes back as its own closest neighbour.
+        hits = store.cosine_top_k(vec, k=len(store), exclude={key})
+    except Exception as exc:
+        logger.debug("neighbours_above: abstaining for '%s' (%s)", query_path, exc)
+        return None
+    return [
+        _basename(h.get("path") or "")
+        for h in hits
+        if h.get("score", 0.0) >= floor and h.get("path")
+    ]
+
+
 def related_notes(
     query_path: str,
     *,

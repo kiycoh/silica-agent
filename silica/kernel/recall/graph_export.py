@@ -723,17 +723,27 @@ def cluster_ctx_path() -> Path:
     return paths.index_dir() / "clusters_ctx.json"
 
 
+# Bumped when the ctx KEY SHAPE changes: a cache written under the old shape is
+# indistinguishable from a fresh one and would keep every consumer missing.
+_CLUSTER_CTX_VERSION = 2
+
+
 def load_cluster_ctx() -> dict | None:
-    """Full cache envelope {"sig": [nodes, edges], "ctx": {...}} or None."""
+    """Full cache envelope {"v", "sig": [nodes, edges], "ctx": {...}} or None.
+
+    A cache from an older key shape is discarded, not migrated: one Louvain
+    recompute is cheaper than a migration that has to be right forever.
+    """
     import orjson
 
     p = cluster_ctx_path()
     if not p.exists():
         return None
     try:
-        return orjson.loads(p.read_bytes())
+        env = orjson.loads(p.read_bytes())
     except Exception:
         return None
+    return env if env.get("v") == _CLUSTER_CTX_VERSION else None
 
 
 def save_cluster_ctx(sig: list[int], ctx: dict) -> None:
@@ -742,27 +752,40 @@ def save_cluster_ctx(sig: list[int], ctx: dict) -> None:
     try:
         p = cluster_ctx_path()
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_bytes(orjson.dumps({"sig": sig, "ctx": ctx}))
+        p.write_bytes(orjson.dumps({"v": _CLUSTER_CTX_VERSION, "sig": sig, "ctx": ctx}))
     except Exception as e:
         logger.debug("graph_export: cluster ctx cache save skipped (%s)", e)
 
 
 def ctx_from_report(report) -> dict[str, dict]:
     """Per-note cluster ctx from a VaultReport (duck-typed: importing
-    graph_report here would be a cycle — its compute imports this module)."""
+    graph_report here would be a cycle — its compute imports this module).
+
+    Keyed WITHOUT `.md`, and `hub` carries the same shape. Graph node ids keep
+    the extension, and every consumer of this dict strips it before looking up
+    (`collision`, `write` twice, `distill`, `linking` via basename) — so with
+    the extension left on, all six missed on every note. Measured on a 717-note
+    vault: 0 hits out of 717. The whole graph-context feature was inert —
+    AUTOLINK's same-cluster narrowing, COLLISION's hub detection, HUB_UPDATE's
+    cross-cluster warning, and the distiller's graph_context alike. Normalized
+    here, once, rather than at six call sites that already agree with each other.
+    """
+    def key(node_id: str) -> str:
+        return node_id.removesuffix(".md") if isinstance(node_id, str) else node_id
+
     ctx: dict[str, dict] = {}
     for cs in report.clusters:
         for member in cs.members:
-            ctx[member] = {
+            ctx[key(member)] = {
                 "cluster_id": cs.cluster_id,
-                "hub": cs.hub,
+                "hub": key(cs.hub) if cs.hub else cs.hub,
                 "is_hub": member == cs.hub,
             }
     # Isolated nodes too (cluster -1 = "no cluster" for consumers);
     # pagerank_map carries every real node id, zero-valued without analytics.
     for node_id in report.pagerank_map:
-        if node_id not in ctx:
-            ctx[node_id] = {"cluster_id": -1, "hub": None, "is_hub": False}
+        if key(node_id) not in ctx:
+            ctx[key(node_id)] = {"cluster_id": -1, "hub": None, "is_hub": False}
     return ctx
 
 

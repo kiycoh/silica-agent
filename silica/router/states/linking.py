@@ -42,6 +42,33 @@ def _run_title_refs(fsm: "InjectorFSM") -> list[typing.Any]:
     return refs
 
 
+def _relevance_candidates(title_index: list[str]):
+    """path -> the titles worth linking from it, by note-vector cosine.
+
+    Returns a callable so the store, the threshold and the title lookup are
+    resolved once per chunk rather than once per note. Falls back to the whole
+    index — the historical behaviour — whenever the gate cannot answer: threshold
+    off, no embed index, or this note has no stored vector yet (a note written
+    moments ago). Never narrows on a guess.
+    """
+    from silica.config import CONFIG
+    from silica.kernel.recall.relatedness import neighbours_above
+
+    floor = float(getattr(CONFIG, "autolink_min_sim", 0.0) or 0.0)
+    known = set(title_index)
+
+    def candidates(path: str) -> list[str]:
+        near = neighbours_above(path, floor)
+        if near is None:
+            return title_index          # gate unavailable — never narrow on a guess
+        # `[]` is a real answer (nothing close enough), so it is passed through:
+        # falling back to the full index there would restore the very noise the
+        # gate exists to remove.
+        return [n for n in near if n in known]
+
+    return candidates
+
+
 def handle_autolink(fsm: "InjectorFSM") -> None:
     """Best-effort wikilink injection into touched notes (Phase 4).
 
@@ -69,33 +96,22 @@ def handle_autolink(fsm: "InjectorFSM") -> None:
         all_refs = _run_title_refs(fsm)
         title_index = build_title_index(all_refs)
 
-        # Build a reverse map: title (basename, no .md) → cluster_id for fast lookup
-        vault_ctx = fsm.context.get("vault_graph_ctx", {})
-        _title_to_cluster: dict[str, int] = {
-            k.rsplit("/", 1)[-1]: v["cluster_id"]
-            for k, v in vault_ctx.items()
-            if v.get("cluster_id", -1) >= 0
-        }
+        # Candidates come from embedding relevance, not from graph structure.
+        # The same-cluster narrowing that used to sit here had never run once —
+        # `vault_graph_ctx` keys carry `.md` and the lookup stripped it, so every
+        # note read as cluster -1 and fell through to the full index (0 hits in
+        # 717). Fixing the keys made it engage, and the first measurement said
+        # don't: Louvain clusters this vault by structure, not topic, so the ML
+        # concepts one lecture wants are spread over three clusters while its hub
+        # sits in one — narrowing there dropped 7 good links to drop 1 bad one.
+        _relevant = _relevance_candidates(title_index)
 
         total_added = 0
         for path in touched_paths:
             try:
-                note_title = os.path.splitext(os.path.basename(path))[0]
-                note_cluster = _title_to_cluster.get(note_title, -1)
-
-                # Narrow candidates to the same cluster when cluster data is available.
-                # This prevents cross-cluster noise links (e.g. Economics ↔ Physics).
-                if vault_ctx and note_cluster >= 0:
-                    candidates = [
-                        t for t in title_index
-                        if _title_to_cluster.get(t, -1) == note_cluster and t != note_title
-                    ]
-                else:
-                    candidates = None
-
                 added = orch.DRIVER.autolink_note(
                     path,
-                    candidates=candidates if candidates is not None else title_index,
+                    candidates=_relevant(path),
                     title_index=title_index,
                 )
                 if added:

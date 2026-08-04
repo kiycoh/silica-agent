@@ -551,6 +551,20 @@ class SilicaConfig:
         default_factory=lambda: float(os.getenv("SILICA_SIM_THRESHOLD_THEME", "0.35"))
     )
 
+    # AUTOLINK relevance gate: a title is a linking candidate only if its note
+    # vector is within this cosine of the note being linked. 0 disables it (the
+    # whole title index is a candidate, which is what shipped before).
+    #
+    # 0.30 is a knee, not an optimum. Swept 0.00-0.85 against 678 hand-authored
+    # notes' own wikilinks as ground truth: F1 peaks at 0.40 (0.800 vs 0.758 at
+    # 0.00), but that ranks a link the author simply never made as an error.
+    # Judged on the noise it exists to stop (a psychology note linked from an ML
+    # lecture), 0.30 removes 7 of 11 such links for 2 lost real ones; every step
+    # above costs ~9 real links per further noise link removed.
+    autolink_min_sim: float = field(
+        default_factory=lambda: float(os.getenv("SILICA_AUTOLINK_MIN_SIM", "0.30"))
+    )
+
     domain: str | None = field(
         default_factory=lambda: os.getenv("SILICA_DOMAIN") or None
     )
