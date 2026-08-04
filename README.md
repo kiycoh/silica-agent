@@ -6,9 +6,9 @@
 </p>
 
 <p align="center">
+  <a href="https://deepwiki.com/kiycoh/silica-agent"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
   <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/v/silica-agent.svg" alt="PyPI" /></a>
   <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/dm/silica-agent.svg" alt="PyPI Downloads" /></a>
-  <a href="https://deepwiki.com/kiycoh/silica-agent"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
   <a href="https://github.com/kiycoh/silica-agent/blob/main/pyproject.toml#L13"><img src="https://img.shields.io/badge/python-%3E%3D3.11-blue?logo=python&logoColor=white" alt="Python >=3.11" /></a>
   <a href="https://obsidian.md"><img src="https://img.shields.io/badge/Obsidian-Native-7a46e6" alt="Obsidian Native" /></a>
   <a href="https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md"><img src="https://img.shields.io/badge/OKF-v0.2-4285f4" alt="Open Knowledge Format v0.2" /></a>
@@ -62,7 +62,7 @@ something. Notes or a codebase, one vault holds both. Local-first, readable with
 
 **And the two obvious outs are not outs.** Keep the assistant read-only and the vault rots on its own: the same idea captured five times, notes nothing points at any more, links to a file that moved, a subsystem documented against a commit from three months ago. Read-only also leaves the answering problem intact, the model still answers from its own memory or a stale note, and the answer reads the same either way. Or take the usual remedy, a tool that copies your notes into a store of its own: now the corpus being corrupted is one you cannot even open to check.
 
-Silica takes the opposite position. **The vault is the product, not the transcript.** Your folder of markdown is the database, Silica is answerable for the state it is in, and every write it makes passes a gate that re-reads what it just wrote. It runs on your machine, and local models (LM Studio, Ollama) are first-class.
+Silica takes the opposite position. **The vault is the product, not the transcript.** Your folder is the database, Silica is answerable for the state it is in, and every write it makes passes a gate that re-reads what it just wrote. Tested with local models (LM Studio, ollama-server) but it needs further testing on small models.
 
 <sub><b>New to this?</b> A "vault" is just a folder of markdown (<code>.md</code>) files. If you already use Obsidian, that folder is your Obsidian vault, and Silica works on it directly.</sub>
 
