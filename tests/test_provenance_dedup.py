@@ -66,6 +66,27 @@ def test_patch_proceeds_for_a_different_source(tmp_vault):
     assert "## Note aggiuntive — Machine Learning (da lezione_9.md)" in tmp_vault.read(target)
 
 
+def test_duplicate_skip_stamps_ai_flag(tmp_vault):
+    """The duplicate-skip path must leave the note lint-clean like the real
+    patch path does (which stamps `AI: true` via ensure_ai_flag). In safe mode
+    the skip lands on a freshly-seeded mirror copy of a human note that has no
+    `AI` key, so the copy stayed lint-dirty forever and the chunk LINT gate
+    aborted whole chunks on it (run 880b9aa9: f1_c0/f1_c1 both died with
+    "frontmatter 'AI' missing or not boolean" on notes no op had changed)."""
+    target = tmp_vault.note(
+        "Topics/AsyncIO.md",
+        "---\ntags:\n  - async\n---\nseed\n\n[[Hub]]\n\n"
+        "## Note aggiuntive — Async IO (da meeting.md)\n\nfacts\n",
+    )
+    op = Op(op=OpType.patch, heading="Async IO", source_basename="meeting.md",
+            path=target, snippet="first fact", hub="Hub")
+
+    res = execute_one(op)
+
+    assert res.get("skipped") == "duplicate"
+    assert "AI: true" in tmp_vault.read(target)
+
+
 def test_duplicate_block_still_repairs_hub_link(tmp_vault):
     """A note holding the provenance block but NOT the hub link (state left by
     an interrupted run, or a pre-injection silica version) must gain the link

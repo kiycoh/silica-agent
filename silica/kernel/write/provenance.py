@@ -32,6 +32,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -323,6 +324,28 @@ def _norm_ws(s: str) -> str:
     return " ".join(s.split())
 
 
+_SINGLE_BRACE_RE = re.compile(r"(?<=[_^])\{(\w)\}")
+
+
+def _norm_math(s: str) -> str:
+    """Typesetting noise dropped: whitespace, and braces around a lone subscript.
+
+    Both are invisible to LaTeX and both differ systematically between a PDF
+    converter and a model. MinerU spaces a formula out at every token and braces
+    every index (`S _ {B} = \\sum_ {j = 1} ^ {K}`); a model re-emits it tight
+    (`S_B = \\sum_{j=1}^K`). Under plain whitespace-collapsing the two differ
+    every few characters, which shreds difflib's matching blocks below the 3-char
+    floor and reported verbatim formulas as fabrications — the dominant rejection
+    class on any converted-PDF source (measured: 31% of one run's flags).
+
+    Math only: inside a fenced code span whitespace carries meaning.
+
+    ponytail: notation only, no alias table. `\\pmb` vs `\\boldsymbol` renders the
+    same and would recover a few more, but that list only ever grows.
+    """
+    return _SINGLE_BRACE_RE.sub(r"\1", "".join(s.split()))
+
+
 def _local_match_fraction(s: str, src: str) -> float:
     """Best matched-char fraction of *s* with all blocks inside one source
     window of LOCALITY_WINDOW * len(s). Global scatter would let a formula
@@ -357,27 +380,29 @@ def ungrounded_spans(body: str, source: str) -> list[str]:
       is the sharpest fabrication signal (altered 0.01→0.1, invented ε=10⁻⁸);
     - fuzzy match must be LOCAL (see _local_match_fraction).
     """
-    spans: list[str] = []
+    # (span, normalizer) — each class is compared against a source normalized
+    # the same way, so a code fence keeps its whitespace and math loses it.
+    spans: list[tuple[str, Callable[[str], str]]] = []
     if "```" in source:
-        spans += _FENCE_RE.findall(body)
+        spans += [(s, _norm_ws) for s in _FENCE_RE.findall(body)]
     if "$" in source:
         # "$" also matches currency; acceptable for a warn-only gate
         rest = _FENCE_RE.sub("", body)
-        spans += _DISPLAY_MATH_RE.findall(rest)
-        spans += _INLINE_MATH_RE.findall(_DISPLAY_MATH_RE.sub("", rest))
+        spans += [(s, _norm_math) for s in _DISPLAY_MATH_RE.findall(rest)]
+        spans += [(s, _norm_math) for s in _INLINE_MATH_RE.findall(_DISPLAY_MATH_RE.sub("", rest))]
 
-    src = _norm_ws(source)
+    sources = {_norm_ws: _norm_ws(source), _norm_math: _norm_math(source)}
     out: list[str] = []
-    for span in spans:
-        s = _norm_ws(span)
+    for span, norm in spans:
+        s, src = norm(span), sources[norm]
         if len(s) < MIN_GROUNDABLE_CHARS or s in src:
             continue
         numerals = [n for n in _NUMERAL_RE.findall(s) if len(n) >= 2]
         if any(n not in src for n in numerals):
-            out.append(s)
+            out.append(_norm_ws(span))
             continue
         if _local_match_fraction(s, src) < GROUNDING_FLOOR:
-            out.append(s)
+            out.append(_norm_ws(span))
     return out
 
 
