@@ -532,6 +532,32 @@ def test_messages_endpoint_returns_user_and_assistant_turns(client, monkeypatch)
     assert not any(m["role"] == "system" for m in data)
 
 
+def test_messages_endpoint_replays_the_tool_calls_of_a_turn(client):
+    """Reopening a chat has to show the steps, and a failed one as failed."""
+    tc, server = client
+    call = lambda cid, name, args: {  # noqa: E731
+        "id": cid, "type": "function",
+        "function": {"name": name, "arguments": json.dumps(args)},
+    }
+    server.messages += [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "Let me look.", "silica_reasoning": "the vault may hold it",
+         "tool_calls": [call("c1", "silica_read_note", {"name": "a.md"}),
+                        call("c2", "silica_write_note", {"path": "b.md"})]},
+        {"role": "tool", "tool_call_id": "c1", "content": "body"},
+        {"role": "tool", "tool_call_id": "c2", "content": '{"error": "gate refused"}'},
+        {"role": "assistant", "content": "Done."},
+    ]
+    data = [m for m in tc.get("/messages").json() if m["role"] == "assistant"]
+    assert [t["target"] for t in data[0]["tools"]] == ["a.md", "b.md"]
+    assert [t["error"] for t in data[0]["tools"]] == [False, True]
+    # the chain of thought is replayable, step by step
+    assert data[0]["thinking"] == "the vault may hold it"
+    assert data[1]["thinking"] == ""
+    # both halves of the one reply survive, in order, for the client to merge
+    assert [m["content"] for m in data] == ["Let me look.", "Done."]
+
+
 def test_sessions_persist_across_reset_and_reload(client, monkeypatch):
     tc, server = client
 
@@ -1005,10 +1031,12 @@ def test_top_hubs_ranks_by_resolved_degree():
     assert _top_hubs(nodes, edges, top_n=1) == hubs[:1]   # cap honored
 
 
-def test_config_reports_toggle_and_post_flips_thinking_but_not_model(client, monkeypatch):
-    # /config mirrors the TUI's display-only /model plus the live /thinking
-    # toggle. Model is read-only (no runtime switch op). Empty model skips the
-    # network probe in model_limits, so this stays offline.
+def test_config_is_the_headers_cheap_read_and_no_longer_writes(client, monkeypatch):
+    # /config survives the settings panel as the header label's own read: GET
+    # /settings probes four endpoints for their model lists, which the chip that
+    # names the active model must not wait seconds for. Its write half moved —
+    # `thinking` is a persisted settings row now, not a session-only flip.
+    # Empty model skips the network probe in model_limits, so this stays offline.
     from silica.config import CONFIG
 
     tc, _server = client
@@ -1019,10 +1047,8 @@ def test_config_reports_toggle_and_post_flips_thinking_but_not_model(client, mon
     assert set(got) >= {"model", "provider", "context_window", "show_thinking"}
     assert got["show_thinking"] is False
 
-    out = tc.post("/config", json={"show_thinking": True, "model": "hacker/model"}).json()
-    assert out["show_thinking"] is True
-    assert CONFIG.show_thinking is True
-    assert CONFIG.model == ""  # POST never sets the model
+    assert tc.post("/config", json={"show_thinking": True}).status_code == 405
+    assert CONFIG.show_thinking is False
 
 
 # ---------------------------------------------------------------------------

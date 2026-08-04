@@ -8,6 +8,8 @@ dropped in v1 (return None -> the callback skips them).
 """
 from __future__ import annotations
 
+import json
+
 from silica.agent.events import (
     BatchRunStartEvent,
     LLMStreamEvent,
@@ -68,3 +70,25 @@ def event_to_json(ev) -> dict | None:
     if isinstance(ev, BatchRunStartEvent):
         return {"type": "batch", "kind": ev.kind, "label": ev.label}
     return None  # ReasoningEvent / Thinking* — ignored in v1
+
+
+def tool_calls_to_json(msg: dict, failed: set[str] | None = None) -> list[dict]:
+    """The tool lines of a *stored* assistant message, for transcript replay.
+
+    Same verb + target the live `tool_start` event carries, so reopening a chat
+    shows the steps it showed while streaming. Without this the reload dropped
+    every tool call and the answer read as if the agent had touched nothing.
+    """
+    out = []
+    for tc in msg.get("tool_calls") or []:
+        fn = tc.get("function") or {}
+        name = fn.get("name") or ""
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except (TypeError, ValueError):
+            args = {}
+        if not isinstance(args, dict):
+            args = {}
+        out.append({"name": _tool_verb(name), "target": _tool_target(name, args),
+                    "error": bool(failed and tc.get("id") in failed)})
+    return out

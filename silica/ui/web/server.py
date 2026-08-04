@@ -25,12 +25,12 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from silica.agent.constraints import web_turn_constraints
-from silica.agent.loop import run_agent
+from silica.agent.loop import _is_tool_failure, run_agent
 from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
 from silica.config import CONFIG
 from silica.kernel.recall.mindmap import note_resolver
 from silica.sources.web_research import WebTurn
-from silica.ui.web.callback import event_to_json
+from silica.ui.web.callback import event_to_json, tool_calls_to_json
 
 logger = logging.getLogger(__name__)
 
@@ -1418,6 +1418,11 @@ def vault_info():
         "path": CONFIG.vault_path or "",
         "notes": sum(1 for n in nodes if n.get("type") != "ghost"),
         "links": sum(1 for e in edges if e.get("type") == "EXTRACTED"),
+        # STRUCTURAL clusters — Louvain on the wikilinks. The semantic partition
+        # is a separate count and is not summed into this one (ADR-0023); the
+        # sidebar tile says so in its tooltip, and the graph's HUD counts the
+        # zones itself. Nothing here computes the semantic layer: it needs the
+        # k-NN edges this endpoint has no reason to build.
         "clusters": len(communities),
         "unresolved": sum(1 for n in nodes if n.get("type") == "ghost"),
         "tree": render_tree(nodes),
@@ -1449,11 +1454,26 @@ def _top_hubs(nodes: list[dict], edges: list[dict], top_n: int = 24) -> list[dic
 @app.get("/messages")
 def get_messages():
     resolve = note_resolver()
-    data = [
-        {"role": m["role"], "content": m["content"], "html": _linkify(m["content"], resolve)}
-        for m in messages
-        if m.get("role") in ("user", "assistant") and m.get("content")
-    ]
+    # A call whose result carries an error must not replay as a tick: the one
+    # place the user checks whether a write landed is this transcript.
+    failed = {
+        m["tool_call_id"] for m in messages
+        if m.get("role") == "tool" and m.get("tool_call_id") and _is_tool_failure(m.get("content"))
+    }
+    data = []
+    for m in messages:
+        if m.get("role") not in ("user", "assistant"):
+            continue
+        tools = tool_calls_to_json(m, failed) if m["role"] == "assistant" else []
+        content = m.get("content") or ""
+        # The thinking that produced this step, kept out of the wire by _to_wire.
+        # Plain text, not rendered: it is a trace, and the live block shows it raw.
+        thinking = m.get("silica_reasoning") or "" if m["role"] == "assistant" else ""
+        if not content and not tools and not thinking:
+            continue
+        data.append({"role": m["role"], "content": content, "tools": tools,
+                     "thinking": thinking,
+                     "html": _linkify(content, resolve) if content else ""})
     # Vault label + context usage ride headers so the body stays a plain list.
     return JSONResponse(data, headers={
         "X-Silica-Vault": CONFIG.vault_path or "",
@@ -1504,21 +1524,22 @@ def stop():
 
 
 @app.get("/health")
-def health():
-    """The doctor's non-ok findings, for the boot toast.
+def health(all: bool = False):
+    """The doctor's findings — non-ok by default, everything with `?all=1`.
 
     A server the user forgot to start degrades recall silently here: the
     embedder/reranker warnings go to the launching terminal's stderr, which the
     browser never shows. Same checks as `silica doctor`, so the two surfaces
-    cannot disagree; ok rows are dropped because a toast is for what needs
-    fixing.
+    cannot disagree; ok rows are dropped for the sidebar notice, which is for
+    what needs fixing, and kept for the settings panel's diagnostics and for a
+    bug report, which needs the passing rows just as much.
     """
     from silica.onboarding.checks import run_checks
 
     return [
         {"name": r.name, "status": r.status, "detail": r.detail, "hint": r.hint}
         for r in run_checks(CONFIG)
-        if r.status != "ok"
+        if all or r.status != "ok"
     ]
 
 
@@ -1597,19 +1618,160 @@ def get_config():
         window, _ = model_limits(CONFIG.provider, CONFIG.model)
     return {
         "model": CONFIG.model or "",
+        # Empty means "the chat model does the worker's job too" (every call site
+        # falls back to CONFIG.model), and the reader decides what to do with it.
+        "worker_model": CONFIG.worker_model or "",
         "provider": CONFIG.provider or "",
         "context_window": window or 0,
         "show_thinking": CONFIG.show_thinking,
     }
 
 
-@app.post("/config")
-def set_config(payload: dict):
-    """Flip the one runtime toggle the web exposes — the same field /thinking
-    flips in the REPL. Model is not settable (no such operation)."""
-    if "show_thinking" in payload:
-        CONFIG.show_thinking = bool(payload["show_thinking"])
-    return get_config()
+# --- settings panel ----------------------------------------------------------
+# The write half of /config is absorbed here: `thinking` is a persisted row like
+# any other now, not a session-only flip. /config stays as the header chip's
+# cheap read — GET /settings probes four endpoints, which is seconds the header
+# label must not wait for.
+
+
+@app.get("/settings")
+def get_settings():
+    """Every admitted row: value, where the value came from, whether it is
+    locked, and its suggestions. Plus what About needs, so opening the panel is
+    one round trip."""
+    from silica import __version__
+    from silica.onboarding.wizard import resolve_env_path
+    from silica.ui.web import settings as st
+    from silica.update import behind_count
+
+    return {
+        "env_path": st.short_path(resolve_env_path()),
+        "busy": _busy,
+        "sections": st.read_sections(),
+        "version": __version__,
+        "behind": behind_count(),
+        "issues_url": "https://github.com/kiycoh/silica-agent/issues",
+    }
+
+
+def _reject_if_busy_or_locked(key: str) -> None:
+    """One rule for every write: nothing lands while a turn is running.
+
+    Deliberately not a per-row list of what a turn reads — that list would rot
+    at the first new tool and no test would catch it. The cost is waiting for a
+    response to finish.
+    """
+    from silica.ui.web import settings as st
+
+    if _busy:
+        raise HTTPException(status_code=409, detail="a response is running")
+    if st.locked(key):
+        raise HTTPException(status_code=409, detail=f"defined in the environment ({key})")
+
+
+@app.post("/settings")
+def set_setting(payload: dict):
+    """Apply one row: live in CONFIG, persisted in the .env that wins at boot."""
+    from silica.ui.web import settings as st
+
+    key = str(payload.get("key", ""))
+    _reject_if_busy_or_locked(key)
+    if key == st.VAULT_KEY or key in st.EMBED_KEYS:
+        raise HTTPException(status_code=400, detail="this row goes through /settings/confirm")
+    result = st.apply(key, payload.get("value", ""))
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/settings/confirm")
+async def confirm_setting(payload: dict):
+    """The two rows that need a sequence, not an assignment: switching the vault
+    and swapping the embedding model.
+
+    Both are long enough to block, so they run off the event loop. The embedding
+    swap does not repair itself: `sweep()` decides what to re-embed from mtimes,
+    which a model change never touches, so stale vectors would be compared in an
+    incompatible space in silence until something forces a full re-index.
+    """
+    from silica.ui.web import settings as st
+
+    key = str(payload.get("key", ""))
+    value = str(payload.get("value", ""))
+    _reject_if_busy_or_locked(key)
+    if key == st.VAULT_KEY:
+        return await asyncio.to_thread(_apply_vault_switch, value)
+    if key in st.EMBED_KEYS:
+        return await asyncio.to_thread(_apply_embedding_swap, key, value)
+    raise HTTPException(status_code=400, detail="this row does not need confirming")
+
+
+def _apply_vault_switch(path: str) -> dict:
+    from silica.cli import switch_vault
+    from silica.ui.web import settings as st
+
+    switched = switch_vault(path)
+    if switched.error:
+        return {"ok": False, "error": switched.error}
+    # The resolved absolute path, not what was typed: that is what the next boot
+    # must read back, and what the caches were just rebuilt for.
+    result = st.apply(st.VAULT_KEY, switched.vault)
+    # The fresh-session seed carries the old vault's map until it is rebuilt.
+    _prewarm_seed()
+    notes = []
+    if switched.write_dir:
+        notes.append(f"writes confined to {switched.write_dir}/")
+    if switched.invalid_write_dir:
+        notes.append("vault.yaml declares an invalid write_dir — every write will be rejected")
+    if switched.repo_warning:
+        notes.append(switched.repo_warning)
+    if switched.language_drift:
+        notes.append(
+            f"language {switched.language}, co-occurrence store frozen "
+            f"{switched.store_language} — rebuild it with /cooccur --force"
+        )
+    return {**result, "vault": switched.vault, "notes": notes}
+
+
+def _apply_embedding_swap(key: str, value: str) -> dict:
+    from silica.tools import TOOLS
+    from silica.ui.web import settings as st
+
+    result = st.apply(key, value)
+    if not result["ok"]:
+        return result
+    raw = TOOLS["silica_embed_refresh"].run(folder="", force=True)
+    try:
+        report = json.loads(raw)
+    except (TypeError, ValueError):
+        report = {"result": str(raw)[:200]}
+    return {**result, "reindex": report}
+
+
+@app.get("/bug_report")
+def get_bug_report():
+    """The diagnostic block a bug report attaches. Built server-side on purpose:
+    in the browser the API keys sit in the panel's own fields, and a public issue
+    is exactly the wrong place for one."""
+    from silica.ui.web import settings as st
+
+    return st.bug_report()
+
+
+@app.get("/endpoints")
+def get_endpoints():
+    from silica.ui.web import settings as st
+
+    return st.endpoint_status()
+
+
+@app.post("/endpoints/start")
+async def start_endpoint(payload: dict):
+    """Start one local endpoint from the command its own .env key names. Loading
+    a model takes tens of seconds, so this waits on a worker thread."""
+    from silica.ui.web import settings as st
+
+    return await asyncio.to_thread(st.start_endpoint, str(payload.get("label", "")))
 
 
 @app.get("/")
