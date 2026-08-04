@@ -55,14 +55,19 @@ def _run(scenario, **srv_kwargs) -> None:
 
 
 async def _dial(srv, token=None, **kwargs):
-    """Dial + hello like the plugin; return (ws, first reply frame)."""
+    """Dial + hello like the plugin; return (ws, first non-rpc reply frame).
+
+    The handshake installs the connection as the global driver BEFORE sending
+    welcome, so a process-wide DRIVER call can inject an rpc frame ahead of
+    it — demux via _recv_chat, like the real plugin. Refused handshakes never
+    install the driver, so their `bye` is always the first frame anyway."""
     ws = await connect(f"ws://127.0.0.1:{srv.port}", **kwargs)
     await ws.send(json.dumps({
         "type": "hello",
         "token": srv.token if token is None else token,
         "protocolVersion": 1, "role": "plugin",
     }))
-    return ws, json.loads(await ws.recv())
+    return ws, await _recv_chat(ws)
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +153,9 @@ _EMPTY_GRAPH_RPC = {
 
 
 async def _recv_chat(ws):
-    """Next chat frame, answering interleaved driver rpc frames (the graph
-    reads note_resolver issues while rendering chat_done's html) with empty
+    """Next non-rpc frame (chat_*, welcome, bye), answering interleaved driver
+    rpc frames (graph reads from html rendering, or any process-wide DRIVER
+    call once the handshake installs this socket as the driver) with empty
     results — this is what proves rpc and chat share the socket without
     deadlocking the loop."""
     while True:
@@ -326,7 +332,7 @@ def test_chat_refused_when_hosted_by_tui(bridge_env):
     async def scenario(srv):
         ws, _ = await _dial(srv)
         await ws.send(json.dumps({"type": "chat", "turnId": "t1", "text": "ciao"}))
-        reply = json.loads(await ws.recv())
+        reply = await _recv_chat(ws)
         assert reply["type"] == "chat_error"
         assert reply["turnId"] == "t1"
         assert "silica --gui" in reply["error"]
@@ -344,9 +350,37 @@ def test_large_frames_survive_the_bridge(bridge_env):
         big = json.dumps({"type": "rpc_result", "id": 999, "result": "x" * (2 * 2**20)})
         await ws.send(big)  # unknown id — routed to the driver demux, ignored
         await ws.send(json.dumps({"type": "chat", "turnId": "t2", "text": "ping"}))
-        reply = json.loads(await ws.recv())
+        reply = await _recv_chat(ws)
         assert reply["type"] == "chat_error"  # chat disabled, but the reply arrived
         await ws.close()
+
+    _run(scenario, chat_enabled=False)
+
+
+def test_chat_probe_survives_interleaved_driver_rpc(bridge_env):
+    """Regression for the 2026-08-05 full-suite flake: the socket is one
+    channel for two protocols, and the moment the handshake installs this
+    connection as the global driver, ANY process-wide DRIVER call (a leaked
+    worker thread from an earlier test, a post-turn capture flush) lands as an
+    rpc frame between a chat probe and its reply. The probe must demux like
+    the real plugin does — asserting on the first frame is a protocol
+    violation, and it failed exactly here with reply["type"] == "rpc"."""
+    import contextlib
+
+    from silica.driver import get_driver
+
+    async def scenario(srv):
+        ws, _ = await _dial(srv)
+        be = get_driver()
+        # the leaked-thread stand-in: a sync driver call from a worker thread
+        rpc_call = asyncio.create_task(asyncio.to_thread(be.list_files))
+        await asyncio.sleep(0.1)  # let its rpc frame reach the wire first
+        await ws.send(json.dumps({"type": "chat", "turnId": "t9", "text": "ping"}))
+        reply = await _recv_chat(ws)  # answers the rpc, then gets the chat reply
+        assert reply["type"] == "chat_error"
+        assert await rpc_call == []  # the interleaved caller got unblocked too
+        with contextlib.suppress(Exception):
+            await ws.close()
 
     _run(scenario, chat_enabled=False)
 
