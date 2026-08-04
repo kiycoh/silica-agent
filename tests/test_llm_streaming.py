@@ -41,6 +41,10 @@ def test_call_llm_streams_deltas_and_reassembles():
     assert mock_builder.called
     assert deltas == [("reset", ""), ("reasoning", "hmm"), ("text", "Hel"), ("text", "lo")]
     assert res.text == "Hello"
+    # The rebuilt message carries no reasoning, so the deltas are the only copy
+    # left: without keeping them, a reopened chat has no thinking to replay.
+    assert res.reasoning == "hmm"
+    assert res.assistant_message["silica_reasoning"] == "hmm"
 
 
 def test_bounded_stream_times_out_on_stalled_chunk():

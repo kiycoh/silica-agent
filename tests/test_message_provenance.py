@@ -34,6 +34,22 @@ class ToWireTest(unittest.TestCase):
         self.assertNotIn("origin", wire)
         self.assertEqual(wire["content"], "x")
 
+    def test_kept_thinking_never_reaches_the_provider(self):
+        # the trace is kept for the transcript; re-sending it re-bills it once
+        # per iteration of the tool loop, which is why it lives behind _to_wire
+        msg = {"role": "assistant", "content": "done", "silica_reasoning": "long trace"}
+        wire = _to_wire(msg)
+        self.assertNotIn("silica_reasoning", wire)
+        self.assertEqual(wire, {"role": "assistant", "content": "done"})
+        self.assertIn("silica_reasoning", msg)  # the history keeps its copy
+
+    def test_context_meter_counts_the_wire_form(self):
+        from silica.cli import _count_context_tokens
+
+        plain = [{"role": "assistant", "content": "done"}]
+        kept = [{"role": "assistant", "content": "done", "silica_reasoning": "word " * 500}]
+        self.assertEqual(_count_context_tokens(plain), _count_context_tokens(kept))
+
 
 if __name__ == "__main__":
     unittest.main()

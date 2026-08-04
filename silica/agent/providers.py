@@ -183,20 +183,26 @@ def clamp_max_tokens(provider: str, model: str, requested: int | None, input_cha
     return want
 
 
-def _to_wire(msg: dict) -> dict:
-    """Strip internal provenance and render the CLI marker for the wire.
+# Keys the history carries for silica's own use and the provider must never see.
+# `origin` is turn provenance; `silica_reasoning` is the model's thinking, kept
+# so a reopened chat can replay the trace it showed while streaming — sending it
+# back would re-bill a multi-thousand-token trace on every later iteration of the
+# tool loop, which is exactly why it used to be thrown away.
+INTERNAL_KEYS = ("origin", "silica_reasoning")
 
-    `origin` is an internal-only field; the OpenAI message object rejects
-    unknown fields, so it must never reach the SDK. When ``origin == "cli"``
-    the content is wrapped in <silica-cli> markers so the model can tell a
-    harness directive apart from a human turn. Messages without ``origin``
-    (the common case) are returned unchanged.
+
+def _to_wire(msg: dict) -> dict:
+    """Strip internal fields and render the CLI marker for the wire.
+
+    The OpenAI message object rejects unknown fields, so `INTERNAL_KEYS` must
+    never reach the SDK. When ``origin == "cli"`` the content is wrapped in
+    <silica-cli> markers so the model can tell a harness directive apart from a
+    human turn. Messages carrying none of them are returned unchanged.
     """
-    if "origin" not in msg:
+    if not any(k in msg for k in INTERNAL_KEYS):
         return msg
-    origin = msg["origin"]
-    wire = {k: v for k, v in msg.items() if k != "origin"}
-    if origin == "cli" and wire.get("content"):
+    wire = {k: v for k, v in msg.items() if k not in INTERNAL_KEYS}
+    if msg.get("origin") == "cli" and wire.get("content"):
         wire["content"] = f"{SILICA_CLI_OPEN}{wire['content']}{SILICA_CLI_CLOSE}"
     return wire
 

@@ -45,6 +45,12 @@ logger = logging.getLogger(__name__)
 def _count_context_tokens(messages: list[dict]) -> int:
     """Pure counter — lets callers (e.g. the web seed prewarm) count a candidate
     message list without clobbering the live session's CONFIG.context_tokens."""
+    # Counted on the WIRE form: litellm's counter bills every string value it
+    # finds, so the kept thinking trace would show up in the meter as context the
+    # provider is being charged for, when `_to_wire` drops it before the request.
+    from silica.agent.providers import _to_wire
+
+    messages = [_to_wire(m) for m in messages]
     try:
         import litellm
         return litellm.token_counter(model=CONFIG.model, messages=messages)

@@ -515,6 +515,10 @@ def call_llm(
         litellm.ServiceUnavailableError,
         litellm.BadGatewayError,
     )
+    # The reassembled message is litellm's business and it does not always carry
+    # reasoning back; on the streaming path the deltas are the only place it is
+    # guaranteed to exist, so keep them for the history.
+    streamed_reasoning: list[str] = []
     if on_delta is None:
         response = retry_transient(
             lambda: _bounded(lambda: litellm.completion(**kwargs), _LOCAL_LLM_TIMEOUT, model),
@@ -522,6 +526,7 @@ def call_llm(
     else:
         def _stream_once():
             on_delta("reset", "")
+            streamed_reasoning.clear()  # a retry replays the whole trace
             chunks = []
             # include_usage: without it the provider sends no usage chunk and
             # stream_chunk_builder falls back to counting tokens locally, so the
@@ -540,6 +545,7 @@ def call_llm(
                     continue  # usage-only / malformed trailing chunk
                 r = getattr(delta, "reasoning_content", None) or getattr(delta, "reasoning", None)
                 if isinstance(r, str) and r:
+                    streamed_reasoning.append(r)
                     on_delta("reasoning", r)
                 c = getattr(delta, "content", None)
                 if isinstance(c, str) and c:
@@ -568,17 +574,22 @@ def call_llm(
     blocks = getattr(message, "thinking_blocks", None)
     if not reasoning and isinstance(blocks, list):
         reasoning = "\n".join(b.get("thinking", "") for b in blocks if isinstance(b, dict))
+    if not reasoning and streamed_reasoning:
+        reasoning = "".join(streamed_reasoning)
 
     # Build the assistant message dict for conversation history
     raw = ([(tc.id, tc.function.name, tc.function.arguments) for tc in message.tool_calls]
            if message.tool_calls else None)
     assistant_msg, parsed_calls = build_assistant_message(message.content, raw)
-    # `reasoning_content` is deliberately NOT stored in the history: it is
-    # re-sent on every later iteration of the tool loop (litellm forwards it
-    # verbatim, and ollama_chat maps it to `thinking`), which re-bills a
-    # multi-thousand-token trace once per iteration for nothing — no provider
-    # but Anthropic consumes it, and Anthropic wants thinking_blocks. Display
-    # reads LLMResponse.reasoning instead.
+    # The trace is kept under an INTERNAL key, never `reasoning_content`: that
+    # name is re-sent on every later iteration of the tool loop (litellm forwards
+    # it verbatim, and ollama_chat maps it to `thinking`), which re-bills a
+    # multi-thousand-token trace once per iteration for nothing — no provider but
+    # Anthropic consumes it, and Anthropic wants thinking_blocks. `_to_wire`
+    # strips this one at the wire boundary, so it costs the provider nothing and
+    # a reopened chat can still show the thinking that produced the answer.
+    if reasoning:
+        assistant_msg["silica_reasoning"] = reasoning
     if isinstance(blocks, list):
         assistant_msg["thinking_blocks"] = blocks
 
