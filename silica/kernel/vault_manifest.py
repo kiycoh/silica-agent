@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -319,6 +320,45 @@ def load_manifest(vault: str | Path) -> VaultManifest:
         conventions=conventions,
         write_dir=write_dir,
     )
+
+
+_WRITE_DIR_LINE = re.compile(r"write_dir\s*:")
+
+
+def set_write_dir(vault: str | Path, value: str) -> Path:
+    """Declare `write_dir: <value>` in `<vault>/vault.yaml`; "" ⇒ in place.
+
+    The writer behind the settings panel's safe-mode toggle. Line-level rather
+    than a yaml round-trip because vault.yaml is hand-written: safe_dump would
+    hand it back reordered and stripped of every comment. Only a top-level
+    `write_dir:` line is replaced (an indented one belongs to another block), and
+    a manifest that has none gets it appended, so nothing else in the file moves.
+
+    Clearing writes `write_dir: ""` instead of deleting the line: "in place" is a
+    decision the user made and the file should say so.
+    """
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    path = Path(vault) / MANIFEST_REL
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    line = f"write_dir: {value}\n" if value else 'write_dir: ""\n'
+
+    out: list[str] = []
+    replaced = False
+    for existing in text.splitlines(keepends=True):
+        if not replaced and _WRITE_DIR_LINE.match(existing):
+            out.append(line)
+            replaced = True
+        else:
+            out.append(existing)
+    if not replaced:
+        if out and not out[-1].endswith("\n"):
+            out.append("\n")
+        out.append(line)
+
+    atomic_write_bytes(path, "".join(out).encode("utf-8"))
+    reset_manifest_cache()
+    return path
 
 
 _cached: VaultManifest | None = None

@@ -146,6 +146,31 @@ def test_switch_vault_refuses_a_path_that_is_not_a_directory(tmp_vault, tmp_path
     assert CONFIG.vault_path == before  # nothing moved
 
 
+def test_safe_mode_round_trips_through_vault_yaml_not_the_env(tmp_vault, env_file):
+    """The one row whose store is the manifest. Off then on re-derives the
+    boundary from the vault's content, so there is no remembered value to rot."""
+    from pathlib import Path
+
+    from silica.kernel.vault_manifest import reset_manifest_cache
+    from silica.ui.web import settings as st
+
+    root = Path(CONFIG.vault_path)
+    (root / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
+    reset_manifest_cache()
+    row = next(r for rows in st.sections().values() for r in rows
+               if r.key == st.SAFE_MODE_KEY)
+    assert st._value(row) == "true"
+
+    assert st.apply(st.SAFE_MODE_KEY, "false")["ok"] is True
+    assert st._value(row) == "false"
+    assert 'write_dir: ""' in (root / "vault.yaml").read_text(encoding="utf-8")
+
+    result = st.apply(st.SAFE_MODE_KEY, "true")
+    assert result["values"] == {"safe_mode": "true", "write_dir": "silica"}
+    assert st._value(row) == "true"
+    assert not env_file.exists()  # never an env var
+
+
 def test_the_bug_payload_carries_no_api_key(tmp_vault, monkeypatch):
     """The report is built server-side precisely so that nothing which can see a
     key ever builds it — a public issue is the wrong place for one."""

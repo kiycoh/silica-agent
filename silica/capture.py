@@ -35,9 +35,9 @@ def find_vault(cwd: str) -> Path | None:
     """The vault `cwd` belongs to: nearest ancestor holding `vault.yaml`.
 
     The walk-up is what makes a hook fired from `<repo>/silica/kernel` capture
-    to `<repo>`. An adopted source tree always has the manifest
-    (`declare_write_dir` writes it); a prose vault opts in by dropping an empty
-    one, which parses to defaults.
+    to `<repo>`. Any adopted vault has the manifest — `declare_write_dir` writes
+    it on first launch, since every vault now declares a write boundary — so a
+    folder without one is a folder Silica has never been pointed at.
     """
     d = Path(cwd)
     for candidate in (d, *d.parents):

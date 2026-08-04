@@ -2697,7 +2697,13 @@ function stRevert(row, input) {
 // list is empty exactly when the endpoint is down — which is the moment you
 // opened this panel to fix it. A datalist degrades to a text field on its own.
 function stBuildControl(row, rowEl, labelEl) {
-  if (row.kind === "readonly") return stEl("span", "st-ro", row.value || "—");
+  if (row.kind === "readonly") {
+    // Registered like any control so a write that derives it (safe mode sets
+    // write_dir) refreshes the readout instead of leaving it stale until reopen.
+    const ro = stEl("span", "st-ro", row.value || "—");
+    stState.controls.push({ row, input: ro });
+    return ro;
+  }
   const id = `st-c${++stState.uid}`;
   labelEl.setAttribute("for", id);
   let input;
@@ -2784,6 +2790,7 @@ function stSyncKey(key, value) {
   for (const { row, input } of stState.controls) {
     if (row.key !== key) continue;
     row.value = value;
+    if (row.kind === "readonly") { input.textContent = value || "—"; continue; }
     if (row.kind === "toggle") input.checked = value === "true";
     else if (row.kind === "secret") input.value = input.readOnly ? maskKey(value) : value;
     else input.value = value;

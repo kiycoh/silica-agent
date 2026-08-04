@@ -58,15 +58,17 @@ def test_cwd_code_repo_adopts_root_and_declares_write_dir(tmp_path, monkeypatch,
     assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: docs/silica\n"
 
 
-def test_cwd_prose_folder_stays_in_place(tmp_path, monkeypatch, vault_env):
-    # A folder of notes is written in place: no subfolder, and no manifest at all
-    # (in-place IS the default, so there is nothing to declare).
+def test_cwd_prose_folder_stages_in_the_mirror(tmp_path, monkeypatch, vault_env):
+    # A folder of notes is still adopted whole, but safe mode is the default, so
+    # the boundary is declared rather than left implicit. Declaring is not
+    # creating: the folder appears when the first note lands in it.
     (tmp_path / "nota.md").write_text("# nota")
     monkeypatch.chdir(tmp_path)
     CONFIG.vault_path = ""
     _activate_repo_mode()
     assert Path(CONFIG.vault_path).resolve() == tmp_path.resolve()
-    assert not (tmp_path / "vault.yaml").exists()
+    assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: silica\n"
+    assert not (tmp_path / "silica").exists()
     assert not (tmp_path / "docs").exists()
 
 

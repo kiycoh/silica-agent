@@ -140,4 +140,6 @@ def test_handler_on_obsidian_vault_is_verbatim(tmp_path, monkeypatch):
     assert handled is True
     assert CONFIG.vault_path == str(tmp_path.resolve())  # root, no docs/silica
     assert not (tmp_path / "docs" / "silica").exists()
-    assert not (tmp_path / "vault.yaml").exists()  # in place is the default
+    # The vault is still adopted verbatim; what the switch declares is where
+    # writes may land, and safe mode is the default for someone's own notes.
+    assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: silica\n"

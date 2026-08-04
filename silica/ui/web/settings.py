@@ -63,6 +63,12 @@ class Row:
 VAULT_KEY = "SILICA_VAULT"
 EMBED_KEYS = ("SILICA_EMBEDDING_MODEL", "SILICA_EMBEDDING_BASE_URL")
 
+# The one row that is not an env var. Safe mode is a *view* over `write_dir` in
+# vault.yaml — reading it as `bool(active_write_dir())` and writing it there is
+# what keeps the manifest the single source of truth instead of adding a second
+# boundary the enforcement seam would have to learn about.
+SAFE_MODE_KEY = "safe_mode"
+
 _EMBED_WARN = "changing this invalidates every stored vector"
 
 # The four endpoints serve.py knows how to start, and the env key that names the
@@ -119,6 +125,9 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 warn="switching rebuilds every index for the new folder"),
             Row("SILICA_INBOX_DIR", "inbox_dir", "inbox folder", "text",
                 "where nucleated files land"),
+            Row(SAFE_MODE_KEY, "", "safe mode", "toggle",
+                "new notes land in a staging folder that mirrors your vault · "
+                "paste its contents over the vault to file them in place"),
             Row("write_dir", "", "write dir", "readonly",
                 "writes confined here · the rest is read-only context"),
             Row("SILICA_GIT_COMMIT", "git_commit", "git commit", "enum",
@@ -228,6 +237,12 @@ def _value(row: Row) -> str:
     CONFIG field of their own."""
     if row.kind == "readonly":
         return _readonly_value(row.key)
+    if row.key == SAFE_MODE_KEY:
+        from silica.kernel.vault_manifest import active_write_dir
+
+        # An unresolvable declaration reads as on (it is truthy, and every write
+        # is being rejected): flipping the toggle off is then the repair.
+        return "true" if active_write_dir() else "false"
     if row.attr:
         val = getattr(CONFIG, row.attr, "")
         if isinstance(val, bool):
@@ -392,6 +407,31 @@ def write_env(updates: dict[str, str]) -> Path:
     return path
 
 
+def apply_safe_mode(on: bool) -> dict:
+    """Flip the write boundary in the active vault's `vault.yaml`.
+
+    Turning it back on re-derives the boundary from the vault's content rather
+    than restoring a remembered value: a source tree keeps its declared
+    `docs/silica`, a prose vault gets the mirror. No "previous write_dir" is
+    stored anywhere, so there is none to go stale against a vault that changed.
+    """
+    from silica.kernel.vault_manifest import MANIFEST_REL, set_write_dir
+    from silica.onboarding.adopt import write_dir_for
+
+    vault = (CONFIG.vault_path or "").strip()
+    if not vault or not Path(vault).is_dir():
+        return {"ok": False, "error": "no vault to confine writes in"}
+    declared = write_dir_for(vault) if on else ""
+    try:
+        path = set_write_dir(vault, declared)
+    except OSError as exc:
+        return {"ok": False, "error": f"could not write {MANIFEST_REL} ({exc})"}
+    return {"ok": True, "path": short_path(path), "values": {
+        SAFE_MODE_KEY: "true" if declared else "false",
+        "write_dir": declared or "the vault root",
+    }}
+
+
 def apply(key: str, value) -> dict:
     """Apply one row: mutate CONFIG, then persist every key it drags.
 
@@ -405,6 +445,10 @@ def apply(key: str, value) -> dict:
         return {"ok": False, "error": f"not a setting: {key}"}
     if key in SHELL_ENV:
         return {"ok": False, "error": f"defined in the environment ({key})"}
+    if key == SAFE_MODE_KEY:
+        # Not an env var: the manifest is the store, so none of the .env
+        # machinery below applies to this row.
+        return apply_safe_mode(_truthy(value))
 
     updates = provider_group(str(value)) if key == "SILICA_PROVIDER" else {}
     if not updates:

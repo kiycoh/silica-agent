@@ -117,16 +117,28 @@ def _vault_scope() -> str:
     vault while sitting on a repo full of Markdown.
     """
     from silica.kernel.vault_manifest import active_write_dir
+    from silica.onboarding.adopt import SAFE_WRITE_DIR
 
     vault = CONFIG.vault_path
     write_dir = active_write_dir()
     if not write_dir:
         return f"Vault: {vault} — you read and write notes anywhere under it."
-    return (
+    scope = (
         f"Vault: {vault} — you read everything under it, including files that "
         f"are not yours (a repo's own README, docs, specs). New notes go under "
         f"{write_dir}/, the only place you may write; that folder being empty "
         f"does not mean the vault is empty."
+    )
+    if write_dir != SAFE_WRITE_DIR:
+        return scope
+    # The mirror only earns its merge-by-paste if the model replicates the tree
+    # it can already see in the vault map, so the instruction ships with it.
+    return scope + (
+        f" {write_dir}/ is a staging mirror of the vault's own tree: a note that "
+        f"belongs in Projects/ goes to {write_dir}/Projects/, so the user merges "
+        f"by pasting the folder's contents over the vault. Reuse the folders the "
+        f"vault already has. A folder it does not have yet is rejected unless the "
+        f"op carries a \"reason\" stating why no existing folder fits."
     )
 
 

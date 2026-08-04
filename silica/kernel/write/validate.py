@@ -188,14 +188,56 @@ def validate_operations(
     log — this is the same set, counted. Absent keys mean no repair of that
     kind, never a zero row.
     """
+    from silica.config import CONFIG
     from silica.kernel.write.ops_io import parse_ops
     from silica.kernel.vault_manifest import active_write_dir, within
+    from silica.onboarding.adopt import SAFE_WRITE_DIR
     ops_parsed = parse_ops(ops)
     ops = [op.model_copy(deep=True) for op in ops_parsed]
 
     # Vault write boundary (`write_dir` in vault.yaml); "" ⇒ the whole vault, so
     # a vault that declares nothing behaves exactly as before.
     write_root = active_write_dir()
+    # Safe mode only: `silica/` mirrors the vault's own tree, so a subfolder
+    # inside it is a claim that the vault has no folder for this note. The rebase
+    # below repairs a FORGOTTEN prefix for free, but an INVENTED subtree is
+    # indistinguishable from a correct one — hence the check further down.
+    mirror = write_root == SAFE_WRITE_DIR
+    vault_root = (getattr(CONFIG, "vault_path", "") or "").strip()
+
+    # The run's landing folder follows the ops into the boundary. Without this
+    # the rebase below moves every write into `write_root/` while target_dir
+    # still names the folder outside it, and the "not in target folder" check
+    # downstream then rejects the whole batch — the two were comparing paths
+    # from different spaces. Reachable before safe mode (a code vault plus any
+    # target_dir outside docs/silica); reachable on every prose vault after it.
+    if write_root and target_dir and not os.path.isabs(target_dir) and not within(
+        target_dir, write_root
+    ):
+        target_dir = write_root + "/" + target_dir.replace("\\", "/").strip("/")
+
+    def _invented_folder(rel_path: str) -> str:
+        """The mirror-relative parent of `rel_path` when no folder answers for it
+        yet; "" when one does, when it is the mirror root, or when no vault.
+
+        Two places answer, because the mirror is a preview of the vault after the
+        paste: a folder the vault already has, and a folder an earlier run
+        already created INSIDE the mirror (justified once, at creation — the
+        gate is per folder, not per note, and the user's veto is declining to
+        paste it).
+
+        Presence check only — whether the reason is a *good* one is the prompt's
+        job, not an LLM adjudication this seam has to stay deterministic without.
+        """
+        under = (rel_path or "").replace("\\", "/").strip("/").split("/", 1)
+        parent = os.path.dirname(under[1]) if len(under) == 2 else ""
+        if not parent or not vault_root:
+            return ""
+        if os.path.isdir(os.path.join(vault_root, parent)):
+            return ""
+        if os.path.isdir(os.path.join(vault_root, SAFE_WRITE_DIR, parent)):
+            return ""
+        return parent
 
     def _repaired(pattern: str) -> None:
         if normalized_out is not None:
@@ -504,6 +546,29 @@ def validate_operations(
         except ValueError:
             return False
 
+    # Safe mode: which invented folders this batch has already accounted for.
+    # Resolved up front so the gate is order-independent — with a per-op check
+    # five notes into one new folder rejected four of them, and WHICH four
+    # depended on where the model happened to put the sentence.
+    justified_folders: set[str] = set()
+    if mirror:
+        # The run's landing folder is the user's own filing decision (typed at
+        # /nucleate, folded onto the tree by resolve_target_dir), so it never
+        # owes the model's justification. Exact match, not `within`: a subtree
+        # improvised UNDER it is still the model's invention.
+        landing = (target_dir or "").replace("\\", "/").strip("/")
+        if landing and not os.path.isabs(target_dir or ""):
+            head, _, tail = landing.partition("/")
+            if head.lower() == SAFE_WRITE_DIR:
+                landing = tail  # the user typed the mirror path themselves
+            if landing:
+                justified_folders.add(landing.lower())
+        for op in ops:
+            if op.op == OpType.write and op.path and (op.reason or "").strip():
+                stated = _invented_folder(op.path)
+                if stated:
+                    justified_folders.add(stated.lower())
+
     for op in ops:
         heading = op.heading
         op_type = op.op
@@ -530,6 +595,23 @@ def validate_operations(
                 rejected_ops.append(Rejection(
                     op=op,
                     reason=f"outside the vault write boundary '{write_root}/': {outside[0]}",
+                ))
+                continue
+
+        # Safe mode: a new note may land in any folder that already answers for
+        # it without saying anything. A folder nobody has claimed yet is a
+        # filing decision the model made alone — it costs one sentence to state
+        # it, and the steering loop lets it retry with one.
+        if mirror and op_type == OpType.write and path:
+            invented = _invented_folder(path)
+            if invented and invented.lower() not in justified_folders:
+                rejected_ops.append(Rejection(
+                    op=op,
+                    reason=(
+                        f"'{invented}/' does not exist in the vault — file this "
+                        f"under a folder that does, or set \"reason\" to state "
+                        f"why no existing folder fits"
+                    ),
                 ))
                 continue
 

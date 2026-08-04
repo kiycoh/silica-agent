@@ -8,10 +8,15 @@ A vault path is adopted as-is: Silica reads the folder the user pointed at, not 
 subfolder it invented. What still needs deciding is where it may *write*, and the
 answer differs by content:
 
-  * an Obsidian vault, or a folder of prose → in place (`write_dir: ""`), which is
-    the manifest default, so nothing is written and behaviour is unchanged;
-  * a source tree → notes land in `docs/silica`, declared in `vault.yaml` so the
-    choice is visible, versionable and editable instead of re-guessed every run.
+  * a folder of prose, Obsidian vault included → notes land in `silica`, a
+    staging mirror of the vault's own tree (safe mode, on by default): merging is
+    a plain file-manager paste of its contents over the vault root;
+  * a source tree → notes land in `docs/silica`, which is Silica's own folder in
+    that repo rather than a mirror of it.
+
+Either way the choice is declared in `vault.yaml` so it is visible, versionable
+and editable instead of re-guessed every run — and reversible from one toggle in
+the settings panel, which writes this same field.
 
 No prompt: the detection picks a default, the caller prints it, and `vault.yaml`
 makes it changeable. A question at adoption time would block the GUI and MCP
@@ -25,7 +30,6 @@ from pathlib import Path
 from silica.kernel.recall.paths import (
     NOISE_DIRS,
     SILICAIGNORE_REL,
-    is_obsidian_vault,
     looks_like_code,
 )
 from silica.kernel.vault_manifest import MANIFEST_REL
@@ -34,6 +38,12 @@ logger = logging.getLogger(__name__)
 
 # Where notes go in a source tree: visible and committable next to the code.
 CODE_WRITE_DIR = "docs/silica"
+# Where notes go in a prose vault: a staging folder that MIRRORS the vault tree,
+# so `silica/Projects/foo.md` becomes `Projects/foo.md` by pasting the folder's
+# contents over the root. This one name is also the switch for the mirror rules
+# (prompt wording, new-folder check) — `docs/silica` is Silica's own tree in a
+# repo, not a mirror of it, so those rules do not apply there.
+SAFE_WRITE_DIR = "silica"
 
 _SILICAIGNORE_HEADER = """\
 # .silicaignore — directory names Silica never walks when indexing this vault.
@@ -73,7 +83,13 @@ def write_dir_for(vault: str | Path) -> str:
 
     Pure decision, no I/O beyond the detection scan. Callers that compose
     `vault.yaml` themselves (the first-run wizard) use this; `declare_write_dir`
-    is the persisting variant.
+    is the persisting variant, and the settings toggle re-derives from here
+    rather than restoring a remembered value — there is no "previous write_dir"
+    state to go stale.
+
+    Only a folder that is not a folder answers "" now: safe mode is the default,
+    so a prose vault is confined to its mirror like a repo is confined to
+    `docs/silica`, and filing in place is something the user turns ON.
 
     A `docs/silica` that already holds notes settles it whatever the content
     ratio says: that is a vault from before the write boundary existed, and the
@@ -81,12 +97,12 @@ def write_dir_for(vault: str | Path) -> str:
     where they are, the vault goes back to being the folder you launched in.
     """
     root = Path(vault)
-    if not root.is_dir() or is_obsidian_vault(root):
+    if not root.is_dir():
         return ""
     # glob is lazy and stops at the first hit; a missing dir yields nothing.
     if next((root / CODE_WRITE_DIR).glob("**/*.md"), None):
         return CODE_WRITE_DIR
-    return CODE_WRITE_DIR if looks_like_code(root) else ""
+    return CODE_WRITE_DIR if looks_like_code(root) else SAFE_WRITE_DIR
 
 
 def declare_write_dir(vault: str | Path) -> str | None:
@@ -94,8 +110,12 @@ def declare_write_dir(vault: str | Path) -> str | None:
 
     Returns the declared value when this call wrote it (the caller announces it),
     or None when there was nothing to declare: a manifest already exists (the
-    vault has spoken, never overrule it), or the content reads as prose and the
-    in-place default already fits, in which case the vault stays file-free.
+    vault has spoken, never overrule it), or the path is not a folder.
+
+    Since safe mode is the default, every already-adopted vault WITHOUT a
+    `vault.yaml` gets one on its next launch. That is the behaviour change, taken
+    knowingly: it is one visible line of YAML and one toggle to undo, and the
+    alternative is a default that only protects vaults adopted after today.
 
     Deliberately creates no directory: an empty `docs/silica` would then read as
     a pre-`write_dir` vault to every back-compat lookup.

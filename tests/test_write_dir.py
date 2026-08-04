@@ -173,10 +173,13 @@ def test_a_pre_write_dir_layout_declares_itself(tmp_path):
     assert resolve_vault_switch(str(tmp_path)).vault == str(tmp_path.resolve())
 
 
-def test_declare_write_dir_leaves_prose_in_place_and_file_free(tmp_path):
+def test_declare_write_dir_stages_prose_in_the_mirror(tmp_path):
+    # Safe mode is the default: prose is confined to `silica/` rather than
+    # filed in place, and the declaration says so out loud.
     (tmp_path / "nota.md").write_text("# nota")
-    assert declare_write_dir(tmp_path) is None
-    assert not (tmp_path / "vault.yaml").exists()
+    assert declare_write_dir(tmp_path) == "silica"
+    assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: silica\n"
+    assert not (tmp_path / "silica").exists()  # declaring is not creating
 
 
 def test_declare_write_dir_never_overrules_an_existing_manifest(tmp_path):
@@ -187,10 +190,51 @@ def test_declare_write_dir_never_overrules_an_existing_manifest(tmp_path):
     assert load_manifest(str(tmp_path)).write_dir == "notes"
 
 
-def test_declare_write_dir_leaves_an_obsidian_vault_alone(tmp_path):
+def test_an_obsidian_vault_is_confined_like_any_prose_vault(tmp_path):
+    # The early-return that used to force "" here is gone: being an Obsidian
+    # vault is exactly the case safe mode exists for — someone's own notes.
     (tmp_path / ".obsidian").mkdir()
-    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")  # docs repo
-    assert declare_write_dir(tmp_path) is None
+    (tmp_path / "nota.md").write_text("# nota")
+    assert declare_write_dir(tmp_path) == "silica"
+
+
+def test_safe_mode_never_overrules_a_code_vaults_own_boundary(tmp_path):
+    # Toggling safe mode on re-derives; a source tree keeps docs/silica, which
+    # is Silica's own folder in that repo and not a mirror of it.
+    from silica.onboarding.adopt import write_dir_for
+
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
+    assert write_dir_for(tmp_path) == "docs/silica"
+
+
+# --- the safe-mode toggle ----------------------------------------------------
+
+def test_toggle_round_trip_keeps_the_rest_of_the_manifest(tmp_path):
+    from silica.kernel.vault_manifest import set_write_dir
+
+    (tmp_path / "vault.yaml").write_text(
+        "# hand-written\nsources: [prose]\nwrite_dir: silica\n", encoding="utf-8"
+    )
+
+    set_write_dir(tmp_path, "")
+    off = load_manifest(str(tmp_path))
+    assert off.write_dir == ""
+    assert off.sources == ("prose",)
+    assert "# hand-written" in (tmp_path / "vault.yaml").read_text(encoding="utf-8")
+
+    set_write_dir(tmp_path, "silica")
+    assert load_manifest(str(tmp_path)).write_dir == "silica"
+    assert (tmp_path / "vault.yaml").read_text(encoding="utf-8").count("write_dir") == 1
+
+
+def test_toggle_declares_the_field_on_a_manifest_that_lacks_it(tmp_path):
+    from silica.kernel.vault_manifest import set_write_dir
+
+    (tmp_path / "vault.yaml").write_text("sources: [prose]\n", encoding="utf-8")
+    set_write_dir(tmp_path, "silica")
+
+    assert load_manifest(str(tmp_path)).write_dir == "silica"
+    assert load_manifest(str(tmp_path)).sources == ("prose",)
 
 
 # --- enforcement ------------------------------------------------------------
@@ -220,8 +264,8 @@ def _op(op, **kw):
     return {"op": op, "heading": "Concetto", "source_basename": "src.md", **kw}
 
 
-def _write(path):
-    return _op("write", path=path, snippet="corpo della nota " * 10)
+def _write(path, **kw):
+    return _op("write", path=path, snippet="corpo della nota " * 10, **kw)
 
 
 def test_a_new_note_aimed_outside_is_filed_inside_the_boundary(bounded_vault):
@@ -278,6 +322,146 @@ def test_a_vault_that_declares_nothing_is_unaffected(tmp_vault, monkeypatch):
 
     assert rejected == []
     assert [o.path for o in validated] == ["Concepts/Foo.md"]  # no rebase
+
+
+# --- safe mode: the mirror and its new-folder rule ---------------------------
+
+@pytest.fixture
+def mirror_vault(tmp_vault, monkeypatch):
+    """A prose vault under safe mode: writes stage in `silica/`."""
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    monkeypatch.setenv("SILICA_MIN_WRITE_SNIPPET_CHARS", "10")
+    root = Path(CONFIG.vault_path)
+    (root / "Progetti").mkdir(exist_ok=True)
+    (root / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
+    reset_manifest_cache()
+    return tmp_vault
+
+
+def test_a_forgotten_prefix_still_lands_in_the_mirror(mirror_vault):
+    # The safety net that makes the model's job "replicate the tree" and not
+    # "remember a prefix": the rebase produces exactly the mirror path.
+    validated, rejected = _validate([_write("Progetti/Foo.md")])
+
+    assert rejected == []
+    assert [o.path for o in validated] == ["silica/Progetti/Foo.md"]
+
+
+def test_the_mirror_root_needs_no_reason(mirror_vault):
+    # Its parent is the vault root, which exists by construction.
+    validated, rejected = _validate([_write("silica/Foo.md")])
+
+    assert rejected == []
+    assert [o.path for o in validated] == ["silica/Foo.md"]
+
+
+def test_an_invented_folder_without_a_reason_is_rejected(mirror_vault):
+    validated, rejected = _validate([_write("silica/Inventata/Foo.md")])
+
+    assert validated == []
+    assert "'Inventata/' does not exist in the vault" in rejected[0].reason
+    assert "reason" in rejected[0].reason  # the retry the steering loop needs
+
+
+def test_an_invented_folder_with_a_reason_is_accepted(mirror_vault):
+    validated, rejected = _validate(
+        [_write("silica/Inventata/Foo.md", reason="no existing folder covers this")]
+    )
+
+    assert rejected == []
+    assert [o.path for o in validated] == ["silica/Inventata/Foo.md"]
+
+
+def test_a_folder_an_earlier_run_created_is_not_re_challenged(mirror_vault):
+    # The mirror is the vault as it will be after the paste: a folder already
+    # staged there was justified once, at creation. Asking again for every note
+    # filed into it would make the gate per-note instead of per-folder.
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    (Path(CONFIG.vault_path) / "silica" / "Inventata").mkdir(parents=True)
+
+    validated, rejected = _validate([_write("silica/Inventata/Seconda.md")])
+
+    assert rejected == []
+    assert [o.path for o in validated] == ["silica/Inventata/Seconda.md"]
+
+
+def test_the_landing_folder_the_user_typed_owes_no_reason(mirror_vault):
+    # target_dir is where the user said to file this run. Rejecting it would ask
+    # the model to justify a decision it did not make. The injected hub follows
+    # the boundary too — target_dir is rebased once, so everything derived from
+    # it lands inside the mirror instead of beside it.
+    from silica.kernel.write.validate import validate_operations
+
+    validated, rejected = validate_operations(
+        [_write("silica/Chimica/Foo.md")], [], "Chimica"
+    )
+
+    assert rejected == []
+    assert sorted(o.path for o in validated) == [
+        "silica/Chimica/Chimica.md",  # the hub
+        "silica/Chimica/Foo.md",
+    ]
+
+
+def test_a_landing_folder_outside_the_boundary_carries_the_batch_inside(bounded_vault):
+    # The defect the rebase closes, on the vault shape that had it before safe
+    # mode: the op moves into docs/silica while target_dir names a folder
+    # outside it, and every write is then "not in target folder".
+    from silica.kernel.write.validate import validate_operations
+
+    validated, rejected = validate_operations([_write("Concepts/Foo.md")], [], "Concepts")
+
+    assert rejected == []
+    assert "docs/silica/Concepts/Foo.md" in [o.path for o in validated]
+
+
+def test_a_subtree_improvised_under_the_landing_folder_still_needs_one(mirror_vault):
+    # The user chose Chimica, not Chimica/Organica — the exemption is an exact
+    # match, so the deeper folder is still the model's own invention.
+    from silica.kernel.write.validate import validate_operations
+
+    validated, rejected = validate_operations(
+        [_write("silica/Chimica/Organica/Foo.md")], [], "Chimica"
+    )
+
+    assert validated == []
+    assert "'Chimica/Organica/' does not exist" in rejected[0].reason
+
+
+def test_one_reason_covers_every_note_in_the_batch(mirror_vault):
+    # A batch is one filing proposal. Per-op, this rejected three of four — and
+    # which three depended on where the model put the sentence.
+    ops = [_write(f"silica/Inventata/N{i}.md") for i in range(4)]
+    ops[2]["reason"] = "no existing folder covers this material"
+
+    validated, rejected = _validate(ops)
+
+    assert rejected == []
+    assert len(validated) == 4
+
+
+def test_a_batch_with_no_reason_at_all_is_still_rejected(mirror_vault):
+    ops = [_write(f"silica/Inventata/N{i}.md") for i in range(3)]
+
+    validated, rejected = _validate(ops)
+
+    assert validated == []
+    assert len(rejected) == 3
+
+
+def test_a_code_vault_never_asks_for_a_reason(bounded_vault):
+    # docs/silica is Silica's own tree in a repo, not a mirror of the repo, so
+    # "this folder does not exist at the root" says nothing there.
+    validated, rejected = _validate([_write("docs/silica/Inventata/Foo.md")])
+
+    assert rejected == []
+    assert [o.path for o in validated] == ["docs/silica/Inventata/Foo.md"]
 
 
 def test_a_broken_declaration_rejects_every_write(tmp_vault, monkeypatch):
