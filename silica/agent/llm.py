@@ -590,6 +590,10 @@ def call_llm(
     # a reopened chat can still show the thinking that produced the answer.
     if reasoning:
         assistant_msg["silica_reasoning"] = reasoning
+        # Sole observability for non-interactive calls (distiller, steer,
+        # subagents): only the interactive loop emits ReasoningEvent, so
+        # outside it the trace parked above is never read. A -v run logs it.
+        logger.debug("LLM reasoning: %s", reasoning)
     if isinstance(blocks, list):
         assistant_msg["thinking_blocks"] = blocks
 

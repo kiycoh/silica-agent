@@ -227,7 +227,12 @@ def build_substrate(
                 if stems:
                     vocab_lines.append(", ".join(stems)[:600])  # hard token-budget cap
                 if hub_names:
-                    vocab_lines.append("Hub notes: " + ", ".join(sorted(set(hub_names))))
+                    # Capped like its two siblings: this list is as long as the
+                    # vault has hubs (102 on a mid-size one) and had no bound at
+                    # all, so it could outweigh every other section of the
+                    # substrate in the prompt.
+                    vocab_lines.append(
+                        "Hub notes: " + ", ".join(sorted(set(hub_names)))[:600])
                 if code_names:
                     vocab_lines.append("Code names: " + ", ".join(code_names)[:600])
         except Exception as _voc_e:

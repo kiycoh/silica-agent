@@ -46,6 +46,19 @@ _MD_IMAGE_SRC_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A figure caption: the <details> block a PDF converter emits DIRECTLY under the
+# image it describes (MinerU + a vision model: "<summary>contour</summary>" and a
+# transcribed axis table). It is machine-written description of a picture, not
+# something the document says — and it read as source content: one real run made
+# a note titled "Y-axis Range" out of a caption table header, body and all.
+# Positional, not a list of summary labels: a hand-written <details> that follows
+# no image is the author's and stays.
+_IMAGE_CAPTION_RE = re.compile(
+    rf"(?:!\[\[[^\]]*\.{_IMAGE_EXTENSIONS}(?:\|[^\]]*)?\]\]|!\[[^\]]*\]\([^)]*\))"
+    r"[ \t]*\n\s*<details>.*?</details>",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -60,12 +73,19 @@ def strip_images(text: str) -> str:
       - ``![](path/to/image.jpeg)``          Standard Markdown (empty alt)
       - ``![alt text](https://…/img.png)``   Standard Markdown (remote)
 
+    A ``<details>`` block sitting directly under an image goes with it: that is
+    a PDF converter's machine-written figure caption, not something the document
+    says. A ``<details>`` that follows no image is the author's and survives.
+
     Wikilinks without ``!`` prefix (``[[Note]]``) are left untouched.
     Plain text, headings, and code blocks are left untouched.
 
     Empty lines left by removed embeds are collapsed to at most one blank line
     so the surrounding text reads cleanly.
     """
+    # 0. Image + its converter-written caption, together — after step 1 the
+    #    caption no longer follows anything and can't be told from an author's.
+    text = _IMAGE_CAPTION_RE.sub("", text)
     # 1. Remove Obsidian-flavor embeds
     text = _OFM_IMAGE_RE.sub("", text)
     # 2. Remove standard Markdown images

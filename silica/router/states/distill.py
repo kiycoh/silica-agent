@@ -205,6 +205,27 @@ def _filter_chunk_to_concepts(chunk: dict, names: set) -> dict | None:
     return {**chunk, "batches": batches}
 
 
+def _vocabulary_hubs(vault_ctx: dict) -> list[str]:
+    """Hub note names fit to be shown as the vault's preferred terminology.
+
+    The substrate prints these under "reuse these instead of coining synonyms",
+    so what is in the list is what the distiller is told to name things after.
+    Inbox hubs are dropped: staging clusters are hubbed by whatever the source
+    happened to be, and on a vault of converted PDFs that meant 27 of 102 hub
+    names were chapter slugs (`01-an-introduction-to-support-vector-machines`).
+    Telling the model to reuse those is worse than telling it nothing.
+    """
+    from silica.kernel.recall.paths import is_inbox_path
+
+    names = []
+    for v in vault_ctx.values():
+        hub = v.get("hub") if isinstance(v, dict) else None
+        if not hub or not v.get("is_hub") or is_inbox_path(hub):
+            continue
+        names.append(hub.rsplit("/", 1)[-1])
+    return sorted(set(names))
+
+
 def _inject_graph_ctx(chunk: dict, vault_ctx: dict) -> dict:
     """Return a shallow-enriched copy of chunk with graph_context added to concepts.
 
@@ -277,10 +298,7 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
             enriched_chunk,
             manifest_titles=fsm.manifest.titles(),
             cleared_parents=fsm.context.get("run_cleared_parents"),
-            hub_names=[
-                v["hub"].rsplit("/", 1)[-1] for v in vault_ctx.values()
-                if isinstance(v, dict) and v.get("is_hub") and v.get("hub")
-            ],
+            hub_names=_vocabulary_hubs(vault_ctx),
         )
     except Exception as _sub_e:
         logger.debug("DELEGATE: substrate build failed (non-fatal): %s", _sub_e)

@@ -54,6 +54,30 @@ def close_unbalanced_fences(text: str) -> str:
     return text
 
 
+_ECHOED_H1_RE = re.compile(r"^(\s*(?:<!--.*?-->\s*)*)#\s+(?P<h1>[^\n]+)\n+", re.DOTALL)
+
+
+def _drop_echoed_title(body: str, h1: str) -> str:
+    """Drop the body's opening H1 when it just repeats the note title.
+
+    The template writes `# {h1}` itself, and a distiller that opens its snippet
+    with the same heading produced the title twice — inconsistently, since only
+    the snippets that happened to include one were affected (13 notes of 24 in
+    one real run). A LEADING provenance stamp is stepped over, and an H1 that
+    says something DIFFERENT is left alone: that is content, not an echo.
+
+    Compared through `slugify`, because the title reaching here came from a
+    filename and lost its punctuation on the way: "Classificazione: approcci
+    discriminativo e generativo" in the body against "Classificazione approcci
+    discriminativo e generativo" as the title is one heading twice, and an exact
+    match read it as two.
+    """
+    m = _ECHOED_H1_RE.match(body)
+    if not m or slugify(m.group("h1")).casefold() != slugify(h1).casefold():
+        return body
+    return m.group(1).lstrip() + body[m.end():]
+
+
 def template_spoke(heading: str, snippet: str, hub: str, title: str | None = None, tags: list[str] | None = None, related: list[str] | None = None, parent: str | None = None) -> str:
     today = datetime.date.today().isoformat()
     body = snippet.strip() or "(da espandere)"
@@ -142,12 +166,15 @@ def prepare_fields(*, title: str, body: str, hub: str | None = None,
 
     Also normalizes body: models drift toward emitting frontmatter at the
     top of markdown regardless of instructions, so a leading YAML block is
-    stripped with a warning rather than landing inside the rendered note.
+    stripped with a warning rather than landing inside the rendered note —
+    and so is an opening H1 that only repeats the title the template writes
+    itself (see `_drop_echoed_title`).
     """
     m = frontmatter.FM_RE.match(body)
     if m:
         logger.warning("prepare_fields: stripped leading YAML block from body")
         body = body[m.end():]
+    body = _drop_echoed_title(body, title)
 
     hub_link = _link_name(hub) if hub else ""
     parent_link = _link_name(parent) if parent else hub_link
