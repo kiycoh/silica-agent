@@ -39,8 +39,17 @@ def handle_lint(fsm: "InjectorFSM") -> None:
         if op.touched_ref() and op.op not in (OpType.delete, OpType.skip)
     ]
 
+    # Per-op lint runs diff-aware (only violations a patch INTRODUCES block it);
+    # this gate re-checks after autolink/backlink/hub mutations and must apply
+    # the same tolerance, or a pre-existing issue in a patched user note aborts
+    # the whole chunk (run 880b9aa9: f1_c0/f1_c1 died on an inherited
+    # "frontmatter 'AI' missing" the WRITE phase had correctly waved through).
+    baselines = fsm._chunk_ctx.get("lint_baseline", {})
     for path, op_type, hub in touched:
         res = orch.silica_lint(path, op_type=op_type or "", hub=hub or "")
+        new_errors = [
+            e for e in res.get("errors", []) if e not in set(baselines.get(path, []))
+        ]
         if orch.CONFIG.verbose:
             logger.info(
                 "[DEBUG LINT Gate]: File: %s | Type: %s | Hub: %s | Success: %s | Errors: %s",
@@ -50,8 +59,8 @@ def handle_lint(fsm: "InjectorFSM") -> None:
                 res["success"],
                 res.get("errors", []),
             )
-        if not res["success"]:
-            fsm._chunk_ctx["abort_reason"] = f"Lint failed for {path}: {res['errors']}"
+        if not res["success"] and new_errors:
+            fsm._chunk_ctx["abort_reason"] = f"Lint failed for {path}: {new_errors}"
             fsm._progress_note(fsm._chunk_task_id("lint"), "lint", "failed", error=fsm._chunk_ctx["abort_reason"])
             fsm.state = orch.InjectorState.ROLLBACK
             return

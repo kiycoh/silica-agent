@@ -180,6 +180,12 @@ def handle_write(fsm: "InjectorFSM") -> None:
 
     result = bulk_write_atomic(ops, hub=fsm.hub, lint=True)
 
+    # Per-op lint tolerated these pre-existing violations (patch baseline);
+    # hand them to the chunk LINT gate so it applies the same tolerance.
+    fsm._chunk_ctx["lint_baseline"] = {
+        r.path: r.baseline_errors for r in result.committed if r.baseline_errors
+    }
+
     # Accumulate surviving notes' inverses for the undo journal (recorded at
     # CLEANUP after autolink finalises content → correct version-guard hashes).
     for r in result.committed:

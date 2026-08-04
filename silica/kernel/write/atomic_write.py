@@ -30,6 +30,10 @@ class NoteCommitResult:
     post_hash: str | None = None
     error: str | None = None
     reverted: bool = False
+    # Pre-write lint violations this op was allowed to inherit (patch baseline).
+    # The chunk LINT gate must tolerate exactly these, or a pre-existing issue
+    # in a user-authored note aborts every chunk that patches it.
+    baseline_errors: list[str] = field(default_factory=list)
 
 
 def commit_note_atomic(op: Op, *, hub: str | None = None, lint: bool = True) -> NoteCommitResult:
@@ -138,7 +142,8 @@ def _commit_note_atomic_unlocked(op: Op, *, hub: str | None = None, lint: bool =
             post_hash = None
 
     return NoteCommitResult(
-        ok=True, path=path, op=op_name, inverses=inverses, post_hash=post_hash
+        ok=True, path=path, op=op_name, inverses=inverses, post_hash=post_hash,
+        baseline_errors=sorted(baseline_errors),
     )
 
 

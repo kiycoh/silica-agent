@@ -463,6 +463,63 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
     assert fsm.context["final_status"] == "failed"  # zero commits: honest verdict, not "partial"
 
 
+def _lint_gate_fsm(op_path: str):
+    """LINT-state FSM with one committed patch op on op_path (graph gate green)."""
+    from silica.kernel.write.ops import Op, OpType
+    fsm = InjectorFSM("Inbox/test.md", "TargetDir")
+    fsm.context.setdefault("chunk", {})["ops_path"] = "dummy_ops.json"
+    fsm._pre_graph = MagicMock()
+    fsm._txn = MagicMock()
+    fsm._txn.created_paths = []
+    fsm.state = InjectorState.LINT
+    op = Op(op=OpType.patch, path=op_path, heading="H",
+            source_basename="s.md", snippet="x", hub="Hub")
+    return fsm, [op]
+
+
+@patch("silica.router.orchestrator.silica_lint")
+@patch("silica.router.orchestrator.DRIVER")
+@patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
+def test_fsm_lint_gate_tolerates_per_op_baseline(mock_driver, mock_lint):
+    """The gate must apply the same diff-aware tolerance as per-op lint
+    (commit_note_atomic baseline): a pre-existing violation in a patched user
+    note is not this chunk's regression. Run 880b9aa9: f1_c0/f1_c1 aborted —
+    discarding their committed ops — on an inherited "frontmatter 'AI'
+    missing" the WRITE phase had correctly waved through."""
+    inherited = "frontmatter 'AI' missing or not boolean"
+    mock_lint.return_value = {"success": False, "errors": [inherited]}
+    mock_driver.graph_snapshot.return_value = MagicMock()
+
+    fsm, ops = _lint_gate_fsm("Topics/Legacy.md")
+    fsm.context["chunk"]["lint_baseline"] = {"Topics/Legacy.md": [inherited]}
+    with patch("silica.router.orchestrator.load_ops", return_value=ops), \
+         patch("silica.kernel.graph_diff.check_graph_regression", return_value=(True, [])):
+        fsm.step()
+
+    assert fsm.state != InjectorState.ROLLBACK
+
+
+@patch("silica.router.orchestrator.silica_lint")
+@patch("silica.router.orchestrator.DRIVER")
+@patch("silica.router.recipe_parser.load_recipe", new=lambda *a, **k: _RECIPE)
+def test_fsm_lint_gate_still_blocks_new_violations(mock_driver, mock_lint):
+    """Control for the baseline tolerance: a violation NOT in the baseline
+    (introduced by this chunk, e.g. by autolink/hub mutations after per-op
+    lint) must still abort to ROLLBACK."""
+    mock_lint.return_value = {"success": False, "errors": ["unknown callout type [!x]"]}
+    mock_driver.graph_snapshot.return_value = MagicMock()
+
+    fsm, ops = _lint_gate_fsm("Topics/Legacy.md")
+    fsm.context["chunk"]["lint_baseline"] = {
+        "Topics/Legacy.md": ["frontmatter 'AI' missing or not boolean"]
+    }
+    with patch("silica.router.orchestrator.load_ops", return_value=ops):
+        fsm.step()
+
+    assert fsm.state == InjectorState.ROLLBACK
+    assert "unknown callout type" in fsm.context["chunk"]["abort_reason"]
+
+
 @patch("silica.router.orchestrator.silica_recon")
 @patch("silica.router.orchestrator.silica_payload")
 @patch("silica.router.states.distill.run_distiller")
