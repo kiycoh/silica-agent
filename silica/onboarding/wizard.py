@@ -115,6 +115,27 @@ def _endpoint_model_ids(base_url: str) -> list[str]:
         return []
 
 
+def resolve_env_path() -> Path:
+    """The `.env` a settings write must land in — the one that would win at boot.
+
+    An existing project .env is updated in place; otherwise the settings go to
+    the user-level file, which config.py loads from any directory. The old
+    "cwd/.env" default dropped a config file into whatever folder the shell sat
+    in, and one an installed silica would never read again.
+
+    Same precedence config.py layers with, so what is written here is what the
+    next launch reads back. Creates the parent directory, never the file.
+    """
+    cwd = Path.cwd()
+    repo_root = gitstate.find_repo_root(cwd)
+    path = next(
+        (p for p in (cwd / ".env", Path(repo_root or cwd) / ".env") if p.exists()),
+        USER_ENV,
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def merge_env(existing: str, updates: dict[str, str]) -> str:
     """Update KEY=VALUE lines in place — uncommenting a `# KEY=default` line when
     KEY is collected — preserve every other line untouched, and append keys that
@@ -827,18 +848,8 @@ def run_wizard(
     env_path: Path | None = None,
     advanced: bool = False,
 ) -> int:
-    cwd = Path.cwd()
     if env_path is None:
-        # An existing project .env is updated in place; otherwise the settings go
-        # to the user-level file, which config.py loads from any directory. The
-        # old "cwd/.env" default dropped a config file into whatever folder the
-        # shell sat in, and one an installed silica would never read again.
-        repo_root = gitstate.find_repo_root(cwd)
-        env_path = next(
-            (p for p in (cwd / ".env", Path(repo_root or cwd) / ".env") if p.exists()),
-            USER_ENV,
-        )
-        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path = resolve_env_path()  # shared with the web settings panel
     try:
         return _run_wizard_inner(input_fn, env_path, advanced=advanced)
     except KeyboardInterrupt:

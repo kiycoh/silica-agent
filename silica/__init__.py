@@ -18,6 +18,14 @@ import os as _os
 # third-party import. Re-exported as silica.config.VAULT_PINNED, its usual name.
 VAULT_PINNED = bool(_os.environ.get("SILICA_VAULT", "").strip())
 
+# The same capture, generalised to every key. config.py layers the .env files
+# with override=False, so a key the shell already exported wins at boot and no
+# amount of writing to a .env can change it. After that load the two are
+# indistinguishable in os.environ — every .env key is in there too. The settings
+# panel needs the difference to know which rows it must show locked instead of
+# accepting an edit it cannot make stick.
+SHELL_ENV = frozenset(_os.environ)
+
 try:
     # Written by setuptools-scm at build/install time (gitignored).
     from ._version import version as __version__

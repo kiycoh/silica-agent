@@ -149,7 +149,7 @@ def ensure_local_servers(config=None) -> None:
 
     cfg = config or CONFIG
     for label, key, get_url in (
-        ("chat", "SILICA_PROVIDER_SERVE_CMD", lambda: _chat_base_url(cfg)),
+        ("chat", "SILICA_PROVIDER_SERVE_CMD", lambda: chat_base_url(cfg)),
         ("embeddings", "SILICA_EMBEDDING_SERVE_CMD", lambda: cfg.embedding_base_url),
         ("rerank", "SILICA_RERANK_SERVE_CMD", lambda: cfg.rerank_base_url),
         ("stt", "SILICA_STT_SERVE_CMD", lambda: cfg.stt_base_url),
@@ -159,7 +159,7 @@ def ensure_local_servers(config=None) -> None:
             ensure(label, get_url(), command)
 
 
-def _chat_base_url(cfg) -> str:
+def chat_base_url(cfg) -> str:
     """Where the chat provider is served — the preset URL unless one is pinned."""
     if cfg.provider_base_url:
         return cfg.provider_base_url

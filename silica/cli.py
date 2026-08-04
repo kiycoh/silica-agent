@@ -253,6 +253,86 @@ def resolve_vault_switch(arg: str) -> VaultTarget:
     return VaultTarget(str(target), not target.is_dir())
 
 
+class VaultSwitch(NamedTuple):
+    """What a completed ``switch_vault`` did, for whoever has to report it.
+
+    ``error`` set means nothing happened at all. Everything else is a thing the
+    caller may want to say out loud: ``created`` the directory did not exist,
+    ``write_dir`` this call declared one in vault.yaml, ``invalid_write_dir``
+    the manifest declares one Silica cannot resolve (every write will be
+    rejected), ``repo_warning`` the vault⊂repo invariant is violated,
+    ``language_drift`` the co-occurrence store is frozen in another language.
+    """
+    vault: str
+    error: str | None = None
+    created: bool = False
+    write_dir: str | None = None
+    seeded_ignore: bool = False
+    invalid_write_dir: bool = False
+    repo_warning: str = ""
+    language: str = ""
+    store_language: str = ""
+    language_drift: bool = False
+
+
+def switch_vault(arg: str) -> VaultSwitch:
+    """Point the running process at another vault — the whole sequence.
+
+    Not an assignment: a live process holds a driver, an overlay cache, a
+    manifest and vault-scoped index caches, and every one of them still answers
+    for the old folder until it is reset. Skipping any single step leaves reads
+    and writes disagreeing about which vault they are in.
+
+    Prints nothing, so the REPL and the web settings panel can share it: the
+    caller renders the returned record. Never raises for a bad path — that is
+    ``error``.
+    """
+    from pathlib import Path
+
+    from silica.driver import reset_driver
+    from silica.kernel.recall.paths import repo_root_warning
+    from silica.kernel.recall.relatedness import reset_vault_caches
+    from silica.kernel.text.overlay import reset_overlay_cache
+    from silica.kernel.vault_manifest import (
+        apply_manifest_to_config,
+        get_active_manifest,
+        reset_manifest_cache,
+    )
+    from silica.onboarding.adopt import declare_write_dir, seed_silicaignore
+    from silica.onboarding.checks import language_status
+
+    target = resolve_vault_switch(arg)
+    if target.error:
+        return VaultSwitch("", error=target.error)
+    resolved = target.vault
+    if target.created:
+        Path(resolved).mkdir(parents=True, exist_ok=True)
+    declared = declare_write_dir(resolved)
+    seeded = seed_silicaignore(resolved)
+    CONFIG.vault_path = resolved
+    reset_driver()
+    reset_overlay_cache()  # overlay is vault-scoped; don't serve the old vault's
+    reset_manifest_cache()  # manifest is vault-scoped too
+    apply_manifest_to_config()
+    # Vault-scoped store caches are path-keyed (harmless on lookup) but retain
+    # the old vault's index/vectors for the process lifetime.
+    reset_vault_caches()
+    lang, store_lang, drift = language_status(resolved)
+    return VaultSwitch(
+        vault=resolved,
+        created=target.created,
+        write_dir=declared,
+        seeded_ignore=bool(seeded),
+        # Declared but unresolvable (absolute/traversal). Refusing here is the
+        # whole point of not degrading it to "" in the parser.
+        invalid_write_dir=get_active_manifest().write_dir is None,
+        repo_warning=repo_root_warning(resolved) or "",
+        language=lang or "",
+        store_language=store_lang or "",
+        language_drift=bool(drift),
+    )
+
+
 def default_user_vault(home=None):
     """Stable per-user vault used when no explicit SILICA_VAULT and no repo
     mode applies. Sits alongside ~/.silica/{ledger,undo_journal,checkpoints}.db.
@@ -392,61 +472,36 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
     cmd = parts[0].lower()
 
     if cmd == "/vault":
-        from pathlib import Path
-        from silica.driver import reset_driver
-
         arg = " ".join(parts[1:]).strip()
         if arg:
-            target = resolve_vault_switch(arg)
-            if target.error:
-                CONSOLE.print(f"  [red]Cannot adopt as a vault — {target.error}[/]")
+            r = switch_vault(arg)
+            if r.error:
+                CONSOLE.print(f"  [red]Cannot adopt as a vault — {r.error}[/]")
                 return True
-            if target.created:
-                Path(target.vault).mkdir(parents=True, exist_ok=True)
-                CONSOLE.print(f"  Created [bold]{target.vault}[/] as the session vault.")
-            resolved = target.vault
-            from silica.onboarding.adopt import declare_write_dir, seed_silicaignore
-
-            declared = declare_write_dir(resolved)
-            if declared:
+            if r.created:
+                CONSOLE.print(f"  Created [bold]{r.vault}[/] as the session vault.")
+            if r.write_dir:
                 CONSOLE.print(
-                    f"  Source tree — writes confined to [bold]{declared}/[/]; the rest of "
+                    f"  Source tree — writes confined to [bold]{r.write_dir}/[/]; the rest of "
                     "the vault is read-only context. Change `write_dir` in vault.yaml."
                 )
-            if seed_silicaignore(resolved):
+            if r.seeded_ignore:
                 CONSOLE.print("  Created [bold].silicaignore[/] — add folders to keep out of the index.")
-            CONFIG.vault_path = resolved
-            reset_driver()
-            from silica.kernel.text.overlay import reset_overlay_cache
-            reset_overlay_cache()  # overlay is vault-scoped; don't serve the old vault's
-            from silica.kernel.vault_manifest import apply_manifest_to_config, reset_manifest_cache
-            reset_manifest_cache()  # manifest is vault-scoped too
-            apply_manifest_to_config()
-            from silica.kernel.vault_manifest import get_active_manifest
-
-            if get_active_manifest().write_dir is None:
-                # Declared but unresolvable (absolute/traversal). Refusing here is
-                # the whole point of not degrading it to "" in the parser.
+            if r.invalid_write_dir:
                 CONSOLE.print(
                     "  [red]⚠ vault.yaml declares an invalid `write_dir` — every write "
                     "will be rejected until it is a relative path inside the vault.[/]"
                 )
-            # Vault-scoped store caches are path-keyed (harmless on lookup) but
-            # retain the old vault's index/vectors for the process lifetime.
-            from silica.kernel.recall.relatedness import reset_vault_caches
-            reset_vault_caches()
-            CONSOLE.print(f"  Vault → [bold]{resolved}[/] (backend: {CONFIG.backend})")
-            _announce_code_lane()
+            CONSOLE.print(f"  Vault → [bold]{r.vault}[/] (backend: {CONFIG.backend})")
+            if r.repo_warning:
+                CONSOLE.print(f"  [yellow]⚠ {r.repo_warning}[/]")
             # Surface the frozen-language drift here, not only in `/vault` info:
             # a switch is exactly when a wrong-frozen store (english on an IT
             # vault) would otherwise stay silent. Reuses the doctor's check.
-            from silica.onboarding.checks import language_status
-
-            lang, store_lang, drift = language_status(resolved)
-            if drift:
+            if r.language_drift:
                 CONSOLE.print(
-                    f"  [yellow]⚠ Language: {lang}, co-occurrence store "
-                    f"frozen {store_lang} — run /cooccur --force to rebuild.[/]"
+                    f"  [yellow]⚠ Language: {r.language}, co-occurrence store "
+                    f"frozen {r.store_language} — run /cooccur --force to rebuild.[/]"
                 )
             CONSOLE.print(
                 "  [dim]Index namespace follows the vault — run /embed and /cooccur "
@@ -457,6 +512,8 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         CONSOLE.print(f"  Vault:   [bold]{vault}[/]")
         CONSOLE.print(f"  Backend: {CONFIG.backend}")
         if CONFIG.vault_path:
+            from pathlib import Path
+
             count = len(list(Path(CONFIG.vault_path).rglob("*.md")))
             CONSOLE.print(f"  Notes:   {count}")
             from silica.onboarding.checks import language_status

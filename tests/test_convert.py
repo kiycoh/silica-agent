@@ -109,7 +109,7 @@ def test_empty_extraction_raises_pointing_at_ocr(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
     # setitem, not setattr: the PDF path resolves the provider through the
     # registry dict, which holds its own reference to the function.
-    monkeypatch.setitem(conv._PDF_PROVIDERS, "pymupdf", lambda src, wd: ("   \n\n", wd))
+    monkeypatch.setitem(conv.PDF_PROVIDERS, "pymupdf", lambda src, wd: ("   \n\n", wd))
     tmp_vault.note("scan.pdf", "x")
 
     with pytest.raises(ValueError, match="no text extracted.*mineru"):

@@ -210,12 +210,12 @@ def _doc_to_md(target: str, dest_dir: str) -> list[str]:
     # PDF and nothing else, so DOCX/EPUB/… go straight to pymupdf.
     if src.suffix.lower() != ".pdf":
         provider = _via_pymupdf
-    elif CONFIG.pdf_provider in _PDF_PROVIDERS:
-        provider = _PDF_PROVIDERS[CONFIG.pdf_provider]
+    elif CONFIG.pdf_provider in PDF_PROVIDERS:
+        provider = PDF_PROVIDERS[CONFIG.pdf_provider]
     else:
         raise ValueError(
             f"unknown pdf_provider {CONFIG.pdf_provider!r} "
-            f"(known: {', '.join(_PDF_PROVIDERS)})"
+            f"(known: {', '.join(PDF_PROVIDERS)})"
         )
     with tempfile.TemporaryDirectory() as tmp:
         md_text, images_src = provider(src, Path(tmp))
@@ -418,7 +418,7 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
     return md_path.read_text(encoding="utf-8", errors="replace"), md_path.parent / "images"
 
 
-_PDF_PROVIDERS = {
+PDF_PROVIDERS = {
     "pymupdf": _via_pymupdf,
     "docling": _pdf_via_docling,
     "mineru": _pdf_via_mineru,
