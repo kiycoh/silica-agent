@@ -8,13 +8,8 @@
 <p align="center">
   <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/v/silica-agent.svg" alt="PyPI" /></a>
   <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/dm/silica-agent.svg" alt="PyPI Downloads" /></a>
-  <a href="https://github.com/kiycoh/silica-agent/releases"><img src="https://img.shields.io/github/v/release/kiycoh/silica-agent?display_name=tag" alt="GitHub release" /></a>
   <a href="https://deepwiki.com/kiycoh/silica-agent"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
   <a href="https://github.com/kiycoh/silica-agent/blob/main/pyproject.toml#L13"><img src="https://img.shields.io/badge/python-%3E%3D3.11-blue?logo=python&logoColor=white" alt="Python >=3.11" /></a>
-  <br/>
-  <a href="#readme"><img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey" alt="Platform" /></a>
-  <a href="#readme"><img src="https://img.shields.io/badge/local--first-100%25%20offline-2ea44f" alt="Local-first" /></a>
-  <a href="#readme"><img src="https://img.shields.io/badge/MCP-FastMCP%20stdio-6366f1" alt="MCP" /></a>
   <a href="https://obsidian.md"><img src="https://img.shields.io/badge/Obsidian-Native-7a46e6" alt="Obsidian Native" /></a>
   <a href="https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md"><img src="https://img.shields.io/badge/OKF-v0.2-4285f4" alt="Open Knowledge Format v0.2" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/kiycoh/silica-agent" alt="License" /></a>
@@ -26,23 +21,17 @@ You cannot safely delegate writes to an LLM on a corpus you mean to keep.<br/>
 Silica exists to make that delegation safe.
 </h3>
 
-<p align="center">
+<p align="left">
 On facts absent from its training data, hallucination has a statistical floor (<a href="https://arxiv.org/abs/2509.04664">OpenAI</a>), and a personal vault is made of exactly those facts.<br/>
-Left editing over long workflows, even frontier models corrupt a quarter of a document (<a href="https://arxiv.org/abs/2604.15597">Microsoft</a>). And in a growing knowledge base, the damage compounds: today's unchecked edit is retrieved as tomorrow's ground truth.
+Left editing over long workflows, even frontier models corrupt a quarter of a document (<a href="https://arxiv.org/abs/2604.15597">Microsoft</a>).<br/>
+And in a growing knowledge base, the damage compounds: today's unchecked edit is retrieved as tomorrow's ground truth.
 </p>
 
-<p align="center">
+<p align="left">
 Silica is the transactional write path for a folder of markdown: the model proposes, a parser<br/>
 and an FSM verify and execute, and every write is re-read after it lands, reverted if it broke<br/>
 something. Notes or a codebase, one vault holds both. Local-first, readable with or without it.
 </p>
-
-<p align="center">
-  <b>82.1%</b> answerable accuracy and <b>~90%</b> correct refusals on LoCoMo &nbsp;·&nbsp;
-  <b>100%</b> write integrity across a real 758-note vault<br/>
-  <sub><a href="#measured">how these were measured</a></sub>
-</p>
-
 
 <p align="center">
   <img src="assets/demo-test.gif" alt="Silica answering, auditing, writing to and reverting a real vault" width="900" />
@@ -53,23 +42,37 @@ something. Notes or a codebase, one vault holds both. Local-first, readable with
   a write to it, and the same write taken back out.</sub>
 </p>
 
+<p align="center">
+  <b>82.1%</b> answerable accuracy and <b>~90%</b> correct refusals on LoCoMo &nbsp;·&nbsp;
+  <b>100%</b> write integrity across a real 758-note vault<br/>
+  <sub><a href="#measured">how these were measured</a></sub>
+</p>
+
 ---
 
 ## Why Silica
 
 ### The problem
 
-**Errors enter by construction.** On facts with no learnable pattern, a model's hallucination rate has a statistical lower bound: it cannot fall below the share of facts seen only once in training ([Kalai et al., 2025](https://arxiv.org/abs/2509.04664)). A personal vault is the limiting case of that theorem. Your decisions, your meetings, your half-finished ideas are not rare in the training data, they are absent from it. This is not a bug the next model release fixes.
+**Errors enter by construction.** A personal vault is the limiting case of that hallucination floor. Your decisions, your meetings, your half-finished ideas are not rare in the training data, they are absent from it, and the bound is not on facts the model saw once, it is on facts it never saw ([Kalai et al., 2025](https://arxiv.org/abs/2509.04664)). This is not a bug the next model release fixes.
 
-**Errors compound.** Microsoft's DELEGATE-52 benchmark left documents in a model's care across long editing workflows: even frontier models corrupted an average of 25% of the content, in sparse, severe errors that land silently, and the damage grows with document size, interaction length, and distractor files ([Laban et al., 2026](https://arxiv.org/abs/2604.15597)).
+**Errors compound.** What Microsoft's 25% is made of matters more than the number: sparse, severe errors that land silently, growing with document size, interaction length, and the count of distractor files in the folder ([Laban et al., 2026](https://arxiv.org/abs/2604.15597)). A vault is large, long-lived, and made almost entirely of distractors.
 
-**Errors propagate.** A vault is not a pile of independent files, it is a linked graph that gets retrieved from. The hallucination written today is the ground truth recalled tomorrow: the model links to it, derives notes from it, answers out of it. Corruption does not stay where it landed.
+**Errors propagate.** A vault is not a pile of independent files, it is a linked graph that gets retrieved from, which is why corruption does not stay where it landed: the model links to the bad note, derives notes from it, answers out of it.
 
 **And the two obvious outs are not outs.** Keep the assistant read-only and the vault rots on its own: the same idea captured five times, notes nothing points at any more, links to a file that moved, a subsystem documented against a commit from three months ago. Read-only also leaves the answering problem intact, the model still answers from its own memory or a stale note, and the answer reads the same either way. Or take the usual remedy, a tool that copies your notes into a store of its own: now the corpus being corrupted is one you cannot even open to check.
 
 Silica takes the opposite position. **The vault is the product, not the transcript.** Your folder of markdown is the database, Silica is answerable for the state it is in, and every write it makes passes a gate that re-reads what it just wrote. It runs on your machine, and local models (LM Studio, Ollama) are first-class.
 
 <sub><b>New to this?</b> A "vault" is just a folder of markdown (<code>.md</code>) files. If you already use Obsidian, that folder is your Obsidian vault, and Silica works on it directly.</sub>
+
+**Try it before reading the rest.** Reading a vault needs no model and no API key, so one line hands your notes to an agent you already run:
+
+```bash
+silica setup claude             # or: setup codex, setup opencode
+```
+
+Nothing is asked, nothing else is configured, and nothing is written. Full [install](#install) below.
 
 ---
 
@@ -118,7 +121,7 @@ Silica is that pattern with a gate in front of it, and the vault it curates is a
 - **[§11](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md#11-conformance) conformance by construction, not by export.** Every note declares a `type`. Silica derives it from signals the kernel already keys on (a path under `sources/`, a code binding, a plan status) and stamps it at the single write seam, so there is no export step and no second copy of your notes. A `type` you wrote yourself is never overwritten, and §4.1 tolerates a vocabulary the spec has never heard of, so your own stays conformant. `silica doctor` censuses the vault against the three §11 clauses, and a one-shot backfill closes the gap on notes that predate the field.
 - **§5.2 `verified`, the way back to the human tier.** Silica flags what it wrote, and a note it once touched used to rank as agent-authored forever after. A `verified:` entry naming a person restores the human trust tier. A machine actor does not qualify: a pipeline re-reading its own output is not a second opinion, and letting one count would hand the agent a lever on its own authority.
 
-**What conformance covers.** The notes the vault owns. Silica does not force frontmatter onto markdown it did not write, because in a repository a `README` is markdown by right, and it does not generate the optional `index.md` and `log.md` bundle files.
+**What conformance covers.** The notes the vault owns. Silica does not force frontmatter onto markdown it did not write, because in a repository a `README` is markdown by right, and it does not generate the optional `index.md` bundle file. It does write the bundle-root `log.md`, the journal every run appends a line to, but flat and oldest-first rather than the newest-first date-grouped shape [§9](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md#9-log-files) describes: the path is the spec's, the layout is not yet.
 
 ---
 
@@ -149,19 +152,39 @@ The two nearest neighbors are worth naming. [Basic Memory](https://github.com/ba
 
 ### What Silica did not invent
 
-Credit where it is owed. **The wiki pattern itself** is Karpathy's and **the format that carries it** is Google's OKF, as [above](#the-pattern-and-the-format); what Silica adds is the gate in front of both, and it is the only part of this section it claims. **Plain markdown, local-first, AGPL** is the entry ticket to this category and Basic Memory got there too; Silica pays it in full, with no tier above the local one. **A graph with community detection and an interactive view** ships in Graphify, GitNexus, LLM Wiki, and GraphRAG; what Silica adds is that the same co-occurrence structure is also a retrieval leg. **Self-linking atomic notes** are A-MEM's thesis, and old news in Obsidian plugins; Silica's part is that those links survive a merge, a split, and a rename. **Staleness against the code** is Fiberplane Drift's reformat-immune AST fingerprint, Swimm sells it, OpenWiki schedules it; Silica runs it inside the vault that also holds your notes, and `/impact`, from a diff back to the notes it invalidates, is the piece almost nobody replicates. **Typed relations** are Graphiti's, with per-edge validity intervals Silica does not model, computed here on demand rather than frozen at ingest. **An MCP server and local models** are table stakes: four drivers, one gate, no privileged client.
+Credit where it is owed.
+
+- **The wiki pattern itself** is Karpathy's and **the format that carries it** is Google's OKF, as [above](#the-pattern-and-the-format). What Silica adds is the gate in front of both, and it is the only part of this section it claims.
+- **Plain markdown, local-first, AGPL** is the entry ticket to this category and Basic Memory got there too. Silica pays it in full, with no tier above the local one.
+- **A graph with community detection and an interactive view** ships in Graphify, GitNexus, LLM Wiki, and GraphRAG. What Silica adds is that the same co-occurrence structure is also a retrieval leg.
+- **Self-linking atomic notes** are A-MEM's thesis, and old news in Obsidian plugins. Silica's part is that those links survive a merge, a split, and a rename.
+- **Staleness against the code** is Fiberplane Drift's reformat-immune AST fingerprint, Swimm sells it, OpenWiki schedules it. Silica runs it inside the vault that also holds your notes, and `/impact`, from a diff back to the notes it invalidates, is the piece almost nobody replicates.
+- **Typed relations** are Graphiti's, with per-edge validity intervals Silica does not model, computed here on demand rather than frozen at ingest.
+- **An MCP server and local models** are table stakes: four drivers, one gate, no privileged client.
+
+---
+
+## What you can do
+
+**Clear an inbox without losing anything.**<br/>
+Drop raw clippings, drafts, PDFs, or Jupyter Notebooks (`.ipynb`) in a folder. `/nucleate Inbox/*` distills each one into an atomic note, checks it against what you already have so you do not end up with a fifth copy of the same idea, and files it. Hand it twenty files at once and each one still goes through the same gate.
+
+**Ask your notes instead of your memory.**<br/>
+`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz [note]`. All read-only, all grounded in the vault. Graded answers are logged, so untargeted `/quiz` draws from the notes you have missed before: what you did not know comes back, what you already knew does not.
+
+**When the vault does not have it.**<br/>
+If every search a turn ran came back empty, Silica says so instead of answering thin, and names `/web`. Typing it is the consent: the answer comes from the web, with citations appended from the pages that were actually opened rather than from what the model claims it read. Fetching is direct, with no third-party reader in the path. That turn writes nothing; `/keep` saves it to the inbox when it was worth keeping, and `/web-search "<topic>"` does the same in bulk for a whole question.
+
+**See the structure your notes already have.**<br/>
+`/graph out.html` renders the vault as an interactive page, notes as nodes, communities colored and named, no server needed. `/map <note>` grows a radial mind-map out from a single note, written as an Obsidian canvas plus an SVG. Both local, both drawn from the same co-occurrence graph retrieval uses.
+
+Reorganizing by intent, typed relation maps, reading paths, diagrams, contested claims, dedup, and the rest are in the [command reference](#command-reference).
 
 ---
 
 ## Install
 
-Reading a vault needs no model and no API key, so the shortest way in is to hand your folder of notes to an agent you already run and ask it something:
-
-```bash
-silica setup claude             # or: setup codex, setup opencode
-```
-
-That writes the MCP server into your client's own config, and your assistant can search, recall, and read your notes from the next session on. Nothing else is configured, nothing is asked.
+The [one-liner above](#why-silica) writes the MCP server into your client's own config, and from the next session on your assistant can search, recall, and read your notes. That is the whole read path.
 
 Writing notes needs a model. That is what the wizard is for:
 
@@ -298,24 +321,6 @@ args = ["--from", "silica-agent[mcp]", "silica", "mcp"]
 Add `SILICA_VAULT` to the entry (an `env` table for Codex, `environment` for opencode) only to override the working directory and serve one fixed vault everywhere, which is what a headless run like a cron unit wants. An MCP client starts the server with its own environment, so any other setting the tools need (embedding endpoint, model) belongs in that same block rather than in a shell profile.
 
 </details>
-
----
-
-## What you can do
-
-**Clear an inbox without losing anything.**<br/>
-Drop raw clippings, drafts, PDFs, or Jupyter Notebooks (`.ipynb`) in a folder. `/nucleate Inbox/*` distills each one into an atomic note, checks it against what you already have so you do not end up with a fifth copy of the same idea, and files it. Hand it twenty files at once and each one still goes through the same gate.
-
-**Ask your notes instead of your memory.**<br/>
-`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz [note]`. All read-only, all grounded in the vault. Graded answers are logged, so untargeted `/quiz` draws from the notes you have missed before: what you did not know comes back, what you already knew does not.
-
-**When the vault does not have it.**<br/>
-If every search a turn ran came back empty, Silica says so instead of answering thin, and names `/web`. Typing it is the consent: the answer comes from the web, with citations appended from the pages that were actually opened rather than from what the model claims it read. Fetching is direct, with no third-party reader in the path. That turn writes nothing; `/keep` saves it to the inbox when it was worth keeping, and `/web-search "<topic>"` does the same in bulk for a whole question.
-
-**See the structure your notes already have.**<br/>
-`/graph out.html` renders the vault as an interactive page, notes as nodes, communities colored and named, no server needed. `/map <note>` grows a radial mind-map out from a single note, written as an Obsidian canvas plus an SVG. Both local, both drawn from the same co-occurrence graph retrieval uses.
-
-Reorganizing by intent, typed relation maps, reading paths, diagrams, contested claims, dedup, and the rest are in the [command reference](#command-reference).
 
 ---
 
