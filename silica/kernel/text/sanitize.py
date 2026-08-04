@@ -256,6 +256,73 @@ def _inject_external_bodies(parsed, bodies: dict[int, str]) -> None:
         _resolve_op_refs(op, bodies)
 
 
+class TruncatedArray(ValueError):
+    """A JSON array was cut mid-stream, but its leading objects were recovered.
+
+    Raised by parse_json instead of the bare JSONDecodeError when the payload
+    looks like an op array whose tail is missing (max_tokens truncation). The
+    complete leading objects are in `.ops`, the unrecoverable remainder in
+    `.tail`. Subclassing ValueError keeps every existing `except Exception`
+    call-site failing exactly as before — partial data is only ever used by
+    callers that catch TruncatedArray by name.
+    """
+
+    def __init__(self, ops: list, tail: str):
+        super().__init__(
+            f"truncated JSON array: recovered {len(ops)} complete leading "
+            f"objects, {len(tail)} chars unrecoverable"
+        )
+        self.ops = ops
+        self.tail = tail
+
+
+def _salvage_array(text: str) -> tuple[list, str] | None:
+    """Recover the complete leading `{...}` objects of a truncated JSON array.
+
+    String-aware scan (a `}` inside a string value never closes an object).
+    Collection stops at the first object that fails to parse on its own — the
+    recovered prefix is always a clean prefix of the intended array. Returns
+    (objects, unconsumed_tail), or None when nothing was recoverable.
+    """
+    start = text.find('[')
+    if start == -1:
+        return None
+    ops: list = []
+    in_string = escape = False
+    depth = 0
+    obj_start = -1
+    end_of_last = start
+    for i in range(start + 1, len(text)):
+        ch = text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == '\\':
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch in '{[':
+            if depth == 0 and ch == '{':
+                obj_start = i
+            depth += 1
+        elif ch in '}]':
+            if depth == 0:
+                break  # the array closed by itself; anything further is tail
+            depth -= 1
+            if depth == 0 and obj_start != -1:
+                try:
+                    ops.append(json.loads(text[obj_start:i + 1]))
+                except json.JSONDecodeError:
+                    return (ops, text[obj_start:]) if ops else None
+                end_of_last = i
+                obj_start = -1
+    tail = text[end_of_last + 1:]
+    return (ops, tail) if ops else None
+
+
 def parse_json(raw: str, strict: bool = False):
     raw, _bodies = extract_body_appendix(raw)
     cleaned = raw.strip()
@@ -305,6 +372,12 @@ def parse_json(raw: str, strict: bool = False):
             parse_err = e
 
     if parsed is None:
+        salvage = _salvage_array(processed)
+        if salvage is not None:
+            ops, tail = salvage
+            if _bodies:
+                _inject_external_bodies(ops, _bodies)
+            raise TruncatedArray(ops, tail)
         if parse_err is not None:
             raise parse_err
         raise ValueError("JSON Parse Error")

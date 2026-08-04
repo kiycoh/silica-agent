@@ -241,7 +241,7 @@ class SanitizeArgs(BaseModel):
 def silica_sanitize(distiller_output_path: str,
                     verbatim_source: str | None = None) -> dict[str, Any]:
     """Validates and sanitizes the JSON returned by Distiller workers."""
-    from silica.kernel.text.sanitize import parse_json, normalize_ops
+    from silica.kernel.text.sanitize import TruncatedArray, parse_json, normalize_ops
 
     try:
         with open(distiller_output_path, 'r', encoding='utf-8') as f:
@@ -249,8 +249,19 @@ def silica_sanitize(distiller_output_path: str,
     except Exception as e:
         return {"error": f"Failed to read distiller output: {e}"}
 
+    salvaged = None
     try:
         parsed_obj, was_clean = parse_json(raw_content, strict=False)
+    except TruncatedArray as t:
+        # max_tokens cut the payload: apply the clean leading ops instead of
+        # losing the whole chunk, and say so — the loss must reach the caller.
+        parsed_obj, was_clean = t.ops, False
+        salvaged = {"recovered_ops": len(t.ops), "lost_chars": len(t.tail)}
+        logger.warning(
+            "sanitize: distiller output truncated — recovered %d leading ops, "
+            "%d chars lost (%s)",
+            len(t.ops), len(t.tail), distiller_output_path,
+        )
     except Exception as e:
         return {"error": f"JSON Parse Error: {e}"}
 
@@ -273,11 +284,14 @@ def silica_sanitize(distiller_output_path: str,
                         op["op"] = "skip"
                         op["reason"] = f"unlinked_axis '{op.get('linked_axis')}' not in main_thematic_axes"
 
-    return {
+    result = {
         "success": True,
         "parsed": parsed_obj,
         "was_clean": was_clean
     }
+    if salvaged:
+        result["salvaged"] = salvaged
+    return result
 
 
 class ValidateOpsArgs(BaseModel):
