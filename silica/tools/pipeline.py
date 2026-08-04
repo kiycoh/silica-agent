@@ -68,7 +68,10 @@ def _link_recovered_writes(
     # section an in-flight chunk of the same source already created.
     if not hub_name:
         return
-    hub_path = f"{(target_dir or '').rstrip('/')}/{hub_name}.md"
+    from silica.kernel.write.moc import moc_target
+    hub_path = moc_target(hub_name, target_dir)
+    if not hub_path:  # staging note, never a MOC target
+        return
     try:
         hub_note = DRIVER.read_note(hub_path)
     except Exception as e:
@@ -114,6 +117,21 @@ def _same_note(ref_a, ref_b) -> bool:
         p = r.path or r.name
         return os.path.normcase(p.replace("\\", "/").removesuffix(".md").strip("/"))
     return norm(ref_a) == norm(ref_b)
+
+
+def _prefers(candidate, incumbent) -> bool:
+    """True when `candidate` is the vault original and `incumbent` its mirror copy.
+
+    Only under safe mode is a note ever present twice; everywhere else this
+    answers False and grouping keeps its first hit exactly as before.
+    """
+    from silica.kernel.vault_manifest import active_write_dir, within
+    from silica.onboarding.adopt import SAFE_WRITE_DIR
+
+    if active_write_dir() != SAFE_WRITE_DIR:
+        return False
+    a, b = candidate.path or "", incumbent.path or ""
+    return bool(a and b) and within(b, SAFE_WRITE_DIR) and not within(a, SAFE_WRITE_DIR)
 
 
 class ReconArgs(BaseModel):
@@ -169,6 +187,13 @@ def silica_recon(inbox_file: str, limit: int = 0) -> dict[str, Any]:
             name = h.ref.name
             if name not in grouped:
                 grouped[name] = {"ref": h.ref, "count": 0}
+            elif _prefers(h.ref, grouped[name]["ref"]):
+                # Safe mode puts a preview copy of a note beside the note. They
+                # group under one name, so WHICH path answered was down to scan
+                # order — and the model was shown its own unmerged draft as the
+                # vault's state. The original always wins; the copy exists to be
+                # pasted over it, not to stand in for it.
+                grouped[name]["ref"] = h.ref
             grouped[name]["count"] += 1
             
         if not grouped:

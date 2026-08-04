@@ -1357,7 +1357,11 @@ def test_hub_update_writes_parent_at_its_real_vault_path(tmp_path):
     note = MagicMock()
     note.content = "# lezione_7\n\nExisting\n"
 
+    # Two names for the one proxy: the FSM reads/overwrites through
+    # orchestrator.DRIVER, name resolution lives in kernel/write/moc.py and
+    # reaches the driver directly (kernel must not import router).
     with patch("silica.router.orchestrator.DRIVER") as mock_driver, \
+         patch("silica.driver.DRIVER", mock_driver), \
          patch("silica.router.orchestrator.time") as mock_time:
         mock_driver.read_note.return_value = note
         mock_driver.overwrite.return_value = None

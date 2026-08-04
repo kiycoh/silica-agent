@@ -502,14 +502,22 @@ def to_vault_relative(path: str, *, ensure_md: bool = True) -> str:
 
 
 def is_inbox_path(path: str) -> bool:
-    """True when a vault-relative path sits anywhere under the configured
-    inbox root (case-insensitive). The inbox is staging, never a write or
-    merge target — callers use this to filter candidates and reject ops.
+    """True when a vault-relative path sits anywhere under an inbox root
+    (case-insensitive). The inbox is staging, never a write or merge target —
+    callers use this to filter candidates and reject ops.
+
+    BOTH roots answer. `active_inbox_dir` composes the write boundary, so under
+    safe mode it names `silica/Inbox` — the inbox Silica writes into — and the
+    user's own `Inbox/` stopped being recognised as one. That is the wrong way
+    round for a guard: this question is "may an op target this?", and the answer
+    for the real inbox is no whatever folder Silica stages into.
     """
+    from silica.config import CONFIG
     from silica.kernel.vault_manifest import active_inbox_dir
 
-    root = active_inbox_dir() or "Inbox"
-    return path.replace("\\", "/").lstrip("/").casefold().startswith(root.casefold() + "/")
+    p = path.replace("\\", "/").lstrip("/").casefold()
+    roots = {active_inbox_dir(), (getattr(CONFIG, "inbox_dir", "") or "").strip("/"), "Inbox"}
+    return any(p.startswith(r.casefold() + "/") for r in roots if r)
 
 
 def resolve_target_dir(target_dir: str) -> str:

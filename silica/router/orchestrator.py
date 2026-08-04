@@ -242,7 +242,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self.inbox_files: list[str] = [to_vault_relative(f) for f in files]
         self.inbox_file: str = self.inbox_files[0]  # first file; compat with single-file callers
         from silica.kernel.recall.paths import resolve_target_dir
-        target_dir = resolve_target_dir(target_dir)
+        from silica.kernel.vault_manifest import in_write_dir
+        # Case-fold against the REAL tree first (the mirror often has no folder
+        # for this note yet), then rebase into the write boundary. Rebasing here
+        # rather than in validate's local copy is what makes HUB_UPDATE and
+        # anneal agree with the ops: both build `<target_dir>/<hub>.md`, and a
+        # target_dir left outside the boundary sent them looking for a hub at a
+        # path this run can never have written.
+        target_dir = in_write_dir(resolve_target_dir(target_dir))
         self.target_dir = target_dir
 
         # Hub sanity check: if not specified, inherit the folder name of target_dir

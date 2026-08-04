@@ -299,10 +299,21 @@ def silica_cleanup(inbox_file: str, done_dir: str = "done") -> dict[str, Any]:
     """Move the inbox file to done/ after successful pipeline completion.
 
     C5: Only callable from DONE state — the orchestrator enforces this.
+
+    A source that sits OUTSIDE the write boundary is never moved: under safe
+    mode the run is a preview the user merges by pasting, and consuming the
+    source would mutate the one tree the boundary exists to protect. It stays
+    in the inbox, which is also where a re-run needs to find it.
     """
     import os
+    from silica.kernel.vault_manifest import active_write_dir, in_write_dir, within
+
+    write_root = active_write_dir()
+    if write_root and not within(inbox_file, write_root):
+        return {"success": True, "skipped": inbox_file,
+                "reason": f"outside the write boundary '{write_root}/'"}
     base_name = os.path.basename(inbox_file)
-    target = f"{done_dir}/{base_name}"
+    target = f"{in_write_dir(done_dir)}/{base_name}"
     try:
         DRIVER.move(inbox_file, target)
         return {"success": True, "moved": inbox_file, "to": target}

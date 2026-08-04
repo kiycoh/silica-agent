@@ -141,6 +141,8 @@ def _execute_patch(op: Op, path: str) -> dict:
             "Missing 'heading', 'snippet', or 'source_basename' for patch operation"
         )
 
+    from silica.kernel.vault_manifest import seed_mirror_copy
+    seed_mirror_copy(path)
     try:
         nc = DRIVER.read_note(path)
     except RuntimeError as e:
@@ -165,7 +167,10 @@ def _execute_patch(op: Op, path: str) -> dict:
         bool(source_basename) and note_authored_by(path, source_basename)
     )
     if already_present:
-        repaired = templates.ensure_hub_link(nc.content, op.hub)
+        # Same lint floor as the real-patch path below: a safe-mode skip lands
+        # on a freshly-seeded mirror copy of a human note (no `AI` key), and an
+        # unstamped copy fails the chunk LINT gate on every later touch.
+        repaired = templates.ensure_ai_flag(templates.ensure_hub_link(nc.content, op.hub))
         if repaired != nc.content:
             DRIVER.overwrite(path, repaired)
         return {"path": path, "op": "patch", "success": True, "skipped": "duplicate"}

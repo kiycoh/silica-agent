@@ -259,9 +259,9 @@ def validate_operations(
         # A NEW note's location is Silica's own filing decision, so a write
         # aimed outside the boundary is rebased into it (structure preserved)
         # rather than rejected — target_dir and the model both predate the
-        # vault's declaration. Ops that touch an EXISTING note are never
-        # rebased: that would silently hit a different file. They get rejected
-        # in the main loop below.
+        # vault's declaration. Ops that touch an EXISTING note outside a MIRROR
+        # are never rebased: that would silently hit a different file. They get
+        # rejected in the main loop below.
         if write_root and op.op == OpType.write and op.path and not within(op.path, write_root):
             rebased = write_root + "/" + op.path.replace("\\", "/").strip("/")
             logger.debug("validate: write_dir rebase '%s' → '%s'", op.path, rebased)
@@ -586,7 +586,14 @@ def validate_operations(
         # applies to every op type, and protects files Silica reads but must not
         # author (a source tree, someone's hand-written notes). "" ⇒ whole vault,
         # so a vault that declares nothing is unaffected.
-        if write_root:
+        # Safe mode exempts patches: they are judged against the REAL note they
+        # enrich (collision path, existence) and only then rebased onto its
+        # mirror copy, at the bottom of the patch branch. Rejecting them here
+        # left safe mode able to create and never to enrich, which is most of
+        # what an ingest does — 11 of 20 deferred ops in one real run, and 6
+        # patches on the same lecture without safe mode against 1 with.
+        mirror_patch = mirror and op_type in (OpType.patch, OpType.overwrite)
+        if write_root and not mirror_patch:
             touched = [op.touched_ref()]
             if op_type == OpType.move:
                 touched.append(op.to_path)  # a move must not leave the boundary either
@@ -734,6 +741,15 @@ def validate_operations(
             if _reason:
                 rejected_ops.append(Rejection(op=op, reason=_reason))
                 continue
+            # Everything above judged the op against the note it actually
+            # enriches. Only the landing moves: under safe mode the append goes
+            # to the mirror copy (`_execute_patch` seeds it from the original),
+            # so the vault note itself is untouched until the user pastes.
+            if mirror_patch and not within(op.path, write_root):
+                rebased = write_root + "/" + op.path.replace("\\", "/").strip("/")
+                logger.debug("validate: mirror patch rebase '%s' → '%s'", op.path, rebased)
+                _repaired("mirror_patch_rebase")
+                op.path = rebased
             validated_ops.append(op)
 
         elif op_type == OpType.write:

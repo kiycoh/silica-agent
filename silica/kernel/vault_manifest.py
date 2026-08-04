@@ -414,6 +414,63 @@ def active_inbox_dir() -> str:
     return f"{write_dir}/{inbox}" if write_dir else inbox
 
 
+def in_write_dir(rel_path: str) -> str:
+    """`rel_path` composed into the write boundary; unchanged when already inside.
+
+    The composer behind every folder Silica creates for its own bookkeeping
+    (`done/`, `sources/`) the way `active_inbox_dir` composes the inbox. Those
+    call sites build their path from a bare constant, which knows nothing about
+    `write_dir` and so drops a folder at the root of a vault whose writes are
+    confined elsewhere.
+    """
+    rel = (rel_path or "").replace("\\", "/").strip("/")
+    write_dir = active_write_dir()
+    if not write_dir or not rel or within(rel, write_dir):
+        return rel
+    return f"{write_dir}/{rel}"
+
+
+def seed_mirror_copy(path: str) -> None:
+    """Safe mode: copy the vault original into the mirror before it is enriched.
+
+    Every seam that ENRICHES an existing note (patch, hub MOC, parent MOC) works
+    on `silica/<same path>`; the mirror is a preview of the vault after the
+    paste, so that copy has to start as the note itself or pasting it would drop
+    everything the note already said. No-op outside safe mode, when the copy
+    already exists, or when there is no original — the caller's own read then
+    reports the miss exactly as before.
+
+    Goes through the DRIVER, not the filesystem: with the Obsidian bridge
+    attached, reads are answered by Obsidian's own vault index, and a copy
+    written straight to disk came back "file not found" to the very seam that
+    had just asked for it.
+
+    Best-effort: a copy that cannot be made leaves the read to report it.
+    """
+    from silica.driver import DRIVER
+    from silica.onboarding.adopt import SAFE_WRITE_DIR
+
+    if active_write_dir() != SAFE_WRITE_DIR or not within(path, SAFE_WRITE_DIR):
+        return
+    rel = path.replace("\\", "/").strip("/")[len(SAFE_WRITE_DIR) + 1:]
+    if not rel:
+        return
+    try:
+        DRIVER.read_note(path)
+        return  # the copy is already there
+    except Exception:
+        pass
+    try:
+        original = DRIVER.read_note(rel).content
+    except Exception:
+        return  # nothing to mirror — the caller's own read reports the miss
+    try:
+        DRIVER.create(path, original)
+        logger.debug("mirror: seeded '%s' from '%s'", path, rel)
+    except Exception as e:
+        logger.warning("mirror: could not seed '%s': %s", path, e)
+
+
 def apply_manifest_to_config() -> None:
     """Manifest determines CONFIG fields the environment did not set (env
     wins). Symmetric on purpose: a vault that declares no overlay clears a

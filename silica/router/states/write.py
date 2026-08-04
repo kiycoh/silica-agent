@@ -29,27 +29,10 @@ from silica.kernel.write.ops import OpType
 # reuse them; aliased here to keep the FSM code and existing tests unchanged.
 from silica.kernel.write.moc import (
     hub_desc as _hub_desc,
+    moc_target as _moc_target,
     merge_moc_section as _merge_moc_section,
     moc_heading as _moc_heading,
 )
-
-
-def _resolve_vault_path(name: str) -> str | None:
-    """Real vault-relative path of an existing note by name, searched vault-wide.
-
-    Mirrors validate._resolve_parent's `search_names` check so HUB_UPDATE writes
-    the parent where it actually lives instead of assuming `target_dir/<name>.md`.
-    Returns None when the note doesn't exist yet (caller falls back to target_dir).
-    """
-    name_l = name.lower()
-    try:
-        matches = [r for r in orch.DRIVER.search_names(name) if r.name.lower() == name_l and r.path]
-    except Exception:
-        return None
-    if not matches:
-        return None
-    # Deterministic pick on duplicate names: shallowest path, then lexical.
-    return sorted(matches, key=lambda r: (r.path.count("/"), r.path.lower()))[0].path
 
 
 def handle_snapshot(fsm: "InjectorFSM") -> None:
@@ -419,7 +402,12 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
         fsm._transition_success()
         return
 
-    hub_path = f"{fsm.target_dir}/{hub_name}.md".replace("//", "/")
+    hub_path = _moc_target(hub_name, fsm.target_dir)
+    if not hub_path:  # the hub resolved to an inbox note — never a MOC target
+        logger.info("HUB_UPDATE: hub '%s' is staging, skipping", hub_name)
+        fsm._progress_note(fsm._chunk_task_id("hub_update"), "hub_update", "done")
+        fsm._transition_success()
+        return
     from silica.driver.base import NoteRef
     hub_ref = NoteRef(name=hub_name, path=hub_path)
 
@@ -520,7 +508,10 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
             # validate's search_names check) instead of assuming it sits under
             # target_dir — otherwise an existing parent in another folder reads
             # as "File not found". Fall back to target_dir only for a new note.
-            parent_path = _resolve_vault_path(parent_name) or f"{fsm.target_dir}/{parent_name}.md".replace("//", "/")
+            parent_path = _moc_target(parent_name, fsm.target_dir)
+            if not parent_path:  # staging note, never a MOC target
+                logger.info("HUB_UPDATE: parent '%s' is staging, skipping", parent_name)
+                continue
             try:
                 from silica.driver.base import NoteRef as _NR
                 p_ref = _NR(name=parent_name, path=parent_path)

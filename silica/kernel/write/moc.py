@@ -13,6 +13,58 @@ from __future__ import annotations
 import re
 
 
+def resolve_note_path(name: str) -> str | None:
+    """Real vault-relative path of an existing note by name, searched vault-wide.
+
+    Mirrors validate._resolve_parent's `search_names` check. Returns None when
+    the note doesn't exist yet (caller falls back to `target_dir/<name>.md`).
+    """
+    from silica.driver import DRIVER
+
+    name_l = name.lower()
+    try:
+        matches = [r for r in DRIVER.search_names(name) if r.name.lower() == name_l and r.path]
+    except Exception:
+        return None
+    if not matches:
+        return None
+    # Deterministic pick on duplicate names: shallowest path, then lexical.
+    return sorted(matches, key=lambda r: (r.path.count("/"), r.path.lower()))[0].path
+
+
+def moc_target(name: str, target_dir: str) -> str:
+    """Where a hub/parent note's MOC block must be written; "" ⇒ nowhere.
+
+    Two corrections in one, because they compose:
+
+    - `target_dir/<name>.md` was assumed, but a hub defaults to the BASENAME of
+      target_dir and the common vault convention puts that note BESIDE its
+      folder (`ML/Apprendimento supervisionato.md` for the folder of the same
+      name) rather than inside it. Assuming the layout sent every hub read to a
+      path the vault never had, and MOC membership was skipped for whole runs.
+    - Resolution answers with the REAL note, which under safe mode is exactly
+      the file the run must not touch. The landing is rebased onto the mirror
+      copy; `seed_mirror_copy` gives that copy the original's content first, so
+      the block lands on top of what the note already said.
+    """
+    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.vault_manifest import in_write_dir, seed_mirror_copy
+
+    resolved = resolve_note_path(name)
+    # A source file shares its title with the notes distilled from it, so name
+    # resolution can answer with the very lecture being ingested. The inbox is
+    # staging and never a MOC target: "" rather than the target_dir fallback,
+    # which would name a path nothing will ever write and log a miss that reads
+    # like a failure. Under safe mode it also stopped a mirror copy of the
+    # source being seeded beside the notes.
+    if resolved and is_inbox_path(resolved):
+        return ""
+    fallback = f"{(target_dir or '').rstrip('/')}/{name}.md".replace("//", "/")
+    landing = in_write_dir(resolved or fallback)
+    seed_mirror_copy(landing)
+    return landing
+
+
 def moc_heading(source_name: str, sample: str) -> str:
     """Language-aware MOC section heading: '## Da: {name}' or '## From: {name}'.
 

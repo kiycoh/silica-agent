@@ -288,6 +288,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         from silica.kernel.write.contested import append_before_superseded
         from silica.kernel.write.ops import InverseOp, InverseOpKind
         from silica.kernel.recall.paths import SOURCES_DIR
+        from silica.kernel.vault_manifest import in_write_dir
         from silica.kernel.write.provenance import (
             attribute_lines,
             footnote_label,
@@ -295,7 +296,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         )
 
         basename = os.path.basename(source_file)
-        leaf_rel = f"{SOURCES_DIR}/{basename}"
+        leaf_rel = f"{in_write_dir(SOURCES_DIR)}/{basename}"
         leaf_stem = basename.removesuffix(".md")
 
         try:
