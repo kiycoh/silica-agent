@@ -84,6 +84,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._graph = nx.DiGraph()
         self._unresolved_links: set[tuple[str, str]] = set() # (source_path, raw_target)
         self._mention_index: dict[str, set[str]] = {}        # title_lower -> set(path)
+        self._alias_pairs: dict[str, list[str]] = {}         # path -> frontmatter aliases
         self._title_trie: dict = {}                    # char trie of note titles (mention matching)
         self._needs_reindex: bool = True
         self._dirty_paths: set[str] = set()           # paths patched since last full rebuild
@@ -188,6 +189,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._graph.clear()
         self._unresolved_links.clear()
         self._mention_index.clear()
+        self._alias_pairs.clear()
 
         from silica.kernel.vault_manifest import active_inbox_dir
         inbox = active_inbox_dir()
@@ -269,6 +271,12 @@ class ObsidianFSBackend(GraphIndexMixin):
                 # Mention index
                 for title_lower in mentions_in(content.lower(), self._title_trie):
                     self._mention_index.setdefault(title_lower, set()).add(rel_path_file)
+
+                # Frontmatter aliases — harvested here because this pass already
+                # holds every body in hand; a separate props_of() sweep would
+                # re-read the whole vault to learn the same thing.
+                if (al := fm.aliases_of(content)):
+                    self._alias_pairs[rel_path_file] = al
             except Exception as e:
                 logger.warning("Failed to index %s: %s", rel_path_file, e)
 
@@ -305,6 +313,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != rel_path}
         for paths_set in self._mention_index.values():
             paths_set.discard(rel_path)
+        self._alias_pairs.pop(rel_path, None)
 
         if content is None:
             # deletion path
@@ -346,6 +355,9 @@ class ObsidianFSBackend(GraphIndexMixin):
         # --- rebuild mention index for this path (first-word-anchored) ---
         for title_lower in mentions_in(content.lower(), self._title_trie):
             self._mention_index.setdefault(title_lower, set()).add(rel_path)
+
+        if (al := fm.aliases_of(content)):
+            self._alias_pairs[rel_path] = al
 
         self._dirty_paths.add(rel_path)
 
@@ -557,6 +569,19 @@ class ObsidianFSBackend(GraphIndexMixin):
             return self._resolve_path(ref).stat().st_mtime
         except (OSError, RuntimeError):
             return None
+
+    def alias_index(self) -> list[tuple[str, list[str]]]:
+        """(title, aliases) pairs for every note declaring frontmatter aliases.
+
+        Feeds autolink.build_alias_map. Served from the graph index, so it costs
+        no reads of its own.
+        """
+        self._ensure_index()
+        return [
+            (ref.name, self._alias_pairs[path])
+            for path, ref in self._notes.items()
+            if path in self._alias_pairs
+        ]
 
     def props_of(self, ref: NoteRef | str) -> dict:
         """Read frontmatter properties."""
@@ -809,7 +834,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         self.list_files()) on every call.
         """
         import os
-        from silica.kernel.link.autolink import autolink, build_title_index
+        from silica.kernel.link.autolink import autolink, build_alias_map, build_title_index
         nc = self.read_note(path)
         body = nc.content or ""
         if not body.strip():
@@ -817,7 +842,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         if title_index is None:
             title_index = build_title_index(self.list_files())
         self_title = os.path.splitext(os.path.basename(path))[0]
-        new_body, added = autolink(body, title_index, candidates=candidates, self_title=self_title)
+        aliases = build_alias_map(self.alias_index(), title_index)
+        new_body, added = autolink(
+            body, title_index, candidates=candidates, self_title=self_title, aliases=aliases
+        )
         if added:
             self.overwrite(path, new_body)
         return added

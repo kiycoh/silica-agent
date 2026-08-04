@@ -471,6 +471,12 @@ class ObsidianWSBackend(GraphIndexMixin):
             self._is_graph_built = False  # body rewritten plugin-side; cheapest correct patch
         return list(added)
 
+    def alias_index(self) -> list[tuple[str, list[str]]]:
+        # Empty by design: this backend does not run the autolink kernel, so it
+        # has nothing to feed an alias map. Obsidian resolves frontmatter
+        # aliases natively when the plugin autolinks.
+        return []
+
     # ------------------------------------------------------------------
     # In-memory index patching after writes (mirrors fs_backend)
     # ------------------------------------------------------------------

@@ -77,6 +77,10 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _HEADING_RE = re.compile(r"^#{1,6} .+$", re.MULTILINE)
 
 
+# Blockquote / callout markers opening a line: "> ", ">> ", "> > ".
+_QUOTE_PREFIX_RE = re.compile(r"^[ \t]*(?:>[ \t]*)+")
+
+
 def _block_skip_spans(text: str) -> list[tuple[int, int]]:
     """Char spans for line-based code regions: fenced code (``` / ~~~, including
     an unclosed fence that runs to EOF) and indented (4-space/tab) code blocks.
@@ -84,6 +88,12 @@ def _block_skip_spans(text: str) -> list[tuple[int, int]]:
     Line-scanned, not regex: sequential-pairing regexes can't survive an
     unbalanced fence marker (audit finding 6), and an indented code block is
     defined by a preceding blank line (CommonMark) — neither is a clean regex.
+
+    A blockquote/callout prefix is stripped before the fence test. Without it a
+    fence inside a callout (`> ```python`) was not a fence, so its language tag
+    got wikilinked into `> ```[[Python]]` and — worse — the missed opener flipped
+    fence parity for the rest of the note, which is how a URL two lines up came
+    back as `…Article.[[HTML]]`. Measured on a real vault note.
     """
     spans: list[tuple[int, int]] = []
     pos = 0
@@ -92,7 +102,8 @@ def _block_skip_spans(text: str) -> list[tuple[int, int]]:
     in_indented = False
     for line in text.splitlines(keepends=True):
         end = pos + len(line)
-        is_fence = line.lstrip(" \t").startswith(("```", "~~~"))
+        bare = _QUOTE_PREFIX_RE.sub("", line).lstrip(" \t")
+        is_fence = bare.startswith(("```", "~~~"))
         is_blank = line.strip() == ""
 
         if fence_open_at is not None:          # inside a fence
@@ -170,6 +181,7 @@ def autolink(
     title_index: Sequence[str],
     candidates: Sequence[str] | None = None,
     self_title: str | None = None,
+    aliases: dict[str, str] | None = None,
 ) -> tuple[str, list[str]]:
     """Wrap the first occurrence of each vault title in `body` with a wikilink.
 
@@ -181,9 +193,14 @@ def autolink(
         self_title:  The title/basename of the note being processed.  When
                      provided, this title is excluded from linking — a note must
                      never contain a wikilink to itself.
+        aliases:     Optional surface->canonical map from `build_alias_map`.  An
+                     alias is a second spelling of a title that is already in the
+                     work set, scanned exactly like the title and emitted as
+                     `[[Canonical|surface]]` so the graph keeps one node.
 
     Returns:
         (new_body, added_links) — modified body and list of linked titles.
+        Added links are canonical titles, never alias surfaces.
 
     Guarantees:
         - Never modifies text inside skip regions.
@@ -212,9 +229,44 @@ def autolink(
     if not work_titles:
         return body, []
 
+    # A frontmatter alias joins the work set as its own surface, mapped back to
+    # the title it belongs to. It rides through the rest of this function as an
+    # ordinary string — the skip mask, the shadow pass and longest-first all
+    # operate on surfaces, not on titles — and only the emitted target differs.
+    # An alias whose note is not in the work set is dropped here rather than in
+    # build_alias_map: the candidates gate narrows per note, the alias map is
+    # vault-wide.
+    target_of: dict[str, str] = {t: t for t in work_titles}
+    if aliases:
+        by_lower = {t.lower(): t for t in work_titles}
+        for surface, canonical in aliases.items():
+            owner = by_lower.get(canonical.lower())
+            if owner is not None and surface.lower() not in by_lower:
+                target_of[surface] = owner
+
     # Sort longest-first: prevents short titles from shadowing longer ones
     # ("Deep Learning" before "Learning")
-    work_titles = sorted(work_titles, key=len, reverse=True)
+    work_titles = sorted(target_of, key=len, reverse=True)
+
+    # A longer vault title OWNS its mentions even when it is not a candidate:
+    # "statistica descrittiva" is an occurrence of [[Statistica descrittiva]],
+    # never of [[Statistica]]. Longest-first only arbitrates among candidates,
+    # so narrowing the set made the generic link WORSE (285-note A/B:
+    # [[Statistica]] false positives rose 15x → 16x from T=0.00 to T=0.40 as
+    # the specific title fell below threshold). Mask every occurrence of a
+    # longer index title that contains a candidate as a whole word.
+    shadow_res: list[re.Pattern] = []
+    if candidates is not None:
+        work_lower = {t.lower() for t in work_titles}
+        checks = [
+            (w, re.compile(r"(?<!\w)" + re.escape(w) + r"(?!\w)")) for w in work_lower
+        ]
+        shadow_res = [
+            re.compile(r"(?<!\w)" + re.escape(t) + r"(?!\w)", re.IGNORECASE)
+            for t in title_index
+            if t.lower() not in work_lower
+            and any(len(t) > len(w) and rx.search(t.lower()) for w, rx in checks)
+        ]
 
     # Pre-scan: collect titles that are already wikilinked in the body.
     # A note should have at most one [[title]] link — if it's already there,
@@ -232,22 +284,37 @@ def autolink(
     added: list[str] = []
     current = body
 
+    def _mask_of(text: str) -> list[bool]:
+        m = _build_skip_mask(text)
+        for rx in shadow_res:
+            for sm in rx.finditer(text):
+                for i in range(sm.start(), sm.end()):
+                    m[i] = True
+        return m
+
     # Skip mask built once; rebuilt only after an actual substitution shifts
     # positions. When most titles don't match (full-index fallback), this is the
     # difference between one mask build and one-per-title (audit §4).
-    mask = _build_skip_mask(current)
+    mask = _mask_of(current)
 
-    for title in work_titles:
-        if len(title) < 2:
+    for surface in work_titles:
+        title = target_of[surface]   # the link target; == surface unless aliased
+
+        if len(surface) < 2:
             continue  # single-character titles are too noisy
 
         if title.lower() in existing_links:
             continue  # already linked elsewhere in the note — skip
 
-        # Build case-insensitive whole-word pattern
-        escaped = re.escape(title)
+        # Build case-insensitive whole-word pattern.
+        # `(?!\.\w)`: a title followed by a dot-and-letter is the stem of a
+        # FILENAME, not prose — "Inbox excerpt: Lezione 9.md" was becoming
+        # "[[Lezione 9]].md", a link with its extension hanging outside the
+        # brackets (5 notes of one real run). A sentence-final "Lezione 9." is
+        # unaffected: the dot there is followed by a space.
+        escaped = re.escape(surface)
         pattern = re.compile(
-            r"(?<!\[)(?<!\w)" + escaped + r"(?!\w)(?!\])",
+            r"(?<!\[)(?<!\w)" + escaped + r"(?!\w)(?!\])(?!\.\w)",
             re.IGNORECASE,
         )
 
@@ -275,7 +342,7 @@ def autolink(
         current = current[: match.start()] + link + current[match.end() :]
         added.append(title)
         existing_links.add(title.lower())  # prevent duplicates within this call
-        mask = _build_skip_mask(current)   # positions shifted — rebuild
+        mask = _mask_of(current)           # positions shifted — rebuild
 
     return current, added
 
@@ -360,3 +427,41 @@ def build_title_index(refs: list) -> list[str]:
     return sorted(
         first_casing[lc] for lc, count in lower_counts.items() if count == 1
     )
+
+
+def build_alias_map(
+    pairs, title_index: Sequence[str]
+) -> dict[str, str]:
+    """Build the alias surface -> canonical title map from frontmatter aliases.
+
+    Args:
+        pairs:       iterable of (title, aliases) as harvested from the vault
+                     (see DRIVER.alias_index / frontmatter.aliases_of).
+        title_index: the disambiguated title list the links will target.
+
+    An alias is dropped when it collides with a real note title, when two notes
+    claim it, or when its own note is missing from `title_index` — the same
+    ambiguity rule build_title_index applies to titles, so an ambiguous note
+    cannot come back through the alias door. Surfaces are lowercased: autolink
+    matches case-insensitively and preserves the body's own casing in the pipe.
+    """
+    index = {t.lower(): t for t in title_index}
+    claims: dict[str, set[str]] = {}
+
+    for title, alias_list in pairs:
+        canonical = index.get(str(title or "").lower())
+        if canonical is None:
+            continue
+        for alias in alias_list or []:
+            surface = str(alias).strip().lower()
+            # `surface in index`: a note titled "AI" outranks another note's
+            # "AI" alias, always. `len < 2` mirrors autolink's own noise floor.
+            if len(surface) < 2 or surface in index:
+                continue
+            claims.setdefault(surface, set()).add(canonical)
+
+    return {
+        surface: next(iter(owners))
+        for surface, owners in claims.items()
+        if len(owners) == 1
+    }

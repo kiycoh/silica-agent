@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from silica.kernel.link.autolink import autolink, build_title_index
+from silica.kernel.link.autolink import autolink, build_alias_map, build_title_index
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +30,37 @@ def test_autolink_links_first_occurrence_only():
     new_body, added = autolink(body, ["Neural Networks"])
     assert new_body.count("[[Neural Networks]]") == 1
     assert "Neural Networks" in added
+
+
+def test_autolink_noncandidate_longer_title_shadows_its_words():
+    """A mention owned by a LONGER vault title must not be linked as the
+    shorter title it contains, even when the longer title is not a candidate.
+    Longest-first ordering only protected among candidates, so narrowing the
+    candidate set (embedding threshold) made the generic link WORSE: on the
+    285-note A/B, [[Statistica]] false positives rose 15x → 16x going from
+    T=0.00 to T=0.40 because [[Statistica descrittiva]] fell out of the set."""
+    body = "La statistica descrittiva studia i dati raccolti."
+    new_body, added = autolink(
+        body,
+        ["Statistica", "Statistica descrittiva"],
+        candidates=["Statistica"],
+    )
+    assert added == []
+    assert new_body == body
+
+
+def test_autolink_shadowed_word_still_links_standalone_occurrence():
+    """Shadowing masks only the longer title's own occurrences: a standalone
+    mention of the shorter candidate elsewhere in the body must still link."""
+    body = "La statistica descrittiva studia i dati. La statistica è ampia."
+    new_body, added = autolink(
+        body,
+        ["Statistica", "Statistica descrittiva"],
+        candidates=["Statistica"],
+    )
+    assert added == ["Statistica"]
+    assert "La [[Statistica|statistica]] è ampia." in new_body
+    assert "[[Statistica|statistica]] descrittiva" not in new_body
 
 
 def test_autolink_no_match_returns_unchanged():
@@ -403,3 +434,80 @@ def test_autolink_escapes_the_alias_pipe_inside_a_table_row():
     # outside a table the alias pipe stays bare (escaping there would render).
     prose, _ = autolink("I like neural networks a lot.", ["Neural Networks"])
     assert "[[Neural Networks|neural networks]]" in prose
+
+
+# ---------------------------------------------------------------------------
+# Frontmatter aliases — a second surface for a title, one node in the graph
+# ---------------------------------------------------------------------------
+
+def test_autolink_links_an_alias_to_its_canonical_title():
+    aliases = build_alias_map([("Artificial Intelligence", ["AI"])], ["Artificial Intelligence"])
+    body = "The AI winter ended."
+    new_body, added = autolink(body, ["Artificial Intelligence"], aliases=aliases)
+    # the target is the note, the visible text is the body's own word
+    assert "[[Artificial Intelligence|AI]]" in new_body
+    assert added == ["Artificial Intelligence"]
+
+
+def test_autolink_alias_is_idempotent_and_does_not_double_link():
+    aliases = build_alias_map([("Artificial Intelligence", ["AI"])], ["Artificial Intelligence"])
+    body = "AI matters. Artificial Intelligence matters more."
+    once, added = autolink(body, ["Artificial Intelligence"], aliases=aliases)
+    twice, again = autolink(once, ["Artificial Intelligence"], aliases=aliases)
+    # one link for the note, whichever surface came first — not one per surface
+    assert once.count("[[Artificial Intelligence") == 1
+    assert added == ["Artificial Intelligence"]
+    assert twice == once and again == []
+
+
+def test_autolink_alias_respects_the_candidate_gate():
+    aliases = build_alias_map([("Artificial Intelligence", ["AI"])], ["Artificial Intelligence"])
+    body = "The AI winter ended."
+    # the note is not a candidate for this body → neither is its alias
+    new_body, added = autolink(body, ["Artificial Intelligence"], candidates=[], aliases=aliases)
+    assert new_body == body and added == []
+
+
+def test_autolink_alias_excluded_on_its_own_note():
+    aliases = build_alias_map([("Artificial Intelligence", ["AI"])], ["Artificial Intelligence"])
+    body = "AI is the subject of this very note."
+    new_body, added = autolink(
+        body, ["Artificial Intelligence"], self_title="Artificial Intelligence", aliases=aliases
+    )
+    assert new_body == body and added == []
+
+
+def test_build_alias_map_drops_alias_claimed_by_two_notes():
+    m = build_alias_map(
+        [("Artificial Intelligence", ["AI"]), ("Adobe Illustrator", ["AI"])],
+        ["Artificial Intelligence", "Adobe Illustrator"],
+    )
+    assert m == {}
+
+
+def test_build_alias_map_drops_alias_colliding_with_a_real_title():
+    # a note titled "AI" outranks another note's "AI" alias, always
+    m = build_alias_map([("Artificial Intelligence", ["ai"])], ["Artificial Intelligence", "AI"])
+    assert m == {}
+
+
+def test_build_alias_map_drops_alias_of_a_note_absent_from_the_index():
+    # build_title_index drops ambiguous titles; the alias door must stay shut too
+    m = build_alias_map([("Ambiguous", ["Amb"])], ["Artificial Intelligence"])
+    assert m == {}
+
+
+def test_build_alias_map_skips_single_char_and_blank_surfaces():
+    m = build_alias_map([("Artificial Intelligence", ["A", " ", "AI"])], ["Artificial Intelligence"])
+    assert m == {"ai": "Artificial Intelligence"}
+
+
+def test_aliases_of_reads_the_obsidian_spellings():
+    from silica.kernel.write.frontmatter import aliases_of
+
+    assert aliases_of("---\naliases: [AI, ANI]\n---\n\nbody\n") == ["AI", "ANI"]
+    assert aliases_of("---\naliases:\n  - AI\n  - ANI\n---\n\nbody\n") == ["AI", "ANI"]
+    assert aliases_of("---\nalias: AI, ANI\n---\n\nbody\n") == ["AI", "ANI"]
+    assert aliases_of("---\ntags: [x]\n---\n\nbody\n") == []
+    assert aliases_of("no frontmatter here") == []
+    assert aliases_of("---\naliases: [\n---\n\nbroken yaml\n") == []

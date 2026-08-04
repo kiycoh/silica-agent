@@ -368,6 +368,15 @@ class ObsidianDriver(Protocol):
         """
         ...
 
+    def alias_index(self) -> list[tuple[str, list[str]]]:
+        """(title, aliases) pairs for notes declaring frontmatter aliases.
+
+        Feeds autolink.build_alias_map so a mention of a note's alias links to
+        the note itself. Backends that delegate autolinking to Obsidian return
+        an empty list: Obsidian resolves aliases on its own.
+        """
+        ...
+
     # -- advanced ----------------------------------------------------------
 
     def list_files(self, folder: str = "") -> list[NoteRef]:

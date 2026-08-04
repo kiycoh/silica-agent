@@ -114,3 +114,41 @@ def test_handle_autolink_passes_title_index_to_driver():
     driver.autolink_note.assert_called_once()
     _, kwargs = driver.autolink_note.call_args
     assert kwargs.get("title_index") == build_title_index(refs)
+
+
+# ---------------------------------------------------------------------------
+# Frontmatter aliases — harvested by the index, consumed by autolink_note
+# ---------------------------------------------------------------------------
+
+def test_autolink_note_links_a_mention_of_a_frontmatter_alias(tmp_path):
+    """The end-to-end seam: `aliases: [AI]` on one note makes a bare "AI" in
+    another note link to that note, as [[Artificial Intelligence|AI]]. Without
+    the alias layer this mention stays unlinked and the concept splits in two."""
+    (tmp_path / "Artificial Intelligence.md").write_text(
+        "---\naliases: [AI]\n---\n\n# Artificial Intelligence\n", encoding="utf-8"
+    )
+    (tmp_path / "Note.md").write_text("The AI winter ended.", encoding="utf-8")
+    backend = ObsidianFSBackend(str(tmp_path))
+
+    added = backend.autolink_note("Note.md")
+
+    body = backend.read_note("Note.md").content
+    assert "[[Artificial Intelligence|AI]]" in body
+    assert added == ["Artificial Intelligence"]
+
+
+def test_alias_index_tracks_a_note_edited_after_the_first_scan(tmp_path):
+    """_patch_index must maintain the alias harvest, not just _rebuild_index:
+    an alias added after the index was warm has to become linkable, and one
+    removed has to stop being linkable."""
+    (tmp_path / "Artificial Intelligence.md").write_text("# AI\n", encoding="utf-8")
+    backend = ObsidianFSBackend(str(tmp_path))
+    assert backend.alias_index() == []
+
+    backend.overwrite(
+        "Artificial Intelligence.md", "---\naliases: [AI]\n---\n\n# Artificial Intelligence\n"
+    )
+    assert backend.alias_index() == [("Artificial Intelligence", ["AI"])]
+
+    backend.overwrite("Artificial Intelligence.md", "# Artificial Intelligence\n")
+    assert backend.alias_index() == []
