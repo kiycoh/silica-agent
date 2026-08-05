@@ -191,35 +191,17 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._mention_index.clear()
         self._alias_pairs.clear()
 
-        from silica.kernel.vault_manifest import active_inbox_dir
-        inbox = active_inbox_dir()
-        inbox_norm = os.path.normcase(inbox) if inbox else None
-
         files_to_process = []
         skip = ignore_matcher(self.vault_path)
 
         # Pass 1: Find all markdown files and populate self._notes and self._graph nodes
         for root, dirs, files in os.walk(self.vault_path):
-            rel_path = Path(root).relative_to(self.vault_path).as_posix()
-
             # Skip hidden folders, plus vendored/build trees and whatever
             # `.silicaignore` adds: a vault adopted as-is can be a repo root,
             # where node_modules/ alone would flood the note graph with
             # thousands of third-party READMEs.
             dirs[:] = [d for d in dirs if not d.startswith(".") and not skip(d)]
 
-            # Skip inbox directory if configured
-            if inbox_norm:
-                new_dirs = []
-                for d in dirs:
-                    sub_rel_path = (Path(rel_path) / d).as_posix().strip(".")
-                    sub_rel_norm = os.path.normcase(sub_rel_path.replace("\\", "/").strip("/"))
-                    if sub_rel_norm == inbox_norm or sub_rel_norm.startswith(inbox_norm + "/"):
-                        logger.debug("Skipping indexing for inbox directory: %s", sub_rel_path)
-                    else:
-                        new_dirs.append(d)
-                dirs[:] = new_dirs
-                
             for file in files:
                 if not file.endswith(".md"):
                     continue
@@ -235,12 +217,6 @@ class ObsidianFSBackend(GraphIndexMixin):
                 if is_vault_artifact(rel_path_file):
                     continue
 
-                # Double safety check: skip if rel_path_file is in inbox
-                if inbox_norm:
-                    rel_path_norm = os.path.normcase(rel_path_file.replace("\\", "/").strip("/"))
-                    if rel_path_norm == inbox_norm or rel_path_norm.startswith(inbox_norm + "/"):
-                        continue
-                
                 name = file[:-3]
                 ref = NoteRef(name=name, path=rel_path_file)
                 self._notes[rel_path_file] = ref
@@ -284,16 +260,6 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._dirty_paths.clear()
         logger.debug("Indexed %d notes", len(self._notes))
 
-    def _is_inbox_path(self, rel_path: str) -> bool:
-        """True if rel_path is the inbox directory or lives inside it."""
-        from silica.kernel.vault_manifest import active_inbox_dir
-        inbox = active_inbox_dir()
-        if not inbox:
-            return False
-        inbox_norm = os.path.normcase(inbox)
-        rel_norm = os.path.normcase(rel_path.replace("\\", "/").strip("/"))
-        return rel_norm == inbox_norm or rel_norm.startswith(inbox_norm + "/")
-
     @_locked
     def _patch_index(self, rel_path: str, content: str | None) -> None:
         """Incrementally update the graph index for a single changed path.
@@ -301,10 +267,12 @@ class ObsidianFSBackend(GraphIndexMixin):
         If content is None the note was deleted — remove it from the index.
         Call this instead of setting _needs_reindex = True for single-file writes.
         """
-        # Inbox notes are never indexed (_rebuild_index skips the whole
-        # directory), so a write/move into the inbox must degrade to a
-        # removal — otherwise it strands an entry the next rebuild drops.
-        if content is not None and (self._is_inbox_path(rel_path) or is_vault_artifact(rel_path)):
+        # Vault artifacts are never indexed (_rebuild_index drops them), so a
+        # write to one must degrade to a removal — otherwise it strands an entry
+        # the next rebuild drops. The inbox is indexed like any other folder:
+        # staging notes are source material, and the ops that must not target
+        # them are gated by `is_inbox_path`, not by their absence from the index.
+        if content is not None and is_vault_artifact(rel_path):
             content = None
 
         # --- remove stale data for this path ---

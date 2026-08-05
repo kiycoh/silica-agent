@@ -27,7 +27,9 @@ def test_the_inbox_stays_inside_the_write_boundary(tmp_path, monkeypatch):
         f"docs/silica/{CONFIG.inbox_dir}/materiale.md"
     ]
     # And the staging area is still recognised as such at its new depth.
-    assert backend._is_inbox_path(f"docs/silica/{CONFIG.inbox_dir}/materiale.md")
+    from silica.kernel.recall.paths import is_inbox_path
+
+    assert is_inbox_path(f"docs/silica/{CONFIG.inbox_dir}/materiale.md")
 
 
 def test_no_boundary_leaves_the_inbox_at_the_vault_root(tmp_path, monkeypatch):

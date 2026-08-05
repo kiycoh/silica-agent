@@ -18,16 +18,23 @@ def test_fs_create_patches_index(tmp_path):
     assert ("test.md", "Missing") in backend._unresolved_links
 
 
-def test_fs_create_into_inbox_not_indexed(tmp_path, monkeypatch):
-    """_patch_index must skip inbox paths, mirroring _rebuild_index."""
+def test_fs_create_into_inbox_is_indexed(tmp_path, monkeypatch):
+    """_patch_index indexes inbox paths, mirroring _rebuild_index.
+
+    Staging notes are source material: they belong in the index so the file
+    tree, search and recall can reach them. What must never happen to them is
+    being TARGETED by an op, and that is `is_inbox_path`'s job, not the index's.
+    """
     from silica.config import CONFIG
+    from silica.kernel.recall.paths import is_inbox_path
     monkeypatch.setattr(CONFIG, "inbox_dir", "Inbox")
     backend = ObsidianFSBackend(vault_path=str(tmp_path))
     backend._rebuild_index()
 
     backend.create("Inbox/clip.md", "raw clipped content")
-    assert "Inbox/clip.md" not in backend._notes
-    assert "Inbox/clip.md" not in backend._graph
+    assert "Inbox/clip.md" in backend._notes
+    assert "Inbox/clip.md" in backend._graph
+    assert is_inbox_path("Inbox/clip.md")
 
 
 def test_resolve_path_never_escapes_vault_via_cwd(tmp_path, monkeypatch):

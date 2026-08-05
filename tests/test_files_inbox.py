@@ -1,11 +1,11 @@
-"""silica_files answers for inbox folders too.
+"""silica_files answers for inbox folders even when the index cannot.
 
-The note index skips the inbox on purpose (inbox drafts must not reach the
-graph, embeddings or co-occurrence), so `DRIVER.list_files("Inbox/x")` is
-always empty by design. But the /nucleate folder fallback tells the agent to
+The note index used to skip the inbox, so `DRIVER.list_files("Inbox/x")` came
+back empty by design. But the /nucleate folder fallback tells the agent to
 resolve a folder argument with exactly that call: an empty result there is not
 "the folder is empty", it is "the tool cannot see this folder", and the model
-filled the gap by inventing filenames.
+filled the gap by inventing filenames. The index now walks the inbox; these
+cases pin the `list_inbox_files` fallback that still catches an empty listing.
 """
 from __future__ import annotations
 

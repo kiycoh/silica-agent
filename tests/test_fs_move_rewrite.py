@@ -426,15 +426,15 @@ class TestMoveFailurePath:
 
 
 # ---------------------------------------------------------------------------
-# Test 8 — move into inbox: _patch_index must not index inbox paths
+# Test 8 — move into inbox: _patch_index indexes inbox paths like any other
 # ---------------------------------------------------------------------------
 
 class TestMoveIntoInbox:
-    """Moving a note into the configured inbox must not index it.
+    """Moving a note into the configured inbox keeps it indexed.
 
-    _rebuild_index skips the inbox directory entirely, so the incremental
-    patch path must do the same — otherwise a move into the inbox strands
-    an index entry that the next full rebuild would drop.
+    _rebuild_index walks the inbox like any other folder, so the incremental
+    patch path must do the same — the two disagreeing is what strands an index
+    entry the next full rebuild would contradict, in either direction.
     """
 
     @pytest.fixture
@@ -448,12 +448,13 @@ class TestMoveIntoInbox:
         _write(v, "Ref.md", "See [[Note]] for details.\n")
         return v
 
-    def test_moved_note_not_indexed(self, vault: Path) -> None:
+    def test_moved_note_stays_indexed(self, vault: Path) -> None:
         b = _make_backend(vault)
         b.move("Note.md", "Inbox/Note.md")
-        assert "Inbox/Note.md" not in b._notes
-        assert "Inbox/Note.md" not in b._graph
-        assert b._resolve_target("Note") is None
+        assert "Inbox/Note.md" in b._notes
+        assert "Inbox/Note.md" in b._graph
+        # The link in Ref.md follows the note into the inbox instead of dangling.
+        assert b._resolve_target("Note").path == "Inbox/Note.md"
 
     def test_patched_index_matches_full_rebuild(self, vault: Path) -> None:
         b = _make_backend(vault)

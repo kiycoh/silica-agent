@@ -236,9 +236,9 @@ def test_nucleate_folder_of_notes_resolves_without_the_agent(repo_vault, stub_co
     """A folder of notes expands here, deterministically.
 
     `expand_folder` reads a git-backed census of the code lane, so it is blind to
-    a plain Obsidian vault, and the note index skips the inbox — the folder used
-    to reach the agent as a bare name with no listing behind it, and the model
-    answered with filenames it had invented.
+    a plain Obsidian vault, and the note index used to skip the inbox — the
+    folder reached the agent as a bare name with no listing behind it, and the
+    model answered with filenames it had invented.
     """
     _, vault = repo_vault
     folder = vault / "Inbox" / "machine_learning"

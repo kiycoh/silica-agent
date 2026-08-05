@@ -112,8 +112,9 @@ def test_verbose_fsm_logging(caplog):
         logger.setLevel(orig_level)
 
 
-def test_inbox_blacklisting_and_external_reads(tmp_path):
-    """Verify that files inside inbox_dir are blacklisted from indexing and search, and that external files can be read."""
+def test_inbox_indexing_and_external_reads(tmp_path):
+    """Verify that files inside inbox_dir ARE indexed and searchable (staging is
+    source material), and that external files can be read."""
     import os
     from silica.config import CONFIG
     from silica.driver.fs_backend import ObsidianFSBackend
@@ -145,24 +146,28 @@ def test_inbox_blacklisting_and_external_reads(tmp_path):
         backend = ObsidianFSBackend(vault_path=str(vault_dir))
         backend._ensure_index()
         
-        # 1. Check that notes in Inbox are not indexed
+        # 1. Check that notes in Inbox are indexed
         assert any(ref.name == "note1" for ref in backend._notes.values())
-        assert not any(ref.name == "meeting_notes" for ref in backend._notes.values())
-        
+        assert any(ref.name == "meeting_notes" for ref in backend._notes.values())
+
         # 2. Check list_files
         listed = [ref.name for ref in backend.list_files()]
         assert "note1" in listed
-        assert "meeting_notes" not in listed
-        
+        assert "meeting_notes" in listed
+
         # 3. Check search_names
         searched_names = [ref.name for ref in backend.search_names("notes")]
-        assert "meeting_notes" not in searched_names
-        
-        # 4. Check search_context
-        hits = backend.search_context("Inbox")
-        assert len(hits) == 0
-        
-        # 5. Check reading an external file outside the vault
+        assert "meeting_notes" in searched_names
+
+        # 4. Check search_context reaches inbox bodies
+        hits = backend.search_context("Hello from Inbox Note")
+        assert [h.ref.path for h in hits] == ["Inbox/meeting_notes.md"]
+
+        # 5. But the inbox is still never a legal op target.
+        from silica.kernel.recall.paths import is_inbox_path
+        assert is_inbox_path("Inbox/meeting_notes.md")
+
+        # 6. Check reading an external file outside the vault
         external_file = tmp_path / "external_inbox.md"
         external_file.write_text("External file content", encoding="utf-8")
         

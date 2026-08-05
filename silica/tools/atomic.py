@@ -282,13 +282,17 @@ def notes_under(folder: str) -> list[str]:
     """Vault-relative `.md` paths under `folder`, natural-sorted. "" ⇒ the vault.
 
     The one answer to "which notes does this folder hold?", because neither
-    half of the codebase could give it for an inbox folder: `list_files` reads
-    the note index, which skips the inbox on purpose (drafts must not reach the
-    graph, embeddings or co-occurrence), and `sources.registry.expand_folder`
-    answers only for the code lane off a git-backed census — a plain Obsidian
-    vault is no repo, so it returns [] for every folder in it. Between the two a
-    folder argument had no listing at all, and the only caller left to produce
-    one was an LLM guessing filenames.
+    half of the codebase could give it for an inbox folder: the note index used
+    to skip the inbox entirely, and `sources.registry.expand_folder` answers
+    only for the code lane off a git-backed census — a plain Obsidian vault is
+    no repo, so it returns [] for every folder in it. Between the two a folder
+    argument had no listing at all, and the only caller left to produce one was
+    an LLM guessing filenames.
+
+    The index now walks the inbox, so `list_files` alone answers. The
+    `list_inbox_files` fallback below stays as belt-and-braces: its failure mode
+    was a model inventing filenames, which is not a failure worth re-earning to
+    save four lines.
     """
     from silica.kernel.recall.paths import in_folder
     from silica.kernel.vault_manifest import active_inbox_dir

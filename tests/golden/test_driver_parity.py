@@ -197,8 +197,9 @@ def test_synthetic_vault_list_files(fs_backend):
     refs = fs_backend.list_files()
     paths = {r.path for r in refs}
 
-    # Exclude inbox notes (the FS backend skips them per CONFIG.inbox_dir)
-    # Here inbox_dir is not configured, so all notes ARE indexed.
+    # `_inbox/` is the synthetic vault's staging fixture, not a configured
+    # inbox; the index walks it either way, so this only narrows what SPEC
+    # entries this assertion speaks for.
     non_inbox_specs = [s for s in SPEC if not s.path.startswith("_inbox/")]
     for spec in non_inbox_specs:
         assert spec.path in paths, (
