@@ -614,7 +614,7 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
     from silica.kernel.write.bulk import execute_operations
     from silica.kernel.recall.deferred import get_deferred_store
     from silica.kernel.write.ops_io import parse_ops
-    from silica.kernel.text.sanitize import parse_json
+    from silica.kernel.text.sanitize import normalize_ops, parse_json
     from silica.kernel.write.validate import validate_operations
     from silica.tools.wrapped import build_txn
 
@@ -627,6 +627,18 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
         return {"status": "empty"}
     target_dir = bundle.get("target_dir", "")
     hub = bundle.get("hub")
+    payloads = bundle.get("payloads") or []
+    # The heading gate downstream only admits headings named in the payloads,
+    # but the model never saw that list — it re-conceptualized freely and lost
+    # the whole retry to mechanical rejections (17 of 55 deferrals on the
+    # 2026-08-05 run were RETRY-phase 'Heading not present in payload concepts').
+    allowed_headings = sorted({
+        c.get("name")
+        for p in payloads if isinstance(p, dict)
+        for b in p.get("batches", [])
+        for c in b.get("concepts", [])
+        if c.get("name")
+    })
     file_reasons = bundle.get("rejection_reasons", {})
     feedback = [
         {
@@ -637,9 +649,14 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
         for o in ops
     ]
     hub_line = f"\nHUB: {hub}" if hub else ""
+    headings_line = (
+        "\nALLOWED HEADINGS (every op's \"heading\" MUST be one of these, "
+        "verbatim — never invent a new one):\n"
+        + "\n".join(f"- {h}" for h in allowed_headings) + "\n"
+    ) if allowed_headings else ""
     prompt = (
         "You are repairing note-write operations that a validation gate rejected.\n"
-        f"TARGET_DIR: {target_dir}{hub_line}\n"
+        f"TARGET_DIR: {target_dir}{hub_line}{headings_line}\n"
         "Each op below is echoed with the exact reason it was rejected. Fix ONLY\n"
         "what the reason requires — keep the content otherwise identical — and\n"
         "return the corrected ops as a JSON array in the same op schema. Omit an\n"
@@ -662,6 +679,21 @@ def _steer_bundle(content_hash: str) -> dict[str, Any]:
         parsed, _ = parse_json(response.text or "", strict=False)
     except Exception as e:
         return {"status": "error", "error": str(e)[:200]}
+    # Same post-processing the main distill path gets (silica_sanitize →
+    # normalize_ops): without it, steer output skipped every escape repair and
+    # over-escaped LaTeX (`\\{a_c\\}`, `\\dots`) landed verbatim in the vault.
+    # The bundle's own excerpts anchor the per-site collapse — the best
+    # approximation of the chunk text available at the boundary.
+    if isinstance(parsed, dict) and isinstance(parsed.get("updates"), list):
+        parsed = parsed["updates"]
+    if isinstance(parsed, list):
+        anchor = "\n".join(
+            c.get("inbox_excerpt") or ""
+            for p in payloads if isinstance(p, dict)
+            for b in p.get("batches", [])
+            for c in b.get("concepts", [])
+        ) or None
+        parsed = normalize_ops(parsed, verbatim_source=anchor)
     fixed = parse_ops(parsed) if isinstance(parsed, (list, dict)) else []
     fixed = [op for op in fixed if op.op != OpType.skip]
     if not fixed:

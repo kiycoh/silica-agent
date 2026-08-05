@@ -237,6 +237,93 @@ def test_anneal_steer_offers_and_honors_the_body_appendix(tmp_vault, tmp_path, m
     assert "\t" not in note
 
 
+def test_anneal_steer_prompt_lists_allowed_headings(tmp_vault, tmp_path, monkeypatch):
+    # The heading gate only admits headings named in the payloads, but the
+    # steer model never saw that list — it re-conceptualized freely and lost
+    # the whole retry to mechanical rejections (17 of 55 deferrals on the
+    # 2026-08-05 run). The prompt must carry the allowed names.
+    from silica.tools import pipeline
+
+    tmp_vault.note("Reti/Reti.md", "# Reti\n")
+    store = _park(monkeypatch, tmp_path)
+    payloads = [{"batches": [{"inbox_file": "inbox/c.md", "concepts": [
+        {"name": "Broker", "inbox_excerpt": "il Broker smista i messaggi"},
+        {"name": "Topic", "inbox_excerpt": "il Topic raggruppa per argomento"},
+    ]}]}]
+    store.put(
+        "iii9", "inbox/c.md", "Reti", None,
+        [{"op": "write", "heading": "Broker", "source_basename": "c.md",
+          "path": "Reti/Broker.md", "title": "Broker", "snippet": "corto"}],
+        rejection_reasons={"Reti/Broker.md": "snippet too short"},
+        phase="VALIDATE",
+        payloads=payloads,
+    )
+
+    prompts = []
+
+    class _Resp:
+        text = orjson.dumps([{
+            "op": "write", "heading": "Broker", "source_basename": "c.md",
+            "path": "Reti/Broker.md", "title": "Broker", "snippet": LONG,
+        }]).decode()
+
+    class _Provider:
+        def call_llm(self, messages, tools=None, **kw):
+            prompts.append(messages[0]["content"])
+            return _Resp()
+
+    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _Provider())
+
+    res = pipeline.silica_anneal(steer=True)
+
+    assert "ALLOWED HEADINGS" in prompts[0]
+    assert "- Broker" in prompts[0] and "- Topic" in prompts[0]
+    assert res["written"] == 1
+
+
+def test_anneal_steer_output_gets_the_sanitize_repairs(tmp_vault, tmp_path, monkeypatch):
+    # The steer path used to feed the model's JSON straight to parse_ops,
+    # skipping normalize_ops entirely — over-escaped LaTeX (`\\top`, `\\{`)
+    # landed verbatim in the vault (8 committed notes, 2026-08-05). The
+    # bundle's own excerpts anchor the per-site collapse.
+    from silica.tools import pipeline
+
+    tmp_vault.note("Reti/Reti.md", "# Reti\n")
+    store = _park(monkeypatch, tmp_path)
+    payloads = [{"batches": [{"inbox_file": "inbox/c.md", "concepts": [
+        {"name": "Broker", "inbox_excerpt": "vincolo $\\top$ e insieme $\\{a\\}$"},
+    ]}]}]
+    store.put(
+        "jjja", "inbox/c.md", "Reti", None,
+        [{"op": "write", "heading": "Broker", "source_basename": "c.md",
+          "path": "Reti/Broker.md", "title": "Broker", "snippet": "corto"}],
+        rejection_reasons={"Reti/Broker.md": "snippet too short"},
+        phase="VALIDATE",
+        payloads=payloads,
+    )
+
+    class _Resp:  # JSON body over-escaped by the model INSIDE the string
+        text = orjson.dumps([{
+            "op": "write", "heading": "Broker", "source_basename": "c.md",
+            "path": "Reti/Broker.md", "title": "Broker",
+            "snippet": LONG + " Vincolo: $\\\\top$ su $\\\\{a\\\\}$.",
+        }]).decode()
+
+    class _Provider:
+        def call_llm(self, messages, tools=None, **kw):
+            return _Resp()
+
+    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _Provider())
+
+    res = pipeline.silica_anneal(steer=True)
+    assert res["written"] == 1
+
+    from silica.driver import DRIVER
+    note = DRIVER.read_note("Reti/Broker.md").content
+    assert "$\\top$" in note and "$\\{a\\}$" in note
+    assert "\\\\top" not in note and "\\\\{" not in note
+
+
 def test_anneal_retry_without_payloads_keeps_legacy_behavior(tmp_vault, tmp_path, monkeypatch):
     # Old bundles (pre-schema) carry no payloads: retry still validates
     # payload-free, so they are not bricked by the schema addition.
