@@ -313,6 +313,34 @@ def notes_under(folder: str) -> list[str]:
     return sorted(paths, key=_natural_key)
 
 
+def _unconverted_under(folder: str) -> list[str]:
+    """Non-markdown inbox files under `folder`, natural-sorted; `Images/` excluded.
+
+    `notes_under` lists the inbox .md-only, so a folder holding nothing but PDFs
+    came back as {"total": 0, "files": []} — a payload indistinguishable from a
+    folder that is not there, and the agent duly reported it as non-existent.
+    Naming the unconverted files is the only way the caller can tell the two
+    apart, since `silica_inbox_ls` is not in the MCP core surface. `Images/` is
+    conversion output, not input, and outnumbers the notes 70:1.
+    """
+    from silica.kernel.recall.paths import in_folder
+    from silica.kernel.vault_manifest import active_inbox_dir
+
+    scope = _vault_rel(folder)
+    inbox = active_inbox_dir()
+    if not scope or not inbox or not in_folder(scope, inbox):
+        return []
+    return sorted(
+        (
+            r.path for r in DRIVER.list_inbox_files()
+            if not r.path.endswith(".md")
+            and in_folder(r.path, scope)
+            and "/Images/" not in r.path
+        ),
+        key=_natural_key,
+    )
+
+
 def _vault_rel(path: str) -> str:
     """`path` as a vault-relative posix path; already-relative input passes through.
 
@@ -342,7 +370,8 @@ def silica_files(folder: str = "") -> dict:
     notes, plus "code": [repo-relative path, ...] with the ingestible source
     files under `folder` (empty folder= lists notes only). An inbox folder is
     listed too — its notes are kept out of the vault index, not missing — but
-    only its .md: unconverted files there (PDFs etc.) need `/convert` first.
+    only its .md under "files"; the unconverted files there (PDFs etc.) come
+    back under "unconverted" and need `/convert` before anything can read them.
     A note's wikilink name is its filename without the extension. A folder of code is NOT empty
     just because it holds no .md — feed the "code" paths to /nucleate to stage
     a skeleton stub per file. Both listings are capped at 200 entries: when
@@ -358,6 +387,17 @@ def silica_files(folder: str = "") -> dict:
     if len(files) > _FILES_CAP:
         result["truncated"] = True
         result["hint"] = "Listing capped at 200 entries; pass folder= to narrow."
+    # An inbox folder of PDFs is not an empty folder: say so, or the caller
+    # concludes the path does not exist. See _unconverted_under.
+    pending = _unconverted_under(folder) if folder else []
+    if pending:
+        result["unconverted"] = pending[:_FILES_CAP]
+        result["unconverted_total"] = len(pending)
+        result.setdefault(
+            "hint",
+            f"{len(pending)} file(s) here are not markdown yet — "
+            "ask the user to run /convert <path>, then work on the resulting .md.",
+        )
     # folder-scoped only — a bare call would dump a whole repo into
     # the context window, and the vault map already covers "what is here".
     if folder:

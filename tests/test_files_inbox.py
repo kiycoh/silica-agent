@@ -73,6 +73,28 @@ def test_listing_is_natural_sorted():
     ]
 
 
+def test_folder_of_pdfs_is_not_reported_as_empty():
+    """A folder holding only unconverted files used to answer {"total": 0,
+    "files": []} — the same payload as a folder that is not there, and the agent
+    reported it as "the path does not exist". Images/ stays out: it is
+    conversion output, not something to convert."""
+    with patch("silica.tools.atomic.DRIVER") as drv, \
+         patch("silica.kernel.vault_manifest.active_inbox_dir", return_value="Inbox"):
+        drv.list_files.return_value = []
+        drv.list_inbox_files.return_value = _refs(
+            "Inbox/papers/2509.04664v1.pdf",
+            "Inbox/papers/jaamas2000b.pdf",
+            "Inbox/papers/Images/fig1.png",
+        )
+        res = silica_files("Inbox/papers/")
+    assert res["total"] == 0
+    assert res["unconverted"] == [
+        "Inbox/papers/2509.04664v1.pdf",
+        "Inbox/papers/jaamas2000b.pdf",
+    ]
+    assert "/convert" in res["hint"]
+
+
 def test_non_inbox_folder_does_not_consult_the_inbox():
     """An empty vault folder stays empty — the fallback is scoped to the inbox,
     not a second listing every miss falls through to."""
