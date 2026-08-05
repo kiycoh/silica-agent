@@ -282,6 +282,7 @@ def validate_operations(
     expected_collision_paths: dict[tuple[str, str], str | None] = {}
     concept_excerpts: dict[tuple[str, str], str] = {}
     collision_excerpts: dict[tuple[str, str], str] = {}
+    source_files: dict[str, str] = {}
     inbox_folders = set()
     has_payloads = bool(payloads)
 
@@ -297,7 +298,8 @@ def validate_operations(
                 source_basename = os.path.basename(inbox_file)
                 inbox_dir = os.path.dirname(os.path.abspath(inbox_file))
                 inbox_folders.add(inbox_dir)
-                
+                source_files[source_basename] = inbox_file
+
                 if source_basename not in valid_concepts:
                     valid_concepts[source_basename] = set()
                     
@@ -476,6 +478,28 @@ def validate_operations(
                 })
             op.parent = None
 
+    _source_text_cache: dict[str, str] = {}
+
+    def _full_source_text(basename: str) -> str:
+        """The whole source document, "" when unreadable. A finished source
+        moves to <write_dir>/done/<basename> at CLEANUP, and RETRY/steer
+        validates after the move — so look there too."""
+        if basename not in _source_text_cache:
+            from silica.kernel.vault_manifest import in_write_dir
+
+            text = ""
+            candidates = [source_files.get(basename), f"{in_write_dir('done')}/{basename}"]
+            for cand in candidates:
+                if not cand:
+                    continue
+                try:
+                    text = DRIVER.read_note(cand).content
+                    break
+                except Exception:
+                    continue
+            _source_text_cache[basename] = text
+        return _source_text_cache[basename]
+
     def _check_grounding(op: Op) -> None:
         """Warn-only verbatim gate (never rejects): math/code spans in the body
         that can't be located in the source excerpt are fabrication candidates."""
@@ -490,6 +514,17 @@ def validate_operations(
             return
         from silica.kernel.write.provenance import ungrounded_spans
         spans = ungrounded_spans(body, source_text)
+        if spans:
+            # Second look against the whole document: the distiller (and the
+            # steer model, which sees the entire bundle) legitimately stitches
+            # from neighboring windows, and a span verbatim elsewhere in the
+            # source is not fabrication (IDK.md, 2026-08-05: 3/3 flagged spans
+            # were verbatim in the file, outside the concept's window). Only
+            # ever clears spans — a class the excerpt didn't gate stays ungated.
+            full = _full_source_text(op.source_basename)
+            if full:
+                still = set(ungrounded_spans(body, f"{source_text}\n{full}"))
+                spans = [s for s in spans if s in still]
         if spans:
             logger.warning(
                 "validate: '%s' — %d verbatim span(s) not grounded in source excerpt: %s",

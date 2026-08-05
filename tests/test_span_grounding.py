@@ -37,6 +37,52 @@ def test_whitespace_drift_is_grounded():
     assert ungrounded_spans(body, src) == []
 
 
+def test_a_bold_macro_swap_is_still_the_same_formula():
+    # The dominant flag class on a converted-PDF source: the converter emits the
+    # macro its PDF encoded, the model re-emits the one it learned, and a vector
+    # equation copied faithfully reads as fabricated.
+    src = "The normal equation is $\\mathbf{w}^* = (\\mathbf{Z}^T \\mathbf{Z})^{-1} \\mathbf{Z}^T \\mathbf{y}$."
+    body = "$$\\boldsymbol{w}^* = (\\boldsymbol{Z}^T \\boldsymbol{Z})^{-1} \\boldsymbol{Z}^T \\boldsymbol{y}$$"
+    assert ungrounded_spans(body, src) == []
+
+
+def test_the_normalizer_folds_bold_and_leaves_alphabets_alone():
+    # The fold is one closed family, deliberately not an alias table: blackboard
+    # bold and calligraphic are different sets, not two spellings of one.
+    from silica.kernel.write.provenance import _norm_math
+
+    assert _norm_math("\\mathbf{w}") == _norm_math("\\boldsymbol{w}") == _norm_math("\\pmb{w}")
+    assert _norm_math("\\mathcal{X}") != _norm_math("\\mathbb{X}")
+    assert _norm_math("\\bmod") == "\\bmod"  # \b-guarded: not a bold macro
+
+
+def test_an_upright_wrapper_swap_is_still_the_same_formula():
+    # The dominant residue class of the 2026-08-05 run: converter says
+    # \mathrm (spaced out by MinerU), model says \text — one macro swap on a
+    # short span used to fall below the locality floor and read as fabricated.
+    src = "Spearman: $\\rho _ { \\mathrm { a l l } } = 0 . 6 3 4$ over all pairs."
+    body = "Correlation was $\\rho_{\\text{all}} = 0.634$ on the full set."
+    assert ungrounded_spans(body, src) == []
+
+
+def test_operatorname_star_and_pr_are_the_same_operator():
+    src = ("Bound: $\\operatorname* { P r } \\left[ | \\mathrm { M M - s r } | "
+           "\\le 4 . 4 2 \\right] \\ge 1 - \\gamma$ holds.")
+    body = "$$\\Pr\\left[ |\\mathrm{MM-sr}| \\le 4.42 \\right] \\ge 1 - \\gamma$$"
+    assert ungrounded_spans(body, src) == []
+
+
+def test_the_normalizer_folds_upright_wrappers_and_leaves_alphabets_alone():
+    from silica.kernel.write.provenance import _norm_math
+
+    assert (_norm_math("\\mathrm{err}") == _norm_math("\\text{err}")
+            == _norm_math("\\operatorname{err}") == "err")
+    assert _norm_math("\\operatorname*{Pr}") == _norm_math("\\Pr") == "Pr"
+    assert _norm_math("\\mathsf{Fill}") == _norm_math("\\mathrm{Fill}")
+    assert _norm_math("\\Prime") == "\\Prime"  # guarded: not the \Pr operator
+    assert _norm_math("\\mathbb{R}") != _norm_math("\\mathcal{R}")
+
+
 def test_invented_formula_is_flagged():
     src = "Adam uses $\\beta_1 = 0.9$ and $\\beta_2 = 0.999$ for its moving averages of gradients."
     body = "Hyperparameters: $\\beta_1 = 0.9$, $\\beta_2 = 0.999$, $\\epsilon_{stability} = 10^{-8}$ (numerical stability)."
@@ -179,6 +225,72 @@ def test_patch_grounds_against_collision_excerpt_too(tmp_vault):
     assert rejected == []
     assert any(o.heading == "Adam Optimizer" for o in validated)
     assert ungrounded == []
+
+
+def test_span_verbatim_elsewhere_in_source_is_not_flagged(tmp_vault):
+    # The steer model sees the whole bundle and legitimately stitches from
+    # neighboring windows (IDK.md, 2026-08-05: all 3 flagged spans were
+    # verbatim in the file, outside the concept's own excerpt). When the
+    # source document is readable, a span grounded anywhere in it clears.
+    src_path = tmp_vault.note(
+        "Inbox/lez.md",
+        "Intro on optimizers.\n\n"
+        "Momentum uses $v_t = \\gamma v_{t-1} + \\eta \\nabla L(w_t)$ as usual.\n\n"
+        "Adam combines momentum and RMSProp, with $\\beta_1 = 0.9$.",
+    )
+    payload = {
+        "schema_version": 1,
+        "batches": [{
+            "inbox_file": src_path,
+            "concepts": [{
+                "name": "Adam Optimizer",
+                "action_hint": "create",
+                # The excerpt window does NOT contain the momentum formula.
+                "inbox_excerpt": "Adam combines momentum and RMSProp, with $\\beta_1 = 0.9$.",
+                "vault_collision": None,
+            }],
+        }],
+    }
+    snippet = (
+        "Adam builds on momentum, $v_t = \\gamma v_{t-1} + \\eta \\nabla L(w_t)$, "
+        "with $\\beta_1 = 0.9$ on the first moment."
+    )
+    ungrounded: list[dict] = []
+    validated, rejected = validate_operations(
+        [_write_op(snippet)], [payload], "Corso", ungrounded_out=ungrounded,
+    )
+    assert rejected == []
+    assert any(o.heading == "Adam Optimizer" for o in validated)
+    assert ungrounded == []
+
+
+def test_fabrication_stays_flagged_with_full_source_available(tmp_vault):
+    # The fallback only ever clears spans that ARE in the document — an
+    # invented constant fails against the whole file exactly as it failed
+    # against the excerpt.
+    src_path = tmp_vault.note(
+        "Inbox/lez.md",
+        "Adam combines momentum and RMSProp, with $\\beta_1 = 0.9$.",
+    )
+    payload = {
+        "schema_version": 1,
+        "batches": [{
+            "inbox_file": src_path,
+            "concepts": [{
+                "name": "Adam Optimizer",
+                "action_hint": "create",
+                "inbox_excerpt": "Adam combines momentum and RMSProp, with $\\beta_1 = 0.9$.",
+                "vault_collision": None,
+            }],
+        }],
+    }
+    snippet = "Typical: $\\beta_1 = 0.9$ and $\\epsilon_{stability} = 10^{-8}$ for robustness."
+    ungrounded: list[dict] = []
+    validate_operations(
+        [_write_op(snippet)], [payload], "Corso", ungrounded_out=ungrounded,
+    )
+    assert len(ungrounded) == 1
+    assert any("epsilon" in s for s in ungrounded[0]["spans"])
 
 
 def test_grounded_op_reports_nothing(tmp_vault):

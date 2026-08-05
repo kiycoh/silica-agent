@@ -262,7 +262,7 @@ def note_authored_by(
     Reads the provenance ledger: on any prior run, did this exact source file
     write or patch this note? The patch executor uses it to make a re-ingest
     idempotent — a source must not re-append its own concepts into the notes it
-    already wrote (each re-append is a redundant "Note aggiuntive (da <source>)"
+    already wrote (each re-append is a redundant "Additional notes (from <source>)"
     block). A genuinely new concept has no prior authored note, so it still
     flows to a fresh write; a DIFFERENT source enriching the same note still
     patches. Matches any recorded version of the source (an A->B->A edit still
@@ -325,10 +325,23 @@ def _norm_ws(s: str) -> str:
 
 
 _SINGLE_BRACE_RE = re.compile(r"(?<=[_^])\{(\w)\}")
+_BOLD_MACRO_RE = re.compile(r"\\(?:mathbf|boldsymbol|pmb|bm|bf)\b")
+# Upright-text wrappers around a name: which one a formula carries is the
+# converter's or the model's habit, not content. `\operatorname*{Pr}`,
+# `\mathrm{err}`, `\mathsf{Fill}` and `\text{err}` all put the same upright
+# word on the page; stripped to the bare word so they compare equal. Applied
+# after whitespace collapsing, so MinerU's `\mathrm { e r r }` folds too.
+# (Measured 2026-08-05: the dominant residue class of grounding flags was a
+# single wrapper swap on a short span — \text vs \mathrm vs \mathsf — which
+# alone drops the local match fraction below the floor.)
+_UPRIGHT_MACRO_RE = re.compile(r"\\(?:operatorname\*?|text|mathrm|mathsf)\{([^{}]*)\}")
+# `\Pr` is the one named operator the wrappers alias with (`\operatorname*{Pr}`).
+_PR_MACRO_RE = re.compile(r"\\Pr(?![A-Za-z])")
 
 
 def _norm_math(s: str) -> str:
-    """Typesetting noise dropped: whitespace, and braces around a lone subscript.
+    """Typesetting noise dropped: whitespace, braces around a lone subscript, and
+    which macro was used to bold a symbol.
 
     Both are invisible to LaTeX and both differ systematically between a PDF
     converter and a model. MinerU spaces a formula out at every token and braces
@@ -340,10 +353,28 @@ def _norm_math(s: str) -> str:
 
     Math only: inside a fenced code span whitespace carries meaning.
 
-    ponytail: notation only, no alias table. `\\pmb` vs `\\boldsymbol` renders the
-    same and would recover a few more, but that list only ever grows.
+    The bold macros are one closed family — `\\mathbf`, `\\boldsymbol`, `\\pmb`,
+    `\\bm`, `\\bf` all put the same bold symbol on the page, and which one a
+    formula carries says nothing about what it states. A converter emits the
+    one its PDF encoded and a model re-emits the one it learned, so a vector
+    equation copied faithfully read as fabricated (one run on a converted ML
+    lecture flagged 61 spans over six notes, the two spellings interleaved
+    between them).
+
+    Same reasoning folds the upright-text wrappers (`\\operatorname*?`,
+    `\\text`, `\\mathrm`, `\\mathsf`) to their bare content, plus the `\\Pr`
+    alias they typeset.
+
+    ponytail: these families only, not an alias table. Alphabets stay
+    distinct — `\\mathbb{R}` and `\\mathcal{R}` are different sets, and this
+    normalizer will not say otherwise.
     """
-    return _SINGLE_BRACE_RE.sub(r"\1", "".join(s.split()))
+    s = "".join(s.split())
+    prev = None
+    while prev != s:  # nested wrappers: \operatorname*{\mathrm{Pr}}
+        prev, s = s, _UPRIGHT_MACRO_RE.sub(r"\1", s)
+    s = _PR_MACRO_RE.sub("Pr", s)
+    return _BOLD_MACRO_RE.sub(r"\\bf", _SINGLE_BRACE_RE.sub(r"\1", s))
 
 
 def _local_match_fraction(s: str, src: str) -> float:
