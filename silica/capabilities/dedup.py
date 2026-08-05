@@ -318,7 +318,7 @@ def _route_verdict(
             snippet=contested_callout(decision.addition, source_basename),
             hub=hub,
             reason=f"contested: {decision.rationale[:120]}",
-            contested_by=f"fonte: {source_basename}",
+            contested_by=f"source: {source_basename}",
         )
     else:
         op = Op(
@@ -395,10 +395,10 @@ def _route_distinct(
         if not excerpt:
             return no_merge  # nothing to materialize the spoke from
         title = concept or candidate_name
-        body = f"{excerpt}\n\n*(da {source_basename})*"
+        body = f"{excerpt}\n\n*(from {source_basename})*"
     # The framework, not the model, guarantees the spoke is born linked.
     if candidate_name and f"[[{candidate_name}]]" not in body:
-        body += f"\n\nCorrelati: [[{candidate_name}]]"
+        body += f"\n\nRelated: [[{candidate_name}]]"
 
     emit_feedback(item, "committing")
     spoke_path = f"{target_dir}/{slugify(title) or title}.md"

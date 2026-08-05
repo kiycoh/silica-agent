@@ -29,7 +29,7 @@ def test_lint_failure_reverts_only_this_note(tmp_vault, monkeypatch):
     # the violation is NEWLY introduced (a pre-existing one wouldn't revert).
     def fake_lint(note_name, op_type="", hub=""):
         from silica.driver import DRIVER
-        introduced = "Note aggiuntive" in DRIVER.read_note(note_name).content
+        introduced = "Additional notes" in DRIVER.read_note(note_name).content
         return {"success": not introduced, "errors": ["bad link"] if introduced else []}
     monkeypatch.setattr("silica.tools.composed.silica_lint", fake_lint)
     res = commit_note_atomic(_patch_op(target), lint=True)
@@ -46,7 +46,7 @@ def test_failing_sibling_does_not_roll_back_others(tmp_vault, monkeypatch):
 
     def fake_lint(note_name, op_type="", hub=""):
         from silica.driver import DRIVER
-        introduced = "Roadmap" in note_name and "Note aggiuntive" in DRIVER.read_note(note_name).content
+        introduced = "Roadmap" in note_name and "Additional notes" in DRIVER.read_note(note_name).content
         return {"success": not introduced, "errors": ["bad"] if introduced else []}
     monkeypatch.setattr("silica.tools.composed.silica_lint", fake_lint)
 

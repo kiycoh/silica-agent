@@ -80,7 +80,7 @@ def _drop_echoed_title(body: str, h1: str) -> str:
 
 def template_spoke(heading: str, snippet: str, hub: str, title: str | None = None, tags: list[str] | None = None, related: list[str] | None = None, parent: str | None = None) -> str:
     today = datetime.date.today().isoformat()
-    body = snippet.strip() or "(da espandere)"
+    body = snippet.strip() or "(to be expanded)"
     h1 = title or heading  # title wins: filename and H1 stay in sync
 
     hub_link = _link_name(hub)
@@ -201,7 +201,7 @@ def prepare_fields(*, title: str, body: str, hub: str | None = None,
 
     return {
         "title": title,
-        "body": close_unbalanced_fences(body.strip()) or "(da espandere)",
+        "body": close_unbalanced_fences(body.strip()) or "(to be expanded)",
         "tags": tag_list,
         "related": related_items,
         "parent": f'"[[{parent_link}]]"' if parent_link else "",
@@ -356,7 +356,7 @@ def patch_snippet(heading: str, snippet: str, source_basename: str, hub: str | N
             stamp_line = f"{rendered}\n\n"
     patch_text = f"""
 
-## Note aggiuntive — {heading} (da {source_basename})
+{provenance_header(heading, source_basename)}
 
 {stamp_line}{close_unbalanced_fences(snippet.strip())}
 """
@@ -486,20 +486,41 @@ def ensure_system_floor(content: str, prior: str | None = None) -> str:
     return _stamp_agent(head + tail)
 
 
-PROVENANCE_HEADER_PREFIX = "## Note aggiuntive"
+PROVENANCE_HEADER_PREFIX = "## Additional notes"
+
+# Emitted until 2026-08. Recognized forever: the header is the idempotency key
+# for a patch block (block_present), so a vault carrying blocks in the old
+# spelling must keep matching or every re-ingest appends a second copy of what
+# it already wrote. Never emitted — read side only.
+LEGACY_PROVENANCE_HEADER_PREFIX = "## Note aggiuntive"
+
+PROVENANCE_HEADER_PREFIXES = (PROVENANCE_HEADER_PREFIX, LEGACY_PROVENANCE_HEADER_PREFIX)
 
 
 def provenance_header(heading: str, source_basename: str) -> str:
     """The exact header line patch_snippet emits for a (heading, source) block.
 
     Single source of truth so the patch executor can detect an already-injected
-    block and stay idempotent on re-injection.
+    block and stay idempotent on re-injection — patch_snippet interpolates this
+    rather than repeating the literal, which is what let the two drift apart.
     """
-    return f"## Note aggiuntive — {heading} (da {source_basename})"
+    return f"{PROVENANCE_HEADER_PREFIX}: {heading} (from {source_basename})"
+
+
+def _legacy_provenance_header(heading: str, source_basename: str) -> str:
+    """The pre-2026-08 Italian spelling of the same block header."""
+    return f"{LEGACY_PROVENANCE_HEADER_PREFIX} — {heading} (da {source_basename})"
 
 
 def block_present(existing_content: str | None, heading: str, source_basename: str) -> bool:
-    """True if a provenance block for (heading, source_basename) is already present."""
+    """True if a provenance block for (heading, source_basename) is already present.
+
+    Both spellings count: a note patched before the header was translated still
+    holds that source's block, and re-appending it would duplicate the content.
+    """
     if not existing_content:
         return False
-    return provenance_header(heading, source_basename) in existing_content
+    return (
+        provenance_header(heading, source_basename) in existing_content
+        or _legacy_provenance_header(heading, source_basename) in existing_content
+    )

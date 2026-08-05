@@ -469,7 +469,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         /cooccur [folder] [--force]
         /lexical [folder] [--force]
         /graph [output.html] [folder]
-        /map <nota> [--force]
+        /map <note> [--force]
         /find <query> [--k=N]
         /impact [<git-range>]
         /path <noteA> <noteB>
@@ -652,22 +652,22 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         positional = [p for p in parts[1:] if not p.startswith("-")]
         note = " ".join(positional).strip()
         if not note:
-            CONSOLE.print("  Usage: /map <nota> [--force]")
+            CONSOLE.print("  Usage: /map <note> [--force]")
             return True
         result = TOOLS["silica_mindmap"].run(note_path=note, force=force)
         try:
             parsed = json.loads(result)
             if parsed.get("skipped"):
                 CONSOLE.print(
-                    f"  [yellow]Mappa già presente[/] ({parsed['skipped']}) — "
-                    "non sovrascritta. Usa [bold]/map <nota> --force[/] per rigenerare."
+                    f"  [yellow]Map already present[/] ({parsed['skipped']}), not "
+                    "overwritten. Use [bold]/map <note> --force[/] to regenerate."
                 )
             elif "error" in parsed:
                 CONSOLE.print(f"  [red]{parsed['error']}[/]")
             else:
                 CONSOLE.print(
-                    f"  Mappa scritta: [bold]{parsed.get('path', '?')}[/] "
-                    f"({parsed.get('nodes', '?')} nodi, {parsed.get('edges', '?')} archi)"
+                    f"  Map written: [bold]{parsed.get('path', '?')}[/] "
+                    f"({parsed.get('nodes', '?')} nodes, {parsed.get('edges', '?')} edges)"
                 )
         except Exception:
             CONSOLE.print(result)

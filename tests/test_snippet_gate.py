@@ -1,5 +1,5 @@
 """Precision gate at write — a note body under MIN_WRITE_SNIPPET_CHARS is
-deferred, never written as a «(da espandere)» placeholder.
+deferred, never written as a «(to be expanded)» placeholder.
 
 Real fixture: run 5d0a3350 (2026-07-04) — the distiller returned whole chunks
 of write ops with snippet="" despite full inbox excerpts in the payload;

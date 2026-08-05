@@ -44,7 +44,7 @@ class VerifyMismatchError(RuntimeError):
 
 
 def _verify_landed(op: Op, path: str, intended: str | None) -> str | None:
-    """Falsifiable gate: rilegge dal DRIVER e confronta. None = ok, str = errore.
+    """Falsifiable gate: re-read from the DRIVER and compare. None = ok, str = error.
 
     `intended` is the final body composed by the caller (post frontmatter/merge/
     patch enrichment — write, overwrite AND patch all pass their exact composed
@@ -105,7 +105,7 @@ def _execute_write(op: Op, path: str) -> dict:
 
     # Claim stamp under the H1. Only when there is a body to stamp: prepending
     # to an empty snippet would make it truthy and swallow prepare_fields'
-    # "(da espandere)" placeholder. op.snippet stays untouched so the MOC
+    # "(to be expanded)" placeholder. op.snippet stays untouched so the MOC
     # bullet (hub_desc) still reads the first line of real prose.
     if op.valid_from and snippet.strip():
         from silica.kernel.write.contested import stamp
@@ -156,7 +156,7 @@ def _execute_patch(op: Op, path: str) -> dict:
     #      prior WRITE lays down no block, so #1 can't see it) — this is the
     #      re-ingest case: an edited source re-distills unchanged concepts that
     #      collision-match their own prior notes and would each gain a redundant
-    #      "Note aggiuntive (da <source>)" block.
+    #      "Additional notes: <heading> (from <source>)" block.
     # Either way the hub-link repair must still land, or the post-write lint
     # fails this op on every retry (2026-07-17 nucleate run: notes patched by
     # an interrupted run could never be re-patched).

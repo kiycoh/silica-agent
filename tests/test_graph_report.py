@@ -437,7 +437,7 @@ related:
   - "[[B]]"
 contested: true
 contradictions:
-  - "fonte: appunti.md"
+  - "source: appunti.md"
 ---
 
 # A
@@ -469,7 +469,7 @@ def test_contested_notes_surface_in_analytics_report(tmp_vault):
     r = compute_report(_nodes_edges_override=(nodes, edges), analytics=True)
 
     assert [c.path for c in r.contested] == ["A"]
-    assert r.contested[0].refs == ["fonte: appunti.md"]
+    assert r.contested[0].refs == ["source: appunti.md"]
     assert r.totals["contested"] == 1
 
 

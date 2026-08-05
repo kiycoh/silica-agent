@@ -33,7 +33,7 @@ def same_file_key(path: str) -> str:
 
 # Precision gate: a write op whose snippet is shorter than this is deferred
 # instead of written — execute_write would otherwise fill the note with a
-# "(da espandere)" placeholder (real incident: run 5d0a3350, 2026-07-04, the
+# "(to be expanded)" placeholder (real incident: run 5d0a3350, 2026-07-04, the
 # distiller returned whole chunks with snippet="" despite full inbox excerpts).
 # Rejection routes through the existing defer + steer path, so the distiller
 # gets re-prompted with the reason.

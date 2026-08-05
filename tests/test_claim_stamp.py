@@ -71,7 +71,7 @@ def test_valid_from_survives_broken_yaml():
 def test_patch_snippet_byte_identical_without_valid_from():
     """The parity guarantee: no valid_from, no diff."""
     expected = (
-        "\n\n## Note aggiuntive — Warfarin (da appunti.md)\n\n"
+        "\n\n## Additional notes: Warfarin (from appunti.md)\n\n"
         "Il dosaggio raccomandato è 5mg/die.\n"
     )
     assert templates.patch_snippet(
@@ -85,7 +85,7 @@ def test_patch_snippet_stamps_under_the_header():
         heading="Warfarin", snippet="Il dosaggio raccomandato è 5mg/die.",
         source_basename="appunti.md", valid_from="2023-05-08",
     )
-    header_i = out.index("## Note aggiuntive")
+    header_i = out.index("## Additional notes")
     stamp_i = out.index("<!-- silica:")
     body_i = out.index("Il dosaggio raccomandato")
     assert header_i < stamp_i < body_i
@@ -151,7 +151,7 @@ def test_execute_patch_stamps_the_block(tmp_vault):
 
     content = tmp_vault.read(path)
     assert parse_stamp(content) == {"valid_from": "2023-05-08"}
-    assert content.index("## Note aggiuntive") < content.index("<!-- silica:")
+    assert content.index("## Additional notes") < content.index("<!-- silica:")
     assert "5mg/die" in content  # the pre-existing claim is untouched
 
 

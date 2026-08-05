@@ -139,7 +139,7 @@ def test_dedup_contradicts_builds_contested_patch():
     op = ops_arg[0]
     assert op.op == OpType.patch
     assert op.path == "Concepts/Gradient Descent.md"
-    assert op.contested_by == "fonte: ml.md"
+    assert op.contested_by == "source: ml.md"
     assert op.snippet.startswith("> [!warning]")
     assert "50mg/die" in op.snippet
     # Same leash as the merge path: the model never escalates beyond a patch.
@@ -267,7 +267,7 @@ def test_dedup_distinct_authoring_failure_falls_back_mechanical():
     op = commit.call_args.args[0][0]
     assert op.op == OpType.write
     assert "Variante mini-batch con momentum." in op.snippet  # excerpt verbatim
-    assert "(da ml.md)" in op.snippet                          # provenance
+    assert "(from ml.md)" in op.snippet                          # provenance
     assert "[[Gradient Descent]]" in op.snippet                # born linked
     assert res["followup"]["kind"] == "refine"                 # ADR-0001 deferred refine
     assert res["followup"]["target_path"] == op.path

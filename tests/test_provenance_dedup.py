@@ -8,11 +8,20 @@ from silica.kernel.write.provenance import append_record, note_authored_by
 
 def test_provenance_helpers():
     hdr = provenance_header("Async IO", "meeting.md")
-    assert hdr == "## Note aggiuntive — Async IO (da meeting.md)"
+    assert hdr == "## Additional notes: Async IO (from meeting.md)"
     body = f"seed\n\n{hdr}\n\nfacts\n"
     assert block_present(body, "Async IO", "meeting.md") is True
     assert block_present(body, "Async IO", "other.md") is False
     assert block_present("seed only", "Async IO", "meeting.md") is False
+
+
+def test_block_present_still_matches_the_legacy_italian_header():
+    """The header is the idempotency key for a patch block. A vault written
+    before the header was translated still holds blocks in the old spelling,
+    and failing to match them appends a second copy of content already there."""
+    legacy = "seed\n\n## Note aggiuntive — Async IO (da meeting.md)\n\nfacts\n"
+    assert block_present(legacy, "Async IO", "meeting.md") is True
+    assert block_present(legacy, "Async IO", "other.md") is False
 
 
 def test_double_patch_is_idempotent(tmp_vault):
@@ -26,7 +35,7 @@ def test_double_patch_is_idempotent(tmp_vault):
 
     assert res.get("skipped") == "duplicate"
     assert tmp_vault.read(target) == after_first   # no second block appended
-    assert after_first.count("## Note aggiuntive — Async IO (da meeting.md)") == 1
+    assert after_first.count("## Additional notes: Async IO (from meeting.md)") == 1
 
 
 def test_patch_skipped_when_source_already_authored_note(tmp_vault):
@@ -47,7 +56,7 @@ def test_patch_skipped_when_source_already_authored_note(tmp_vault):
     res = execute_one(op)
 
     assert res.get("skipped") == "duplicate"
-    assert "## Note aggiuntive" not in tmp_vault.read(target)
+    assert "## Additional notes" not in tmp_vault.read(target)
 
 
 def test_patch_proceeds_for_a_different_source(tmp_vault):
@@ -63,7 +72,7 @@ def test_patch_proceeds_for_a_different_source(tmp_vault):
     res = execute_one(op)
 
     assert res.get("skipped") is None
-    assert "## Note aggiuntive — Machine Learning (da lezione_9.md)" in tmp_vault.read(target)
+    assert "## Additional notes: Machine Learning (from lezione_9.md)" in tmp_vault.read(target)
 
 
 def test_duplicate_skip_stamps_ai_flag(tmp_vault):
@@ -73,7 +82,7 @@ def test_duplicate_skip_stamps_ai_flag(tmp_vault):
     `AI` key, so the copy stayed lint-dirty forever and the chunk LINT gate
     aborted whole chunks on it (run 880b9aa9: f1_c0/f1_c1 both died with
     "frontmatter 'AI' missing or not boolean" on notes no op had changed)."""
-    target = tmp_vault.note(
+    target = tmp_vault.note(  # legacy header on purpose: pre-translation vault
         "Topics/AsyncIO.md",
         "---\ntags:\n  - async\n---\nseed\n\n[[Hub]]\n\n"
         "## Note aggiuntive — Async IO (da meeting.md)\n\nfacts\n",
@@ -92,7 +101,7 @@ def test_duplicate_block_still_repairs_hub_link(tmp_vault):
     an interrupted run, or a pre-injection silica version) must gain the link
     on re-patch — otherwise the post-write lint fails the op on every retry
     (real incident: 2026-07-17 nucleate run, Claude Shannon.md)."""
-    target = tmp_vault.note(
+    target = tmp_vault.note(  # legacy header on purpose: pre-translation vault
         "Topics/AsyncIO.md",
         "---\nAI: true\n---\nseed\n\n## Note aggiuntive — Async IO (da meeting.md)\n\nfacts\n",
     )

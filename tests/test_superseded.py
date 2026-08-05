@@ -18,7 +18,7 @@ from silica.kernel.write.contested import (
     resolve_contested,
 )
 
-REF = "fonte: appunti-cardiologia-2026.md"
+REF = "source: appunti-cardiologia-2026.md"
 REF2 = "flagged: dose sbagliata (by user, 2026-07-25)"
 
 NOTE = """---
@@ -35,7 +35,7 @@ AI: true
 
 Il dosaggio raccomandato è 5mg/die.
 
-## Note aggiuntive — Dosaggio Warfarin (da appunti.md)
+## Additional notes: Dosaggio Warfarin (from appunti.md)
 
 > [!warning] Contradiction — from appunti.md
 > Il dosaggio raccomandato è 50mg/die.
@@ -53,7 +53,7 @@ def _contested(note: str = NOTE, ref: str = REF) -> str:
 def test_append_is_byte_identical_without_the_section():
     """The parity guarantee: no `## Superseded`, no behaviour change."""
     body = "# Titolo\n\nProsa.\n"
-    block = "\n\n## Note aggiuntive — X (da y.md)\n\nnuovo\n"
+    block = "\n\n## Additional notes: X (from y.md)\n\nnuovo\n"
     assert append_before_superseded(body, block) == body.rstrip() + "\n" + block
 
 
@@ -62,7 +62,7 @@ def test_append_lands_above_the_superseded_section():
         "# Titolo\n\nProsa.\n\n"
         f"{SUPERSEDED_HEADING}\n\n> [!quote] vecchio claim\n"
     )
-    out = append_before_superseded(body, "\n\n## Note aggiuntive — X (da y.md)\n\nnuovo\n")
+    out = append_before_superseded(body, "\n\n## Additional notes: X (from y.md)\n\nnuovo\n")
     assert out.index("nuovo") < out.index(SUPERSEDED_HEADING)
     assert out.rstrip().endswith("> [!quote] vecchio claim")
 
@@ -107,7 +107,7 @@ def test_resolve_stamps_valid_to():
 
 def test_resolve_drops_the_orphaned_provenance_header():
     out = resolve_contested(_contested(), resolved_by="user", valid_to="2026-07-25")
-    assert "## Note aggiuntive" not in out  # its only content moved away
+    assert "## Additional notes" not in out  # its only content moved away
 
 
 def test_resolve_keeps_a_header_that_still_has_content():
@@ -116,7 +116,7 @@ def test_resolve_keeps_a_header_that_still_has_content():
         "> Conflicts with this note. Unresolved.\n\nAltro contenuto della fonte.\n",
     )
     out = resolve_contested(_contested(note), resolved_by="user", valid_to="2026-07-25")
-    assert "## Note aggiuntive" in out
+    assert "## Additional notes" in out
     assert "Altro contenuto della fonte." in out
 
 

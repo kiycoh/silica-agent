@@ -167,11 +167,12 @@ def _extract_contradiction_callouts(body: str) -> tuple[str, list[str]]:
 
     A callout is the run of contiguous `>`-prefixed lines opened by the
     warning marker (its internal blank lines are `>`-prefixed too, so the run
-    is unbroken). A `## Note aggiuntive` header left with nothing but
-    whitespace under it is dropped with its callout: the header exists only to
-    attribute the block that just moved.
+    is unbroken). A provenance header left with nothing but whitespace under
+    it is dropped with its callout: the header exists only to attribute the
+    block that just moved. Both header spellings count, so a note written
+    before the header was translated still gets its orphan pruned.
     """
-    from silica.kernel.write.templates import PROVENANCE_HEADER_PREFIX
+    from silica.kernel.write.templates import PROVENANCE_HEADER_PREFIXES
 
     lines = body.splitlines()
     kept: list[str] = []
@@ -191,7 +192,7 @@ def _extract_contradiction_callouts(body: str) -> tuple[str, list[str]]:
     if callouts:
         pruned: list[str] = []
         for idx, line in enumerate(kept):
-            if line.startswith(PROVENANCE_HEADER_PREFIX):
+            if line.startswith(PROVENANCE_HEADER_PREFIXES):
                 rest = kept[idx + 1:]
                 nxt = next((r for r in rest if r.strip()), "")
                 if not nxt or nxt.startswith("## "):
