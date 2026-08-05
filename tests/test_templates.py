@@ -6,6 +6,7 @@ from silica.kernel.write.templates import (
     ensure_ai_flag,
     prepare_fields,
     render_note,
+    stamp_sources,
     template_spoke,
 )
 
@@ -148,6 +149,27 @@ def test_floor_creates_minimal_block_when_no_prior():
     assert out.startswith(f"---\nAI: true\nlast modified: {today}\n---\n\n# N")
     # prior without a block is the same case
     assert ensure_system_floor("# N\n\nbody\n", prior="# bare prior\n") == out
+
+
+def test_stamp_sources_unions_and_is_idempotent():
+    """A note written by one source and patched by another lists both; re-stamping
+    an already-listed source must be byte-identical (re-ingest safety)."""
+    from silica.kernel.write import frontmatter
+
+    base = "---\nAI: true\n---\n\n# N\nbody\n"
+    two = stamp_sources(stamp_sources(base, "lec-01.md"), "lec-02.md")
+    data, _, body = frontmatter.split(two)
+    assert data["sources"] == ["lec-01.md", "lec-02.md"]
+    assert body == "# N\nbody\n"
+    assert stamp_sources(two, "lec-01.md") == two
+    # Plain strings, never wikilinks: a link would enter the graph.
+    assert "[[" not in two.split("\n---\n")[0]
+
+
+def test_stamp_sources_passthrough_without_frontmatter_or_source():
+    assert stamp_sources("# N\nbody\n", "s.md") == "# N\nbody\n"
+    fm = "---\nAI: true\n---\n\nx"
+    assert stamp_sources(fm, "") == fm
 
 
 def test_floor_with_existing_block_is_ensure_ai_flag():

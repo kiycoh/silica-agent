@@ -103,6 +103,31 @@ def _never_called(*a, **k):
     raise AssertionError("PDF provider called for a non-PDF input")
 
 
+def test_converted_note_carries_source_file_provenance(tmp_vault, monkeypatch):
+    """The provenance ledger only ever records the inbox note's basename, so the
+    converted note's own frontmatter is the one pointer back to the real file."""
+    monkeypatch.setattr(conv, "_via_pymupdf", lambda src, wd: ("# Doc\n\nbody", wd))
+    tmp_vault.note("memo.docx", "x")
+
+    note = _inbox_note(conv.convert("memo.docx")[0]).read_text(encoding="utf-8")
+    head = note.split("\n---\n")[0]
+    assert note.startswith('---\nsource_file: "')
+    assert str(Path(CONFIG.vault_path) / "memo.docx") in head
+    assert "# Doc" in note  # body intact below the block
+
+
+def test_every_segment_carries_source_file_provenance(tmp_vault, monkeypatch):
+    chapter = " ".join(f"w{i}" for i in range(6000))  # ~30k chars, no degenerate runs
+    big = f"# One\n\n{chapter}\n\n# Two\n\n{chapter}\n"
+    monkeypatch.setattr(conv, "_via_pymupdf", lambda src, wd: (big, wd))
+    tmp_vault.note("book.docx", "x")
+
+    paths = conv.convert("book.docx")
+    assert len(paths) > 1
+    for p in paths:
+        assert _inbox_note(p).read_text(encoding="utf-8").startswith('---\nsource_file: "')
+
+
 def test_empty_extraction_raises_pointing_at_ocr(tmp_vault, monkeypatch):
     """A scan with no text layer yields nothing; writing an empty inbox note and
     calling it success is the failure mode this guard exists to prevent."""

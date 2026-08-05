@@ -325,7 +325,16 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             # can never disagree.
             _data, _raw, body = frontmatter.split(source_text)
             date = source_valid_from(source_text, getattr(fsm, "seen_override", None))
-            leaf = f"---\ndate: {date}\nsource_id: {basename}\n---\n\n{body.lstrip()}"
+            # Carry `source_file:` (stamped by convert on every converted inbox
+            # note) into the leaf: this block otherwise replaces the source's
+            # frontmatter wholesale, and the leaf is the only copy left once
+            # the inbox note is archived.
+            src_file = _data.get("source_file") if isinstance(_data, dict) else None
+            carry = ""
+            if src_file:
+                quoted = str(src_file).replace("\\", "\\\\").replace('"', '\\"')
+                carry = f'source_file: "{quoted}"\n'
+            leaf = f"---\ndate: {date}\nsource_id: {basename}\n{carry}---\n\n{body.lstrip()}"
             orch.DRIVER.create(leaf_rel, leaf)
             fsm._run_inverses.append(
                 (leaf_rel, InverseOp(kind=InverseOpKind.delete_created, path=leaf_rel), None)

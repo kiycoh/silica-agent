@@ -61,6 +61,25 @@ def test_keep_sources_writes_leaf_and_links(tmp_vault):
     assert kinds == [InverseOpKind.delete_created, InverseOpKind.restore_version]
 
 
+def test_leaf_carries_source_file_from_converted_source(tmp_vault):
+    """A converted inbox note names its real file in `source_file:`; the leaf
+    rebuilds the frontmatter wholesale, so the key must be carried over or the
+    pointer dies with the archived inbox note."""
+    tmp_vault.note(
+        "Inbox/src.md",
+        '---\ndate: 2026-03-01\nsource_file: "/home/u/paper.pdf"\n---\nverbatim words\n',
+    )
+    tmp_vault.note("Concepts/A.md", "# A\nbody\n")
+    fsm = _fsm([_entry("src.md", "write", "Concepts/A")], keep_sources=True)
+
+    finalize._write_source_leaf(fsm, "Inbox/src.md")
+
+    leaf = _vault_file("sources/src.md").read_text(encoding="utf-8")
+    head = leaf.split("\n---\n")[0]
+    assert 'source_file: "/home/u/paper.pdf"' in head
+    assert "source_file" not in leaf.split("\n---\n", 1)[1]  # not duplicated in the body
+
+
 def test_plain_ingest_writes_no_leaf(tmp_vault):
     tmp_vault.note("Inbox/src.md", "words\n")
     tmp_vault.note("Concepts/A.md", "# A\n")

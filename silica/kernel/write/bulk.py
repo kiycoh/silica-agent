@@ -123,6 +123,7 @@ def _execute_write(op: Op, path: str) -> dict:
     )
     content = templates.render_note(templates.resolve_template(), fields)
     content = templates.ensure_system_floor(content)
+    content = templates.stamp_sources(content, op.source_basename)
     DRIVER.create(path, content)
     err = _verify_landed(op, path, content)
     if err:
@@ -187,6 +188,7 @@ def _execute_patch(op: Op, path: str) -> dict:
         from silica.kernel.write.contested import mark_contested
         new_content = mark_contested(new_content, op.contested_by)
     new_content = templates.ensure_ai_flag(new_content)
+    new_content = templates.stamp_sources(new_content, source_basename)
     DRIVER.overwrite(path, new_content)
     err = _verify_landed(op, path, new_content)
     if err:

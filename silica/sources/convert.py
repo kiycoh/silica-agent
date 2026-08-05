@@ -240,12 +240,18 @@ def _doc_to_md(target: str, dest_dir: str) -> list[str]:
 
     inbox = active_inbox_dir() or "Inbox"
     segments = split_markdown(body)
+    # Every segment names the real file it came from: the provenance ledger
+    # only ever records the inbox note's basename, so without this the original
+    # PDF is untraceable once the inbox note is archived. Plain quoted string,
+    # not a link — the pointer must not enter the graph. CLEANUP carries it
+    # into the source leaf when the note is later nucleated with keep_sources.
+    fm = _provenance_fm(src)
     # Single segment (a paper, an article) keeps the flat inbox path — no change
     # in behaviour, no subdir for the common case. Image links are basename
     # embeds (![[fig.png]]) so they resolve from any segment regardless of dir.
     if len(segments) == 1:
         note_rel = f"{inbox}/{src.stem}.md"
-        DRIVER.upsert(note_rel, body)  # re-converting the same source refreshes its inbox note
+        DRIVER.upsert(note_rel, fm + body.lstrip("\n"))  # re-converting the same source refreshes its inbox note
         return [note_rel]
 
     width = len(str(len(segments)))
@@ -253,7 +259,7 @@ def _doc_to_md(target: str, dest_dir: str) -> list[str]:
     for i, seg in enumerate(segments, 1):
         slug = _segment_slug(seg, "part")
         note_rel = f"{inbox}/{src.stem}/{i:0{width}d}-{slug}.md"
-        DRIVER.upsert(note_rel, seg)  # re-converting the same source refreshes its segments
+        DRIVER.upsert(note_rel, fm + seg.lstrip("\n"))  # re-converting the same source refreshes its segments
         paths.append(note_rel)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
     return paths
@@ -427,6 +433,12 @@ PDF_PROVIDERS = {
 
 
 # --- shared helpers ---------------------------------------------------------
+
+def _provenance_fm(src: Path) -> str:
+    """Frontmatter block naming the converted file's real origin (absolute path)."""
+    quoted = str(src).replace("\\", "\\\\").replace('"', '\\"')
+    return f'---\nsource_file: "{quoted}"\n---\n\n'
+
 
 def _resolve_input(target: str) -> Path:
     """Absolute as given; relative tried vault-first, then cwd.

@@ -455,6 +455,39 @@ def stamp_documents(content: str, documents: list[str], code_ref: str | None = N
     return "---\n" + head + tail
 
 
+_SOURCES_BLOCK_RE = re.compile(r"^sources:[^\n]*(?:\n[ \t]+-[^\n]*)*\n?", re.MULTILINE)
+
+
+def stamp_sources(content: str, source_basename: str) -> str:
+    """Splice the source basename into a `sources:` frontmatter list.
+
+    Same string-level mechanism and union semantics as `stamp_documents`: a
+    note written by one source and patched by two more accumulates all three.
+    Entries are plain quoted strings, never wikilinks — a link to the archived
+    source would enter the graph (degree-N source nodes, dangling links when
+    `done/` is pruned, bare-name resolution colliding with the note itself);
+    an inert string carries the provenance without any of that. The content
+    hash stays ledger-side (provenance.json) on purpose.
+    """
+    if not source_basename or not content.startswith("---\n"):
+        return content
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return content  # unterminated frontmatter — leave for the lint to flag
+    data, _, _ = frontmatter.split(content)
+    prior = data.get("sources") if isinstance(data, dict) else None
+    if isinstance(prior, str):
+        prior = [prior]
+    merged = list(dict.fromkeys(
+        [str(s) for s in (prior or []) if s] + [source_basename]
+    ))
+    head, tail = _SOURCES_BLOCK_RE.sub("", content[4:end]).rstrip("\n"), content[end:]
+    lines = "".join('  - "%s"\n' % s.replace("\\", "\\\\").replace('"', '\\"')
+                    for s in merged)
+    head = f"{head}\nsources:\n{lines}".rstrip("\n")
+    return "---\n" + head + tail
+
+
 def ensure_system_floor(content: str, prior: str | None = None) -> str:
     """String-level floor under every write: `AI: true` + `last modified`
     always land, whatever the model emitted. No YAML round-trip.
