@@ -395,6 +395,36 @@ def active_write_dir() -> str:
     return declared if declared is not None else _UNRESOLVABLE_WRITE_DIR
 
 
+def resolve_inbox_dir(vault_root: str | Path, write_dir: str, inbox: str) -> str:
+    """Where the inbox IS, given a declared boundary and a folder name.
+
+    The composed path (`<write_dir>/<inbox>`) is where Silica CREATES its
+    staging area, so it wins whenever it exists and whenever neither exists — a
+    fresh vault must not scatter an inbox outside the boundary. But a vault that
+    already keeps its `Inbox/` at the root predates the boundary, and composing
+    over it pointed every inbox seam at a folder that is not there:
+    `list_inbox_files` came back empty while the user was staring at a full
+    inbox, and doctor reported the one that exists as missing.
+
+    An unresolvable boundary never falls back. `_UNRESOLVABLE_WRITE_DIR` exists
+    to make every path impossible, and answering with the root inbox would hand
+    back a writable one.
+    """
+    inbox = (inbox or "").replace("\\", "/").strip("/")
+    if not inbox:
+        return ""
+    write_dir = (write_dir or "").strip("/")
+    if not write_dir:
+        return inbox
+    composed = f"{write_dir}/{inbox}"
+    if write_dir == _UNRESOLVABLE_WRITE_DIR or not vault_root:
+        return composed
+    root = Path(vault_root)
+    if (root / composed).is_dir() or not (root / inbox).is_dir():
+        return composed
+    return inbox
+
+
 def active_inbox_dir() -> str:
     """Vault-relative inbox root for the active vault; "" ⇒ no inbox configured.
 
@@ -403,15 +433,16 @@ def active_inbox_dir() -> str:
     raw off `CONFIG.inbox_dir` because that field knows nothing about
     `write_dir`: every caller that built a path from it was dropping an `Inbox/`
     at the root of the user's source tree, outside the one folder writes are
-    supposed to land in. An unresolvable boundary propagates, same as above.
+    supposed to land in. A root inbox that already exists keeps its place —
+    see `resolve_inbox_dir`.
     """
     from silica.config import CONFIG
 
-    inbox = (getattr(CONFIG, "inbox_dir", "") or "").replace("\\", "/").strip("/")
-    if not inbox:
-        return ""
-    write_dir = active_write_dir()
-    return f"{write_dir}/{inbox}" if write_dir else inbox
+    return resolve_inbox_dir(
+        getattr(CONFIG, "vault_path", "") or "",
+        active_write_dir(),
+        getattr(CONFIG, "inbox_dir", "") or "",
+    )
 
 
 def in_write_dir(rel_path: str) -> str:

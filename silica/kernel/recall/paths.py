@@ -506,17 +506,19 @@ def is_inbox_path(path: str) -> bool:
     (case-insensitive). The inbox is staging, never a write or merge target —
     callers use this to filter candidates and reject ops.
 
-    BOTH roots answer. `active_inbox_dir` composes the write boundary, so under
-    safe mode it names `silica/Inbox` — the inbox Silica writes into — and the
-    user's own `Inbox/` stopped being recognised as one. That is the wrong way
-    round for a guard: this question is "may an op target this?", and the answer
-    for the real inbox is no whatever folder Silica stages into.
+    EVERY root answers, composed and bare, whichever one `active_inbox_dir`
+    happens to resolve to for this vault. The question here is "may an op target
+    this?", and the answer is no for both the inbox Silica stages into and the
+    one the user keeps — deriving the set from the resolved inbox alone left
+    whichever lost the resolution unguarded, and patch ops aimed at it stopped
+    being rejected.
     """
     from silica.config import CONFIG
-    from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.vault_manifest import active_inbox_dir, in_write_dir
 
     p = path.replace("\\", "/").lstrip("/").casefold()
-    roots = {active_inbox_dir(), (getattr(CONFIG, "inbox_dir", "") or "").strip("/"), "Inbox"}
+    inbox = (getattr(CONFIG, "inbox_dir", "") or "").strip("/")
+    roots = {active_inbox_dir(), in_write_dir(inbox), inbox, "Inbox"}
     return any(p.startswith(r.casefold() + "/") for r in roots if r)
 
 

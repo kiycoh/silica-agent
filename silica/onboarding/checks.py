@@ -150,10 +150,10 @@ def check_vault(config: SilicaConfig) -> CheckResult:
         # Doctor may be handed a config that is not the active vault (the wizard
         # does exactly that), so the boundary comes from this path's own
         # manifest rather than from active_inbox_dir().
-        from silica.kernel.vault_manifest import load_manifest
+        from silica.kernel.vault_manifest import load_manifest, resolve_inbox_dir
 
         write_dir = load_manifest(str(p)).write_dir or ""
-        inbox = "/".join(x for x in (write_dir, config.inbox_dir.strip("/")) if x)
+        inbox = resolve_inbox_dir(p, write_dir, config.inbox_dir)
         if inbox and not (p / inbox).is_dir():
             return CheckResult(
                 "vault", "warn",
