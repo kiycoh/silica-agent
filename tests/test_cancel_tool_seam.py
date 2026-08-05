@@ -27,14 +27,14 @@ def _tc(name, call_id):
     return SimpleNamespace(name=name, args={}, id=call_id)
 
 
-def test_tool_receives_cancel_token_when_declared():
+def test_tool_receives_cancel_token_when_declared(monkeypatch):
     seen = {}
 
     def long_tool(cancel_token=None):
         seen["token"] = cancel_token
         return "ok"
 
-    TOOLS["long_tool"] = Tool(long_tool, "long_tool", "doc", _Args, "composed")
+    monkeypatch.setitem(TOOLS, "long_tool", Tool(long_tool, "long_tool", "doc", _Args, "composed"))
 
     token = threading.Event()
     calls = [0]
@@ -51,14 +51,14 @@ def test_tool_receives_cancel_token_when_declared():
     assert seen["token"] is token
 
 
-def test_tool_without_cancel_token_is_unaffected():
+def test_tool_without_cancel_token_is_unaffected(monkeypatch):
     seen = {}
 
     def plain_tool():
         seen["ran"] = True
         return "ok"
 
-    TOOLS["plain_tool"] = Tool(plain_tool, "plain_tool", "doc", _Args, "atomic")
+    monkeypatch.setitem(TOOLS, "plain_tool", Tool(plain_tool, "plain_tool", "doc", _Args, "atomic"))
 
     calls = [0]
 

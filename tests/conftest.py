@@ -69,6 +69,45 @@ def _isolate_cooccurrence_index(tmp_path, monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.fixture(autouse=True)
+def _isolate_silica_home(tmp_path_factory, monkeypatch: pytest.MonkeyPatch):
+    """Sandbox every ~/.silica default under the test's tmp dir.
+
+    The ledger/undo-journal/checkpoint singletons are first-caller-wins (the
+    path argument is ignored once initialised) and default to the developer's
+    real ~/.silica/*.db; paths._SILICA_HOME feeds tmp/, index/ and session
+    capture. An unpatched caller (orchestrator record, CLEANUP) would write
+    real state, pin its store for the rest of the process, and let concurrent
+    suite runs interfere with each other through the shared files.
+
+    Outside tmp_path on purpose: path_lease drops its flock files under
+    _SILICA_HOME, and tests assert over tmp_path's exact contents.
+    """
+    home = tmp_path_factory.mktemp("silica-home")
+    import silica.kernel.recall.paths as paths_mod
+    import silica.kernel.write.checkpoints as cp_mod
+    import silica.kernel.write.ledger as ledger_mod
+    import silica.kernel.write.undo_journal as journal_mod
+
+    monkeypatch.setattr(paths_mod, "_SILICA_HOME", home)
+    monkeypatch.setattr(ledger_mod, "_DEFAULT_LEDGER_PATH", home / "ledger.db")
+    monkeypatch.setattr(journal_mod, "_DEFAULT_JOURNAL_PATH", home / "undo_journal.db")
+    monkeypatch.setattr(cp_mod, "_DEFAULT_CHECKPOINT_PATH", home / "checkpoints.db")
+    singletons = ((ledger_mod, "_ledger"), (journal_mod, "_store"), (cp_mod, "_store"))
+    for mod, attr in singletons:
+        monkeypatch.setattr(mod, attr, None)
+    yield
+    # Close whatever the test created before monkeypatch restores the attrs,
+    # so per-test sqlite files don't accumulate open fds across the run.
+    for mod, attr in singletons:
+        store = getattr(mod, attr)
+        if store is not None:
+            try:
+                store.close()
+            except Exception:
+                pass
+
+
+@pytest.fixture(autouse=True)
 def _isolate_distill_cache(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Redirect the distiller reply cache to a per-test tmp path.
 

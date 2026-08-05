@@ -551,10 +551,11 @@ def test_index_path_is_keyed_by_vault(tmp_path, monkeypatch):
 def test_index_path_falls_back_to_global_without_vault(monkeypatch):
     from silica.config import CONFIG
     from silica.kernel.recall import paths
-    from pathlib import Path
 
     monkeypatch.setattr(CONFIG, "vault_path", "")
-    assert paths.index_dir() == Path.home() / ".silica" / "index"
+    # The global (non-vault-namespaced) dir — _SILICA_HOME, not Path.home(),
+    # so the invariant holds under the suite's home sandbox too.
+    assert paths.index_dir() == paths._SILICA_HOME / "index"
 
 
 def test_legacy_index_migrates_on_load(tmp_path, monkeypatch):

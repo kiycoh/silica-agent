@@ -43,8 +43,8 @@ def _profile(**over):
     return WorkerProfile(**base)
 
 
-def test_run_worker_uses_worker_model_and_returns_structured_result():
-    TOOLS["probe_tool"] = Tool(lambda: "probe-ok", "probe_tool", "doc", _Args, "atomic")
+def test_run_worker_uses_worker_model_and_returns_structured_result(monkeypatch):
+    monkeypatch.setitem(TOOLS, "probe_tool", Tool(lambda: "probe-ok", "probe_tool", "doc", _Args, "atomic"))
     seen = {}
 
     calls = [0]
