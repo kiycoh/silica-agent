@@ -146,6 +146,22 @@ def test_run_injector_rejects_pdf_with_convert_hint(repo_vault):
     assert "paper.pdf" in out["error"] and "/convert" in out["error"]
 
 
+def test_run_injector_convert_hint_is_copy_pasteable(repo_vault):
+    """The hint is a line the user pastes back into the CLI, and the shortcut
+    parser shlex-splits it — an unquoted path with spaces arrives as N args."""
+    import shlex
+
+    from silica.cli import _expand_workflow_shortcut
+    from silica.tools import TOOLS
+
+    rel = "Inbox/Deep Learning (Goodfellow, Bengio, Courville).pdf"
+    out = TOOLS["silica_run_injector"].fn(inbox_files=[rel], target_dir="Concepts")
+    line = out["error"].split("`")[1]  # the /convert … the agent tells the user to run
+    assert shlex.split(line) == ["/convert", rel]
+    # and the CLI accepts it as one path (the file is absent → converter error, not a split)
+    _expand_workflow_shortcut(line)
+
+
 def test_run_injector_rejects_unknown_type_without_convert_hint(repo_vault):
     from silica.tools import TOOLS
 

@@ -32,6 +32,12 @@ def test_every_doc_ext_reaches_the_converter(ext, tmp_vault):
         conv.convert(f"ghost{ext}")
 
 
+def test_surrounding_whitespace_does_not_hide_the_extension(tmp_vault):
+    """A quoted path with a stray trailing space is still a PDF, not an unknown type."""
+    with pytest.raises(ValueError, match="file not found"):
+        conv.convert("  ghost.pdf ")
+
+
 # --- pymupdf provider (default; real library, no fakes) ---------------------
 
 def _pdf_bytes(pages: list[str], toc: list | None = None) -> bytes:

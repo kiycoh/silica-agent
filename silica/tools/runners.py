@@ -60,8 +60,14 @@ def silica_run_injector(
     unclaimed = [f for f in files if adapter_for(f, enabled=enabled) is None]
     if unclaimed:
         pdfs = [f for f in unclaimed if f.lower().endswith(".pdf")]
+        # shlex.quote: the suggested line is meant to be copy-pasted verbatim,
+        # and the CLI shortcut parser shlex-splits it — an unquoted "Deep
+        # Learning (Goodfellow…).pdf" arrives as eight separate arguments.
+        import shlex
+
         hint = (
-            f"Ask the user to run `/convert {' '.join(pdfs)}` (or upload via the GUI), "
+            f"Ask the user to run `/convert {' '.join(shlex.quote(p) for p in pdfs)}` "
+            "(or upload via the GUI), "
             "then nucleate the resulting .md note(s)."
             if pdfs
             else "No adapter or converter handles this file type."

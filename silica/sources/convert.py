@@ -91,6 +91,10 @@ def convert(target: str, dest_dir: str = "") -> list[str]:
     over ``DOC_EXTS``; anything else → ``ValueError``. Side artifacts (extracted
     figures) go to ``<dest_dir>/Images`` when given, else ``<inbox>/Images``.
     """
+    # Strip first: a quoted path with a stray trailing space ("…book.pdf ") has
+    # suffix ".pdf " — not in DOC_EXTS — and the rejection then prints ".pdf",
+    # a message the user cannot tell from a real unsupported type.
+    target = target.strip()
     if Path(target).suffix.lower() not in DOC_EXTS:
         raise ValueError(f"no converter for {Path(target).suffix.lower() or 'this file type'}")
     return _doc_to_md(target, dest_dir)
