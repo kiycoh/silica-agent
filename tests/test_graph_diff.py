@@ -128,6 +128,37 @@ def test_graph_diff_case_insensitivity_and_path_normalization():
     assert not errors
 
 
+def test_graph_diff_ghost_links_from_patched_notes_allowed():
+    """A note the chunk PATCHED carries the same intentional forward references
+    as one it created — the distiller wrote them in the same pass, and only the
+    prior existence of a file told the two apart. Five of them rolled back a
+    chunk that had already committed three notes. What stays blocking is
+    collateral damage: a ghost link appearing in a note nobody touched."""
+    pre = GraphSnapshot(
+        orphans=[], unresolved=[], link_counts={"ML/Machine learning": 1}
+    )
+    post = GraphSnapshot(
+        orphans=[],
+        unresolved=[
+            Link(
+                source=NoteRef(name="Machine learning", path="ML/Machine learning.md"),
+                target="Algebra lineare",
+            )
+        ],
+        link_counts={"ML/Machine learning": 2},
+    )
+
+    success, errors = check_graph_regression(
+        pre, post, created_paths=[], patched_paths=frozenset({"ML/Machine learning.md"})
+    )
+    assert success, errors
+
+    # Untouched by this chunk, the very same link is still a regression.
+    success, errors = check_graph_regression(pre, post, created_paths=[])
+    assert not success
+    assert "New unresolved links introduced" in errors[0]
+
+
 def test_graph_diff_ghost_links_from_created_notes_allowed():
     """Ghost links (unresolved wikilinks) from newly created notes must NOT
     trigger the regression gate. A created note that references a concept not

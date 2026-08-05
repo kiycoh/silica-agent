@@ -22,6 +22,7 @@ def check_graph_regression(
     post: GraphSnapshot,
     created_paths: list[str],
     deferred_stems: frozenset[str] = frozenset(),
+    patched_paths: frozenset[str] = frozenset(),
 ) -> tuple[bool, list[str]]:
     """Verify that the changes do not introduce structural regressions.
 
@@ -38,10 +39,16 @@ def check_graph_regression(
          Links to *deferred* targets (planned but not yet written due to a
          settle failure) are also exempt — they will be resolved on the next
          pipeline iteration when the deferred ops are retried.
+         So is a note this payload PATCHED: the ghost links in it were written
+         by the same distiller in the same pass as the ones in a created note,
+         and calling one intentional and the other vandalism only depended on
+         whether the concept already had a file. What is left for the rule is
+         its real job — collateral damage to notes nobody in this chunk touched.
 
     Args:
       deferred_stems: lowercase basenames (no extension) of notes that were
         planned in this chunk but failed to settle and were deferred for retry.
+      patched_paths: vault-relative paths this payload patched or overwrote.
 
     Returns:
       (success, list_of_errors)
@@ -89,9 +96,11 @@ def check_graph_regression(
     # target notes surface as new_unres even though nothing changed in them —
     # a false positive that mirrors the Rule 1 domain-expansion problem already
     # guarded by norm_pre_observed.
+    norm_patched = {normalize_path(p) for p in patched_paths}
     new_unres_blocking = {
         (src, tgt) for src, tgt in new_unres
         if src not in norm_created
+        and src not in norm_patched   # exempt notes this chunk deliberately edited
         and src in norm_pre_observed   # must have a concrete pre-write baseline
         and tgt not in deferred_stems  # exempt planned-but-deferred targets
     }

@@ -113,8 +113,14 @@ def handle_lint(fsm: "InjectorFSM") -> None:
             deferred_stems = set(fsm._chunk_ctx.get("deferred_stems", []))
             deferred_stems |= fsm._run_concept_stems
 
+            patched_paths = frozenset(
+                p for op in ops
+                if op.op in (OpType.patch, OpType.overwrite) and (p := op.touched_ref())
+            )
+
             success, errors = check_graph_regression(
-                fsm._pre_graph, post_graph, created_paths, frozenset(deferred_stems)
+                fsm._pre_graph, post_graph, created_paths, frozenset(deferred_stems),
+                patched_paths,
             )
 
             if orch.CONFIG.verbose:
