@@ -553,6 +553,21 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
         if data is not None:
             loop.call_soon_threadsafe(q.put_nowait, data)
 
+    # InjectorFSM phase transitions arrive on BUS, not through the agent
+    # callback: they are emitted from inside the tool, several layers below the
+    # loop that owns `cb`. Subscribed per turn and dropped in the finally, so a
+    # turn never receives another turn's phases and nothing accumulates across
+    # turns. Publishing happens on the FSM's thread, hence the same
+    # call_soon_threadsafe hop `cb` uses.
+    def on_phase(ev):
+        try:
+            cb(ev)
+        except RuntimeError:
+            pass  # loop already closed: the turn is gone, the event is moot
+
+    from silica.agent.bus import BUS
+    BUS.subscribe("work/phase", on_phase)
+
     try:
         # A slash command follows the REPL's dispatch order (silica/cli.py): the
         # direct handler first — synchronous, no LLM round-trip — then the
@@ -661,6 +676,7 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
         logger.exception("web turn failed")
         yield {"type": "error", "error": str(exc)}
     finally:
+        BUS.unsubscribe("work/phase", on_phase)
         _save_session()  # persist even on error so the user's turn isn't lost
         _prewarm_seed()  # the turn may have written notes — refresh the new-chat seed
         if task is not None and not task.done():
@@ -1571,11 +1587,19 @@ def get_messages():
         m["tool_call_id"] for m in messages
         if m.get("role") == "tool" and m.get("tool_call_id") and _is_tool_failure(m.get("content"))
     }
+    # Tool results, which the loop below skips over: a nucleate run's outcome
+    # (notes, links, which chunks died and where) exists nowhere else, so
+    # without this a reloaded chat could only say the injector had run.
+    results = {
+        m["tool_call_id"]: m.get("content") or ""
+        for m in messages
+        if m.get("role") == "tool" and m.get("tool_call_id")
+    }
     data = []
     for m in messages:
         if m.get("role") not in ("user", "assistant"):
             continue
-        tools = tool_calls_to_json(m, failed) if m["role"] == "assistant" else []
+        tools = tool_calls_to_json(m, failed, results) if m["role"] == "assistant" else []
         content = m.get("content") or ""
         # The thinking that produced this step, kept out of the wire by _to_wire.
         # Plain text, not rendered: it is a trace, and the live block shows it raw.

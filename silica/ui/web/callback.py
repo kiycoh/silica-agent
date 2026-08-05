@@ -13,11 +13,18 @@ import json
 from silica.agent.events import (
     BatchRunStartEvent,
     LLMStreamEvent,
+    PhaseEvent,
     ToolCompleteEvent,
     ToolErrorEvent,
     ToolStartEvent,
 )
-from silica.ui.renderer import _tool_target, _tool_verb  # same verb + target the TUI shows
+from silica.ui.renderer import (  # same verb + target the TUI shows
+    _CHUNK_PHASES,
+    _FILE_PHASES,
+    _PHASE_LABELS,
+    _tool_target,
+    _tool_verb,
+)
 
 # How a tool changes the vault, for the chat footer's grouping. Only the tools
 # that mutate notes are listed; everything else is a read. Deliberately keyed on
@@ -50,6 +57,56 @@ def _note_refs(args: dict) -> list[str]:
     return refs
 
 
+# The injector's two phase tracks, in run order, sent once at tool_start so the
+# client can draw the whole pipeline greyed out instead of growing it a row at a
+# time. rollback is absent by design: it is an exception branch (on_gate_fail in
+# recipes/injector.yaml), and listing it made every healthy run display a pending
+# "rollback" step that was never going to run.
+_PHASE_TRACKS = {
+    "file": list(_FILE_PHASES.values()),
+    "chunk": list(_CHUNK_PHASES.values()),
+}
+
+# final_status as the FSM writes it -> what the user is told. The FSM emits
+# "Success" capitalised and the rest lowercase (states/finalize.py); normalising
+# here rather than renaming at the source keeps cli.py's _DRAIN_SETTLED and the
+# FSM tests on their existing contract.
+_STATUS_TEXT: dict[str, tuple[str, str]] = {
+    "success":           ("ok", ""),
+    "partial":           ("partial", ""),
+    "no_ops":            ("empty", "no operations produced"),
+    "already_nucleated": ("empty", "already in the vault"),
+}
+
+
+def _injector_summary(result: str | None) -> dict:
+    """The completion line of a run_injector call, from its stored result.
+
+    Shared by the live tool_done event and by transcript replay, so a reloaded
+    chat states the same outcome it stated while streaming.
+    """
+    try:
+        data = json.loads(result) if isinstance(result, str) else {}
+    except (TypeError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    raw = str(data.get("final_status") or "unknown")
+    kind, reason = _STATUS_TEXT.get(raw.lower(), ("failed", ""))
+    failed = [f for f in (data.get("failed_chunks") or []) if isinstance(f, dict)]
+    return {
+        "kind": kind,               # ok | partial | empty | failed
+        "reason": reason,
+        "status": raw.lower(),
+        "notes": data.get("yield_notes") or 0,
+        "links": data.get("yield_links") or 0,
+        "files": data.get("files_total") or 0,
+        "committed": data.get("chunks_committed") or 0,
+        "failed_chunks": [{"chunk": f.get("chunk", ""), "phase": f.get("phase", "")}
+                          for f in failed],
+    }
+
+
 def event_to_json(ev) -> dict | None:
     if isinstance(ev, LLMStreamEvent):
         return {"type": "delta", "kind": ev.chunk_type, "text": ev.content}
@@ -59,12 +116,28 @@ def event_to_json(ev) -> dict | None:
         notes = _note_refs(ev.args)
         if ev.name == "silica_move" and isinstance(ev.args.get("to"), str):
             notes = [ev.args["to"].strip()]
-        return {"type": "tool_start", "name": _tool_verb(ev.name), "id": ev.call_id,
-                "target": _tool_target(ev.name, ev.args),
-                "effect": _TOOL_EFFECT.get(ev.name, "read"),
-                "notes": notes}
+        out = {"type": "tool_start", "name": _tool_verb(ev.name), "id": ev.call_id,
+               "target": _tool_target(ev.name, ev.args),
+               "effect": _TOOL_EFFECT.get(ev.name, "read"),
+               "notes": notes}
+        if ev.name == "silica_run_injector":
+            out["pipeline"] = _PHASE_TRACKS
+        return out
     if isinstance(ev, ToolCompleteEvent):
-        return {"type": "tool_done", "name": _tool_verb(ev.name), "id": ev.call_id}
+        out = {"type": "tool_done", "name": _tool_verb(ev.name), "id": ev.call_id}
+        if ev.name == "silica_run_injector":
+            out["summary"] = _injector_summary(ev.result)
+        return out
+    if isinstance(ev, PhaseEvent):
+        # The label, not the recipe id: the client matches rows by exact string,
+        # and no id->label rule it could apply covers both hub_update/hub-update
+        # and crossdedup/cross-dedup. Guessing left cross-dedup grey for the
+        # whole run.
+        return {"type": "phase", "phase": _PHASE_LABELS.get(ev.phase, ev.phase),
+                "status": ev.status,
+                "scope": ev.scope, "source_file": ev.source_file,
+                "file_idx": ev.file_idx, "file_total": ev.file_total,
+                "chunk_idx": ev.chunk_idx, "chunk_total": ev.chunk_total}
     if isinstance(ev, ToolErrorEvent):
         return {"type": "tool_error", "name": _tool_verb(ev.name), "id": ev.call_id, "error": ev.error}
     if isinstance(ev, BatchRunStartEvent):
@@ -72,12 +145,20 @@ def event_to_json(ev) -> dict | None:
     return None  # ReasoningEvent / Thinking* — ignored in v1
 
 
-def tool_calls_to_json(msg: dict, failed: set[str] | None = None) -> list[dict]:
+def tool_calls_to_json(
+    msg: dict,
+    failed: set[str] | None = None,
+    results: dict[str, str] | None = None,
+) -> list[dict]:
     """The tool lines of a *stored* assistant message, for transcript replay.
 
     Same verb + target the live `tool_start` event carries, so reopening a chat
     shows the steps it showed while streaming. Without this the reload dropped
     every tool call and the answer read as if the agent had touched nothing.
+
+    `results` maps tool_call_id -> stored result content. A nucleate run's
+    outcome lives only in that result, so without it a reloaded chat showed a
+    bare "injector" line for a run that had reported notes, links and failures.
     """
     out = []
     for tc in msg.get("tool_calls") or []:
@@ -89,6 +170,9 @@ def tool_calls_to_json(msg: dict, failed: set[str] | None = None) -> list[dict]:
             args = {}
         if not isinstance(args, dict):
             args = {}
-        out.append({"name": _tool_verb(name), "target": _tool_target(name, args),
-                    "error": bool(failed and tc.get("id") in failed)})
+        line = {"name": _tool_verb(name), "target": _tool_target(name, args),
+                "error": bool(failed and tc.get("id") in failed)}
+        if name == "silica_run_injector" and results:
+            line["summary"] = _injector_summary(results.get(tc.get("id", "")))
+        out.append(line)
     return out

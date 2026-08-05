@@ -1762,8 +1762,88 @@ details.side-section:hover>summary.side-title {
 }
 
 /* in-flight (no done/error class yet) breathes so it never looks hung */
-.tool:not(.done):not(.error) {
+.tool:not(.done):not(.error):not(.tool-pipeline) {
   animation: pulse 1.4s ease-in-out infinite;
+  /* the pipeline block is excluded: it says what it is doing phase by phase, so
+     pulsing the whole block would animate text that is already legible */
+}
+
+/* --- injector pipeline block ------------------------------------------------
+   A nucleate run is minutes long with a repeating phase cycle inside it; every
+   other tool is one line because every other tool is one step. Two tracks, in
+   the two scopes the FSM actually runs: file phases advance once per document,
+   the chunk cycle restarts for each chunk of it. No third signal colour is
+   invented — running borrows --accent, failure --warn, exactly as elsewhere. */
+.tool-pipeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.15rem 0 0.35rem;
+}
+
+.pipe-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.tool-pipeline.running .pipe-title { color: var(--frost); }
+.tool-pipeline.ok .pipe-title,
+.tool-pipeline.empty .pipe-title { color: var(--ash); }
+.tool-pipeline.partial .pipe-title,
+.tool-pipeline.failed .pipe-title { color: var(--warn); }
+
+.pipe-pos {
+  color: var(--ash);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Collapsed is the resting state of a good run: it has nothing left to say that
+   its one summary line does not already say. */
+.tool-pipeline.collapsed .pipe-track { display: none; }
+
+.pipe-track {
+  padding-left: 0.9rem;
+  overflow-x: auto;   /* narrow viewports scroll the track, never the page */
+}
+
+.pipe-file {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.9rem;
+}
+
+.pipe-chunk {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.pipe-phase {
+  display: flex;
+  gap: 0.45rem;
+  align-items: baseline;
+  color: var(--ash);
+  transition: color var(--dur) var(--ease);
+}
+
+.pipe-mark { width: 0.8em; flex: none; }
+
+.pipe-time {
+  color: var(--ash);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;   /* a ticking timer must not reflow the row */
+}
+
+.pipe-phase.pending { opacity: 0.45; }
+.pipe-phase.running { color: var(--accent); }
+.pipe-phase.failed  { color: var(--warn); }
+
+.pipe-failed {
+  padding-left: 0.9rem;
+  color: var(--warn);
+  overflow-wrap: anywhere;
 }
 
 .commands {

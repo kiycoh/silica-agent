@@ -62,6 +62,149 @@ function notify(msg, level = "error") {
 // transcript reads exactly like the stream that produced it.
 const toolLabel = (t) => (t.target ? `${t.name} "${t.target}"` : t.name);
 
+// --- injector pipeline block -------------------------------------------------
+// Every other tool is one flat line; a nucleate run is minutes of work with a
+// 15-phase cycle inside it, and a lone spinner reading "injector" was the whole
+// of what the GUI said about it. The TUI has always shown the phases (it holds
+// the only subscriber to the FSM's phase stream) — this is the same information,
+// laid out for a surface that has vertical space and no 12fps redraw budget.
+
+const PHASE_MARK = { done: "✓", running: "◉", failed: "✗", pending: "·" };
+const SUMMARY_MARK = { ok: "✓", partial: "◐", empty: "⊘", failed: "✗" };
+
+const fmtDur = (s) =>
+  s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s / 60)}m${String(Math.floor(s % 60)).padStart(2, "0")}s`;
+
+// One line of counts for a finished run. Shared by the live tool_done event and
+// by transcript replay, so reopening a chat restates what it said while running.
+function injectorSummaryLine(label, s) {
+  const bits = [];
+  if (s.files) bits.push(s.files === 1 ? "1 file" : `${s.files} files`);
+  if (s.notes) bits.push(`${s.notes} notes`);
+  if (s.links) bits.push(`${s.links} links`);
+  if (s.reason) bits.push(s.reason);
+  if (s.kind === "partial" && s.failed_chunks.length) {
+    bits.push(`${s.failed_chunks.length} of ${s.committed + s.failed_chunks.length} chunks failed`);
+  }
+  const mark = SUMMARY_MARK[s.kind] || "✓";
+  return `${mark} injector · ${label}${bits.length ? "   " + bits.join(" · ") : ""}`;
+}
+
+function makePipelineBlock(label, tracks) {
+  const el = document.createElement("div");
+  el.className = "tool tool-pipeline running";
+  el.innerHTML =
+    `<div class="pipe-head"><span class="pipe-title"></span><span class="pipe-pos"></span></div>` +
+    `<div class="pipe-track pipe-file"></div><div class="pipe-track pipe-chunk"></div>`;
+  const head = el.querySelector(".pipe-title");
+  const pos = el.querySelector(".pipe-pos");
+  head.textContent = `» injector · ${label}`;
+
+  // Both tracks are drawn once, greyed out, so the pipeline reads as a known
+  // sequence with a position in it rather than a list that grows as it goes.
+  const rows = {};
+  for (const [scope, names] of Object.entries(tracks)) {
+    const box = el.querySelector(scope === "file" ? ".pipe-file" : ".pipe-chunk");
+    for (const name of names) {
+      const r = document.createElement("div");
+      r.className = "pipe-phase pending";
+      r.innerHTML = `<span class="pipe-mark">·</span><span class="pipe-name"></span><span class="pipe-time"></span>`;
+      r.querySelector(".pipe-name").textContent = name;
+      box.appendChild(r);
+      rows[`${scope}:${name}`] = r;
+    }
+  }
+
+  let chunkKey = null;      // resets the chunk track when the run moves on
+  let running = null;       // { row, at } — the phase whose timer is ticking
+  // The TUI gets a live timer free from Rich re-rendering at 12fps; here the
+  // running row is ticked locally from when its event arrived, so the server
+  // sends elapsed only once, on done.
+  const timer = setInterval(() => {
+    if (running) running.row.querySelector(".pipe-time").textContent = fmtDur((Date.now() - running.at) / 1000);
+  }, 100);
+
+  function setRow(row, state, secs) {
+    const undo = row.dataset.rollback === "1";
+    // A completed rollback is not a step that went well: it is the undo of one
+    // that did not. Ticking it in the same grey as `write` read as success.
+    row.className = `pipe-phase ${undo && state !== "pending" ? "failed" : state}`;
+    row.querySelector(".pipe-mark").textContent =
+      undo && state !== "pending" ? "↳" : (PHASE_MARK[state] || "·");
+    if (secs != null) row.querySelector(".pipe-time").textContent = fmtDur(secs);
+  }
+
+  return {
+    el,
+    applyPhase(ev) {
+      // Position rides on every event, so a dropped one cannot leave the header
+      // naming the wrong file or chunk — the next event restates all of it.
+      const bits = [];
+      if (ev.file_total > 1) bits.push(`file ${ev.file_idx + 1}/${ev.file_total}`);
+      if (ev.chunk_total > 0) bits.push(`chunk ${ev.chunk_idx + 1}/${ev.chunk_total}`);
+      pos.textContent = bits.join(" · ");
+      if (ev.source_file) head.textContent = `» injector · ${ev.source_file}`;
+
+      const key = `${ev.file_idx}:${ev.chunk_idx}`;
+      if (ev.scope === "chunk" && key !== chunkKey) {
+        chunkKey = key;
+        for (const [k, r] of Object.entries(rows)) {
+          if (k.startsWith("chunk:")) { setRow(r, "pending"); r.querySelector(".pipe-time").textContent = ""; }
+        }
+      }
+
+      // rollback is not in either track: it is an exception branch, and drawing
+      // it as a pending step made every healthy run advertise a rollback that
+      // was never coming. It gets appended only when it actually fires.
+      // ev.phase is the display label (the server maps it), so this is an exact
+      // match — no id-to-label rule here can cover both hub_update/hub-update
+      // and crossdedup/cross-dedup, and guessing left one phase permanently grey.
+      let row = rows[`${ev.scope}:${ev.phase}`];
+      if (!row && ev.phase === "rollback") {
+        row = rows["exception:rollback"];
+        if (!row) {
+          row = document.createElement("div");
+          row.className = "pipe-phase";
+          row.dataset.rollback = "1";
+          row.innerHTML = `<span class="pipe-mark">↳</span><span class="pipe-name">rollback</span><span class="pipe-time"></span>`;
+          el.querySelector(".pipe-chunk").appendChild(row);
+          rows["exception:rollback"] = row;
+        }
+      }
+      if (!row) return;
+      if (ev.status === "running") {
+        setRow(row, "running");
+        running = { row, at: Date.now() };
+      } else {
+        const secs = ev.elapsed != null ? ev.elapsed
+          : (running && running.row === row ? (Date.now() - running.at) / 1000 : null);
+        setRow(row, ev.status === "failed" ? "failed" : "done", secs);
+        if (running && running.row === row) running = null;
+      }
+    },
+    finish(summary) {
+      clearInterval(timer);
+      running = null;
+      const s = summary || { kind: "failed", reason: "", notes: 0, links: 0, files: 0, committed: 0, failed_chunks: [] };
+      const name = (head.textContent || "").replace(/^» injector · /, "");
+      el.classList.remove("running");
+      el.classList.add(s.kind);
+      head.textContent = injectorSummaryLine(name, s);
+      // A good run collapses to its one line; a bad one keeps the track open on
+      // the phase that broke, which is the only time the detail is worth rows.
+      if (s.kind === "ok" || s.kind === "empty") {
+        el.classList.add("collapsed");
+        pos.textContent = "";
+      } else if (s.failed_chunks && s.failed_chunks.length) {
+        const d = document.createElement("div");
+        d.className = "pipe-failed";
+        d.textContent = s.failed_chunks.map((f) => `✗ ${f.chunk}${f.phase ? " " + f.phase : ""}`).join(" · ");
+        el.appendChild(d);
+      }
+    },
+  };
+}
+
 function bubble(role) {
   const el = document.createElement("div");
   el.className = "msg " + (role === "user" ? "user" : "silica");
@@ -308,6 +451,8 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   // change" is a result the user needs stated, not inferred from an absence.
   const failed = new Map();
   const claimed = {};  // call id → { refs, effect, verb }, held until tool_done
+  const pipes = {};    // call id → injector pipeline block, held until tool_done
+  let curPipe = null;  // the block phase events currently belong to
   let curText = null;   // open markdown segment { el, raw }
   let curTools = null;  // open group of consecutive tools
   let curThink = null;  // open thinking block { details, body, raw }
@@ -457,6 +602,18 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       (seg.el.lastElementChild || seg.el).appendChild(caret); // inline at the text tail
       peekDelta(ev.text);
     } else if (ev.type === "tool_start") {
+      if (ev.pipeline) {
+        // A nucleate run gets the block instead of a line; tool calls are
+        // dispatched one at a time (agent/loop.py), so the phase events that
+        // follow belong to this one until its tool_done arrives.
+        const p = makePipelineBlock(ev.target || "?", ev.pipeline);
+        toolsGroup().appendChild(p.el);
+        curTools.appendChild(caret);
+        pipes[ev.id] = p;
+        curPipe = p;
+        claimed[ev.id] = { refs: ev.notes || [], effect: ev.effect || "read", verb: ev.name };
+        return;
+      }
       const t = document.createElement("div");
       t.className = "tool";
       t.dataset.label = toolLabel(ev);
@@ -465,7 +622,16 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       curTools.appendChild(caret);
       toolEls[ev.id] = t;
       claimed[ev.id] = { refs: ev.notes || [], effect: ev.effect || "read", verb: ev.name };
+    } else if (ev.type === "phase") {
+      if (curPipe) curPipe.applyPhase(ev);
+      bumpChanges(); // notes land mid-run, not at tool_done
     } else if (ev.type === "tool_done") {
+      bumpChanges(); // a write tool that emits no phases still changed the vault
+      if (pipes[ev.id]) {
+        pipes[ev.id].finish(ev.summary);
+        if (curPipe === pipes[ev.id]) curPipe = null;
+        delete pipes[ev.id];
+      }
       const t = toolEls[ev.id];
       if (t) { t.className = "tool done"; t.textContent = "✓ " + (t.dataset.label || ev.name); }
       const c = claimed[ev.id];
@@ -476,6 +642,13 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         delete claimed[ev.id];
       }
     } else if (ev.type === "tool_error") {
+      if (pipes[ev.id]) {
+        // No summary to read: the tool raised instead of returning a verdict, so
+        // the block keeps the track open on whatever phase was in flight.
+        pipes[ev.id].finish(null);
+        if (curPipe === pipes[ev.id]) curPipe = null;
+        delete pipes[ev.id];
+      }
       const t = toolEls[ev.id];
       if (t) {
         t.className = "tool error";
@@ -791,6 +964,20 @@ $("#tree").addEventListener("click", (e) => {
 // app where you can read what actually changed rather than what was claimed.
 const changedPaths = new Set();
 const KIND_MARK = { created: "+", deleted: "−", moved: "→", modified: "±" };
+
+// A turn-end refresh is enough for a one-note write, and wrong for a run: an
+// injector writes for minutes before its tool returns, so the notes were on disk
+// — Obsidian showing them — while this list stayed empty and read as broken.
+// Every phase bumps it, throttled: a run emits one every few hundred ms, and
+// /changes re-reads each tracked note off disk. The trailing edge is covered by
+// the turn-end call, so a leading-edge throttle drops nothing.
+let lastBump = 0;
+function bumpChanges() {
+  const now = performance.now();
+  if (now - lastBump < 2000) return;
+  lastBump = now;
+  loadChanges();
+}
 
 async function loadChanges() {
   let rows = [];
@@ -2574,8 +2761,24 @@ async function loadVault() {
         g.className = "tools";
         for (const t of m.tools) {
           const d = document.createElement("div");
-          d.className = "tool " + (t.error ? "error" : "done");
-          d.textContent = (t.error ? "✗ " : "✓ ") + toolLabel(t);
+          if (t.summary) {
+            // The run's outcome, restated from the stored tool result. Without
+            // it a reloaded chat could only say the injector had run — not what
+            // it wrote, or which chunks died.
+            d.className = "tool tool-pipeline collapsed " + t.summary.kind;
+            d.innerHTML = `<div class="pipe-head"><span class="pipe-title"></span></div>`;
+            d.querySelector(".pipe-title").textContent = injectorSummaryLine(t.target || "?", t.summary);
+            if (t.summary.failed_chunks.length) {
+              const f = document.createElement("div");
+              f.className = "pipe-failed";
+              f.textContent = t.summary.failed_chunks.map((x) => `✗ ${x.chunk}${x.phase ? " " + x.phase : ""}`).join(" · ");
+              d.appendChild(f);
+              d.classList.remove("collapsed");
+            }
+          } else {
+            d.className = "tool " + (t.error ? "error" : "done");
+            d.textContent = (t.error ? "✗ " : "✓ ") + toolLabel(t);
+          }
           g.appendChild(d);
         }
         turn.body.appendChild(g);

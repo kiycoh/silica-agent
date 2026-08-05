@@ -105,6 +105,101 @@ def test_event_to_json_maps_the_render_event_seam():
     assert event_to_json(ReasoningEvent("thinking", 0)) is None
 
 
+def test_injector_start_carries_the_file_and_the_tracks():
+    """Regression: _tool_target read the legacy `inbox_file` key while every real
+    caller passes `inbox_files`, so a nucleate run showed a bare "injector" with
+    no document name at all. The two phase tracks ride along so the client can
+    draw the pipeline greyed out instead of growing it a row at a time."""
+    from silica.agent.events import ToolStartEvent
+    from silica.ui.web.callback import event_to_json
+
+    ev = event_to_json(ToolStartEvent(
+        "silica_run_injector", {"inbox_files": ["Inbox/a.md", "Inbox/b.md"]}, "c9", 0))
+    assert ev["target"] == "Inbox/a.md +1"
+    assert ev["pipeline"]["file"][0] == "recon"
+    assert ev["pipeline"]["chunk"][0] == "collision"
+    # An exception branch is not a step: listing it made every healthy run show a
+    # pending rollback that was never coming.
+    assert "rollback" not in ev["pipeline"]["file"] + ev["pipeline"]["chunk"]
+
+
+def test_phase_event_restates_the_whole_position():
+    from silica.agent.events import PhaseEvent
+    from silica.ui.web.callback import event_to_json
+
+    assert event_to_json(PhaseEvent(
+        phase="distill", status="running", scope="chunk", file_idx=1, file_total=2,
+        chunk_idx=2, chunk_total=5, source_file="b.md")) == {
+        "type": "phase", "phase": "distill", "status": "running", "scope": "chunk",
+        "source_file": "b.md", "file_idx": 1, "file_total": 2,
+        "chunk_idx": 2, "chunk_total": 5,
+    }
+
+
+def test_phase_wire_sends_labels_the_track_can_match():
+    """Found in the browser, not in the code: the client matches rows by exact
+    string, and the two phases whose id differs from their label (crossdedup ->
+    cross-dedup, hub_update -> hub-update) need different rules, so any guess the
+    client makes leaves one of them grey for the whole run. The server maps."""
+    from silica.agent.events import PhaseEvent
+    from silica.ui.web.callback import _PHASE_TRACKS, event_to_json
+
+    every = _PHASE_TRACKS["file"] + _PHASE_TRACKS["chunk"]
+    for pid in ["recon", "crossdedup", "payload", "salience", "distill", "hub_update", "lint"]:
+        wire = event_to_json(PhaseEvent(phase=pid, status="running", scope="chunk",
+                                        file_idx=0, file_total=1, chunk_idx=0, chunk_total=1))
+        assert wire["phase"] in every, f"{pid} arrives as {wire['phase']!r}, which matches no row"
+
+
+def test_injector_summary_reads_the_five_terminal_statuses():
+    """no_ops and already_nucleated finish WELL while writing nothing; rendering
+    them as a bare success with zero counts is true and unreadable."""
+    import json
+    from silica.ui.web.callback import _injector_summary
+
+    def s(**kw):
+        return _injector_summary(json.dumps(kw))
+
+    # "Success" is capitalised at the source (states/finalize.py) and the rest
+    # are not; normalising here keeps cli.py's _DRAIN_SETTLED on its contract.
+    ok = s(final_status="Success", yield_notes=14, yield_links=9, files_total=2)
+    assert (ok["kind"], ok["notes"], ok["links"], ok["files"]) == ("ok", 14, 9, 2)
+
+    assert s(final_status="no_ops")["reason"] == "no operations produced"
+    assert s(final_status="already_nucleated")["reason"] == "already in the vault"
+    assert s(final_status="no_ops")["kind"] == "empty"
+
+    part = s(final_status="partial", chunks_committed=5,
+             failed_chunks=[{"chunk": "f0_c3", "phase": "lint", "error": "…"}])
+    assert part["kind"] == "partial"
+    assert part["failed_chunks"] == [{"chunk": "f0_c3", "phase": "lint"}]
+
+    # Unparseable / absent result must not read as a success.
+    assert _injector_summary(None)["kind"] == "failed"
+    assert _injector_summary("not json")["kind"] == "failed"
+
+
+def test_transcript_replay_restates_the_injector_outcome():
+    """Regression: /messages skipped every role=="tool" message, so the stored
+    result never reached the replay and a reloaded chat could only say the
+    injector had run — not what it wrote or which chunks died."""
+    import json
+    from silica.ui.web.callback import tool_calls_to_json
+
+    msg = {"role": "assistant", "tool_calls": [{
+        "id": "c1",
+        "function": {"name": "silica_run_injector",
+                     "arguments": json.dumps({"inbox_files": ["Inbox/a.md"]})},
+    }]}
+    results = {"c1": json.dumps({"final_status": "Success", "yield_notes": 3,
+                                 "yield_links": 4, "files_total": 1})}
+
+    assert "summary" not in tool_calls_to_json(msg, None, None)[0]
+    line = tool_calls_to_json(msg, None, results)[0]
+    assert line["target"] == "Inbox/a.md"
+    assert (line["summary"]["notes"], line["summary"]["links"]) == (3, 4)
+
+
 def test_index_cache_busts_churning_assets(client):
     # app.js/app.css must carry a ?v= content hash so an edited asset can't be
     # served stale from the browser's heuristic cache; vendored bundles don't.
