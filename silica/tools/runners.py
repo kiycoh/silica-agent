@@ -107,6 +107,13 @@ def silica_run_injector(
         "failed_chunks": failed,
         "files_summary": result.get("files_summary", []),
         "subagents": result.get("subagents", {}),
+        # What the run actually yielded. Both frontends build their completion
+        # line from these; until they were projected here the keys existed only
+        # inside fsm.context and every summary read "1 file · 3m12s", never the
+        # note and link counts it was written to show.
+        "yield_notes": result.get("yield_notes", 0),
+        "yield_links": result.get("yield_links", 0),
+        "files_total": len(files),
     }
     if result.get("error"):
         projected["error"] = result["error"]
