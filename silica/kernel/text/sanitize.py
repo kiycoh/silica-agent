@@ -66,35 +66,48 @@ def repair_code_span_newlines(text: str) -> str:
     return _CODE_SPAN_NEWLINE_RE.sub(lambda _m: "`\\n`", text)
 
 
-# A doubled backslash right before a letter, in text that never travelled
-# through JSON: there is no escaping to do out there, so the second backslash
-# is the model over-escaping the very sequence it was told to copy verbatim
-# (measured on the body pass: 12 bodies out of 12).
-# With the source in hand the decision is per-site: a doubling the source
-# itself contains (a LaTeX `\\` row break glued to a letter, prose genuinely
-# discussing double escaping) is the model copying faithfully — kept. Any
-# other doubling is over-escape — collapsed. Callers with no source in scope
-# keep the blanket collapse, former ceilings included.
+# A run of doubled backslashes in text that never travelled through JSON:
+# there is no escaping to do out there, so the doubling is the model
+# over-escaping the very sequence it was told to copy verbatim (measured on
+# the body pass: 12 bodies out of 12). Whole runs, not just `\\` before a
+# letter: a model that leaves `\pmb` alone still writes a LaTeX row break
+# `\\` as `\\\\`, because THAT is the sequence it reads as an escape — 25
+# quadrupled row breaks and 23 `\\{`/`\\}` landed in the vault on 2026-08-05,
+# the doubling that survived the body-appendix path once JSON decoding was no
+# longer there to halve it for free.
+# With the source in hand the decision is per-site: a run the source itself
+# contains (a real `\\` row break, prose genuinely discussing double escaping)
+# is the model copying faithfully — kept. Any other run is over-escape —
+# halved. Without a source only the unambiguous sites go: 4+ backslashes,
+# which LaTeX has no construct for, and a doubling glued to a letter or brace.
 # ponytail: the needle is searched across the WHOLE source, so a doubling
 # that excerpt A contains preserves an identical over-escape in a body drawn
 # from excerpt B of the same chunk — per-op excerpt attribution if that ever
 # bites.
-_OVER_ESCAPED_RE = re.compile(r"\\\\(?=[A-Za-z])")
-_WORD_AFTER_RE = re.compile(r"[A-Za-z]+")
+_OVER_ESCAPED_RE = re.compile(r"(?<!\\)(?:\\\\)+(?!\\)")
+# What follows the run is half the needle: the whole word for a macro
+# (`\\pmb` vs `\pmb`), otherwise the single next character — a row break's
+# trailing space is exactly what tells a faithful `\\ ` apart from an
+# over-escaped `\ `.
+_AFTER_RE = re.compile(r"[A-Za-z]+|.", re.DOTALL)
+_UNAMBIGUOUS_AFTER_RE = re.compile(r"[A-Za-z{}]")
 
 
 def collapse_over_escaped_backslashes(text: str, source: str | None = None) -> str:
-    """`\\\\top` -> `\\top` in text that was never JSON-escaped.
+    """`\\\\top` -> `\\top`, `\\\\\\\\` -> `\\\\` in text that was never JSON-escaped.
 
-    With `source`, collapse only the sites whose doubled form (`\\\\` + the
-    following word) the source does not itself contain."""
-    if source is None:
-        return _OVER_ESCAPED_RE.sub(r"\\", text)
-
+    With `source`, halve only the runs whose doubled form (the run + the
+    following word, or its single next character) the source does not itself
+    contain."""
     def _site(m: re.Match) -> str:
-        word = _WORD_AFTER_RE.match(m.string, m.end())
-        needle = m.group(0) + (word.group(0) if word else "")
-        return m.group(0) if needle in source else "\\"
+        run = m.group(0)
+        after = _AFTER_RE.match(m.string, m.end())
+        tail = after.group(0) if after else ""
+        if source is None:
+            keep = len(run) == 2 and not _UNAMBIGUOUS_AFTER_RE.match(tail)
+        else:
+            keep = (run + tail) in source
+        return run if keep else "\\" * (len(run) // 2)
 
     return _OVER_ESCAPED_RE.sub(_site, text)
 
@@ -162,8 +175,19 @@ def normalize_ops(ops: list, *, verbatim_source: str | None = None) -> list:
                     if verbatim:
                         parts[i] = collapse_over_escaped_backslashes(
                             parts[i], source=verbatim_source)
-                    elif "\\n" in parts[i]:  # never inside math spans
-                        parts[i] = replace_outside_math(parts[i], "\\n", "\n")
+                    else:
+                        if "\\n" in parts[i]:  # never inside math spans
+                            parts[i] = replace_outside_math(parts[i], "\\n", "\n")
+                        # JSON decoding does not make the text clean: a model
+                        # that over-escapes INSIDE the JSON string delivers
+                        # `\\dots` / `\\{a_c\\}` after decoding, and nothing
+                        # downstream repaired it (8 committed notes, 2026-08-05).
+                        # Anchored-only: without a source there is no way to
+                        # tell over-escape from a faithful copy, so no-source
+                        # callers keep today's behavior.
+                        if verbatim_source:
+                            parts[i] = collapse_over_escaped_backslashes(
+                                parts[i], source=verbatim_source)
                     # After the expansion, never before: the expansion would
                     # turn the repaired `\n` straight back into a line break.
                     parts[i] = repair_code_span_newlines(parts[i])

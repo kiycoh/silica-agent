@@ -482,6 +482,26 @@ def test_collapse_with_source_decides_per_site():
         "resta \\\\beta e cade \\\\top") == "resta \\beta e cade \\top"
 
 
+def test_collapse_halves_quadrupled_row_break_but_keeps_the_real_one():
+    from silica.kernel.text.sanitize import collapse_over_escaped_backslashes
+
+    # The class the letter-lookahead rule could not see: a model that leaves
+    # `\boldsymbol` alone still doubles the row break, because `\\` is the
+    # sequence IT reads as an escape. Anchoring saves it only if the needle
+    # carries what follows the run — the bare run `\\` is in every matrix
+    # source, so a needle of `\\` alone kept every over-escape in the vault.
+    src = "$\\boldsymbol{x} = \\left[ \\begin{array}{c} x_1 \\\\ x_2 \\end{array} \\right]$"
+    body = ("$\\boldsymbol{x} = \\left[ \\begin{array}{c} x_1 \\\\\\\\ x_2"
+            " \\end{array} \\right]$ con $S = \\\\{1, 3\\\\}$ e riga \\\\ vera.")
+    assert collapse_over_escaped_backslashes(body, source=src) == (
+        "$\\boldsymbol{x} = \\left[ \\begin{array}{c} x_1 \\\\ x_2"
+        " \\end{array} \\right]$ con $S = \\{1, 3\\}$ e riga \\\\ vera.")
+    # No source: 4+ backslashes are unambiguous (LaTeX has no such construct),
+    # a lone `\\ ` row break is not and stays.
+    assert collapse_over_escaped_backslashes(
+        "a \\\\\\\\ b e riga \\\\ vera") == "a \\\\ b e riga \\\\ vera"
+
+
 def test_external_body_collapse_spares_latex_breaks_and_fenced_code():
     # `\\` as a LaTeX line break carries a space or a bracket, not a letter.
     # Inside a fence a doubled backslash is source: C's "\\n" is an escaped
@@ -496,3 +516,34 @@ def test_external_body_collapse_spares_latex_breaks_and_fenced_code():
     )
     parsed, _ = parse_json(raw)
     assert normalize_ops(parsed["updates"])[0]["snippet"] == body
+
+
+def test_json_path_collapses_over_escape_with_source_anchor():
+    # JSON decoding does not make the text clean: a model that over-escapes
+    # INSIDE the JSON string delivers `\\dots` / `\\{a_c\\}` after decoding
+    # (8 committed notes, 2026-08-05 run). With the chunk text as anchor the
+    # collapse runs on the JSON path too — braces included.
+    ops = [{"op": "write", "path": "X.md",
+            "snippet": "Errori: $\\mathcal{E}_c = \\mathcal{R}_c \\setminus \\\\{a_c\\\\}$"
+                       " e $X = (x_1, \\\\dots, x_m)$."}]
+    src = "Il sorgente ha $\\mathcal{E}_c$ e $x_1, \\dots, x_m$ senza doppi."
+    out = normalize_ops(ops, verbatim_source=src)[0]["snippet"]
+    assert out == ("Errori: $\\mathcal{E}_c = \\mathcal{R}_c \\setminus \\{a_c\\}$"
+                   " e $X = (x_1, \\dots, x_m)$.")
+
+
+def test_json_path_without_source_keeps_doublings():
+    # No anchor, no way to tell over-escape from a faithful copy: the JSON
+    # path stays untouched — today's behavior, the safe direction.
+    ops = [{"op": "write", "path": "X.md", "snippet": "resta $\\\\top$"}]
+    assert normalize_ops(ops)[0]["snippet"] == "resta $\\\\top$"
+
+
+def test_json_path_anchor_keeps_doubling_the_source_contains():
+    # Per-site decision survives on the JSON path: a doubling the source
+    # itself carries is the model copying faithfully.
+    ops = [{"op": "write", "path": "X.md",
+            "snippet": "resta $a \\\\beta$ e cade $\\\\top$"}]
+    src = "matrice con $a \\\\beta$ dentro"
+    out = normalize_ops(ops, verbatim_source=src)[0]["snippet"]
+    assert out == "resta $a \\\\beta$ e cade $\\top$"

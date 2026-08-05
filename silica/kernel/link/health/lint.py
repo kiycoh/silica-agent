@@ -78,7 +78,7 @@ def _build_ctx(text: str, stem: str | None) -> Ctx:
 # wikilink-patterns → raw body; bracket-balance → noncode.
 # ---------------------------------------------------------------------------
 
-_DOUBLE_LATEX = re.compile(r"(?<!\\)\\\\[a-zA-Z]{2,}")        # literal \\frac (LLM artifact)
+_DOUBLE_LATEX = re.compile(r"(?<!\\)\\\\(?:[a-zA-Z]{2,}|[{}])")  # literal \\frac, \\{ (LLM artifact)
 _LITERAL_BACKSLASH_N = re.compile(r"\\n(?![a-zA-Z])")        # \n artifact, not \nabla/\neq
 _EMPTY_DISPLAY_MATH = re.compile(r"\$\$\s*\$\$")
 _EMPTY_INLINE_MATH = re.compile(r"(?<!\$)\$[ \t]*\$(?!\$)")
