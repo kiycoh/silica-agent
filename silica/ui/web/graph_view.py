@@ -732,7 +732,12 @@ function clearFocus() {{
 // about to happen anyway.
 function refreshPaint() {{
   Graph.nodeColor(Graph.nodeColor());
-  Graph.linkColor(Graph.linkColor());
+  // 3D links live in the merged LineSegments: one buffer rewrite against the
+  // full link digest (9k material rebuilds) the accessor re-pass would cost.
+  // With PARTICLES on the lib still owns the photon carriers, so those keep
+  // the re-pass beside the merge.
+  if (is2D() || PARTICLES) Graph.linkColor(Graph.linkColor());
+  if (!is2D()) repaintLinkSeg();
   wake(120);
 }}
 
@@ -1027,6 +1032,111 @@ function linkPaint(l) {{
   return out;
 }}
 
+// --- 3D: every link in ONE LineSegments -------------------------------------
+// The bundle builds a separate THREE.Line per link: one draw call and one
+// per-tick geometry write each, which on this vault is ~9k of either and
+// ~36ms a frame before a single sphere is drawn — measured, and the reason
+// the 3D view lagged. So the lib's lines are never shown (linkVisibility
+// false) and never positioned (linkPositionUpdate returns true), and this
+// layer draws every visible link as one LineSegments: one object, one draw
+// call, two vertices per link, RGBA per vertex so the per-edge alpha rank
+// survives the merge. Fog applies to the shared material like it did to the
+// per-link ones.
+//
+// No THREE global exists (same constraint as faceteNodes below), and no
+// LineSegments instance exists to steal a constructor from. A Line instance
+// does — and the renderer branches on the isLineSegments FLAG, not the class,
+// so a Line wearing the flag renders as GL_LINES. The donor is the ONE line
+// the lib is allowed to build: its visibility accessor admits RAW_EDGES[0]
+// only, and an accessor that returns false makes the lib skip creating the
+// object outright (verified, not assumed) — so the whole per-link fleet, its
+// 9k materials included, is simply never born. The donor itself stays
+// degenerate at the origin (linkPositionUpdate never lets it be positioned)
+// and draws nothing.
+//
+// Particles are the one carve-out. A photon group is only created for a link
+// whose line object exists (verified: admit the link, photons appear; skip
+// it, they never do), so the links that may carry photons — GAP always,
+// SIMILAR for the drift — stay lib-owned whenever PARTICLES is on: real
+// lines, lib-positioned, excluded from the merge. PARTICLES off (the
+// default) merges everything behind the one donor.
+const libOwnsLink = l => PARTICLES && (l.type === "GAP" || l.type === "SIMILAR");
+let LinkSeg = null;   // {{ obj, pos, col, colorCls, edges }}
+
+// The same conversion Color.setStyle applies (sRGB into the working space),
+// without setStyle's per-call "alpha will be ignored" console warning.
+function segRGBA(Color, s) {{
+  let r, g, b, a = 1;
+  if (s[0] === "#") {{
+    const n = parseInt(s.slice(1), 16);
+    r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255;
+  }} else {{
+    const p = s.match(/rgba?\(([^)]+)\)/)[1].split(",").map(Number);
+    r = p[0]; g = p[1]; b = p[2];
+    if (p.length > 3) a = p[3];
+  }}
+  const c = new Color().setRGB(r / 255, g / 255, b / 255, "srgb");
+  return [c.r, c.g, c.b, a];
+}}
+
+function buildLinkSeg() {{
+  const line = RAW_EDGES.length && RAW_EDGES[0].__lineObj;
+  if (!line) return;               // digest not run yet; next frame retries
+  const E = RAW_EDGES.length;
+  const pos = new Float32Array(E * 6);
+  const col = new Float32Array(E * 8);
+  const Attr = line.geometry.getAttribute("position").constructor;
+  const geom = new (line.geometry.constructor)();
+  geom.setAttribute("position", new Attr(pos, 3));
+  geom.setAttribute("color", new Attr(col, 4));
+  const mat = new (line.material.constructor)({{ vertexColors: true, transparent: true }});
+  const obj = new (line.constructor)(geom, mat);
+  obj.isLineSegments = true;       // the renderer reads the flag, not the class
+  obj.type = "LineSegments";
+  obj.frustumCulled = false;       // positions churn every tick; skip bounds
+  obj.raycast = () => {{}};        // the pointer belongs to the nodes
+  (line.parent || Graph.scene()).add(obj);
+  LinkSeg = {{ obj, pos, col, colorCls: line.material.color.constructor, edges: [] }};
+  repaintLinkSeg();
+}}
+
+// Colours + the visible set — only when they change (filters, focus, dim),
+// which is what refreshPaint/applyFilters call in place of the accessor
+// re-pass that used to rebuild 9k materials.
+function repaintLinkSeg() {{
+  if (!LinkSeg) return;
+  const edges = LinkSeg.edges = RAW_EDGES.filter(e => !e._hidden && !libOwnsLink(e));
+  for (let i = 0; i < edges.length; i++) {{
+    const c = segRGBA(LinkSeg.colorCls, linkPaint(edges[i]));
+    LinkSeg.col.set(c, i * 8);
+    LinkSeg.col.set(c, i * 8 + 4);
+  }}
+  LinkSeg.obj.geometry.setDrawRange(0, edges.length * 2);
+  LinkSeg.obj.geometry.getAttribute("color").needsUpdate = true;
+  writeLinkSegPositions();
+}}
+
+function writeLinkSegPositions() {{
+  const {{ pos, edges, obj }} = LinkSeg;
+  for (let i = 0; i < edges.length; i++) {{
+    const a = NODE_BY_ID[edges[i].from], b = NODE_BY_ID[edges[i].to];
+    const o = i * 6;
+    pos[o]     = a.x || 0; pos[o + 1] = a.y || 0; pos[o + 2] = a.z || 0;
+    pos[o + 3] = b.x || 0; pos[o + 4] = b.y || 0; pos[o + 5] = b.z || 0;
+  }}
+  obj.geometry.getAttribute("position").needsUpdate = true;
+}}
+
+// Per frame beside the label layers (the loop always runs in 3D): build once
+// the lib's digest has produced a carrier, then follow the nodes — but only
+// while they can move. A settled, unwoken graph skips the write entirely.
+function linkSegStep() {{
+  if (is2D()) return;
+  if (!LinkSeg) {{ buildLinkSeg(); return; }}
+  if (!simRunning && performance.now() >= awakeUntil) return;
+  writeLinkSegPositions();
+}}
+
 // --- 3D: the same crystal the mark is cut from ------------------------------
 // PARTICLES/SHADING come from the settings panel (Display). Both off is the
 // bundle's own look: smooth lit spheres, no fog, still edges.
@@ -1210,6 +1320,7 @@ function buildGraph() {{
     // switches with nothing in the console to say why.
     try {{ Graph._destructor(); }} catch (e) {{ console.warn("graph teardown failed", e); }}
     el.innerHTML = "";
+    LinkSeg = null;   // died with the scene; the next 3D build remakes it
   }}
   const G = is2D() ? new ForceGraph(el) : new ForceGraph3D(el);
   // Seeded positions and the decay that goes with them, decided before the data
@@ -1282,15 +1393,29 @@ function buildGraph() {{
       .nodeRelSize(NODE_REL_SIZE)
       .nodeCanvasObject(drawNode)
       .nodePointerAreaPaint(paintNodeArea)
+      // The picking canvas repaints on a ~800ms debounce, and its link pass
+      // strokes every edge at width+4px — 40-80ms on this vault, landing as a
+      // visible hitch once or twice a second through any pan. Nothing hovers
+      // or clicks a link here (no linkLabel, no onLinkHover), so the pass
+      // buys nothing: paint no link areas at all. Node picking keeps its own
+      // painter above. Measured: worst 2D frame 78ms -> 9ms.
+      .linkPointerAreaPaint(() => {{}})
       // Pre, not Post: a zone is the ground the notes stand on. 2D only — the
       // 3D bundle hands out no THREE, so there the zones are colour and name.
       .onRenderFramePre(drawZones);
   }} else {{
-    // Perf on big vaults (1200+ notes): linkWidth>0 makes every edge a cylinder
-    // mesh and arrows add a cone per edge — thousands of meshes. Width 0 ⇒ cheap
-    // GL lines; no arrows; fewer sphere segments; finite cooldown so the sim
-    // settles and stops reflowing instead of re-laying-out every frame.
+    // Perf on big vaults (1200+ notes): the bundle gives every link its own
+    // THREE.Line — a draw call and a per-tick buffer write each. The links are
+    // drawn merged instead (see LinkSeg above), and the visibility accessor
+    // admits exactly one lib line into existence: the constructor donor. A
+    // falsy accessor result skips object creation entirely, so the other 9k
+    // Lines and their materials are never built at all. linkWidth 0 keeps the
+    // donor a cheap Line rather than a cylinder mesh; fewer sphere segments.
     G.linkWidth(0).nodeResolution(6)
+      .linkVisibility(l => l === RAW_EDGES[0] || (libOwnsLink(l) && !l._hidden))
+      // "handled" for merged links and for the donor, which stays degenerate;
+      // lib-owned particle carriers keep the default update and really move.
+      .linkPositionUpdate((o, coords, l) => !libOwnsLink(l))
       // 1 so the per-edge alpha in linkPaint is the final opacity rather than
       // being scaled by a second global. The bundle's default 0.2 is what put
       // every link at the same weight in the first place.
@@ -1448,7 +1573,10 @@ function applyFilters() {{
   computeFilters();
   // Re-pass the current accessor to force a visibility refresh without resetting the physics layout
   Graph.nodeVisibility(Graph.nodeVisibility());
-  Graph.linkVisibility(Graph.linkVisibility());
+  // 3D link visibility lives in the merged buffer; the accessor re-pass stays
+  // for 2D and, with PARTICLES on, for the lib-owned photon carriers.
+  if (is2D() || PARTICLES) Graph.linkVisibility(Graph.linkVisibility());
+  if (!is2D()) repaintLinkSeg();
   wake(120);   // and re-evaluate the idle tick: gaps may have just been toggled
 }}
 
@@ -1732,9 +1860,12 @@ function syncZoneLoop() {{
     const step = () => {{
       positionZoneLabels();
       positionNodeLabels();
-      // Both 3D-only and both cheap. styleScene is here rather than wired to
+      // All 3D-only and all cheap. styleScene is here rather than wired to
       // each rebuild site because the rebuilds are the bundle's, not ours, and
       // land whenever it decides: a frame is the one moment we know they have.
+      // linkSegStep rides the same fact — the link carriers it builds from
+      // appear whenever the digest does.
+      linkSegStep();
       styleScene();
       fogStep();
       zoneRaf = requestAnimationFrame(step);
