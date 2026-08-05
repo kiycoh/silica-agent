@@ -39,6 +39,7 @@ from silica.driver.base import (
 from silica.kernel.link.ast import extract_links
 from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import is_source_leaf
+from silica.kernel.write import session_changes
 from silica.kernel.write.notetype import stamp_type
 from silica.kernel.write.ops import InverseOp, InverseOpKind
 
@@ -415,6 +416,10 @@ class ObsidianWSBackend(GraphIndexMixin):
         content = stamp_type(path, content)   # OKF §4.1 `type`, if absent
         data = self._rpc("create", path=path, content=content)
         ref = NoteRef(name=data["name"], path=data["path"])
+        # The plugin's path is the authoritative one, and it is only known once
+        # the reply is in — so this one records after the write, with no baseline
+        # read: a create had nothing to be a baseline.
+        session_changes.touched(ref.path, None)
         self._patch_graph_add(ref.path, ref, content)
         return ref
 
@@ -430,6 +435,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         still goes through the public seam and re-stamps a pre-backfill note.
         Promote to a Protocol verb only if that divergence ever bites.
         """
+        session_changes.touched_from_disk(path)
         self._rpc("overwrite", path=path, content=content)
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
         ref = NoteRef(name=name, path=path)
@@ -438,22 +444,32 @@ class ObsidianWSBackend(GraphIndexMixin):
 
     def append(self, ref: NoteRef | str, content: str) -> None:
         path = self._path_arg(ref)
+        session_changes.touched_from_disk(path)
         self._rpc("append", path=path, content=content)
         # Optimistic patch — add any new links introduced by the fragment.
         if self._is_graph_built and path in self._graph:
             self._add_link_edges(path, content)
 
     def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
-        self._rpc("set_prop", path=self._path_arg(ref), name=name, value=value, type=type_)
+        path = self._path_arg(ref)
+        session_changes.touched_from_disk(path)
+        self._rpc("set_prop", path=path, name=name, value=value, type=type_)
 
     def move(self, ref: NoteRef | str, to: str) -> None:
-        self._rpc("move", path=self._path_arg(ref), to=to)
+        path = self._path_arg(ref)
+        # The row follows the file, same as the fs backend. The referrers Obsidian
+        # rewrites on its own side stay out of the list: the plugin never says
+        # which notes it touched, and guessing them would be a lie in a diff.
+        session_changes.touched_from_disk(path)
+        session_changes.renamed(path, to)
+        self._rpc("move", path=path, to=to)
         # Obsidian rewrites incoming wikilinks on move; patching every referrer
         # over the wire isn't worth it — reinvalidate, rebuild lazily on next read.
         self._is_graph_built = False
 
     def delete(self, ref: NoteRef | str) -> None:
         path = self._path_arg(ref)
+        session_changes.touched_from_disk(path)
         self._rpc("delete", path=path)
         self._patch_graph_remove(path)
 
@@ -466,6 +482,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         # title_index is accepted for protocol parity but ignored: the WS/CLI
         # backend delegates title resolution to Obsidian's live graph, so a
         # caller-built index does not apply.
+        session_changes.touched_from_disk(path)  # the plugin rewrites the body
         added = self._rpc("autolink_note", path=path, candidates=candidates) or []
         if added:
             self._is_graph_built = False  # body rewritten plugin-side; cheapest correct patch

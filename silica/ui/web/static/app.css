@@ -72,6 +72,13 @@
      of the wordmark sweep, never a control state. */
   --warn: #E0A93B;
   /* amber, caution only */
+  --add: #4FD08A;
+  --del: #E8657F;
+  /* the two diff poles. They are not in the mascot's palette and they are not
+     meant to be: added and removed is the one place in this app where the colour
+     is a convention older than any brand, and inventing a violet for "removed"
+     would cost the reader a legend. Both clear 4.5:1 on --slate and on the tinted
+     line fills below. */
   --mono: "Martian Mono", ui-monospace, Menlo, monospace;
   --sans: "Lexend", system-ui, sans-serif;
   /* the sidebar's width, so #dock's left inset cannot drift from it */
@@ -225,6 +232,10 @@
   /* the eye, on paper. 6.96:1 on the sheet, 4.87:1 on the deepest plane */
   --violet: #4B3BC0;
   --warn: #7A5305;
+  /* the diff poles walked into paper's contrast range: the dark set's mint and
+     rose are both under 2:1 on a white sheet */
+  --add: #1C6B3F;
+  --del: #A32338;
 
   --sheet: #FFFFFF;
   /* the answer, printed */
@@ -887,6 +898,85 @@ details.side-section:hover>summary.side-title {
 .tree-note:hover {
   background: var(--slate-2);
   color: var(--frost);
+}
+
+/* changes — one row per note this session touched. Same row geometry as the
+   tree, because it is the same object seen from a different question ("what is
+   in the vault" / "what did we just do to it"); what it adds is a leading mark
+   and a +/− tally, so a glance answers how big the change was without opening it. */
+/* the count is a flex item in the summary, so a leading space in its text is
+   collapsed away and it welds itself to the label. Margin, not whitespace. */
+#changes-count {
+  margin-left: 0.6em;
+  letter-spacing: 0;
+  color: var(--ash-dim);
+}
+
+#changes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chg-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  color: var(--ash);
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: var(--r-sm);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.chg-row:hover {
+  background: var(--slate-2);
+  color: var(--frost);
+}
+
+.chg-mark {
+  flex-shrink: 0;
+  width: 0.75rem;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.chg-row.created .chg-mark {
+  color: var(--add);
+}
+
+.chg-row.deleted .chg-mark {
+  color: var(--del);
+}
+
+.chg-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chg-tally {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.35rem;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.chg-add {
+  color: var(--add);
+}
+
+.chg-del {
+  color: var(--del);
+}
+
+.chg-quiet {
+  color: var(--ash-dim);
 }
 
 /* history — last section, capped list + expand link, sidebar scrolls */
@@ -2831,6 +2921,103 @@ details.fm summary:hover {
   display: block;
   color: var(--ash-dim);
   font-size: 13px;
+}
+
+/* --- diff mode --------------------------------------------------------------
+   A code well, not a document: monospace, no wrapping, one scroller. The tint on
+   a changed line does the reading and the leading +/− carries it for anyone the
+   colour does not reach — which is also what makes a copied diff still parse. */
+#note-diff {
+  padding: 1.1rem 1.3rem 2rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+#note-diff[hidden] {
+  display: none;
+}
+
+#note-diff.dl-wait {
+  display: block;
+  color: var(--ash-dim);
+  font-size: 13px;
+}
+
+.dl-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-family: var(--mono);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.dl-kind {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ash-dim);
+}
+
+.dl-kind.created {
+  color: var(--add);
+}
+
+.dl-kind.deleted {
+  color: var(--del);
+}
+
+.dl-from {
+  flex: 1;
+  min-width: 0;
+  color: var(--ash-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-track {
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0;
+  overflow-x: auto;
+}
+
+.dl-line {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.65;
+  white-space: pre;
+  padding: 0 0.8rem;
+  color: var(--text);
+}
+
+.dl-add {
+  color: var(--add);
+  background: color-mix(in srgb, var(--add) 12%, transparent);
+}
+
+.dl-del {
+  color: var(--del);
+  background: color-mix(in srgb, var(--del) 12%, transparent);
+}
+
+.dl-ctx {
+  color: var(--ash);
+}
+
+/* the elision itself, not a line of the note: centred, no fill, no text to read */
+.dl-gap {
+  color: var(--ash-dim);
+  text-align: center;
+  padding: 0.15rem 0;
+}
+
+.dl-empty {
+  color: var(--ash-dim);
+  font-size: 12px;
 }
 
 .cx-sec {

@@ -56,6 +56,7 @@
       <div class="hp-row"><span class="hp-what">drop a file</span><span>anywhere on the window to nucleate it into Inbox/</span></div>
       <div class="hp-row"><span class="hp-what">click SILICA</span><span>starts a new chat; the old one stays in History</span></div>
       <div class="hp-row"><span class="hp-what">every write</span><span>gets a card in the transcript with its own revert</span></div>
+      <div class="hp-row"><span class="hp-what">Changes</span><span>lists every note this session touched; click one to read its diff</span></div>
       <div class="hp-row"><span class="hp-what">the mic</span><span>dictates into the message; needs a local transcription endpoint</span></div>
       <!-- the two renderer buttons are labelled 3D and 2D and nothing else; what
            separates them lives here, not in a longer button -->
@@ -90,6 +91,14 @@
         <input id="side-search" type="text" placeholder="filter names of notes + chats&hellip;" autocomplete="off" aria-label="filter notes and chats by name" />
         <div id="side-search-status" hidden aria-live="polite"></div>
       </div>
+
+      <!-- what this session did to the vault, above the files it did it to.
+           Hidden until there is something in it: an empty compartment that never
+           fills is worse than no compartment. -->
+      <details class="side-section" id="side-changes" hidden open>
+        <summary class="side-title">Changes<span id="changes-count"></span></summary>
+        <div class="side-body"><div id="changes"></div></div>
+      </details>
 
       <details class="side-section" id="side-files" open>
         <summary class="side-title">Files<button type="button" id="tree-collapse" title="collapse all folders" aria-label="collapse all folders">collapse</button></summary>
@@ -211,6 +220,7 @@
            states of one surface, not two places to go. -->
       <div id="note-mode" role="group" aria-label="drawer mode">
         <button type="button" data-mode="context" title="concepts, connections and what is missing">context</button>
+        <button type="button" data-mode="diff" title="what this session changed in this note">diff</button>
         <button type="button" data-mode="note" class="active" title="read the note">note</button>
       </div>
       <button id="note-close" class="ghost" title="close" aria-label="close this note">&#10005;</button>
@@ -246,6 +256,9 @@
          map render to answer "what is around this note", which Related answers
          better at zero cost — and the map button still reaches the real map.) -->
     <div id="note-context" hidden></div>
+    <!-- diff mode: the note against how it stood before this session touched it,
+         built in JS from /changes/diff. -->
+    <div id="note-diff" hidden></div>
     <div id="note-body"></div>
   </aside>
 

@@ -39,6 +39,7 @@ from silica.driver.base import (
     trie_remove,
 )
 from silica.kernel.write import frontmatter as fm
+from silica.kernel.write import session_changes
 from silica.kernel.link import ofm
 from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import ignore_matcher, is_source_leaf
@@ -741,6 +742,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
+        session_changes.touched(rel_path, None)  # no baseline: the note is new
         full_path.write_text(content, encoding="utf-8")
         self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
@@ -780,6 +782,7 @@ class ObsidianFSBackend(GraphIndexMixin):
 
         if stamp:
             content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
+        session_changes.touched(rel_path, self._read_cached(full_path))
         full_path.write_text(content, encoding="utf-8")
         self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
@@ -824,10 +827,11 @@ class ObsidianFSBackend(GraphIndexMixin):
         if not path.exists():
             raise RuntimeError(f"File not found: {path}")
             
+        rel_path_str = path.relative_to(self.vault_path).as_posix()
+        session_changes.touched(rel_path_str, self._read_cached(path))
         with open(path, "a", encoding="utf-8") as f:
             f.write(content)
 
-        rel_path_str = path.relative_to(self.vault_path).as_posix()
         self._invalidate_body(rel_path_str)
         if self._needs_reindex:
             self._rebuild_index()
@@ -850,6 +854,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         data[name] = value
         
         new_content = fm.dump(data, body)
+        session_changes.touched(path.relative_to(self.vault_path).as_posix(), content)
         path.write_text(new_content, encoding="utf-8")
         self._body_cache.pop(str(path), None)
 
@@ -893,6 +898,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         # Step 4: physical filesystem move
         dst = self.vault_path / new_rel
         dst.parent.mkdir(parents=True, exist_ok=True)
+        # The row follows the file: baseline first (in case this is the note's
+        # first touch this session), then move it onto the new key.
+        session_changes.touched(old_rel, self._read_cached(src))
+        session_changes.renamed(old_rel, new_rel)
         src.rename(dst)
         self._invalidate_body(old_rel)
         self._invalidate_body(new_rel)
@@ -937,6 +946,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 )
                 if n > 0:
                     # Write directly — avoids re-entrant overwrite() logic
+                    session_changes.touched(referrer_rel, referrer_content)
                     referrer_path.write_text(new_content, encoding="utf-8")
                     self._invalidate_body(referrer_rel)
                     referrer_updates.append((referrer_rel, new_content))
@@ -1006,6 +1016,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             raise RuntimeError(f"File not found: {path}")
 
         rel_path_str = path.relative_to(self.vault_path).as_posix()
+        session_changes.touched(rel_path_str, self._read_cached(path))
         path.unlink()
         self._invalidate_body(rel_path_str)
         if self._needs_reindex:

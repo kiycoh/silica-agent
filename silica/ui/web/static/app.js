@@ -437,6 +437,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     if (answer) addCopyBtn(body, () => answer);
     loadSessions(); // turn saved server-side — refresh titles/order
     loadVaultInfo(); // a turn may have written notes — refresh stats + tree
+    loadChanges();   // …and the sidebar's record of what it changed
     graphStale = true; // a turn may have written notes — rebuild next graph view
     metricsStale = true; // …and remeasure the next time the metrics tab opens
   }
@@ -783,6 +784,47 @@ $("#tree").addEventListener("click", (e) => {
   else openNote(path);
 });
 
+// --- changes (what this session did to the vault) ----------------------------
+// The list is the server's, not the transcript's: it survives a reload, folds
+// five writes to one note into one row, and empties a row when /undo puts the
+// bytes back. A row opens the drawer on the diff, which is the only place in the
+// app where you can read what actually changed rather than what was claimed.
+const changedPaths = new Set();
+const KIND_MARK = { created: "+", deleted: "−", moved: "→", modified: "±" };
+
+async function loadChanges() {
+  let rows = [];
+  try {
+    rows = await (await fetch("/changes")).json();
+  } catch { return; } // ambient, not an errand: a failed poll says nothing
+  changedPaths.clear();
+  const box = $("#changes");
+  box.innerHTML = "";
+  for (const r of rows) {
+    changedPaths.add(r.path);
+    const row = mkEl("div", "chg-row " + r.kind);
+    row.dataset.path = r.path;
+    row.title = r.from ? `${r.from} → ${r.path}` : r.path;
+    row.appendChild(mkEl("span", "chg-mark", KIND_MARK[r.kind] || "±"));
+    row.appendChild(mkEl("span", "chg-name", r.name));
+    const tally = mkEl("span", "chg-tally");
+    if (r.added) tally.appendChild(mkEl("span", "chg-add", "+" + r.added));
+    if (r.removed) tally.appendChild(mkEl("span", "chg-del", "−" + r.removed));
+    if (!r.added && !r.removed) tally.appendChild(mkEl("span", "chg-quiet", r.kind));
+    row.appendChild(tally);
+    box.appendChild(row);
+  }
+  $("#side-changes").hidden = !rows.length;
+  $("#changes-count").textContent = rows.length || "";
+  applySidebarFilter();
+  syncDrawerMode(); // the diff tab may have just become available for the open note
+}
+
+$("#changes").addEventListener("click", (e) => {
+  const row = e.target.closest(".chg-row");
+  if (row) openDiff(row.dataset.path);
+});
+
 // One search box filters both the file tree and the chat history.
 function applySidebarFilter() {
   const q = $("#side-search").value.trim().toLowerCase();
@@ -796,6 +838,11 @@ function applySidebarFilter() {
     const any = Array.from(d.querySelectorAll(".tree-note")).some((n) => !n.hidden);
     d.hidden = !!q && !any;
     if (q && any) d.open = true;
+  });
+  // changed notes: same substring rule as the tree, on the same names
+  $("#changes").querySelectorAll(".chg-row").forEach((el) => {
+    el.hidden = !!q && !el.textContent.toLowerCase().includes(q) &&
+                !(el.dataset.path || "").toLowerCase().includes(q);
   });
   // sessions: substring on title; while searching, the expand cap is lifted
   $("#sessions").querySelectorAll(".session").forEach((el) => {
@@ -1971,10 +2018,18 @@ let drawerMode = "note";
 let ghostName = null; // set while the drawer holds an unresolved link, which has no reader
 
 function syncDrawerMode() {
+  const path = lastNotePath || lastViewedPath;
   document.querySelectorAll("#note-mode button").forEach((b) => {
     b.classList.toggle("active", b.dataset.mode === drawerMode);
     // A ghost has no file to read; the reader half stops being an offer.
     if (b.dataset.mode === "note") b.disabled = !!ghostName;
+    // Same rule for diff: a note this session never touched has no diff, and an
+    // enabled tab onto an empty pane is a promise the drawer cannot keep.
+    if (b.dataset.mode === "diff") {
+      b.disabled = !!ghostName || !changedPaths.has(path);
+      b.title = b.disabled ? "this session has not changed this note"
+                           : "what this session changed in this note";
+    }
   });
   // The five actions act on the SELECTED NOTE, so they survive the mode switch
   // — but a ghost has no note to act on, and an enabled button that does
@@ -1982,6 +2037,7 @@ function syncDrawerMode() {
   document.querySelectorAll("#note-actions .na").forEach((b) => { b.disabled = !!ghostName; });
   $("#note-body").hidden = drawerMode !== "note";
   $("#note-context").hidden = drawerMode !== "context";
+  $("#note-diff").hidden = drawerMode !== "diff";
 }
 
 // Shared tail of both openers: raise the panel and let fitPanes negotiate the
@@ -2047,9 +2103,64 @@ async function openContext(target) {
 $("#note-mode").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-mode]");
   if (!b || b.disabled || b.dataset.mode === drawerMode) return;
-  if (b.dataset.mode === "note") openNote(lastNotePath || lastViewedPath);
-  else openContext({ path: lastNotePath || lastViewedPath });
+  const path = lastNotePath || lastViewedPath;
+  if (b.dataset.mode === "note") openNote(path);
+  else if (b.dataset.mode === "diff") openDiff(path);
+  else openContext({ path });
 });
+
+// --- diff mode ---------------------------------------------------------------
+// The note against how it stood before this session touched it. Red is what left
+// the file, green is what arrived; the gaps are the unchanged stretches the
+// server left out. Rows are DOM nodes, never innerHTML: every line here is a line
+// of the user's own vault.
+async function openDiff(path) {
+  if (!path) return;
+  lastNotePath = path;
+  lastViewedPath = path;
+  ghostName = null;
+  drawerMode = "diff";
+  syncDrawerMode();
+  focusGraphNode(path);
+  const box = $("#note-diff");
+  box.className = "dl-wait";
+  box.textContent = "reading the diff…";
+  showDrawer(path.split("/").pop().replace(/\.md$/, ""));
+  let d;
+  try {
+    d = await (await fetch("/changes/diff?path=" + encodeURIComponent(path))).json();
+  } catch {
+    box.className = "dl-wait";
+    box.textContent = "couldn't read that diff";
+    return;
+  }
+  box.className = "";
+  box.innerHTML = "";
+  const head = mkEl("div", "dl-head");
+  head.appendChild(mkEl("span", "dl-kind " + d.kind, d.kind));
+  if (d.from) head.appendChild(mkEl("span", "dl-from", d.from + " →"));
+  if (d.added) head.appendChild(mkEl("span", "chg-add", "+" + d.added));
+  if (d.removed) head.appendChild(mkEl("span", "chg-del", "−" + d.removed));
+  box.appendChild(head);
+  if (!d.lines.length) {
+    box.appendChild(mkEl("div", "dl-empty", d.kind === "moved"
+      ? "moved — the bytes are unchanged"
+      : "no difference left: this note is back to how it started"));
+  }
+  const track = mkEl("div", "dl-track");
+  const CLS = { "+": "dl-add", "-": "dl-del", "@": "dl-gap" };
+  for (const l of d.lines) {
+    const cls = CLS[l.op] || "dl-ctx";
+    // A gap is the elision itself, not a line of the note.
+    track.appendChild(mkEl("div", "dl-line " + cls, l.op === "@" ? "⋯" : l.op + l.text));
+  }
+  box.appendChild(track);
+  if (d.clipped)
+    box.appendChild(mkEl("div", "dl-empty",
+      `${d.clipped} more lines — open the note for the rest`));
+  box.scrollTop = 0;
+  showDrawer(d.name || path);
+}
 
 function closeNote() {
   notePanel.classList.remove("open");
@@ -2912,7 +3023,7 @@ async function stCommit(row, input, rowEl) {
     graphStale = true;
     if (activeTab === "graph" && graphMode === "graph") setGraphMode("graph");
   }
-  if (row.key === "SILICA_VAULT") { loadVault(); loadVaultInfo(); loadSessions(); }
+  if (row.key === "SILICA_VAULT") { loadVault(); loadVaultInfo(); loadSessions(); loadChanges(); }
 }
 
 // --- sheets: confirmations and the bug report, inside the modal so the focus
@@ -3286,6 +3397,7 @@ async function loadHealth() {
 loadVault();
 loadSessions();
 loadVaultInfo();
+loadChanges(); // the server's ledger outlives the tab — a reload keeps the list
 loadConfig(); // header shows the active model without opening the panel
 loadHealth(); // a chat/embedder/reranker server that isn't up says so, once, here
 // Land on chat — it's the primary surface. The tab handler does the rest.

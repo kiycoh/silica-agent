@@ -1104,6 +1104,117 @@ def note(path: str = ""):
     return {"title": _clean_name(canon), "html": html}
 
 
+# --- what this session changed (GET /changes, /changes/diff) ------------------
+# The ledger is the driver's (silica.kernel.write.session_changes): the note as it
+# stood before silica first touched it. The *after* side is read off disk on every
+# request, so the list is never a claim about the past — it is the difference
+# between then and the file as it is right now, and an /undo empties a row by
+# putting the bytes back rather than by anyone remembering to remove it.
+
+_DIFF_CONTEXT = 3
+# ponytail: a hard line cap, tail dropped with a count. Past a few hundred lines a
+# diff stops being reviewable in a drawer and the note itself is one click away.
+_MAX_DIFF_LINES = 800
+# difflib opens every diff with a hunk header, but a gap marker only *means*
+# something when lines were skipped above it — which is not the case when the
+# first hunk starts at the top of the file (or at 0, for a create or a delete).
+_HUNK_AT_TOP = re.compile(r"^@@ -[01](?:,\d+)? \+[01](?:,\d+)? @@")
+
+
+def _read_note_text(rel: str) -> str | None:
+    """The note's bytes as they are now, or None if it is no longer there."""
+    try:
+        return (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
+def _tally(before: str, after: str) -> tuple[int, int]:
+    """Lines added and removed — the same opcodes the unified diff walks."""
+    import difflib
+
+    added = removed = 0
+    sm = difflib.SequenceMatcher(None, before.splitlines(), after.splitlines(), autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag in ("replace", "delete"):
+            removed += i2 - i1
+        if tag in ("replace", "insert"):
+            added += j2 - j1
+    return added, removed
+
+
+def _kind(before: str | None, after: str | None, origin: str | None, changed: bool) -> str:
+    if before is None:
+        return "created"
+    if after is None:
+        return "deleted"
+    return "moved" if origin and not changed else "modified"
+
+
+def _change_rows() -> list[dict]:
+    from silica.kernel.write import session_changes
+
+    rows = []
+    for path, base in session_changes.snapshot().items():
+        after = _read_note_text(path)
+        if base.before is None and after is None:
+            continue  # created and then rolled back: nothing happened
+        added, removed = _tally(base.before or "", after or "")
+        if not (added or removed or base.origin):
+            continue  # written with the same bytes it already had
+        rows.append({
+            "path": path,
+            "name": _clean_name(path),
+            "kind": _kind(base.before, after, base.origin, bool(added or removed)),
+            "added": added,
+            "removed": removed,
+            "from": base.origin,
+        })
+    return rows
+
+
+@app.get("/changes")
+def changes():
+    """Every note this session has changed, oldest first."""
+    return _change_rows()
+
+
+@app.get("/changes/diff")
+def changes_diff(path: str = ""):
+    """One note's diff as flat rows: `-` removed, `+` added, ` ` context, `@` gap."""
+    import difflib
+
+    from silica.kernel.write import session_changes
+
+    base = session_changes.snapshot().get(path)
+    if base is None:
+        return {"path": path, "name": _clean_name(path), "kind": "unchanged", "lines": []}
+    before, after = base.before or "", _read_note_text(path)
+    added, removed = _tally(before, after or "")
+    rows: list[dict] = []
+    diff = difflib.unified_diff(before.splitlines(), (after or "").splitlines(),
+                                lineterm="", n=_DIFF_CONTEXT)
+    for i, ln in enumerate(diff):
+        if i < 2:
+            continue  # the ---/+++ file headers difflib always emits first
+        if ln.startswith("@@"):
+            if not rows and _HUNK_AT_TOP.match(ln):
+                continue  # nothing was skipped above the first line
+            rows.append({"op": "@", "text": ""})
+            continue
+        rows.append({"op": ln[:1] or " ", "text": ln[1:]})
+    return {
+        "path": path,
+        "name": _clean_name(path),
+        "kind": _kind(base.before, after, base.origin, bool(added or removed)),
+        "from": base.origin,
+        "added": added,
+        "removed": removed,
+        "lines": rows[:_MAX_DIFF_LINES],
+        "clipped": max(0, len(rows) - _MAX_DIFF_LINES),
+    }
+
+
 # --- context explorer (GET /context) -----------------------------------------
 # One blocking call, all of it deterministic and LLM-free. Measured on a
 # 718-note vault, warm: related 0.01s, concepts(note=) 0.06s, outline/links/
@@ -1708,11 +1819,14 @@ async def confirm_setting(payload: dict):
 
 def _apply_vault_switch(path: str) -> dict:
     from silica.cli import switch_vault
+    from silica.kernel.write import session_changes
     from silica.ui.web import settings as st
 
     switched = switch_vault(path)
     if switched.error:
         return {"ok": False, "error": switched.error}
+    # The Changes list describes paths in the vault we just left.
+    session_changes.clear()
     # The resolved absolute path, not what was typed: that is what the next boot
     # must read back, and what the caches were just rebuilt for.
     result = st.apply(st.VAULT_KEY, switched.vault)
