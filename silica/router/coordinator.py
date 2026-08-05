@@ -67,7 +67,14 @@ class Coordinator:
         wq = WorkQueue(run_dir=run_dir)
         self.fsm.work_queue = wq
         self.fsm.warning_ledger = WarningLedger(run_dir=run_dir)
-        BUS.subscribe("work/*", lambda e: logger.debug("work event: %s", e))
+
+        # Named, not a lambda, so it can be unsubscribed: this used to leak one
+        # subscriber per run, and "work/*" now also matches the per-phase stream
+        # (work/phase), so run N was fanning every phase transition out to N-1
+        # dead debug closures.
+        def _log_work_event(e) -> None:
+            logger.debug("work event: %s", e)
+        BUS.subscribe("work/*", _log_work_event)
 
         max_workers = max(1, int(getattr(self.config, "subagent_max_concurrent", 3)))
         pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="subagent")
@@ -84,6 +91,7 @@ class Coordinator:
             self._stop.set()
             raise
         finally:
+            BUS.unsubscribe("work/*", _log_work_event)
             wq.close()
             if self._stop.is_set():
                 # Best-effort: cancel queued futures and return without joining threads
