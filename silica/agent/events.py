@@ -70,6 +70,35 @@ class WorkFeedbackEvent:
 
 
 @dataclass(slots=True)
+class PhaseEvent:
+    """One InjectorFSM phase transition, published on "work/phase".
+
+    Self-describing: every event restates the full run position, so a consumer
+    needs no state machine of its own and a dropped event cannot strand a view
+    on the wrong chunk — the next one re-declares where the run is.
+
+    `chunk_total` is the current FILE's chunk count, never the run's: `_chunks`
+    is flat but grows one file-group at a time (states/setup.py), so a run-wide
+    denominator would shrink the reported progress every time a later file is
+    partitioned. `file_idx` comes from `_current_file_idx`, which is correct
+    during the file-scope phases; the chunk map is not (it still points into the
+    previous file until that file's PAYLOAD lands).
+
+    No call_id: agent/loop.py dispatches tool calls strictly sequentially, so
+    these attach unambiguously to the last injector call still running.
+    """
+    phase: str          # recipe phase id, e.g. "distill"
+    status: str         # "running" | "done" | "failed"
+    scope: str          # "file" | "chunk" | "exception" (rollback)
+    file_idx: int
+    file_total: int
+    chunk_idx: int
+    chunk_total: int
+    source_file: str = ""
+    elapsed: float | None = None   # set on done/failed only
+
+
+@dataclass(slots=True)
 class WorkCompleteEvent:
     item_id: str
     kind: str

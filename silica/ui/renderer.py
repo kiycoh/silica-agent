@@ -31,44 +31,19 @@ from silica.ui.style import GLYPHS
 
 logger = logging.getLogger(__name__)
 
-# Module-level hook for pipeline phase events emitted by InjectorFSM.
-# Set by _ProgressRenderer when silica_run_injector starts; cleared on completion.
-_pipeline_phase_hook: Callable[[str, str, float | None], None] | None = None
+def emit_phase(event) -> None:
+    """Called by InjectorFSM to surface a phase transition to whoever is watching.
 
-
-def _set_pipeline_hook(hook: Callable[[str, str, float | None], None] | None) -> None:
-    global _pipeline_phase_hook
-    _pipeline_phase_hook = hook
-
-
-def emit_pipeline_phase(phase: str, status: str, elapsed: float | None = None) -> None:
-    """Called by InjectorFSM to surface phase transitions into the TUI. No-op if not registered."""
-    if _pipeline_phase_hook is not None:
-        try:
-            _pipeline_phase_hook(phase, status, elapsed)
-        except Exception:
-            pass
-
-
-# Module-level hook for files-processed progress emitted by InjectorFSM.
-_run_progress_hook: Callable[[int, int, str], None] | None = None
-
-
-def _set_run_progress_hook(hook: Callable[[int, int, str], None] | None) -> None:
-    global _run_progress_hook
-    _run_progress_hook = hook
-
-
-def emit_run_progress(done: int, total: int, label: str = "") -> None:
-    """Called by InjectorFSM to surface files-processed progress. No-op if not registered.
-
-    `label` is the document currently being processed; it drives the panel title.
+    Publishes on BUS rather than calling a registered hook: the TUI is not the
+    only frontend any more (the web turn subscribes too, silica/ui/web/server.py),
+    and a module-global hook admits exactly one consumer and cannot be observed
+    from a test without writing into that global.
     """
-    if _run_progress_hook is not None:
-        try:
-            _run_progress_hook(done, total, label)
-        except Exception:
-            pass
+    try:
+        from silica.agent.bus import BUS
+        BUS.publish("work/phase", event)
+    except Exception:
+        pass
 
 
 _batch_run_hook: Callable[[RenderEvent], None] | None = None
@@ -186,9 +161,34 @@ def _tool_target(name: str, args: dict) -> str:
     """
     if name == "silica_move":
         return f'{args.get("ref", "")} {GLYPHS["arrow"]} {args.get("to", "")}'.strip()
+    if name == "silica_run_injector":
+        return _injector_label(args)
     _, key = _TOOL_DESC.get(name, (None, None))
     val = args.get(key) if key else None
     return str(val).strip() if val else ""
+
+
+def _injector_files(args: dict) -> list[str]:
+    """The inbox files of a run_injector call, plural key first.
+
+    `inbox_file` is the legacy singular; every real caller passes `inbox_files`
+    (the CLI tells the agent to, silica/cli.py). Reading only the singular is why
+    the web transcript showed a bare "injector" with no filename at all.
+    """
+    files = args.get("inbox_files")
+    files = [f for f in files if isinstance(f, str) and f.strip()] if isinstance(files, list) else []
+    single = args.get("inbox_file")
+    if isinstance(single, str) and single.strip() and single not in files:
+        files.insert(0, single)
+    return files
+
+
+def _injector_label(args: dict) -> str:
+    files = _injector_files(args)
+    if not files:
+        return ""
+    extra = f" +{len(files) - 1}" if len(files) > 1 else ""
+    return f"{files[0]}{extra}"
 
 
 def _synthetic_tool_desc(name: str, args: dict) -> str:
@@ -196,6 +196,9 @@ def _synthetic_tool_desc(name: str, args: dict) -> str:
     if name == "silica_move":
         ref, to = args.get("ref", ""), args.get("to", "")
         return f'move [bold]"{escape(str(ref))}"[/bold] {GLYPHS["arrow"]} [bold]"{escape(str(to))}"[/bold]'
+    if name == "silica_run_injector":
+        label = _injector_label(args)
+        return f'injector [bold]"{escape(label)}"[/bold]' if label else "injector"
     verb, key = _TOOL_DESC.get(name, (name.removeprefix("silica_").replace("_", " "), None))
     val = args.get(key, "") if key else ""
     if val:
@@ -203,11 +206,24 @@ def _synthetic_tool_desc(name: str, args: dict) -> str:
     return verb
 
 
-_PHASE_LABELS: dict[str, str] = {
+# The injector recipe's two nested scopes, as the FSM actually runs them.
+# File-scope phases run once per inbox file; the chunk cycle re-enters at
+# COLLISION/DELEGATE for every chunk of that file (orchestrator.py) and never at
+# RECON. Splitting them is what lets a frontend reset the chunk track per chunk
+# without wrongly clearing the file track.
+#
+# Hardcoded on purpose: merge_overlay (silica/router/overlay.py, ADR-0005)
+# rejects any Domain Pack that adds, removes or reorders phases, so this can only
+# drift from an edit to recipes/injector.yaml — which tests/test_phase_track.py
+# pins.
+_FILE_PHASES: dict[str, str] = {
     "recon":      "recon",
     "crossdedup": "cross-dedup",
     "payload":    "payload",
     "salience":   "salience",
+}
+
+_CHUNK_PHASES: dict[str, str] = {
     "collision":  "collision",
     "distill":    "distill",
     "sanitize":   "sanitize",
@@ -219,11 +235,15 @@ _PHASE_LABELS: dict[str, str] = {
     "backlink":   "backlink",
     "lint":       "lint",
     "cleanup":    "cleanup",
-    "rollback":   "rollback",
 }
 
+# rollback carries on_gate_fail in the recipe: an exception branch, not a step.
+# It is deliberately absent from _PHASE_ORDER — as the 16th entry it rendered as
+# "· rollback" pending on every healthy run, showing "everything went wrong" as
+# something about to happen. It is drawn only once it actually fires.
+_PHASE_LABELS: dict[str, str] = {**_FILE_PHASES, **_CHUNK_PHASES, "rollback": "rollback"}
 
-_PHASE_ORDER: list[str] = list(_PHASE_LABELS.values())
+_PHASE_ORDER: list[str] = [*_FILE_PHASES.values(), *_CHUNK_PHASES.values()]
 _MICRO_PHASE_ORDER: tuple[str, ...] = ("reading", "calling_llm", "committing")
 
 
@@ -310,6 +330,8 @@ class _ProgressRenderer:
         self._injector_call_id: str | None = None
         self._pipeline_phases: list[dict] = []   # ordered: {phase, status, elapsed}
         self._phase_start_times: dict[str, float] = {}
+        # Run position, restated by every PhaseEvent (file/chunk counters + label).
+        self._inject_pos: dict = {}
         # Inject progress bar (tracks files processed / total)
         self._inject_inbox_label: str = ""
         self._inject_file_count: int = 0
@@ -328,6 +350,7 @@ class _ProgressRenderer:
         _batch_run_hook = self.__call__
         from silica.agent.bus import BUS
         BUS.subscribe("work/feedback", self._on_work_feedback)
+        BUS.subscribe("work/phase", self._on_pipeline_phase)
 
     def _flush_ok_run(self) -> None:
         """Print (and clear) the buffered ✓ line, aggregated when count > 1."""
@@ -383,8 +406,29 @@ class _ProgressRenderer:
             self._live.stop()
             self._live = None
 
-    def _on_pipeline_phase(self, phase: str, status: str, elapsed: float | None) -> None:
-        """Callback registered as the global pipeline hook while injector runs."""
+    def _on_pipeline_phase(self, event) -> None:
+        """Called from BUS when the InjectorFSM publishes a PhaseEvent.
+
+        Subscribed for the renderer's whole life, so it guards on the injector
+        being the live tool exactly as _on_work_feedback guards on _batch.
+        """
+        if self._injector_call_id is None:
+            return
+        phase, status, elapsed = event.phase, event.status, event.elapsed
+        # Position rides on every event, so a missed one can't leave the header
+        # naming the wrong file or chunk.
+        self._inject_pos = {
+            "file_idx": event.file_idx, "file_total": event.file_total,
+            "chunk_idx": event.chunk_idx, "chunk_total": event.chunk_total,
+        }
+        if event.source_file:
+            self._inject_inbox_label = event.source_file
+        if self._inject_progress is not None and self._inject_task_id is not None:
+            self._inject_progress.update(
+                self._inject_task_id,
+                completed=min(event.file_idx, event.file_total),
+                total=event.file_total,
+            )
         label = _PHASE_LABELS.get(phase, phase)
         if status == "running":
             now = time.monotonic()
@@ -409,21 +453,20 @@ class _ProgressRenderer:
                 self._pipeline_phases.append({"phase": label, "status": status, "elapsed": dur})
         self._update_live()
 
-    def _on_run_progress(self, done: int, total: int, label: str = "") -> None:
-        """Drive the injector bar by FILES processed (monotonic, always completes).
-
-        Unlike the old phase-count bar, this never stalls below 100%: the FSM
-        iterates every chunk, so files done reaches the file total. Clamp to
-        guard against a stale total. `label`, when non-empty, retitles the panel
-        with the document currently being processed.
-        """
-        if label:
-            self._inject_inbox_label = label
-        if self._inject_progress is not None and self._inject_task_id is not None:
-            self._inject_progress.update(
-                self._inject_task_id, completed=min(done, total), total=total
-            )
-        self._update_live()
+    def _position_suffix(self) -> str:
+        """` · file 1/2 · chunk 3/5` for the injector header, empty before the
+        first PhaseEvent. Both denominators are per-file and known when shown:
+        the run-wide chunk total does not exist until the last file is
+        partitioned (see PhaseEvent)."""
+        pos = self._inject_pos
+        if not pos:
+            return ""
+        bits = []
+        if pos.get("file_total", 0) > 1:
+            bits.append(f"file {pos['file_idx'] + 1}/{pos['file_total']}")
+        if pos.get("chunk_total", 0) > 0:
+            bits.append(f"chunk {pos['chunk_idx'] + 1}/{pos['chunk_total']}")
+        return f" [dim]·[/] [dim]{' · '.join(bits)}[/]" if bits else ""
 
     def _on_work_feedback(self, event) -> None:
         """Called from BUS when a sub-agent publishes a WorkFeedbackEvent."""
@@ -457,7 +500,8 @@ class _ProgressRenderer:
                 # The running phase is already marked ◉ in the track — no separate phase line.
                 header = Spinner(
                     "dots",
-                    text=f" [bold]injector[/] [dim]·[/] {escape(self._inject_inbox_label)}",
+                    text=f" [bold]injector[/] [dim]·[/] {escape(self._inject_inbox_label)}"
+                         f"{self._position_suffix()}",
                     style="brand.cyan",
                 )
                 parts: list = [header, Padding(_StageTrack(self._pipeline_phases, CONSOLE.width), (0, 0, 0, 2))]
@@ -635,17 +679,12 @@ class _ProgressRenderer:
                 self._active_tools[event.call_id] = {"name": event.name, "args": event.args}
                 if event.name == "silica_run_injector":
                     self._injector_call_id = event.call_id
-                    files = event.args.get("inbox_files", [])
-                    files = files if isinstance(files, list) else []
-                    single = event.args.get("inbox_file", "")
-                    if single and single not in files:
-                        files = [single, *files]
+                    files = _injector_files(event.args)
                     self._inject_file_count = max(1, len(files))
                     self._inject_inbox_label = str(files[0] if files else "?")
                     self._pipeline_phases = []
                     self._phase_start_times = {}
-                    _set_pipeline_hook(self._on_pipeline_phase)
-                    _set_run_progress_hook(self._on_run_progress)
+                    self._inject_pos = {}
                     # File bar only when there is more than one file — a 0/1→1/1 bar is noise.
                     if self._inject_file_count > 1:
                         self._inject_progress = Progress(
@@ -702,11 +741,12 @@ class _ProgressRenderer:
                 desc = _synthetic_tool_desc(event.name, event.args)
 
                 if event.name == "silica_run_injector" and self._injector_call_id == event.call_id:
-                    # Deregister hooks; print compact single-line summary
+                    # Close the live block; print compact single-line summary. The
+                    # BUS subscription stays for the renderer's life — clearing
+                    # _injector_call_id is what silences it (see _on_pipeline_phase).
                     self._flush_ok_run()
-                    _set_pipeline_hook(None)
-                    _set_run_progress_hook(None)
                     self._injector_call_id = None
+                    self._inject_pos = {}
                     if self._inject_progress is not None:
                         self._inject_progress.stop()
                         self._inject_progress = None
@@ -719,11 +759,12 @@ class _ProgressRenderer:
                         _data = json.loads(event.result) if isinstance(event.result, str) else {}
                     except Exception:
                         _data = {}
-                    bits = [f"{self._inject_file_count or 1} file"]
+                    n_files = self._inject_file_count or 1
+                    bits = [f"{n_files} file" if n_files == 1 else f"{n_files} files"]
                     if _data.get("yield_notes"):
-                        bits.append(f"{_data['yield_notes']} note")
+                        bits.append(f"{_data['yield_notes']} notes")
                     if _data.get("yield_links"):
-                        bits.append(f"{_data['yield_links']} link")
+                        bits.append(f"{_data['yield_links']} links")
                     yield_str = " [dim]·[/] ".join(bits)
                     if failed_phases:
                         last_phase = self._pipeline_phases[-1]["phase"] if self._pipeline_phases else "?"
@@ -798,10 +839,11 @@ class _ProgressRenderer:
         _batch_run_hook = None
         self._flush_ok_run()
         self._stream_buf = ""
-        _set_pipeline_hook(None)
-        _set_run_progress_hook(None)
+        self._injector_call_id = None
+        self._inject_pos = {}
         from silica.agent.bus import BUS
         BUS.unsubscribe("work/feedback", self._on_work_feedback)
+        BUS.unsubscribe("work/phase", self._on_pipeline_phase)
         if self._batch is not None:
             batch = self._batch
             self._batch = None

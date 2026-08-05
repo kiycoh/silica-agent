@@ -556,9 +556,16 @@ def test_injector_single_file_has_no_bar():
         CONFIG.tool_progress = orig_mode
 
 
+def _phase(phase, status, *, scope="chunk", fi=0, ft=1, ci=0, ct=0, src="", elapsed=None):
+    from silica.agent.events import PhaseEvent
+    return PhaseEvent(phase=phase, status=status, scope=scope, file_idx=fi,
+                      file_total=ft, chunk_idx=ci, chunk_total=ct,
+                      source_file=src, elapsed=elapsed)
+
+
 def test_phase_refires_do_not_touch_file_bar():
-    """The bar tracks FILES processed, not phases — so phase re-fires (retries /
-    deferred reprocessing) never move it. The phase track still dedups by label."""
+    """The bar tracks FILES, not phases — so phase re-fires (retries / deferred
+    reprocessing) within one file never move it. The track still dedups by label."""
     from rich.progress import (
         Progress, SpinnerColumn, BarColumn, MofNCompleteColumn, TimeElapsedColumn,
     )
@@ -566,6 +573,7 @@ def test_phase_refires_do_not_touch_file_bar():
 
     cb = make_progress_callback()
     try:
+        cb._injector_call_id = "1"   # the guard: events are ignored otherwise
         cb._inject_progress = Progress(
             SpinnerColumn(), BarColumn(), MofNCompleteColumn(), TimeElapsedColumn(),
             auto_refresh=False,
@@ -575,10 +583,10 @@ def test_phase_refires_do_not_touch_file_bar():
         cb._phase_start_times = {}
 
         phases = ["payload", "salience", "collision"]
-        for _ in range(3):  # three passes over the same phases
+        for _ in range(3):  # three passes over the same phases, all inside file 0
             for p in phases:
-                cb._on_pipeline_phase(p, "running", None)
-                cb._on_pipeline_phase(p, "done", 0.1)
+                cb._on_pipeline_phase(_phase(p, "running", ft=3))
+                cb._on_pipeline_phase(_phase(p, "done", ft=3, elapsed=0.1))
 
         # Bar untouched by phase events; track deduped to 3 distinct phases.
         assert cb._inject_progress.tasks[cb._inject_task_id].completed == 0
@@ -587,62 +595,96 @@ def test_phase_refires_do_not_touch_file_bar():
         cb.close()
 
 
-def test_count_files_done():
-    from silica.router.orchestrator import _count_files_done
-    # file 0 → chunks 0,1 ; file 1 → chunk 2 ; file 2 → chunk 3
-    flat_map = {0: (0, 0), 1: (0, 1), 2: (1, 0), 3: (2, 0)}
-    assert _count_files_done(flat_map, upto_idx=0) == 0   # nothing past 0
-    assert _count_files_done(flat_map, upto_idx=2) == 1   # file 0 fully behind
-    assert _count_files_done(flat_map, upto_idx=4) == 3   # all done
-    assert _count_files_done({}, upto_idx=5) == 0
+def test_phase_events_ignored_when_injector_not_running():
+    """The renderer subscribes to work/phase for its whole life, so it must drop
+    events arriving outside an injector call — as _on_work_feedback does for
+    batches. Without the guard a stray event would open a phase track under
+    whatever tool happened to be live."""
+    from silica.ui.renderer import make_progress_callback
 
-
-def _capture_file_progress(fn):
-    """Run fn() with the run-progress hook installed; return [(done, total), ...]."""
-    from silica.ui import renderer
-    seen: list[tuple[int, int]] = []
-    renderer._set_run_progress_hook(lambda d, t, label="": seen.append((d, t)))
+    cb = make_progress_callback()
     try:
-        fn()
+        assert cb._injector_call_id is None
+        cb._on_pipeline_phase(_phase("distill", "running"))
+        assert cb._pipeline_phases == []
     finally:
-        renderer._set_run_progress_hook(None)
-    return seen
+        cb.close()
 
 
 def test_committed_file_counts_toward_bar_done():
     """Regression: an already-committed (dedup'd) file is in the denominator
     (len(inbox_files)) but is skipped before PAYLOAD, so it never enters the
-    flat map. It must still count as done, or the bar stalls below 100%."""
+    chunk map. It must still count as done, or the bar stalls below 100%.
+
+    _current_file_idx starts past the committed prefix, so the position the FSM
+    reports already accounts for it — this pins that, not the old chunk-map count.
+    """
     from silica.router.orchestrator import InjectorFSM
 
     with patch("silica.kernel.write.ledger.get_ledger"):
         fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
     fsm._committed_file_indices = {0}          # file 0 already nucleated → skipped
-    fsm._chunk_flat_to_fi_ci = {0: (1, 0)}     # only file 1 got payloaded
-    fsm._chunks = [{}]
+    fsm._current_file_idx = fsm._next_uncommitted_file_idx(0)
 
-    seen = _capture_file_progress(lambda: fsm._emit_files_progress(len(fsm._chunks)))
-    done, total = seen[-1]
-    assert (done, total) == (2, 2), f"bar stalled at {done}/{total} — committed file not counted"
+    pos = fsm._phase_position("recon")
+    assert pos["file_idx"] == 1, "committed file not counted as behind us"
+    assert pos["file_total"] == 2
+    assert pos["source_file"] == "Inbox/b.md"
 
 
-def test_file_advance_surfaces_finished_file():
-    """Regression: finishing a file (advancing to the next) must emit progress,
-    else a run of 1-chunk files sits at 0/N until the very last chunk."""
-    from silica.router.orchestrator import InjectorFSM, InjectorState
+def test_phase_position_names_the_file_being_processed():
+    """Regression: during file 2's RECON/CROSSDEDUP/PAYLOAD the chunk map still
+    points into file 1 (it only gains file 2's entries at file 2's PAYLOAD), so
+    deriving the position from it named the previous document."""
+    from silica.router.orchestrator import InjectorFSM
 
     with patch("silica.kernel.write.ledger.get_ledger"):
         fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
-    fsm._chunk_flat_to_fi_ci = {0: (0, 0)}     # file 0 payloaded, one chunk
-    fsm._chunks = [{}]
-    fsm._current_chunk_idx = 0
-    fsm.context["payload"] = {"chunks": fsm._chunks}
+    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1)}   # only file 0 payloaded
+    fsm._current_chunk_idx = 1
+    fsm._current_file_idx = 1                            # advanced, RECON of file 1
 
-    with patch.object(fsm, "_advance_file_or_done", return_value=True):
-        seen = _capture_file_progress(fsm._on_pipeline_end)
-    assert seen, "no progress emitted when a file finished and the FSM advanced"
-    done, _total = seen[-1]
-    assert done >= 1, f"finished file 0 not reflected (done={done})"
+    pos = fsm._phase_position("recon")
+    assert pos["source_file"] == "Inbox/b.md"
+    assert pos["file_idx"] == 1
+    assert pos["scope"] == "file"
+    # A file-scope phase runs before this file has chunks: reporting the previous
+    # file's chunk index here would rewind the counter under the reader.
+    assert pos["chunk_idx"] == 0
+
+
+def test_phase_position_chunk_total_is_per_file():
+    """The run-wide chunk total does not exist until the last file is
+    partitioned (_chunks grows one file-group at a time), so the denominator
+    shown must be the current file's."""
+    from silica.router.orchestrator import InjectorFSM
+
+    with patch("silica.kernel.write.ledger.get_ledger"):
+        fsm = InjectorFSM(inbox_files=["Inbox/a.md", "Inbox/b.md"], target_dir="Concepts")
+    fsm._file_chunks = {0: {"chunks": [{}, {}, {}]}, 1: {"chunks": [{}, {}]}}
+    fsm._chunk_flat_to_fi_ci = {0: (0, 0), 1: (0, 1), 2: (0, 2), 3: (1, 0), 4: (1, 1)}
+    fsm._chunks = [{}] * 5
+
+    fsm._current_file_idx, fsm._current_chunk_idx = 0, 1
+    assert fsm._phase_position("distill")["chunk_total"] == 3
+    assert fsm._phase_position("distill")["chunk_idx"] == 1
+
+    fsm._current_file_idx, fsm._current_chunk_idx = 1, 4
+    pos = fsm._phase_position("distill")
+    assert (pos["chunk_idx"], pos["chunk_total"]) == (1, 2), "counter must restart per file"
+
+
+def test_failed_chunk_records_its_phase():
+    """The failure ledger must say WHERE a chunk died structurally: on reload
+    there is no phase stream, and the phase used to exist only inside the error
+    prose. rollback must not overwrite the gate that actually failed."""
+    from silica.router.orchestrator import InjectorFSM
+
+    with patch("silica.kernel.write.ledger.get_ledger"):
+        fsm = InjectorFSM(inbox_files=["Inbox/a.md"], target_dir="Concepts")
+    fsm._progress_note("f0_c0_lint", "lint", "running")
+    fsm._progress_note("f0_c0_rollback", "rollback", "running")
+    assert fsm._failed_phase_id() == "lint"
 
 
 def test_injector_bar_total_is_file_count():
@@ -667,7 +709,7 @@ def test_injector_bar_total_is_file_count():
         CONFIG.tool_progress = orig_mode
 
 
-def test_run_progress_advances_file_bar():
+def test_phase_event_advances_file_bar():
     from rich.progress import (
         Progress, SpinnerColumn, BarColumn, MofNCompleteColumn, TimeElapsedColumn,
     )
@@ -675,31 +717,51 @@ def test_run_progress_advances_file_bar():
 
     cb = make_progress_callback()
     try:
+        cb._injector_call_id = "1"
         cb._inject_progress = Progress(
             SpinnerColumn(), BarColumn(), MofNCompleteColumn(), TimeElapsedColumn(),
             auto_refresh=False,
         )
         cb._inject_task_id = cb._inject_progress.add_task("", total=3)
-        cb._on_run_progress(2, 3)
+        cb._on_pipeline_phase(_phase("recon", "running", scope="file", fi=2, ft=3))
         assert cb._inject_progress.tasks[cb._inject_task_id].completed == 2
-        cb._on_run_progress(9, 3)  # clamp: never overflow
-        assert cb._inject_progress.tasks[cb._inject_task_id].completed == 3
+        cb._on_pipeline_phase(_phase("recon", "running", scope="file", fi=9, ft=3))
+        assert cb._inject_progress.tasks[cb._inject_task_id].completed == 3  # clamped
     finally:
         cb.close()
 
 
-def test_run_progress_updates_inbox_label():
+def test_phase_event_updates_inbox_label_and_position():
     """Regression: the panel title must follow the document currently processed,
-    not stay frozen on the first file."""
+    not stay frozen on the first file. Position rides on every event, so a
+    missed one cannot leave the header naming the wrong file."""
     from silica.ui.renderer import make_progress_callback
 
     cb = make_progress_callback()
     try:
+        cb._injector_call_id = "1"
         cb._inject_inbox_label = "a.md"
-        cb._on_run_progress(1, 2, label="b.md")
+        cb._on_pipeline_phase(_phase("distill", "running", fi=1, ft=2, ci=2, ct=5, src="b.md"))
         assert cb._inject_inbox_label == "b.md"
-        cb._on_run_progress(2, 2, label="")  # empty label must not clobber
-        assert cb._inject_inbox_label == "b.md"
+        assert "file 2/2" in cb._position_suffix()
+        assert "chunk 3/5" in cb._position_suffix()
+        cb._on_pipeline_phase(_phase("lint", "running", fi=1, ft=2, ci=2, ct=5, src=""))
+        assert cb._inject_inbox_label == "b.md"  # empty label must not clobber
+    finally:
+        cb.close()
+
+
+def test_single_file_run_shows_no_file_counter():
+    """A `file 1/1` counter is noise, the same reason the bar is suppressed."""
+    from silica.ui.renderer import make_progress_callback
+
+    cb = make_progress_callback()
+    try:
+        cb._injector_call_id = "1"
+        cb._on_pipeline_phase(_phase("distill", "running", fi=0, ft=1, ci=1, ct=4))
+        suffix = cb._position_suffix()
+        assert "file" not in suffix
+        assert "chunk 2/4" in suffix
     finally:
         cb.close()
 
@@ -726,11 +788,36 @@ def test_injector_summary_shows_yield(capsys):
                 duration_s=4.2, iteration=1,
             ))
         out = capsys.readouterr().out
-        assert "3 file" in out
-        assert "7 note" in out
-        assert "12 link" in out
+        assert "3 files" in out
+        assert "7 notes" in out
+        assert "12 links" in out
     finally:
         cb.close()
         CONFIG.tool_progress = orig_mode
+
+
+def test_injector_projection_carries_yield_counts():
+    """The summary line above reads yield_notes/yield_links off the tool result,
+    but the projection never copied them out of fsm.context — so every real run
+    printed "1 file · 3m12s" and never what it had created. Pins the projection,
+    not just the renderer's willingness to display it."""
+    from unittest.mock import MagicMock, patch as _patch
+
+    with _patch("silica.router.coordinator.Coordinator") as Coord, \
+         _patch("silica.kernel.vault_manifest.get_active_manifest") as manifest, \
+         _patch("silica.sources.registry.adapter_for", return_value=object()):
+        manifest.return_value.sources = []
+        inst = MagicMock()
+        inst.run.return_value = {
+            "final_status": "Success", "committed_chunks": 2,
+            "yield_notes": 7, "yield_links": 12,
+        }
+        Coord.return_value = inst
+        from silica.tools.runners import silica_run_injector
+        out = silica_run_injector(inbox_files=["Inbox/a.md"], target_dir="Concepts")
+
+    assert out["yield_notes"] == 7
+    assert out["yield_links"] == 12
+    assert out["files_total"] == 1
 
 

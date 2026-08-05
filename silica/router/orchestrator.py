@@ -51,16 +51,11 @@ from silica.router import states
 logger = logging.getLogger(__name__)
 
 
-def _count_files_done(flat_map: dict[int, tuple[int, int]], upto_idx: int) -> int:
-    """Number of inbox files whose every chunk's flat index is < upto_idx.
-
-    Drives the TUI file-progress bar: a file is "done" once the FSM has advanced
-    past its last chunk. Pass upto_idx=len(chunks) to mark all files done.
-    """
-    last_flat: dict[int, int] = {}
-    for flat, (fi, _ci) in flat_map.items():
-        last_flat[fi] = max(last_flat.get(fi, -1), flat)
-    return sum(1 for last in last_flat.values() if last < upto_idx)
+# Recipe phases that run once per inbox file, before that file has any chunks.
+# Everything else in injector.yaml is per-chunk, except rollback (on_gate_fail).
+# Mirrored for display by _FILE_PHASES/_CHUNK_PHASES in silica/ui/renderer.py;
+# tests/test_phase_track.py pins both against the recipe.
+_FILE_SCOPE_PHASES = frozenset({"recon", "crossdedup", "payload", "salience"})
 
 
 def _refresh_cooccurrence_for_ops(
@@ -316,6 +311,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._current_file_idx: int = 0
         self._file_chunks: dict[int, dict] = {}  # fi → {"source_file": str, "chunks": [...]}
         self._chunk_flat_to_fi_ci: dict[int, tuple[int, int]] = {}  # flat_idx → (file_idx, chunk_idx)
+        self._last_running_phase: str = ""  # phase in flight, for the failure ledger
         # CROSSDEDUP incremental state: (concept_name, vec) of prior files' survivors
         self._crossdedup_vecs: list[tuple[str, list[float]]] = []
 
@@ -466,12 +462,52 @@ class InjectorFSM(BaseFSM[InjectorState]):
         except Exception as _e:
             logger.debug("progress shadow error (suppressed): %s", _e)
 
-        # Emit phase event to TUI (no-op if no hook is registered)
+        # The phase in flight, for the failure ledger. rollback is excluded so it
+        # cannot overwrite the gate that actually failed — it runs as a
+        # consequence of that failure, and the order of the two is not fixed.
+        if status == "running" and capability_name != "rollback":
+            self._last_running_phase = capability_name
+
+        # Surface the transition to whatever frontend is watching (no-op if none).
         try:
-            from silica.ui.renderer import emit_pipeline_phase
-            emit_pipeline_phase(capability_name, status)
+            from silica.agent.events import PhaseEvent
+            from silica.ui.renderer import emit_phase
+            emit_phase(PhaseEvent(phase=capability_name, status=status,
+                                  **self._phase_position(capability_name)))
         except Exception:
             pass
+
+    def _failed_phase_id(self) -> str:
+        """The phase the current chunk died in, or "" if none was recorded."""
+        return getattr(self, "_last_running_phase", "") or ""
+
+    def _phase_position(self, capability_name: str) -> dict:
+        """Where the run is, for a PhaseEvent. Every event restates all of it.
+
+        file_idx comes from _current_file_idx, NOT from the chunk map: the map
+        still points into the previous file during the next file's
+        RECON/CROSSDEDUP/PAYLOAD (it only gains that file's entries at its own
+        PAYLOAD), so deriving it there names the wrong document.
+
+        chunk_total is this FILE's chunk count. The run-wide total does not exist
+        until the last file is partitioned — `_chunks` grows one file-group at a
+        time — so a run-wide denominator would keep moving under the reader.
+        """
+        fi = self._current_file_idx
+        _, ci = self._chunk_flat_to_fi_ci.get(self._current_chunk_idx, (fi, 0))
+        scope = ("exception" if capability_name == "rollback"
+                 else "file" if capability_name in _FILE_SCOPE_PHASES
+                 else "chunk")
+        return {
+            "scope": scope,
+            "file_idx": fi,
+            "file_total": len(self.inbox_files),
+            # A file-scope phase runs before this file has chunks; reporting the
+            # previous file's chunk index there would rewind the counter.
+            "chunk_idx": 0 if scope == "file" else ci,
+            "chunk_total": len(self._file_chunks.get(fi, {}).get("chunks", [])),
+            "source_file": self.inbox_files[fi] if fi < len(self.inbox_files) else "",
+        }
 
     @property
     def _chunk_ctx(self) -> dict:
@@ -730,19 +766,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
             except Exception as e:
                 logger.debug("flush: lexical index save skipped (%s)", e)
 
-    def _emit_files_progress(self, upto_idx: int) -> None:
-        """Surface files-processed/total to the TUI bar (no-op without a renderer)."""
-        try:
-            from silica.ui.renderer import emit_run_progress
-            total = len(self.inbox_files)
-            # Committed (dedup'd) files are skipped before PAYLOAD, so they never
-            # enter the flat map — count them as done or the bar can't reach total.
-            done = _count_files_done(self._chunk_flat_to_fi_ci, upto_idx)
-            done += len(getattr(self, "_committed_file_indices", set()))
-            emit_run_progress(min(done, total), total, label=self._current_source_file)
-        except Exception:
-            pass
-
     def _next_uncommitted_file_idx(self, start: int) -> int:
         """Return the first file index >= start not already committed in the ledger."""
         idx = start
@@ -779,14 +802,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
         next_idx = self._next_uncommitted_chunk_idx(self._current_chunk_idx + 1)
         if next_idx < len(self._chunks):
             self._current_chunk_idx = next_idx
-            self._emit_files_progress(next_idx)
             logger.info(f"✔ Batch completed successfully. Advancing to batch {self._current_chunk_idx + 1}")
             # Restart per-chunk loop from COLLISION (Phase 5) if present, else DELEGATE
             self.state = InjectorState.COLLISION if self._has_collision_phase else InjectorState.DELEGATE
         elif self._advance_file_or_done():
-            self._emit_files_progress(len(self._chunks))  # surface the finished file
+            pass  # routed to RECON; the next phase event carries the new position
         else:
-            self._emit_files_progress(len(self._chunks))
             logger.info("🎉 All batched chunks have been successfully injected and verified!")
             self.state = InjectorState.DONE
 
@@ -850,8 +871,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # which once collapsed 6 batch failures into "batch 5 failed" and fed a
         # false "5/6 ok" success report downstream.
         self.context["has_partial_failure"] = True
+        # `phase` is recorded structurally, not left to be parsed back out of the
+        # error prose: a frontend replaying a stored run (no live phase stream)
+        # can then still say WHERE each chunk died, not just that it did.
         self.context.setdefault("failed_chunks", []).append(
-            {"chunk": f"f{fi}_c{ci}", "error": abort_reason[:200]}
+            {"chunk": f"f{fi}_c{ci}", "phase": self._failed_phase_id(),
+             "error": abort_reason[:200]}
         )
 
         # Per-file accounting is CLEANUP-anchored, but a failed last chunk never
@@ -875,17 +900,14 @@ class InjectorFSM(BaseFSM[InjectorState]):
         next_idx = self._next_uncommitted_chunk_idx(self._current_chunk_idx + 1)
         if next_idx < len(self._chunks):
             self._current_chunk_idx = next_idx
-            self._emit_files_progress(next_idx)
             logger.info(
                 "Chunk f%d_c%d failed — advancing to chunk %d of %d.",
                 fi, ci, self._current_chunk_idx + 1, len(self._chunks),
             )
             self.state = InjectorState.COLLISION if self._has_collision_phase else InjectorState.DELEGATE
         elif self._advance_file_or_done():
-            self._emit_files_progress(len(self._chunks))  # surface the finished file
             logger.info("Chunk f%d_c%d failed (last chunk of file) — advancing to next file.", fi, ci)
         else:
-            self._emit_files_progress(len(self._chunks))
             logger.info(
                 "Chunk f%d_c%d failed (last uncommitted chunk). Run concludes with partial success.", fi, ci
             )
