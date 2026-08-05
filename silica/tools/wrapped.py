@@ -88,9 +88,12 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
                           kept as a best-effort hint for backends that support it.
       delete  → recreate_deleted(path, prior_content=<full body>)
     """
+    from silica.kernel.vault_manifest import seed_mirror_copy
+
     ops = parse_ops(ops_data)
     patch_refs: list[NoteRef] = []
     prior_contents: dict[str, str | None] = {}
+    seeded_here: set[str] = set()
     inverses: list[InverseOp] = []
 
     for op in ops:
@@ -126,8 +129,21 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
                 nc = DRIVER.read_note(ref)
                 prior_contents[path] = nc.content
             except Exception as e:
-                logger.warning("build_txn: could not read prior content for %s: %s", path, e)
-                prior_contents[path] = None
+                # Safe mode: the patch lands on the note's mirror copy, which
+                # _execute_patch seeds at WRITE time — after this snapshot and
+                # after the pre-write graph. Seed it here instead. Born later,
+                # the copy gave every same-folder [[link]] a nearer target
+                # between the two graph snapshots, and the original's lost
+                # backlinks read as vandalism to the regression gate; born now,
+                # both worlds contain it and the diff is clean. It also gives
+                # the rollback a body to restore instead of skipping the op.
+                seed_mirror_copy(path)
+                try:
+                    prior_contents[path] = DRIVER.read_note(ref).content
+                    seeded_here.add(path)
+                except Exception:
+                    logger.warning("build_txn: could not read prior content for %s: %s", path, e)
+                    prior_contents[path] = None
         elif op_type == OpType.delete:
             name = path.rsplit("/", 1)[-1].removesuffix(".md")
             ref = NoteRef(name=name, path=path)
@@ -151,10 +167,18 @@ def build_txn(ops_data: list[Op] | list[dict]) -> Txn:
     base_txn = DRIVER.snapshot_versions(patch_refs)
 
     for ref in patch_refs:
+        key = ref.path or ref.name
+        if key in seeded_here:
+            # A copy this txn brought into being is undone by removing it, not
+            # by restoring a body the vault never had before the chunk. The
+            # created_paths below picks it up too, so the graph gate grants it
+            # the same forward-reference exemption as any other new note.
+            inverses.append(InverseOp(kind=InverseOpKind.delete_created, path=ref.path))
+            continue
         inverses.append(InverseOp(
             kind=InverseOpKind.restore_version,
             path=ref.path,
-            prior_content=prior_contents.get(ref.path or ref.name),
+            prior_content=prior_contents.get(key),
         ))
 
     created_paths = [

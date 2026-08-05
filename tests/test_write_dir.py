@@ -455,6 +455,44 @@ def test_a_batch_with_no_reason_at_all_is_still_rejected(mirror_vault):
     assert len(rejected) == 3
 
 
+def test_the_mirror_copy_is_born_at_snapshot_time(mirror_vault):
+    # The graph gate diffs a pre-write world against a post-write one. A copy
+    # that appears only at WRITE time lands between the two, and every
+    # same-folder [[link]] re-resolves onto it — the original loses backlinks
+    # it still has and the gate rolls the chunk back. Seeded here, both
+    # snapshots see it, and its rollback is a delete, not a restore of a body
+    # that never existed.
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.kernel.write.ops import InverseOpKind
+    from silica.tools.wrapped import build_txn
+
+    mirror_vault.note("Progetti/Foo.md", "# Foo\ncorpo originale\n")
+    txn = build_txn([_op("patch", path="silica/Progetti/Foo.md", snippet="x" * 40)])
+
+    copy = Path(CONFIG.vault_path) / "silica" / "Progetti" / "Foo.md"
+    assert copy.read_text(encoding="utf-8") == "# Foo\ncorpo originale\n"
+    assert txn.created_paths == ["silica/Progetti/Foo.md"]
+    assert [i.kind for i in txn.inverses] == [InverseOpKind.delete_created]
+
+
+def test_a_mirror_copy_an_earlier_chunk_seeded_is_restored_not_deleted(mirror_vault):
+    # Only the copy this txn brought into being is undone by removing it. One
+    # an earlier chunk already enriched holds content of its own, and deleting
+    # it would throw away every note distilled into it before this one.
+    from silica.kernel.write.ops import InverseOpKind
+    from silica.tools.wrapped import build_txn
+
+    mirror_vault.note("Progetti/Foo.md", "# Foo\ncorpo originale\n")
+    mirror_vault.note("silica/Progetti/Foo.md", "# Foo\ngia' arricchita\n")
+    txn = build_txn([_op("patch", path="silica/Progetti/Foo.md", snippet="x" * 40)])
+
+    assert txn.created_paths == []
+    assert [i.kind for i in txn.inverses] == [InverseOpKind.restore_version]
+    assert txn.inverses[0].prior_content == "# Foo\ngia' arricchita\n"
+
+
 def test_a_code_vault_never_asks_for_a_reason(bounded_vault):
     # docs/silica is Silica's own tree in a repo, not a mirror of the repo, so
     # "this folder does not exist at the root" says nothing there.
