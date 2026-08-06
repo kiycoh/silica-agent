@@ -34,12 +34,14 @@ something. Notes or a codebase, one vault holds both. Local-first, readable with
 </p>
 
 <p align="center">
-  <img src="assets/demo-test.gif" alt="Silica answering, auditing, writing to and reverting a real vault" width="900" />
+  <a href="https://youtu.be/nYLiKTtMZuY">
+    <img src="assets/gui_presentation_poster.png" alt="The Silica web GUI, showing a real vault as a graph with semantic zones" width="900" />
+  </a>
 </p>
 
 <p align="center">
-  <sub>A real 710-note vault, adopted as-is. An answer grounded in it, a structural audit of it,<br/>
-  a write to it, and the same write taken back out.</sub>
+  <sub><a href="https://youtu.be/nYLiKTtMZuY">▶ Watch the walkthrough</a> &nbsp;·&nbsp;
+  a real vault nucleated, read, and mapped, in three minutes.</sub>
 </p>
 
 <p align="center">
@@ -263,6 +265,15 @@ A chat-first interface at `http://localhost:8765`. Query and curate from the bro
 ### 2. Terminal &nbsp;·&nbsp; `silica`
 
 The interactive REPL. Every command in the [reference](#command-reference) lives here, and it is the fastest driver once you know the verbs.
+
+<p align="center">
+  <img src="assets/demo-test.gif" alt="Silica answering, auditing, writing to and reverting a real vault" width="900" />
+</p>
+
+<p align="center">
+  <sub>A real 710-note vault, adopted as-is. An answer grounded in it, a structural audit of it,<br/>
+  a write to it, and the same write taken back out.</sub>
+</p>
 
 ### 3. Obsidian plugin &nbsp;·&nbsp; `silica connect`
 
