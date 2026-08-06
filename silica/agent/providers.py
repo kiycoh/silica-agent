@@ -15,6 +15,7 @@ import orjson
 from pydantic import BaseModel
 
 from silica.agent.llm import LLMResponse, build_assistant_message, openrouter_routing, retry_transient
+from silica.config import HOSTED_PROVIDERS
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,22 @@ def ollama_num_ctx() -> int:
         return _OLLAMA_DEFAULT_NUM_CTX
 
 
+# Hosted, OpenAI-compatible base URLs. litellm resolves the same prefixes
+# natively for the interactive loop; the presets below serve the
+# constrained-decoding/distiller path. Gemini goes through its OpenAI-compatible
+# endpoint; both loops read the same GEMINI_API_KEY. "custom" (any other
+# OpenAI-compatible URL) has no static row — its endpoint comes from
+# config.provider_base_url/_api_key (see get_provider).
+_HOSTED_BASE_URLS = {
+    "openrouter": "https://openrouter.ai/api/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    "openai": "https://api.openai.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "deepseek": "https://api.deepseek.com",
+    "mistral": "https://api.mistral.ai/v1",
+    "xai": "https://api.x.ai/v1",
+}
+
 PROVIDER_PRESETS = {
     "lmstudio": {
         "base_url": "http://localhost:1234/v1",
@@ -78,26 +95,12 @@ PROVIDER_PRESETS = {
         "base_url": _ollama_base_url(),
         "api_key": "ollama"  # Ollama ignores it; the OpenAI SDK demands non-empty.
     },
-    "openrouter": {
-        "base_url": "https://openrouter.ai/api/v1",
-        "api_key_env": "OPENROUTER_API_KEY"
+    # Hosted rows derive their key env var from config.HOSTED_PROVIDERS — one
+    # table, so the two can't drift (they used to be kept in sync by hand).
+    **{
+        name: {"base_url": _HOSTED_BASE_URLS[name], "api_key_env": key_env}
+        for name, (key_env, _models) in HOSTED_PROVIDERS.items()
     },
-    # Google Gemini via its OpenAI-compatible endpoint (constrained-decoding /
-    # distiller path). The interactive loop routes gemini/* through litellm
-    # natively; both read the same GEMINI_API_KEY.
-    "gemini": {
-        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "api_key_env": "GEMINI_API_KEY"
-    },
-    # Hosted, OpenAI-compatible. litellm resolves the same prefixes natively for
-    # the interactive loop; these presets serve the constrained-decoding/distiller
-    # path. "custom" (any other OpenAI-compatible URL) has no static row — its
-    # endpoint comes from config.provider_base_url/_api_key (see get_provider).
-    "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"},
-    "groq": {"base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY"},
-    "deepseek": {"base_url": "https://api.deepseek.com", "api_key_env": "DEEPSEEK_API_KEY"},
-    "mistral": {"base_url": "https://api.mistral.ai/v1", "api_key_env": "MISTRAL_API_KEY"},
-    "xai": {"base_url": "https://api.x.ai/v1", "api_key_env": "XAI_API_KEY"},
 }
 
 

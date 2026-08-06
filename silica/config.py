@@ -47,10 +47,11 @@ PROVIDER_PREFIXES = frozenset({
 })
 
 # Hosted providers in fallback order: (API key env var, model ids best first).
-# Two readers, one table — `model_from_env` takes the head of the first entry
-# whose key is exported, the wizard offers the whole list as a pick-list. Lives
-# here rather than beside PROVIDER_PRESETS because config is imported on every
-# path, including the ones that must not pay for the openai SDK.
+# One table, three readers — `model_from_env` takes the head of the first entry
+# whose key is exported, the wizard offers the whole list as a pick-list, and
+# agent.providers derives its PROVIDER_PRESETS hosted rows from it. Lives here
+# rather than beside PROVIDER_PRESETS because config is imported on every path,
+# including the ones that must not pay for the openai SDK.
 # ponytail: a hand-kept list goes stale as vendors ship — that is the ceiling,
 # and the wizard's `other` entry is the escape hatch. Upgrade path if it rots:
 # fetch /models from the provider instead of hardcoding.
