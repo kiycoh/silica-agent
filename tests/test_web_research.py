@@ -21,6 +21,17 @@ from silica.tools import TOOLS
 
 
 @pytest.fixture(autouse=True)
+def _fresh_turn_state():
+    """`_LANES` and the dead-lane counter are per-turn module globals, cleared by
+    `_reset_turn()` at loop entry. A test calling `wr.web_search` directly never
+    enters a loop, so without this a run of failed searches carries into the next
+    test and the guard fires on a search that was meant to reach a lane."""
+    wr._reset_turn()
+    yield
+    wr._reset_turn()
+
+
+@pytest.fixture(autouse=True)
 def _no_network(monkeypatch):
     """Every lane is a stub or an error. Mojeek scrapes with httpx.get, so a
     test that stubs only httpx.post would reach the real Mojeek from a
@@ -31,6 +42,20 @@ def _no_network(monkeypatch):
 
     monkeypatch.setattr(wr.httpx, "get", boom)
     monkeypatch.setattr(wr.httpx, "post", boom)
+
+
+@pytest.fixture(autouse=True)
+def _no_llm(monkeypatch):
+    """call_llm goes to a live provider, not through wr.httpx — a test that
+    banks a quote would otherwise really compose (measured: a local
+    llama-server answered one). Composition swallows this into the §3.6
+    fallback, which is exactly the one-shot path those tests exercise; tests
+    about composition install their own fake over this one."""
+
+    def boom(*a, **kw):
+        raise RuntimeError("test reached the LLM")
+
+    monkeypatch.setattr(wr, "call_llm", boom)
 
 
 # --- web_search tool --------------------------------------------------------
@@ -274,6 +299,56 @@ def test_web_search_double_failure_names_the_tavily_escape_hatch(monkeypatch):
         wr.web_search("anything")
 
 
+def _all_lanes_down(monkeypatch) -> list[int]:
+    """Stub every lane into failing. Returns the list that counts DDG dials."""
+    def boom(*a, **k):
+        raise ValueError("cannot resolve 'en.wikipedia.org'")
+
+    dialled: list[int] = []
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "")
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: (dialled.append(1), _Challenged())[1])
+    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _MojeekCaptcha())
+    monkeypatch.setattr(wr._web_fetch, "_fetch", boom)
+    return dialled
+
+
+def test_web_search_stops_dialling_once_every_lane_is_down(monkeypatch):
+    """A search that exhausts every lane pays up to four HTTP timeouts, and the
+    convergence guard in run_agent cannot catch the pattern because it keys on
+    identical arguments and a research loop never repeats a query. At a ceiling
+    of 48 that is half an hour of dialling a dead stack, so the tool gives up on
+    its own after _DEAD_LANES_LIMIT and fails without touching the network."""
+    dialled = _all_lanes_down(monkeypatch)
+
+    for _ in range(wr._DEAD_LANES_LIMIT):
+        with pytest.raises(ValueError, match="DuckDuckGo answered"):
+            wr.web_search("q")
+    spent = len(dialled)
+    assert spent == wr._DEAD_LANES_LIMIT
+
+    with pytest.raises(ValueError, match="exhausted every lane"):
+        wr.web_search("q")
+    assert len(dialled) == spent, "the guard fired after dialling anyway"
+
+
+def test_one_answering_lane_resets_the_dead_lane_guard(monkeypatch):
+    """Consecutive, not cumulative: a rate limit that lifts mid-run must not
+    leave the loop counting down to a shutdown it no longer needs."""
+    dialled = _all_lanes_down(monkeypatch)
+
+    for _ in range(wr._DEAD_LANES_LIMIT - 1):
+        with pytest.raises(ValueError, match="DuckDuckGo answered"):
+            wr.web_search("q")
+
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _FakeDDGResp())
+    assert json.loads(wr.web_search("q"))          # DDG is back
+    monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: (dialled.append(1), _Challenged())[1])
+
+    # Back to a dead stack: the counter restarts, so this is a lane error again.
+    with pytest.raises(ValueError, match="DuckDuckGo answered"):
+        wr.web_search("q")
+
+
 class _FakeTavilyResp:
     def raise_for_status(self):
         return self
@@ -374,6 +449,7 @@ def _patch_run_agent(monkeypatch, body, tool_results=None):
 
     def fake_run_agent(messages, model, tool_progress_callback=None, constraints=None, **kw):
         captured["constraints"] = constraints
+        captured["messages"] = messages
         captured["model"] = model
         for i, items in enumerate(tool_results or []):
             call_id = f"c{i}"
@@ -452,8 +528,29 @@ def test_web_research_constrains_loop_to_search_and_fetch(tmp_vault, monkeypatch
 
     wr.web_research("x", max_searches=7)
 
-    assert captured["constraints"].tools == ("web_search", "web_fetch")
+    assert captured["constraints"].tools == (
+        "web_search", "web_fetch", "remember", "plan"
+    )
     assert captured["constraints"].max_iterations == 7
+
+
+def test_steering_off_restores_the_pre_plan_loop(tmp_vault, monkeypatch):
+    """Gate arm A (spec §6): flipping _STEERING must remove both the tool
+    and the prompt step, or arm A tells the model to call a tool it does
+    not have."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
+    monkeypatch.setattr(wr, "_STEERING", False)
+    captured = _patch_run_agent(monkeypatch, body="Findings.")
+    wr.web_research("q")
+    assert captured["constraints"].tools == ("web_search", "web_fetch", "remember")
+    assert "plan(" not in captured["messages"][0]["content"]
+
+
+def test_steering_on_puts_the_plan_step_in_the_prompt(tmp_vault, monkeypatch):
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
+    captured = _patch_run_agent(monkeypatch, body="Findings.")
+    wr.web_research("q")
+    assert "plan(" in captured["messages"][0]["content"]
 
 
 def _patch_run_agent_calling_web_search(monkeypatch, calls):
@@ -931,3 +1028,443 @@ def test_web_search_failure_line_survives_rich_markup(tmp_vault, monkeypatch):
     out = _run_cli('/web-search "x"')
     assert "web-search failed" in out
     assert "[/y]" in out
+
+
+# --- remember: the evidence bank and its verbatim guardian (spec §3.2/§3.5) --
+
+_QUOTE_PAGE = (
+    "Source: https://s.test/a\n\nAlpha Title\n\n"
+    "Graphs beat lists for this workload. Second sentence,\nwrapped by the "
+    "renderer, still one claim."
+)
+
+
+def _fetched(page=_QUOTE_PAGE, call_id="f1"):
+    """Feed the guardian the event the real loop emits after a web_fetch."""
+    from silica.agent.events import ToolCompleteEvent
+
+    wr._harvest_page(ToolCompleteEvent(
+        name="web_fetch", args={"url": "https://s.test/a"}, call_id=call_id,
+        result=page, duration_s=0.0, iteration=1,
+    ))
+
+
+def test_remember_registered_and_sensitive():
+    assert TOOLS["remember"].sensitive is True
+
+
+def test_remember_accepts_a_verbatim_quote_and_rejects_a_paraphrase():
+    _fetched()
+
+    out = wr.remember("https://s.test/a", "Graphs beat lists for this workload.", "core")
+
+    assert "[Q1]" in out
+    with pytest.raises(ValueError, match="verbatim"):
+        wr.remember("https://s.test/a", "Lists are worse than graphs here.", "para")
+    assert list(wr._BANK) == ["Q1"]
+
+
+def test_remember_tolerates_reflowed_whitespace():
+    """The fetched text wraps mid-sentence; the model quotes it on one line.
+    Whitespace is the renderer's, not the author's, so it must not fail the
+    verbatim check."""
+    _fetched()
+
+    out = wr.remember(
+        "https://s.test/a",
+        "Second sentence, wrapped by the renderer, still one claim.",
+        "wrap",
+    )
+
+    assert "[Q1]" in out
+
+
+def test_remember_rejects_a_url_never_fetched():
+    with pytest.raises(ValueError, match="no page fetched"):
+        wr.remember("https://never.test/x", "anything", "w")
+
+
+def test_remember_is_idempotent_for_the_same_quote():
+    """A retrying model must not mint a second ID for the same evidence."""
+    _fetched()
+
+    wr.remember("https://s.test/a", "Graphs beat lists for this workload.", "a")
+    again = wr.remember("https://s.test/a", "Graphs  beat lists for this workload.", "b")
+
+    assert "already banked as [Q1]" in again
+    assert len(wr._BANK) == 1
+
+
+def test_bank_and_pages_are_per_turn():
+    _fetched()
+    wr.remember("https://s.test/a", "Graphs beat lists for this workload.", "a")
+
+    wr._reset_turn()
+
+    assert not wr._BANK and not wr._PAGES
+
+
+def test_bind_citations_renumbers_by_first_appearance_and_reorders_sources():
+    bank = {
+        "Q1": wr._Quote("https://b.test", "quote b", "w"),
+        "Q2": wr._Quote("https://a.test", "quote a", "w"),
+    }
+    collected = [
+        ("https://c.test", "C"), ("https://b.test", "B"), ("https://a.test", "A"),
+    ]
+
+    body, sources, audit = wr._bind_citations("x [Q2] y [Q1] z [Q2].", collected, bank)
+
+    assert body == "x [1] y [2] z [1]."
+    # Cited pages first, in first-citation order; the uncited page stays listed
+    # (ADR-0015: sources are every page the run opened), just after them.
+    assert sources == [
+        ("https://a.test", "A"), ("https://b.test", "B"), ("https://c.test", "C"),
+    ]
+    assert audit == ""
+
+
+def test_quotes_from_one_page_share_one_source_number():
+    """Citations name sources, not bank rows: [Q1] and [Q2] off the same page
+    are the same [1], singly or in a combined marker."""
+    bank = {
+        "Q1": wr._Quote("https://a.test", "one", "w"),
+        "Q2": wr._Quote("https://a.test", "two", "w"),
+    }
+
+    body, sources, _ = wr._bind_citations(
+        "x [Q1] y [Q2] z [Q1, Q2].", [("https://a.test", "A")], bank
+    )
+
+    assert body == "x [1] y [1] z [1]."
+    assert sources == [("https://a.test", "A")]
+
+
+def test_a_phantom_marker_is_removed_and_audited():
+    body, sources, audit = wr._bind_citations("A claim [Q9]. More.", [], {})
+
+    assert body == "A claim. More."
+    assert "1 marker(s) named no banked quote" in audit
+
+
+def test_web_research_binds_citations_and_leaves_the_bank_in_the_leaf(
+    tmp_vault, monkeypatch
+):
+    """End to end: the note carries [n] markers bound to the mechanical Sources
+    block, a phantom marker is stripped and audited, a disobedient model-written
+    Sources section is cut, and the leaf carries the bank for /nucleate."""
+    from silica.agent.events import ToolCompleteEvent
+
+    def fake_run_agent(messages, model, tool_progress_callback=None,
+                       constraints=None, **kw):
+        tool_progress_callback(ToolCompleteEvent(
+            name="web_fetch", args={"url": "https://s.test/a"}, call_id="f1",
+            result=_QUOTE_PAGE, duration_s=0.0, iteration=1,
+        ))
+        wr.remember(
+            "https://s.test/a", "Graphs beat lists for this workload.", "core claim"
+        )
+        return (
+            "Graphs win [Q1], allegedly always [Q7].\n\n"
+            "## Sources\n1. stale hand-written line"
+        )
+
+    monkeypatch.setattr(wr, "run_agent", fake_run_agent)
+
+    note_rel = wr.web_research("graph workloads")
+    body = (Path(CONFIG.vault_path) / note_rel).read_text(encoding="utf-8")
+
+    assert "Graphs win [1], allegedly always." in body
+    assert "[Q1]" not in body and "[Q7]" not in body
+    assert "stale hand-written line" not in body
+    assert "1. https://s.test/a — https://s.test/a" in body
+    assert "Citation audit: 1 marker(s)" in body
+    assert body.count("## Sources") == 1
+
+    from silica.kernel.recall.paths import SOURCES_DIR
+
+    leaf = (
+        Path(CONFIG.vault_path) / SOURCES_DIR / Path(note_rel).name
+    ).read_text(encoding="utf-8")
+    assert "## Evidence bank" in leaf
+    assert "[Q1] https://s.test/a" in leaf
+    assert "> Graphs beat lists for this workload." in leaf
+    assert "why: core claim" in leaf
+
+
+# --- outline + per-section writer (spec §3.3/§3.4) and the §3.6 fallback -----
+
+def test_parse_outline_reads_sections_and_ids():
+    text = (
+        "## How they are trained [Q3, Q7, Q11]\n"
+        "Some stray prose the model added.\n"
+        "## Where they fail [Q2]\n"
+    )
+
+    assert wr._parse_outline(text) == [
+        ("How they are trained", ["Q3", "Q7", "Q11"]),
+        ("Where they fail", ["Q2"]),
+    ]
+
+
+def test_parse_outline_ignores_headings_without_ids():
+    assert wr._parse_outline("## Intro\n\nJust prose, no bank IDs anywhere.") == []
+
+
+_TWO_PAGE_BANK = {
+    "Q1": wr._Quote("https://a.test", "alpha quote", "why a"),
+    "Q2": wr._Quote("https://b.test", "beta quote", "why b"),
+}
+
+
+def _sequential_llm(monkeypatch, replies):
+    """wr.call_llm fake answering `replies` in order; returns the calls seen.
+
+    A reply that is an Exception is raised instead of returned."""
+    from types import SimpleNamespace
+
+    calls: list[list[dict]] = []
+
+    def fake(model, messages, **kw):
+        assert kw.get("tools") is None, "outline/writer calls must be tool-less"
+        calls.append(messages)
+        reply = replies[len(calls) - 1]
+        if isinstance(reply, Exception):
+            raise reply
+        return SimpleNamespace(text=reply)
+
+    monkeypatch.setattr(wr, "call_llm", fake)
+    return calls
+
+
+def test_compose_findings_writes_each_section_from_its_own_quotes(monkeypatch):
+    """The outline call sees the bank index (no quote texts); each section call
+    sees only its own quotes; headings are added mechanically."""
+    calls = _sequential_llm(monkeypatch, [
+        "## Alpha side [Q1]\n## Beta side [Q2]",
+        "Alpha prose [Q1].",
+        "Beta prose [Q2].",
+    ])
+
+    body = wr._compose_findings("the question", _TWO_PAGE_BANK)
+
+    assert body == (
+        "## Alpha side\n\nAlpha prose [Q1].\n\n## Beta side\n\nBeta prose [Q2]."
+    )
+    outline_user = calls[0][-1]["content"]
+    assert "Q1 | https://a.test | why a" in outline_user
+    assert "alpha quote" not in outline_user          # index only, spec §3.3
+    alpha_user = calls[1][-1]["content"]
+    assert "alpha quote" in alpha_user
+    assert "beta quote" not in alpha_user             # only its own quotes, §3.4
+    assert "## Alpha side [Q1]" in alpha_user         # the whole outline as context
+
+
+def test_compose_findings_returns_none_when_outline_unparsable(monkeypatch):
+    _sequential_llm(monkeypatch, ["I could not decide on sections, sorry."])
+
+    assert wr._compose_findings("q", _TWO_PAGE_BANK) is None
+
+
+def test_compose_findings_returns_none_when_a_section_call_fails(monkeypatch):
+    _sequential_llm(monkeypatch, [
+        "## Alpha side [Q1]\n## Beta side [Q2]",
+        "Alpha prose [Q1].",
+        RuntimeError("provider down"),
+    ])
+
+    assert wr._compose_findings("q", _TWO_PAGE_BANK) is None
+
+
+def test_compose_findings_strips_a_writer_echoed_heading(monkeypatch):
+    """Measured on the first live replay: the writer sometimes opens with the
+    section heading despite the prompt, and the mechanical heading made it a
+    duplicate. An echoed heading is dropped; an unrelated one is prose."""
+    calls = _sequential_llm(monkeypatch, [
+        "## Alpha side [Q1]",
+        "## Alpha side\n\nAlpha prose [Q1].\n\n### A sub-point\n\nMore.",
+    ])
+
+    body = wr._compose_findings("q", _TWO_PAGE_BANK)
+
+    assert body == (
+        "## Alpha side\n\nAlpha prose [Q1].\n\n### A sub-point\n\nMore."
+    )
+    assert calls  # composition really ran
+
+
+def test_bind_citations_collapses_adjacent_duplicate_markers():
+    """[Q3][Q3] (measured live) and [Q3] [Q3] are one citation, not two."""
+    bank = {"Q3": wr._Quote("https://a.test", "one", "w")}
+
+    body, _, _ = wr._bind_citations(
+        "bypassed [Q3][Q3]. also [Q3] [Q3]. kept [Q3], [Q3].",
+        [("https://a.test", "A")], bank,
+    )
+
+    assert body == "bypassed [1]. also [1]. kept [1], [1]."
+
+
+def test_compose_findings_drops_sections_citing_only_phantoms(monkeypatch):
+    """An outline section naming only unknown IDs gets no writer call; one
+    whose every section is phantom is unparsable in effect."""
+    _sequential_llm(monkeypatch, ["## Ghosts [Q9]\n## More ghosts [Q8]"])
+
+    assert wr._compose_findings("q", _TWO_PAGE_BANK) is None
+
+
+def _run_agent_banking_one_quote(monkeypatch, body="One-shot body [Q1]."):
+    """Fake loop: fetches a page, banks Q1, returns `body` as its final message."""
+    from silica.agent.events import ToolCompleteEvent
+
+    def fake_run_agent(messages, model, tool_progress_callback=None,
+                       constraints=None, **kw):
+        tool_progress_callback(ToolCompleteEvent(
+            name="web_fetch", args={"url": "https://s.test/a"}, call_id="f1",
+            result=_QUOTE_PAGE, duration_s=0.0, iteration=1,
+        ))
+        wr.remember(
+            "https://s.test/a", "Graphs beat lists for this workload.", "core"
+        )
+        return body
+
+    monkeypatch.setattr(wr, "run_agent", fake_run_agent)
+
+
+def test_web_research_composes_from_bank_when_quotes_banked(tmp_vault, monkeypatch):
+    """/web-search end to end: the composed sections replace the loop's
+    one-shot body, and the composed markers bind to the Sources block."""
+    _run_agent_banking_one_quote(monkeypatch)
+    _sequential_llm(monkeypatch, [
+        "## The claim [Q1]",
+        "Graphs carry the day [Q1].",
+    ])
+
+    note_rel = wr.web_research("graph workloads")
+    body = (Path(CONFIG.vault_path) / note_rel).read_text(encoding="utf-8")
+
+    assert "## The claim\n\nGraphs carry the day [1]." in body
+    assert "One-shot body" not in body
+    assert "1. https://s.test/a — https://s.test/a" in body
+
+
+def test_web_research_keeps_oneshot_body_when_composition_fails(
+    tmp_vault, monkeypatch
+):
+    """§3.6: a dead composition path costs nothing — the loop's final message
+    is the note body, exactly as before the outline existed."""
+    _run_agent_banking_one_quote(monkeypatch)
+    _sequential_llm(monkeypatch, [RuntimeError("provider down")])
+
+    note_rel = wr.web_research("graph workloads")
+    body = (Path(CONFIG.vault_path) / note_rel).read_text(encoding="utf-8")
+
+    assert "One-shot body [1]." in body
+
+
+def test_web_research_skips_composition_when_bank_is_empty(tmp_vault, monkeypatch):
+    """§3.6: no banked quotes, no extra LLM calls — today's path verbatim.
+
+    Counted with a recording fake, not an in-fake raise: composition swallows
+    every exception into its fallback, so a raise would pass vacuously."""
+    _patch_run_agent(monkeypatch, "Plain findings.", tool_results=[
+        json.dumps([{"title": "A", "url": "https://a.test", "content": ""}])
+    ])
+    calls = _sequential_llm(monkeypatch, [])
+
+    note_rel = wr.web_research("plain concept")
+    body = (Path(CONFIG.vault_path) / note_rel).read_text(encoding="utf-8")
+
+    assert "Plain findings." in body
+    assert calls == []
+
+
+def test_web_turn_never_composes(monkeypatch):
+    """Spec §5: outline and per-section writer run only in /web-search. The
+    /web turn answers in direct prose even with quotes banked."""
+    monkeypatch.setattr(
+        wr, "call_llm",
+        lambda *a, **kw: (_ for _ in ()).throw(
+            AssertionError("/web must not compose")
+        ),
+    )
+    turn = wr.WebTurn("q")
+    wr._BANK["Q1"] = wr._Quote("https://a.test", "alpha", "w")
+
+    out = turn.attribute("Answer [Q1].", [])
+
+    assert out.startswith("Answer [1].")
+
+
+# --- plan: the live steering plan (spec-web-research-plan-steering) ---------
+
+
+def test_plan_registered_and_sensitive():
+    assert TOOLS["plan"].sensitive is True
+
+
+def test_plan_rejects_text_without_section_headings():
+    with pytest.raises(ValueError, match="no `## ` section headings"):
+        wr.plan("just prose, no structure")
+    assert wr._PLAN == ""
+
+
+def test_plan_rejects_unknown_ids_listing_the_known_ones():
+    wr._BANK["Q1"] = wr._Quote(url="https://s.test/a", quote="q", why="w")
+    with pytest.raises(ValueError, match=r"unknown quote ID\(s\): Q7"):
+        wr.plan("## Training [Q7]")
+    assert wr._PLAN == ""
+
+
+def test_plan_rejection_names_an_empty_bank():
+    with pytest.raises(ValueError, match=r"\(none yet\)"):
+        wr.plan("## Training [Q1]")
+
+
+def test_plan_accepts_gap_headings_and_names_them():
+    wr._BANK["Q1"] = wr._Quote(url="https://s.test/a", quote="q", why="w")
+    out = wr.plan("## Training [Q1]\n## Failure modes\n## Cost")
+    assert out == "saved: 3 sections, 1 with evidence; gaps: Failure modes; Cost"
+
+
+def test_plan_confirms_full_coverage():
+    wr._BANK["Q1"] = wr._Quote(url="https://s.test/a", quote="q", why="w")
+    assert wr.plan("## Training [Q1]") == "saved: 1 section, all with evidence"
+
+
+def test_plan_replaces_the_previous_plan():
+    wr.plan("## First")
+    wr.plan("## Second")
+    assert wr._PLAN == "## Second"
+
+
+def test_reset_turn_clears_the_plan():
+    wr._PLAN = "## Stale"
+    wr._reset_turn()
+    assert wr._PLAN == ""
+
+
+def test_live_plan_leaves_composition_untouched(tmp_vault, monkeypatch):
+    """§2 invariant: the composer sees only (concept, bank). A saved plan
+    must neither divert composition nor be passed to it. Recording fake, not
+    asserts inside the fake: web_research swallows composer failures by
+    design (§3.6), so an AssertionError raised in there is vacuous."""
+    monkeypatch.setattr(CONFIG, "tavily_api_key", "k")
+    calls = []
+
+    def fake_run_agent(messages, model, tool_progress_callback=None,
+                       constraints=None, **kw):
+        wr._PAGES["https://s.test/a"] = "Source: https://s.test/a\nGraphs beat lists."
+        wr.remember("https://s.test/a", "Graphs beat lists.", "core")
+        wr.plan("## Data structures [Q1]\n## Open gap")
+        return "Findings [Q1]."
+
+    monkeypatch.setattr(wr, "run_agent", fake_run_agent)
+
+    def recording_compose(concept, bank):
+        calls.append((concept, dict(bank)))
+        return "## Data structures\n\nProse [Q1]."
+
+    monkeypatch.setattr(wr, "_compose_findings", recording_compose)
+    wr.web_research("the question")
+    assert calls == [("the question", {"Q1": wr._BANK["Q1"]})]

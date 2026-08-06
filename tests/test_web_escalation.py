@@ -4,7 +4,7 @@
 """`/web` consent turn, trace-built citations, `/keep`, thin-coverage hint.
 
 No network and no LLM: `call_llm` and `run_agent` are faked. What is pinned here
-is the escalation contract — the web turn sees only the two web tools, the
+is the escalation contract — the web turn sees only the three web tools, the
 citations come from the tool trace rather than from the model's prose, and the
 hint fires on a mechanical hard miss only.
 """
@@ -27,9 +27,9 @@ from silica.sources import web_research as wr
 
 # --- 1. the toolset of a /web turn -------------------------------------------
 
-def test_web_turn_exposes_exactly_the_two_web_tools():
-    """The consent turn is the only chat path to web_search/web_fetch, and it must
-    not carry the vault toolset along with them."""
+def test_web_turn_exposes_exactly_the_three_web_tools():
+    """The consent turn is the only chat path to web_search/web_fetch/remember,
+    and it must not carry the vault toolset along with them."""
     from silica.agent.constraints import web_turn_constraints
     from silica.agent.loop import run_agent
 
@@ -50,7 +50,7 @@ def test_web_turn_exposes_exactly_the_two_web_tools():
         )
 
     names = {t["function"]["name"] for t in (captured["tools"] or [])}
-    assert names == {"web_search", "web_fetch"}
+    assert names == {"web_search", "web_fetch", "remember"}
 
 
 def test_web_turn_iteration_cap_matches_web_research():
@@ -296,3 +296,58 @@ def test_the_default_chat_toolset_still_excludes_the_web_tools():
 
     assert "web_search" not in chat_tools()
     assert "web_fetch" not in chat_tools()
+
+
+def test_the_default_chat_toolset_excludes_remember_too():
+    from silica.agent.constraints import chat_tools
+
+    assert "remember" not in chat_tools()
+
+
+# --- 9. the evidence bank on the /web path (spec §3.2/§3.5) ------------------
+
+_RW_PAGE = "Source: https://a.test/rw\n\nRewiring\n\nEdges move locally."
+
+
+def _turn_with_banked_quote(question="q"):
+    """A WebTurn that fetched a page and banked one quote from it."""
+    turn = _turn_with_trace(question=question, results=[_HITS])
+    turn(ToolCompleteEvent(
+        name="web_fetch", args={"url": "https://a.test/rw"}, call_id="f1",
+        result=_RW_PAGE, duration_s=0.0, iteration=2,
+    ))
+    wr.remember("https://a.test/rw", "Edges move locally.", "definition")
+    return turn
+
+
+def test_web_answer_binds_bank_markers_to_the_sources_block():
+    """[Qk] in the chat answer becomes [n] pointing at the block below it, and
+    a marker with no banked quote is stripped and audited — the same guarantee
+    the batch note gets, on the answer the user actually reads."""
+    turn = _turn_with_banked_quote()
+
+    out = turn.attribute("Rewiring works [Q1], and fails [Q9].", [])
+
+    assert "Rewiring works [1], and fails." in out
+    assert "[Q1]" not in out and "[Q9]" not in out
+    assert "1. Rewiring — https://a.test/rw" in out
+    assert "Citation audit: 1 marker(s)" in out
+
+
+def test_keep_carries_the_bank_into_the_leaf(tmp_vault, monkeypatch):
+    """The stash snapshots the bank at attribute time: a later turn resetting
+    the module state must not strip the kept note's leaf of its quotes."""
+    monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)
+    turn = _turn_with_banked_quote(question="rewiring")
+    turn.attribute("Claim [Q1].", [])
+    wr._reset_turn()  # a later turn moved on; the stash must not care
+
+    note_rel = wr.keep_last()
+
+    from silica.kernel.recall.paths import SOURCES_DIR
+
+    leaf = (
+        Path(CONFIG.vault_path) / SOURCES_DIR / Path(note_rel).name
+    ).read_text(encoding="utf-8")
+    assert "## Evidence bank" in leaf
+    assert "> Edges move locally." in leaf

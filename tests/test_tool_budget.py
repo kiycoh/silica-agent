@@ -47,6 +47,13 @@ def test_chat_tools_keeps_every_recovery_path_it_advertises():
     for name in chat:
         desc = tools[name].description or ""
         for other in tools:
+            # Bare-word tool names (plan, remember) collide with prose: the
+            # ledger's "when the plan is exhausted" is not a recovery hint.
+            # Only namespaced names are detectable by substring, and both
+            # bare names are sensitive, so a chat description that pointed at
+            # one would be a doc bug this check cannot see. Known ceiling.
+            if "_" not in other:
+                continue
             if other in desc and other != name:
                 assert other in chat, f"{name} tells the model to call {other}, which chat_tools() hides"
 

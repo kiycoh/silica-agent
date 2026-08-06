@@ -388,7 +388,7 @@ def test_web_routes_as_an_agent_turn_with_trace_built_citations(client, monkeypa
 
     def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None,
                        constraints=None, **kw):
-        assert constraints.tools == ("web_search", "web_fetch")
+        assert constraints.tools == ("web_search", "web_fetch", "remember")
         tool_progress_callback(ToolCompleteEvent(
             name="web_search", args={"query": "q"}, call_id="c1",
             result=json.dumps([{"title": "Rewiring", "url": "https://a.test/rw"}]),

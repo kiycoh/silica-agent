@@ -52,13 +52,23 @@ _CHAT_EXCLUDED = frozenset({
 
 
 def web_turn_constraints() -> AgentConstraints:
-    """`/web` — the consented web turn: the two web tools and nothing else.
+    """`/web` — the consented web turn: the three web tools and nothing else.
+    (`remember` banks a verbatim quote from a fetched page; it touches only
+    per-turn module state in silica/sources/web_research.py, never the vault.)
 
-    16 is the twin of `_DEFAULT_MAX_SEARCHES` in silica/sources/web_research.py.
-    Duplicated rather than imported: the import direction is sources -> agent, so
-    this module must not read that one.
+    48 is the twin of `_DEFAULT_MAX_SEARCHES` in silica/sources/web_research.py,
+    which carries the reasoning for the number. Duplicated rather than imported:
+    the import direction is sources -> agent, so this module must not read that
+    one; test_web_turn_iteration_cap_matches_web_research holds them equal.
+
+    Held equal even though this lane is interactive and that one is batch: the
+    cap is a ceiling, not a target, so a /web question that converges in four
+    steps costs four either way. Split the two the day a /web turn is seen
+    spending a ceiling it had no reason to spend.
     """
-    return AgentConstraints(tools=("web_search", "web_fetch"), max_iterations=16)
+    return AgentConstraints(
+        tools=("web_search", "web_fetch", "remember"), max_iterations=48
+    )
 
 
 def chat_tools() -> tuple[str, ...]:

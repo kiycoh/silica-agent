@@ -36,7 +36,7 @@ import silica.tools.composed  # noqa: F401
 import silica.tools.wrapped  # noqa: F401
 import silica.tools.codedocs_tool  # noqa: F401
 import silica.tools.delegate_tool  # noqa: F401
-import silica.sources.web_research  # noqa: F401  (registers the web_search and web_fetch tools)
+import silica.sources.web_research  # noqa: F401  (registers the web_search, web_fetch, remember and plan tools)
 from silica.sources.web_research import WebTurn
 
 logger = logging.getLogger(__name__)
@@ -1208,7 +1208,9 @@ def _expand_web_turn(user_input: str, messages: list[dict]) -> tuple[str, str] |
     return question, (
         f"Answer this from the web, not from the vault: {question}\n"
         "Use `web_search` to find pages and `web_fetch` to read the ones that look "
-        "like they answer it — a search snippet is not the article. Then answer in "
+        "like they answer it — a search snippet is not the article. When you will "
+        "lean on a specific sentence or figure, bank it with `remember(url, quote, "
+        "why)` and cite the ID it returns inline, like [Q2]. Then answer in "
         "prose, and say plainly that the answer comes from the web rather than from "
         "the user's own notes. Do not write a Sources section: the citations are "
         "appended mechanically from the pages you actually opened."
