@@ -497,7 +497,7 @@ def _decide_dedup(
         messages=[{"role": "user", "content": user_message}],
         tools=None,
         response_schema=DedupDecision if author_spoke else DedupVerdict,
-        max_tokens=int(os.getenv("DEDUP_MAX_TOKENS", "2048")),
+        max_tokens=2048,
     )
     raw = response.text or ""
     try:
@@ -601,7 +601,7 @@ def _decide_dedup_batch(
         messages=[{"role": "user", "content": user_message}],
         tools=None,
         response_schema=DedupBatchDecision if author_spoke else DedupVerdictBatch,
-        max_tokens=int(os.getenv("DEDUP_MAX_TOKENS", "2048")) * n,
+        max_tokens=2048 * n,
     )
     return _parse_batch(response.text or "", n)
 

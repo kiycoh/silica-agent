@@ -32,7 +32,7 @@ REFINED = NoteContent(content="# Target\n\nPolished body with [[Link]].\n")
 def test_refine_op_carries_base_content_from_read_time():
     with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content=ORIGINAL)), \
          patch("silica.capabilities.refine._refine_note", return_value=REFINED), \
-         patch("silica.capabilities.refine.commit_ops", return_value={"status": "committed"}) as commit:
+         patch("silica.capabilities._base.commit_ops", return_value={"status": "committed"}) as commit:
         run_refine(_item("refine"), CONFIG)
     assert commit.call_args.args[0][0].base_content == ORIGINAL
 
@@ -40,7 +40,7 @@ def test_refine_op_carries_base_content_from_read_time():
 def test_enrich_op_carries_base_content_from_read_time():
     with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content=ORIGINAL)), \
          patch("silica.capabilities.enrich._enrich_note", return_value=REFINED), \
-         patch("silica.capabilities.enrich.commit_ops", return_value={"status": "committed"}) as commit:
+         patch("silica.capabilities._base.commit_ops", return_value={"status": "committed"}) as commit:
         run_enrich(_item("enrich"), CONFIG)
     assert commit.call_args.args[0][0].base_content == ORIGINAL
 

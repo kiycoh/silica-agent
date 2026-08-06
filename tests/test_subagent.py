@@ -389,7 +389,7 @@ def test_refine_builds_overwrite_under_refiner_bounds():
     refined = NoteContent(content="# Target\n\n> [!note]\nBody with [[Link]].")
     with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="old body [[Link]]")), \
          patch("silica.capabilities.refine._refine_note", return_value=refined), \
-         patch("silica.capabilities.refine.commit_ops", return_value={"status": "committed", "committed": 1}) as commit:
+         patch("silica.capabilities._base.commit_ops", return_value={"status": "committed", "committed": 1}) as commit:
         res = run_refine(_refine_item(), CONFIG)
     assert res["status"] == "committed"
     ops_arg = commit.call_args.args[0]

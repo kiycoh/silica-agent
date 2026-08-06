@@ -22,7 +22,7 @@ from silica.agent.bounds import expand_bounds
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.write.validate import min_write_snippet_chars
 from silica.kernel.workqueue import WorkItem
-from silica.capabilities._base import NoteContent, emit_feedback, load_prompt
+from silica.capabilities._base import NoteContent, emit_feedback, load_prompt, parse_content
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,6 @@ def _author_body(
     feedback: str = "",
 ) -> str:
     from silica.agent.providers import get_provider
-    from silica.kernel.text.sanitize import parse_json
 
     prompt = load_prompt("expand_prompt.txt")
     hub_hint = f"\nParent note: [[{hub}]]" if hub else ""
@@ -137,13 +136,6 @@ def _author_body(
         messages=[{"role": "user", "content": user_message}],
         tools=None,
         response_schema=NoteContent,
-        max_tokens=int(os.getenv("EXPAND_MAX_TOKENS", "4096")),
+        max_tokens=4096,
     )
-    raw = response.text or ""
-    try:
-        parsed, _ = parse_json(raw, strict=False)
-        if isinstance(parsed, dict) and "content" in parsed:
-            return str(parsed["content"])
-    except Exception as e:
-        logger.debug("expand parse failed: %s", e)
-    return ""
+    return parse_content(response.text or "")

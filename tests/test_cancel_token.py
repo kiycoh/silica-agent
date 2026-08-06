@@ -154,7 +154,7 @@ def test_feedback_events_published_on_normal_run(config):
 
     with patch("silica.driver.DRIVER.read_note", return_value=_MockNote()), \
          patch("silica.capabilities.refine._refine_note", return_value=NoteContent(content="x")), \
-         patch("silica.capabilities.refine.commit_ops", return_value={"status": "committed"}):
+         patch("silica.capabilities._base.commit_ops", return_value={"status": "committed"}):
         run_refine(item, config)
 
     phases = [e.phase for e in received]

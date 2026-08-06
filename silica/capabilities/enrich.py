@@ -8,63 +8,28 @@ import logging
 import os
 from typing import Any
 
-from silica.agent.commit import commit_ops
-from silica.agent.bounds import refiner_bounds
-from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
-from silica.capabilities._base import NoteContent, emit_feedback, load_prompt, read_or_skip
+from silica.capabilities._base import (
+    NoteContent, load_prompt, parse_content, run_note_rewrite,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def run_enrich(item: WorkItem, config: Any) -> dict[str, Any]:
     target_path = item.target_path
-
-    emit_feedback(item, "reading")
-    original, skip = read_or_skip(target_path)
-    if skip is not None:
-        return skip
-
-    if item.cancel_token.is_set():
-        return {"status": "cancelled"}
-
-    emit_feedback(item, "calling_llm")
     hub = item.context.get("hub") or os.path.splitext(os.path.basename(target_path))[0]
-    enriched = _enrich_note(config, target_path, original, hub)
-    if not enriched.content.strip():
-        return {"status": "no_change", "reason": "enricher produced no content"}
-
-    if item.cancel_token.is_set():
-        return {"status": "cancelled"}
-
-    emit_feedback(item, "committing")
-    op = Op(
-        op=OpType.overwrite,
-        heading=os.path.splitext(os.path.basename(target_path))[0],
-        source_basename=os.path.basename(target_path),
-        path=target_path,
-        content=enriched.content,
-        # Snapshot at READ time — see refine.py: a concurrent edit during the
-        # LLM window must 3-way-conflict against what the enricher actually read.
-        base_content=original,
-        hub=hub,
+    return run_note_rewrite(
+        item, config,
         reason="semantic enrichment",
-    )
-    # refiner_bounds guarantees anti-info-loss (wikilinks preserved + length floor).
-    bounds = refiner_bounds(target_path, hub=hub)
-    result = commit_ops(
-        [op],
-        target_dir=os.path.dirname(target_path),
+        worker_label="enricher",
         hub=hub,
-        bounds=bounds,
-        read_note=lambda _p: original,
+        rewrite=lambda path, original, h: _enrich_note(config, path, original, h),
     )
-    return result
 
 
 def _enrich_note(config: Any, target_path: str, original: str, hub: str) -> NoteContent:
     from silica.agent.providers import get_provider
-    from silica.kernel.text.sanitize import parse_json
     from silica.kernel.context_builder import build_context
 
     system_prompt = (
@@ -92,13 +57,6 @@ def _enrich_note(config: Any, target_path: str, original: str, hub: str) -> Note
         ],
         tools=None,
         response_schema=NoteContent,
-        max_tokens=int(os.getenv("ENRICH_MAX_TOKENS", os.getenv("MAX_TOKENS", "32768"))),
+        max_tokens=int(os.getenv("MAX_TOKENS", "32768")),
     )
-    raw = response.text or ""
-    try:
-        parsed, _ = parse_json(raw, strict=False)
-        if isinstance(parsed, dict) and "content" in parsed:
-            return NoteContent(content=str(parsed["content"]))
-    except Exception as e:
-        logger.debug("enrich parse failed: %s", e)
-    return NoteContent(content="")
+    return NoteContent(content=parse_content(response.text or ""))

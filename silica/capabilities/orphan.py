@@ -95,7 +95,7 @@ def _decide_links(
         messages=[{"role": "user", "content": user_message}],
         tools=None,
         response_schema=OrphanLinkDecision,
-        max_tokens=int(os.getenv("ORPHAN_MAX_TOKENS", "512")),
+        max_tokens=512,
     )
     raw = response.text or ""
     try:
