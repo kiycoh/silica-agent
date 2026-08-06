@@ -106,7 +106,7 @@ def sections() -> dict[str, tuple[Row, ...]]:
     """The admitted rows, by panel section. A row may appear twice (thinking is
     both the session's one live toggle and a display preference); the panel
     syncs every control bound to the same key after a write."""
-    from silica.onboarding.wizard import _EMBED_MODELS, _RERANK_MODELS
+    from silica.onboarding.wizard import EMBED_MODELS, RERANK_MODELS
 
     providers = tuple(sorted(PROVIDER_PREFIXES))
     return {
@@ -145,12 +145,12 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 models_of="chat"),
             Row("SILICA_EMBEDDING_MODEL", "embedding_model", "embedding model", "text",
                 "what turns notes into vectors", models_of="embeddings",
-                warn=_EMBED_WARN, curated=tuple(_EMBED_MODELS)),
+                warn=_EMBED_WARN, curated=tuple(EMBED_MODELS)),
             Row("SILICA_EMBEDDING_BASE_URL", "embedding_base_url", "embedding url", "text",
                 "where embeddings are computed", warn=_EMBED_WARN),
             Row("SILICA_RERANK_MODEL", "rerank_model", "reranker", "text",
                 "reorders recall results · optional", models_of="rerank",
-                curated=tuple(_RERANK_MODELS)),
+                curated=tuple(RERANK_MODELS)),
             Row("SILICA_RERANK_BASE_URL", "rerank_base_url", "reranker url", "text",
                 "empty falls back to the in-process cross-encoder"),
             Row("SILICA_WORKER_MODEL", "worker_model", "worker model", "text",
@@ -281,7 +281,7 @@ def _enum_options(row: Row) -> tuple[str, ...]:
 def _text_options(row: Row, models: dict[str, list[str]]) -> tuple[str, ...]:
     """Suggestions for a text row: what the endpoint actually advertises, plus
     the curated ids, plus whatever the enumerated domain is. Never a closed set
-    — `_endpoint_model_ids` returns [] on any error, and an endpoint is down
+    — `endpoint_model_ids` returns [] on any error, and an endpoint is down
     exactly when the user opens this panel to fix it (spec §5.2)."""
     from silica.kernel.text.language import SNOWBALL_TO_ISO
 
@@ -298,14 +298,14 @@ def _probe_models() -> dict[str, list[str]]:
     and embeddings usually share one server, so the usual cost is two requests."""
     from concurrent.futures import ThreadPoolExecutor
 
-    from silica.onboarding.wizard import _endpoint_model_ids
+    from silica.onboarding.wizard import endpoint_model_ids
 
     urls = base_urls()
     distinct = sorted({u for u in urls.values() if u})
     if not distinct:
         return {}
     with ThreadPoolExecutor(max_workers=len(distinct)) as pool:
-        found = dict(zip(distinct, pool.map(_endpoint_model_ids, distinct)))
+        found = dict(zip(distinct, pool.map(endpoint_model_ids, distinct)))
     return {label: found.get(url, []) for label, url in urls.items()}
 
 
@@ -374,7 +374,7 @@ def provider_group(provider: str) -> dict[str, str]:
     model is left alone and the user picks it in the row below.
     """
     from silica.agent.providers import PROVIDER_PRESETS
-    from silica.onboarding.wizard import _endpoint_model_ids
+    from silica.onboarding.wizard import endpoint_model_ids
 
     updates = {"SILICA_PROVIDER": provider}
     preset = PROVIDER_PRESETS.get(provider, {})
@@ -383,7 +383,7 @@ def provider_group(provider: str) -> dict[str, str]:
     if hosted:
         updates["SILICA_MODEL"] = hosted[1][0]
     elif base_url:
-        found = _endpoint_model_ids(base_url)
+        found = endpoint_model_ids(base_url)
         if found:
             updates["SILICA_MODEL"] = found[0]
     if base_url:
@@ -557,7 +557,7 @@ def endpoint_status() -> list[dict]:
     from concurrent.futures import ThreadPoolExecutor
 
     from silica.onboarding.serve import is_local, ready
-    from silica.onboarding.wizard import _endpoint_model_ids
+    from silica.onboarding.wizard import endpoint_model_ids
 
     urls = base_urls()
 
@@ -569,7 +569,7 @@ def endpoint_status() -> list[dict]:
             "label": label,
             "url": url,
             "up": up,
-            "models": len(_endpoint_model_ids(url)) if up else 0,
+            "models": len(endpoint_model_ids(url)) if up else 0,
             "local": bool(url) and is_local(url),
             "command": os.getenv(cmd_key, "").strip(),
             "command_key": cmd_key,

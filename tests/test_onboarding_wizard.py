@@ -97,7 +97,7 @@ class TestRunWizard:
         # Rerank-extra detection is pinned False so the reranker question is
         # deterministic regardless of what this machine has installed.
         import silica.onboarding.wizard as wizard
-        monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: [])
+        monkeypatch.setattr(wizard, "endpoint_model_ids", lambda url: [])
         monkeypatch.setattr(wizard, "_rerank_extra_present", lambda: False)
 
     def _scripted(self, answers):
@@ -613,7 +613,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
-        monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: ["qwen3-30b"])
+        monkeypatch.setattr(wizard, "endpoint_model_ids", lambda url: ["qwen3-30b"])
 
         answers = [
             "",          # setup mode → essential
@@ -639,7 +639,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
-        # autouse fixture already stubs _endpoint_model_ids → []
+        # autouse fixture already stubs endpoint_model_ids → []
 
         answers = [
             "",              # setup mode → essential
@@ -666,7 +666,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
         monkeypatch.setattr(
-            wizard, "_endpoint_model_ids", lambda url: ["qwen3-30b", "nomic-embed-text"]
+            wizard, "endpoint_model_ids", lambda url: ["qwen3-30b", "nomic-embed-text"]
         )
 
         answers = [
@@ -701,7 +701,7 @@ class TestRunWizard:
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
         # A chat model is listed but nothing with "embed" → no candidate.
-        monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: ["qwen3-30b"])
+        monkeypatch.setattr(wizard, "endpoint_model_ids", lambda url: ["qwen3-30b"])
 
         answers = [
             "",          # setup mode → essential
@@ -809,7 +809,7 @@ class TestEndpointModelIds:
                 return {"data": [{"id": "a"}, {"id": "b"}, {"no_id": 1}]}
 
         monkeypatch.setattr("httpx.get", lambda url, timeout=0: _Resp())
-        assert wizard._endpoint_model_ids("http://x/v1") == ["a", "b"]
+        assert wizard.endpoint_model_ids("http://x/v1") == ["a", "b"]
 
     def test_returns_empty_on_error(self, monkeypatch):
         import silica.onboarding.wizard as wizard
@@ -818,7 +818,7 @@ class TestEndpointModelIds:
             raise OSError("down")
 
         monkeypatch.setattr("httpx.get", _raise)
-        assert wizard._endpoint_model_ids("http://x/v1") == []
+        assert wizard.endpoint_model_ids("http://x/v1") == []
 
 
 class TestPick:
@@ -865,7 +865,7 @@ class TestWizardModes:
     def _stub(self, monkeypatch, tmp_path):
         import silica.onboarding.wizard as wizard
 
-        monkeypatch.setattr(wizard, "_endpoint_model_ids", lambda url: [])
+        monkeypatch.setattr(wizard, "endpoint_model_ids", lambda url: [])
         monkeypatch.setattr(wizard, "_rerank_extra_present", lambda: False)
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
@@ -902,7 +902,7 @@ class TestWizardModes:
 
     def test_essential_gate_y_embeddings_autodetect_still_works(self, monkeypatch):
         monkeypatch.setattr(
-            self.wizard, "_endpoint_model_ids",
+            self.wizard, "endpoint_model_ids",
             lambda url: ["qwen3-30b", "nomic-embed-text"],
         )
         answers = [

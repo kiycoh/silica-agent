@@ -51,7 +51,7 @@ _WORKER_MODELS = {
     "mistral": ["mistral/mistral-small-latest"],
 }
 
-_EMBED_MODELS = [
+EMBED_MODELS = [
     "text-embedding-qwen3-embedding-4b",  # LM Studio's id for the same weights
     "qwen3-embedding-4b",
     "nomic-embed-text",
@@ -60,7 +60,7 @@ _EMBED_MODELS = [
 
 # Served /rerank endpoints only (llama.cpp --reranking, Infinity, Jina) — the
 # in-process [rerank] extra picks its own weights.
-_RERANK_MODELS = ["bge-reranker-v2-m3-Q8_0", "bge-reranker-v2-m3"]
+RERANK_MODELS = ["bge-reranker-v2-m3-Q8_0", "bge-reranker-v2-m3"]
 
 _EMBED_KEYS = ("SILICA_EMBEDDING_MODEL", "SILICA_EMBEDDING_BASE_URL", "SILICA_EMBEDDING_API_KEY",
                "SILICA_EMBEDDING_SERVE_CMD")
@@ -102,7 +102,7 @@ def _find_env_example(repo_root: Path | str | None) -> Path | None:
     return next((c for c in candidates if c.is_file()), None)
 
 
-def _endpoint_model_ids(base_url: str) -> list[str]:
+def endpoint_model_ids(base_url: str) -> list[str]:
     """Model ids advertised by an OpenAI-compatible `/models` endpoint, best-effort
     ([] on any error). Powers LM Studio autodetect and the local-embeddings
     suggestion, mirroring _ollama_installed_models / check_chat_endpoint."""
@@ -551,7 +551,7 @@ def _run_wizard_inner(
         else:  # lmstudio — probe /models like the Ollama branch does with tags.
             lmstudio_base = PROVIDER_PRESETS["lmstudio"]["base_url"]
             model = _ask_local_model(
-                input_fn, _endpoint_model_ids(lmstudio_base), "LM Studio", lmstudio_base, "qwen3-30b"
+                input_fn, endpoint_model_ids(lmstudio_base), "LM Studio", lmstudio_base, "qwen3-30b"
             )
         updates["SILICA_MODEL"] = model
         return True
@@ -606,7 +606,7 @@ def _run_wizard_inner(
         # text-embedding-*; a served embedder without "embed" in its id needs the
         # explicit prompts below. Upgrade path: probe each model's capabilities.
         candidate = next(
-            (m for m in _endpoint_model_ids(local_base) if "embed" in m.lower()), ""
+            (m for m in endpoint_model_ids(local_base) if "embed" in m.lower()), ""
         ) if local else ""
         if candidate and _ask(
             input_fn, f"Use {candidate} at {local_base} for embeddings? [y/n]", "y"
@@ -617,7 +617,7 @@ def _run_wizard_inner(
         else:
             updates["SILICA_EMBEDDING_MODEL"] = _pick(
                 input_fn, "Embedding model — pick a number or type an id",
-                _EMBED_MODELS, other_prompt="Embedding model",
+                EMBED_MODELS, other_prompt="Embedding model",
                 default=defaults.embedding_model,
             )
             updates["SILICA_EMBEDDING_BASE_URL"] = _ask(
@@ -668,7 +668,7 @@ def _run_wizard_inner(
         provider = state["provider"]
         if provider == "lmstudio":
             from silica.agent.providers import PROVIDER_PRESETS
-            options = _endpoint_model_ids(PROVIDER_PRESETS["lmstudio"]["base_url"])
+            options = endpoint_model_ids(PROVIDER_PRESETS["lmstudio"]["base_url"])
         elif provider == "ollama":
             options = _ollama_installed_models()
         else:
@@ -760,7 +760,7 @@ def _run_wizard_inner(
             )
             updates["SILICA_RERANK_MODEL"] = _pick(
                 input_fn, "Reranker model — pick a number or type an id",
-                _RERANK_MODELS, other_prompt="Reranker model id",
+                RERANK_MODELS, other_prompt="Reranker model id",
             )
             updates["SILICA_RERANK_API_KEY"] = _ask(
                 input_fn, "Reranker API key", "lm-studio", secret=True
