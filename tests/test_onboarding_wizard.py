@@ -350,7 +350,7 @@ class TestRunWizard:
         manifest = tmp_path / "vault.yaml"
         assert manifest.is_file()
         text = manifest.read_text(encoding="utf-8")
-        assert "sources:" in text and "code" in text and "overlay: codebase" in text
+        assert "sources:" in text and "code" in text
         assert "conventions" not in text and "language" not in text
 
     def test_repo_mode_writes_forced_language_into_manifest(self, monkeypatch, tmp_path):
@@ -450,7 +450,7 @@ class TestRunWizard:
         """The design's language question is unscoped to repo mode: an explicit-path
         vault with no vault.yaml yet must also be asked, and an explicit answer writes
         a minimal manifest pinning both cooccurrence_lang (stemmer) and the conventions
-        language (distiller) — no sources/overlay, unlike repo mode."""
+        language (distiller) — no sources, unlike repo mode."""
         import silica.onboarding.wizard as wizard
 
         vault = tmp_path / "vault"
@@ -544,7 +544,7 @@ class TestRunWizard:
 
     def test_repo_mode_colon_language_answer_does_not_corrupt_manifest(self, monkeypatch, tmp_path):
         """Finding 5: a colon-containing free-text answer, embedded raw into YAML,
-        breaks the whole manifest (repo mode's sources/overlay would silently
+        breaks the whole manifest (repo mode's sources would silently
         degrade to defaults on next load). The answer must be validated before
         it ever reaches the file."""
         import silica.onboarding.wizard as wizard
@@ -569,10 +569,9 @@ class TestRunWizard:
 
         assert rc == 0
         manifest = load_manifest(str(tmp_path))
-        # sources/overlay are written unconditionally in repo mode — an invalid
+        # sources are written unconditionally in repo mode — an invalid
         # language answer must never degrade the whole manifest to defaults.
         assert "code" in manifest.sources
-        assert manifest.overlay == "codebase"
 
     def test_non_repo_mode_preserves_existing_manifest_no_question_asked(self, monkeypatch, tmp_path):
         """An existing vault.yaml must never be touched — and the question must not

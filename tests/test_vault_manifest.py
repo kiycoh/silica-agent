@@ -24,7 +24,7 @@ def _fresh_cache():
 def test_defaults_prose_only_outside_git(tmp_path):
     m = load_manifest(tmp_path)
     assert m.sources == ("prose",)
-    assert m.overlay is None and m.cooccurrence_lang is None
+    assert m.cooccurrence_lang is None
 
 
 def test_defaults_include_code_inside_git(tmp_path):
@@ -36,12 +36,11 @@ def test_defaults_include_code_inside_git(tmp_path):
 
 def test_manifest_file_overrides_defaults(tmp_path):
     (tmp_path / "vault.yaml").write_text(
-        "sources: [prose]\noverlay: codebase\ncooccurrence_lang: italian\n",
+        "sources: [prose]\ncooccurrence_lang: italian\n",
         encoding="utf-8",
     )
     m = load_manifest(tmp_path)
     assert m.sources == ("prose",)
-    assert m.overlay == "codebase"
     assert m.cooccurrence_lang == "italian"
 
 
@@ -146,43 +145,37 @@ def test_apply_manifest_env_var_wins_over_auto_default(tmp_path, monkeypatch):
 
 def test_apply_manifest_env_wins(tmp_path, monkeypatch):
     (tmp_path / "vault.yaml").write_text(
-        "overlay: codebase\ncooccurrence_lang: italian\n", encoding="utf-8"
+        "cooccurrence_lang: italian\n", encoding="utf-8"
     )
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    monkeypatch.setattr(CONFIG, "domain", None)
     monkeypatch.setattr(CONFIG, "cooccurrence_lang", "english")
 
-    monkeypatch.delenv("SILICA_DOMAIN", raising=False)
     monkeypatch.delenv("SILICA_COOCCURRENCE_LANG", raising=False)
     apply_manifest_to_config()
-    assert CONFIG.domain == "codebase"
     assert CONFIG.cooccurrence_lang == "italian"
 
     reset_manifest_cache()
-    monkeypatch.setattr(CONFIG, "domain", "legal")
-    monkeypatch.setenv("SILICA_DOMAIN", "legal")
+    monkeypatch.setattr(CONFIG, "cooccurrence_lang", "french")
+    monkeypatch.setenv("SILICA_COOCCURRENCE_LANG", "french")
     apply_manifest_to_config()
-    assert CONFIG.domain == "legal"  # env precedence
+    assert CONFIG.cooccurrence_lang == "french"  # env precedence
 
 
-def test_apply_manifest_clears_overlay_on_switch_to_plain_vault(tmp_path, monkeypatch):
+def test_apply_manifest_clears_lang_on_switch_to_plain_vault(tmp_path, monkeypatch):
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
     (tmp_path / "a" / "vault.yaml").write_text(
-        "overlay: legal\ncooccurrence_lang: italian\n", encoding="utf-8"
+        "cooccurrence_lang: italian\n", encoding="utf-8"
     )
-    monkeypatch.delenv("SILICA_DOMAIN", raising=False)
     monkeypatch.delenv("SILICA_COOCCURRENCE_LANG", raising=False)
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "a"))
-    monkeypatch.setattr(CONFIG, "domain", None)
     monkeypatch.setattr(CONFIG, "cooccurrence_lang", "english")
     apply_manifest_to_config()
-    assert CONFIG.domain == "legal" and CONFIG.cooccurrence_lang == "italian"
+    assert CONFIG.cooccurrence_lang == "italian"
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path / "b"))
     reset_manifest_cache()
     apply_manifest_to_config()
-    assert CONFIG.domain is None          # not leaked from vault a
     assert CONFIG.cooccurrence_lang == "auto"  # not leaked from vault a; "auto" is the real default
 
 

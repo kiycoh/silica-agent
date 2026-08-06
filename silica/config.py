@@ -571,10 +571,6 @@ class SilicaConfig:
         default_factory=lambda: float(os.getenv("SILICA_AUTOLINK_MIN_SIM", "0.30"))
     )
 
-    domain: str | None = field(
-        default_factory=lambda: os.getenv("SILICA_DOMAIN") or None
-    )
-
     # Mindmap (/map): radial map rooted on one note. Node cap is "breathing room"
     # (readable map, not a hairball); latent_k = neighbours asked of the
     # relatedness facade; hops = wikilink BFS depth from the root.

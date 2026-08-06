@@ -430,8 +430,6 @@ def check_manifest(config: SilicaConfig) -> CheckResult:
             f"known sources: {sorted(known)}",
         )
     detail = f"sources={list(m.sources)}"
-    if m.overlay:
-        detail += f", overlay={m.overlay}"
     return CheckResult("vault manifest", "ok", detail)
 
 

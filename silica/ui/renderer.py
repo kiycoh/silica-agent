@@ -212,10 +212,8 @@ def _synthetic_tool_desc(name: str, args: dict) -> str:
 # RECON. Splitting them is what lets a frontend reset the chunk track per chunk
 # without wrongly clearing the file track.
 #
-# Hardcoded on purpose: merge_overlay (silica/router/overlay.py, ADR-0005)
-# rejects any Domain Pack that adds, removes or reorders phases, so this can only
-# drift from an edit to recipes/injector.yaml — which tests/test_phase_track.py
-# pins.
+# Hardcoded on purpose: this can only drift from an edit to
+# recipes/injector.yaml — which tests/test_phase_track.py pins.
 _FILE_PHASES: dict[str, str] = {
     "recon":      "recon",
     "crossdedup": "cross-dedup",

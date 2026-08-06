@@ -80,7 +80,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
         # Bundled package data — if it's missing the install is broken; fail fast.
         from silica.router.recipe_parser import load_recipe
         from silica.config import CONFIG
-        self._recipe = load_recipe("organizer", domain=getattr(CONFIG, "domain", None))
+        self._recipe = load_recipe("organizer")
 
         # BaseFSM contract
         self._phase_label = "Organizer"

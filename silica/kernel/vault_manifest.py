@@ -3,8 +3,8 @@
 
 """Vault manifest — declared capabilities per vault (ADR-0014).
 
-`<vault>/vault.yaml` declares which source adapters participate, the active
-domain overlay (ADR-0005 pack name) and the co-occurrence language. This is
+`<vault>/vault.yaml` declares which source adapters participate and the
+co-occurrence language. This is
 composition, not taxonomy: there is no vault *type*. Absence of the file ⇒
 retro-compatible defaults (prose always on; code on iff the vault sits
 inside a git repo) — no migration required. Cached like kernel/overlay.py;
@@ -91,7 +91,6 @@ DEFAULT_CONVENTIONS = VaultConventions()
 @dataclass(frozen=True)
 class VaultManifest:
     sources: tuple[str, ...]
-    overlay: str | None = None
     cooccurrence_lang: str | None = None
     conventions: VaultConventions = DEFAULT_CONVENTIONS
     # Write boundary: the only subtree of the vault Silica may create, patch,
@@ -283,7 +282,6 @@ def load_manifest(vault: str | Path) -> VaultManifest:
             logger.warning("vault.yaml: `sources` must be a non-empty string list — using defaults")
         src = defaults.sources
 
-    overlay = raw.get("overlay")
     lang = raw.get("cooccurrence_lang")
 
     # Absent ⇒ "" (vault root, in place). Declared-but-unresolvable ⇒ None, and
@@ -315,7 +313,6 @@ def load_manifest(vault: str | Path) -> VaultManifest:
 
     return VaultManifest(
         sources=src,
-        overlay=overlay if isinstance(overlay, str) and overlay else None,
         cooccurrence_lang=lang if isinstance(lang, str) and lang else None,
         conventions=conventions,
         write_dir=write_dir,
@@ -504,13 +501,11 @@ def seed_mirror_copy(path: str) -> None:
 
 def apply_manifest_to_config() -> None:
     """Manifest determines CONFIG fields the environment did not set (env
-    wins). Symmetric on purpose: a vault that declares no overlay clears a
-    previous vault's overlay on /vault switch instead of leaking it."""
+    wins). Symmetric on purpose: a vault that declares nothing clears a
+    previous vault's setting on /vault switch instead of leaking it."""
     from silica.config import CONFIG
 
     m = get_active_manifest()
-    if os.getenv("SILICA_DOMAIN") is None:
-        CONFIG.domain = m.overlay
     if os.getenv("SILICA_COOCCURRENCE_LANG") is None:
         # "auto" mirrors the config-level default for this field (per-store
         # detection, frozen at build — see kernel/cooccurrence.py). A vault

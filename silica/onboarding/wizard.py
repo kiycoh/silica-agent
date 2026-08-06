@@ -292,7 +292,7 @@ def _ask_language(input_fn: Callable[[str], str]) -> str:
     `_parse_conventions` folds to None (the user believes they forced a
     language but silently didn't), and any other stray punctuation — a colon
     above all — can break the surrounding YAML, degrading the WHOLE manifest
-    (in repo mode this silently drops sources/overlay too). Anything that
+    (in repo mode this silently drops sources too). Anything that
     isn't a bare name is treated as no answer rather than risking either
     failure mode.
     """
@@ -436,9 +436,9 @@ def _run_wizard_inner(
                 manifest = repo_vault / MANIFEST_REL
                 if not manifest.exists():
                     # Declared capabilities (ADR-0014): repo-mode vault wants the
-                    # codebase overlay and the code source active.
+                    # code source active.
                     lang_answer = _ask_language(input_fn)
-                    content = "sources: [prose, code]\noverlay: codebase\n"
+                    content = "sources: [prose, code]\n"
                     if write_dir:
                         content += f"write_dir: {write_dir}\n"
                     if lang_answer:

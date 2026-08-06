@@ -318,7 +318,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # S3.3: Load the recipe for dynamic configuration. The recipe is bundled
         # package data — if it's missing the install is broken; fail fast.
         from silica.router.recipe_parser import load_recipe
-        self._recipe = load_recipe("injector", domain=getattr(CONFIG, "domain", None))
+        self._recipe = load_recipe("injector")
         self._has_collision_phase = any(
             p.get("id") == "collision" for p in self._recipe.get("phases", [])
         )

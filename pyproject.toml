@@ -100,9 +100,9 @@ Issues = "https://github.com/kiycoh/silica-agent/issues"
 
 [tool.setuptools]
 # Ship every git-tracked non-.py asset under the package (prompts, recipes,
-# domains, overlays, web static, .env.example). Beats per-package data globs:
+# overlays, web static, .env.example). Beats per-package data globs:
 # capabilities/prompts/** sits under the silica.capabilities package while
-# recipes/ and domains/ are non-package subdirs of silica — include-package-data
+# recipes/ and overlays/ are non-package subdirs of silica — include-package-data
 # attributes each file to its nearest package automatically, and new asset dirs
 # ship for free. Without this a wheel install drops them and crashes at runtime.
 include-package-data = true

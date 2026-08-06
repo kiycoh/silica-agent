@@ -3,10 +3,8 @@
 
 """The phase tables are hardcoded in two places away from the recipe.
 
-That is safe by construction — merge_overlay (silica/router/overlay.py, ADR-0005)
-rejects any Domain Pack that adds, removes or reorders phases, so a pack cannot
-make them drift. The one thing that can is an edit to recipes/injector.yaml, and
-these tests are what fails on that day.
+The one thing that can make them drift is an edit to recipes/injector.yaml,
+and these tests are what fails on that day.
 """
 from __future__ import annotations
 
