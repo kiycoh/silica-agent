@@ -248,6 +248,10 @@ def run_agent(
     # Key: (tool_name, args_json_string)
     # Value: consecutive failure count
     consecutive_failures: dict[tuple[str, str], int] = {}
+    # Set when the convergence guard stops the loop: the run lands with the
+    # same tool-less final turn as the iteration cap, instead of discarding
+    # everything it found behind a RuntimeError.
+    convergence_landing = False
 
     # Message indices already elided by this run's compaction sweeps. The callers
     # keep their own set across turns; the two never conflict because a stub is
@@ -464,9 +468,12 @@ def run_agent(
                             progress.save()
                         except Exception:
                             pass
-                    raise RuntimeError(
-                        f"Tool '{tc.name}' failed 3 consecutive times with the same arguments: {tc.args}"
-                    )
+                    # Stop the loop, keep the run: a deep research turn that
+                    # stubs its toes on one tool (measured live: a re-pasted
+                    # non-verbatim `remember` quote, three times) still holds
+                    # 40+ steps of findings worth answering from.
+                    convergence_landing = True
+                    break
                 elif failures_count == 2:
                     logger.warning("Convergence guard: tool '%s' with args %s failed consecutively. Injecting warning message.", tc.name, tc.args)
                     pending_notices.append(
@@ -483,13 +490,23 @@ def run_agent(
         # require the tool messages contiguous immediately after the assistant).
         messages.extend(pending_notices)
 
+        if convergence_landing:
+            # The guard broke out mid-dispatch: siblings of the aborted call
+            # may be unanswered, and the landing call below rejects orphaned
+            # tool_calls blocks.
+            repair_tool_call_history(messages)
+            break
+
         notice = _budget_notice(iteration, max_iterations)
         if notice is not None:
             messages.append(notice)
 
         # Loop continues: re-call LLM with tool results
 
-    logger.warning("Agent loop hit max iterations (%d)", max_iterations)
+    if convergence_landing:
+        logger.warning("Agent loop stopped by the convergence guard; landing")
+    else:
+        logger.warning("Agent loop hit max iterations (%d)", max_iterations)
     # One last turn with the tools removed, rather than discarding the whole
     # turn. Everything the model found or wrote is still in `messages`; asking
     # for it back costs one call and turns a completed write reported as

@@ -228,24 +228,44 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
             cls="atomic"
         )
 
-        # Mock LLM to always call the same tool with same args
+        # Mock LLM: the same failing tool call while tools are offered, a text
+        # answer on the forced tool-less landing turn.
         resp1 = LLMResponse(
             text=None,
             tool_calls=[ToolCall(id="tc1", name="failing_tool", args={"param": "value"})],
             assistant_message={"role": "assistant", "tool_calls": []},
             usage={}
         )
-        mock_call_llm.return_value = resp1
+        landing = LLMResponse(
+            text="salvaged findings",
+            assistant_message={"role": "assistant"},
+            usage={}
+        )
+        mock_call_llm.side_effect = (
+            lambda *a, **kw: landing if kw.get("tools") is None else resp1
+        )
 
         with patch.dict(TOOLS, {"failing_tool": failing_tool}):
             messages = [{"role": "user", "content": "run the tool"}]
-            
-            # Since N=3 causes RuntimeError, running the agent should raise RuntimeError
-            with self.assertRaises(RuntimeError) as context:
-                run_agent(messages, model="test_model")
-            
-            self.assertIn("failed 3 consecutive times", str(context.exception))
 
-            # Inspect history to check that the warning message was injected at consecutive failure #2
+            # 3 identical failures stop the loop, but land it the same way the
+            # iteration cap does — a 47-step research run is salvaged as an
+            # answer, not discarded as a RuntimeError (measured live: one
+            # stubbornly re-paraphrased `remember` killed a 30-minute run).
+            result = run_agent(messages, model="test_model")
+
+            self.assertEqual(result, "salvaged findings")
+
+            # The warning was still injected at consecutive failure #2
             system_messages = [m for m in messages if m.get("role") == "system"]
             self.assertTrue(any("DO NOT call this tool again with the exact same arguments" in m["content"] for m in system_messages))
+
+            # Landing left no orphaned tool_calls behind for the final call
+            for i, m in enumerate(messages):
+                if m.get("role") == "assistant" and m.get("tool_calls"):
+                    answered = {
+                        t["tool_call_id"] for t in messages[i + 1:]
+                        if t.get("role") == "tool"
+                    }
+                    for tc in m["tool_calls"]:
+                        self.assertIn(tc["id"], answered)
