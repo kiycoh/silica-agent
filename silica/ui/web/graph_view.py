@@ -43,11 +43,6 @@ from silica.kernel.recall.graph_export import (
 
 logger = logging.getLogger(__name__)
 
-_VIS_JS_URLS = (
-    "https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/3d-force-graph.min.js",
-    "https://cdn.jsdelivr.net/npm/force-graph@1.51.2/dist/force-graph.min.js",
-)
-
 # Both renderers, in load order: WebGL first (the default mode), canvas second.
 _VENDORED_BUNDLES = ("3d-force-graph.min.js", "force-graph.min.js")
 
@@ -143,8 +138,8 @@ def render_html(
 ) -> str:
     """Produce a fully self-contained 3d-force-graph HTML string.
 
-    Pass lib_js to embed the bundle inline (truly offline-capable).
-    If omitted, CDN link is used as a fallback.
+    lib_js is the vendored renderer bundle, embedded inline (offline-capable;
+    export_graph always supplies it via _vendored_lib_js).
     communities is a list of Community objects; legend is built from it.
     zones is the semantic partition (node["sgroup"]); it draws the zone layer,
     which is off until asked for and is a different grouping from communities.
@@ -264,8 +259,7 @@ def render_html(
       if (!pinned) mq.addEventListener("change", function () {{ location.reload(); }});
     }})();
   </script>
-  {f'<script>{lib_js}</script>' if lib_js
-    else "".join(f'<script src="{u}"></script>' for u in _VIS_JS_URLS)}
+  <script>{lib_js}</script>
   <style>
     /* Palette mirrors the app shell: crystal substrate travelling blue to
        violet the way the mascot is shaded, iced cyan accent, amber for

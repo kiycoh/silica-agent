@@ -102,23 +102,13 @@ class TestLibJsInlining:
         html = render_html(nodes, edges, lib_js=bundle)
         assert f"<script>{bundle}</script>" in html
 
-    def test_no_cdn_src_when_lib_js_provided(self, small_graph):
-        """When lib_js is non-empty, no <script src= CDN tag should appear."""
+    def test_never_a_cdn_script_src(self, small_graph):
+        """The bundle is always inlined — no <script src= network dependency,
+        even with an empty lib_js (the CDN fallback is gone)."""
         nodes, edges = small_graph
-        html = render_html(nodes, edges, lib_js="/* bundle */")
-        assert "<script src=" not in html
-
-    def test_cdn_fallback_when_no_lib_js(self, small_graph):
-        """When lib_js is empty, a <script src= CDN tag should appear."""
-        nodes, edges = small_graph
-        html = render_html(nodes, edges, lib_js="")
-        assert "<script src=" in html
-
-    def test_cdn_url_points_to_3d_force_graph(self, small_graph):
-        """CDN fallback should reference 3d-force-graph, not vis-network."""
-        nodes, edges = small_graph
-        html = render_html(nodes, edges, lib_js="")
-        assert "3d-force-graph" in html
+        for lib_js in ("/* bundle */", ""):
+            html = render_html(nodes, edges, lib_js=lib_js)
+            assert "<script src=" not in html
 
 
 # ---------------------------------------------------------------------------
