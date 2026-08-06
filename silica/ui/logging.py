@@ -9,7 +9,7 @@ from rich.console import Console
 
 from silica.ui.console import CONSOLE
 from silica.ui.style import GLYPHS
-from silica.ui.theme import SILICA_THEME
+from silica.ui.console import SILICA_THEME
 
 
 class LiveAwareStreamHandler(logging.StreamHandler):
