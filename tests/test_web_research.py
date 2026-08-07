@@ -1482,3 +1482,6 @@ def test_guardian_forgives_quote_style_not_words():
     # every word must still be there verbatim: style is forgiven, wording is not
     assert _squash("the verifier prunes branches already explored") not in _squash(page)
     assert _squash("the states it has previously been in") not in _squash(page)
+    # guillemet and CJK quote styles fold too (European and CJK sources)
+    assert _squash('he called it "fine"') in _squash("he called it «fine».")
+    assert _squash('the 「lease」 expires') in _squash('the "lease" expires')
