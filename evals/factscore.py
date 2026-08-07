@@ -52,6 +52,9 @@ _JUDGE_PROMPT = (
     "Facts:\n{facts}\n\n"
     "For each fact, decide whether it is supported by the source document. "
     "A fact is supported when the source states it or directly implies it. "
+    "Judge only from the source document above: a fact that is plausible, or "
+    "that you know to be true from elsewhere, but that this source does not "
+    "state, is \"no\". Do not argue for the fact on the source's behalf. "
     "Answer with one line per fact, exactly \"N: yes\" or \"N: no\". "
     "No other text."
 )

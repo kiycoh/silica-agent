@@ -47,7 +47,7 @@ def test_every_knob_is_in_the_key(monkeypatch, tmp_path):
 def test_empty_reply_retries_and_is_never_cached(monkeypatch, tmp_path):
     calls = _patch(monkeypatch, tmp_path, [""])
     assert oracle.cached_text("m", [{"role": "user", "content": "q"}]) == ""
-    assert len(calls) == 3  # retried in-call
+    assert len(calls) == oracle._ATTEMPTS  # retried in-call
     assert not list((tmp_path / "oracle").rglob("*.json"))  # nothing frozen
     calls.clear()
     oracle.cached_text("m", [{"role": "user", "content": "q"}])

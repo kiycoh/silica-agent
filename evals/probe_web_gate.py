@@ -409,7 +409,16 @@ def main(argv=None) -> int:
         paired: dict[str, list[str]] = {}
         for row in rows:
             paired.setdefault(row["concept"], []).append(row["file"])
-        summary = {"judge_model": judge, "runs": rows, "paired": paired}
+        # A note the judge could not score is a lost cell, and a lost cell is a
+        # lost PAIR out of five: the L3 gate silently dropped 2/11 runs this way
+        # (transient provider drops during decompose) and the summary hid it.
+        unscored = [f"{r['acquisition']['arm']}:{r['file']}" for r in rows
+                    if r["note"]["factscore"] is None]
+        if unscored:
+            print(f"UNSCORED notes {len(unscored)}/{len(rows)} — each one "
+                  f"costs its whole pair: {', '.join(unscored)}", flush=True)
+        summary = {"judge_model": judge, "runs": rows, "paired": paired,
+                   "note_unscored": unscored}
         out = json.dumps(summary, ensure_ascii=False, indent=1)
         if args.out:
             Path(args.out).write_text(out, encoding="utf-8")

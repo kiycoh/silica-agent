@@ -39,7 +39,13 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _CACHE_DIR = Path(__file__).parent / ".oracle"
-_ATTEMPTS = 3
+# Six attempts, exponential backoff (~31s covered). The old 3-attempts-in-3s
+# lost two of eleven gate notes to one provider drop: byte-identical decompose
+# prompts returned empty through all three tries, then succeeded on a manual
+# retry 25 minutes later. A lost decompose silently excludes a whole note from
+# a gate that has five pairs, so the retry window errs wide — a worker thread
+# blocked half a minute is cheaper than a cell.
+_ATTEMPTS = 6
 
 
 def cached_text(model: str, messages: list[dict], **kwargs) -> str:
@@ -72,5 +78,6 @@ def cached_text(model: str, messages: list[dict], **kwargs) -> str:
             except Exception as exc:  # a cache write must never fail an eval
                 logger.warning("oracle: cache write failed for %s (%s)", path.name, exc)
             return text
-        time.sleep(1.0 * (attempt + 1))
+        if attempt + 1 < _ATTEMPTS:
+            time.sleep(2.0 ** attempt)
     return ""
