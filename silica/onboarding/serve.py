@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
+from silica.kernel.scrub import scrub_credentials
+
 logger = logging.getLogger(__name__)
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
@@ -84,7 +86,8 @@ def _fail(label: str, headline: str, log_path: Path) -> bool:
         lines = []
     hits = [ln for ln in lines if _ERROR_LINE.search(ln)]
     for line in (hits or lines)[-3:]:
-        CONSOLE.print(f"    [dim]{line[:200]}[/]")
+        # scrub: a server's own log commonly restates its launch argv, key and all.
+        CONSOLE.print(f"    [dim]{scrub_credentials(line)[:200]}[/]")
     if label in _DEGRADES_TO:
         CONSOLE.print(f"  [yellow]→ {_DEGRADES_TO[label]}.[/]")
     CONSOLE.print(f"  [dim]Full log: {log_path}[/]")
@@ -110,9 +113,13 @@ def ensure(label: str, base_url: str, command: str) -> bool:
     log_dir = Path.home() / ".silica" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{label}-server.log"
-    logger.info("%s at %s is down — starting: %s", label, base_url, command)
+    # Never echo the URL or the command as configured: a proxy endpoint carries
+    # its key in the userinfo or the query, a serve command as a flag, and this
+    # line precedes the doctor's own report.
+    shown = scrub_credentials(base_url)
+    logger.info("%s at %s is down — starting: %s", label, shown, scrub_credentials(command))
     # Loading a model takes tens of seconds; say so rather than look hung.
-    CONSOLE.print(f"  [dim]{label} at {base_url} is down — starting it…[/]")
+    CONSOLE.print(f"  [dim]{label} at {shown} is down — starting it…[/]")
     with open(log_path, "ab") as log:
         # start_new_session: the server is a daemon the next silica run should
         # find already up, so it must outlive this process and ignore its Ctrl-C.
@@ -123,7 +130,7 @@ def ensure(label: str, base_url: str, command: str) -> bool:
     deadline = time.monotonic() + _READY_TIMEOUT
     while time.monotonic() < deadline:
         if ready(base_url):
-            logger.info("%s ready at %s", label, base_url)
+            logger.info("%s ready at %s", label, shown)
             CONSOLE.print(f"  [dim]{label} ready.[/]")
             return True
         # A missing model file kills llama-server in under a second; without this
