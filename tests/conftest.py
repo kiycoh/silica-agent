@@ -14,6 +14,40 @@ def _fresh_bus(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _restore_tools_registry() -> None:
+    """Undo any registration a test leaves in the global TOOLS dict.
+
+    TOOLS is module-level and `@tool` writes into it at import time; ten test
+    files register into it by hand. That leak is the first mechanism behind the
+    2026-08-05 suite flakiness (a real eager tool registered by one test broke
+    another's exact-set assertion under pytest-randomly), and it was closed per
+    test with try/finally. Per test is convention, so the eleventh author
+    reintroduces it. Snapshot and restore, never clear: registration happens at
+    import, so clearing would empty the registry for the rest of the session.
+
+    Restoring the snapshot wholesale is wrong for the same reason. The first
+    test to import a tool module registers it DURING the test, and the import
+    is cached, so deleting what it added unregisters those tools for the whole
+    session — that is how `silica_code_pack` went missing from
+    `exposed_tools(all_tools=True)` two tests after `test_mcp_surface` imported
+    it. So an addition is kept when it came from a `silica.*` module (the
+    product registry filling in lazily) and dropped otherwise (a fake defined
+    in a test).
+
+    ponytail: this hides a leaking test instead of failing it. Stability was
+    chosen over catching the author; assert the registry is unchanged here if
+    that turns out to be the wrong trade.
+    """
+    from silica.tools import TOOLS
+    snapshot = dict(TOOLS)
+    yield
+    TOOLS.update(snapshot)  # undo overwrites and deletions
+    for name in set(TOOLS) - set(snapshot):
+        if not getattr(TOOLS[name].fn, "__module__", "").startswith("silica"):
+            del TOOLS[name]
+
+
+@pytest.fixture(autouse=True)
 def _reset_run_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset the process-wide 429 pacing floor so it can't leak between tests
     (a leaked cooldown would make a later real retry sleep for seconds)."""
