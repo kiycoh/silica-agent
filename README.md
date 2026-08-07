@@ -260,8 +260,6 @@ flowchart LR
 
 A chat-first interface at `http://localhost:8765`. Query and curate from the browser, watch answers stream in, open the graph. Start here if you are new.
 
-![Web UI](https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/web_gui_screenshot.png)
-
 ### 2. Terminal &nbsp;·&nbsp; `silica`
 
 The interactive REPL. Every command in the [reference](#command-reference) lives here, and it is the fastest driver once you know the verbs.
