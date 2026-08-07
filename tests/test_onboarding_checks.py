@@ -692,6 +692,70 @@ class TestOwnSessionCapture:
         assert "episodic" in result.detail.lower()
 
 
+class TestReportSurvivesItsOwnChecks:
+    """One raising check must not take down the twelve that would have answered."""
+
+    def test_a_raising_check_becomes_one_failed_row(self, monkeypatch):
+        import silica.onboarding.checks as checks
+
+        before = checks.run_checks(_cfg())
+
+        def check_vault(config):  # __name__ is what names the degraded row
+            raise OSError("vault unmounted mid-run")
+
+        monkeypatch.setattr(checks, "check_vault", check_vault)
+        after = checks.run_checks(_cfg())
+
+        assert len(after) == len(before)  # every other check still answered
+        raised = [r for r in after if "check raised" in r.detail]
+        assert len(raised) == 1
+        assert raised[0].name == "vault"
+        assert raised[0].status == "fail"
+        assert "vault unmounted mid-run" in raised[0].detail
+
+    def test_payload_ok_matches_has_failures(self):
+        import silica.onboarding.checks as checks
+
+        results = checks.run_checks(_cfg())
+        payload = checks.report_payload(results)
+
+        assert payload["ok"] is not checks.has_failures(results)
+        assert len(payload["results"]) == len(results)
+        assert set(payload["results"][0]) == {"name", "status", "detail", "hint"}
+
+
+class TestCredentialsNeverReachTheOutput:
+    """httpx exceptions carry the full request URL, query included."""
+
+    _LEAKY = "http://user:sk-real@host:1234/v1?api_key=sk-real"
+
+    def _results(self):
+        from silica.onboarding.checks import CheckResult
+
+        return [CheckResult("rerank", "warn", f"{self._LEAKY} unreachable",
+                            f"start the server at {self._LEAKY}")]
+
+    def test_json_payload_is_scrubbed(self):
+        import json
+
+        from silica.onboarding.checks import report_payload
+
+        assert "sk-real" not in json.dumps(report_payload(self._results()))
+
+    def test_rendered_report_is_scrubbed(self, capsys, monkeypatch):
+        from silica.onboarding.checks import render_report
+        from silica.ui.console import CONSOLE
+
+        # Wide enough that the table cannot wrap the redaction marker apart and
+        # turn the positive half of this assertion into a false green.
+        monkeypatch.setattr(CONSOLE, "width", 300)
+        render_report(self._results())
+
+        out = capsys.readouterr().out
+        assert "sk-real" not in out
+        assert "***" in out
+
+
 def test_check_quarantine_sees_cross_vault_state_in_home(tmp_path, monkeypatch):
     """undo_journal.db and checkpoints live at ~/.silica, not under the vault:
     their quarantined copies were invisible to the only surface that reports

@@ -16,6 +16,7 @@ import re
 import shlex
 import sys
 import uuid
+from contextlib import nullcontext, redirect_stdout
 from typing import NamedTuple
 
 from silica.ui.style import FlatMarkdown
@@ -2257,7 +2258,9 @@ def _doctor_live_probe() -> bool:
     try:
         resp = call_llm(CONFIG.model, [{"role": "user", "content": "Reply with: ok"}], max_tokens=5)
     except Exception as e:  # any provider/transport error → not working
-        CONSOLE.print(f"  [red]✗ live probe failed:[/] {e}")
+        # scrub: provider exceptions embed the full request URL, key included.
+        from silica.kernel.scrub import scrub_credentials
+        CONSOLE.print(f"  [red]✗ live probe failed:[/] {scrub_credentials(e)}")
         return False
     if (resp.text or "").strip():
         CONSOLE.print("  [green]✓ live probe: model replied[/]")
@@ -2350,12 +2353,29 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         return 0
     if args[:1] == ["doctor"]:
         import silica.onboarding.checks as checks
-        _ensure_servers()  # report the state after the autostart, not before it
-        results = checks.run_checks(CONFIG)
-        checks.render_report(results)
-        # --live: opt-in real completion (costs a token on hosted providers).
-        live_ok = _doctor_live_probe() if "--live" in args[1:] else True
-        return 1 if (checks.has_failures(results) or not live_ok) else 0
+        as_json = "--json" in args[1:]
+        # Under --json stdout IS the payload, so the autostart's and the live
+        # probe's console chatter has to land somewhere else or the output
+        # stops parsing. CONSOLE resolves sys.stdout per write, so the redirect
+        # reaches it.
+        quiet = redirect_stdout(sys.stderr) if as_json else nullcontext()
+        with quiet:
+            _ensure_servers()  # report the state after the autostart, not before it
+            results = checks.run_checks(CONFIG)
+            # --live: opt-in real completion (costs a token on hosted providers).
+            # A row in BOTH outcomes, appended before rendering: the table has
+            # to show what the exit code is about, and a --json consumer has to
+            # be able to tell "--live passed" from "--live never ran".
+            if "--live" in args[1:]:
+                live_ok = _doctor_live_probe()
+                results.append(checks.CheckResult(
+                    "live probe", "ok" if live_ok else "fail",
+                    "the model replied" if live_ok else "the model did not reply"))
+            if not as_json:
+                checks.render_report(results)
+        if as_json:
+            print(json.dumps(checks.report_payload(results), ensure_ascii=False, indent=2))
+        return 1 if checks.has_failures(results) else 0
     if args[:1] == ["init"]:
         import silica.onboarding.wizard as wizard_mod
         return wizard_mod.run_wizard(advanced="--advanced" in args[1:])

@@ -6,9 +6,9 @@
 Any MCP client (Claude Code first) gets Silica as vault memory: context
 search through the relatedness facade, note reading, and gated writing.
 
-Default surface is CORE_TOOLS — the subset (search + read +
-write) — because every exposed schema is context the client pays for on each
-session. `--all` exposes the full default toolset (same sensitive/internal
+Default surface is CORE_TOOLS — the subset (search + read + write, plus the
+doctor read) — because every exposed schema is context the client pays for on
+each session. `--all` exposes the full default toolset (same sensitive/internal
 filter as the chat agent's loop).
 
 stdout is the protocol channel: nothing here may print to it. Logging goes
@@ -45,6 +45,11 @@ CORE_TOOLS = (
     "silica_write_note",
     "silica_patch_note",
     "silica_flag_note",
+    # Not vault memory: the client's read of whether the memory it is talking to
+    # is actually whole. A degraded leg (no embeddings, no rerank, unwritable
+    # vault) answers plausibly instead of erroring, so without this the only way
+    # to find out is to be told.
+    "silica_doctor",
 )
 
 # MCP behavior hints: everything we serve is read-only except these three.
@@ -55,7 +60,9 @@ WRITE_TOOLS = frozenset({"silica_write_note", "silica_patch_note", "silica_flag_
 # setting only two advertised every journaled, revertible write as destructive
 # and the whole closed-world vault as open-world. Hosts gate destructive tools
 # harder, which bought extra confirmation prompts for nothing, and open-world
-# was simply false: no tool here reaches outside the vault.
+# was simply false: the domain is the vault, plus — for the doctor alone — the
+# user's own configured endpoints. Named in advance either way, never the
+# unpredictable set of entities the hint is about.
 _READ_ONLY = dict(readOnlyHint=True, destructiveHint=False,
                   idempotentHint=True, openWorldHint=False)
 # Additive, not destructive: every write goes through the undo journal

@@ -26,6 +26,47 @@ class TestDispatchSubcommand:
         monkeypatch.setattr(checks, "render_report", lambda results: None)
         assert _dispatch_subcommand(["doctor"]) == 1
 
+    def test_doctor_json_parses_and_mirrors_the_exit_code(self, monkeypatch, capsys):
+        """stdout is the payload: nothing else may print on it."""
+        import json
+
+        import silica.cli as cli
+        import silica.onboarding.checks as checks
+        from silica.cli import _dispatch_subcommand
+
+        bad = checks.CheckResult("vault", "fail", "missing", "run `silica init`")
+        monkeypatch.setattr(checks, "run_checks", lambda cfg: [bad])
+        # The autostart prints to the console; under --json that has to be
+        # redirected away from stdout, which is what this asserts.
+        monkeypatch.setattr(cli, "_ensure_servers", lambda: print("starting llama-server…"))
+
+        code = _dispatch_subcommand(["doctor", "--json"])
+
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["ok"] is False
+        assert code == 1
+        assert payload["results"] == [
+            {"name": "vault", "status": "fail", "detail": "missing", "hint": "run `silica init`"}
+        ]
+
+    def test_live_probe_is_a_row_in_both_outcomes(self, monkeypatch, capsys):
+        """A passing --live run must be distinguishable from --live never run,
+        and a failing one must show WHY the exit code is 1 in the report itself."""
+        import json
+
+        import silica.cli as cli
+        import silica.onboarding.checks as checks
+        from silica.cli import _dispatch_subcommand
+
+        monkeypatch.setattr(checks, "run_checks",
+                            lambda cfg: [checks.CheckResult("chat model", "ok", "x")])
+        for replied, status, code in ((True, "ok", 0), (False, "fail", 1)):
+            monkeypatch.setattr(cli, "_doctor_live_probe", lambda r=replied: r)
+            assert _dispatch_subcommand(["doctor", "--live", "--json"]) == code
+            rows = {r["name"]: r["status"]
+                    for r in json.loads(capsys.readouterr().out)["results"]}
+            assert rows["live probe"] == status
+
     def test_init_delegates_to_wizard(self, monkeypatch):
         import silica.onboarding.wizard as wizard_mod
         from silica.cli import _dispatch_subcommand

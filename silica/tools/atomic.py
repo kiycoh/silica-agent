@@ -799,6 +799,23 @@ class WeakNotesArgs(BaseModel):
     limit: int = Field(default=10, description="How many notes to return")
 
 
+@tool(EmptyArgs, cls="atomic")
+def silica_doctor() -> dict:
+    """Silica's own health: model, endpoints, vault, indexes and hooks.
+
+    The same checks `silica doctor` runs, as data. Call it when a capability
+    behaves as if it were off (relatedness that never finds anything, rerank
+    that never sharpens, a vault write that lands nowhere) instead of guessing:
+    a leg that degraded says so here. Endpoint credentials are redacted.
+    Unlike the CLI this never autostarts local servers first — that can block
+    for minutes on a model load — so it reports the state as it is right now.
+    """
+    from silica.config import CONFIG
+    from silica.onboarding import checks
+
+    return checks.report_payload(checks.run_checks(CONFIG))
+
+
 @tool(WeakNotesArgs, cls="atomic")
 def silica_weak_notes(limit: int = 10) -> list:
     """Notes the reader has answered wrong, worst first — the review queue.

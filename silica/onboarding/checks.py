@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 import httpx
 
@@ -24,6 +24,7 @@ from silica.agent.providers import (
 )
 from silica.config import SilicaConfig
 from silica.kernel.code import gitstate
+from silica.kernel.scrub import scrub_credentials
 
 _HTTP_TIMEOUT = 3.0
 
@@ -43,6 +44,16 @@ class CheckResult:
     status: Literal["ok", "warn", "fail", "unknown"]
     detail: str
     hint: str = ""
+
+    def __post_init__(self) -> None:
+        # Scrubbed at composition, not per output surface: the doctor table,
+        # the --json payload, the GUI's /health endpoint and the settings
+        # panel's bug report all consume these fields, and a scrub call at
+        # each renderer is the call the next surface forgets. httpx exception
+        # text carries the full request URL, query included, so the endpoint
+        # checks cannot promise these fields are clean on their own.
+        object.__setattr__(self, "detail", scrub_credentials(self.detail))
+        object.__setattr__(self, "hint", scrub_credentials(self.hint))
 
 
 # `unknown` is deliberately distinct from `ok`: when a check cannot read the
@@ -542,22 +553,43 @@ def check_session_capture(config: SilicaConfig) -> CheckResult:
     )
 
 
+def _guarded(name: str, check: Callable[[SilicaConfig], CheckResult],
+             config: SilicaConfig) -> CheckResult:
+    """Run one check, degrading it in place instead of taking down the report.
+
+    The HTTP checks guard themselves, but the filesystem and parsing ones do
+    not: a single OSError on a vault the user just unmounted used to abort the
+    whole run, including the twelve checks that would have answered. A check
+    that raises is a failure, not a new state.
+
+    `name` is the row name the check itself uses when it answers, so a consumer
+    keying on `results[].name` finds the row in exactly the degraded run the
+    guard exists to report — deriving it from `check.__name__` gave "manifest"
+    for a row every healthy run calls "vault manifest".
+    """
+    try:
+        return check(config)
+    except Exception as exc:  # noqa: BLE001 — the doctor must survive any check
+        return CheckResult(name, "fail", f"check raised: {type(exc).__name__}: {exc}")
+
+
 def run_checks(config: SilicaConfig) -> list[CheckResult]:
-    return [
-        check_chat_model(config),
-        check_chat_endpoint(config),
+    checks: list[tuple[str, Callable[[SilicaConfig], CheckResult]]] = [
+        ("chat model", check_chat_model),
+        ("chat endpoint", check_chat_endpoint),
         # Ollama-only: the silent-truncation trap is specific to it.
-        *([check_ollama_context(config)] if config.provider == "ollama" else []),
-        check_vault(config),
-        check_manifest(config),
-        check_language(config),
-        check_embeddings(config),
-        check_rerank(config),
-        check_quarantine(config),
-        check_okf(config),
-        check_capture_hook(config),
-        check_session_capture(config),
+        *([("ollama context", check_ollama_context)] if config.provider == "ollama" else []),
+        ("vault", check_vault),
+        ("vault manifest", check_manifest),
+        ("language", check_language),
+        ("embeddings", check_embeddings),
+        ("rerank", check_rerank),
+        ("quarantine", check_quarantine),
+        ("OKF §11", check_okf),
+        ("session capture", check_capture_hook),
+        ("own sessions", check_session_capture),
     ]
+    return [_guarded(name, c, config) for name, c in checks]
 
 
 def has_failures(results: list[CheckResult]) -> bool:
@@ -569,6 +601,23 @@ def has_failures(results: list[CheckResult]) -> bool:
 # the whole reason routine lines must not shout.
 _STATUS_GLYPH = {"ok": ("✓", "green"), "warn": ("⚠", "yellow"),
                  "fail": ("✗", "red"), "unknown": ("?", "dim")}
+
+
+def report_payload(results: list[CheckResult]) -> dict:
+    """Machine-readable mirror of `render_report` — how the agent reads its own health.
+
+    Deliberately a flat mirror of the dataclass rather than a shaped schema:
+    once something routes on the field names, growing a shape is a breaking
+    change, and `CheckResult` is already the contract. Credentials are already
+    scrubbed — CheckResult redacts its own fields at composition.
+    """
+    return {
+        "results": [
+            {"name": r.name, "status": r.status, "detail": r.detail, "hint": r.hint}
+            for r in results
+        ],
+        "ok": not has_failures(results),
+    }
 
 
 def render_report(results: list[CheckResult]) -> None:

@@ -224,7 +224,7 @@ uv tool install 'silica-agent[all]'      # everything above except dev
 
 `[all]` inherits `[pdf]` and `[rerank]`, so it pulls torch and downloads several GB of model weights the first time those run.
 
-Check your environment at any time with `silica doctor`. Add `--live` to send one tiny request that confirms the model really replies.
+Check your environment at any time with `silica doctor`. Add `--live` to send one tiny request that confirms the model really replies, or `--json` for the same report as a machine-readable payload (credentials in endpoint URLs are redacted).
 
 For development, clone and install editable instead (adds tests and linters), then prefix commands with `uv run`:
 
