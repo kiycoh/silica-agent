@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
@@ -263,7 +264,14 @@ def steer_run(rec: dict, judge_model: str) -> dict:
     The composer is the same live code for every recording, so the writer is
     literally identical across arms and any difference is acquisition. The
     factscore floor guards against the plan steering toward pages that do
-    not hold up; it does not decide (spec §6)."""
+    not hold up; it does not decide (spec §6).
+
+    `note` scores the body the agent actually wrote. Reporting only `floor`
+    answered a question nobody asked: the floor is recomposed live from the
+    bank at replay time, so it exists even when the run wrote no note at all
+    (eBPF-A leaked its tool call as text and still floored 0.943) and it
+    drifts between replays (the PQC A/A floors differ by 0.068 where their
+    notes differ by 0.006)."""
     bank = {qid: wr._Quote(*v) for qid, v in rec["bank"].items()}
     trace_values = list(rec["trace"].values())
     composed = wr._compose_findings(rec["concept"], bank) if bank else None
@@ -272,6 +280,7 @@ def steer_run(rec: dict, judge_model: str) -> dict:
         "acquisition": acquisition(rec),
         "tokens": rec.get("tokens"),
         "quote_validity": bank_validity(bank, trace_values),
+        "note": _arm(rec["oneshot_body"], trace_values, bank, judge_model),
         "floor": (
             _arm(composed, trace_values, bank, judge_model)
             if composed is not None
@@ -335,18 +344,32 @@ def main(argv=None) -> int:
 
     if args.cmd == "steer":
         judge = args.judge_model or CONFIG.model
-        rows = []
-        for path in sorted(Path(args.runs).glob("*.json")):
+
+        def score(path: Path) -> dict:
             rec = json.loads(path.read_text(encoding="utf-8"))
             row = steer_run(rec, judge)
             row["file"] = path.name
-            rows.append(row)
             acq, floor = row["acquisition"], row["floor"] or {}
             print(f"{path.name}: arm={acq['arm']} urls={acq['urls_with_quotes']} "
                   f"quotes={acq['quotes']} yield={acq['yield_per_fetch']} "
                   f"steps={acq['steps']} tokens={row['tokens']} "
                   f"validity={row['quote_validity']} "
-                  f"factscore={floor.get('factscore')}")
+                  f"note={row['note']['factscore']} "
+                  f"floor={floor.get('factscore')}", flush=True)
+            return row
+
+        # Recordings are independent (isolated judge calls), and scoring two
+        # bodies per run doubled a loop that already took ~80min for five.
+        # STEER_WORKERS=1 forces serial.
+        paths = sorted(Path(args.runs).glob("*.json"))
+        workers = int(os.getenv("STEER_WORKERS", "4"))
+        if workers <= 1:
+            rows = [score(p) for p in paths]
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                rows = list(ex.map(score, paths))
         paired: dict[str, list[str]] = {}
         for row in rows:
             paired.setdefault(row["concept"], []).append(row["file"])
