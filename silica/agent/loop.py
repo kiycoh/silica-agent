@@ -350,6 +350,20 @@ def run_agent(
         if not resp.tool_calls:
             return resp.text or ""
 
+        # Tool calls, so whatever text this iteration streamed was a preamble and
+        # not the answer — but its deltas are already painted. Retract them with
+        # the signal the stream contract already carries (llm.py sends the same
+        # event when a transient retry replays an attempt); content names the
+        # scope, so a renderer keeps the reasoning that produced the call.
+        # Must precede the first ToolStartEvent below: the TUI's live region is
+        # shared, and a reset arriving after a tool line would clear a region
+        # that has already moved on. Guarded on on_delta because streaming is
+        # only wired for the interactive loop — a worker run must not emit an
+        # event nobody subscribed to. _emit and not _stream_delta: _abandon is
+        # already set by the time the call returns.
+        if _llm_kwargs.get("on_delta") is not None:
+            _emit(LLMStreamEvent(chunk_type="reset", content="text", iteration=iteration))
+
         # The loop is where the history explodes — a single fat read can add
         # thousands of tokens, and every later iteration re-sends it. The
         # callers only sweep once run_agent has already returned, so on a local

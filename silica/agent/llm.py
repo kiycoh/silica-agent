@@ -464,6 +464,10 @@ def call_llm(
         on_delta: optional (chunk_type, content) sink; when given the call streams,
             emitting "reasoning"/"text" deltas as they arrive (plus a "reset" at the
             start of each attempt, so a mid-stream retry can clear any preview).
+            A reset's content names what it retracts: "" is everything painted
+            this attempt (a replay repeats the reasoning too), "text" is the
+            answer alone — the loop sends that one when the turn turns out to be
+            a tool call and the reasoning behind it is worth keeping on screen.
             The final LLMResponse is identical to the non-streaming path.
         cancel: optional abandonment flag, forwarded to retry_transient — set it
             when nobody is waiting on this call anymore so retries stop.

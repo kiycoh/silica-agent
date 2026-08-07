@@ -457,6 +457,11 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   let curTools = null;  // open group of consecutive tools
   let curThink = null;  // open thinking block { details, body, raw }
   let segments = 0;     // text runs so far; an uninterrupted one upgrades to server html
+  // Segments painted since the last tool block — all a `reset` can still take
+  // back. A tool result is committed, so anything above one stands, and the
+  // *open* segment is not the unit: a retry that streamed think→text has already
+  // let go of its thinking block by the time the retraction arrives.
+  let live = [];
 
   // Opening one segment kind closes the other two; a thinking block collapses
   // as it closes (it stays open only while it is the live tail).
@@ -473,7 +478,9 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     details.open = true;
     details.innerHTML = `<summary>thinking</summary><div class="thinking-body"></div>`;
     flow.appendChild(details);
-    return (curThink = { details, body: details.querySelector(".thinking-body"), raw: "" });
+    curThink = { details, body: details.querySelector(".thinking-body"), raw: "" };
+    live.push(curThink);
+    return curThink;
   }
   function textSeg() {
     if (curText) return curText;
@@ -483,8 +490,33 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     flow.appendChild(el);
     curText = { el, raw: "" };
     texts.push(curText);
+    live.push(curText);
     segments++;
     return curText;
+  }
+  // Retract the model's output for a server-sent `reset` delta. `textOnly` keeps
+  // the thinking: a turn that resolved into a tool call retracts the preamble it
+  // streamed, not the reasoning that produced the call. A full reset (a retry
+  // replays the attempt from the top) takes the reasoning too, or the thinking
+  // block ends up holding both passes.
+  function dropLiveSegments(textOnly) {
+    for (const seg of live) {
+      if (seg.details) {
+        if (!textOnly) seg.details.remove();
+        continue;
+      }
+      seg.el.remove();
+      const i = texts.indexOf(seg);
+      if (i >= 0) texts.splice(i, 1);
+      segments--; // keeps `done`'s "uninterrupted turn" upgrade test honest
+    }
+    live = textOnly ? live.filter((s) => s.details) : [];
+    curText = null;
+    if (!textOnly) curThink = null;
+    peekRollback();
+    // The drop detached the caret with the segment it lived in; a retry can
+    // back off for seconds, and a bubble with no activity marker reads as done.
+    flow.appendChild(caret);
   }
   function toolsGroup() {
     if (curTools) return curTools;
@@ -492,6 +524,8 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     const g = document.createElement("div");
     g.className = "tools";
     flow.appendChild(g);
+    live = [];  // a tool result commits everything above it
+    peekMark(); // …including the dock's copy of it
     return (curTools = g);
   }
   const flowMsg = (s) => { const d = document.createElement("div"); d.className = "stream-text"; d.textContent = s; flow.appendChild(d); };
@@ -589,7 +623,16 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
 
   function handle(ev) {
     pending.remove(); // something arrived — the placeholder has done its job
-    if (ev.type === "delta" && ev.kind === "reasoning") {
+    if (ev.type === "delta" && ev.kind === "reset") {
+      // The server retracts what it just streamed: a transient retry replays the
+      // whole attempt (agent/llm.py), and a turn that resolved into tool calls
+      // streamed a preamble, never an answer (agent/loop.py). Without this branch
+      // the event fell through and the replay was spliced under the truncated
+      // first take, so the GUI showed a duplicated answer the TUI did not.
+      // A reset's `text` is the retraction scope, not delta text: "" takes the
+      // whole attempt (reasoning included), "text" the answer alone.
+      dropLiveSegments(ev.text === "text");
+    } else if (ev.type === "delta" && ev.kind === "reasoning") {
       const th = thinkSeg();
       th.raw += ev.text;
       th.body.textContent = th.raw;
@@ -2601,7 +2644,7 @@ function openPeek(title) {
   body.appendChild(caret);
   $("#peek-title").textContent = title;
   peekEl.hidden = false;
-  peek = { body, caret, raw: "" };
+  peek = { body, caret, raw: "", mark: 0 };
 }
 function closePeek() {
   peekEl.hidden = true;
@@ -2619,6 +2662,16 @@ function peekDelta(text) {
   peek.body.innerHTML = mdLite(peek.raw);
   (peek.body.lastElementChild || peek.body).appendChild(peek.caret);
   peek.body.scrollTop = peek.body.scrollHeight;
+}
+// The dock mirrors the same text deltas as one flat string, so a retraction has
+// to cut it back too — to the last tool block, not to zero: text the chat pane
+// already committed above one still stands.
+function peekMark() { if (peek) peek.mark = peek.raw.length; }
+function peekRollback() {
+  if (!peek) return;
+  peek.raw = peek.raw.slice(0, peek.mark);
+  peek.body.innerHTML = mdLite(peek.raw);
+  (peek.body.lastElementChild || peek.body).appendChild(peek.caret);
 }
 // `done` upgrade: the server's canonical OFM render (wikilinks, callouts, math),
 // same swap the chat pane does. Also covers no-delta turns (raw still empty).

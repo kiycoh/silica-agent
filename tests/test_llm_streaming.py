@@ -116,6 +116,106 @@ def test_run_agent_streams_only_with_callback(mock_call_llm):
     assert "on_delta" not in mock_call_llm.call_args.kwargs
 
 
+def _tool_then_answer(preamble="let me look"):
+    """A provider that streams `preamble` as text and only then reveals that the
+    turn is a tool call; the second turn answers. Returns (fake_call_llm, TOOLS
+    patch target name)."""
+    from silica.agent.llm import LLMResponse, ToolCall
+
+    responses = [
+        LLMResponse(
+            text=preamble,
+            tool_calls=[ToolCall(id="tc1", name="silica_read_note", args={"name": "n"})],
+            assistant_message={"role": "assistant", "tool_calls": []}, usage={},
+        ),
+        LLMResponse(
+            text="Final answer", tool_calls=[],
+            assistant_message={"role": "assistant", "content": "Final answer"}, usage={},
+        ),
+    ]
+
+    def fake_call_llm(model, messages, **kw):
+        resp = responses.pop(0)
+        if kw.get("on_delta") is not None and resp.text:
+            kw["on_delta"]("text", resp.text)
+        return resp
+
+    return fake_call_llm
+
+
+def _run_collecting(events, **run_kw):
+    from silica.agent.loop import run_agent
+    from silica.tools import TOOLS
+
+    tool = MagicMock()
+    tool.run.return_value = "note content"
+    # Explicit, not MagicMock defaults: a bare mock's .sensitive is truthy, so the
+    # loop filters it out of `allowed` and dispatch takes the forbidden-tool
+    # branch — no ToolStartEvent, and the ordering this file asserts is vacuous.
+    tool.sensitive = False
+    tool.internal = False
+    with patch.dict(TOOLS, {"silica_read_note": tool}):
+        return run_agent([{"role": "user", "content": "x"}], model="m",
+                         tool_progress_callback=events.append, **run_kw)
+
+
+@patch("silica.agent.loop.call_llm")
+def test_tool_call_retracts_the_text_it_already_streamed(mock_call_llm):
+    """The loop learns the streamed text was a preamble only after painting it,
+    so it retracts it — before the first tool line, since the TUI's live region
+    is shared and a later reset would clear a region that has moved on."""
+    from silica.agent.events import LLMStreamEvent, ToolStartEvent
+
+    mock_call_llm.side_effect = _tool_then_answer()
+    events: list = []
+    assert _run_collecting(events) == "Final answer"
+
+    kinds = [(type(e), getattr(e, "chunk_type", None)) for e in events]
+    resets = [i for i, k in enumerate(kinds) if k == (LLMStreamEvent, "reset")]
+    texts = [i for i, k in enumerate(kinds) if k == (LLMStreamEvent, "text")]
+    starts = [i for i, (t, _) in enumerate(kinds) if t is ToolStartEvent]
+    assert len(resets) == 1, kinds
+    assert texts and starts
+    assert texts[0] < resets[0] < starts[0], kinds
+    # Scoped: the reasoning that produced the tool call stays on screen.
+    assert events[resets[0]].content == "text"
+
+
+@patch("silica.agent.loop.call_llm")
+def test_a_plain_answer_is_never_retracted(mock_call_llm):
+    from silica.agent.events import LLMStreamEvent
+    from silica.agent.llm import LLMResponse
+
+    def fake_call_llm(model, messages, **kw):
+        if kw.get("on_delta") is not None:
+            kw["on_delta"]("text", "Final answer")
+        return LLMResponse(text="Final answer", tool_calls=[],
+                           assistant_message={"role": "assistant", "content": "Final answer"},
+                           usage={})
+
+    mock_call_llm.side_effect = fake_call_llm
+    events: list = []
+    assert _run_collecting(events) == "Final answer"
+    assert not [e for e in events
+                if isinstance(e, LLMStreamEvent) and e.chunk_type == "reset"]
+
+
+@patch("silica.agent.loop.call_llm")
+def test_no_reset_when_the_run_never_streamed(mock_call_llm):
+    """Constrained runs stay on the non-streaming call (no on_delta), so nobody
+    subscribed to a reset — emitting one anyway would clear an unrelated region."""
+    from silica.agent.constraints import AgentConstraints
+    from silica.agent.events import LLMStreamEvent
+
+    mock_call_llm.side_effect = _tool_then_answer()
+    events: list = []
+    assert _run_collecting(events, constraints=AgentConstraints(
+        tools=("silica_read_note",))) == "Final answer"
+    assert "on_delta" not in mock_call_llm.call_args.kwargs
+    assert not [e for e in events
+                if isinstance(e, LLMStreamEvent) and e.chunk_type == "reset"]
+
+
 def test_renderer_stream_buffer_accumulates_and_resets():
     from rich.console import Console
     from silica.agent.events import LLMStreamEvent, ThinkingEndEvent
