@@ -1468,3 +1468,17 @@ def test_live_plan_leaves_composition_untouched(tmp_vault, monkeypatch):
     monkeypatch.setattr(wr, "_compose_findings", recording_compose)
     wr.web_research("the question")
     assert calls == [("the question", {"Q1": wr._BANK["Q1"]})]
+
+
+def test_guardian_forgives_quote_style_not_words():
+    """Pages render apostrophes curly; models copy them back ASCII. Reading that
+    as a paraphrase killed a whole research run (18 rejections, no findings)."""
+    from silica.sources.web_research import _squash
+
+    page = "the verifier looks at all the states it’s previously been in, " \
+           "so the branch is ‘pruned’ — that is, it converges."
+    assert _squash("the states it's previously been in") in _squash(page)
+    assert _squash("the branch is 'pruned' - that is") in _squash(page)
+    # every word must still be there verbatim: style is forgiven, wording is not
+    assert _squash("the verifier prunes branches already explored") not in _squash(page)
+    assert _squash("the states it has previously been in") not in _squash(page)
