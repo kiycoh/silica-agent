@@ -7,7 +7,7 @@ A metric that cannot fail reports PASS regardless of the arm, and the gate reads
 as a result. This harness has been bitten by the class repeatedly (`a333ce0`: the
 L3 gate scored the recomposed floor and not the note; `e8ddf63`: the decompose cap
 cut long notes mid-fact and never judged the tail; the PPR phase-0 kill gate, vacuous
-because 3-hop reached 98% of the vault), and the teardown of NexusRAG showed the pure
+because 3-hop reached 98% of the vault) showed the pure
 form: two eval metrics matching `\\d+` against citation IDs guaranteed to contain a
 letter, so both scored 1.0 on every input and two rows of its summary table were
 decoration.
@@ -84,7 +84,7 @@ CONTROLS: dict[str, tuple[Callable, list[tuple[tuple, Any]], str]] = {
             (("Fact [Q9].", {"Q1": _quote("https://e.example/p", "The cat sat")}), True),
             (("Fact [Q1].", {"Q1": _quote("https://e.example/p", "The cat sat")}), False),
         ],
-        "The NexusRAG defect in its exact shape: a phantom-citation check whose "
+        "A phantom-citation check whose "
         "pattern cannot match the markers the writer actually emits reports zero "
         "phantoms forever. Cite a quote id that was never banked; it must be seen.",
     ),
