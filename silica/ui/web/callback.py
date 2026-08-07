@@ -3,7 +3,7 @@
 
 """RenderEvent -> JSON. The single source of truth for the wire event map.
 
-Mirrors the table in docs/spec-gui-web.md. Reasoning/thinking events are
+Mirrors the table in docs/specs/gui-web.md. Reasoning/thinking events are
 dropped in v1 (return None -> the callback skips them).
 """
 from __future__ import annotations

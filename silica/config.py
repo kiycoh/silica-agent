@@ -536,7 +536,7 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_COOCCURRENCE_LANG", "auto")
     )
 
-    # BM25 tf term in the co-occurrence ranking leg (docs/spec-cooccur-scoring.md).
+    # BM25 tf term in the co-occurrence ranking leg (docs/specs/cooccur-scoring.md).
     # Off by default: the probe gate (+4.02pp recall@10, +0.055 mrr, p=0.0015) covers
     # retrieval only, and the same seam feeds autolink, dedup, /map and collision
     # routing. Fase 2 (those surfaces) and fase 3 (answer-side) promote it, not this

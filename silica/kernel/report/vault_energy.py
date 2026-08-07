@@ -3,7 +3,7 @@
 
 """E(vault): the lattice energy of the vault as a single scalar.
 
-Formalises Part IV.1 of docs/Silica_x_chemistry.md. Every term already exists
+Formalises Part IV.1 of docs/architecture/silica-x-chemistry.md. Every term already exists
 as a field on VaultReport; this module only composes them. No new metric, no
 new dependency, no LLM.
 

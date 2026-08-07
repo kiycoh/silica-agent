@@ -6,7 +6,7 @@
 One table, two readers — `GET /settings` renders it and `POST /settings` applies
 a row — so the surface and the writer cannot drift apart.
 
-Admission rule (docs/spec-settings-panel.md §3): a row is a setting only when the
+Admission rule (docs/specs/settings-panel.md §3): a row is a setting only when the
 user can answer it without running a benchmark. Most of config.py is not that.
 `sim_threshold_*`, `novelty_tau`, `dedup_scan_k`, the `episodic_*` family and
 `cooccur_bm25` are research levers with a closed verdict behind them; offering

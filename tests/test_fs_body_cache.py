@@ -1,6 +1,6 @@
 """In-memory body cache on ObsidianFSBackend — mtime-keyed, invalidated on write.
 
-Pins root fix 1 of docs/audits/2026-07-21-perf-audit-hot-paths.md: reads route
+Pins root fix 1 of docs/audits/done/2026-07-21-perf-hot-paths.md: reads route
 through a process-lifetime cache keyed by mtime, and every backend write method
 keeps it coherent with what just landed on disk.
 """

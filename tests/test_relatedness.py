@@ -656,7 +656,7 @@ def test_rank_cooccur_postings_invalidated_on_upsert_and_delete(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# BM25 tf term (CONFIG.cooccur_bm25, docs/spec-cooccur-scoring.md fase 1)
+# BM25 tf term (CONFIG.cooccur_bm25, docs/specs/cooccur-scoring.md fase 1)
 # ---------------------------------------------------------------------------
 
 def _nodes(**counts: int) -> dict:

@@ -1,6 +1,6 @@
 """Settings panel — the seams that fail silently if they break.
 
-Ponytail: one check per contract from docs/spec-settings-panel.md §11. The
+Ponytail: one check per contract from docs/specs/settings-panel.md §11. The
 panel's own rendering is not tested here (that is a browser's job); what is
 tested is everything that decides WHERE a value lands, whether it is allowed to
 land at all, and whether a secret can escape.

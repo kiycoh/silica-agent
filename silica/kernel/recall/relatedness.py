@@ -282,7 +282,7 @@ def _rank_cooccur_from_profile(
     (implicit concept->notes inverted index). Returns None when nothing overlaps.
 
     The tf term is raw count by default and BM25-saturated under
-    CONFIG.cooccur_bm25 (docs/spec-cooccur-scoring.md fase 1). Nothing else moves
+    CONFIG.cooccur_bm25 (docs/specs/cooccur-scoring.md fase 1). Nothing else moves
     with the flag: same IDF, same candidate set, same filters, same abstain, same
     tie-break, so the flag isolates the tf term the probe measured.
     """

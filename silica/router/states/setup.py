@@ -239,7 +239,7 @@ def novelty_gate(fsm: "InjectorFSM", raw_payload: dict) -> tuple[dict, int]:
     # name is embedded as a title and scored against stored title vectors,
     # never against full note bodies — the body signal was measured not to
     # separate captured from novel concepts (their cosine distributions
-    # overlap; docs/Silica_x_chemistry.md IV.3).
+    # overlap; docs/architecture/silica-x-chemistry.md IV.3).
     names: list[str] = []
     for batch in raw_payload.get("batches", []):
         for c in batch.get("concepts", []):

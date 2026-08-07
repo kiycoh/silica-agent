@@ -5,8 +5,8 @@ every single write (and move() calls _patch_index R+2 times per move, R =
 referrer count). The backend now holds ONE trie as state (self._title_trie)
 and inserts/removes only the single changed title on each patch.
 
-Covers the four correctness cases from the perf audit (docs/audits/2026-07-21-
-perf-audit-hot-paths.md, root fix 2):
+Covers the four correctness cases from the perf audit
+(docs/audits/done/2026-07-21-perf-hot-paths.md, root fix 2):
   1. create -> mention
   2. delete (unique title) -> mention no longer recorded
   3. delete one of two same-named notes -> title still mentionable

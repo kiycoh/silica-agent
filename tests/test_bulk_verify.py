@@ -1,6 +1,6 @@
 """Tests for the post-write verify gate (falsifiable gate) in kernel/bulk.py.
 
-Spec: docs/spec-formalizzazione-orchestrazione.md §1 / .superpowers/sdd/task-1-brief.md.
+Spec: docs/specs/orchestration-formalization.md §1 / .superpowers/sdd/task-1-brief.md.
 Today `success: True` in kernel/bulk.py means "the driver did not raise", not
 "the disk holds what I intended to write" (the LaTeX saga: a write channel
 silently doubled backslashes for weeks with the suite green on the fs backend).
