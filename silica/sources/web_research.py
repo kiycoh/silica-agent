@@ -106,9 +106,12 @@ from, copying the quote exactly as the fetched text shows it. It returns an ID \
 like Q3; cite that inline as [Q3]. A claim you could not bank a quote for is a \
 claim you cannot make.
 5. Identify gaps and adjacent areas of knowledge.
-6. Search again where a gap remains. Stop when another search would no longer \
-change what you are about to write — not when you have merely enough to write \
-something. One or two steps for a trivial concept; twenty to thirty is normal \
+6. Search again where a gap remains — but first mine the pages you already \
+have: `find_in_page(url, pattern)` returns every line of an already-fetched \
+page matching a phrase, and is far cheaper than a fetch. A good page usually \
+answers more than the question you fetched it for. Stop when another search \
+would no longer change what you are about to write — not when you have merely \
+enough to write something. One or two steps for a trivial concept; twenty to thirty is normal \
 for a genuinely complex one. Do not pad with redundant searches, and do not \
 stop on a question you have only answered from snippets.
 7. When done, reply with NO tool call — your final message IS the note body.
@@ -341,6 +344,52 @@ def remember(url: str, quote: str, why: str) -> str:
     qid = f"Q{len(_BANK) + 1}"
     _BANK[qid] = _Quote(url=url, quote=quote.strip(), why=why.strip())
     return f"banked [{qid}] — cite it inline as [{qid}]"
+
+
+class FindInPageArgs(BaseModel):
+    url: str
+    pattern: str
+
+
+@tool(FindInPageArgs, cls="atomic", sensitive=True)
+def find_in_page(url: str, pattern: str) -> str:
+    """Find every line containing a word or phrase in a page already read with
+    web_fetch, shown with a line of context. Mine the pages you have before
+    fetching new ones: the text returned is the page's own, ready to bank with
+    remember."""
+    # Same cache the remember guardian reads, same style of failure: the error
+    # names what IS fetchable so a wrong URL costs one step, not a spiral.
+    url = url.strip()
+    page = _PAGES.get(url)
+    if page is None:
+        fetched = "\n".join(f"  {u}" for u in _PAGES) or "  (none yet)"
+        raise ValueError(
+            f"no page fetched from {url!r} this turn — find only searches "
+            "pages you have read with web_fetch, using the URL on the page's "
+            f"own 'Source:' line. Fetched so far:\n{fetched}"
+        )
+    needle = _squash(pattern).lower()
+    if not needle:
+        raise ValueError("empty pattern — give a word or phrase to find.")
+    lines = page.splitlines()
+    hits = [i for i, line in enumerate(lines) if needle in _squash(line).lower()]
+    if not hits:
+        return f"no line of {url} matches {pattern!r}"
+    # ponytail: 8 windows of ±1 line, 4000 chars, nearby hits folded into one
+    # window — a pager (loc/num_lines) is the upgrade if runs outgrow this.
+    shown: list[int] = []
+    for i in hits:
+        if shown and i - shown[-1] < 3:
+            continue
+        shown.append(i)
+        if len(shown) == 8:
+            break
+    windows = [
+        "\n".join(lines[max(0, i - 1):i + 2]).strip() for i in shown
+    ]
+    tail = f"\n\n({len(hits) - len(shown)} more matching lines not shown)" \
+        if len(hits) > len(shown) else ""
+    return "\n…\n".join(windows)[:4000] + tail
 
 
 class PlanArgs(BaseModel):
@@ -675,9 +724,9 @@ def web_research(
         tool_progress_callback=_record,
         constraints=AgentConstraints(
             tools=(
-                ("web_search", "web_fetch", "remember", "plan")
+                ("web_search", "web_fetch", "remember", "find_in_page", "plan")
                 if _STEERING
-                else ("web_search", "web_fetch", "remember")
+                else ("web_search", "web_fetch", "remember", "find_in_page")
             ),
             max_iterations=max_searches,
         ),

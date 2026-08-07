@@ -50,7 +50,7 @@ def test_web_turn_exposes_exactly_the_three_web_tools():
         )
 
     names = {t["function"]["name"] for t in (captured["tools"] or [])}
-    assert names == {"web_search", "web_fetch", "remember"}
+    assert names == {"web_search", "web_fetch", "remember", "find_in_page"}
 
 
 def test_web_turn_iteration_cap_matches_web_research():

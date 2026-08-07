@@ -52,9 +52,10 @@ _CHAT_EXCLUDED = frozenset({
 
 
 def web_turn_constraints() -> AgentConstraints:
-    """`/web` — the consented web turn: the three web tools and nothing else.
-    (`remember` banks a verbatim quote from a fetched page; it touches only
-    per-turn module state in silica/sources/web_research.py, never the vault.)
+    """`/web` — the consented web turn: the four web tools and nothing else.
+    (`remember` banks a verbatim quote from a fetched page and `find_in_page`
+    greps one; both touch only per-turn module state in
+    silica/sources/web_research.py, never the vault.)
 
     48 is the twin of `_DEFAULT_MAX_SEARCHES` in silica/sources/web_research.py,
     which carries the reasoning for the number. Duplicated rather than imported:
@@ -67,7 +68,8 @@ def web_turn_constraints() -> AgentConstraints:
     spending a ceiling it had no reason to spend.
     """
     return AgentConstraints(
-        tools=("web_search", "web_fetch", "remember"), max_iterations=48
+        tools=("web_search", "web_fetch", "remember", "find_in_page"),
+        max_iterations=48,
     )
 
 

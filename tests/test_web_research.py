@@ -529,7 +529,7 @@ def test_web_research_constrains_loop_to_search_and_fetch(tmp_vault, monkeypatch
     wr.web_research("x", max_searches=7)
 
     assert captured["constraints"].tools == (
-        "web_search", "web_fetch", "remember", "plan"
+        "web_search", "web_fetch", "remember", "find_in_page", "plan"
     )
     assert captured["constraints"].max_iterations == 7
 
@@ -542,7 +542,9 @@ def test_steering_off_restores_the_pre_plan_loop(tmp_vault, monkeypatch):
     monkeypatch.setattr(wr, "_STEERING", False)
     captured = _patch_run_agent(monkeypatch, body="Findings.")
     wr.web_research("q")
-    assert captured["constraints"].tools == ("web_search", "web_fetch", "remember")
+    assert captured["constraints"].tools == (
+        "web_search", "web_fetch", "remember", "find_in_page"
+    )
     assert "plan(" not in captured["messages"][0]["content"]
 
 
@@ -1485,3 +1487,40 @@ def test_guardian_forgives_quote_style_not_words():
     # guillemet and CJK quote styles fold too (European and CJK sources)
     assert _squash('he called it "fine"') in _squash("he called it «fine».")
     assert _squash('the 「lease」 expires') in _squash('the "lease" expires')
+
+
+def test_find_in_page_rejects_unfetched_url_naming_the_fetched():
+    wr._PAGES["https://s.test/a"] = "Source: https://s.test/a\nbody"
+    with pytest.raises(ValueError) as err:
+        wr.find_in_page("https://other.test", "x")
+    assert "https://s.test/a" in str(err.value)
+
+
+def test_find_in_page_returns_matching_lines_with_context():
+    wr._PAGES["https://s.test/a"] = (
+        "Source: https://s.test/a\n"
+        "intro line\n"
+        "the RVV 1.0 spec was ratified in 2021\n"
+        "closing line\n"
+        "unrelated\n"
+    )
+    out = wr.find_in_page("https://s.test/a", "ratified in 2021")
+    assert "the RVV 1.0 spec was ratified in 2021" in out
+    assert "intro line" in out and "closing line" in out  # ±1 line of context
+    assert "unrelated" not in out
+
+
+def test_find_in_page_forgives_typography_and_reports_misses():
+    wr._PAGES["https://s.test/a"] = "Source: https://s.test/a\nit’s ‘pruned’ here\n"
+    assert "pruned" in wr.find_in_page("https://s.test/a", "it's 'pruned'")
+    assert wr.find_in_page("https://s.test/a", "absent").startswith("no line")
+
+
+def test_find_in_page_folds_nearby_hits_and_caps_windows():
+    lines = [f"filler {i}" for i in range(40)]
+    for i in (3, 4, 30):        # 3 and 4 fold into one window
+        lines[i] = f"needle at {i}"
+    wr._PAGES["https://s.test/a"] = "Source: https://s.test/a\n" + "\n".join(lines)
+    out = wr.find_in_page("https://s.test/a", "needle")
+    assert "needle at 3" in out and "needle at 30" in out
+    assert "(1 more matching lines not shown)" in out  # 4 folded, counted
