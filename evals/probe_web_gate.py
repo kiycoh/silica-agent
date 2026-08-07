@@ -318,6 +318,17 @@ def main(argv=None) -> int:
     steer_p.add_argument("--out", default=None)
     args = ap.parse_args(argv)
 
+    if args.cmd in ("replay", "steer"):
+        # Imported here, not at module scope: negative_controls pins this module's
+        # metric functions, so a top-level import would be a cycle. Runs before any
+        # judge call — a metric that cannot fail must cost zero tokens to catch.
+        from evals.negative_controls import assert_metrics_discriminate
+
+        metrics = ["effective_citations", "bank_validity", "flags_phantom_marker"]
+        if args.cmd == "steer":
+            metrics.append("acquisition")  # the L3 primaries
+        assert_metrics_discriminate(*metrics)
+
     if args.cmd == "record":
         vault = Path(args.vault)
         (vault / "Inbox").mkdir(parents=True, exist_ok=True)
