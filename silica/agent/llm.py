@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import random
+import re
 import sys
 import threading
 import time
@@ -390,6 +391,34 @@ def expand_tool_calls(
     return parsed, wire
 
 
+# Some providers (observed: deepseek through OpenRouter) sometimes serialize a
+# tool call into the assistant CONTENT instead of the tool_calls field. Nothing
+# downstream can tell that from a deliberate final answer, so the loop accepts
+# the markup as the model's reply: in the L3 gate that made one research run
+# "write" its note as a raw web_fetch call, 188 chars of tags, and the run was
+# counted as a completed note. Recovering the call here covers every provider
+# path, since all three of them assemble the message through this function.
+_LEAK_BLOCK = re.compile(r"<｜?DSML｜?tool_calls>.*?</｜?DSML｜?tool_calls>", re.S)
+_LEAK_INVOKE = re.compile(
+    r"<｜?DSML｜?invoke\s+name=\"([^\"]+)\"\s*>(.*?)</｜?DSML｜?invoke>", re.S)
+_LEAK_PARAM = re.compile(
+    r"<｜?DSML｜?parameter\s+name=\"([^\"]+)\"[^>]*>(.*?)</｜?DSML｜?parameter>", re.S)
+
+
+def recover_leaked_tool_calls(content: str) -> tuple[str, list[tuple[str, str, str]]]:
+    """Leaked-as-text tool calls -> (content with them removed, raw triples)."""
+    calls = []
+    for i, (name, body) in enumerate(_LEAK_INVOKE.findall(content)):
+        # ponytail: every parameter comes back a string — the leaked markup
+        # carries no type we can trust. A tool wanting an int gets "5" and
+        # rejects it visibly; coerce here if that ever shows up in a real trace.
+        args = {k: v.strip() for k, v in _LEAK_PARAM.findall(body)}
+        calls.append((f"call_leaked_{i}", name, json.dumps(args)))
+    if not calls:
+        return content, []
+    return _LEAK_INVOKE.sub("", _LEAK_BLOCK.sub("", content)).strip(), calls
+
+
 def build_assistant_message(
     content: str | None, tool_calls_raw: list[tuple[str, str, str]] | None,
 ) -> tuple[dict, list[ToolCall]]:
@@ -398,6 +427,13 @@ def build_assistant_message(
 
     Callers add path-specific keys (reasoning_content, thinking_blocks) afterwards.
     """
+    if not tool_calls_raw and content and "DSML" in content:
+        content, tool_calls_raw = recover_leaked_tool_calls(content)
+        if tool_calls_raw:
+            logger.warning(
+                "recovered %d tool call(s) the provider leaked into assistant "
+                "content: %s", len(tool_calls_raw),
+                ", ".join(name for _id, name, _args in tool_calls_raw))
     msg: dict = {"role": "assistant"}
     if content:
         msg["content"] = content
