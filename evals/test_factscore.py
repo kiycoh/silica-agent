@@ -142,3 +142,23 @@ def test_entity_notes_fall_back_to_full_conv_on_incomplete_ledger(tmp_path):
     by = {p["rel"]: p for p in pairs}
     assert by["memory/Alice"]["sessions"] == [factscore._FULL_CONV]
     assert by["memory/Alice"]["source"] == "Alice: hi\n\nBob: bye"
+
+
+def test_decompose_budget_scales_with_body():
+    """A flat cap truncated long notes mid-fact, silently dropping their tail
+    from the denominator — and punishing the arm that writes longer notes."""
+    assert factscore.decompose_budget("x" * 200) == 2048       # floor holds
+    assert factscore.decompose_budget("x" * 10_000) == 5000    # the L3 note size
+    assert factscore.decompose_budget("x" * 10**6) == 16384    # capped, not unbounded
+
+
+def test_decompose_asks_for_the_scaled_budget(monkeypatch):
+    seen = []
+
+    def fake(model, prompt, max_tokens):
+        seen.append(max_tokens)
+        return "- a fact\n- another fact"
+
+    monkeypatch.setattr(factscore, "_llm", fake)
+    factscore.decompose("m", "x" * 10_000)
+    assert seen == [5000]

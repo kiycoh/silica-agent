@@ -72,10 +72,22 @@ def _llm(model: str, prompt: str, max_tokens: int) -> str:
                        max_tokens=max_tokens, temperature=0.0)
 
 
+def decompose_budget(text: str) -> int:
+    """Output tokens to allow for decomposing `text`.
+
+    A flat 2048 silently truncated: a 10k-char note decomposes to ~134 facts
+    (~9.6k chars of reply), so the tail of every long note was cut mid-fact and
+    never judged — and since the cut lands at a fixed output size, the arm that
+    writes longer notes loses more of itself to it. Facts run about one input
+    char each, so half the body plus the old floor covers it with headroom.
+    """
+    return min(16384, max(2048, len(text) // 2))
+
+
 def decompose(model: str, text: str) -> list[str] | None:
     """Note body -> atomic facts. None = decompose failure (empty/format-broken
     reply): the note is excluded from scoring and surfaced, never scored 0."""
-    out = _llm(model, _DECOMPOSE_PROMPT.format(text=text), 2048)
+    out = _llm(model, _DECOMPOSE_PROMPT.format(text=text), decompose_budget(text))
     facts = [f.strip() for f in _FACT_RE.findall(out) if f.strip()]
     return facts or None
 
