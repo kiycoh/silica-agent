@@ -26,7 +26,8 @@ _DOCUMENTS_FIELD = Field(
                 "records — the why, not the what: closed directions, measured "
                 "ceilings, constraints not derivable from the source. Conventionally "
                 "the note lives at <wiki_dir>/<repo-path>.md so the vault mirrors "
-                "the code tree. Read them back with silica_code_why.",
+                "the code tree. /stale flags the note once a commit moves the "
+                "bound path past the recorded code_ref.",
 )
 
 

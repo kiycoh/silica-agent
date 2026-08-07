@@ -185,8 +185,8 @@ def warn_unpinned_provider(model: str, provider_pin: str | None) -> None:
 
     Falsy, not `is None`: CONFIG.openrouter_provider defaults to "", so an
     `is None` test made this guard dead for every caller that passed the config
-    field straight through (probe_explain_rubric, probe_code_why) — no pin, no
-    warning, a nondeterministic run reported as an A/B.
+    field straight through (probe_explain_rubric) — no pin, no warning, a
+    nondeterministic run reported as an A/B.
     """
     if not provider_pin and str(model).startswith("openrouter/"):
         print("WARNING: openrouter model with no provider pin — unpinned routing "
