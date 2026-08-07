@@ -131,10 +131,15 @@ def factscore_any_page(model: str, body: str, pages: list[str]) -> dict:
 
 
 def record_run(concept: str, out_dir: Path, max_searches: int,
-               arm: str = "B", tag: str | None = None) -> Path:
+               arm: str = "B", tag: str | None = None,
+               corpus_stamp: dict | None = None) -> Path:
     """One live research run, frozen. Composition is off either way; `arm`
     picks the acquisition: "A" runs the exact pre-steering loop (no plan
-    tool, no prompt step), "B" runs with steering on."""
+    tool, no prompt step), "B" runs with steering on.
+
+    `corpus_stamp` is provenance, not behaviour: the caller that installed a
+    frozen corpus (main, via evals.web_corpus) says so here, so a recording
+    can never be mistaken for a live-web one. None = live web."""
     trace: dict[str, str] = {}
 
     def freeze(event) -> None:
@@ -198,6 +203,7 @@ def record_run(concept: str, out_dir: Path, max_searches: int,
         "oneshot_body": captured.get("oneshot", ""),
         "bank": bank,
         "trace": trace,
+        "corpus": corpus_stamp,
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{slugify(concept) or 'concept'}-{tag or arm}.json"
@@ -304,6 +310,10 @@ def main(argv=None) -> int:
     rec_p.add_argument("--max-searches", type=int, default=48)
     rec_p.add_argument("--arm", choices=["A", "B"], default="B",
                        help="A = steering off (pre-L3 loop), B = steering on")
+    rec_p.add_argument("--corpus", nargs="+", default=None,
+                       help="recording dirs/files whose fetched pages become "
+                            "the frozen web for this batch: search and fetch "
+                            "answer only from them (spec L5)")
     rec_p.add_argument("--tag", default=None,
                        help="filename suffix, e.g. A2 for the A/A noise run")
     rep_p = sub.add_parser("replay")
@@ -338,19 +348,34 @@ def main(argv=None) -> int:
             for line in Path(args.concepts).read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-        for concept in concepts:
-            # No single concept may kill the batch — measured twice live: a
-            # no-findings ValueError at cap 12, then a convergence-guard
-            # RuntimeError at cap 48 that threw away three finished runs.
-            try:
-                path = record_run(concept, Path(args.out), args.max_searches,
-                                  args.arm, args.tag)
-            except Exception as err:
-                print(f"FAILED {concept!r}: {err}")
-                continue
-            rec = json.loads(path.read_text(encoding="utf-8"))
-            print(f"recorded {path.name}: {len(rec['trace'])} tool results, "
-                  f"{len(rec['bank'])} quotes banked")
+        from contextlib import ExitStack
+
+        stack, stamp = ExitStack(), None
+        if args.corpus:
+            from evals import web_corpus
+
+            corpus = web_corpus.load(args.corpus)
+            print(f"corpus: {len(corpus.pages)} frozen pages "
+                  f"from {len(args.corpus)} source(s)")
+            if corpus.conflicts:
+                print(f"corpus: {corpus.conflicts} URL(s) drifted between "
+                      "recordings; first fetch kept")
+            stamp = {"pages": len(corpus.pages), "sources": list(args.corpus)}
+            stack.enter_context(web_corpus.install(corpus))
+        with stack:
+            for concept in concepts:
+                # No single concept may kill the batch — measured twice live: a
+                # no-findings ValueError at cap 12, then a convergence-guard
+                # RuntimeError at cap 48 that threw away three finished runs.
+                try:
+                    path = record_run(concept, Path(args.out), args.max_searches,
+                                      args.arm, args.tag, corpus_stamp=stamp)
+                except Exception as err:
+                    print(f"FAILED {concept!r}: {err}")
+                    continue
+                rec = json.loads(path.read_text(encoding="utf-8"))
+                print(f"recorded {path.name}: {len(rec['trace'])} tool results, "
+                      f"{len(rec['bank'])} quotes banked")
         return 0
 
     if args.cmd == "steer":

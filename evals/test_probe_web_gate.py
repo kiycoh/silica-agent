@@ -178,7 +178,8 @@ def test_record_batch_survives_a_concept_with_no_findings(monkeypatch, tmp_path,
     concepts.write_text("good one\nbad one\nworse one\nlast one\n", encoding="utf-8")
     recorded = []
 
-    def fake_record_run(concept, out_dir, max_searches, arm="B", tag=None):
+    def fake_record_run(concept, out_dir, max_searches, arm="B", tag=None,
+                        corpus_stamp=None):
         if concept == "bad one":
             raise ValueError("web-research produced no findings")
         if concept == "worse one":
@@ -258,6 +259,21 @@ def test_acquisition_handles_no_fetches_and_missing_arm():
     acq = pwg.acquisition({"bank": {}, "trace": {}})
     assert acq["arm"] == "A"          # L2-era recordings had no arm key
     assert acq["yield_per_fetch"] is None
+
+
+def test_record_stamps_corpus_provenance(monkeypatch, tmp_path):
+    """A frozen-corpus recording must say so — live and offline acquisition
+    would otherwise be indistinguishable files."""
+    monkeypatch.setattr(
+        wr, "web_research",
+        lambda concept, max_searches=None, tool_progress_callback=None: "Inbox/x.md",
+    )
+    stamp = {"pages": 7, "sources": ["docs/gate-l3-2026-08-06/runs"]}
+    path = pwg.record_run("crdt", tmp_path, 4, arm="A", corpus_stamp=stamp)
+    rec = json.loads(path.read_text(encoding="utf-8"))
+    assert rec["corpus"] == stamp
+    live = pwg.record_run("crdt2", tmp_path, 4, arm="A")
+    assert json.loads(live.read_text(encoding="utf-8"))["corpus"] is None
 
 
 def test_record_arm_a_flips_steering_off_and_restores_it(monkeypatch, tmp_path):
