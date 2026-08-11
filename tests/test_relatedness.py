@@ -89,6 +89,33 @@ def test_embed_ranking_returns_path_name_score(tmp_path):
     assert ("B", "B note") == (ranking[0][0], ranking[0][1])
 
 
+def test_related_notes_excludes_the_query_when_it_carries_md(tmp_path):
+    """A caller may hand in a graph-style '<path>.md'; the store keys are stripped.
+
+    Regression: `blocked` was built from the raw path, so the exclude never matched
+    a store key and the query note came back as its own closest neighbour at cosine
+    1.0, burning a slot in the fusion pool. /map (mindmap._with_md) hits this on
+    every call. Both keyspaces must now give the same answer.
+    """
+    from silica.kernel.recall.relatedness import related_notes
+
+    es = _embed_store(tmp_path)
+
+    with_md = [r.path for r in related_notes("A.md", embed_store=es, k=3)]
+    stripped = [r.path for r in related_notes("A", embed_store=es, k=3)]
+
+    assert "A" not in with_md and "A.md" not in with_md
+    assert with_md == stripped == ["B", "C"]
+
+
+def test_embed_ranking_normalises_the_query_keyspace(tmp_path):
+    """_embed_ranking resolves the vector through cooccur_key, so '<path>.md'
+    finds the same vector as the stripped key instead of abstaining."""
+    es = _embed_store(tmp_path)
+    assert _embed_ranking(es, "A.md", k=5, exclude={"A"}) == \
+           _embed_ranking(es, "A",    k=5, exclude={"A"})
+
+
 def test_embed_ranking_abstains_when_note_not_indexed(tmp_path):
     es = _embed_store(tmp_path)
     assert _embed_ranking(es, "DOES_NOT_EXIST", k=5, exclude=set()) is None

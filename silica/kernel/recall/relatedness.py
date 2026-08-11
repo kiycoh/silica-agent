@@ -36,7 +36,7 @@ import statistics
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from silica.kernel.recall.cooccurrence import CooccurStore
+from silica.kernel.recall.cooccurrence import CooccurStore, cooccur_key
 from silica.kernel.recall.embed import EmbedStore
 from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import in_folder
@@ -173,10 +173,9 @@ def _embed_ranking(
     """Embed ranking for an INDEXED note: resolve its vector by path, then rank."""
     if embed_store is None:
         return None
-    vec = embed_store.get_vec(query_path)
-    if vec is None:
-        vec = embed_store.get_vec(query_path.removesuffix(".md"))
-    return _rank_embeddings_from_vec(embed_store, vec, k=k, exclude=exclude)
+    return _rank_embeddings_from_vec(
+        embed_store, embed_store.get_vec(cooccur_key(query_path)), k=k, exclude=exclude
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -592,7 +591,12 @@ def related_notes(
     true matches even under IDF weighting, so it stays opt-in for the one caller
     that wants pure associative reach (autolink candidate discovery).
     """
-    blocked = set(exclude or ()) | {query_path}
+    # Normalize to the STORE keyspace before anything is excluded. CooccurStore
+    # normalizes at its own boundary (note_nodes -> cooccur_key); EmbedStore does
+    # not, so a caller handing in a graph-style '<path>.md' built an exclude that
+    # never matched any store key and the query note came back as its own closest
+    # neighbour, burning a slot in the fusion pool. /map did exactly that.
+    blocked = {cooccur_key(x) for x in (exclude or ())} | {cooccur_key(query_path)}
     pool = max(k * 3, _POOL_MIN)
 
     embed_rank = _embed_ranking(embed_store, query_path, k=pool, exclude=blocked)
@@ -602,9 +606,7 @@ def related_notes(
 
     mem_embed_rank = None
     if memory_embed_store is not None and embed_store is not None:
-        vec = embed_store.get_vec(query_path)
-        if vec is None:
-            vec = embed_store.get_vec(query_path.removesuffix(".md"))
+        vec = embed_store.get_vec(cooccur_key(query_path))
         mem_embed_rank = _rank_embeddings_from_vec(
             memory_embed_store, vec, k=pool, exclude=set()
         )
