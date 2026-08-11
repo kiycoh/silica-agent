@@ -23,7 +23,21 @@ def test_run_subagent_batch_empty():
 
 # --- silica_dedup ----------------------------------------------------------
 
-class _FakeStore:
+class _BatchFromTopK:
+    """cosine_top_k_batch expressed through the fake's own cosine_top_k.
+
+    The scan calls the batch API (one matmul for the whole scope); these fixtures
+    stay single-source on the per-note ranking they were written to express.
+    """
+
+    def cosine_top_k_batch(self, keys, k=5, *, exclude_self=True, block=256):
+        return {
+            p: self.cosine_top_k(self.get_vec(p), k, {p} if exclude_self else set())
+            for p in keys if self.get_vec(p) is not None
+        }
+
+
+class _FakeStore(_BatchFromTopK):
     def __len__(self):
         return 2
 
@@ -161,7 +175,7 @@ def test_cli_refine_scopes_with_in_folder():
 
 # --- Regression: k=1 horizon bug -------------------------------------------
 
-class _ThreeNoteStore:
+class _ThreeNoteStore(_BatchFromTopK):
     """Simulates a vault where:
       - A→B scores 0.90 (above τ_high=0.85 → must be skipped, NOT stop the loop)
       - A→C scores 0.80 (borderline [τ_low=0.75, τ_high=0.85] → must be found)
@@ -228,7 +242,7 @@ def test_dedup_secondary_borderline_found_with_expanded_k():
 
 # --- Title-similarity gate ---------------------------------------------------
 
-class _TitleGateStore:
+class _TitleGateStore(_BatchFromTopK):
     """Simulates a vault where 'ROS' and 'JSON in ROS 2' have:
       - full-note score = 0.40 (below τ_low=0.75 → normally excluded)
       - title_vec cosine  = 0.85 (above sim_title_threshold=0.80 → admitted)

@@ -52,6 +52,7 @@ def _compute_missing_links(
     try:
         from silica.agent.providers import get_embedder
         from silica.config import CONFIG
+        from silica.kernel.recall.cooccurrence import cooccur_key
         from silica.kernel.recall.embed import get_store
         import networkx as nx
 
@@ -68,19 +69,29 @@ def _compute_missing_links(
     results: list[MissingLink] = []
     seen: set[tuple[str, str]] = set()
 
+    # Keyspace bridge, as in cooccur_delta: G_und node ids are graph paths WITH
+    # '.md', embed-store keys are stripped. Every candidate coming back from the
+    # store must be mapped BACK to a node id before it touches the graph — without
+    # it `tgt not in G_und` was true for every candidate and this whole section
+    # returned [] on any real vault (measured: 0 links, 12 once the keyspaces line
+    # up). The tests missed it because their fixtures use bare ids like "A"/"B",
+    # where the two keyspaces coincide.
+    gid_by_key = {cooccur_key(n): n for n in G_und.nodes}
+
     for source in god_paths:
-        vec = store.get_vec(source)
-        if vec is None:
-            vec = store.get_vec(source.removesuffix(".md"))
+        skey = cooccur_key(source)
+        vec = store.get_vec(skey)
         if vec is None:
             continue
         try:
-            candidates = store.cosine_top_k(vec, k=k, exclude={source})
+            candidates = store.cosine_top_k(vec, k=k, exclude={skey})
         except Exception:
             continue
 
         for cand in candidates:
-            tgt = cand["path"]
+            tgt = gid_by_key.get(cand["path"])
+            if tgt is None:
+                continue                       # scored note is not a graph node
             score = cand.get("score", 0.0)
             if score < tau:
                 break  # results are sorted desc
@@ -104,8 +115,11 @@ def _compute_missing_links(
             structural = cn / (1.0 + cn)
 
             # --- #5 temporal decay: boost recent note pairs ------------------
-            ts_src = store._notes.get(source, {}).get("ts", 0)
-            ts_tgt = store._notes.get(tgt, {}).get("ts", 0)
+            # Store keyspace, not node ids — the old code passed `source` with its
+            # '.md' still on, so ts_src was always 0 and the pair's recency silently
+            # collapsed to the target's alone.
+            ts_src = store.get_ts(skey)
+            ts_tgt = store.get_ts(cooccur_key(tgt))
             age_days = max(0.0, (now - max(ts_src, ts_tgt)) / 86400.0)
             recency = 2.0 ** (-age_days / _RECENCY_HALFLIFE_DAYS)  # [0, 1]
             adjusted = score * (1.0 + 0.3 * structural) * (1.0 + 0.1 * recency)
@@ -220,16 +234,19 @@ def _compute_duplicate_pairs(
     seen: set[tuple[str, str]] = set()
 
     scope = [p for p in store.paths() if in_folder(p, report.scope)]
+    # One blocked matmul for the whole scope instead of one matvec per note — the
+    # loop below only ever wants each note's single nearest neighbour, but paid a
+    # full pass over the index for each. Same top-1 (see cosine_top_k_batch).
+    try:
+        neighbours = store.cosine_top_k_batch(scope, k=1)
+    except Exception as exc:
+        # Same contract as the missing-store branch above: [] would read as "the
+        # vault is clean" and silently disarm /dedup and /curate.
+        logger.debug("graph_report: cosine dedup leg failed (%s)", exc)
+        return _minhash_duplicate_pairs(report), []
 
     for p in scope:
-        vec = store.get_vec(p)
-        if not vec:
-            continue
-        try:
-            candidates = store.cosine_top_k(vec, k=1, exclude={p})
-        except Exception:
-            continue
-
+        candidates = neighbours.get(p)
         if not candidates:
             continue
 

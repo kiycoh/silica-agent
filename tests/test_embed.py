@@ -574,3 +574,122 @@ def test_legacy_index_migrates_on_load(tmp_path, monkeypatch):
     assert "old/note" in store._notes  # loaded from legacy
     store.save()
     assert keyed.exists()              # copied forward into the keyed namespace
+
+
+# ---------------------------------------------------------------------------
+# document_theme_vector — bounded cost on book-sized bodies
+# ---------------------------------------------------------------------------
+
+def _marker_body(n_blocks: int) -> str:
+    """n_blocks of exactly 1200 chars, each starting with its own index marker."""
+    return "".join(f"<{i:04d}>" + "a" * 1194 for i in range(n_blocks))
+
+
+def _fake_embedder(calls: list):
+    fake = MagicMock()
+    fake.model = "fake-theme-model"
+    def _embed(texts):
+        calls.append(list(texts))
+        return [[1.0, 0.0] for _ in texts]
+    fake.embed.side_effect = _embed
+    return fake
+
+
+def test_theme_vector_samples_book_sized_body():
+    """A 40k-char body must cost a bounded, equispaced sample of blocks — not
+    one embed input per 1200 chars (RECON paid 34 blocks per book segment)."""
+    from silica.kernel.recall.embed import document_theme_vector
+
+    calls: list = []
+    vec = document_theme_vector(_fake_embedder(calls), _marker_body(40))
+
+    assert vec
+    assert len(calls) == 1
+    sent = calls[0]
+    assert len(sent) <= 8
+    picked = sorted(int(s[1:5]) for s in sent)
+    assert picked[0] == 0        # the opening block is always sampled
+    assert picked[-1] >= 30      # and the sample reaches the back quarter
+
+
+def test_theme_vector_short_body_embeds_every_block():
+    """At or under the sample budget the behavior is bit-identical to before:
+    every block is embedded, in order."""
+    from silica.kernel.recall.embed import document_theme_vector
+
+    calls: list = []
+    vec = document_theme_vector(_fake_embedder(calls), _marker_body(5))
+
+    assert vec
+    assert [int(s[1:5]) for s in calls[0]] == [0, 1, 2, 3, 4]
+
+
+# ---------------------------------------------------------------------------
+# EmbedStore.cosine_top_k_batch
+# ---------------------------------------------------------------------------
+
+def _random_store(tmp_path, n=40, dim=16, seed=7):
+    import random
+    rng = random.Random(seed)
+    store = EmbedStore(path=tmp_path / "embeddings.json")
+    for i in range(n):
+        store.upsert(f"note_{i}", f"Note {i}", [rng.uniform(-1.0, 1.0) for _ in range(dim)])
+    return store
+
+
+def test_cosine_top_k_batch_matches_per_note_path(tmp_path):
+    """The whole point of the batch path: same top-k as N separate calls.
+
+    It replaces the per-note loop in graph_export.knn_edges, so any divergence in
+    membership or ORDER silently rewires the semantic map. Scores may differ in the
+    last decimal (the query is normalized once instead of twice), ranking may not.
+    """
+    store = _random_store(tmp_path)
+    keys = store.paths()
+
+    batch = store.cosine_top_k_batch(keys, k=6)
+    assert set(batch) == set(keys)
+    for key in keys:
+        per_note = store.cosine_top_k(store.get_vec(key), k=6, exclude={key})
+        assert [r["path"] for r in batch[key]] == [r["path"] for r in per_note]
+        for got, want in zip(batch[key], per_note):
+            assert got["score"] == pytest.approx(want["score"], abs=1e-3)
+            assert got["name"] == want["name"]
+
+
+def test_cosine_top_k_batch_excludes_self(tmp_path):
+    store = _random_store(tmp_path, n=10)
+    for key, hits in store.cosine_top_k_batch(store.paths(), k=9).items():
+        assert key not in [h["path"] for h in hits]
+
+
+def test_cosine_top_k_batch_skips_unknown_and_off_dimension(tmp_path):
+    store = _random_store(tmp_path, n=5, dim=4)
+    store.upsert("odd_dim", "Odd", [1.0, 0.0, 0.0])   # minority dim, off the matrix
+
+    out = store.cosine_top_k_batch([*store.paths(), "never_indexed"], k=3)
+    assert "never_indexed" not in out
+    assert "odd_dim" not in out
+    assert len(out) == 5
+
+
+def test_cosine_top_k_batch_blocks_do_not_change_results(tmp_path):
+    """block only bounds peak memory; it must not be observable in the output."""
+    store = _random_store(tmp_path, n=25)
+    keys = store.paths()
+    assert store.cosine_top_k_batch(keys, k=4, block=3) == store.cosine_top_k_batch(keys, k=4)
+
+
+def test_cosine_top_k_batch_degenerate_tail_matches_per_note_path(tmp_path):
+    """Fewer than k strictly-positive neighbours: the fast path cannot decide the
+    tail (0.0-scored off-matrix notes and their ordering belong to _search), so it
+    delegates. This is the branch the random-vector test never reaches."""
+    store = EmbedStore(path=tmp_path / "embeddings.json")
+    store.upsert("east",  "East",  [1.0, 0.0])
+    store.upsert("north", "North", [0.0, 1.0])    # cosine 0.0 vs east
+    store.upsert("west",  "West",  [-1.0, 0.0])   # cosine -1.0 vs east
+
+    batch = store.cosine_top_k_batch(["east"], k=2)["east"]
+    per_note = store.cosine_top_k(store.get_vec("east"), k=2, exclude={"east"})
+    assert [r["path"] for r in batch] == [r["path"] for r in per_note] == ["north", "west"]
+    assert [r["score"] for r in batch] == [r["score"] for r in per_note]

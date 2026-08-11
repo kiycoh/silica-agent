@@ -355,13 +355,14 @@ def test_missing_links_common_neighbors_boosts_ranking(monkeypatch):
     ])
 
     class _Store:
-        _notes: dict = {}
-
         def __len__(self):
             return 6
 
         def get_vec(self, p):
             return [1.0, 0.0] if p == "S" else None
+
+        def get_ts(self, p):
+            return 0.0
 
         def cosine_top_k(self, vec, k=10, exclude=None):
             return [
@@ -391,6 +392,54 @@ def test_missing_links_common_neighbors_boosts_ranking(monkeypatch):
     assert pairs.index(("S", "A")) < pairs.index(("S", "B"))
 
 
+def test_missing_links_bridge_the_md_keyspace(monkeypatch):
+    """Graph node ids carry '.md'; embed-store keys do not. _compute_missing_links
+    must cross that boundary in both directions.
+
+    Regression: it did not, so `tgt not in G_und` was true for every candidate and
+    the section returned [] on every real vault. The other fixtures here use bare
+    ids ("S"/"A"/"B") where the two keyspaces happen to coincide, which is exactly
+    why the defect survived. This one uses the production shape.
+    """
+    import networkx as nx
+
+    # S -- X -- A: A sits at distance 2 from S, so it clears the d_prev > 1 gate.
+    G = nx.Graph()
+    G.add_edges_from([("S.md", "X.md"), ("A.md", "X.md")])
+
+    class _Store:
+        def __len__(self):
+            return 3
+
+        def get_vec(self, p):
+            # Only ever answers to the STRIPPED key: proves the source side is bridged.
+            return [1.0, 0.0] if p == "S" else None
+
+        def get_ts(self, p):
+            assert not p.endswith(".md"), "timestamps are keyed in the store keyspace"
+            return 0.0
+
+        def cosine_top_k(self, vec, k=10, exclude=None):
+            assert exclude == {"S"}, "self-exclusion must use the store key"
+            return [{"path": "A", "score": 0.90}]        # stripped, as the real store returns
+
+    monkeypatch.setattr("silica.kernel.recall.embed.EmbedStore", _Store)
+    monkeypatch.setattr("silica.agent.providers.get_embedder", lambda cfg: object())
+
+    report = VaultReport(
+        generated_at="x", scope="", totals={},
+        god_nodes=[NodeStat(id="S.md", label="S", cluster=0,
+                            out_degree=1, in_degree=0, degree=1)],
+        bridges=[], orphans=[], dangling=[], clusters=[],
+    )
+
+    from silica.kernel.report.graph_report.embed_signals import _compute_missing_links
+    links = _compute_missing_links(report, G, tau=0.5, k=10)
+
+    # The proposal survives, and both ends are reported as graph node ids.
+    assert [(l.source, l.target) for l in links] == [("S.md", "A.md")]
+
+
 def test_duplicate_pairs_split_confirmed_vs_borderline(monkeypatch):
     """≥ τ_high → confirmed (merge candidate); τ_low..τ_high → borderline; ≤ τ_low dropped."""
     from silica.kernel.report import graph_report as gr
@@ -402,13 +451,15 @@ def test_duplicate_pairs_split_confirmed_vs_borderline(monkeypatch):
     }
 
     class _Store:
-        _notes: dict = {}
         def __len__(self): return len(nn)
         def paths(self): return list(nn)
         def get_vec(self, p): return [p] if p in nn else None
         def cosine_top_k(self, vec, k=1, exclude=None):
             tgt, score = nn[vec[0]]
             return [{"path": tgt, "score": score}]
+        # The dedup leg ranks the whole scope in one call now.
+        def cosine_top_k_batch(self, keys, k=1, *, exclude_self=True, block=256):
+            return {p: self.cosine_top_k(self.get_vec(p), k, {p}) for p in keys if p in nn}
 
     monkeypatch.setattr("silica.kernel.recall.embed.EmbedStore", _Store)
 

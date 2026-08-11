@@ -310,8 +310,9 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     the client force-layout positions notes by semantic proximity instead of by
     explicit wikilinks. Notes without a stored vector simply get no edges.
 
-    Deterministic, offline (stored vectors + a single BLAS matvec per note, via
-    EmbedStore.cosine_top_k). Empty list when the embed index is absent.
+    Deterministic, offline (stored vectors + one blocked BLAS matmul for the whole
+    vault, via EmbedStore.cosine_top_k_batch). Empty list when the embed index is
+    absent.
     """
     from silica.kernel.recall.cooccurrence import cooccur_key
     from silica.kernel.recall.embed import get_store
@@ -324,14 +325,17 @@ def knn_edges(nodes: list[dict], k: int = 6) -> list[dict]:
     # carry '.md'. Map both through cooccur_key so a store hit resolves to its node.
     id_by_key = {cooccur_key(n["id"]): n["id"] for n in nodes if n.get("type") != "ghost"}
 
+    # One matmul for the whole vault, not one matvec per note: this is the only
+    # all-pairs consumer of the embed store, and the per-note loop made it the
+    # sole O(N²) pass in the system (2.9 s at 1238 notes, ~6 min at 12k). Same
+    # top-k, exactly — see cosine_top_k_batch.
+    neighbours = store.cosine_top_k_batch(list(id_by_key), k=k)
+
     edges: list[dict] = []
     seen: set[tuple[str, str]] = set()
     idx = 0
     for key, nid in id_by_key.items():
-        vec = store.get_vec(key)
-        if vec is None:
-            continue
-        for cand in store.cosine_top_k(vec, k=k, exclude={key}):
+        for cand in neighbours.get(key, ()):
             tid = id_by_key.get(cooccur_key(cand["path"]))
             if tid is None or tid == nid:
                 continue

@@ -33,6 +33,14 @@ class _FakeStore:
         )
         return [{"path": p, "name": p, "score": s} for s, p in ranked[:k]]
 
+    def cosine_top_k_batch(self, keys, k=5, *, exclude_self=True, block=256):
+        # What knn_edges actually calls. Keys with no stored vector are absent from
+        # the result, which is how the real store reports "no neighbours".
+        return {
+            key: self.cosine_top_k(self._vecs[key], k, {key} if exclude_self else set())
+            for key in keys if key in self._vecs
+        }
+
 
 def _nodes(*ids):
     return [{"id": i, "type": "note"} for i in ids]

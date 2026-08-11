@@ -156,6 +156,8 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
     latter catches "ROS" / "JSON in ROS 2" where bodies diverge but titles are
     clearly related.
     """
+    import numpy as np
+
     from silica.kernel.recall.embed import get_store, _cosine
     from silica.config import CONFIG as _C
 
@@ -168,15 +170,34 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
     τ_title = getattr(_C, "sim_title_threshold", 0.80)
 
     scope = [p for p in store.paths() if _in_folder(p, folder)]
+    # One blocked matmul for the whole scope, not one matvec per note: the scan is
+    # N searches over an N-row index, so the per-note shape was quadratic in vault
+    # size. Same top-k (see cosine_top_k_batch); notes without a usable vector are
+    # simply absent from the result, as the `if not vec: continue` did.
+    neighbours = store.cosine_top_k_batch(scope, k=_C.dedup_scan_k)
     seen_pairs: set[tuple[str, str]] = set()
     pairs: list[dict] = []
 
+    _title_cache: dict[str, Any] = {}
+
+    def _title_vec(path: str):
+        """Title vector as a float64 array, or None when the note has none.
+
+        ponytail: memo, because the title gate below re-converted the same stored
+        list on every candidate pair — 10 conversions per distinct vector, measured
+        — and the conversion, not the dot product, was the cost (158 us -> 6.6 us
+        per pair). float64 specifically: `_cosine` asks for float64, so asarray on
+        an already-float64 array is a no-op and the score stays bit-identical; a
+        float32 cache would be re-copied on every call and is slower than no cache
+        at all. Drop this if the title vectors ever arrive as arrays.
+        """
+        if path not in _title_cache:
+            raw = store.get_title_vec(path)
+            _title_cache[path] = np.asarray(raw, dtype=np.float64) if raw else None
+        return _title_cache[path]
+
     for p in scope:
-        vec = store.get_vec(p)
-        if not vec:
-            continue
-        candidates = store.cosine_top_k(vec, k=_C.dedup_scan_k, exclude={p})
-        for match in candidates:
+        for match in neighbours.get(p, ()):
             score = match.get("score", 0.0)
             other = match.get("path", "")
             if not other or not _in_folder(other, folder):
@@ -184,11 +205,12 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
 
             # Title-level similarity gate: catches pairs whose bodies diverge
             # but whose titles share a strong semantic relationship.
-            title_vec_p = store.get_title_vec(p)
-            title_vec_o = store.get_title_vec(other)
+            title_vec_p = _title_vec(p)
+            title_vec_o = _title_vec(other)
             title_score = (
                 _cosine(title_vec_p, title_vec_o)
-                if title_vec_p and title_vec_o
+                # `is not None`, not truthiness: a numpy array raises on bool().
+                if title_vec_p is not None and title_vec_o is not None
                 else 0.0
             )
 

@@ -6,7 +6,7 @@
 Architecture:
   - EmbedStore  — orjson-backed index at ~/.silica/index/embeddings.json
   - build_index — incremental: skips notes already present, batches new ones
-  - cosine_top_k inside EmbedStore — pure Python, no numpy
+  - cosine_top_k inside EmbedStore — one numpy matrix-vector product, no ANN index
   - refresh_note — re-embed a single note (call after writes)
 
 Embeddings substrate rule (from the plan):
@@ -39,6 +39,10 @@ def _index_path() -> Path:
 # Maximum characters of note content to embed (title + body prefix).
 # Keeps embedding calls fast without losing most of the signal.
 _MAX_CHARS = 1200
+
+# Theme-vector sampling budget: at most this many _MAX_CHARS blocks are
+# embedded per document, equispaced across the body (document_theme_vector).
+_THEME_MAX_SEGMENTS = 8
 
 
 # ---------------------------------------------------------------------------
@@ -77,11 +81,22 @@ _theme_cache: dict[tuple[str, str, int], list[float]] = {}
 _THEME_CACHE_MAX = 64
 
 
-def document_theme_vector(embedder: Any, body: str, *, segment_chars: int = _MAX_CHARS) -> list[float]:
-    """Thematic centroid of a document: embed body segments then average.
+def document_theme_vector(
+    embedder: Any, body: str, *, segment_chars: int = _MAX_CHARS,
+    max_segments: int = _THEME_MAX_SEGMENTS,
+) -> list[float]:
+    """Thematic centroid of a document: embed a bounded sample of body segments,
+    then average.
 
     Robust on long notes. Returns [] if embedder fails or body is empty.
-    Cached per (model, body-hash, segment_chars) — see _theme_cache above.
+    Cached per (model, body-hash, segment_chars, max_segments) — see
+    _theme_cache above.
+
+    Bodies over ``max_segments`` blocks are sampled equispaced rather than
+    embedded in full: both consumers (keyphrase MMR, SALIENCE at τ=0.35) use
+    this vector as a direction, not a faithful centroid, and walking a book
+    segment block-by-block made RECON's cost linear in the note size (34
+    embed inputs per 40k-char segment). ``max_segments=0`` disables sampling.
     """
     if not body.strip():
         return []
@@ -90,11 +105,15 @@ def document_theme_vector(embedder: Any, body: str, *, segment_chars: int = _MAX
         getattr(embedder, "model", ""),
         hashlib.sha1(body.encode("utf-8", "ignore")).hexdigest(),
         segment_chars,
+        max_segments,
     )
     cached = _theme_cache.get(key)
     if cached is not None:
         return cached
     segs = [body[i:i + segment_chars] for i in range(0, len(body), segment_chars)] or [body]
+    if max_segments and len(segs) > max_segments:
+        step = len(segs) / max_segments
+        segs = [segs[int(i * step)] for i in range(max_segments)]
     try:
         vecs = embedder.embed(segs)
     except Exception:
@@ -256,6 +275,13 @@ class EmbedStore:
                 self._notes = {}
 
     def save(self) -> Path:
+        # ponytail: a flush reserializes the WHOLE index, ~250 ms / 25.6 MB at 1.2k
+        # notes and linear in vault size. It stays off the hot path only because
+        # callers batch (refresh_note(save=False), one flush per run). This is the
+        # first thing that breaks with scale, before search ever does: reopen when a
+        # flush passes ~2 s (~12k notes), and the answer there is sqlite or an
+        # append-only shard, NOT a vector DB. See cosine_top_k_batch for why the
+        # search side is not the limit.
         atomic_write_bytes(self._path, _serialize_notes(self._notes))
         return self._path
 
@@ -318,6 +344,17 @@ class EmbedStore:
         entry = self._notes.get(path)
         return entry.get("content_hash") if entry else None
 
+    def get_ts(self, path: str) -> float:
+        """Return when the note was last embedded, or 0.0 if it is not indexed.
+
+        The temporal-decay signal in graph_report used to read `store._notes[p]["ts"]`
+        directly — the one reach into the private dict from outside this class, and a
+        double `.get` with a default, so a change of entry shape would have degraded
+        the ranking silently instead of failing.
+        """
+        entry = self._notes.get(path)
+        return float(entry.get("ts", 0.0)) if entry else 0.0
+
     def has(self, path: str) -> bool:
         return path in self._notes
 
@@ -339,6 +376,12 @@ class EmbedStore:
         title_vec) or off-dimension falls through to a 0.0 score, matching the
         old per-pair _cosine length guard. Zero vectors normalize to zero rows.
         """
+        # ponytail: dense float32 in RAM, both matrices — 25 MB at 1.2k notes × 2560
+        # dims, linear in vault size. Reopen at ~500 MB (~25k notes). float16 halves
+        # it and is REFUTED on speed: numpy has no half-precision BLAS, so the matvec
+        # drops out of OpenBLAS into a software loop. Measured on this store:
+        # matvec 0.03 ms -> 12.4 ms, mat@mat.T 10 ms -> 15.3 s. Do not retry without
+        # a BLAS that speaks fp16.
         vecs = {p: self._notes[p].get(vec_key) for p in self._notes}
         paths = [p for p, v in vecs.items() if v]
         if not paths:
@@ -430,6 +473,75 @@ class EmbedStore:
         """
         self._ensure_matrix()
         return self._search(self._tmat, self._tmat_paths, self._tmat_dim, query_vec, k, exclude)
+
+    def cosine_top_k_batch(
+        self,
+        keys: list[str],
+        k: int = 5,
+        *,
+        exclude_self: bool = True,
+        block: int = 256,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Top-k neighbours for MANY stored notes at once, same result as calling
+        `cosine_top_k(get_vec(key), k, exclude={key})` per key.
+
+        The all-pairs shape (knn_edges). One `cosine_top_k` per note is N matvecs,
+        each re-reading the full matrix: BLAS-2, memory-bound, O(N²) passes over
+        the index. One blocked `mat @ mat.T` is BLAS-3 and reads it once per block.
+        Measured on a 1238-note store: 2.9 s -> 30 ms, and the results are the same
+        top-k, not an approximation — which is why this is the answer to "search
+        does not scale" rather than an ANN index.
+
+        Keys absent from the search matrix (unknown, no vector, or off the modal
+        dimension after a model swap) are simply missing from the result. The
+        per-note path returned k arbitrary 0.0-scored notes for those; no edges is
+        the more honest answer, and it only differs in that degenerate case.
+
+        `block` bounds the peak: block × N float32 (256 × 12k notes = 12 MB).
+        """
+        self._ensure_matrix()
+        mat, mpaths = self._mat, self._mat_paths
+        if mat is None or not mat.size or k <= 0:
+            return {}
+        row_of = {p: i for i, p in enumerate(mpaths)}
+        present = [key for key in keys if key in row_of]
+        if not present:
+            return {}
+        rows = np.fromiter((row_of[key] for key in present), dtype=np.intp, count=len(present))
+        out: dict[str, list[dict[str, Any]]] = {}
+        for start in range(0, len(present), block):
+            chunk = rows[start:start + block]
+            sims = mat[chunk] @ mat.T          # rows are already unit-normalized
+            if exclude_self:
+                # -inf, not deletion: keeps column indices aligned with mpaths, and
+                # argpartition below takes the k largest, so it can never be picked.
+                sims[np.arange(len(chunk)), chunk] = -np.inf
+            for r, key in enumerate(present[start:start + block]):
+                row = sims[r]
+                if k >= row.size:
+                    cand = np.arange(row.size)
+                else:
+                    part = np.argpartition(-row, k - 1)[:k]
+                    kth = float(row[part].min())
+                    if kth <= 0.0:
+                        # Degenerate: fewer than k strictly-positive neighbours, so
+                        # _search's full-vault branch (0.0-scored off-matrix notes,
+                        # their ordering) decides the tail. Delegate rather than
+                        # reimplement it.
+                        out[key] = self.cosine_top_k(
+                            self._notes[key]["vec"], k=k,
+                            exclude={key} if exclude_self else None,
+                        )
+                        continue
+                    # Every index tied at the k-th score, so the (score, path)
+                    # tie-break below matches _search exactly.
+                    cand = np.flatnonzero(row >= kth)
+                top = heapq.nlargest(k, ((float(row[j]), mpaths[j]) for j in cand.tolist()))
+                out[key] = [
+                    {"path": p, "name": self._notes[p]["name"], "score": round(score, 4)}
+                    for score, p in top
+                ]
+        return out
 
 
 # ---------------------------------------------------------------------------
