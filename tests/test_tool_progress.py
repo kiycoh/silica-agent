@@ -332,17 +332,17 @@ def test_thinking_slash_toggle():
 def test_stage_track_centers_on_running_phase():
     from silica.ui.renderer import _stage_track
     phases = [
-        {"phase": "recon",      "status": "done",    "elapsed": 1.0},
-        {"phase": "cross-dedup","status": "done",    "elapsed": 0.5},
-        {"phase": "payload",    "status": "done",    "elapsed": 0.8},
-        {"phase": "salience",   "status": "done",    "elapsed": 0.3},
-        {"phase": "collision",  "status": "running", "elapsed": None},
+        {"phase": "recon",     "status": "done",    "elapsed": 1.0},
+        {"phase": "payload",   "status": "done",    "elapsed": 0.8},
+        {"phase": "salience",  "status": "done",    "elapsed": 0.3},
+        {"phase": "collision", "status": "done",    "elapsed": 0.4},
+        {"phase": "distill",   "status": "running", "elapsed": None},
     ]
     track = _stage_track(phases, console_width=120)
     plain = track.plain
     # Running phase is visible
-    assert "◉ collision" in plain
-    # Phases in window are visible (collision is index 4; window is indices 1-7)
+    assert "◉ distill" in plain
+    # Phases in window are visible (distill is index 4; window is indices 1-7)
     assert "✓ payload" in plain
     assert "✓ salience" in plain
     # Phases outside window are NOT visible (recon is index 0, outside window start=1)
@@ -358,7 +358,7 @@ def test_stage_track_empty_shows_pending_from_start():
     # No running phase → center=0, window starts at 0, no leading ellipsis
     assert not plain.startswith("…")
     assert "· recon" in plain
-    assert "· cross-dedup" in plain
+    assert "· payload" in plain
 
 
 def test_injector_block_height_constant_across_widths():
@@ -391,12 +391,12 @@ def test_injector_block_height_constant_across_widths():
 def test_stage_track_failed_phase_shown():
     from silica.ui.renderer import _stage_track
     phases = [
-        {"phase": "recon",      "status": "done",   "elapsed": 1.0},
-        {"phase": "cross-dedup","status": "failed",  "elapsed": 0.2},
+        {"phase": "recon",    "status": "done",   "elapsed": 1.0},
+        {"phase": "payload",  "status": "failed", "elapsed": 0.2},
     ]
     track = _stage_track(phases, console_width=120)
     plain = track.plain
-    assert "✗ cross-dedup" in plain
+    assert "✗ payload" in plain
 
 
 def _make_mock_batch(kind: str = "refine") -> dict:
@@ -633,7 +633,7 @@ def test_committed_file_counts_toward_bar_done():
 
 
 def test_phase_position_names_the_file_being_processed():
-    """Regression: during file 2's RECON/CROSSDEDUP/PAYLOAD the chunk map still
+    """Regression: during file 2's RECON/PAYLOAD the chunk map still
     points into file 1 (it only gains file 2's entries at file 2's PAYLOAD), so
     deriving the position from it named the previous document."""
     from silica.router.orchestrator import InjectorFSM

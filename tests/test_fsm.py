@@ -233,7 +233,6 @@ def test_fsm_multi_chunk_loop(
     expected_sequence = [
         # First chunk cycle
         InjectorState.RECON,
-        InjectorState.CROSSDEDUP, # Phase 1.5 (best-effort, single file → skip)
         InjectorState.PAYLOAD,
         InjectorState.SALIENCE,   # Phase 2.05 (best-effort, embedder unavailable → skip)
         InjectorState.COLLISION,  # Phase 5 (best-effort, no index → skip)
@@ -569,7 +568,6 @@ def test_fsm_recipe_end_to_end_flow(
     # Verify the sequence of states visited exactly matches the injector.yaml phases
     expected_sequence = [
         InjectorState.RECON,
-        InjectorState.CROSSDEDUP, # Phase 1.5 (best-effort, single file → skip)
         InjectorState.PAYLOAD,
         InjectorState.SALIENCE,   # Phase 2.05 (best-effort, embedder unavailable → skip)
         InjectorState.COLLISION,  # Phase 5 (best-effort, empty index → skip)
@@ -1114,118 +1112,6 @@ def test_fsm_create_settle_timeout_rollback(
 
 
 # ---------------------------------------------------------------------------
-# CROSSDEDUP tests
-# ---------------------------------------------------------------------------
-
-def _make_fsm_at_crossdedup(recon_list: list[dict]) -> InjectorFSM:
-    """Helper: build an FSM positioned at CROSSDEDUP with pre-populated recon."""
-    fsm = InjectorFSM("Inbox/a.md", "TargetDir", inbox_files=["Inbox/a.md", "Inbox/b.md"])
-    fsm.state = InjectorState.CROSSDEDUP
-    fsm.context["recon"] = recon_list
-    return fsm
-
-
-def test_crossdedup_skips_single_file():
-    """Single-file runs skip CROSSDEDUP immediately."""
-    fsm = InjectorFSM("Inbox/a.md", "TargetDir")
-    fsm.state = InjectorState.CROSSDEDUP
-    fsm.context["recon"] = [{"file": "Inbox/a.md", "new_concepts": ["PIL"], "collisions": []}]
-    fsm.step()
-    assert fsm.state == InjectorState.PAYLOAD
-    assert fsm.context["recon"][0]["new_concepts"] == ["PIL"]
-
-
-def test_crossdedup_removes_cross_file_near_duplicate():
-    """Incremental CROSSDEDUP: a concept near-duplicate (cosine ≥ τ_high) of a
-    prior file's survivor is removed when the later file's pass runs."""
-    similar_vec = [1.0, 0.0, 0.0]
-    mock_embedder = MagicMock()
-    mock_embedder.embed.return_value = [similar_vec]  # one concept per file pass
-
-    with patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.router.orchestrator.CONFIG") as mock_cfg:
-        mock_cfg.sim_threshold_high = 0.85
-
-        # File 0 pass: no priors → survivor cached
-        fsm = _make_fsm_at_crossdedup(
-            [{"file": "Inbox/a.md", "new_concepts": ["PIL"], "collisions": []}]
-        )
-        fsm.step()
-        assert fsm.state == InjectorState.PAYLOAD
-        assert fsm.context["recon"][0]["new_concepts"] == ["PIL"]    # survivor kept
-
-        # File 1 pass: same vector → duplicate removed
-        fsm._current_file_idx = 1
-        fsm.state = InjectorState.CROSSDEDUP
-        fsm.context["recon"].append(
-            {"file": "Inbox/b.md", "new_concepts": ["Prodotto Interno Lordo"], "collisions": []}
-        )
-        fsm.step()
-
-    assert fsm.state == InjectorState.PAYLOAD
-    assert fsm.context["recon"][0]["new_concepts"] == ["PIL"]        # winner kept
-    assert fsm.context["recon"][1]["new_concepts"] == []             # loser removed
-    assert fsm.context["crossdedup_merged"] == 1
-
-
-def test_crossdedup_keeps_distinct_concepts():
-    """Concepts that are semantically different are left untouched in both files."""
-    recon = [
-        {"file": "Inbox/a.md", "new_concepts": ["PIL"],            "collisions": []},
-        {"file": "Inbox/b.md", "new_concepts": ["Entropia"],       "collisions": []},
-    ]
-    fsm = _make_fsm_at_crossdedup(recon)
-
-    mock_embedder = MagicMock()
-    mock_embedder.embed.return_value = [[1.0, 0.0], [0.0, 1.0]]  # orthogonal → cosine 0.0
-
-    with patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.router.orchestrator.CONFIG") as mock_cfg:
-        mock_cfg.sim_threshold_high = 0.85
-        fsm.step()
-
-    assert fsm.state == InjectorState.PAYLOAD
-    assert fsm.context["recon"][0]["new_concepts"] == ["PIL"]
-    assert fsm.context["recon"][1]["new_concepts"] == ["Entropia"]
-    assert "crossdedup_merged" not in fsm.context
-
-
-def test_crossdedup_skips_when_embedder_unavailable():
-    """Best-effort: if get_embedder raises, CROSSDEDUP passes through unchanged."""
-    recon = [
-        {"file": "Inbox/a.md", "new_concepts": ["PIL"],     "collisions": []},
-        {"file": "Inbox/b.md", "new_concepts": ["PIL"],     "collisions": []},
-    ]
-    fsm = _make_fsm_at_crossdedup(recon)
-
-    with patch("silica.agent.providers.get_embedder", side_effect=RuntimeError("no key")):
-        fsm.step()
-
-    assert fsm.state == InjectorState.PAYLOAD
-    assert fsm.context["recon"][1]["new_concepts"] == ["PIL"]  # untouched
-
-
-def test_crossdedup_skips_when_embed_call_fails():
-    """Best-effort: if embedder.embed raises, CROSSDEDUP passes through unchanged."""
-    recon = [
-        {"file": "Inbox/a.md", "new_concepts": ["PIL"],     "collisions": []},
-        {"file": "Inbox/b.md", "new_concepts": ["PIL"],     "collisions": []},
-    ]
-    fsm = _make_fsm_at_crossdedup(recon)
-
-    mock_embedder = MagicMock()
-    mock_embedder.embed.side_effect = RuntimeError("rate limit")
-
-    with patch("silica.agent.providers.get_embedder", return_value=mock_embedder), \
-         patch("silica.router.orchestrator.CONFIG") as mock_cfg:
-        mock_cfg.sim_threshold_high = 0.85
-        fsm.step()
-
-    assert fsm.state == InjectorState.PAYLOAD
-    assert fsm.context["recon"][1]["new_concepts"] == ["PIL"]  # untouched
-
-
-# ---------------------------------------------------------------------------
 # WRITE partial-failure containment (Fase A → B)
 # ---------------------------------------------------------------------------
 
@@ -1520,11 +1406,11 @@ def test_coordinator_forwards_the_episodic_capture_switch():
 
 
 def test_best_effort_states_from_recipe():
-    # A26: crossdedup/salience/collision/autolink/backlink are best_effort in the
+    # A26: salience/collision/autolink/backlink are best_effort in the
     # recipe, so an unhandled failure in any of them must skip, not abort.
     fsm = InjectorFSM("Inbox/test.md", "TargetDir")
     assert fsm._best_effort_states == {
-        InjectorState.CROSSDEDUP, InjectorState.SALIENCE, InjectorState.COLLISION,
+        InjectorState.SALIENCE, InjectorState.COLLISION,
         InjectorState.AUTOLINK, InjectorState.BACKLINK,
     }
 
@@ -1548,3 +1434,19 @@ def test_best_effort_failure_skips_to_next_phase():
 
     assert fsm.state == InjectorState.DONE  # reached COLLISION, not ERROR
     assert fsm.context.get("error") == "salience blew up"
+
+
+def test_recon_steps_straight_to_payload():
+    """CROSSDEDUP is gone (2026-08-09 A/B: it deleted 44% of a book's concepts,
+    only 60% of them real duplicates). RECON hands the file to PAYLOAD, and the
+    state no longer exists on the enum."""
+    fsm = InjectorFSM("Inbox/a.md", "TargetDir", inbox_files=["Inbox/a.md", "Inbox/b.md"])
+    fsm.state = InjectorState.RECON
+    fsm.context["recon"] = [{"file": "Inbox/a.md", "new_concepts": ["PIL"], "collisions": []}]
+
+    with patch("silica.router.orchestrator.states.setup.handle_recon",
+               side_effect=lambda f: f._transition_success()):
+        fsm.step()
+
+    assert fsm.state == InjectorState.PAYLOAD
+    assert not hasattr(InjectorState, "CROSSDEDUP")

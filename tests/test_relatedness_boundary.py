@@ -54,7 +54,7 @@ ALLOWED = {
     "router/organize_fsm.py":       "L1 co-occurrence classification, not relatedness ranking",
     "router/orchestrator.py":       "co-occurrence index freshness hook (build_index)",
     "router/states/collision.py":   "constructs stores to inject into the facade",
-    "router/states/setup.py":       "pairwise cosine (crossdedup, salience theme gate)",
+    "router/states/setup.py":       "pairwise cosine (salience theme gate)",
     "router/states/write.py":       "incremental embed index refresh after writes",
     "router/states/finalize.py":    "embed index cleanup on rollback",
     "driver/fs_backend.py":         "embed vector cleanup on note delete/rename (index maintenance), not relatedness ranking",

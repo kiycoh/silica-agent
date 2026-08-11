@@ -116,8 +116,7 @@ class TestT1MultiFileInit:
         fsm._file_content_hashes = ["", ""]
         # File 0 setup pass
         fsm.state = InjectorState.RECON
-        fsm.step()  # RECON → CROSSDEDUP
-        fsm.step()  # CROSSDEDUP → PAYLOAD
+        fsm.step()  # RECON → PAYLOAD
         fsm.step()  # PAYLOAD → SALIENCE
 
         task_ids = [t.id for t in fsm.progress.tasks]
@@ -128,8 +127,7 @@ class TestT1MultiFileInit:
         # File advance (normally triggered by _on_pipeline_end after f0's last chunk)
         assert fsm._advance_file_or_done()
         assert fsm.state == InjectorState.RECON
-        fsm.step()  # RECON → CROSSDEDUP
-        fsm.step()  # CROSSDEDUP → PAYLOAD
+        fsm.step()  # RECON → PAYLOAD
         fsm.step()  # PAYLOAD → SALIENCE
 
         task_ids = [t.id for t in fsm.progress.tasks]

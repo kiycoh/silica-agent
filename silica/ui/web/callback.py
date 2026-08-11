@@ -130,9 +130,8 @@ def event_to_json(ev) -> dict | None:
         return out
     if isinstance(ev, PhaseEvent):
         # The label, not the recipe id: the client matches rows by exact string,
-        # and no id->label rule it could apply covers both hub_update/hub-update
-        # and crossdedup/cross-dedup. Guessing left cross-dedup grey for the
-        # whole run.
+        # and no id->label rule it could apply covers hub_update/hub-update.
+        # Guessing left the renamed phase grey for the whole run.
         return {"type": "phase", "phase": _PHASE_LABELS.get(ev.phase, ev.phase),
                 "status": ev.status,
                 "scope": ev.scope, "source_file": ev.source_file,

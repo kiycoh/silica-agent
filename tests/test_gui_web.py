@@ -138,14 +138,14 @@ def test_phase_event_restates_the_whole_position():
 
 def test_phase_wire_sends_labels_the_track_can_match():
     """Found in the browser, not in the code: the client matches rows by exact
-    string, and the two phases whose id differs from their label (crossdedup ->
-    cross-dedup, hub_update -> hub-update) need different rules, so any guess the
-    client makes leaves one of them grey for the whole run. The server maps."""
+    string, and a phase whose id differs from its label (hub_update -> hub-update)
+    needs its own rule, so any guess the client makes leaves it grey for the whole
+    run. The server maps."""
     from silica.agent.events import PhaseEvent
     from silica.ui.web.callback import _PHASE_TRACKS, event_to_json
 
     every = _PHASE_TRACKS["file"] + _PHASE_TRACKS["chunk"]
-    for pid in ["recon", "crossdedup", "payload", "salience", "distill", "hub_update", "lint"]:
+    for pid in ["recon", "payload", "salience", "distill", "hub_update", "lint"]:
         wire = event_to_json(PhaseEvent(phase=pid, status="running", scope="chunk",
                                         file_idx=0, file_total=1, chunk_idx=0, chunk_total=1))
         assert wire["phase"] in every, f"{pid} arrives as {wire['phase']!r}, which matches no row"

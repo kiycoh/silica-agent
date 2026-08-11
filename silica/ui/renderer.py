@@ -216,7 +216,6 @@ def _synthetic_tool_desc(name: str, args: dict) -> str:
 # recipes/injector.yaml — which tests/test_phase_track.py pins.
 _FILE_PHASES: dict[str, str] = {
     "recon":      "recon",
-    "crossdedup": "cross-dedup",
     "payload":    "payload",
     "salience":   "salience",
 }

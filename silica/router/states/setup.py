@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Injector run-setup states: RECON, CROSSDEDUP, PAYLOAD, SALIENCE.
+"""Injector run-setup states: RECON, PAYLOAD, SALIENCE.
 
 Handler bodies for InjectorFSM, extracted from orchestrator.py: each function
 takes the FSM instance and mutates its context/state exactly as the former
@@ -65,74 +65,6 @@ def handle_recon(fsm: "InjectorFSM") -> None:
                     existing.append(notice)
                 else:
                     fsm.context["deferred"] = [existing, notice]
-
-
-def handle_crossdedup(fsm: "InjectorFSM") -> None:
-    """Cross-file concept deduplication — Phase 1.5, incremental variant.
-
-    Embeds the CURRENT file's new_concepts (one small call) and compares them
-    against the cached vectors of prior files' survivors: a near-duplicate
-    (cosine ≥ τ_high) is removed, first-file occurrence wins — same semantics
-    as the old all-files pass, paid per file instead of up-front. Best-effort:
-    silently skips when the embedder is unavailable or the run is single-file.
-    """
-    recon_list: list[dict] = fsm.context.get("recon", [])
-    if not recon_list or len(fsm.inbox_files) < 2:
-        fsm._transition_success()
-        return
-
-    cur = recon_list[-1]  # appended by RECON for the current file
-    names = list(cur.get("new_concepts", []))
-    if not names:
-        fsm._transition_success()
-        return
-
-    from silica.agent.providers import get_embedder_or_none
-    from silica.kernel.recall.embed import _cosine
-    embedder = get_embedder_or_none(orch.CONFIG, "CROSSDEDUP")
-    if embedder is None:
-        fsm._transition_success()
-        return
-
-    try:
-        vecs = embedder.embed(names)
-    except Exception as _e:
-        logger.warning("CROSSDEDUP: embed call failed (%s) — skipping", _e)
-        fsm._transition_success()
-        return
-
-    # Ragged-embed guard (mirrors NOVELTY/COLLISION): a short reply would zip
-    # short and silently drop the trailing concepts from dedup (A6).
-    if len(vecs) != len(names):
-        logger.warning(
-            "CROSSDEDUP: ragged embed (%d vecs for %d names) — skipping",
-            len(vecs), len(names),
-        )
-        fsm._transition_success()
-        return
-
-    τ_high = getattr(orch.CONFIG, "sim_threshold_high", 0.85)
-    fi = fsm._current_file_idx
-    removed = 0
-    for name, vec in zip(names, vecs):
-        scored = ((pn, _cosine(vec, pv)) for pn, pv in fsm._crossdedup_vecs)
-        dup = next(((pn, s) for pn, s in scored if s >= τ_high), None)
-        if dup is not None:
-            nc = cur.get("new_concepts", [])
-            if name in nc:
-                nc.remove(name)
-            removed += 1
-            logger.info(
-                "CROSSDEDUP: '%s' (file %d) merged into '%s' (score=%.3f)",
-                name, fi, dup[0], dup[1],
-            )
-        else:
-            fsm._crossdedup_vecs.append((name, vec))
-
-    if removed:
-        fsm.context["crossdedup_merged"] = fsm.context.get("crossdedup_merged", 0) + removed
-        logger.info("CROSSDEDUP: %d duplicate concept(s) removed from file %d", removed, fi)
-    fsm._transition_success()
 
 
 def _within_cluster_tol(cached_sig, sig: list[int]) -> bool:

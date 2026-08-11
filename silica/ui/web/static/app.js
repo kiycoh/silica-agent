@@ -157,8 +157,8 @@ function makePipelineBlock(label, tracks) {
       // it as a pending step made every healthy run advertise a rollback that
       // was never coming. It gets appended only when it actually fires.
       // ev.phase is the display label (the server maps it), so this is an exact
-      // match — no id-to-label rule here can cover both hub_update/hub-update
-      // and crossdedup/cross-dedup, and guessing left one phase permanently grey.
+      // match — an id-to-label rule here would have to cover hub_update/hub-update,
+      // and guessing left that phase permanently grey.
       let row = rows[`${ev.scope}:${ev.phase}`];
       if (!row && ev.phase === "rollback") {
         row = rows["exception:rollback"];

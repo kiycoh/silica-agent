@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 # Everything else in injector.yaml is per-chunk, except rollback (on_gate_fail).
 # Mirrored for display by _FILE_PHASES/_CHUNK_PHASES in silica/ui/renderer.py;
 # tests/test_phase_track.py pins both against the recipe.
-_FILE_SCOPE_PHASES = frozenset({"recon", "crossdedup", "payload", "salience"})
+_FILE_SCOPE_PHASES = frozenset({"recon", "payload", "salience"})
 
 
 def _refresh_cooccurrence_for_ops(
@@ -174,7 +174,6 @@ def _commit_docs_for_ops(
 class InjectorState(Enum):
     INIT = auto()
     RECON = auto()         # Phase 1
-    CROSSDEDUP = auto()    # Phase 1.5 — cross-file concept deduplication
     PAYLOAD = auto()       # Phase 2.0
     SALIENCE = auto()      # Phase 2.05 — thematic salience gate (drop off-theme concepts)
     COLLISION = auto()     # Phase 5 — dedup routing: high-sim→patch, borderline→defer, low→write
@@ -312,8 +311,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._file_chunks: dict[int, dict] = {}  # fi → {"source_file": str, "chunks": [...]}
         self._chunk_flat_to_fi_ci: dict[int, tuple[int, int]] = {}  # flat_idx → (file_idx, chunk_idx)
         self._last_running_phase: str = ""  # phase in flight, for the failure ledger
-        # CROSSDEDUP incremental state: (concept_name, vec) of prior files' survivors
-        self._crossdedup_vecs: list[tuple[str, list[float]]] = []
 
         # S3.3: Load the recipe for dynamic configuration. The recipe is bundled
         # package data — if it's missing the install is broken; fail fast.
@@ -364,7 +361,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._rollback_state = InjectorState.ROLLBACK
         self._phase_to_state: dict[str, InjectorState] = {
             "recon":      InjectorState.RECON,
-            "crossdedup": InjectorState.CROSSDEDUP,
             "payload":    InjectorState.PAYLOAD,
             "salience":   InjectorState.SALIENCE,
             "collision":  InjectorState.COLLISION,
@@ -384,7 +380,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # S2.2.1: Handlers mapping and error policy.
         self._HANDLERS = {
             InjectorState.RECON:      lambda: states.setup.handle_recon(self),
-            InjectorState.CROSSDEDUP: lambda: states.setup.handle_crossdedup(self),
             InjectorState.PAYLOAD:    lambda: states.setup.handle_payload(self),
             InjectorState.SALIENCE:   lambda: states.setup.handle_salience(self),
             InjectorState.COLLISION:  lambda: states.collision.handle_collision(self),
@@ -404,7 +399,6 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._ON_ERROR = {
             # Setup phases: abort the whole run on failure
             InjectorState.RECON: InjectorState.ERROR,
-            InjectorState.CROSSDEDUP: InjectorState.ERROR,
             InjectorState.PAYLOAD: InjectorState.ERROR,
             # Per-chunk phases: contain failure at chunk level via rollback
             InjectorState.DELEGATE: InjectorState.ROLLBACK,
@@ -486,7 +480,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
 
         file_idx comes from _current_file_idx, NOT from the chunk map: the map
         still points into the previous file during the next file's
-        RECON/CROSSDEDUP/PAYLOAD (it only gains that file's entries at its own
+        RECON/PAYLOAD (it only gains that file's entries at its own
         PAYLOAD), so deriving it there names the wrong document.
 
         chunk_total is this FILE's chunk count. The run-wide total does not exist
