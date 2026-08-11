@@ -97,6 +97,129 @@ def test_length_still_breaks_a_tie_within_a_tier():
     assert merge_rank(long) > merge_rank(short)
 
 
+# --- suppress_contest (§6.1-bis) ---------------------------------------------
+
+def test_strict_dominance_with_no_clock_on_the_incoming_suppresses():
+    """Nothing suggests the incoming claim is fresher, so reliability decides."""
+    from silica.kernel.write.contested import TIER_DISTILLED, suppress_contest
+
+    assert suppress_contest(HUMAN, incoming_tier=TIER_DISTILLED, incoming_clock=None)
+
+
+def test_a_fresher_incoming_claim_vetoes_the_suppression():
+    """Measured on the fixture corpus: this is how tier dominance gets it wrong.
+
+    A stale human note contradicted by a newer sourced claim is the ordinary
+    memory update, not an attack on the note's authority. Recency does not
+    resolve the contest here — it only refuses to let reliability resolve it.
+    """
+    from silica.kernel.write.contested import TIER_GROUNDED, suppress_contest
+
+    stale = HUMAN.replace("# ", "<!-- silica: valid_from=2019-04-02 -->\n\n# ", 1)
+    assert not suppress_contest(stale, incoming_tier=TIER_GROUNDED,
+                                incoming_clock="2024-11-30")
+    assert suppress_contest(stale, incoming_tier=TIER_GROUNDED,
+                            incoming_clock="2018-01-01")  # older: no veto
+
+
+def test_an_unknown_target_clock_vetoes_a_dated_incoming_claim():
+    """Cannot rule out staleness, so do not auto-resolve. The conservative half
+    of the rule: silence about the target's date is not evidence of freshness."""
+    from silica.kernel.write.contested import TIER_GROUNDED, suppress_contest
+
+    assert not suppress_contest(HUMAN, incoming_tier=TIER_GROUNDED,
+                                incoming_clock="2026-05-01")
+
+
+def test_a_human_vouching_date_counts_as_the_target_clock():
+    """OKF §5.2 `verified.at` is a person saying "I read this, on this day" —
+    the one clock a note carries that a stamp cannot supply."""
+    from silica.kernel.write.contested import TIER_GROUNDED, suppress_contest
+
+    assert suppress_contest(VERIFIED, incoming_tier=TIER_GROUNDED,
+                            incoming_clock="2026-05-01")
+
+
+def test_equal_tier_never_suppresses_whatever_the_clocks_say():
+    """§7.5 holds through the new path: recency alone resolves nothing."""
+    from silica.kernel.write.contested import TIER_HUMAN, suppress_contest
+
+    assert not suppress_contest(HUMAN, incoming_tier=TIER_HUMAN, incoming_clock=None)
+    assert not suppress_contest(HUMAN, incoming_tier=TIER_HUMAN,
+                                incoming_clock="1999-01-01")
+
+
+# --- §6.1-bis through the dedup route ----------------------------------------
+
+def _contradiction_run(tmp_vault, *, target: str, source_text: str, leaf: str | None = None):
+    """Route a `contradicts` verdict against `target` and return the note after."""
+    from unittest.mock import patch
+
+    from silica.capabilities.dedup import DedupDecision, run_dedup
+    from silica.config import SilicaConfig
+    from silica.kernel.workqueue import WorkItem
+
+    tmp_vault.note("Clinica/Clinica.md", "# Clinica\n")
+    note = tmp_vault.note("Clinica/Warfarin.md", target)
+    tmp_vault.note("Inbox/appunti.md", source_text)
+    if leaf is not None:
+        tmp_vault.note("sources/appunti.md", leaf)
+
+    item = WorkItem(
+        kind="dedup",
+        target_path="Clinica/Warfarin.md",
+        context={"concept": "Dosaggio", "excerpt": "Il dosaggio è 50mg/die.",
+                 "candidate": "Warfarin", "hub": "Clinica",
+                 "inbox_file": "Inbox/appunti.md"},
+        reason="dedup score=0.88",
+    )
+    decision = DedupDecision(verdict="contradicts", rationale="5 vs 50 mg",
+                             addition="Il dosaggio è 50mg/die.")
+    with patch("silica.capabilities.dedup._decide_dedup", return_value=decision):
+        res = run_dedup(item, SilicaConfig())
+    return res, tmp_vault.read(note)
+
+
+def test_a_dominated_undated_contradiction_is_filed_not_flagged(tmp_vault):
+    """The case §6.1-bis exists for: a hand-written note against an undated,
+    unsourced claim. Nothing suggests the incoming side is fresher, so the
+    contest is settled in the note's favour instead of being left to a human."""
+    from silica.kernel.write.contested import SUPERSEDED_HEADING, contested_refs
+
+    res, out = _contradiction_run(
+        tmp_vault,
+        target="---\ntype: Note\n---\n\n# Warfarin\n\nIl dosaggio è 5mg/die.\n",
+        source_text="# Appunti\n\nIl dosaggio è 50mg/die.\n",
+    )
+
+    assert res["status"] == "committed", res
+    assert contested_refs(out) == []            # not flagged
+    assert SUPERSEDED_HEADING in out            # filed instead
+    grave = out[out.index(SUPERSEDED_HEADING):]
+    assert "50mg/die" in grave                  # the losing claim is kept, not dropped
+    assert "5mg/die" in out[: out.index(SUPERSEDED_HEADING)]  # the live claim stays
+
+
+def test_a_fresher_contradiction_still_flags_the_note(tmp_vault):
+    """The trap, in production: the incoming claim is dated and the note is not.
+
+    Same tiers as the case above, opposite outcome, because the one thing that
+    changed is evidence that the note may be the stale side.
+    """
+    from silica.kernel.write.contested import SUPERSEDED_HEADING, contested_refs
+
+    res, out = _contradiction_run(
+        tmp_vault,
+        target="---\ntype: Note\n---\n\n# Warfarin\n\nIl dosaggio è 5mg/die.\n",
+        source_text="---\ndate: 2026-08-01\n---\n\n# Appunti\n\nIl dosaggio è 50mg/die.\n",
+    )
+
+    assert res["status"] == "committed", res
+    assert contested_refs(out) == ["source: appunti.md"]
+    assert SUPERSEDED_HEADING not in out
+    assert "Unresolved." in out
+
+
 # --- mark_superseded_by ------------------------------------------------------
 
 def test_mark_superseded_by_sets_a_wikilink():

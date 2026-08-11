@@ -154,10 +154,12 @@ class FlagNoteArgs(BaseModel):
     name: str = Field(description="Name or vault-relative path of the note to flag")
     reason: str = Field(default="", description="Why the note is wrong or stale, in a few words")
     clear: bool = Field(default=False, description="Clear a previously set flag instead of setting one")
+    ref: str = Field(default="", description="With clear: resolve only this entry of the note's `contradictions:` list, verbatim; default resolves every open one")
 
 
 @tool(FlagNoteArgs, cls="composed", collapse="eager")
-def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[str, Any]:
+def silica_flag_note(name: str, reason: str = "", clear: bool = False,
+                     ref: str = "") -> dict[str, Any]:
     """Flag an EXISTING note as wrong or stale, found while USING it.
 
     The correction entry point: a note that fed an answer but proved wrong is
@@ -171,7 +173,11 @@ def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[s
     import os
 
     from silica.kernel.write.checkpoints import get_checkpoint_store
-    from silica.kernel.write.contested import mark_contested, resolve_contested
+    from silica.kernel.write.contested import (
+        contested_refs,
+        mark_contested,
+        resolve_contested,
+    )
 
     try:
         nc = DRIVER.read_note(name)
@@ -187,13 +193,19 @@ def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[s
         # Not clear_contested: dropping the flag while leaving a body callout
         # that still reads "Unresolved" makes the note lie about its own state.
         # resolve_contested files the callout under `## Superseded` first.
-        new_content = resolve_contested(prior_content, resolved_by=who, valid_to=today)
+        new_content = resolve_contested(prior_content, resolved_by=who, valid_to=today,
+                                        source_ref=ref or None)
     else:
         source_ref = f"flagged: {reason} (by {who}, {today})"
         new_content = mark_contested(prior_content, source_ref)
 
+    # Read the state back off the note instead of assuming `not clear`: with a
+    # `ref` the clear is partial, and a note with contradictions still open is
+    # contested whatever the caller asked for.
+    still_contested = bool(contested_refs(new_content))
+
     if new_content == prior_content:
-        return {"note": name, "path": path, "contested": not clear, "changed": False}
+        return {"note": name, "path": path, "contested": still_contested, "changed": False}
 
     try:
         DRIVER.overwrite(path, new_content)
@@ -202,7 +214,7 @@ def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[s
 
     try:
         from silica.kernel import contested_register
-        contested_register.discard(path) if clear else contested_register.add(path)
+        contested_register.add(path) if still_contested else contested_register.discard(path)
     except Exception:
         pass  # digest index is best-effort; the note's frontmatter is the truth
 
@@ -215,7 +227,7 @@ def silica_flag_note(name: str, reason: str = "", clear: bool = False) -> dict[s
         logger.warning("checkpoint push failed for '%s': %s — /undo has no "
                        "restore point for this write", path, e)
 
-    return {"note": name, "path": path, "contested": not clear,
+    return {"note": name, "path": path, "contested": still_contested,
             "checkpoint_depth": checkpoint_depth, "checkpoint_ok": checkpoint_ok}
 
 

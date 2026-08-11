@@ -205,6 +205,88 @@ def _gated_batch_decisions(
     ]
 
 
+def _incoming_side(ctx: dict, source_basename: str) -> tuple[int, str | None]:
+    """(tier, event clock) of the claim arriving from this source.
+
+    NOT `reliability_tier` of the source text: a raw document has no `AI` key
+    and would rank HUMAN, which says "the agent did not write this" and nothing
+    at all about whether a person vouched for the claim (§6.1). §5's rule
+    instead — grounded while the verbatim source is reachable, distilled once
+    it is not. The clock is whatever the source actually states, never today.
+    """
+    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.vault_manifest import in_write_dir
+    from silica.kernel.write.contested import TIER_DISTILLED, TIER_GROUNDED
+    from silica.kernel.write.provenance import source_event_date
+
+    leaf, _err = read_or_skip(f"{in_write_dir(SOURCES_DIR)}/{source_basename}")
+    if leaf:
+        return TIER_GROUNDED, source_event_date(leaf)
+    inbox_file = ctx.get("inbox_file") or ""
+    source_text = (read_or_skip(inbox_file)[0] or "") if inbox_file else ""
+    return TIER_DISTILLED, source_event_date(source_text)
+
+
+def _file_dominated_claim(
+    ctx: dict, path: str, decision: Any, source_basename: str, hub: str | None
+) -> dict | None:
+    """§6.1-bis: file a claim the note strictly outranks, instead of contesting it.
+
+    Returns None when the contest must stay open, which is every case where the
+    two sides rank equal, where the incoming claim wins, or where anything
+    suggests the note is the stale side. The asymmetry is the design: this only
+    ever suppresses in the one direction where the information suffices, and a
+    contest left visible costs a human a decision, while one resolved wrongly
+    buries a live claim.
+
+    Priced on `evals/golden/fixtures/contests` before being written: bare tier
+    dominance acts on 4 of 7 ranked contests and gets 2 wrong; with the recency
+    veto in `suppress_contest` it acts on 2 and gets both right.
+    """
+    import datetime
+
+    from silica.agent.bounds import dedup_supersede_bounds
+    from silica.kernel.write.contested import (
+        SUPERSEDED_HEADING,
+        superseded_claim,
+        suppress_contest,
+    )
+    from silica.kernel.write.moc import merge_moc_section
+
+    prior, _err = read_or_skip(path)
+    if not prior:
+        return None
+    incoming_tier, incoming_clock = _incoming_side(ctx, source_basename)
+    if not suppress_contest(prior, incoming_tier=incoming_tier,
+                            incoming_clock=incoming_clock):
+        return None
+
+    today = datetime.date.today().isoformat()
+    filed = merge_moc_section(prior, SUPERSEDED_HEADING, superseded_claim(
+        decision.addition, source_basename=source_basename,
+        valid_from=incoming_clock, valid_to=today,
+    ))
+    result = commit_ops(
+        [Op(
+            op=OpType.overwrite,
+            heading=ctx.get("concept", "") or "superseded claim",
+            source_basename=source_basename,
+            path=path,
+            content=filed,
+            base_content=prior,
+            reason=f"contested: outranked on arrival ({decision.rationale[:80]})",
+        )],
+        target_dir=os.path.dirname(path),
+        bounds=dedup_supersede_bounds(path, hub=hub),
+    )
+    if result.get("status") != "committed":
+        return None  # bounds or a concurrent edit refused it: leave the contest open
+    result.setdefault("rationale", decision.rationale)
+    result.setdefault("verdict", "contradicts")
+    result["superseded"] = True
+    return result
+
+
 def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
     """Point the absorbed note at the one that took its content.
 
@@ -309,6 +391,9 @@ def _route_verdict(
     inbox_file = ctx.get("inbox_file", "")
     source_basename = os.path.basename(inbox_file) if inbox_file else "dedup"
     if decision.verdict == "contradicts":
+        filed = _file_dominated_claim(ctx, candidate_path, decision, source_basename, hub)
+        if filed is not None:
+            return filed
         from silica.kernel.write.contested import contested_callout
         op = Op(
             op=OpType.patch,

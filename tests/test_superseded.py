@@ -150,6 +150,49 @@ def test_resolve_leaves_broken_yaml_alone():
 
 # --- through the tool --------------------------------------------------------
 
+def _two_refs() -> str:
+    note = mark_contested(NOTE, REF)
+    note = note.replace(
+        "> Conflicts with this note. Unresolved.\n",
+        "> Conflicts with this note. Unresolved.\n\n"
+        + contested_callout("Il dosaggio è 500mg/die.", "slides.md") + "\n",
+    )
+    return mark_contested(note, "source: slides.md")
+
+
+def test_flag_note_resolves_one_ref_and_stays_contested(tmp_vault):
+    """The Fase D selector at the tool: resolving one verdict is not clearing all."""
+    from silica.kernel import contested_register
+    from silica.tools.notes import silica_flag_note
+
+    path = tmp_vault.note("Farmacologia/Dosaggio Warfarin.md", _two_refs())
+    contested_register.add("Farmacologia/Dosaggio Warfarin.md")
+
+    res = silica_flag_note(name="Farmacologia/Dosaggio Warfarin.md", clear=True,
+                           ref="source: slides.md")
+    assert "error" not in res, res
+    assert res["contested"] is True  # one contradiction is still open
+
+    content = tmp_vault.read(path)
+    assert contested_refs(content) == [REF]
+    assert "500mg/die" in content[content.index(SUPERSEDED_HEADING):]
+    assert "Unresolved." in content  # the surviving one still reads unresolved
+    assert "Farmacologia/Dosaggio Warfarin.md" in contested_register.entries()
+
+
+def test_flag_note_unknown_ref_changes_nothing(tmp_vault):
+    from silica.tools.notes import silica_flag_note
+
+    path = tmp_vault.note("Farmacologia/Dosaggio Warfarin.md", _two_refs())
+    prior = tmp_vault.read(path)
+
+    res = silica_flag_note(name="Farmacologia/Dosaggio Warfarin.md", clear=True,
+                           ref="source: mai-vista.md")
+    assert res["changed"] is False
+    assert res["contested"] is True
+    assert tmp_vault.read(path) == prior
+
+
 def test_flag_note_clear_files_the_callout(tmp_vault):
     from silica.tools.notes import silica_flag_note
 

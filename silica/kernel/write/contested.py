@@ -137,7 +137,9 @@ def contested_callout(claim: str, source_basename: str) -> str:
 
 SUPERSEDED_HEADING = "## Superseded"
 _SUPERSEDED_RE = re.compile(r"^## Superseded\s*$", re.MULTILINE)
-_CONTRADICTION_START_RE = re.compile(r"^> \[!warning\] Contradiction\b")
+_CONTRADICTION_START_RE = re.compile(
+    r"^> \[!warning\] Contradiction\b(?:[^\n]*?\bfrom (?P<src>[^\n]+?))?\s*$"
+)
 
 
 def append_before_superseded(content: str, block: str) -> str:
@@ -162,8 +164,21 @@ def _split_at_superseded(body: str) -> tuple[str, str]:
     return body[: m.start()], body[m.start():]
 
 
-def _extract_contradiction_callouts(body: str) -> tuple[str, list[str]]:
-    """Lift every contradiction callout out of `body`.
+def ref_source(ref: str) -> str:
+    """The source basename a `contradictions:` ref names; "" when it names none.
+
+    Two spellings reach the list: `source: appunti.md` from the dedup judge,
+    which has a callout in the body, and `flagged: … (by user, date)` from
+    silica_flag_note, which has none. Only the first can be matched to a block.
+    """
+    kind, _, rest = ref.partition(":")
+    return rest.strip() if kind.strip() == "source" else ""
+
+
+def _extract_contradiction_callouts(
+    body: str, source: str | None = None
+) -> tuple[str, list[str]]:
+    """Lift contradiction callouts out of `body`; all of them, or one source's.
 
     A callout is the run of contiguous `>`-prefixed lines opened by the
     warning marker (its internal blank lines are `>`-prefixed too, so the run
@@ -171,6 +186,9 @@ def _extract_contradiction_callouts(body: str) -> tuple[str, list[str]]:
     it is dropped with its callout: the header exists only to attribute the
     block that just moved. Both header spellings count, so a note written
     before the header was translated still gets its orphan pruned.
+
+    `source` restricts the lift to the callouts attributed to that basename,
+    which is how one contradiction is resolved while the others stay open.
     """
     from silica.kernel.write.templates import PROVENANCE_HEADER_PREFIXES
 
@@ -179,7 +197,8 @@ def _extract_contradiction_callouts(body: str) -> tuple[str, list[str]]:
     callouts: list[str] = []
     i = 0
     while i < len(lines):
-        if _CONTRADICTION_START_RE.match(lines[i]):
+        m = _CONTRADICTION_START_RE.match(lines[i])
+        if m and (source is None or (m.group("src") or "").strip() == source):
             j = i
             while j < len(lines) and lines[j].startswith(">"):
                 j += 1
@@ -239,6 +258,11 @@ def reliability_tier(content: str, *, has_source_leaf: bool | None = None) -> in
     restores the tier the patch cost it. A machine verifier does not: a pipeline
     re-reading its own output is not a second opinion.
     """
+    # ponytail: three ordinal levels off signals that already exist, not a
+    # calibrated score. Known ceiling: a legacy user note decays to T2 the first
+    # time the agent patches it, because ensure_ai_flag stamps `AI: true` with no
+    # way to say "partly". Upgrade path if that ever costs a real contest:
+    # `AI: partial` on the first patch of a note that had no AI key.
     data, raw, _body = frontmatter.split(content or "")
     if data is None:
         if raw is not None:  # frontmatter present but broken YAML
@@ -263,6 +287,73 @@ def merge_rank(content: str) -> tuple[int, int]:
     return (reliability_tier(content), len(content))
 
 
+def superseded_claim(
+    claim: str, *, source_basename: str, valid_from: str | None, valid_to: str
+) -> list[str]:
+    """The `## Superseded` entry for a claim that lost the contest on arrival.
+
+    `from=` is the derivation axis (§4.1): the source the claim came from, never
+    a note of the vault. The block is built here rather than by the judge, which
+    only ever supplies the verdict and the claim text.
+    """
+    quoted = "\n".join(f"> {line}".rstrip() for line in claim.strip().splitlines())
+    return [
+        stamp(**{"valid_from": valid_from or "", "valid_to": valid_to,
+                 "from": source_basename}),
+        f"> [!quote] Superseded {valid_to} (from {source_basename})",
+        quoted,
+        "",
+    ]
+
+
+def note_clock(content: str) -> str | None:
+    """The freshest date a note can show for its own claims; None when it shows none.
+
+    Two sources, both already written by this codebase: the newest `valid_from`
+    on a claim stamp (Fase A), and OKF §5.2 `verified.at`, a person recording
+    the day they read the note. A note that carries neither is not thereby
+    fresh — it is silent, which `suppress_contest` treats as the risk it is.
+    """
+    from silica.kernel.write.notetype import verified_entries
+
+    dates = [s["valid_from"] for s in parse_stamps(content) if s.get("valid_from")]
+    data, _raw, _body = frontmatter.split(content or "")
+    dates += [
+        str(e.get("at")) for e in verified_entries(data) if e.get("at")
+    ]
+    return max(dates) if dates else None
+
+
+def suppress_contest(
+    target_content: str, *, incoming_tier: int, incoming_clock: str | None
+) -> bool:
+    """Whether a contradiction may be auto-resolved in the target's favour (§6.1-bis).
+
+    Two conditions, and the second is why this is not last-write-wins wearing a
+    hat. First, the target must STRICTLY outrank the incoming claim: equal tier
+    carries no signal and stays contested (§7.5). Second, nothing may indicate
+    the losing claim is the fresher one — recency never resolves a contest here,
+    it only refuses to let reliability resolve one it would get wrong.
+
+    An unknown target clock vetoes a dated incoming claim on purpose. Silence
+    about when a note was last true is not evidence that it still is, and the
+    asymmetry is deliberate: declining to auto-resolve leaves a visible contest,
+    while resolving wrongly buries a live claim under `## Superseded`.
+
+    Measured on `evals/golden/fixtures/contests`: strict dominance alone acts on
+    4 contests and gets 2 wrong (precision 0.50); with this veto it acts on 2
+    and gets both right, at the cost of leaving one more settleable contest
+    open. Both failures it removes were a stale note meeting a fresher source,
+    which is the ordinary memory update rather than an exotic case.
+    """
+    if reliability_tier(target_content) <= incoming_tier:
+        return False
+    if incoming_clock is None:
+        return True  # nothing suggests the losing claim is fresher
+    target_clock = note_clock(target_content)
+    return target_clock is not None and target_clock >= incoming_clock
+
+
 def mark_superseded_by(content: str, winner: str) -> str:
     """Point a merged-away note at the note that absorbed it.
 
@@ -282,13 +373,22 @@ def mark_superseded_by(content: str, winner: str) -> str:
     return frontmatter.dump(data, body)
 
 
-def resolve_contested(content: str, *, resolved_by: str, valid_to: str) -> str:
+def resolve_contested(
+    content: str, *, resolved_by: str, valid_to: str, source_ref: str | None = None
+) -> str:
     """Resolve a note's contradictions without erasing the record.
 
-    Every open contradiction callout moves under `## Superseded`, stamped with
-    `valid_to` and its "Unresolved." tail rewritten, before the frontmatter
-    flags are dropped. Callouts already filed under `## Superseded` are left
-    alone, so re-running is a no-op.
+    Each resolved callout moves under `## Superseded`, stamped with `valid_to`
+    and its "Unresolved." tail rewritten, before the frontmatter flags are
+    dropped. Callouts already filed under `## Superseded` are left alone, so
+    re-running is a no-op.
+
+    `source_ref` resolves exactly one entry of `contradictions:` and files only
+    the blocks attributed to it; `contested: true` survives until the list
+    empties. Without it every open contradiction is resolved at once, which is
+    all a caller holding no verdict can honestly ask for. A ref that is not in
+    the list returns the note unchanged: resolving twice must not clear a
+    contradiction nobody adjudicated.
 
     This is what `clear_contested` should have been: clearing the flag while
     leaving a body callout that still reads "Unresolved" makes the note lie
@@ -304,8 +404,21 @@ def resolve_contested(content: str, *, resolved_by: str, valid_to: str) -> str:
     if not data.get(CONTESTED_KEY):
         return content
 
+    remaining: list[str] = []
+    source: str | None = None
+    if source_ref is not None:
+        refs = list(data.get(CONTRADICTIONS_KEY) or [])
+        if source_ref not in refs:
+            return content
+        remaining = [r for r in refs if r != source_ref]
+        source = ref_source(source_ref)
+
     live, tail = _split_at_superseded(body)
-    kept, callouts = _extract_contradiction_callouts(live)
+    if source_ref is not None and not source:
+        # A `flagged:` ref carries no body block — the ref drops, nothing moves.
+        kept, callouts = live, []
+    else:
+        kept, callouts = _extract_contradiction_callouts(live, source)
 
     new_body = kept + tail
     if callouts:
@@ -316,6 +429,9 @@ def resolve_contested(content: str, *, resolved_by: str, valid_to: str) -> str:
             block.append("")
         new_body = merge_moc_section(new_body, SUPERSEDED_HEADING, block)
 
-    data.pop(CONTESTED_KEY, None)
-    data.pop(CONTRADICTIONS_KEY, None)
+    if remaining:
+        data[CONTRADICTIONS_KEY] = remaining
+    else:
+        data.pop(CONTESTED_KEY, None)
+        data.pop(CONTRADICTIONS_KEY, None)
     return frontmatter.dump(data, new_body)

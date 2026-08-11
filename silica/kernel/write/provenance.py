@@ -67,6 +67,17 @@ def source_valid_from(source_text: str, seen_override: str | None = None) -> str
     the FSM puts on every note it writes, which must agree or a claim and its
     leaf would date the same event differently.
     """
+    return source_event_date(source_text, seen_override) or datetime.now().date().isoformat()
+
+
+def source_event_date(source_text: str, seen_override: str | None = None) -> str | None:
+    """The event clock a source actually states; None when it states none.
+
+    Same precedence as `source_valid_from` minus its today fallback, which
+    exists because a write has to stamp something. A verdict must not inherit
+    it: when the question is whether an incoming claim is fresher than the note
+    it contradicts, "undated" and "today" are opposite evidence.
+    """
     if seen_override:
         return str(seen_override)
     try:
@@ -78,7 +89,7 @@ def source_valid_from(source_text: str, seen_override: str | None = None) -> str
             return str(date)
     except Exception:
         pass
-    return datetime.now().date().isoformat()
+    return None
 
 
 # ponytail: single-entry memo keyed on (path, mtime_ns, size) — a big re-ingest

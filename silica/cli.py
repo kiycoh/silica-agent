@@ -850,7 +850,9 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             for c in contras:
                 CONSOLE.print(f"      conflicts with: {c}")
         CONSOLE.print(
-            "  Resolve by editing the note, then remove `contested: true` and its callout."
+            "  Ask the agent to resolve one with silica_flag_note(clear=True, "
+            "ref=…), passing a `conflicts with` line above verbatim; the losing "
+            "claim is filed under `## Superseded` instead of being deleted."
         )
         return True
 

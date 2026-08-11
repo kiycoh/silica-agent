@@ -121,13 +121,20 @@ def test_dedup_no_merge_when_addition_empty():
 
 def test_dedup_contradicts_builds_contested_patch():
     """Third verdict: the conflicting claim lands as ONE contested patch op —
-    warning callout in the snippet, contested_by set for the frontmatter mark."""
+    warning callout in the snippet, contested_by set for the frontmatter mark.
+
+    The note is agent-written so the contest genuinely stays open: §6.1-bis
+    files the claim instead when the note strictly outranks it, which the next
+    test covers. Every mocked read returns this body, the source leaf included,
+    so the incoming side ranks grounded and nothing is suppressed.
+    """
     decision = DedupDecision(
         verdict="contradicts",
         rationale="conflicting dosage",
         addition="Il dosaggio raccomandato è 50mg/die.",
     )
-    with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="existing body")), \
+    agent_note = "---\nAI: true\n---\n\nexisting body"
+    with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content=agent_note)), \
          patch("silica.capabilities.dedup._decide_dedup", return_value=decision), \
          patch("silica.capabilities.dedup.commit_ops", return_value={"status": "committed", "committed": 1}) as commit:
         res = run_dedup(_item(), CONFIG)
@@ -145,6 +152,48 @@ def test_dedup_contradicts_builds_contested_patch():
     # Same leash as the merge path: the model never escalates beyond a patch.
     bounds = commit.call_args.kwargs["bounds"]
     assert bounds.name == "dedup"
+
+
+def test_dedup_contradicts_files_a_claim_the_note_outranks():
+    """§6.1-bis: the op shape of a suppressed contest, and its leash.
+
+    An overwrite rather than a patch because the block goes INSIDE `## Superseded`
+    and patches land above it by construction; `base_content` is what makes a
+    concurrent edit collide instead of being stomped.
+    """
+    from silica.kernel.write.ops import OpType
+
+    decision = DedupDecision(
+        verdict="contradicts",
+        rationale="conflicting dosage",
+        addition="Il dosaggio raccomandato è 50mg/die.",
+    )
+    # Human note, and no source leaf on disk: the incoming claim is distilled
+    # and undated, so nothing suggests it is the fresher side.
+    def _read(ref, *a, **k):
+        path = getattr(ref, "path", ref)
+        if "sources/" in str(path):
+            raise FileNotFoundError(path)
+        return MagicMock(content="# Gradient Descent\n\nexisting body")
+
+    with patch("silica.driver.DRIVER.read_note", side_effect=_read), \
+         patch("silica.capabilities.dedup._decide_dedup", return_value=decision), \
+         patch("silica.capabilities.dedup.commit_ops",
+               return_value={"status": "committed", "committed": 1}) as commit:
+        res = run_dedup(_item(), CONFIG)
+
+    assert res["status"] == "committed"
+    assert res["superseded"] is True
+    op = commit.call_args.args[0][0]
+    assert op.op == OpType.overwrite
+    assert op.path == "Concepts/Gradient Descent.md"
+    assert op.base_content == "# Gradient Descent\n\nexisting body"
+    assert "## Superseded" in op.content
+    assert "50mg/die" in op.content.split("## Superseded", 1)[1]
+    assert "existing body" in op.content.split("## Superseded", 1)[0]
+    bounds = commit.call_args.kwargs["bounds"]
+    assert bounds.name == "dedup_supersede"
+    assert bounds.allowed_ops == frozenset({OpType.overwrite})
 
 
 def test_dedup_contradicts_without_claim_is_no_merge():
