@@ -31,6 +31,7 @@ from evals.golden import (
     probe_dedup,
     probe_fusion,
     probe_links,
+    probe_supersede,
 )
 
 BASELINE_PATH = Path(__file__).parent / "baseline.json"
@@ -43,8 +44,19 @@ GATED_DROP_2PP = ("classify.agreement", "links.recall", "fusion.recall_at_10")
 # Rates where HIGH is bad: a rise past tolerance fails (mirror image of DROP).
 # dedup.tp_leak_rate self-arms — compare() only reads keys present in both docs,
 # and the TP metric is recorded only when its labels resolve (pairs>0).
-GATED_RISE_2PP = ("dedup.fp_auto_merge_rate", "dedup.tp_leak_rate")
+# supersede.* self-arm the same way: the wrong rate needs the embed leg for its
+# pairs, the missed rate needs a contested note. §8.2 asks for the missed rate to
+# be informational on the first run and gated after — which is what recording it
+# in a baseline does, with no separate switch to remember to flip.
+GATED_RISE_2PP = ("dedup.fp_auto_merge_rate", "dedup.tp_leak_rate",
+                  "supersede.missed_resolution_rate")
 GATED_EXACT_ONE = ("integrity.rate",)
+# A merge inversion is a defect, not a rate to tolerate: `merge_rank` makes one
+# structurally impossible, so any count above zero is a regression. Gated as a
+# COUNT because the rate could not carry it — a full revert of §6.2 measured
+# 0.0209 against a 2pp tolerance, i.e. it failed by 0.09pp and a partial revert
+# would have slipped under. Same shape as integrity.rate: any new violation fails.
+GATED_EXACT_ZERO = ("supersede.wrong_merges",)
 _PRIMARIES = ("classify.agreement", "links.recall", "integrity.rate")
 
 # Metrics that need the embed leg live. When the on-disk index is absent
@@ -196,6 +208,15 @@ def collect(vault: Path, *, tier: str = "cheap", verbose: bool = False) -> dict:
         else:
             print("SKIP  dedup.*      — embed index absent (offline)")
 
+    # SUPERSEDE (spec-contested-bitemporal §8.2): does a resolution ever hand the
+    # merge to the weaker claim, and how many open contests would a tier rule
+    # settle. Reuses the already-open stores; the wrong arm rides the embed leg
+    # for its pairs and its keys are simply absent without it.
+    sp = probe_supersede.run(vault, embed_store=embed_store, cooccur_store=store,
+                             verbose=verbose)
+    for key, val in sp.items():
+        metrics[f"supersede.{key}"] = val
+
     # E(vault): lattice energy as one informational scalar + its six signed
     # terms (docs IV.1). Same report depth every run — analytics (cohesion,
     # gaps) + cooccurrence (integration deficits) — so E is comparable across
@@ -252,6 +273,9 @@ def compare(baseline: dict, doc: dict) -> list[str]:
     for key in GATED_EXACT_ONE:
         if key in d and d[key] != 1.0:
             fails.append(f"{key}: {d[key]:.3f} != 1.0 (any new violation fails)")
+    for key in GATED_EXACT_ZERO:
+        if key in d and d[key] != 0:
+            fails.append(f"{key}: {d[key]:.0f} != 0 (any inversion fails)")
     return fails
 
 
@@ -266,7 +290,8 @@ def print_table(doc: dict, baseline: dict | None) -> None:
     base_m = baseline["metrics"] if baseline else {}
     # Rise-gated dedup rates ARE gated by compare(); mark them so the table
     # matches the gate (they were silently unmarked before).
-    gated = set(GATED_DROP_2PP) | set(GATED_RISE_2PP) | set(GATED_EXACT_ONE)
+    gated = (set(GATED_DROP_2PP) | set(GATED_RISE_2PP)
+             | set(GATED_EXACT_ONE) | set(GATED_EXACT_ZERO))
     print(f"\n{'metric':<38} {'value':>10} {'baseline':>10} {'delta':>9}  gate")
     for key in sorted(doc["metrics"]):
         val = doc["metrics"][key]
