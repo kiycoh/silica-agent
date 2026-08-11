@@ -386,3 +386,79 @@ def test_recon_italian_drops_latex_and_structural_keeps_content():
     for junk in ("mathbb", "lezione", "cfu", "sum", "leq", "theta"):
         assert junk not in phrases, f"{junk!r} should be filtered"
     assert "percettrone" in phrases, "content word lost"
+
+
+# ---------------------------------------------------------------------------
+# _mmr — cost on a real embedding pool
+# ---------------------------------------------------------------------------
+
+def _naive_mmr(vecs, theme, k, lam, rel):
+    """Reference: the per-pair formulation, kept only as the correctness oracle."""
+    from silica.kernel.recall.embed import _cosine
+
+    cand, sel = list(range(len(vecs))), []
+    while cand and len(sel) < k:
+        if not sel:
+            i = max(cand, key=lambda i: rel[i])
+        else:
+            i = max(cand, key=lambda i: lam * rel[i]
+                    - (1 - lam) * max(_cosine(vecs[i], vecs[j]) for j in sel))
+        sel.append(i)
+        cand.remove(i)
+    return sel
+
+
+def test_mmr_ranks_full_pool_in_seconds_not_minutes():
+    """RECON ranks YAKE_POOL=100 vectors of the embedder's real width on every
+    note. Recomputing each pair through _cosine (4 np.asarray per call) made
+    this 26-46s per note; it must cost a fraction of a second."""
+    import random
+    import time
+    from silica.kernel.text.keyphrase import _mmr
+
+    random.seed(7)
+    dim, n = 2560, 100  # Qwen3-Embedding-4B width, YAKE_POOL
+    vecs = [[random.random() for _ in range(dim)] for _ in range(n)]
+    theme = [random.random() for _ in range(dim)]
+    rel = [random.random() for _ in range(n)]
+
+    t0 = time.monotonic()
+    order = _mmr(vecs, theme, k=n, lam=0.6, rel=rel)
+    elapsed = time.monotonic() - t0
+
+    assert sorted(order) == list(range(n))  # a full ranking, nothing dropped
+    assert elapsed < 2.0, f"_mmr took {elapsed:.1f}s for {n} vectors of dim {dim}"
+
+
+def test_mmr_selection_matches_the_per_pair_reference():
+    """The faster formulation must pick the same order as the naive one."""
+    import random
+    from silica.kernel.text.keyphrase import _mmr
+
+    random.seed(11)
+    dim, n = 32, 12
+    vecs = [[random.random() for _ in range(dim)] for _ in range(n)]
+    theme = [random.random() for _ in range(dim)]
+    rel = [random.random() for _ in range(n)]
+
+    assert _mmr(vecs, theme, k=n, lam=0.6, rel=rel) == \
+        _naive_mmr(vecs, theme, k=n, lam=0.6, rel=rel)
+
+
+def test_rerank_abstains_on_ragged_embeddings():
+    """A short embed reply (the A6 ragged case the other legs already guard)
+    must abstain so the caller keeps the YAKE rank — never rank on a pool whose
+    vectors are not the same width."""
+    from unittest.mock import MagicMock
+    from silica.kernel.text.keyphrase import _rerank, ConceptCandidate
+    from silica.kernel.text.overlay import DomainOverlay
+
+    pool = [ConceptCandidate(phrase=p, score=0.1) for p in ("alpha", "beta", "gamma")]
+    fake = MagicMock()
+    fake.model = "fake"
+    # theme call: one well-formed vector; phrase call: one row of the wrong width
+    fake.embed.side_effect = [[[1.0, 0.0, 0.0]], [[1.0, 0.0, 0.0], [0.0, 1.0], [0.0, 0.0, 1.0]]]
+
+    out = _rerank(pool, "alpha beta gamma body text", DomainOverlay(stopwords=frozenset(), noise_patterns=()), fake)
+
+    assert out is None

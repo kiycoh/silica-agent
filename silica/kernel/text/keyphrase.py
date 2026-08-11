@@ -28,6 +28,8 @@ import os
 import re
 from dataclasses import dataclass, field
 
+import numpy as np
+
 from silica.kernel.text import language
 from silica.kernel.recall.embed import _cosine, document_theme_vector
 from silica.kernel.text.overlay import DomainOverlay, overlay_for_lang
@@ -142,19 +144,38 @@ def _mmr(vecs, theme, k, lam: float = MMR_LAMBDA, rel=None) -> list[int]:
     `rel[i]` is the relevance of candidate i (default: cosine to `theme`). Each
     pick maximises `lam*rel - (1-lam)*max similarity to already-picked`, so
     near-duplicates of a selected candidate are demoted.
+
+    Candidate-candidate similarity is taken once as a matrix and each candidate
+    carries a running max against the already-picked set. The per-pair form
+    re-derived every cosine on every iteration: on a real pool (YAKE_POOL=100
+    vectors of the embedder's width) that was ~166k `_cosine` calls, ~1.1M
+    `np.asarray` conversions and 26-46s per note, which is 94% of RECON.
+    Vectors must be uniform width — `_rerank` abstains before calling here.
     """
+    if not vecs:
+        return []
+    M = np.asarray(vecs, dtype=np.float64)
+    norms = np.linalg.norm(M, axis=1, keepdims=True)
+    M = M / np.where(norms == 0.0, 1.0, norms)  # a zero row stays zero → sim 0
+    sim = M @ M.T
     if rel is None:
         rel = [_cosine(v, theme) for v in vecs]
     cand = list(range(len(vecs)))
+    # Running max similarity to the picked set. -inf, not 0.0: cosine may be
+    # negative and the per-pair form never clamped it.
+    best = [float("-inf")] * len(vecs)
     sel: list[int] = []
     while cand and len(sel) < k:
         if not sel:
             i = max(cand, key=lambda i: rel[i])
         else:
-            i = max(cand, key=lambda i: lam * rel[i]
-                    - (1 - lam) * max(_cosine(vecs[i], vecs[j]) for j in sel))
+            i = max(cand, key=lambda i: lam * rel[i] - (1 - lam) * best[i])
         sel.append(i)
         cand.remove(i)
+        for j in cand:
+            s = float(sim[j, i])
+            if s > best[j]:
+                best[j] = s
     return sel
 
 
@@ -180,6 +201,11 @@ def _rerank(
     except Exception:
         return None
     if not vecs:
+        return None
+    # Ragged reply (A6, guarded the same way in NOVELTY/COLLISION): a short
+    # list would zip short and silently drop the tail, and mixed widths would
+    # rank a pool on similarities that are not comparable. Abstain instead.
+    if len(vecs) != len(phrases) or len({len(v) for v in vecs}) != 1:
         return None
 
     structural = _structural_concepts(body, overlay)
