@@ -75,7 +75,7 @@ def _orphan_candidates(path: str, k: int = 5) -> list[dict]:
         from silica.kernel.recall.relatedness import related_notes
 
         from silica.agent.providers import get_reranker
-        from silica.kernel.recall.rerank import note_document, rerank_related
+        from silica.kernel.recall.rerank import link_query, rerank_related
 
         # cooccur_key (case-PRESERVED, .md-stripped) is the store keyspace; _norm_path
         # would lowercase and miss the case-preserving stored keys -> empty results.
@@ -89,7 +89,7 @@ def _orphan_candidates(path: str, k: int = 5) -> list[dict]:
             k=pool,
         )
         if reranker:
-            results = rerank_related(reranker, note_document(key), results, k=k)
+            results = rerank_related(reranker, link_query(key), results, k=k)
         return [{"name": r.name, "path": r.path} for r in results]
     except Exception:
         return []

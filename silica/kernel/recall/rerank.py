@@ -126,6 +126,53 @@ def note_document(path: str, *, query: str = "", max_chars: int = _WINDOW_CHARS)
     return f"{name}\n{excerpt}".strip()
 
 
+# Obsidian's default capture names: a real word the informativeness check below
+# would wave through. ponytail: en + it only — an unlisted locale's default name
+# falls through to the measured body-window branch, never to a wrong answer.
+_JUNK_TITLE = re.compile(r"^(?:untitled|new note|senza titolo)\b[\s\d]*$", re.IGNORECASE)
+
+
+def link_query(path: str) -> str:
+    """Cross-encoder query for the note-as-query call sites (orphan/link repair).
+
+    The title alone when it carries at least one real word and is not a default
+    capture name; else the head window of the body. Two branches, both measured
+    on the masked-wikilink A/B (609 pairs, 795-note vault, mxbai-rerank-base-v2):
+
+      * bare title: mrr +0.081 over fused, vs +0.055 for the old title+excerpt
+        document (paired p=0.028) — and ANY body text in the query erased the
+        difference, title+150 chars already scored as title+800, so there is no
+        excerpt length to tune (bench/local_rerank_excerpt_sweep.json);
+      * junk title -> bare body head window, +0.037: in the title-blind
+        ablation no syntactic surrogate (first document heading, YAKE top-2)
+        beat it, so the fallback is one branch, not a ladder
+        (bench/local_rerank_title_blind.json).
+
+    A date-like title ("2026-08-09") fails the one-real-word check with no date
+    regex needed; "2026-08-09 riunione" passes as a title. Returns '' when the
+    note is unreadable — rerank_related abstains on an empty query, preserving
+    first-stage order.
+    """
+    name, text = _read_body(path)
+    if re.search(r"[^\W\d_]{3,}", name) and not _JUNK_TITLE.match(name.strip()):
+        return name
+    # This branch is a FLOOR, not a fix, and read time cannot raise it: the two
+    # measured numbers above say a good title roughly doubles what the reranker
+    # recovers (+0.081 vs +0.037), and the title-blind ablation refuted every
+    # cheap way of rebuilding one from the body — first heading tied the bare
+    # body (86/92, p=0.71) and YAKE top-2 lost to it (72/107, p=0.011). Short
+    # was never the reason the title won: heading is 24 chars like the title and
+    # bought nothing. The title wins because it is the note's IDENTITY, which
+    # the body simply does not carry in extractable form.
+    # So the missing half is only recoverable at WRITE time, by giving the note
+    # a real title instead of giving the query a surrogate: synthesis at
+    # /promote (the capture is already in front of an LLM there, zero extra
+    # calls) and a rename work item in curate beside the orphan repairs. That
+    # pays on co-occurrence, the graph and wikilinks too, since build_contribution
+    # indexes `name` into the note's own text — not on this one call.
+    return text[:_WINDOW_CHARS].strip()
+
+
 def _path_of(item: Any) -> str:
     if isinstance(item, dict):
         return item.get("path", "")

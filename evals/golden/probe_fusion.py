@@ -46,7 +46,9 @@ def run_rerank_ab(vault, store, *, embed_store=None, reranker=None,
     rank wins/losses).
 
     Arm B mirrors the production call sites (coordinator/_orphan_candidates,
-    curate): query text = note_document(key).
+    curate): query text = link_query(key) — bare title when informative, body
+    head window otherwise (query-shape A/B, bench/local_rerank_excerpt_sweep
+    + local_rerank_title_blind). Pre-gate baselines used note_document(key).
 
     ``empty_docs`` counts endpoints whose query text could not be read — for
     those, rerank_related no-ops on the empty query and arm B silently
@@ -55,7 +57,7 @@ def run_rerank_ab(vault, store, *, embed_store=None, reranker=None,
     """
     from silica.kernel.link import correlate
     from silica.kernel.recall.relatedness import related_notes
-    from silica.kernel.recall.rerank import note_document, rerank_related
+    from silica.kernel.recall.rerank import link_query, rerank_related
 
     empty = {
         "pairs_evaluated": 0, "endpoints": 0, "empty_docs": 0,
@@ -83,7 +85,7 @@ def run_rerank_ab(vault, store, *, embed_store=None, reranker=None,
         # so the arms differ only by the rerank pass (membership is shared).
         results = related_notes(key, embed_store=es, cooccur_store=store, k=k)
         base_topk[key] = [r.path for r in results]
-        doc = note_document(key)
+        doc = link_query(key)
         if not doc:
             empty_docs += 1
         rr_topk[key] = [r.path for r in rerank_related(reranker, doc, results, k=k)]

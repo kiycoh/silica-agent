@@ -586,7 +586,13 @@ class Reranker:
 
 # Multilingual by design: a vault is whatever language its owner writes in
 # (conventions.language), and bge-reranker-base is English/Chinese only.
-LOCAL_RERANK_MODEL = "BAAI/bge-reranker-v2-m3"
+# mxbai-rerank-base-v2 (Apache-2.0, Qwen2.5-0.5B backbone) over bge-v2-m3 on the
+# link/orphan A/B (bench/local_rerank_query_ab.json, 609 masked wikilink pairs on
+# a 795-note Italian vault): mrr +0.055 over the fused baseline at p=2.5e-09,
+# where bge scored 125 wins / 100 losses at p=0.109, i.e. indistinguishable from
+# not reranking at all. Costs ~390ms per 10-doc call against bge's ~140ms served.
+# A HuggingFace repo id, never a GGUF filename — see get_reranker.
+LOCAL_RERANK_MODEL = "mixedbread-ai/mxbai-rerank-base-v2"
 
 
 @lru_cache(maxsize=1)
@@ -669,18 +675,27 @@ def get_reranker(config: Any) -> Reranker | LocalReranker | FallbackReranker | N
     """Return a reranker: a served /rerank endpoint (config defaults to a local
     llama-server) when it answers, else the in-process cross-encoder if the
     [rerank] extra is installed, else None (disabled).
+
+    `config.rerank_model` names the model the SERVED endpoint loads and is not a
+    valid identity for the in-process leg: the shipped default is a GGUF filename
+    ("bge-reranker-v2-m3-Q8_0"), which HuggingFace resolves to a repo that does
+    not exist, so LocalReranker abstained on every call and the documented
+    fallback never once ran. The local leg therefore always uses
+    LOCAL_RERANK_MODEL, which is what `silica doctor` has always reported it uses.
     """
     base_url = getattr(config, "rerank_base_url", "")
     model = getattr(config, "rerank_model", "")
     served = Reranker(
         base_url=base_url, model=model, api_key=getattr(config, "rerank_api_key", ""),
     ) if (base_url and model) else None
+    # ponytail: no per-config override for the local model — one constant until
+    # someone needs two different cross-encoders on one machine.
     if served is not None and has_local_rerank():
-        return FallbackReranker(served, LocalReranker(model=model or LOCAL_RERANK_MODEL))
+        return FallbackReranker(served, LocalReranker(model=LOCAL_RERANK_MODEL))
     if served is not None:
         return served
     if has_local_rerank():
-        return LocalReranker(model=model or LOCAL_RERANK_MODEL)
+        return LocalReranker(model=LOCAL_RERANK_MODEL)
     return None
 
 

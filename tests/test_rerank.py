@@ -167,6 +167,53 @@ def test_best_windows_n1_equals_best_window():
     assert best_windows(long, "a an of", 500, 1) == [best_window(long, "a an of", 500)]
 
 
+# --- link_query (orphan/link-path query gate) -----------------------------
+
+def test_link_query_uses_informative_title_alone(monkeypatch):
+    # Query-shape A/B (bench/local_rerank_excerpt_sweep.json): the bare title
+    # reordered best; any body text in the query erased the gain.
+    from silica.kernel.recall import rerank as rr_mod
+
+    monkeypatch.setattr(rr_mod, "_read_body",
+                        lambda p, **kw: ("Normatività", "body " * 300))
+    assert rr_mod.link_query("Concepts/Normatività") == "Normatività"
+
+
+def test_link_query_dated_title_falls_back_to_body_window(monkeypatch):
+    # "2026-08-09" has no 3-letter word — rejected with no date regex; the
+    # fallback is the measured bare body head (title-blind ablation: no
+    # syntactic surrogate beat it, bench/local_rerank_title_blind.json).
+    from silica.kernel.recall import rerank as rr_mod
+
+    body = "meeting notes " * 100
+    monkeypatch.setattr(rr_mod, "_read_body", lambda p, **kw: ("2026-08-09", body))
+    assert rr_mod.link_query("inbox/2026-08-09") == body[:rr_mod._WINDOW_CHARS].strip()
+
+
+def test_link_query_dated_title_with_a_word_stays_a_title(monkeypatch):
+    from silica.kernel.recall import rerank as rr_mod
+
+    monkeypatch.setattr(rr_mod, "_read_body",
+                        lambda p, **kw: ("2026-08-09 riunione", "body text"))
+    assert rr_mod.link_query("inbox/2026-08-09 riunione") == "2026-08-09 riunione"
+
+
+def test_link_query_default_capture_names_fall_back(monkeypatch):
+    from silica.kernel.recall import rerank as rr_mod
+
+    for junk in ("Untitled", "Untitled 3", "New Note 12", "senza titolo 2"):
+        monkeypatch.setattr(rr_mod, "_read_body", lambda p, **kw: (junk, "body text"))
+        assert rr_mod.link_query("inbox/x") == "body text", junk
+
+
+def test_link_query_unreadable_note_is_empty(monkeypatch):
+    # '' propagates to rerank_related, which abstains on an empty query.
+    from silica.kernel.recall import rerank as rr_mod
+
+    monkeypatch.setattr(rr_mod, "_read_body", lambda p, **kw: ("", ""))
+    assert rr_mod.link_query("inbox/x") == ""
+
+
 # --- client ---------------------------------------------------------------
 
 def test_client_parses_results_into_input_order(monkeypatch):

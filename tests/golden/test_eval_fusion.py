@@ -96,7 +96,7 @@ def test_embed_only_pair_needs_the_embed_leg(tmp_path):
 
 
 def _point_driver_at(tmp_path):
-    """note_document reads through the DRIVER — aim it at the synthetic vault."""
+    """link_query reads through the DRIVER — aim it at the synthetic vault."""
     import silica.driver
     from silica.config import CONFIG
 
