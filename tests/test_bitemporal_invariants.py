@@ -65,6 +65,27 @@ def test_sources_block_lands_above_the_superseded_section(tmp_vault):
     assert out.rstrip().endswith("claim vecchio.")
 
 
+def test_undated_source_leaves_the_leaf_undated(tmp_vault):
+    """No today fallback on the leaf: `date: <today>` would be read back by
+    `_incoming_side` as the incoming clock of every future contest this leaf
+    feeds — ingest noise wearing the event clock's uniform."""
+    from silica.driver import DRIVER
+    from silica.kernel.recall.paths import SOURCES_DIR
+    from silica.kernel.vault_manifest import in_write_dir
+
+    tmp_vault.note("Inbox/nodate.md", "verbatim source words\n")
+    tmp_vault.note("Concepts/B.md", "# B\n\nbody\n")
+
+    finalize._write_source_leaf(
+        _fsm([_entry("nodate.md", "write", "Concepts/B")], keep_sources=True),
+        "Inbox/nodate.md",
+    )
+
+    leaf = DRIVER.read_note(f"{in_write_dir(SOURCES_DIR)}/nodate.md").content
+    assert "date:" not in leaf, leaf
+    assert "source_id: nodate.md" in leaf
+
+
 # --- Invariant 4: a `valid_to` stamp implies a block under `## Superseded` ---
 
 def _assert_valid_to_is_filed(content: str) -> None:

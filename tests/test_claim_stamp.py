@@ -11,7 +11,7 @@ from __future__ import annotations
 from silica.kernel.write import templates
 from silica.kernel.write.contested import parse_stamp, stamp
 from silica.kernel.write.ops import Op, OpType
-from silica.kernel.write.provenance import source_valid_from
+from silica.kernel.write.provenance import source_event_date
 
 
 # --- stamp / parse_stamp (pure) ----------------------------------------------
@@ -39,31 +39,31 @@ def test_parse_stamp_absent():
     assert parse_stamp("# Titolo\n\nSolo prosa.") == {}
 
 
-# --- source_valid_from (pure) ------------------------------------------------
+# --- source_event_date (pure) ------------------------------------------------
 
 SOURCE = "---\ndate: 2023-05-08\nsource_id: session_1.md\n---\n\nCaroline: ciao!\n"
 
 
-def test_valid_from_prefers_capture_clock():
-    assert source_valid_from(SOURCE, "2026-07-25") == "2026-07-25"
+def test_event_date_prefers_capture_clock():
+    assert source_event_date(SOURCE, "2026-07-25") == "2026-07-25"
 
 
-def test_valid_from_falls_back_to_source_date():
-    assert source_valid_from(SOURCE, None) == "2023-05-08"
+def test_event_date_falls_back_to_source_date():
+    assert source_event_date(SOURCE, None) == "2023-05-08"
 
 
-def test_valid_from_defaults_to_today_without_signal():
-    import datetime
-    today = datetime.date.today().isoformat()
-    assert source_valid_from("# Nessun frontmatter\n", None) == today
-    assert source_valid_from("", None) == today
+def test_event_date_none_without_signal():
+    """No today fallback: an undated source must yield NO stamp, not an
+    ingest-dated one — the run date is noise on the event axis and feeds
+    note_clock a fake freshness that defeats the recency veto."""
+    assert source_event_date("# Nessun frontmatter\n", None) is None
+    assert source_event_date("", None) is None
 
 
-def test_valid_from_survives_broken_yaml():
-    """Unparseable frontmatter must degrade to today, never raise into the FSM."""
-    import datetime
+def test_event_date_survives_broken_yaml():
+    """Unparseable frontmatter must degrade to None, never raise into the FSM."""
     broken = "---\ndate: [unclosed\n---\n\nbody\n"
-    assert source_valid_from(broken, None) == datetime.date.today().isoformat()
+    assert source_event_date(broken, None) is None
 
 
 # --- patch_snippet parity ----------------------------------------------------
@@ -168,3 +168,43 @@ def test_stamp_does_not_leak_into_the_moc_bullet(tmp_vault):
     )
     execute_one(op)
     assert hub_desc(op.snippet) == "Il dosaggio raccomandato è 5mg/die."
+
+
+# --- /nucleate --seen: the capture clock's CLI entry point --------------------
+
+def _dispatch_nucleate(monkeypatch, tmp_vault, line):
+    """Drive the /nucleate shortcut to the Coordinator seam, capturing kwargs."""
+    import silica.router.coordinator as rc
+
+    calls: dict = {}
+
+    class _FakeCoordinator:
+        def __init__(self, **kw):
+            calls.update(kw)
+
+        def run(self):
+            return {"final_status": "done"}
+
+    monkeypatch.setattr(rc, "Coordinator", _FakeCoordinator)
+    tmp_vault.note("Inbox/x.md", "parole\n")
+    from silica.cli import _expand_workflow_shortcut
+
+    _expand_workflow_shortcut(line)
+    return calls
+
+
+def test_seen_flag_reaches_the_coordinator(tmp_vault, monkeypatch):
+    calls = _dispatch_nucleate(
+        monkeypatch, tmp_vault, "/nucleate Inbox/x.md --target=Concepts --seen=2023-05-08"
+    )
+    assert calls.get("seen_override") == "2023-05-08"
+
+
+def test_garbage_seen_is_refused_not_stamped(tmp_vault, monkeypatch):
+    """A typo'd date would ride every claim of the run as valid_from —
+    refuse it at the boundary, run without a capture clock."""
+    calls = _dispatch_nucleate(
+        monkeypatch, tmp_vault, "/nucleate Inbox/x.md --target=Concepts --seen=2023-13-99"
+    )
+    assert calls.get("seen_override") is None
+    assert calls  # the run itself still dispatched

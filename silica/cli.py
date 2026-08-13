@@ -1555,7 +1555,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
     Syntax:
         /report [folder] [--top-k=N] [--embeddings]
-        /nucleate <file|folder...> [--target=DIR] [--hub=H] [--keep-sources]
+        /nucleate <file|folder...> [--target=DIR] [--hub=H] [--keep-sources] [--seen=YYYY-MM-DD]
         /convert <file...> [--target=DIR]
         /summarize <note|folder...>
         /explain "<concept>" [--level=intro|expert]
@@ -1602,6 +1602,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         target_dir = ""
         hub = ""
         keep_sources = False
+        seen = ""
         for arg in args:
             if arg.startswith("--target="):
                 target_dir = arg[len("--target="):]
@@ -1609,8 +1610,20 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 hub = arg[len("--hub="):]
             elif arg == "--keep-sources":
                 keep_sources = True  # verbatim leaf in sources/ beside the notes
+            elif arg.startswith("--seen="):
+                seen = arg[len("--seen="):]  # capture clock: the day the described events happened
             elif not arg.startswith("-"):
                 files.append(arg)  # preserve original case
+
+        if seen:
+            # Trust boundary: this string becomes the valid_from on every claim
+            # of the run — a typo'd date would poison note_clock vault-wide.
+            import datetime as _dt
+            try:
+                seen = _dt.date.fromisoformat(seen).isoformat()
+            except ValueError:
+                CONSOLE.print(f"  [yellow]--seen ignored: {seen!r} is not YYYY-MM-DD[/]")
+                seen = ""
 
         from pathlib import Path
         from silica.kernel.vault_manifest import get_active_manifest
@@ -1759,7 +1772,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         try:
             result = Coordinator(
                 inbox_files=md_files, target_dir=target_dir, hub=hub or None,
-                keep_sources=keep_sources,
+                keep_sources=keep_sources, seen_override=seen or None,
             ).run()
         except ValueError as exc:
             # A path outside the vault (or any other rejected argument) is user

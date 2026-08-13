@@ -58,25 +58,20 @@ def _store_path(vault_path: str | None) -> Path | None:
     return Path(resolved) / DEFAULT_PROVENANCE_FILENAME
 
 
-def source_valid_from(source_text: str, seen_override: str | None = None) -> str:
-    """Event clock for a source: when the thing it describes happened.
+def source_event_date(source_text: str, seen_override: str | None = None) -> str | None:
+    """Event clock for a source: when the thing it describes happened; None
+    when it states none.
 
     Distinct from the ingest clock (this store's `date`, the day we read the
-    file). Precedence: capture clock, then the source's own `date:`, then
-    today. Two callers share it: the source leaf writer and the claim stamp
-    the FSM puts on every note it writes, which must agree or a claim and its
-    leaf would date the same event differently.
-    """
-    return source_event_date(source_text, seen_override) or datetime.now().date().isoformat()
-
-
-def source_event_date(source_text: str, seen_override: str | None = None) -> str | None:
-    """The event clock a source actually states; None when it states none.
-
-    Same precedence as `source_valid_from` minus its today fallback, which
-    exists because a write has to stamp something. A verdict must not inherit
-    it: when the question is whether an incoming claim is fresher than the note
-    it contradicts, "undated" and "today" are opposite evidence.
+    file). Precedence: capture clock, then the source's own `date:` — never
+    today. An undated source stays undated on purpose: on the write path None
+    emits no claim stamp at all (an ingest-dated stamp is noise on the event
+    axis — measured on a real vault: 107 stamps, one distinct day), and on the
+    verdict path "undated" and "today" are opposite evidence when the question
+    is whether an incoming claim is fresher than the note it contradicts.
+    Callers that must agree share it: the source-leaf writer and the claim
+    stamp the FSM puts on every note it writes, or a claim and its leaf would
+    date the same event differently.
     """
     if seen_override:
         return str(seen_override)

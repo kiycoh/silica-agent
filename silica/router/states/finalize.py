@@ -307,7 +307,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         from silica.kernel.write.provenance import (
             attribute_lines,
             footnote_label,
-            source_valid_from,
+            source_event_date,
         )
 
         basename = os.path.basename(source_file)
@@ -328,9 +328,11 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             # Single frontmatter block: keep the source BODY verbatim; the date
             # is the source's event clock, resolved by the same function that
             # stamps it on every claim (kernel/provenance) so leaf and claim
-            # can never disagree.
+            # can never disagree. An undated source leaves the leaf undated:
+            # `date: <today>` here would be read back by _incoming_side as the
+            # incoming clock of every future contest this leaf feeds.
             _data, _raw, body = frontmatter.split(source_text)
-            date = source_valid_from(source_text, getattr(fsm, "seen_override", None))
+            date = source_event_date(source_text, getattr(fsm, "seen_override", None))
             # Carry `source_file:` (stamped by convert on every converted inbox
             # note) into the leaf: this block otherwise replaces the source's
             # frontmatter wholesale, and the leaf is the only copy left once
@@ -340,7 +342,8 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             if src_file:
                 quoted = str(src_file).replace("\\", "\\\\").replace('"', '\\"')
                 carry = f'source_file: "{quoted}"\n'
-            leaf = f"---\ndate: {date}\nsource_id: {basename}\n{carry}---\n\n{body.lstrip()}"
+            date_line = f"date: {date}\n" if date else ""
+            leaf = f"---\n{date_line}source_id: {basename}\n{carry}---\n\n{body.lstrip()}"
             orch.DRIVER.create(leaf_rel, leaf)
             fsm._run_inverses.append(
                 (leaf_rel, InverseOp(kind=InverseOpKind.delete_created, path=leaf_rel), None)

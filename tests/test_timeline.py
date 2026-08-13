@@ -61,6 +61,49 @@ def test_sources_and_hidden_excluded(tmp_path):
     assert [r[2] for r in t["rows"]] == ["kept"] and t["total_dated"] == 1
 
 
+# --- note_clock fallback: FSM-written notes carry no frontmatter `date:` -----
+
+def _stamped(path, *dates, fm="", body="# T\n"):
+    """A note dated only by claim stamps, the way the FSM writes one."""
+    stamps = "\n\n".join(f"<!-- silica: valid_from={d} -->" for d in dates)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{fm}{body}\n{stamps}\n", encoding="utf-8")
+
+
+def test_claim_stamps_date_a_note_with_no_frontmatter_date(tmp_path):
+    """The whole point: a nucleated note has no `date:` and used to be invisible."""
+    _stamped(tmp_path / "n.md", "2026-03-16")
+    t = timeline(tmp_path)
+    assert t["rows"] == [("2026-03-16", "n", "n")] and t["total_dated"] == 1
+
+
+def test_multi_stamp_note_sits_at_its_most_recent_claim(tmp_path):
+    """note_clock is a MAX: a note fed by many sources dates from the newest."""
+    _stamped(tmp_path / "hub.md", "2026-03-10", "2026-04-30", "2026-03-24")
+    assert timeline(tmp_path)["rows"] == [("2026-04-30", "hub", "hub")]
+
+
+def test_frontmatter_date_outranks_the_stamps(tmp_path):
+    """An explicit `date:` is the note's statement about itself and wins."""
+    _stamped(tmp_path / "n.md", "2026-04-30", fm="---\ndate: 2026-01-01\n---\n")
+    assert timeline(tmp_path)["rows"] == [("2026-01-01", "n", "n")]
+
+
+def test_verified_at_dates_a_note_with_no_stamps(tmp_path):
+    """The other half of note_clock: a person recording when they read it."""
+    (tmp_path / "v.md").write_text(
+        "---\nverified:\n  - by: 'human:kiycoh'\n    at: 2026-05-02\n---\n\nbody\n",
+        encoding="utf-8",
+    )
+    assert timeline(tmp_path)["rows"] == [("2026-05-02", "v", "v")]
+
+
+def test_unstamped_undated_note_stays_excluded(tmp_path):
+    """Silence must not become a date — the fallback widens the index, not the rule."""
+    (tmp_path / "quiet.md").write_text("# Solo prosa\n\nniente date.\n", encoding="utf-8")
+    assert timeline(tmp_path) == {"rows": [], "total_dated": 0, "dropped": 0}
+
+
 def test_one_undecodable_note_skips_not_crashes(tmp_path):
     (tmp_path / "good.md").write_text("---\ndate: 2026-01-02\n---\nbody\n",
                                       encoding="utf-8")

@@ -292,7 +292,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Per-file content info — populated by run() before _run_loop starts
         self._file_canonicals: list[str] = []
         self._file_content_hashes: list[str] = []
-        self._file_valid_from: list[str] = []  # source event clock, stamped on each claim
+        self._file_valid_from: list[str | None] = []  # source event clock; None → no stamp
         self._committed_file_indices: set[int] = set()  # indices of already-committed files
 
         # Iterative chunk processing state fields
@@ -609,7 +609,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         ledger = get_ledger()
 
         # Compute per-file canonicals and content hashes; track committed status
-        from silica.kernel.write.provenance import source_valid_from
+        from silica.kernel.write.provenance import source_event_date
         self._file_canonicals = []
         self._file_content_hashes = []
         self._file_valid_from = []
@@ -630,8 +630,11 @@ class InjectorFSM(BaseFSM[InjectorState]):
                     content_hash = ""
             self._file_content_hashes.append(content_hash)
             # Resolve the event clock once per file, off the bytes already read.
+            # None (undated source) stamps nothing: the run date is the ingest
+            # clock, and stamping it as valid_from would feed note_clock a fake
+            # freshness that defeats suppress_contest's recency veto.
             self._file_valid_from.append(
-                source_valid_from(
+                source_event_date(
                     content_bytes.decode("utf-8", "replace"),
                     getattr(self, "seen_override", None),
                 )

@@ -10,6 +10,15 @@ row per note pointing at it by the identifier silica_read_note resolves (its
 filename stem). Undated notes are EXCLUDED: a note with no date has no place
 on a chronology, and "end of list" would read as most-recent — wrong.
 
+A note the FSM wrote carries no frontmatter ``date`` at all — its event clock
+lives per-claim, in ``<!-- silica: valid_from=… -->`` stamps — so reading
+frontmatter alone left this index blind to everything nucleated (measured on a
+real vault: 1 row out of 86 stamped notes). ``note_clock`` is the fallback and
+the same one ``suppress_contest`` reads, so a note dates identically here and
+in a contest. It is a MAX over the note's stamps: a note fed by nine sources
+sits at its most recent claim, which is the reading a recency-sorted
+chronology wants.
+
 Pure and LLM-free. Full rglob + frontmatter parse per call; the FS body
 cache absorbs most of the read cost.
 # ponytail: no row cache — add an mtime-keyed one only if 10k+ vaults hurt.
@@ -19,6 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from silica.kernel.write import frontmatter
+from silica.kernel.write.contested import note_clock
 from silica.kernel.recall.paths import SOURCES_DIR
 
 
@@ -50,12 +60,15 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str]]:
         if parts[0] == SOURCES_DIR:
             continue  # verbatim leaves: reachable only via ## Sources links (§2)
         try:
-            data, _raw, _body = frontmatter.split(f.read_text(encoding="utf-8"))
+            text = f.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             # One non-UTF-8 note (a latin-1 file, an embedded binary blob)
             # must skip that file, never take the whole timeline down.
             continue
-        date = (data or {}).get("date")
+        data, _raw, _body = frontmatter.split(text)
+        # Frontmatter first: an explicit `date:` is the note's own statement
+        # about itself and outranks what its claims happen to carry.
+        date = (data or {}).get("date") or note_clock(text)
         if not date:
             continue
         label = str((data or {}).get("session_id") or f.stem)
