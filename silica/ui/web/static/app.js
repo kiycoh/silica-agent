@@ -619,6 +619,10 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     loadChanges();   // …and the sidebar's record of what it changed
     graphStale = true; // a turn may have written notes — rebuild next graph view
     metricsStale = true; // …and remeasure the next time the metrics tab opens
+    // The one place shape is dropped: the other two `graphStale` sites are a
+    // theme flip and a render setting, and neither moves a note. folders/areas/
+    // read take their colours from tokens, so they survive both untouched.
+    shapeData = null;
   }
 
   function handle(ev) {
@@ -1237,10 +1241,23 @@ function setGraphMode(m) {
   graphMode = m;
   document.querySelectorAll(".gmode-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.gmode === m));
   const isMap = m === "map";
-  $("#graph-frame").hidden = isMap;
+  // folders / areas / read render in-page. They take the whole pane, so both
+  // iframes hide and the note search goes with them: it flies the graph camera
+  // and roots the map, and neither means anything on a treemap or a matrix.
+  const isShape = m in SHAPE_VIEWS;
+  $("#shape-pane").hidden = !isShape;
+  $("#node-search-wrap").hidden = isShape;
+  $("#graph-frame").hidden = isMap || isShape;
   $("#map-frame").hidden = !isMap || !mapRootedPath;
   $("#map-picker").hidden = !isMap || !!mapRootedPath;
   closeNodeResults();
+  if (isShape) {
+    $("#graph-loading").hidden = true;
+    $("#map-loading").hidden = true;
+    drawShape();
+    return;
+  }
+  $("#shape-loading").hidden = true;
   if (isMap) {
     $("#graph-loading").hidden = true;
     if (mapRootedPath) $("#map-loading").hidden = true;
@@ -1269,6 +1286,292 @@ $("#graph-frame").addEventListener("load", () => {
   syncDrawerToViews(); // ditto for the drawer, which hides this frame's HUD
 });
 $("#map-frame").addEventListener("load", () => { $("#map-loading").hidden = true; });
+
+// --- explore: three surfaces that are not link-space -------------------------
+// graph and map both lay notes out by how they CONNECT. Three questions that
+// shape cannot answer: where does a note sit, how do two areas couple as a
+// whole, and in what order could this be read. One /shape load feeds all three.
+let shapeData = null;
+let shapeLoading = false;
+let folderPrefix = []; // drill state for the containment view
+
+async function loadShape() {
+  if (shapeData || shapeLoading) return shapeData;
+  shapeLoading = true;
+  $("#shape-loading").hidden = false;
+  try {
+    const d = await (await fetch("/shape")).json();
+    if (d.error) { notify("couldn't read the vault shape: " + d.error); return null; }
+    shapeData = d;
+    return d;
+  } catch { notify("couldn't read the vault shape"); return null; }
+  finally { shapeLoading = false; $("#shape-loading").hidden = true; }
+}
+
+// Squarified treemap. ~30 lines instead of d3-hierarchy: the vendored bundles
+// are the graph renderers, and pulling a layout library in for one rect split
+// would be the largest dependency on the page by a wide margin.
+// Returns [{...item, x, y, w, h}] in the given rect.
+function squarify(items, x, y, w, h) {
+  const out = [];
+  let rest = items.filter((i) => i.value > 0).sort((a, b) => b.value - a.value);
+  while (rest.length) {
+    const total = rest.reduce((s, i) => s + i.value, 0);
+    const vertical = w < h;          // lay the next row along the shorter side
+    const side = vertical ? w : h;
+    // Grow the row while the worst aspect ratio in it keeps improving.
+    let row = [], best = Infinity, sum = 0;
+    for (const it of rest) {
+      const trial = sum + it.value;
+      const thickness = (trial / total) * (vertical ? h : w);
+      const worst = Math.max(
+        ...[...row, it].map((r) => {
+          const len = (r.value / trial) * side;
+          return Math.max(thickness / len, len / thickness);
+        }));
+      if (row.length && worst > best) break;
+      row.push(it); sum = trial; best = worst;
+    }
+    const thickness = (sum / total) * (vertical ? h : w);
+    let off = 0;
+    for (const it of row) {
+      const len = (it.value / sum) * side;
+      out.push(vertical
+        ? { ...it, x: x + off, y, w: len, h: thickness }
+        : { ...it, x, y: y + off, w: thickness, h: len });
+      off += len;
+    }
+    if (vertical) { y += thickness; h -= thickness; } else { x += thickness; w -= thickness; }
+    rest = rest.slice(row.length);
+  }
+  return out;
+}
+
+// One level of the containment tree at `prefix`: immediate children, each with
+// its note count and how much of it belongs to a single area.
+function folderLevel(notes, prefix, real) {
+  const pre = prefix.length ? prefix.join("/") + "/" : "";
+  const kids = new Map();
+  for (const n of notes) {
+    if (!n.path.startsWith(pre)) continue;
+    const tail = n.path.slice(pre.length);
+    const cut = tail.indexOf("/");
+    const name = cut === -1 ? tail : tail.slice(0, cut);
+    let k = kids.get(name);
+    if (!k) kids.set(name, k = { name, folder: cut !== -1, count: 0, areas: new Map() });
+    k.count++;
+    // Only multi-note areas count toward purity. A singleton carries a group id
+    // like any other community, so counting it would let a folder of six
+    // unrelated notes report six areas and a purity of 1/6 — a number about the
+    // clustering's tail, not about the filing. `real` is the same set the
+    // matrix draws, so the two surfaces agree on what an area is.
+    if (real.has(n.area)) k.areas.set(n.area, (k.areas.get(n.area) || 0) + 1);
+  }
+  return [...kids.values()].map((k) => {
+    const placed = [...k.areas.values()].reduce((s, v) => s + v, 0);
+    const top = Math.max(0, ...k.areas.values());
+    return { ...k, value: k.count, placed,
+             purity: placed ? top / placed : null, spread: k.areas.size };
+  });
+}
+
+// The containment view. Area is note count; the fill is IMPURITY, so a folder
+// whose notes all belong to one area is nearly blank and one that mixes nine
+// areas is solid. That direction is deliberate: the question this surface
+// answers is where filing and meaning disagree, so the disagreements are the
+// ones that should be loud. Colouring by area instead would need a 26-hue
+// categorical palette, which is exactly what the viz tokens exist to avoid.
+function renderFolders(s) {
+  const pane = mkEl("div", "shape-body");
+  const head = mkEl("div", "shape-head");
+  const crumbs = mkEl("div", "fcrumb");
+  const mk = (label, depth) => {
+    const b = mkEl("button", "fcrumb-b", label);
+    b.type = "button";
+    b.addEventListener("click", () => { folderPrefix = folderPrefix.slice(0, depth); drawShape(); });
+    return b;
+  };
+  crumbs.appendChild(mk("vault", 0));
+  folderPrefix.forEach((p, i) => {
+    crumbs.appendChild(mkEl("span", "fcrumb-sep", "/"));
+    crumbs.appendChild(mk(p, i + 1));
+  });
+  head.appendChild(crumbs);
+  head.appendChild(mkEl("span", "shape-sub",
+    "area = notes · fill = how much the folder mixes areas · click a folder to descend"));
+  pane.appendChild(head);
+
+  const rows = folderLevel(s.notes, folderPrefix, new Set(s.areas.map((a) => a.id)));
+  if (!rows.length) { pane.appendChild(mkEl("p", "mempty", "Nothing here.")); return pane; }
+
+  const box = mkEl("div", "tmap");
+  // A fixed viewBox with percentage-positioned tiles: the layout is computed in
+  // an abstract 100x100 box and the container decides the pixels, so a resize
+  // needs no relayout and no observer.
+  for (const t of squarify(rows, 0, 0, 100, 100)) {
+    const tile = mkEl("div", "tmap-tile" + (t.folder ? " folder" : ""));
+    tile.style.cssText = `left:${t.x}%;top:${t.y}%;width:${t.w}%;height:${t.h}%`;
+    const impurity = t.purity === null ? 0 : 1 - t.purity;
+    tile.style.setProperty("--i", impurity.toFixed(3));
+    const pur = t.purity === null ? "no area" : `${Math.round(t.purity * 100)}% one area`;
+    tile.title = `${t.name} — ${t.count} notes · ${pur}`
+      + (t.spread > 1 ? ` · spans ${t.spread} areas` : "");
+    const lbl = mkEl("div", "tmap-lbl");
+    lbl.appendChild(mkEl("span", "tmap-name", t.name));
+    lbl.appendChild(mkEl("span", "tmap-n", nfmt(t.count)));
+    tile.appendChild(lbl);
+    if (t.folder) {
+      tile.addEventListener("click", () => { folderPrefix = [...folderPrefix, t.name]; drawShape(); });
+    } else {
+      tile.dataset.path = (folderPrefix.length ? folderPrefix.join("/") + "/" : "") + t.name;
+      tile.classList.add("clickable");
+    }
+    box.appendChild(tile);
+  }
+  pane.appendChild(box);
+
+  const worst = rows.filter((r) => r.purity !== null && r.placed >= 3)
+    .sort((a, b) => a.purity - b.purity)[0];
+  pane.appendChild(mkEl("p", "mnote", worst
+    ? `Most mixed here: ${worst.name}, ${Math.round(worst.purity * 100)}% in its biggest area across ${worst.spread}.`
+    : "Too few placed notes here to read purity."));
+  return pane;
+}
+
+// Area x area coupling. Every pair at once, where the metrics tab's gap list is
+// a top-N: an absence is only readable against the pairs that are present, and
+// a ranked list of the emptiest pairs cannot show that.
+// Two scales in one grid, so they get two treatments: off-diagonal cells ramp on
+// the accent by inter-area link count, the diagonal is neutral and carries the
+// area's own cohesion. A shared ramp would put a 0.11 cohesion and 11 links in
+// the same ink and invite reading one as the other.
+function renderAreas(s) {
+  const pane = mkEl("div", "shape-body");
+  const head = mkEl("div", "shape-head");
+  head.appendChild(mkEl("strong", null, "Area coupling"));
+  const pairs = s.areas.length * (s.areas.length - 1) / 2;
+  let linked = 0;
+  for (let i = 0; i < s.areas.length; i++) {
+    for (let j = i + 1; j < s.areas.length; j++) if (s.matrix[i][j]) linked++;
+  }
+  head.appendChild(mkEl("span", "shape-sub",
+    `${s.areas.length} areas · ${linked} of ${pairs} pairs share a link · diagonal is cohesion`));
+  pane.appendChild(head);
+
+  let max = 1;
+  for (let i = 0; i < s.areas.length; i++) {
+    for (let j = 0; j < s.areas.length; j++) if (i !== j) max = Math.max(max, s.matrix[i][j]);
+  }
+  const wrap = mkEl("div", "smx-scroll");
+  const g = mkEl("div", "smx dense");
+  g.style.setProperty("--cols", s.areas.length);
+  g.appendChild(mkEl("div", "smx-corner"));
+  for (const a of s.areas) {
+    const h = mkEl("div", "smx-col", a.label);
+    h.title = `${a.label} — ${a.size} notes · cohesion ${a.cohesion}`;
+    g.appendChild(h);
+  }
+  s.areas.forEach((a, i) => {
+    const lbl = mkEl("div", "smx-row", a.label);
+    lbl.title = `${a.label} — ${a.size} notes`;
+    if (a.path) { lbl.dataset.path = a.path; lbl.classList.add("clickable"); }
+    g.appendChild(lbl);
+    s.areas.forEach((b, j) => {
+      const v = s.matrix[i][j];
+      if (i === j) {
+        // ".55" saves two characters in a 22px cell, but only where there IS a
+        // leading zero: slicing it off 1.00 printed ".00", so a perfectly
+        // cohesive area read as the least cohesive one on the grid.
+        const coh = a.cohesion >= 1 ? "1" : a.cohesion ? a.cohesion.toFixed(2).slice(1) : "";
+        const c = mkEl("div", "smx-cell diag", coh);
+        c.title = `${a.label}: cohesion ${a.cohesion} — ${a.intra} linked pairs inside ${a.size} notes`;
+        g.appendChild(c);
+        return;
+      }
+      const c = mkEl("div", "smx-cell" + (v ? "" : " empty"), v ? String(v) : "");
+      if (v) {
+        c.style.setProperty("--i", Math.sqrt(v / max).toFixed(3));
+        c.title = `${a.label} ↔ ${b.label}: ${v} linked note pairs`;
+      } else {
+        c.title = `${a.label} ↮ ${b.label}: nothing links them`;
+      }
+      g.appendChild(c);
+    });
+  });
+  wrap.appendChild(g);
+  pane.appendChild(wrap);
+  pane.appendChild(mkEl("p", "mnote",
+    `${nfmt(s.totals.singletons)} single-note areas are left out: each would be a row and a column `
+    + "of zeroes, and 65 of them would bury the 26 that carry the vault."));
+  return pane;
+}
+
+// A reading order, derived and not authored. The one surface here that is not a
+// layout: it answers "where do I start and what next", which no arrangement of
+// nodes in space can, because space has no order.
+function renderReading(s) {
+  const pane = mkEl("div", "shape-body");
+  const head = mkEl("div", "shape-head");
+  const r = s.reading;
+  head.appendChild(mkEl("strong", null, "A way through"));
+  head.appendChild(mkEl("span", "shape-sub",
+    `${r.stops.length} stops · areas biggest first, each hub then what it opens onto`));
+  pane.appendChild(head);
+  // The vault holds notes that share a name across folders, so a path can list
+  // the same label twice for two different files. Where that happens the parent
+  // folder rides along: two identical rows pointing at different notes is worse
+  // than a longer label, and silently dropping one would be worse still.
+  const seenLabel = new Map();
+  for (const st of r.stops) seenLabel.set(st.label, (seenLabel.get(st.label) || 0) + 1);
+  const ol = mkEl("ol", "rpath");
+  let area = null;
+  for (const stop of r.stops) {
+    if (stop.area !== area) {
+      area = stop.area;
+      ol.appendChild(mkEl("li", "rpath-area", area));
+    }
+    const li = mkEl("li", "rpath-stop clickable");
+    li.dataset.path = stop.path;
+    // The full path, not the parent folder: the notes that collide here are
+    // forks of each other under `silica/`, so they share every segment except
+    // the first, and one parent segment disambiguated nothing.
+    const name = seenLabel.get(stop.label) > 1
+      ? stop.path.replace(/\.md$/, "") : stop.label;
+    const n = mkEl("span", "rpath-name", name);
+    n.title = stop.path;
+    li.appendChild(n);
+    li.appendChild(mkEl("span", "rpath-why", stop.why));
+    ol.appendChild(li);
+  }
+  pane.appendChild(ol);
+  // The cut is stated rather than left to be inferred from a heading count: the
+  // path stops at a readable length, and 18 unmentioned areas would make this
+  // read as a tour of the whole vault.
+  const cut = r.areas_total - r.areas_covered;
+  pane.appendChild(mkEl("p", "mnote",
+    "Derived from link structure alone, so it promises adjacency and not importance: "
+    + "each stop is linked to something already read."
+    + (cut > 0 ? ` ${nfmt(cut)} smaller areas are past the end of the path.` : "")));
+  return pane;
+}
+
+const SHAPE_VIEWS = { folders: renderFolders, areas: renderAreas, read: renderReading };
+
+async function drawShape() {
+  const pane = $("#shape-pane");
+  const render = SHAPE_VIEWS[graphMode];
+  if (!render) return;
+  const s = shapeData || await loadShape();
+  if (!s || !SHAPE_VIEWS[graphMode]) return; // mode may have changed while loading
+  pane.innerHTML = "";
+  pane.appendChild(SHAPE_VIEWS[graphMode](s));
+}
+
+// Same convention the metrics rows use: a row that names a note opens it.
+$("#shape-pane").addEventListener("click", (e) => {
+  const el = e.target.closest("[data-path]");
+  if (el && el.dataset.path) openContext({ path: el.dataset.path });
+});
 
 // --- metrics tab -------------------------------------------------------------
 // Everything the L1 graph report measures, as cards. Charts are HTML tables:

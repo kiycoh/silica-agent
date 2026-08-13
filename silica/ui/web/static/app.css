@@ -4177,6 +4177,130 @@ body.note-open #toasts {
 .stack-seg.ord-2 { background: var(--c-ord-2); }
 .stack-seg.ord-1 { background: var(--c-ord-1); }
 
+/* --- explore: folders / areas / read ---------------------------------------
+   Three in-page surfaces sharing one pane, where graph and map each own an
+   iframe. They scroll as a unit under the toolbar. */
+/* flex: 1 like the two iframes it stands in for, so the toolbar keeps its
+   height and only this scrolls. min-height:0 or the matrix's own width would
+   push the pane past the viewport instead of scrolling inside it. */
+#shape-pane {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  /* #graph-bar is absolute over the whole view so it can float on the graph
+     canvas. These panes have content at the top instead, so they clear it. */
+  padding: 3.4rem 1.1rem 1.6rem;
+}
+
+.shape-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.shape-sub {
+  font-size: 11px;
+  color: var(--ash);
+}
+
+/* treemap: tiles are positioned in percentages of an abstract 100x100 box, so
+   the container alone decides the pixels and a resize needs no relayout. */
+.tmap {
+  position: relative;
+  width: 100%;
+  height: min(62vh, 620px);
+  background: var(--bubble);
+}
+
+.tmap-tile {
+  position: absolute;
+  overflow: hidden;
+  /* 2px of surface between tiles, the same separator .stack uses — never a
+     stroke, which at this density would read as a grid of its own. */
+  outline: 2px solid var(--page);
+  outline-offset: -1px;
+  /* --i is impurity: a folder whose notes all sit in one area stays near-blank
+     and a folder mixing nine areas goes solid, so the disagreements are the
+     loud ones. Capped like the session matrix, so one foreground reads across
+     the whole ramp in both themes. */
+  background: color-mix(in srgb, var(--c-accent) calc(var(--i, 0) * 45%), transparent);
+}
+
+.tmap-tile.folder {
+  cursor: pointer;
+}
+
+.tmap-tile:hover {
+  outline-color: var(--accent);
+}
+
+.tmap-lbl {
+  display: flex;
+  flex-direction: column;
+  padding: 0.3rem 0.4rem;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--frost);
+  pointer-events: none;
+}
+
+.tmap-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Demoted by size, not by colour. --ash is a muted foreground for the page
+   ground; over a tile that ramps to 45% accent it measured 2.59:1, so the count
+   on the biggest, most mixed folder was the least readable thing on the view.
+   The ground varies here, and size is the only hierarchy channel that does not. */
+.tmap-n {
+  color: var(--frost);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* reading path: a roll, not a chart — the order is the whole content */
+.rpath {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-width: 62ch;
+}
+
+.rpath-area {
+  margin: 1rem 0 0.35rem;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ash);
+}
+
+.rpath-stop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0.5rem;
+  border-left: 2px solid var(--line-2);
+  cursor: pointer;
+}
+
+.rpath-stop:hover {
+  border-left-color: var(--accent);
+  background: var(--bubble);
+}
+
+.rpath-name {
+  color: var(--frost);
+}
+
+.rpath-why {
+  font-size: 11px;
+  color: var(--ash);
+}
 /* meter: one ratio against its limit, fill and track from one ramp */
 .meter-wrap {
   margin-bottom: 0.7rem;

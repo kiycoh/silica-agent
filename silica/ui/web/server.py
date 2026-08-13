@@ -852,6 +852,227 @@ def _degree_histogram(degree_map: dict[str, int]) -> list[dict]:
     return out
 
 
+def _shape_reading(adj: dict, deg: dict, areas: list[dict], label_of: dict, stops: int = 24) -> list[dict]:
+    """A reading order over the vault, derived rather than authored.
+
+    Areas biggest first, and inside one the hub then its best-connected
+    neighbours, breadth-first. Not a ranking of what matters: it is the order
+    that keeps each next note adjacent to something already read, which is the
+    only property a reading path can actually promise from link structure.
+
+    Capped, because a path with 795 stops is the file tree with extra words.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    # Every area's hub, reserved. Hubs link to each other, so without this the
+    # second area's hub gets picked up as a neighbour of the first, and then its
+    # own section is skipped as already-seen — silently dropping the area, and
+    # the biggest ones first, since those are exactly the well-connected hubs.
+    hubs = {a["path"] for a in areas if a["path"]}
+    covered = 0
+    for a in areas:
+        hub = a["path"]
+        if not hub:
+            continue
+        if len(out) + 1 > stops:
+            break
+        covered += 1
+        seen.add(hub)
+        out.append({"path": hub, "label": label_of.get(hub, hub), "area": a["label"],
+                    "why": f"hub of {a['label']} — {a['size']} notes, the densest point of the area"})
+        # Two neighbours per area: enough to show what the hub opens onto,
+        # few enough that the biggest area cannot eat the whole path.
+        near = sorted((n for n in adj.get(hub, ()) if n not in seen and n not in hubs),
+                      key=lambda n: -deg.get(n, 0))[:2]
+        for n in near:
+            if len(out) >= stops:
+                break
+            seen.add(n)
+            out.append({"path": n, "label": label_of.get(n, n), "area": a["label"],
+                        "why": f"linked from the hub, {deg.get(n, 0)} links of its own"})
+    return {"stops": out, "areas_covered": covered, "areas_total": len(areas)}
+
+
+@app.get("/shape")
+def shape():
+    """Three read-only views over ONE graph build: containment, area coupling,
+    and a derived reading order.
+
+    They share an endpoint because they share the expensive part — build_graph_data
+    plus community detection — and splitting them into three routes would pay it
+    three times for surfaces a reader flips between.
+    """
+    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
+
+    try:
+        nodes, edges = build_graph_data(folder="")
+        communities = detect_communities(nodes, edges)
+    except Exception as exc:
+        logger.warning("shape: graph build failed (%s)", exc)
+        return {"error": str(exc)}
+
+    real = [n for n in nodes if n.get("type") != "ghost"]
+    group_of = {n["id"]: n.get("group", -1) for n in real}
+    label_of = {n["id"]: n.get("label") or n["id"].rsplit("/", 1)[-1] for n in real}
+
+    adj: dict[str, set[str]] = {}
+    deg: dict[str, int] = {}
+    intra: dict[int, int] = {}
+    inter: dict[tuple[int, int], int] = {}
+    # Unordered pairs, counted once. A wikilink is directed and a mutual pair is
+    # two edges, so counting edges made cohesion exceed 1 on any small area whose
+    # notes link both ways — a 2-note area with a mutual link scored 2.0 on a
+    # ratio bounded in [0, 1]. `compute_report` walks `G_und.edges()` for exactly
+    # this reason; deduping here is what puts the two on one currency. The
+    # off-diagonal therefore counts LINKED PAIRS of notes, not wikilinks.
+    seen_pairs: set[tuple[str, str]] = set()
+    for e in edges:
+        if e.get("type") != "EXTRACTED":
+            continue
+        a, b = e.get("from"), e.get("to")
+        ga, gb = group_of.get(a), group_of.get(b)
+        if ga is None or gb is None or a == b:
+            continue
+        key = (a, b) if a < b else (b, a)
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+        deg[a] = deg.get(a, 0) + 1
+        deg[b] = deg.get(b, 0) + 1
+        if ga == gb:
+            if ga >= 0:
+                intra[ga] = intra.get(ga, 0) + 1
+        elif ga >= 0 and gb >= 0:
+            inter[(min(ga, gb), max(ga, gb))] = inter.get((min(ga, gb), max(ga, gb)), 0) + 1
+
+    sizes: dict[int, int] = {}
+    for g in group_of.values():
+        if g >= 0:
+            sizes[g] = sizes.get(g, 0) + 1
+
+    # Multi-note communities only, biggest first. A singleton is its own
+    # community: on the matrix it is a row and column of zeroes with a perfect
+    # diagonal, which is 65 rows of noise around the 26 that carry the vault.
+    ids = sorted((g for g, s in sizes.items() if s > 1), key=lambda g: (-sizes[g], g))
+    hub_of: dict[int, str] = {}
+    for g in ids:
+        members = [n for n in real if group_of.get(n["id"]) == g]
+        best = max(members, key=lambda n: deg.get(n["id"], 0), default=None)
+        if best:
+            hub_of[g] = best["id"]
+
+    def cohesion(g: int) -> float:
+        s = sizes[g]
+        possible = s * (s - 1) / 2
+        return round(intra.get(g, 0) / possible, 4) if possible else 0.0
+
+    areas = [
+        {"id": g, "label": label_of.get(hub_of.get(g, ""), f"#{g}"), "path": hub_of.get(g, ""),
+         "size": sizes[g], "cohesion": cohesion(g), "intra": intra.get(g, 0)}
+        for g in ids
+    ]
+    matrix = [[(intra.get(a, 0) if a == b else inter.get((min(a, b), max(a, b)), 0))
+               for b in ids] for a in ids]
+
+    return {
+        "areas": areas,
+        "matrix": matrix,
+        # Every real note, for the containment view. Three fields, not the whole
+        # node: the treemap needs a path, an area and a weight, and shipping the
+        # colour/font/title the canvas uses would triple the payload for nothing.
+        "notes": [{"path": n["id"], "size": n.get("size") or 1, "area": group_of.get(n["id"], -1)}
+                  for n in real],
+        "reading": _shape_reading(adj, deg, areas, label_of),
+        "totals": {"notes": len(real), "areas": len(ids),
+                   "singletons": sum(1 for s in sizes.values() if s <= 1)},
+    }
+
+
+def _write_sessions(report) -> dict | None:
+    """The days claims were written, crossed against the areas that received them.
+
+    Not a chronology of the vault: the vault's clock is per-claim (`valid_from`
+    stamps), and only a nucleated note carries one. So this measures what WROTE
+    the vault, not when the vault's subjects happened.
+
+    A session x area matrix, not a time axis. Measured on a real vault the dates
+    collapse onto 9 days inside a 2-month window with one straggler two years
+    back; on a linear date axis that straggler takes 90% of the width and the
+    nine days that hold 99% of the work land in a smear. The matrix drops the
+    duration and keeps what varies -- which areas recur across sessions.
+
+    Areas are the multi-note communities only. A singleton is its own community,
+    so counting them would make every session look perfectly focused by
+    construction. Areas never written into are counted rather than listed: the
+    reading here is coverage, and 19 empty columns bury the 7 carrying the work.
+
+    A stem that resolves to more than one note (the vault has forked pairs
+    sharing a subpath under `write_dir`) is attributed to no area and counted as
+    ambiguous, because guessing one of the two would silently move a mark into
+    the wrong column.
+    """
+    from silica.kernel.write.timeline import timeline
+
+    vault = Path(CONFIG.vault_path or "").expanduser()
+    if not vault.is_dir():
+        return None
+    rows = timeline(vault, limit=10**6)["rows"]
+    if not rows:
+        return None
+
+    areas = [c for c in report.clusters if c.size > 1]
+    # Stem -> the areas claiming it. A set, so a genuine fork shows up as >1
+    # rather than as whichever member the iteration happened to reach last.
+    by_stem: dict[str, set[int]] = {}
+    for c in areas:
+        for m in c.members:
+            by_stem.setdefault(m.rsplit("/", 1)[-1].removesuffix(".md"), set()).add(c.cluster_id)
+    hub_path = {c.cluster_id: (c.hub or "") for c in areas}
+
+    days: dict[str, dict[str, int]] = {}
+    touched: dict[int, int] = {}
+    ambiguous = unplaced = 0
+    for date, _label, stem in rows:
+        hit = by_stem.get(stem)
+        if not hit:
+            unplaced += 1
+            continue
+        if len(hit) > 1:
+            ambiguous += 1
+            continue
+        cid = next(iter(hit))
+        cells = days.setdefault(date, {})
+        cells[str(cid)] = cells.get(str(cid), 0) + 1
+        touched[cid] = touched.get(cid, 0) + 1
+
+    if not days:
+        return None
+    # Busiest area first: the columns are read left to right, and the areas the
+    # writing actually lands in are the ones worth seeing without scrolling.
+    ordered = sorted(touched.items(), key=lambda kv: (-kv[1], kv[0]))
+    return {
+        "areas": [
+            {"id": str(cid), "label": (hub_path.get(cid, "") or f"#{cid}").rsplit("/", 1)[-1]
+             .removesuffix(".md"), "path": hub_path.get(cid, ""), "total": n}
+            for cid, n in ordered
+        ],
+        "days": [
+            {"date": d, "notes": sum(cells.values()), "cells": cells}
+            for d, cells in sorted(days.items())
+        ],
+        "areas_total": len(areas),
+        "untouched": len(areas) - len(touched),
+        # The notes with no claim clock at all. Named, never dropped: on a vault
+        # written mostly by hand this is the overwhelming majority, and a matrix
+        # that omits it reads as "the whole vault, over 9 days".
+        "undated": max((report.totals or {}).get("notes", 0) - len(rows), 0),
+        "ambiguous": ambiguous,
+        "unplaced": unplaced,
+    }
+
+
 @app.get("/metrics")
 def metrics(proposals: bool = False):
     """Everything the L1 graph report measures, as JSON for the metrics tab.

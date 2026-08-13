@@ -160,6 +160,13 @@
         <div class="gmode-tabs">
           <button type="button" class="active" data-gmode="graph" title="wikilink structure + semantic k-NN overlay; toggle the layers in the HUD">graph</button>
           <button type="button" data-gmode="map" title="radial map rooted on one note">map</button>
+          <!-- Three surfaces over the same graph that are NOT link-space: graph
+               and map both lay notes out by how they connect, so neither can
+               show where a note SITS, how two areas couple as a whole, or what
+               order the vault could be read in. -->
+          <button type="button" data-gmode="folders" title="the vault as folders, shaded by how much each folder mixes areas">folders</button>
+          <button type="button" data-gmode="areas" title="area x area coupling: every pair at once, not a top-N list">areas</button>
+          <button type="button" data-gmode="read" title="a reading order derived from hubs and their links">read</button>
         </div>
 
         <!-- graph + map modes: fuzzy note search. Pick → fly the graph camera
@@ -189,6 +196,15 @@
           <div id="map-picker-list"></div>
         </div>
       </div>
+
+      <div id="shape-loading" class="frame-loading" hidden>
+        <div class="spinner"></div>
+        <div>Reading the vault's shape.</div>
+      </div>
+
+      <!-- folders / areas / read all render in-page from one /shape load, so
+           unlike graph and map they share a pane instead of owning an iframe -->
+      <div id="shape-pane" hidden></div>
 
       <iframe id="graph-frame" title="vault graph"></iframe>
       <iframe id="map-frame" title="radial map" hidden></iframe>
