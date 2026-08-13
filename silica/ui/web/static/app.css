@@ -4301,6 +4301,130 @@ body.note-open #toasts {
   font-size: 11px;
   color: var(--ash);
 }
+
+/* session x area matrix: one hue, intensity carries magnitude and the printed
+   number carries the value, so the cell never depends on colour alone. Column
+   heads run vertical because an area is named by its hub note and those names
+   are phrases, not labels — rotated they cost 90px of height once instead of
+   forcing a 7-column grid to 900px of width. */
+.smx-scroll {
+  overflow-x: auto;
+  margin-bottom: 0.7rem;
+}
+
+.smx {
+  display: grid;
+  /* fallback like --zero's: an unset count makes the repeat() invalid, which
+     drops the whole declaration and collapses the matrix into one column. */
+  grid-template-columns: max-content repeat(var(--cols, 1), 30px) 40px;
+  gap: 2px;
+  width: max-content;
+  font-size: 11px;
+}
+
+.smx-corner {
+  /* the empty cell over the date column */
+}
+
+.smx-col {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  height: 118px;
+  /* block, not flex: text-overflow does nothing inside a flex container, so the
+     flex version cut "Apprendimento automatico" to "Apprendimento autor" with
+     no mark that anything was missing. In vertical-rl + rotate(180deg) the
+     text ends at the bottom, so text-align:right is what bottom-aligns the
+     short heads against the long ones. */
+  display: block;
+  text-align: right;
+  padding-bottom: 3px;
+  color: var(--ash);
+  white-space: nowrap;
+  overflow: hidden;
+  /* A hub note's name is a phrase, so the longest still run past the head.
+     Ellipsis rather than a bare cut: "Intelligenza artifi" reads as a word,
+     "Intelligenza artifici…" reads as a name that did not fit, and the full
+     one is on the head's own tooltip either way. */
+  text-overflow: ellipsis;
+}
+
+.smx-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 0.5rem;
+  color: var(--ash);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.smx-cell {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--frost);
+  /* --i is the sqrt-scaled intensity over the card's own ground, the same way
+     .stack lets the surface through its gaps and .hist-bar sits on no track at
+     all. Mixing over a filled track instead made an unwritten cell paint a
+     saturated teal, so the matrix read as full everywhere and absence read as
+     a low value.
+
+     Capped at 45%, which is what lets one foreground serve the whole ramp. The
+     first pass swapped to --on-vivid past the midpoint, tuned by eye in dark
+     mode; in light mode that put white on a 70%-teal cell at 3.0:1, under the
+     floor. A translucent fill makes contrast a function of the mix, so no
+     static pairing can track it — bounding the mix is what makes it static
+     again. The number carries the value here anyway; the tint is the second
+     encoding, not the first. */
+  background: color-mix(in srgb, var(--c-accent) calc(var(--i, 0) * 45%), transparent);
+}
+
+.smx-cell.empty {
+  background: none;
+}
+
+/* 26 areas need a tighter cell than 9 sessions do, or the matrix is 900px wide
+   before the label column */
+.smx.dense {
+  grid-template-columns: max-content repeat(var(--cols, 1), 22px);
+}
+
+.smx.dense .smx-cell {
+  height: 22px;
+  font-size: 10px;
+}
+
+/* the diagonal is an area against itself: cohesion, on its own scale. Neutral
+   rather than a step of the accent ramp, because a 0.11 cohesion and 11 links
+   sharing one ink invites reading either as the other. */
+.smx-cell.diag {
+  background: var(--bubble);
+  /* --ash on --bubble measured 4.48:1, just under the floor. The neutral ground
+     is already what separates the diagonal from the accent ramp, so the colour
+     demotion was buying nothing the background did not already say. */
+  color: var(--frost);
+}
+
+/* the totals column is a sum, not another area: neutral, never on the ramp */
+.smx-cell.smx-tot {
+  background: none;
+  color: var(--frost);
+}
+
+.smx-col.smx-tot {
+  color: var(--ash-dim);
+}
+
+.smx-cell.clickable {
+  cursor: pointer;
+}
+
+.smx-cell.clickable:hover {
+  outline: 1px solid var(--accent);
+}
+
 /* meter: one ratio against its limit, fill and track from one ramp */
 .meter-wrap {
   margin-bottom: 0.7rem;

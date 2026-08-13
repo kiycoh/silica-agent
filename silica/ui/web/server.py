@@ -1222,6 +1222,7 @@ def metrics(proposals: bool = False):
             if report.temporal and report.temporal.notes_scanned
             else None
         ),
+        "sessions": _write_sessions(report),
         "code_coverage": (
             {
                 "documented": report.code_coverage.documented,

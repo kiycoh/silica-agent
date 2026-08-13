@@ -1812,6 +1812,52 @@ function stackedBar(segs) {
   return bar;
 }
 
+// Session × area matrix. A time axis is the wrong form for this data and the
+// vault says so: the claim clocks land on a handful of days inside a couple of
+// months, with the odd straggler years back, so a linear date axis spends its
+// width on the gap and smears everything that matters into one column. Dropping
+// the duration and keeping the ordering leaves what actually varies — which
+// areas recur session after session, and which never come up at all.
+// Cells carry the count as text, not just as intensity: the tab's rule is that
+// every value reads without a hover, and colour here is the second encoding.
+function sessionMatrix(s) {
+  const wrap = mkEl("div", "smx-scroll");
+  const g = mkEl("div", "smx");
+  g.style.setProperty("--cols", s.areas.length);
+  const max = Math.max(...s.days.map((d) => Math.max(...Object.values(d.cells), 0)), 1);
+
+  g.appendChild(mkEl("div", "smx-corner"));
+  for (const a of s.areas) {
+    const h = mkEl("div", "smx-col", a.label);
+    h.title = `${a.label} — ${a.total} claims across ${s.days.length} sessions`;
+    g.appendChild(h);
+  }
+  g.appendChild(mkEl("div", "smx-col smx-tot", "total"));
+
+  for (const d of s.days) {
+    const lbl = mkEl("div", "smx-row", d.date);
+    lbl.title = `${d.date}: ${d.notes} claims`;
+    g.appendChild(lbl);
+    for (const a of s.areas) {
+      const n = d.cells[a.id] || 0;
+      // An empty cell gets its slot and no mark: painting a stub would say
+      // "a little", and the reading is "that area saw nothing that day".
+      const c = mkEl("div", "smx-cell" + (n ? "" : " empty"), n ? String(n) : "");
+      if (n) {
+        // sqrt, so a session of 1 stays visible next to one of 12 instead of
+        // resolving to a tint indistinguishable from empty.
+        c.style.setProperty("--i", Math.sqrt(n / max).toFixed(3));
+        c.title = `${d.date} · ${a.label}: ${n}`;
+        if (a.path) { c.dataset.path = a.path; c.classList.add("clickable"); }
+      }
+      g.appendChild(c);
+    }
+    g.appendChild(mkEl("div", "smx-cell smx-tot", String(d.notes)));
+  }
+  wrap.appendChild(g);
+  return wrap;
+}
+
 // cols: [{key, label, num?}] — `num` right-aligns and tabularises the column.
 function mTable(cols, rows) {
   const t = mkEl("table", "chart data");
@@ -2048,6 +2094,31 @@ function renderMetrics(d) {
       ],
     ));
     grid.appendChild(tc);
+  }
+
+  // --- write sessions --------------------------------------------------------
+  // What wrote the vault, not when its subjects happened: only a nucleated note
+  // carries a claim clock. Reads as coverage — the areas the writing keeps
+  // landing in, and the ones it has never reached.
+  if (d.sessions?.days?.length) {
+    const s = d.sessions;
+    const sc = mCard("Write sessions",
+      `${s.days.length} days · ${s.areas.length} of ${s.areas_total} areas written into`);
+    sc.appendChild(sessionMatrix(s));
+    // The unmeasured majority, named. A matrix that omitted it would read as
+    // "the whole vault, over 9 days", which is the opposite of true.
+    const caveats = [`${nfmt(s.undated)} notes carry no claim clock and have no place here`];
+    if (s.untouched) {
+      caveats.push(`${nfmt(s.untouched)} areas have never been written into`);
+    }
+    // Not a rounding loss: these are notes whose name resolves to two areas at
+    // once, so any column would be a guess. Printed because the row totals
+    // otherwise silently fall short of the dated count.
+    if (s.ambiguous) {
+      caveats.push(`${nfmt(s.ambiguous)} claims sit on a name that two areas both hold`);
+    }
+    sc.appendChild(mkEl("p", "mnote", caveats.join(" · ")));
+    grid.appendChild(sc);
   }
 
   // --- code coverage ---------------------------------------------------------
