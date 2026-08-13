@@ -37,6 +37,7 @@ import silica.tools.composed  # noqa: F401
 import silica.tools.wrapped  # noqa: F401
 import silica.tools.codedocs_tool  # noqa: F401
 import silica.tools.delegate_tool  # noqa: F401
+import silica.tools.tabular  # noqa: F401
 import silica.sources.web_research  # noqa: F401  (registers the web_search, web_fetch, remember and plan tools)
 from silica.sources.web_research import WebTurn
 

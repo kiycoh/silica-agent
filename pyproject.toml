@@ -96,6 +96,12 @@ pdf = [
 # same project. Note it inherits [pdf] and [rerank], so it pulls torch and
 # downloads several GB of weights on first use.
 all = ["silica-agent[gui,connect,mcp,rerank,pdf]"]
+# Opt-in tabular lane (`silica_query_table`) — SQL over a .csv/.parquet the user
+# points at. One wheel, ~20 MB, no server and no ETL, imported only inside the
+# tool body so the base install never pays for it. Kept out of [all] until the
+# lane has an accuracy gate: a wrong number reads as authoritative, so shipping
+# it by default would be worse than not shipping it.
+bi = ["duckdb>=1.5.5"]
 
 [project.scripts]
 silica = "silica.cli:main"
