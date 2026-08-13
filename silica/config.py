@@ -379,6 +379,46 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_PDF_OCR_LANG", "en,it,fr,de,es")
     )
 
+    # Speech-to-text backend for audio/video conversion (silica/sources/convert.py).
+    # "endpoint" (default) POSTs to an OpenAI-compatible
+    # `/v1/audio/transcriptions` — whisper.cpp's `whisper-server` and
+    # faster-whisper-server both speak it, and it adds no dependency to Silica:
+    # same posture as the LLM and rerank base URLs. "whispercpp" shells out to a
+    # local whisper.cpp binary instead, for a machine with no server running.
+    # There is no in-process option on purpose: every one of them pulls torch.
+    asr_provider: str = field(
+        default_factory=lambda: os.getenv("SILICA_ASR_PROVIDER", "endpoint")
+    )
+
+    # Base URL of the OpenAI-compatible transcription server. 8080 is
+    # whisper.cpp's `whisper-server` default; `/v1` is appended if absent.
+    asr_base_url: str = field(
+        default_factory=lambda: os.getenv("SILICA_ASR_BASE_URL", "http://127.0.0.1:8080")
+    )
+
+    # Model name sent in the multipart form. Local servers ignore it (they serve
+    # the one model they loaded); it is required by the API shape.
+    asr_model: str = field(
+        default_factory=lambda: os.getenv("SILICA_ASR_MODEL", "whisper-1")
+    )
+
+    # ISO-639-1 language hint for transcription; empty means let the model detect.
+    # Unlike pdf_ocr_lang this CAN be detected from the signal, so auto is the
+    # default and the pin is for when detection picks wrong on a bilingual track.
+    asr_lang: str = field(default_factory=lambda: os.getenv("SILICA_ASR_LANG", ""))
+
+    # Path to (or name on PATH of) the whisper.cpp CLI, for asr_provider=whispercpp.
+    # Upstream renamed `main` to `whisper-cli` in 2024; both names are tried.
+    asr_whispercpp_bin: str = field(
+        default_factory=lambda: os.getenv("SILICA_ASR_WHISPERCPP_BIN", "")
+    )
+
+    # whisper.cpp needs an explicit model file (`-m`); there is no default it can
+    # find on its own, so this is required for that provider.
+    asr_whispercpp_model: str = field(
+        default_factory=lambda: os.getenv("SILICA_ASR_WHISPERCPP_MODEL", "")
+    )
+
     # Tavily API key: the /web-search backstop when DuckDuckGo challenges us.
     # Empty is fine — DuckDuckGo is the primary lane and needs no key.
     tavily_api_key: str = field(

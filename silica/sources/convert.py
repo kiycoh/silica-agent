@@ -5,8 +5,25 @@
 
 A plain function, not a `SourceAdapter`: `/convert` exposes it and `/nucleate`
 calls it as the fallback when no source adapter claims a file. Dispatch is by
-extension: PDF plus every other format MuPDF opens (`DOC_EXTS` — DOCX, EPUB,
-XPS, MOBI, FB2).
+extension over `DOC_EXTS`, three families with three different backends:
+
+  * PDF — the selectable provider seam below.
+  * Everything else MuPDF opens (DOCX, EPUB, XPS, MOBI, FB2) — pymupdf, always.
+  * Images (`IMG_EXTS`) and OOXML decks/sheets (`OFFICE_EXTS`) — mineru, always,
+    because it is the only backend that opens them at all. Images take mineru's
+    OCR pipeline (it wraps them into a one-page PDF); pptx/xlsx take its native
+    python-pptx/openpyxl reader, no LibreOffice involved.
+  * ODF, RTF and legacy `.xls` (`_PURE_PY_OFFICE_EXTS`) — read in process, with
+    no office suite anywhere: an ODF file is a ZIP the standard library opens,
+    and striprtf + xlrd together weigh ~200 KB.
+  * Legacy binary `.doc`/`.ppt` (`LEGACY_OFFICE_EXTS`) — the only two formats
+    left that need LibreOffice. It converts to PDF, which re-enters the provider
+    seam above. Hardened rather than trusted: own profile, hard timeout, doctor
+    probe (`probe_soffice`).
+  * Audio and video (`MEDIA_EXTS`) — transcribed, not parsed: ffmpeg demuxes to
+    16 kHz mono wav and `ASR_PROVIDERS[CONFIG.asr_provider]` turns that into
+    text. Every provider returns markdown into the same shared tail, so a talk
+    gets the same sanitizing, segmentation and provenance a book gets.
 
 For PDF the converter is selectable via `CONFIG.pdf_provider` (ADR-0011):
 `pymupdf` default (pymupdf4llm, ~60 MB installed, no torch and no JVM, but no
@@ -27,6 +44,7 @@ embeds → write the note to the inbox) is shared and provider-agnostic.
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -34,6 +52,8 @@ import re
 import shutil
 import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
+import zipfile
 from glob import glob
 from pathlib import Path
 
@@ -78,7 +98,116 @@ _MINERU_ERR_RE = re.compile(r"error|exception|traceback", re.IGNORECASE)
 # already claims them, and round-tripping plain text through a page renderer would
 # hard-wrap it at the page width.
 _PYMUPDF_ONLY_EXTS = (".docx", ".epub", ".xps", ".mobi", ".fb2")
-DOC_EXTS = (".pdf", *_PYMUPDF_ONLY_EXTS)
+
+# Image formats mineru opens (its own `image_suffixes`). It wraps the image into
+# a one-page PDF internally, so a screenshot or a scan takes the same OCR
+# pipeline a scanned PDF takes. Both `.tif` and `.tiff` land because mineru
+# sniffs content rather than trusting the extension (measured: `.tif` -> "tiff",
+# `.jpg` -> "jpeg"). `.heic` is absent: mineru does not list it, and reading it
+# at all needs pillow-heif.
+IMG_EXTS = (".png", ".jpg", ".jpeg", ".jp2", ".webp", ".gif", ".bmp", ".tif", ".tiff")
+
+# OOXML mineru parses NATIVELY, via python-pptx / openpyxl, with no LibreOffice
+# anywhere in the path. Output lands in `<stem>/office/<stem>.md` instead of
+# `auto/`, which the provider's recursive glob already finds; slide titles come
+# out as `##` headings, which is what `_split_on_headings` wants.
+#
+# `.docx` is deliberately NOT here: pymupdf reads it in the base install, so
+# routing it through mineru would demand the [pdf] extra for a format that
+# already works. The pre-2007 binaries are not here either -- neither mineru nor
+# MuPDF opens them (see `_PURE_PY_OFFICE_EXTS` and `LEGACY_OFFICE_EXTS`).
+OFFICE_EXTS = (".pptx", ".xlsx")
+
+# Inputs no provider but mineru opens, so the provider seam does not apply.
+_MINERU_ONLY_EXTS = (*IMG_EXTS, *OFFICE_EXTS)
+
+# ODF is a ZIP with a `content.xml` inside, so reading it needs no office suite
+# and no dependency at all — `zipfile` plus `xml.etree`. RTF and legacy `.xls`
+# need one small pure-python parser each (striprtf 15 KB BSD-3, xlrd 192 KB
+# BSD). Together that is ~200 KB against the ~240 MB minimum a headless
+# LibreOffice install costs on Debian (measured: libreoffice-core 155 MB +
+# -common 47 MB + one app), for five of the seven formats that used to demand it.
+#
+# ponytail: text only. The old `soffice → pdf → pymupdf` path carried embedded
+# figures through; these do not. Re-save as PDF when the images are the point.
+ODF_EXTS = (".odt", ".odp", ".ods")
+_PURE_PY_OFFICE_EXTS = (*ODF_EXTS, ".rtf", ".xls")
+
+# What is left after the above: the two pre-2007 binary formats with no pure
+# python reader worth carrying. Apache POI reads both and is Apache-2.0, but it
+# is Java — trading a 240 MB office suite for a JVM is not a trade. So these two
+# keep the LibreOffice hop, and when it is absent they are refused with a
+# message naming the OOXML escape rather than converted badly.
+#
+# The hop itself is ~15 lines. Everything else here is because `soffice` names
+# two different programs, and the wrong one takes the whole terminal hostage.
+# Measured on this developer's machine (`/usr/bin/soffice` →
+# `/opt/openoffice4/program/soffice`, Apache OpenOffice 4.1.16):
+#
+#   * `--convert-to` (double dash) is not an AOO option, and the string
+#     "convert-to" appears NOWHERE in the 4.1.16 install: AOO never implemented
+#     headless conversion. unoconv exists precisely because of that.
+#   * Handed an option it does not know, AOO does not fail — it starts in GUI
+#     mode and opens its first-start wizard. That is the "hang": 0.36 s of CPU
+#     in 120 s of wall clock, waiting on a dialog nobody asked for.
+#   * With single-dash flags and `-nofirststartwizard`, the same binary starts
+#     and exits in 0.8 s, exit 0, no window.
+#
+# So: single-dash flags (LibreOffice accepts them too), the wizard suppressed,
+# and AOO refused BEFORE the subprocess rather than after — attempting it puts a
+# dialog on the user's screen, which no timeout can take back.
+LEGACY_OFFICE_EXTS = (".ppt", ".doc")
+# Single dash on purpose (see above). `-invisible`/`-nodefault`/`-norestore`
+# keep it from opening a blank document or restoring a crashed session;
+# `-nolockcheck` stops it consulting a profile lock we deliberately bypass.
+_SOFFICE_QUIET = (
+    "-headless", "-invisible", "-nofirststartwizard",
+    "-nolockcheck", "-nodefault", "-norestore",
+)
+_SOFFICE_TIMEOUT_S = 300
+# The probe only has to prove the binary starts and exits, so it gets a much
+# shorter leash than a real conversion. Measured at 0.8 s on a cold profile.
+_SOFFICE_PROBE_TIMEOUT_S = 20
+# AOO with no JRE prints this to stderr and still exits 0, so it must not be
+# mistaken for the cause when a conversion really does fail.
+_SOFFICE_NOISE = ("javaldx",)
+
+# Media: transcribed, not parsed. Both families take the same path (ffmpeg
+# demuxes any container to 16 kHz mono wav, which is the one input every ASR
+# accepts), so video costs nothing beyond `-vn`. The list is what ffmpeg reads
+# in a default build, not everything it can be built for.
+AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma")
+VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mpg", ".mpeg")
+MEDIA_EXTS = (*AUDIO_EXTS, *VIDEO_EXTS)
+
+DOC_EXTS = (
+    ".pdf", *_PYMUPDF_ONLY_EXTS, *IMG_EXTS, *OFFICE_EXTS, *MEDIA_EXTS,
+    *_PURE_PY_OFFICE_EXTS, *LEGACY_OFFICE_EXTS,
+)
+
+# The subset that is a *document* someone meant to keep, as opposed to an
+# attachment that happens to be convertible. Onboarding offers to convert what
+# it finds sitting in a vault, and by that measure an image or a video is almost
+# always an attachment: every Obsidian vault carries pasted screenshots, and
+# `_copy_images` puts Silica's OWN extracted figures in `<inbox>/Images`. Offering
+# to convert those would mean offering to re-ingest our own output.
+CONVERTIBLE_DOC_EXTS = (
+    ".pdf", *_PYMUPDF_ONLY_EXTS, *OFFICE_EXTS, *_PURE_PY_OFFICE_EXTS,
+    *LEGACY_OFFICE_EXTS,
+)
+
+# ffmpeg knobs. `-nostdin` is not cosmetic: ffmpeg reads stdin by default and
+# would swallow the TUI's keystrokes (or block) when run under a prompt.
+_FFMPEG_ARGS = ("-nostdin", "-loglevel", "error", "-y")
+_ASR_SAMPLE_RATE = "16000"
+# Generous: transcribing is minutes of audio, not one page. omniparse's
+# equivalent subprocess call has no timeout at all, so a stuck decoder there
+# hangs the request forever.
+_FFMPEG_TIMEOUT_S = 1800
+_ASR_TIMEOUT_S = 7200
+# A pause this long ends a paragraph. Transcripts otherwise carry no blank line
+# at all, and `_split_by_size` leaves an oversized single paragraph whole.
+_ASR_PARAGRAPH_GAP_S = 2.0
 
 
 def convert(target: str, dest_dir: str = "") -> list[str]:
@@ -210,9 +339,26 @@ def _respace_prose(md: str) -> str:
 
 def _doc_to_md(target: str, dest_dir: str) -> list[str]:
     src = _resolve_input(target)
-    # The provider seam is PDF-only — mineru/docling/opendataloader all take a
-    # PDF and nothing else, so DOCX/EPUB/… go straight to pymupdf.
-    if src.suffix.lower() != ".pdf":
+    suffix = src.suffix.lower()
+    # Images and OOXML have exactly one backend, so the provider seam does not
+    # apply: pymupdf opens an image but reads no text out of it (measured: a
+    # 1653x2339 render of a text page yields ''), and neither docling nor
+    # opendataloader is a path verified here for either family.
+    if suffix in _MINERU_ONLY_EXTS:
+        provider = _pdf_via_mineru
+    elif suffix in MEDIA_EXTS:
+        provider = _via_asr
+    elif suffix in ODF_EXTS:
+        provider = _via_odf
+    elif suffix == ".rtf":
+        provider = _via_rtf
+    elif suffix == ".xls":
+        provider = _via_xls
+    elif suffix in LEGACY_OFFICE_EXTS:
+        provider = _via_legacy_office
+    # The rest of the seam is PDF-only — docling/opendataloader take a PDF and
+    # nothing else, so DOCX/EPUB/… go straight to pymupdf.
+    elif suffix != ".pdf":
         provider = _via_pymupdf
     elif CONFIG.pdf_provider in PDF_PROVIDERS:
         provider = PDF_PROVIDERS[CONFIG.pdf_provider]
@@ -225,6 +371,27 @@ def _doc_to_md(target: str, dest_dir: str) -> list[str]:
         md_text, images_src = provider(src, Path(tmp))
         if not md_text.strip():
             # Silence here would write an empty inbox note and call it success.
+            if suffix in MEDIA_EXTS:
+                raise ValueError(
+                    f"no speech transcribed from {src.name} — the audio track "
+                    "carries no recognisable speech (music, silence, or a "
+                    "language the model was not given)"
+                )
+            if suffix in _MINERU_ONLY_EXTS:
+                # mineru already ran (it is the only backend for these), so
+                # pointing at OCR would be advice the user has already taken.
+                raise ValueError(
+                    f"no readable text in {src.name} — the OCR pass found none "
+                    "(a photo with no writing in it, or an empty document)"
+                )
+            if suffix in _PURE_PY_OFFICE_EXTS:
+                # No OCR anywhere in this path, so advice about OCR would be a
+                # red herring: the file really does carry no text.
+                raise ValueError(
+                    f"no text in {src.name} — the document is empty, or its "
+                    "content is entirely images (which this path does not read; "
+                    "re-save it as PDF to run those through OCR)"
+                )
             # The usual cause is a scan with no text layer, and pymupdf — the
             # default — has no OCR at all, so name the provider that does.
             raise ValueError(
@@ -374,6 +541,497 @@ def _pdf_via_opendataloader(src: Path, workdir: Path) -> tuple[str, Path]:
     return Path(hits[0]).read_text(encoding="utf-8", errors="replace"), images
 
 
+# --- office without an office suite: ODF, RTF, legacy .xls ------------------
+
+_ODF_TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+_ODF_TABLE_NS = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+_ODF_P = f"{{{_ODF_TEXT_NS}}}p"
+_ODF_H = f"{{{_ODF_TEXT_NS}}}h"
+_ODF_LEVEL = f"{{{_ODF_TEXT_NS}}}outline-level"
+_ODF_ROW = f"{{{_ODF_TABLE_NS}}}table-row"
+_ODF_CELL = f"{{{_ODF_TABLE_NS}}}table-cell"
+# The three block elements worth emitting. Everything else (spans, links,
+# bookmarks, annotations) is inline and comes along inside `itertext()`.
+_ODF_BLOCKS = (_ODF_P, _ODF_H, _ODF_ROW)
+
+
+def _odf_text(el: ET.Element) -> str:
+    """All text under one block, whitespace-normalised.
+
+    ODF encodes runs of spaces as `<text:s/>` and tabs as `<text:tab/>`, which
+    carry no text of their own, so collapsing here loses nothing that survived
+    the format anyway.
+    """
+    return " ".join("".join(el.itertext()).split())
+
+
+def _odf_row(row: ET.Element) -> str:
+    """One spreadsheet/table row as `cell | cell | cell`.
+
+    Trailing empties are dropped because ODF pads every row out to the sheet
+    width — a two-column `.ods` still declares its rows 1024 cells wide, via
+    `table:number-columns-repeated` on one empty cell. Repeats are deliberately
+    NOT expanded: doing so is what turns a small sheet into megabytes of pipes.
+    """
+    cells = [_odf_text(c) for c in row.findall(_ODF_CELL)]
+    while cells and not cells[-1]:
+        cells.pop()
+    return " | ".join(cells)
+
+
+def _via_odf(src: Path, workdir: Path) -> tuple[str, Path]:
+    """`.odt`/`.odp`/`.ods` → markdown, standard library only.
+
+    An ODF file is a ZIP whose `content.xml` already holds the text in document
+    order, so the entire "install a 240 MB office suite" hop bought us, for
+    text, an XML walk. Headings keep their outline level, table rows keep their
+    shape, and nothing runs as a subprocess.
+    """
+    try:
+        with zipfile.ZipFile(src) as z:
+            root = ET.fromstring(z.read("content.xml"))
+    except (zipfile.BadZipFile, KeyError, ET.ParseError) as e:
+        raise ValueError(
+            f"{src.name} is not a readable ODF document ({type(e).__name__}) — "
+            "re-save it, or export it as PDF"
+        ) from None
+
+    # Blocks in document order, minus any nested inside another block: a text
+    # box holds `text:p` inside a `text:p`, and a table cell holds them inside a
+    # row, so emitting both levels would print that text twice.
+    blocks = [el for el in root.iter() if el.tag in _ODF_BLOCKS]
+    nested = {
+        id(d) for el in blocks for d in el.iter() if d is not el and d.tag in _ODF_BLOCKS
+    }
+    out: list[str] = []
+    prev = ""
+    for el in blocks:
+        if id(el) in nested:
+            continue
+        text = _odf_row(el) if el.tag == _ODF_ROW else _odf_text(el)
+        if not text:
+            continue
+        if el.tag == _ODF_H:
+            raw = el.get(_ODF_LEVEL, "1")
+            # Clamped: ODF outline levels run past 6, and `####### x` is not a
+            # heading in markdown — it renders as literal hashes.
+            level = int(raw) if raw.isdigit() and raw != "0" else 1
+            text = f"{'#' * min(level, 6)} {text}"
+        if out:
+            # Consecutive rows are one block, not one paragraph each: a
+            # 200-row sheet would otherwise reach the segmenter as 200 paragraphs.
+            out.append("\n" if el.tag == prev == _ODF_ROW else "\n\n")
+        out.append(text)
+        prev = el.tag
+    return "".join(out), workdir
+
+
+def _via_rtf(src: Path, workdir: Path) -> tuple[str, Path]:
+    """`.rtf` → text via striprtf (15 KB, BSD-3)."""
+    try:
+        from striprtf.striprtf import rtf_to_text
+    except ImportError:
+        raise ValueError(
+            "striprtf not installed — `pip install striprtf`, "
+            "or re-save the file as PDF"
+        ) from None
+    # RTF is 7-bit ASCII by spec with non-ASCII escaped, so a stray raw byte is
+    # a malformed file rather than a different encoding: replace and move on.
+    return rtf_to_text(
+        src.read_text(encoding="utf-8", errors="replace"), errors="ignore"
+    ), workdir
+
+
+def _xls_cell(cell, datemode: int) -> str:
+    """One legacy-spreadsheet cell as text.
+
+    Numbers matter here: xlrd hands back every number as a float, so a quantity
+    of 3 reaches the vault as "3.0" unless it is put back. Dates are worse — the
+    wire format is a float offset from an epoch that differs between Mac and
+    Windows workbooks, which is what `datemode` carries.
+    """
+    import xlrd
+
+    if cell.ctype == xlrd.XL_CELL_DATE:
+        try:
+            return xlrd.xldate_as_datetime(cell.value, datemode).isoformat(" ")
+        except Exception:                       # a corrupt serial is not fatal
+            return str(cell.value)
+    if cell.ctype == xlrd.XL_CELL_BOOLEAN:
+        return "true" if cell.value else "false"
+    if cell.ctype == xlrd.XL_CELL_NUMBER and float(cell.value).is_integer():
+        return str(int(cell.value))
+    return str(cell.value).strip()
+
+
+def _via_xls(src: Path, workdir: Path) -> tuple[str, Path]:
+    """Legacy `.xls` (BIFF) → markdown via xlrd (192 KB, BSD).
+
+    xlrd 2.x dropped `.xlsx` and kept exactly this: the pre-2007 binary format,
+    which is the one nothing else in the base install reads. Each sheet becomes
+    an `##` heading so `_split_on_headings` can segment a fat workbook.
+    """
+    try:
+        import xlrd
+    except ImportError:
+        raise ValueError(
+            "xlrd not installed — `pip install xlrd`, or re-save the file as .xlsx"
+        ) from None
+
+    try:
+        # logfile: xlrd narrates ("*** No CODEPAGE record...") straight to
+        # stdout, which in the TUI lands in the middle of the user's session.
+        book = xlrd.open_workbook(str(src), logfile=io.StringIO())
+    except Exception as e:
+        raise ValueError(f"could not read {src.name}: {e}") from None
+
+    out: list[str] = []
+    for sheet in book.sheets():
+        rows = []
+        for r in range(sheet.nrows):
+            cells = [_xls_cell(c, book.datemode) for c in sheet.row(r)]
+            while cells and not cells[-1]:
+                cells.pop()
+            if cells:
+                rows.append(" | ".join(cells))
+        if rows:
+            out.append(f"## {sheet.name}\n\n" + "\n".join(rows))
+    return "\n\n".join(out), workdir
+
+
+# --- legacy office: the LibreOffice hop -------------------------------------
+
+
+def soffice_bin() -> str | None:
+    """Path to LibreOffice's headless entry point, or None.
+
+    `soffice` first: on Debian/Ubuntu `libreoffice` is a shell wrapper around it,
+    and one less shell in a subprocess that already hangs is worth having.
+    """
+    return shutil.which("soffice") or shutil.which("libreoffice")
+
+
+def soffice_flavour(exe: str | None = None) -> tuple[str, str]:
+    """("libreoffice" | "openoffice" | "unknown", product string).
+
+    Read from `bootstraprc` beside the resolved binary, which carries
+    `ProductKey=OpenOffice 4.1.16` / `ProductKey=LibreOffice 25.x`. A file read
+    and no subprocess: the one thing we must not do to identify the suite is
+    *run* it, because running Apache OpenOffice with an unknown option is what
+    opens the wizard in the first place.
+    """
+    exe = exe or soffice_bin()
+    if not exe:
+        return "unknown", ""
+    rc = Path(os.path.realpath(exe)).parent / "bootstraprc"
+    try:
+        for line in rc.read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("ProductKey="):
+                product = line.split("=", 1)[1].strip()
+                low = product.lower()
+                if "libreoffice" in low:
+                    return "libreoffice", product
+                if "openoffice" in low:
+                    return "openoffice", product
+                return "unknown", product
+    except OSError:
+        pass
+    return "unknown", ""
+
+
+def _soffice_cmd(exe: str, profile: Path, args: list[str]) -> list[str]:
+    """A soffice invocation that opens no window and collides with no session.
+
+    `-env:UserInstallation` is load-bearing twice over. Without it soffice shares
+    the user's real profile, so a conversion blocks on the lock held by their
+    open Writer window. With it, the profile is new — which is itself what tells
+    AOO it is a first run, so `-nofirststartwizard` is not optional here.
+    """
+    return [
+        exe, *_SOFFICE_QUIET, f"-env:UserInstallation=file://{profile}", *args,
+    ]
+
+
+def _soffice_tail(proc) -> str:
+    """Last meaningful stderr/stdout line, minus the known noise."""
+    lines = [
+        ln.strip() for ln in (proc.stderr or proc.stdout or "").splitlines()
+        if ln.strip() and not ln.strip().startswith(_SOFFICE_NOISE)
+    ]
+    return lines[-1][:200] if lines else ""
+
+
+def probe_soffice(timeout_s: int = _SOFFICE_PROBE_TIMEOUT_S) -> tuple[str, str]:
+    """(status, detail): "missing" | "unsupported" | "hung" | "broken" | "ok".
+
+    Agent-Reach's probe taxonomy rather than a boolean, because each answer needs
+    a different sentence from the user's point of view: install it, install a
+    *different* one, fix a stuck install, read the error.
+
+    "unsupported" is the one this machine taught us. Apache OpenOffice is a
+    perfectly working office suite that answers `which` and starts fine, and it
+    still cannot do this job, because it never implemented `-convert-to`. A
+    boolean probe would have called it healthy and let the conversion open a
+    dialog to discover otherwise.
+
+    `-terminate_after_init` is the cheapest thing that proves the binary starts
+    AND exits without a window: measured 0.8 s cold on AOO 4.1.16.
+    """
+    exe = soffice_bin()
+    if not exe:
+        return "missing", "no soffice/libreoffice on PATH"
+    flavour, product = soffice_flavour(exe)
+    if flavour == "openoffice":
+        return "unsupported", (
+            f"{product or 'Apache OpenOffice'} at {exe} has no headless "
+            "`-convert-to`; LibreOffice is the build that converts"
+        )
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            proc = subprocess.run(
+                _soffice_cmd(exe, Path(tmp) / "profile", ["-terminate_after_init"]),
+                capture_output=True, text=True, timeout=timeout_s,
+                stdin=subprocess.DEVNULL,
+            )
+        except subprocess.TimeoutExpired:
+            return "hung", (
+                f"{exe} did not start and exit within {timeout_s}s — it is waiting "
+                "on something (a dialog, or another instance's profile lock)"
+            )
+        except OSError as e:
+            return "broken", f"{exe} could not be run: {e}"
+    if proc.returncode != 0:
+        return "broken", f"{exe} exited {proc.returncode}: {_soffice_tail(proc)}"
+    return "ok", product or exe
+
+
+def _legacy_office_to_pdf(src: Path, workdir: Path) -> Path:
+    """`soffice → pdf`, with its own profile and a hard timeout.
+
+    The timeout is the point. omniparse runs the same conversion as
+    `subprocess.run(cmd, check=True)` with no timeout at all, which on a machine
+    whose LibreOffice hangs (measured, see LEGACY_OFFICE_EXTS) blocks the caller
+    forever with no output and no error.
+    """
+    # Both remaining formats have a free way out, so the errors below lead with
+    # it rather than with the 240 MB install: `.doc`/`.ppt` re-saved as
+    # `.docx`/`.pptx` are read by pymupdf and mineru with nothing extra.
+    ooxml = ".docx" if src.suffix == ".doc" else ".pptx"
+    exe = soffice_bin()
+    if not exe:
+        raise ValueError(
+            f"converting {src.suffix} needs LibreOffice — re-save the file as "
+            f"{ooxml} or PDF (no install needed), or install it "
+            "(`apt install libreoffice` / `brew install --cask libreoffice`)"
+        )
+    flavour, product = soffice_flavour(exe)
+    if flavour == "openoffice":
+        # Refused up front, not attempted and timed out: AOO answers an unknown
+        # option by starting its GUI and opening the first-start wizard, and a
+        # dialog on the user's screen is not something a timeout can undo.
+        raise ValueError(
+            f"{product or 'Apache OpenOffice'} cannot convert {src.name}: it has "
+            "no headless `-convert-to` (the option does not exist in the 4.1 "
+            f"line). Re-save the file as {ooxml} or PDF, or install LibreOffice "
+            "alongside it"
+        )
+    out = workdir / "soffice"
+    out.mkdir(parents=True, exist_ok=True)
+    cmd = _soffice_cmd(
+        exe, workdir / "profile",
+        ["-convert-to", "pdf", "-outdir", str(out), str(src)],
+    )
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=_SOFFICE_TIMEOUT_S,
+            stdin=subprocess.DEVNULL,  # never let it wait on a terminal
+        )
+    except subprocess.TimeoutExpired:
+        status, detail = probe_soffice()
+        raise ValueError(
+            f"LibreOffice timed out after {_SOFFICE_TIMEOUT_S}s converting "
+            f"{src.name} (probe: {status} — {detail}). Run `silica doctor`, or "
+            "re-save the file as PDF"
+        ) from None
+    pdfs = sorted(out.glob("*.pdf"))
+    if proc.returncode != 0 or not pdfs:
+        detail = _soffice_tail(proc) or f"exit {proc.returncode}, no PDF written"
+        raise ValueError(f"LibreOffice could not convert {src.name}: {detail}")
+    return pdfs[0]
+
+
+def _via_legacy_office(src: Path, workdir: Path) -> tuple[str, Path]:
+    """Legacy/ODF → PDF → whichever PDF provider is configured.
+
+    Deliberately routed back through the seam rather than pinned to pymupdf: the
+    intermediate is a real PDF, so a user who installed mineru for OCR gets it
+    here too.
+    """
+    pdf = _legacy_office_to_pdf(src, workdir)
+    provider = PDF_PROVIDERS.get(CONFIG.pdf_provider)
+    if provider is None:
+        raise ValueError(
+            f"unknown pdf_provider {CONFIG.pdf_provider!r} "
+            f"(known: {', '.join(PDF_PROVIDERS)})"
+        )
+    return provider(pdf, workdir)
+
+
+# --- media: ffmpeg demux + a speech-to-text provider ------------------------
+
+
+def _media_to_wav(src: Path, workdir: Path) -> Path:
+    """Any container → 16 kHz mono wav, the one input every ASR accepts.
+
+    One ffmpeg call for audio and video alike: `-vn` drops a video stream that
+    may not be there, which is cheaper than branching on the extension. Not
+    moviepy (omniparse's choice): that is an imageio + numpy tree to run a
+    binary Silica already needs on PATH for the YouTube lane.
+    """
+    exe = shutil.which("ffmpeg")
+    if not exe:
+        raise ValueError(
+            "reading audio/video needs ffmpeg on PATH — install it with your "
+            "package manager (`apt install ffmpeg` / `brew install ffmpeg`)"
+        )
+    wav = workdir / "audio.wav"
+    try:
+        proc = subprocess.run(
+            [exe, *_FFMPEG_ARGS, "-i", str(src), "-vn",
+             "-ac", "1", "-ar", _ASR_SAMPLE_RATE, "-f", "wav", str(wav)],
+            capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        raise ValueError(f"ffmpeg timed out after {_FFMPEG_TIMEOUT_S}s on {src.name}") from None
+    if proc.returncode != 0 or not wav.exists():
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        detail = tail[-1][:200] if tail else f"exit {proc.returncode}"
+        raise ValueError(f"ffmpeg could not read {src.name}: {detail}")
+    if wav.stat().st_size <= 44:  # a wav header and no samples
+        raise ValueError(f"{src.name} carries no audio track")
+    return wav
+
+
+def _asr_base(url: str) -> str:
+    """Normalise a configured base URL to one ending in `/v1`.
+
+    Users paste both shapes, and a doubled or missing `/v1` is a 404 whose
+    message says nothing about the cause.
+    """
+    base = url.rstrip("/")
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
+def _asr_via_endpoint(wav: Path) -> str:
+    """OpenAI-compatible `/v1/audio/transcriptions`, asking for VTT.
+
+    VTT rather than the default json: the cue timings are what
+    `vtt_to_text(paragraph_gap_s=...)` turns into paragraph breaks, and a
+    transcript with no paragraph breaks is one oversized inbox note. The text is
+    thrown away either way, only the boundaries survive.
+    """
+    import httpx
+
+    from silica.sources.web_fetch import vtt_to_text
+
+    url = f"{_asr_base(CONFIG.asr_base_url)}/audio/transcriptions"
+    data = {"model": CONFIG.asr_model, "response_format": "vtt"}
+    if CONFIG.asr_lang.strip():
+        data["language"] = CONFIG.asr_lang.strip()
+    try:
+        with wav.open("rb") as fh:
+            resp = httpx.post(
+                url,
+                files={"file": (wav.name, fh, "audio/wav")},
+                data=data,
+                timeout=_ASR_TIMEOUT_S,
+            )
+    except httpx.HTTPError as e:
+        raise ValueError(
+            f"no transcription server at {url}: {e}. Start one (whisper.cpp: "
+            "`whisper-server -m <model>`), or set SILICA_ASR_PROVIDER=whispercpp"
+        ) from None
+    if resp.status_code != 200:
+        raise ValueError(f"transcription server returned {resp.status_code}: {resp.text[:200]}")
+    body = resp.text
+    # A server that ignored response_format answers json; read the text out of it
+    # rather than writing `{"text": ...}` into the vault.
+    if body.lstrip().startswith("{"):
+        try:
+            body = str(json.loads(body).get("text", ""))
+        except ValueError:
+            pass
+    return vtt_to_text(body, paragraph_gap_s=_ASR_PARAGRAPH_GAP_S)
+
+
+def _asr_via_whispercpp(wav: Path) -> str:
+    """Local whisper.cpp binary, for a machine with no server running."""
+    from silica.sources.web_fetch import vtt_to_text
+
+    configured = CONFIG.asr_whispercpp_bin.strip()
+    # Upstream renamed `main` to `whisper-cli` in 2024; accept either.
+    exe = shutil.which(configured) if configured else (
+        shutil.which("whisper-cli") or shutil.which("whisper.cpp")
+    )
+    if not exe:
+        raise ValueError(
+            "whisper.cpp not found — set SILICA_ASR_WHISPERCPP_BIN to its path, "
+            "or use SILICA_ASR_PROVIDER=endpoint with a transcription server"
+        )
+    model = CONFIG.asr_whispercpp_model.strip()
+    if not model:
+        raise ValueError(
+            "whisper.cpp needs a model file — set SILICA_ASR_WHISPERCPP_MODEL "
+            "(e.g. models/ggml-base.bin); it has no default it can find itself"
+        )
+    out = wav.with_suffix("")  # whisper.cpp appends .vtt itself
+    cmd = [exe, "-m", model, "-f", str(wav), "-ovtt", "-of", str(out), "-np"]
+    if CONFIG.asr_lang.strip():
+        cmd += ["-l", CONFIG.asr_lang.strip()]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_ASR_TIMEOUT_S)
+    except subprocess.TimeoutExpired:
+        raise ValueError(f"whisper.cpp timed out after {_ASR_TIMEOUT_S}s") from None
+    vtt = out.with_suffix(".vtt")
+    if proc.returncode != 0 or not vtt.exists():
+        tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+        raise ValueError(f"whisper.cpp failed: {tail[-1][:200] if tail else proc.returncode}")
+    return vtt_to_text(vtt.read_text(encoding="utf-8", errors="replace"),
+                       paragraph_gap_s=_ASR_PARAGRAPH_GAP_S)
+
+
+ASR_PROVIDERS = {
+    "endpoint": _asr_via_endpoint,
+    "whispercpp": _asr_via_whispercpp,
+}
+
+
+def _via_asr(src: Path, workdir: Path) -> tuple[str, Path]:
+    """Media provider, same `(markdown, images_dir)` contract as the rest.
+
+    Returning into the shared tail is the whole point: a transcript then gets
+    sanitizing, paragraph segmentation, `source_file` provenance and the inbox
+    write for free, and a three-hour talk is split like a book instead of
+    landing as one note RECON caps at 40 concepts.
+    """
+    if CONFIG.asr_provider not in ASR_PROVIDERS:
+        raise ValueError(
+            f"unknown asr_provider {CONFIG.asr_provider!r} "
+            f"(known: {', '.join(ASR_PROVIDERS)})"
+        )
+    wav = _media_to_wav(src, workdir)
+    text = ASR_PROVIDERS[CONFIG.asr_provider](wav)
+    images = workdir / "images"
+    images.mkdir(parents=True, exist_ok=True)  # none, but the tail expects a dir
+    if not text.strip():
+        # Empty, NOT a bare heading: the shared empty guard is what turns this
+        # into an error, and a heading would make silence look like success.
+        return "", images
+    # A heading gives the segmenter a cut point and the note a title line; the
+    # stem is all the metadata a bare media file carries.
+    return f"# {src.stem}\n\n{text}\n", images
+
+
 def _mineru_error(stderr: str) -> str:
     """One-line, human-readable error from mineru's stderr.
 
@@ -408,6 +1066,12 @@ def _mineru_error(stderr: str) -> str:
 
 
 def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
+    """The OCR provider, and the only backend for `IMG_EXTS` / `OFFICE_EXTS`.
+
+    Input-agnostic on purpose: the CLI sniffs the file's content and picks its
+    own pipeline (`auto/` for pdf and images, `office/` for pptx/xlsx), and the
+    recursive glob below finds the markdown under either.
+    """
     out = workdir / "out"
     try:
         proc = subprocess.run(
@@ -438,10 +1102,49 @@ PDF_PROVIDERS = {
 
 # --- shared helpers ---------------------------------------------------------
 
+def _source_date(src: Path) -> str | None:
+    """Creation date the document itself declares, ISO `YYYY-MM-DD`; None when
+    it declares none.
+
+    Feeds rung 2 of the event-clock precedence (kernel/provenance
+    `source_event_date` reads the converted note's `date:`), so the FSM dates
+    claims by the document instead of the run. Metadata the format states, and
+    nothing else: no mtime fallback — a download's mtime is the download, not
+    the document. Never worth failing a conversion over, hence the blanket
+    except.
+    """
+    import datetime
+    try:
+        if src.suffix.lower() in OFFICE_EXTS:
+            # OOXML core properties: <dcterms:created>2024-04-02T09:00:00Z</…>
+            import zipfile
+
+            xml = zipfile.ZipFile(src).read("docProps/core.xml").decode("utf-8", "replace")
+            m = re.search(r"<dcterms:created[^>]*>(\d{4})-(\d{2})-(\d{2})", xml)
+        else:
+            # PDF and the other formats MuPDF opens (docx, epub, …):
+            # metadata date format "D:20240402093000+02'00'"
+            import pymupdf
+
+            with pymupdf.open(src) as doc:
+                m = re.search(
+                    r"(\d{4})(\d{2})(\d{2})", doc.metadata.get("creationDate") or ""
+                )
+        if not m:
+            return None
+        # fromisoformat validates ranges: a "D:00000000"-style stamp dies here.
+        return datetime.date.fromisoformat("-".join(m.groups())).isoformat()
+    except Exception:
+        return None
+
+
 def _provenance_fm(src: Path) -> str:
-    """Frontmatter block naming the converted file's real origin (absolute path)."""
+    """Frontmatter block naming the converted file's real origin (absolute
+    path), plus the document's own creation date when it states one."""
     quoted = str(src).replace("\\", "\\\\").replace('"', '\\"')
-    return f'---\nsource_file: "{quoted}"\n---\n\n'
+    date = _source_date(src)
+    date_line = f"date: {date}\n" if date else ""
+    return f'---\n{date_line}source_file: "{quoted}"\n---\n\n'
 
 
 def _resolve_input(target: str) -> Path:

@@ -3,6 +3,12 @@
 Providers are mocked: docling/opendataloader are injected as fake modules and the
 mineru subprocess is patched, so no ML models / real PDFs / installs are needed.
 """
+import io
+import os
+import re
+import shutil
+import struct
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -132,6 +138,59 @@ def test_every_segment_carries_source_file_provenance(tmp_vault, monkeypatch):
     assert len(paths) > 1
     for p in paths:
         assert _inbox_note(p).read_text(encoding="utf-8").startswith('---\nsource_file: "')
+
+
+# --- _source_date: the document's own creation date → frontmatter `date:` ----
+
+def test_pdf_creation_date_lands_in_frontmatter(tmp_vault, monkeypatch):
+    """Rung 2 of the event clock: a dated PDF dates its claims by the document,
+    not the run (`source_event_date` reads the converted note's `date:`)."""
+    pymupdf = pytest.importorskip("pymupdf")
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+    doc = pymupdf.open()
+    doc.new_page().insert_text((72, 72), "Dated body", fontsize=11)
+    doc.set_metadata({"creationDate": "D:20240402093000+02'00'"})
+    (Path(CONFIG.vault_path) / "dated.pdf").write_bytes(doc.tobytes())
+
+    note = _inbox_note(conv.convert("dated.pdf")[0]).read_text(encoding="utf-8")
+    assert note.startswith("---\ndate: 2024-04-02\n")
+
+
+def test_undated_pdf_gets_no_date_line(tmp_vault, monkeypatch):
+    """No metadata → no `date:` — a missing event clock must stay missing (the
+    FSM would stamp it on every claim as valid_from)."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+    (Path(CONFIG.vault_path) / "plain.pdf").write_bytes(_pdf_bytes(["Undated body"]))
+
+    note = _inbox_note(conv.convert("plain.pdf")[0]).read_text(encoding="utf-8")
+    assert note.startswith('---\nsource_file: "')
+    assert "\ndate:" not in note.split("\n---\n")[0]
+
+
+def test_ooxml_dcterms_created_is_read_from_the_zip(tmp_vault):
+    import zipfile
+
+    p = Path(CONFIG.vault_path) / "deck.pptx"
+    with zipfile.ZipFile(p, "w") as z:
+        z.writestr(
+            "docProps/core.xml",
+            '<coreProperties xmlns:dcterms="d"><dcterms:created>'
+            "2023-11-20T09:00:00Z</dcterms:created></coreProperties>",
+        )
+    assert conv._source_date(p) == "2023-11-20"
+
+
+def test_source_date_rejects_garbage_and_absence(tmp_vault):
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.set_metadata({"creationDate": "D:00001332"})  # month 13, day 32
+    garbage = Path(CONFIG.vault_path) / "garbage.pdf"
+    garbage.write_bytes(doc.tobytes())
+    assert conv._source_date(garbage) is None
+
+    missing = Path(CONFIG.vault_path) / "ghost.pdf"
+    assert conv._source_date(missing) is None
 
 
 def test_empty_extraction_raises_pointing_at_ocr(tmp_vault, monkeypatch):
@@ -381,6 +440,850 @@ def test_pdf_mineru_provider_success(tmp_vault, monkeypatch):
     body = _inbox_note(conv.convert("paper.pdf")[0]).read_text(encoding="utf-8")
     assert "![[paper-h.jpg]]" in body
     assert (Path(CONFIG.vault_path) / "Inbox/Images/paper-h.jpg").is_file()
+
+
+# --- images and OOXML: mineru is the only backend ---------------------------
+
+
+@pytest.mark.parametrize("ext", conv.IMG_EXTS + conv.OFFICE_EXTS)
+def test_image_and_office_route_to_mineru_whatever_the_provider_says(
+    ext, tmp_vault, monkeypatch
+):
+    """pymupdf opens an image and reads no text out of it (measured: a 1653x2339
+    render of a text page yields ''), and it does not open pptx/xlsx at all. So
+    unlike DOCX these must NOT fall back to pymupdf when the provider is unset
+    or set to something else -- they must reach mineru or fail loudly."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+    monkeypatch.setattr(conv, "_via_pymupdf", _never_called_pymupdf)
+    seen: list[str] = []
+
+    def run(cmd, **kw):
+        seen.append(cmd[cmd.index("-p") + 1])
+        return _fake_mineru_run()(cmd, **kw)
+
+    monkeypatch.setattr(conv.subprocess, "run", run)
+    tmp_vault.note(f"asset{ext}", "x")
+
+    body = _inbox_note(conv.convert(f"asset{ext}")[0]).read_text(encoding="utf-8")
+    assert [Path(p).name for p in seen] == [f"asset{ext}"]
+    assert "# M" in body
+
+
+def _never_called_pymupdf(*a, **k):
+    raise AssertionError("pymupdf called for an input it cannot read text from")
+
+
+def test_office_output_lands_under_its_own_parse_dir(tmp_vault, monkeypatch):
+    """Measured on mineru 3.4.4: a pptx parses into `<stem>/office/<stem>.md`,
+    not the `auto/` a pdf gets. The provider's glob is recursive so both work --
+    pinned here because a non-recursive "fix" would silently break only OOXML."""
+    tmp_vault.note("deck.pptx", "x")
+
+    def run(cmd, **kw):
+        out = Path(cmd[cmd.index("-o") + 1])
+        stem = Path(cmd[cmd.index("-p") + 1]).stem
+        d = out / stem / "office"          # the real layout, not `auto/`
+        d.mkdir(parents=True)
+        (d / f"{stem}.md").write_text("## Slide One\n\n- bullet\n", encoding="utf-8")
+
+        class R:
+            returncode, stderr, stdout = 0, "", ""
+        return R()
+
+    monkeypatch.setattr(conv.subprocess, "run", run)
+
+    body = _inbox_note(conv.convert("deck.pptx")[0]).read_text(encoding="utf-8")
+    assert "## Slide One" in body
+    assert "- bullet" in body
+
+
+def test_unreadable_image_error_does_not_advise_installing_ocr(tmp_vault, monkeypatch):
+    """mineru IS the backend here, so the PDF branch's "install [pdf] and set
+    SILICA_PDF_PROVIDER=mineru" would be advice the user has already taken."""
+    monkeypatch.setattr(conv, "_pdf_via_mineru", lambda src, wd: ("  \n\n", wd))
+    tmp_vault.note("cat.png", "x")
+
+    with pytest.raises(ValueError, match="no readable text in cat.png") as e:
+        conv.convert("cat.png")
+    assert "SILICA_PDF_PROVIDER" not in str(e.value)
+    assert not (Path(CONFIG.vault_path) / CONFIG.inbox_dir / "cat.md").exists()
+
+
+# The one test that exercises the REAL mineru CLI end to end, answering the
+# TODO(real-api) in convert.py for the two families where mineru is the only
+# backend. Gated twice: it needs the binary AND ~35 s per input, so it stays out
+# of the default run. To verify a change to the image/OOXML lanes:
+#
+#   SILICA_TEST_REAL_MINERU=1 uv run pytest tests/test_convert.py -k real_mineru
+_REAL_MINERU = pytest.mark.skipif(
+    not (os.getenv("SILICA_TEST_REAL_MINERU") and shutil.which("mineru")),
+    reason="set SILICA_TEST_REAL_MINERU=1 and install mineru to run the real CLI",
+)
+
+
+@_REAL_MINERU
+def test_real_mineru_ocrs_an_image_with_no_text_layer(tmp_vault):
+    """A screenshot or a scan: pixels only, no text layer anywhere in the file."""
+    pymupdf = pytest.importorskip("pymupdf")
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), "Silica ingestion probe", fontsize=24)
+    page.insert_text((72, 140), "Second line of scanned text.", fontsize=18)
+    rendered = pymupdf.open("pdf", doc.tobytes())[0].get_pixmap(dpi=200)
+    png = Path(CONFIG.vault_path) / "scan.png"
+    png.write_bytes(rendered.tobytes("png"))
+    # the premise: no text layer at all, so a non-OCR provider would find nothing
+    assert pymupdf.open(png)[0].get_text().strip() == ""
+
+    body = _inbox_note(conv.convert(str(png))[0]).read_text(encoding="utf-8")
+    assert "Silica ingestion probe" in body
+    assert "Second line of scanned text." in body
+
+
+@_REAL_MINERU
+def test_real_mineru_reads_a_pptx_without_libreoffice(tmp_vault, monkeypatch):
+    """mineru parses OOXML natively (python-pptx), so no `soffice` is spawned --
+    which matters because a present-but-hung LibreOffice is a real machine
+    state. Slide titles must arrive as headings, since that is what the
+    segmenter splits on."""
+    pptx_mod = pytest.importorskip("pptx")
+    deck = pptx_mod.Presentation()
+    slide = deck.slides.add_slide(deck.slide_layouts[1])
+    slide.shapes.title.text = "Ingestion Roadmap"
+    slide.placeholders[1].text = "Images via mineru\nOffice native"
+    path = Path(CONFIG.vault_path) / "deck.pptx"
+    deck.save(path)
+
+    def no_soffice(cmd, **kw):
+        assert "soffice" not in str(cmd) and "libreoffice" not in str(cmd)
+        return _real_run(cmd, **kw)
+
+    _real_run = conv.subprocess.run
+    monkeypatch.setattr(conv.subprocess, "run", no_soffice)
+
+    body = _inbox_note(conv.convert(str(path))[0]).read_text(encoding="utf-8")
+    assert "## Ingestion Roadmap" in body
+    assert "Images via mineru" in body
+
+
+def test_gui_picker_accepts_the_new_families(tmp_vault):
+    """`supported_nucleate_extensions()` is the GUI drop-zone's accept set; it
+    unions DOC_EXTS, so a widened converter must show up there with no edit."""
+    from silica.sources.registry import supported_nucleate_extensions
+
+    accepted = set(supported_nucleate_extensions())
+    assert {".png", ".jpg", ".tiff", ".pptx", ".xlsx"} <= accepted
+    assert {".mp3", ".wav", ".mp4", ".mkv"} <= accepted
+
+
+# --- legacy office: the LibreOffice hop -------------------------------------
+
+
+def _fake_soffice(monkeypatch, *, writes_pdf=True, returncode=0, stderr="", hang=False,
+                  flavour="libreoffice"):
+    """Stand in for soffice, asserting the hardening flags on the way through."""
+    def run(cmd, **kw):
+        assert cmd[0].endswith(("soffice", "libreoffice"))
+        # Single dash, NOT `--headless`: Apache OpenOffice does not know the
+        # double-dash form, and an option it does not know makes it start in GUI
+        # mode and open its first-start wizard.
+        assert "-headless" in cmd and "--headless" not in cmd
+        # A fresh profile IS a first run, so the wizard must be suppressed too.
+        assert "-nofirststartwizard" in cmd
+        # the load-bearing flag: without it a conversion blocks on the lock held
+        # by the user's own open office window
+        assert any(a.startswith("-env:UserInstallation=file://") for a in cmd)
+        assert kw.get("timeout") == conv._SOFFICE_TIMEOUT_S
+        assert kw.get("stdin") is subprocess.DEVNULL
+        if hang:
+            raise subprocess.TimeoutExpired(cmd, conv._SOFFICE_TIMEOUT_S)
+        if writes_pdf:
+            out = Path(cmd[cmd.index("-outdir") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "deck.pdf").write_bytes(_pdf_bytes(["Slide text from a .ppt"]))
+
+        class R:
+            pass
+        R.returncode, R.stderr, R.stdout = returncode, stderr, ""
+        return R()
+
+    monkeypatch.setattr(conv.shutil, "which", lambda n: f"/usr/bin/{n}")
+    monkeypatch.setattr(conv, "soffice_flavour", lambda exe=None: (flavour, f"{flavour} 1.0"))
+    monkeypatch.setattr(conv.subprocess, "run", run)
+
+
+@pytest.mark.parametrize("ext", conv.LEGACY_OFFICE_EXTS)
+def test_legacy_office_goes_through_libreoffice_then_the_pdf_seam(
+    ext, tmp_vault, monkeypatch
+):
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+    _fake_soffice(monkeypatch)
+    tmp_vault.note(f"deck{ext}", "x")
+
+    body = _inbox_note(conv.convert(f"deck{ext}")[0]).read_text(encoding="utf-8")
+    assert "Slide text from a .ppt" in body
+
+
+def test_legacy_office_honours_the_configured_pdf_provider(tmp_vault, monkeypatch):
+    """The intermediate is a real PDF, so someone who installed mineru for OCR
+    must get mineru here too, not a silent downgrade to pymupdf."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "mineru")
+    _fake_soffice(monkeypatch)
+    seen: list[str] = []
+    monkeypatch.setitem(
+        conv.PDF_PROVIDERS, "mineru",
+        lambda src, wd: (seen.append(src.suffix) or ("# From mineru\n\nbody", wd)),
+    )
+    tmp_vault.note("old.doc", "x")
+
+    body = _inbox_note(conv.convert("old.doc")[0]).read_text(encoding="utf-8")
+    assert seen == [".pdf"]          # it received the converted PDF, not the .doc
+    assert "# From mineru" in body
+
+
+def test_libreoffice_timeout_says_what_to_do(tmp_vault, monkeypatch):
+    """The branch that matters most: a present-but-hung LibreOffice. omniparse
+    runs this same conversion with no timeout at all, so there it blocks forever
+    with no output and no error."""
+    _fake_soffice(monkeypatch, hang=True)
+    monkeypatch.setattr(conv, "probe_soffice", lambda *a, **k: ("hung", "no CPU burned"))
+    tmp_vault.note("old.ppt", "x")
+
+    with pytest.raises(ValueError, match="LibreOffice timed out.*probe: hung"):
+        conv.convert("old.ppt")
+
+
+def test_libreoffice_silent_failure_is_an_error_not_an_empty_note(tmp_vault, monkeypatch):
+    """soffice exits 0 and writes nothing on some inputs; a missing PDF has to
+    fail here rather than surface as an empty conversion."""
+    _fake_soffice(monkeypatch, writes_pdf=False, stderr="Error: source file could not be loaded")
+    tmp_vault.note("old.doc", "x")
+
+    with pytest.raises(ValueError, match="could not convert old.doc.*could not be loaded"):
+        conv.convert("old.doc")
+
+
+def test_missing_libreoffice_leads_with_the_free_workaround(tmp_vault, monkeypatch):
+    """Re-saving as `.docx` costs nothing and pymupdf reads it in the base
+    install, so the 240 MB install must not be the first thing offered."""
+    monkeypatch.setattr(conv.shutil, "which", lambda n: None)
+    tmp_vault.note("old.doc", "x")
+
+    with pytest.raises(ValueError, match=r"needs LibreOffice.*re-save the file as \.docx"):
+        conv.convert("old.doc")
+
+
+def test_apache_openoffice_is_refused_before_the_subprocess(tmp_vault, monkeypatch):
+    """The measured case. AOO 4.1 never implemented `-convert-to` (the string is
+    absent from the whole install), and handed an option it does not know it
+    starts in GUI mode and opens its first-start wizard. A dialog on the user's
+    screen is not something a timeout can undo, so this must never reach
+    subprocess.run at all."""
+    monkeypatch.setattr(conv.shutil, "which", lambda n: "/usr/bin/soffice")
+    monkeypatch.setattr(
+        conv, "soffice_flavour", lambda exe=None: ("openoffice", "OpenOffice 4.1.16")
+    )
+    monkeypatch.setattr(conv.subprocess, "run", _never_called)
+    tmp_vault.note("old.ppt", "x")
+
+    with pytest.raises(ValueError, match="OpenOffice 4.1.16 cannot convert old.ppt"):
+        conv.convert("old.ppt")
+
+
+def test_apache_openoffice_error_names_the_right_ooxml_target_per_format(
+    tmp_vault, monkeypatch
+):
+    """Both remaining formats have a way out, and it is a different one each:
+    telling someone with a `.doc` to re-save it as `.pptx` is noise."""
+    monkeypatch.setattr(conv.shutil, "which", lambda n: "/usr/bin/soffice")
+    monkeypatch.setattr(conv, "soffice_flavour", lambda exe=None: ("openoffice", "AOO"))
+    tmp_vault.note("old.ppt", "x")
+    tmp_vault.note("old.doc", "x")
+
+    with pytest.raises(ValueError, match=r"Re-save the file as \.pptx or PDF"):
+        conv.convert("old.ppt")
+    with pytest.raises(ValueError, match=r"Re-save the file as \.docx or PDF"):
+        conv.convert("old.doc")
+
+
+
+
+def test_probe_reports_missing_when_there_is_no_binary(monkeypatch):
+    monkeypatch.setattr(conv.shutil, "which", lambda n: None)
+    assert conv.probe_soffice()[0] == "missing"
+
+
+def test_probe_reports_unsupported_for_apache_openoffice_without_running_it(monkeypatch):
+    """A boolean probe would call AOO healthy: it answers `which`, it starts, it
+    exits 0. Identifying it must not involve running it."""
+    monkeypatch.setattr(conv.shutil, "which", lambda n: "/usr/bin/soffice")
+    monkeypatch.setattr(
+        conv, "soffice_flavour", lambda exe=None: ("openoffice", "OpenOffice 4.1.16")
+    )
+    monkeypatch.setattr(conv.subprocess, "run", _never_called)
+
+    status, detail = conv.probe_soffice()
+    assert status == "unsupported"
+    assert "no headless" in detail and "4.1.16" in detail
+
+
+def test_probe_reports_hung_on_a_binary_that_never_exits(monkeypatch):
+    monkeypatch.setattr(conv.shutil, "which", lambda n: "/usr/bin/soffice")
+    monkeypatch.setattr(conv, "soffice_flavour", lambda exe=None: ("libreoffice", "LO"))
+
+    def never_exits(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout", 1))
+
+    monkeypatch.setattr(conv.subprocess, "run", never_exits)
+    status, detail = conv.probe_soffice(timeout_s=1)
+    assert status == "hung"
+    assert "did not start and exit" in detail
+
+
+def test_probe_reports_broken_on_a_nonzero_exit(monkeypatch):
+    monkeypatch.setattr(conv.shutil, "which", lambda n: "/usr/bin/soffice")
+    monkeypatch.setattr(conv, "soffice_flavour", lambda exe=None: ("libreoffice", "LO"))
+
+    class R:
+        returncode = 77
+        stderr = "javaldx: Could not find a Java Runtime Environment!\nlibreglo.so: cannot open shared object"
+        stdout = ""
+
+    monkeypatch.setattr(conv.subprocess, "run", lambda cmd, **kw: R())
+    status, detail = conv.probe_soffice()
+    assert status == "broken"
+    # the javaldx warning is noise AOO prints even on success; it must not be
+    # reported as the cause
+    assert "cannot open shared object" in detail
+    assert "javaldx" not in detail
+
+
+def test_flavour_is_read_from_bootstraprc_not_from_running_it(tmp_path, monkeypatch):
+    program = tmp_path / "program"
+    program.mkdir()
+    exe = program / "soffice"
+    exe.write_text("#!/bin/sh\n", encoding="utf-8")
+    (program / "bootstraprc").write_text(
+        "[Bootstrap]\nProductKey=OpenOffice 4.1.16\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(conv.subprocess, "run", _never_called)
+
+    assert conv.soffice_flavour(str(exe)) == ("openoffice", "OpenOffice 4.1.16")
+
+    (program / "bootstraprc").write_text(
+        "[Bootstrap]\nProductKey=LibreOffice 25.8\n", encoding="utf-8"
+    )
+    assert conv.soffice_flavour(str(exe)) == ("libreoffice", "LibreOffice 25.8")
+
+
+def test_flavour_is_unknown_when_there_is_no_bootstraprc(tmp_path):
+    exe = tmp_path / "soffice"
+    exe.write_text("#!/bin/sh\n", encoding="utf-8")
+    assert conv.soffice_flavour(str(exe)) == ("unknown", "")
+
+
+_HAS_SOFFICE = pytest.mark.skipif(
+    not shutil.which("soffice") and not shutil.which("libreoffice"),
+    reason="needs an office suite installed to probe",
+)
+
+
+@_HAS_SOFFICE
+def test_real_office_probe_answers_within_its_leash():
+    """Probe whatever office suite this machine actually has.
+
+    Accepts any real answer on purpose: on the machine this was written on the
+    honest one is "unsupported" (Apache OpenOffice 4.1.16), and a test demanding
+    "ok" would only pass on a LibreOffice box. What it pins is what the probe must
+    never do — exceed its own leash, crash, or open a window.
+    """
+    import time
+
+    started = time.monotonic()
+    status, detail = conv.probe_soffice(timeout_s=8)
+    elapsed = time.monotonic() - started
+
+    assert status in {"ok", "unsupported", "hung", "broken"}
+    assert detail
+    # the leash plus generous slack for process teardown
+    assert elapsed < 12, f"probe took {elapsed:.1f}s"
+
+
+# --- office without an office suite: ODF, RTF, legacy .xls -------------------
+
+_ODF_HEAD = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<office:document-content '
+    'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+    'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
+    'xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0">'
+    "<office:body><office:text>"
+)
+_ODF_TAIL = "</office:text></office:body></office:document-content>"
+
+
+def _odf_bytes(body: str, ext: str = ".odt") -> bytes:
+    """A real ODF file: a ZIP with mimetype + content.xml, like the suites write."""
+    import zipfile
+
+    kind = {".odt": "text", ".odp": "presentation", ".ods": "spreadsheet"}[ext]
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("mimetype", f"application/vnd.oasis.opendocument.{kind}")
+        z.writestr("content.xml", _ODF_HEAD + body + _ODF_TAIL)
+    return buf.getvalue()
+
+
+def _biff2_bytes(rows: list[list]) -> bytes:
+    """A real (tiny) legacy `.xls`, hand-assembled.
+
+    Writing one needs no library: BIFF2 is BOF / one record per cell / EOF, and
+    xlrd still parses it. The alternative was `xlwt`, a dependency added purely
+    so a test could produce input — and one that has been unmaintained since 2019.
+    """
+    def rec(op: int, payload: bytes = b"") -> bytes:
+        return struct.pack("<HH", op, len(payload)) + payload
+
+    out = [rec(0x0009, struct.pack("<HH", 2, 0x0010))]      # BOF: biff2, worksheet
+    for r, cells in enumerate(rows):
+        for c, v in enumerate(cells):
+            head = struct.pack("<HH", r, c) + b"\x00\x00\x00"   # row, col, attrs
+            if isinstance(v, (int, float)):
+                out.append(rec(0x0003, head + struct.pack("<d", v)))     # NUMBER
+            else:
+                b = v.encode("latin-1")
+                out.append(rec(0x0004, head + bytes([len(b)]) + b))      # LABEL
+    out.append(rec(0x000A))                                  # EOF
+    return b"".join(out)
+
+
+def _no_subprocess(monkeypatch):
+    """Nothing in these lanes may shell out — that is the whole point."""
+    monkeypatch.setattr(conv.subprocess, "run", _never_called)
+    monkeypatch.setattr(conv, "soffice_bin", _never_called)
+
+
+def test_only_the_two_binary_formats_still_need_an_office_suite():
+    """Regression guard on the routing itself: widening this back to ODF/RTF/xls
+    should be a failing test, not a 240 MB dependency quietly coming back."""
+    assert set(conv.LEGACY_OFFICE_EXTS) == {".doc", ".ppt"}
+    assert set(conv._PURE_PY_OFFICE_EXTS) == {".odt", ".odp", ".ods", ".rtf", ".xls"}
+
+
+def test_odt_is_read_with_no_office_suite_and_no_subprocess(tmp_vault, monkeypatch):
+    _no_subprocess(monkeypatch)
+    (Path(CONFIG.vault_path) / "notes.odt").write_bytes(_odf_bytes(
+        '<text:h text:outline-level="1">Chapter One</text:h>'
+        "<text:p>First paragraph.</text:p>"
+        '<text:h text:outline-level="3">Deep heading</text:h>'
+        "<text:p>Second paragraph.</text:p>"
+    ))
+
+    body = _inbox_note(conv.convert("notes.odt")[0]).read_text(encoding="utf-8")
+    assert "# Chapter One" in body
+    assert "### Deep heading" in body
+    assert "First paragraph." in body and "Second paragraph." in body
+
+
+def test_odf_outline_level_is_clamped_to_markdown_depth(tmp_vault, monkeypatch):
+    """ODF outline levels run past 6; `####### x` is not a heading in markdown."""
+    _no_subprocess(monkeypatch)
+    (Path(CONFIG.vault_path) / "deep.odt").write_bytes(_odf_bytes(
+        '<text:h text:outline-level="9">Too deep</text:h>'
+    ))
+
+    body = _inbox_note(conv.convert("deep.odt")[0]).read_text(encoding="utf-8")
+    assert "###### Too deep" in body
+    assert "####### " not in body
+
+
+def test_odf_text_inside_a_text_box_is_not_emitted_twice(tmp_vault, monkeypatch):
+    """A draw:frame puts `text:p` inside a `text:p`. Walking every block without
+    dropping the nested ones prints the frame's words a second time."""
+    _no_subprocess(monkeypatch)
+    (Path(CONFIG.vault_path) / "boxed.odt").write_bytes(_odf_bytes(
+        "<text:p><draw:frame><draw:text-box>"
+        "<text:p>Caption words</text:p>"
+        "</draw:text-box></draw:frame></text:p>"
+    ))
+
+    body = _inbox_note(conv.convert("boxed.odt")[0]).read_text(encoding="utf-8")
+    assert body.count("Caption words") == 1
+
+
+def test_ods_rows_stay_rows_and_the_padding_is_dropped(tmp_vault, monkeypatch):
+    """A sheet reaches the segmenter as lines, not as one paragraph per row, and
+    the empty cells ODF pads every row with do not become trailing pipes."""
+    _no_subprocess(monkeypatch)
+    row = (
+        "<table:table-row>"
+        "<table:table-cell><text:p>{a}</text:p></table:table-cell>"
+        "<table:table-cell><text:p>{b}</text:p></table:table-cell>"
+        '<table:table-cell table:number-columns-repeated="1022"/>'
+        "</table:table-row>"
+    )
+    (Path(CONFIG.vault_path) / "sheet.ods").write_bytes(_odf_bytes(
+        "<table:table>"
+        + row.format(a="item", b="qty")
+        + row.format(a="bolt", b="3")
+        + "</table:table>",
+        ext=".ods",
+    ))
+
+    body = _inbox_note(conv.convert("sheet.ods")[0]).read_text(encoding="utf-8")
+    assert "item | qty\nbolt | 3" in body
+    assert "| |" not in body and not any(
+        ln.endswith("|") for ln in body.splitlines()
+    )
+
+
+def test_a_corrupt_odf_says_so_instead_of_raising_a_zip_error(tmp_vault, monkeypatch):
+    _no_subprocess(monkeypatch)
+    (Path(CONFIG.vault_path) / "broken.odt").write_bytes(b"not a zip at all")
+
+    with pytest.raises(ValueError, match="not a readable ODF document.*export it as PDF"):
+        conv.convert("broken.odt")
+
+
+def test_rtf_is_read_with_no_office_suite(tmp_vault, monkeypatch):
+    _no_subprocess(monkeypatch)
+    tmp_vault.note(
+        "memo.rtf",
+        r"{\rtf1\ansi\deff0 {\fonttbl{\f0 Times;}}\f0\fs24 Hello from RTF.\par}",
+    )
+
+    body = _inbox_note(conv.convert("memo.rtf")[0]).read_text(encoding="utf-8")
+    assert "Hello from RTF." in body
+
+
+def test_legacy_xls_is_read_with_no_office_suite(tmp_vault, monkeypatch):
+    _no_subprocess(monkeypatch)
+    (Path(CONFIG.vault_path) / "stock.xls").write_bytes(
+        _biff2_bytes([["item", "qty"], ["bolt", 3.0], ["nut", 4.5]])
+    )
+
+    body = _inbox_note(conv.convert("stock.xls")[0]).read_text(encoding="utf-8")
+    assert "item | qty" in body
+    # xlrd hands back every number as a float: unrepaired, a count of 3 reaches
+    # the vault as "3.0", and a fractional value must still keep its decimals.
+    assert "bolt | 3" in body and "bolt | 3.0" not in body
+    assert "nut | 4.5" in body
+
+
+def test_xls_sheet_names_become_headings_the_segmenter_can_split_on(
+    tmp_vault, monkeypatch
+):
+    _no_subprocess(monkeypatch)
+    (Path(CONFIG.vault_path) / "book.xls").write_bytes(_biff2_bytes([["only", "row"]]))
+
+    body = _inbox_note(conv.convert("book.xls")[0]).read_text(encoding="utf-8")
+    assert re.search(r"^## \S", body, re.M)
+
+
+def test_an_empty_office_document_does_not_advertise_ocr(tmp_vault, monkeypatch):
+    """These lanes have no OCR anywhere, so the usual "install mineru" advice
+    would send the user to fix a component this path never touches."""
+    _no_subprocess(monkeypatch)
+    (Path(CONFIG.vault_path) / "blank.odt").write_bytes(_odf_bytes("<text:p/>"))
+
+    with pytest.raises(ValueError, match="no text in blank.odt") as e:
+        conv.convert("blank.odt")
+    assert "mineru" not in str(e.value)
+
+
+# --- media: ffmpeg demux + an ASR provider ----------------------------------
+
+_VTT = """WEBVTT
+
+00:00:00.000 --> 00:00:02.000
+The first thing to know
+
+00:00:02.100 --> 00:00:04.000
+is that the demux is one call.
+
+00:00:19.000 --> 00:00:21.000
+After a long pause, a new thought.
+"""
+
+
+def _fake_asr(monkeypatch, vtt=_VTT):
+    """Stand in for the transcription server, at the provider seam."""
+    from silica.sources.web_fetch import vtt_to_text
+
+    monkeypatch.setattr(
+        conv, "_asr_via_endpoint",
+        lambda wav: vtt_to_text(vtt, paragraph_gap_s=conv._ASR_PARAGRAPH_GAP_S),
+    )
+    monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", conv._asr_via_endpoint)
+
+
+def _fake_wav(monkeypatch):
+    """Stand in for ffmpeg: write a wav with more than a bare header."""
+    def to_wav(src, workdir):
+        wav = Path(workdir) / "audio.wav"
+        wav.write_bytes(b"RIFF" + b"\0" * 64)
+        return wav
+    monkeypatch.setattr(conv, "_media_to_wav", to_wav)
+
+
+@pytest.mark.parametrize("ext", conv.MEDIA_EXTS)
+def test_every_media_ext_reaches_the_asr_lane(ext, tmp_vault, monkeypatch):
+    _fake_wav(monkeypatch)
+    _fake_asr(monkeypatch)
+    tmp_vault.note(f"talk{ext}", "x")
+
+    body = _inbox_note(conv.convert(f"talk{ext}")[0]).read_text(encoding="utf-8")
+    assert f"# talk" in body
+    assert "the demux is one call." in body
+
+
+def test_transcript_gets_paragraph_breaks_at_pauses(tmp_vault, monkeypatch):
+    """A transcript with no blank line anywhere is ONE paragraph, and
+    `_split_by_size` leaves an oversized paragraph whole — so a long talk would
+    land as a single note whose concepts RECON caps at 40. A pause is the only
+    paragraph boundary a transcript carries."""
+    _fake_wav(monkeypatch)
+    _fake_asr(monkeypatch)
+    tmp_vault.note("talk.mp3", "x")
+
+    body = _inbox_note(conv.convert("talk.mp3")[0]).read_text(encoding="utf-8")
+    assert "is that the demux is one call.\n\nAfter a long pause" in body
+
+
+def test_silent_media_raises_instead_of_writing_an_empty_note(tmp_vault, monkeypatch):
+    _fake_wav(monkeypatch)
+    monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", lambda wav: "   \n")
+    tmp_vault.note("music.mp3", "x")
+
+    with pytest.raises(ValueError, match="no speech transcribed"):
+        conv.convert("music.mp3")
+    assert not (Path(CONFIG.vault_path) / CONFIG.inbox_dir / "music.md").exists()
+
+
+def test_unknown_asr_provider_names_the_known_ones(tmp_vault, monkeypatch):
+    monkeypatch.setattr(CONFIG, "asr_provider", "nope")
+    tmp_vault.note("talk.mp3", "x")
+
+    with pytest.raises(ValueError, match="unknown asr_provider.*endpoint"):
+        conv.convert("talk.mp3")
+
+
+def test_media_never_reaches_a_document_provider(tmp_vault, monkeypatch):
+    """A .mp4 handed to pymupdf or mineru is a parse of garbage, not an error."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "mineru")
+    monkeypatch.setattr(conv, "_via_pymupdf", _never_called_pymupdf)
+    monkeypatch.setattr(conv.subprocess, "run", _never_called)
+    _fake_wav(monkeypatch)
+    _fake_asr(monkeypatch)
+    tmp_vault.note("clip.mkv", "x")
+
+    assert conv.convert("clip.mkv")
+
+
+@pytest.mark.parametrize("base,expected", [
+    ("http://h:8080", "http://h:8080/v1"),
+    ("http://h:8080/", "http://h:8080/v1"),
+    ("http://h:8080/v1", "http://h:8080/v1"),
+    ("http://h:8080/v1/", "http://h:8080/v1"),
+])
+def test_asr_base_url_is_normalised(base, expected):
+    """Users paste both shapes; a doubled or missing /v1 is a 404 whose message
+    says nothing about the cause."""
+    assert conv._asr_base(base) == expected
+
+
+def test_endpoint_provider_posts_multipart_and_asks_for_vtt(tmp_vault, monkeypatch):
+    """VTT rather than the default json: the cue timings are the only thing that
+    can become paragraph breaks downstream."""
+    seen = {}
+
+    class R:
+        status_code, text = 200, _VTT
+
+    def fake_post(url, files=None, data=None, timeout=None):
+        seen.update(url=url, data=dict(data or {}), name=files["file"][0],
+                    payload=files["file"][1].read())
+        return R()
+
+    import httpx
+    monkeypatch.setattr(httpx, "post", fake_post)
+    monkeypatch.setattr(CONFIG, "asr_base_url", "http://127.0.0.1:9999")
+    monkeypatch.setattr(CONFIG, "asr_lang", "it")
+    wav = Path(CONFIG.vault_path) / "a.wav"
+    wav.write_bytes(b"RIFF-payload")
+
+    out = conv._asr_via_endpoint(wav)
+    assert seen["url"] == "http://127.0.0.1:9999/v1/audio/transcriptions"
+    assert seen["data"]["response_format"] == "vtt"
+    assert seen["data"]["language"] == "it"
+    assert seen["payload"] == b"RIFF-payload"   # the file really was sent
+    assert "the demux is one call." in out
+    assert "-->" not in out and "WEBVTT" not in out
+
+
+def test_endpoint_provider_survives_a_server_that_ignores_response_format(tmp_vault, monkeypatch):
+    """Some OpenAI-compatible servers answer json whatever you ask for. Writing
+    `{"text": ...}` into the vault would be worse than reading it out."""
+    class R:
+        status_code = 200
+        text = '{"text": "plain json answer"}'
+
+    import httpx
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: R())
+    wav = Path(CONFIG.vault_path) / "a.wav"
+    wav.write_bytes(b"x")
+
+    assert conv._asr_via_endpoint(wav) == "plain json answer"
+
+
+def test_no_server_says_how_to_start_one(tmp_vault, monkeypatch):
+    import httpx
+
+    def boom(*a, **k):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "post", boom)
+    wav = Path(CONFIG.vault_path) / "a.wav"
+    wav.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="no transcription server.*whisper-server"):
+        conv._asr_via_endpoint(wav)
+
+
+def test_whispercpp_without_a_model_says_so(tmp_vault, monkeypatch):
+    monkeypatch.setattr(CONFIG, "asr_whispercpp_bin", "")
+    monkeypatch.setattr(CONFIG, "asr_whispercpp_model", "")
+    monkeypatch.setattr(conv.shutil, "which", lambda n: "/usr/bin/whisper-cli")
+    wav = Path(CONFIG.vault_path) / "a.wav"
+    wav.write_bytes(b"x")
+
+    with pytest.raises(ValueError, match="whisper.cpp needs a model file"):
+        conv._asr_via_whispercpp(wav)
+
+
+def test_missing_ffmpeg_names_the_install(tmp_vault, monkeypatch):
+    monkeypatch.setattr(conv.shutil, "which", lambda n: None)
+    with pytest.raises(ValueError, match="needs ffmpeg on PATH"):
+        conv._media_to_wav(Path("a.mp3"), Path(CONFIG.vault_path))
+
+
+_HAS_FFMPEG = pytest.mark.skipif(
+    not shutil.which("ffmpeg"), reason="needs the real ffmpeg binary"
+)
+
+
+@_HAS_FFMPEG
+def test_real_ffmpeg_demuxes_a_video_to_mono_16k_wav(tmp_vault, tmp_path):
+    """The demux half is Silica's own code, so it is verified against the real
+    binary rather than a fake: a container with a video stream and a tone must
+    come out as 16 kHz mono PCM with actual samples in it."""
+    src = tmp_path / "clip.mp4"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=duration=1:size=128x96:rate=10",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+         "-c:v", "libx264", "-c:a", "aac", "-shortest", str(src)],
+        check=True, capture_output=True,
+    )
+
+    wav = conv._media_to_wav(src, tmp_path)
+    assert wav.is_file() and wav.stat().st_size > 1000
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+         "stream=channels,sample_rate,codec_name", "-of", "csv=p=0", str(wav)],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert probe.startswith("pcm_s16le,16000,1"), probe
+
+
+@_HAS_FFMPEG
+def test_real_ffmpeg_rejects_a_file_with_no_audio_track(tmp_vault, tmp_path):
+    """A silent screen recording must fail loudly, not transcribe to nothing."""
+    src = tmp_path / "mute.mp4"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+         "-f", "lavfi", "-i", "testsrc=duration=1:size=128x96:rate=10",
+         "-c:v", "libx264", str(src)],
+        check=True, capture_output=True,
+    )
+
+    with pytest.raises(ValueError, match="no audio track|could not read"):
+        conv._media_to_wav(src, tmp_path)
+
+
+@_HAS_FFMPEG
+def test_real_ffmpeg_reports_a_file_that_is_not_media(tmp_vault, tmp_path):
+    src = tmp_path / "fake.mp3"
+    src.write_text("this is not audio", encoding="utf-8")
+    with pytest.raises(ValueError, match="could not read fake.mp3"):
+        conv._media_to_wav(src, tmp_path)
+
+
+@_HAS_FFMPEG
+def test_a_real_video_becomes_a_real_note_over_a_real_socket(tmp_vault, tmp_path):
+    """The whole media lane end to end, with only the ASR *model* substituted.
+
+    Everything here is the real thing: ffmpeg demuxes a real mp4, httpx encodes
+    a real multipart body over a real TCP socket, and a stdlib HTTP server
+    answers with VTT the way whisper-server does. That leaves exactly one fake —
+    the transcription itself — so the multipart encoding, the response parsing,
+    the paragraph breaks and the inbox write are all verified rather than
+    asserted. The monkeypatched-httpx test above cannot see any of that.
+    """
+    import http.server
+    import threading
+
+    received: dict[str, bytes] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            received["path"] = self.path.encode()
+            received["ctype"] = (self.headers.get("content-type") or "").encode()
+            received["body"] = self.rfile.read(int(self.headers["content-length"]))
+            payload = _VTT.encode("utf-8")
+            self.send_response(200)
+            self.send_header("content-type", "text/vtt")
+            self.send_header("content-length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *a):  # keep pytest output clean
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        src = Path(CONFIG.vault_path) / "keynote.mp4"
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc=duration=1:size=128x96:rate=10",
+             "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+             "-c:v", "libx264", "-c:a", "aac", "-shortest", str(src)],
+            check=True, capture_output=True,
+        )
+        CONFIG.asr_base_url = f"http://127.0.0.1:{server.server_port}"
+        CONFIG.asr_provider = "endpoint"
+        CONFIG.asr_lang = ""
+
+        notes = conv.convert(str(src))
+    finally:
+        server.shutdown()
+        CONFIG.asr_base_url = SilicaConfig().asr_base_url
+        CONFIG.asr_provider = SilicaConfig().asr_provider
+
+    # the server saw a real multipart upload at the OpenAI-compatible path
+    assert received["path"] == b"/v1/audio/transcriptions"
+    assert received["ctype"].startswith(b"multipart/form-data")
+    assert b'name="file"' in received["body"] and b"RIFF" in received["body"]
+    assert b'name="response_format"' in received["body"] and b"vtt" in received["body"]
+
+    body = _inbox_note(notes[0]).read_text(encoding="utf-8")
+    assert body.startswith('---\nsource_file: "')      # provenance survived
+    assert "# keynote" in body
+    assert "The first thing to know" in body
+    assert "is that the demux is one call.\n\nAfter a long pause" in body
+    assert "WEBVTT" not in body and "-->" not in body
 
 
 def test_same_figure_name_from_two_pdfs_does_not_clobber(tmp_vault, monkeypatch):

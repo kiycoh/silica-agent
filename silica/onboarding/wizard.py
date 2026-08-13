@@ -349,14 +349,20 @@ def unindexable_docs(vault: Path, cap: int = _DOC_SCAN_CAP) -> list[Path]:
     `/convert` turns them into notes. Onboarding is the one place that sees the
     vault before the user asks their first question, so it is where the gap gets
     named.
+
+    `CONVERTIBLE_DOC_EXTS`, not the full `DOC_EXTS`: the converter also takes
+    images and media, and those sitting in a vault are attachments, not documents
+    someone is waiting to ingest. Counting them would greet a user who pastes
+    screenshots with "500 documents to convert", and would count the figures
+    Silica itself extracted into `<inbox>/Images`.
     """
-    from silica.sources.convert import DOC_EXTS
+    from silica.sources.convert import CONVERTIBLE_DOC_EXTS
 
     out: list[Path] = []
     for i, p in enumerate(vault.rglob("*")):
         if i >= cap:
             break
-        if p.suffix.lower() in DOC_EXTS and p.is_file():
+        if p.suffix.lower() in CONVERTIBLE_DOC_EXTS and p.is_file():
             out.append(p)
     return out
 

@@ -1075,6 +1075,33 @@ class TestUnindexableDocs:
         found = {p.name for p in unindexable_docs(tmp_path)}
         assert found == {"paper.pdf", "book.EPUB"}   # recursive, case-insensitive
 
+    def test_attachments_are_not_offered_as_documents(self, tmp_path):
+        """The converter also takes images, decks and media, but an image sitting
+        in a vault is an attachment. Counting them would greet someone who pastes
+        screenshots with "N documents to convert" — and `<inbox>/Images` is where
+        Silica puts the figures it extracted itself, so it would offer to
+        re-ingest its own output."""
+        from silica.onboarding.wizard import unindexable_docs
+
+        images = tmp_path / "Inbox" / "Images"
+        images.mkdir(parents=True)
+        for name in ("paper-fig1.png", "pasted-20260813.jpg", "diagram.tiff"):
+            (images / name).write_bytes(b"img")
+        (tmp_path / "standup.mp4").write_bytes(b"vid")
+        (tmp_path / "voice-memo.mp3").write_bytes(b"aud")
+        (tmp_path / "report.pdf").write_bytes(b"%PDF-1.4")
+        (tmp_path / "deck.pptx").write_bytes(b"pptx")
+
+        found = {p.name for p in unindexable_docs(tmp_path)}
+        assert found == {"report.pdf", "deck.pptx"}
+
+    def test_every_offered_extension_is_one_convert_accepts(self):
+        """The narrow list must stay a subset of what the converter dispatches on,
+        or onboarding would offer a conversion that immediately errors."""
+        from silica.sources.convert import CONVERTIBLE_DOC_EXTS, DOC_EXTS
+
+        assert set(CONVERTIBLE_DOC_EXTS) <= set(DOC_EXTS)
+
     def test_walk_is_bounded(self, tmp_path):
         from silica.onboarding.wizard import unindexable_docs
 

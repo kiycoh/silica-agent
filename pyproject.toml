@@ -47,6 +47,13 @@ dependencies = [
   # non-commercial restriction on an AGPL package. The cap costs borderless-table
   # detection; lift it only if silica ever stops being distributed.
   "pymupdf4llm>=0.3.4,<1",
+  # Legacy office without an office suite. Both are pure python, tiny and
+  # permissive (BSD): striprtf 15 KB reads .rtf, xlrd 192 KB reads pre-2007
+  # .xls (2.x dropped .xlsx and kept exactly the format nothing else opens).
+  # ODF needs neither -- it is a ZIP the standard library reads. Together they
+  # replace a ~240 MB LibreOffice install for 5 of the 7 legacy formats.
+  "striprtf>=0.0.29",
+  "xlrd>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -266,5 +273,8 @@ module = [
     "yaml", "yaml.*", "networkx", "networkx.*",
     # PDF providers (mineru via the [pdf] extra; docling/opendataloader manual):
     "docling.*", "docling_core.*", "opendataloader_pdf", "pymupdf4llm",
+    # Legacy office readers: both ship no stubs (xlrd has been feature-frozen
+    # since 2.0 dropped .xlsx, which is exactly why it is safe to depend on).
+    "xlrd", "striprtf.*",
 ]
 ignore_missing_imports = true

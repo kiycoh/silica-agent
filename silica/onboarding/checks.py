@@ -10,6 +10,7 @@ presence and HTTP reachability only.
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
@@ -463,6 +464,49 @@ def check_quarantine(config: SilicaConfig) -> CheckResult:
     return CheckResult("quarantine", "ok", "no quarantined state")
 
 
+def check_converters(config: SilicaConfig) -> CheckResult:
+    """External binaries the ingestion lanes shell out to, and their real state.
+
+    Never `fail`: these are optional lanes, and someone who never converts a
+    .doc does not have a broken install. What this row exists for is the state
+    between installed and working — `which` finding a binary is not evidence it
+    can do the job. Apache OpenOffice is the case that proved it: a healthy
+    office suite that starts fine and simply never implemented headless
+    `-convert-to`, so the conversion it is asked for opens a GUI wizard instead.
+    Reading that here beats meeting it mid-conversion.
+    """
+    from silica.sources.convert import probe_soffice
+
+    ffmpeg = shutil.which("ffmpeg")
+    status, detail = probe_soffice()
+    parts = [
+        f"ffmpeg {'ok' if ffmpeg else 'missing'} (audio/video)",
+        f"office {status} (.doc/.ppt only)",
+    ]
+    # The blast radius shrank once ODF/RTF/.xls became in-process reads, so
+    # every office sentence below has to say how small it now is — otherwise a
+    # `warn` reads as "conversion is broken" when 5 of 7 formats are unaffected.
+    scope = (
+        ". Only .doc/.ppt need it; .odt/.odp/.ods/.rtf/.xls are read in process "
+        "and .pptx/.docx/.xlsx were never affected"
+    )
+    if status == "unsupported":
+        return CheckResult(
+            "converters", "warn", "; ".join(parts),
+            f"{detail}{scope}. Those two are refused with that message rather "
+            "than attempted; re-save them as .docx/.pptx to skip the suite",
+        )
+    if status in ("hung", "broken"):
+        return CheckResult("converters", "warn", "; ".join(parts), detail + scope)
+    if not ffmpeg or status == "missing":
+        return CheckResult(
+            "converters", "unknown", "; ".join(parts),
+            "optional: install ffmpeg for audio/video, libreoffice for .doc/.ppt "
+            "(or just re-save those as .docx/.pptx)",
+        )
+    return CheckResult("converters", "ok", "; ".join(parts))
+
+
 def check_okf(config: SilicaConfig) -> CheckResult:
     """Open Knowledge Format §11: the vault IS a bundle, or it says why not.
 
@@ -585,6 +629,7 @@ def run_checks(config: SilicaConfig) -> list[CheckResult]:
         ("embeddings", check_embeddings),
         ("rerank", check_rerank),
         ("quarantine", check_quarantine),
+        ("converters", check_converters),
         ("OKF §11", check_okf),
         ("session capture", check_capture_hook),
         ("own sessions", check_session_capture),
