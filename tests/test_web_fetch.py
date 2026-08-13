@@ -371,7 +371,7 @@ second line &amp; more
 
 
 def test_vtt_to_text_strips_timings_markup_and_rolling_duplicates():
-    assert wf._vtt_to_text(_VTT).splitlines() == [
+    assert wf.vtt_to_text(_VTT).splitlines() == [
         "hello world",
         "second line & more",
     ]
@@ -493,6 +493,22 @@ def test_wikipedia_reads_the_api_instead_of_the_rendered_page(monkeypatch):
     assert "Prose." in out
 
 
+def test_wikipedia_titles_the_page_from_the_api_not_its_lead_sentence(monkeypatch):
+    """The API extract opens with the lead paragraph, so the positional guess
+    named these notes "PageRank is an algorithm used by Google Search to ran".
+    The canonical title comes back in the response, past `redirects=1`."""
+    _serve(
+        monkeypatch,
+        _Resp(ctype="application/json", payload=_wp_page(
+            title="PageRank",
+            extract="PageRank is an algorithm used by Google Search to rank web pages.",
+        )),
+    )
+    page = wf.fetch_page("https://en.wikipedia.org/wiki/Page_rank")
+    assert page.title == "PageRank"
+    assert page.text.startswith("Source: https://en.wikipedia.org/wiki/Page_rank")
+
+
 def test_wikipedia_title_is_percent_decoded_before_it_is_a_parameter(monkeypatch):
     """`/wiki/Cura%C3%A7ao` must reach the API as the title `Curaçao`, urlencoded
     once. Passing the raw path through double-encodes it into a missing page."""
@@ -605,20 +621,215 @@ def test_wikipedia_extract_drops_exploded_mathml_and_keeps_the_latex(monkeypatch
 def test_a_real_fetch_result_yields_a_citation_and_a_title(monkeypatch):
     """`_render`'s `Source: <url>` header is a contract with web_research:
     `_collect_sources` lifts the citation out of it (at a magic offset) and
-    `_title_of` skips past it to name the note. Every other test on both sides
-    hardcodes its own copy of that shape, so changing `_render` would leave the
-    suite green while every fetched note is titled `Source: https://...` and
-    every fetched citation disappears. Run the real producer into the real
-    consumers once, so the seam has somewhere to break."""
-    from silica.sources.web_research import _collect_sources, _title_of
+    `_first_line_of` skips past it to probe readability. Every other test on
+    both sides hardcodes its own copy of that shape, so changing `_render` would
+    leave the suite green while every fetched citation disappears. Run the real
+    producer into the real consumers once, so the seam has somewhere to break.
+
+    The title now rides beside the text instead of being read out of it, so
+    assert both halves of the Page the consumer receives."""
+    from silica.sources.web_research import _collect_sources, _first_line_of
 
     _serve(
         monkeypatch,
         _Resp(text="<html><title>Real Title</title><body><p>Prose.</p></body></html>"),
     )
-    out = wf.web_fetch("https://example.com/article")
+    page = wf.fetch_page("https://example.com/article")
 
-    assert _collect_sources([out]) == [
+    assert _collect_sources([page.text]) == [
         ("https://example.com/article", "https://example.com/article")
     ]
-    assert _title_of(out) == "Real Title"
+    assert _first_line_of(page.text) == "Real Title"
+    assert page.title == "Real Title"
+
+
+# --- E1: structured title harvest -------------------------------------------
+
+
+def test_og_title_beats_the_title_element():
+    """og:title is authored for sharing, so it arrives without the SEO suffix."""
+    html = """<html><head>
+      <title>How to Grind Coffee | Bean Weekly</title>
+      <meta property="og:title" content="How to Grind Coffee">
+    </head><body><p>x</p></body></html>"""
+    assert wf.page_title(html) == "How to Grind Coffee"
+
+
+def test_twitter_title_is_the_second_choice():
+    html = """<html><head><title>t</title>
+      <meta name="twitter:title" content="Card Title"></head></html>"""
+    assert wf.page_title(html) == "Card Title"
+
+
+def test_og_title_shipped_as_name_is_still_read():
+    """Half the web puts the OG key in `name=` instead of `property=`."""
+    html = '<html><head><meta name="og:title" content="OG via name"></head></html>'
+    assert wf.page_title(html) == "OG via name"
+
+
+def test_declared_site_name_suffix_is_stripped():
+    html = """<html><head>
+      <title>Attention Is All You Need — arXiv</title>
+      <meta property="og:site_name" content="arXiv"></head></html>"""
+    assert wf.page_title(html) == "Attention Is All You Need"
+
+
+def test_a_suffix_that_is_not_the_site_name_survives():
+    """No guessing which half of a separated title is the site: without a
+    declared site name the whole title stands."""
+    html = "<html><head><title>The Pragmatic Programmer - 20th Anniversary</title></head></html>"
+    assert wf.page_title(html) == "The Pragmatic Programmer - 20th Anniversary"
+
+
+def test_site_name_only_strips_from_the_end():
+    html = """<html><head><title>arXiv - Attention Is All You Need</title>
+      <meta property="og:site_name" content="arXiv"></head></html>"""
+    assert wf.page_title(html) == "arXiv - Attention Is All You Need"
+
+
+def test_a_doubled_site_name_is_stripped_once():
+    html = """<html><head><title>Bean Weekly | Bean Weekly</title>
+      <meta property="og:site_name" content="Bean Weekly"></head></html>"""
+    assert wf.page_title(html) == "Bean Weekly"
+
+
+def test_a_title_that_is_nothing_but_the_suffix_is_kept_whole():
+    """Stripping would leave an empty title, which is worse than a redundant
+    one: the note would fall back to naming itself after a lead sentence."""
+    html = """<html><head><title> | Bean Weekly</title>
+      <meta property="og:site_name" content="Bean Weekly"></head></html>"""
+    assert wf.page_title(html) == "| Bean Weekly"
+
+
+def test_svg_title_does_not_win_over_the_head_title():
+    html = ("<html><head><title>Head Title</title></head>"
+            "<body><svg><title>icon label</title></svg></body></html>")
+    assert wf.page_title(html) == "Head Title"
+
+
+def test_page_with_no_title_yields_empty_string():
+    assert wf.page_title("<html><body><p>orphan prose</p></body></html>") == ""
+
+
+def test_title_whitespace_is_collapsed_and_capped():
+    html = "<html><head><title>\n  spread   out\n</title></head></html>"
+    assert wf.page_title(html) == "spread out"
+    long = f"<html><head><title>{'x' * 300}</title></head></html>"
+    assert len(wf.page_title(long)) == wf._MAX_TITLE
+
+
+def test_plain_text_response_carries_no_title(monkeypatch):
+    """A .txt or JSON body has no title element; promoting its first line to one
+    is exactly the positional guess this replaces."""
+    _serve(monkeypatch, _Resp(text="just some prose", ctype="text/plain"))
+    page = wf.fetch_page("https://example.com/notes.txt")
+    assert page.title == ""
+    assert "just some prose" in page.text
+
+
+# --- E2: code fences --------------------------------------------------------
+
+
+def test_pre_block_is_fenced_and_keeps_its_indentation():
+    html = """<body><p>Before.</p>
+<pre><code>def f():
+    return 1
+</code></pre>
+<p>After.</p></body>"""
+    out = wf._extract_text(html)
+    assert "```\ndef f():\n    return 1\n```" in out
+    assert "Before." in out and "After." in out
+
+
+def test_fenced_code_keeps_blank_lines_but_prose_still_collapses():
+    html = "<pre>a\n\nb</pre><p>c    d</p>"
+    out = wf._extract_text(html)
+    assert "```\na\n\nb\n```" in out
+    assert "c d" in out
+
+
+def test_pre_inside_skipped_container_emits_no_fence():
+    """An unpaired fence would render the whole rest of the page as code."""
+    out = wf._extract_text("<nav><pre>menu</pre></nav><p>real</p>")
+    assert "```" not in out
+    assert out == "real"
+
+
+def test_unclosed_pre_is_fenced_shut():
+    out = wf._extract_text("<body><pre>truncated code")
+    assert out.count("```") == 2
+    assert out.endswith("```")
+
+
+def test_truncation_closes_a_fence_it_cut_open():
+    text = "intro\n```\n" + "x" * 200
+    out = wf._truncate(text, limit=40)
+    assert out.count("```") == 2
+    assert "truncated at 40 characters" in out
+
+
+def test_truncation_leaves_balanced_fences_alone():
+    out = wf._truncate("```\na\n```\n" + "y" * 200, limit=40)
+    assert out.count("```") == 2
+
+
+# --- image alt text ---------------------------------------------------------
+
+
+def test_image_alt_text_survives_marked_as_an_image():
+    """On a technical page the alt is often the only description of a diagram
+    that exists in the markup, and this parser read no attributes at all."""
+    out = wf._extract_text(
+        '<p>See below.</p><img src="a.png" alt="Transformer block diagram">'
+        "<p>As shown.</p>"
+    )
+    assert "[image: Transformer block diagram]" in out
+    assert "See below." in out and "As shown." in out
+
+
+def test_self_closing_image_is_read_too():
+    out = wf._extract_text('<img src="a.png" alt="XHTML self closed" />')
+    assert "[image: XHTML self closed]" in out
+
+
+def test_image_without_alt_adds_nothing():
+    assert wf._extract_text('<p>a</p><img src="x.png"><p>b</p>') == "a\n\nb"
+    assert wf._extract_text('<p>a</p><img src="x.png" alt="  "><p>b</p>') == "a\n\nb"
+
+
+def test_alt_with_no_letters_is_dropped():
+    """`alt="***"` and `alt="—"` are spacers, not captions."""
+    assert "image:" not in wf._extract_text('<img alt="***"><img alt="—">')
+
+
+def test_repeated_alt_is_emitted_once():
+    """Icon rows repeat one alt down a page; each is a line of pure noise."""
+    html = "".join('<li><img src="i.png" alt="bullet icon">item</li>' for _ in range(5))
+    assert wf._extract_text(html).count("[image: bullet icon]") == 1
+
+
+def test_alt_returns_after_a_different_alt_interrupts():
+    """Adjacent-equal dedup, not seen-once: the same diagram legitimately appears
+    twice on a long page, separated by other content."""
+    out = wf._extract_text(
+        '<img alt="figure one"><p>prose</p><img alt="figure two">'
+        '<p>prose</p><img alt="figure one">'
+    )
+    assert out.count("[image: figure one]") == 2
+
+
+def test_alt_inside_skipped_boilerplate_is_dropped():
+    """A nav is full of icons; none of them describe the page."""
+    out = wf._extract_text(
+        '<nav><img alt="home icon"><img alt="search icon"></nav>'
+        '<article><img alt="real figure">body</article>'
+    )
+    assert "home icon" not in out and "search icon" not in out
+    assert "[image: real figure]" in out
+
+
+def test_alt_does_not_leak_into_the_title_harvest():
+    """`page_title` must still name the page, not its first figure."""
+    html = ('<html><head><title>Real Title</title></head>'
+            '<body><img alt="hero banner"><p>x</p></body></html>')
+    assert wf.page_title(html) == "Real Title"

@@ -852,9 +852,14 @@ def test_main_agent_default_toolset_excludes_web_search():
 
 # --- /fetch ------------------------------------------------------------------
 
-def _patch_web_fetch(monkeypatch, text):
+def _patch_web_fetch(monkeypatch, text, title=""):
+    """Stand in for the fetch at the seam `fetch_to_inbox` actually calls.
+
+    `title=""` means the page declared none, which is the first-line fallback
+    these tests were written against.
+    """
     import silica.sources.web_fetch as wf
-    monkeypatch.setattr(wf, "web_fetch", lambda url: text)
+    monkeypatch.setattr(wf, "fetch_page", lambda url: wf.Page(text, title))
 
 
 def test_fetch_to_inbox_writes_a_note_titled_after_the_page(tmp_vault, monkeypatch):
@@ -879,6 +884,28 @@ def test_fetch_to_inbox_writes_a_note_titled_after_the_page(tmp_vault, monkeypat
     assert "1. On Graph Theory — https://a.test/post" in body
 
 
+def test_fetch_to_inbox_prefers_the_declared_title_over_the_first_line(
+    tmp_vault, monkeypatch
+):
+    """The note title is the reranker's query and the filename slug. When the
+    page declares one, the lead sentence must not win it."""
+    _patch_web_fetch(
+        monkeypatch,
+        "Source: https://a.test/post\n\nGraphs are everywhere, and this post "
+        "argues that they are also unavoidable.\n\nBody prose here.",
+        title="On Graph Theory",
+    )
+
+    note_rel = wr.fetch_to_inbox("https://a.test/post")
+
+    assert note_rel == f"{CONFIG.inbox_dir}/On Graph Theory.md"
+    body = (Path(CONFIG.vault_path) / note_rel).read_text(encoding="utf-8")
+    assert 'title: "On Graph Theory"' in body
+    assert "1. On Graph Theory — https://a.test/post" in body
+    # the lead sentence is still in the body, just not in the title
+    assert "Graphs are everywhere" in body
+
+
 def test_fetch_to_inbox_assumes_https_for_a_bare_domain(tmp_vault, monkeypatch):
     """`/fetch en.wikipedia.org/wiki/X` is how humans type URLs. The scheme is
     inferred here at the user-facing seam, so the strict guard in web_fetch
@@ -888,9 +915,9 @@ def test_fetch_to_inbox_assumes_https_for_a_bare_domain(tmp_vault, monkeypatch):
 
     def fake(url):
         seen["url"] = url
-        return "Source: https://a.test/post\n\nOn Graph Theory\n\nBody."
+        return wf.Page("Source: https://a.test/post\n\nOn Graph Theory\n\nBody.", "")
 
-    monkeypatch.setattr(wf, "web_fetch", fake)
+    monkeypatch.setattr(wf, "fetch_page", fake)
 
     body = (Path(CONFIG.vault_path) / wr.fetch_to_inbox("a.test/post")).read_text(
         encoding="utf-8"
@@ -952,7 +979,7 @@ def test_fetch_to_inbox_propagates_the_fetch_error(tmp_vault, monkeypatch):
     def boom(url):
         raise ValueError("403 at https://a.test: bot wall")
 
-    monkeypatch.setattr(wf, "web_fetch", boom)
+    monkeypatch.setattr(wf, "fetch_page", boom)
     with pytest.raises(ValueError, match="403"):
         wr.fetch_to_inbox("https://a.test/post")
     inbox = Path(CONFIG.vault_path) / CONFIG.inbox_dir
@@ -1001,7 +1028,7 @@ def test_fetch_failure_line_survives_a_url_that_looks_like_rich_markup(
     def boom(url):
         raise ValueError(f"cannot resolve {url!r}: nope")
 
-    monkeypatch.setattr(wf, "web_fetch", boom)
+    monkeypatch.setattr(wf, "fetch_page", boom)
 
     out = _run_cli("/fetch https://a.test/[/x]")
     assert "fetch failed" in out

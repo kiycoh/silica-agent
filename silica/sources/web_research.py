@@ -1169,10 +1169,15 @@ def _unique_inbox_path(concept: str, fallback: str = "web-research") -> str:
     return f"{inbox}/{basename}"
 
 
-def _title_of(text: str) -> str:
+def _first_line_of(text: str) -> str:
     """First real line of the fetched text, skipping our own Source: header.
 
-    On a well-formed page that is the <title>, which html.parser emits first.
+    This is the readability probe -- a fetch that yields nothing but the header
+    has nothing to write -- and the last-resort title for a page that declares
+    none. It is no longer the primary title: positionally, the first line is
+    the `<title>` only when the text path *is* the rendered HTML, and it is not
+    for the Wikipedia API extract (which opens with the lead sentence) or a
+    YouTube transcript (which opens with the first thing said).
     """
     for raw in text.splitlines():
         line = raw.strip()
@@ -1196,10 +1201,16 @@ def fetch_to_inbox(url: str) -> str:
         # web_fetch's guard still validates the https form, and agent-issued
         # calls (which always carry a scheme) stay strict.
         url = f"https://{url}"
-    text = _web_fetch.web_fetch(url).strip()
-    title = _title_of(text)
-    if not title:
+    page = _web_fetch.fetch_page(url)
+    text = page.text.strip()
+    first_line = _first_line_of(text)
+    if not first_line:
         raise ValueError(f"nothing readable at {url}")
+    # The page's own title names the note; the first line is only the fallback
+    # for a source that declares none. The note title is the reranker's query
+    # (write-time is the one lane that A/B left open), and it is also the
+    # filename slug, so a lead sentence in that slot costs twice.
+    title = page.title or first_line
 
     note = _build_note(
         title, text, [(url, title)], source="web-fetch", force_sources=True
