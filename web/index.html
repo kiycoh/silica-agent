@@ -29,20 +29,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Silica · the transactional write path for a folder of markdown</title>
+  <title>Silica · any LLM, grounded in the documents you keep</title>
   <meta name="description"
-    content="You cannot safely delegate writes to an LLM on a corpus you mean to keep. Silica is the transactional write path for a folder of markdown: the model proposes, an FSM verifies and executes, and every write is re-read after it lands and reverted if it broke something.">
+    content="Silica gives any LLM the documents you actually keep: answers grounded in your own notes, and connections between them you would not have found. When it writes back, a parser and a finite-state machine verify and execute, and every write is re-read after it lands and reverted if it broke something.">
   <meta name="theme-color" content="#0B0D12">
   <meta name="color-scheme" content="dark">
-  <link rel="icon" href="/silica-favicon.svg" type="image/svg+xml">
-  <meta property="og:title" content="Silica · the transactional write path for a folder of markdown">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <meta property="og:title" content="Silica · any LLM, grounded in the documents you keep">
   <meta property="og:description"
-    content="The model proposes, an FSM verifies and executes, and every write is re-read after it lands and reverted if it broke something. Plain markdown, on your disk.">
+    content="Answers grounded in your own notes, and connections between them you would not have found. Every write it makes back is verified after it lands, reverted if it broke something. Plain markdown, on your disk.">
   <meta property="og:type" content="website">
   <meta property="og:image" content="/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="Silica. You cannot safely delegate writes to an LLM. uv tool install silica-agent.">
+  <meta property="og:image:alt"
+    content="Silica gives any LLM the documents you actually keep. When it writes back, every edit is re-read after it lands and reverted if it broke something. uv tool install silica-agent.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:image" content="/og.png">
   <link rel="preload" as="font" type="font/woff2" href="/fonts/archivo-latin.woff2" crossorigin>
@@ -57,20 +58,8 @@
   <header class="nav">
     <div class="nav-in">
       <a class="brand" href="#masthead" aria-label="Silica, home">
-        <svg class="brand-mark" viewBox="0 0 120 120" width="20" height="20" aria-hidden="true" focusable="false">
-          <g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M92 28 L24 48 L60 100 Z" />
-            <path d="M63 58 L92 28" />
-            <path d="M63 58 L24 48" />
-            <path d="M63 58 L60 100" />
-          </g>
-          <g fill="currentColor">
-            <circle cx="92" cy="28" r="8" />
-            <circle cx="24" cy="48" r="8" />
-            <circle cx="60" cy="100" r="8" />
-            <circle cx="63" cy="58" r="8" />
-          </g>
-        </svg>
+        <!-- the mark, monochrome, generated from assets/silica-mark-favicon.svg by assets/build_banners.py -->
+        <svg class="brand-mark" viewBox="0 0 512 512" width="20" height="20" aria-hidden="true" focusable="false"><path d="M476.4 235.9Q488.0 256.0 476.4 276.1L383.6 436.8Q372.0 456.9 348.8 456.9L163.2 456.9Q140.0 456.9 128.4 436.8L35.6 276.1Q24.0 256.0 35.6 235.9L128.4 75.2Q140.0 55.1 163.2 55.1L348.8 55.1Q372.0 55.1 383.6 75.2Z" fill="none" stroke="currentColor" stroke-width="18" stroke-linejoin="round"/><g fill="none" stroke="currentColor" stroke-width="14" stroke-linecap="round"><path d="M271.6 281.6 Q282.4 299.3 311.6 311.8"/><path d="M241.6 282.3 Q231.7 300.5 235.4 332.0"/><path d="M226.0 256.7 Q205.3 257.2 179.9 276.2"/><path d="M240.4 230.4 Q229.6 212.7 200.4 200.2"/><path d="M270.4 229.7 Q280.3 211.5 276.6 180.0"/><path d="M286.0 255.3 Q306.7 254.8 332.1 235.8"/></g><g fill="currentColor"><circle cx="329.0" cy="319.3" r="24"/><circle cx="237.7" cy="350.9" r="24"/><circle cx="164.7" cy="287.6" r="24"/><circle cx="183.0" cy="192.7" r="24"/><circle cx="274.3" cy="161.1" r="24"/><circle cx="347.3" cy="224.4" r="24"/></g><path d="M272.1 278.1Q268.2 283.4 261.6 282.7L244.9 281.0Q238.4 280.3 235.7 274.2L228.8 258.9Q226.2 252.9 230.0 247.5L239.9 233.9Q243.8 228.6 250.4 229.3L267.1 231.0Q273.6 231.7 276.3 237.8L283.2 253.1Q285.8 259.1 282.0 264.5Z" fill="currentColor"/></svg>
         <span class="brand-text">Silica</span>
       </a>
       <nav class="nav-links" aria-label="Primary">
@@ -105,11 +94,12 @@
           </li>
         </ul>
 
-        <h1 class="display">You cannot safely delegate writes to an LLM on a corpus you mean to keep.</h1>
+        <h1 class="display">Silica gives any LLM the documents you actually keep.</h1>
 
-        <p class="deck">Silica is the transactional write path for a folder of markdown. The model proposes, a parser
-          and a finite-state machine verify and execute, and every write is re-read after it lands, reverted if it broke
-          something. Notes or a codebase, one vault holds both. Local-first, readable with or without it.</p>
+        <p class="deck">Answers grounded in your own notes, and connections between them you would not have found by
+          reading. And when the model writes back, a parser and a finite-state machine verify and execute, and every
+          write is re-read after it lands, reverted if it broke something. Notes or a codebase, one vault holds both.
+          Local-first, readable with or without it.</p>
       </div>
 
       <!-- the one element that crosses the rule, and it is the action -->

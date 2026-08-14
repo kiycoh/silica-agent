@@ -17,8 +17,8 @@
 
 
 <h3 align="center">
-You cannot safely delegate writes to an LLM on a corpus you mean to keep.<br/>
-Silica exists to make that delegation safe.
+Silica gives any LLM the documents you actually keep.<br/>
+Answers grounded in your own notes, and connections between them you would not have found.
 </h3>
 
 <p align="left">
@@ -80,6 +80,10 @@ Nothing is asked, nothing else is configured, and nothing is written. Full [inst
 
 ## How the guardrail works
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/gate.svg" alt="An edit proposed by the model passes parse, structure and link checks, lands in the note and is read back after it lands. A second edit fails the structure check and is sent back, leaving the note unchanged." width="880" />
+</p>
+
 Code already survived this exact failure mode: software absorbs model-written changes because nothing lands unparsed. Compilers, type checkers, and test gates mechanically check what the model writes, and you let them reject and rewrite your work every day. Vaults had no equivalent. Silica puts an LLM's edits behind the same kind of guardrail:
 
 | You already let a tool… | to guard against… | Silica does the same by… |
@@ -88,10 +92,6 @@ Code already survived this exact failure mode: software absorbs model-written ch
 | a **test suite** block a merge that breaks behavior | regressions | a post-write verify gate that reverts any edit which breaks vault coherence |
 | **git** roll back a bad commit | losing history | `/undo` and `/revert` rolling back per note or per run |
 | a **formatter** rewrite your code without asking | drift and inconsistency | graph-safe refactors that redirect links so a merge never orphans a note |
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/pipeline.svg" alt="Silica vault pipeline mapped onto a software engineering pipeline" width="880" />
-</p>
 
 ### Design contracts
 
@@ -337,23 +337,13 @@ Add `SILICA_VAULT` to the entry (an `env` table for Codex, `environment` for ope
 
 A question is not handed to one index and hoped for. It runs down independent legs, and the results are fused by rank:
 
-```mermaid
-flowchart LR
-    Q["Your question"] --> E["Embeddings<br/>semantic similarity<br/>needs an embedding model"]
-    Q --> C["Co-occurrence<br/>concept graph<br/>no model needed"]
-    Q -. "opt-in" .-> L["Lexical<br/>BM25 + fuzzy<br/>no model needed"]
-    E --> F["RRF fusion<br/>combines by rank, not by score"]
-    C --> F
-    L -.-> F
-    F --> R["Ranked notes, each carrying<br/>which leg found it"]
-
-    style C fill:none,stroke:#3987e5,stroke-width:2px
-    style L fill:none,stroke:#3987e5,stroke-width:2px
-```
+<p align="center">
+  <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/grounding.svg" alt="A question runs down three legs: embeddings, co-occurrence, and the opt-in lexical leg. The lexical leg abstains. The other two return their own rankings, fused by rank, so a note both legs found outranks a note only one of them found." width="880" />
+</p>
 
 Fusing by rank is what lets legs that measure nothing comparable sit in the same pool: a cosine and an unbounded BM25 score never have to agree on a scale. And a leg with nothing useful to say **abstains** rather than emitting a flat ranking that would poison the pool, so fusion degrades to whichever legs survived.
 
-That is the whole reason the highlighted legs matter. They are deterministic and embedder-free, so with no embedding model at all, retrieval keeps working instead of failing. Each hit records its provenance, so an answer can name the note it came from.
+That is the whole reason the two legs marked *no model* matter. They are deterministic and embedder-free, so with no embedding model at all, retrieval keeps working instead of failing. Each hit records its provenance, so an answer can name the note it came from.
 
 The lexical leg is dotted because it is exactly that: optional. Build it with `/lexical` and it joins the same fusion, strong on the rare tokens, proper nouns, and dates that a semantic index is weakest on.
 
