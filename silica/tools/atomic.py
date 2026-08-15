@@ -395,8 +395,10 @@ def silica_files(folder: str = "") -> dict:
         result["unconverted_total"] = len(pending)
         result.setdefault(
             "hint",
-            f"{len(pending)} file(s) here are not markdown yet — "
-            "ask the user to run /convert <path>, then work on the resulting .md.",
+            f"{len(pending)} file(s) here are not markdown yet. /nucleate handles "
+            "them directly (it converts, then distills) — suggest `/nucleate "
+            "<path>` for one, or `/nucleate <folder>` for all of them. Only "
+            "suggest /convert when the user wants the markdown WITHOUT notes.",
         )
     # folder-scoped only — a bare call would dump a whole repo into
     # the context window, and the vault map already covers "what is here".

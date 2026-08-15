@@ -552,3 +552,29 @@ def test_the_index_skips_vendored_trees(tmp_vault):
     paths = [f.path for f in files]
     assert any(p.endswith("nota.md") for p in paths)
     assert not any("node_modules" in p or "build/out" in p for p in paths)
+
+
+# --- what the CLI announces vs where the write lands -------------------------
+
+def test_nucleate_announces_the_write_dir_rebased_target(tmp_path, monkeypatch):
+    """Safe mode rebases every write into the mirror, but the CLI printed the
+    pre-rebase folder ("nucleate: 2 file(s) → appunti") — the user opened
+    appunti/, found nothing, and concluded the run wrote nothing."""
+    from silica.config import CONFIG
+
+    _manifest(tmp_path, "write_dir: silica\n")
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    reset_manifest_cache()
+
+    from silica.cli import _announced_target
+    assert _announced_target("appunti") == "silica/appunti"
+
+
+def test_announced_target_is_identity_without_a_boundary(tmp_path, monkeypatch):
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
+    reset_manifest_cache()
+
+    from silica.cli import _announced_target
+    assert _announced_target("appunti") == "appunti"

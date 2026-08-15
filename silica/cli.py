@@ -1113,6 +1113,22 @@ def _seed_batch_ledger(cap: str, payloads: list[dict], *, kind: str, label: str)
     )
 
 
+def _announced_target(target_dir: str) -> str:
+    """The folder the user will find the notes in, write-boundary included.
+
+    Validate rebases every write into the vault's `write_dir`, so announcing
+    the raw target ("nucleate: 2 file(s) → appunti") named a folder nothing
+    lands in — the user opened it, found nothing, and concluded the run wrote
+    nothing. Display-only: the Coordinator still takes the raw target.
+    """
+    try:
+        from silica.kernel.vault_manifest import in_write_dir
+
+        return in_write_dir(target_dir)
+    except Exception:
+        return target_dir
+
+
 def _pick_target_folder(md_files: list[str]) -> str:
     """Choose the destination folder for a nucleate run with ONE small LLM call.
 
@@ -1581,6 +1597,46 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         /schematize "the ingest pipeline"
         /diagram Concepts/ML --save=Concepts/ML/map.md
     """
+    def _rejoin_spaced_paths(tokens: list[str]) -> list[str]:
+        """Re-join adjacent tokens that only exist as one spaced path.
+
+        An unquoted `/nucleate Inbox/LLM Agent Memory.pdf` shlex-splits into
+        three tokens, and each then failed separately with an error naming the
+        wrong file ("Skipped Memory.pdf"). Greedy longest-join: a token that
+        does not exist on its own but does exist joined with its neighbours
+        (vault-relative or cwd-relative) becomes that one path. Tokens that
+        exist alone are never merged, so quoted paths keep working unchanged.
+        """
+        from pathlib import Path as _P
+
+        def _exists(s: str) -> bool:
+            vp = CONFIG.vault_path.strip()
+            return _P(s).exists() or bool(vp and (_P(vp) / s).exists())
+
+        out: list[str] = []
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok.startswith("-") or _exists(tok):
+                out.append(tok)
+                i += 1
+                continue
+            joined = None
+            cand = tok
+            for j in range(i + 1, len(tokens)):
+                if tokens[j].startswith("-"):
+                    break
+                cand = f"{cand} {tokens[j]}"
+                if _exists(cand):
+                    joined = (j, cand)
+            if joined:
+                out.append(joined[1])
+                i = joined[0] + 1
+            else:
+                out.append(tok)
+                i += 1
+        return out
+
     if not user_input.strip().startswith("/"):
         return None  # not a shortcut — skip shlex entirely, plain prose can have stray quotes/apostrophes
     try:
@@ -1596,7 +1652,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         return _promote(parts[1:])
 
     if cmd == "/nucleate":
-        args = parts[1:]
+        args = _rejoin_spaced_paths(parts[1:])
         if not args:
             return _drain_wal()
         files: list[str] = []
@@ -1654,10 +1710,25 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 # through to the agent fallback below with nothing but the
                 # folder name — a listing an LLM had to guess at.
                 group = notes_under(f)
-                if group:
-                    CONSOLE.print(f"  {f}: [bold]{len(group)}[/] note(s)")
+                # An inbox folder of PDFs answered "0 notes" and went to the
+                # agent as an unresolvable name. Unconverted files are
+                # first-class /nucleate input (each runs through convert below),
+                # so a folder argument picks them up like it picks up notes.
+                from silica.sources.convert import DOC_EXTS
+                from silica.tools.atomic import _unconverted_under
+                pending = [
+                    p for p in _unconverted_under(f)
+                    if Path(p).suffix.lower() in DOC_EXTS
+                ]
+                if group or pending:
+                    detail = f"[bold]{len(group)}[/] note(s)" if group else ""
+                    if pending:
+                        detail += (", " if detail else "") + \
+                            f"[bold]{len(pending)}[/] file(s) to convert"
+                    CONSOLE.print(f"  {f}: {detail}")
+                group = group + pending
             expanded.extend(group or [f])
-        files = expanded
+        files = list(dict.fromkeys(expanded))
 
         md_files: list[str] = []
         staged = 0
@@ -1677,7 +1748,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                     md_files.extend(convert(f, dest_dir=target_dir))
                 except ValueError as e:
                     # A path with a real extension is a genuinely-unsupported file:
-                    # skip it deterministically (no round-trip can convert a .csv).
+                    # skip it deterministically (no round-trip can convert a .zip).
                     # A bare name or folder (no suffix) is a resolvable intent the
                     # flag parser couldn't read — let the agent handle it.
                     if Path(f).suffix:
@@ -1721,6 +1792,25 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 "target_dir. If nothing is ingestible, say so briefly."
             )
 
+        # A folder arg can list both a PDF and its already-converted chunks;
+        # convert() upserts the same chunk paths, so dedup keeps each once.
+        md_files = list(dict.fromkeys(md_files))
+
+        # Reference lists are citation metadata, not content: skip flagged
+        # chunks (convert marks them `references: true`). The raw chunk stays
+        # in the inbox for lookup — it just never becomes venue/journal notes.
+        from silica.sources.convert import is_references_chunk
+        ref_chunks = [mf for mf in md_files if is_references_chunk(mf)]
+        if ref_chunks:
+            md_files = [mf for mf in md_files if mf not in ref_chunks]
+            CONSOLE.print(
+                f"  [dim]skipped {len(ref_chunks)} references section(s) — "
+                f"kept in the inbox, not distilled into notes[/]"
+            )
+        if not md_files and ref_chunks:
+            CONSOLE.print("  [yellow]nothing left to nucleate: only references sections were given[/]")
+            return ""
+
         from pathlib import Path as _Path
         from silica.kernel.write.provenance import check_renucleate, content_sha256
 
@@ -1743,7 +1833,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             # per-note thematic placement stays /organize's job.
             try:
                 target_dir = _pick_target_folder(md_files)
-                CONSOLE.print(f"  auto-target: [bold]{target_dir}[/]")
+                CONSOLE.print(f"  auto-target: [bold]{_announced_target(target_dir)}[/]")
             except Exception as exc:
                 logger.debug("/nucleate: auto-target pick failed (non-fatal): %s", exc)
 
@@ -1769,7 +1859,9 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         # run's tokens for a handful of decision tokens).
         from silica.router.coordinator import Coordinator
 
-        CONSOLE.print(f"  nucleate: {len(md_files)} file(s) → [bold]{target_dir}[/]")
+        CONSOLE.print(
+            f"  nucleate: {len(md_files)} file(s) → [bold]{_announced_target(target_dir)}[/]"
+        )
         try:
             result = Coordinator(
                 inbox_files=md_files, target_dir=target_dir, hub=hub or None,
@@ -1830,7 +1922,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         return ""
 
     if cmd == "/convert":
-        args = parts[1:]
+        args = _rejoin_spaced_paths(parts[1:])
         files = [a for a in args if not a.startswith("-")]
         target_dir = next((a[len("--target="):] for a in args if a.startswith("--target=")), "")
         if not files:
