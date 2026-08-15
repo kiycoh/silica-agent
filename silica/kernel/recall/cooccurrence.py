@@ -508,15 +508,36 @@ class CooccurStore:
 
         # Steps 5–7 — score, rank, surface, label
         result: dict[int, str] = {}
+        ranked_by_i: dict[int, list[str]] = {}
         for orig_i, tf in zip(valid_indices, tf_list):
             scored = [
                 (stem, count * math.log(1 + N / df[stem]))
                 for stem, count in tf.items()
             ]
             ranked = sorted(scored, key=lambda kv: (-kv[1], kv[0]))
-            top_stems = [stem for stem, _score in ranked[:terms]]
+            ranked_by_i[orig_i] = [stem for stem, _score in ranked]
+            top_stems = ranked_by_i[orig_i][:terms]
             surfaces = [self.node_label(stem) for stem in top_stems]
             result[orig_i] = " · ".join(surfaces)
+
+        # Step 8 — dedup: two communities sharing top stems came out with the
+        # SAME label ("memory · agents" twice, 2026-08-15), indistinguishable
+        # in every legend. Extend colliding labels with their next-ranked stem
+        # until unique (or the ranking runs dry — then the tie stands).
+        seen: dict[str, int] = {}
+        for orig_i in sorted(result):
+            label = result[orig_i]
+            if label not in seen:
+                seen[label] = orig_i
+                continue
+            depth = terms
+            while label in seen and depth < len(ranked_by_i[orig_i]):
+                depth += 1
+                stems = ranked_by_i[orig_i][:depth]
+                label = " · ".join(self.node_label(s) for s in stems)
+            if label not in seen:
+                result[orig_i] = label
+                seen[label] = orig_i
 
         return result
 

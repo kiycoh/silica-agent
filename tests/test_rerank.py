@@ -330,3 +330,24 @@ def test_local_reranker_abstains_on_error(monkeypatch):
 def test_local_reranker_empty_input():
     assert LocalReranker(model="m").scores("", ["d"]) is None
     assert LocalReranker(model="m").scores("q", []) is None
+
+
+def test_rerank_updates_scores_to_match_the_new_order():
+    """Reordering while keeping first-stage scores made /find print
+    0.033, 0.032, 0.031, 0.031, 0.032 — numbers the order contradicts.
+    After a rerank the score IS the cross-encoder relevance."""
+    from types import SimpleNamespace
+
+    items = [SimpleNamespace(path=p, score=s)
+             for p, s in (("a", 0.03), ("b", 0.02), ("c", 0.01))]
+    out = rerank_related(_Fake([0.2, 0.1, 0.9]), "q", items, k=3,
+                         document_of=lambda it: it.path)
+    assert [i.path for i in out] == ["c", "a", "b"]
+    assert [i.score for i in out] == [0.9, 0.2, 0.1]
+
+
+def test_rerank_leaves_items_without_a_score_field_alone():
+    out = rerank_related(_Fake([0.2, 0.9]), "q",
+                         [{"path": "a"}, {"path": "b"}], k=2, document_of=_DOC)
+    assert [i["path"] for i in out] == ["b", "a"]
+    assert "score" not in out[0] and "score" not in out[1]

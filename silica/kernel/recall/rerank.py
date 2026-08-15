@@ -234,4 +234,18 @@ def rerank_related(
     if scores is None or len(scores) != len(pool):
         return pool
     order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
-    return [pool[i] for i in order]
+    out = [pool[i] for i in order]
+    # The first-stage score is ordering-only (RelatedNote contract) — and after
+    # a reorder it no longer even orders. Overwrite it with the cross-encoder
+    # relevance so the number a caller displays always matches the ranking
+    # (observed: /find printing 0.033, 0.032, 0.031, 0.031, 0.032).
+    for item, i in zip(out, order):
+        if isinstance(item, dict):
+            if "score" in item:
+                item["score"] = scores[i]
+        elif hasattr(item, "score"):
+            try:
+                item.score = scores[i]
+            except Exception:
+                pass  # frozen carriers keep their first-stage score
+    return out

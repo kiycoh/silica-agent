@@ -519,7 +519,54 @@ def _fuse(
                 origin=origin,
             )
         )
-    return out[:k]
+    return dedupe_mirror_shadows(out)[:k]
+
+
+def _mirror_prefix() -> str:
+    """`"silica/"` when the ACTIVE vault stages writes in the mirror, else "".
+
+    Keyed on the one write_dir name whose contents mirror the vault tree
+    (onboarding.adopt.SAFE_WRITE_DIR — same function-level import as
+    vault_manifest.seed_mirror_copy); `docs/silica` is Silica's own folder in
+    a repo, not a mirror of it, so no dedupe applies there.
+    """
+    try:
+        from silica.kernel.vault_manifest import active_write_dir
+        from silica.onboarding.adopt import SAFE_WRITE_DIR
+
+        wd = active_write_dir()
+        return wd + "/" if wd == SAFE_WRITE_DIR else ""
+    except Exception:
+        return ""
+
+
+def dedupe_mirror_shadows(results: list[RelatedNote]) -> list[RelatedNote]:
+    """Drop originals shadowed by their own mirror copy.
+
+    Safe mode stages `silica/X` as the pending update of `X`: one note, two
+    paths — and /find listed both (observed 2026-08-15). The mirror copy is
+    the curated, newer state, so it wins; an original stays only when no
+    mirror twin made the pool. Memory-lane results are never compared: their
+    paths belong to the memory vault (ADR-0019).
+    """
+    prefix = _mirror_prefix()
+    if not prefix:
+        return results
+    mirrored = {
+        r.path[len(prefix):].removesuffix(".md").casefold()
+        for r in results
+        if r.origin == "vault" and r.path.startswith(prefix)
+    }
+    if not mirrored:
+        return results
+    return [
+        r for r in results
+        if not (
+            r.origin == "vault"
+            and not r.path.startswith(prefix)
+            and r.path.removesuffix(".md").casefold() in mirrored
+        )
+    ]
 
 
 def neighbours_above(query_path: str, floor: float) -> list[str] | None:

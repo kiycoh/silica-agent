@@ -40,3 +40,22 @@ def test_delete_is_md_suffix_agnostic() -> None:
     store.delete_note("a")
     assert store.note_nodes("a") == {}
     assert store.note_nodes("a.md") == {}
+
+
+def test_community_labels_never_duplicate() -> None:
+    # Two communities dominated by the same terms came out with the SAME
+    # label ("memory · agents" twice, 2026-08-15) — the legend could not tell
+    # them apart. Colliding labels must extend with the next-ranked stem.
+    store = CooccurStore()
+    store.upsert_note("a", _contrib("A", "memory agents build memory for agents using retrieval pipelines"))
+    store.upsert_note("b", _contrib("B", "memory agents build memory for agents using quantization tricks"))
+    labels = store.community_labels([{"a"}, {"b"}])
+    assert len(labels) == 2
+    assert labels[0] != labels[1], f"duplicate community labels: {labels}"
+
+
+def test_html_entities_never_become_nodes() -> None:
+    from silica.kernel.text.text import clean_body
+    cleaned = clean_body("They said &quot;memory&quot; &amp; retrieval matter.", fences=True)
+    assert "quot" not in cleaned and "amp" not in cleaned
+    assert '"memory"' in cleaned

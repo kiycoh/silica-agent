@@ -121,6 +121,12 @@ def clean_body(text: str, *, fences: bool) -> str:
     """
     if not text:
         return ""
+    # HTML entities decode before tokenization: converted documents carry
+    # `&quot;`/`&amp;` etc., and the bare entity names were becoming graph
+    # nodes ("quot" surfaced as a community label, 2026-08-15).
+    if "&" in text:
+        import html as _html
+        text = _html.unescape(text)
     _data, _fm, body = frontmatter.split(text)
     body = _WIKILINK_RE.sub(
         lambda m: f" {_WIKILINK_SEP_RE.sub(' ', m.group(1))} ", strip_images(body)

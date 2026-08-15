@@ -687,3 +687,30 @@ def test_reranker_down_then_wrong_model_each_warn_once(mock_post, caplog, fresh_
     down, wrong_model = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
     assert "reranker unreachable at" in down
     assert "is up but rejected model `typo-model`" in wrong_model
+
+
+@patch("silica.agent.providers.httpx.post")
+def test_fallback_reranker_names_the_fallback_not_degradation(mock_post, caplog, fresh_warn_state):
+    """With the in-process leg catching the call, "recall degrades; run
+    `silica doctor`" was a lie doctor itself contradicted ("using in-process
+    fallback"). The warning must say which leg took over instead."""
+    from silica.agent.providers import FallbackReranker, Reranker
+
+    mock_post.side_effect = ConnectionError("refused")
+
+    class _Local:
+        model = "local-x"
+
+        def scores(self, q, d):
+            return [0.5] * len(d)
+
+    fb = FallbackReranker(
+        Reranker(base_url="http://127.0.0.1:1235/v1", model="bge"), _Local()
+    )
+    with caplog.at_level("WARNING", logger="silica.agent.providers"):
+        assert fb.scores("q", ["a"]) == [0.5]
+
+    msgs = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(msgs) == 1
+    assert "falling back to in-process local-x" in msgs[0]
+    assert "recall degrades" not in msgs[0]

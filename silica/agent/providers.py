@@ -448,7 +448,9 @@ def _failure_kind(exc: Exception) -> str:
     return "failed"
 
 
-def warn_down_once(role: str, where: str, exc: Exception, model: str = "") -> None:
+def warn_down_once(
+    role: str, where: str, exc: Exception, model: str = "", fallback: str = ""
+) -> None:
     """Report a degraded relatedness leg once per (role, kind), then at DEBUG.
 
     Both legs fail open by design (embed leg abstains, rerank keeps the fused
@@ -466,7 +468,12 @@ def warn_down_once(role: str, where: str, exc: Exception, model: str = "") -> No
         args = (role, where, model, exc)
     else:
         msg, args = "%s failed at %s (%s)", (role, where, exc)
-    msg += " — recall degrades; run `silica doctor`"
+    if fallback:
+        # A caught failure is not a degradation: saying "recall degrades" here
+        # contradicted doctor's own "using in-process fallback" on the same state.
+        msg += f" — falling back to {fallback}"
+    else:
+        msg += " — recall degrades; run `silica doctor`"
 
     if (role, kind) in _warned_down:
         logger.debug(msg, *args)
@@ -552,6 +559,10 @@ class Reranker:
         self.model = model
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self.timeout = timeout
+        # Set by FallbackReranker: names the leg that catches this one's
+        # abstention, so the down-warning says "falling back to X" instead of
+        # claiming a degradation that never happens.
+        self.fallback_note = ""
 
     def scores(self, query: str, documents: list[str]) -> list[float] | None:
         """Relevance score per document in input order, or None to abstain.
@@ -580,7 +591,7 @@ class Reranker:
                     scored[i] = float(r.get("relevance_score", r.get("score", 0.0)))
             return scored
         except Exception as e:
-            warn_down_once("reranker", self.url, e, self.model)
+            warn_down_once("reranker", self.url, e, self.model, fallback=self.fallback_note)
             return None
 
 
@@ -665,6 +676,9 @@ class FallbackReranker:
     def __init__(self, primary: Reranker, secondary: LocalReranker):
         self.primary = primary
         self.secondary = secondary
+        primary.fallback_note = (
+            f"in-process {getattr(secondary, 'model', 'cross-encoder')}"
+        )
 
     def scores(self, query: str, documents: list[str]) -> list[float] | None:
         scores = self.primary.scores(query, documents)
