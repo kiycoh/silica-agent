@@ -126,9 +126,10 @@ class TestLedgerSteering:
         # silica_ledger_next returns the pending task
         result = silica_ledger_next(run_id)
         assert "error" not in result
-        assert result["capability"] == "silica_autolink"
-        assert result["payload"]["note_path"] == "Notes/Test"
-        task_id = result["task_id"]
+        assert result["remaining"] == 0
+        assert result["tasks"][0]["capability"] == "silica_autolink"
+        assert result["tasks"][0]["payload"]["note_path"] == "Notes/Test"
+        task_id = result["tasks"][0]["task_id"]
 
         # silica_ledger_update marks it done
         upd = silica_ledger_update(run_id, task_id, "done")
@@ -181,7 +182,62 @@ class TestLedgerSteering:
         p.save()
 
         res = silica_ledger_next(run_id)
-        assert res.get("needs_confirmation") is True
+        assert res["tasks"][0]["needs_confirmation"] is True
+
+    def test_next_drains_the_whole_ready_frontier(self, tmp_path, monkeypatch):
+        """One call hands out every runnable task, not one per round trip.
+
+        Serving them one at a time cost 3 LLM round trips per task and read to
+        the agent as "this tool only takes one item".
+        """
+        import silica.kernel.progress as prog_mod
+        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+
+        from silica.kernel.progress import ProgressLedger
+        from silica.tools.atomic import silica_ledger_next
+        import orjson
+
+        p = ProgressLedger.new(mode="test")
+        run_dir = tmp_path / "runs" / p.run_id
+        (run_dir / "payloads").mkdir(parents=True)
+        for i in range(5):
+            t = p.add_task("silica_autolink")
+            pp = run_dir / "payloads" / f"{t.id}.json"
+            pp.write_bytes(orjson.dumps({"note_paths": [f"N{i}.md"]}))
+            t.input_ref = str(pp)
+        # ...except one gated behind a still-pending task: not part of the frontier.
+        gated = p.add_task("silica_autolink", depends_on=[p.tasks[0].id])
+        p.save()
+
+        res = silica_ledger_next(p.run_id)
+        assert len(res["tasks"]) == 5
+        assert res["remaining"] == 0
+        assert gated.id not in {t["task_id"] for t in res["tasks"]}
+
+    def test_next_caps_a_fat_drain_and_says_what_is_left(self, tmp_path, monkeypatch):
+        """The byte budget bounds one drain; `remaining` is how the agent knows."""
+        import silica.kernel.progress as prog_mod
+        monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+
+        from silica.kernel.progress import ProgressLedger
+        from silica.tools.atomic import silica_ledger_next, LEDGER_DRAIN_BYTES
+        import orjson
+
+        p = ProgressLedger.new(mode="test")
+        run_dir = tmp_path / "runs" / p.run_id
+        (run_dir / "payloads").mkdir(parents=True)
+        fat = ["Folder/" + "x" * 60 + f"{i}.md" for i in range(60)]  # ~4KB per payload
+        for _ in range(10):
+            t = p.add_task("silica_autolink")
+            pp = run_dir / "payloads" / f"{t.id}.json"
+            pp.write_bytes(orjson.dumps({"note_paths": fat}))
+            t.input_ref = str(pp)
+        p.save()
+
+        res = silica_ledger_next(p.run_id)
+        assert 0 < len(res["tasks"]) < 10
+        assert res["remaining"] == 10 - len(res["tasks"])
+        assert len(orjson.dumps(res)) < LEDGER_DRAIN_BYTES * 2
 
 
 # ---------------------------------------------------------------------------
@@ -272,3 +328,52 @@ class TestGraphExportAutoCooccur:
 
         # Must not raise — naming degrades to "Cluster N", graph still renders.
         assert gmod.silica_graph_export() == {"ok": True}
+
+
+def test_report_names_the_fixes_it_queues(tmp_vault, tmp_path, monkeypatch):
+    """The chat layer asked "apply the 2 proposed fixes?" without ever saying
+    which — the tool result must name tier + capability + reason for every
+    queued task, so consent is informed instead of blind."""
+    import silica.kernel.progress as prog_mod
+    monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+
+    tmp_vault.note("A.md", "# A\n\nalpha beta gamma.")
+    tmp_vault.note("B.md", "# B\n\ndelta epsilon zeta.")
+
+    from silica.tools.graph import silica_vault_report
+    res = silica_vault_report()
+
+    assert "plan_preview" in res
+    for t in res["plan_preview"]:
+        assert t["tier"] in ("auto", "propose")
+        assert t["capability"]
+        assert t["reason"]
+
+
+def test_report_names_unconverted_documents_anywhere_in_the_vault(tmp_vault, tmp_path, monkeypatch):
+    """/report only scanned Inbox/ for pending files: a student's slide/*.pdf
+    was invisible and the audit read as "nothing to do" over a folder of
+    unread material. Already-converted documents (their .md sits in done/ or
+    the inbox) are not re-reported."""
+    import silica.kernel.progress as prog_mod
+    from pathlib import Path
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(prog_mod, "_RUNS_DIR", tmp_path / "runs")
+    tmp_vault.note("A.md", "# A\n\nalpha.")
+    root = Path(CONFIG.vault_path)
+    (root / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
+    from silica.kernel.vault_manifest import reset_manifest_cache
+    reset_manifest_cache()
+    (root / "slide").mkdir()
+    (root / "slide" / "deck.pdf").write_bytes(b"%PDF-1.4")
+    (root / "letture").mkdir()
+    (root / "letture" / "paper.pdf").write_bytes(b"%PDF-1.4")
+    tmp_vault.note("silica/done/paper.md", "# paper (converted)")
+
+    from silica.tools.graph import silica_vault_report
+    res = silica_vault_report()
+
+    pend = res.get("unconverted") or {}
+    assert "slide/deck.pdf" in pend.get("files", [])
+    assert "letture/paper.pdf" not in pend.get("files", [])

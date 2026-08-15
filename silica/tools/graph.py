@@ -131,7 +131,12 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
 
     Skips frontmatter, code blocks, math, headings, and already-linked text.
     Only links titles that exist in the vault graph (graph-safe by construction).
-    Returns the total number of links added.
+
+    ONE call consumes the ENTIRE `note_paths` list — there is no per-call limit
+    and nothing is left pending. `notes_scanned` echoes the list length back;
+    `notes_linked` counts only the notes that actually gained a link, which is
+    normally lower because most notes have nothing left to link. Do NOT re-call
+    to "finish the rest": there is no rest.
 
     For the reverse direction (inject links TO newly created notes into older
     neighbours) use silica_backlink; for a vault-wide maintenance pass that also
@@ -178,17 +183,20 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
             cooccur_store = None
 
     total_added = 0
-    processed = 0
+    linked = 0
+    skipped: list[str] = []
     write_errors: list[str] = []
 
     for path in paths:
         try:
             nc = DRIVER.read_note(path)
-        except Exception:
+        except Exception as e:
+            skipped.append(f"{path}: unreadable ({type(e).__name__})")
             continue
 
         body = nc.content or ""
         if not body.strip():
+            skipped.append(f"{path}: empty")
             continue
 
         candidates: list[str] | None = None
@@ -218,15 +226,26 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
 
         try:
             added = DRIVER.autolink_note(
-                path, candidates=candidates if candidates is not None else title_index
+                path,
+                candidates=candidates if candidates is not None else title_index,
+                title_index=title_index,  # already built above; else rebuilt per note
             )
             if added:
                 total_added += len(added)
-                processed += 1
+                linked += 1
         except Exception as e:
             write_errors.append(f"{path}: {e}")
 
-    result = {"notes_processed": processed, "total_links_added": total_added}
+    # `notes_scanned` is the anti-relaunch signal: the whole list is consumed in
+    # one call, so a low `notes_linked` means "nothing left to link", not
+    # "call me again with the rest".
+    result = {
+        "notes_scanned": len(paths),
+        "notes_linked": linked,
+        "total_links_added": total_added,
+    }
+    if skipped:
+        result["skipped"] = skipped
     if write_errors:
         result["write_errors"] = write_errors
     return result
@@ -865,11 +884,73 @@ def silica_vault_report(
         "report_md": paths["path_md"],
     }
 
+    # Material waiting in the inbox is part of the vault's state: an audit of
+    # an "empty" vault that holds four PDFs must say so, or the caller reports
+    # "nothing to do" over a folder full of work (observed 2026-08-15).
+    try:
+        from silica.tools.atomic import _unconverted_under
+        from silica.kernel.vault_manifest import active_inbox_dir
+
+        inbox = active_inbox_dir()
+        pending = _unconverted_under(inbox) if inbox else []
+        if pending:
+            result["inbox_pending"] = {
+                "total": len(pending),
+                "files": pending[:20],
+                "hint": "not yet in the vault — suggest /nucleate <path> (or the folder) to bring them in",
+            }
+    except Exception as exc:
+        logger.debug("silica_vault_report: inbox pending scan skipped (%s)", exc)
+
+    # The inbox is not the only place unread material sits: a student's
+    # slide/*.pdf never entered Inbox/, and the audit read as "nothing to do"
+    # over a folder of unconverted documents (observed 2026-08-15). Documents
+    # whose converted .md already exists (inbox or done/) are not re-reported.
+    try:
+        if vault_path:
+            from silica.kernel.vault_manifest import in_write_dir
+            from silica.onboarding.wizard import unindexable_docs
+
+            root = Path(vault_path)
+            converted_stems = {
+                p.stem for p in (root / in_write_dir("done")).glob("*.md")
+            }
+            try:
+                from silica.driver import DRIVER as _drv
+
+                converted_stems |= {
+                    Path(r.path).stem for r in _drv.list_inbox_files()
+                    if r.path.endswith(".md")
+                }
+            except Exception:
+                pass
+            docs = [
+                p.relative_to(root).as_posix()
+                for p in unindexable_docs(root)
+                if p.stem not in converted_stems
+            ]
+            if docs:
+                result["unconverted"] = {
+                    "total": len(docs),
+                    "files": docs[:20],
+                    "hint": "not readable by the index — suggest /nucleate <path> "
+                            "(or /convert) to bring them in",
+                }
+    except Exception as exc:
+        logger.debug("silica_vault_report: unconverted scan skipped (%s)", exc)
+
     if not seed_ledger:
         return result
 
     # 3. Build plan and seed ledger
     plan = build_task_plan(report)
+
+    # Name what was queued: the chat layer asks consent on these tasks, and a
+    # bare count ("2 proposed fixes") forces a blind yes/no (observed 2026-08-15).
+    result["plan_preview"] = [
+        {"tier": c.tier, "capability": c.capability_name, "reason": c.reason}
+        for c in plan.auto + plan.propose
+    ]
 
     run = Run.new(
         mode="analyst",

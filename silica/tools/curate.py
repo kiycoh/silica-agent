@@ -237,8 +237,8 @@ def _execution_outcome_counts(
     The mechanical autolink direct-commit isn't a WorkItem, so its real
     outcome (links actually added, from silica_autolink's own return value —
     not the candidate-pair count the plan carried) is folded in separately.
-    silica_autolink returns {"notes_processed", "total_links_added"} (see
-    silica/tools/graph.py); "added" is silica_backlink's key, not autolink's.
+    silica_autolink returns {"notes_scanned", "notes_linked", "total_links_added"}
+    (see silica/tools/graph.py); "added" is silica_backlink's key, not autolink's.
     """
     counts: dict[str, int] = dict(batch.get("summary", {}))
     added = (autolink_result or {}).get("total_links_added", 0)

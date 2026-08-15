@@ -53,17 +53,25 @@ def generic_projection(result: dict) -> str:
     """Conservative fallback stub for an eager tool with no `summarize`.
 
     Keeps scalars and short strings verbatim; elides long collections to a
-    `<N items>` placeholder. Appends a hint that the full body is recoverable.
+    `<N items>` placeholder. Appends a hint that the full body is recoverable —
+    only when something was actually elided. A result made of scalars survives
+    whole, and telling the model to re-call a lossless stub is an instruction to
+    redo work it already finished: the agent read "notes_processed=1 … ⟨↻
+    re-call to expand⟩" off a completed batch autolink and re-ran it six times.
     """
     parts: list[str] = []
+    elided = False
     for k, v in result.items():
         if isinstance(v, (list, dict)) and len(v) > 3:
             parts.append(f"{k}=<{len(v)} items>")
+            elided = True
         elif isinstance(v, str) and len(v) > 80:
             parts.append(f"{k}=<{len(v)} chars>")
+            elided = True
         else:
             parts.append(f"{k}={v}")
-    return "; ".join(parts) + " ⟨↻ re-call to expand⟩"
+    body = "; ".join(parts)
+    return f"{body} ⟨↻ re-call to expand⟩" if elided else body
 
 
 def read_projection(result_str: str) -> str:

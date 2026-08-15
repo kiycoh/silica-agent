@@ -677,13 +677,23 @@ def silica_graph_explain(note: str, depth: int = 1) -> dict:
 class LedgerNextArgs(BaseModel):
     run_id: str = Field(description="Run ID returned by silica_vault_report")
 
+
+# ponytail: fixed byte budget per drain — payloads carry ~4KB path chunks, and
+# a 40-task run would otherwise land ~40k tokens in one tool result. Make it a
+# tool arg only if a caller ever wants a different slice.
+LEDGER_DRAIN_BYTES = 12000
+
+
 @tool(LedgerNextArgs, cls="atomic")
 def silica_ledger_next(run_id: str) -> dict:
-    """Return the next actionable task for a run: capability (tool name), validated
-    payload, and reason. Returns {"done": true} when the plan is exhausted.
+    """Return EVERY task that is ready to run now, as `tasks` — not one task.
 
-    The agent should call the named tool with the payload, then call
-    silica_ledger_update to record the outcome.
+    Each entry carries its own capability (tool name), validated payload, and
+    reason. Run them all: they are the frontier, so nothing in the list waits
+    on anything else in it, and one silica_ledger_update per task records the
+    outcomes. `remaining` counts the ready tasks that did not fit this drain —
+    call again only when it is above zero. Returns {"done": true} when the plan
+    is exhausted.
     """
     import orjson
     from pathlib import Path
@@ -696,26 +706,37 @@ def silica_ledger_next(run_id: str) -> dict:
     except Exception as exc:
         return {"error": f"Failed to load ledger: {exc}"}
 
-    t = progress.next_pending()
-    if t is None:
+    ready = progress.ready_pending()
+    if not ready:
         return {"done": True}
 
-    # Load payload from disk if available
-    payload: dict = {}
-    if t.input_ref:
-        try:
-            payload = orjson.loads(Path(t.input_ref).read_bytes())
-        except Exception:
-            pass
+    tasks: list[dict] = []
+    budget = LEDGER_DRAIN_BYTES
+    for t in ready:
+        # Load payload from disk if available
+        payload: dict = {}
+        if t.input_ref:
+            try:
+                payload = orjson.loads(Path(t.input_ref).read_bytes())
+            except Exception:
+                pass
 
-    return {
-        "task_id": t.id,
-        "capability": t.capability_name,
-        "payload": payload,
-        "reason": payload.get("_reason", ""),
-        "needs_confirmation": payload.get("needs_confirmation", False),
-        "attempts": t.attempts,
-    }
+        entry = {
+            "task_id": t.id,
+            "capability": t.capability_name,
+            "payload": payload,
+            "reason": payload.get("_reason", ""),
+            "needs_confirmation": payload.get("needs_confirmation", False),
+            "attempts": t.attempts,
+        }
+        budget -= len(orjson.dumps(entry))
+        # The first task ships whatever it weighs: a payload fatter than the
+        # whole budget must still be servable, or the run stalls forever.
+        if tasks and budget < 0:
+            break
+        tasks.append(entry)
+
+    return {"tasks": tasks, "remaining": len(ready) - len(tasks)}
 
 
 class LedgerUpdateArgs(BaseModel):

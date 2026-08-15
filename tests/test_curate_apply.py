@@ -83,7 +83,7 @@ def test_apply_enqueues_correct_workitem_kinds(monkeypatch, tmp_path):
 
     def _fake_autolink(srcs):
         autolinked["srcs"] = srcs
-        return {"notes_processed": 1, "total_links_added": 1}
+        return {"notes_scanned": 1, "notes_linked": 1, "total_links_added": 1}
 
     monkeypatch.setattr(curate, "_run_autolink", _fake_autolink)
 
@@ -165,12 +165,13 @@ def test_apply_outcome_counts_include_real_autolink_result(monkeypatch, tmp_path
     """The mechanical autolink item count in the plan is a candidate count,
     not what actually happened — outcome_counts must use the real
     links-added figure from silica_autolink's return value. The mock uses
-    silica_autolink's REAL return shape {"notes_processed", "total_links_added"}
+    silica_autolink's REAL return shape
+    {"notes_scanned", "notes_linked", "total_links_added"}
     (silica/tools/graph.py) — "added" is silica_backlink's key, not autolink's."""
     monkeypatch.setattr(curate, "run_subagent_batch", _Capture())
     monkeypatch.setattr(
         curate, "_run_autolink",
-        lambda srcs: {"notes_processed": 1, "total_links_added": 3},
+        lambda srcs: {"notes_scanned": 1, "notes_linked": 1, "total_links_added": 3},
     )
 
     plan = _plan(CurationItem(kind="autolink", target="X", partner="Y", score=3.0))

@@ -491,6 +491,47 @@ def test_batch_micro_phase_resets_on_ledger_next_complete(monkeypatch):
         CONFIG.tool_progress = orig_mode
 
 
+def test_batch_bar_advances_per_ledger_update_not_per_next(monkeypatch):
+    """One ledger_next now hands out a whole frontier, so counting its
+    completions would undercount a 5-task run as 1. The bar counts the
+    per-task ledger_update instead."""
+    import json
+    import silica.agent.bus as bus_mod
+    from silica.agent.events import ToolCompleteEvent
+    from silica.ui.renderer import make_progress_callback
+
+    monkeypatch.setattr(CONSOLE, "_force_terminal", False)
+    orig_bus = bus_mod.BUS
+    orig_mode = CONFIG.tool_progress
+    bus_mod.BUS = bus_mod.EventBus()
+    try:
+        CONFIG.tool_progress = "all"
+        cb = make_progress_callback()
+        cb._batch = _make_mock_batch("autolink")
+
+        def _complete(name, result):
+            cb(ToolCompleteEvent(
+                name=name, args={}, call_id="c", result=json.dumps(result),
+                duration_s=0.1, iteration=1,
+            ))
+
+        _complete("silica_ledger_next", {
+            "tasks": [{"task_id": f"t{i}", "payload": {"note_paths": [f"a/n{i}.md"]}}
+                      for i in range(3)],
+            "remaining": 0,
+        })
+        assert cb._batch["done"] == 0            # handed out, not finished
+        assert cb._batch["current_label"] == "n0.md"
+
+        for _ in range(3):
+            _complete("silica_ledger_update", {"ok": True})
+        assert cb._batch["done"] == 3
+    finally:
+        cb.close()
+        bus_mod.BUS = orig_bus
+        CONFIG.tool_progress = orig_mode
+
+
 def test_live_aware_handler_resolves_stderr_dynamically():
     """Regression for torn panels: a log handler that caches ``sys.stderr`` at
     construction writes raw bytes while a ``rich.Live`` has redirected stderr to its

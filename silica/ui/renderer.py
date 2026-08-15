@@ -710,22 +710,31 @@ class _ProgressRenderer:
                     CONSOLE.print(f"  [cyan]→[/] {desc}")
 
         elif isinstance(event, ToolCompleteEvent):
-            # Batch: track ledger_next completions to advance progress
-            if self._batch is not None and event.name == "silica_ledger_next":
+            # Batch: ledger_next sets the label, ledger_update advances the bar.
+            # One next now hands out a whole frontier of tasks, so counting its
+            # completions would undercount the run; one update lands per task.
+            if self._batch is not None and event.name in (
+                "silica_ledger_next", "silica_ledger_update"
+            ):
                 try:
                     result_data = json.loads(event.result)
                 except Exception:
                     result_data = {}
+                if event.name == "silica_ledger_update":
+                    self._batch["done"] = min(self._batch["done"] + 1, self._batch["total"])
+                    self._batch["micro_phase"] = ""
+                    self._update_batch_live()
+                    return
                 if result_data.get("done"):
                     self._finalize_batch()
                 else:
-                    payload = result_data.get("payload", {})
+                    tasks = result_data.get("tasks") or []
+                    payload = (tasks[0].get("payload") if tasks else None) or {}
                     note_paths = payload.get("note_paths", [])
                     if isinstance(note_paths, list) and note_paths:
                         name0 = note_paths[0].rsplit("/", 1)[-1]
                         extra = f" +{len(note_paths) - 1}" if len(note_paths) > 1 else ""
                         self._batch["current_label"] = f"{name0}{extra}"
-                    self._batch["done"] = min(self._batch["done"] + 1, self._batch["total"])
                     self._batch["micro_phase"] = ""
                     self._update_batch_live()
                 return

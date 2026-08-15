@@ -45,15 +45,22 @@ A vault review happens in two steps, and the user is in charge of the second one
 
 **Step 1 — Report (the default).** Call `silica_vault_report(...)`. Write a short, friendly summary
 in chat from the returned `digest`, point the user to GRAPH_REPORT.md, and tell them how many fixes
-are ready (auto / propose / issues). Then stop and ask whether they'd like you to go ahead.
+are ready (auto / propose / issues), naming each queued fix from `plan_preview` (its capability and
+reason), never a bare count: the user cannot consent to fixes they were not shown. Then stop and ask
+whether they'd like you to go ahead.
 Do NOT call `silica_ledger_next`; do NOT apply any autolinks, corrections, renames, or deletions yet.
 
 **Step 2 — Apply (only after the user clearly says yes).** Resume the run with its `run_id`:
-   a. Call `silica_ledger_next(run_id)` — look at `capability` and `payload`.
-   b. If `needs_confirmation` is true in the payload, check with the user before going ahead.
-   c. Run exactly the tool named in `capability` with the given `payload`.
-   d. Call `silica_ledger_update(run_id, task_id, status)` to record what happened.
-   Repeat until `silica_ledger_next` returns `{"done": true}`.
+   a. Call `silica_ledger_next(run_id)`. It hands you `tasks` — EVERY task ready to run
+      right now, not one. Nothing in that list waits on anything else in it.
+   b. If a task has `needs_confirmation`, check with the user before running that one.
+   c. Run them all in the same turn: one call per task, exactly the tool named in its
+      `capability`, with its `payload` verbatim.
+   d. Record every outcome in the same turn too: one
+      `silica_ledger_update(run_id, task_id, status)` per task.
+   Call `silica_ledger_next` again only if `remaining` was above zero. Stop when it
+   returns `{"done": true}`. A tool that reports fewer items touched than you handed it
+   has finished anyway — it is telling you nothing was left to do, not asking to be re-run.
 For **issues** (things that need a judgment call, like unresolved links), show each one to the user
 and let them decide before creating, renaming, or deleting anything.
 """

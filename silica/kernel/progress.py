@@ -285,19 +285,27 @@ class ProgressLedger:
             self.cursor = None
         self._touch()
 
-    def next_pending(self) -> Task | None:
-        """Return first pending task whose dependencies are all done.
+    def ready_pending(self, limit: int = 0) -> list[Task]:
+        """Every pending task whose dependencies are all done, in plan order.
 
-        Tasks with status 'blocked' or 'deferred' are never returned —
-        they require human resolution via IssueCard before they can proceed.
+        The runnable frontier, not the whole backlog: a task gated behind a
+        still-pending dependency stays out until that dependency lands, so a
+        caller can fire the whole returned list at once without ordering it.
+        `limit` 0 means no cap. Tasks with status 'blocked' or 'deferred' are
+        never returned — they require human resolution via IssueCard before
+        they can proceed.
         """
         done_ids = {t.id for t in self.tasks if t.status == "done"}
-        for t in self.tasks:
-            if t.status != "pending":
-                continue
-            if all(dep in done_ids for dep in t.depends_on):
-                return t
-        return None
+        ready = [
+            t for t in self.tasks
+            if t.status == "pending" and all(dep in done_ids for dep in t.depends_on)
+        ]
+        return ready[:limit] if limit > 0 else ready
+
+    def next_pending(self) -> Task | None:
+        """Return the first task of the runnable frontier, or None."""
+        ready = self.ready_pending(limit=1)
+        return ready[0] if ready else None
 
     # ------------------------------------------------------------------
     # Idempotency helpers (Phase 2)

@@ -30,6 +30,18 @@ def test_generic_projection_keeps_scalars_elides_long_lists():
     assert "re-call" in out  # re-fetch hint
 
 
+def test_generic_projection_no_recall_hint_when_nothing_elided():
+    """A lossless stub must not tell the model to re-call.
+
+    silica_autolink returns two scalars; the unconditional hint read as "the
+    batch is unfinished, call me again" and the agent re-ran a completed
+    autolink six times.
+    """
+    out = generic_projection({"notes_scanned": 22, "notes_linked": 1, "total_links_added": 3})
+    assert "notes_scanned=22" in out
+    assert "re-call" not in out
+
+
 def test_read_stub_names_the_call():
     out = read_stub("silica_read_note", '{"name": "Foo"}')
     assert out.startswith("⟪silica:")

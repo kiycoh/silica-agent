@@ -52,6 +52,26 @@ def test_autolink_focuses_on_cooccurrence_candidates(vault):
     assert "[[Sailing]]" not in body     # not a cooccurrence candidate -> focused out
 
 
+def test_autolink_consumes_the_whole_list_in_one_call(vault):
+    """One call scans every path in note_paths — there is no per-call limit.
+
+    `notes_linked` counts only the notes that gained a link, so it undershoots
+    the list length on a second pass; `notes_scanned` is what tells the agent
+    the batch is done. Without it the agent re-ran the same finished batch.
+    """
+    from silica.tools.composed import silica_autolink
+    paths = ["Concepts/Note A.md", "Concepts/Neural.md", "Concepts/Sailing.md"]
+
+    first = silica_autolink(note_paths=paths, use_candidates=False)
+    assert first["notes_scanned"] == 3
+    assert first["notes_linked"] >= 1
+    assert first["total_links_added"] >= 2
+
+    second = silica_autolink(note_paths=paths, use_candidates=False)
+    assert second["notes_scanned"] == 3      # still scanned all three...
+    assert second["total_links_added"] == 0  # ...and there was nothing left
+
+
 def test_autolink_full_scan_fallback_when_no_signal(vault):
     # Empty embed + empty cooccur -> facade returns [] -> candidates stays None
     # -> full title scan still links (must NOT be suppressed to an empty list).
