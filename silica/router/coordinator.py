@@ -59,9 +59,15 @@ class Coordinator:
         )
 
     def run(self) -> dict[str, Any]:
+        import time
+
         from silica.kernel.workqueue import WorkQueue
         from silica.router.warning_ledger import WarningLedger
         from silica.agent.bus import BUS
+
+        # Sweep scope marker: files under target_dir modified from here on are
+        # candidates for the end-of-run dangling-link sweep.
+        self._run_started: float | None = time.time()
 
         run_dir = getattr(self.fsm.progress, "run_dir", None)
         wq = WorkQueue(run_dir=run_dir)
@@ -103,6 +109,10 @@ class Coordinator:
         # Re-verify: recompute orphans after the repairs committed.
         self._reverify_orphans(result)
 
+        # Zero dangling links on run exit: forward-refs that never materialized
+        # are unlinked back to plain text (deterministic; only this run's notes).
+        self._sweep_dangling_links(result)
+
         # Surface any consumer-thread crashes (handle() already swallows per-item
         # errors, so this only catches unexpected pool failures).
         for f in futures:
@@ -112,6 +122,19 @@ class Coordinator:
 
         result["subagents"] = wq.summary()
         logger.info("Coordinator: sub-agent outcomes %s", result["subagents"])
+
+        # The passes above (sub-agent repairs, link sweep) edit the run's notes
+        # AFTER finalize hashed them, so /revert's "modified since inject" guard
+        # refused the run's own writes. Re-hash now: the run is truly over, and
+        # this state is the one the guard should protect.
+        undo_run_id = getattr(self.fsm, "_undo_run_id", None)
+        if undo_run_id:
+            try:
+                from silica.kernel.write.undo_journal import get_undo_journal
+
+                get_undo_journal().refresh_post_hashes(undo_run_id)
+            except Exception as e:
+                logger.debug("post-run hash refresh failed (non-fatal): %s", e)
         return result
 
     # --- end-of-run orphan resolution -------------------------------------
@@ -198,6 +221,72 @@ class Coordinator:
             "residual": len(residual),
             "enqueued": enqueued,
         }
+
+    def _sweep_dangling_links(self, result: dict) -> None:
+        """Unlink wikilinks still dangling after the whole run committed.
+
+        The run's notes come from the provenance ledger (written at CLEANUP,
+        keyed by this run_id), plus AI-authored notes under the run's target
+        folder written since the run started — deferred retries and sub-agent
+        repairs commit outside the FSM manifest, and their notes were escaping
+        the sweep (observed: [[KnowledGPT]] left dangling in a recovered note).
+        Notes without `AI: true` are never touched, so a human's own deliberate
+        forward-references survive. A run-level /revert deletes the run's
+        notes, which subsumes these edits.
+        """
+        try:
+            from silica.kernel.link.sweep import sweep_dangling_links
+            from silica.kernel.write.provenance import read_records
+
+            run_id = getattr(getattr(self.fsm, "progress", None), "run_id", None)
+            if not run_id:
+                return
+            notes = {
+                n
+                for r in read_records()
+                if r.get("run_id") == run_id
+                for n in (r.get("notes") or [])
+            }
+            notes.update(self._run_written_under_target())
+            notes = sorted(notes)
+            if not notes:
+                return
+            summary = sweep_dangling_links(notes)
+            if summary["links_stripped"]:
+                result["link_sweep"] = {
+                    "notes_edited": summary["notes_edited"],
+                    "links_stripped": summary["links_stripped"],
+                }
+        except Exception as e:
+            logger.warning("dangling-link sweep failed (non-fatal): %s", e)
+
+    def _run_written_under_target(self) -> set[str]:
+        """AI-authored notes under the run's target folder modified since the
+        run started — the sweep scope for writes that bypass the FSM manifest
+        (deferred retries, sub-agent repairs). Vault-relative, no `.md`."""
+        out: set[str] = set()
+        try:
+            from pathlib import Path
+
+            started = getattr(self, "_run_started", None)
+            target = getattr(self.fsm, "target_dir", "") or ""
+            vault = (getattr(self.config, "vault_path", "") or "").strip()
+            if not target or not vault or started is None:
+                return out
+            base = Path(vault) / target
+            for p in base.rglob("*.md"):
+                try:
+                    if p.stat().st_mtime < started:
+                        continue
+                    head = p.read_text(encoding="utf-8", errors="replace")[:2048]
+                    if "\nAI: true" not in head:
+                        continue
+                except OSError:
+                    continue
+                out.add(str(p.relative_to(vault))[:-3])
+        except Exception as e:
+            logger.debug("run-written scan failed (non-fatal): %s", e)
+        return out
 
     def _reverify_orphans(self, result: dict) -> None:
         """After repairs commit, recompute how many warned notes are still orphaned."""

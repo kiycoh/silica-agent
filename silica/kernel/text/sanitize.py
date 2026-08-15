@@ -217,6 +217,13 @@ def normalize_ops(ops: list, *, verbatim_source: str | None = None) -> list:
 # ponytail: collides only if a body literally contains a `===SILICA-BODY N===`
 # line — vanishingly rare; upgrade the sentinel if it ever surfaces.
 _BODY_MARKER = re.compile(r"^===SILICA-BODY (\d+)===$", re.MULTILINE)
+# Split-tolerant variant: models occasionally garble the sentinel word
+# (`===SILICA-BILY 5===`, observed 2026-08-15). A strict-only split then folds
+# the garbled marker line AND the whole next body into the PREVIOUS body — the
+# one corruption the write gate exists to prevent. Any `===SILICA-<word> N===`
+# line is unmistakably a marker attempt, never prose, so splitting on the
+# loose form recovers both bodies intact.
+_BODY_MARKER_LOOSE = re.compile(r"^===\s*SILICA[-_ ][A-Z]{2,8}\s+(\d+)\s*===$", re.MULTILINE | re.IGNORECASE)
 
 
 def extract_body_appendix(raw: str) -> tuple[str, dict[int, str]]:
@@ -226,8 +233,16 @@ def extract_body_appendix(raw: str) -> tuple[str, dict[int, str]]:
     map. Bodies are verbatim — no JSON unescaping ever touches them, so LaTeX
     backslashes survive (`\\top` stays `\\top`, never decodes to a TAB). No
     markers → (raw, {}), i.e. legacy single-blob JSON output is untouched.
+
+    Splitting is loose (garbled sentinel words still split, see
+    `_BODY_MARKER_LOOSE`) but ACTIVATION is strict: at least one exact
+    `===SILICA-BODY N===` marker must be present, so ordinary prose that
+    happens to contain a `===SILICA-… N===`-shaped line can never flip a
+    legacy single-blob payload into appendix mode.
     """
-    markers = list(_BODY_MARKER.finditer(raw))
+    if not _BODY_MARKER.search(raw):
+        return raw, {}
+    markers = list(_BODY_MARKER_LOOSE.finditer(raw))
     if not markers:
         return raw, {}
     json_text = raw[: markers[0].start()]

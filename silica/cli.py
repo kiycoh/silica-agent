@@ -941,14 +941,37 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         if not run_id:
             CONSOLE.print("  Nothing to revert — no runs recorded for this vault.")
             return True
+        # Name WHAT is being reverted: the journal's run ids live in a different
+        # id-space than the progress ledger's (log.md), so a bare id told the
+        # user nothing about which run they were about to undo.
+        info = None
+        try:
+            info = get_undo_journal().run_info(run_id)
+        except Exception:
+            pass
+        source = (info or {}).get("source") or ""
+        when = ""
+        if info and info.get("started_at"):
+            from datetime import datetime as _dt
+            when = _dt.fromtimestamp(info["started_at"]).strftime("%Y-%m-%d %H:%M")
+        label = f" ({source}, started {when})" if source and when else ""
         res = revert_run(run_id)
         stale = len(res.get("stale", []))
         line = (
-            f"  Revert {run_id[:8]}…: {len(res['reverted'])} writes reverted, "
+            f"  Revert {run_id[:8]}…{label}: {len(res['reverted'])} writes reverted, "
             f"{len(res['skipped'])} skipped (modified), "
             f"{stale} stale (vault changed), {len(res['errors'])} errors."
         )
         CONSOLE.print(line)
+        # log.md narrated the run's writes; it must narrate the take-back too.
+        try:
+            from silica.kernel.recall.run_log import append_log_line, format_revert_event
+            append_log_line(
+                format_revert_event(source, len(res["reverted"]), len(res["skipped"])),
+                run_id,
+            )
+        except Exception:
+            pass  # the journal is a courtesy, never a failure path
         return True
 
     if cmd == "/review":
@@ -1869,6 +1892,12 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         status = result.get("final_status") or result.get("error") or "done"
         failed = result.get("failed_chunks") or []
         extra = f" — {len(failed)} chunk(s) failed" if failed else ""
+        sw = result.get("link_sweep") or {}
+        if sw.get("links_stripped"):
+            extra += (
+                f" — {sw['links_stripped']} dangling link(s) unlinked "
+                f"in {sw['notes_edited']} note(s)"
+            )
         CONSOLE.print(f"  nucleate finished: [bold]{status}[/]{extra} — details in log.md")
         return ""
 

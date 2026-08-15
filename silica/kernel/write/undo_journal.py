@@ -157,6 +157,51 @@ class UndoJournalStore:
             out.append((inv, r["post_hash"]))
         return out
 
+    def run_info(self, run_id: str) -> dict | None:
+        """`{source, vault, started_at}` for a run, or None when unknown.
+
+        /revert shows this next to the id: the journal's run ids live in a
+        different id-space than the progress ledger's (log.md), so a bare id
+        never tells the user WHAT they are about to revert.
+        """
+        row = self._conn().execute(
+            "SELECT source, vault, started_at FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {"source": row["source"], "vault": row["vault"],
+                "started_at": row["started_at"]}
+
+    def refresh_post_hashes(self, run_id: str) -> int:
+        """Re-hash every journalled path from the vault's CURRENT content.
+
+        FINALIZE records post-write hashes, but the coordinator's end-of-run
+        passes (dangling-link sweep, orphan repairs) edit the run's notes AFTER
+        that — so /revert's "modified since inject" guard refused the run's own
+        writes. Called once when the run is truly over: the state on disk at
+        that moment is the state the guard should protect. Returns the number
+        of rows updated.
+        """
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT DISTINCT path FROM inverses WHERE run_id = ?", (run_id,)
+        ).fetchall()
+        updated = 0
+        for r in rows:
+            path = r["path"]
+            try:
+                current = DRIVER.read_note(path).content
+                new_hash: str | None = _content_hash(current)
+            except Exception:
+                new_hash = None  # note absent — the stale guard handles it
+            conn.execute(
+                "UPDATE inverses SET post_hash = ? WHERE run_id = ? AND path = ?",
+                (new_hash, run_id, path),
+            )
+            updated += 1
+        conn.commit()
+        return updated
+
     def mark_reverted(self, run_id: str) -> None:
         conn = self._conn()
         conn.execute(
@@ -199,6 +244,7 @@ def revert_run(run_id: str, *, store: UndoJournalStore | None = None) -> dict:
     skipped: list[dict] = []
     stale: list[dict] = []
     errors: list[dict] = []
+    applied_paths: set[str] = set()
 
     for inv, post_hash in entries:
         try:
@@ -218,7 +264,15 @@ def revert_run(run_id: str, *, store: UndoJournalStore | None = None) -> dict:
             stale.append({"path": inv.path, "reason": "note absent (vault changed)"})
             continue
 
-        if post_hash is not None and cur_hash is not None and cur_hash != post_hash:
+        # The guard belongs to the NEWEST inverse per path only: two chunks
+        # patching one note both carry the FINAL content's hash, so the older
+        # link of the chain can never match once the newer one applied. After
+        # the newest passes, the older ones are the chain's own history.
+        if (
+            inv.path not in applied_paths
+            and post_hash is not None and cur_hash is not None
+            and cur_hash != post_hash
+        ):
             skipped.append({"path": inv.path, "reason": "modified since inject"})
             continue
 
@@ -230,8 +284,21 @@ def revert_run(run_id: str, *, store: UndoJournalStore | None = None) -> dict:
                 errors.append({"path": inv.path, "error": "; ".join(res["errors"])})
             else:
                 reverted.append(inv.path)
+                applied_paths.add(inv.path)
         except Exception as e:
             errors.append({"path": inv.path, "error": str(e)})
+
+    # A partial revert can delete notes that surviving (skipped) notes still
+    # link to — the run's own hub kept [[links]] to notes the revert removed.
+    # Sweep only the survivors this run wrote: they are journalled paths, so
+    # the edit stays inside the run's own footprint.
+    if reverted and skipped:
+        try:
+            from silica.kernel.link.sweep import sweep_dangling_links
+
+            sweep_dangling_links(sorted({s["path"] for s in skipped}))
+        except Exception as e:
+            logger.debug("revert: survivor link sweep failed (non-fatal): %s", e)
 
     store.mark_reverted(run_id)
     return {"run_id": run_id, "reverted": reverted, "skipped": skipped,

@@ -231,3 +231,95 @@ def test_revert_run_applies_move_back(tmp_vault, tmp_path):
     assert res["errors"] == []
     assert (tmp_path / "vault" / "Inbox" / "Note.md").exists()
     assert not (tmp_path / "vault" / "Concepts" / "Note.md").exists()
+
+
+# --- end-of-run passes vs the "modified since inject" guard ------------------
+
+def test_end_of_run_edits_stay_revertable(tmp_vault, tmp_path):
+    """FINALIZE records post-write hashes, but the coordinator's end-of-run
+    passes (dangling-link sweep, orphan repairs) edit the run's notes AFTER
+    that — so /revert refused the run's own writes as "modified since inject"
+    (6 of 10 in one real run). Re-hashing when the run is truly over restores
+    coverage."""
+    from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
+
+    store = UndoJournalStore(tmp_path / "j.db")
+    p = tmp_vault.note("N.md", "written by the run")
+    run_id = store.start_run("nucleate")
+    store.record(
+        run_id,
+        InverseOp(kind=InverseOpKind.delete_created, path="N.md"),
+        post_hash=_h("written by the run"),
+    )
+    tmp_vault.write(p, "then swept by the run's own link sweep")
+
+    store.refresh_post_hashes(run_id)
+
+    res = revert_run(run_id, store=store)
+    assert res["reverted"] == ["N.md"]
+    assert res["skipped"] == []
+
+
+def test_chained_inverses_for_one_path_all_apply(tmp_vault, tmp_path):
+    """Two chunks patching one note leave two inverses, both hashed against the
+    FINAL content — so the older link of the chain always failed the guard.
+    Once the newest inverse for a path passes and applies, the older ones are
+    the chain's own history and apply unconditionally."""
+    from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
+
+    store = UndoJournalStore(tmp_path / "j.db")
+    p = tmp_vault.note("N.md", "final")
+    run_id = store.start_run("nucleate")
+    final_hash = _h("final")
+    store.record(run_id, InverseOp(kind=InverseOpKind.restore_version,
+                                   path="N.md", prior_content="original"),
+                 post_hash=final_hash)
+    store.record(run_id, InverseOp(kind=InverseOpKind.restore_version,
+                                   path="N.md", prior_content="after chunk 1"),
+                 post_hash=final_hash)
+
+    res = revert_run(run_id, store=store)
+    assert res["skipped"] == []
+    assert tmp_vault.read(p) == "original"
+
+
+def test_run_info_names_source_and_start(tmp_path):
+    """/revert printed a bare journal id from a different id-space than the one
+    log.md shows — naming the run's source and start time is what lets the
+    user tell WHAT they are about to revert."""
+    from silica.kernel.write.undo_journal import UndoJournalStore
+
+    store = UndoJournalStore(tmp_path / "j.db")
+    run_id = store.start_run(source="nucleate", vault="/v")
+    info = store.run_info(run_id)
+    assert info["source"] == "nucleate"
+    assert info["started_at"] > 0
+    assert store.run_info("nope") is None
+
+
+def test_partial_revert_unlinks_dangling_refs_in_survivors(tmp_vault, tmp_path):
+    """Deleting a created note while a sibling survives left the survivor
+    pointing at a dead target ([[Congestion Window]] in the hub, observed).
+    After a partial revert the survivors' links to the deleted notes are
+    unlinked back to plain text."""
+    from silica.kernel.write.undo_journal import UndoJournalStore, revert_run
+
+    store = UndoJournalStore(tmp_path / "j.db")
+    tmp_vault.note("Fresh.md", "# Fresh\n")
+    hub = tmp_vault.note("hub.md", "see [[Fresh]] for more")
+    run_id = store.start_run("nucleate")
+    store.record(run_id, InverseOp(kind=InverseOpKind.delete_created, path="Fresh.md"),
+                 post_hash=_h("# Fresh\n"))
+    store.record(run_id, InverseOp(kind=InverseOpKind.restore_version,
+                                   path="hub.md", prior_content=""),
+                 post_hash=_h("see [[Fresh]] for more"))
+    # The user edited the hub after the run: it must survive the revert...
+    tmp_vault.write(hub, "my own words + see [[Fresh]] for more")
+
+    res = revert_run(run_id, store=store)
+
+    assert res["reverted"] == ["Fresh.md"]
+    assert [s["path"] for s in res["skipped"]] == ["hub.md"]
+    # ...but not keep a link to a note the revert just deleted.
+    assert "[[Fresh]]" not in tmp_vault.read(hub)
+    assert "my own words" in tmp_vault.read(hub)

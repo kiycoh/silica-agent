@@ -5,11 +5,18 @@ import argparse
 import datetime
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from silica.kernel.link import ofm
 from silica.kernel.write import frontmatter
 from silica.driver import DRIVER
+
+# Internal wire-format delimiter (`===SILICA-BODY N===`, garbled variants
+# included). One leaked verbatim into a committed note on 2026-08-15 — the
+# exact corruption class the post-write gate exists to reject, so any line
+# shaped like it is a hard error, never a warning.
+_SENTINEL_LEAK_RE = re.compile(r"^===\s*SILICA\b.*===\s*$", re.MULTILINE | re.IGNORECASE)
 
 
 def check_expires_at(data: dict) -> list[str]:
@@ -75,6 +82,9 @@ def validate_note(path, hub, op_type=None):
     try:
         nc = DRIVER.read_note(path)
         content = nc.content
+
+        if _SENTINEL_LEAK_RE.search(content):
+            errors.append("Internal delimiter leaked into note (===SILICA-…=== line)")
 
         data, _, _ = frontmatter.split(content)
         if data is None:

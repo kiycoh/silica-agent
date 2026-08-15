@@ -155,3 +155,13 @@ def test_tail_log_missing_file_returns_empty(tmp_path):
     vault = tmp_path / "vault"
     vault.mkdir()
     assert tail_log(5, vault_path=str(vault)) == []
+
+
+def test_format_revert_event_names_source_and_counts():
+    """log.md said "8 new notes" after a /revert had taken 4 of them back out —
+    the journal must narrate the revert too, or it lies by omission."""
+    from silica.kernel.recall.run_log import format_revert_event
+
+    assert format_revert_event("nucleate", 4, 6) == \
+        "revert (nucleate) → 4 note(s) restored, 6 kept (modified since)"
+    assert format_revert_event("", 2, 0) == "revert → 2 note(s) restored"

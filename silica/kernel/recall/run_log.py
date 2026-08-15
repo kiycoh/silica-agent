@@ -50,6 +50,19 @@ def format_curate_event(counts: dict[str, int]) -> str:
     return f"curate → {total} item{breakdown}"
 
 
+def format_revert_event(source: str, reverted: int, skipped: int) -> str:
+    """`revert (nucleate) → 4 note(s) restored, 6 kept (modified since)`.
+
+    Without this line log.md kept narrating notes a /revert had already taken
+    back out — the journal lied by omission.
+    """
+    head = f"revert ({source})" if source else "revert"
+    line = f"{head} → {reverted} note(s) restored"
+    if skipped:
+        line += f", {skipped} kept (modified since)"
+    return line
+
+
 def _resolve_vault_path(vault_path: str | None) -> str | None:
     if vault_path:
         return vault_path

@@ -547,3 +547,33 @@ def test_json_path_anchor_keeps_doubling_the_source_contains():
     src = "matrice con $a \\\\beta$ dentro"
     out = normalize_ops(ops, verbatim_source=src)[0]["snippet"]
     assert out == "resta $a \\\\beta$ e cade $\\top$"
+
+
+# --- garbled sentinel recovery (2026-08-15 nucleate run) ---------------------
+
+def test_garbled_body_marker_still_splits():
+    # `===SILICA-BILY 5===` (model typo) used to fold the marker line AND
+    # body 5 into body 4 — internal delimiter committed verbatim into a note.
+    raw = (
+        '{"updates":[{"op":"write","path":"A.md","snippet_ref":4},'
+        '{"op":"write","path":"B.md","snippet_ref":5}]}\n'
+        "===SILICA-BODY 4===\n"
+        "Episodic memory body.\n"
+        "===SILICA-BILY 5===\n"
+        "KIVI body.\n"
+    )
+    from silica.kernel.text.sanitize import extract_body_appendix
+    _, bodies = extract_body_appendix(raw)
+    assert bodies[4] == "Episodic memory body."
+    assert bodies[5] == "KIVI body."
+    assert "SILICA" not in bodies[4]
+
+
+def test_loose_marker_alone_never_activates_appendix_mode():
+    # Activation stays strict: a prose line merely shaped like a sentinel in a
+    # legacy single-blob payload must not flip the parser into appendix mode.
+    raw = '{"updates":[]}\n===SILICA-THING 3===\nnot an appendix\n'
+    from silica.kernel.text.sanitize import extract_body_appendix
+    json_text, bodies = extract_body_appendix(raw)
+    assert bodies == {}
+    assert json_text == raw
