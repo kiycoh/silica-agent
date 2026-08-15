@@ -10,6 +10,7 @@ presence and HTTP reachability only.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -284,6 +285,10 @@ _LANG_SAMPLE_MAX_FILES = 30
 _LANG_SAMPLE_PER_FILE_CHARS = 150
 _LANG_SAMPLE_TOTAL_CHARS = 4000
 
+# `AI: true` anywhere in a frontmatter head — the system floor stamps it as a
+# top-level key, and the sample only needs a cheap screen, not a YAML parse.
+_AI_FLAG_RE = re.compile(r"^AI:\s*true\s*$", re.MULTILINE)
+
 
 def sample_vault_text(vault: str) -> str:
     """Deterministic, cheap sample of a vault's prose for language detection.
@@ -304,21 +309,49 @@ def sample_vault_text(vault: str) -> str:
     the `/vault` info block in cli.py go through `detect_vault_language`
     below, which calls this — no duplicated sampling.
     """
+    from silica.kernel.recall.graph_export import is_vault_artifact
+    from silica.kernel.vault_manifest import load_manifest
+
+    root = Path(vault)
     try:
-        files = sorted(Path(vault).rglob("*.md"))[:_LANG_SAMPLE_MAX_FILES]
+        files = sorted(root.rglob("*.md"))
     except Exception:
         return ""
+    # The agent's own output never votes on the vault's language: 13 generated
+    # English notes flipped a human-Italian vault to `english`, and doctor then
+    # proposed rebuilding the co-occurrence store in English — freezing the
+    # error. Excluded: root artifacts (GRAPH_REPORT.md sorts before every note
+    # and is English scaffolding), the conversion archive under `done/` (the
+    # input's language, not the vault's), and any note stamped `AI: true`.
+    try:
+        write_dir = load_manifest(vault).write_dir or ""
+    except Exception:
+        write_dir = ""
+    done_prefix = f"{write_dir}/done/" if write_dir else "done/"
     parts: list[str] = []
     total = 0
+    sampled = 0
     for f in files:
-        if total >= _LANG_SAMPLE_TOTAL_CHARS:
+        if sampled >= _LANG_SAMPLE_MAX_FILES or total >= _LANG_SAMPLE_TOTAL_CHARS:
             break
         try:
-            chunk = f.read_text(encoding="utf-8", errors="ignore")[:_LANG_SAMPLE_PER_FILE_CHARS]
+            rel = f.relative_to(root).as_posix()
+        except ValueError:
+            rel = f.name
+        if is_vault_artifact(rel) or rel.startswith(done_prefix):
+            continue
+        try:
+            head = f.read_text(encoding="utf-8", errors="ignore")[:2000]
         except Exception:
             continue
+        if head.startswith("---\n") and _AI_FLAG_RE.search(
+            head[: head.find("\n---\n", 4) if head.find("\n---\n", 4) != -1 else len(head)]
+        ):
+            continue
+        chunk = head[:_LANG_SAMPLE_PER_FILE_CHARS]
         parts.append(chunk)
         total += len(chunk)
+        sampled += 1
     return "".join(parts)[:_LANG_SAMPLE_TOTAL_CHARS]
 
 
@@ -389,6 +422,23 @@ def language_status(vault: str) -> tuple[str | None, str | None, bool]:
     authority = declared_language(vault) or detect_vault_language(vault)
     store = frozen_store_language(vault) if authority else None
     return authority, store, bool(authority and store and authority != store)
+
+
+def reply_language_for(vault: str) -> str | None:
+    """The language chat should default to for `vault`.
+
+    Explicit conventions win (`reply_language`, else `language`); the fallback
+    is the vault's own authority (declared `cooccurrence_lang`, else detected
+    from the human notes). Without the fallback a /quiz on an Italian vault
+    came back in English: slash-command turns carry no language of their own,
+    and only the explicit conventions ever reached the prompt.
+    """
+    if not vault:
+        return None
+    from silica.kernel.vault_manifest import load_manifest
+
+    conv = load_manifest(vault).conventions
+    return conv.reply_language or conv.language or language_status(vault)[0]
 
 
 def check_language(config: SilicaConfig) -> CheckResult:

@@ -770,3 +770,78 @@ def test_check_quarantine_sees_cross_vault_state_in_home(tmp_path, monkeypatch):
     r = checks.check_quarantine(_cfg())
     assert r.status == "warn"
     assert "undo_journal" in r.detail
+
+
+class TestDetectionIgnoresTheAgentsOwnOutput:
+    IT = ("il controllo della congestione e la finestra del mittente che "
+          "cresce con la connessione e non con il tempo della rete ")
+    EN = ("the congestion window is a sender-side variable that grows with "
+          "the connection and not with the network over time ")
+
+    def test_ai_authored_notes_do_not_vote(self, tmp_path):
+        """13 English notes written by Silica itself flipped a human-Italian
+        vault to `english`, and doctor then proposed rebuilding the
+        co-occurrence store in English — freezing the error. The agent's own
+        output never votes on the vault's language."""
+        from silica.onboarding.checks import detect_vault_language
+
+        for i in range(3):
+            (tmp_path / f"nota{i}.md").write_text(f"# nota\n\n{self.IT}", encoding="utf-8")
+        ai = f"---\nAI: true\nlast modified: 2026-08-15\n---\n\n{self.EN}"
+        for i in range(20):
+            (tmp_path / f"gen{i}.md").write_text(ai, encoding="utf-8")
+
+        assert detect_vault_language(str(tmp_path)) == "italian"
+
+    def test_vault_root_artifacts_do_not_vote(self, tmp_path):
+        """GRAPH_REPORT.md sorts before every note and is English scaffolding."""
+        from silica.onboarding.checks import detect_vault_language
+
+        (tmp_path / "GRAPH_REPORT.md").write_text(
+            "# Silica Vault Report\n\n" + self.EN * 10, encoding="utf-8")
+        (tmp_path / "log.md").write_text(self.EN * 5, encoding="utf-8")
+        (tmp_path / "nota.md").write_text(self.IT, encoding="utf-8")
+
+        assert detect_vault_language(str(tmp_path)) == "italian"
+
+    def test_the_conversion_archive_does_not_vote(self, tmp_path):
+        """`silica/done/` holds verbatim converted sources — the input's
+        language, not the vault's."""
+        from silica.onboarding.checks import detect_vault_language
+
+        (tmp_path / "vault.yaml").write_text("write_dir: silica\n", encoding="utf-8")
+        done = tmp_path / "silica" / "done"
+        done.mkdir(parents=True)
+        for i in range(10):
+            (done / f"paper{i}.md").write_text(self.EN * 4, encoding="utf-8")
+        (tmp_path / "nota.md").write_text(self.IT, encoding="utf-8")
+
+        assert detect_vault_language(str(tmp_path)) == "italian"
+
+
+class TestReplyLanguage:
+    IT = TestDetectionIgnoresTheAgentsOwnOutput.IT
+
+    def test_explicit_conventions_win(self, tmp_path):
+        from silica.onboarding.checks import reply_language_for
+
+        (tmp_path / "vault.yaml").write_text(
+            "conventions:\n  reply_language: english\n", encoding="utf-8")
+        (tmp_path / "nota.md").write_text(self.IT, encoding="utf-8")
+        assert reply_language_for(str(tmp_path)) == "english"
+
+    def test_falls_back_to_the_vaults_own_language(self, tmp_path):
+        """A /quiz on an Italian vault came back in English: slash-command
+        turns carry no language of their own, and only the explicit
+        conventions ever reached the prompt. The vault's authority (declared,
+        else detected) is the missing fallback."""
+        from silica.onboarding.checks import reply_language_for
+
+        for i in range(3):
+            (tmp_path / f"nota{i}.md").write_text(self.IT, encoding="utf-8")
+        assert reply_language_for(str(tmp_path)) == "italian"
+
+    def test_no_vault_returns_none(self):
+        from silica.onboarding.checks import reply_language_for
+
+        assert reply_language_for("") is None

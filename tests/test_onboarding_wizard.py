@@ -137,6 +137,37 @@ class TestRunWizard:
         assert "SILICA_MODEL=test-model" in content
         assert "OPENROUTER_API_KEY" not in content
 
+    def test_vault_path_defaults_to_the_launch_folder(self, monkeypatch, tmp_path):
+        """Outside a git repo the vault question had no default at all, so the
+        promised "Enter accepts the shown default" looped forever on the first
+        step. The folder you launched `silica init` in is the default vault,
+        same rule as `silica` itself."""
+        import silica.onboarding.wizard as wizard
+
+        notes = tmp_path / "notes"
+        notes.mkdir()
+        (notes / "a.md").write_text("# a")
+        env_path = tmp_path / ".env"
+
+        monkeypatch.chdir(notes)
+        monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
+        monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
+        monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+
+        answers = [
+            "",            # setup mode → essential
+            "",            # vault path → Enter accepts the launch folder
+            "",            # force language? → Enter, follow source
+            "",            # provider → default lmstudio
+            "test-model",  # model id
+            "n",           # high-value gate → skip embeddings/reranker
+            "",            # write .env → default y
+        ]
+        rc = wizard.run_wizard(input_fn=self._scripted(answers), env_path=env_path)
+
+        assert rc == 0
+        assert f"SILICA_VAULT={notes}" in env_path.read_text()
+
     def test_configured_model_kept_with_one_enter(self, monkeypatch, tmp_path):
         # A model already configured (the global ~/.silica/.env) survives a
         # per-vault re-run: Enter keeps it, no provider/model/key re-asking.

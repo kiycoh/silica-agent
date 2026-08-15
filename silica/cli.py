@@ -150,10 +150,13 @@ def _fresh_messages() -> list[dict]:
     Single source of truth for the initial state, shared by session start and
     /clear so the two can't drift.
     """
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.onboarding.checks import reply_language_for
 
-    conv = get_active_manifest().conventions
-    reply = conv.reply_language or conv.language
+    # Explicit conventions, else the vault's own language (declared, else
+    # detected from the human notes): a slash-command turn carries no language
+    # of its own, and defaulting to English on an Italian vault answered /quiz
+    # in the wrong language.
+    reply = reply_language_for(CONFIG.vault_path)
     messages: list[dict] = [{"role": "system", "content": system_prompt(reply)}]
     messages.append({"role": "system", "content": _vault_scope()})
     _inject_vault_map(messages)

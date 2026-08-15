@@ -457,7 +457,10 @@ def _run_wizard_inner(
                     manifest.write_text(content, encoding="utf-8")
         if not use_repo_mode:
             while True:
-                path = _ask(input_fn, "Vault path (existing directory)")
+                # The launch folder is the default vault — same rule as `silica`
+                # itself. Without it this was the one step with no default, under
+                # a banner promising "Enter accepts the shown default".
+                path = _ask(input_fn, "Vault path (existing directory)", str(Path.cwd()))
                 resolved = Path(path).expanduser() if path else None
                 if resolved is not None and resolved.is_dir():
                     updates["SILICA_VAULT"] = str(resolved)
