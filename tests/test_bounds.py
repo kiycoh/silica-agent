@@ -95,26 +95,44 @@ def test_refiner_bounds_rejects_shrink():
 
 # --- orphan bounds ----------------------------------------------------------
 
-def test_orphan_bounds_allows_patch_that_adds_link():
-    bounds = orphan_bounds("Notes/Orphan.md")
-    op = _op(OpType.patch, "Notes/Orphan.md", snippet="## Related\n\n- [[Neighbor]]\n")
-    kept, rejected = bounds.enforce(op_list := [op])
+def test_orphan_bounds_allows_patch_into_neighbour_linking_the_orphan():
+    bounds = orphan_bounds(["Notes/Neighbor.md"], orphan_title="Orphan")
+    op = _op(OpType.patch, "Notes/Neighbor.md", snippet="## Related\n\n- [[Orphan]]\n")
+    kept, rejected = bounds.enforce([op])
     assert len(kept) == 1 and not rejected
 
 
 def test_orphan_bounds_rejects_patch_without_link():
-    bounds = orphan_bounds("Notes/Orphan.md")
-    op = _op(OpType.patch, "Notes/Orphan.md", snippet="## Related\n\n(no links here)\n")
+    bounds = orphan_bounds(["Notes/Neighbor.md"], orphan_title="Orphan")
+    op = _op(OpType.patch, "Notes/Neighbor.md", snippet="## Related\n\n(no links here)\n")
     kept, rejected = bounds.enforce([op])
     assert kept == []
     assert "no wikilink" in rejected[0]["reason"]
 
 
-def test_orphan_bounds_rejects_overwrite_and_other_targets():
-    bounds = orphan_bounds("Notes/Orphan.md")
+def test_orphan_bounds_rejects_a_link_to_anything_but_the_orphan():
+    """A wikilink is not enough: only one pointing AT the orphan lowers its in-degree."""
+    bounds = orphan_bounds(["Notes/Neighbor.md"], orphan_title="Orphan")
+    op = _op(OpType.patch, "Notes/Neighbor.md", snippet="## Related\n\n- [[Something Else]]\n")
+    kept, rejected = bounds.enforce([op])
+    assert kept == []
+    assert "no wikilink to 'Orphan'" in rejected[0]["reason"]
+
+
+def test_orphan_bounds_rejects_patching_the_orphan_itself():
+    """The regression this fix exists for: patching the orphan only adds out-degree,
+    so it must fall outside the envelope even when it does add the link."""
+    bounds = orphan_bounds(["Notes/Neighbor.md"], orphan_title="Orphan")
+    op = _op(OpType.patch, "Notes/Orphan.md", snippet="## Related\n\n- [[Neighbor]]\n")
+    kept, rejected = bounds.enforce([op])
+    assert kept == []
+
+
+def test_orphan_bounds_rejects_overwrite_and_unoffered_targets():
+    bounds = orphan_bounds(["Notes/Neighbor.md"], orphan_title="Orphan")
     ops = [
-        _op(OpType.overwrite, "Notes/Orphan.md", content="[[X]]"),
-        _op(OpType.patch, "Notes/Other.md", snippet="[[X]]"),
+        _op(OpType.overwrite, "Notes/Neighbor.md", content="[[Orphan]]"),
+        _op(OpType.patch, "Notes/Other.md", snippet="[[Orphan]]"),
     ]
     kept, rejected = bounds.enforce(ops)
     assert kept == []
@@ -189,8 +207,8 @@ def test_bare_hub_does_not_block_collateral_note():
 
 def test_orphan_bounds_allows_repair_when_no_hub():
     """When hub=None, orphan repair must not be blocked."""
-    bounds = orphan_bounds("notes/Orphan.md", hub=None)
-    patch_op = _op(OpType.patch, "notes/Orphan.md", snippet="[[SomeLink]]")
-    kept, rejected = bounds.enforce([patch_op], read_note=lambda p: "# Orphan\n")
+    bounds = orphan_bounds(["notes/Neighbor.md"], orphan_title="Orphan", hub=None)
+    patch_op = _op(OpType.patch, "notes/Neighbor.md", snippet="[[Orphan]]")
+    kept, rejected = bounds.enforce([patch_op], read_note=lambda p: "# Neighbor\n")
     assert len(kept) == 1
     assert len(rejected) == 0

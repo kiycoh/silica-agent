@@ -67,17 +67,21 @@ def make_no_info_loss_guard(floor_ratio: float = 0.85) -> Callable[[Op, str], st
     return guard
 
 
-def make_link_addition_guard() -> Callable[[Op, str], str | None]:
-    """Build a content_guard requiring a patch/overwrite to ADD at least one wikilink.
+def make_backlink_guard(orphan_title: str) -> Callable[[Op, str], str | None]:
+    """Build a content_guard requiring a patch to ADD a wikilink to `orphan_title`.
 
-    Used by the orphan connector: a de-orphaning op that introduces no link is a
-    no-op and is rejected, so the orphan is reported unresolved rather than
-    silently "fixed".
+    Used by the orphan connector, which writes into a NEIGHBOUR: "added some
+    wikilink" is not enough there, because only a link pointing back at the
+    orphan lowers the orphan's in-degree. Any other link is a no-op that would
+    still report the orphan as repaired.
     """
+    want = _norm_path(orphan_title).rsplit("/", 1)[-1]
+
     def guard(op: Op, original: str) -> str | None:
         added = op.content if op.content is not None else (op.snippet or "")
-        if not _wikilinks(added):
-            return "orphan repair added no wikilink"
+        targets = {t.rsplit("/", 1)[-1] for t in _wikilinks(added)}
+        if not want or want not in targets:
+            return f"orphan repair added no wikilink to '{orphan_title}'"
         return None
 
     return guard
@@ -311,18 +315,27 @@ def refiner_bounds(
     )
 
 
-def orphan_bounds(orphan_path: str, *, hub: str | None = None) -> CapabilityBounds:
-    """Connector bounds: append-only patch into the orphan note that ADDS a link.
+def orphan_bounds(
+    neighbour_paths: list[str], *, orphan_title: str, hub: str | None = None
+) -> CapabilityBounds:
+    """Connector bounds: append-only patch into a NEIGHBOUR that links TO the orphan.
 
-    Permits a single `patch` against `orphan_path` whose body introduces at least
-    one wikilink (de-orphaning it).  Never overwrites, deletes, or creates.
+    An orphan is a note with in-degree 0 — literally what graph_report counts —
+    so the link has to land in the neighbour and point back at the orphan. The
+    pre-2026-08-14 bounds permitted a patch into the orphan itself, which only
+    ever gave it out-degree: on a 795-note vault 39 of the 100 orphans already
+    carried outgoing links and were still counted, so the `orphans` term of
+    E(vault) sat frozen at +100 no matter how many repairs ran.
+
+    Permits `patch` against the offered neighbours only, each introducing a
+    wikilink to `orphan_title`.  Never overwrites, deletes, or creates.
     """
-    orphan_key = _norm_path(orphan_path)
+    allowed = {_norm_path(p) for p in neighbour_paths if p}
     forbidden = frozenset({hub} if hub else set())
     return CapabilityBounds(
         name="orphan",
         allowed_ops=frozenset({OpType.patch}),
-        target_predicate=lambda p: _norm_path(p) == orphan_key,
+        target_predicate=lambda p: _norm_path(p) in allowed,
         forbidden_paths=forbidden,
-        content_guard=make_link_addition_guard(),
+        content_guard=make_backlink_guard(orphan_title),
     )

@@ -468,20 +468,97 @@ def _orphan_item():
     )
 
 
-def test_orphan_links_only_to_offered_candidates():
-    # Model returns one valid candidate + one hallucinated name.
-    decision = OrphanLinkDecision(links=["Gradient Descent", "Made Up Note"], rationale="related")
+def _run_orphan_capturing(item, decision):
     with patch("silica.driver.DRIVER.read_note", return_value=MagicMock(content="orphan body")), \
          patch("silica.capabilities.orphan._decide_links", return_value=decision), \
          patch("silica.capabilities.orphan.commit_ops", return_value={"status": "committed", "committed": 1}) as commit:
-        res = run_orphan(_orphan_item(), CONFIG)
+        res = run_orphan(item, CONFIG)
+    return res, commit
+
+
+def test_orphan_links_only_to_offered_candidates():
+    # Model returns one valid candidate + one hallucinated name.
+    decision = OrphanLinkDecision(links=["Gradient Descent", "Made Up Note"], rationale="related")
+    res, commit = _run_orphan_capturing(_orphan_item(), decision)
     assert res["status"] == "committed"
-    op = commit.call_args.args[0][0]
-    assert op.op == OpType.patch and op.path == "Notes/Lonely.md"
-    # Hallucinated target filtered out; only the offered candidate is linked.
-    assert "[[Gradient Descent]]" in op.snippet
-    assert "Made Up Note" not in op.snippet
+    ops = commit.call_args.args[0]
+    # Hallucinated target filtered out: one op, for the one offered candidate.
+    assert len(ops) == 1
+    assert ops[0].op == OpType.patch
     assert commit.call_args.kwargs["bounds"].name == "orphan"
+
+
+def test_orphan_patches_the_neighbour_not_the_orphan():
+    """The link must land in the neighbour and point AT the orphan.
+
+    An orphan is a note with in-degree 0, so a link written into the orphan
+    itself only adds out-degree: it leaves the note orphaned and the `orphans`
+    term of E(vault) unmoved. This is the regression the 2026-08-14 flip fixes.
+    """
+    decision = OrphanLinkDecision(links=["Gradient Descent"], rationale="related")
+    _, commit = _run_orphan_capturing(_orphan_item(), decision)
+    op = commit.call_args.args[0][0]
+    assert op.path == "Concepts/Gradient Descent.md", "patch must target the neighbour"
+    assert op.path != "Notes/Lonely.md"
+    assert "[[Lonely]]" in op.snippet, "the link must point back at the orphan"
+    assert "Gradient Descent" not in op.snippet
+
+
+def test_orphan_completes_the_md_suffix_on_candidate_paths():
+    """Candidate paths arrive in the relatedness keyspace (cooccur_key, no '.md').
+
+    The driver reads either spelling, but the op path is what gets WRITTEN, so a
+    bare key would patch a file that does not exist.
+    """
+    item = WorkItem(
+        kind="orphan",
+        target_path="Notes/Lonely.md",
+        context={"candidates": [
+            {"name": "Bare", "path": "Concepts/Bare"},          # keyspace form
+            {"name": "Suffixed", "path": "Concepts/Suffixed.md"},  # already a path
+        ]},
+        reason="residual_orphan",
+    )
+    decision = OrphanLinkDecision(links=["Bare", "Suffixed"], rationale="both")
+    _, commit = _run_orphan_capturing(item, decision)
+    paths = [o.path for o in commit.call_args.args[0]]
+    assert paths == ["Concepts/Bare.md", "Concepts/Suffixed.md"]
+
+
+def test_orphan_provenance_key_is_per_orphan():
+    """A popular neighbour is the best candidate for many orphans, and the patch
+    executor skips a re-append keyed by (heading, source_basename). A flat
+    "orphan" key would let the first orphan land and silently drop the rest."""
+    def key_for(orphan_path):
+        item = WorkItem(
+            kind="orphan",
+            target_path=orphan_path,
+            context={"candidates": [{"name": "Hub", "path": "Concepts/Hub.md"}]},
+            reason="residual_orphan",
+        )
+        _, commit = _run_orphan_capturing(
+            item, OrphanLinkDecision(links=["Hub"], rationale="r")
+        )
+        return commit.call_args.args[0][0].source_basename
+
+    assert key_for("Notes/First.md") != key_for("Notes/Second.md")
+
+
+def test_orphan_skips_candidates_outside_the_write_boundary():
+    """Same boundary backlink_pass enforces: this rewrites pre-existing notes
+    anywhere in the vault, so on a vault that reads a whole source tree it must
+    never edit a note outside write_dir."""
+    item = WorkItem(
+        kind="orphan",
+        target_path="docs/silica/Lonely.md",
+        context={"candidates": [{"name": "Readme", "path": "README.md"}]},
+        reason="residual_orphan",
+    )
+    decision = OrphanLinkDecision(links=["Readme"], rationale="related")
+    with patch("silica.capabilities.orphan.active_write_dir", return_value="docs/silica"):
+        res, commit = _run_orphan_capturing(item, decision)
+    assert res["status"] == "no_link"
+    commit.assert_not_called()
 
 
 def test_orphan_no_link_when_model_picks_nothing_valid():
@@ -513,9 +590,9 @@ def test_orphan_hub_is_none_when_context_has_no_hub():
 
     captured_hubs = []
 
-    def capture_orphan_bounds(target, *, hub):
+    def capture_orphan_bounds(neighbours, *, orphan_title, hub):
         captured_hubs.append(hub)
-        return real_orphan_bounds(target, hub=hub)
+        return real_orphan_bounds(neighbours, orphan_title=orphan_title, hub=hub)
 
     with patch.object(orphan_module, "orphan_bounds", side_effect=capture_orphan_bounds), \
          patch("silica.capabilities.orphan.commit_ops", return_value={"status": "no_ops"}), \

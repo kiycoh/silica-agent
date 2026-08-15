@@ -72,8 +72,8 @@ def test_orphan_with_matching_title_goes_auto():
     r.totals["orphans"] = 1
     plan = build_task_plan(r)
     auto_caps = [c.capability_name for c in plan.auto]
-    assert "silica_autolink" in auto_caps
-    assert all(c.tier == "auto" for c in plan.auto if c.capability_name == "silica_autolink")
+    assert "silica_backlink" in auto_caps
+    assert all(c.tier == "auto" for c in plan.auto if c.capability_name == "silica_backlink")
 
 
 def test_orphan_without_match_goes_propose():
@@ -83,12 +83,50 @@ def test_orphan_without_match_goes_propose():
     r.totals["orphans"] = 1
     plan = build_task_plan(r)
     propose_caps = [c.capability_name for c in plan.propose]
-    assert "silica_autolink" in propose_caps
+    assert "silica_backlink" in propose_caps
     # Nothing in auto for this case (no matching title)
-    auto_paths = []
+    auto_titles = []
     for c in plan.auto:
-        auto_paths.extend(c.payload.get("note_paths", []))
-    assert "Notes/Zeta999" not in auto_paths
+        auto_titles.extend(c.payload.get("new_titles", []))
+    assert "Zeta999" not in auto_titles
+
+
+def test_orphan_repair_injects_into_peers_not_into_the_orphan():
+    """The plan must BACKLINK an orphan, never autolink it.
+
+    An orphan is a note with in-degree 0, so scanning its own body for mentions
+    of other titles gives it out-degree and leaves it orphaned. The link has to
+    go the other way: into its cluster peers, naming the orphan.
+    """
+    r = _empty_report()
+    r.orphans = ["Concepts/Lonely"]
+    r.totals["orphans"] = 1
+    r.clusters = [
+        _cluster(0, size=3, hub="Concepts/Hub",
+                 members=["Concepts/Lonely", "Concepts/Hub", "Concepts/Peer"]),
+    ]
+    plan = build_task_plan(r)
+    orphan_tasks = [c for c in plan.auto + plan.propose if c.capability_name == "silica_backlink"]
+    assert len(orphan_tasks) == 1
+    payload = orphan_tasks[0].payload
+    assert payload["new_titles"] == ["Lonely"], "the orphan is what gets linked TO"
+    assert "Concepts/Hub" in payload["neighbourhood"]
+    assert "Concepts/Peer" in payload["neighbourhood"]
+    # And nothing anywhere in the plan autolinks the orphan itself.
+    assert all(
+        "Concepts/Lonely" not in c.payload.get("note_paths", [])
+        for c in plan.auto + plan.propose
+    )
+
+
+def test_orphan_without_a_cluster_gets_an_empty_neighbourhood():
+    """No cluster (-1) means no peers to scan — a no-op, never a full-vault sweep."""
+    r = _empty_report()
+    r.orphans = ["Notes/Nowhere"]
+    r.totals["orphans"] = 1
+    plan = build_task_plan(r)
+    tasks = [c for c in plan.auto + plan.propose if c.capability_name == "silica_backlink"]
+    assert tasks and tasks[0].payload["neighbourhood"] == []
 
 
 # ---------------------------------------------------------------------------

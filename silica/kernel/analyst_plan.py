@@ -77,7 +77,7 @@ _IRREVERSIBLE = frozenset({
 # Threshold for orphan "linkable" heuristic: an orphan goes to `auto` only
 # when its title appears as a substring of an existing note name (graph-safe
 # title-match heuristic). If no title candidates are known at plan-time we use
-# `propose` instead. The actual candidate lookup happens in silica_autolink.
+# `propose` instead. The actual mention lookup happens in silica_backlink.
 _CLUSTER_SIZE_THRESHOLD = 40   # clusters > this → propose audit
 _DANGLING_REFS_THRESHOLD = 2   # dangling targets seen >= this many times → escalate
 
@@ -167,6 +167,14 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
         return chunks
 
     # 1. Orphans
+    #
+    # BACKLINK, not autolink. `report.orphans` is in-degree == 0, so the link has
+    # to be injected into the *neighbours*, pointing at the orphan. Autolinking
+    # the orphan scans ITS body for mentions of other titles and gives it
+    # out-degree, which leaves the in-degree at 0: on a 795-note vault 39 of the
+    # 100 orphans already carried outgoing links and were still counted, and the
+    # `orphans` term of E(vault) never moved. Same guarantees either way — both
+    # only wrap literal mentions of notes that exist, so both stay graph-safe.
     auto_orphans_by_cluster: dict[int, list[str]] = {}
     propose_orphans_by_cluster: dict[int, list[str]] = {}
 
@@ -177,20 +185,40 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
         else:
             propose_orphans_by_cluster.setdefault(cid, []).append(orphan)
 
+    cluster_members: dict[int, list[str]] = {c.cluster_id: list(c.members) for c in report.clusters}
+
+    def _backlink_payload(chunk: list[str]) -> dict:
+        """Orphan titles to inject, and the cluster peers to scan for a mention.
+
+        Scoped to the orphans' own clusters: that is where prose about them
+        already lives, and a vault-wide scan would re-read every note per chunk.
+        An orphan with no cluster (-1) contributes no peers, so the pass is a
+        no-op for it rather than a full-vault sweep.
+        """
+        cids = {node_to_cluster.get(o, -1) for o in chunk}
+        peers = {m for cid in cids if cid != -1 for m in cluster_members.get(cid, ())}
+        return {
+            "new_titles": [o.rsplit("/", 1)[-1].removesuffix(".md") for o in chunk],
+            # backlink_pass passes self_title, so an orphan left in the
+            # neighbourhood can gain a link to a *different* orphan and never
+            # to itself.
+            "neighbourhood": sorted(peers),
+        }
+
     for chunk in _chunk_groups(auto_orphans_by_cluster):
         auto.append(TaskCandidate(
-            capability_name="silica_autolink",
-            payload={"note_paths": chunk, "use_candidates": True},
-            reason=f"{len(chunk)} orphans have linkable title candidates → auto-link",
+            capability_name="silica_backlink",
+            payload=_backlink_payload(chunk),
+            reason=f"{len(chunk)} orphans are named in existing notes → auto-backlink",
             tier="auto",
             priority=0,
         ))
 
     for chunk in _chunk_groups(propose_orphans_by_cluster):
         propose.append(TaskCandidate(
-            capability_name="silica_autolink",
-            payload={"note_paths": chunk, "use_candidates": True},
-            reason=f"{len(chunk)} orphans — no clear title match, confirm before autolinking",
+            capability_name="silica_backlink",
+            payload=_backlink_payload(chunk),
+            reason=f"{len(chunk)} orphans — no clear title match, confirm before backlinking",
             tier="propose",
             priority=1,
         ))

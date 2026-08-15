@@ -1,10 +1,16 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Orphan-connector capability — link a lonely note to offered candidate notes.
+"""Orphan-connector capability — make an offered neighbour link to a lonely note.
 
 The model may only choose among candidates that were actually offered; an
 invented target is filtered out so we never create another dangling link.
+
+Direction matters: an orphan is a note with in-degree 0, so the wikilink is
+written INTO the chosen neighbour, pointing at the orphan. Writing it into the
+orphan instead (what this did until 2026-08-14) only adds out-degree and leaves
+the note orphaned — the undirected edge is the same either way, but only this
+direction clears the metric the report and E(vault) actually read.
 """
 from __future__ import annotations
 
@@ -16,6 +22,7 @@ from pydantic import BaseModel
 
 from silica.agent.commit import commit_ops
 from silica.agent.bounds import orphan_bounds
+from silica.kernel.vault_manifest import active_write_dir, within
 from silica.kernel.write.ops import Op, OpType
 from silica.kernel.workqueue import WorkItem
 from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
@@ -46,8 +53,8 @@ def run_orphan(item: WorkItem, config: Any) -> dict[str, Any]:
     decision = _decide_links(config, target, body[:8000], candidates)
     # Only keep links that were actually offered as candidates — never let the
     # model invent a target (which would just create another dangling link).
-    candidate_names = {c.get("name", "") for c in candidates}
-    valid = [n for n in decision.links if n in candidate_names]
+    by_name = {c.get("name", ""): c.get("path", "") for c in candidates}
+    valid = [n for n in dict.fromkeys(decision.links) if by_name.get(n)]
     if not valid:
         return {"status": "no_link", "rationale": decision.rationale}
 
@@ -55,19 +62,45 @@ def run_orphan(item: WorkItem, config: Any) -> dict[str, Any]:
         return {"status": "cancelled"}
 
     emit_feedback(item, "committing")
-    snippet = "## Related\n\n" + "\n".join(f"- [[{n}]]" for n in valid) + "\n"
+    title = os.path.splitext(os.path.basename(target))[0]
     hub = item.context.get("hub")
-    op = Op(
-        op=OpType.patch,
-        heading="Related",
-        source_basename="orphan",
-        path=target,
-        snippet=snippet,
-        hub=hub,
-        reason=f"orphan connect: {decision.rationale[:120]}",
-    )
-    bounds = orphan_bounds(target, hub=hub)
-    result = commit_ops([op], target_dir=os.path.dirname(target), hub=hub, bounds=bounds)
+    # The candidate paths come from the relatedness facade, whose keyspace is
+    # cooccur_key: '.md'-stripped. The driver reads either spelling, but the op
+    # path is what gets written, so it has to be the real note.
+    neighbours = list(dict.fromkeys(
+        p if p.endswith(".md") else p + ".md" for n in valid if (p := by_name[n])
+    ))
+    # This patches pre-existing notes anywhere in the vault (hence the empty
+    # target_dir below, which lifts validate's landing-folder gate), so it
+    # enforces the write boundary itself exactly as backlink_pass does: on a
+    # vault that reads a whole source tree, a de-orphaning patch must never
+    # edit its README.
+    write_root = active_write_dir()
+    if write_root:
+        neighbours = [p for p in neighbours if within(p, write_root)]
+    if not neighbours:
+        return {"status": "no_link", "rationale": "no candidate inside the write boundary"}
+
+    snippet = f"## Related\n\n- [[{title}]]\n"
+    ops = [
+        Op(
+            op=OpType.patch,
+            heading="Related",
+            # Per-orphan, not a flat "orphan": the provenance block keyed by
+            # (heading, source) is what makes a re-patch idempotent, and a
+            # popular neighbour is the best candidate for many orphans. A
+            # shared key would let the first one land and silently skip the
+            # rest as duplicates.
+            source_basename=f"orphan:{title}",
+            path=p,
+            snippet=snippet,
+            hub=hub,
+            reason=f"orphan connect: {decision.rationale[:120]}",
+        )
+        for p in neighbours
+    ]
+    bounds = orphan_bounds(neighbours, orphan_title=title, hub=hub)
+    result = commit_ops(ops, target_dir="", hub=hub, bounds=bounds)
     result.setdefault("linked", valid)
     return result
 
