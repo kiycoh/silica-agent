@@ -764,6 +764,9 @@ def silica_ledger_update(run_id: str, task_id: str, status: str, error: str = ""
 class QuizResult(BaseModel):
     path: str = Field(description="Note the question was drawn from (wikilink name or vault-relative path)")
     correct: bool = Field(description="True if the reader's answer was right")
+    concepts: list[str] = Field(default_factory=list, description="The 1-3 concepts this question actually tested, as you named them when writing it")
+    q: str = Field(default="", description="The question text as asked — lets later rounds avoid re-asking it")
+    anchor: str = Field(default="", description="Optional citation into the note: '#Heading', or '#^id' only if that block id already exists in the note body")
 
 
 class RecordQuizArgs(BaseModel):
@@ -776,8 +779,9 @@ def silica_record_quiz(results: list) -> dict:
 
     Call once after grading a round of questions, one entry per question. This
     writes no note: the log is derived state, and it is what makes
-    silica_weak_notes and the report's attention list rank by what the reader
-    actually got wrong instead of by file age.
+    silica_review_queue and the report's attention list rank by what the reader
+    actually got wrong instead of by file age. Concepts are logged raw, exactly
+    as spelled — the learner view resolves them to the index keyspace at read.
     """
     from silica.kernel.report import quiz
 
@@ -791,14 +795,19 @@ def silica_record_quiz(results: list) -> dict:
             name = DRIVER.read_note(name).ref.path or name
         except Exception:
             pass  # unresolvable: log the reader's spelling rather than drop the answer
-        entries.append({"path": name, "correct": bool(r.get("correct"))})
+        entries.append({
+            "path": name, "correct": bool(r.get("correct")),
+            "concepts": r.get("concepts") or [],
+            "q": r.get("q") or "", "anchor": r.get("anchor") or "",
+        })
 
     written = quiz.record(entries)
     return {"recorded": written, "wrong": sum(1 for e in entries if not e["correct"])}
 
 
-class WeakNotesArgs(BaseModel):
-    limit: int = Field(default=10, description="How many notes to return")
+class ReviewQueueArgs(BaseModel):
+    limit: int = Field(default=10, description="How many notes to return (global picker mode)")
+    target: str = Field(default="", description="Optional vault path prefix: report EVERY note under it with its retention state instead of picking — the calibration read a study plan starts from")
 
 
 @tool(EmptyArgs, cls="atomic")
@@ -818,14 +827,27 @@ def silica_doctor() -> dict:
     return checks.report_payload(checks.run_checks(CONFIG))
 
 
-@tool(WeakNotesArgs, cls="atomic")
-def silica_weak_notes(limit: int = 10) -> list:
-    """Notes the reader has answered wrong, worst first — the review queue.
+@tool(ReviewQueueArgs, cls="atomic")
+def silica_review_queue(limit: int = 10, target: str = "") -> list:
+    """What the reader should review next — the learner model's picker.
 
-    Reads the graded-quiz log written by silica_record_quiz. Empty until at
-    least one round has been graded, which means "nothing measured yet", not
-    "nothing to review".
+    Each row carries an estimated retention R (0..1, null = never measured) and
+    a pool: "due" (known once, decaying — worst first), "unexplored" (zero quiz
+    evidence: AI-written notes first, then central unmeasured notes), "known"
+    (recalled recently; only reported in target mode). R derives from note
+    creation dates, `AI: true` authorship and the graded-quiz ledger — writing
+    a note counts as learning it once; being quizzed is the only thing that
+    ever proves it since.
     """
-    from silica.kernel.report import quiz
+    from silica.kernel.report import learner
 
-    return quiz.weakest(limit)
+    rows = learner.review_queue(limit=limit, target=target)
+    return [
+        {
+            "path": r["path"],
+            "R": None if r["R"] is None else round(r["R"], 3),
+            "why": r["why"], "misses": r["misses"], "attempts": r["attempts"],
+            "ai": r["ai"],
+        }
+        for r in rows
+    ]

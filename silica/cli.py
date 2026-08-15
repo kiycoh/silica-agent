@@ -1578,6 +1578,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         /explain "<concept>" [--level=intro|expert]
         /compare "<A>" "<B>" [...]
         /quiz [note|folder] [--n=10]
+        /learn <area|folder|note|topic>
         /relate <note> [--n=8]
         /schematize <note|folder|topic> [--save=<path>]
         /diagram <note|folder|topic> [--save=<path>]
@@ -2197,14 +2198,15 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             source = "from " + ", ".join(f"`{t}`" for t in targets)
             pick = "Read the note(s) (list a folder's notes first)."
         else:
-            # No target: the review queue picks. Recall failures are the whole
-            # point of logging them, so an untargeted /quiz spends its questions
-            # where the reader has already been measured wrong.
-            source = "from the notes this reader keeps getting wrong"
+            # No target: the learner model picks. Half the round re-tests what
+            # is decaying, half probes what was never measured — every graded
+            # answer feeds the same ledger either way (spec: learner-model).
+            source = "from the learner model's review queue"
             pick = (
-                "Call silica_weak_notes to pick the targets, and read them. If it comes back "
-                "empty nothing has been graded yet: say so, then quiz the vault's recent or "
-                "central notes instead."
+                "Call silica_review_queue to pick the targets, and read them. Mix both pools: "
+                "'due' rows were known once and are decaying — re-test them; 'unexplored' rows "
+                "were never measured, and the AI-written ones were never learned at all, so "
+                "probe those first. An empty queue means an empty vault: say so."
             )
         return (
             f"Run a {n}-question active-recall quiz {source}.\n"
@@ -2215,13 +2217,52 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             f"message: retrieving from memory is what makes the round worth running, and a "
             f"visible answer key destroys it.\n"
             f"When the reader replies, grade each answer, cite each source note as a "
-            f"[[wikilink]], then call silica_record_quiz once with one entry per question "
-            f"({{path, correct}}). Grade an unanswered or skipped question as incorrect.\n"
+            f"[[wikilink]], then call silica_record_quiz once with one entry per question: "
+            f"path, correct, concepts (the 1-3 concepts that question tested), q (the "
+            f"question text), and anchor ('#Heading' when one heading clearly holds the "
+            f"answer). Grade an unanswered or skipped question as incorrect.\n"
+            f"After grading, offer ONE follow-up round drilling what was just missed — run "
+            f"it only if the reader accepts.\n"
             f"A wrong answer is the reader's miss, not the note's fault, and needs nothing "
             f"beyond the grade. If grading instead exposes a fault in the note itself (it "
             f"states something wrong, or contradicts another note you read), offer to record "
             f"that with silica_flag_note, and only run it once the reader says so.\n"
             f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
+        )
+
+    if cmd == "/learn":
+        targets = [a for a in parts[1:] if not a.startswith("-")]
+        if not targets:
+            return "Error: /learn requires a target. Usage: /learn <area|folder|note|topic>"
+        target = " ".join(targets)
+        # Vault-content targets only (spec: learner-model D6). New-material
+        # tutoring — teaching a topic the vault does not hold, with web research
+        # and generated material — plugs in HERE: resolve `target` against
+        # outside sources before the syllabus search, everything below reuses.
+        return (
+            f"Guide the reader through re-learning `{target}` from their own vault.\n"
+            f"1. Find the plan: look for an existing syllabus note — frontmatter "
+            f"`type: syllabus` with `target:` matching `{target}`.\n"
+            f"2. No syllabus yet: build one. Call silica_review_queue with target= to read "
+            f"the area's retention state, read the notes involved, then write ONE syllabus "
+            f"note via silica_write_note with props={{\"type\": \"syllabus\", \"target\": "
+            f"{json.dumps(target)}}}, body = ordered steps, each a "
+            f"`- [ ]` checkbox with [[wikilinks]] to the note(s) it covers and a one-line "
+            f"goal. Order steps pedagogically, prerequisites first — infer the order from "
+            f"the content you read, the graph stores none. SKIP what the reader still "
+            f"retains (high R): start the plan at the frontier. Optionally end the note "
+            f"with a mermaid diagram of the path. Then STOP and ask whether to begin.\n"
+            f"3. Syllabus exists: resume at the first unchecked step.\n"
+            f"Teaching discipline, for every step: teach ONE logical step per message, no "
+            f"rushing ahead; add a mermaid diagram when the step earns one; close the step "
+            f"with 2-3 gate questions and STOP — no answer key in the same message, the "
+            f"/quiz rule. When the reader replies: grade, cite sources as [[wikilinks]], "
+            f"call silica_record_quiz once (entries carry path, correct, concepts, q, "
+            f"anchor — gates are quizzes). A passed gate ticks the step's checkbox via "
+            f"silica_patch_note; a failed one leaves it unchecked so the next /learn "
+            f"returns there. Then offer the next step; never start it unprompted.\n"
+            f"The ledger is the truth: when checkboxes and graded history disagree, trust "
+            f"the grades."
         )
 
     if cmd == "/relate":

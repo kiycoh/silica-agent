@@ -491,13 +491,21 @@ class ProgressLedger:
         except Exception:
             pass
 
-        # Recall failures: the notes the reader keeps getting wrong. Same
-        # worklist an untargeted /quiz picks from; the digest only says it is
-        # non-empty, so the signal reaches the human without running a report.
+        # Recall failures: measured retention, worst first — the learner
+        # view's due pool, restricted to notes a quiz actually graded. Prior-
+        # only decay stays out of the digest: "weak recall" of a note never
+        # tested would be a guess, and the digest must stay silent until
+        # something was measured (quiz.py's own contract).
         try:
-            from silica.kernel.report import quiz
+            from silica.kernel.report import learner
 
-            weak = quiz.weakest(3)
+            weak = sorted(
+                (
+                    r for r in learner.view().values()
+                    if r["attempts"] and r["R"] is not None and r["R"] < learner.DUE_R
+                ),
+                key=lambda r: r["R"],
+            )[:3]
             if weak:
                 names = ", ".join(w["path"] for w in weak)
                 parts.append(f"WEAK RECALL: {names} -> run /quiz to review")

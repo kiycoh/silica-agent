@@ -172,7 +172,7 @@ Credit where it is owed.
 Drop raw clippings, drafts, PDFs, or Jupyter Notebooks (`.ipynb`) in a folder. `/nucleate Inbox/*` distills each one into an atomic note, checks it against what you already have so you do not end up with a fifth copy of the same idea, and files it. Hand it twenty files at once and each one still goes through the same gate.
 
 **Ask your notes instead of your memory.**<br/>
-`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz [note]`. All read-only, all grounded in the vault. Graded answers are logged, so untargeted `/quiz` draws from the notes you have missed before: what you did not know comes back, what you already knew does not.
+`/explain "<concept>"`, `/compare "A" "B"`, `/summarize <folder>`, `/quiz [note]`, `/learn <target>`. All grounded in the vault. Graded answers feed a learner model that estimates what you still retain from when each note was written and how you have scored since, so untargeted `/quiz` re-tests what is decaying and probes what was never measured, and `/learn` turns the same estimate into a step-by-step study plan over your own notes: what you did not know comes back, what you still know stays out of the way.
 
 **When the vault does not have it.**<br/>
 If every search a turn ran came back empty, Silica says so instead of answering thin, and names `/web`. Typing it is the consent: the answer comes from the web, with citations appended from the pages that were actually opened rather than from what the model claims it read. Fetching is direct, with no third-party reader in the path. That turn writes nothing; `/keep` saves it to the inbox when it was worth keeping, and `/web-search "<topic>"` does the same in bulk for a whole question.
@@ -414,7 +414,8 @@ One artifact, two readers: a human reads it as a current map of the repository, 
 | `/explain "<concept>" [--level=intro\|expert]` | Explain a concept grounded in the vault at the chosen register |
 | `/summarize <note\|folder...>` | Read-only digest of one or more notes in chat |
 | `/compare "A" "B"` | Comparison table; surfaces contradictions and contested notes |
-| `/quiz [note\|folder] [--n=10]` | Active-recall quiz; misses resurface. No target = weak notes queue |
+| `/quiz [note\|folder] [--n=10]` | Active-recall quiz; misses resurface. No target = review queue (decaying + never-measured notes) |
+| `/learn <area\|folder\|note\|topic>` | Guided re-learning: builds or resumes a syllabus note calibrated on what you still retain, teaches step by step with quiz gates |
 | `/relate <note> [--n=8]` | Typed relationship map (prerequisite, elaborates, contradicts, etc.) |
 | `/path <noteA> <noteB>` | Shortest reading path between two notes (wikilinks + co-occurrence) |
 | `/schematize <target> [--save=<path>]` | Breakdown table of a note, folder, or topic (optional note save) |

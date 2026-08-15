@@ -43,11 +43,32 @@ def test_appends_and_survives_a_torn_line(log):
     assert quiz.stats()["a"]["misses"] == 2  # the tail is readable past the damage
 
 
-def test_weakest_is_worst_first_and_ignores_the_notes_you_know(log):
-    quiz.record([{"path": "Hard.md", "correct": False}] * 3)
-    quiz.record([{"path": "Medium.md", "correct": False}])
-    quiz.record([{"path": "Known.md", "correct": True}] * 5)
-    assert [r["path"] for r in quiz.weakest()] == ["Hard.md", "Medium.md"]
+def test_record_carries_concepts_question_and_anchor(log):
+    """New optional fields land in the log; absent fields keep the legacy line shape."""
+    quiz.record([
+        {"path": "Math/Linear Algebra.md", "correct": True,
+         "concepts": ["eigenvector", "basis"], "q": "What is an eigenvector?",
+         "anchor": "#Definitions"},
+        {"path": "Math/Calculus.md", "correct": False},  # legacy-shaped entry
+    ])
+    lines = [__import__("json").loads(l) for l in log.read_text().splitlines()]
+    assert lines[0]["concepts"] == ["eigenvector", "basis"]
+    assert lines[0]["q"] == "What is an eigenvector?"
+    assert lines[0]["anchor"] == "#Definitions"
+    assert set(lines[1]) == {"ts", "path", "correct"}  # no empty keys smuggled in
+    # stats() must not choke on the richer lines
+    assert quiz.stats()["math/linear algebra"]["correct"] == 1
+
+
+def test_entries_returns_ordered_events_and_survives_damage(log):
+    quiz.record([{"path": "A.md", "correct": False, "concepts": ["rag"]}])
+    with log.open("a", encoding="utf-8") as f:
+        f.write('{"ts": "2026-01-01T00:00:00+00:00", "path": "B.md", "corr\n')  # torn
+    quiz.record([{"path": "A.md", "correct": True, "q": "second round"}])
+    ev = quiz.entries()
+    assert [e["correct"] for e in ev] == [False, True]  # oldest first, torn line skipped
+    assert ev[0]["concepts"] == ["rag"] and ev[1]["q"] == "second round"
+    assert quiz.entries() == sorted(ev, key=lambda e: e["ts"])
 
 
 def test_misses_outrank_idleness_in_the_attention_list():
@@ -107,6 +128,16 @@ def test_unquizzed_vault_scores_exactly_as_before():
     assert r.attention_candidates[0].score == 10.0  # (9+1)/(1+0)
 
 
+def _vault_note(rel: str) -> None:
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    p = Path(CONFIG.vault_path) / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("---\ndate: 2024-01-01\n---\nbody\n", encoding="utf-8")
+
+
 def test_digest_surfaces_weak_notes(log, tmp_path):
     """A missed note reaches the human through the run digest, not only /graph."""
     import silica.kernel.progress as _mod
@@ -115,6 +146,23 @@ def test_digest_surfaces_weak_notes(log, tmp_path):
     p = _mod.ProgressLedger.new(mode="chat", inputs={})
     assert "WEAK RECALL" not in p.digest()  # nothing graded yet: nothing to say
 
+    _vault_note("Concepts/RAG.md")
     quiz.record([{"path": "Concepts/RAG.md", "correct": False}])
     d = p.digest()
     assert "WEAK RECALL" in d and "Concepts/RAG.md" in d
+
+
+def test_digest_retires_a_note_recalled_since_the_miss(log, tmp_path):
+    """One old miss must not haunt the digest after the reader re-learns the note."""
+    import silica.kernel.progress as _mod
+    _mod._RUNS_DIR = tmp_path
+
+    _vault_note("Relearned.md")
+    _vault_note("Struggling.md")
+    quiz.record([{"path": "Relearned.md", "correct": False}])
+    quiz.record([{"path": "Relearned.md", "correct": True}] * 3)  # stability recovered
+    quiz.record([{"path": "Struggling.md", "correct": False}])
+
+    d = _mod.ProgressLedger.new(mode="chat", inputs={}).digest()
+    assert "Struggling.md" in d
+    assert "Relearned.md" not in d  # retention re-measured high: nothing to nag about

@@ -35,7 +35,12 @@ def key(path: str) -> str:
 
 
 def record(results: list[dict]) -> int:
-    """Append graded answers. Each entry: {"path": <note>, "correct": bool}.
+    """Append graded answers. Each entry: {"path": <note>, "correct": bool},
+    plus optional evidence fields: "concepts" (the 1-3 concepts the question
+    tested, as the asking model named them — resolved to the index keyspace at
+    read time, never here), "q" (the question text), "anchor" (a "#heading" or
+    existing "#^id" citation into the note). Absent fields are omitted, so a
+    legacy-shaped call writes a legacy-shaped line.
 
     Returns the number of entries written. Appends rather than rewriting, so
     a crash mid-write costs the tail of one round and never the history.
@@ -46,10 +51,15 @@ def record(results: list[dict]) -> int:
         path = str((r or {}).get("path") or "").strip()
         if not path:
             continue  # a question with no source note carries no recall signal
-        lines.append(json.dumps(
-            {"ts": now, "path": path, "correct": bool(r.get("correct"))},
-            ensure_ascii=False,
-        ))
+        rec: dict = {"ts": now, "path": path, "correct": bool(r.get("correct"))}
+        concepts = [str(c).strip() for c in (r.get("concepts") or []) if str(c).strip()]
+        if concepts:
+            rec["concepts"] = concepts
+        for k in ("q", "anchor"):
+            v = str(r.get(k) or "").strip()
+            if v:
+                rec[k] = v
+        lines.append(json.dumps(rec, ensure_ascii=False))
     if not lines:
         return 0
     p = log_path()
@@ -57,6 +67,35 @@ def record(results: list[dict]) -> int:
     with p.open("a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     return len(lines)
+
+
+def entries() -> list[dict]:
+    """Every graded answer as logged, oldest first — the raw event stream the
+    learner view derives from. Optional fields pass through untouched; a line
+    missing path or correct carries no event and is skipped, like torn lines.
+    """
+    p = log_path()
+    if not p.exists():
+        return []
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("quiz: unreadable log %s (%s)", p, exc)
+        return []
+    out: list[dict] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+            rec["path"] = str(rec["path"])
+            rec["correct"] = bool(rec["correct"])
+        except (ValueError, KeyError, TypeError):
+            continue  # one torn or hand-edited line must not blind the rest
+        out.append(rec)
+    out.sort(key=lambda e: str(e.get("ts") or ""))
+    return out
 
 
 def stats() -> dict[str, dict]:
@@ -86,10 +125,3 @@ def stats() -> dict[str, dict]:
             s["last"] = ts
             s["path"] = path  # last spelling wins: notes get renamed
     return out
-
-
-def weakest(limit: int = 10) -> list[dict]:
-    """Notes with the worst recall record, worst first. Empty until graded."""
-    rows = [dict(s) for s in stats().values() if s["misses"]]
-    rows.sort(key=lambda r: (-r["misses"], r["last"]))
-    return rows[:limit]

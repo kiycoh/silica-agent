@@ -152,6 +152,13 @@ COMMANDS: tuple[Command, ...] = (
         examples=("/quiz Concepts/ML --n=5", "/quiz"),
     ),
     Command(
+        name="/learn",
+        group="workflow",
+        usage="<area|folder|note|topic>",
+        summary="guided re-learning: builds (or resumes) a syllabus note calibrated on what you still retain, then teaches step by step with quiz gates",
+        examples=("/learn Concepts/ML", '/learn "differential forms"'),
+    ),
+    Command(
         name="/relate",
         group="workflow",
         usage="<note> [--n=8]",
