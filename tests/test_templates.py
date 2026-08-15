@@ -295,3 +295,53 @@ def test_path_shaped_template_names_rejected(tpl_vault, caplog):
     with caplog.at_level(logging.WARNING):
         assert resolve_template() == BUILTIN_TEMPLATE
     assert "invalid vault default template name" in caplog.text
+
+
+# --- stamp_citation (2026-08-15: DOI/authors reach the note) -----------------
+
+def test_stamp_citation_adds_prefixed_keys():
+    from silica.kernel.write.templates import stamp_citation
+    content = "---\ntitle: A\nAI: true\n---\n\n# A\n\nbody\n"
+    out = stamp_citation(content, {
+        "doi": "10.20944/preprints202603.0359.v1",
+        "authors": "Tang, He, Zhao",
+        "source_title": "LLM Agent Memory",
+    })
+    assert 'source_doi: "10.20944/preprints202603.0359.v1"' in out
+    assert 'source_authors: "Tang, He, Zhao"' in out
+    assert 'source_title: "LLM Agent Memory"' in out
+    assert out.endswith("# A\n\nbody\n")
+
+
+def test_stamp_citation_first_writer_wins():
+    from silica.kernel.write.templates import stamp_citation
+    content = '---\ntitle: A\nsource_doi: "10.1/first"\n---\n\nbody\n'
+    out = stamp_citation(content, {"doi": "10.2/second"})
+    assert out.count("source_doi") == 1
+    assert "10.1/first" in out and "10.2/second" not in out
+
+
+def test_stamp_citation_empty_or_no_frontmatter_is_noop():
+    from silica.kernel.write.templates import stamp_citation
+    assert stamp_citation("no frontmatter", {"doi": "10.1/x"}) == "no frontmatter"
+    c = "---\ntitle: A\n---\n\nbody\n"
+    assert stamp_citation(c, {}) == c
+
+
+def test_hub_note_never_parents_itself():
+    """The auto-created hub op carries hub=<its own name>, so the hub note
+    shipped with `parent note: [[appunti]]` ON appunti itself — a self-link
+    that self-attests. A note is never its own parent or its own relative."""
+    from silica.kernel.write.templates import prepare_fields
+
+    f = prepare_fields(title="appunti", body="x", hub="appunti")
+    assert f["parent"] == ""
+    assert '"[[appunti]]"' not in f["related"]
+
+
+def test_self_reference_guard_leaves_real_hubs_alone():
+    from silica.kernel.write.templates import prepare_fields
+
+    f = prepare_fields(title="Slow start", body="x", hub="appunti")
+    assert f["parent"] == '"[[appunti]]"'
+    assert '"[[appunti]]"' in f["related"]

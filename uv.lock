@@ -3788,6 +3788,7 @@ all = [
 ]
 bi = [
     { name = "duckdb" },
+    { name = "openpyxl" },
 ]
 connect = [
     { name = "websockets" },
@@ -3833,6 +3834,7 @@ requires-dist = [
     { name = "networkx", specifier = ">=3" },
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "openai" },
+    { name = "openpyxl", marker = "extra == 'bi'", specifier = ">=3.1" },
     { name = "orjson" },
     { name = "prompt-toolkit", specifier = ">=3.0" },
     { name = "pydantic", specifier = ">=2.0" },

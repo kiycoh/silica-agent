@@ -566,3 +566,48 @@ def content_sha256(source_path: str) -> str:
             return hashlib.sha256(content_bytes).hexdigest()
         except OSError:
             return ""
+
+
+# Citation fields a converted chunk carries in its frontmatter (stamped by
+# sources/convert._provenance_fm) that written notes inherit, so a note can be
+# cited without reopening the original document.
+CITATION_KEYS = ("doi", "arxiv", "authors", "source_title")
+
+_citation_memo: dict[str, dict[str, str]] = {}
+
+
+def citation_of(source_basename: str, *, vault_path: str | None = None) -> dict[str, str]:
+    """Citation frontmatter of the inbox chunk `source_basename` derives from.
+
+    Searched under the active inbox tree (chunks live there until CLEANUP
+    archives them into its `done/` subtree, still under the inbox). Missing
+    file, unreadable frontmatter, or no citation keys all degrade to {} —
+    provenance is additive, never a reason to fail a write. Memoized per
+    basename for the duration of the process (a run stamps many notes from
+    one chunk).
+    """
+    if not source_basename:
+        return {}
+    if source_basename in _citation_memo:
+        return _citation_memo[source_basename]
+
+    result: dict[str, str] = {}
+    try:
+        from silica.kernel.vault_manifest import active_inbox_dir
+        from silica.kernel.write import frontmatter
+
+        root = _resolve_vault_path(vault_path)
+        inbox = active_inbox_dir()
+        if root and inbox:
+            hits = sorted((Path(root) / inbox).rglob(source_basename))
+            if hits:
+                data, _, _ = frontmatter.split(hits[0].read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    result = {
+                        k: str(data[k]) for k in CITATION_KEYS
+                        if data.get(k) not in (None, "")
+                    }
+    except Exception as exc:
+        logger.debug("citation_of(%s) failed (non-fatal): %s", source_basename, exc)
+    _citation_memo[source_basename] = result
+    return result

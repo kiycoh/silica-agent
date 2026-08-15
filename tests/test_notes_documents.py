@@ -138,3 +138,30 @@ def test_patch_stamp_invalidates_the_snapshot(vault, tmp_path):
                             source_basename="chat", documents=["src/m.py"])
     assert "error" not in res, res
     assert not cache.exists()
+
+
+# --- props: caller-supplied frontmatter keys ---------------------------------
+# /learn's contract says "write ONE syllabus note: frontmatter `type: syllabus`
+# + `target:`" — and no tool could write either. The syllabus landed as
+# `type: Note` and every /learn rebuilt the plan from scratch.
+
+def test_props_land_in_frontmatter(vault):
+    res = silica_write_note(
+        path="Syllabus - TCP.md", body="- [ ] step 1",
+        props={"type": "syllabus", "target": "congestione TCP"},
+    )
+    assert res.get("success") is True
+    text = (vault / "Syllabus - TCP.md").read_text(encoding="utf-8")
+    fm = text.split("---")[1]
+    assert "type: syllabus" in fm
+    assert "target: congestione TCP" in fm
+
+
+def test_props_reserved_keys_are_rejected(vault):
+    """`AI:`, `last modified:` and `verified:` are the system floor and the
+    human trust tier — a model writing them would hand the agent a lever on
+    its own authority (OKF §5.2)."""
+    for key in ("AI", "last modified", "verified"):
+        res = silica_write_note(path=f"X-{key}.md", body="b", props={key: "x"})
+        assert "error" in res, key
+        assert not (vault / f"X-{key}.md").exists()

@@ -178,6 +178,13 @@ def prepare_fields(*, title: str, body: str, hub: str | None = None,
 
     hub_link = _link_name(hub) if hub else ""
     parent_link = _link_name(parent) if parent else hub_link
+    # A note is never its own parent or its own relative: the auto-created hub
+    # op carries hub=<its own name>, which stamped every hub note with a
+    # self-link that self-attests ("parent note: [[appunti]]" on appunti.md).
+    if parent_link == _link_name(title):
+        parent_link = ""
+    if hub_link == _link_name(title):
+        hub_link = ""
 
     related_items: list[str] = []
     if parent_link:
@@ -486,6 +493,55 @@ def stamp_sources(content: str, source_basename: str) -> str:
                     for s in merged)
     head = f"{head}\nsources:\n{lines}".rstrip("\n")
     return "---\n" + head + tail
+
+
+def stamp_citation(content: str, cite: dict[str, str]) -> str:
+    """Splice the source's citation fields (doi/arxiv/authors/source_title)
+    into a note's frontmatter, prefixed `source_` where not already.
+
+    Same string-level mechanism as `stamp_sources`. First writer wins per key:
+    a note fed by two sources keeps the first source's identifiers rather than
+    silently swapping them. Values are inert quoted strings — like `sources:`,
+    citation metadata must not enter the graph.
+    """
+    if not cite or not content.startswith("---\n"):
+        return content
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return content  # unterminated frontmatter — leave for the lint to flag
+    data, _, _ = frontmatter.split(content)
+    existing = set(data.keys()) if isinstance(data, dict) else set()
+    head, tail = content[4:end].rstrip("\n"), content[end:]
+    for key, val in cite.items():
+        out_key = key if key.startswith("source_") else f"source_{key}"
+        if out_key in existing:
+            continue
+        v = str(val).replace("\\", "\\\\").replace('"', '\\"')
+        head = f'{head}\n{out_key}: "{v}"'
+    return "---\n" + head + tail
+
+
+def upsert_props(content: str, props: dict[str, str]) -> str:
+    """Insert (or replace) scalar caller-supplied keys in the frontmatter block.
+
+    String-level like `stamp_type`: the rest of the block stays byte-for-byte
+    intact. Callers run this after `ensure_system_floor`, so a block always
+    exists; content without one is returned unchanged. Reserved-key policy is
+    the caller's (the tool layer rejects `AI`/`last modified`/`verified`).
+    """
+    if not props or not content.startswith("---\n"):
+        return content
+    end = content.find("\n---\n", 4)
+    if end == -1:
+        return content
+    head = content[:end]
+    for key, value in props.items():
+        line_re = re.compile(rf"^{re.escape(key)}:.*$", re.MULTILINE)
+        if line_re.search(head[4:]):
+            head = head[:4] + line_re.sub(f"{key}: {value}", head[4:], count=1)
+        else:
+            head += f"\n{key}: {value}"
+    return head + content[end:]
 
 
 def ensure_system_floor(content: str, prior: str | None = None) -> str:

@@ -25,7 +25,7 @@ def _inbox_note(note_rel: str) -> Path:
 
 # --- dispatch ---------------------------------------------------------------
 
-@pytest.mark.parametrize("target", ["notes.xyz", "noext", "data.csv"])
+@pytest.mark.parametrize("target", ["notes.xyz", "noext", "data.zip"])
 def test_unknown_extension_raises(target):
     with pytest.raises(ValueError, match="no converter"):
         conv.convert(target)
@@ -1438,3 +1438,91 @@ def test_pdf_book_splits_into_multiple_inbox_notes(tmp_vault, monkeypatch):
     assert all((Path(CONFIG.vault_path) / p).is_file() for p in paths)
     assert "## Alpha" in (Path(CONFIG.vault_path) / paths[0]).read_text(encoding="utf-8")
     assert "## Beta" in (Path(CONFIG.vault_path) / paths[1]).read_text(encoding="utf-8")
+
+
+# --- tabular profile (csv/tsv/parquet → profile note, never rows) ------------
+
+def test_csv_profile_carries_stats_not_the_table(tmp_vault):
+    pytest.importorskip("duckdb")
+    p = Path(CONFIG.vault_path) / "metrics.csv"
+    p.write_text("name,value\n" + "\n".join(f"item{i},{i}" for i in range(50)) + "\n")
+
+    [note_rel] = conv.convert(str(p))
+
+    body = _inbox_note(note_rel).read_text(encoding="utf-8")
+    assert "silica_query_table" in body           # the note routes reads to SQL
+    assert "50 rows" in body
+    assert "BIGINT" in body                        # sniffed type, not a guess
+    assert "item3" in body                         # sample: first 5 rows appear
+    assert "item40" not in body                    # the table itself stayed on disk
+
+
+def test_csv_profile_without_duckdb_still_lists_columns(tmp_vault, monkeypatch):
+    monkeypatch.setitem(sys.modules, "duckdb", None)  # import raises ImportError
+    p = Path(CONFIG.vault_path) / "sales.csv"
+    p.write_text("region,amount\nnorth,100\nsouth,30\nsouth,20\n")
+
+    [note_rel] = conv.convert(str(p))
+
+    body = _inbox_note(note_rel).read_text(encoding="utf-8")
+    assert "region" in body and "amount" in body
+    assert "3 rows" in body
+    assert "[bi]" in body                          # names what the fallback lacks
+
+
+def test_parquet_profile_without_duckdb_names_the_extra(tmp_vault, monkeypatch):
+    monkeypatch.setitem(sys.modules, "duckdb", None)
+    p = Path(CONFIG.vault_path) / "data.parquet"
+    p.write_bytes(b"PAR1")
+    with pytest.raises(ValueError, match=r"\[bi\]"):
+        conv.convert(str(p))
+
+
+# --- references-section flagging (2026-08-15) --------------------------------
+
+def test_references_section_flagged_with_continuations():
+    # A references section and its heading-less overflow parts all come out
+    # flagged; real content before it never packs into the same segment.
+    body = "# Paper\n\nintro prose\n\n## Method\n\nmmm\n\n"
+    refs = "## References\n\n" + "\n\n".join(f"[{i}] Author {i}. Title." for i in range(40))
+    segs = conv._split_markdown_flagged(body + refs, max_chars=300)
+    flags = [f for _, f in segs]
+    assert flags[0] is False
+    assert any(flags), "references never flagged"
+    # flag is a suffix run: once references start, every later part is flagged
+    first_ref = flags.index(True)
+    assert all(flags[first_ref:])
+    assert "## References" in segs[first_ref][0]
+    # no mixed segment: content text never lands in a flagged segment
+    assert all("## Method" not in s for s, f in segs if f)
+
+
+def test_references_heading_variants_match():
+    for h in ("## References", "# REFERENCES", "## Bibliography",
+              "## 7. References", "## **References**", "## Bibliografia"):
+        assert conv._section_is_references(h + "\n\n[1] X."), h
+    for h in ("## Reference Architectures", "## Methods", "## Cross-references in text"):
+        assert not conv._section_is_references(h + "\n\nbody"), h
+
+
+def test_split_markdown_unchanged_without_references():
+    md = "# Paper\n\nintro\n\n## Method\n\naaa\n\n## Results\n\nbbb"
+    assert conv.split_markdown(md) == [md]
+
+
+def test_doc_citation_finds_doi_and_arxiv_in_head(tmp_path):
+    md = ("# Paper Title\n\nAuthors here\n\n"
+          "doi: 10.20944/preprints202603.0359.v1\n\narXiv:2603.01234v2\n\nAbstract…")
+    fake = tmp_path / "x.bin"  # unopenable by pymupdf → metadata skipped, regexes still run
+    fake.write_bytes(b"")
+    cite = conv._doc_citation(fake, md)
+    assert cite["doi"] == "10.20944/preprints202603.0359.v1"
+    assert cite["arxiv"] == "2603.01234v2"
+
+
+def test_doc_citation_ignores_reference_section_dois(tmp_path):
+    # A DOI past the first-page window is another paper's DOI.
+    md = "# T\n\nintro\n" + "x" * 9000 + "\n10.9999/someone-elses-paper"
+    fake = tmp_path / "x.bin"
+    fake.write_bytes(b"")
+    assert "doi" not in conv._doc_citation(fake, md)

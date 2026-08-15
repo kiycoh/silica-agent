@@ -180,9 +180,16 @@ AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma")
 VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mpg", ".mpeg")
 MEDIA_EXTS = (*AUDIO_EXTS, *VIDEO_EXTS)
 
+# Data files: never prose-converted row by row. A .csv in the inbox becomes a
+# PROFILE note — schema, per-column stats, a 5-row sample — that makes the file
+# discoverable by recall while the rows stay on disk for `silica_query_table`
+# to aggregate in place. json/ndjson stay out: their shape is unknowable up
+# front (config? API dump? records?), so profiling them would guess.
+TABULAR_EXTS = (".csv", ".tsv", ".parquet")
+
 DOC_EXTS = (
     ".pdf", *_PYMUPDF_ONLY_EXTS, *IMG_EXTS, *OFFICE_EXTS, *MEDIA_EXTS,
-    *_PURE_PY_OFFICE_EXTS, *LEGACY_OFFICE_EXTS,
+    *_PURE_PY_OFFICE_EXTS, *LEGACY_OFFICE_EXTS, *TABULAR_EXTS,
 )
 
 # The subset that is a *document* someone meant to keep, as opposed to an
@@ -193,7 +200,7 @@ DOC_EXTS = (
 # to convert those would mean offering to re-ingest our own output.
 CONVERTIBLE_DOC_EXTS = (
     ".pdf", *_PYMUPDF_ONLY_EXTS, *OFFICE_EXTS, *_PURE_PY_OFFICE_EXTS,
-    *LEGACY_OFFICE_EXTS,
+    *LEGACY_OFFICE_EXTS, *TABULAR_EXTS,
 )
 
 # ffmpeg knobs. `-nostdin` is not cosmetic: ffmpeg reads stdin by default and
@@ -268,6 +275,69 @@ def _split_by_size(text: str, max_chars: int) -> list[str]:
     return segs or [text]
 
 
+# A section whose first heading is a bibliography heading. Reference lists are
+# citation metadata, not content to nucleate: one survey's references produced
+# 34 venue notes (NeurIPS.md, ICML.md, …) out of 98 total (2026-08-15 run).
+_REFERENCES_HEADING_RE = re.compile(
+    r"^#{1,6}\s*[\d.\s]*\**\s*(references?|bibliography|works cited|bibliografia|"
+    r"riferimenti(?:\s+bibliografici)?)\s*\**\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_references_chunk(note_rel: str) -> bool:
+    """True when a converted inbox chunk is flagged `references: true`.
+
+    The /nucleate side of the flag written by `_doc_to_md`. Unreadable or
+    unflagged files answer False — never blocks ingestion on a read error.
+    """
+    from silica.driver import DRIVER
+    from silica.kernel.write import frontmatter
+
+    try:
+        data, _, _ = frontmatter.split(DRIVER.read_note(note_rel).content)
+    except Exception:
+        return False
+    return bool(isinstance(data, dict) and data.get("references"))
+
+
+def _section_is_references(section: str) -> bool:
+    for line in section.splitlines():
+        if _HEADING_RE.match(line):
+            return bool(_REFERENCES_HEADING_RE.match(line.strip()))
+    return False
+
+
+def _split_markdown_flagged(md: str, max_chars: int) -> list[tuple[str, bool]]:
+    """split_markdown's engine, each segment flagged is_references.
+
+    The flag is per SECTION (heading-level), inherited by its size-split
+    continuation pieces, and packing never merges across a flag change — so a
+    references section and its heading-less overflow parts all come out
+    flagged, and never absorb (or get absorbed by) real content.
+    """
+    pieces: list[tuple[str, bool]] = []
+    for section in _split_on_headings(md):
+        is_ref = _section_is_references(section)
+        if len(section) <= max_chars:
+            pieces.append((section, is_ref))
+        else:
+            pieces.extend((p, is_ref) for p in _split_by_size(section, max_chars))
+
+    out: list[tuple[str, bool]] = []
+    cur, cur_ref = "", False
+    for p, is_ref in pieces:
+        if cur and (len(cur) + len(p) > max_chars or is_ref != cur_ref):
+            out.append((cur, cur_ref))
+            cur = ""
+        if not cur:
+            cur_ref = is_ref
+        cur += p
+    if cur.strip():
+        out.append((cur, cur_ref))
+    return out or [(md, False)]
+
+
 def split_markdown(md: str, max_chars: int = _MAX_SEGMENT_CHARS) -> list[str]:
     """Book-sized markdown → RECON-sized segments: heading-split, packed to size.
 
@@ -281,23 +351,7 @@ def split_markdown(md: str, max_chars: int = _MAX_SEGMENT_CHARS) -> list[str]:
     micro-segments. A document smaller than ``max_chars`` packs to a single
     segment. Always returns ≥1 segment.
     """
-    pieces: list[str] = []
-    for section in _split_on_headings(md):
-        if len(section) <= max_chars:
-            pieces.append(section)
-        else:
-            pieces.extend(_split_by_size(section, max_chars))
-
-    out: list[str] = []
-    cur = ""
-    for p in pieces:
-        if cur and len(cur) + len(p) > max_chars:
-            out.append(cur)
-            cur = ""
-        cur += p
-    if cur.strip():
-        out.append(cur)
-    return out or [md]
+    return [seg for seg, _ in _split_markdown_flagged(md, max_chars)]
 
 
 def _segment_slug(segment: str, fallback: str) -> str:
@@ -344,7 +398,9 @@ def _doc_to_md(target: str, dest_dir: str) -> list[str]:
     # apply: pymupdf opens an image but reads no text out of it (measured: a
     # 1653x2339 render of a text page yields ''), and neither docling nor
     # opendataloader is a path verified here for either family.
-    if suffix in _MINERU_ONLY_EXTS:
+    if suffix in TABULAR_EXTS:
+        provider = _via_tabular
+    elif suffix in _MINERU_ONLY_EXTS:
         provider = _pdf_via_mineru
     elif suffix in MEDIA_EXTS:
         provider = _via_asr
@@ -410,13 +466,14 @@ def _doc_to_md(target: str, dest_dir: str) -> list[str]:
     from silica.kernel.vault_manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
-    segments = split_markdown(body)
+    flagged = _split_markdown_flagged(body, _MAX_SEGMENT_CHARS)
+    segments = [seg for seg, _ in flagged]
     # Every segment names the real file it came from: the provenance ledger
     # only ever records the inbox note's basename, so without this the original
     # PDF is untraceable once the inbox note is archived. Plain quoted string,
     # not a link — the pointer must not enter the graph. CLEANUP carries it
     # into the source leaf when the note is later nucleated with keep_sources.
-    fm = _provenance_fm(src)
+    fm = _provenance_fm(src, body)
     # Single segment (a paper, an article) keeps the flat inbox path — no change
     # in behaviour, no subdir for the common case. Image links are basename
     # embeds (![[fig.png]]) so they resolve from any segment regardless of dir.
@@ -427,10 +484,14 @@ def _doc_to_md(target: str, dest_dir: str) -> list[str]:
 
     width = len(str(len(segments)))
     paths: list[str] = []
-    for i, seg in enumerate(segments, 1):
+    for i, (seg, is_ref) in enumerate(flagged, 1):
         slug = _segment_slug(seg, "part")
         note_rel = f"{inbox}/{src.stem}/{i:0{width}d}-{slug}.md"
-        DRIVER.upsert(note_rel, fm + seg.lstrip("\n"))  # re-converting the same source refreshes its segments
+        # References segments carry a frontmatter flag so /nucleate can skip
+        # them: a reference list is citation metadata, not content — one gets
+        # kept as raw material, never distilled into venue/journal notes.
+        seg_fm = fm.replace("---\n", "---\nreferences: true\n", 1) if is_ref else fm
+        DRIVER.upsert(note_rel, seg_fm + seg.lstrip("\n"))  # re-converting the same source refreshes its segments
         paths.append(note_rel)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
     return paths
@@ -697,6 +758,114 @@ def _via_xls(src: Path, workdir: Path) -> tuple[str, Path]:
         if rows:
             out.append(f"## {sheet.name}\n\n" + "\n".join(rows))
     return "\n\n".join(out), workdir
+
+
+# --- data files: profile, never rows ----------------------------------------
+
+
+def _md_cell(value: object) -> str:
+    """A value as one markdown table cell: pipe-safe, capped, never None."""
+    text = "" if value is None else str(value)
+    if len(text) > 80:
+        text = text[:77] + "..."
+    return text.replace("|", "\\|").replace("\n", " ")
+
+
+def _md_table(header: list[str], rows: list[list]) -> str:
+    """A markdown table — with the separator row that makes it one."""
+    lines = [
+        "| " + " | ".join(_md_cell(h) for h in header) + " |",
+        "|" + "---|" * len(header),
+    ]
+    lines += ["| " + " | ".join(_md_cell(v) for v in row) + " |" for row in rows]
+    return "\n".join(lines)
+
+
+def _profile_md(
+    src: Path,
+    n_rows: int,
+    columns_table: str,
+    sample_cols: list[str],
+    sample_rows: list[list],
+) -> str:
+    n_cols = len(sample_cols)
+    return (
+        f"# {src.name} data profile\n\n"
+        f"Data file: `{src}` — {n_rows} rows x {n_cols} columns.\n\n"
+        "The rows are NOT in the vault; this note is the file's profile. Answer "
+        "questions about the data by querying the file in place:\n"
+        f'`silica_query_table(path="{src}", sql="SELECT ... FROM t")` — '
+        "start with `SUMMARIZE t` when unsure.\n\n"
+        f"## Columns\n\n{columns_table}\n\n"
+        f"## Sample (first {len(sample_rows)} rows)\n\n"
+        + _md_table(sample_cols, sample_rows)
+        + "\n"
+    )
+
+
+def _duckdb_profile(src: Path) -> str:
+    """Schema + per-column stats + sample, computed by DuckDB without loading."""
+    from silica.tools.tabular import _bind_source, _connect
+
+    con = _connect(src.parent)
+    try:
+        _bind_source(con, src)
+        n_rows = con.execute("SELECT count(*) FROM t").fetchone()[0]
+        stats = con.execute(
+            "SELECT column_name, column_type, min, max, approx_unique, "
+            "null_percentage FROM (SUMMARIZE t)"
+        ).fetchall()
+        sample = con.execute("SELECT * FROM t LIMIT 5").fetchall()
+        sample_cols = [d[0] for d in con.description]
+    finally:
+        con.close()
+    columns_table = _md_table(
+        ["column", "type", "min", "max", "distinct", "null %"],
+        [list(row) for row in stats],
+    )
+    return _profile_md(src, n_rows, columns_table, sample_cols, [list(r) for r in sample])
+
+
+def _csv_basic_profile(src: Path) -> str:
+    """Header + row count + sample via the stdlib — the no-[bi] fallback.
+
+    No types and no stats: naming what is missing beats faking it, and the note
+    says how to get the rest.
+    """
+    import csv
+
+    delimiter = "\t" if src.suffix.lower() == ".tsv" else ","
+    with src.open(newline="", encoding="utf-8", errors="replace") as fh:
+        reader = csv.reader(fh, delimiter=delimiter)
+        header = next(reader, [])
+        sample = [row for _, row in zip(range(5), reader)]
+        n_rows = len(sample) + sum(1 for _ in reader)
+    columns_table = (
+        _md_table(["column"], [[h] for h in header])
+        + "\n\nTypes and per-column stats need DuckDB: "
+        "`pip install 'silica-agent[bi]'`, then re-run /convert."
+    )
+    return _profile_md(src, n_rows, columns_table, header, sample)
+
+
+def _via_tabular(src: Path, workdir: Path) -> tuple[str, Path]:
+    """Data file → profile note. The rows never enter the vault.
+
+    ADR-0014 turns every source into prose, and for a data file the honest
+    prose is a *description* of the table, not a serialization of it: column
+    names and types are exactly what the agent needs to write a correct
+    `silica_query_table` SELECT on the first try, and they embed — rows don't.
+    """
+    try:
+        import duckdb  # noqa: F401
+    except ImportError:
+        if src.suffix.lower() == ".parquet":
+            # The stdlib reads CSV; nothing in the base install reads parquet.
+            raise ValueError(
+                "profiling parquet needs DuckDB: pip install 'silica-agent[bi]'"
+            ) from None
+        return _csv_basic_profile(src), workdir
+    return _duckdb_profile(src), workdir
 
 
 # --- legacy office: the LibreOffice hop -------------------------------------
@@ -1138,13 +1307,54 @@ def _source_date(src: Path) -> str | None:
         return None
 
 
-def _provenance_fm(src: Path) -> str:
+# A DOI or arXiv id stated near the top of the document. Scanned on the first
+# few KB only: a references section is full of OTHER papers' DOIs, and the
+# document's own identifier sits on page one.
+_DOI_RE = re.compile(r"\b(10\.\d{4,9}/[^\s\"'<>\])}]+)")
+_ARXIV_RE = re.compile(r"arXiv:\s*(\d{4}\.\d{4,5})(v\d+)?", re.IGNORECASE)
+
+
+def _doc_citation(src: Path, md_text: str) -> dict[str, str]:
+    """Citation fields the document itself declares: doi/arxiv from the first
+    page's text, authors/title from the format's own metadata. Absent fields
+    are absent keys — never guessed, never worth failing a conversion over."""
+    cite: dict[str, str] = {}
+    try:
+        if src.suffix.lower() in (".pdf", *_PYMUPDF_ONLY_EXTS):
+            import pymupdf
+
+            with pymupdf.open(src) as doc:
+                meta = doc.metadata or {}
+            title = (meta.get("title") or "").strip()
+            authors = (meta.get("author") or "").strip()
+            if title:
+                cite["source_title"] = title
+            if authors:
+                cite["authors"] = authors
+    except Exception:
+        pass
+    head = md_text[:8000]
+    m = _DOI_RE.search(head)
+    if m:
+        cite["doi"] = m.group(1).rstrip(".,;")
+    m = _ARXIV_RE.search(head)
+    if m:
+        cite["arxiv"] = m.group(1) + (m.group(2) or "")
+    return cite
+
+
+def _provenance_fm(src: Path, md_text: str = "") -> str:
     """Frontmatter block naming the converted file's real origin (absolute
-    path), plus the document's own creation date when it states one."""
+    path), the document's own creation date when it states one, and the
+    citation fields it declares (doi/arxiv/authors/title) — what a researcher
+    needs to cite the source without reopening the original file."""
     quoted = str(src).replace("\\", "\\\\").replace('"', '\\"')
     date = _source_date(src)
-    date_line = f"date: {date}\n" if date else ""
-    return f'---\n{date_line}source_file: "{quoted}"\n---\n\n'
+    lines = [f"date: {date}\n"] if date else []
+    for key, val in _doc_citation(src, md_text).items():
+        v = str(val).replace("\\", "\\\\").replace('"', '\\"')
+        lines.append(f'{key}: "{v}"\n')
+    return f'---\n{"".join(lines)}source_file: "{quoted}"\n---\n\n'
 
 
 def _resolve_input(target: str) -> Path:

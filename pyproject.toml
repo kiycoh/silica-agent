@@ -101,7 +101,13 @@ all = ["silica-agent[gui,connect,mcp,rerank,pdf]"]
 # tool body so the base install never pays for it. Kept out of [all] until the
 # lane has an accuracy gate: a wrong number reads as authoritative, so shipping
 # it by default would be worse than not shipping it.
-bi = ["duckdb>=1.5.5"]
+bi = [
+    "duckdb>=1.5.5",
+    # .xlsx/.xlsm sheets for silica_query_table: read in-process (values only)
+    # because DuckDB's own `excel` extension needs INSTALL, which the tool's
+    # sandbox blocks by design. `.xls` rides on xlrd, already a base dep.
+    "openpyxl>=3.1",
+]
 
 [project.scripts]
 silica = "silica.cli:main"

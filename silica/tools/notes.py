@@ -239,6 +239,7 @@ class WriteNoteArgs(BaseModel):
     related: list[str] | None = Field(default=None, description="Related note names, rendered as frontmatter wikilinks")
     parent: str | None = Field(default=None, description="Parent note name for the 'parent note' frontmatter key")
     template: str | None = Field(default=None, description="Named template from the vault's templates dir; 'none' skips the skeleton (AI/last-modified floor still applied)")
+    props: dict[str, str] | None = Field(default=None, description="Extra scalar frontmatter keys, e.g. {'type': 'syllabus'}; AI/last modified/verified are reserved")
     documents: list[str] | None = _DOCUMENTS_FIELD
 
 
@@ -251,12 +252,14 @@ def silica_write_note(
     related: list[str] | None = None,
     parent: str | None = None,
     template: str | None = None,
+    props: dict[str, str] | None = None,
     documents: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a new note in the vault — the fast path for single-note creation.
 
     Frontmatter is mechanical: pass structured fields (title/tags/related/
-    parent), never raw YAML in `body` — a leading YAML block is stripped.
+    parent, plus scalar `props` for keys like `type`/`target`), never raw
+    YAML in `body` — a leading YAML block is stripped.
     The note skeleton comes from the vault template (explicit `template`
     name > vault default > built-in); `template="none"` writes the body
     as-is with only the system floor stamped.
@@ -271,6 +274,15 @@ def silica_write_note(
     from silica.kernel.write import templates as tpl
     from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.workqueue import path_lease
+
+    # `AI:`, `last modified:` and `verified:` are the system floor and the human
+    # trust tier — a model writing them would hand the agent a lever on its own
+    # authority (OKF §5.2). Reject, never silently drop: the caller must know.
+    if props:
+        reserved = [k for k in props if k.strip().lower() in ("ai", "last modified", "verified")]
+        if reserved:
+            return {"error": f"Reserved frontmatter key(s) {reserved}: "
+                             "AI, last modified and verified are system-owned."}
 
     docs: list[str] = []
     code_ref: str | None = None
@@ -295,6 +307,8 @@ def silica_write_note(
         )
         content = tpl.render_note(source, fields)
     content = tpl.ensure_system_floor(content)
+    if props:
+        content = tpl.upsert_props(content, props)
     if docs:
         content = tpl.stamp_documents(content, docs, code_ref)
 
