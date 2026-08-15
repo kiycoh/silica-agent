@@ -328,12 +328,54 @@ function mdLite(src) {
       const shown = (alias || path.split("/").pop().replace(/\.md$/, "")).trim();
       return `<a class="note-link" data-path="${path.replace(/"/g, "&quot;")}">${shown}</a>`;
     });
-  const inline = (t) =>
-    wiki(esc(t))
-      .replace(/`([^`]+)`/g, "<code>$1</code>")
+  // Only these schemes become a live href. mdLite builds its anchors by hand and
+  // gets none of the validateLink pass markdown-it runs server-side, so a
+  // model-authored `[x](javascript:…)` landed as a live anchor in the app's own
+  // origin. A whitelist, not a blocklist: `java\tscript:` walks straight through
+  // a blocklist and the browser still runs it. Unsafe → the text, no anchor.
+  const safeHref = (u) => {
+    const s = u.trim().replace(/[\x00-\x1f]/g, "");
+    const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(s);
+    return !scheme || ["http", "https", "mailto"].includes(scheme[1].toLowerCase()) ? s : null;
+  };
+  // Sentence punctuation and an unbalanced closing paren belong to the prose, not
+  // to the URL — the same call linkify-it makes server-side, so a citation ending
+  // in a full stop links the same in both renders (a Wikipedia URL's own balanced
+  // parens survive).
+  const trimUrl = (u) => {
+    let end = u.length;
+    const count = (s, c) => (s.split(c).length - 1);
+    for (;;) {
+      if (end > 0 && ".,;:!?".includes(u[end - 1])) { end--; continue; }
+      const head = u.slice(0, end);
+      if (end > 0 && u[end - 1] === ")" && count(head, "(") < count(head, ")")) { end--; continue; }
+      return u.slice(0, end);
+    }
+  };
+  // Both link forms in ONE pass. A bare URL matched before the markdown form eats
+  // the target inside `](…)`; matched after, it re-matches the URL already sitting
+  // in `href="…"` and nests the anchors. The lookbehind keeps it off the target of
+  // a `[[…]]` that wiki() already turned into an attribute.
+  const LINK = /\[([^\]]+)\]\(([^)\s]+)\)|(?<![\w"'=@./-])(https?:\/\/[^\s<>"'`]+)/g;
+  const inline = (t) => {
+    // Code spans are parked as placeholders for the rest of the pass: emphasis and
+    // links used to be applied INSIDE the <code> they had already produced, so
+    // `` `https://x` `` would have come out of this change as a live anchor.
+    const code = [];
+    return wiki(esc(t))
+      .replace(/`([^`]+)`/g, (_m, c) => `\u0000${code.push(c) - 1}\u0000`)
       .replace(/\*\*([^*]+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*([^*\n]+?)\*/g, "<em>$1</em>")
-      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2">$1</a>');
+      .replace(LINK, (_m, txt, target, bare) => {
+        if (bare === undefined) {
+          const h = safeHref(target);
+          return h ? `<a href="${h.replace(/"/g, "&quot;")}">${txt}</a>` : txt;
+        }
+        const u = trimUrl(bare);
+        return `<a href="${u.replace(/"/g, "&quot;")}">${u}</a>` + bare.slice(u.length);
+      })
+      .replace(/\u0000(\d+)\u0000/g, (_m, i) => `<code>${code[i]}</code>`);
+  };
   const lines = src.split("\n");
   const out = [];
   let i = 0, list = null;
@@ -1193,11 +1235,23 @@ function showTab(tab) {
   $("#view-metrics").classList.toggle("active", tab === "metrics");
   if (tab === "graph") setGraphMode(graphMode); // load the active mode's content
   if (tab === "metrics") loadMetrics();
+  // Deep-linkable views: the hash names the tab ("explore" is the label users
+  // see for the graph view), so a pasted URL opens on the right screen.
+  const slug = tab === "graph" ? "explore" : tab;
+  if (location.hash !== "#" + slug) history.replaceState(null, "", "#" + slug);
 }
 $(".tabs").addEventListener("click", (e) => {
   const tab = e.target.dataset.tab;
   if (tab) showTab(tab);
 });
+// #explore / #metrics / #chat on the URL select the tab, at load and on manual
+// hash edits alike. Unknown hashes are left alone (note anchors, etc.).
+function tabFromHash() {
+  const slug = (location.hash || "").replace(/^#/, "");
+  const tab = slug === "explore" ? "graph" : slug;
+  if (["chat", "graph", "metrics"].includes(tab) && tab !== activeTab) showTab(tab);
+}
+window.addEventListener("hashchange", tabFromHash);
 
 // --- theme ------------------------------------------------------------------
 // The palette itself is CSS, and the <head> script owns resolving "auto" — this
@@ -3131,6 +3185,14 @@ document.addEventListener("click", (e) => {
   if (!e.target.closest("#node-search-wrap")) closeNodeResults();
   const link = e.target.closest(".note-link, .wc-open");
   if (link) { e.preventDefault(); openNote(link.dataset.path); return; }
+  // An external link opens in its own tab. The app has no internal <a href> of
+  // its own — every in-app move is JS — so any href in the flow came out of a
+  // rendered answer or note, and following it in place tore down the SPA: the
+  // turn, the open drawer and the graph focus all went with it. Scoped to
+  // http(s) on purpose: a `[text](nota.md)` still resolves against the origin
+  // the way it does today, rather than opening a new tab on a 404.
+  const ext = e.target.closest('a[href^="http:"], a[href^="https:"]');
+  if (ext) { e.preventDefault(); window.open(ext.href, "_blank", "noopener"); return; }
   if (notePanel.classList.contains("open") &&
       !e.target.closest("#note-panel") && !e.target.closest("#sidebar") &&
       !e.target.closest("#dock") && !e.target.closest("#note-last")) closeNote();
@@ -4005,10 +4067,18 @@ async function loadHealth() {
       t.textContent = r.name + ": " + r.detail;
       n.appendChild(t);
       if (r.hint) {
+        // Hints collapsed behind a disclosure: three stacked notices with a
+        // five-line JSON hooks blob were eating half the sidebar on first
+        // load. One line each until the user asks for the remedy.
+        const d = document.createElement("details");
+        const s = document.createElement("summary");
+        s.textContent = "how to fix";
+        d.appendChild(s);
         const h = document.createElement("div");
         h.className = "notice-hint";
         h.textContent = r.hint;
-        n.appendChild(h);
+        d.appendChild(h);
+        n.appendChild(d);
       }
       const x = document.createElement("button");
       x.type = "button";
@@ -4030,5 +4100,11 @@ loadVaultInfo();
 loadChanges(); // the server's ledger outlives the tab — a reload keeps the list
 loadConfig(); // header shows the active model without opening the panel
 loadHealth(); // a chat/embedder/reranker server that isn't up says so, once, here
-// Land on chat — it's the primary surface. The tab handler does the rest.
-document.querySelector('.tab[data-tab="chat"]').click();
+// Land on chat — it's the primary surface — unless the URL names another view
+// (#explore, #metrics): a pasted deep link must win over the default. Read the
+// hash BEFORE the default click: showTab rewrites it via replaceState.
+const bootSlug = (location.hash || "").replace(/^#/, "");
+const bootTab = bootSlug === "explore" ? "graph" : bootSlug;
+document.querySelector(
+  `.tab[data-tab="${["chat", "graph", "metrics"].includes(bootTab) ? bootTab : "chat"}"]`
+).click();

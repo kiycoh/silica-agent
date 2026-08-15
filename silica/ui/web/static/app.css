@@ -729,6 +729,10 @@ details.side-section:hover>summary.side-title {
   flex-direction: column;
   gap: 0.4rem;
   margin-top: 0.6rem;
+  /* Five warn cards were half the sidebar, pushing FILES below the fold on
+     first load. The stack scrolls; every notice stays reachable. */
+  max-height: 34vh;
+  overflow-y: auto;
 }
 
 .notice {
@@ -744,6 +748,19 @@ details.side-section:hover>summary.side-title {
 .notice-text {
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+/* remedy collapsed behind a one-line disclosure until asked for */
+.notice details > summary {
+  margin-top: 0.25rem;
+  color: var(--ash-dim);
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.notice details > summary:hover {
+  color: var(--frost);
 }
 
 /* the fix is usually a config blob: keep it selectable, cap how much it takes */
@@ -2341,6 +2358,11 @@ details.side-section:hover>summary.side-title {
   left: 0;
   z-index: 3;
   pointer-events: none;
+  /* The graph iframe's HUD is right-anchored, 216px + 10px margin. Keep the
+     bar out of that band and wrap instead: at ~1030px the find-a-note box
+     was sitting ON the HUD's renderer toggle. */
+  max-width: calc(100% - 236px);
+  flex-wrap: wrap;
 }
 
 #graph-bar>* {

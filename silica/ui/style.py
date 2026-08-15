@@ -39,9 +39,29 @@ class _FlatHeading(Heading):
 
 
 class FlatMarkdown(Markdown):
-    """Markdown whose headings render flat (styles come from theme markdown.h*)."""
+    """Markdown whose headings render flat (styles come from theme markdown.h*),
+    with bare URLs autolinked so rich wraps them in OSC 8.
+
+    rich builds its own parser in ``Markdown.__init__`` and parses immediately,
+    so the only seam is to re-parse. The displayed text stays the URL itself,
+    which is what keeps this honest on a terminal with no OSC 8 support (macOS
+    Terminal, screen): the sequence is ignored and the URL is still readable and
+    selectable, exactly as before.
+    """
 
     elements = {**Markdown.elements, "heading_open": _FlatHeading}
+
+    def __init__(self, markup: str, **kwargs) -> None:
+        from markdown_it import MarkdownIt
+
+        super().__init__(markup, **kwargs)
+        parser = MarkdownIt().enable("strikethrough").enable("table").enable("linkify")
+        parser.options["linkify"] = True
+        # fuzzy_link off or `nota.md` in prose resolves to the Moldovan ccTLD and
+        # renders as a link to http://nota.md; fuzzy_email off keeps the scope at
+        # "a URL is clickable", not "prose opens a mail client".
+        parser.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+        self.parsed = parser.parse(markup)
 
 GROUP_STYLE: dict[str, str] = {
     "workflow": "#22d3ee",  # BRAND_CYAN — works in both markup and Table column style

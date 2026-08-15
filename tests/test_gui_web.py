@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.link_cases import URL_CASES
+
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -776,6 +778,51 @@ def test_linkify_without_resolver_is_plain_render():
     assert _linkify("see [[Foo]] here").strip() == "<p>see [[Foo]] here</p>"
 
 
+# ---------------------------------------------------------------------------
+# _linkify — bare URLs. Shared corpus with the mdLite half (tests/link_cases.py).
+# ---------------------------------------------------------------------------
+
+
+def _basename_resolve(ref: str):
+    """A resolver with `_resolve_in`'s basename fallback, which is the whole
+    reason a URL used to come back as a note: it matches the last path segment,
+    and `_PATHLIKE` hands it every token with a slash in it."""
+    stem = ref.rsplit("/", 1)[-1].removesuffix(".md").lower()
+    return {"chemistry": "areas/chemistry.md"}.get(stem)
+
+
+@pytest.mark.parametrize("md, present, absent", URL_CASES)
+def test_linkify_url_contract(md, present, absent):
+    from silica.ui.web.server import _linkify
+
+    html = _linkify(md, _fake_resolve)
+    for frag in present:
+        assert frag in html, html
+    for frag in absent:
+        assert frag not in html, html
+
+
+def test_linkify_bare_url_is_not_swallowed_by_a_same_named_note():
+    from silica.ui.web.server import _linkify
+
+    # It used to render as `<a class="note-link" data-path="areas/chemistry.md">
+    # chemistry</a>`: the URL disappeared from the page and the click opened an
+    # unrelated note. Every web citation was one note name away from this.
+    html = _linkify("vedi https://en.wikipedia.org/wiki/chemistry ok", _basename_resolve)
+    assert '<a href="https://en.wikipedia.org/wiki/chemistry">' in html
+    assert "note-link" not in html
+
+
+def test_linkify_never_nests_a_note_ref_inside_a_link():
+    from silica.ui.web.server import _linkify
+
+    # The link text carries a path, so the note pass fired inside the anchor and
+    # emitted <a> within <a>, which the browser then unnests.
+    html = _linkify("[vedi chemistry.md](https://e.com)", _basename_resolve)
+    assert html.count("<a ") == 1, html
+    assert "note-link" not in html
+
+
 def test_embed_with_subpath_fragment_still_renders_image():
     # Obsidian embeds carry a #center/#heading subpath and a width alias:
     # the fragment must not defeat the asset-extension check (regression).
@@ -1515,3 +1562,20 @@ def test_community_colour_has_a_paper_band():
         assert _zone_color(i) != _zone_color(i, on_paper=True)
     # and the two partitions still do not share a colour key (ADR-0023)
     assert _community_color(3, on_paper=True) != _zone_color(3, on_paper=True)
+
+
+def test_health_hides_the_cli_hook_check_from_the_sidebar(client, monkeypatch):
+    """"session capture" tells a GUI user to edit .claude/settings.json — a
+    Claude-Code-integration concern the browser can do nothing about. It
+    stays out of the sidebar notices and stays IN the ?all=1 diagnostics."""
+    tc, _ = client
+    import silica.onboarding.checks as checks
+
+    monkeypatch.setattr(checks, "run_checks", lambda cfg: [
+        checks.CheckResult("session capture", "warn", "no hook", "edit settings.json"),
+        checks.CheckResult("embeddings", "warn", "down", "start it"),
+    ])
+    assert [r["name"] for r in tc.get("/health").json()] == ["embeddings"]
+    assert [r["name"] for r in tc.get("/health?all=1").json()] == [
+        "session capture", "embeddings",
+    ]

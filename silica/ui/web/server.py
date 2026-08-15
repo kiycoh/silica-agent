@@ -419,7 +419,17 @@ def _linkify(text: str, resolve=None) -> str:
     from mdit_py_plugins.dollarmath import dollarmath_plugin
 
     text = _strip_ofm_meta(text or "")
-    md = MarkdownIt(options_update={"highlight": _highlight}).enable("table").enable("strikethrough")
+    md = (
+        MarkdownIt(options_update={"highlight": _highlight})
+        .enable("table")
+        .enable("strikethrough")
+        .enable("linkify")
+    )
+    md.options["linkify"] = True
+    # fuzzy_link off or `nota.md` in prose resolves to the Moldovan ccTLD and
+    # renders as a link to http://nota.md; fuzzy_email off keeps the scope at
+    # "a URL is clickable", not "prose opens a mail client".
+    md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
     # allow_space=False keeps prose prices ("$5 and $10") out of math
     md.use(dollarmath_plugin, allow_space=False, allow_digits=False)
     tokens = md.parse(text)
@@ -431,7 +441,18 @@ def _linkify(text: str, resolve=None) -> str:
         if tok.type != "inline" or not tok.children:
             continue
         new = []
+        # Note refs are suppressed inside an anchor. `_PATHLIKE` matches any token
+        # with a slash, so the display text of a link (an autolinked URL is its own
+        # text) hit the basename fallback in _resolve_in and came back as a note:
+        # `https://en.wikipedia.org/wiki/chemistry` rendered as a `.note-link` to
+        # `chemistry.md`, nested inside the <a href> the browser then unnests.
+        # Whoever writes `[...](url)` has already said where the link points.
+        depth = 0
         for child in tok.children:
+            if child.type == "link_open":
+                depth += 1
+            elif child.type == "link_close":
+                depth = max(0, depth - 1)
             if child.type == "html_inline":
                 child.content = _rewrite_raw_img_src(child.content)
                 new.append(child)
@@ -452,7 +473,7 @@ def _linkify(text: str, resolve=None) -> str:
             if child.type != "text":
                 new.append(child)
                 continue
-            frag = _inline_ofm(child.content, resolve)
+            frag = _inline_ofm(child.content, None if depth else resolve)
             raw = Token("html_inline", "", 0)
             raw.content = frag
             new.append(raw)
@@ -1897,10 +1918,13 @@ def health(all: bool = False):
     """
     from silica.onboarding.checks import run_checks
 
+    # "session capture" tells the user to edit .claude/settings.json — a
+    # Claude-Code-integration concern the browser can do nothing about. It
+    # stays out of the sidebar notices; ?all=1 (diagnostics) keeps it.
     return [
         {"name": r.name, "status": r.status, "detail": r.detail, "hint": r.hint}
         for r in run_checks(CONFIG)
-        if all or r.status != "ok"
+        if all or (r.status != "ok" and r.name != "session capture")
     ]
 
 

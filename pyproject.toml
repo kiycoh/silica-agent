@@ -28,7 +28,9 @@ dependencies = [
   "python-dotenv>=1.0",
   "rich",
   "networkx>=3",
-  "markdown-it-py",
+  # [linkify] pulls linkify-it-py: bare URLs in an answer become link tokens
+  # before the note-ref pass sees them, in the web render and the TUI alike.
+  "markdown-it-py[linkify]",
   "orjson",
   "openai",
   "numpy>=2.4.6",
