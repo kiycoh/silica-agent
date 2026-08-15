@@ -2110,6 +2110,17 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 intent_parts.append(arg)
             i += 1
 
+        # Both organizer tools filter with `ref.path.startswith(scope)` over
+        # vault-relative paths, so an absolute --scope matches zero notes and the
+        # whole run reports success on an empty plan. Normalize here, where the
+        # user types the path, and refuse a scope outside the vault out loud.
+        if scope:
+            from silica.kernel.recall.paths import to_vault_relative
+            try:
+                scope = to_vault_relative(scope, ensure_md=False)
+            except ValueError as exc:
+                return f"Error: /organize --scope is not usable: {exc}"
+
         # Re-join intent (handles both quoted and unquoted multi-word)
         intent = " ".join(intent_parts).strip('"\'')
         run_extra = ", move_uncategorized=true" if move_uncat else ""
@@ -2484,6 +2495,31 @@ def _ensure_servers() -> None:
     ensure_local_servers()
 
 
+_CLI_HELP = """\
+silica — your personal note curator agent
+
+Usage:
+  silica                     open the REPL in the current folder's vault
+  silica --gui [--port N]    serve the web GUI (default http://localhost:8765)
+  silica doctor [--live]     check the environment (--json for machine output)
+  silica init [--advanced]   first-run wizard
+  silica setup <client>      register the MCP server (claude, codex, opencode)
+  silica connect             bridge to the Obsidian desktop app
+  silica mcp [--all]         serve the vault over stdio MCP
+  silica import <path>       import external material into the vault
+  silica update [--check]    self-update
+  silica --version           print the version and exit
+
+Options:
+  -c "<command>"             run one REPL command and exit (repeatable),
+                             e.g. silica -c "/report"
+  -v, --verbose              debug logging
+  -h, --help                 this help
+
+The vault is the folder you launch in; SILICA_VAULT overrides it. Type /help
+inside the REPL for the slash-command reference."""
+
+
 def _dispatch_subcommand(args: list[str]) -> int | None:
     """Handle `silica doctor` / `init` / `setup` / `connect` / `mcp` / `update`.
 
@@ -2491,6 +2527,19 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     Lazy imports keep REPL startup unchanged. Module attributes (not `from`
     imports) so tests can monkeypatch run_checks / run_wizard / run_connect.
     """
+    # --help/--version answer and exit BEFORE any vault/server bootstrap: a
+    # first contact typing `silica --help` used to get the full REPL instead,
+    # embeddings autostart included.
+    if args[:1] in (["--help"], ["-h"], ["help"]):
+        print(_CLI_HELP)
+        return 0
+    if args[:1] in (["--version"], ["-V"], ["version"]):
+        try:
+            from silica._version import version as _v
+        except Exception:
+            _v = "unknown"
+        print(f"silica {_v}")
+        return 0
     if args[:1] == ["update"]:
         import silica.update as update_mod
         return update_mod.update(check_only="--check" in args[1:])
@@ -2630,15 +2679,27 @@ def main():
     _bridge = start_bridge_thread()
 
     # Wizard first: it prints its own banner and re-execs on success, so running
-    # it after print_home() showed the banner twice in one screen.
-    _autolaunch_wizard_if_unconfigured()  # re-execs on success; returns otherwise
-    print_home()
-    if _bridge is not None:
-        CONSOLE.print(f"  [dim]Obsidian bridge on ws://127.0.0.1:{_bridge.port}[/]\n")
+    # it after print_home() showed the banner twice in one screen. One-shot -c
+    # runs skip the banner and the wizard: they are scripting, not a session.
+    if "-c" not in sys.argv:
+        _autolaunch_wizard_if_unconfigured()  # re-execs on success; returns otherwise
+        print_home()
+        if _bridge is not None:
+            CONSOLE.print(f"  [dim]Obsidian bridge on ws://127.0.0.1:{_bridge.port}[/]\n")
     if not _model_configured():
         CONSOLE.print(_NO_MODEL_HINT)
 
-    session = build_session()
+    # One-shot mode: `silica -c "/report"` runs each -c command through the
+    # exact same turn body as the REPL, then exits — scripting without piping
+    # a here-doc into an interactive prompt. Repeatable (-c A -c B runs both).
+    oneshot: list[str] = [
+        sys.argv[i + 1]
+        for i, a in enumerate(sys.argv)
+        if a == "-c" and i + 1 < len(sys.argv)
+    ]
+    oneshot_iter = iter(oneshot)
+
+    session = build_session() if not oneshot else None
     messages = _fresh_messages()
     collapsed: set[int] = set()  # message indices already elided by compaction
     # This session's own identity, for the capture lane. Random, not a clock:
@@ -2654,16 +2715,23 @@ def main():
     callback = make_progress_callback()
 
     while True:
-        try:
-            # raw=True: background-thread logs (bridge connect, workers) write
-            # pre-rendered ANSI to the patched stderr. Without raw, prompt_toolkit
-            # escapes the codes and they print literally (e.g. "?[1;2m") above the
-            # prompt instead of rendering as colour.
-            with patch_stdout(raw=True):
-                user_input = session.prompt(prompt_text(), bottom_toolbar=bottom_toolbar)
-        except (EOFError, KeyboardInterrupt):
-            print("\n  (_  _)。˚")
-            break
+        if oneshot:
+            nxt = next(oneshot_iter, None)
+            if nxt is None:
+                break
+            user_input = nxt
+            CONSOLE.print(f"  [dim]› {user_input}[/]")
+        else:
+            try:
+                # raw=True: background-thread logs (bridge connect, workers) write
+                # pre-rendered ANSI to the patched stderr. Without raw, prompt_toolkit
+                # escapes the codes and they print literally (e.g. "?[1;2m") above the
+                # prompt instead of rendering as colour.
+                with patch_stdout(raw=True):
+                    user_input = session.prompt(prompt_text(), bottom_toolbar=bottom_toolbar)
+            except (EOFError, KeyboardInterrupt):
+                print("\n  (_  _)。˚")
+                break
 
         user_input = user_input.strip()
         if not user_input:

@@ -519,3 +519,42 @@ class TestOrganizerFSMRollback:
 
 
 
+
+
+# ---------------------------------------------------------------------------
+# /organize --scope resolution
+# ---------------------------------------------------------------------------
+
+
+class TestOrganizeScope:
+    """Both organizer tools filter with `ref.path.startswith(scope)` over
+    vault-relative paths. An absolute --scope therefore matches zero notes and
+    the run reports success on an empty plan — the failure this normalizes."""
+
+    def _expand(self, line):
+        from silica.cli import _expand_workflow_shortcut
+
+        return _expand_workflow_shortcut(line)
+
+    def test_absolute_scope_inside_the_vault_is_relativized(self, monkeypatch, tmp_path):
+        import silica.config
+
+        monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(tmp_path))
+        msg = self._expand(f'/organize --scope={tmp_path}/docs/silica "by domain"')
+        assert '"docs/silica"' in msg
+        assert str(tmp_path) not in msg
+
+    def test_absolute_scope_outside_the_vault_is_refused_out_loud(self, monkeypatch, tmp_path):
+        import silica.config
+
+        monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(tmp_path / "vault"))
+        msg = self._expand('/organize --scope=/elsewhere/docs "by domain"')
+        assert msg.startswith("Error:")
+        assert "outside the configured vault" in msg
+
+    def test_relative_scope_passes_through(self, monkeypatch, tmp_path):
+        import silica.config
+
+        monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(tmp_path))
+        msg = self._expand('/organize --scope=Inbox "by domain"')
+        assert '"Inbox"' in msg
