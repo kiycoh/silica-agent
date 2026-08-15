@@ -152,6 +152,32 @@ def test_callback_modes_output(capsys, monkeypatch):
         CONFIG.tool_progress = orig_mode
 
 
+def test_web_fetches_are_never_collapsed_into_one_line(capsys, monkeypatch):
+    """`✓ web fetch ×5` throws away the five sites the answer was read from,
+    which is the only reason that line is printed at all.
+
+    The aggregation is right for everything else and stays; the exemption is
+    what a future tidy-up of `_flush_ok_run` would silently undo, taking the
+    feature with it while the suite stayed green.
+    """
+    from silica.agent.events import ThinkingEndEvent
+
+    monkeypatch.setattr(CONSOLE, "_force_terminal", True)
+    monkeypatch.setattr(CONFIG, "tool_progress", "new")
+    cb = make_progress_callback()
+
+    for url in ("https://docs.kernel.org/scheduler/sched-domains.html", "https://lwn.net/Articles/1"):
+        cb(ToolCompleteEvent(name="web_fetch", args={"url": url}, call_id=url,
+                             result="", duration_s=0.0, iteration=1))
+    cb(ThinkingEndEvent(iteration=1))  # anything but a completion flushes the pending run
+
+    out = capsys.readouterr().out
+    assert "docs.kernel.org" in out
+    assert "lwn.net" in out
+    assert "×" not in out           # not aggregated
+    assert "/scheduler/" not in out  # the host, not the URL — the path is the Sources block's job
+
+
 def test_reasoning_event_renders_when_enabled(capsys):
     from silica.agent.events import ReasoningEvent
     from silica.ui.renderer import make_progress_callback

@@ -51,7 +51,14 @@ def test_meter_off_is_noop(monkeypatch):
 # can't be pinned. Tokens are approximated as chars/4 — the same proxy
 # cli._count_context_tokens falls back to, and it reproduced the metered split
 # exactly. Without this a +30% prompt lands silently on every call.
-CHAT_PREFIX_TOKENS = 9_193
+#
+# Re-measured 2026-08-14 at 10_298 (schemas 9.2k, system prompt 1.0k). Of the
+# +1105 since the first pin, 909 are tool schemas the toolset grew before this
+# measurement, and 196 are the in-chat web door: silica_web_answer's schema plus
+# the prompt lines that tell the model to use it. The tolerance had absorbed the
+# earlier schema growth silently down to 10 tokens of headroom, which is the
+# reverse of what the pin is for: re-pin when it fires, and say which part moved.
+CHAT_PREFIX_TOKENS = 10_298
 CHAT_PREFIX_TOLERANCE = 0.10
 
 

@@ -1225,16 +1225,9 @@ def _expand_web_turn(user_input: str, messages: list[dict]) -> tuple[str, str] |
         )
         if not question:
             raise ValueError(_WEB_USAGE)
-    return question, (
-        f"Answer this from the web, not from the vault: {question}\n"
-        "Use `web_search` to find pages and `web_fetch` to read the ones that look "
-        "like they answer it — a search snippet is not the article. When you will "
-        "lean on a specific sentence or figure, bank it with `remember(url, quote, "
-        "why)` and cite the ID it returns inline, like [Q2]. Then answer in "
-        "prose, and say plainly that the answer comes from the web rather than from "
-        "the user's own notes. Do not write a Sources section: the citations are "
-        "appended mechanically from the pages you actually opened."
-    )
+    from silica.sources.web_research import web_turn_instruction
+
+    return question, web_turn_instruction(question)
 
 
 def _stage_envelope(body: str, stem: str, inbox: str) -> str:
@@ -2748,11 +2741,15 @@ def main():
                 model=CONFIG.model,
                 tool_progress_callback=watch,
                 constraints=(
-                    web_turn_constraints() if web else AgentConstraints(tools=chat_tools())
+                    web_turn_constraints() if web else AgentConstraints(tools=chat_tools(messages))
                 ),
             )
             if web:
                 answer = watch.attribute(answer, messages)
+            elif watch.web_answer:
+                from silica.sources.web_research import relay_sources
+
+                answer = relay_sources(answer, messages)
             if answer:
                 CONSOLE.print()
                 CONSOLE.print("[role.assistant]⏺ silica[/]")

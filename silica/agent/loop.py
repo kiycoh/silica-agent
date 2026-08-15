@@ -425,7 +425,16 @@ def run_agent(
                 )
                 start_time = time.perf_counter()
                 try:
-                    result = allowed[tc.name].run(_cancel_token=cancel_token, **tc.args)
+                    # The frontend callback, deliberately not `_emit`: `_emit`
+                    # also publishes on the bus, and a tool that runs a loop of
+                    # its own has its own `_emit` publishing there already — so
+                    # forwarding that one would put every inner event on
+                    # `agent/tool_*` twice.
+                    result = allowed[tc.name].run(
+                        _cancel_token=cancel_token,
+                        _progress=tool_progress_callback,
+                        **tc.args,
+                    )
                     duration = time.perf_counter() - start_time
                     _emit(
                         ToolCompleteEvent(

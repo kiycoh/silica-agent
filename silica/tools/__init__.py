@@ -86,21 +86,26 @@ class Tool:
             },
         }
 
-    def run(self, _cancel_token: Any = None, **kwargs: Any) -> str:
+    def run(self, _cancel_token: Any = None, _progress: Any = None, **kwargs: Any) -> str:
         """Validate args via pydantic, then execute the tool function.
 
-        `_cancel_token` is injected by the agent loop and forwarded to the
-        underlying function only when that function declares a `cancel_token`
-        parameter. It is never part of the params model / JSON schema.
+        `_cancel_token` and `_progress` are injected by the agent loop and
+        forwarded to the underlying function only when it declares the matching
+        parameter (`cancel_token` / `progress`). Neither is part of the params
+        model / JSON schema. `progress` is what lets a tool running a loop of its
+        own — silica_web_answer — draw its steps into the UI the outer loop is
+        already streaming to, instead of showing one opaque spinning row.
         Always returns a JSON string — either the result or an error.
         """
         try:
             validated = self.params_model(**kwargs)
             call_kwargs = validated.model_dump()
-            if _cancel_token is not None:
+            injected = {"cancel_token": _cancel_token, "progress": _progress}
+            if any(v is not None for v in injected.values()):
                 sig = inspect.signature(self.fn)
-                if "cancel_token" in sig.parameters:
-                    call_kwargs["cancel_token"] = _cancel_token
+                for param, value in injected.items():
+                    if value is not None and param in sig.parameters:
+                        call_kwargs[param] = value
             result = self.fn(**call_kwargs)
             # Ensure result is always a string
             if isinstance(result, str):

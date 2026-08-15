@@ -73,8 +73,38 @@ def web_turn_constraints() -> AgentConstraints:
     )
 
 
-def chat_tools() -> tuple[str, ...]:
-    """Toolset for the interactive chat loop: everything except batch maintenance.
+def _summoned(messages: "list[dict] | None") -> set[str]:
+    """Excluded tools that a slash command in THIS conversation named.
+
+    `/organize` expands into a directive that tells the model to call
+    silica_generate_taxonomy and then silica_run_organizer. Both are excluded
+    above, so the turn dead-ended on tools the model could not see — the very
+    failure the _CHAT_EXCLUDED comment warns about for tool descriptions, which
+    the description-level test could not see because this instruction lives in
+    prompt text, not in a description.
+
+    Read over the whole history rather than the current message: /organize is a
+    four-step protocol (generate -> confirm -> dry run -> apply) and the user's
+    "yes, go ahead" carries no tool name of its own. That is the same reason
+    chat_tools() is not scoped per turn.
+
+    ponytail: substring match over cli-origin turns only, so ordinary prose that
+    happens to quote a tool name cannot summon it. Compaction that drops the
+    directive drops the tools with it and the user re-runs the command; revisit
+    if that is ever seen for real.
+    """
+    if not messages:
+        return set()
+    text = "\n".join(
+        m["content"] for m in messages
+        if m.get("origin") == "cli" and isinstance(m.get("content"), str)
+    )
+    return {n for n in _CHAT_EXCLUDED if n in text} if text else set()
+
+
+def chat_tools(messages: "list[dict] | None" = None) -> tuple[str, ...]:
+    """Toolset for the interactive chat loop: everything except batch maintenance,
+    plus any excluded tool a slash command in `messages` explicitly asked for.
 
     Deliberately NOT scoped per turn. The vault-review protocol spans turns —
     step 1 reports, step 2 applies via silica_ledger_next after the user agrees —
@@ -83,7 +113,8 @@ def chat_tools() -> tuple[str, ...]:
     """
     from silica.tools import TOOLS
 
+    extra = _summoned(messages)
     return tuple(
         n for n, t in TOOLS.items()
-        if not t.sensitive and not t.internal and n not in _CHAT_EXCLUDED
+        if not t.sensitive and not t.internal and (n not in _CHAT_EXCLUDED or n in extra)
     )

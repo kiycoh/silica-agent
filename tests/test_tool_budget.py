@@ -66,6 +66,45 @@ def test_chat_tools_keeps_the_multi_turn_review_protocol():
         assert name in chat
 
 
+def test_a_slash_command_reaches_the_excluded_tools_it_names():
+    """The /organize dead end: its directive tells the model to call
+    silica_generate_taxonomy and silica_run_organizer, both hidden by
+    _CHAT_EXCLUDED. The turn used to answer "those tools aren't available to me".
+
+    Checked through the real expansion, not a hand-written string, so the day the
+    directive is reworded the check follows it.
+    """
+    from silica.cli import _expand_workflow_shortcut
+
+    directive = _expand_workflow_shortcut('/organize "group by domain"')
+    assert directive and "silica_generate_taxonomy" in directive
+    history = [{"role": "user", "content": directive, "origin": "cli"}]
+    chat = set(chat_tools(history))
+    assert "silica_generate_taxonomy" in chat
+    assert "silica_run_organizer" in chat
+
+
+def test_the_summoned_tools_survive_the_follow_up_turn():
+    # /organize is generate -> confirm -> dry run -> apply. The confirming turn
+    # names no tool at all; scoping to the current message would strand it.
+    from silica.cli import _expand_workflow_shortcut
+
+    history = [
+        {"role": "user", "content": _expand_workflow_shortcut('/organize "by domain"'), "origin": "cli"},
+        {"role": "assistant", "content": "Here is the taxonomy. Look right?"},
+        {"role": "user", "content": "yes, go ahead"},
+    ]
+    assert "silica_run_organizer" in set(chat_tools(history))
+
+
+def test_prose_quoting_a_tool_name_does_not_summon_it():
+    # Only a cli-origin directive summons. A human asking *about* the organizer
+    # must not silently hand the model a bulk-move tool.
+    history = [{"role": "user", "content": "what does silica_run_organizer do?"}]
+    assert "silica_run_organizer" not in set(chat_tools(history))
+    assert set(chat_tools(history)) == set(chat_tools())
+
+
 def test_chat_tools_actually_cuts_the_block():
     tools = _all_tools()
     def cost(names):

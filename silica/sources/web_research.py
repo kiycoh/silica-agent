@@ -41,6 +41,7 @@ from __future__ import annotations
 import datetime
 import json
 import re
+from dataclasses import replace
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -50,7 +51,7 @@ from urllib.parse import parse_qs, quote, urlencode, urlsplit
 import httpx
 
 from silica.agent.constraints import AgentConstraints
-from silica.agent.events import ToolCompleteEvent
+from silica.agent.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
 from silica.agent.llm import call_llm
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
@@ -774,6 +775,16 @@ _LAST_WEB_TURN: (
 ) = None
 
 
+_SOURCES_HEAD = "## Sources (web)"
+
+
+def _sources_block(sources: list[tuple[str, str]], lanes: str) -> str:
+    """The citation block appended to a web-backed answer, wherever it came from."""
+    lines = [f"{i}. {title} — {url}" for i, (url, title) in enumerate(sources, 1)]
+    block = f"{_SOURCES_HEAD}\n" + ("\n".join(lines) or "(no sources captured)")
+    return f"{block}\n\n{lanes}" if lanes else block
+
+
 class WebTurn:
     """Trace recorder + mechanical attribution for one `/web` turn.
 
@@ -820,14 +831,138 @@ class WebTurn:
         answer, sources, audit = _bind_citations(answer, _collect_sources(raw), _BANK)
         lanes = "\n".join(line for line in (_lane_line(), audit) if line)
         _LAST_WEB_TURN = (self.question, answer, sources, raw, lanes, dict(_BANK))
-        lines = [f"{i}. {title} — {url}" for i, (url, title) in enumerate(sources, 1)]
-        block = "## Sources (web)\n" + ("\n".join(lines) or "(no sources captured)")
-        if lanes:
-            block = f"{block}\n\n{lanes}"
-        out = f"{answer.rstrip()}\n\n{block}"
+        out = f"{answer.rstrip()}\n\n{_sources_block(sources, lanes)}"
         if messages and messages[-1].get("role") == "assistant":
             messages[-1]["content"] = out
         return out
+
+
+def web_turn_instruction(question: str) -> str:
+    """The consented web turn's user-side instruction, shared by both doors.
+
+    `/web` expands to it in the chat's own history (silica/cli.py), and
+    `silica_web_answer` sends it into a sub-loop of its own. One text, so the two
+    doors cannot drift into answering the same question two different ways.
+    """
+    return (
+        f"Answer this from the web, not from the vault: {question}\n"
+        "Use `web_search` to find pages and `web_fetch` to read the ones that look "
+        "like they answer it — a search snippet is not the article. When you will "
+        "lean on a specific sentence or figure, bank it with `remember(url, quote, "
+        "why)` and cite the ID it returns inline, like [Q2]. Then answer in "
+        "prose, and say plainly that the answer comes from the web rather than from "
+        "the user's own notes. Do not write a Sources section: the citations are "
+        "appended mechanically from the pages you actually opened. "
+        "Reply in the language the question is written in."
+    )
+
+
+# The sub-loop has no vault and no chat history, so it gets a lane prompt of its
+# own rather than the chat system prompt: everything it needs is in the
+# instruction above, and the chat prompt would only offer it tools it cannot see.
+_ANSWER_SYSTEM_PROMPT = (
+    "You are Silica's web lane. You answer exactly one question from the live "
+    "web and nothing else."
+)
+
+
+class WebAnswerArgs(BaseModel):
+    question: str
+
+
+# The inner tools worth showing live: the query it typed and the page it opened.
+# An allowlist rather than "everything except remember/plan/find_in_page" — a
+# tool added to web_turn_constraints() later stays out of the chat by
+# construction, instead of leaking until someone remembers to ban it.
+_LIVE_TOOLS = ("web_search", "web_fetch")
+
+
+def _live_progress(progress):
+    """Forward the sub-loop's search and fetch events to the outer frontend.
+
+    Without this the chat shows one spinning `web answer` row for the whole lane
+    and never says which sites the answer is being read from. Only the two tools
+    above pass: the sub-loop's own stream deltas would otherwise render into the
+    chat bubble as if the chat model had written them.
+
+    The ids are namespaced because they are NOT unique across loops — the
+    provider mints them per request, and `recover_leaked_tool_calls` restarts at
+    `call_leaked_0` per message. The web UI indexes its rows by id, so an inner
+    id equal to an outer one closes the wrong row.
+    """
+    if progress is None:
+        return None
+
+    def _forward(event) -> None:
+        if (
+            isinstance(event, (ToolStartEvent, ToolCompleteEvent, ToolErrorEvent))
+            and event.name in _LIVE_TOOLS
+        ):
+            progress(replace(event, call_id=f"web:{event.call_id}"))
+
+    return _forward
+
+
+@tool(WebAnswerArgs, cls="composed")
+def silica_web_answer(question: str, cancel_token=None, progress=None) -> str:
+    """Answer a question from the live web, with citations.
+
+    Call this whenever the user asks you to search the web, or asks for something
+    the vault cannot hold — today's news, a library's current API, anything dated
+    after their notes. Do NOT call it to answer from the user's own notes; the
+    vault tools do that. Returns prose plus a Sources block built from the pages
+    actually opened: pass that block through as it comes, never rewrite it and
+    never name a source it does not list. `/keep` saves the answer as an Inbox note.
+    """
+    from silica.agent.constraints import web_turn_constraints
+
+    # A sub-loop, not the four web tools handed to the chat: a fetched page is
+    # attacker-controlled text, and in here the only tools it can reach are the
+    # web ones (ADR-0009 non-ambient authority). The chat loop, which does hold
+    # the write tools, sees the finished answer and never the raw page.
+    #
+    # `progress` is the outer loop's frontend callback, injected by Tool.run.
+    # Only searches and fetches cross back out (_live_progress): the boundary
+    # that keeps the raw page away from the chat loop is unchanged, what leaves
+    # is a tool name and its arguments.
+    messages = [
+        {"role": "system", "content": _ANSWER_SYSTEM_PROMPT},
+        {"role": "user", "content": web_turn_instruction(question)},
+    ]
+    watch = WebTurn(question, _live_progress(progress))
+    answer = run_agent(
+        messages,
+        model=CONFIG.model,
+        tool_progress_callback=watch,
+        constraints=web_turn_constraints(),
+        cancel_token=cancel_token,
+    )
+    return watch.attribute(answer, messages)
+
+
+def relay_sources(answer: str, messages: list[dict]) -> str:
+    """Put the door's citation block back on a chat answer that dropped it.
+
+    `/web` answers the user directly, so WebTurn.attribute owns the last word.
+    Through `silica_web_answer` the chat model stands between the web lane and
+    the user, and a relay paraphrases: a live turn was seen replacing the block
+    with a hand-written "Fonte:" line naming a page the lane had not opened.
+    That is the one thing the web path exists to make impossible, so the block is
+    reapplied here — same guarantee, whichever door the answer came through.
+
+    Idempotent: an answer that relayed the block faithfully gets nothing.
+
+    ponytail: the last door of the turn wins. Two `silica_web_answer` calls in
+    one turn cite the second; split the stash into a per-turn list the day a
+    turn is seen asking the web two different questions.
+    """
+    if not answer or _LAST_WEB_TURN is None or _SOURCES_HEAD in answer:
+        return answer
+    _, _, sources, _, lanes, _ = _LAST_WEB_TURN
+    out = f"{answer.rstrip()}\n\n{_sources_block(sources, lanes)}"
+    if messages and messages[-1].get("role") == "assistant":
+        messages[-1]["content"] = out
+    return out
 
 
 def keep_last() -> str:

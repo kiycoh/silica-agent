@@ -40,9 +40,14 @@ class RecallWatch:
         self._inner = inner
         self.calls = 0
         self.misses = 0
+        # Did this turn go to the web through silica_web_answer? The UI reapplies
+        # the citation block when it did (web_research.relay_sources).
+        self.web_answer = False
 
     def __call__(self, event) -> None:
         if isinstance(event, ToolCompleteEvent):
+            if event.name == "silica_web_answer":
+                self.web_answer = True
             self._inspect(event)
         if self._inner is not None:
             self._inner(event)

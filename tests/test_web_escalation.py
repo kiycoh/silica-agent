@@ -351,3 +351,127 @@ def test_keep_carries_the_bank_into_the_leaf(tmp_vault, monkeypatch):
     ).read_text(encoding="utf-8")
     assert "## Evidence bank" in leaf
     assert "> Edges move locally." in leaf
+
+
+# --- 10. the in-chat door (silica_web_answer) --------------------------------
+
+def test_the_chat_toolset_carries_the_door_not_the_tools_behind_it():
+    """The chat model can decide to go to the web, but only through the
+    sub-loop tool: the four web tools stay out of a turn that holds the write
+    tools, which is the whole point of ADR-0009 here."""
+    from silica.agent.constraints import chat_tools
+
+    assert "silica_web_answer" in chat_tools()
+
+
+def test_web_answer_runs_the_consented_sub_loop_and_cites_its_trace(monkeypatch):
+    """One question in, cited prose out — and the sub-loop it spends is the
+    same constrained turn `/web` spends, not the caller's toolset."""
+    from silica.agent.constraints import web_turn_constraints
+
+    monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)
+    seen = {}
+
+    def fake_run_agent(messages, model=None, tool_progress_callback=None,
+                       constraints=None, cancel_token=None):
+        seen["tools"] = constraints.tools
+        seen["question"] = messages[-1]["content"]
+        tool_progress_callback(ToolCompleteEvent(
+            name="web_search", args={"query": "q"}, call_id="s1",
+            result=json.dumps(_HITS), duration_s=0.0, iteration=1,
+        ))
+        messages.append({"role": "assistant", "content": "An answer."})
+        return "An answer."
+
+    monkeypatch.setattr(wr, "run_agent", fake_run_agent)
+
+    out = wr.silica_web_answer("what is rewiring")
+
+    assert seen["tools"] == web_turn_constraints().tools
+    assert "what is rewiring" in seen["question"]
+    assert "1. Rewiring — https://a.test/rw" in out
+    # and the answer is keepable, exactly like a /web turn's
+    assert wr._LAST_WEB_TURN is not None
+
+
+def test_the_sub_loops_searches_reach_the_outer_ui(monkeypatch):
+    """The chat used to show one opaque `web answer` row for the whole lane.
+
+    Driven through Tool.run rather than the function, because the injection seam
+    is half of what is pinned here: the loop hands the frontend callback to any
+    tool declaring `progress`, and only searches and fetches come back out —
+    banked quotes and the sub-loop's own stream deltas would render into the
+    chat bubble as if the chat model had written them.
+
+    The ids come back namespaced: they are not unique across loops (the provider
+    mints them per request), and the web UI indexes its rows by id, so a bare
+    inner id can close an outer row.
+    """
+    from silica.agent.events import LLMStreamEvent, ToolStartEvent
+    from silica.tools import TOOLS
+
+    monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)
+
+    def fake_run_agent(messages, model=None, tool_progress_callback=None,
+                       constraints=None, cancel_token=None):
+        for ev in (
+            ToolStartEvent(name="web_search", args={"query": "q"}, call_id="c1", iteration=1),
+            ToolCompleteEvent(name="web_search", args={"query": "q"}, call_id="c1",
+                              result=json.dumps(_HITS), duration_s=0.0, iteration=1),
+            ToolStartEvent(name="remember", args={"url": "https://a.test/rw"},
+                           call_id="c2", iteration=2),
+            LLMStreamEvent(chunk_type="text", content="half an answer", iteration=2),
+            ToolStartEvent(name="web_fetch", args={"url": "https://a.test/rw"},
+                           call_id="c3", iteration=3),
+            ToolCompleteEvent(name="web_fetch", args={"url": "https://a.test/rw"},
+                              call_id="c3", result="Source: https://a.test/rw\n\nbody",
+                              duration_s=0.0, iteration=3),
+        ):
+            tool_progress_callback(ev)
+        messages.append({"role": "assistant", "content": "An answer."})
+        return "An answer."
+
+    monkeypatch.setattr(wr, "run_agent", fake_run_agent)
+
+    seen = []
+    TOOLS["silica_web_answer"].run(_progress=seen.append, question="what is rewiring")
+
+    assert [(e.name, e.call_id) for e in seen] == [
+        ("web_search", "web:c1"),
+        ("web_search", "web:c1"),
+        ("web_fetch", "web:c3"),
+        ("web_fetch", "web:c3"),
+    ]
+
+
+def test_a_relayed_answer_that_dropped_the_block_gets_it_back():
+    """The chat model stands between the web lane and the user, and a relay
+    paraphrases: the citations must survive it."""
+    turn = _turn_with_trace(question="rewiring", results=[_HITS])
+    turn.attribute("Answer.", [])  # the door stashed the turn
+
+    messages = [{"role": "assistant", "content": "Fonte: un sito a caso."}]
+    out = wr.relay_sources("Fonte: un sito a caso.", messages)
+
+    assert "1. Rewiring — https://a.test/rw" in out
+    assert messages[-1]["content"] == out  # history carries what the user saw
+
+
+def test_a_faithful_relay_is_not_cited_twice():
+    turn = _turn_with_trace(question="rewiring", results=[_HITS])
+    relayed = turn.attribute("Answer.", [])
+
+    assert wr.relay_sources(relayed, []) == relayed
+
+
+def test_the_watch_flags_the_turn_that_used_the_door():
+    """The UI only reapplies the block on a turn that actually went to the web."""
+    watch = RecallWatch()
+    assert watch.web_answer is False
+
+    watch(ToolCompleteEvent(
+        name="silica_web_answer", args={"question": "q"}, call_id="w1",
+        result="prose", duration_s=0.0, iteration=1,
+    ))
+
+    assert watch.web_answer is True

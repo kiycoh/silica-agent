@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from typing import Callable
+from urllib.parse import urlsplit
 from rich.live import Live
 from rich.padding import Padding
 from rich.spinner import Spinner
@@ -145,6 +146,23 @@ _TOOL_DESC: dict[str, tuple[str, str | None]] = {
     "silica_snapshot": ("snapshot", "ops_json_path"),
     "silica_restore": ("restore", "txn_id"),
     "silica_cleanup": ("cleanup", "inbox_file"),
+    "web_search": ("web search", "query"),
+    "web_fetch": ("web fetch", "url"),
+    # The question the chat model handed to the web lane — it rewords the user's
+    # own, and this row is the only place that rewording is ever visible. Without
+    # it a wrong answer reads as "web search is bad" rather than "it asked
+    # something else".
+    "silica_web_answer": ("web answer", "question"),
+}
+
+# Value transforms for targets that are unreadable raw. Beside _TOOL_DESC and
+# applied by both readers below, so the next one lands in one place instead of
+# growing a third copied branch in each of two near-duplicate functions.
+_TARGET_FMT: dict[str, Callable[[str], str]] = {
+    # The host, not the URL. Live, "which sources" is a site you judge at a
+    # glance; the full URL with its title arrives at the end of the turn anyway,
+    # in the answer's own `## Sources (web)` block.
+    "web_fetch": lambda url: urlsplit(url).netloc or url,
 }
 
 
@@ -164,8 +182,8 @@ def _tool_target(name: str, args: dict) -> str:
     if name == "silica_run_injector":
         return _injector_label(args)
     _, key = _TOOL_DESC.get(name, (None, None))
-    val = args.get(key) if key else None
-    return str(val).strip() if val else ""
+    val = str(args.get(key) or "").strip() if key else ""
+    return _TARGET_FMT.get(name, str)(val) if val else ""
 
 
 def _injector_files(args: dict) -> list[str]:
@@ -202,6 +220,7 @@ def _synthetic_tool_desc(name: str, args: dict) -> str:
     verb, key = _TOOL_DESC.get(name, (name.removeprefix("silica_").replace("_", " "), None))
     val = args.get(key, "") if key else ""
     if val:
+        val = _TARGET_FMT.get(name, str)(str(val))
         return f'{verb} [bold]"{escape(str(val))}"[/bold]'
     return verb
 
@@ -239,6 +258,11 @@ _CHUNK_PHASES: dict[str, str] = {
 # "· rollback" pending on every healthy run, showing "everything went wrong" as
 # something about to happen. It is drawn only once it actually fires.
 _PHASE_LABELS: dict[str, str] = {**_FILE_PHASES, **_CHUNK_PHASES, "rollback": "rollback"}
+
+# Tools whose ✓ lines never collapse into `✓ verb ×N`. For these the target IS
+# the payload — `✓ web fetch ×5` throws away the five sites the answer was read
+# from, which is the whole reason the line is printed.
+_NO_AGGREGATE = frozenset({"web_search", "web_fetch"})
 
 _PHASE_ORDER: list[str] = [*_FILE_PHASES.values(), *_CHUNK_PHASES.values()]
 _MICRO_PHASE_ORDER: tuple[str, ...] = ("reading", "calling_llm", "committing")
@@ -803,7 +827,11 @@ class _ProgressRenderer:
                     # Buffer the ✓ line: consecutive completions of the same tool
                     # collapse into one aggregated line at flush time.
                     run = self._ok_run
-                    if run is not None and run["name"] == event.name:
+                    if (
+                        run is not None
+                        and run["name"] == event.name
+                        and event.name not in _NO_AGGREGATE
+                    ):
                         run["count"] += 1
                         run["dur"] += event.duration_s
                     else:

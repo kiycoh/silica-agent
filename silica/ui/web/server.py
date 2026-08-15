@@ -656,6 +656,10 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
             # Before _linkify and before the compaction sweep: the Sources block
             # belongs to what the user sees AND to what the history carries.
             answer = watch.attribute(answer, messages)
+        elif watch.web_answer:
+            from silica.sources.web_research import relay_sources
+
+            answer = relay_sources(answer, messages)
         _update_context_tokens(messages)
         _collapsed = _compact_context(messages, _collapsed)
         # note_resolver reads the DRIVER graph — with the ws backend installed
