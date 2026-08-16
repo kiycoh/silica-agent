@@ -282,16 +282,19 @@ def run_agent(
             return  # interrupted/abandoned — stop feeding the renderer
         _emit(LLMStreamEvent(chunk_type=chunk_type, content=content, iteration=iteration))
 
-    # Streaming is a TUI ergonomic: only the interactive main loop gets it —
-    # constrained (worker/batch) runs stay on the plain non-streaming call.
+    # Streaming is a TUI ergonomic: only interactive turns get it — worker and
+    # batch runs stay on the plain non-streaming call. A constrained toolset no
+    # longer implies "worker": an interactive caller that wants the chat_tools
+    # cut says so with constraints.interactive.
     # The kwarg is only passed when active, so call_llm test doubles only need
     # the bare signature plus cancel=None.
+    _interactive = constraints is None or constraints.interactive
     _llm_kwargs: dict = {"tools": None}
     if temperature is not None:
         # None keeps the provider default (product behavior). Eval agent arms
         # pin 0.0 so a single-run A/B measures the lever, not sampling noise.
         _llm_kwargs["temperature"] = temperature
-    if tool_progress_callback is not None and constraints is None:
+    if tool_progress_callback is not None and _interactive:
         _llm_kwargs["on_delta"] = _stream_delta
 
     def _interruptible_llm(kwargs: dict):
@@ -333,7 +336,7 @@ def run_agent(
             # once nobody is waiting (harmless on success: the call already
             # returned). ponytail: sync litellm can't abort the in-flight HTTP
             # request — best we can do is stop waiting and stop retrying.
-            slot = worker_slot() if constraints is not None else nullcontext()
+            slot = nullcontext() if _interactive else worker_slot()
             with slot:
                 _abandon.clear()
                 _llm_kwargs["tools"] = schemas
@@ -544,7 +547,7 @@ def run_agent(
     messages.append({"role": "system", "content": _FINAL_TURN_INSTRUCTION})
     _emit(ThinkingStartEvent(iteration=iteration))
     try:
-        slot = worker_slot() if constraints is not None else nullcontext()
+        slot = nullcontext() if _interactive else worker_slot()
         with slot:
             _abandon.clear()
             final_kwargs = dict(_llm_kwargs)

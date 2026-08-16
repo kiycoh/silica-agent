@@ -17,6 +17,13 @@ class AgentConstraints:
     tools: tuple[str, ...]          # subset of TOOLS the loop may expose + dispatch
     model: str | None = None        # override the model arg when set
     max_iterations: int | None = None  # override the default safety cap when set
+    # An interactive turn with a constrained toolset. run_agent used to read
+    # "constraints is None" as "interactive": streaming on, no worker slot.
+    # That conflated two independent facts — the GUI chat wants the chat_tools
+    # cut (a smaller tool block every iteration) while keeping its live stream
+    # and staying off the worker-pool cap. This flag says which of the two a
+    # constrained caller is; batch/worker callers leave it False.
+    interactive: bool = False
 
 
 # Batch/maintenance tools the conversational loop does not need to *choose*: the
@@ -37,6 +44,7 @@ class AgentConstraints:
 _CHAT_EXCLUDED = frozenset({
     "silica_aliases",            # /aliases
     "silica_anneal",             # vault-wide maintenance pass, FSM-driven
+    "silica_code_pack",          # MCP-facing (external rewrite agents); no chat flow
     "silica_deferred_list",      # deferred-ops bookkeeping, surfaced by the FSM
     "silica_deferred_flush",
     "silica_deferred_retry",
@@ -47,6 +55,7 @@ _CHAT_EXCLUDED = frozenset({
     "silica_inbox_ls",
     "silica_ledger_digest",      # /report runs it directly, no agent involved
     "silica_mindmap",            # /map
+    "silica_record_quiz",        # /quiz and /learn name it in their directives
     "silica_run_organizer",      # /organize
 })
 

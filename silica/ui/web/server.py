@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from silica.agent.constraints import web_turn_constraints
+from silica.agent.constraints import AgentConstraints, chat_tools, web_turn_constraints
 from silica.agent.loop import _is_tool_failure, run_agent
 from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
 from silica.config import CONFIG
@@ -58,15 +58,10 @@ def _build_seed() -> None:
     uses the pure token counter so a background rebuild can't clobber the
     context meter of the conversation in progress."""
     global _seed
-    from silica.cli import _count_context_tokens, _inject_vault_map
-    from silica.onboarding.checks import reply_language_for
-    from silica.prompts import system_prompt
+    from silica.cli import _count_context_tokens, seed_messages
 
-    # Same resolution as the TUI: explicit conventions, else the vault's own
-    # language — see reply_language_for.
-    reply = reply_language_for(CONFIG.vault_path)
-    msgs: list[dict] = [{"role": "system", "content": system_prompt(reply, math=True)}]
-    _inject_vault_map(msgs)
+    # The same builder the TUI seeds from, math=True for the MathML renderer.
+    msgs = seed_messages(math=True)
     _seed = (msgs, _count_context_tokens(msgs))
 
 
@@ -661,7 +656,15 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
             asyncio.to_thread(
                 run_agent, messages, CONFIG.model, watch,
                 cancel_token=current_cancel,
-                constraints=web_turn_constraints() if web else None,
+                # Same chat_tools cut as the CLI REPL (the tool block is the
+                # biggest per-iteration cost); interactive keeps the GUI's live
+                # stream and keeps the turn off the worker-slot cap. Slash
+                # directives carry origin="cli", so excluded tools a command
+                # names are summoned back exactly as in the terminal.
+                constraints=(
+                    web_turn_constraints() if web
+                    else AgentConstraints(tools=chat_tools(messages), interactive=True)
+                ),
             )
         )
         current_task = task

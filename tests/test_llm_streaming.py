@@ -201,6 +201,22 @@ def test_a_plain_answer_is_never_retracted(mock_call_llm):
 
 
 @patch("silica.agent.loop.call_llm")
+def test_an_interactive_constrained_run_still_streams(mock_call_llm):
+    """The chat_tools cut rides in via AgentConstraints, but an interactive
+    turn (CLI REPL, GUI chat) must keep its live stream and stay off the
+    worker-slot cap — "constrained toolset" no longer implies "worker"."""
+    from silica.agent.constraints import AgentConstraints
+
+    mock_call_llm.side_effect = _tool_then_answer()
+    events: list = []
+    with patch("silica.agent.loop.worker_slot",
+               side_effect=AssertionError("interactive turn grabbed a worker slot")):
+        assert _run_collecting(events, constraints=AgentConstraints(
+            tools=("silica_read_note",), interactive=True)) == "Final answer"
+    assert callable(mock_call_llm.call_args.kwargs["on_delta"])
+
+
+@patch("silica.agent.loop.call_llm")
 def test_no_reset_when_the_run_never_streamed(mock_call_llm):
     """Constrained runs stay on the non-streaming call (no on_delta), so nobody
     subscribed to a reset — emitting one anyway would clear an unrelated region."""

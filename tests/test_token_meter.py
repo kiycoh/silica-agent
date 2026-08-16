@@ -58,7 +58,14 @@ def test_meter_off_is_noop(monkeypatch):
 # the prompt lines that tell the model to use it. The tolerance had absorbed the
 # earlier schema growth silently down to 10 tokens of headroom, which is the
 # reverse of what the pin is for: re-pin when it fires, and say which part moved.
-CHAT_PREFIX_TOKENS = 10_298
+# Re-measured 2026-08-15 at 11_633: +1335 is the calendar surface — the three
+# event tools' schemas (create/update/agenda, ~650 tok after a deliberate
+# description trim) joining the chat set, plus their share of the json wrapper.
+# Re-measured 2026-08-16 at 11_848: the schemas did not move, the system prompt
+# did (1214 -> 1428). +214 is the prompt audit — the recall-vs-search routing
+# line, silica_flag_note, and the two report fields the review step 1 was not
+# naming. Re-pinned rather than left to the tolerance, per the paragraph above.
+CHAT_PREFIX_TOKENS = 11_848
 CHAT_PREFIX_TOLERANCE = 0.10
 
 

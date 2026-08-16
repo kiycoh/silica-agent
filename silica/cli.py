@@ -166,11 +166,15 @@ def _vault_scope() -> str:
     )
 
 
-def _fresh_messages() -> list[dict]:
-    """Seed a fresh conversation: system prompt + vault scope + map + token count.
+def seed_messages(math: bool = False) -> list[dict]:
+    """The system context a fresh conversation starts from: prompt, date, vault
+    scope, vault map, and the restated language rule.
 
-    Single source of truth for the initial state, shared by session start and
-    /clear so the two can't drift.
+    Shared by the TUI and the GUI (`ui/web/server._build_seed`, which passes
+    math=True for the MathML renderer). It used to be TUI-only, and the GUI's
+    own seed had drifted to prompt + map: no `_vault_scope`, so the model was
+    blind to `write_dir`, and no closing language line, which is the fix commit
+    f104232 shipped here and never carried across. One builder, no drift.
     """
     from silica.onboarding.checks import reply_language_for
 
@@ -179,7 +183,8 @@ def _fresh_messages() -> list[dict]:
     # of its own, and defaulting to English on an Italian vault answered /quiz
     # in the wrong language.
     reply = reply_language_for(CONFIG.vault_path)
-    messages: list[dict] = [{"role": "system", "content": system_prompt(reply)}]
+    messages: list[dict] = [{"role": "system", "content": system_prompt(reply, math=math)}]
+    messages.append({"role": "system", "content": _today_line()})
     messages.append({"role": "system", "content": _vault_scope()})
     _inject_vault_map(messages)
     # The vault map is the vault's own language. On a vault whose notes are not
@@ -187,6 +192,17 @@ def _fresh_messages() -> list[dict]:
     # the model answers in the notes' language. Restate it last, closest to the
     # user turn.
     messages.append({"role": "system", "content": _lang_prefer(reply)})
+    return messages
+
+
+def _fresh_messages() -> list[dict]:
+    """`seed_messages` plus the live context meter — session start and /clear.
+
+    The meter update is what the GUI must NOT do off the request path (it would
+    clobber the meter of the conversation in progress), so it lives here rather
+    than in the shared builder.
+    """
+    messages = seed_messages()
     _update_context_tokens(messages)
     return messages
 
@@ -2929,7 +2945,12 @@ def main():
                 model=CONFIG.model,
                 tool_progress_callback=watch,
                 constraints=(
-                    web_turn_constraints() if web else AgentConstraints(tools=chat_tools(messages))
+                    # interactive=True: the chat_tools cut must not also demote
+                    # the REPL to a worker (no streaming, worker-slot capped) —
+                    # which is what it silently did when the toolset constraint
+                    # was first wired in.
+                    web_turn_constraints() if web
+                    else AgentConstraints(tools=chat_tools(messages), interactive=True)
                 ),
             )
             if web:
