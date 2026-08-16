@@ -71,7 +71,7 @@ def test_nucleate_md_with_target_dispatches_fsm_directly(stub_coordinator):
     assert msg == ""  # handled inline — no agent turn
     assert stub_coordinator == [
         {"inbox_files": ["Inbox/a.md"], "target_dir": "Concepts/AI", "hub": None,
-         "keep_sources": False, "seen_override": None}
+         "keep_sources": False, "seen_override": None, "distill_profile": None}
     ]
 
 
@@ -136,30 +136,60 @@ def test_slash_command_unbalanced_quotes_still_errors():
     assert msg == 'Error: unbalanced quotes in command. Wrap paths with spaces in "...".'
 
 
-def test_run_injector_rejects_pdf_with_convert_hint(repo_vault):
-    # The agent tool has no converter; a .pdf reaching the FSM would be read as
-    # binary garbage. Guard rejects it and points the agent at /convert.
+def test_run_injector_converts_a_pdf_itself(repo_vault, monkeypatch):
+    """The agent tool used to answer "ask the user to run /convert" — told, in a
+    REPL, to the person who had just asked the agent to do it. /nucleate has
+    always converted inline; the tool now does the same."""
+    import silica.tools.runners as runners_mod
     from silica.tools import TOOLS
 
-    out = TOOLS["silica_run_injector"].fn(inbox_files=["Inbox/paper.pdf"], target_dir="Concepts")
-    assert "error" in out
-    assert "paper.pdf" in out["error"] and "/convert" in out["error"]
+    seen: dict = {}
+
+    class _Fake:
+        def __init__(self, **kw):
+            seen.update(kw)
+            self.fsm = type("F", (), {"progress": type("P", (), {"run_id": "r1"})()})()
+
+        def run(self):
+            return {"final_status": "done"}
+
+    monkeypatch.setattr("silica.router.coordinator.Coordinator", _Fake)
+    monkeypatch.setattr("silica.sources.convert.convert",
+                        lambda target, dest_dir="": ["Concepts/paper-01.md"])
+    assert runners_mod  # module imported for the patch target above
+
+    out = TOOLS["silica_run_injector"].fn(inbox_files=["Inbox/paper.pdf"],
+                                          target_dir="Concepts")
+
+    assert "error" not in out
+    assert seen["inbox_files"] == ["Concepts/paper-01.md"]
 
 
-def test_run_injector_convert_hint_is_copy_pasteable(repo_vault):
-    """The hint is a line the user pastes back into the CLI, and the shortcut
-    parser shlex-splits it — an unquoted path with spaces arrives as N args."""
-    import shlex
-
-    from silica.cli import _expand_workflow_shortcut
+def test_run_injector_names_a_file_no_converter_handles(repo_vault, monkeypatch):
     from silica.tools import TOOLS
 
-    rel = "Inbox/Deep Learning (Goodfellow, Bengio, Courville).pdf"
-    out = TOOLS["silica_run_injector"].fn(inbox_files=[rel], target_dir="Concepts")
-    line = out["error"].split("`")[1]  # the /convert … the agent tells the user to run
-    assert shlex.split(line) == ["/convert", rel]
-    # and the CLI accepts it as one path (the file is absent → converter error, not a split)
-    _expand_workflow_shortcut(line)
+    def _boom(target, dest_dir=""):
+        raise ValueError("unsupported file type .zip")
+
+    monkeypatch.setattr("silica.sources.convert.convert", _boom)
+
+    out = TOOLS["silica_run_injector"].fn(inbox_files=["Inbox/corpus.zip"],
+                                          target_dir="Concepts")
+    assert "corpus.zip" in out["error"] and ".zip" in out["error"]
+
+
+def test_run_injector_asks_for_a_target_before_transcoding(repo_vault, monkeypatch):
+    """Converting a 200 MB scan and then bailing on a missing target_dir burns
+    minutes for nothing."""
+    from silica.tools import TOOLS
+
+    def _never(target, dest_dir=""):
+        raise AssertionError("converted before the target check")
+
+    monkeypatch.setattr("silica.sources.convert.convert", _never)
+
+    out = TOOLS["silica_run_injector"].fn(inbox_files=["Inbox/paper.pdf"], target_dir="")
+    assert "target_dir" in out["error"]
 
 
 def test_run_injector_rejects_unknown_type_without_convert_hint(repo_vault):
@@ -530,3 +560,259 @@ def test_run_injector_projects_outcomes_not_raw_context(repo_vault, monkeypatch)
     assert len(out["failed_chunks"]) == 6
     assert "payload" not in out and "recon" not in out
     assert out["run_id"] == "r1"
+
+
+# --- auto-target: cold-start and inbox self-pick -----------------------------
+#
+# Both defects were measured on a 74-PDF research library whose first
+# `/nucleate <book>.pdf` produced zero notes in ~10 minutes: the folder census
+# saw no .md anywhere, the model echoed the inbox subfolder back, and VALIDATE
+# then rejected all 31 ops with "contains forbidden inbox segment".
+
+def test_auto_target_refuses_a_pick_inside_the_inbox(tmp_vault, monkeypatch):
+    """A pick under the inbox is rejected at the source, not 20 LLM calls later
+    at VALIDATE, where it costs a whole run and writes nothing."""
+    import silica.agent.llm as llm
+    from silica.cli import _pick_target_folder
+
+    class _R:
+        text = "Inbox/Book-of-Enoch"
+
+    monkeypatch.setattr(llm, "call_llm", lambda *a, **k: _R())
+    tmp_vault.note("Concepts/existing.md", "census non-empty\n")
+    tmp_vault.note("Inbox/Book-of-Enoch/01-enoch.md", "body\n")
+
+    with pytest.raises(ValueError):
+        _pick_target_folder(["Inbox/Book-of-Enoch/01-enoch.md"])
+
+
+def test_folder_census_offers_folders_that_hold_no_markdown(tmp_vault, monkeypatch):
+    """A researcher's library is folders of PDFs. Censusing only .md parents
+    hides the whole taxonomy and leaves the model nothing to pick."""
+    import silica.agent.llm as llm
+    from silica.cli import _pick_target_folder
+
+    seen: dict = {}
+
+    class _R:
+        text = "02-apocrifi"
+
+    def _spy(model, messages, **kw):
+        seen["prompt"] = messages[0]["content"]
+        return _R()
+
+    monkeypatch.setattr(llm, "call_llm", _spy)
+    tmp_vault.note("02-apocrifi/Book-of-Enoch.pdf", "%PDF-1.4\n")
+    tmp_vault.note("04-massoneria/Mackey.pdf", "%PDF-1.4\n")
+    tmp_vault.note("Inbox/01-enoch.md", "body\n")
+
+    assert _pick_target_folder(["Inbox/01-enoch.md"]) == "02-apocrifi"
+    assert "02-apocrifi" in seen["prompt"]
+    assert "04-massoneria" in seen["prompt"]
+    assert "- Inbox" not in seen["prompt"]
+
+
+# --- folder batch: idempotent re-runs, no re-OCR ----------------------------
+#
+# A research library is 74 scanned books at minutes of OCR + minutes of LLM
+# each: the batch is days of wall clock, so it WILL be interrupted. Re-running
+# `/nucleate <folder>` must resume — skip books already in done/, reuse
+# segments already converted, drop segments already distilled — instead of
+# paying the whole corpus again. All three identities are already on disk
+# (frontmatter `source_file`, the done/ archive, provenance.json); these pin
+# that the batch reads them.
+
+def _library(tmp_vault, monkeypatch):
+    from pathlib import Path
+
+    import silica.cli as cli_mod
+
+    tmp_vault.note("vault.yaml", "write_dir: silica\n")
+    tmp_vault.note("04-massoneria/mackey.pdf", "%PDF mackey")
+    tmp_vault.note("04-massoneria/memphis.pdf", "%PDF memphis")
+    tmp_vault.note("04-massoneria/_foto/set-a/p1.jpg", "img")
+    tmp_vault.note("04-massoneria/_foto/set-a/p2.jpg", "img")
+    from silica.kernel.vault_manifest import reset_manifest_cache
+    reset_manifest_cache()
+
+    converted: list[str] = []
+
+    def _fake_convert(target, dest_dir=""):
+        converted.append(target)
+        stem = Path(target).stem
+        rel = f"silica/Inbox/{stem}/01-{stem}.md"
+        tmp_vault.note(rel, f"# {stem}\n\nbody of {stem}\n")
+        return [rel]
+
+    monkeypatch.setattr("silica.sources.convert.convert", _fake_convert)
+    monkeypatch.setattr(cli_mod, "_pick_target_folder",
+                        lambda files: "silica/04-massoneria")
+    return converted
+
+
+def test_folder_batch_converts_documents_and_leaves_page_photos_alone(
+        tmp_vault, monkeypatch, stub_coordinator):
+    converted = _library(tmp_vault, monkeypatch)
+
+    msg = _expand_workflow_shortcut("/nucleate 04-massoneria")
+
+    assert msg == ""
+    assert sorted(converted) == ["04-massoneria/mackey.pdf",
+                                 "04-massoneria/memphis.pdf"]
+    # One Coordinator run per book — the pipeline unit. Book B converts while
+    # book A distills, so their segments must never share a run.
+    assert [c["inbox_files"] for c in stub_coordinator] == [
+        ["silica/Inbox/mackey/01-mackey.md"],
+        ["silica/Inbox/memphis/01-memphis.md"],
+    ]
+
+
+def test_an_already_ingested_book_is_not_reconverted(
+        tmp_vault, monkeypatch, stub_coordinator):
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    converted = _library(tmp_vault, monkeypatch)
+    abs_pdf = str(Path(CONFIG.vault_path) / "04-massoneria/mackey.pdf")
+    tmp_vault.note("silica/done/01-mackey.md",
+                   f'---\nsource_file: "{abs_pdf}"\n---\n\nbody\n')
+
+    _expand_workflow_shortcut("/nucleate 04-massoneria")
+
+    assert converted == ["04-massoneria/memphis.pdf"]
+    assert stub_coordinator[0]["inbox_files"] == [
+        "silica/Inbox/memphis/01-memphis.md"]
+
+
+def test_interrupted_conversion_segments_are_reused_not_reocred(
+        tmp_vault, monkeypatch, stub_coordinator):
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    converted = _library(tmp_vault, monkeypatch)
+    abs_pdf = str(Path(CONFIG.vault_path) / "04-massoneria/mackey.pdf")
+    tmp_vault.note("silica/Inbox/mackey/01-mackey.md",
+                   f'---\nsource_file: "{abs_pdf}"\n---\n\nseg one\n')
+    tmp_vault.note("silica/Inbox/mackey/02-mackey.md",
+                   f'---\nsource_file: "{abs_pdf}"\n---\n\nseg two\n')
+
+    _expand_workflow_shortcut("/nucleate 04-massoneria")
+
+    assert converted == ["04-massoneria/memphis.pdf"]
+    # Reused segments are a ready unit and dispatch first (their distill is
+    # what the conversion of the next book overlaps with).
+    assert [c["inbox_files"] for c in stub_coordinator] == [
+        ["silica/Inbox/mackey/01-mackey.md", "silica/Inbox/mackey/02-mackey.md"],
+        ["silica/Inbox/memphis/01-memphis.md"],
+    ]
+
+
+def test_an_unchanged_already_distilled_segment_is_dropped(
+        tmp_vault, monkeypatch, stub_coordinator):
+    from silica.kernel.write.provenance import append_record, content_sha256
+
+    tmp_vault.note("vault.yaml", "write_dir: silica\n")
+    from silica.kernel.vault_manifest import reset_manifest_cache
+    reset_manifest_cache()
+    tmp_vault.note("silica/Inbox/b/01-x.md", "segment one\n")
+    tmp_vault.note("silica/Inbox/b/02-y.md", "segment two\n")
+    append_record("01-x.md", content_sha256("silica/Inbox/b/01-x.md"),
+                  "prior-run", ["silica/T/X"])
+
+    _expand_workflow_shortcut(
+        "/nucleate silica/Inbox/b/01-x.md silica/Inbox/b/02-y.md --target=T")
+
+    assert stub_coordinator[0]["inbox_files"] == ["silica/Inbox/b/02-y.md"]
+
+
+def test_a_zero_yield_record_does_not_freeze_the_failure(
+        tmp_vault, monkeypatch, stub_coordinator):
+    """A prior run that produced no notes (everything deferred) must not make
+    the skip permanent — the segment gets another chance."""
+    from silica.kernel.write.provenance import append_record, content_sha256
+
+    tmp_vault.note("vault.yaml", "write_dir: silica\n")
+    from silica.kernel.vault_manifest import reset_manifest_cache
+    reset_manifest_cache()
+    tmp_vault.note("silica/Inbox/b/01-x.md", "segment one\n")
+    append_record("01-x.md", content_sha256("silica/Inbox/b/01-x.md"),
+                  "prior-run", [])
+
+    _expand_workflow_shortcut("/nucleate silica/Inbox/b/01-x.md --target=T")
+
+    assert stub_coordinator[0]["inbox_files"] == ["silica/Inbox/b/01-x.md"]
+
+
+def test_a_fully_ingested_batch_ends_without_a_run(
+        tmp_vault, monkeypatch, stub_coordinator):
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    converted = _library(tmp_vault, monkeypatch)
+    for stem in ("mackey", "memphis"):
+        abs_pdf = str(Path(CONFIG.vault_path) / f"04-massoneria/{stem}.pdf")
+        tmp_vault.note(f"silica/done/01-{stem}.md",
+                       f'---\nsource_file: "{abs_pdf}"\n---\n\nbody\n')
+
+    msg = _expand_workflow_shortcut("/nucleate 04-massoneria")
+
+    assert msg == ""            # nothing left is an answer, not an agent turn
+    assert converted == []
+    assert stub_coordinator == []
+
+
+def test_next_book_converts_while_the_previous_distills(
+        tmp_vault, monkeypatch):
+    """The ~2x lever: conversion is local OCR, distillation is network LLM —
+    they use different resources and used to run strictly in sequence. The
+    conversion of book B must complete DURING book A's distill, not after."""
+    import threading
+    from pathlib import Path
+
+    import silica.cli as cli_mod
+    import silica.router.coordinator as coord_mod
+
+    tmp_vault.note("vault.yaml", "write_dir: silica\n")
+    tmp_vault.note("04-massoneria/alpha.pdf", "%PDF alpha")
+    tmp_vault.note("04-massoneria/beta.pdf", "%PDF beta")
+    from silica.kernel.vault_manifest import reset_manifest_cache
+    reset_manifest_cache()
+
+    timeline: list[str] = []
+    first_dispatch_started = threading.Event()
+    overlap_seen = threading.Event()
+
+    def _fake_convert(target, dest_dir=""):
+        stem = Path(target).stem
+        if stem == "beta":
+            # Sequential pipeline: this wait times out (beta converts before
+            # any dispatch). Overlapped: alpha's distill is already running.
+            if first_dispatch_started.wait(5):
+                overlap_seen.set()
+        timeline.append(f"convert:{stem}")
+        rel = f"silica/Inbox/{stem}/01-{stem}.md"
+        tmp_vault.note(rel, f"body of {stem}\n")
+        return [rel]
+
+    class _SlowCoordinator:
+        def __init__(self, **kw):
+            self.files = kw["inbox_files"]
+
+        def run(self):
+            timeline.append(f"dispatch:{Path(self.files[0]).stem}")
+            first_dispatch_started.set()
+            return {"final_status": "Success"}
+
+    monkeypatch.setattr("silica.sources.convert.convert", _fake_convert)
+    monkeypatch.setattr(coord_mod, "Coordinator", _SlowCoordinator)
+    monkeypatch.setattr(cli_mod, "_pick_target_folder",
+                        lambda files: "silica/04-massoneria")
+
+    _expand_workflow_shortcut("/nucleate 04-massoneria")
+
+    assert overlap_seen.is_set(), f"no overlap — timeline: {timeline}"
+    assert timeline == ["convert:alpha", "dispatch:01-alpha",
+                        "convert:beta", "dispatch:01-beta"]

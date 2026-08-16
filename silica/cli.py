@@ -1208,6 +1208,175 @@ def _announced_target(target_dir: str) -> str:
         return target_dir
 
 
+def _draft_title(body: str, stem: str) -> str:
+    """First `# ` heading, else the file stem. Never a prose fragment: the
+    audit's `minutes of compute` came from letting a model pick a mid-sentence
+    span, so this stays mechanical."""
+    for line in body.splitlines():
+        if line.startswith("# ") and line[2:].strip():
+            return line[2:].strip().replace("/", "-")
+    return stem
+
+
+def _file_drafts(
+    md_files: list[str], target_dir: str, undo_run: str | None
+) -> list[str]:
+    """File draft-form sources instead of distilling them; return the rest.
+
+    docs/specs/nucleation-forms.md: a draft is the owner's in-progress
+    artifact — both distillation outcomes observed on drafts were defects
+    (silent drop, verbatim paste under a fragment title). Filing = one note at
+    the resolved target, body intact, `form: draft` frontmatter, /revert
+    coverage, source archived. Interactive runs confirm; headless runs file
+    and report. A "n" answer sends the file down normal nucleation under the
+    vault fallback profile.
+    """
+    from pathlib import Path
+
+    import silica.kernel.forms as forms
+    from silica.driver import DRIVER
+    from silica.kernel.write import frontmatter
+    from silica.sources.registry import _record_inverse
+    from silica.tools.wrapped import silica_cleanup
+
+    kept: list[str] = []
+    for f in md_files:
+        try:
+            text = forms.read_source_text(f)
+            res = forms.resolve(text)
+        except Exception:
+            kept.append(f)
+            continue
+        if res.form != "draft":
+            # Visibility is non-negotiable (nucleation-forms spec): the lens
+            # verdict prints where auto-target is announced, never silently.
+            CONSOLE.print(
+                f"  {f}: profile [bold]{res.profile or 'default'}[/] ({res.origin})"
+            )
+            kept.append(f)
+            continue
+        if sys.stdin.isatty():
+            ans = CONSOLE.input(
+                f"  {f} looks like a draft of yours ({res.origin}) — file it "
+                f"as-is instead of distilling? [Y/n] "
+            ).strip().lower()
+            if ans in ("n", "no"):
+                kept.append(f)
+                continue
+        try:
+            dest_dir = target_dir or _pick_target_folder([f])
+        except Exception:
+            CONSOLE.print(f"  [yellow]{f}: draft, but no target resolved — distilling instead[/]")
+            kept.append(f)
+            continue
+        # The filed copy is a Silica write like any other: composed into the
+        # write boundary. A bare-folder pick used to land the draft in the
+        # user's source tree, beside their own files.
+        from silica.kernel.vault_manifest import in_write_dir
+        dest_dir = in_write_dir(dest_dir)
+        data, _, body = frontmatter.split(text)
+        data = dict(data or {})
+        data["form"] = "draft"
+        data.setdefault("source_file", Path(f).name)
+        fm_lines = "".join(f"{k}: {json.dumps(v) if isinstance(v, str) else v}\n"
+                           for k, v in data.items())
+        note = f"---\n{fm_lines}---\n\n{body.strip()}\n"
+        title = _draft_title(body, Path(f).stem)
+        note_rel = f"{dest_dir}/{title}.md"
+        prior: str | None = None
+        try:
+            prior = DRIVER.read_note(note_rel).content
+        except Exception:
+            prior = None
+        if prior is not None:
+            note_rel = f"{dest_dir}/{title} ({Path(f).stem}).md"
+            prior = None
+        DRIVER.upsert(note_rel, note)
+        if undo_run:
+            _record_inverse(undo_run, note_rel, prior)
+        silica_cleanup(f, "done")
+        CONSOLE.print(
+            f"  filed draft ({res.origin}): [bold]{note_rel}[/] — body kept intact"
+        )
+    return kept
+
+
+# Silica's own bookkeeping folders — never a destination for a concept note.
+_CENSUS_SKIP = {"done", "sources", "Images", "logs", "attachments"}
+
+
+def _prior_conversions() -> dict[str, dict]:
+    """abspath of a converted source → {"inbox": [segment paths], "done": n}.
+
+    The two places a source's converted segments can already live: still in the
+    inbox (a run that never finished) and archived in done/ (a run that did).
+    Read once per /nucleate invocation off the `source_file` frontmatter that
+    convert() stamps on every segment — the identity `_resolve_input` produced
+    at conversion time, so the same resolver matches it on re-run.
+    """
+    from pathlib import Path
+
+    from silica.driver import DRIVER
+    from silica.kernel.vault_manifest import active_inbox_dir, in_write_dir
+    from silica.kernel.write import frontmatter
+
+    out: dict[str, dict] = {}
+    vault = Path(CONFIG.vault_path or "")
+
+    def _scan(rels: list[str], bucket: str) -> None:
+        for rel in rels:
+            try:
+                data, _, _ = frontmatter.split(
+                    (vault / rel).read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            src = str((data or {}).get("source_file") or "")
+            if not src:
+                continue
+            entry = out.setdefault(src, {"inbox": [], "done": 0})
+            if bucket == "inbox":
+                entry["inbox"].append(rel)
+            else:
+                entry["done"] += 1
+
+    if active_inbox_dir():
+        _scan([r.path for r in DRIVER.list_inbox_files()
+               if r.path.endswith(".md")], "inbox")
+    done = in_write_dir("done")
+    if done:
+        _scan([r.path for r in DRIVER.list_files(done)], "done")
+    from silica.tools.atomic import _natural_key
+    for entry in out.values():
+        entry["inbox"].sort(key=_natural_key)  # segment order is ingest order
+    return out
+
+
+def _shallow_folders(vault_path: str, max_depth: int = 2) -> set[str]:
+    """Vault-relative folders holding at least one file, down to `max_depth`.
+
+    ponytail: depth-capped instead of a full walk — a scanned-book library has
+    one folder per photographed artefact and the deep tail is noise, not a
+    destination. Raise the cap if someone files notes deeper than two levels
+    in a folder that holds no markdown yet.
+    """
+    from pathlib import Path
+
+    root = Path(vault_path or "")
+    if not root.is_dir():
+        return set()
+    out: set[str] = set()
+    for depth in range(1, max_depth + 1):
+        for d in root.glob("/".join(["*"] * depth)):
+            if not d.is_dir():
+                continue
+            rel = d.relative_to(root).as_posix()
+            if any(p.startswith(".") for p in d.relative_to(root).parts):
+                continue
+            if any(c.is_file() and not c.name.startswith(".") for c in d.iterdir()):
+                out.add(rel)
+    return out
+
+
 def _pick_target_folder(md_files: list[str]) -> str:
     """Choose the destination folder for a nucleate run with ONE small LLM call.
 
@@ -1223,13 +1392,25 @@ def _pick_target_folder(md_files: list[str]) -> str:
     from silica.kernel.vault_manifest import active_inbox_dir
 
     inbox = active_inbox_dir() or "Inbox"
-    folders = sorted({
+    # Note parents (any depth) PLUS the shallow tree of folders that hold
+    # anything at all. A research library is folders of PDFs: censusing note
+    # parents alone showed the model an EMPTY list, whereupon it echoed back the
+    # inbox subfolder the source sat in and VALIDATE rejected all 31 ops.
+    folders = {
         str(Path(r.path or r.name).parent)
         for r in DRIVER.list_files("")
-        if (r.path or r.name).endswith(".md")
-    } - {".", inbox})
-    folders = [f for f in folders if not f.startswith(f"{inbox}/")]
-    excerpt = (DRIVER.read_note(md_files[0]).content or "")[:1500]
+    } | _shallow_folders(CONFIG.vault_path)
+    folders = sorted(
+        f for f in folders - {".", inbox}
+        if not f.startswith(f"{inbox}/")
+        and not any(part.startswith(".") or part in _CENSUS_SKIP
+                    for part in Path(f).parts)
+    )
+    # read_source_text, not DRIVER.read_note: a .txt inbox source (draft
+    # filing's ep180 case) must be auto-targetable too.
+    from silica.kernel.forms import read_source_text
+
+    excerpt = read_source_text(md_files[0])[:1500]
     prompt = (
         "Pick the single most relevant destination folder for nucleating this "
         "content into a knowledge vault. Reply with ONLY the folder path on one "
@@ -1243,6 +1424,13 @@ def _pick_target_folder(md_files: list[str]) -> str:
     pick = next((ln for ln in lines if ln), "")
     if not pick:
         raise ValueError("empty folder pick")
+    # Same rule VALIDATE applies to every op, asked once here instead of once
+    # per rejected op an hour of LLM calls later.
+    from silica.kernel.recall.paths import is_inbox_path
+
+    norm = pick.replace("\\", "/").strip("/")
+    if is_inbox_path(f"{norm}/x.md"):
+        raise ValueError(f"folder pick {pick!r} lands in the inbox")
     return pick
 
 
@@ -1733,6 +1921,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         hub = ""
         keep_sources = False
         seen = ""
+        profile = ""
         for arg in args:
             if arg.startswith("--target="):
                 target_dir = arg[len("--target="):]
@@ -1742,6 +1931,10 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 keep_sources = True  # verbatim leaf in sources/ beside the notes
             elif arg.startswith("--seen="):
                 seen = arg[len("--seen="):]  # capture clock: the day the described events happened
+            elif arg.startswith("--profile="):
+                # Explicit lens override: tops the whole form ladder
+                # (docs/specs/nucleation-forms.md), filing included.
+                profile = arg[len("--profile="):]
             elif not arg.startswith("-"):
                 files.append(arg)  # preserve original case
 
@@ -1761,6 +1954,31 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         from silica.kernel.write.undo_journal import get_undo_journal
         from silica.sources.registry import adapter_for, expand_folder, folder_rel, stage
         from silica.tools.atomic import notes_under
+
+        # B6: a glob token ("Inbox/*", the README's documented batch form) is
+        # expanded here, against the vault root. Unexpanded it would survive as
+        # a literal and fall through to the agent, taking the one batch command
+        # the docs advertise off the deterministic path.
+        import glob as _glob
+        globbed: list[str] = []
+        glob_miss = False
+        for f in files:
+            if any(ch in f for ch in "*?["):
+                hits = sorted(
+                    h.replace(os.sep, "/")
+                    for h in _glob.glob(f, root_dir=CONFIG.vault_path.strip() or ".")
+                )
+                if hits:
+                    CONSOLE.print(f"  {f}: [bold]{len(hits)}[/] match(es)")
+                else:
+                    CONSOLE.print(f"  [yellow]{f}: no files match[/]")
+                    glob_miss = True
+                globbed.extend(hits)
+            else:
+                globbed.append(f)
+        files = globbed
+        if not files and glob_miss:
+            return ""  # a miss is an answer, not a question for the agent
 
         enabled = get_active_manifest().sources
         # A folder argument is the common way to say "this subsystem": expand it
@@ -1787,12 +2005,28 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 # agent as an unresolvable name. Unconverted files are
                 # first-class /nucleate input (each runs through convert below),
                 # so a folder argument picks them up like it picks up notes.
-                from silica.sources.convert import DOC_EXTS
+                from silica.sources.convert import DOC_EXTS, IMG_EXTS
                 from silica.tools.atomic import _unconverted_under
                 pending = [
                     p for p in _unconverted_under(f)
                     if Path(p).suffix.lower() in DOC_EXTS
                 ]
+                # Images stay batch input only inside the inbox (screenshots
+                # dropped there to OCR). In a SOURCE folder they are a book
+                # photographed page by page: converting each page as its own
+                # document is hundreds of one-page runs of garbage.
+                from silica.kernel.recall.paths import is_inbox_path
+                if not is_inbox_path(f.rstrip("/") + "/x.md"):
+                    photos = [p for p in pending
+                              if Path(p).suffix.lower() in IMG_EXTS]
+                    if photos:
+                        pending = [p for p in pending if p not in photos]
+                        CONSOLE.print(
+                            f"  [dim]{f}: left {len(photos)} image(s) alone — "
+                            f"a photographed book is one artefact, not "
+                            f"{len(photos)} documents; /nucleate an image "
+                            f"explicitly to OCR it on its own[/]"
+                        )
                 if group or pending:
                     detail = f"[bold]{len(group)}[/] note(s)" if group else ""
                     if pending:
@@ -1806,28 +2040,56 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         md_files: list[str] = []
         staged = 0
         needs_agent = not files  # only flags given (dropped --folder=) → agent infers
-        # One run per /nucleate invocation, so /revert undoes the batch the user
-        # asked for rather than one file of it. A run with no inverses (nothing
-        # staged) is invisible to last_active_run, so opening it costs nothing.
+        # One CLI journal run per /nucleate invocation for what this loop writes
+        # itself (staged code, filed drafts). The FSM opens its own journal run
+        # per dispatched unit, so on a multi-book batch /revert undoes one book
+        # at a time, most recent first — run it again for the previous one.
         undo_run = get_undo_journal().start_run(
             source="nucleate", vault=CONFIG.vault_path.strip() or None
         ) if files else None
+        prior_conversions: dict[str, dict] | None = None  # built on first need
+        # Pipeline units: loose .md arguments form one ready unit; each source
+        # document is its own unit — ready when its segments already exist,
+        # queued for conversion otherwise. One Coordinator run per unit, so
+        # book N+1 can convert while book N distills.
+        ready_units: list[tuple[str, list[str]]] = []
+        to_convert: list[str] = []
         for f in files:
             adapter = adapter_for(f, enabled=enabled)
             if adapter is None:
-                # No source claims this file type → try the converter fallback
-                # (PDF today). The CONVERTED .md is what the FSM re-reads.
+                # No source claims this file type → the converter lane (PDF
+                # today). A bare name or folder (no suffix) is a resolvable
+                # intent the flag parser couldn't read — agent, not converter.
+                if not Path(f).suffix:
+                    needs_agent = True
+                    continue
+                # Batch resume: conversion is the expensive half (minutes of
+                # OCR per scanned book), so a re-run must not pay it again.
+                # Both identities are already on disk — segments in the inbox
+                # (interrupted run) and the done/ archive (finished book) both
+                # carry `source_file` frontmatter.
+                from silica.sources.convert import _resolve_input
                 try:
-                    md_files.extend(convert(f, dest_dir=target_dir))
-                except ValueError as e:
-                    # A path with a real extension is a genuinely-unsupported file:
-                    # skip it deterministically (no round-trip can convert a .zip).
-                    # A bare name or folder (no suffix) is a resolvable intent the
-                    # flag parser couldn't read — let the agent handle it.
-                    if Path(f).suffix:
-                        CONSOLE.print(f"  [yellow]Skipped {f}: {e}[/]")
-                    else:
-                        needs_agent = True
+                    src_key = str(_resolve_input(f))
+                except ValueError:
+                    src_key = ""  # convert() stays the authority on missing files
+                if prior_conversions is None:
+                    prior_conversions = _prior_conversions()
+                prior = prior_conversions.get(src_key) if src_key else None
+                if prior and prior["inbox"]:
+                    CONSOLE.print(
+                        f"  {f}: reusing [bold]{len(prior['inbox'])}[/] "
+                        f"already-converted segment(s)"
+                    )
+                    ready_units.append((f, prior["inbox"]))
+                    continue
+                if prior and prior["done"]:
+                    CONSOLE.print(
+                        f"  [dim]{f}: already nucleated "
+                        f"({prior['done']} segment(s) in done/) — skipped[/]"
+                    )
+                    continue
+                to_convert.append(f)
                 continue
             result = stage(adapter, f, run_root.get(f, ""), undo_run)
             if result["status"] == "distill":
@@ -1848,7 +2110,12 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 CONSOLE.print(f"  Wrote [bold]{staged}[/] code note(s). /wiki for prose.")
             CONSOLE.print("  [dim]/revert undoes this run.[/]")
 
-        if not md_files:
+        # Loose .md arguments distill together, exactly as before the pipeline —
+        # first in line: they are ready, so the first conversion overlaps them.
+        if md_files:
+            ready_units.insert(0, ("", list(dict.fromkeys(md_files))))
+
+        if not ready_units and not to_convert:
             if staged or not needs_agent:
                 # Staged inline, or only genuinely-unsupported files — nothing for the agent.
                 return ""
@@ -1865,96 +2132,213 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 "target_dir. If nothing is ingestible, say so briefly."
             )
 
-        # A folder arg can list both a PDF and its already-converted chunks;
-        # convert() upserts the same chunk paths, so dedup keeps each once.
-        md_files = list(dict.fromkeys(md_files))
+        total_units = len(ready_units) + len(to_convert)
+        batch = total_units > 1
+        dispatched = 0
 
-        # Reference lists are citation metadata, not content: skip flagged
-        # chunks (convert marks them `references: true`). The raw chunk stays
-        # in the inbox for lookup — it just never becomes venue/journal notes.
-        from silica.sources.convert import is_references_chunk
-        ref_chunks = [mf for mf in md_files if is_references_chunk(mf)]
-        if ref_chunks:
-            md_files = [mf for mf in md_files if mf not in ref_chunks]
+        def _at() -> str:
+            """Clock on the per-unit lines of a batch — a folder of scanned
+            books runs for hours, and the unit boundaries are the only place
+            to read where the time went. Single-unit runs stay unadorned."""
+            from datetime import datetime
+            return f"[dim]{datetime.now().strftime('%H:%M:%S')}[/] " if batch else ""
+
+        # Conversions run with the user-passed destination, as they always did:
+        # an auto-picked target is resolved at first dispatch, after conversion.
+        convert_dest = target_dir
+
+        def _prepare_unit(mfs: list[str]) -> list[str]:
+            """refs filter → draft filing → provenance drop, for one unit."""
+            # A folder arg can list both a PDF and its already-converted chunks;
+            # convert() upserts the same chunk paths, so dedup keeps each once.
+            mfs = list(dict.fromkeys(mfs))
+
+            # Reference lists are citation metadata, not content: skip flagged
+            # chunks (convert marks them `references: true`). The raw chunk
+            # stays in the inbox for lookup — never venue/journal notes.
+            from silica.sources.convert import is_references_chunk
+            ref_chunks = [mf for mf in mfs if is_references_chunk(mf)]
+            if ref_chunks:
+                mfs = [mf for mf in mfs if mf not in ref_chunks]
+                CONSOLE.print(
+                    f"  [dim]skipped {len(ref_chunks)} references section(s) — "
+                    f"kept in the inbox, not distilled into notes[/]"
+                )
+                if not mfs:
+                    CONSOLE.print("  [yellow]nothing left to nucleate: only references sections were given[/]")
+                    return []
+
+            # Draft filing (docs/specs/nucleation-forms.md): the owner's own
+            # working material is filed, not distilled. Runs before auto-target
+            # so a run that was ONLY drafts never pays the folder-pick call. An
+            # explicit --profile tops the ladder: no resolution, no filing.
+            if not profile:
+                mfs = _file_drafts(mfs, target_dir, undo_run)
+                if not mfs:
+                    return []  # everything was filed; reported above
+
+            from pathlib import Path as _Path
+            from silica.kernel.write.provenance import (
+                check_renucleate, content_sha256, read_records,
+            )
+
+            kept_md: list[str] = []
+            distilled_prior = 0
+            for mf in mfs:
+                try:
+                    incoming_sha = content_sha256(mf)
+                    if not incoming_sha:
+                        kept_md.append(mf)
+                        continue
+                    # Same sha as the last record AND that run yielded notes ⇒
+                    # this segment is already in the vault — re-distilling it
+                    # costs a full LLM pass to write nothing. A zero-yield
+                    # record (all ops deferred) is a failure, not a
+                    # completion: never skip on it.
+                    recs = read_records(_Path(mf).name)
+                    last = recs[-1] if recs else None
+                    if last and last.get("sha256") == incoming_sha and last.get("notes"):
+                        distilled_prior += 1
+                        continue
+                    modified, prior_notes = check_renucleate(_Path(mf).name, incoming_sha)
+                    if modified:
+                        CONSOLE.print(
+                            f"  [yellow]re-nucleate of a modified source: {prior_notes} note(s) "
+                            f"derived from the previous version[/]"
+                        )
+                except Exception as exc:
+                    logger.debug("/nucleate: re-nucleate provenance check skipped for %s (non-fatal): %s", mf, exc)
+                kept_md.append(mf)
+            if distilled_prior:
+                CONSOLE.print(
+                    f"  [dim]{distilled_prior} segment(s) already distilled "
+                    f"(unchanged since their run) — skipped[/]"
+                )
+            return kept_md
+
+        def _dispatch_unit(label: str, mfs: list[str]) -> str | None:
+            """Prepare and run one unit; a returned string is the agent
+            fallback (unresolvable target) and ends the whole batch."""
+            nonlocal target_dir, dispatched
+            mfs = _prepare_unit(mfs)
+            if not mfs:
+                return None
+
+            if not target_dir:
+                # auto-target: one small folder-pick call, not a full agent
+                # turn; resolved once, every later unit inherits it.
+                try:
+                    target_dir = _pick_target_folder(mfs)
+                    CONSOLE.print(f"  auto-target: [bold]{_announced_target(target_dir)}[/]")
+                except Exception as exc:
+                    logger.debug("/nucleate: auto-target pick failed (non-fatal): %s", exc)
+
+            if not target_dir:
+                # Fallback: hand the folder choice to the agent (legacy behavior).
+                files_json = json.dumps(mfs)
+                msg = (
+                    f"Run the Injector pipeline for {len(mfs)} file(s).\n"
+                    f"No target folder was given. Skim the inbox file(s) {files_json}, "
+                    f"then pick the single most relevant existing vault folder for "
+                    f"this content (use the vault map; list folders if unsure). If "
+                    f"nothing fits, pick a sensible new folder name. State the chosen "
+                    f"folder in one line, then call `silica_run_injector` with "
+                    f"inbox_files={files_json}, target_dir=<chosen folder>"
+                )
+                if hub:
+                    msg += f", hub={json.dumps(hub)}"
+                return msg + "."
+
+            # Direct FSM dispatch — no LLM orchestrator. The old path
+            # round-tripped the whole session history through the model on
+            # every turn just to relay these arguments to silica_run_injector
+            # (~40% of a nucleate run's tokens for a handful of decision tokens).
+            from silica.router.coordinator import Coordinator
+
+            head = f"{label}: " if (batch and label) else ""
             CONSOLE.print(
-                f"  [dim]skipped {len(ref_chunks)} references section(s) — "
-                f"kept in the inbox, not distilled into notes[/]"
+                f"  {_at()}{head}nucleate: {len(mfs)} file(s) → [bold]{_announced_target(target_dir)}[/]"
             )
-        if not md_files and ref_chunks:
-            CONSOLE.print("  [yellow]nothing left to nucleate: only references sections were given[/]")
-            return ""
-
-        from pathlib import Path as _Path
-        from silica.kernel.write.provenance import check_renucleate, content_sha256
-
-        for mf in md_files:
             try:
-                incoming_sha = content_sha256(mf)
-                if not incoming_sha:
-                    continue
-                modified, prior_notes = check_renucleate(_Path(mf).name, incoming_sha)
-                if modified:
-                    CONSOLE.print(
-                        f"  [yellow]re-nucleate of a modified source: {prior_notes} note(s) "
-                        f"derived from the previous version[/]"
-                    )
-            except Exception as exc:
-                logger.debug("/nucleate: re-nucleate provenance check skipped for %s (non-fatal): %s", mf, exc)
+                result = Coordinator(
+                    inbox_files=mfs, target_dir=target_dir, hub=hub or None,
+                    keep_sources=keep_sources, seen_override=seen or None,
+                    distill_profile=profile or None,
+                ).run()
+            except ValueError as exc:
+                # A path outside the vault (or any other rejected argument) is
+                # user error, not a crash: the batch moves to the next unit.
+                CONSOLE.print(f"  [yellow]nucleate: {exc}[/]")
+                return None
+            status = result.get("final_status") or result.get("error") or "done"
+            failed = result.get("failed_chunks") or []
+            extra = f" — {len(failed)} chunk(s) failed" if failed else ""
+            sw = result.get("link_sweep") or {}
+            if sw.get("links_stripped"):
+                extra += (
+                    f" — {sw['links_stripped']} dangling link(s) unlinked "
+                    f"in {sw['notes_edited']} note(s)"
+                )
+            if sw.get("links_relinked"):
+                extra += f" — {sw['links_relinked']} spelling variant(s) repointed"
+            CONSOLE.print(f"  {_at()}{head}nucleate finished: [bold]{status}[/]{extra} — details in log.md")
+            dispatched += 1
+            return None
 
-        if not target_dir:
-            # auto-target: one small folder-pick call, not a full agent turn;
-            # per-note thematic placement stays /organize's job.
-            try:
-                target_dir = _pick_target_folder(md_files)
-                CONSOLE.print(f"  auto-target: [bold]{_announced_target(target_dir)}[/]")
-            except Exception as exc:
-                logger.debug("/nucleate: auto-target pick failed (non-fatal): %s", exc)
+        # Conversion is local OCR, distillation is network LLM — different
+        # resources, so the NEXT book converts while the current unit distills.
+        # One worker, one conversion ahead: further parallel OCR just contends
+        # for the same GPU. Worth ~2% of wall-clock, not the 2x this comment
+        # used to claim: measured 2026-08-16 on 07-religioni-comparate, OCR is
+        # 43-68 s per book against 6+ min of distillation. The 2x ceiling needs
+        # a corpus where OCR time approaches LLM time, which text PDFs never do.
+        from concurrent.futures import ThreadPoolExecutor
 
-        if not target_dir:
-            # Fallback: hand the folder choice to the agent (legacy behavior).
-            files_json = json.dumps(md_files)
-            msg = (
-                f"Run the Injector pipeline for {len(md_files)} file(s).\n"
-                f"No target folder was given. Skim the inbox file(s) {files_json}, "
-                f"then pick the single most relevant existing vault folder for "
-                f"this content (use the vault map; list folders if unsure). If "
-                f"nothing fits, pick a sensible new folder name. State the chosen "
-                f"folder in one line, then call `silica_run_injector` with "
-                f"inbox_files={files_json}, target_dir=<chosen folder>"
-            )
-            if hub:
-                msg += f", hub={json.dumps(hub)}"
-            return msg + "."
+        pool = ThreadPoolExecutor(max_workers=1) if to_convert else None
 
-        # Direct FSM dispatch — no LLM orchestrator. The old path round-tripped
-        # the whole session history through the model on every turn just to
-        # relay these arguments to silica_run_injector (~40% of a nucleate
-        # run's tokens for a handful of decision tokens).
-        from silica.router.coordinator import Coordinator
+        def _submit(i: int):
+            if pool is None or i >= len(to_convert):
+                return None
+            if batch:
+                CONSOLE.print(
+                    f"  {_at()}[{i + 1}/{len(to_convert)}] converting {to_convert[i]}"
+                )
+            return pool.submit(convert, to_convert[i], convert_dest)
 
-        CONSOLE.print(
-            f"  nucleate: {len(md_files)} file(s) → [bold]{_announced_target(target_dir)}[/]"
-        )
+        pending = _submit(0)
         try:
-            result = Coordinator(
-                inbox_files=md_files, target_dir=target_dir, hub=hub or None,
-                keep_sources=keep_sources, seen_override=seen or None,
-            ).run()
-        except ValueError as exc:
-            # A path outside the vault (or any other rejected argument) is user
-            # error, not a crash: the REPL keeps the session.
-            CONSOLE.print(f"  [yellow]nucleate: {exc}[/]")
-            return ""
-        status = result.get("final_status") or result.get("error") or "done"
-        failed = result.get("failed_chunks") or []
-        extra = f" — {len(failed)} chunk(s) failed" if failed else ""
-        sw = result.get("link_sweep") or {}
-        if sw.get("links_stripped"):
-            extra += (
-                f" — {sw['links_stripped']} dangling link(s) unlinked "
-                f"in {sw['notes_edited']} note(s)"
+            for label, segs in ready_units:
+                msg = _dispatch_unit(label, segs)
+                if msg:
+                    return msg
+            for i, src in enumerate(to_convert):
+                try:
+                    segs = pending.result()
+                except (ValueError, RuntimeError) as e:
+                    CONSOLE.print(f"  [yellow]Skipped {src}: {e}[/]")
+                    segs = []
+                pending = _submit(i + 1)
+                if segs:
+                    msg = _dispatch_unit(src, segs)
+                    if msg:
+                        return msg
+        finally:
+            if pool is not None:
+                # wait=False: a mineru run cannot be cancelled; on an early
+                # agent-fallback return the in-flight conversion finishes in
+                # the background and its segments are reused next time.
+                pool.shutdown(wait=False)
+
+        if total_units and not dispatched:
+            CONSOLE.print(
+                "  [dim]nothing left to distill — everything was filed, "
+                "skipped, or already in the vault[/]"
             )
-        CONSOLE.print(f"  nucleate finished: [bold]{status}[/]{extra} — details in log.md")
+        if batch and dispatched > 1:
+            CONSOLE.print(
+                f"  [dim]{dispatched} run(s) — /revert undoes the most recent; "
+                f"run it again for the one before[/]"
+            )
         return ""
 
     if cmd == "/settings":

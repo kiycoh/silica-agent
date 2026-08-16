@@ -314,31 +314,58 @@ def notes_under(folder: str) -> list[str]:
 
 
 def _unconverted_under(folder: str) -> list[str]:
-    """Non-markdown inbox files under `folder`, natural-sorted; `Images/` excluded.
+    """Non-markdown files under `folder`, natural-sorted; `Images/` excluded.
 
-    `notes_under` lists the inbox .md-only, so a folder holding nothing but PDFs
-    came back as {"total": 0, "files": []} — a payload indistinguishable from a
-    folder that is not there, and the agent duly reported it as non-existent.
-    Naming the unconverted files is the only way the caller can tell the two
-    apart, since `silica_inbox_ls` is not in the MCP core surface. `Images/` is
-    conversion output, not input, and outnumbers the notes 70:1.
+    `notes_under` lists .md only, so a folder holding nothing but PDFs came back
+    as {"total": 0, "files": []} — a payload indistinguishable from a folder
+    that is not there, and the agent duly reported it as non-existent. Naming
+    the unconverted files is the only way the caller can tell the two apart.
+    `Images/` is conversion output, not input, and outnumbers the notes 70:1.
+
+    Answers for source folders as well as the inbox: a research library is nine
+    folders of scanned books and one INDEX.md, and while the rule was
+    inbox-only every one of them read as empty.
     """
     from silica.kernel.recall.paths import in_folder
     from silica.kernel.vault_manifest import active_inbox_dir
 
     scope = _vault_rel(folder)
-    inbox = active_inbox_dir()
-    if not scope or not inbox or not in_folder(scope, inbox):
+    if not scope:
         return []
+    inbox = active_inbox_dir()
+    if inbox and in_folder(scope, inbox):
+        paths = (r.path for r in DRIVER.list_inbox_files())
+    else:
+        paths = _vault_files_under(scope)
     return sorted(
         (
-            r.path for r in DRIVER.list_inbox_files()
-            if not r.path.endswith(".md")
-            and in_folder(r.path, scope)
-            and "/Images/" not in r.path
+            p for p in paths
+            if not p.endswith(".md")
+            and in_folder(p, scope)
+            and "/Images/" not in p
         ),
         key=_natural_key,
     )
+
+
+def _vault_files_under(scope: str) -> list[str]:
+    """Vault-relative files under `scope`, dotfiles and dot-dirs skipped."""
+    import os
+
+    from silica.config import CONFIG
+
+    root = Path(CONFIG.vault_path or "")
+    base = root / scope
+    if not base.is_dir():
+        return []
+    out: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        for name in filenames:
+            if name.startswith("."):
+                continue
+            out.append((Path(dirpath) / name).relative_to(root).as_posix())
+    return out
 
 
 def _vault_rel(path: str) -> str:
@@ -378,6 +405,10 @@ def silica_files(folder: str = "") -> dict:
     "truncated" is true, narrow with folder= instead of re-calling. For a bare
     count ("how many notes?") use the returned "total" — or the '## Vault map'
     block already in context, without any call.
+
+    A bare call also returns "source_folders": {folder: count} for the vault's
+    non-markdown material (PDFs, scans, media). Those files ARE in the vault
+    even though no note exists for them yet — never report them as missing.
     """
     # bare paths, not {name, path} dicts — NoteRef.name is the
     # filename without its extension, so the dict shipped every note's name
@@ -409,7 +440,35 @@ def silica_files(folder: str = "") -> dict:
         if code:
             result["code"] = code[:_FILES_CAP]
             result["code_total"] = len(code)
+    else:
+        # Folders, never the files: a bare listing on a library of scanned books
+        # showed only the notes Silica had written, so the agent told the user
+        # their own PDFs were "nowhere in the vault". A count per top folder is
+        # five lines and answers the question the file list was being read for.
+        census = _source_folder_census()
+        if census:
+            result["source_folders"] = census
+            result.setdefault(
+                "hint",
+                "These folders hold files that are not notes yet (PDFs, scans, "
+                "media). They ARE in the vault — call silica_files(folder=…) to "
+                "name them, or /nucleate a path to turn one into notes.",
+            )
     return result
+
+
+def _source_folder_census() -> dict[str, int]:
+    """Top-level folder -> count of non-markdown files under it, non-empty only."""
+    from collections import Counter
+
+    from silica.kernel.recall.paths import is_inbox_path
+
+    counts: Counter = Counter()
+    for p in _vault_files_under(""):
+        if p.endswith(".md") or "/" not in p or is_inbox_path(p):
+            continue
+        counts[p.split("/", 1)[0]] += 1
+    return dict(counts.most_common(_FILES_CAP))
 
 
 class ExistsArgs(BaseModel):
@@ -417,12 +476,29 @@ class ExistsArgs(BaseModel):
 
 @tool(ExistsArgs, cls="atomic")
 def silica_exists(path: str) -> bool:
-    """Verifies if a note exists in the vault (including the inbox) given its relative path."""
+    """Verifies a file exists in the vault (notes, inbox, and source files alike).
+
+    Answers for non-markdown too: asked to ingest a PDF sitting in the library,
+    the agent read this `False` and told the user the file was nowhere in their
+    vault. `read_note` only opens markdown, and "I cannot read it" is not the
+    same answer as "it is not there".
+    """
     try:
         DRIVER.read_note(path)
         return True
     except Exception:
+        pass
+    from silica.config import CONFIG
+
+    root = Path(CONFIG.vault_path or "")
+    if not root.is_dir():
         return False
+    try:
+        target = (root / (path or "").strip()).resolve()
+        target.relative_to(root.resolve())
+    except (ValueError, OSError):
+        return False
+    return target.is_file()
 
 
 # ---------------------------------------------------------------------------

@@ -50,30 +50,6 @@ def silica_run_injector(
     if not files:
         return {"error": "No inbox file(s) specified"}
 
-    # The FSM re-reads inbox files as prose; a file no adapter claims (PDF, other
-    # binaries) would be read as garbage. Conversion (convert()) is a CLI/GUI step,
-    # not an agent tool, so surface it instead of nucleating junk. See cli.py:923.
-    from silica.kernel.vault_manifest import get_active_manifest
-    from silica.sources.registry import adapter_for
-
-    enabled = get_active_manifest().sources
-    unclaimed = [f for f in files if adapter_for(f, enabled=enabled) is None]
-    if unclaimed:
-        pdfs = [f for f in unclaimed if f.lower().endswith(".pdf")]
-        # shlex.quote: the suggested line is meant to be copy-pasted verbatim,
-        # and the CLI shortcut parser shlex-splits it — an unquoted "Deep
-        # Learning (Goodfellow…).pdf" arrives as eight separate arguments.
-        import shlex
-
-        hint = (
-            f"Ask the user to run `/convert {' '.join(shlex.quote(p) for p in pdfs)}` "
-            "(or upload via the GUI), "
-            "then nucleate the resulting .md note(s)."
-            if pdfs
-            else "No adapter or converter handles this file type."
-        )
-        return {"error": f"Not ingestible as-is: {', '.join(unclaimed)}. {hint}"}
-
     # A target folder is not optional: the distiller prompt interpolates it into
     # {TARGET} and derives {HUB_NAME} from it, so an empty one renders the two
     # placeholders literally. The model then obeys "hub MUST be exactly
@@ -82,8 +58,39 @@ def silica_run_injector(
     # the hub auto-creator drops a junk `{HUB_NAME}.md` in the vault root. The
     # CLI always resolves a target before dispatching (cli.py:1226); this guard
     # covers the agent-tool path, whose contract already says to pass one.
+    # Asked before conversion: a PDF is minutes of work to transcode and it
+    # would all be thrown away here.
     if not target_dir.strip():
         return {"error": "No target_dir specified. Pick the vault folder for these notes and pass it as target_dir."}
+
+    # The FSM re-reads inbox files as prose, so a file no adapter claims (PDF,
+    # EPUB, other binaries) has to be transcoded first. `/nucleate` has always
+    # done that inline; the agent tool used to answer "ask the user to run
+    # /convert", which in a REPL means telling the user to type, themselves, the
+    # thing they just asked for — and in a library of 74 scanned books that
+    # instruction stands between the user and the entire corpus.
+    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.sources.registry import adapter_for
+
+    enabled = get_active_manifest().sources
+    if any(adapter_for(f, enabled=enabled) is None for f in files):
+        from silica.sources.convert import convert
+
+        resolved: list[str] = []
+        rejected: list[str] = []
+        for f in files:
+            if adapter_for(f, enabled=enabled) is not None:
+                resolved.append(f)
+                continue
+            try:
+                resolved.extend(convert(f, dest_dir=target_dir))
+            except (ValueError, RuntimeError) as exc:
+                rejected.append(f"{f} ({exc})")
+        if rejected:
+            return {"error": f"Not ingestible as-is: {'; '.join(rejected)}."}
+        files = list(dict.fromkeys(resolved))
+        if not files:
+            return {"error": "Conversion produced no markdown to nucleate."}
 
     coordinator = Coordinator(
         inbox_files=files,

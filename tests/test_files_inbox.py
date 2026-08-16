@@ -105,3 +105,75 @@ def test_non_inbox_folder_does_not_consult_the_inbox():
         res = silica_files("Informatica/Vuota")
     assert res["total"] == 0
     drv.list_inbox_files.assert_not_called()
+
+
+# --- source folders outside the inbox ---------------------------------------
+#
+# A theology library is nine folders of PDFs and one INDEX.md. Every one of
+# them answered {"total": 0, "files": []} — the same payload as a folder that
+# does not exist — because only inbox folders declared their unconverted files.
+
+def test_a_source_folder_of_pdfs_is_not_an_empty_folder(tmp_vault):
+    from pathlib import Path
+    d = Path(tmp_vault.note("04-massoneria/Mackey_Encyclopedia_1914.pdf", "%PDF")).parent
+    (d / "rite_of_memphis_1879.pdf").write_bytes(b"%PDF-1.4\n")
+    (d / "cover.jpg").write_bytes(b"\xff\xd8\xff")
+
+    res = silica_files("04-massoneria")
+
+    assert res["unconverted_total"] == 3
+    assert "04-massoneria/Mackey_Encyclopedia_1914.pdf" in res["unconverted"]
+    assert "04-massoneria/cover.jpg" in res["unconverted"]
+    assert "nucleate" in res["hint"]
+
+
+def test_notes_in_a_source_folder_still_come_back_as_notes(tmp_vault):
+    tmp_vault.note("04-massoneria/Mackey.md", "# Mackey\n")
+    tmp_vault.note("04-massoneria/book.pdf", "%PDF")
+
+    res = silica_files("04-massoneria")
+
+    assert res["files"] == ["04-massoneria/Mackey.md"]
+    assert res["unconverted"] == ["04-massoneria/book.pdf"]
+
+
+# --- silica_exists ----------------------------------------------------------
+#
+# Asked to ingest a PDF sitting in the library, the agent answered "there's no
+# file called Gospel-of-mary-magdelene.pdf anywhere in the vault — not in that
+# folder, not in the inbox, nowhere." The file was there. silica_exists answers
+# through read_note, which only opens markdown.
+
+def test_exists_answers_for_a_non_markdown_vault_file(tmp_vault):
+    from silica.tools.atomic import silica_exists
+
+    tmp_vault.note("02-apocrifi/Gospel-of-mary.pdf", "%PDF-1.4\n")
+
+    assert silica_exists("02-apocrifi/Gospel-of-mary.pdf") is True
+
+
+def test_exists_is_still_false_for_a_missing_file(tmp_vault):
+    from silica.tools.atomic import silica_exists
+
+    assert silica_exists("02-apocrifi/not-here.pdf") is False
+
+
+def test_exists_does_not_escape_the_vault(tmp_vault):
+    from silica.tools.atomic import silica_exists
+
+    assert silica_exists("../../etc/passwd") is False
+
+
+def test_bare_listing_names_the_folders_that_hold_source_files(tmp_vault):
+    """The agent's "list files" is a bare call. On a library of PDFs it showed
+    only the notes Silica had written, so the agent concluded the user's own
+    books were not in the vault. Names the folders, not the 764 files."""
+    tmp_vault.note("silica/Concepts/Uriel.md", "# Uriel\n")
+    tmp_vault.note("02-apocrifi/Enoch.pdf", "%PDF")
+    tmp_vault.note("02-apocrifi/Mary.pdf", "%PDF")
+    tmp_vault.note("04-massoneria/Mackey.pdf", "%PDF")
+
+    res = silica_files("")
+
+    assert res["source_folders"] == {"02-apocrifi": 2, "04-massoneria": 1}
+    assert "files" in res  # notes still listed as before

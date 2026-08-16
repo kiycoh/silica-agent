@@ -50,7 +50,9 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
@@ -61,6 +63,46 @@ from silica.config import CONFIG
 from silica.kernel.text.sanitize import strip_degenerate_runs
 
 logger = logging.getLogger(__name__)
+
+
+def _reap_with_parent_factory():
+    """`preexec_fn` that makes the kernel kill this child with its parent.
+
+    The converters here are long-running and hold real resources — mineru
+    keeps the GPU for a minute or more per book. `subprocess.run` reaps them on
+    timeout and on error, but nothing reaps them when Silica's own process is
+    killed: the child is reparented to init and runs on (observed 2026-08-16 on
+    a 75-PDF batch, mineru left holding the card and cleaned by hand).
+    PR_SET_PDEATHSIG hands that job to the kernel, which is the only party
+    still alive to do it.
+
+    The signal fires when the forking *thread* exits, not the process — safe
+    only because every caller below is a blocking `subprocess.run` on that same
+    thread, so the thread cannot outlive the child. Do not reuse this for a
+    Popen the caller keeps and walks away from.
+
+    ponytail: Linux-only. Elsewhere it stays None and the child still outlives
+    a hard kill; the portable fix is a supervisor process, which is a lot of
+    machinery for a case a `pkill mineru` already covers.
+    """
+    if sys.platform != "linux":
+        return None
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL("libc.so.6", use_errno=True)
+    except OSError as e:  # no glibc (musl images), no prctl binding
+        logger.debug("PR_SET_PDEATHSIG unavailable (%s)", e)
+        return None
+    _PR_SET_PDEATHSIG = 1
+
+    def _reap_with_parent() -> None:
+        libc.prctl(_PR_SET_PDEATHSIG, signal.SIGKILL)
+
+    return _reap_with_parent
+
+
+_REAP_WITH_PARENT = _reap_with_parent_factory()
 
 _IMG_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 _MD_IMG_RE = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
@@ -1014,6 +1056,7 @@ def _legacy_office_to_pdf(src: Path, workdir: Path) -> Path:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=_SOFFICE_TIMEOUT_S,
             stdin=subprocess.DEVNULL,  # never let it wait on a terminal
+            preexec_fn=_REAP_WITH_PARENT,
         )
     except subprocess.TimeoutExpired:
         status, detail = probe_soffice()
@@ -1069,6 +1112,7 @@ def _media_to_wav(src: Path, workdir: Path) -> Path:
             [exe, *_FFMPEG_ARGS, "-i", str(src), "-vn",
              "-ac", "1", "-ar", _ASR_SAMPLE_RATE, "-f", "wav", str(wav)],
             capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_S,
+            preexec_fn=_REAP_WITH_PARENT,
         )
     except subprocess.TimeoutExpired:
         raise ValueError(f"ffmpeg timed out after {_FFMPEG_TIMEOUT_S}s on {src.name}") from None
@@ -1158,7 +1202,8 @@ def _asr_via_whispercpp(wav: Path) -> str:
     if CONFIG.asr_lang.strip():
         cmd += ["-l", CONFIG.asr_lang.strip()]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_ASR_TIMEOUT_S)
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=_ASR_TIMEOUT_S, preexec_fn=_REAP_WITH_PARENT)
     except subprocess.TimeoutExpired:
         raise ValueError(f"whisper.cpp timed out after {_ASR_TIMEOUT_S}s") from None
     vtt = out.with_suffix(".vtt")
@@ -1246,6 +1291,7 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
         proc = subprocess.run(
             ["mineru", "-p", str(src), "-o", str(out), "-b", _MINERU_BACKEND, *_MINERU_ARGS],
             capture_output=True, text=True, timeout=_MINERU_TIMEOUT_S,
+            preexec_fn=_REAP_WITH_PARENT,  # killing the batch must free the GPU
         )
     except FileNotFoundError:
         raise ValueError(
