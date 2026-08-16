@@ -52,10 +52,26 @@ def _resolve_vault_path(vault_path: str | None) -> str | None:
 
 
 def _store_path(vault_path: str | None) -> Path | None:
+    """`<vault>/<write_dir>/provenance.json` — Silica's own ledger, so it lives
+    inside the write boundary. Reads fall back to a root file written before
+    this: pointing Silica at an existing library used to leave both this and
+    `log.md` in the user's root, beside their own README.
+    """
     resolved = _resolve_vault_path(vault_path)
     if not resolved:
         return None
-    return Path(resolved) / DEFAULT_PROVENANCE_FILENAME
+    root = Path(resolved)
+    try:
+        from silica.kernel.vault_manifest import in_write_dir
+
+        composed = root / in_write_dir(DEFAULT_PROVENANCE_FILENAME)
+    except Exception as exc:
+        logger.debug("provenance: write-dir compose failed (non-fatal): %s", exc)
+        return root / DEFAULT_PROVENANCE_FILENAME
+    legacy = root / DEFAULT_PROVENANCE_FILENAME
+    if composed != legacy and not composed.exists() and legacy.exists():
+        return legacy
+    return composed
 
 
 def source_event_date(source_text: str, seen_override: str | None = None) -> str | None:

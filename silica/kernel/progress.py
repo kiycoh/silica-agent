@@ -204,6 +204,12 @@ class ProgressLedger:
     tasks: list[Task] = field(default_factory=list)
     issues: list[IssueCard] = field(default_factory=list)
     cursor: str | None = None  # task_id currently running
+    # Which vault this run belongs to. `~/.silica/runs` is shared by every
+    # vault on the machine, so without this /status in a fresh vault printed
+    # the progress tree of whatever ran last anywhere. Ledgers written before
+    # the stamp carry "" and belong to nobody: one blank /status right after
+    # upgrade beats showing another vault's work as if it were yours.
+    vault: str = ""
 
     # ------------------------------------------------------------------
     # Factory
@@ -218,6 +224,7 @@ class ProgressLedger:
             started_at=now,
             last_updated=now,
             inputs=inputs or {},
+            vault=_active_vault(),
         )
 
     # ------------------------------------------------------------------
@@ -705,16 +712,35 @@ class Run:
         self.progress.save()
 
 
-def latest_run_id() -> str | None:
-    """run_id of the most recently modified run that has a ledger.json, or None.
+def _active_vault() -> str:
+    try:
+        from silica.config import CONFIG
 
-    Public replacement for reaching into the private _RUNS_DIR layout.
+        return str(getattr(CONFIG, "vault_path", "") or "")
+    except Exception:
+        return ""
+
+
+def _ledger_vault(path: Path) -> str:
+    try:
+        return str(orjson.loads(path.read_bytes()).get("vault") or "")
+    except Exception:
+        return ""
+
+
+def latest_run_id() -> str | None:
+    """run_id of this vault's most recently modified run, or None.
+
+    Public replacement for reaching into the private _RUNS_DIR layout. Scoped
+    to the active vault: the runs root is shared machine-wide.
     """
     if not _RUNS_DIR.exists():
         return None
+    vault = _active_vault()
     candidates = [
         d for d in _RUNS_DIR.iterdir()
         if d.is_dir() and (d / "ledger.json").exists()
+        and _ledger_vault(d / "ledger.json") == vault
     ]
     if not candidates:
         return None

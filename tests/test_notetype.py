@@ -163,3 +163,20 @@ def test_backfill_makes_a_legacy_vault_conformant(tmp_path):
     assert counts["stamped"] == 3
     assert okf_conformance(tmp_path) == []
     assert mod.backfill(tmp_path)["stamped"] == 0   # second pass is a no-op
+
+
+def test_silicas_own_journal_is_not_a_violation(tmp_path):
+    """`log.md` is written by Silica, and §11.3's advice for it is "rename any
+    `index`/`log` note by hand" — an instruction the user cannot carry out,
+    since the next run recreates it. Doctor warned about it on every run."""
+    _write(tmp_path, "vault.yaml", "write_dir: silica\n")
+    _write(tmp_path, "silica/log.md", "- 2026-08-16 · nucleate `a.md` · run abc\n")
+
+    assert okf_conformance(tmp_path) == []
+
+
+def test_a_users_own_log_note_is_still_a_violation(tmp_path):
+    _write(tmp_path, "vault.yaml", "write_dir: silica\n")
+    _write(tmp_path, "Journal/log.md", "---\ntype: Note\n---\n\nB\n")
+
+    assert [v.clause for v in okf_conformance(tmp_path)] == ["11.3"]

@@ -50,7 +50,24 @@ def is_concept(s: str, overlay: DomainOverlay | None = None) -> bool:
         return False
     if not re.search(r'[A-Za-zÀ-ÿ]{3,}', s):
         return False
+    if _stutters(s):
+        return False
     return not any(p.search(s) for p in overlay.noise_patterns)
+
+
+def _stutters(s: str) -> bool:
+    """True when a word repeats inside the phrase — a sliding n-gram artefact.
+
+    YAKE's window walks the text, so prose that repeats a word within three
+    tokens ("the holy angels, the holy ones") yields "holy angels holy" beside
+    the real "holy angels", and both compete for the same candidate budget. No
+    concept names the same thing twice.
+
+    ponytail: exact lowercase tokens, no stemming — "angels/angel" is a
+    different candidate, not a stutter, and collapsing those is dedup's job.
+    """
+    words = [w for w in re.findall(r'\w+', s.lower()) if len(w) > 2]
+    return len(words) != len(set(words))
 
 
 # Math stripping migrated to the kernel/text seam (C1): see text.strip_math.

@@ -13,7 +13,10 @@ forward-ref any more, it is a broken link the run itself manufactured
 `sweep_dangling_links` runs after the FSM and its repair sub-agents finish:
 for every note the run wrote, wikilinks whose target still does not resolve
 are unlinked back to plain text (`[[X]]` → `X`, `[[X|alias]]` → `alias`) and
-unresolved `related:` frontmatter entries are dropped. Deterministic, no LLM.
+unresolved `related:` frontmatter entries are dropped. A target that resolves
+only under a folded spelling is repointed instead of stripped (`[[Ahura
+Mazda]]` → `[[Ahura-Mazda|Ahura Mazda]]`, see `_make_resolver`). Deterministic,
+no LLM.
 Notes the run touched are the only ones edited, so a run-level /revert (which
 deletes those notes) already covers the sweep's edits.
 
@@ -24,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 
 from silica.kernel.link.ast import NON_MD_EXTENSIONS
 
@@ -37,21 +41,52 @@ _WIKILINK_RE = re.compile(r"(!?)\[\[([^\]|#\n]+)(#[^\]|\n]*)?(?:\|([^\]\n]*))?\]
 _RELATED_ENTRY_RE = re.compile(r"^[ \t]*-[ \t]+[\"']?\[\[([^\]|#\n]+)[^\]\n]*\]\][\"']?[ \t]*$")
 
 
+def _fold(name: str) -> str:
+    """Case, punctuation and accents dropped: `Ahura-Mazda` → `ahura mazda`."""
+    s = unicodedata.normalize("NFKD", name)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
 def _make_resolver(extra_names: set[str] | None = None):
-    """name/path → bool, cached; resolution mirrors validate's link check."""
+    """target → the note name it resolves to, "" when nothing does; cached.
+
+    Exact first, mirroring validate's link check and Obsidian's own rule. Only
+    on a miss does it consult a folded index of the vault's names: one segment
+    of a run writes `Ahura-Mazda.md` while another writes `[[Ahura Mazda]]`, and
+    treating that as dangling deleted an edge between two notes of the same
+    batch (7 of the 151 links stripped on one book, measured 2026-08-16). The
+    fold is exact after folding — no prefix, no ratio — so it can only ever
+    match another spelling of the same name. Callers repoint rather than strip.
+    """
     from silica.driver import DRIVER
 
-    cache: dict[str, bool] = {}
-    extra = {n.lower() for n in (extra_names or set())}
+    cache: dict[str, str] = {}
+    extra = {n.lower(): n for n in (extra_names or set())}
+    folded: dict[str, str] | None = None
 
-    def resolves(target: str) -> bool:
+    def _folded_index() -> dict[str, str]:
+        # Built once per sweep and only when an exact match has already failed.
+        nonlocal folded
+        if folded is None:
+            folded = {}
+            try:
+                for r in DRIVER.search_names(""):
+                    folded.setdefault(_fold(r.name), r.name)
+            except Exception:
+                folded = {}
+            for low, name in extra.items():
+                folded.setdefault(_fold(low), name)
+        return folded
+
+    def resolves(target: str) -> str:
         stem = target.strip().removesuffix(".md")
         key = stem.lower()
         if key in cache:
             return cache[key]
         if key in extra:
-            cache[key] = True
-            return True
+            cache[key] = stem
+            return stem
         try:
             if "/" in stem:
 
@@ -62,35 +97,43 @@ def _make_resolver(extra_names: set[str] | None = None):
                     except RuntimeError:
                         return False
 
-                result = _path_exists(stem + ".md") or _path_exists(stem)
+                result = stem if (_path_exists(stem + ".md") or _path_exists(stem)) else ""
+            elif any(r.name.lower() == key for r in DRIVER.search_names(stem)):
+                result = stem
             else:
-                result = any(
-                    r.name.lower() == key for r in DRIVER.search_names(stem)
-                )
+                result = _folded_index().get(_fold(stem), "")
         except Exception:
-            result = True  # resolution failure must never strip a link
+            result = stem  # resolution failure must never strip a link
         cache[key] = result
         return result
 
     return resolves
 
 
-def _unlink_body(body: str, resolves) -> tuple[str, list[str]]:
-    """Replace unresolved wikilinks with their display text; return (new, stripped)."""
+def _unlink_body(body: str, resolves) -> tuple[str, list[str], list[str]]:
+    """Unlink what does not resolve, repoint what resolves under another
+    spelling; return (new, stripped, relinked)."""
     stripped: list[str] = []
+    relinked: list[str] = []
 
     def _sub(m: re.Match) -> str:
-        embed, target, _anchor, alias = m.group(1), m.group(2), m.group(3), m.group(4)
+        embed, target, anchor, alias = m.group(1), m.group(2), m.group(3), m.group(4)
         t = target.strip()
         # Embeds and non-note targets (images, PDFs) are not note links.
         if embed or t.lower().endswith(NON_MD_EXTENSIONS):
             return m.group(0)
-        if resolves(t):
+        hit = resolves(t)
+        if hit == t:
             return m.group(0)
+        if hit:
+            # The display text is what the reader already sees; only the target
+            # moves, so the note reads exactly as before and the edge is real.
+            relinked.append(hit)
+            return f"[[{hit}{anchor or ''}|{(alias or t).strip()}]]"
         stripped.append(t)
         return (alias or t).strip()
 
-    return _WIKILINK_RE.sub(_sub, body), stripped
+    return _WIKILINK_RE.sub(_sub, body), stripped, relinked
 
 
 def _prune_related(fm_text: str, resolves) -> tuple[str, list[str]]:
@@ -106,10 +149,14 @@ def _prune_related(fm_text: str, resolves) -> tuple[str, list[str]]:
         if in_related:
             m = _RELATED_ENTRY_RE.match(line)
             if m:
-                if resolves(m.group(1)):
+                entry = m.group(1).strip()
+                hit = resolves(entry)
+                if hit == entry:
                     out.append(line)
+                elif hit:
+                    out.append(line.replace(m.group(1), hit, 1))
                 else:
-                    dropped.append(m.group(1).strip())
+                    dropped.append(entry)
                 continue
             # The list continues on indented lines or further dash items
             # (column-0 lists occur); any other top-level key ends it.
@@ -119,7 +166,7 @@ def _prune_related(fm_text: str, resolves) -> tuple[str, list[str]]:
 
 
 def sweep_note(rel_path: str, resolves) -> dict | None:
-    """Sweep one note; returns {"path", "stripped": [...]} when edited, else None."""
+    """Sweep one note; returns {"path", "stripped", "relinked"} when edited."""
     from silica.driver import DRIVER
     from silica.kernel.write.frontmatter import FM_RE
 
@@ -128,13 +175,12 @@ def sweep_note(rel_path: str, resolves) -> dict | None:
     except Exception:
         return None
     content = nc.content
-    m = FM_RE.match(content)
-    if m:
+    if m := FM_RE.match(content):
         fm_new, dropped = _prune_related(m.group(0), resolves)
-        body_new, stripped = _unlink_body(content[m.end():], resolves)
+        body_new, stripped, relinked = _unlink_body(content[m.end():], resolves)
         new = fm_new + body_new
     else:
-        new, stripped = _unlink_body(content, resolves)
+        new, stripped, relinked = _unlink_body(content, resolves)
         dropped = []
     if new == content:
         return None
@@ -143,14 +189,18 @@ def sweep_note(rel_path: str, resolves) -> dict | None:
     except Exception as e:
         logger.warning("link sweep: overwrite failed for %s (left as-is): %s", rel_path, e)
         return None
-    return {"path": rel_path, "stripped": sorted(set(stripped + dropped))}
+    return {
+        "path": rel_path,
+        "stripped": sorted(set(stripped + dropped)),
+        "relinked": sorted(set(relinked)),
+    }
 
 
 def sweep_dangling_links(note_paths: list[str]) -> dict:
     """Unlink still-dangling wikilinks in the given run-written notes.
 
     `note_paths` are vault-relative, `.md` optional. Returns
-    {"notes_edited": N, "links_stripped": M, "details": [...]}.
+    {"notes_edited": N, "links_stripped": M, "links_relinked": K, "details": [...]}.
     """
     resolves = _make_resolver()
     details: list[dict] = []
@@ -160,9 +210,16 @@ def sweep_dangling_links(note_paths: list[str]) -> dict:
         if r:
             details.append(r)
     total = sum(len(d["stripped"]) for d in details)
-    if total:
+    moved = sum(len(d["relinked"]) for d in details)
+    if total or moved:
         logger.info(
-            "link sweep: unlinked %d dangling wikilink(s) across %d note(s)",
-            total, len(details),
+            "link sweep: unlinked %d dangling wikilink(s) and repointed %d "
+            "spelling variant(s) across %d note(s)",
+            total, moved, len(details),
         )
-    return {"notes_edited": len(details), "links_stripped": total, "details": details}
+    return {
+        "notes_edited": len(details),
+        "links_stripped": total,
+        "links_relinked": moved,
+        "details": details,
+    }

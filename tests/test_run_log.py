@@ -165,3 +165,69 @@ def test_format_revert_event_names_source_and_counts():
     assert format_revert_event("nucleate", 4, 6) == \
         "revert (nucleate) → 4 note(s) restored, 6 kept (modified since)"
     assert format_revert_event("", 2, 0) == "revert → 2 note(s) restored"
+
+
+# --- write boundary ---------------------------------------------------------
+#
+# Pointing Silica at a 5 GB library of scanned books (write_dir: silica) left a
+# `log.md` in the library root next to the user's own README.md and INDEX.md.
+# The journal is something Silica creates, so it belongs inside the boundary.
+
+def test_append_lands_inside_write_dir(tmp_path, monkeypatch):
+    import silica.config
+    import silica.kernel.vault_manifest as vm
+
+    vault = tmp_path / "vault"
+    (vault / "silica").mkdir(parents=True)
+    monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault))
+    monkeypatch.setattr(vm, "active_write_dir", lambda: "silica")
+
+    append_log_line("nucleate `a.md` → 1 new, 0 patch, 0 deferred", "deadbeef1234",
+                    vault_path=str(vault))
+
+    assert (vault / "silica" / DEFAULT_LOG_FILENAME).exists()
+    assert not (vault / DEFAULT_LOG_FILENAME).exists()
+
+
+def test_tail_still_reads_a_legacy_root_log(tmp_path, monkeypatch):
+    """Vaults written before the boundary fix keep their journal at the root."""
+    import silica.config
+    import silica.kernel.vault_manifest as vm
+
+    vault = tmp_path / "vault"
+    (vault / "silica").mkdir(parents=True)
+    (vault / DEFAULT_LOG_FILENAME).write_text("- 2026-01-01 · old · run abc\n",
+                                              encoding="utf-8")
+    monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault))
+    monkeypatch.setattr(vm, "active_write_dir", lambda: "silica")
+
+    assert tail_log(5, vault_path=str(vault)) == ["- 2026-01-01 · old · run abc"]
+
+
+def test_provenance_store_also_lands_inside_write_dir(tmp_path, monkeypatch):
+    """Same leak as the journal: pointing Silica at a library dropped both
+    `log.md` and `provenance.json` in the user's root."""
+    import silica.config
+    import silica.kernel.vault_manifest as vm
+    from silica.kernel.write.provenance import DEFAULT_PROVENANCE_FILENAME, _store_path
+
+    vault = tmp_path / "vault"
+    (vault / "silica").mkdir(parents=True)
+    monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault))
+    monkeypatch.setattr(vm, "active_write_dir", lambda: "silica")
+
+    assert _store_path(str(vault)) == vault / "silica" / DEFAULT_PROVENANCE_FILENAME
+
+
+def test_provenance_store_keeps_a_legacy_root_file(tmp_path, monkeypatch):
+    import silica.config
+    import silica.kernel.vault_manifest as vm
+    from silica.kernel.write.provenance import DEFAULT_PROVENANCE_FILENAME, _store_path
+
+    vault = tmp_path / "vault"
+    (vault / "silica").mkdir(parents=True)
+    (vault / DEFAULT_PROVENANCE_FILENAME).write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault))
+    monkeypatch.setattr(vm, "active_write_dir", lambda: "silica")
+
+    assert _store_path(str(vault)) == vault / DEFAULT_PROVENANCE_FILENAME

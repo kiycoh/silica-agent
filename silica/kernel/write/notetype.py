@@ -124,10 +124,21 @@ def okf_conformance(vault: Path | str) -> list[Violation]:
     """
     from silica.kernel.recall.paths import ignore_matcher
 
+    from silica.kernel.recall.run_log import DEFAULT_LOG_FILENAME
+    from silica.kernel.vault_manifest import load_manifest
+
     vault = Path(vault)
     if not vault.is_dir():
         return []
     ignored = ignore_matcher(vault)
+    # Silica's own journal is not a note. §11.3's advice for it reads "rename
+    # any `index`/`log` note by hand" — which the user cannot do, because the
+    # next run writes it again. Read the write_dir off THIS vault, not the
+    # active one: doctor is routinely pointed at a vault it has not opened.
+    try:
+        journal = f"{load_manifest(vault).write_dir}/{DEFAULT_LOG_FILENAME}".lstrip("/")
+    except Exception:
+        journal = DEFAULT_LOG_FILENAME
     out: list[Violation] = []
     for f in sorted(vault.rglob("*.md")):
         parts = f.relative_to(vault).parts
@@ -136,6 +147,8 @@ def okf_conformance(vault: Path | str) -> list[Violation]:
         if any(ignored(p) for p in parts[:-1]):
             continue  # .silicaignore / NOISE_DIRS: node_modules under a repo vault
         rel = f.relative_to(vault).as_posix()
+        if rel == journal:
+            continue
         if f.stem.lower() in RESERVED_NAMES:
             out.append(Violation(rel, "11.3", f"reserved note name `{f.stem}` — rename by hand"))
         try:

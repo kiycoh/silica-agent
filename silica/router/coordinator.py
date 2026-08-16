@@ -25,6 +25,14 @@ from silica.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
+# Ceiling on end-of-run orphan repairs: each one is a worker LLM call carrying
+# an 8000-char note body, so a run that warned on a whole folder must not turn
+# CLEANUP into an unbounded token spend. Residual orphans past the cap stay in
+# the warning ledger and the vault report — dropped from THIS run's repair
+# pass, never from visibility. ponytail: fixed cap, promote to Config if a
+# real run ever needs a different ceiling.
+MAX_ORPHAN_REPAIRS_PER_RUN = 16
+
 
 class Coordinator:
     def __init__(
@@ -203,8 +211,15 @@ class Coordinator:
         # Residual = warned notes that are STILL orphaned after the full run.
         residual = [p for p in warned if not current or _norm_path(p) in current]
 
+        if len(residual) > MAX_ORPHAN_REPAIRS_PER_RUN:
+            logger.warning(
+                "orphan repair: %d residual orphans, repairing the first %d — "
+                "the rest stay in the warning ledger / vault report.",
+                len(residual), MAX_ORPHAN_REPAIRS_PER_RUN,
+            )
+
         enqueued = 0
-        for path in residual:
+        for path in residual[:MAX_ORPHAN_REPAIRS_PER_RUN]:
             candidates = self._orphan_candidates(path)
             if not candidates:
                 continue
@@ -252,10 +267,11 @@ class Coordinator:
             if not notes:
                 return
             summary = sweep_dangling_links(notes)
-            if summary["links_stripped"]:
+            if summary["links_stripped"] or summary["links_relinked"]:
                 result["link_sweep"] = {
                     "notes_edited": summary["notes_edited"],
                     "links_stripped": summary["links_stripped"],
+                    "links_relinked": summary["links_relinked"],
                 }
         except Exception as e:
             logger.warning("dangling-link sweep failed (non-fatal): %s", e)

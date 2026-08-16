@@ -111,3 +111,59 @@ def test_related_single_quoted_entries_pruned(vault):
     sweep_dangling_links(["A"])
     text = (vault / "A.md").read_text(encoding="utf-8")
     assert "'[[Hub]]'" in text and "Ghost Entry" not in text
+
+
+class TestPunctuationVariantsAreRelinked:
+    """The run that writes `[[Ahura Mazda]]` in one segment writes
+    `Ahura-Mazda.md` in another: the note is there, the spelling drifted. Exact
+    resolution called that dangling and deleted the edge (7 of the 151 links
+    the sweep stripped on one book, measured 2026-08-16). The fold is exact
+    after dropping case, punctuation and accents — never a ratio."""
+
+    def test_hyphen_variant_is_relinked_not_stripped(self, vault):
+        _write(vault, "Ahura-Mazda.md", "---\ntitle: Ahura-Mazda\n---\n\nBody.\n")
+        _write(vault, "A.md", "---\ntitle: A\n---\n\nThe law of [[Ahura Mazda]].\n")
+        from silica.kernel.link.sweep import sweep_dangling_links
+
+        summary = sweep_dangling_links(["A"])
+
+        text = (vault / "A.md").read_text(encoding="utf-8")
+        assert "[[Ahura-Mazda|Ahura Mazda]]" in text
+        assert summary["links_stripped"] == 0
+        assert summary["links_relinked"] == 1
+
+    def test_an_alias_keeps_its_display_text(self, vault):
+        _write(vault, "Amesha-Spentas.md", "---\ntitle: x\n---\n\nBody.\n")
+        _write(vault, "A.md", "---\ntitle: A\n---\n\nThe [[Amesha Spentas|holy ones]].\n")
+        from silica.kernel.link.sweep import sweep_dangling_links
+
+        sweep_dangling_links(["A"])
+
+        assert "[[Amesha-Spentas|holy ones]]" in (vault / "A.md").read_text()
+
+    def test_related_entry_is_repointed_not_dropped(self, vault):
+        _write(vault, "Ahura-Mazda.md", "---\ntitle: x\n---\n\nBody.\n")
+        _write(
+            vault, "A.md",
+            '---\ntitle: A\nrelated:\n  - "[[Ahura Mazda]]"\n---\n\nBody.\n',
+        )
+        from silica.kernel.link.sweep import sweep_dangling_links
+
+        sweep_dangling_links(["A"])
+
+        text = (vault / "A.md").read_text(encoding="utf-8")
+        assert '- "[[Ahura-Mazda]]"' in text
+
+    def test_a_name_that_only_looks_similar_is_still_stripped(self, vault):
+        """Folding is not fuzzy matching: a different name stays dangling."""
+        _write(vault, "Zoroastrian Philosophy.md", "---\ntitle: x\n---\n\nBody.\n")
+        _write(
+            vault, "A.md",
+            "---\ntitle: A\n---\n\nOn [[Zoroastrian philosophy and ethics]].\n",
+        )
+        from silica.kernel.link.sweep import sweep_dangling_links
+
+        summary = sweep_dangling_links(["A"])
+
+        assert summary["links_stripped"] == 1
+        assert "[[" not in (vault / "A.md").read_text().split("---\n")[-1]

@@ -845,3 +845,26 @@ class TestReplyLanguage:
         from silica.onboarding.checks import reply_language_for
 
         assert reply_language_for("") is None
+
+
+class TestConvertersReportsThePdfLane:
+    """A library of scanned books lives or dies on the PDF provider: pymupdf has
+    no OCR at all, so a scan yields nothing and the failure only surfaces
+    mid-conversion. The converters row named ffmpeg and the office suite and
+    said nothing about the lane that matters most."""
+
+    def test_row_names_the_pdf_provider(self, monkeypatch):
+        from silica.config import CONFIG
+        from silica.onboarding.checks import check_converters
+
+        monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
+        detail = check_converters(CONFIG).detail
+        assert "pymupdf" in detail and "no OCR" in detail
+
+    def test_an_ocr_capable_provider_says_so(self, monkeypatch):
+        from silica.config import CONFIG
+        from silica.onboarding.checks import check_converters
+
+        monkeypatch.setattr(CONFIG, "pdf_provider", "mineru")
+        detail = check_converters(CONFIG).detail
+        assert "mineru" in detail and "OCR" in detail

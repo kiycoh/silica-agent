@@ -42,6 +42,27 @@ logger = logging.getLogger(__name__)
 _report_memo: dict[tuple, VaultReport] = {}
 
 
+def _is_staging(path: str) -> bool:
+    """True for Silica's own staging paths: the inbox and the `done/` archive.
+
+    Neither is knowledge — the inbox is material awaiting distillation, `done/`
+    is what has already been distilled — so nothing links to them by design and
+    calling them orphaned reports Silica's bookkeeping as vault damage.
+    """
+    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.vault_manifest import in_write_dir
+
+    from silica.kernel.recall.run_log import DEFAULT_LOG_FILENAME
+
+    p = (path or "").replace("\\", "/").lstrip("/")
+    if is_inbox_path(p):
+        return True
+    if p.casefold() == in_write_dir(DEFAULT_LOG_FILENAME).casefold():
+        return True  # the run journal, same reason
+    done = in_write_dir("done").casefold()
+    return bool(done) and p.casefold().startswith(done + "/")
+
+
 def _index_stores_sig(with_embeddings: bool, with_cooccurrence: bool) -> tuple:
     """(mtime_ns, size) of the index-side stores these flags pull in.
 
@@ -426,9 +447,16 @@ def compute_report(
 
     # ------------------------------------------------------------------
     # Orphans (in-degree == 0, scoped to folder)
+    #
+    # Staging excluded: the inbox holds sources awaiting distillation and
+    # `done/` holds the ones already consumed. Nothing is supposed to link to
+    # either, so counting them made E(vault) a reading of the inbox — on a
+    # freshly-ingested library, 12 of 12 orphans were staging files and the
+    # orphan term was 92% of the total energy.
     # ------------------------------------------------------------------
     orphans: list[str] = sorted(
-        nid for nid in real_ids if in_deg.get(nid, 0) == 0
+        nid for nid in real_ids
+        if in_deg.get(nid, 0) == 0 and not _is_staging(nid)
     )
 
     # ------------------------------------------------------------------

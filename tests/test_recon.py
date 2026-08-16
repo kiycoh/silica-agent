@@ -234,3 +234,34 @@ class TestStripMath:
         out = strip_math(src)
         assert out == src                      # no math -> content unchanged
         assert src == "La rete neurale calcola il gradiente."  # input not mutated
+
+
+class TestRepeatedTokenPhrases:
+    """YAKE's n-grams slide over the text, so prose that repeats a word inside a
+    window yields candidates that repeat it too. A Book of Enoch chapter gave
+    `Holy Angels holy`, `Mountain holy mountain`, `Angels righteous angels`,
+    `Spirit Longed spirit` — nine of forty candidate slots spent on phrases that
+    are a real concept plus a stutter. No concept names the same thing twice."""
+
+    @pytest.mark.parametrize("phrase", [
+        "Holy Angels holy",
+        "Mountain holy mountain",
+        "Angels righteous angels",
+        "Spirit Longed spirit",
+        "gradient descent gradient",
+    ])
+    def test_stuttering_phrase_is_not_a_concept(self, phrase):
+        from silica.kernel.text.overlay import DEFAULT_OVERLAY
+        from silica.kernel.text.recon import is_concept
+        assert not is_concept(phrase, overlay=DEFAULT_OVERLAY)
+
+    @pytest.mark.parametrize("phrase", [
+        "Holy Angels",
+        "Lord of Spirits",
+        "Rite of Memphis",
+        "gradient descent",
+    ])
+    def test_the_underlying_concept_survives(self, phrase):
+        from silica.kernel.text.overlay import DEFAULT_OVERLAY
+        from silica.kernel.text.recon import is_concept
+        assert is_concept(phrase, overlay=DEFAULT_OVERLAY)

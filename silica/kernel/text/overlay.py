@@ -60,7 +60,26 @@ _ENGLISH_STRUCTURAL_TERMS: frozenset[str] = frozenset({
     "principle", "principles", "foundation", "foundations",
 })
 
-_DEFAULT_STOPWORDS: frozenset[str] = _ENGLISH_FUNCTION_WORDS | _ENGLISH_STRUCTURAL_TERMS
+# Early Modern English function words. Snowball's list is modern, so in any
+# corpus of scripture, law or history written before ~1900 these read to YAKE as
+# content words and the recurring liturgical formula outranks the subject:
+# a Book of Enoch run produced `Saith the Lord of Spirits` and `Spirits hath
+# revealed` as concepts. Grammar only — no nouns, so `lord` and `spirit` stay
+# extractable.
+_ARCHAIC_ENGLISH_FUNCTION_WORDS: frozenset[str] = frozenset({
+    "thou", "thee", "thy", "thine", "ye", "hast", "hath", "doth", "dost",
+    "shalt", "wilt", "art", "saith", "sayeth", "unto", "thereof", "therein",
+    "thereto", "wherein", "whereof", "whereby", "whence", "whither", "hither",
+    "thither", "hence", "yea", "nay", "verily", "behold", "lo", "wast", "wert",
+    "canst", "couldst", "shouldst", "wouldst", "mayest", "midst", "amongst",
+    "betwixt", "ere", "oft", "nigh", "peradventure", "howbeit", "insomuch",
+    "notwithstanding", "aforesaid", "hereunto", "forasmuch",
+})
+
+_DEFAULT_STOPWORDS: frozenset[str] = (
+    _ENGLISH_FUNCTION_WORDS | _ENGLISH_STRUCTURAL_TERMS
+    | _ARCHAIC_ENGLISH_FUNCTION_WORDS
+)
 
 _DEFAULT_NOISE_PATTERN_STRINGS: tuple[str, ...] = (
     # Numeric list markers: "1. ", "2) ", "3- "

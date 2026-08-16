@@ -174,3 +174,19 @@ class TestLatestRunId:
         a = _new_run()
         (runs_dir / "junk_dir").mkdir(parents=True)
         assert prog_mod.latest_run_id() == a.run_id
+
+    def test_ignores_runs_from_another_vault(self, runs_dir, monkeypatch):
+        """`~/.silica/runs` is global. A brand-new vault's first /status was
+        printing the whole progress tree of a run made in a different vault."""
+        import silica.config
+
+        monkeypatch.setattr(silica.config.CONFIG, "vault_path", "/vaults/other")
+        other = _new_run()
+        monkeypatch.setattr(silica.config.CONFIG, "vault_path", "/vaults/mine")
+        assert prog_mod.latest_run_id() is None
+
+        mine = _new_run()
+        import os
+        os.utime(runs_dir / other.run_id, (2_000_000, 2_000_000))
+        os.utime(runs_dir / mine.run_id, (1_000_000, 1_000_000))
+        assert prog_mod.latest_run_id() == mine.run_id

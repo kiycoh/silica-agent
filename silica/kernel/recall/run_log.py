@@ -27,6 +27,26 @@ logger = logging.getLogger(__name__)
 DEFAULT_LOG_FILENAME = "log.md"
 
 
+def _log_path(vault: str, filename: str) -> Path:
+    """`<vault>/<write_dir>/<filename>` — the journal is Silica's own artifact.
+
+    A vault whose writes are confined to `silica/` was still getting a `log.md`
+    dropped in the user's root, beside their own README. Reads fall back to a
+    root journal written before this: legacy stays readable forever.
+    """
+    from silica.kernel.vault_manifest import in_write_dir
+
+    root = Path(vault)
+    try:
+        composed = root / in_write_dir(filename)
+    except Exception as exc:  # config not resolvable — root is the honest guess
+        logger.debug("run_log: write-dir compose failed (non-fatal): %s", exc)
+        return root / filename
+    if composed != root / filename and not composed.exists() and (root / filename).exists():
+        return root / filename
+    return composed
+
+
 def format_nucleate_event(source_basename: str, new: int, patch: int, deferred: int) -> str:
     """`nucleate \\`file.md\\` → 7 new, 3 patch, 2 deferred` — the nucleate event shape."""
     return f"nucleate `{source_basename}` → {new} new, {patch} patch, {deferred} deferred"
@@ -104,7 +124,7 @@ def append_log_line(
 
     short_id = (run_id or "")[:8]
     marker = f"run {short_id}"
-    log_path = Path(resolved) / filename
+    log_path = _log_path(resolved, filename)
 
     try:
         existing = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
@@ -144,7 +164,7 @@ def tail_log(
     resolved = _resolve_vault_path(vault_path)
     if not resolved or n <= 0:
         return []
-    log_path = Path(resolved) / filename
+    log_path = _log_path(resolved, filename)
     if not log_path.exists():
         return []
     try:

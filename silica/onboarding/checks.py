@@ -514,6 +514,24 @@ def check_quarantine(config: SilicaConfig) -> CheckResult:
     return CheckResult("quarantine", "ok", "no quarantined state")
 
 
+def _pdf_lane(config: SilicaConfig) -> str:
+    """The PDF provider and whether it can read a scan.
+
+    A library of photographed books is entirely unreadable under the default
+    provider, and nothing said so until a conversion returned no text. pymupdf
+    is the only bundled provider without OCR; the rest install via the [pdf]
+    extra, so naming an unknown one is a configuration error worth seeing here.
+    """
+    from silica.sources.convert import PDF_PROVIDERS
+
+    name = (getattr(config, "pdf_provider", "") or "pymupdf").strip()
+    if name not in PDF_PROVIDERS:
+        return f"{name} — unknown provider (known: {', '.join(PDF_PROVIDERS)})"
+    if name == "pymupdf":
+        return f"{name} — no OCR, a scan with no text layer yields nothing"
+    return f"{name} — OCR available"
+
+
 def check_converters(config: SilicaConfig) -> CheckResult:
     """External binaries the ingestion lanes shell out to, and their real state.
 
@@ -530,6 +548,7 @@ def check_converters(config: SilicaConfig) -> CheckResult:
     ffmpeg = shutil.which("ffmpeg")
     status, detail = probe_soffice()
     parts = [
+        f"pdf {_pdf_lane(config)}",
         f"ffmpeg {'ok' if ffmpeg else 'missing'} (audio/video)",
         f"office {status} (.doc/.ppt only)",
     ]

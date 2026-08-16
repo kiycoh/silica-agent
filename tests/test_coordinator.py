@@ -140,6 +140,29 @@ def test_coordinator_enqueues_only_residual_orphans_and_reverifies():
     assert ow["residual_after"] == 0    # re-verify: repaired
 
 
+def test_orphan_repairs_are_capped_per_run():
+    """Each repair is a worker LLM call carrying an 8000-char body: a run that
+    warned on a whole folder must not turn CLEANUP into an unbounded spend.
+    Past the cap, orphans stay visible in the ledger — just not repaired now."""
+    from silica.router.coordinator import MAX_ORPHAN_REPAIRS_PER_RUN
+
+    class _ManyWarnings(_FakeFSMWithWarnings):
+        def run(self):
+            for i in range(MAX_ORPHAN_REPAIRS_PER_RUN + 5):
+                self.warning_ledger.add(f"Concepts/O{i}.md", "orphan", "orphaned")
+            return {"final_status": "ok"}
+
+    coord = _coordinator_with(_ManyWarnings(), SilicaConfig())
+    with patch("silica.agent.subagent.BoundedSubAgent", _FakeAgent), \
+         patch.object(type(coord), "_current_orphans", return_value=set()), \
+         patch.object(type(coord), "_orphan_candidates", return_value=[{"name": "X", "path": "Concepts/X"}]):
+        result = coord.run()
+
+    ow = result["orphan_warnings"]
+    assert ow["residual"] == MAX_ORPHAN_REPAIRS_PER_RUN + 5   # visibility intact
+    assert ow["enqueued"] == MAX_ORPHAN_REPAIRS_PER_RUN       # spend bounded
+
+
 # --- interrupt regression ---------------------------------------------------
 # Regression: KI mid-drain left the Live display active (garbled terminal) and
 # worker threads alive (blocking Ctrl+C).  Now _stop is set on BaseException,

@@ -334,3 +334,23 @@ class TestLanguageOverlay:
     def test_unsupported_language_returns_default(self):
         from silica.kernel.text.overlay import language_overlay, DEFAULT_OVERLAY
         assert language_overlay("klingon") is DEFAULT_OVERLAY
+
+
+class TestArchaicEnglish:
+    """A library of 1560-1900 scripture and masonic history distilled into notes
+    titled `Saith the Lord of Spirits`, `Spirits hath revealed`, `Surround the
+    Lord`. Snowball's English stoplist is modern: every archaic function word
+    reads to YAKE as a content word, and the recurring liturgical formula wins
+    on frequency."""
+
+    def test_archaic_function_words_are_stopwords(self):
+        from silica.kernel.text.overlay import DEFAULT_OVERLAY
+
+        for w in ("saith", "hath", "thou", "thee", "thy", "unto", "ye", "doth"):
+            assert w in DEFAULT_OVERLAY.stopwords, w
+
+    def test_modern_content_words_are_untouched(self):
+        from silica.kernel.text.overlay import DEFAULT_OVERLAY
+
+        for w in ("lord", "spirit", "angel", "covenant", "temple"):
+            assert w not in DEFAULT_OVERLAY.stopwords, w

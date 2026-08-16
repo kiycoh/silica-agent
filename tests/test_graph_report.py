@@ -699,3 +699,37 @@ def test_single_component_stays_out_of_health():
     r = compute_report(_nodes_edges_override=(nodes, edges))
     assert r.totals["components"] == 1
     assert "disconnected islands" not in to_markdown(r)
+
+
+# ---------------------------------------------------------------------------
+# Staging is not knowledge
+#
+# Opening the metrics panel on a 46-note vault showed E(vault) = +13.00, of
+# which +12.00 was the orphan term — and all 12 orphans were Silica's own
+# staging files: the converted chapters waiting in silica/Inbox/ and the
+# consumed sources archived in silica/done/. The headline health number was
+# measuring the inbox.
+# ---------------------------------------------------------------------------
+
+def _staging_graph():
+    nodes = [
+        _make_node("Concepts/Uriel.md", "Uriel", group=0),
+        _make_node("Concepts/Angels.md", "Angels", group=0),
+        _make_node("silica/Inbox/Enoch/03-chapter-3.md", "03-chapter-3", group=-1),
+        _make_node("silica/done/01-enoch.md", "01-enoch", group=-1),
+    ]
+    edges = [_make_edge("e0", "Concepts/Uriel.md", "Concepts/Angels.md")]
+    return nodes, edges
+
+
+def test_inbox_and_done_files_are_not_orphans(monkeypatch):
+    import silica.kernel.vault_manifest as vm
+
+    monkeypatch.setattr(vm, "active_inbox_dir", lambda: "silica/Inbox")
+    monkeypatch.setattr(vm, "active_write_dir", lambda: "silica")
+    nodes, edges = _staging_graph()
+
+    r = compute_report(_nodes_edges_override=(nodes, edges))
+
+    assert r.orphans == ["Concepts/Uriel.md"]
+    assert r.totals["orphans"] == 1
