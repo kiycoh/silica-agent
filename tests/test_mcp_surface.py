@@ -30,7 +30,7 @@ def test_write_tools_are_the_only_non_readonly_hints():
     # advertised to MCP clients as read-only — catch the drift here.
     assert WRITE_TOOLS <= set(CORE_TOOLS)
     for name in WRITE_TOOLS:
-        assert any(k in name for k in ("write", "patch", "flag"))
+        assert any(k in name for k in ("write", "patch", "flag", "create", "update"))
 
 
 def test_every_served_tool_sets_all_four_hints():

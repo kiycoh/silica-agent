@@ -111,6 +111,28 @@ def _inject_vault_map(messages: list[dict]) -> None:
         logger.debug("vault map injection skipped: %s", exc)
 
 
+def _today_line() -> str:
+    """Today's date, which the model cannot get from anywhere else in the seed.
+
+    `silica_event_create` takes an absolute 'YYYY-MM-DD HH:MM' and `silica_agenda`
+    only 'today' or an ISO date, so resolving "next Wednesday" is the model's job
+    — and without this it resolves it against its training cutoff. The one other
+    date in the context is incidental: the run-log tail inside the vault map,
+    which is the *last run's* day and is a best-effort block that can be absent.
+
+    # ponytail: session-scoped, like the rest of the seed. A session that spans
+    # midnight keeps the day it started on; re-stamp per turn if that ever bites.
+    """
+    import datetime as _dt
+
+    today = _dt.date.today()
+    return (
+        f"Today is {today:%A, %d %B %Y} ({today.isoformat()}). Resolve relative "
+        f'dates ("tomorrow", "next Wednesday") against it, never against anything '
+        f"you remember."
+    )
+
+
 def _vault_scope() -> str:
     """One line naming the two paths the agent must not confuse.
 
@@ -858,6 +880,21 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
             "ref=…), passing a `conflicts with` line above verbatim; the losing "
             "claim is filed under `## Superseded` instead of being deleted."
         )
+        return True
+
+    if cmd == "/agenda":
+        from rich.markup import escape
+
+        from silica.tools.events import silica_agenda
+
+        arg = " ".join(parts[1:]).strip().casefold()
+        # "week" is the default window spelled out; a date moves the start.
+        start = "today" if arg in ("", "today", "week") else arg
+        res = silica_agenda(start=start, days=7)
+        if res.get("error"):
+            CONSOLE.print(f"  [yellow]{escape(res['error'])}[/]")
+            return True
+        CONSOLE.print(escape(res["text"]))
         return True
 
     if cmd == "/episodes":
@@ -2635,6 +2672,55 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
     return None
 
 
+def _start_reminder_daemon() -> None:
+    """60 s tick: due event reminders -> banner above the prompt.
+
+    Daemon thread, interactive REPL only. The tick re-resolves the active
+    vault every iteration (the vault singleton is first-caller-wins and
+    /vault can switch it — a Path captured at thread start would tick
+    against the wrong vault). Sleep-first, so the first post-launch tick is
+    also the cold-start delivery of reminders missed while the app was
+    closed (collapsed to one late notice per event by the kernel).
+    Best-effort: a reminder is a courtesy, never a crash.
+    """
+    import threading
+    import time as _time
+
+    def _tick_loop() -> None:
+        import datetime as _dt
+        from pathlib import Path as _Path
+
+        from rich.markup import escape
+
+        while True:
+            _time.sleep(60)
+            try:
+                raw = (CONFIG.vault_path or "").strip()
+                if not raw:
+                    continue
+                vault = _Path(raw)
+                from silica.kernel.calendar.model import scan_events
+                from silica.kernel.calendar.reminders import (
+                    advance_marks, due_reminders, load_marks, save_marks,
+                )
+                events = scan_events(vault)
+                if not events:
+                    continue
+                marks = load_marks(vault)
+                due = due_reminders(events, marks, _dt.datetime.now())
+                if not due:
+                    continue
+                save_marks(vault, advance_marks(marks, due))
+                for r in due:
+                    tag = "[yellow]late reminder[/]" if r["late"] else "[bold cyan]reminder[/]"
+                    when = r["start"].strftime("%Y-%m-%d %H:%M")
+                    CONSOLE.print(f"  {tag} · {escape(r['title'])} · {when}")
+            except Exception as e:
+                logger.debug("reminder tick failed (non-fatal): %s", e)
+
+    threading.Thread(target=_tick_loop, daemon=True, name="silica-reminders").start()
+
+
 def _gui_port() -> int:
     """Parse `--port N` / `--port=N` from argv (default 8765)."""
     for i, a in enumerate(sys.argv):
@@ -2703,6 +2789,8 @@ def main():
     oneshot_iter = iter(oneshot)
 
     session = build_session() if not oneshot else None
+    if not oneshot:
+        _start_reminder_daemon()
     messages = _fresh_messages()
     collapsed: set[int] = set()  # message indices already elided by compaction
     # This session's own identity, for the capture lane. Random, not a clock:

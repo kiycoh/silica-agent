@@ -56,6 +56,7 @@ dependencies = [
   # replace a ~240 MB LibreOffice install for 5 of the 7 legacy formats.
   "striprtf>=0.0.29",
   "xlrd>=2.0",
+  "python-dateutil>=2.9.0.post0",
 ]
 
 [project.optional-dependencies]

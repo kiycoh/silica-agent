@@ -35,6 +35,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="chat">chat</button>
       <button class="tab" data-tab="graph">explore</button>
+      <button class="tab" data-tab="calendar">calendar</button>
       <button class="tab" data-tab="metrics">metrics</button>
     </nav>
     <div class="spacer"></div>
@@ -212,6 +213,25 @@
 
     <!-- metrics: everything the L1 graph report measures, rendered as charts.
          Cards are built in JS from /metrics; only the shell lives here. -->
+    <section id="view-calendar" class="view">
+      <div id="cal-head">
+        <div id="cal-nav" role="group" aria-label="calendar navigation">
+          <button type="button" id="cal-prev" class="ghost" title="previous" aria-label="previous">&#8249;</button>
+          <button type="button" id="cal-today" class="ghost" title="jump to today">today</button>
+          <button type="button" id="cal-next" class="ghost" title="next" aria-label="next">&#8250;</button>
+        </div>
+        <div id="cal-title" aria-live="polite"></div>
+        <div class="spacer"></div>
+        <div id="cal-mode" role="group" aria-label="calendar mode">
+          <button type="button" data-calmode="month" class="active">month</button>
+          <button type="button" data-calmode="week">week</button>
+        </div>
+      </div>
+      <div id="cal-main">
+        <div id="cal-grid" aria-label="calendar grid"></div>
+        <aside id="cal-agenda" aria-label="agenda"></aside>
+      </div>
+    </section>
     <section id="view-metrics" class="view">
       <div id="metrics-bar">
         <div class="mbar-title">Vault metrics</div>

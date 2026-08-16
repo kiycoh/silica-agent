@@ -40,6 +40,14 @@ from silica.tools.notes import (  # noqa: F401
     silica_patch_note,
     silica_write_note,
 )
+from silica.tools.events import (  # noqa: F401
+    AgendaArgs,
+    EventCreateArgs,
+    EventUpdateArgs,
+    silica_agenda,
+    silica_event_create,
+    silica_event_update,
+)
 from silica.tools.graph import (  # noqa: F401
     AutolinkArgs,
     BacklinkArgs,

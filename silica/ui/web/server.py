@@ -1099,6 +1099,42 @@ def _write_sessions(report) -> dict | None:
     }
 
 
+@app.get("/calendar")
+def calendar(start: str = "", days: int = 7):
+    """The 4-axis agenda days for the calendar tab — one endpoint, one build
+    (the /shape pattern). Same payload the chat tool returns."""
+    from silica.tools.events import silica_agenda
+
+    return silica_agenda(start=start or "today", days=max(1, min(90, days)))
+
+
+@app.post("/reminders")
+def reminders_poll():
+    """The front-end poll IS the reminder tick: compute due, advance the
+    high-water marks, return the list. POST, not GET — the poll mutates the
+    sidecar, and a cacheable GET risks a stale 200 swallowing a delivery.
+    At-most-once: the mark advances on delivery; REPL and GUI share the
+    sidecar, so whichever surface polls first delivers."""
+    import datetime as _dt
+    from pathlib import Path as _Path
+
+    from silica.config import CONFIG
+    from silica.kernel.calendar.model import scan_events
+    from silica.kernel.calendar.reminders import (
+        advance_marks, due_reminders, load_marks, save_marks,
+    )
+
+    vault = _Path(CONFIG.vault_path)
+    events = scan_events(vault)
+    marks = load_marks(vault)
+    due = due_reminders(events, marks, _dt.datetime.now())
+    if due:
+        save_marks(vault, advance_marks(marks, due))
+    return {"due": [{"stem": r["stem"], "title": r["title"],
+                     "start": r["start"].isoformat(sep=" "), "late": r["late"]}
+                    for r in due]}
+
+
 @app.get("/metrics")
 def metrics(proposals: bool = False):
     """Everything the L1 graph report measures, as JSON for the metrics tab.

@@ -1579,3 +1579,64 @@ def test_health_hides_the_cli_hook_check_from_the_sidebar(client, monkeypatch):
     assert [r["name"] for r in tc.get("/health?all=1").json()] == [
         "session capture", "embeddings",
     ]
+
+
+# --- calendar ----------------------------------------------------------------
+
+EVENT_NOTE_FM = "---\ntitle: Dentist\nevent_start: 2026-08-20 15:00\n---\n"
+
+
+def test_calendar_endpoint_serves_the_agenda_days(client, tmp_vault):
+    tc, _server = client
+    tmp_vault.note("calendar/2026-08-20 Dentist.md", EVENT_NOTE_FM)
+
+    d = tc.get("/calendar", params={"start": "2026-08-17", "days": 7}).json()
+    assert "error" not in d, d
+    assert d["start"] == "2026-08-17" and len(d["days"]) == 7
+    day = {r["date"]: r for r in d["days"]}["2026-08-20"]
+    assert [e["title"] for e in day["events"]] == ["Dentist"]
+
+
+def test_calendar_endpoint_rejects_a_bad_start(client):
+    tc, _server = client
+    assert "error" in tc.get("/calendar", params={"start": "not-a-date"}).json()
+
+
+def test_reminders_poll_is_post_and_delivers_at_most_once(client, tmp_vault):
+    # One-shot in the past with an at-start reminder: exactly one late notice
+    # on the first poll, none on the second (the mark advanced), and GET is
+    # not an allowed method (the poll advances marks — a mutation).
+    tc, _server = client
+    tmp_vault.note("calendar/call.md",
+                   "---\nevent_start: 2026-08-10 15:00\nevent_reminder: 0m\n---\n")
+
+    first = tc.post("/reminders").json()
+    assert [(r["title"], r["late"]) for r in first["due"]] == [("call", True)]
+    assert tc.post("/reminders").json() == {"due": []}
+    assert tc.get("/reminders").status_code == 405
+
+
+def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
+    """The GUI used to build its own seed (prompt + vault map) and had drifted:
+    no `_vault_scope`, so the model was blind to `write_dir`, and no closing
+    language line — the fix f104232 shipped for the TUI and never carried over.
+    Both now come from `cli.seed_messages`, so the drift cannot come back."""
+    import datetime as dt
+
+    from silica.cli import seed_messages
+    from silica.ui.web import server
+
+    server._build_seed()
+    gui = [m["content"] for m in server._seed[0]]
+    tui = [m["content"] for m in seed_messages()]
+
+    assert len(gui) == len(tui)
+    # Same messages, one difference: the GUI prompt carries the math block.
+    assert gui[1:] == tui[1:]
+    assert "$$" in gui[0] and "$$" not in tui[0]
+    # And the two things the GUI was missing, by content rather than by parity:
+    # what day it is (nothing else in the seed carries a date) and the read/write
+    # scope. The closing line is the restated language rule.
+    assert dt.date.today().isoformat() in gui[1]
+    assert gui[2].startswith("Vault: ")
+    assert "language" in gui[-1].lower()

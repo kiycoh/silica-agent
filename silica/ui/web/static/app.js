@@ -1232,8 +1232,10 @@ function showTab(tab) {
   document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   $("#view-chat").classList.toggle("active", tab === "chat");
   $("#view-graph").classList.toggle("active", tab === "graph");
+  $("#view-calendar").classList.toggle("active", tab === "calendar");
   $("#view-metrics").classList.toggle("active", tab === "metrics");
   if (tab === "graph") setGraphMode(graphMode); // load the active mode's content
+  if (tab === "calendar") loadCalendar();
   if (tab === "metrics") loadMetrics();
   // Deep-linkable views: the hash names the tab ("explore" is the label users
   // see for the graph view), so a pasted URL opens on the right screen.
@@ -1249,7 +1251,7 @@ $(".tabs").addEventListener("click", (e) => {
 function tabFromHash() {
   const slug = (location.hash || "").replace(/^#/, "");
   const tab = slug === "explore" ? "graph" : slug;
-  if (["chat", "graph", "metrics"].includes(tab) && tab !== activeTab) showTab(tab);
+  if (["chat", "graph", "calendar", "metrics"].includes(tab) && tab !== activeTab) showTab(tab);
 }
 window.addEventListener("hashchange", tabFromHash);
 
@@ -4100,11 +4102,337 @@ loadVaultInfo();
 loadChanges(); // the server's ledger outlives the tab — a reload keeps the list
 loadConfig(); // header shows the active model without opening the panel
 loadHealth(); // a chat/embedder/reranker server that isn't up says so, once, here
+// --- calendar ----------------------------------------------------------------
+// Month grid + week view over GET /calendar (the 4-axis agenda payload), with
+// nodus-style lane-packing for multi-day bars: per week row, spans pack into
+// the first free lane, Mon–Sun clipped; in month mode lanes cap at 3 and the
+// overflow folds into the day's "+N". The agenda panel shows the upcoming 7
+// days, or the one day clicked in the grid. POST /reminders every 30 s IS the
+// reminder tick (setInterval stays alive in hidden tabs); delivered ones land
+// on the toast strip.
+
+let calMode = "month";        // "month" | "week"
+let calAnchor = new Date();   // any date inside the visible month/week
+let calSelected = null;       // "YYYY-MM-DD" the agenda panel focuses on, or null
+let calDays = {};             // date -> DayRow of the visible window
+let calUpcoming = null;       // DayRows of today+7, for the default agenda panel
+
+const CAL_LANE_CAP = 3;       // month mode: visible multi-day lanes per week
+const CAL_CHIP_CAP = 2;       // month mode: visible timed chips per day
+
+function calFmt(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function calMonday(d) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return x;
+}
+function calWindow() {
+  if (calMode === "week") return { start: calMonday(calAnchor), days: 7 };
+  const first = new Date(calAnchor.getFullYear(), calAnchor.getMonth(), 1);
+  return { start: calMonday(first), days: 42 };
+}
+
+async function loadCalendar() {
+  const w = calWindow();
+  try {
+    const [grid, up] = await Promise.all([
+      fetch(`/calendar?start=${calFmt(w.start)}&days=${w.days}`).then((r) => r.json()),
+      fetch("/calendar?start=today&days=7").then((r) => r.json()),
+    ]);
+    if (grid.error) { notify(grid.error); return; }
+    calDays = {};
+    for (const row of grid.days) calDays[row.date] = row;
+    calUpcoming = up.error ? null : up.days;
+    renderCalendar();
+    renderCalAgenda();
+  } catch { notify("couldn't load the calendar"); }
+}
+
+// A bar is anything that must draw as a span: all-day, or crossing midnight.
+function calIsBar(e) {
+  return e.all_day || (e.end && e.end.slice(0, 10) !== e.start.slice(0, 10));
+}
+
+// nodus layoutCalendarWeek: first-fit lanes over column intervals.
+function calPackLanes(spans) {
+  spans.sort((a, b) => a.c0 - b.c0 || (b.c1 - b.c0) - (a.c1 - a.c0));
+  const lanes = [];
+  for (const s of spans) {
+    let lane = lanes.findIndex((l) => l.every((o) => o.c1 < s.c0 || o.c0 > s.c1));
+    if (lane === -1) { lane = lanes.length; lanes.push([]); }
+    lanes[lane].push(s);
+    s.lane = lane;
+  }
+  return lanes.length;
+}
+
+function calEventEl(e, cls, withTime) {
+  const el = document.createElement("div");
+  el.className = cls + (e.status ? " " + e.status : "");
+  if (withTime && !e.all_day) {
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = e.start.slice(11, 16);
+    el.appendChild(t);
+  }
+  el.appendChild(document.createTextNode((e.status === "done" ? "✓ " : "") + e.title));
+  el.title = e.title;
+  el.addEventListener("click", (ev) => { ev.stopPropagation(); openNote(e.path); });
+  return el;
+}
+
+function calBuildWeek(dates, tall) {
+  const week = document.createElement("div");
+  week.className = "cal-week" + (tall ? " wk" : "");
+
+  // Reconstruct spans from the per-day buckets: same (stem, start) on
+  // consecutive days is one occurrence.
+  const spans = new Map();
+  dates.forEach((date, i) => {
+    for (const e of (calDays[date] || {}).events || []) {
+      if (!calIsBar(e)) continue;
+      const k = e.stem + "|" + e.start;
+      const s = spans.get(k) || { c0: i, c1: i, ev: e };
+      s.c1 = i;
+      spans.set(k, s);
+    }
+  });
+  const bars = [...spans.values()];
+  const laneTotal = calPackLanes(bars);
+  const laneCap = tall ? laneTotal : Math.min(laneTotal, CAL_LANE_CAP);
+  // repeat(0, …) is invalid CSS and would drop the whole declaration
+  week.style.gridTemplateRows =
+    laneCap > 0 ? `20px repeat(${laneCap}, 20px) 1fr` : "20px 1fr";
+
+  const todayStr = calFmt(new Date());
+  const overflow = new Array(7).fill(0);
+  const visMonth = calAnchor.getMonth();
+
+  dates.forEach((date, i) => {
+    const cell = document.createElement("div");
+    cell.className = "cal-day";
+    // Explicit column: a cell with a definite row span but an auto column
+    // would be pushed past any bar-occupied column by the sparse placement
+    // cursor, spilling days 5..7 into implicit tracks (measured: 10 columns).
+    cell.style.gridColumn = String(i + 1);
+    if (i === 6) cell.classList.add("c7");
+    if (date === todayStr) cell.classList.add("today");
+    if (date === calSelected) cell.classList.add("selected");
+    const d = new Date(date + "T00:00");
+    if (calMode === "month" && d.getMonth() !== visMonth) cell.classList.add("other");
+    const num = document.createElement("div");
+    num.className = "cal-num";
+    const nn = document.createElement("span");
+    nn.textContent = d.getDate();
+    num.appendChild(nn);
+    cell.appendChild(num);
+
+    if (laneCap > 0) {
+      // Hold the lane band open: chips flow in normal cell layout while bars
+      // paint on the overlapping grid rows — without this the first chip
+      // renders underneath a bar.
+      const spacer = document.createElement("div");
+      spacer.style.flex = `0 0 ${laneCap * 20}px`;
+      cell.appendChild(spacer);
+    }
+    const chips = document.createElement("div");
+    chips.className = "cal-chips";
+    const timed = ((calDays[date] || {}).events || []).filter((e) => !calIsBar(e));
+    const cap = tall ? timed.length : CAL_CHIP_CAP;
+    timed.slice(0, cap).forEach((e) => chips.appendChild(calEventEl(e, "cal-chip", true)));
+    overflow[i] += Math.max(0, timed.length - cap);
+    cell.appendChild(chips);
+
+    const more = document.createElement("div");
+    more.className = "cal-more";
+    cell.appendChild(more);
+
+    cell.addEventListener("click", () => {
+      calSelected = calSelected === date ? null : date;
+      renderCalendar();
+      renderCalAgenda();
+    });
+    week.appendChild(cell);
+  });
+
+  for (const s of bars) {
+    if (s.lane >= laneCap) {
+      for (let c = s.c0; c <= s.c1; c++) overflow[c] += 1;
+      continue;
+    }
+    const bar = calEventEl(s.ev, "cal-bar", false);
+    bar.style.gridColumn = `${s.c0 + 1} / ${s.c1 + 2}`;
+    bar.style.gridRow = String(s.lane + 2);
+    week.appendChild(bar);
+  }
+  overflow.forEach((n, i) => {
+    if (n > 0) week.children[i].querySelector(".cal-more").textContent = `+${n} more`;
+  });
+  return week;
+}
+
+function renderCalendar() {
+  const grid = $("#cal-grid");
+  grid.replaceChildren();
+  const dow = document.createElement("div");
+  dow.className = "cal-dow";
+  for (const n of ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]) {
+    const c = document.createElement("div");
+    c.textContent = n;
+    dow.appendChild(c);
+  }
+  grid.appendChild(dow);
+
+  const w = calWindow();
+  const dates = [];
+  for (let i = 0; i < w.days; i++) {
+    const d = new Date(w.start);
+    d.setDate(d.getDate() + i);
+    dates.push(calFmt(d));
+  }
+  for (let r = 0; r < dates.length / 7; r++) {
+    grid.appendChild(calBuildWeek(dates.slice(r * 7, r * 7 + 7), calMode === "week"));
+  }
+
+  const t = $("#cal-title");
+  if (calMode === "month") {
+    t.textContent = calAnchor.toLocaleString("en-US", { month: "long", year: "numeric" });
+  } else {
+    const a = calMonday(calAnchor);
+    const b = new Date(a); b.setDate(b.getDate() + 6);
+    const f = (d) => d.toLocaleString("en-US", { month: "short", day: "numeric" });
+    t.textContent = `${f(a)} – ${f(b)}, ${b.getFullYear()}`;
+  }
+}
+
+function calAgendaDay(row) {
+  const sec = document.createElement("div");
+  sec.className = "cal-ag-day";
+  const d = new Date(row.date + "T00:00");
+  const h = document.createElement("div");
+  h.className = "cal-ag-date";
+  h.textContent = d.toLocaleString("en-US", { month: "short", day: "numeric" });
+  const wd = document.createElement("span");
+  wd.className = "wd";
+  wd.textContent = d.toLocaleString("en-US", { weekday: "long" });
+  h.appendChild(wd);
+  sec.appendChild(h);
+
+  let any = false;
+  for (const e of row.events) {
+    any = true;
+    const it = document.createElement("div");
+    it.className = "cal-ag-item ev" + (e.status ? " " + e.status : "");
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = e.all_day ? "all-day" : e.start.slice(11, 16);
+    it.appendChild(when);
+    const ti = document.createElement("span");
+    ti.textContent = e.title;
+    it.appendChild(ti);
+    it.addEventListener("click", () => openNote(e.path));
+    sec.appendChild(it);
+  }
+  for (const n of row.notes) {
+    any = true;
+    const it = document.createElement("div");
+    it.className = "cal-ag-item";
+    const k = document.createElement("span");
+    k.className = "when cal-ag-kind";
+    k.textContent = "note";
+    it.appendChild(k);
+    it.appendChild(document.createTextNode(n.label));
+    sec.appendChild(it);
+  }
+  for (const a of row.activity) {
+    any = true;
+    const it = document.createElement("div");
+    it.className = "cal-ag-item";
+    const k = document.createElement("span");
+    k.className = "when cal-ag-kind";
+    k.textContent = "agent";
+    it.appendChild(k);
+    it.appendChild(document.createTextNode(a));
+    sec.appendChild(it);
+  }
+  for (const r of row.review || []) {
+    any = true;
+    const it = document.createElement("div");
+    it.className = "cal-ag-item";
+    const k = document.createElement("span");
+    k.className = "when cal-ag-kind";
+    k.textContent = "review";
+    it.appendChild(k);
+    it.appendChild(document.createTextNode(r.path || ""));
+    sec.appendChild(it);
+  }
+  if (!any) {
+    const e = document.createElement("div");
+    e.className = "cal-ag-empty";
+    e.textContent = "nothing scheduled";
+    sec.appendChild(e);
+  }
+  return sec;
+}
+
+function renderCalAgenda() {
+  const panel = $("#cal-agenda");
+  panel.replaceChildren();
+  const head = document.createElement("div");
+  head.className = "cal-ag-head";
+  if (calSelected && calDays[calSelected]) {
+    head.textContent = "selected day";
+    panel.appendChild(head);
+    panel.appendChild(calAgendaDay(calDays[calSelected]));
+  } else if (calUpcoming) {
+    head.textContent = "next 7 days";
+    panel.appendChild(head);
+    for (const row of calUpcoming) panel.appendChild(calAgendaDay(row));
+  }
+}
+
+$("#cal-prev").addEventListener("click", () => {
+  if (calMode === "month") calAnchor.setMonth(calAnchor.getMonth() - 1);
+  else calAnchor.setDate(calAnchor.getDate() - 7);
+  loadCalendar();
+});
+$("#cal-next").addEventListener("click", () => {
+  if (calMode === "month") calAnchor.setMonth(calAnchor.getMonth() + 1);
+  else calAnchor.setDate(calAnchor.getDate() + 7);
+  loadCalendar();
+});
+$("#cal-today").addEventListener("click", () => {
+  calAnchor = new Date();
+  calSelected = null;
+  loadCalendar();
+});
+$("#cal-mode").addEventListener("click", (e) => {
+  const m = e.target.dataset.calmode;
+  if (!m || m === calMode) return;
+  calMode = m;
+  document.querySelectorAll("#cal-mode button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.calmode === m));
+  loadCalendar();
+});
+
+// The poll is the tick: the endpoint computes due, advances the sidecar marks,
+// and returns what to show. At-most-once shared with the REPL daemon.
+setInterval(async () => {
+  try {
+    const d = await (await fetch("/reminders", { method: "POST" })).json();
+    for (const r of d.due || []) {
+      notify((r.late ? "late reminder: " : "reminder: ") + r.title + " · " + r.start.slice(0, 16), "info");
+    }
+  } catch { /* a reminder is a courtesy; the next tick retries */ }
+}, 30000);
+
 // Land on chat — it's the primary surface — unless the URL names another view
-// (#explore, #metrics): a pasted deep link must win over the default. Read the
-// hash BEFORE the default click: showTab rewrites it via replaceState.
+// (#explore, #calendar, #metrics): a pasted deep link must win over the default.
+// Read the hash BEFORE the default click: showTab rewrites it via replaceState.
 const bootSlug = (location.hash || "").replace(/^#/, "");
 const bootTab = bootSlug === "explore" ? "graph" : bootSlug;
 document.querySelector(
-  `.tab[data-tab="${["chat", "graph", "metrics"].includes(bootTab) ? bootTab : "chat"}"]`
+  `.tab[data-tab="${["chat", "graph", "calendar", "metrics"].includes(bootTab) ? bootTab : "chat"}"]`
 ).click();

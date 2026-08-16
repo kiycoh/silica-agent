@@ -59,6 +59,14 @@ COMMANDS: tuple[Command, ...] = (
         examples=("/episodes", "/episodes --save=~/episodes.md"),
     ),
     Command(
+        name="/agenda",
+        group="direct",
+        usage="[today|week|YYYY-MM-DD]",
+        summary="per-day merge of events, dated notes, agent activity and review due",
+        examples=("/agenda", "/agenda week", "/agenda 2026-09-01"),
+        repl_only=True,  # the GUI has its own calendar tab
+    ),
+    Command(
         name="/convert",
         group="direct",
         usage="<file...> [--target=DIR]",

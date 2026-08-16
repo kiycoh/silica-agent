@@ -45,6 +45,9 @@ CORE_TOOLS = (
     "silica_write_note",
     "silica_patch_note",
     "silica_flag_note",
+    "silica_event_create",
+    "silica_event_update",
+    "silica_agenda",
     # Not vault memory: the client's read of whether the memory it is talking to
     # is actually whole. A degraded leg (no embeddings, no rerank, unwritable
     # vault) answers plausibly instead of erroring, so without this the only way
@@ -53,7 +56,8 @@ CORE_TOOLS = (
 )
 
 # MCP behavior hints: everything we serve is read-only except these three.
-WRITE_TOOLS = frozenset({"silica_write_note", "silica_patch_note", "silica_flag_note"})
+WRITE_TOOLS = frozenset({"silica_write_note", "silica_patch_note", "silica_flag_note",
+                         "silica_event_create", "silica_event_update"})
 
 # All four hints, always. Per the MCP spec an omitted hint defaults to the
 # permissive reading — destructiveHint and openWorldHint both default TRUE — so

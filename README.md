@@ -438,6 +438,7 @@ One artifact, two readers: a human reads it as a current map of the repository, 
 | `/convert <file...>` | Transcode non-markdown files (PDFs) into markdown drafts |
 | `/promote [<key>]` | List what session memory keeps repeating, promote one chain into a note through the gate |
 | `/episodes [--save=<path>]` | Show what session memory holds, dated and grouped by key; writes nothing unless you name a path |
+| `/agenda [today\|week\|YYYY-MM-DD]` | Per-day merge of events, dated notes, agent activity and review due; events live as calendar notes, reminders arrive in-app |
 
 **Indexes** `/embed` · `/cooccur` (embedder-free) · `/lexical` (BM25 and fuzzy)
 
