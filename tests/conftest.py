@@ -14,6 +14,42 @@ def _fresh_bus(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_form_sniff_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The form sniff must never reach a real endpoint from a test.
+
+    Raising makes sniff_form degrade to "" (its designed offline posture);
+    tests that want a specific verdict monkeypatch forms.sniff_form or
+    forms.call_llm themselves, which overrides this stub. The memo is cleared
+    so one test's verdict can never leak into another's."""
+    import silica.kernel.forms as forms
+
+    forms._sniff_memo.clear()
+
+    def _offline(*a, **k):
+        raise RuntimeError("form sniff disabled in tests")
+
+    monkeypatch.setattr(forms, "call_llm", _offline)
+
+    # Same posture for the residue verification: never a real endpoint from a
+    # test. Its designed offline degrade is [] (CLEANUP proceeds); residue
+    # tests monkeypatch finalize.residue_facts themselves, overriding this.
+    # Both dispatch seams are stubbed for the same reason (decompose at chunk
+    # attach, evidence+judge at the last chunk's WRITE — each submits LLM
+    # calls to a pool); test_residue_dispatch binds the real implementations
+    # at import time, before this fixture patches the attrs.
+    import silica.router.states.finalize as _finalize
+
+    monkeypatch.setattr(_finalize, "residue_facts", lambda *a, **k: [])
+    monkeypatch.setattr(_finalize, "maybe_dispatch_residue_check", lambda *a, **k: None)
+    monkeypatch.setattr(_finalize, "maybe_dispatch_residue_decompose", lambda *a, **k: None)
+    # The gate's late-dispatch fallback submits the whole verification to a
+    # pool; without this stub every FSM cleanup test would hit the network.
+    monkeypatch.setattr(_finalize, "_verify_now",
+                        lambda *a, **k: {"missing": [], "total": 0, "judged": 0,
+                                         "failures": 0, "off_theme": 0})
+
+
+@pytest.fixture(autouse=True)
 def _restore_tools_registry() -> None:
     """Undo any registration a test leaves in the global TOOLS dict.
 

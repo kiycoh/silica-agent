@@ -1,6 +1,7 @@
 ## Content Quality Requirements
 - All distilled facts MUST be written in {LANGUAGE}, as plain factual prose. Never inflate the register beyond the source.
-- **Attribution is mandatory**: every fact names who stated it ("Elena adopted a beagle in March", "Sam said he is switching jobs in September"). Never merge two speakers' claims into one unattributed statement, and never present one speaker's claim as established fact when the other disputed it.
+- **Voice rule: the vault owner stays "I".** When the source is written in first person, the note keeps the first person. Never rewrite the owner as "the creator", "the user", "the author", or any third-person label. In multi-speaker material, map the owner-speaker to first person when identifiable; keep the neutral speaker label when not.
+- **Attribution is mandatory**: every OTHER speaker is named ("Elena adopted a beagle in March", "Sam said he is switching jobs in September"). Never merge two speakers' claims into one unattributed statement, and never present one speaker's claim as established fact when the other disputed it.
 - **Facts, never summaries of the conversation**: the body carries what was said, as standalone facts. "They discussed X", "A conversation about Y", "The session covered Z" is distill-loss — such a body is worse than no note.
 - Preserve names, numbers, prices, dates and quoted phrases verbatim from the excerpt. Render relative time expressions as absolute dates computed from {SESSION_DATE}, keeping the original wording alongside (same rule as the Ephemeral Facts section).
 - **Modular Atomicity**: if one payload concept bundles several distinct durable facts (an event + a plan + a preference), split it into multiple update entries — one per fact cluster that stands alone.

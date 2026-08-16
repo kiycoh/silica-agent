@@ -358,6 +358,33 @@ def set_write_dir(vault: str | Path, value: str) -> Path:
     return path
 
 
+def set_distill_profile(vault: str | Path, profile: str) -> Path:
+    """Declare `conventions.distill_profile` in `<vault>/vault.yaml`.
+
+    A nested key, so unlike set_write_dir this is a yaml round-trip (same
+    trade as the /settings writer): hand-written comments do not survive.
+    The wizard only calls it with explicit user consent.
+    """
+    import yaml
+
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    path = Path(vault) / MANIFEST_REL
+    data = {}
+    if path.is_file():
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            data = loaded
+    conv = data.get("conventions")
+    if not isinstance(conv, dict):
+        conv = {}
+    conv["distill_profile"] = profile
+    data["conventions"] = conv
+    atomic_write_bytes(path, yaml.safe_dump(data, sort_keys=False).encode("utf-8"))
+    reset_manifest_cache()
+    return path
+
+
 _cached: VaultManifest | None = None
 
 

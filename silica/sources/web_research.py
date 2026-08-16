@@ -1245,6 +1245,7 @@ def _build_note(
     source: str = "web-research",
     force_sources: bool = False,
     lanes: str = "",
+    form: str = "",
 ) -> str:
     """Deterministic frontmatter + body + guaranteed ## Sources.
 
@@ -1259,10 +1260,15 @@ def _build_note(
     the verbatim page, where a ## Sources heading is the *page author's* (every
     markdown README has one) and must not be able to stand in for Silica's."""
     today = datetime.date.today().isoformat()
+    # `form:` is the ingress stamp of docs/specs/nucleation-forms.md: clipped
+    # external content declares itself so nucleation picks the clip lens
+    # without sniffing.
+    form_line = f"form: {form}\n" if form else ""
     front = (
         "---\n"
         f"title: {json.dumps(concept)}\n"
         f"source: {source}\n"
+        f"{form_line}"
         f"fetched: {today}\n"
         f"tags: [inbox, {source}]\n"
         "---\n"
@@ -1348,7 +1354,8 @@ def fetch_to_inbox(url: str) -> str:
     title = page.title or first_line
 
     note = _build_note(
-        title, text, [(url, title)], source="web-fetch", force_sources=True
+        title, text, [(url, title)], source="web-fetch", force_sources=True,
+        form="clip",
     )
     note_rel = _unique_inbox_path(title, fallback="web-fetch")
     from silica.driver import DRIVER

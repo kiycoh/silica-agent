@@ -1,8 +1,13 @@
 ## Decision Rubric
 The source is a conversational transcript (chat log, interview, therapy or
-coaching session, meeting). Concepts anchor stretches of dialogue; excerpts are
-dialogue windows, not expository sections. The anchor name may be weak (a
+coaching session, meeting) or the vault owner's own typed record of an event
+(call notes, meeting notes). Concepts anchor stretches of dialogue; excerpts
+are dialogue windows, not expository sections. The anchor name may be weak (a
 person, a topic word) — the value is in the facts stated inside the window.
+When the record is the owner's own notes, the note-taker is "I": write the
+owner's actions and decisions in first person in every write AND patch
+snippet. The literal wordings "the user", "the creator", "the author" are
+REJECTED — they misattribute the owner's own voice.
 For every concept in every batch, decide exactly ONE action:
 
 - **patch** — vault_collision is not null AND the dialogue excerpt contains durable facts (events, decisions, biographical details, dates, named entities, stated preferences, commitments) that are NOT present in vault_collision.excerpt. Extract only the missing facts. When `graph_context.is_hub` is true, the matched note is a structural anchor of its cluster — prefer `patch` even at lower confidence rather than creating a shadow note.

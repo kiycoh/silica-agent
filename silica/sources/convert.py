@@ -1351,6 +1351,11 @@ def _provenance_fm(src: Path, md_text: str = "") -> str:
     quoted = str(src).replace("\\", "\\\\").replace('"', '\\"')
     date = _source_date(src)
     lines = [f"date: {date}\n"] if date else []
+    # Form stamp (docs/specs/nucleation-forms.md): a converted media file is a
+    # transcript by construction, so the profile ladder never has to sniff it.
+    # A document's form is not knowable at ingress; it gets no stamp.
+    if src.suffix.lower() in MEDIA_EXTS:
+        lines.append("form: transcript\n")
     for key, val in _doc_citation(src, md_text).items():
         v = str(val).replace("\\", "\\\\").replace('"', '\\"')
         lines.append(f'{key}: "{v}"\n')

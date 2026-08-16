@@ -1279,7 +1279,9 @@ def test_a_real_video_becomes_a_real_note_over_a_real_socket(tmp_vault, tmp_path
     assert b'name="response_format"' in received["body"] and b"vtt" in received["body"]
 
     body = _inbox_note(notes[0]).read_text(encoding="utf-8")
-    assert body.startswith('---\nsource_file: "')      # provenance survived
+    assert body.startswith('---\n')                     # frontmatter block
+    assert 'source_file: "' in body                     # provenance survived
+    assert 'form: transcript' in body                   # media ingress stamp
     assert "# keynote" in body
     assert "The first thing to know" in body
     assert "is that the demux is one call.\n\nAfter a long pause" in body

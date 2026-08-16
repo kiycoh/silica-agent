@@ -341,6 +341,59 @@ def _ask_local_model(
 _DOC_SCAN_CAP = 20_000
 
 
+def propose_form_fallback(vault: Path, cap: int = _DOC_SCAN_CAP) -> str | None:
+    """Fallback distill profile to propose, from a mechanical `form:` census.
+
+    docs/specs/nucleation-forms.md wizard step: no vault-wide auto-inference
+    and zero extra LLM calls — only the ingress stamps already sitting in
+    frontmatter count. Proposes only when the stamped sample is sizable
+    (>= 10) and skewed (>= 70% one form), and never proposes draft: draft has
+    no lens, so it cannot be a fallback profile.
+    """
+    from collections import Counter
+
+    from silica.kernel.forms import profile_for, stamped_form
+
+    counts: Counter[str] = Counter()
+    scanned = 0
+    for p in vault.rglob("*.md"):
+        scanned += 1
+        if scanned > cap:
+            break
+        try:
+            form = stamped_form(p.read_text(encoding="utf-8", errors="replace")[:2000])
+        except OSError:
+            continue
+        if form:
+            counts[form] += 1
+    total = sum(counts.values())
+    if total < 10:
+        return None
+    form, n = counts.most_common(1)[0]
+    if n / total < 0.7:
+        return None
+    return profile_for(form) or None
+
+
+def _offer_form_fallback(input_fn: Callable[[str], str], vault: Path) -> None:
+    """Propose `conventions.distill_profile` on a skewed vault; write on yes."""
+    profile = propose_form_fallback(vault)
+    if not profile:
+        return
+    answer = _ask(
+        input_fn,
+        f"This vault looks like mostly {profile}-form material — set "
+        f"`conventions.distill_profile: {profile}` as the fallback lens? [y/n]",
+        "y",
+    )
+    if answer.lower() not in ("y", "yes"):
+        return
+    from silica.kernel.vault_manifest import set_distill_profile
+
+    set_distill_profile(vault, profile)
+    CONSOLE.print(f"  {GLYPHS['ok']} conventions.distill_profile: {profile}")
+
+
 def unindexable_docs(vault: Path, cap: int = _DOC_SCAN_CAP) -> list[Path]:
     """Documents present in the vault that the index cannot read.
 
@@ -485,6 +538,10 @@ def _run_wizard_inner(
                         encoding="utf-8",
                     )
         _warn_unindexable(repo_vault if use_repo_mode else resolved)
+        # nucleation-forms wizard step: proposal only, written only on yes,
+        # and only when the stamped distribution is skewed — a fresh or mixed
+        # vault asks nothing, so existing flows are untouched.
+        _offer_form_fallback(input_fn, repo_vault if use_repo_mode else resolved)
         return True
 
     def step_provider() -> bool:
