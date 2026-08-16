@@ -39,3 +39,10 @@ uv run pytest                # tests must pass
 Silica is licensed under **AGPL-3.0-or-later**. By submitting a contribution you agree it is licensed
 under the same terms, and that every source file keeps its `SPDX-License-Identifier: AGPL-3.0-or-later`
 header. See [LICENSE](LICENSE).
+
+You keep the copyright on what you write. On top of the AGPL grant above, you also grant Alessandro
+Carosia a perpetual, worldwide, irrevocable, non-exclusive right to use your contribution and to
+relicense it under other terms, permissive or commercial. Silica is single-owner today, and that is
+what keeps a future relicensing possible at all: one merged PR without this grant would pin the
+project to AGPL forever. Opening a PR is your agreement, there is no separate form to sign. If you
+are contributing on behalf of an employer, make sure you have the authority to grant this.
