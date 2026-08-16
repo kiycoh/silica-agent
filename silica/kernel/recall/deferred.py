@@ -157,6 +157,42 @@ class DeferredStore:
             "rejection_reasons": reasons,
             "payloads": payloads_dedup,
         }
+        # Sticky residue facts: every defer site rewrites bundles with an
+        # explicit field list, so preservation must live HERE or any retry or
+        # anneal would silently destroy the declared residue.
+        existing = self.get(content_hash)
+        if existing and existing.get("residue_facts"):
+            bundle["residue_facts"] = existing["residue_facts"]
+        atomic_write_bytes(
+            self._bundle_path(content_hash),
+            orjson.dumps(bundle, option=orjson.OPT_INDENT_2),
+        )
+
+    def put_residue_facts(
+        self,
+        content_hash: str,
+        source_path: str,
+        target_dir: str,
+        hub: str | None,
+        facts: list[str],
+    ) -> None:
+        """Attach verified-missing residue facts to this source's bundle.
+
+        Merges (ordered dedup) with any facts already declared; creates a
+        residue-only bundle (no ops) when none exists. Ops and payloads of an
+        existing bundle are untouched."""
+        bundle = self.get(content_hash) or {
+            "content_hash": content_hash,
+            "source_path": source_path,
+            "target_dir": target_dir,
+            "hub": hub,
+            "rejected_ops": [],
+            "rejection_reasons": {},
+            "payloads": [],
+        }
+        merged = list(dict.fromkeys([*bundle.get("residue_facts", []), *facts]))
+        bundle["residue_facts"] = merged
+        bundle["timestamp"] = time.time()
         atomic_write_bytes(
             self._bundle_path(content_hash),
             orjson.dumps(bundle, option=orjson.OPT_INDENT_2),
@@ -179,6 +215,7 @@ class DeferredStore:
                     "target_dir": bundle.get("target_dir", ""),
                     "hub": bundle.get("hub"),
                     "rejected_count": len(bundle.get("rejected_ops", [])),
+                    "residue_count": len(bundle.get("residue_facts", [])),
                     "timestamp": bundle.get("timestamp", 0.0),
                 })
             except Exception:
@@ -217,6 +254,27 @@ class DeferredStore:
         return True
 
     def remove(self, content_hash: str) -> bool:
+        """Clear a bundle's op lifecycle (retry cleared it, last op dropped).
+
+        Demotes to a residue-only bundle when declared residue facts are
+        present — the ops' lifecycle ending must not erase the coverage
+        declaration. Explicit discard is purge()."""
+        bundle = self.get(content_hash)
+        if bundle is None:
+            return False
+        if bundle.get("residue_facts"):
+            bundle["rejected_ops"] = []
+            bundle["rejection_reasons"] = {}
+            bundle["payloads"] = []
+            atomic_write_bytes(
+                self._bundle_path(content_hash),
+                orjson.dumps(bundle, option=orjson.OPT_INDENT_2),
+            )
+            return True
+        return self.purge(content_hash)
+
+    def purge(self, content_hash: str) -> bool:
+        """Delete the bundle unconditionally (user-explicit flush)."""
         p = self._bundle_path(content_hash)
         if p.exists():
             p.unlink()

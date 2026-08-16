@@ -1,0 +1,211 @@
+"""Verification-based residue core (kernel/residue.py).
+
+Replaces the open-enumeration check (source vs notes[:6000]) refuted by the
+2026-08-16 ROI audit: declared residue was 100% false positives because the
+check read 1.4-4% of the note set. The new core decomposes the source into
+atomic facts once, retrieves candidate evidence per fact with the vault's own
+embed index, and judges each fact with the narrow supported-by question.
+"""
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from silica.kernel import residue as rs
+
+
+def _reply(text):
+    return SimpleNamespace(text=text)
+
+
+class TestDecompose:
+    def test_parses_fact_lines(self):
+        out = "- Enoch ascends to heaven.\n- The Watchers descend on Hermon.\nnoise\n- Azazel teaches metallurgy."
+        with patch("silica.agent.llm.call_llm", return_value=_reply(out)):
+            facts = rs.decompose_facts("source text")
+        assert facts == ["Enoch ascends to heaven.",
+                         "The Watchers descend on Hermon.",
+                         "Azazel teaches metallurgy."]
+
+    def test_empty_reply_degrades_to_none(self):
+        # None = "could not decompose" (skip verification), distinct from
+        # "decomposed to zero facts" which would falsely mean full coverage.
+        with patch("silica.agent.llm.call_llm", return_value=_reply("")):
+            assert rs.decompose_facts("source text") is None
+
+
+class TestEvidenceWindowing:
+    def test_best_paragraphs_picks_by_word_overlap(self):
+        body = ("Intro paragraph about nothing much.\n\n"
+                "Azazel taught men to make swords and knives of metal.\n\n"
+                "A closing paragraph on the moon calendar.")
+        top = rs._best_paragraphs(body, "Azazel teaches metallurgy and swords", n=1)
+        assert "swords" in top[0]
+
+    def test_short_body_returned_whole(self):
+        assert rs._best_paragraphs("tiny body", "any fact", n=3) == ["tiny body"]
+
+
+class TestGatherEvidence:
+    def test_batches_embeddings_and_reads_top_notes(self):
+        facts = ["fact one", "fact two"]
+        embedder = SimpleNamespace(embed=lambda texts: [[1.0, 0.0]] * len(texts))
+        store = SimpleNamespace(
+            cosine_top_k=lambda vec, k=2: [{"path": "Concepts/A", "name": "A", "score": 0.9}],
+        )
+        bodies = {"Concepts/A": "Alpha body paragraph.", "Concepts/A.md": "Alpha body paragraph."}
+        ev = rs.gather_evidence(facts, embedder=embedder, store=store,
+                                read_body=lambda p: bodies.get(p, ""))
+        assert len(ev) == 2
+        assert all("Alpha body paragraph." in e for e in ev)
+        assert all("[[A]]" in e for e in ev)  # evidence names its note
+
+    def test_embed_failure_degrades_to_none(self):
+        def boom(texts):
+            raise RuntimeError("embedder down")
+        ev = rs.gather_evidence(["f"], embedder=SimpleNamespace(embed=boom),
+                                store=None, read_body=lambda p: "")
+        assert ev is None
+
+
+class TestJudge:
+    def test_batched_verdicts_parse(self):
+        replies = iter([_reply("1: yes\n2: no")])
+        with patch("silica.agent.llm.call_llm", side_effect=lambda *a, **k: next(replies)):
+            verdicts = rs.judge_covered(["covered fact", "missing fact"],
+                                        ["evidence a", "evidence b"])
+        assert verdicts == [True, False]
+
+    def test_garbled_line_is_judge_failure_not_verdict(self):
+        with patch("silica.agent.llm.call_llm", return_value=_reply("1: yes\nnonsense")):
+            verdicts = rs.judge_covered(["a", "b"], ["ea", "eb"])
+        assert verdicts == [True, None]
+
+    def test_judge_is_deterministic_temperature_zero(self):
+        # Parity with the factscore judge: free temperature on a
+        # reasoning-class router model produced empty/misnumbered replies
+        # in-run (45/45 and 92/92 judge failures, run 5e88feb0).
+        with patch("silica.agent.llm.call_llm", return_value=_reply("1: yes")) as llm:
+            rs.judge_covered(["a"], ["ea"])
+        assert llm.call_args.kwargs.get("temperature") == 0
+
+    def test_zero_parse_batch_retries_exactly_once(self):
+        replies = iter([_reply("thinking out loud, no verdicts"),
+                        _reply("1: yes\n2: no")])
+        with patch("silica.agent.llm.call_llm",
+                   side_effect=lambda *a, **k: next(replies)) as llm:
+            verdicts = rs.judge_covered(["a", "b"], ["ea", "eb"])
+        assert verdicts == [True, False]
+        assert llm.call_count == 2
+
+    def test_zero_parse_twice_degrades_without_third_call(self):
+        with patch("silica.agent.llm.call_llm",
+                   return_value=_reply("still nothing parsable")) as llm:
+            verdicts = rs.judge_covered(["a", "b"], ["ea", "eb"])
+        assert verdicts == [None, None]
+        assert llm.call_count == 2
+
+
+class TestDecomposeRetry:
+    def test_empty_parse_retries_exactly_once(self):
+        replies = iter([_reply("no fact lines here"), _reply("- a real fact")])
+        with patch("silica.agent.llm.call_llm",
+                   side_effect=lambda *a, **k: next(replies)) as llm:
+            facts = rs.decompose_facts("source")
+        assert facts == ["a real fact"]
+        assert llm.call_count == 2
+
+    def test_empty_parse_twice_degrades_to_none(self):
+        with patch("silica.agent.llm.call_llm", return_value=_reply("nothing")) as llm:
+            assert rs.decompose_facts("source") is None
+        assert llm.call_count == 2
+
+
+class TestThemeFilter:
+    def _embedder(self):
+        # fact "on" aligns with the theme axis; fact "off" is orthogonal.
+        table = {"on-theme fact": [1.0, 0.0], "off-theme fact": [0.0, 1.0]}
+        return SimpleNamespace(embed=lambda texts: [table.get(t, [1.0, 0.0])
+                                                    for t in texts])
+
+    def test_off_theme_facts_are_excluded_before_judging(self):
+        with patch("silica.kernel.recall.embed.document_theme_vector",
+                   return_value=[1.0, 0.0]):
+            kept, vecs, off = rs.filter_on_theme(
+                ["on-theme fact", "off-theme fact"], "source body",
+                embedder=self._embedder(), theme_tau=0.5)
+        assert kept == ["on-theme fact"]
+        assert off == 1
+        assert vecs == [[1.0, 0.0]]
+
+    def test_tau_zero_keeps_everything(self):
+        with patch("silica.kernel.recall.embed.document_theme_vector",
+                   return_value=[1.0, 0.0]):
+            kept, vecs, off = rs.filter_on_theme(
+                ["on-theme fact", "off-theme fact"], "source body",
+                embedder=self._embedder(), theme_tau=0.0)
+        assert kept == ["on-theme fact", "off-theme fact"] and off == 0
+
+    def test_missing_theme_vector_keeps_everything(self):
+        with patch("silica.kernel.recall.embed.document_theme_vector",
+                   return_value=[]):
+            kept, _vecs, off = rs.filter_on_theme(
+                ["on-theme fact", "off-theme fact"], "source body",
+                embedder=self._embedder(), theme_tau=0.5)
+        assert len(kept) == 2 and off == 0
+
+
+class TestGatherWithPrecomputedVecs:
+    def test_no_embed_call_when_vecs_given(self):
+        def boom(texts):
+            raise AssertionError("must not embed again")
+        store = SimpleNamespace(
+            cosine_top_k=lambda vec, k=2: [{"path": "Concepts/A", "name": "A",
+                                            "score": 0.9}])
+        ev = rs.gather_evidence(["f"], embedder=SimpleNamespace(embed=boom),
+                                store=store, read_body=lambda p: "body",
+                                vecs=[[1.0, 0.0]])
+        assert len(ev) == 1 and "body" in ev[0]
+
+
+class TestVerifyMissing:
+    def test_missing_are_facts_judged_uncovered(self):
+        with patch.object(rs, "decompose_facts", return_value=["a", "b", "c"]), \
+             patch.object(rs, "gather_evidence", return_value=["ea", "eb", "ec"]), \
+             patch.object(rs, "judge_covered", return_value=[True, False, None]):
+            res = rs.verify_missing("source", embedder=object(), store=object(),
+                                    read_body=lambda p: "")
+        assert res["missing"] == ["b"]
+        assert res["total"] == 3 and res["judged"] == 2 and res["failures"] == 1
+
+    def test_theme_filter_applies_before_evidence_and_judge(self):
+        with patch.object(rs, "decompose_facts", return_value=["on", "off"]), \
+             patch.object(rs, "filter_on_theme",
+                          return_value=(["on"], [[1.0]], 1)) as flt, \
+             patch.object(rs, "gather_evidence", return_value=["e"]) as gev, \
+             patch.object(rs, "judge_covered", return_value=[False]):
+            res = rs.verify_missing("source", embedder=object(), store=object(),
+                                    read_body=lambda p: "", theme_tau=0.35)
+        flt.assert_called_once()
+        assert gev.call_args.kwargs.get("vecs") == [[1.0]]
+        assert res["missing"] == ["on"]
+        assert res["total"] == 2 and res["off_theme"] == 1
+
+    def test_no_embedder_degrades_to_empty_missing(self):
+        res = rs.verify_missing("source", embedder=None, store=object(),
+                                read_body=lambda p: "")
+        assert res["missing"] == [] and res.get("skipped") == "no embedder"
+
+    def test_decompose_failure_degrades_to_empty_missing(self):
+        with patch.object(rs, "decompose_facts", return_value=None):
+            res = rs.verify_missing("source", embedder=object(), store=object(),
+                                    read_body=lambda p: "")
+        assert res["missing"] == [] and res.get("skipped") == "decompose failed"
+
+    def test_precomputed_facts_skip_decompose(self):
+        with patch.object(rs, "decompose_facts") as dec, \
+             patch.object(rs, "gather_evidence", return_value=["e"]), \
+             patch.object(rs, "judge_covered", return_value=[False]):
+            res = rs.verify_missing("source", facts=["known fact"],
+                                    embedder=object(), store=object(),
+                                    read_body=lambda p: "")
+        dec.assert_not_called()
+        assert res["missing"] == ["known fact"]

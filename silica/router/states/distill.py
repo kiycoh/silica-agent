@@ -68,8 +68,9 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list) -> None:
     wq = getattr(fsm, "work_queue", None)
     if wq is None:
         return
-    from silica.kernel.workqueue import WorkItem
+    from silica.kernel.workqueue import WorkItem, batch_dedup_items
 
+    items: list[WorkItem] = []
     for r in rejected_raw:
         if not isinstance(r, dict):
             continue
@@ -85,23 +86,28 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list) -> None:
             title_score = float(m.group(3)) if m.group(3) else 0.0
         except (TypeError, ValueError):
             title_score = 0.0
+        items.append(WorkItem(
+            kind="dedup",
+            target_path=m.group(2),
+            context={
+                "concept": op.get("heading", ""),
+                "excerpt": op.get("snippet", ""),
+                "candidate": m.group(1),
+                "score": 0.0,
+                "title_score": title_score,
+                "inbox_file": fsm.inbox_file,
+                "hub": fsm.hub,
+                "content_hash": fsm._current_content_hash,
+                "target_dir": fsm.target_dir,
+            },
+            reason=r.get("reason", "near_title"),
+        ))
+    # Same family collapse COLLISION applies: N rejections against one candidate
+    # note become ONE judge call, instead of N calls each re-sending that note's
+    # 8000-char body. Singletons pass through batch_dedup_items untouched.
+    for wi in batch_dedup_items(items):
         try:
-            wq.enqueue(WorkItem(
-                kind="dedup",
-                target_path=m.group(2),
-                context={
-                    "concept": op.get("heading", ""),
-                    "excerpt": op.get("snippet", ""),
-                    "candidate": m.group(1),
-                    "score": 0.0,
-                    "title_score": title_score,
-                    "inbox_file": fsm.inbox_file,
-                    "hub": fsm.hub,
-                    "content_hash": fsm._current_content_hash,
-                    "target_dir": fsm.target_dir,
-                },
-                reason=r.get("reason", "near_title"),
-            ))
+            wq.enqueue(wi)
         except Exception as _qe:
             logger.debug("VALIDATE: failed to enqueue near_title dedup item: %s", _qe)
 
@@ -273,6 +279,21 @@ def _chunk_concept_count(chunk: dict) -> int:
     return sum(len(b.get("concepts", [])) for b in chunk.get("batches", []))
 
 
+def _file_profile(fsm: "InjectorFSM", idx: int) -> str | None:
+    """Distill profile for chunk ``idx``: run-level arg > per-file PAYLOAD pin.
+
+    The run-level arg (/promote, --profile) short-circuits the pin for every
+    file; the pin is what the form ladder resolved at PAYLOAD
+    (docs/specs/nucleation-forms.md). Both read sites (prompt and gate) go
+    through here so they can never disagree on the lens.
+    """
+    run_level = getattr(fsm, "distill_profile", None)
+    if run_level:
+        return run_level
+    fi = fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]
+    return fsm.context.get(f"file_{fi}_profile")
+
+
 def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
     """Snapshot the full run_distiller kwargs for chunk ``idx``.
 
@@ -313,17 +334,19 @@ def _distill_inputs(fsm: "InjectorFSM", idx: int) -> dict[str, typing.Any]:
         substrate=substrate,
         session_date=_doc_date(fsm, idx) or fsm.progress.started_at[:10],
         language=fsm.context.get(f"file_{fi}_language"),
-        profile=getattr(fsm, "distill_profile", None),
+        profile=_file_profile(fsm, idx),
     )
 
 
 def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
-    """Dispatch distill calls for chunks [idx, idx+k) of the current file.
+    """Dispatch distill calls for chunks [idx, idx+k) of the flat list.
 
     COLLISION for lookahead chunks runs here, early, on the main thread (the
     pass is main-thread-only by design); only the run_distiller network call
-    goes to the pool. Spec: staleness ≤ k-1 chunks, window never crosses a
-    file boundary.
+    goes to the pool. Spec: staleness ≤ k-1 chunks; the window may cross ONE
+    file boundary (warm_next_file preps the next file when its chunks are not
+    attached yet — same ≤ k-1 staleness class as within-file lookahead, which
+    the 2026-07-18 k=1-vs-k=3 A/B bounded), never a second one.
     """
     k = int(getattr(orch.CONFIG, "distill_concurrency", 1) or 1)
     if k <= 1:
@@ -333,12 +356,34 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
         fsm._prefetcher = DistillPrefetcher(max_workers=k)
 
     from silica.router.states.collision import collision_pass
+    from silica.router.states.setup import warm_next_file
 
     fi_cur = fsm._chunk_flat_to_fi_ci.get(idx, (fsm._current_file_idx, 0))[0]
-    for j in range(idx, min(idx + k, len(fsm._chunks))):
-        if fsm._chunk_flat_to_fi_ci.get(j, (fi_cur, 0))[0] != fi_cur:
-            break  # never cross a file boundary
+    allowed_next: int | None = None  # the one file boundary the window may cross
+    warmed = False
+    j = idx
+    while j < idx + k:
+        if j >= len(fsm._chunks):
+            # Window ran past the attached chunks: prep the next file early so
+            # its first distill is in flight while this file's tail is written.
+            if warmed or not warm_next_file(fsm):
+                break
+            warmed = True
+            continue  # re-check j against the grown flat list
+        fi_j = fsm._chunk_flat_to_fi_ci.get(j, (fi_cur, 0))[0]
+        if fi_j != fi_cur:
+            if allowed_next is None:
+                allowed_next = fi_j
+            elif fi_j != allowed_next:
+                break  # never cross a second file boundary
+        if fsm.context.get(f"chunk_{j}_steer_context"):
+            # Steer/residue chunks run inline by design: handle_delegate
+            # discards any prefetched future for them, so dispatching one
+            # burns a full distill call for nothing.
+            j += 1
+            continue
         if j in fsm._prefetcher:
+            j += 1
             continue
         if j > idx and not fsm.context.get(f"chunk_{j}_collision_done"):
             try:
@@ -346,8 +391,10 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
                 fsm.context[f"chunk_{j}_collision_done"] = True
             except Exception as _ce:
                 logger.warning("prefetch: collision_pass(%d) failed (%s) — chunk stays sequential", j, _ce, exc_info=True)
+                j += 1
                 continue
         if _chunk_concept_count(fsm._chunks[j]) == 0:
+            j += 1
             continue  # emptied by collision/novelty; the inline guard finishes it free
         # Content-addressed idempotency: never dispatch a chunk a prior run
         # already completed (same key derivation as handle_delegate).
@@ -359,9 +406,11 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
         except Exception:
             done = None
         if done:
+            j += 1
             continue
         kwargs = _distill_inputs(fsm, j)
         fsm._prefetcher.submit(j, lambda kw=kwargs: run_distiller(**kw))
+        j += 1
 
 
 def handle_delegate(fsm: "InjectorFSM") -> None:
@@ -455,8 +504,12 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
             else:
                 chunk_result = run_distiller(**kwargs)
         # Wall-clock the chunk actually cost the run (wait time for prefetched
-        # calls) — the A/B report's per-chunk latency source.
-        fsm.context.setdefault("distill_secs", {})[idx] = round(time.monotonic() - _t0, 2)
+        # calls) — the A/B report's per-chunk latency source. Mirrored into the
+        # persisted ledger (inputs) so a finished run can be diagnosed without
+        # checkpoint-mtime archaeology; saved by the "done" progress note below.
+        _secs = round(time.monotonic() - _t0, 2)
+        fsm.context.setdefault("distill_secs", {})[idx] = _secs
+        fsm.progress.inputs.setdefault("distill_secs", {})[fsm._chunk_task_id("distill")] = _secs
         if "error" in chunk_result:
             fsm._progress_note(fsm._chunk_task_id("distill"), "distill", "failed", error=chunk_result["error"])
             raise RuntimeError(f"Distiller error on batch {idx}: {chunk_result['error']}")
@@ -551,7 +604,7 @@ def handle_validate(fsm: "InjectorFSM") -> None:
         hub=fsm.hub,
         # Same profile as the prompt: an extractive run judged by the default
         # floor would reject its own (correct) verbatim output.
-        profile=getattr(fsm, "distill_profile", None),
+        profile=_file_profile(fsm, fsm._current_chunk_idx),
     )
 
     if "error" in res:

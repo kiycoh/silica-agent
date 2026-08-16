@@ -157,3 +157,19 @@ def test_empty_chunk_skips_distiller_but_completes():
     rd.assert_not_called()
     fsm._make_tmp.assert_called_once_with({"updates": []})
     fsm._transition_success.assert_called_once()
+
+
+def test_distill_secs_persisted_to_ledger_inputs():
+    # Per-chunk distill wall-clock must land in the persisted ledger (inputs),
+    # not just the in-memory context — mtime archaeology was the only way to
+    # diagnose where a run's time went.
+    from silica.router.states import distill as d
+    fsm = _delegate_fsm(_chunk_one_concept())
+    fsm.progress.inputs = {}
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 1), \
+         patch.object(d, "run_distiller", return_value={"updates": []}), \
+         patch("silica.kernel.recall.episodic.capture_from_distill"):
+        d.handle_delegate(fsm)
+    secs = fsm.progress.inputs.get("distill_secs")
+    assert secs is not None and "f0_c0_distill" in secs
+    assert isinstance(secs["f0_c0_distill"], float)

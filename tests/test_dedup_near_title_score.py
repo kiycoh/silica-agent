@@ -48,3 +48,27 @@ def test_missing_ratio_stays_zero():
     }]
     _enqueue_near_title_dedups(_fsm(q), rejected)
     assert q.items[0].context["title_score"] == 0.0  # graceful when absent
+
+
+def test_rejections_against_one_candidate_become_one_judge_call():
+    """N near-title rejections of the same note must enqueue ONE family batch
+    (the candidate body dominates the judge prompt; per-item calls re-send it
+    N times), while a rejection against a different note stays its own item."""
+    q = _FakeQueue()
+    rejected = [
+        {"op": {"heading": "Beta", "snippet": "b1"},
+         "reason": "near_title candidate='Betas' path='TargetDir/Betas.md' ratio=0.90"},
+        {"op": {"heading": "Beta variant", "snippet": "b2"},
+         "reason": "near_title candidate='Betas' path='TargetDir/Betas.md' ratio=0.88"},
+        {"op": {"heading": "Gamma", "snippet": "g"},
+         "reason": "near_title candidate='Gammas' path='TargetDir/Gammas.md' ratio=0.91"},
+    ]
+    _enqueue_near_title_dedups(_fsm(q), rejected)
+    by_path = {it.target_path: it for it in q.items}
+    assert len(q.items) == 2
+    family = by_path["TargetDir/Betas.md"]
+    # Two concepts, each keeping its own fuzzy ratio for the gate.
+    scores = sorted(c["title_score"] for c in family.context["concepts"])
+    assert scores == [0.88, 0.90]
+    # The singleton passes through unbatched, shape unchanged.
+    assert by_path["TargetDir/Gammas.md"].context["title_score"] == 0.91

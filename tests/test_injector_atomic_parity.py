@@ -68,6 +68,23 @@ def vault_fsm(tmp_path, monkeypatch):
     silica.driver._driver = None
 
 
+def test_write_hands_chunk_to_residue_dispatch(vault_fsm, monkeypatch):
+    """WRITE ends by offering the chunk to the residue pre-dispatch seam
+    (which itself decides last-chunk/draft/failure), so the check call rides
+    the mechanical tail instead of the file boundary."""
+    from unittest.mock import MagicMock
+    a = vault_fsm.note("A.md", "---\n---\nseed\n")
+    monkeypatch.setattr("silica.tools.composed.silica_lint",
+                        lambda *a_, **kw: {"success": True, "errors": []})
+    dispatch = MagicMock()
+    monkeypatch.setattr("silica.router.states.finalize.maybe_dispatch_residue_check", dispatch)
+
+    fsm = vault_fsm.make_fsm()
+    fsm.context["chunk"] = {"ops_path": vault_fsm.ops_path([_patch(a)])}
+    states.write.handle_write(fsm)
+    dispatch.assert_called_once_with(fsm)
+
+
 def test_injector_write_defers_failing_note_keeps_siblings(vault_fsm, monkeypatch):
     """A chunk with one lint-failing note: others commit, bad one deferred."""
     a = vault_fsm.note("A.md", "---\n---\nseed\n")

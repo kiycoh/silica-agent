@@ -447,7 +447,9 @@ class DeferredFlushArgs(BaseModel):
 def silica_deferred_flush(content_hash: str) -> dict:
     """Discard a deferred op bundle — marks those rejected ops as permanently skipped."""
     from silica.kernel.recall.deferred import get_deferred_store
-    removed = get_deferred_store().remove(content_hash)
+    # purge, not remove: the user's explicit discard also drops any declared
+    # residue facts, which remove() would deliberately keep.
+    removed = get_deferred_store().purge(content_hash)
     if removed:
         return {"removed": True, "content_hash": content_hash}
     return {"removed": False, "error": f"No deferred bundle found for {content_hash[:8]}…"}

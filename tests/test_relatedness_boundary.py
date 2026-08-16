@@ -55,6 +55,7 @@ ALLOWED = {
     "router/orchestrator.py":       "co-occurrence index freshness hook (build_index)",
     "router/states/collision.py":   "constructs stores to inject into the facade",
     "router/states/setup.py":       "pairwise cosine (salience theme gate)",
+    "kernel/residue.py":            "pairwise cosine (residue theme filter, same gate as salience), not relatedness ranking",
     "router/states/write.py":       "incremental embed index refresh after writes",
     "router/states/finalize.py":    "embed index cleanup on rollback",
     "driver/fs_backend.py":         "embed vector cleanup on note delete/rename (index maintenance), not relatedness ranking",

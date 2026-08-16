@@ -1,0 +1,191 @@
+"""Residue verification dispatch (verification-based residue, 2026-08-17).
+
+Concurrency shape: decompose is dispatched when a file's chunks are attached
+(it rides the whole file's distillation), evidence is gathered on the MAIN
+thread at the last chunk's WRITE (snapshot: no race with autolink edits),
+judge batches run as parallel futures, and the gate assembles the verdicts.
+Every degrade falls back to the inline path or to [] (fail-open).
+"""
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from silica.router.states import finalize as fz
+
+# Bound at import time, BEFORE the autouse network guard in conftest stubs
+# the module attributes for every other test.
+real_decompose_dispatch = fz.maybe_dispatch_residue_decompose
+real_check_dispatch = fz.maybe_dispatch_residue_check
+real_residue_facts = fz.residue_facts
+real_verify_now = fz._verify_now
+
+
+def _driver_stub(content="Source text stating a fact."):
+    return SimpleNamespace(read_note=lambda p: SimpleNamespace(content=content))
+
+
+def _residue_fsm(ci=1, n_chunks=2, form=None, failed_task=None):
+    fsm = SimpleNamespace()
+    fsm._current_chunk_idx = ci
+    fsm._chunk_flat_to_fi_ci = {i: (0, i) for i in range(n_chunks)}
+    fsm._file_chunks = {0: {"source_file": "Inbox/in.md",
+                            "chunks": [{} for _ in range(n_chunks)]}}
+    fsm.inbox_file = "Inbox/in.md"
+    fsm.context = {}
+    if form:
+        fsm.context["file_0_form"] = form
+    fsm.progress = MagicMock()
+    fsm.progress.tasks = (
+        [SimpleNamespace(id=failed_task, status="failed")] if failed_task else []
+    )
+    fsm.progress.inputs = {}
+    return fsm
+
+
+def _shutdown(fsm):
+    pool = getattr(fsm, "_residue_executor", None)
+    if pool is not None:
+        pool.shutdown(wait=False)
+
+
+class TestDecomposeDispatch:
+    def test_stores_future_per_file(self):
+        fsm = _residue_fsm()
+        with patch("silica.driver.DRIVER", _driver_stub()), \
+             patch("silica.kernel.residue.decompose_facts",
+                   return_value=["f1"]) as dec:
+            real_decompose_dispatch(fsm, 0, "Inbox/in.md")
+            assert fsm._residue_decompose[0].result(timeout=5) == ["f1"]
+        dec.assert_called_once()
+        _shutdown(fsm)
+
+    def test_skips_draft_and_empty_source_and_is_idempotent(self):
+        fsm = _residue_fsm(form="draft")
+        with patch("silica.driver.DRIVER", _driver_stub()):
+            real_decompose_dispatch(fsm, 0, "Inbox/in.md")
+        assert not getattr(fsm, "_residue_decompose", None)
+
+        fsm2 = _residue_fsm()
+        with patch("silica.driver.DRIVER", _driver_stub(content="  ")):
+            real_decompose_dispatch(fsm2, 0, "Inbox/in.md")
+        assert not getattr(fsm2, "_residue_decompose", None)
+
+        fsm3 = _residue_fsm()
+        with patch("silica.driver.DRIVER", _driver_stub()), \
+             patch("silica.kernel.residue.decompose_facts", return_value=["f"]) as dec:
+            real_decompose_dispatch(fsm3, 0, "Inbox/in.md")
+            real_decompose_dispatch(fsm3, 0, "Inbox/in.md")
+        dec.assert_called_once()
+        _shutdown(fsm3)
+
+
+class TestCheckDispatch:
+    def _decomposed(self, fsm, facts):
+        with patch("silica.driver.DRIVER", _driver_stub()), \
+             patch("silica.kernel.residue.decompose_facts", return_value=facts):
+            real_decompose_dispatch(fsm, 0, "Inbox/in.md")
+            fsm._residue_decompose[0].result(timeout=5)
+
+    def test_gathers_evidence_and_submits_judge_futures(self):
+        fsm = _residue_fsm()
+        self._decomposed(fsm, ["fact a", "fact b"])
+        with patch("silica.agent.providers.get_embedder_or_none",
+                   return_value=object()), \
+             patch("silica.kernel.recall.embed.get_store", return_value=object()), \
+             patch("silica.driver.DRIVER", _driver_stub()), \
+             patch("silica.kernel.residue.filter_on_theme",
+                   return_value=(["fact a", "fact b"], [[1.0], [1.0]], 0)), \
+             patch("silica.kernel.residue.gather_evidence",
+                   return_value=["ea", "eb"]) as gev, \
+             patch("silica.kernel.residue.judge_covered",
+                   return_value=[True, False]):
+            real_check_dispatch(fsm)
+            fi, facts, futures = fsm._residue_future
+            assert fi == 0 and facts == ["fact a", "fact b"]
+            assert fsm.context["file_0_residue_meta"] == {"total": 2, "off_theme": 0}
+            verdicts = [v for f in futures for v in f.result(timeout=5)]
+        gev.assert_called_once()  # evidence snapshotted on the main thread
+        assert gev.call_args.kwargs.get("vecs") == [[1.0], [1.0]]
+        assert verdicts == [True, False]
+        _shutdown(fsm)
+
+    def test_decompose_not_done_leaves_gate_inline(self):
+        fsm = _residue_fsm()
+        import threading
+        gate = threading.Event()
+        with patch("silica.driver.DRIVER", _driver_stub()), \
+             patch("silica.kernel.residue.decompose_facts",
+                   side_effect=lambda s: gate.wait(5) or ["f"]):
+            real_decompose_dispatch(fsm, 0, "Inbox/in.md")
+            real_check_dispatch(fsm)
+            gate.set()
+        assert getattr(fsm, "_residue_future", None) is None
+        assert getattr(fsm, "_residue_ready", None) is None
+        _shutdown(fsm)
+
+    def test_decompose_failure_becomes_ready_skip(self):
+        fsm = _residue_fsm()
+        self._decomposed(fsm, None)
+        with patch("silica.driver.DRIVER", _driver_stub()):
+            real_check_dispatch(fsm)
+        fi, res = fsm._residue_ready
+        assert fi == 0 and res["missing"] == [] and res.get("skipped")
+        _shutdown(fsm)
+
+    def test_guards_mid_file_draft_failed(self):
+        for fsm in (_residue_fsm(ci=0),
+                    _residue_fsm(form="draft"),
+                    _residue_fsm(failed_task="f0_c0_write")):
+            self._decomposed(fsm, ["f"]) if not fsm.context.get("file_0_form") \
+                else None
+            with patch("silica.driver.DRIVER", _driver_stub()):
+                real_check_dispatch(fsm)
+            assert getattr(fsm, "_residue_future", None) is None
+            _shutdown(fsm)
+
+
+class TestResidueFactsConsumption:
+    def test_assembles_judge_futures_and_stashes_stats(self):
+        from concurrent.futures import ThreadPoolExecutor
+        fsm = _residue_fsm()
+        pool = ThreadPoolExecutor(max_workers=1)
+        futures = [pool.submit(lambda: [True, False, None])]
+        fsm._residue_future = (0, ["a", "b", "c"], futures)
+        missing = real_residue_facts(fsm, 0, "Inbox/in.md")
+        assert missing == ["b"]
+        stats = fsm.context["file_0_residue_stats"]
+        assert stats["total"] == 3 and stats["judged"] == 2 and stats["failures"] == 1
+        assert fsm._residue_future is None
+        pool.shutdown(wait=False)
+
+    def test_consumes_ready_result(self):
+        fsm = _residue_fsm()
+        fsm._residue_ready = (0, {"missing": [], "total": 0, "judged": 0,
+                                  "failures": 0, "skipped": "decompose failed"})
+        assert real_residue_facts(fsm, 0, "Inbox/in.md") == []
+        assert fsm.context["file_0_residue_stats"]["skipped"] == "decompose failed"
+
+    def test_inline_fallback_runs_full_verification(self):
+        fsm = _residue_fsm()
+        with patch.object(fz, "_verify_now", real_verify_now), \
+             patch("silica.driver.DRIVER", _driver_stub()), \
+             patch("silica.agent.providers.get_embedder_or_none",
+                   return_value=object()), \
+             patch("silica.kernel.recall.embed.get_store", return_value=object()), \
+             patch("silica.kernel.residue.verify_missing",
+                   return_value={"missing": ["m"], "total": 2,
+                                 "judged": 2, "failures": 0}) as vm:
+            missing = real_residue_facts(fsm, 0, "Inbox/in.md")
+        assert missing == ["m"]
+        assert vm.call_args.kwargs.get("facts") is None  # decomposes itself
+        assert fsm.context["file_0_residue_stats"]["total"] == 2
+
+    def test_judge_future_failure_degrades_to_empty(self):
+        from concurrent.futures import ThreadPoolExecutor
+        fsm = _residue_fsm()
+        pool = ThreadPoolExecutor(max_workers=1)
+
+        def boom():
+            raise RuntimeError("judge died")
+        fsm._residue_future = (0, ["a"], [pool.submit(boom)])
+        assert real_residue_facts(fsm, 0, "Inbox/in.md") == []
+        pool.shutdown(wait=False)

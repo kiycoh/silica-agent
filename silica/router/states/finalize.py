@@ -235,10 +235,14 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
         # a context-less fsm stub can't sink the log append below.
         ctx = getattr(fsm, "context", None)
         if isinstance(ctx, dict):
-            ctx.setdefault("files_summary", []).append(
-                {"file": basename, "new": new_count, "patch": patch_count,
-                 "deferred": deferred_count}
-            )
+            entry = {"file": basename, "new": new_count, "patch": patch_count,
+                     "deferred": deferred_count}
+            declared = ctx.get("declared_residue", {}).get(basename)
+            if declared:
+                # nucleation-forms spec: the declared residue is part of the
+                # run report, so a dropped fact is never invisible.
+                entry["residue"] = len(declared)
+            ctx.setdefault("files_summary", []).append(entry)
 
         event = format_nucleate_event(basename, new_count, patch_count, deferred_count)
         append_log_line(event, fsm.progress.run_id, dedup_key=f"`{basename}`")
@@ -400,6 +404,347 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         logger.debug("CLEANUP: source leaf skipped (non-fatal): %s", exc)
 
 
+def _residue_pool(fsm: "InjectorFSM"):
+    pool = getattr(fsm, "_residue_executor", None)
+    if pool is None:
+        from concurrent.futures import ThreadPoolExecutor
+        # 3 workers: one decompose in flight (possibly a warmed next file's
+        # too) plus parallel judge batches at the file boundary.
+        pool = fsm._residue_executor = ThreadPoolExecutor(
+            max_workers=3, thread_name_prefix="residue")
+    return pool
+
+
+def maybe_dispatch_residue_decompose(fsm: "InjectorFSM", fi: int,
+                                     inbox_file: str) -> None:
+    """PAYLOAD-attach seam: start decomposing the source into atomic facts.
+
+    Decompose is the verification's long pole and depends only on the source
+    text, so it rides the file's entire distillation for free; the last
+    chunk's WRITE picks the result up (maybe_dispatch_residue_check).
+    Best-effort: never raises."""
+    try:
+        if fsm.context.get(f"file_{fi}_form") == "draft":
+            return
+        futs = getattr(fsm, "_residue_decompose", None)
+        if futs is None:
+            futs = fsm._residue_decompose = {}
+        if fi in futs:
+            return
+        from silica.driver import DRIVER
+        source = DRIVER.read_note(inbox_file).content or ""
+        if not source.strip():
+            return
+        from silica.kernel import residue as _residue
+        futs[fi] = _residue_pool(fsm).submit(_residue.decompose_facts, source)
+    except Exception as exc:
+        logger.debug("PAYLOAD: residue decompose dispatch skipped (non-fatal): %s", exc)
+
+
+def maybe_dispatch_residue_check(fsm: "InjectorFSM") -> None:
+    """WRITE-time seam: turn the decomposed facts into judge futures.
+
+    On a file's last chunk, once its notes are on disk: gather per-fact
+    evidence on the MAIN thread (reads snapshotted, so the background judge
+    calls never race autolink/backlink edits of the same notes), then submit
+    the judge batches to the pool; _residue_gate assembles the verdicts.
+    Mirrors the gate's own refusals (mid-file chunk, draft form, failed
+    file). When decompose is missing or still running, the gate simply runs
+    the whole verification inline. Best-effort: never raises."""
+    try:
+        fi, ci = fsm._chunk_flat_to_fi_ci.get(
+            fsm._current_chunk_idx, (0, fsm._current_chunk_idx))
+        group = fsm._file_chunks.get(fi, {})
+        if ci + 1 < len(group.get("chunks", [])):
+            return
+        if fsm.context.get(f"file_{fi}_form") == "draft":
+            return
+        fi_prefix = f"f{fi}_"
+        if any(t.status == "failed" for t in fsm.progress.tasks
+               if t.id.startswith(fi_prefix)):
+            return  # the gate refuses failed files anyway
+        fut = getattr(fsm, "_residue_decompose", {}).get(fi)
+        if fut is None or not fut.done():
+            return
+        facts = fut.result()
+        _empty = {"missing": [], "total": 0, "judged": 0, "failures": 0}
+        if facts is None:
+            fsm._residue_ready = (fi, {**_empty, "skipped": "decompose failed"})
+            return
+        if not facts:
+            fsm._residue_ready = (fi, _empty)
+            return
+        from silica.agent.providers import get_embedder_or_none
+        from silica.kernel.recall.embed import get_store
+        from silica.kernel import residue as _residue
+        embedder = get_embedder_or_none(orch.CONFIG, "RESIDUE")
+        if embedder is None:
+            fsm._residue_ready = (fi, {**_empty, "skipped": "no embedder"})
+            return
+        from silica.driver import DRIVER
+        inbox_file = group.get("source_file", fsm.inbox_file)
+        source = DRIVER.read_note(inbox_file).content or ""
+        total = len(facts)
+        # Same theme filter SALIENCE applies to concepts: off-theme claims are
+        # content the pipeline deliberately drops, never "missing" residue.
+        facts, vecs, off_theme = _residue.filter_on_theme(
+            facts, source, embedder=embedder,
+            theme_tau=getattr(orch.CONFIG, "sim_threshold_theme", 0.35))
+        fsm.context[f"file_{fi}_residue_meta"] = {
+            "total": total, "off_theme": off_theme}
+        if not facts:
+            fsm._residue_ready = (fi, {**_empty, "total": total,
+                                       "off_theme": off_theme})
+            return
+        evidence = _residue.gather_evidence(
+            facts, embedder=embedder, store=get_store(),
+            read_body=lambda p: DRIVER.read_note(p).content or "", vecs=vecs)
+        if evidence is None:
+            fsm._residue_ready = (fi, {**_empty, "total": total,
+                                       "off_theme": off_theme,
+                                       "skipped": "evidence failed"})
+            return
+        pool = _residue_pool(fsm)
+        B = _residue._JUDGE_BATCH
+        futures = [pool.submit(_residue.judge_covered,
+                               facts[i:i + B], evidence[i:i + B])
+                   for i in range(0, len(facts), B)]
+        fsm._residue_future = (fi, facts, futures)
+    except Exception as exc:
+        logger.debug("WRITE: residue pre-dispatch skipped (non-fatal): %s", exc)
+
+
+def _verify_now(fsm: "InjectorFSM", fi: int, inbox_file: str) -> dict:
+    """The whole verification, synchronously: decompose (reusing a finished
+    early dispatch when present) → theme filter → evidence → judge. The slow
+    path — callers run it on the residue pool, never on the boundary."""
+    from silica.agent.providers import get_embedder_or_none
+    from silica.kernel.recall.embed import get_store
+    from silica.kernel import residue as _residue
+    from silica.driver import DRIVER
+
+    source = DRIVER.read_note(inbox_file).content or ""
+    dfut = getattr(fsm, "_residue_decompose", {}).get(fi)
+    pre = dfut.result() if dfut is not None and dfut.done() else None
+    return _residue.verify_missing(
+        source,
+        embedder=get_embedder_or_none(orch.CONFIG, "RESIDUE"),
+        store=get_store(),
+        read_body=lambda p: DRIVER.read_note(p).content or "",
+        facts=pre,
+        theme_tau=getattr(orch.CONFIG, "sim_threshold_theme", 0.35),
+    )
+
+
+def residue_facts(fsm: "InjectorFSM", fi: int, inbox_file: str) -> list[str]:
+    """The file's VERIFIED-missing facts (verification-based residue).
+
+    Consumes the WRITE-time judge futures (or a ready degrade marker) when
+    present for this file; otherwise runs the whole verification inline.
+    Stashes verification stats in context[file_{fi}_residue_stats] for the
+    gate's instrument. Best-effort and fail-open: any failure degrades to []
+    (a false "missing" declaration is the disease the 2026-08-16 ROI audit
+    killed) so CLEANUP never blocks on it."""
+    try:
+        ready = getattr(fsm, "_residue_ready", None)
+        pending = getattr(fsm, "_residue_future", None)
+        if ready is not None and ready[0] == fi:
+            fsm._residue_ready = None
+            res = ready[1]
+        elif pending is not None and pending[0] == fi:
+            fsm._residue_future = None
+            _fi, facts, futures = pending
+            meta = fsm.context.pop(f"file_{fi}_residue_meta", {})
+            verdicts = [v for f in futures for v in f.result()]
+            res = {
+                "missing": [fa for fa, v in zip(facts, verdicts) if v is False],
+                "total": meta.get("total", len(facts)),
+                "judged": sum(1 for v in verdicts if v is not None),
+                "failures": sum(1 for v in verdicts if v is None),
+                "off_theme": meta.get("off_theme", 0),
+            }
+        else:
+            res = _verify_now(fsm, fi, inbox_file)
+        fsm.context[f"file_{fi}_residue_stats"] = {
+            k: v for k, v in res.items() if k != "missing"}
+        return res["missing"]
+    except Exception as exc:
+        logger.debug("CLEANUP: residue verification failed (non-fatal): %s", exc)
+        return []
+
+
+def _residue_gate(
+    fsm: "InjectorFSM", fi: int, inbox_file: str, file_has_failure: bool
+) -> None:
+    """Declare the file's verified-missing facts at its last-chunk CLEANUP.
+
+    Verification-based (kernel/residue.py): declares only facts the narrow
+    judge confirmed absent, to the run report, log.md and the deferred store
+    (sticky residue_facts) — never silently dropped, and never a re-distill
+    round: the round was refuted by the 2026-08-16 ROI audit (it re-added
+    already-present facts at 60-170s each; the old open-enumeration check
+    read 1.4-4% of the notes it judged). Draft files skip (body intact by
+    construction); failed files keep the existing retry semantics untouched.
+    """
+    if file_has_failure:
+        return
+    if fsm.context.get(f"file_{fi}_form") == "draft":
+        return
+    # The round is gone, so nothing forces this gate to wait for the judge:
+    # anything not already resolved is parked and declared later (next flush
+    # or run end) — report, log and bundle are order-insensitive in-run.
+    pending = getattr(fsm, "_residue_future", None)
+    ready = getattr(fsm, "_residue_ready", None)
+    lst = getattr(fsm, "_residue_pending", None)
+    if lst is None:
+        lst = fsm._residue_pending = []
+    if (pending is not None and pending[0] == fi
+            and not all(f.done() for f in pending[2])):
+        # Judge futures still in flight: park them.
+        fsm._residue_future = None
+        meta = fsm.context.pop(f"file_{fi}_residue_meta", {})
+        lst.append(("verdicts", fi, inbox_file, pending[1], pending[2], meta))
+        logger.info(
+            "CLEANUP: residue verification for %s still running — "
+            "declaration deferred to the next flush.",
+            os.path.basename(inbox_file),
+        )
+        return
+    if (ready is not None and ready[0] == fi) or (
+            pending is not None and pending[0] == fi):
+        # Resolved (degrade marker or finished futures): declare now, cheap.
+        from time import monotonic as _mono
+        _t0 = _mono()
+        facts = residue_facts(fsm, fi, inbox_file)
+        stats = fsm.context.pop(f"file_{fi}_residue_stats", {})
+        _declare_residue(fsm, fi, inbox_file, facts, stats,
+                         round(_mono() - _t0, 2))
+        return
+    # No dispatch ran (decompose missing or still running at WRITE): the
+    # whole verification goes to the pool — this fallback used to run inline
+    # and block the boundary for its full duration (355s observed, run
+    # d8b4d4c1). Pool-thread note reads accept bounded staleness from
+    # concurrent autolink edits: link markup, not fact content.
+    lst.append(("result", fi, inbox_file,
+                _residue_pool(fsm).submit(_verify_now, fsm, fi, inbox_file)))
+    logger.info(
+        "CLEANUP: residue verification for %s dispatched late — "
+        "declaration deferred to the next flush.",
+        os.path.basename(inbox_file),
+    )
+
+
+def _declare_residue(fsm: "InjectorFSM", fi: int, inbox_file: str,
+                     facts: list[str], stats: dict, secs: float) -> None:
+    """Record the instrument and, when facts are missing, declare them:
+    run report (capped at 12), log.md line, deferred-store bundle (full,
+    sticky residue_facts field)."""
+    try:
+        fsm.progress.inputs.setdefault("residue_secs", {})[f"f{fi}"] = secs
+        # Verification instrument, uncensored (the old cap right-censored the
+        # ROI metric): the full missing list plus total/judged/failures.
+        fsm.progress.inputs.setdefault("residue", {})[f"f{fi}"] = {
+            "missing": facts, **stats}
+    except Exception:
+        pass
+    if not facts:
+        return
+    basename = os.path.basename(inbox_file)
+    # Report/log stay bounded; the deferred bundle carries the full list.
+    fsm.context.setdefault("declared_residue", {})[basename] = facts[:12]
+    logger.warning(
+        "CLEANUP: %d verified-missing fact(s) in %s declared.",
+        len(facts), basename,
+    )
+    try:
+        from silica.kernel.recall.deferred import get_deferred_store
+        hashes = getattr(fsm, "_file_content_hashes", []) or []
+        content_hash = (hashes[fi] if fi < len(hashes) else
+                        getattr(fsm, "_current_content_hash", ""))
+        if content_hash:
+            get_deferred_store().put_residue_facts(
+                content_hash, inbox_file, fsm.target_dir, fsm.hub, facts)
+    except Exception as exc:
+        logger.debug("CLEANUP: residue defer failed (non-fatal): %s", exc)
+    try:
+        from silica.kernel.recall.run_log import append_log_line
+
+        append_log_line(
+            f"residue `{basename}` → {len(facts)} fact(s) declared uncovered",
+            fsm.progress.run_id, dedup_key=f"residue `{basename}`",
+        )
+    except Exception as exc:
+        logger.debug("CLEANUP: residue log line failed (non-fatal): %s", exc)
+
+
+def flush_residue_pending(fsm: "InjectorFSM", wait: bool) -> None:
+    """Declare parked verifications whose judge futures completed.
+
+    wait=True (run end) resolves every parked entry, bounded by the real
+    judge call durations; wait=False declares only what already finished.
+    A failed future degrades that file to a no-declaration record, never to
+    a false "missing" (same fail-open contract as the whole lane)."""
+    lst = getattr(fsm, "_residue_pending", None)
+    if not lst:
+        return
+    from time import monotonic as _mono
+    keep: list = []
+    declared = 0
+    for entry in lst:
+        kind = entry[0]
+        futures = entry[4] if kind == "verdicts" else [entry[3]]
+        if not wait and not all(f.done() for f in futures):
+            keep.append(entry)
+            continue
+        _t0 = _mono()
+        if kind == "result":
+            _k, fi, inbox_file, fut = entry
+            try:
+                res = fut.result()
+            except Exception as exc:
+                logger.warning("residue: deferred verification for f%d failed (%s)",
+                               fi, exc)
+                res = {"missing": [], "total": 0, "judged": 0, "failures": 0,
+                       "off_theme": 0, "skipped": "verification failed"}
+            stats = {k: v for k, v in res.items() if k != "missing"}
+            _declare_residue(fsm, fi, inbox_file, res["missing"], stats,
+                             round(_mono() - _t0, 2))
+            declared += 1
+            continue
+        _k, fi, inbox_file, facts, futures, meta = entry
+        try:
+            verdicts = [v for f in futures for v in f.result()]
+        except Exception as exc:
+            logger.warning("residue: deferred verification for f%d failed (%s)",
+                           fi, exc)
+            _declare_residue(fsm, fi, inbox_file, [], {
+                "total": meta.get("total", len(facts)), "judged": 0,
+                "failures": len(facts),
+                "off_theme": meta.get("off_theme", 0),
+            }, round(_mono() - _t0, 2))
+            declared += 1
+            continue
+        missing = [fa for fa, v in zip(facts, verdicts) if v is False]
+        stats = {
+            "total": meta.get("total", len(facts)),
+            "judged": sum(1 for v in verdicts if v is not None),
+            "failures": sum(1 for v in verdicts if v is None),
+            "off_theme": meta.get("off_theme", 0),
+        }
+        _declare_residue(fsm, fi, inbox_file, missing, stats,
+                         round(_mono() - _t0, 2))
+        declared += 1
+    fsm._residue_pending = keep
+    if declared:
+        # A flush can run past the last progress note of the run (the DONE
+        # hooks): without an explicit save the instrument recorded above
+        # would never reach the ledger on disk (lost for f3, run d8b4d4c1).
+        try:
+            fsm.progress.save()
+        except Exception as exc:
+            logger.debug("residue flush save failed (non-fatal): %s", exc)
+
+
 def handle_cleanup(fsm: "InjectorFSM") -> None:
     from silica.tools.wrapped import silica_cleanup
 
@@ -414,14 +759,23 @@ def handle_cleanup(fsm: "InjectorFSM") -> None:
         n_chunks_in_file = len(file_group.get("chunks", []))
         is_last_chunk_of_file = (ci + 1 >= n_chunks_in_file)
 
+        fi_prefix = f"f{fi}_"
+        file_has_failure = any(
+            t.status == "failed" for t in fsm.progress.tasks
+            if t.id.startswith(fi_prefix)
+        )
+        inbox_file_for_fi = file_group.get("source_file", fsm.inbox_file)
+
+        # Residue declaration (nucleation-forms spec, verification-based since
+        # 2026-08-17): hooked HERE, not post-validate, because the all-skip
+        # short-circuit jumps straight to CLEANUP and this is the one seam
+        # both paths share. Declares verified-missing facts (report + log +
+        # deferred store); archiving proceeds in the same pass — there is no
+        # residue round anymore.
         if is_last_chunk_of_file:
-            # Only archive if no chunk of this file failed
-            fi_prefix = f"f{fi}_"
-            file_has_failure = any(
-                t.status == "failed" for t in fsm.progress.tasks
-                if t.id.startswith(fi_prefix)
-            )
-            inbox_file_for_fi = file_group.get("source_file", fsm.inbox_file)
+            _residue_gate(fsm, fi, inbox_file_for_fi, file_has_failure)
+
+        if is_last_chunk_of_file:
             # Log the per-file outcome regardless of failures: a file that
             # committed notes in earlier chunks still deserves its log.md line
             # and files_summary entry. Only ARCHIVING is gated on no-failure

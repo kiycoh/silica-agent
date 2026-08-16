@@ -296,3 +296,122 @@ def test_empty_payload_ops_are_not_deferred():
     assert r({"op": "write", "path": "x.md", "snippet": "real body"})
     assert r({"op": "overwrite", "path": "x.md", "content": "real body"})
     assert r({"op": "delete", "path": "x.md"})  # no body needed — retriable
+
+
+def test_defer_ops_drops_a_bundle_aimed_at_a_different_target(tmp_path, monkeypatch):
+    """Merging is right across the phases and chunks of one run. Across runs
+    that retargeted the file it is not: a first /nucleate that mistargeted a
+    book left 41 ops pointing into the inbox, and the successful re-run reported
+    "34 new, 42 deferred" — reading, to the user, as half the book dropped. The
+    stale ops are unretryable too: their paths are the ones VALIDATE rejects."""
+    from silica.kernel.recall import deferred
+    from silica.router.orchestrator import InjectorFSM
+
+    monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
+    deferred._stores.clear()
+    store = deferred.get_deferred_store()
+    store.put("h-same", "Inbox/enoch.md", "Inbox/Book-of-Enoch", None,
+              [{"op": "write", "path": "Inbox/Book-of-Enoch/Uriel.md", "heading": "Uriel"}])
+
+    fsm = InjectorFSM("Inbox/enoch.md", "Concepts/Apocrypha")
+    fsm._file_content_hashes = ["h-same"]
+    fsm._chunks = []
+    fsm._current_chunk_idx = 0
+    fsm._defer_ops(
+        [{"op": "write", "path": "Concepts/Apocrypha/Raphael.md", "heading": "Raphael",
+          "snippet": "body"}],
+        {"Concepts/Apocrypha/Raphael.md": "lint failed"},
+        phase="VALIDATE",
+    )
+
+    ops = store.get("h-same")["rejected_ops"]
+    assert [o["path"] for o in ops] == ["Concepts/Apocrypha/Raphael.md"]
+
+
+def test_defer_ops_still_accumulates_within_one_target(tmp_path, monkeypatch):
+    from silica.kernel.recall import deferred
+    from silica.router.orchestrator import InjectorFSM
+
+    monkeypatch.setattr(deferred, "_store_dir", lambda: tmp_path / "deferred")
+    deferred._stores.clear()
+    store = deferred.get_deferred_store()
+    store.put("h-acc", "Inbox/enoch.md", "Concepts/Apocrypha", None,
+              [{"op": "write", "path": "Concepts/Apocrypha/Uriel.md", "heading": "Uriel",
+                "snippet": "body"}])
+
+    fsm = InjectorFSM("Inbox/enoch.md", "Concepts/Apocrypha")
+    fsm._file_content_hashes = ["h-acc"]
+    fsm._chunks = []
+    fsm._current_chunk_idx = 0
+    fsm._defer_ops(
+        [{"op": "write", "path": "Concepts/Apocrypha/Raphael.md", "heading": "Raphael",
+          "snippet": "body"}],
+        {}, phase="WRITE",
+    )
+
+    assert len(store.get("h-acc")["rejected_ops"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Residue facts in the bundle (verification-based residue, 2026-08-17):
+# the invariant lives in the STORE so retry/anneal call sites that rewrite
+# bundles with explicit field lists cannot destroy the facts.
+# ---------------------------------------------------------------------------
+
+def _ops():
+    return [{"op": "write", "path": "Dir/X.md", "heading": "X"}]
+
+
+def test_put_preserves_existing_residue_facts(store):
+    store.put_residue_facts("h1", "inbox/a.md", "Dir", None, ["fact one"])
+    # a later defer site rewrites the bundle knowing nothing of the field
+    store.put("h1", "inbox/a.md", "Dir", None, _ops())
+    b = store.get("h1")
+    assert b["residue_facts"] == ["fact one"]
+    assert len(b["rejected_ops"]) == 1
+
+
+def test_put_residue_facts_merges_and_keeps_ops(store):
+    store.put("h1", "inbox/a.md", "Dir", None, _ops())
+    store.put_residue_facts("h1", "inbox/a.md", "Dir", None, ["fact one"])
+    store.put_residue_facts("h1", "inbox/a.md", "Dir", None,
+                            ["fact one", "fact two"])
+    b = store.get("h1")
+    assert b["residue_facts"] == ["fact one", "fact two"]  # deduped merge
+    assert len(b["rejected_ops"]) == 1
+
+
+def test_put_residue_facts_creates_residue_only_bundle(store):
+    store.put_residue_facts("h2", "inbox/b.md", "Dir", None, ["only fact"])
+    b = store.get("h2")
+    assert b["residue_facts"] == ["only fact"]
+    assert b["rejected_ops"] == []
+
+
+def test_remove_demotes_to_residue_only_bundle(store):
+    store.put("h1", "inbox/a.md", "Dir", None, _ops())
+    store.put_residue_facts("h1", "inbox/a.md", "Dir", None, ["fact one"])
+    assert store.remove("h1") is True  # ops cleared...
+    b = store.get("h1")
+    assert b is not None and b["residue_facts"] == ["fact one"]  # ...facts kept
+    assert b["rejected_ops"] == []
+
+
+def test_remove_without_residue_deletes(store):
+    store.put("h1", "inbox/a.md", "Dir", None, _ops())
+    assert store.remove("h1") is True
+    assert store.get("h1") is None
+
+
+def test_purge_deletes_even_with_residue(store):
+    store.put_residue_facts("h1", "inbox/a.md", "Dir", None, ["fact one"])
+    assert store.purge("h1") is True
+    assert store.get("h1") is None
+
+
+def test_list_all_reports_residue_count(store):
+    store.put("h1", "inbox/a.md", "Dir", None, _ops())
+    store.put_residue_facts("h1", "inbox/a.md", "Dir", None, ["f1", "f2"])
+    rows = store.list_all()
+    assert rows[0]["rejected_count"] == 1
+    assert rows[0]["residue_count"] == 2

@@ -134,7 +134,11 @@ def test_prefetch_ahead_dispatches_window_and_runs_collision_for_lookahead():
     fsm._prefetcher.shutdown()
 
 
-def test_prefetch_ahead_stops_at_file_boundary():
+def test_prefetch_ahead_crosses_one_attached_file_boundary():
+    # The window used to break at the file boundary, exposing the next file's
+    # first distill as a 40-65s inline stall (measured on the 2026-08-16
+    # library batches). Once the next file's chunks are attached, the window
+    # crosses into it.
     from silica.router.states import distill as d
     fsm = _stub_fsm(n_chunks=4, file_of={0: 0, 1: 0, 2: 1, 3: 1})
     with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
@@ -142,7 +146,72 @@ def test_prefetch_ahead_stops_at_file_boundary():
          patch("silica.router.states.collision.collision_pass"):
         d._prefetch_ahead(fsm, 0)
     assert 0 in fsm._prefetcher and 1 in fsm._prefetcher
-    assert 2 not in fsm._prefetcher  # next file — never prefetched
+    assert 2 in fsm._prefetcher      # next file's first chunk — now in flight
+    assert 3 not in fsm._prefetcher  # window size still caps the dispatch
+    fsm._prefetcher.shutdown()
+
+
+def test_prefetch_ahead_never_crosses_two_boundaries():
+    from silica.router.states import distill as d
+    fsm = _stub_fsm(n_chunks=3, file_of={0: 0, 1: 1, 2: 2})
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+         patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
+         patch("silica.router.states.collision.collision_pass"):
+        d._prefetch_ahead(fsm, 0)
+    assert 0 in fsm._prefetcher and 1 in fsm._prefetcher
+    assert 2 not in fsm._prefetcher  # a second file boundary is never crossed
+    fsm._prefetcher.shutdown()
+
+
+def test_prefetch_ahead_skips_steer_context_chunks():
+    # A chunk with a pending steer context (residue rounds pre-set it) runs
+    # inline by design: handle_delegate discards any prefetched future for it,
+    # so dispatching one burns a full distill call for nothing.
+    from silica.router.states import distill as d
+    fsm = _stub_fsm(n_chunks=3)
+    fsm.context["chunk_1_steer_context"] = "## Residue feedback"
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+         patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
+         patch("silica.router.states.collision.collision_pass"):
+        d._prefetch_ahead(fsm, 0)
+    assert 0 in fsm._prefetcher and 2 in fsm._prefetcher
+    assert 1 not in fsm._prefetcher  # would be discarded at DELEGATE
+    fsm._prefetcher.shutdown()
+
+
+def test_prefetch_ahead_warms_next_file_when_unattached():
+    from silica.router.states import distill as d
+    fsm = _stub_fsm(n_chunks=2)
+
+    def _fake_warm(f):
+        flat = len(f._chunks)
+        f._chunks.append({"schema_version": 1,
+                          "batches": [{"inbox_file": "next.md",
+                                       "concepts": [{"name": "n0"}]}]})
+        f._chunk_flat_to_fi_ci[flat] = (1, 0)
+        return True
+
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+         patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
+         patch("silica.router.states.collision.collision_pass"), \
+         patch("silica.router.states.setup.warm_next_file",
+               side_effect=_fake_warm) as warm:
+        d._prefetch_ahead(fsm, 0)
+    warm.assert_called_once()
+    assert 2 in fsm._prefetcher  # warmed chunk entered the window
+    fsm._prefetcher.shutdown()
+
+
+def test_prefetch_ahead_warm_failure_falls_back_to_sequential():
+    from silica.router.states import distill as d
+    fsm = _stub_fsm(n_chunks=2)
+    with patch.object(d.orch.CONFIG, "distill_concurrency", 3, create=True), \
+         patch.object(d, "run_distiller", side_effect=lambda **kw: {"updates": []}), \
+         patch("silica.router.states.collision.collision_pass"), \
+         patch("silica.router.states.setup.warm_next_file", return_value=False):
+        d._prefetch_ahead(fsm, 0)
+    assert 0 in fsm._prefetcher and 1 in fsm._prefetcher
+    assert 2 not in fsm._prefetcher
     fsm._prefetcher.shutdown()
 
 

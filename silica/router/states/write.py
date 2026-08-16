@@ -361,6 +361,16 @@ def handle_write(fsm: "InjectorFSM") -> None:
             if os.path.abspath(_p) not in _known:
                 _stem = os.path.splitext(os.path.basename(_p))[0]
                 _cached_refs.append(NoteRef(name=_stem, path=_p))
+
+    # Residue pre-dispatch: on a file's last chunk, start the residue check
+    # now so its LLM call rides hub_update/autolink/backlink/lint instead of
+    # the file boundary (the seam itself decides last-chunk/draft/failure).
+    try:
+        from silica.router.states import finalize as _fz
+        _fz.maybe_dispatch_residue_check(fsm)
+    except Exception as _rde:
+        logger.debug("WRITE: residue pre-dispatch failed (non-fatal): %s", _rde)
+
     fsm._transition_success()
 
 

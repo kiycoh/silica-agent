@@ -588,6 +588,19 @@ class InjectorFSM(BaseFSM[InjectorState]):
             from silica.kernel.recall.deferred import get_deferred_store
             store = get_deferred_store()
             existing = store.get(content_hash) or {}
+            # Accumulation is per-run. A bundle saved against a DIFFERENT target
+            # belongs to an earlier run of the same source that aimed somewhere
+            # else: its op paths point into that old folder, so retrying them
+            # re-fails forever and counting them tells the user a successful run
+            # dropped work it never touched ("34 new, 42 deferred", where 41
+            # were the previous run's).
+            if existing and existing.get("target_dir") != self.target_dir:
+                logger.info(
+                    "%s: dropping %d deferred op(s) from an earlier run targeting %r",
+                    phase, len(existing.get("rejected_ops", [])),
+                    existing.get("target_dir"),
+                )
+                existing = {}
             store.put(
                 content_hash=content_hash,
                 source_path=self._current_source_file,
@@ -687,6 +700,8 @@ class InjectorFSM(BaseFSM[InjectorState]):
         finally:
             if getattr(self, "_prefetcher", None) is not None:
                 self._prefetcher.shutdown()
+            if getattr(self, "_residue_executor", None) is not None:
+                self._residue_executor.shutdown(wait=False, cancel_futures=True)
             if not cancelled:
                 self._boundary_anneal()
             self._flush_indexes()
@@ -730,8 +745,32 @@ class InjectorFSM(BaseFSM[InjectorState]):
             res = silica_anneal(steer=False)
             if res.get("written"):
                 logger.info("boundary anneal: recovered %d deferred op(s)", res.get("written"))
+                self._lift_recovered_partial()
         except Exception as e:
             logger.debug("boundary anneal skipped (%s)", e)
+
+    def _lift_recovered_partial(self) -> None:
+        """Drop the "partial" verdict when the anneal recovered every failure.
+
+        has_partial_failure is a one-way latch and CLEANUP computes
+        final_status before this sweep runs, so a run that ended complete still
+        announced `partial` (measured 2026-08-16: three ops failed lint/write,
+        all three notes written by the anneal seconds later, verdict unchanged).
+        Only WRITE-deferred ops are recoverable here: a chunk that rolled back
+        recorded failed_chunks and keeps its verdict, and a file whose bundle
+        survives the anneal really is partial.
+        """
+        if not self.context.get("has_partial_failure") or self.context.get("failed_chunks"):
+            return
+        from silica.kernel.recall.deferred import get_deferred_store
+
+        store = get_deferred_store()
+        if any(store.get(h) for h in (self._file_content_hashes or []) if h):
+            return
+        self.context["has_partial_failure"] = False
+        self.context["final_status"] = (
+            "Success" if self.context.get("run_had_ops") else "no_ops"
+        )
 
     def _flush_indexes(self) -> None:
         """Persist the deferred embed + co-occurrence upserts once per run (Fix A).
@@ -797,7 +836,15 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._pre_graph = None
         self._get_chunks_from_context_if_empty()
         next_idx = self._next_uncommitted_chunk_idx(self._current_chunk_idx + 1)
-        if next_idx < len(self._chunks):
+        # A warm-attached next file's chunks sit in the flat list before its
+        # RECON ever ran: a chunk belonging to a later file means THIS file is
+        # done, and the per-file machinery must advance through RECON (the
+        # warmed states fast-path via their guards; the cursor is positioned
+        # by the warmed PAYLOAD).
+        if next_idx < len(self._chunks) and (
+            self._chunk_flat_to_fi_ci.get(next_idx, (self._current_file_idx, 0))[0]
+            == self._current_file_idx
+        ):
             self._current_chunk_idx = next_idx
             logger.info(f"✔ Batch completed successfully. Advancing to batch {self._current_chunk_idx + 1}")
             # Restart per-chunk loop from COLLISION (Phase 5) if present, else DELEGATE
@@ -806,6 +853,13 @@ class InjectorFSM(BaseFSM[InjectorState]):
             pass  # routed to RECON; the next phase event carries the new position
         else:
             logger.info("🎉 All batched chunks have been successfully injected and verified!")
+            # Parked residue verifications resolve here, before the executor
+            # shutdown in _run_loop's finally would cancel their futures.
+            try:
+                from silica.router.states import finalize as _fz
+                _fz.flush_residue_pending(self, wait=True)
+            except Exception as _fe:
+                logger.debug("residue flush failed (non-fatal): %s", _fe)
             self.state = InjectorState.DONE
 
     def _source_canonical_for(self, inbox_file: str) -> str:
@@ -895,7 +949,12 @@ class InjectorFSM(BaseFSM[InjectorState]):
         # Advance to next uncommitted chunk, or conclude the run as partial
         self._get_chunks_from_context_if_empty()
         next_idx = self._next_uncommitted_chunk_idx(self._current_chunk_idx + 1)
-        if next_idx < len(self._chunks):
+        # Same warm-attach guard as _on_pipeline_end: a next chunk belonging
+        # to a later file must advance through RECON, not jump straight in.
+        if next_idx < len(self._chunks) and (
+            self._chunk_flat_to_fi_ci.get(next_idx, (self._current_file_idx, 0))[0]
+            == self._current_file_idx
+        ):
             self._current_chunk_idx = next_idx
             logger.info(
                 "Chunk f%d_c%d failed — advancing to chunk %d of %d.",
@@ -908,6 +967,13 @@ class InjectorFSM(BaseFSM[InjectorState]):
             logger.info(
                 "Chunk f%d_c%d failed (last uncommitted chunk). Run concludes with partial success.", fi, ci
             )
+            # Same flush as _on_pipeline_end's DONE: completed files' parked
+            # declarations must survive a failing last file.
+            try:
+                from silica.router.states import finalize as _fz
+                _fz.flush_residue_pending(self, wait=True)
+            except Exception as _fe:
+                logger.debug("residue flush failed (non-fatal): %s", _fe)
             # "partial" implies something committed; with zero commits the honest
             # verdict is "failed" (the old unconditional "partial" helped sell a
             # fully-failed run as a mostly-successful one).

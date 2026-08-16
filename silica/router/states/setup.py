@@ -34,7 +34,10 @@ def handle_recon(fsm: "InjectorFSM") -> None:
     fi = fsm._current_file_idx
     inbox_file = fsm.inbox_files[fi]
     with orch.phase(fsm, "recon", "recon"):
-        res = orch.silica_recon(inbox_file)
+        # Warmed early by the distill prefetch window (warm_next_file): reuse
+        # the recon it already ran instead of paying the pass twice.
+        warm = fsm.context.pop(f"warm_recon_{fi}", None)
+        res = warm if warm is not None else orch.silica_recon(inbox_file)
         if "error" in res:
             fsm._progress_note("recon", "recon", "failed", error=res["error"])
             raise RuntimeError(f"Recon failed for {inbox_file}: {res['error']}")
@@ -274,27 +277,51 @@ def novelty_gate(fsm: "InjectorFSM", raw_payload: dict) -> tuple[dict, int]:
     return {**raw_payload, "batches": kept_batches}, len(diverted)
 
 
-def handle_payload(fsm: "InjectorFSM") -> None:
-    """Payload assembly for the CURRENT file only (per-file pipeline).
+def _pin_file_profile(fsm: "InjectorFSM", fi: int, inbox_file: str) -> None:
+    """Resolve the file's source form and pin the lens for all its chunks.
 
-    Appends this file's chunks to the flat chunk list and registers its
-    progress tasks; earlier files' chunks are already written by the time
-    this runs again for the next file.
+    The ladder lives in kernel.forms (stamp > sniff > fallback); a run-level
+    profile (--profile, /promote) short-circuits the whole resolution, so no
+    sniff call is ever paid under it. A `draft` verdict reaching the FSM means
+    a direct tool call bypassed the dispatch filing path: it distills under
+    the vault fallback, with the verdict kept visible in context and the log.
     """
-    fi = fsm._current_file_idx
-    inbox_file = fsm.inbox_files[fi] if fi < len(fsm.inbox_files) else fsm.inbox_file
-    fsm._progress_note("payload", "payload", "running")
-    # Current file's recon only — appended last by RECON
-    recon_cur = fsm.context["recon"][-1]
+    if getattr(fsm, "distill_profile", None):
+        return
+    import silica.kernel.forms as forms
+
+    text = forms.read_source_text(inbox_file)
+    res = forms.resolve(text)
+    profile = res.profile
+    if res.form == "draft":
+        from silica.kernel.prep_delegation import active_distill_profile
+
+        profile = active_distill_profile()
+        logger.info(
+            "PAYLOAD: %s classified draft (%s) inside the FSM — filing happens "
+            "at dispatch; distilling under the %r fallback.",
+            inbox_file, res.origin, profile,
+        )
+    if profile:
+        fsm.context[f"file_{fi}_profile"] = profile
+    fsm.context[f"file_{fi}_form"] = res.form
+    fsm.context[f"file_{fi}_form_origin"] = res.origin
+    logger.info("PAYLOAD: %s profile=%s (%s)", inbox_file, profile or "default", res.origin)
+
+
+def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, list[dict]]:
+    """Recon result → (payload tool result, this file's chunk list).
+
+    The pure assembly core of PAYLOAD, shared with warm_next_file. Raises
+    RuntimeError when the payload tool errors; mutates no per-file FSM state.
+    """
     recon_path = fsm._make_tmp([recon_cur])
     phase_conf = fsm._get_recipe_phase("payload")
     max_concepts = phase_conf.get("partition_if_over", 200)
     max_bytes = int(os.getenv("DISTILLER_CHUNK_MAX_BYTES", str(30 * 1024)))
     res = orch.silica_payload(recon_path, max_concepts=max_concepts, max_bytes=max_bytes)
     if "error" in res:
-        fsm._progress_note("payload", "payload", "failed", error=res["error"])
         raise RuntimeError(f"Payload failed: {res['error']}")
-    fsm.context["payload"] = res
 
     # Re-partition this file's payload (§3.6); fall back to the legacy
     # flat-chunk path when batch structure is absent (e.g. tests).
@@ -343,13 +370,23 @@ def handle_payload(fsm: "InjectorFSM") -> None:
         if not new_chunks:
             new_chunks = [res]
 
+    return res, new_chunks
+
+
+def _attach_file_chunks(fsm: "InjectorFSM", fi: int, inbox_file: str,
+                        new_chunks: list[dict]) -> int:
+    """Attach a file's chunks: flat list + index, pins, facts, tasks.
+
+    The bookkeeping half of PAYLOAD, shared with warm_next_file — which is
+    why it never touches _current_chunk_idx (a warmed file is attached while
+    the previous file is still being processed). Returns the first flat idx.
+    """
     # Append this file's chunk group; flat indices continue after prior files'
     start_flat = len(fsm._chunks)
     fsm._file_chunks[fi] = {"source_file": inbox_file, "chunks": new_chunks}
     for ci, chunk in enumerate(new_chunks):
         fsm._chunks.append(chunk)
         fsm._chunk_flat_to_fi_ci[start_flat + ci] = (fi, ci)
-    fsm._current_chunk_idx = start_flat
 
     # Cache-stable prompt: pin the distiller LANGUAGE once per file so the
     # rendered template prefix is byte-identical across this file's chunks
@@ -370,30 +407,96 @@ def handle_payload(fsm: "InjectorFSM") -> None:
     except Exception as _lang_e:
         logger.debug("PAYLOAD: language pin skipped (non-fatal): %s", _lang_e, exc_info=True)
 
-    # Accumulate facts["sources"] with per-file concept + chunk counts
+    # Same seam, same cache-stability rationale as the language pin: resolve
+    # the file's source form once and pin the lens for every chunk of the file
+    # (docs/specs/nucleation-forms.md).
+    try:
+        _pin_file_profile(fsm, fi, inbox_file)
+    except Exception as _form_e:
+        logger.debug("PAYLOAD: profile pin skipped (non-fatal): %s", _form_e, exc_info=True)
+
+    # Residue verification, stage 1: decompose the source into atomic facts
+    # in the background — it depends only on the source text, so it rides the
+    # file's whole distillation; the last chunk's WRITE picks it up. After
+    # the profile pin on purpose: the dispatch skips draft forms.
+    try:
+        from silica.router.states import finalize as _fz
+        _fz.maybe_dispatch_residue_decompose(fsm, fi, inbox_file)
+    except Exception as _rde:
+        logger.debug("PAYLOAD: residue decompose dispatch skipped (non-fatal): %s", _rde)
+
+    # Accumulate facts["sources"] with per-file concept + chunk counts.
+    # Replace-if-present: a warm-attached file that was detached for a residue
+    # round re-attaches without doubling its entry.
     n_concepts = sum(
         len(b.get("concepts", []))
         for chunk in new_chunks
         for b in chunk.get("batches", [])
     )
-    fsm.progress.inputs.setdefault("sources", []).append({
-        "inbox_file": inbox_file,
-        "concepts": n_concepts,
-        "chunks": len(new_chunks),
-    })
+    sources = fsm.progress.inputs.setdefault("sources", [])
+    entry = {"inbox_file": inbox_file, "concepts": n_concepts, "chunks": len(new_chunks)}
+    for i, s in enumerate(sources):
+        if s.get("inbox_file") == inbox_file:
+            sources[i] = entry
+            break
+    else:
+        sources.append(entry)
 
-    # Register per-chunk tasks with f{fi}_c{ci}_{cap} IDs and intra-file deps
+    # Register per-chunk tasks with f{fi}_c{ci}_{cap} IDs and intra-file deps.
+    # Existing ids are kept (resume re-runs PAYLOAD; warm may have registered).
     caps = ("collision", "distill", "sanitize", "validate", "snapshot", "write", "hub_update", "autolink", "backlink", "lint", "cleanup")
+    existing = {t.id for t in fsm.progress.tasks}
     prev_in_file = "payload"
     for ci in range(len(new_chunks)):
         for cap in caps:
             tid = f"f{fi}_c{ci}_{cap}"
-            fsm.progress.add_task(cap, task_id=tid, depends_on=[prev_in_file])
+            if tid not in existing:
+                fsm.progress.add_task(cap, task_id=tid, depends_on=[prev_in_file])
             prev_in_file = tid
     try:
         fsm.progress.save()
     except Exception as _e:
         logger.debug("progress save error (suppressed): %s", _e)
+
+    return start_flat
+
+
+def handle_payload(fsm: "InjectorFSM") -> None:
+    """Payload assembly for the CURRENT file only (per-file pipeline).
+
+    Appends this file's chunks to the flat chunk list and registers its
+    progress tasks; earlier files' chunks are already written by the time
+    this runs again for the next file. A file warm_next_file already attached
+    fast-paths: only the chunk cursor is positioned.
+    """
+    fi = fsm._current_file_idx
+    inbox_file = fsm.inbox_files[fi] if fi < len(fsm.inbox_files) else fsm.inbox_file
+    fsm._progress_note("payload", "payload", "running")
+
+    if fi in fsm._file_chunks:
+        # Warmed early by the distill prefetch window: chunks, pins and tasks
+        # are attached — position the cursor where the normal path would have.
+        fsm.context["payload"] = fsm.context.pop(
+            f"warm_payload_{fi}", fsm.context.get("payload"))
+        fsm._current_chunk_idx = min(
+            flat for flat, (f, _c) in fsm._chunk_flat_to_fi_ci.items() if f == fi
+        )
+        fsm._progress_note("payload", "payload", "done")
+        if "vault_graph_ctx" not in fsm.context:
+            fsm.context["vault_graph_ctx"] = build_vault_graph_ctx()
+        fsm._transition_success()
+        return
+
+    # Current file's recon only — appended last by RECON
+    recon_cur = fsm.context["recon"][-1]
+    try:
+        res, new_chunks = _assemble_file_chunks(fsm, recon_cur)
+    except RuntimeError as _pe:
+        fsm._progress_note("payload", "payload", "failed", error=str(_pe))
+        raise
+    fsm.context["payload"] = res
+    start_flat = _attach_file_chunks(fsm, fi, inbox_file, new_chunks)
+    fsm._current_chunk_idx = start_flat
 
     fsm._progress_note("payload", "payload", "done")
     logger.info(
@@ -411,6 +514,49 @@ def handle_payload(fsm: "InjectorFSM") -> None:
     fsm._transition_success()
 
 
+def warm_next_file(fsm: "InjectorFSM") -> bool:
+    """Prep the next uncommitted file early so the distill prefetch window
+    can cross the file boundary (measured 40-65s of inline stall per file on
+    the 2026-08-16 library batches: the first distill of every file ran with
+    nothing in flight).
+
+    Runs recon → payload assembly → salience on the main thread (~5s, all
+    mechanical/local) and attaches the chunks; RECON/PAYLOAD/SALIENCE then
+    fast-path through their warm guards at their normal position, keeping
+    every per-file side effect (notices, ledger, archive) on its usual
+    schedule. Best-effort: any failure leaves the file to its own states.
+    Returns True when chunks were attached.
+    """
+    try:
+        if float(getattr(orch.CONFIG, "novelty_tau", 0) or 0) > 0:
+            # The gate diverts concepts to the deferred store; warming would
+            # divert ahead of the file's own turn. Stand down.
+            return False
+        fi = fsm._next_uncommitted_file_idx(fsm._current_file_idx + 1)
+        if fi >= len(fsm.inbox_files) or fi in fsm._file_chunks:
+            return False
+        inbox_file = fsm.inbox_files[fi]
+        res = orch.silica_recon(inbox_file)
+        if "error" in res:
+            return False
+        payload_res, new_chunks = _assemble_file_chunks(fsm, res)
+        fsm.context[f"warm_recon_{fi}"] = res
+        fsm.context[f"warm_payload_{fi}"] = payload_res
+        _attach_file_chunks(fsm, fi, inbox_file, new_chunks)
+        dropped = _salience_filter(fsm, new_chunks)
+        fsm.context[f"file_{fi}_salience_done"] = True
+        logger.info(
+            "WARM: file %d/%d '%s' prepped early — %d chunk(s) attached%s",
+            fi + 1, len(fsm.inbox_files), inbox_file, len(new_chunks),
+            f", {dropped} dropped by salience" if dropped else "",
+        )
+        return bool(new_chunks)
+    except Exception as _we:
+        logger.warning("WARM: next-file prep failed (%s) — staying sequential",
+                       _we, exc_info=True)
+        return False
+
+
 def handle_salience(fsm: "InjectorFSM") -> None:
     """Thematic salience gate — Phase 2.05, current file's chunks only.
 
@@ -418,7 +564,32 @@ def handle_salience(fsm: "InjectorFSM") -> None:
     centroid.  Best-effort: any failure (embedder down, empty index) is
     logged and chunks pass unchanged.  Runs once per file (per-file
     pipeline); _on_pipeline_end restarts chunks from COLLISION, which is
-    correct.
+    correct.  A file warm_next_file already filtered fast-paths.
+    """
+    if fsm.context.pop(f"file_{fsm._current_file_idx}_salience_done", None):
+        fsm._transition_success()
+        return
+
+    fsm._get_chunks_from_context_if_empty()
+    cur_fi = fsm._current_file_idx
+    current_chunks = [
+        chunk for flat_idx, chunk in enumerate(fsm._chunks)
+        if fsm._chunk_flat_to_fi_ci.get(flat_idx, (0, 0))[0] == cur_fi
+    ] or fsm._chunks  # fallback: no fi map (legacy/test paths) → all chunks
+
+    dropped = _salience_filter(fsm, current_chunks)
+    if dropped is not None:
+        fsm.context["salience_dropped"] = dropped
+        if dropped:
+            logger.info("SALIENCE: %d concept(s) below thematic threshold removed", dropped)
+    fsm._transition_success()
+
+
+def _salience_filter(fsm: "InjectorFSM", chunks: list[dict]) -> int | None:
+    """Drop off-theme concepts from ``chunks`` in place.
+
+    The SALIENCE core, shared with warm_next_file. Returns the dropped count,
+    or None when no embedder is available (gate skipped, chunks untouched).
     """
     τ_theme = getattr(orch.CONFIG, "sim_threshold_theme", 0.35)
     from silica.agent.providers import get_embedder_or_none
@@ -426,20 +597,12 @@ def handle_salience(fsm: "InjectorFSM") -> None:
     from silica.kernel.text.text import clean_body
     embedder = get_embedder_or_none(orch.CONFIG, "SALIENCE")
     if embedder is None:
-        fsm._transition_success()
-        return
+        return None
 
-    fsm._get_chunks_from_context_if_empty()
     theme_cache: dict[str, list[float]] = {}
     dropped = 0
 
-    cur_fi = fsm._current_file_idx
-    current_chunks = [
-        chunk for flat_idx, chunk in enumerate(fsm._chunks)
-        if fsm._chunk_flat_to_fi_ci.get(flat_idx, (0, 0))[0] == cur_fi
-    ] or fsm._chunks  # fallback: no fi map (legacy/test paths) → all chunks
-
-    for chunk in current_chunks:
+    for chunk in chunks:
         for batch in chunk.get("batches", []):
             inbox_file = batch.get("inbox_file", fsm.inbox_file)
             if inbox_file not in theme_cache:
@@ -480,7 +643,4 @@ def handle_salience(fsm: "InjectorFSM") -> None:
                     kept.append(c)
             batch["concepts"] = kept
 
-    fsm.context["salience_dropped"] = dropped
-    if dropped:
-        logger.info("SALIENCE: %d concept(s) below thematic threshold removed", dropped)
-    fsm._transition_success()
+    return dropped
