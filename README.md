@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/banner-light.svg" />
-    <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/banner.svg" alt="Silica" width="100%" />
+    <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/banner.svg" alt="Silica" width="440" />
   </picture>
 </p>
 
