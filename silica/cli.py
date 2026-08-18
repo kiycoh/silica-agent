@@ -1832,7 +1832,7 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
     Syntax:
         /report [folder] [--top-k=N] [--embeddings]
-        /nucleate <file|folder...> [--target=DIR] [--hub=H] [--keep-sources] [--seen=YYYY-MM-DD]
+        /nucleate <file|folder...> [--target=DIR] [--hub=H] [--no-keep-sources] [--seen=YYYY-MM-DD]
         /convert <file...> [--target=DIR]
         /summarize <note|folder...>
         /explain "<concept>" [--level=intro|expert]
@@ -1919,7 +1919,12 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
         files: list[str] = []
         target_dir = ""
         hub = ""
-        keep_sources = False
+        # On by default: the leaf lives in `sources/`, which is
+        # retrieval-invisible by construction (is_source_leaf excludes it from
+        # search, search_context and embeddings), so it costs disk and nothing
+        # else — and it is what makes a note's verbatim source reachable at all
+        # (reliability_tier reads exactly that). --no-keep-sources opts out.
+        keep_sources = True
         seen = ""
         profile = ""
         for arg in args:
@@ -1929,6 +1934,8 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
                 hub = arg[len("--hub="):]
             elif arg == "--keep-sources":
                 keep_sources = True  # verbatim leaf in sources/ beside the notes
+            elif arg == "--no-keep-sources":
+                keep_sources = False
             elif arg.startswith("--seen="):
                 seen = arg[len("--seen="):]  # capture clock: the day the described events happened
             elif arg.startswith("--profile="):

@@ -23,6 +23,7 @@ class RunInjectorArgs(BaseModel):
     target_dir: str = Field(description="Destination directory for the extracted concepts")
     hub: str = Field(default="", description="Optional reference hub note")
     resume_run_id: str = Field(default="", description="Run ID to resume (re-processes only failed chunks, skips done ones)")
+    keep_sources: bool = Field(default=True, description="Write the verbatim source leaf in sources/ beside the notes (default on; pass false to skip)")
 
 @tool(RunInjectorArgs, cls="composed", collapse="eager")
 def silica_run_injector(
@@ -31,16 +32,14 @@ def silica_run_injector(
     target_dir: str = "",
     hub: str = "",
     resume_run_id: str = "",
+    keep_sources: bool = True,
     cancel_token: Any = None,
 ) -> dict[str, Any]:
-    """Nucleate one or more inbox files into the vault — the full pipeline with
-    quality gates and rollback. This is THE tool for "nucleate/inject this file".
-
-    Per-chunk failure containment: a failed chunk is rolled back and marked
-    'failed' while the remaining chunks continue. Pass resume_run_id to re-run
-    only the chunks that failed in a previous partial run. Near-duplicate
-    merging runs concurrently in the background.
-    For a single quick note, silica_write_note/silica_patch_note are cheaper.
+    """Nucleate inbox files into the vault — THE tool for "nucleate/inject
+    this file": full pipeline, quality gates, rollback. A failed chunk rolls
+    back and is marked 'failed' while the rest continue; resume_run_id re-runs
+    only the failed chunks. For a single quick note,
+    silica_write_note/silica_patch_note are cheaper.
     """
     from silica.router.coordinator import Coordinator
 

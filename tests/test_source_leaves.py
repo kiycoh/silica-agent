@@ -323,3 +323,40 @@ def test_a_note_with_no_verbatim_line_gets_no_footnote(tmp_vault):
     note = _vault_file("Concepts/A.md").read_text(encoding="utf-8")
     assert "[^src]" not in note
     assert "## Sources" in note and "[[src]]" in note   # the block still lands
+
+
+def test_leaf_in_frontmatter_does_not_suppress_the_sources_block(tmp_vault):
+    """The distiller names the source basename as a `related:`/`parent note:`
+    wikilink long before the leaf exists. The old idempotency check grepped the
+    WHOLE note, so those notes read as "already linked", never got the block,
+    and reliability_tier (which looks for the `## Sources` marker) filed them as
+    distilled. Measured 2026-08-18: 10 of 30 notes on one paper."""
+    tmp_vault.note("Inbox/src.md", "---\ndate: 2026-03-01\n---\nverbatim words\n")
+    tmp_vault.note(
+        "Concepts/A.md",
+        '---\nAI: true\nparent note: "[[src]]"\nrelated:\n  - "[[src]]"\n---\n\n# A\nbody\n',
+    )
+    fsm = _fsm([_entry("src.md", "write", "Concepts/A")], keep_sources=True)
+
+    finalize._write_source_leaf(fsm, "Inbox/src.md")
+
+    note = _vault_file("Concepts/A.md").read_text(encoding="utf-8")
+    assert "## Sources" in note
+
+    from silica.kernel.write.contested import TIER_GROUNDED, reliability_tier
+    assert reliability_tier(note) == TIER_GROUNDED
+
+
+def test_relinking_the_same_leaf_twice_is_still_a_no_op(tmp_vault):
+    """Re-ingest safety: the block must not grow a second copy of the link."""
+    tmp_vault.note("Inbox/src.md", "---\ndate: 2026-03-01\n---\nverbatim words\n")
+    tmp_vault.note("Concepts/A.md", "# A\nbody\n")
+    fsm = _fsm([_entry("src.md", "write", "Concepts/A")], keep_sources=True)
+
+    finalize._write_source_leaf(fsm, "Inbox/src.md")
+    once = _vault_file("Concepts/A.md").read_text(encoding="utf-8")
+    finalize._write_source_leaf(fsm, "Inbox/src.md")
+    twice = _vault_file("Concepts/A.md").read_text(encoding="utf-8")
+
+    assert once == twice
+    assert twice.count("[[src]]") == 1

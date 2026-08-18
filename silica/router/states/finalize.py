@@ -379,8 +379,16 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                 prior = orch.DRIVER.read_note(note_path).content or ""
             except Exception:
                 continue
-            if f"[[{leaf_stem}]]" in prior:
-                continue  # already linked — idempotent on re-ingest
+            # Idempotency is about the BLOCK, not the link anywhere in the file.
+            # The distiller names the source basename as a `related:` /
+            # `parent note:` wikilink long before the leaf exists, so a
+            # whole-file grep read those notes as "already linked": they never
+            # got the block, and reliability_tier — which looks for the marker,
+            # not the link — filed them as distilled. 10 of 30 notes on one
+            # paper (2026-08-18).
+            already = prior.split(_SOURCES_MARKER, 1)[1] if _SOURCES_MARKER in prior else ""
+            if f"[[{leaf_stem}]]" in already:
+                continue  # this leaf is in the block already — re-ingest no-op
             attributed = attribute_lines(prior, leaf_body, label)
             # The definition rides the Sources block and only when a line was
             # actually marked, so a note never carries a dangling `[^id]`.

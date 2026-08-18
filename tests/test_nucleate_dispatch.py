@@ -71,7 +71,7 @@ def test_nucleate_md_with_target_dispatches_fsm_directly(stub_coordinator):
     assert msg == ""  # handled inline — no agent turn
     assert stub_coordinator == [
         {"inbox_files": ["Inbox/a.md"], "target_dir": "Concepts/AI", "hub": None,
-         "keep_sources": False, "seen_override": None, "distill_profile": None}
+         "keep_sources": True, "seen_override": None, "distill_profile": None}
     ]
 
 
@@ -816,3 +816,18 @@ def test_next_book_converts_while_the_previous_distills(
     assert overlap_seen.is_set(), f"no overlap — timeline: {timeline}"
     assert timeline == ["convert:alpha", "dispatch:01-alpha",
                         "convert:beta", "dispatch:01-beta"]
+
+
+def test_keep_sources_is_on_by_default_and_can_be_turned_off(stub_coordinator):
+    """The verbatim leaf in sources/ is what makes a note's source reachable at
+    all (reliability_tier reads it), and sources/ is retrieval-invisible, so
+    keeping it costs nothing but disk. --no-keep-sources is the way back."""
+    _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI")
+    assert stub_coordinator[-1]["keep_sources"] is True
+
+    _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI --no-keep-sources")
+    assert stub_coordinator[-1]["keep_sources"] is False
+
+    # the old explicit flag still parses, for anything that scripts it
+    _expand_workflow_shortcut("/nucleate Inbox/a.md --target=Concepts/AI --keep-sources")
+    assert stub_coordinator[-1]["keep_sources"] is True
