@@ -613,3 +613,44 @@ def block_present(existing_content: str | None, heading: str, source_basename: s
         provenance_header(heading, source_basename) in existing_content
         or _legacy_provenance_header(heading, source_basename) in existing_content
     )
+
+
+# Lane A (survey-provenance spec): the `distinct` dedup verdict persists as one
+# canonical, parseable callout line on the committed spoke. Builder and parser
+# live together (same single-source-of-truth idiom as provenance_header) so the
+# emitter (dedup) and the readers (survey, graph tooling) cannot drift. Emit
+# only this form — there is no legacy form to recognize.
+_RELATED_TRACE_RE = re.compile(
+    r"^> \[!info\] Related: \[\[([^\]]+)\]\] "
+    r"\(judged distinct(?:: (.*))?\)\s*$"
+)
+_RELATED_TRACE_RATIONALE_CHARS = 200
+
+
+def _related_trace_candidate(candidate: str) -> str:
+    """Candidate title made safe for a wikilink: brackets out, spaces folded."""
+    return " ".join(candidate.replace("[", " ").replace("]", " ").split())
+
+
+def related_trace(candidate: str, rationale: str) -> str:
+    """The canonical relation-trace line for a judged-distinct pair."""
+    cand = _related_trace_candidate(candidate)
+    rat = " ".join((rationale or "").split())[:_RELATED_TRACE_RATIONALE_CHARS]
+    tail = f": {rat}" if rat else ""
+    return f"> [!info] Related: [[{cand}]] (judged distinct{tail})"
+
+
+def parse_related_traces(body: str) -> list[tuple[str, str]]:
+    """(candidate, rationale) for every canonical trace line in *body*."""
+    out: list[tuple[str, str]] = []
+    for line in (body or "").splitlines():
+        m = _RELATED_TRACE_RE.match(line)
+        if m:
+            out.append((m.group(1), m.group(2) or ""))
+    return out
+
+
+def has_related_trace(body: str, candidate: str) -> bool:
+    """True if *body* already carries a trace line targeting *candidate*."""
+    cand = _related_trace_candidate(candidate)
+    return any(c == cand for c, _ in parse_related_traces(body))

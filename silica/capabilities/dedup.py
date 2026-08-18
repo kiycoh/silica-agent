@@ -464,7 +464,9 @@ def _route_distinct(
     if not target_dir:
         return no_merge
 
-    from silica.kernel.write.templates import slugify
+    from silica.kernel.write.templates import (
+        has_related_trace, related_trace, slugify,
+    )
 
     concept = ctx.get("concept", "")
     candidate_name = ctx.get("candidate", "")
@@ -481,9 +483,13 @@ def _route_distinct(
             return no_merge  # nothing to materialize the spoke from
         title = concept or candidate_name
         body = f"{excerpt}\n\n*(from {source_basename})*"
-    # The framework, not the model, guarantees the spoke is born linked.
-    if candidate_name and f"[[{candidate_name}]]" not in body:
-        body += f"\n\nRelated: [[{candidate_name}]]"
+    # The framework, not the model, guarantees the spoke is born linked — and
+    # the judged relation survives as a typed, parseable trace (survey-
+    # provenance spec, Lane A): the judge call is already paid, this line is
+    # the only record of its verdict. In-body rather than a post-commit patch,
+    # so the trace exists iff the spoke does and re-runs cannot stack copies.
+    if candidate_name and not has_related_trace(body, candidate_name):
+        body += f"\n\n{related_trace(candidate_name, decision.rationale)}"
 
     emit_feedback(item, "committing")
     spoke_path = f"{target_dir}/{slugify(title) or title}.md"
