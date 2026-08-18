@@ -367,6 +367,7 @@ def backlink_pass(
     """
     import os as _os
     from silica.driver import DRIVER
+    from silica.kernel.recall.paths import is_inbox_path
     from silica.kernel.vault_manifest import active_write_dir, within
 
     # This path rewrites pre-existing notes without passing validate_operations,
@@ -377,6 +378,14 @@ def backlink_pass(
     result: dict[str, list[str]] = {}
     for path in neighbourhood:
         if write_root and not within(path, write_root):
+            continue
+        # The inbox is staging, never a write target — and the guard above
+        # cannot stand in for this one: a vault with no vault.yaml has no write
+        # dir, so `write_root` is "" and `within` returns True for everything.
+        # The neighbourhood sweep excludes source leaves but not staging chunks,
+        # so wikilinks were being injected into the very text CLEANUP later
+        # copies into the verbatim source leaf, and "verbatim" stopped holding.
+        if is_inbox_path(path):
             continue
         try:
             nc = DRIVER.read_note(path)

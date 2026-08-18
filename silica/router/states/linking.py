@@ -42,6 +42,49 @@ def _run_title_refs(fsm: "InjectorFSM") -> list[typing.Any]:
     return refs
 
 
+def _backlink_neighbourhood(new_titles: list[str], touched_abs: set[str]) -> list[str]:
+    """Pre-existing notes whose body mentions any of `new_titles`.
+
+    NOT `DRIVER.mentions_of`, which this phase used to call and which cannot
+    answer the question: the mention index is keyed by the titles that were in
+    the trie when each body was last indexed, and `_patch_index` re-scans only
+    the note just written. A title coined moments ago therefore has no postings
+    against pre-existing bodies, the neighbourhood came out empty, and the phase
+    was inert for exactly the case it exists for. (It answers correctly right
+    after a FULL rebuild, which is why a test that skips `list_files()` first
+    never sees the hole.)
+
+    `search_context_batch` is one vault sweep for every new title, over bodies
+    the driver already caches. It is a substring match where the mention index
+    is word-boundary anchored, i.e. looser — harmless, because this is only the
+    prefilter: `backlink_pass` runs the real `autolink()` on each candidate, and
+    that decides what gets wrapped. Source leaves are search-invisible, so they
+    stay out of the neighbourhood as before.
+
+    ponytail: one cached-body sweep per chunk. If BACKLINK ever shows up as slow
+    on a large vault, cache the lowercased bodies alongside the body cache.
+    """
+    if not new_titles:
+        return []
+    try:
+        hits_by_title = orch.DRIVER.search_context_batch(list(new_titles))
+    except Exception as e:
+        logger.debug("BACKLINK: neighbourhood sweep failed (phase abstains): %s", e)
+        return []
+
+    neighbourhood: list[str] = []
+    seen_norm: set[str] = set()
+    for title in new_titles:
+        for hit in hits_by_title.get(title, []):
+            path = hit.ref.path
+            norm = os.path.abspath(path)
+            if norm in seen_norm or norm in touched_abs:
+                continue
+            seen_norm.add(norm)
+            neighbourhood.append(path)
+    return neighbourhood
+
+
 def _relevance_candidates(title_index: list[str]):
     """path -> the titles worth linking from it, by note-vector cosine.
 
@@ -170,19 +213,7 @@ def handle_backlink(fsm: "InjectorFSM") -> None:
             if p is not None
         }
 
-        neighbourhood: list[str] = []
-        seen_norm: set[str] = set()
-
-        # O(1) lookup into the inverted text index (GraphIndexMixin, both backends).
-        for title in new_titles:
-            try:
-                for path in orch.DRIVER.mentions_of(title):
-                    norm = os.path.abspath(path)
-                    if norm not in seen_norm and norm not in touched_paths_abs:
-                        seen_norm.add(norm)
-                        neighbourhood.append(path)
-            except Exception as _me:
-                logger.debug("BACKLINK: mentions_of for '%s' failed: %s", title, _me)
+        neighbourhood = _backlink_neighbourhood(new_titles, touched_paths_abs)
 
         if not neighbourhood:
             fsm._progress_note(fsm._chunk_task_id("backlink"), "backlink", "done")
