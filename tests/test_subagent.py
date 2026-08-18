@@ -601,3 +601,99 @@ def test_orphan_hub_is_none_when_context_has_no_hub():
         run_orphan(item, CONFIG)
 
     assert captured_hubs == [None], f"Expected hub=None when context has no 'hub' key, got {captured_hubs}"
+
+
+# --- provenance attribution of work items (2026-08-18) ----------------------
+
+def test_item_provenance_reads_a_batched_dedup_context():
+    """batch_dedup_items moves `inbox_file` into the per-concept entries (it is
+    in _BATCH_CONCEPT_KEYS), so the shared context of a family batch has no
+    source at all. Shape copied verbatim from a real run's workqueue.json."""
+    from types import SimpleNamespace
+    from silica.agent.subagent import _item_provenance
+
+    item = SimpleNamespace(context={
+        "candidate": "Single Module",
+        "concepts": [
+            {"concept": "partitions", "excerpt": "…",
+             "inbox_file": "docs/silica/Inbox/physics_0607100v2/2-vi-conclusions.md"},
+            {"concept": "modularity", "excerpt": "…",
+             "inbox_file": "docs/silica/Inbox/physics_0607100v2/2-vi-conclusions.md"},
+        ],
+        "content_hash": "5f7e4c65",
+        "hub": "Papers",
+        "run_id": "run-77",
+        "target_dir": "docs/silica/Papers",
+    })
+    assert _item_provenance(item) == ("2-vi-conclusions.md", "5f7e4c65", "run-77")
+
+
+def test_item_provenance_is_none_without_a_source():
+    from types import SimpleNamespace
+    from silica.agent.subagent import _item_provenance
+
+    assert _item_provenance(SimpleNamespace(context={"content_hash": "x"})) is None
+    assert _item_provenance(SimpleNamespace(context={})) is None
+
+
+def test_dedup_items_carry_the_chunk_s_own_file_not_file_zero():
+    """`fsm.inbox_file` is pinned to inbox_files[0] for the whole run while
+    `_current_content_hash` resolves per chunk, so on a folder nucleation every
+    worker's notes were filed under file 0 paired with another file's sha —
+    source 0 ends up with records at two sha values, which check_renucleate
+    reads as "modified" and drifted_notes reads as derived from a superseded
+    version."""
+    from types import SimpleNamespace
+
+    from silica.agent.subagent import _item_provenance
+    from silica.router.states.distill import _enqueue_near_title_dedups
+
+    class _Q:
+        def __init__(self): self.items = []
+        def enqueue(self, item): self.items.append(item)
+
+    q = _Q()
+    fsm = SimpleNamespace(
+        work_queue=q,
+        inbox_files=["Inbox/a.md", "Inbox/b.md", "Inbox/c.md"],
+        inbox_file="Inbox/a.md",          # pinned to files[0], forever
+        _current_source_file="Inbox/c.md",  # the chunk actually being distilled
+        _current_content_hash="sha-of-c",
+        hub="Hub", target_dir="Target",
+        progress=SimpleNamespace(run_id="run-9"),
+    )
+    _enqueue_near_title_dedups(fsm, [{
+        "op": {"heading": "Beta", "snippet": "beta body"},
+        "reason": "near_title candidate='Betas' path='Target/Betas.md' "
+                  "ratio=0.90 — deferred for dedup review",
+    }])
+
+    assert len(q.items) == 1
+    assert _item_provenance(q.items[0]) == ("c.md", "sha-of-c", "run-9")
+
+
+def test_expand_items_carry_the_same_triple():
+    from types import SimpleNamespace
+
+    from silica.agent.subagent import _item_provenance
+    from silica.router.states.distill import _enqueue_short_snippet_expands
+
+    class _Q:
+        def __init__(self): self.items = []
+        def enqueue(self, item): self.items.append(item)
+
+    q = _Q()
+    fsm = SimpleNamespace(
+        work_queue=q, inbox_file="Inbox/a.md", _current_source_file="Inbox/c.md",
+        _current_content_hash="sha-of-c", hub="Hub", target_dir="Target",
+        progress=SimpleNamespace(run_id="run-9"),
+        _chunks=[{"batches": [{"concepts": [{"name": "Beta", "inbox_excerpt": "…"}]}]}],
+        _current_chunk_idx=0,
+    )
+    _enqueue_short_snippet_expands(fsm, [
+        {"op": {"heading": "Beta", "path": "Target/Beta.md"},
+         "reason": "snippet too short (12 < 100)"},
+    ])
+
+    assert len(q.items) == 1
+    assert _item_provenance(q.items[0]) == ("c.md", "sha-of-c", "run-9")

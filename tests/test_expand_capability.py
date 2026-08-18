@@ -134,8 +134,10 @@ class _FSM:
     hub = "Corso"
     target_dir = "Corso"
     inbox_file = "Inbox/lez.md"
+    _current_source_file = "Inbox/lez.md"
     _current_content_hash = "hash9"
     _current_chunk_idx = 0
+    progress = None
 
     def __init__(self):
         from silica.kernel.workqueue import WorkQueue

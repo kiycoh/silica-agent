@@ -277,7 +277,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
     effort and must never block CLEANUP.
     """
     try:
-        from silica.kernel.write.provenance import append_record
+        from silica.kernel.write.provenance import append_record, is_deriving_op
 
         basename = os.path.basename(source_file)
         content_hashes = getattr(fsm, "_file_content_hashes", [])
@@ -287,7 +287,7 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
 
         notes = sorted({
             e.path for e in fsm.manifest.entries
-            if e.source_basename == basename and e.op in ("write", "patch")
+            if e.source_basename == basename and is_deriving_op(e.op)
         })
 
         append_record(basename, sha256, fsm.progress.run_id, notes)
@@ -322,6 +322,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
         from silica.kernel.write.provenance import (
             attribute_lines,
             footnote_label,
+            is_deriving_op,
             source_event_date,
         )
 
@@ -370,7 +371,7 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
 
         notes = sorted({
             e.path for e in fsm.manifest.entries
-            if e.source_basename == basename and e.op in ("write", "patch")
+            if e.source_basename == basename and is_deriving_op(e.op)
         })
         # Keyed per-claim attribution (OKF §5.1): the leaf body is the only copy
         # of what this source actually said, and here is the one place it sits

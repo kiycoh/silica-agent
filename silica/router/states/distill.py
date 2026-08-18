@@ -95,9 +95,18 @@ def _enqueue_near_title_dedups(fsm: "InjectorFSM", rejected_raw: list) -> None:
                 "candidate": m.group(1),
                 "score": 0.0,
                 "title_score": title_score,
-                "inbox_file": fsm.inbox_file,
+                # _current_source_file, NOT inbox_file: the latter is pinned to
+                # inbox_files[0] for the whole run, so on a folder nucleation
+                # every worker's notes were filed under file 0 paired with
+                # another file's sha — two sha values for one source, which
+                # check_renucleate reads as "modified" and drifted_notes reads
+                # as derived from a superseded version.
+                "inbox_file": fsm._current_source_file,
                 "hub": fsm.hub,
                 "content_hash": fsm._current_content_hash,
+                # The provenance ledger is keyed on the FSM's own run id — what
+                # CLEANUP stamps and what the dangling-link sweep reads back.
+                "run_id": getattr(getattr(fsm, "progress", None), "run_id", "") or "",
                 "target_dir": fsm.target_dir,
             },
             reason=r.get("reason", "near_title"),
@@ -152,9 +161,10 @@ def _enqueue_short_snippet_expands(fsm: "InjectorFSM", rejected_raw: list) -> No
                     "op": op,
                     "excerpt": excerpts.get(op.get("heading", ""), ""),
                     "reason": reason,
-                    "inbox_file": fsm.inbox_file,
+                    "inbox_file": fsm._current_source_file,  # see the dedup item above
                     "hub": fsm.hub,
                     "content_hash": fsm._current_content_hash,
+                    "run_id": getattr(getattr(fsm, "progress", None), "run_id", "") or "",
                     "target_dir": fsm.target_dir,
                 },
                 reason=reason,

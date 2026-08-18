@@ -314,7 +314,7 @@ def _run_embedder_free_dedup_leg(fsm: "InjectorFSM", idx: int, chunk: dict) -> N
         kept = [c for c in batch.get("concepts", []) if id(c) not in dup_ids]
         if kept:
             new_batches.append(
-                {"inbox_file": batch.get("inbox_file", fsm.inbox_file), "concepts": kept}
+                {"inbox_file": batch.get("inbox_file", fsm._current_source_file), "concepts": kept}
             )
     fsm._chunks[idx] = {"schema_version": chunk.get("schema_version", 1), "batches": new_batches}
 
@@ -483,7 +483,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
         logger.info("COLLISION: collapsed %d intra-chunk sibling near-dup concept(s)", _before - _after)
 
     for batch in chunk.get("batches", []):
-        inbox_file = batch.get("inbox_file", fsm.inbox_file)
+        inbox_file = batch.get("inbox_file", fsm._current_source_file)
         kept: list = []
 
         for concept in batch.get("concepts", []):
@@ -640,7 +640,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
                     "excerpt": excerpt,
                     "candidate": match.get("name", candidate_path),
                     "score": d.get("score"),
-                    "inbox_file": d.get("inbox_file", fsm.inbox_file),
+                    "inbox_file": d.get("inbox_file", fsm._current_source_file),
                     "hub": fsm.hub,
                     # C2 verdict routing: lets the dedup capability clean up
                     # (or author the distinct spoke from) the twin bundle.

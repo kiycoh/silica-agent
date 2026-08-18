@@ -248,3 +248,46 @@ def test_interrupt_mid_drain_stops_workers_and_renderer():
     # 3. Renderer can be closed cleanly (Live is stopped, no AttributeError).
     renderer.close()
     assert renderer._live is None, "renderer._live must be None after close()"
+
+
+def test_consumer_threads_resolve_the_run_id_lazily_not_at_thread_entry():
+    """The pool is submitted BEFORE fsm.run(), so _undo_run_id is still None when
+    a worker thread starts. Snapshotting it at entry pins None forever and every
+    expand/dedup write skips the journal — read it per item instead."""
+    from silica.router.coordinator import Coordinator
+
+    fsm = _FakeFSM(0)
+    fsm._undo_run_id = None  # not opened yet, exactly as at pool submit time
+    coord = _coordinator_with(fsm, SilicaConfig())
+
+    seen = {}
+
+    def _fake_consume(wq, agent, stop=None, undo_run=None):
+        fsm._undo_run_id = "run-xyz"          # the FSM opens its run meanwhile
+        seen["at_item"] = undo_run() if undo_run else None
+
+    with patch("silica.agent.subagent.consume", _fake_consume):
+        coord._consume(None)
+
+    assert seen["at_item"] == "run-xyz"
+
+
+def test_consume_stamps_the_run_id_per_item(tmp_vault):
+    """The seam itself: consume() must set the contextvar commit_ops reads."""
+    from silica.agent.commit import _current_undo_run
+    from silica.agent.subagent import consume
+    from silica.kernel.workqueue import WorkQueue, WorkItem
+
+    wq = WorkQueue()
+    wq.enqueue(WorkItem(kind="dedup", target_path="N.md"))
+    wq.close()
+
+    seen = []
+
+    class _Agent:
+        def handle(self, item):
+            seen.append(_current_undo_run.get())
+            return {"status": "committed"}
+
+    consume(wq, _Agent(), None, undo_run=lambda: "run-abc")
+    assert seen == ["run-abc"]

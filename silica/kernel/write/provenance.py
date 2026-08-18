@@ -162,6 +162,21 @@ def read_records(
     return list(records)
 
 
+# Op kinds that DERIVE a note from the source, i.e. what the ledger records.
+# Named once because the three call sites (CLEANUP's manifest, the sub-agent
+# worker lane, the anneal recovery) each spelled it inline and disagreed: the
+# worker lane listed only write/patch, and `overwrite` is the ONLY op four
+# sub-agent profiles in agent/bounds.py are allowed to emit — so the majority of
+# that lane's notes reached the vault with no record at all.
+DERIVING_OPS = frozenset({"write", "patch", "overwrite"})
+
+
+def is_deriving_op(op: Any) -> bool:
+    """True for an op kind that derives a note from its source. Accepts the
+    OpType enum or its `.value`, so both lanes ask the identical question."""
+    return getattr(op, "value", op) in DERIVING_OPS
+
+
 def append_record(
     source: str,
     sha256: str,
@@ -201,12 +216,31 @@ def append_record(
 
         with path_lease(str(path)):
             existing = read_records(vault_path=vault_path)
-            if any(
-                r.get("source") == source and r.get("sha256") == sha256 and r.get("run_id") == run_id
-                for r in existing
-            ):
-                return False
-            existing.append(record)
+            # Merge, not drop: a resumed CLEANUP re-fires with the same triple
+            # AND the same notes, so union is a no-op there — but the sub-agent
+            # lane commits several times under one triple, and dropping the
+            # later ones left their notes with no record at all.
+            idx = next(
+                (i for i, r in enumerate(existing)
+                 if r.get("source") == source and r.get("sha256") == sha256
+                 and r.get("run_id") == run_id),
+                None,
+            )
+            if idx is not None:
+                prior = list(existing[idx].get("notes") or [])
+                merged = list(dict.fromkeys(prior + list(notes)))
+                if merged == prior:
+                    return False
+                # Replace the entry, never edit it in place: read_records copies
+                # the LIST but hands back the very dicts `_records_memo` holds,
+                # so an in-place edit lands in the cache BEFORE the write below
+                # is known to have succeeded. That write can still fail (read-
+                # only vault, ENOSPC, lease dir gone) — the except swallows it
+                # and returns False while mtime/size are unchanged, leaving the
+                # memo valid and reporting notes that were never persisted.
+                existing[idx] = {**existing[idx], "notes": merged}
+            else:
+                existing.append(record)
             # Atomic: this ledger is authoritative (run_id/sha history is not
             # reconstructible from the vault) and read_records quarantines a
             # truncated file, so a torn rewrite would silently lose the history.

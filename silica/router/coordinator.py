@@ -326,4 +326,11 @@ class Coordinator:
         silica/agent/subagent.py (the same engine ad-hoc batches run on)."""
         from silica.agent.subagent import BoundedSubAgent, consume
 
-        consume(wq, BoundedSubAgent(self.config), self._stop)
+        # Pool threads start with a fresh context, so the run id has to be set
+        # inside the worker — and RESOLVED PER ITEM, not snapshotted here: this
+        # pool is submitted before `fsm.run()` opens the journal run, so at
+        # thread entry the id is still None. Without it commit_ops' `if
+        # undo_run_id:` guard silently skips the journal and /revert walks past
+        # every note the expand/dedup workers created.
+        consume(wq, BoundedSubAgent(self.config), self._stop,
+                undo_run=lambda: getattr(self.fsm, "_undo_run_id", None))

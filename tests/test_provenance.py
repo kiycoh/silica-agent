@@ -311,3 +311,127 @@ def test_concurrent_appends_lose_no_records(tmp_path, monkeypatch):
 
     records = provenance.read_records(vault_path=str(vault))
     assert len(records) == 8
+
+
+def test_append_record_merges_notes_into_a_matching_triple(tmp_vault):
+    """Two worker commits for the same (source, sha, run) must both be recorded.
+    The old idempotency dropped the second outright, so a dedup lane that
+    committed twice for one chunk left its second note untraceable."""
+    from silica.kernel.write.provenance import append_record, read_records
+
+    assert append_record("s.md", "sha1", "run1", ["Notes/A"])
+    append_record("s.md", "sha1", "run1", ["Notes/B"])
+
+    rec = [r for r in read_records() if r["sha256"] == "sha1"]
+    assert len(rec) == 1, "the triple must stay one record, not two"
+    assert rec[0]["notes"] == ["Notes/A", "Notes/B"]
+
+
+def test_append_record_of_an_identical_triple_changes_nothing(tmp_vault):
+    """Resume safety: re-entering CLEANUP with the same triple and the same
+    notes must not grow the ledger."""
+    from silica.kernel.write.provenance import append_record, read_records
+
+    append_record("s.md", "sha2", "run2", ["Notes/A"])
+    append_record("s.md", "sha2", "run2", ["Notes/A"])
+    rec = [r for r in read_records() if r["sha256"] == "sha2"]
+    assert len(rec) == 1 and rec[0]["notes"] == ["Notes/A"]
+
+
+def test_a_failed_merge_write_leaves_nothing_in_the_memo(tmp_path, monkeypatch):
+    """The merge branch used to edit the record dict in place.
+
+    read_records copies the LIST but hands back the very dicts the memo holds,
+    so the edit landed in the cache before the rewrite was known to have
+    succeeded — and when the rewrite failed, the memo went on reporting notes
+    that were never persisted. note_authored_by then answered True for an
+    unrecorded note and bulk._execute_patch dropped the patch as a no-op.
+    """
+    import os
+
+    from silica.kernel.write.provenance import note_authored_by
+
+    append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
+    read_records(vault_path=str(tmp_path))            # warm the memo
+
+    monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError("disk full")))
+    assert append_record("a.md", "sha1", "r1", ["N2"], vault_path=str(tmp_path)) is False
+    monkeypatch.undo()
+
+    assert read_records(vault_path=str(tmp_path))[0]["notes"] == ["N1"]
+    assert note_authored_by("N2", "a.md", vault_path=str(tmp_path)) is False
+    assert note_authored_by("N1", "a.md", vault_path=str(tmp_path)) is True
+
+
+def test_a_successful_merge_still_unions_the_notes(tmp_path):
+    """The sub-agent lane commits several times under one triple; the later
+    commits must not lose their notes."""
+    append_record("a.md", "sha1", "r1", ["N1"], vault_path=str(tmp_path))
+    assert append_record("a.md", "sha1", "r1", ["N2"], vault_path=str(tmp_path)) is True
+
+    recs = read_records(vault_path=str(tmp_path))
+    assert len(recs) == 1 and recs[0]["notes"] == ["N1", "N2"]
+
+
+# ---------------------------------------------------------------------------
+# is_deriving_op — one spelling for "this op derived a note from the source"
+# ---------------------------------------------------------------------------
+
+def test_overwrite_derives_a_note_like_write_and_patch():
+    """Four sub-agent profiles in agent/bounds.py may emit NOTHING BUT
+    overwrite, and all three dedup merges emit it. A predicate that lists only
+    write/patch unrecords the majority of that lane."""
+    from silica.kernel.write.ops import OpType
+    from silica.kernel.write.provenance import is_deriving_op
+
+    for op in ("write", "patch", "overwrite"):
+        assert is_deriving_op(op), op
+    for op in (OpType.write, OpType.patch, OpType.overwrite):
+        assert is_deriving_op(op), op
+    assert not is_deriving_op("skip")
+    assert not is_deriving_op(OpType.skip)
+
+
+# ---------------------------------------------------------------------------
+# nonextractive_lines — the extractive invariant
+# ---------------------------------------------------------------------------
+
+_SRC = "The quick brown fox jumps over the lazy dog and then keeps on going."
+
+
+def test_a_body_of_nothing_but_link_lines_is_still_checked():
+    """The wikilink-caption exemption `continue`d without recording the line,
+    so it was neither judged nor judgeable later: the `if not judged` fallback
+    could not see it and a body that was never checked read as fully
+    extractive."""
+    from silica.kernel.write.provenance import nonextractive_lines
+
+    assert nonextractive_lines("Related: [[Alpha]]\nSee also [[Beta]]", _SRC)
+    assert nonextractive_lines("[[Kant]] rejected [[Hume]].", _SRC)
+
+
+def test_a_link_footer_beside_real_content_is_still_exempt():
+    """The exemption itself stands: judging link footers made every block
+    carrying one unpassable."""
+    from silica.kernel.write.provenance import nonextractive_lines
+
+    body = "The quick brown fox jumps over the lazy dog\n\nCorrelati: [[Alpha]]"
+    assert nonextractive_lines(body, _SRC) == []
+
+
+def test_a_single_quoted_verbatim_span_is_extractive():
+    """_norm_extract folds U+2018/U+2019 to a straight apostrophe, so the
+    straight form is what reaches the wrapping-quote strip — and it was the one
+    quote missing from the class."""
+    from silica.kernel.write.provenance import nonextractive_lines
+
+    for open_q, close_q in (("‘", "’"), ("“", "”"),
+                            ("«", "»"), ('"', '"')):
+        line = f"{open_q}The quick brown fox jumps over the lazy dog{close_q}"
+        assert nonextractive_lines(line, _SRC) == [], (open_q, close_q)
+
+
+def test_a_fabricated_line_is_still_rejected():
+    from silica.kernel.write.provenance import nonextractive_lines
+
+    assert nonextractive_lines("A slow green turtle ambles past the alert cat.", _SRC)

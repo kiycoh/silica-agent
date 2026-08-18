@@ -18,8 +18,9 @@ class _FakeQueue:
 
 def _fsm(queue):
     return SimpleNamespace(
-        work_queue=queue, inbox_file="in.md", hub="Hub",
-        _current_content_hash="h", target_dir="TargetDir",
+        work_queue=queue, inbox_file="in.md", _current_source_file="in.md",
+        hub="Hub", _current_content_hash="h", target_dir="TargetDir",
+        progress=SimpleNamespace(run_id="run-1"),
     )
 
 

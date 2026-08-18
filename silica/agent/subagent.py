@@ -27,7 +27,32 @@ from silica.kernel.workqueue import WorkItem
 logger = logging.getLogger(__name__)
 
 
-def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None) -> None:
+def _item_provenance(item: Any) -> tuple[str, str, str] | None:
+    """(source basename, content sha, ledger run id) of the work item.
+
+    dedup carries the inbox path, expand the op's source_basename. The run id
+    is the FSM's own `progress.run_id` — the key CLEANUP stamps and the key the
+    dangling-link sweep and check_renucleate read back. It is NOT the undo
+    journal's run id, which is a separate uuid4 keyspace.
+    """
+    import os
+
+    ctx = getattr(item, "context", None) or {}
+    sha = ctx.get("content_hash") or ""
+    run_id = ctx.get("run_id") or ""
+    src = ctx.get("inbox_file") or (ctx.get("op") or {}).get("source_basename") or ""
+    if not src:
+        # A dedup FAMILY batch: `inbox_file` is in _BATCH_CONCEPT_KEYS, so
+        # batch_dedup_items moved it into the per-concept entries and the shared
+        # context has no source left. One batch is always one file — the sha it
+        # carries is fsm._current_content_hash — so the first entry answers for all.
+        src = next((c.get("inbox_file") for c in (ctx.get("concepts") or [])
+                    if isinstance(c, dict) and c.get("inbox_file")), "")
+    return (os.path.basename(src), sha, run_id) if src and sha else None
+
+
+def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None,
+            undo_run: Any = None) -> None:
     """One consumer thread: claim → handle → complete until the queue closes.
 
     THE consumer loop — shared by the Coordinator's in-run pool and the ad-hoc
@@ -39,6 +64,7 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None) -> None:
     items to be marked cancelled rather than dispatched.
     """
     from silica.agent.bus import BUS
+    from silica.agent.commit import _current_provenance, _current_undo_run
     from silica.agent.events import WorkCancelledEvent
 
     while True:
@@ -52,7 +78,15 @@ def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None) -> None:
                 WorkCancelledEvent(item.id, item.kind, "pre_handle"),
             )
             continue
-        res = agent.handle(item)
+        tok = _current_provenance.set(_item_provenance(item))
+        run_tok = (_current_undo_run.set(undo_run())
+                   if undo_run is not None else None)
+        try:
+            res = agent.handle(item)
+        finally:
+            _current_provenance.reset(tok)
+            if run_tok is not None:
+                _current_undo_run.reset(run_tok)
         wq.complete(item, res.get("status", "done"), res)
 
 

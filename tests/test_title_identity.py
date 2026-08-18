@@ -150,7 +150,9 @@ def test_near_title_rejection_enqueues_dedup_workitem():
         hub = "Corso"
         target_dir = "Corso"
         inbox_file = "Inbox/lez.md"
+        _current_source_file = "Inbox/lez.md"
         _current_content_hash = "hash9"
+        progress = None
 
     rejected = [
         {"op": {"op": "write", "heading": "Description", "path": "Corso/Description.md",

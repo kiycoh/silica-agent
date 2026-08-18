@@ -120,6 +120,42 @@ def commit_derived(rel: str, content: str) -> dict[str, Any]:
     return {"status": "committed"}
 
 
+def _append_provenance(run_id: str | None, touched: list[tuple[str, str, str]]) -> None:
+    """Record this worker's notes against the source it was dispatched for.
+
+    Only the worker lane needs this: the FSM's own writes reach the ledger
+    through CLEANUP's manifest. Best-effort — the notes are already on disk.
+    """
+    prov = _current_provenance.get()
+    if not prov:
+        return
+    source, sha, *tail = prov
+    if not (source and sha):
+        return
+    # No `.md`: the ledger stores note refs bare, and CLEANUP writes them that way.
+    # `overwrite` is in the set because it is the ONLY op four sub-agent profiles
+    # in agent/bounds.py may emit (and what all three dedup merges emit), so
+    # leaving it out silently unrecorded the majority of this lane's writes —
+    # byte for byte the defect this function exists to close.
+    try:
+        from silica.kernel.write.provenance import append_record, is_deriving_op
+
+        notes = sorted({p.removesuffix(".md") for p, op_type, _ in touched
+                        if is_deriving_op(op_type)})
+        if not notes:
+            return
+        # The ledger's key is the FSM's own run id, which the item carries: every
+        # reader (Coordinator._sweep_dangling_links, CLEANUP's own writer,
+        # check_renucleate) matches on `fsm.progress.run_id`. `run_id` here is
+        # the UNDO-journal id — a uuid4 from journal.start_run, a different
+        # keyspace — so records written under it matched nothing and the sweep
+        # still missed exactly the notes this attribution exists to reach.
+        ledger_run = (tail[0] if tail else "") or run_id or "worker"
+        append_record(source, sha, ledger_run, notes)
+    except Exception as exc:
+        logger.debug("commit_ops: provenance append failed (non-fatal): %s", exc)
+
+
 def commit_ops(
     ops: list[Op],
     *,
@@ -202,6 +238,7 @@ def commit_ops(
         undo_run_id = _current_undo_run.get()
         if undo_run_id:
             _journal_inverses(undo_run_id, inverses)
+        _append_provenance(undo_run_id, touched)
 
         return {
             "status": "committed",

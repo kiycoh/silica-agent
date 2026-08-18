@@ -188,3 +188,118 @@ def test_commit_does_not_journal_outside_batch_run():
 
     assert res["status"] == "committed"
     assert recorded == []
+
+
+# --- worker writes must be revertible and traceable (2026-08-18) -------------
+# The Coordinator's in-run expand/dedup lane commits through commit_ops on pool
+# threads. Contextvars do not cross a ThreadPoolExecutor boundary, so
+# _current_undo_run was unset there and the `if undo_run_id:` guard silently
+# skipped the journal; provenance was never appended at all. Measured on a
+# 4-paper library gate: 3 of 39 notes had no inverse and no record.
+
+def _write_op(path="Concepts/Ack.md"):
+    return Op(op=OpType.write, heading="Ack", source_basename="3-rq2.md",
+              path=path, snippet="body " * 40)
+
+
+def _committed(fn):
+    with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
+         patch("silica.tools.wrapped.silica_snapshot",
+               return_value={"txn_id": "t2", "inverses": [{"kind": "delete_created", "path": "Concepts/Ack.md"}]}), \
+         patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
+         patch("silica.tools.composed.silica_lint", return_value={"success": True}):
+        return fn()
+
+
+def test_worker_commit_appends_provenance_for_its_source(tmp_vault):
+    from silica.agent import commit as commit_mod
+    from silica.kernel.write.provenance import read_records
+
+    tok = commit_mod._current_provenance.set(("3-rq2.md", "sha-abc"))
+    try:
+        res = _committed(lambda: commit_ops([_write_op()], target_dir="Concepts"))
+    finally:
+        commit_mod._current_provenance.reset(tok)
+
+    assert res["status"] == "committed"
+    rec = [r for r in read_records() if r.get("sha256") == "sha-abc"]
+    assert rec, "worker write left no provenance record"
+    assert rec[0]["source"] == "3-rq2.md"
+    assert any("Concepts/Ack" in n for n in rec[0]["notes"])
+
+
+def test_worker_commit_without_provenance_context_is_silent(tmp_vault):
+    """An ad-hoc commit_ops (no work item behind it) must not invent a record."""
+    from silica.kernel.write.provenance import read_records
+
+    before = len(read_records())
+    assert _committed(lambda: commit_ops([_write_op()], target_dir="Concepts"))["status"] == "committed"
+    assert len(read_records()) == before
+
+
+def _overwrite_op(path="Concepts/Ack.md"):
+    return Op(op=OpType.overwrite, heading="Ack", source_basename="3-rq2.md",
+              path=path, content="# Ack\n\n" + "body " * 40)
+
+
+def test_worker_commit_records_an_overwrite(tmp_vault):
+    """`overwrite` is the ONLY op four sub-agent profiles in agent/bounds.py may
+    emit, and what all three dedup merges emit. The ledger predicate listed only
+    write/patch, so the majority of the lane's writes reached the vault with no
+    record: /revert walked past them and check_renucleate reported the source as
+    never nucleated."""
+    from silica.agent import commit as commit_mod
+    from silica.kernel.write.provenance import read_records
+
+    tok = commit_mod._current_provenance.set(("3-rq2.md", "sha-ow", "run-fsm-1"))
+    try:
+        with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
+             patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t3", "inverses": []}), \
+             patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
+             patch("silica.tools.composed.silica_lint", return_value={"success": True}):
+            res = commit_ops([_overwrite_op()], target_dir="Concepts")
+    finally:
+        commit_mod._current_provenance.reset(tok)
+
+    assert res["status"] == "committed"
+    rec = [r for r in read_records() if r.get("sha256") == "sha-ow"]
+    assert rec, "an overwrite left no provenance record"
+    assert any("Concepts/Ack" in n for n in rec[0]["notes"])
+
+
+def test_worker_provenance_is_keyed_on_the_fsm_run_not_the_journal_run(tmp_vault):
+    """Every reader of this field — Coordinator._sweep_dangling_links, CLEANUP's
+    own writer — matches on `fsm.progress.run_id`. The lane used to stamp the
+    undo journal's uuid4 instead, a different keyspace, so the records matched
+    nothing and the sweep still missed the notes they exist to attribute."""
+    from silica.agent import commit as commit_mod
+    from silica.kernel.write.provenance import read_records
+
+    tok = commit_mod._current_provenance.set(("3-rq2.md", "sha-key", "run-fsm-2"))
+    journal_tok = commit_mod._current_undo_run.set("undo-uuid-deadbeef")
+    try:
+        with patch("silica.tools.composed.silica_validate_ops", return_value={"validated_count": 1, "success": True}), \
+             patch("silica.tools.wrapped.silica_snapshot", return_value={"txn_id": "t4", "inverses": []}), \
+             patch("silica.tools.composed.silica_bulk_write", return_value={"successful": 1, "total": 1, "failed": []}), \
+             patch("silica.tools.composed.silica_lint", return_value={"success": True}), \
+             patch("silica.agent.commit._journal_inverses"):
+            commit_ops([_write_op()], target_dir="Concepts")
+    finally:
+        commit_mod._current_undo_run.reset(journal_tok)
+        commit_mod._current_provenance.reset(tok)
+
+    rec = [r for r in read_records() if r.get("sha256") == "sha-key"]
+    assert rec and rec[0]["run_id"] == "run-fsm-2"
+
+
+def test_a_two_tuple_provenance_context_still_works(tmp_vault):
+    """The run id is optional: older callers set (source, sha)."""
+    from silica.agent import commit as commit_mod
+    from silica.kernel.write.provenance import read_records
+
+    tok = commit_mod._current_provenance.set(("3-rq2.md", "sha-2tuple"))
+    try:
+        _committed(lambda: commit_ops([_write_op()], target_dir="Concepts"))
+    finally:
+        commit_mod._current_provenance.reset(tok)
+    assert [r for r in read_records() if r.get("sha256") == "sha-2tuple"]
