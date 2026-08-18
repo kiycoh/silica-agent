@@ -340,3 +340,125 @@ def test_anneal_retry_without_payloads_keeps_legacy_behavior(tmp_vault, tmp_path
 
     res = silica_deferred_retry("fff6")
     assert res.get("success") is True and res["written"] == 1
+
+
+# --- recovered writes must be revertible and traceable (2026-08-18) ----------
+# The boundary anneal runs in the FSM's `finally`, after CLEANUP has flushed
+# the journal and closed the manifest. Measured on a 3-paper library gate:
+# 5 of 94 notes existed on disk with no undo inverse and no provenance record —
+# `/revert` walked past them and `check_renucleate` could not see them.
+
+def test_recovered_writes_land_in_the_undo_journal(tmp_vault, tmp_path, monkeypatch):
+    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.tools.pipeline import silica_anneal
+
+    tmp_vault.note("Reti/Reti.md", "# Reti\n")
+    store = _park(monkeypatch, tmp_path)
+    store.put(
+        "ddd4", "inbox/d.md", "Reti", None,
+        [{"op": "write", "heading": "Broker", "source_basename": "d.md",
+          "path": "Reti/Broker.md", "title": "Broker", "snippet": LONG}],
+        rejection_reasons={"Reti/Broker.md": "lint failed (stale)"},
+        phase="VALIDATE",
+    )
+
+    assert silica_anneal()["written"] == 1
+
+    journal = get_undo_journal()
+    run_id = journal.last_active_run()
+    assert run_id, "the anneal opened no journal run"
+    assert "Reti/Broker.md" in {inv.path for inv, _ in journal.inverses_for(run_id)}
+
+
+def test_recovered_writes_are_appended_to_provenance(tmp_vault, tmp_path, monkeypatch):
+    from silica.kernel.write.provenance import read_records
+    from silica.tools.pipeline import silica_anneal
+
+    tmp_vault.note("Reti/Reti.md", "# Reti\n")
+    store = _park(monkeypatch, tmp_path)
+    store.put(
+        "eee5", "inbox/e.md", "Reti", None,
+        [{"op": "write", "heading": "Broker", "source_basename": "e.md",
+          "path": "Reti/Broker.md", "title": "Broker", "snippet": LONG}],
+        rejection_reasons={"Reti/Broker.md": "lint failed (stale)"},
+        phase="VALIDATE",
+    )
+
+    assert silica_anneal()["written"] == 1
+
+    recovered = [r for r in read_records() if r.get("sha256") == "eee5"]
+    assert recovered, "no provenance record for the recovered source"
+    assert any("Reti/Broker" in n for r in recovered for n in r["notes"])
+    assert recovered[0]["source"] == "e.md"
+
+
+# --- who owns the recovered writes (2026-08-19) -----------------------------
+
+def _recovery_args():
+    from types import SimpleNamespace
+
+    from silica.kernel.write.ops import InverseOp, InverseOpKind, Op, OpType
+
+    txn = SimpleNamespace(inverses=[
+        InverseOp(kind=InverseOpKind.delete_created, path="Reti/PubSub.md")])
+    ops = [Op(op=OpType.write, heading="PubSub", source_basename="a.md",
+              path="Reti/PubSub.md", snippet=LONG)]
+    return txn, ops, {"source_path": "Inbox/a.md"}
+
+
+class _FakeJournal:
+    def __init__(self):
+        self.started, self.recorded = [], []
+
+    def start_run(self, **kw):
+        self.started.append(kw)
+        return "fresh-anneal-run"
+
+    def record(self, run_id, inverse, post_hash):
+        self.recorded.append(run_id)
+
+
+def test_the_boundary_anneal_rides_the_run_it_fires_inside(tmp_vault, monkeypatch):
+    """The anneal runs in the FSM's `finally`, so a journal run of its own gets
+    a LATER started_at — and `last_active_run` orders by that. /revert therefore
+    undid the handful of recovered notes and left the whole nucleation on disk.
+    The ledger id is separate and must be the FSM's progress run: that is what
+    Coordinator._sweep_dangling_links matches on."""
+    from silica.agent import commit as commit_mod
+    from silica.kernel.write import undo_journal
+    from silica.kernel.write.provenance import read_records
+    from silica.tools import pipeline
+
+    journal = _FakeJournal()
+    monkeypatch.setattr(undo_journal, "get_undo_journal", lambda: journal)
+
+    txn, ops, bundle = _recovery_args()
+    undo_tok = commit_mod._current_undo_run.set("fsm-undo-run")
+    ledger_tok = commit_mod._current_ledger_run.set("fsm-progress-run")
+    try:
+        pipeline._record_recovered_writes(txn, ops, "sha-x", bundle)
+    finally:
+        commit_mod._current_ledger_run.reset(ledger_tok)
+        commit_mod._current_undo_run.reset(undo_tok)
+
+    assert journal.started == [], "opened a journal run that outranks the FSM's"
+    assert journal.recorded == ["fsm-undo-run"]
+    rec = [r for r in read_records() if r.get("sha256") == "sha-x"]
+    assert rec and rec[0]["run_id"] == "fsm-progress-run"
+
+
+def test_a_standalone_retry_still_opens_its_own_revertible_unit(tmp_vault, monkeypatch):
+    from silica.kernel.write import undo_journal
+    from silica.kernel.write.provenance import read_records
+    from silica.tools import pipeline
+
+    journal = _FakeJournal()
+    monkeypatch.setattr(undo_journal, "get_undo_journal", lambda: journal)
+
+    txn, ops, bundle = _recovery_args()
+    pipeline._record_recovered_writes(txn, ops, "sha-y", bundle)
+
+    assert journal.started and journal.started[0]["source"] == "anneal"
+    assert journal.recorded == ["fresh-anneal-run"]
+    rec = [r for r in read_records() if r.get("sha256") == "sha-y"]
+    assert rec and rec[0]["run_id"] == "anneal"

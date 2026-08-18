@@ -741,8 +741,21 @@ class InjectorFSM(BaseFSM[InjectorState]):
             from silica.kernel.recall.deferred import get_deferred_store
             if not get_deferred_store().list_all():
                 return
+            from silica.agent.commit import _current_ledger_run, _current_undo_run
             from silica.tools.pipeline import silica_anneal
-            res = silica_anneal(steer=False)
+
+            # This sweep writes inside the run's own `finally`, so its notes are
+            # part of the run the user just started: they ride the run's journal
+            # entry (else /revert undoes the anneal and leaves the nucleation)
+            # and carry the run's ledger id (else the dangling-link sweep, which
+            # matches on progress.run_id, cannot see them).
+            toks = (_current_undo_run.set(self._undo_run_id),
+                    _current_ledger_run.set(getattr(self.progress, "run_id", None)))
+            try:
+                res = silica_anneal(steer=False)
+            finally:
+                _current_undo_run.reset(toks[0])
+                _current_ledger_run.reset(toks[1])
             if res.get("written"):
                 logger.info("boundary anneal: recovered %d deferred op(s)", res.get("written"))
                 self._lift_recovered_partial()

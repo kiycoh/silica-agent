@@ -524,6 +524,12 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
 
     # Recovered writes bypassed the FSM's AUTOLINK/HUB_UPDATE — give them edges.
     _link_recovered_writes(validated, target_dir, hub, bundle.get("source_path", ""))
+    # ...and they bypassed CLEANUP, which is where the journal is flushed and
+    # provenance is appended. The boundary anneal runs in the FSM's `finally`,
+    # after both. Measured 2026-08-18 on a 3-paper library gate: 5 of 94 notes
+    # sat on disk with no inverse and no record, so `/revert` walked past them
+    # and `check_renucleate` reported the source as never nucleated.
+    _record_recovered_writes(txn, validated, content_hash, bundle)
 
     # Update or clear the deferred store
     if still_rejected:
@@ -550,6 +556,64 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
     }
 
 
+def _record_recovered_writes(txn, validated, content_hash: str, bundle: dict) -> None:
+    """Journal + provenance for ops recovered outside the FSM's CLEANUP.
+
+    Joins the ambient run when there is one. The boundary anneal fires inside
+    the FSM's `finally`, so its writes belong to the run the user just started:
+    a fresh journal run carries a later `started_at`, `last_active_run` orders
+    by that, and `/revert` therefore undid the handful of recovered notes and
+    left the whole nucleation on disk. Only a STANDALONE `silica_deferred_retry`
+    — no run to join — opens its own revertible unit. Best-effort throughout:
+    the notes are already on disk, and failing here must not undo them.
+    """
+    import hashlib
+
+    from silica.agent.commit import _current_ledger_run, _current_undo_run
+    from silica.config import CONFIG
+    from silica.driver import DRIVER
+
+    try:
+        from silica.kernel.write.undo_journal import get_undo_journal
+
+        journal = get_undo_journal()
+        run_id = _current_undo_run.get() or journal.start_run(
+            source="anneal", vault=CONFIG.vault_path.strip() or None)
+        for inv in txn.inverses:
+            try:
+                post = DRIVER.read_note(inv.path).content
+                post_hash = hashlib.sha256((post or "").encode("utf-8")).hexdigest()
+            except Exception:
+                post_hash = None
+            journal.record(run_id, inv, post_hash)
+    except Exception as exc:
+        logger.debug("anneal: journal record failed (non-fatal): %s", exc)
+        run_id = ""
+
+    try:
+        import os as _os
+
+        from silica.kernel.write.provenance import append_record, is_deriving_op
+
+        source = _os.path.basename(bundle.get("source_path", "") or "")
+        notes = sorted({
+            (op.path or "").removesuffix(".md")
+            for op in validated
+            if is_deriving_op(op.op) and op.path
+        })
+        if source and content_hash and notes:
+            # The LEDGER's run id, which is not the journal's: every reader of
+            # this field (Coordinator._sweep_dangling_links) matches on
+            # `fsm.progress.run_id`, so stamping the journal's uuid4 here wrote
+            # a record nothing could ever find. A standalone retry has no run to
+            # name and stays "anneal". A separate record either way — the ledger
+            # is append-only history, never a rewrite of what CLEANUP recorded.
+            append_record(source, content_hash,
+                          _current_ledger_run.get() or "anneal", notes)
+    except Exception as exc:
+        logger.debug("anneal: provenance append failed (non-fatal): %s", exc)
+
+
 class AnnealArgs(BaseModel):
     steer: bool = Field(
         default=False,
@@ -561,10 +625,9 @@ class AnnealArgs(BaseModel):
 def silica_anneal(steer: bool = False, limit: int = 0) -> dict[str, Any]:
     """Boundary annealing: sweep EVERY deferred bundle through the mechanical
     retry (re-validate against the current vault, write what now passes), then
-    optionally hand each bundle's still-failing ops to the escalation model in
-    ONE call per bundle — the per-op ``rejection_reason`` stamps are the steer
-    feedback. Recovery work happens here, at the boundary, where defects are
-    segregated and batchable, instead of inflating the in-flight pipeline.
+    with steer=True hand each bundle's still-failing ops to the escalation
+    model in ONE call per bundle, steered by the per-op ``rejection_reason``
+    stamps.
     """
     from silica.kernel.recall.deferred import get_deferred_store
 

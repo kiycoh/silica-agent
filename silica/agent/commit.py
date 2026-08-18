@@ -40,6 +40,24 @@ _current_undo_run: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "silica_undo_run", default=None
 )
 
+# Ambient PROVENANCE-ledger run for writes that happen outside CLEANUP but
+# still belong to a run — the boundary anneal, which fires inside the FSM's
+# `finally`. Distinct from _current_undo_run: that one is the undo journal's
+# uuid4, this one is `fsm.progress.run_id`, the key every ledger reader matches
+# on. Unset for a standalone tool call, which records under "anneal".
+_current_ledger_run: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "silica_ledger_run", default=None
+)
+
+# (source_basename, content_sha[, ledger_run_id]) of the work item a worker
+# thread is handling. commit_ops has no manifest and no CLEANUP behind it, so
+# this is the only way a sub-agent's note reaches the provenance ledger. Unset
+# for ad-hoc commits, which have no source to attribute to. The run id is
+# optional so a 2-tuple (older callers, tests) still works.
+_current_provenance: contextvars.ContextVar[tuple[str, ...] | None] = contextvars.ContextVar(
+    "silica_current_provenance", default=None
+)
+
 
 def _journal_inverses(run_id: str, inverses: list[dict]) -> None:
     """Record a committed batch's inverses so /revert can undo subagent writes.
