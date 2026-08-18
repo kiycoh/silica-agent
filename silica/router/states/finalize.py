@@ -856,7 +856,7 @@ def handle_rollback(fsm: "InjectorFSM") -> None:
     fsm._progress_note("rollback", "rollback", "running")
     snapshot_res = fsm._chunk_ctx.get("snapshot", {})
     # fsm._txn.inverses is the single source of truth for rollback (C3 /
-    # ADR-009): SNAPSHOT seeds it and every phase that mutates a pre-existing
+    # ADR-0009): SNAPSHOT seeds it and every phase that mutates a pre-existing
     # note appends to it. Fall back to the persisted snapshot dict only when
     # no live transaction exists (defensive — both share the per-chunk lifetime).
     if fsm._txn is not None:
