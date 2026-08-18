@@ -185,8 +185,11 @@ def _deserialize_notes(raw: bytes) -> dict[str, dict[str, Any]]:
     voff = toff = 0
     for path, m in meta.get("notes", {}).items():
         vlen = int(m.get("vlen", 0))
+        # Views over the two flat buffers, NOT .tolist(): exploding to Python
+        # float lists cost +247 MB RSS on a 24.8 MB / 1198-note index (measured
+        # 2026-08-17, 10x the file). All rows share the one flat array.
         entry: dict[str, Any] = {
-            "vec": flat[voff:voff + vlen].tolist(),
+            "vec": flat[voff:voff + vlen],
             "name": m.get("name", ""),
             "ts": m.get("ts", 0.0),
         }
@@ -194,7 +197,7 @@ def _deserialize_notes(raw: bytes) -> dict[str, dict[str, Any]]:
         tlen = m.get("tlen")
         if tlen is not None:
             tlen = int(tlen)
-            entry["title_vec"] = tflat[toff:toff + tlen].tolist()
+            entry["title_vec"] = tflat[toff:toff + tlen]
             toff += tlen
         ch = m.get("chash")
         if ch:
@@ -270,7 +273,20 @@ class EmbedStore:
             self._notes = _deserialize_notes(raw)
         else:
             try:
-                self._notes = orjson.loads(raw).get("notes", {})
+                notes = orjson.loads(raw).get("notes", {})
+                # Normalize legacy list vectors to float32 rows so the in-memory
+                # representation is uniform whichever format was on disk. INSIDE
+                # the guard: `{"notes": null}` or `{"notes": []}` parses fine and
+                # then blows up here, and _load runs from __init__ — so a half-
+                # written or hand-edited index made EmbedStore() itself raise,
+                # killing every caller that only wanted len(store). A malformed
+                # index degrades to an empty store, as the npz twin does.
+                for entry in notes.values():
+                    for key in ("vec", "title_vec"):
+                        v = entry.get(key)
+                        if v is not None and not isinstance(v, np.ndarray):
+                            entry[key] = np.asarray(v, dtype=np.float32).ravel()
+                self._notes = notes
             except Exception:
                 self._notes = {}
 
@@ -303,11 +319,16 @@ class EmbedStore:
         re-embed edited ones. Omitting it preserves any existing hash.
         """
         existing = self._notes.get(path, {})
-        entry: dict[str, Any] = {"vec": vec, "name": name, "ts": time.time()}
+        # Stored as a float32 row, matching what _load produces: the list only
+        # exists at the get_vec/get_title_vec boundary.
+        entry: dict[str, Any] = {
+            "vec": np.asarray(vec, dtype=np.float32).ravel(),
+            "name": name, "ts": time.time(),
+        }
         # Preserve existing title_vec if not explicitly provided
         resolved_tv = title_vec if title_vec is not None else existing.get("title_vec")
         if resolved_tv is not None:
-            entry["title_vec"] = resolved_tv
+            entry["title_vec"] = np.asarray(resolved_tv, dtype=np.float32).ravel()
         resolved_ch = content_hash if content_hash is not None else existing.get("content_hash")
         if resolved_ch is not None:
             entry["content_hash"] = resolved_ch
@@ -322,9 +343,17 @@ class EmbedStore:
     # Lookup
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _as_list(v: Any) -> list[float] | None:
+        """Materialize the list contract at the API boundary. Internally a
+        vector is a float32 row; externally it stays the list it always was."""
+        if v is None:
+            return None
+        return v.tolist() if isinstance(v, np.ndarray) else v
+
     def get_vec(self, path: str) -> list[float] | None:
         entry = self._notes.get(path)
-        return entry["vec"] if entry else None
+        return self._as_list(entry["vec"]) if entry else None
 
     def get_title_vec(self, path: str) -> list[float] | None:
         """Return the title-only embedding vector, or None if not yet indexed.
@@ -333,7 +362,7 @@ class EmbedStore:
         callers must handle the None case (title_score = 0.0 fallback).
         """
         entry = self._notes.get(path)
-        return entry.get("title_vec") if entry else None
+        return self._as_list(entry.get("title_vec")) if entry else None
 
     def get_content_hash(self, path: str) -> str | None:
         """Return the embedded-text signature, or None for un-hashed entries.
@@ -383,7 +412,9 @@ class EmbedStore:
         # matvec 0.03 ms -> 12.4 ms, mat@mat.T 10 ms -> 15.3 s. Do not retry without
         # a BLAS that speaks fp16.
         vecs = {p: self._notes[p].get(vec_key) for p in self._notes}
-        paths = [p for p, v in vecs.items() if v]
+        # `is not None and len(v)`, never bare truthiness: rows are ndarrays
+        # now, and an ndarray raises on bool().
+        paths = [p for p, v in vecs.items() if v is not None and len(v)]
         if not paths:
             return np.zeros((0, 0), dtype=np.float32), [], None
         # Modal dimension, not the first note's: in a mixed-dim store (post model

@@ -345,7 +345,9 @@ def test_build_index_skips_unchanged_body_across_reload(tmp_path):
 def test_upsert_stores_title_vec(tmp_path):
     store = EmbedStore(path=tmp_path / "idx.json")
     store.upsert("Robotica/ROS", "ROS", [1.0, 0.0], title_vec=[0.9, 0.1])
-    assert store.get_title_vec("Robotica/ROS") == [0.9, 0.1]
+    # float32 at upsert time, not only after a save/load roundtrip: a fresh
+    # entry and a reloaded one now carry identical precision.
+    assert store.get_title_vec("Robotica/ROS") == pytest.approx([0.9, 0.1], rel=1e-6)
 
 
 def test_get_title_vec_missing_returns_none(tmp_path):
