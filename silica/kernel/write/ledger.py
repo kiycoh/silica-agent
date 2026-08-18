@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""SQLite ledger for idempotent resume (ADR-011 / Addendum C5).
+"""SQLite ledger for idempotent resume (ADR-0011 / Addendum C5).
 
 Tracks per-op outcomes. The orchestrator writes here after commit.
 On re-run, the router checks the ledger: a source with all ops 'committed',

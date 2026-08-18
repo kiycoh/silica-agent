@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Canonical Op schema for the Silica pipeline (ADR-007 / Addendum C1).
+"""Canonical Op schema for the Silica pipeline (ADR-0007 / Addendum C1).
 
 This is the single source of truth imported by sanitize, validate, snapshot,
 bulk, and lint. No module defines its own op structure locally.
@@ -112,7 +112,7 @@ class Op(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Rollback inverse ops (ADR-009 / Addendum C3)
+# Rollback inverse ops (ADR-0009 / Addendum C3)
 # ---------------------------------------------------------------------------
 
 class InverseOpKind(str, Enum):

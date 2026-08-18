@@ -8,7 +8,7 @@ From SILICA.md §4.4:
   - silica_move always updates wikilinks (graph-safe).
   - silica_delete refuses to delete if it loses density.
 
-C3 rollback strategy (ADR-009):
+C3 rollback strategy (ADR-0009):
   - write ops   → InverseOp(delete_created, path)
   - patch/overwrite ops → InverseOp(restore_version, path, version=N)
   - Txn.inverses: list[InverseOp] replaces the ad-hoc created_paths field.

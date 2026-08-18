@@ -151,7 +151,7 @@ class GraphSnapshot:
 class Txn:
     """Transaction handle for snapshot/rollback.
 
-    Rollback strategies (C3 / ADR-009):
+    Rollback strategies (C3 / ADR-0009):
       - inverses:       authoritative list of InverseOp — consumed by silica_restore and
                         the ROLLBACK state. Single source of truth.
       - created_paths:  derived from inverses (delete_created entries); same reason.

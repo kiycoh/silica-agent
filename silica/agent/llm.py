@@ -5,7 +5,7 @@
 
 Handles the interactive agentic loop (tool-calling, multi-turn). Provider
 selection for the Distiller's constrained decoding path is in agent/providers.py
-(openai SDK directly, per ADR-008 §M2). This module handles everything else.
+(openai SDK directly, per ADR-0008 §M2). This module handles everything else.
 """
 from __future__ import annotations
 
