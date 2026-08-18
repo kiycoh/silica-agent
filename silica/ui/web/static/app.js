@@ -1221,6 +1221,17 @@ async function openSession(id) {
 // when the vault might actually have changed (graphStale), not on every switch
 // back into the tab. A turn that writes notes sets graphStale = true.
 let graphStale = true;
+// One vocabulary for "which of these is showing". `.active` paints it and this
+// says it out loud, so a segmented control is not a state only a sighted user
+// can read. `aria-pressed` and not `aria-selected`, because these are groups of
+// buttons rather than an ARIA tablist with its roving tabindex — and because it
+// is what the quick actions already carry, so the app keeps one convention
+// instead of gaining a second.
+function setActive(btn, on) {
+  btn.classList.toggle("active", on);
+  btn.setAttribute("aria-pressed", on ? "true" : "false");
+}
+
 // Switching tabs is a function, not only a click: a synthetic .click() bubbles
 // to the document's outside-click handler, which closes the note drawer. Every
 // caller that needs the drawer to survive the switch (the context drawer's
@@ -1229,7 +1240,7 @@ function showTab(tab) {
   activeTab = tab;
   if (tab === "chat") closePeek(); // stream visible → card redundant
   $("#dock").hidden = tab !== "graph"; // ask-from-here lives on the graph + map only
-  document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll(".tab").forEach((b) => setActive(b, b.dataset.tab === tab));
   $("#view-chat").classList.toggle("active", tab === "chat");
   $("#view-graph").classList.toggle("active", tab === "graph");
   $("#view-calendar").classList.toggle("active", tab === "calendar");
@@ -1295,7 +1306,7 @@ let mapRootedPath = null; // note the radial map is rooted on, or null → picke
 // explore tab, so it must be idempotent.
 function setGraphMode(m) {
   graphMode = m;
-  document.querySelectorAll(".gmode-tabs button").forEach((b) => b.classList.toggle("active", b.dataset.gmode === m));
+  document.querySelectorAll(".gmode-tabs button").forEach((b) => setActive(b, b.dataset.gmode === m));
   const isMap = m === "map";
   // folders / areas / read render in-page. They take the whole pane, so both
   // iframes hide and the note search goes with them: it flies the graph camera
@@ -2680,7 +2691,7 @@ let ghostName = null; // set while the drawer holds an unresolved link, which ha
 function syncDrawerMode() {
   const path = lastNotePath || lastViewedPath;
   document.querySelectorAll("#note-mode button").forEach((b) => {
-    b.classList.toggle("active", b.dataset.mode === drawerMode);
+    setActive(b, b.dataset.mode === drawerMode);
     // A ghost has no file to read; the reader half stops being an offer.
     if (b.dataset.mode === "note") b.disabled = !!ghostName;
     // Same rule for diff: a note this session never touched has no diff, and an
@@ -3974,7 +3985,7 @@ function stFilter() {
   empty.hidden = !(q && !hits);
   empty.textContent = `no setting matches "${q}"`;
   for (const b of stTabs.querySelectorAll(".st-tab"))
-    b.classList.toggle("active", !q && b.dataset.section === stState.section);
+    setActive(b, !q && b.dataset.section === stState.section);
 }
 
 // One rule, not a list of which rows a turn happens to read: that list would rot
@@ -4412,8 +4423,7 @@ $("#cal-mode").addEventListener("click", (e) => {
   const m = e.target.dataset.calmode;
   if (!m || m === calMode) return;
   calMode = m;
-  document.querySelectorAll("#cal-mode button").forEach((b) =>
-    b.classList.toggle("active", b.dataset.calmode === m));
+  document.querySelectorAll("#cal-mode button").forEach((b) => setActive(b, b.dataset.calmode === m));
   loadCalendar();
 });
 

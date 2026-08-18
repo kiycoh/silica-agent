@@ -92,7 +92,14 @@ def render_tree(nodes: list[dict]) -> str:
     """Build a collapsible <details> file tree from real note paths.
 
     Pure: nodes -> HTML. Folders become nested <details>/<summary> (native
-    collapse, no JS); notes become <div class="tree-note" data-id=ID>NAME</div>.
+    collapse, no JS); notes become
+    <button type=button class="tree-note" data-id=ID>NAME</button>.
+
+    A button and not a div: the tree is the primary route into a note, and as a
+    click-only div every one of a vault's notes reported to the accessibility
+    tree as `generic` and sat outside the tab order. Nothing else changes —
+    the class, the data-id and the delegated `closest('.tree-note')` handlers
+    are the same, and the CSS resets the button back to a row.
     Ghost nodes (type == "ghost" or empty path) are unresolved links, not files,
     so they are skipped. Folders sort before notes at each level; both groups
     sort case-insensitively.
@@ -119,8 +126,9 @@ def render_tree(nodes: list[dict]) -> str:
             out.append("</details>")
         for leaf, nid in sorted(tree.get("__notes__", []), key=lambda x: x[0].lower()):
             out.append(
-                f'<div class="tree-note" data-id="{html.escape(nid, quote=True)}">'
-                f"{html.escape(leaf)}</div>"
+                f'<button type="button" class="tree-note" '
+                f'data-id="{html.escape(nid, quote=True)}">'
+                f"{html.escape(leaf)}</button>"
             )
         return "".join(out)
 
@@ -417,8 +425,13 @@ def render_html(
                         white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
     #file-tree summary:hover{{color:var(--frost)}}
     #file-tree details details,#file-tree .tree-note{{margin-left:12px}}
-    .tree-note{{color:var(--ash);cursor:pointer;padding:2px 6px;border-left:2px solid transparent;
+    #file-tree .tree-note{{width:calc(100% - 12px)}}
+    /* button reset: the row is a <button> so it is reachable and announces as
+       one, and everything below puts it back to looking like a row */
+    .tree-note{{display:block;text-align:left;font:inherit;background:none;box-sizing:border-box;
+               color:var(--ash);cursor:pointer;padding:2px 6px;border:0;border-left:2px solid transparent;
                white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+    .tree-note:focus-visible{{outline:1px solid var(--accent);outline-offset:-1px}}
     .tree-note:hover{{background:var(--slate-2);border-left-color:var(--accent);color:var(--frost)}}
     .force-row{{display:flex;justify-content:space-between;align-items:center;font-size:12px;
                 color:var(--ash);margin-top:6px}}

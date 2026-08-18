@@ -18,9 +18,16 @@ def test_nested_folders_become_details():
     assert "<details><summary>b</summary>" in html
 
 
-def test_notes_render_as_tree_note_divs_with_data_id():
+def test_notes_render_as_tree_note_buttons_with_data_id():
+    """A note row must be a real button, not a div with a click handler.
+
+    The tree is the primary route into a note. As a div it was unreachable by
+    keyboard and reported to the accessibility tree as `generic`, so a whole
+    vault's worth of notes sat outside the tab order.
+    """
     html = render_tree([_node("a/c.md")])
-    assert '<div class="tree-note" data-id="a/c.md">c.md</div>' in html
+    assert '<button type="button" class="tree-note" data-id="a/c.md">c.md</button>' in html
+    assert '<div class="tree-note"' not in html
 
 
 def test_ghost_nodes_excluded():

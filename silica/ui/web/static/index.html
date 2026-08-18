@@ -33,10 +33,12 @@
     <button id="sidebar-toggle" class="ghost" title="toggle sidebar" aria-label="toggle sidebar">&#9776;</button>
     <button class="brand" id="brand-logo" title="new chat" aria-label="new chat">SILICA</button>
     <nav class="tabs">
-      <button class="tab active" data-tab="chat">chat</button>
-      <button class="tab" data-tab="graph">explore</button>
-      <button class="tab" data-tab="calendar">calendar</button>
-      <button class="tab" data-tab="metrics">metrics</button>
+      <!-- aria-pressed is stamped here as well as by setActive(), so which view
+           is showing is announced on the very first paint, before any JS runs -->
+      <button class="tab active" data-tab="chat" aria-pressed="true">chat</button>
+      <button class="tab" data-tab="graph" aria-pressed="false">explore</button>
+      <button class="tab" data-tab="calendar" aria-pressed="false">calendar</button>
+      <button class="tab" data-tab="metrics" aria-pressed="false">metrics</button>
     </nav>
     <div class="spacer"></div>
     <div class="ctx-tokens" id="ctx-tokens" title="context window usage" aria-hidden="true"></div>
@@ -159,15 +161,15 @@
     <section id="view-graph" class="view">
       <div id="graph-bar">
         <div class="gmode-tabs">
-          <button type="button" class="active" data-gmode="graph" title="wikilink structure + semantic k-NN overlay; toggle the layers in the HUD">graph</button>
-          <button type="button" data-gmode="map" title="radial map rooted on one note">map</button>
+          <button type="button" class="active" data-gmode="graph" aria-pressed="true" title="wikilink structure + semantic k-NN overlay; toggle the layers in the HUD">graph</button>
+          <button type="button" data-gmode="map" aria-pressed="false" title="radial map rooted on one note">map</button>
           <!-- Three surfaces over the same graph that are NOT link-space: graph
                and map both lay notes out by how they connect, so neither can
                show where a note SITS, how two areas couple as a whole, or what
                order the vault could be read in. -->
-          <button type="button" data-gmode="folders" title="the vault as folders, shaded by how much each folder mixes areas">folders</button>
-          <button type="button" data-gmode="areas" title="area x area coupling: every pair at once, not a top-N list">areas</button>
-          <button type="button" data-gmode="read" title="a reading order derived from hubs and their links">read</button>
+          <button type="button" data-gmode="folders" aria-pressed="false" title="the vault as folders, shaded by how much each folder mixes areas">folders</button>
+          <button type="button" data-gmode="areas" aria-pressed="false" title="area x area coupling: every pair at once, not a top-N list">areas</button>
+          <button type="button" data-gmode="read" aria-pressed="false" title="a reading order derived from hubs and their links">read</button>
         </div>
 
         <!-- graph + map modes: fuzzy note search. Pick → fly the graph camera
@@ -255,9 +257,9 @@
            where it SITS (context). A segmented control, because they are two
            states of one surface, not two places to go. -->
       <div id="note-mode" role="group" aria-label="drawer mode">
-        <button type="button" data-mode="context" title="concepts, connections and what is missing">context</button>
-        <button type="button" data-mode="diff" title="what this session changed in this note">diff</button>
-        <button type="button" data-mode="note" class="active" title="read the note">note</button>
+        <button type="button" data-mode="context" aria-pressed="false" title="concepts, connections and what is missing">context</button>
+        <button type="button" data-mode="diff" aria-pressed="false" title="what this session changed in this note">diff</button>
+        <button type="button" data-mode="note" class="active" aria-pressed="true" title="read the note">note</button>
       </div>
       <button id="note-close" class="ghost" title="close" aria-label="close this note">&#10005;</button>
     </header>

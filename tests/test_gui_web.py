@@ -1640,6 +1640,21 @@ def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
     assert dt.date.today().isoformat() in gui[1]
     assert gui[2].startswith("Vault: ")
     assert "language" in gui[-1].lower()
+def test_reduced_motion_is_honoured_for_transitions_not_only_animations():
+    """The file carries dozens of transitions and only four were switched off,
+    so a session that asked the OS for less motion still got the header, the
+    tabs, the sidebar and every row moving."""
+    from silica.ui.web.server import STATIC_DIR
+
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    blocks = css.split("@media (prefers-reduced-motion: reduce)")
+    assert len(blocks) > 1, "no reduced-motion handling at all"
+    blanket = [b for b in blocks[1:] if b.lstrip().startswith("{\n\n  *,")]
+    assert blanket, "no blanket rule: coverage is per-selector and will rot"
+    assert "transition-duration: 0.01ms !important" in blanket[0]
+    assert "animation-duration: 0.01ms !important" in blanket[0]
+
+
 def test_the_injector_tool_keeps_sources_like_nucleate_does():
     """`/nucleate` defaults keep_sources on — the leaf in sources/ is what makes
     a note's verbatim source reachable at all, and reliability_tier reads exactly
