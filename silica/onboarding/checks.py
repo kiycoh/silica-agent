@@ -593,22 +593,33 @@ def check_okf(config: SilicaConfig) -> CheckResult:
     violations = okf_conformance(vault)
     if not violations:
         return CheckResult("OKF §11", "ok", "conformant bundle")
-    by_clause: dict[str, int] = {}
-    for v in violations:
-        by_clause[v.clause] = by_clause.get(v.clause, 0) + 1
-    detail = ", ".join(f"§{c}: {n}" for c, n in sorted(by_clause.items()))
+    def tally(vs: list) -> str:
+        by: dict[str, int] = {}
+        for v in vs:
+            by[v.clause] = by.get(v.clause, 0) + 1
+        return ", ".join(f"§{c}: {n}" for c, n in sorted(by.items()))
+
     actionable = [v for v in violations if v.clause != "11.1"]
     if not actionable:
-        return CheckResult("OKF §11", "ok", f"typed bundle, {detail} without frontmatter")
+        return CheckResult("OKF §11", "ok", f"typed bundle, {tally(violations)} without frontmatter")
     hint = ""
     if any(v.clause == "11.2" for v in actionable):
         hint = "run `uv run python scripts/backfill_notetype.py` to stamp the missing types"
     if any(v.clause == "11.3" for v in actionable):
         hint = (hint + "; " if hint else "") + "rename any `index`/`log` note by hand"
     sample = ", ".join(v.path for v in actionable[:3])
+    # The count and the breakdown have to be the same set of notes. The headline
+    # counted `actionable` while the breakdown was built from every violation,
+    # so a vault with 13 untyped notes and 2 bad names announced itself, in a
+    # panel that is permanently on screen, as "2 non-conformant note(s), §11.1:
+    # 13, §11.3: 2". The 11.1s are still worth naming; they are named as what
+    # they are, which is a separate and non-actionable fact.
+    skipped = len(violations) - len(actionable)
+    aside = f"; {skipped} more without frontmatter" if skipped else ""
     return CheckResult(
         "OKF §11", "warn",
-        f"{len(actionable)} non-conformant note(s) — {detail} (e.g. {sample})",
+        f"{len(actionable)} non-conformant note(s): {tally(actionable)} "
+        f"(e.g. {sample}){aside}",
         hint,
     )
 

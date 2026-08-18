@@ -548,6 +548,33 @@ class TestAggregation:
         assert "legacy.md" in result.detail and "§11.2" in result.detail
         assert "backfill_notetype" in result.hint
 
+    def test_check_okf_headline_counts_the_same_notes_the_breakdown_lists(self, tmp_path):
+        """The count and the per-clause tally must describe one set of notes.
+
+        The headline counted `actionable` (which drops clause 11.1) while the
+        breakdown was built from every violation, so a vault of frontmatter-less
+        notes plus one bad name announced itself, in a panel that is permanently
+        on screen, as "1 non-conformant note(s), §11.1: 3, §11.3: 1".
+        """
+        import re
+
+        from silica.onboarding.checks import check_okf
+
+        # three notes with no frontmatter at all: clause 11.1, never actionable
+        for i in range(3):
+            (tmp_path / f"plain{i}.md").write_text("# prose\n", encoding="utf-8")
+        # one that IS actionable: typed, but with a reserved name (clause 11.3)
+        (tmp_path / "index.md").write_text("---\ntype: Note\n---\n\nB\n", encoding="utf-8")
+
+        result = check_okf(_cfg(vault_path=str(tmp_path)))
+        assert result.status == "warn"
+        headline = int(re.match(r"(\d+) non-conformant", result.detail).group(1))
+        tallied = sum(int(n) for n in re.findall(r"§[\d.]+: (\d+)", result.detail))
+        assert headline == tallied, f"headline says {headline}, breakdown lists {tallied}: {result.detail}"
+        assert "§11.1" not in result.detail, "a non-actionable clause must not sit in the actionable tally"
+        # the frontmatter-less notes are still named, as the separate fact they are
+        assert "3 more without frontmatter" in result.detail
+
     def test_has_failures(self):
         from silica.onboarding.checks import CheckResult, has_failures
         ok = CheckResult("a", "ok", "")
