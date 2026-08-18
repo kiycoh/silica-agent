@@ -1640,3 +1640,16 @@ def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
     assert dt.date.today().isoformat() in gui[1]
     assert gui[2].startswith("Vault: ")
     assert "language" in gui[-1].lower()
+def test_the_injector_tool_keeps_sources_like_nucleate_does():
+    """`/nucleate` defaults keep_sources on — the leaf in sources/ is what makes
+    a note's verbatim source reachable at all, and reliability_tier reads exactly
+    that. The flag was set only on the CLI side while Coordinator defaults it
+    False, so the same file nucleated through the tool (web drag-drop, MCP)
+    produced notes whose source could never be checked."""
+    import inspect
+
+    from silica.tools.runners import RunInjectorArgs, silica_run_injector
+
+    assert RunInjectorArgs.model_fields["keep_sources"].default is True
+    fn = getattr(silica_run_injector, "__wrapped__", silica_run_injector)
+    assert inspect.signature(fn).parameters["keep_sources"].default is True
