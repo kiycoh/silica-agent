@@ -1,6 +1,6 @@
 """Tests for M2: Distiller schema wiring and provider preset selection.
 
-ADR-008 §M2 TDD requirements:
+ADR-0008 §M2 TDD requirements:
 1. run_distiller passes DistillerOutput schema to provider.
 2. A schema-valid response is parsed into list[Op] without error.
 3. A malformed response (JSON in code-fence, truncated) is recovered by
