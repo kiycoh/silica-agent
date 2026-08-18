@@ -118,3 +118,59 @@ def test_never_raises_on_broken_fsm(tmp_vault):
     """Best-effort: a fsm missing the expected attributes must not blow up CLEANUP."""
     broken_fsm = types.SimpleNamespace()
     finalize._log_nucleate_completion(broken_fsm, 0, "Inbox/x.md")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# W1 (survey-provenance spec §10): extractive-gate rejections are counted in
+# the run digest — a dropped claim is never invisible. The deferred bundle is
+# the durable record of what the retries could not save; ops rejected by the
+# extractive span gate carry a "extractive:" rejection_reason stamp.
+# ---------------------------------------------------------------------------
+
+
+def test_files_summary_counts_extractive_rejections(tmp_vault):
+    from silica.kernel.recall.deferred import get_deferred_store
+
+    get_deferred_store().put(
+        content_hash="hash0",
+        source_path="Inbox/lezione-03.md",
+        target_dir="Dir",
+        hub=None,
+        rejected_ops=[
+            {"op": "write", "path": "Dir/X.md", "heading": "X"},
+            {"op": "write", "path": "Dir/Y.md", "heading": "Y"},
+        ],
+        rejection_reasons={
+            "Dir/X.md": "extractive: 2 body line(s) not verbatim from source: foo",
+            "Dir/Y.md": "snippet too short (10 < 80 chars)",
+        },
+    )
+    fsm = _fake_fsm([], run_id="cafecafe0000", content_hashes=["hash0"])
+    fsm.context = {}
+
+    finalize._log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
+
+    [entry] = fsm.context["files_summary"]
+    assert entry["deferred"] == 2
+    assert entry["extractive_rejected"] == 1
+
+
+def test_files_summary_omits_extractive_key_when_none(tmp_vault):
+    from silica.kernel.recall.deferred import get_deferred_store
+
+    get_deferred_store().put(
+        content_hash="hash0",
+        source_path="Inbox/lezione-03.md",
+        target_dir="Dir",
+        hub=None,
+        rejected_ops=[{"op": "write", "path": "Dir/X.md", "heading": "X"}],
+        rejection_reasons={"Dir/X.md": "snippet too short (10 < 80 chars)"},
+    )
+    fsm = _fake_fsm([], run_id="cafecafe0001", content_hashes=["hash0"])
+    fsm.context = {}
+
+    finalize._log_nucleate_completion(fsm, 0, "Inbox/lezione-03.md")
+
+    [entry] = fsm.context["files_summary"]
+    assert entry["deferred"] == 1
+    assert "extractive_rejected" not in entry

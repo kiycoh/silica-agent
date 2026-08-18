@@ -185,3 +185,93 @@ def test_fenced_code_is_never_marked():
     src = "run the command uv run pytest --maxfail=1 to reproduce the failure"
     note = "# How\n\n```bash\nuv run pytest --maxfail=1 to reproduce the failure\n```\n"
     assert attribute_lines(note, src, "session_1") == note
+
+
+def test_quoted_verbatim_span_passes():
+    """A selected span wrapped in quotation marks is still a selected span.
+
+    Found by the W1 audit on `bench/ab_extractive/conv-26`: the same line was
+    rejected quoted and accepted unquoted, so quoting a source span — the
+    canonical extractive act — cost the whole op. The marker strip already
+    covers the block-level form (`>`); this is its inline twin.
+    """
+    src = "Caroline: Yeah, Mel! Life's all about creating memories. Can't wait for the trip!"
+    body = '"Life\'s all about creating memories. Can\'t wait for the trip!"'
+    assert nonextractive_lines(body, src) == []
+
+
+def test_quoted_paraphrase_is_still_flagged():
+    """Stripping the quotes must not weaken the test it wraps."""
+    src = "Caroline: Yeah, Mel! Life's all about creating memories."
+    body = '"Caroline said that making memories is what matters most in life."'
+    assert nonextractive_lines(body, src)
+
+
+# --- Structure is not a claim (W1 audit, 2026-08-18) -------------------------
+# The audit found the gate strips structural MARKERS but then judges the
+# structural TEXT as content. Framework-generated scaffolding — MOC index
+# lines, section headings, link footers — is authored by construction and can
+# never be a source span, so it made every block carrying it unpassable: 105 of
+# 148 rejections on the audited corpus were structure, not rewritten claims.
+
+
+def test_moc_index_line_judges_only_the_quote():
+    """`- [[Note]] — <span>` is an index line: the label is a link to another
+    note, the payload is the quote. Only the quote is claim content."""
+    src = "Caroline: Being a mom is awesome. I'm creating a library for when I have kids."
+    body = "- [[Caroline's future library]] — Caroline: Being a mom is awesome."
+    assert nonextractive_lines(body, src) == []
+
+
+def test_moc_index_line_with_paraphrased_payload_still_flagged():
+    src = "Caroline: Being a mom is awesome. I'm creating a library for when I have kids."
+    body = "- [[Caroline's future library]] — Caroline plans to build a reading room."
+    assert nonextractive_lines(body, src)
+
+
+def test_long_authored_heading_ignored():
+    """`test_headings_and_blank_lines_ignored` already declares headings are
+    structure; it only passed because its heading was under the length floor."""
+    src = "Caroline: We had a blast last year at the Pride fest with supportive friends."
+    body = ("## Additional Pride fest details\n\n"
+            "Caroline: We had a blast last year at the Pride fest with supportive friends.")
+    assert nonextractive_lines(body, src) == []
+
+
+def test_link_only_footer_ignored():
+    """A line whose prose is just a label around wikilinks is a link footer."""
+    src = "Melanie: The picnic was lovely and the weather held up all afternoon."
+    body = ("Melanie: The picnic was lovely and the weather held up all afternoon.\n"
+            "Correlati: [[Caroline]]")
+    assert nonextractive_lines(body, src) == []
+
+
+def test_inline_wikilink_inside_a_quote_still_judged():
+    """Unwrapping an inline autolink must keep judging the sentence: that text
+    WAS in the source, so it stays claim content."""
+    src = "Melanie: I finally finished the painting I started last spring."
+    body = "Melanie: I never started that [[painting]] at all last spring."
+    assert nonextractive_lines(body, src)
+
+
+def test_body_of_only_structure_is_not_declared_extractive():
+    """Exempting structure must never mean "nothing was checked, so it passes".
+
+    Skipping heading lines buys the precision, but a body made ONLY of them
+    reaches the end with zero lines verified, and `[]` here reads as "fully
+    extractive". Under this profile the shape gate is skipped too, so nothing
+    else would catch it: the gate's own contract is a declared hole, never
+    silent loss. When nothing was verifiable, the structure is judged after
+    all.
+    """
+    src = "Caroline: I love painting. Melanie: The picnic was lovely and warm."
+    body = ("## Caroline moved to Berlin last spring\n"
+            "## Melanie quit her job back in March\n")
+    assert nonextractive_lines(body, src)
+
+
+def test_structure_stays_exempt_when_the_block_has_real_content():
+    src = "Caroline: I love painting and the picnic was lovely and warm."
+    body = ("## Additional Pride fest details\n\n"
+            "Caroline: I love painting and the picnic was lovely and warm.")
+    assert nonextractive_lines(body, src) == []

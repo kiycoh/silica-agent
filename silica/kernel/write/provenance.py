@@ -464,6 +464,24 @@ def ungrounded_spans(body: str, source: str) -> list[str]:
 # autolink phase injects later — stripped before the substring check so added
 # structure never reads as content drift.
 _LEADING_MARKER_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)]|#{1,6}|>)\s+")
+# A span wrapped in quotation marks is still a selected span — quoting is the
+# canonical extractive act, and the marker strip above already covers its
+# block-level form (`>`). Stripping the wrapper cannot let non-verbatim content
+# through: the substring test still runs on what is inside.
+# It runs on text that already went through _norm_extract, which folds U+2018 /
+# U+2019 to a straight `'` — so the straight form is the one that actually
+# arrives here, and the curly pair in the class could never match. A genuinely
+# verbatim single-quoted span was therefore rejected as non-extractive.
+_QUOTE_CHARS = "\"'\u201c\u201d\u00ab\u00bb"
+_WRAPPING_QUOTES_RE = re.compile(f"^[{_QUOTE_CHARS}]+|[{_QUOTE_CHARS}]+$")
+_HEADING_LINE_RE = re.compile(r"^\s*#{1,6}\s+")
+# An index line: a wikilink LABEL at the head, a separator, then the payload.
+# The label points at another note, so it is authored by construction and can
+# never be a source span; only the payload is claim content. Kept tight (the
+# link must open the line and a separator must follow) because a looser
+# split-on-any-dash would let a fabricated label ride in on a verbatim quote.
+_INDEX_LABEL_RE = re.compile(r"^\[\[[^\]]+\]\]\s*[\u2014\u2013:-]\s+")
+_ANY_WIKILINK_RE = re.compile(r"\[\[[^\]]+\]\]")
 _WIKILINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
 _EXTRACTIVE_MIN_CHARS = 12  # normalized; shorter residues match trivially
 
@@ -491,13 +509,50 @@ def nonextractive_lines(body: str, source: str) -> list[str]:
     """
     src = _norm_extract(source)
     out: list[str] = []
+    exempt: list[str] = []   # structure set aside, judged only if nothing else was
+    judged = 0
+
+    def _claim(raw: str) -> str:
+        """The judgeable residue of a line: structural marker stripped, index
+        label (the wikilink that introduces the payload) dropped, remaining
+        wikilinks unwrapped to the text they wrap."""
+        marked = _INDEX_LABEL_RE.sub("", _LEADING_MARKER_RE.sub("", raw))
+        return _norm_extract(_WIKILINK_RE.sub(r"\1", marked))
+
     for raw in body.splitlines():
-        line = _WIKILINK_RE.sub(r"\1", _LEADING_MARKER_RE.sub("", raw))
-        norm = _norm_extract(line)
+        # Framework structure is not a claim. A heading is a label, and a line
+        # whose prose is only a caption around wikilinks is a link footer
+        # ("Correlati: [[X]]"); neither can be a selected span, and judging
+        # them made every block carrying one unpassable.
+        #
+        # Set ASIDE, never dropped. A bare `continue` here left the line out of
+        # `exempt` too, so it was not judged AND not judgeable later: a body of
+        # nothing but link lines came back "fully extractive" with zero checks
+        # run, and "[[Kant]] rejected [[Hume]]." passed against a source naming
+        # neither. The `if not judged` fallback below exists for exactly that
+        # case and could not see them.
+        marked = _LEADING_MARKER_RE.sub("", raw)
+        if (_HEADING_LINE_RE.match(raw)
+                or len(_norm_extract(_ANY_WIKILINK_RE.sub("", marked)))
+                < _EXTRACTIVE_MIN_CHARS):
+            exempt.append(_claim(raw))
+            continue
+        norm = _claim(raw)
         if len(norm) < _EXTRACTIVE_MIN_CHARS:
             continue
-        if norm not in src:
+        judged += 1
+        if norm not in src and _WRAPPING_QUOTES_RE.sub("", norm) not in src:
             out.append(norm)
+    if not judged:
+        # Nothing in this body was verifiable, so an empty result would read as
+        # "fully extractive" on a body that was never checked. Judge the
+        # structure after all: exempting it is only safe while real content
+        # carries the block.
+        return [
+            e for e in exempt
+            if len(e) >= _EXTRACTIVE_MIN_CHARS
+            and e not in src and _WRAPPING_QUOTES_RE.sub("", e) not in src
+        ]
     return out
 
 

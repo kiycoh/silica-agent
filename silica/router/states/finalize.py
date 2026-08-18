@@ -220,6 +220,7 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
         )
 
         deferred_count = 0
+        extractive_rejected = 0
         content_hashes = getattr(fsm, "_file_content_hashes", [])
         if fi < len(content_hashes):
             try:
@@ -227,6 +228,11 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
                 bundle = get_deferred_store().get(content_hashes[fi])
                 if bundle:
                     deferred_count = len(bundle.get("rejected_ops", []))
+                    extractive_rejected = sum(
+                        1 for _op in bundle.get("rejected_ops", [])
+                        if isinstance(_op, dict)
+                        and str(_op.get("rejection_reason", "")).startswith("extractive:")
+                    )
             except Exception as _de:
                 logger.debug("CLEANUP: deferred count lookup failed (non-fatal): %s", _de)
 
@@ -237,6 +243,11 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
         if isinstance(ctx, dict):
             entry = {"file": basename, "new": new_count, "patch": patch_count,
                      "deferred": deferred_count}
+            if extractive_rejected:
+                # W1 (survey-provenance spec): a claim the extractive span
+                # gate dropped is declared in the run report, never silently
+                # folded into the aggregate "deferred".
+                entry["extractive_rejected"] = extractive_rejected
             declared = ctx.get("declared_residue", {}).get(basename)
             if declared:
                 # nucleation-forms spec: the declared residue is part of the
