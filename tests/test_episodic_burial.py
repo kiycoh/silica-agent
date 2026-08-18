@@ -143,10 +143,15 @@ class TestDurability:
         """Additive: every frozen store and replay baseline still opens."""
         store = _store(tmp_path)
         _capture(store, "user.dog.name", "the dog is named Tom", "r1")
-        raw = (tmp_path / "episodic.json").read_text(encoding="utf-8")
+        # A store from before the field is by definition also from before the
+        # npz format, so the fixture writes the legacy JSON text directly.
+        import json as _json
+
+        doc = {"schema_version": 1, "next_id": store.next_id,
+               "facts": [{k: v for k, v in f.model_dump().items()
+                          if k != "supersede_cos"} for f in store.facts]}
         (tmp_path / "episodic.json").write_text(
-            raw.replace('"supersede_cos": null,', "").replace(
-                '"supersede_cos":null,', ""), encoding="utf-8")
+            _json.dumps(doc, ensure_ascii=False), encoding="utf-8")
 
         reloaded = _store(tmp_path)
         assert len(reloaded.facts) == 1

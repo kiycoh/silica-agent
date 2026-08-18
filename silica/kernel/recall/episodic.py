@@ -68,9 +68,9 @@ class Fact(BaseModel):
     # changes it. Low means a different referent was dropped into a reused slot
     # — the burial the distiller's key discipline cannot be talked out of.
     supersede_cos: float | None = None
-    # ponytail: inline float list, not npz packing — the store is TTL-bounded
-    # to hundreds of facts; the 10k scaling fix targeted note stores. Pack npz
-    # like note stores if a store ever holds ~10^3+ facts or load/save drags.
+    # Packed as float32 npz by save() — a real store hit this field's old
+    # upgrade condition at 1067 facts / 59 MB, 99.5% of it vectors printed as
+    # decimal text. In memory it stays a plain list; only the disk format packs.
     vec: list[float] | None = None
 
 
@@ -329,6 +329,68 @@ def key_vocabulary_section(store: "EpisodicStore") -> str | None:
     )
 
 
+def _pack_store(doc: dict) -> bytes:
+    """Serialize the store doc as npz: vectors as one flat float32 block, the
+    rest as JSON in the meta entry. Same layout idea as embed._serialize_notes;
+    measured on a real store: 59 MB of decimal text -> ~11 MB binary.
+
+    Mutates `doc["facts"]` entries in place (vec -> vlen); callers pass a doc
+    freshly built from model_dump, never a shared structure.
+    """
+    import io
+
+    import numpy as np
+
+    vecs: list = []
+    for fact in doc.get("facts", []):
+        v = fact.pop("vec", None)
+        if v is not None:
+            arr = np.asarray(v, dtype=np.float32).ravel()
+            vecs.append(arr)
+            fact["vlen"] = int(arr.size)
+
+    flat = np.concatenate(vecs) if vecs else np.zeros(0, dtype=np.float32)
+    meta_arr = np.frombuffer(json.dumps(doc, ensure_ascii=False).encode("utf-8"),
+                             dtype=np.uint8)
+    buf = io.BytesIO()
+    np.savez(buf, flat=flat, meta=meta_arr)
+    return buf.getvalue()
+
+
+def _unpack_store(raw: bytes) -> dict:
+    """Inverse of _pack_store: meta JSON with each fact's vec spliced back in
+    (vlen consumed in order). Raises on a malformed archive; _load quarantines."""
+    import io
+
+    import numpy as np
+
+    with np.load(io.BytesIO(raw), allow_pickle=False) as z:
+        flat = z["flat"]
+        doc = json.loads(z["meta"].tobytes().decode("utf-8"))
+
+    off = 0
+    for fact in doc.get("facts", []):
+        vlen = fact.pop("vlen", None)
+        if vlen is not None:
+            vlen = int(vlen)
+            fact["vec"] = flat[off:off + vlen].tolist()
+            off += vlen
+    return doc
+
+
+def read_store_doc(path: Path) -> dict:
+    """The raw store doc off disk, whichever format it is written in.
+
+    npz archives start with the zip magic 'PK'; the legacy store is JSON text
+    and is recognized forever. Public because the store is not read only by the
+    store: the LongMemEval probes read the same file, and a plain `read_text()`
+    there raised UnicodeDecodeError on the binary format the product had already
+    started writing. One sniff, one place.
+    """
+    raw = path.read_bytes()
+    return _unpack_store(raw) if raw[:2] == b"PK" else json.loads(raw.decode("utf-8"))
+
+
 class EpisodicStore:
     """JSON-file-backed fact store. Facts are not notes; they nucleate INTO notes."""
 
@@ -348,7 +410,9 @@ class EpisodicStore:
         if not self.path.is_file():
             return
         try:
-            doc = json.loads(self.path.read_text(encoding="utf-8"))
+            # Legacy files are recognized forever and migrate to npz on the
+            # next save(); read_store_doc owns the sniff.
+            doc = read_store_doc(self.path)
             self.next_id = int(doc.get("next_id", 1))
             self.lang = doc.get("lang") or None
             self.facts = _FACTS_ADAPTER.validate_python(doc.get("facts", []))
@@ -368,7 +432,7 @@ class EpisodicStore:
         if self.lang:  # absent until the first capture pins it
             doc["lang"] = self.lang
         doc["facts"] = [f.model_dump(exclude_none=False) for f in self.facts]
-        atomic_write_bytes(self.path, json.dumps(doc, ensure_ascii=False).encode("utf-8"))
+        atomic_write_bytes(self.path, _pack_store(doc))
 
     # ------------------------------------------------------------------
     # Capture

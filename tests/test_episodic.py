@@ -992,7 +992,9 @@ def test_store_freezes_key_language_and_merges_non_english_variants(tmp_path):
     assert live[0].supersedes is not None
 
     # frozen on disk, so lookup identity cannot drift as the store grows
-    doc = json.loads((tmp_path / "episodic.json").read_text(encoding="utf-8"))
+    from silica.kernel.recall.episodic import _unpack_store
+
+    doc = _unpack_store((tmp_path / "episodic.json").read_bytes())
     assert doc["lang"] == "italian"
     assert EpisodicStore(path=tmp_path / "episodic.json").lang == "italian"
 

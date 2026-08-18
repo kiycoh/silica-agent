@@ -221,12 +221,15 @@ def product_groups(live: list[dict]) -> dict[str, str]:
 
 
 def _load_facts(vault: Path) -> list[dict]:
+    # Through the product's own reader: the store is an npz archive since the
+    # binary-format change, and a UTF-8 read of it dies on the zip magic.
+    from silica.kernel.recall.episodic import read_store_doc
     from silica.kernel.recall.paths import index_dir_for
 
     path = index_dir_for(str(vault)) / "episodic.json"
     if not path.is_file():
         return []
-    return json.loads(path.read_text(encoding="utf-8")).get("facts", [])
+    return read_store_doc(path).get("facts", [])
 
 
 def _load_live_facts(vault: Path) -> list[dict]:

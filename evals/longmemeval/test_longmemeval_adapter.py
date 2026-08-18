@@ -319,9 +319,9 @@ def test_key_schema_flag_enforces_keys_through_product_seam(tmp_path, monkeypatc
     assert (vault / "vault.yaml").is_file()
     # run() leaves the last question bound, so store_path() IS the product
     # lookup for this vault's episodic store.
-    from silica.kernel.recall.episodic import store_path
+    from silica.kernel.recall.episodic import read_store_doc, store_path
 
-    store = json.loads(store_path().read_text())
+    store = read_store_doc(store_path())
     keys = {f["key"] for f in store["facts"]}
     assert "user.dog.name" in keys
     assert "assistant.recipe.oven_temp_exact" in keys
