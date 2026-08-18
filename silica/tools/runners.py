@@ -91,11 +91,35 @@ def silica_run_injector(
         if not files:
             return {"error": "Conversion produced no markdown to nucleate."}
 
+    # Apparatus is not content — the same filter /nucleate applies (cli.py's
+    # _prepare_unit). This is THE tool for "nucleate this file", and the path
+    # the web drag-drop and every MCP client take, so a filter that lived only
+    # in the CLI was no filter at all: a references list or a venue checklist
+    # arriving here was distilled into venue/journal/ethics notes. The raw chunk
+    # stays in the inbox for lookup, exactly as on the CLI side.
+    from silica.sources.convert import is_skippable_chunk
+
+    kept = [f for f in files if not is_skippable_chunk(f)]
+    skipped = len(files) - len(kept)
+    if not kept:
+        return {"error": "Only apparatus sections (references, contents, venue "
+                         "checklists) were given — nothing to nucleate. They stay "
+                         "in the inbox for lookup."}
+    files = kept
+
     coordinator = Coordinator(
         inbox_files=files,
         target_dir=target_dir,
         hub=hub or None,
         resume_run_id=resume_run_id or None,
+        # On by default, matching /nucleate. The leaf lives in `sources/`, which
+        # is retrieval-invisible by construction, so it costs disk and nothing
+        # else — and it is what makes a note's verbatim source reachable at all
+        # (reliability_tier reads exactly that). It was set only on the CLI side
+        # while Coordinator defaults it False, so the same file nucleated through
+        # this tool — the web drag-drop and every MCP client — silently produced
+        # notes whose source could never be checked.
+        keep_sources=keep_sources,
         cancel_token=cancel_token,
     )
     result = coordinator.run()
@@ -120,6 +144,7 @@ def silica_run_injector(
         "yield_notes": result.get("yield_notes", 0),
         "yield_links": result.get("yield_links", 0),
         "files_total": len(files),
+        "apparatus_skipped": skipped,
     }
     if result.get("error"):
         projected["error"] = result["error"]

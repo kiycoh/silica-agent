@@ -1489,10 +1489,10 @@ def test_references_section_flagged_with_continuations():
     refs = "## References\n\n" + "\n\n".join(f"[{i}] Author {i}. Title." for i in range(40))
     segs = conv._split_markdown_flagged(body + refs, max_chars=300)
     flags = [f for _, f in segs]
-    assert flags[0] is False
+    assert flags[0] == ""
     assert any(flags), "references never flagged"
     # flag is a suffix run: once references start, every later part is flagged
-    first_ref = flags.index(True)
+    first_ref = flags.index("references")
     assert all(flags[first_ref:])
     assert "## References" in segs[first_ref][0]
     # no mixed segment: content text never lands in a flagged segment
@@ -1502,9 +1502,9 @@ def test_references_section_flagged_with_continuations():
 def test_references_heading_variants_match():
     for h in ("## References", "# REFERENCES", "## Bibliography",
               "## 7. References", "## **References**", "## Bibliografia"):
-        assert conv._section_is_references(h + "\n\n[1] X."), h
+        assert conv._section_kind(h + "\n\n[1] X.") == "references", h
     for h in ("## Reference Architectures", "## Methods", "## Cross-references in text"):
-        assert not conv._section_is_references(h + "\n\nbody"), h
+        assert conv._section_kind(h + "\n\nbody") == "", h
 
 
 def test_split_markdown_unchanged_without_references():
@@ -1528,3 +1528,123 @@ def test_doc_citation_ignores_reference_section_dois(tmp_path):
     fake = tmp_path / "x.bin"
     fake.write_bytes(b"")
     assert "doi" not in conv._doc_citation(fake, md)
+
+
+# --- back-matter flagging: contents, venue checklists (2026-08-18) -----------
+# A 246-paper library run showed >50% of the distilled volume of a modern ML
+# paper is apparatus: the table of contents and the NeurIPS submission
+# checklist. The checklist alone produced Code of ethics.md, IRB Approval.md,
+# Crowdsourcing.md — boilerplate identical across hundreds of papers.
+
+def test_contents_heading_is_boilerplate():
+    for h in ("## Contents", "# Table of Contents", "## TABLE OF CONTENTS",
+              "## Indice", "## 1. Contents"):
+        assert conv._section_kind(h + "\n\n1 Intro 1\n2 Method 2") == "boilerplate", h
+
+
+def test_venue_checklist_item_is_boilerplate_by_body():
+    # Split per item, so the heading carries no shared marker — the
+    # Question/Answer/Justification triple is what identifies it.
+    item = (
+        "## 5. Open access to data and code\n\n"
+        "Question: Does the paper provide open access to the data and code?\n\n"
+        "Answer: [Yes]\n\n"
+        "Justification: We provide the code link in the abstract.\n\n"
+        "Guidelines:\n\n"
+        "• The answer NA means that paper does not include experiments.\n"
+    )
+    assert conv._section_kind(item) == "boilerplate"
+    assert conv._section_kind("## NeurIPS Paper Checklist\n\n"
+                              "Question: Do the claims match?\n\nAnswer: [NA]\n\n"
+                              "Justification: n/a\n") == "boilerplate"
+
+
+def test_real_content_is_never_boilerplate():
+    for s in ("## Method\n\nWe answer: yes, the model works.\n",
+              "## Results\n\nJustification: not a checklist, just prose.\n",
+              "## Contents of the Memory Store\n\nEach note carries a context.\n",
+              "## Answer Generation\n\nAnswer: the decoder emits a token.\n"):
+        assert conv._section_kind(s) == "", s
+
+
+def test_references_still_flagged_as_references():
+    assert conv._section_kind("## References\n\n[1] X.") == "references"
+
+
+def test_boilerplate_segment_carries_its_own_frontmatter_key(tmp_vault, monkeypatch):
+    chapter = " ".join(f"w{i}" for i in range(6000))
+    big = (f"# Paper\n\n{chapter}\n\n"
+           "## Contents\n\n1 Intro 1\n2 Method 2\n\n"
+           "## References\n\n[1] Author. Title.\n")
+    monkeypatch.setattr(conv, "_via_pymupdf", lambda src, wd: (big, wd))
+    tmp_vault.note("paper.docx", "x")
+
+    heads = [_inbox_note(p).read_text(encoding="utf-8").split("\n---\n")[0]
+             for p in conv.convert("paper.docx")]
+    assert any("boilerplate: true" in h for h in heads)
+    assert any("references: true" in h for h in heads)
+    # the boilerplate segment is not stamped as references and vice versa
+    assert not any("boilerplate: true" in h and "references: true" in h for h in heads)
+
+
+def test_skippable_chunk_recognizes_both_keys(tmp_vault):
+    tmp_vault.note("Inbox/a.md", "---\nreferences: true\n---\n\n[1] X.")
+    tmp_vault.note("Inbox/b.md", "---\nboilerplate: true\n---\n\n## Contents")
+    tmp_vault.note("Inbox/c.md", "---\ntype: Note\n---\n\nreal content")
+    assert conv.is_skippable_chunk("Inbox/a.md")
+    assert conv.is_skippable_chunk("Inbox/b.md")
+    assert not conv.is_skippable_chunk("Inbox/c.md")
+
+
+def test_a_paper_that_merely_contains_a_checklist_is_not_boilerplate():
+    """The killer false positive: with sparse headings a whole PDF is ONE
+    section, and an unwindowed body rule flagged 100% of a-mem-agentic-memory
+    (96 KB) as apparatus. The triple has to sit at the head of the section."""
+    paper = ("# A-Mem: Agentic Memory for LLM Agents\n\n"
+             + "Real prose about memory evolution. " * 400
+             + "\n\n## NeurIPS Paper Checklist\n\nQuestion: Do the claims match?\n\n"
+               "Answer: [Yes]\n\nJustification: See Section 4.\n")
+    assert conv._section_kind(paper) == ""
+    # split into its real sections, only the checklist one is flagged
+    kinds = [k for _, k in conv._split_markdown_flagged(paper, 100_000)]
+    assert kinds[0] == "" and kinds[-1] == "boilerplate", kinds
+
+
+def test_checklist_guidelines_fragment_is_boilerplate():
+    """The Guidelines block carries no Question/Answer/Justification triple, so
+    the head rule cannot see it — the template's own wording can."""
+    frag = ("## Guidelines:\n\n"
+            "• The answer NA means that the paper has no limitation while the "
+            "answer No means that the paper has limitations.\n")
+    assert conv._section_kind(frag) == "boilerplate"
+    assert conv._section_kind("## Results\n\nNA means not applicable here.\n") == ""
+
+
+def test_a_document_that_is_all_apparatus_is_flagged_even_as_one_segment(tmp_vault, monkeypatch):
+    """The single-segment fast path computed the section kind and then dropped
+    it, so a standalone bibliography export, a scanned contents page or a lone
+    venue checklist — one segment because it fits under _MAX_SEGMENT_CHARS —
+    reached /nucleate unflagged and was distilled into exactly the
+    venue/journal/ethics notes the flag exists to prevent."""
+    refs = "## References\n\n" + "\n".join(
+        f"[{i}] Author {i}. A Title {i}. Journal, 2020." for i in range(40))
+    monkeypatch.setattr(conv, "_via_pymupdf", lambda src, wd: (refs, wd))
+    tmp_vault.note("biblio.docx", "x")
+
+    paths = conv.convert("biblio.docx")
+    assert len(paths) == 1
+    head = _inbox_note(paths[0]).read_text(encoding="utf-8").split("\n---\n")[0]
+    assert "references: true" in head
+    assert conv.is_skippable_chunk(paths[0])
+
+
+def test_a_single_segment_of_real_content_stays_unflagged(tmp_vault, monkeypatch):
+    body = "# Paper\n\n" + "Real prose about memory evolution. " * 200
+    monkeypatch.setattr(conv, "_via_pymupdf", lambda src, wd: (body, wd))
+    tmp_vault.note("paper.docx", "x")
+
+    paths = conv.convert("paper.docx")
+    assert len(paths) == 1
+    head = _inbox_note(paths[0]).read_text(encoding="utf-8").split("\n---\n")[0]
+    assert "references: true" not in head and "boilerplate: true" not in head
+    assert not conv.is_skippable_chunk(paths[0])

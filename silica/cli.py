@@ -2160,19 +2160,20 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
             # convert() upserts the same chunk paths, so dedup keeps each once.
             mfs = list(dict.fromkeys(mfs))
 
-            # Reference lists are citation metadata, not content: skip flagged
-            # chunks (convert marks them `references: true`). The raw chunk
-            # stays in the inbox for lookup — never venue/journal notes.
-            from silica.sources.convert import is_references_chunk
-            ref_chunks = [mf for mf in mfs if is_references_chunk(mf)]
+            # Apparatus is not content: skip flagged chunks (convert marks them
+            # `references: true` / `boilerplate: true`). The raw chunk stays in
+            # the inbox for lookup — never venue/journal/ethics notes.
+            from silica.sources.convert import is_skippable_chunk
+            ref_chunks = [mf for mf in mfs if is_skippable_chunk(mf)]
             if ref_chunks:
                 mfs = [mf for mf in mfs if mf not in ref_chunks]
                 CONSOLE.print(
-                    f"  [dim]skipped {len(ref_chunks)} references section(s) — "
+                    f"  [dim]skipped {len(ref_chunks)} apparatus section(s) "
+                    f"(references, contents, venue checklists) — "
                     f"kept in the inbox, not distilled into notes[/]"
                 )
                 if not mfs:
-                    CONSOLE.print("  [yellow]nothing left to nucleate: only references sections were given[/]")
+                    CONSOLE.print("  [yellow]nothing left to nucleate: only apparatus sections were given[/]")
                     return []
 
             # Draft filing (docs/specs/nucleation-forms.md): the owner's own

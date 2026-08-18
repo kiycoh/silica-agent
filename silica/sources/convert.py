@@ -326,9 +326,49 @@ _REFERENCES_HEADING_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A table of contents: page-number scaffolding, and the autolinker wikilinks
+# every entry ("2.1 [[Memory for LLM Agents]] . 2").
+_CONTENTS_HEADING_RE = re.compile(
+    r"^#{1,6}\s*[\d.\s]*\**\s*(table of contents|contents|indice)\s*\**\s*$",
+    re.IGNORECASE,
+)
 
-def is_references_chunk(note_rel: str) -> bool:
-    """True when a converted inbox chunk is flagged `references: true`.
+# Venue submission checklists (NeurIPS, ICML, ACL) carry a fixed
+# Question/Answer/Justification triple per item. Detected on the BODY, not the
+# heading: the splitter cuts one segment per item ("## 5. Open access to data
+# and code"), so no shared heading marker survives. Demanding both markers is
+# what keeps prose that merely says "Answer:" out of it. Measured on
+# a-mem-agentic-memory (2026-08-18): the checklist alone produced 14 notes —
+# Code of ethics, IRB Approval, Crowdsourcing — identical across every NeurIPS
+# paper in the library.
+_CHECKLIST_ANSWER_RE = re.compile(
+    r"^\s*(?:\*\*)?Answer(?:\*\*)?:\s*\[\s*(?:yes|no|na|n/a)\s*\]",
+    re.IGNORECASE | re.MULTILINE,
+)
+_CHECKLIST_JUSTIFICATION_RE = re.compile(
+    r"^\s*(?:\*\*)?Justification(?:\*\*)?:", re.IGNORECASE | re.MULTILINE
+)
+# How far into a section the checklist triple must appear. One item is heading
+# + Question + Answer + Justification, ~300 chars; anything further in is a
+# paper that quotes a checklist, not a checklist.
+_CHECKLIST_HEAD_CHARS = 700
+# The template's own boilerplate, verbatim in every item's Guidelines block of
+# every NeurIPS submission. Catches the `## Guidelines:` fragments the
+# Question/Answer/Justification rule cannot see, because they carry neither.
+_CHECKLIST_GUIDELINES_RE = re.compile(r"answer\s+NA\s+means", re.IGNORECASE)
+_CHECKLIST_HEADING_RE = re.compile(
+    r"^#{1,6}\s*[\d.\s]*\**\s*(?:neurips|icml|iclr|acl|aaai|cvpr)?\s*"
+    r"paper checklist\s*\**\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_skippable_chunk(note_rel: str) -> bool:
+    """True when a converted inbox chunk is flagged as non-content.
+
+    `boilerplate: true` is the current key; `references: true` is the original
+    one and stays recognized forever — inbox segments from earlier runs carry
+    it, and re-converting is not something a vault owner should have to do.
 
     The /nucleate side of the flag written by `_doc_to_md`. Unreadable or
     unflagged files answer False — never blocks ingestion on a read error.
@@ -340,44 +380,70 @@ def is_references_chunk(note_rel: str) -> bool:
         data, _, _ = frontmatter.split(DRIVER.read_note(note_rel).content)
     except Exception:
         return False
-    return bool(isinstance(data, dict) and data.get("references"))
+    if not isinstance(data, dict):
+        return False
+    return bool(data.get("boilerplate") or data.get("references"))
 
 
-def _section_is_references(section: str) -> bool:
+def _section_kind(section: str) -> str:
+    """Empty for content, else why this section must not be distilled.
+
+    The kind doubles as the frontmatter key stamped on the segment
+    (`references: true` / `boilerplate: true`), so the flag says which class of
+    apparatus it is instead of calling a table of contents a bibliography.
+    """
     for line in section.splitlines():
         if _HEADING_RE.match(line):
-            return bool(_REFERENCES_HEADING_RE.match(line.strip()))
-    return False
+            head = line.strip()
+            if _REFERENCES_HEADING_RE.match(head):
+                return "references"
+            if _CONTENTS_HEADING_RE.match(head) or _CHECKLIST_HEADING_RE.match(head):
+                return "boilerplate"
+            break
+    # HEAD only, never the whole section: with sparse headings a "section" is
+    # the entire document, and a paper that merely CONTAINS the checklist at
+    # the back would flag itself end to end (measured: a-mem-agentic-memory
+    # came out 100% boilerplate on the unwindowed rule). A real checklist item
+    # opens with its triple, so the head is where it must be found.
+    head = section[:_CHECKLIST_HEAD_CHARS]
+    if _CHECKLIST_ANSWER_RE.search(head) and _CHECKLIST_JUSTIFICATION_RE.search(head):
+        return "boilerplate"
+    if _CHECKLIST_GUIDELINES_RE.search(head):
+        return "boilerplate"
+    # ponytail: the template's one-off "IMPORTANT, please:" instruction block
+    # (282 B, once per paper) is left in. A third regex for a quarter of a
+    # kilobyte is not worth owning; widen this if it ever becomes a note.
+    return ""
 
 
-def _split_markdown_flagged(md: str, max_chars: int) -> list[tuple[str, bool]]:
-    """split_markdown's engine, each segment flagged is_references.
+def _split_markdown_flagged(md: str, max_chars: int) -> list[tuple[str, str]]:
+    """split_markdown's engine, each segment carrying its `_section_kind`.
 
-    The flag is per SECTION (heading-level), inherited by its size-split
-    continuation pieces, and packing never merges across a flag change — so a
+    The kind is per SECTION (heading-level), inherited by its size-split
+    continuation pieces, and packing never merges across a kind change — so a
     references section and its heading-less overflow parts all come out
     flagged, and never absorb (or get absorbed by) real content.
     """
-    pieces: list[tuple[str, bool]] = []
+    pieces: list[tuple[str, str]] = []
     for section in _split_on_headings(md):
-        is_ref = _section_is_references(section)
+        kind = _section_kind(section)
         if len(section) <= max_chars:
-            pieces.append((section, is_ref))
+            pieces.append((section, kind))
         else:
-            pieces.extend((p, is_ref) for p in _split_by_size(section, max_chars))
+            pieces.extend((p, kind) for p in _split_by_size(section, max_chars))
 
-    out: list[tuple[str, bool]] = []
-    cur, cur_ref = "", False
-    for p, is_ref in pieces:
-        if cur and (len(cur) + len(p) > max_chars or is_ref != cur_ref):
-            out.append((cur, cur_ref))
+    out: list[tuple[str, str]] = []
+    cur, cur_kind = "", ""
+    for p, kind in pieces:
+        if cur and (len(cur) + len(p) > max_chars or kind != cur_kind):
+            out.append((cur, cur_kind))
             cur = ""
         if not cur:
-            cur_ref = is_ref
+            cur_kind = kind
         cur += p
     if cur.strip():
-        out.append((cur, cur_ref))
-    return out or [(md, False)]
+        out.append((cur, cur_kind))
+    return out or [(md, "")]
 
 
 def split_markdown(md: str, max_chars: int = _MAX_SEGMENT_CHARS) -> list[str]:
@@ -516,24 +582,30 @@ def _doc_to_md(target: str, dest_dir: str) -> list[str]:
     # not a link — the pointer must not enter the graph. CLEANUP carries it
     # into the source leaf when the note is later nucleated with keep_sources.
     fm = _provenance_fm(src, body)
+    # Apparatus segments carry a frontmatter flag so /nucleate can skip them: a
+    # reference list is citation metadata and a venue checklist is submission
+    # paperwork, not content — each gets kept as raw material, never distilled
+    # into venue/journal/ethics notes.
+    def _flag(kind: str) -> str:
+        return fm.replace("---\n", f"---\n{kind}: true\n", 1) if kind else fm
+
     # Single segment (a paper, an article) keeps the flat inbox path — no change
     # in behaviour, no subdir for the common case. Image links are basename
     # embeds (![[fig.png]]) so they resolve from any segment regardless of dir.
+    # It is flagged like any other segment: computing the kind and then dropping
+    # it meant a standalone bibliography export or a lone checklist page — one
+    # segment because it fits under _MAX_SEGMENT_CHARS — was distilled in full.
     if len(segments) == 1:
         note_rel = f"{inbox}/{src.stem}.md"
-        DRIVER.upsert(note_rel, fm + body.lstrip("\n"))  # re-converting the same source refreshes its inbox note
+        DRIVER.upsert(note_rel, _flag(flagged[0][1]) + body.lstrip("\n"))  # re-converting the same source refreshes its inbox note
         return [note_rel]
 
     width = len(str(len(segments)))
     paths: list[str] = []
-    for i, (seg, is_ref) in enumerate(flagged, 1):
+    for i, (seg, kind) in enumerate(flagged, 1):
         slug = _segment_slug(seg, "part")
         note_rel = f"{inbox}/{src.stem}/{i:0{width}d}-{slug}.md"
-        # References segments carry a frontmatter flag so /nucleate can skip
-        # them: a reference list is citation metadata, not content — one gets
-        # kept as raw material, never distilled into venue/journal notes.
-        seg_fm = fm.replace("---\n", "---\nreferences: true\n", 1) if is_ref else fm
-        DRIVER.upsert(note_rel, seg_fm + seg.lstrip("\n"))  # re-converting the same source refreshes its segments
+        DRIVER.upsert(note_rel, _flag(kind) + seg.lstrip("\n"))  # re-converting the same source refreshes its segments
         paths.append(note_rel)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
     return paths
