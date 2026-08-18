@@ -431,6 +431,15 @@ class SilicaConfig:
         default_factory=lambda: int(os.getenv("SILICA_MAX_CONTEXT", "60000"))
     )
 
+    # Rank-graduated recall depth (gate-pending A/B arm, 0 = off): ranks
+    # beyond this many are served as extractive L0 abstracts instead of the
+    # validated 3x1000 windows, and notes already served whole this session
+    # degrade to L0 on repeat. Do NOT default this on before the LME gate
+    # rules on it — the window grid it bends is eval-validated.
+    recall_deep_ranks: int = field(
+        default_factory=lambda: int(os.getenv("SILICA_RECALL_DEEP_RANKS", "0"))
+    )
+
     # Tool progress display level (REPL-runtime, cycled with /verbose)
     # off     — total silence, only the final response
     # new     — shows the tool name only when it changes

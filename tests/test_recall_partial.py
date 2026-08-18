@@ -20,7 +20,7 @@ def _patch(monkeypatch, perception):
     import silica.kernel.recall.perception as perception_mod
 
     monkeypatch.setattr(perception_mod, "perceive",
-                        lambda query, now, k: perception, raising=False)
+                        lambda query, now, k, **kw: perception, raising=False)
 
 
 def test_windowed_note_is_partial_whole_note_is_not(monkeypatch):

@@ -48,6 +48,59 @@ class NoteBlock:
     body: str       # full body, frontmatter stripped
     excerpt: str    # query-densest window of the body
     contested: str | None = None  # correction reason when flagged, else None
+    abstract: bool = False  # served at the L0 tier (rank tail / already served)
+
+
+# L0 abstract shape (OpenViking doc_overview, leaner): enough headings to show
+# the note's skeleton, one paragraph to say what it is about.
+L0_CAP_CHARS = 400
+L0_MAX_HEADINGS = 8
+
+
+def l0_excerpt(body: str, *, cap_chars: int = L0_CAP_CHARS,
+               max_headings: int = L0_MAX_HEADINGS) -> str:
+    """Extractive L0 abstract of a note body: heading tree + first paragraph.
+
+    Deterministic and LLM-free by verdict, not convenience — distill-vs-verbatim
+    and the extractive-ingest arm both scored extractive over generated text.
+    Serves the rank tail (and already-served notes) so a hit keeps its slot at
+    a fraction of the window cost; the model re-reads on demand via `partial`.
+    """
+    import re
+
+    if not body or not body.strip():
+        return ""
+    headings = re.findall(r"^#{1,6}[ \t].+$", body, flags=re.MULTILINE)
+    lines = headings[:max_headings]
+    paragraph = ""
+    for block in re.split(r"\n\s*\n", body):
+        candidate = "\n".join(
+            ln for ln in block.strip().splitlines()
+            if not ln.lstrip().startswith("#")
+        ).strip()
+        if candidate:
+            paragraph = candidate
+            break
+    out = "\n".join(part for part in ("\n".join(lines), paragraph) if part)
+    return out[:cap_chars].strip()
+
+
+def _apply_tiers(blocks: list[NoteBlock], *, deep_ranks: int | None,
+                 served: set[str]) -> None:
+    """Degrade the rank tail and already-served notes to the L0 tier in place.
+
+    Rank counts the FINAL order (what the model sees as #n). A block whose L0
+    comes back empty keeps its window — an empty excerpt would be dropped as
+    contentless, and the slot exists precisely because the tail carries gold.
+    """
+    for rank, b in enumerate(blocks, 1):
+        beyond = deep_ranks is not None and rank > deep_ranks
+        if not beyond and b.path not in served:
+            continue
+        l0 = l0_excerpt(b.body)
+        if l0:
+            b.excerpt = l0
+            b.abstract = True
 
 
 @dataclass
@@ -76,7 +129,10 @@ class Perception:
                 head = f"[#{rank}" + (f" | {b.evidence}" if b.evidence else "")
                 head += (f" | dated {b.date}" if b.date else "")
                 head += (f" | contested: {b.contested}" if b.contested else "")
-                head += (f" | stale:{lvl}" if lvl else "") + "]"
+                head += (f" | stale:{lvl}" if lvl else "")
+                # L0-tier block: the marker tells the model this is a summary
+                # and the note holds more (re-read via `partial`).
+                head += (" | abstract" if b.abstract else "") + "]"
                 parts.append(f"{head}\n{b.excerpt}")
             else:
                 marks = ([f"dated {b.date}"] if b.date else []) \
@@ -348,7 +404,9 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
              paths: list[str] | None = None,
              use_recall_weights: bool = False,
              assemble: bool = False,
-             use_lexical: bool = False) -> Perception:
+             use_lexical: bool = False,
+             deep_ranks: int | None = None,
+             served_before: set[str] | None = None) -> Perception:
     """Retrieve + assemble the answer-time context for `query`.
 
     ``paths`` skips retrieval and assembles the given notes in order (the eval
@@ -362,6 +420,12 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     bypasses retrieval).
     ``use_lexical`` (default off) forwards to `facade_retrieve`'s lexical leg;
     no effect when ``paths`` is set.
+    ``deep_ranks`` (default None = off, byte-identical): ranks beyond it are
+    served as an extractive L0 abstract instead of the query windows — the
+    tail keeps its slot (the rank probe showed it carries gold) at a fraction
+    of the cost. ``served_before``: paths degraded to L0 whatever their rank,
+    because the reader already holds their body (cross-turn dedup). Both are
+    gate-pending A/B arms; --assemble overrides them (it re-budgets blocks).
     """
     from silica.kernel.recall.rerank import best_windows
 
@@ -389,6 +453,9 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     # Correction loop: contested notes are demoted behind clean ones (stable),
     # never dropped — the render marks them so the answer step can distrust them.
     blocks = [b for b in blocks if not b.contested] + [b for b in blocks if b.contested]
+
+    if deep_ranks is not None or served_before:
+        _apply_tiers(blocks, deep_ranks=deep_ranks, served=served_before or set())
 
     if paths is None:
         blocks = _maybe_assemble(blocks, assemble=assemble, query=query)

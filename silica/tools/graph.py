@@ -342,26 +342,41 @@ class RecallArgs(BaseModel):
     k: int = Field(default=15, description="Maximum number of notes contributing to the context")
 
 
+# Cross-turn recall dedup (active only with CONFIG.recall_deep_ranks > 0):
+# paths served at full tier this session. A conversation reset must call
+# reset_recall_served() — a cooled note from a previous chat would otherwise
+# arrive as an abstract the new conversation never saw whole.
+_SERVED: set[str] = set()
+
+
+def reset_recall_served() -> None:
+    """Forget which notes recall served whole; call on /clear and new sessions."""
+    _SERVED.clear()
+
+
 @tool(RecallArgs, cls="composed")
 def silica_recall(query: str, k: int = 15) -> dict[str, Any]:
-    """Assemble an answer-ready memory context for a question.
-
-    The perception the memory eval validates, as one call: fused retrieval
-    (embeddings + co-occurrence, cross-encoder reranked), each note contributing
-    its query-densest window under a rank/evidence/date header, with recalled
-    personal facts (episodic lane) first. Use this when ANSWERING a question
-    from vault memory INSTEAD of stitching search results and note reads
-    together yourself; for a bare ranked list use silica_semantic_search.
-    Returns {context, notes, partial, facts}: answer from `context`; re-read
-    only the notes named in `partial`, the rest arrived whole.
+    """Assemble an answer-ready memory context for a question: fused retrieval,
+    each note's query-densest window under a rank/evidence/date header,
+    recalled personal facts first. Use when ANSWERING from vault memory
+    INSTEAD of stitching searches and reads yourself; for a bare ranked list
+    use silica_semantic_search. Answer from `context`; re-read only the notes
+    named in `partial`, the rest arrived whole.
     """
     import datetime
 
+    from silica.config import CONFIG
     from silica.kernel.recall.perception import perceive
 
     from silica.kernel.code import codedocs
 
-    p = perceive(query, now=datetime.date.today().isoformat(), k=k)
+    deep = int(getattr(CONFIG, "recall_deep_ranks", 0) or 0)
+    p = perceive(query, now=datetime.date.today().isoformat(), k=k,
+                 deep_ranks=deep or None,
+                 served_before=set(_SERVED) if deep else None)
+    if deep:
+        # Only full-tier serves cool: an L0 block was a pointer, not a read.
+        _SERVED.update(b.path for b in p.blocks if not b.abstract)
     stale_map = _peek_stale()
     flagged = {b.path: lvl for b in p.blocks
                if (lvl := codedocs.peek_level(stale_map, b.path))}

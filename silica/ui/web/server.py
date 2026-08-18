@@ -85,6 +85,9 @@ def _reset_session() -> None:
     messages[:] = [dict(m) for m in seed_msgs]  # per-message copy; contents are never mutated
     CONFIG.context_tokens = seed_tokens
     _collapsed.clear()
+    from silica.tools.graph import reset_recall_served
+
+    reset_recall_served()  # the new chat saw nothing whole yet
     current_cancel = None
     current_task = None
     _busy = False

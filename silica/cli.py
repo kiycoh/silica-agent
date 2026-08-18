@@ -3286,6 +3286,9 @@ def main():
                 print_home()
                 messages[:] = _fresh_messages()
                 collapsed = set()  # indices reset with the history
+                from silica.tools.graph import reset_recall_served
+
+                reset_recall_served()  # the new chat saw nothing whole yet
                 continue
 
             result = _handle_slash_command(user_input, messages)
