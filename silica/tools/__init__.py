@@ -25,17 +25,44 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
-def _strip_titles(node: Any) -> Any:
-    """Drop every `title` from a JSON Schema, at any depth.
+# Schema keys whose VALUE is a name -> subschema map, not a schema node. Their
+# keys are field names the model has to see; everything else is an annotation.
+_SCHEMA_MAPS = frozenset({"properties", "patternProperties", "$defs", "definitions"})
 
-    pydantic emits one per field that just restates the field name in Title Case
-    ("with_cooccurrence" → "With Cooccurrence"). Pure annotation, zero
-    information for the model, and the whole toolset is re-sent on every
-    iteration of the agent loop: ~600 tokens per request on the chat toolset.
-    Popping only the top-level title left all of the per-property ones behind.
+
+def _strip_titles(node: Any, *, in_map: bool = False) -> Any:
+    """Compact a JSON Schema for the wire: the whole toolset is re-sent on
+    every iteration of the agent loop, so annotation-only keys are paid per
+    request. Three lossless passes, applied at any depth:
+
+    - drop every annotation `title` (restates the field name in Title Case,
+      ~600 tokens on the chat toolset). A `title` sitting inside `properties`
+      is a real PARAMETER, not an annotation, and survives: dropping it left
+      `required: ["title", ...]` naming a field the model could not see, so a
+      strict validator rejected the call and a lenient one omitted the value
+      (silica_event_create, silica_write_note, silica_graph_export);
+    - collapse the Optional pattern `anyOf: [X, {"type": "null"}]` to X —
+      omitting an optional field already means null, so the null branch says
+      nothing. A real union (two live branches) is left alone;
+    - drop `"default": null` for the same reason; informative defaults
+      (5, "", false) survive.
     """
     if isinstance(node, dict):
-        return {k: _strip_titles(v) for k, v in node.items() if k != "title"}
+        if in_map:
+            return {k: _strip_titles(v) for k, v in node.items()}
+        out = {}
+        for k, v in node.items():
+            if k == "title" or (k == "default" and v is None):
+                continue
+            out[k] = _strip_titles(v, in_map=k in _SCHEMA_MAPS)
+        any_of = out.get("anyOf")
+        if isinstance(any_of, list) and len(any_of) == 2:
+            live = [m for m in any_of if m != {"type": "null"}]
+            if len(live) == 1 and isinstance(live[0], dict):
+                del out["anyOf"]
+                # Parent keys (description, default) win over the branch's.
+                out = {**live[0], **out}
+        return out
     if isinstance(node, list):
         return [_strip_titles(v) for v in node]
     return node

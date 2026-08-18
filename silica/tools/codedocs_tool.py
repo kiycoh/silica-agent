@@ -59,35 +59,19 @@ class CodePackArgs(BaseModel):
 
 @tool(CodePackArgs, cls="composed")
 def silica_code_pack(target: str, budget_chars: int = 24000) -> dict:
-    """Deterministic context pack for one source file: the file itself plus the
-    declared facts around it, inside a character budget.
+    """Deterministic context pack for one source file inside a character
+    budget: the target plus its supertypes, extenders, the visible signatures
+    it actually names, external dependencies, and importers. A closure, not a
+    search — same repo state, same bytes. Use before rewriting or porting a
+    file, instead of ten greps.
 
-    Pass a repo-relative path, optionally narrowed with '#Class' or
-    '#Class.member'. You get back the target itself, its declared supertypes
-    and the repo classes that extend it, the public signatures of the files it
-    can see (resolved imports, plus same-package siblings in Java) filtered to
-    the ones it actually names, its external dependencies, and the files that
-    import it.
-
-    `target_mode` says how the target itself came back. "verbatim" is the whole
-    file. A selector that resolves gives "symbol": that declaration whole, the
-    rest of the file as a signature outline. A file too big for the budget with
-    no selector gives "outline": signatures only. `truncated` is true for both
-    degrades, so check it before treating the target as complete source.
-
-    This is a closure, not a search: no ranking, no embeddings, no language
-    server. The same repo state gives the same bytes. Use it before rewriting
-    or porting a file, so you read the surrounding contracts in one call
-    instead of ten greps.
-
-    `dropped` tells you what you are not seeing, in two kinds. An entry
-    starting with `note: ` is a degrade note: something was unavailable and
-    the pack got poorer, not something you can fetch. Every other entry reads
-    `<section>: <label>` and is a real thing that did not fit the budget, so
-    you can ask for it directly by its label. A section header's count (e.g.
-    `importers (fan-in N)`) is always the true repo-wide total, even when the
-    list printed under it is shorter because budget trimming dropped some of
-    those entries.
+    `target` is repo-relative, optionally narrowed with '#Class' or
+    '#Class.member'. `target_mode`: "verbatim" = whole file; "symbol" = that
+    declaration whole, rest as outline; "outline" = signatures only (over
+    budget) — check `truncated` before treating the target as complete.
+    `dropped`: `note: ...` entries are degrades (not fetchable); other entries
+    are `<section>: <label>` items that did not fit and can be requested by
+    label. Section counts are true repo-wide totals.
     """
     from silica.config import CONFIG
     from silica.kernel.code import codepack

@@ -65,7 +65,11 @@ def test_meter_off_is_noop(monkeypatch):
 # did (1214 -> 1428). +214 is the prompt audit — the recall-vs-search routing
 # line, silica_flag_note, and the two report fields the review step 1 was not
 # naming. Re-pinned rather than left to the tolerance, per the paragraph above.
-CHAT_PREFIX_TOKENS = 11_848
+# Re-measured 2026-08-17 at 10_663: the OpenViking-informed description trim —
+# ~28 tool docstrings cut to routing + result contracts (litellm-measured
+# 5_727 -> 4_046 tok), plus the anyOf-null/default-null schema compaction in
+# _strip_titles. Deliberate: the whole point was lowering this number.
+CHAT_PREFIX_TOKENS = 10_663
 CHAT_PREFIX_TOLERANCE = 0.10
 
 

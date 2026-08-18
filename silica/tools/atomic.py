@@ -391,24 +391,16 @@ class ListFilesArgs(BaseModel):
 
 @tool(ListFilesArgs, cls="atomic")
 def silica_files(folder: str = "") -> dict:
-    """Lists the notes in the vault and the source files under a folder.
+    """Lists vault notes and source files under a folder.
 
-    Returns {"total": N, "files": [vault-relative path, ...]} for markdown
-    notes, plus "code": [repo-relative path, ...] with the ingestible source
-    files under `folder` (empty folder= lists notes only). An inbox folder is
-    listed too — its notes are kept out of the vault index, not missing — but
-    only its .md under "files"; the unconverted files there (PDFs etc.) come
-    back under "unconverted" and need `/convert` before anything can read them.
-    A note's wikilink name is its filename without the extension. A folder of code is NOT empty
-    just because it holds no .md — feed the "code" paths to /nucleate to stage
-    a skeleton stub per file. Both listings are capped at 200 entries: when
-    "truncated" is true, narrow with folder= instead of re-calling. For a bare
-    count ("how many notes?") use the returned "total" — or the '## Vault map'
-    block already in context, without any call.
-
-    A bare call also returns "source_folders": {folder: count} for the vault's
-    non-markdown material (PDFs, scans, media). Those files ARE in the vault
-    even though no note exists for them yet — never report them as missing.
+    Returns {"total", "files"} for markdown (wikilink name = filename minus
+    extension), "code" for ingestible source files (feed to /nucleate — a
+    folder of code is NOT empty just because it holds no .md), "unconverted"
+    for inbox files needing `/convert`, and on a bare call "source_folders"
+    ({folder: count}) for non-markdown material that IS in the vault — never
+    report it as missing. Listings cap at 200: on "truncated", narrow with
+    folder= instead of re-calling. For a bare count use "total" or the
+    '## Vault map' already in context.
     """
     # bare paths, not {name, path} dicts — NoteRef.name is the
     # filename without its extension, so the dict shipped every note's name
@@ -476,12 +468,9 @@ class ExistsArgs(BaseModel):
 
 @tool(ExistsArgs, cls="atomic")
 def silica_exists(path: str) -> bool:
-    """Verifies a file exists in the vault (notes, inbox, and source files alike).
-
-    Answers for non-markdown too: asked to ingest a PDF sitting in the library,
-    the agent read this `False` and told the user the file was nowhere in their
-    vault. `read_note` only opens markdown, and "I cannot read it" is not the
-    same answer as "it is not there".
+    """Verifies a file exists in the vault — notes, inbox, and source files
+    alike (PDFs too). `read_note` only opens markdown: "I cannot read it" is
+    not the same answer as "it is not there".
     """
     try:
         DRIVER.read_note(path)
@@ -613,16 +602,11 @@ class GraphExplainArgs(BaseModel):
 @tool(GraphExplainArgs, cls="atomic")
 def silica_graph_explain(note: str, depth: int = 1) -> dict:
     """Explain a note's structural position: cluster, degree rank, betweenness,
-    out-links, backlinks, and any cross-cluster bridges it participates in.
+    out-links, backlinks, cross-cluster bridges. Low degree + high betweenness
+    = a bridge whose removal fragments the vault, worth reinforcing.
 
-    `betweenness` is the fraction of shortest paths running through the note — a
-    bottleneck signal distinct from degree. A note with LOW degree but HIGH
-    betweenness is a bridge whose removal fragments the vault: worth reinforcing
-    even though it has few links.
-
-    `diagnosis` answers "how well is THIS note integrated" by reading every
-    vault-wide coherence signal for this one note: orphan/hub status, the
-    cohesion of its own cluster, whether it is contested or built on a drifted
+    `diagnosis` reads every vault-wide coherence signal for this one note
+    (orphan/hub status, cluster cohesion, contested or drifted
     source, and its rank in the attention / integration-deficit lists. A `null`
     in a ranked field means the note did not make that list's top-k, which is
     "not among the worst", not "clean".
@@ -874,13 +858,11 @@ class RecordQuizArgs(BaseModel):
 
 @tool(RecordQuizArgs, cls="atomic")
 def silica_record_quiz(results: list) -> dict:
-    """Record graded quiz answers so the notes the reader failed resurface later.
+    """Record graded quiz answers so the notes the reader failed resurface.
 
-    Call once after grading a round of questions, one entry per question. This
-    writes no note: the log is derived state, and it is what makes
-    silica_review_queue and the report's attention list rank by what the reader
-    actually got wrong instead of by file age. Concepts are logged raw, exactly
-    as spelled — the learner view resolves them to the index keyspace at read.
+    Call once after grading, one entry per question. Writes no note — derived
+    state feeding silica_review_queue and the report's attention list.
+    Concepts are logged raw, exactly as spelled.
     """
     from silica.kernel.report import quiz
 
@@ -911,14 +893,11 @@ class ReviewQueueArgs(BaseModel):
 
 @tool(EmptyArgs, cls="atomic")
 def silica_doctor() -> dict:
-    """Silica's own health: model, endpoints, vault, indexes and hooks.
-
-    The same checks `silica doctor` runs, as data. Call it when a capability
-    behaves as if it were off (relatedness that never finds anything, rerank
-    that never sharpens, a vault write that lands nowhere) instead of guessing:
-    a leg that degraded says so here. Endpoint credentials are redacted.
-    Unlike the CLI this never autostarts local servers first — that can block
-    for minutes on a model load — so it reports the state as it is right now.
+    """Silica's own health: model, endpoints, vault, indexes, hooks — the
+    `silica doctor` checks as data. Call when a capability behaves as if off
+    (relatedness finds nothing, a write lands nowhere) instead of guessing.
+    Credentials redacted. Never autostarts local servers: reports the state
+    as it is right now.
     """
     from silica.config import CONFIG
     from silica.onboarding import checks
@@ -930,13 +909,11 @@ def silica_doctor() -> dict:
 def silica_review_queue(limit: int = 10, target: str = "") -> list:
     """What the reader should review next — the learner model's picker.
 
-    Each row carries an estimated retention R (0..1, null = never measured) and
-    a pool: "due" (known once, decaying — worst first), "unexplored" (zero quiz
-    evidence: AI-written notes first, then central unmeasured notes), "known"
-    (recalled recently; only reported in target mode). R derives from note
-    creation dates, `AI: true` authorship and the graded-quiz ledger — writing
-    a note counts as learning it once; being quizzed is the only thing that
-    ever proves it since.
+    Rows carry estimated retention R (0..1, null = never measured) and a pool:
+    "due" (decaying, worst first), "unexplored" (no quiz evidence, AI-written
+    first), "known" (target mode only). R derives from creation dates,
+    `AI: true` authorship and the graded-quiz ledger — writing counts as
+    learning once; quizzes are the only proof since.
     """
     from silica.kernel.report import learner
 

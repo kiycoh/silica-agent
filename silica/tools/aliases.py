@@ -125,14 +125,11 @@ class AliasesArgs(BaseModel):
 
 @tool(AliasesArgs, cls="composed")
 def silica_aliases(apply: bool = False, folder: str = "", cancel_token: Any = None) -> dict[str, Any]:
-    """Propose and record frontmatter aliases for existing note titles.
-
-    One LLM call over the (scoped) title index proposes variant spellings;
-    each variant passes the same ambiguity gate build_alias_map applies at
-    read time (no collision with any real title, single claimant, noise
-    floor). Default is a dry-run returning the surviving groups; apply=True
-    writes `aliases:` into each canonical note through the write gate.
-    Autolink then resolves the new surfaces on every future pass.
+    """Propose and record frontmatter aliases for existing note titles. One
+    LLM call proposes variants; each passes the read-time ambiguity gate (no
+    collision with a real title, single claimant, noise floor). Dry-run by
+    default; apply=True writes `aliases:` through the write gate. Autolink
+    resolves the new surfaces on future passes.
     """
     from silica.config import CONFIG
     from silica.driver import DRIVER

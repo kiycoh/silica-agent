@@ -322,17 +322,12 @@ class DedupFolderArgs(BaseModel):
 
 @tool(DedupFolderArgs, cls="composed")
 def silica_dedup(folder: str = "", cancel_token: Any = None) -> dict[str, Any]:
-    """SCAN a folder (or the vault) for near-duplicate note pairs and merge each
-    smaller note into its larger twin.
-
-    Only the smaller note's genuinely-new info is appended to the larger note
-    (a single append-only patch) — never rewrites, deletes, or creates notes.
-    Requires the embedding index (silica_embed_refresh). If you already know
-    the pairs, use silica_dedup_pairs instead.
-
-    A pair is admitted when its body similarity is borderline OR its titles are
-    strongly similar — the latter catches cases like "ROS" / "JSON in ROS 2"
-    where bodies diverge but titles are clearly related.
+    """SCAN a folder (or the vault) for near-duplicate pairs and merge each
+    smaller note into its larger twin: only genuinely-new info is appended
+    (one patch) — never rewrites, deletes, or creates. Requires the embedding
+    index (silica_embed_refresh). Known pairs: silica_dedup_pairs. Admission
+    is borderline body similarity OR strong title similarity ("ROS" /
+    "JSON in ROS 2").
     """
     from silica.agent.subagent import run_subagent_batch
 
@@ -414,18 +409,11 @@ class GenerateTaxonomyArgs(BaseModel):
 def silica_generate_taxonomy(
     user_intent: str, scope: str = "", save_path: str = "", merge: bool = False
 ) -> dict[str, Any]:
-    """Generate a taxonomy YAML from a natural-language organization intent.
-
-    Uses the LLM to translate the user's description into a structured
-    FolderRule list, validates it with Pydantic, and writes it to disk
-    at taxonomy.yaml (or the specified path).
-
-    With merge=True the existing taxonomy (if any) is treated as standing
-    directives: the LLM preserves its rules and only adds/updates what the
-    new intent requires.
-
-    Returns the validated taxonomy dict and the path it was written to.
-    The user should review the output before running silica_run_organizer.
+    """Generate a taxonomy YAML from a natural-language organization intent
+    and write it to taxonomy.yaml (or save_path). merge=True treats the
+    existing taxonomy as standing directives: preserves its rules, only adds
+    what the new intent requires. The user should review the output before
+    silica_run_organizer.
     """
     from pathlib import Path
 
@@ -573,13 +561,10 @@ def silica_run_organizer(
     llm_arbiter: bool = True,
     move_uncategorized: bool = False,
 ) -> dict[str, Any]:
-    """Classify vault notes against the taxonomy and move them into its folders.
-
-    Requires a taxonomy (silica_generate_taxonomy first). Two-phase:
-    dry_run=True (default) returns the move plan without touching anything;
-    dry_run=False executes the moves graph-safely (wikilinks updated), with
-    automatic rollback if the post-move lint gate fails. To move a single note
-    directly, use silica_move instead.
+    """Classify notes against the taxonomy (silica_generate_taxonomy first)
+    and move them into its folders. dry_run=True (default) returns the plan;
+    dry_run=False moves graph-safely (wikilinks updated) with rollback on a
+    failed lint gate. Single note: silica_move.
     """
     from silica.kernel.organize.taxonomy import load_taxonomy
     from silica.router.organize_fsm import OrganizerFSM

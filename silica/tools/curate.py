@@ -341,20 +341,14 @@ def silica_curate(
     targets: list[str] | None = None,
     cancel_token: Any = None,
 ) -> dict[str, Any]:
-    """Curate the vault: turn structural findings into executed maintenance work.
+    """Curate the vault: turn the report's findings (autolinks, orphans,
+    near-duplicates, oversized/lean notes) into executed maintenance work.
+    Default is a dry-run returning the plan; apply=True executes with undo
+    journaling. Raw audit alone: silica_vault_report.
 
-    Composes a plan from the vault report (strong autolinks, orphans to link,
-    near-duplicate pairs, oversized/lean notes). Default is a dry-run: returns
-    the plan, writes nothing. With apply=True it executes the plan (autolinks,
-    orphan linking, dedup merges, refinements) with undo journaling.
-    For the raw audit report without acting on it, use silica_vault_report.
-
-    Apply a subset with `kinds` and `targets` (they shape both the dry-run
-    preview and the apply path):
-      * "apply only the dedups"       → kinds=["dedup"]
-      * "refine only x.md and y.md"   → kinds=["refine"], targets=["x.md","y.md"]
-    For selection beyond kind/path (ordinals, "all but X"), dry-run first
-    (apply=False), read the returned plan, then pass explicit `targets`.
+    Narrow with `kinds` (e.g. ["dedup"]) and `targets` (paths) — both shape
+    dry-run and apply. For selection beyond kind/path ("all but X"), dry-run
+    first, read the plan, then pass explicit `targets`.
     """
     # the plan is re-derived on every call, so a subset apply after a
     # dry-run replans against the current vault (already true today between

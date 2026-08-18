@@ -217,19 +217,13 @@ class QueryTableArgs(BaseModel):
 def silica_query_table(
     path: str, sql: str, limit: int = 200, sheet: str = ""
 ) -> dict[str, Any]:
-    """Answers a question about a data file by running SQL over it.
-
-    For .csv/.tsv/.parquet/.json and Excel workbooks (.xlsx/.xls, one sheet per
-    call via sheet=) — the aggregation path, for questions semantic search
-    structurally cannot answer: sums, averages, group-by, ranking, counting,
-    filtering on numeric or date ranges. The file is queried in place (nothing
-    is imported, nothing is written) and is bound to the table name `t`.
-
-    Read-only: a single SELECT per call, anything else is rejected. When the
-    columns aren't known yet, `SUMMARIZE t` is the cheap first call. Every
-    reply carries the bound schema — and a numeric-looking column typed VARCHAR
-    holds values that are NOT numbers: try_cast would silently drop those rows
-    from an aggregate, so count what the cast loses before trusting its number.
+    """Answers a question about a data file (.csv/.tsv/.parquet/.json, Excel
+    via sheet=) by running SQL over it — the aggregation path semantic search
+    cannot do: sums, group-by, ranking, ranges. Queried in place, bound to
+    table `t`. Read-only: one SELECT per call. `SUMMARIZE t` is the cheap
+    first call when columns are unknown. Replies carry the bound schema; a
+    numeric-looking VARCHAR column holds non-numbers — count what try_cast
+    loses before trusting an aggregate.
     """
     try:
         import duckdb  # noqa: F401

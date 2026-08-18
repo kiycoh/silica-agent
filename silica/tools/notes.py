@@ -160,14 +160,11 @@ class FlagNoteArgs(BaseModel):
 @tool(FlagNoteArgs, cls="composed", collapse="eager")
 def silica_flag_note(name: str, reason: str = "", clear: bool = False,
                      ref: str = "") -> dict[str, Any]:
-    """Flag an EXISTING note as wrong or stale, found while USING it.
-
-    The correction entry point: a note that fed an answer but proved wrong is
-    marked `contested` in its frontmatter (git-diffable, cleared by hand or by
-    `clear=True`). Contested notes are demoted and marked at recall (never
-    silently dropped) and surfaced in the run digest for a human to resolve.
-    This does NOT edit the note's content or delete it — the human decides.
-    Checkpointed, reversible with /undo.
+    """Flag an EXISTING note as wrong or stale, found while USING it: marks
+    `contested` in frontmatter (clear with clear=True). Contested notes are
+    demoted and marked at recall — never silently dropped — and surfaced in
+    the run digest. Content is never edited or deleted; the human decides.
+    Revertible with /undo.
     """
     import datetime
     import os
@@ -255,19 +252,14 @@ def silica_write_note(
     props: dict[str, str] | None = None,
     documents: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Create a new note in the vault — the fast path for single-note creation.
+    """Create a new note — the fast path for single-note creation.
 
-    Frontmatter is mechanical: pass structured fields (title/tags/related/
-    parent, plus scalar `props` for keys like `type`/`target`), never raw
-    YAML in `body` — a leading YAML block is stripped.
-    The note skeleton comes from the vault template (explicit `template`
-    name > vault default > built-in); `template="none"` writes the body
-    as-is with only the system floor stamped.
-
-    Fails if the note already exists: use silica_patch_note to append to an
-    existing note, or silica_run_injector for multi-note nucleation with
-    quality gates and rollback. The creation is checkpointed and can be
-    reverted with /undo.
+    Pass frontmatter as structured fields (title/tags/related/parent, scalar
+    `props`), never raw YAML in `body` (a leading YAML block is stripped).
+    Skeleton from the vault template (explicit `template` > vault default >
+    built-in); `template="none"` writes the body as-is. Fails if the note
+    exists: append with silica_patch_note; multi-note nucleation with gates
+    and rollback: silica_run_injector. Checkpointed, revertible with /undo.
     """
     from pathlib import PurePosixPath
 

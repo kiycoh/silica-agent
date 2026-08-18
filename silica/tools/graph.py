@@ -44,15 +44,11 @@ class GraphExportArgs(BaseModel):
 @tool(GraphExportArgs, cls="composed")
 def silica_graph_export(output_path: str = "graph.html", folder: str = "",
                         title: str = "Vault Graph", knn_k: int = 6) -> dict[str, Any]:
-    """Generates a self-contained interactive HTML graph of the vault's structure.
-
-    One unified build: the wikilink graph (Louvain-clustered by topic; ghost
-    nodes mark unresolved links) with an embedding k-NN overlay (SIMILAR edges)
-    laid out on the same canvas. The overlay pulls link-orphans next to their
-    semantic neighbours and is toggleable in the viewer's HUD, so notes that
-    aren't explicitly linked still find their place. The output opens directly in
-    any browser. Visualization only — for an actionable structural audit use
-    silica_vault_report.
+    """Self-contained interactive HTML graph of the vault: the wikilink graph
+    (Louvain-clustered; ghost nodes mark unresolved links) plus a toggleable
+    embedding k-NN overlay that places link-orphans next to their semantic
+    neighbours. Opens in any browser. Visualization only — for an actionable
+    structural audit use silica_vault_report.
     """
     from silica.ui.web.graph_view import export_graph
 
@@ -74,13 +70,10 @@ class MindmapArgs(BaseModel):
 
 @tool(MindmapArgs, cls="composed")
 def silica_mindmap(note_path: str, force: bool = False) -> dict[str, Any]:
-    """Builds a radial mind-map rooted on one note and writes it as an Obsidian .canvas.
-
-    Deterministic, no LLM: BFS over the wikilink graph plus the latent (embeddings
-    + co-occurrence) relatedness leg, laid out as radial wedges by community. The
-    .canvas lands in maps/<stem>.canvas and is manipulable in Obsidian. No-clobber:
-    an existing map is not overwritten unless force=True (so your rearrangements
-    survive). For the flat whole-vault network instead, use silica_graph_export.
+    """Radial mind-map rooted on one note, written to maps/<stem>.canvas
+    (editable in Obsidian). Deterministic: BFS over wikilinks plus the latent
+    relatedness leg, radial wedges by community. No-clobber: an existing map
+    needs force=True. Flat whole-vault network: silica_graph_export.
     """
     from pathlib import Path
 
@@ -127,20 +120,15 @@ class AutolinkArgs(BaseModel):
 
 @tool(AutolinkArgs, cls="composed", collapse="eager")
 def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", use_candidates: bool = True) -> dict[str, Any]:
-    """Scan the given notes for mentions of existing vault titles and wrap them as wikilinks.
+    """Scan the given notes for mentions of existing vault titles and wrap them
+    as wikilinks. Skips frontmatter, code, math, headings, already-linked text;
+    only links titles that exist (graph-safe).
 
-    Skips frontmatter, code blocks, math, headings, and already-linked text.
-    Only links titles that exist in the vault graph (graph-safe by construction).
-
-    ONE call consumes the ENTIRE `note_paths` list — there is no per-call limit
-    and nothing is left pending. `notes_scanned` echoes the list length back;
-    `notes_linked` counts only the notes that actually gained a link, which is
-    normally lower because most notes have nothing left to link. Do NOT re-call
-    to "finish the rest": there is no rest.
-
-    For the reverse direction (inject links TO newly created notes into older
-    neighbours) use silica_backlink; for a vault-wide maintenance pass that also
-    finds the candidates itself, use silica_curate.
+    ONE call consumes the ENTIRE `note_paths` list; `notes_linked` below
+    `notes_scanned` is normal — there is no rest, do NOT re-call to finish.
+    Reverse direction (links TO new notes from older neighbours):
+    silica_backlink. Vault-wide pass that finds its own candidates:
+    silica_curate.
     """
     from silica.kernel.link.autolink import build_title_index
 
@@ -337,18 +325,14 @@ class SemanticSearchArgs(BaseModel):
 
 @tool(SemanticSearchArgs, cls="composed")
 def silica_semantic_search(query: str, k: int = 5) -> dict[str, Any]:
-    """Find vault notes by MEANING: fuses embeddings + co-occurrence, then reranks.
+    """Find vault notes by MEANING (embeddings + co-occurrence fused, reranked).
 
-    Use for "what do I have about X" when the exact wording is unknown, and for
-    "which notes resemble this content" — `query` can be a short phrase or a
-    whole paragraph/note body you already have. Routes through the same
-    relatedness facade as autolink/collision — RRF fusion of the embedding and
-    co-occurrence legs, cross-encoder reranked when configured — so a leg that is
-    down (empty embedding index, embedder offline) degrades to the survivor
-    instead of failing. For literal text matches use silica_search_context; when
-    the text IS an existing note, prefer silica_related (it adds the note-edges
-    leg). Returns at most k results, best first; verify with silica_read_note
-    before acting on them.
+    Use for "what do I have about X" when the exact wording is unknown;
+    `query` can be a phrase or a whole paragraph. A leg that is down (empty
+    index, embedder offline) degrades to the survivor. For literal text use
+    silica_search_context; when the text IS an existing note, prefer
+    silica_related. Returns at most k results, best first; verify with
+    silica_read_note before acting.
     """
     return {"query": query, **_facade_search(query, k=k)}
 
@@ -401,14 +385,10 @@ class TimelineArgs(BaseModel):
 
 @tool(TimelineArgs, cls="composed")
 def silica_timeline(start: str = "", end: str = "", limit: int = 50) -> dict[str, Any]:
-    """Chronological index of the vault's dated notes — oldest first.
-
-    Use for questions about ORDERING and TIME: "when did X happen", "what came
-    before/after Y", "what is the most recent Z". Deterministic and LLM-free:
-    reads each note's `date` frontmatter (undated notes have no place on a
-    chronology and are excluded). Consult once to order events, then read the
-    linked note (silica_read_note on its stem) for detail. For content-based
-    recall use silica_recall instead.
+    """Chronological index of the vault's dated notes, oldest first — for
+    ORDERING and TIME questions ("when did X happen", "most recent Z"). Reads
+    `date` frontmatter; undated notes are excluded. Order here, then
+    silica_read_note the stem for detail. Content-based recall: silica_recall.
     """
     from pathlib import Path
 
@@ -432,18 +412,15 @@ class RelatedArgs(BaseModel):
 
 @tool(RelatedArgs, cls="composed")
 def silica_related(note: str, k: int = 5) -> dict[str, Any]:
-    """Given an EXISTING note (by name or path), the notes most related to it.
+    """Given an EXISTING note (by name or path), the notes most related to it —
+    embeddings + co-occurrence + note-edges fused into one ranked shortlist.
 
-    Fuses three graph metrics over the whole vault — embeddings + co-occurrence +
-    direct note-edges (CORRELATE) — into one ranked shortlist with provenance, so
-    you get a bounded set of candidates instead of guessing. Use this when asked
-    "what's related/relevant to note X" INSTEAD of reading X and keyword-searching
-    from its words. For free-form text that is not a note, use silica_semantic_search. Each
-    result carries `evidence` (embed:0.83, cooccur:w9, edge:0.57) naming which metric
-    proposed it, plus `cluster` (its graph community, labeled by hub note) when the
-    cluster cache is warm, and `distance` (wikilink hops from the query; null =
-    unreachable). High score + null/large distance = a missing link worth creating;
-    distance 1 = already linked. Verify with silica_read_note before acting.
+    Use for "what's related to note X" INSTEAD of reading X and
+    keyword-searching; for free-form text use silica_semantic_search. Each
+    result carries `evidence` (which metric proposed it), `cluster`, and
+    `distance` (wikilink hops; null = unreachable). High score + null/large
+    distance = a missing link worth creating; distance 1 = already linked.
+    Verify with silica_read_note before acting.
     """
     from silica.config import CONFIG
     from silica.driver import DRIVER
@@ -540,19 +517,14 @@ class ConceptsArgs(BaseModel):
 
 @tool(ConceptsArgs, cls="composed")
 def silica_concepts(term: str = "", note: str = "", k: int = 10) -> dict[str, Any]:
-    """The vault's concepts: what a term is associated with, or what a note is about.
+    """The vault's concepts (deterministic co-occurrence graph, embedder-free).
 
-    Embedder-free read of the deterministic concept co-occurrence graph, in two modes:
-
-    - `term=`: the concept's canonical surface label, its weighted centrality in the
-      discourse, the top-k co-occurring concepts, and the notes mentioning it most.
-      Use it for terminology decisions (does the vault already have a word for this?)
-      and to pick wikilink targets for a concept BEFORE coining a synonym.
-      Single-word concepts only — for a phrase, query its most distinctive word.
-    - `note=`: the top-k concepts of that note, ranked by weight. Use it to answer
-      "what is this note about" without reading and re-summarising the whole body.
-
-    For ranked related NOTES use silica_related or silica_semantic_search instead.
+    `term=`: canonical label, centrality, top co-occurring concepts, top notes
+    — for terminology decisions and picking wikilink targets BEFORE coining a
+    synonym. Single words only; for a phrase query its most distinctive word.
+    `note=`: that note's top concepts by weight — "what is this about" without
+    reading the body. For related NOTES use silica_related or
+    silica_semantic_search.
     """
     from silica.config import CONFIG
     from silica.kernel.recall.cooccurrence import get_cooccur_store
@@ -676,14 +648,10 @@ class CooccurrenceRefreshArgs(BaseModel):
 
 @tool(CooccurrenceRefreshArgs, cls="composed", collapse="eager")
 def silica_cooccurrence_refresh(folder: str = "", force: bool = False) -> dict[str, Any]:
-    """Build or refresh the vault co-occurrence index.
-
-    The embedder-free twin of silica_embed_refresh: a deterministic concept
-    co-occurrence graph derived purely from note text — works even when the
-    embedder is unavailable. Powers cluster naming and the co-occurrence
-    signals in silica_vault_report. Incremental: skips notes already indexed
-    (unless force=True). Run once to seed an existing vault; writes keep it
-    fresh automatically afterwards.
+    """Build or refresh the co-occurrence index: a deterministic concept graph
+    from note text, works without the embedder. Powers cluster naming and
+    silica_vault_report signals. Incremental (force=True to redo). Seed once
+    on an existing vault; writes keep it fresh afterwards.
     """
     from silica.config import CONFIG
     from silica.kernel.link import correlate
@@ -755,13 +723,10 @@ class LexicalRefreshArgs(BaseModel):
 
 @tool(LexicalRefreshArgs, cls="composed", collapse="eager")
 def silica_lexical_refresh(folder: str = "", force: bool = False) -> dict[str, Any]:
-    """Build or refresh the vault lexical (BM25/fuzzy) index.
-
-    The lexical twin of silica_cooccurrence_refresh: a hand-written in-memory
-    BM25 + fuzzy index over note title+body, strong on rare tokens, proper
-    nouns, and dates. Seeds an existing vault so the optional lexical retrieval
-    leg (use_lexical) has an index to query; writes keep it fresh automatically
-    afterwards (write-hook, index-gated). Run once to create the index.
+    """Build or refresh the lexical (BM25/fuzzy) index over note title+body —
+    strong on rare tokens, proper nouns, dates. Seeds the optional use_lexical
+    retrieval leg; run once on an existing vault, writes keep it fresh
+    afterwards.
     """
     from silica.kernel.recall.lexical import get_lexical_store
 
@@ -829,18 +794,13 @@ def silica_vault_report(
     with_cooccurrence: bool = False,
     seed_ledger: bool = True,
 ) -> dict[str, Any]:
-    """Deterministic structural audit of the vault — the entry point for /graph and vault health checks.
-
-    Computes god-nodes, surprising cross-cluster connections, orphans, dangling
-    links, and clusters. Writes GRAPH_REPORT.md and (if seed_ledger=True) seeds
-    a remediation run to advance task-by-task via silica_ledger_next.
-    For a visual graph instead, use silica_graph_export; to go straight to
-    executable maintenance work, use silica_curate.
-
-    Tier semantics:
-      auto     — reversible, graph-safe ops the agent executes without confirmation
-      propose  — reversible but borderline; agent asks before executing
-      escalate — IssueCards requiring human judgment (create/rename/delete)
+    """Deterministic structural audit — the entry point for /graph and vault
+    health. Computes god-nodes, surprising cross-cluster connections, orphans,
+    dangling links, clusters; writes GRAPH_REPORT.md and (seed_ledger=True)
+    seeds a remediation run for silica_ledger_next. Tiers: auto (execute
+    without confirmation), propose (ask first), escalate (IssueCards, human
+    judgment). Visual graph: silica_graph_export. Straight to executable
+    maintenance: silica_curate.
     """
     import orjson
     from pathlib import Path
@@ -1000,22 +960,13 @@ def silica_vault_report(
 
 @tool(EmptyArgs, cls="composed")
 def silica_health() -> dict[str, Any]:
-    """Retrieval + write-path health check — the golden harness's two GATED metrics, live.
-
-    Runs both gated probes against the current vault and its on-disk indexes:
-      fusion    — masked-wikilink recovery through the full relatedness facade:
-                  recall@10, mrr, embed_coverage, and which legs were live.
-                  Low recall or embed_coverage < 1.0 means related/semantic
-                  search is degraded — refresh with silica_embed_refresh /
-                  silica_cooccurrence_refresh and re-run.
-      integrity — differential lint across the 4 write-path transforms
-                  (frontmatter round-trip, autolink, fs write→read, sanitize);
-                  rate must be exactly 1.0 — anything less means the pipeline
-                  CORRUPTS note bodies and writes should stop.
-
-    Full-vault sweep (reads every note): a diagnostic to run on demand, not a
-    per-write gate. Numbers are regression trends, not absolute quality claims —
-    for a structural audit of the vault's content use silica_vault_report.
+    """Retrieval + write-path health check, live: `fusion` (masked-wikilink
+    recovery — low recall or embed_coverage < 1.0 means related/semantic
+    search is degraded; refresh with silica_embed_refresh /
+    silica_cooccurrence_refresh and re-run) and `integrity` (differential lint
+    across the write-path transforms — under 1.0 the pipeline CORRUPTS note
+    bodies and writes should stop). Full-vault sweep, on demand, not a
+    per-write gate. Structural audit of content: silica_vault_report.
     """
     from pathlib import Path
 
