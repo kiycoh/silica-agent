@@ -1481,7 +1481,7 @@ function renderFolders(s) {
     const impurity = t.purity === null ? 0 : 1 - t.purity;
     tile.style.setProperty("--i", impurity.toFixed(3));
     const pur = t.purity === null ? "no area" : `${Math.round(t.purity * 100)}% one area`;
-    tile.title = `${t.name} — ${t.count} notes · ${pur}`
+    tile.title = `${t.name} · ${t.count} notes · ${pur}`
       + (t.spread > 1 ? ` · spans ${t.spread} areas` : "");
     const lbl = mkEl("div", "tmap-lbl");
     lbl.appendChild(mkEl("span", "tmap-name", t.name));
@@ -1535,12 +1535,12 @@ function renderAreas(s) {
   g.appendChild(mkEl("div", "smx-corner"));
   for (const a of s.areas) {
     const h = mkEl("div", "smx-col", a.label);
-    h.title = `${a.label} — ${a.size} notes · cohesion ${a.cohesion}`;
+    h.title = `${a.label} · ${a.size} notes · cohesion ${a.cohesion}`;
     g.appendChild(h);
   }
   s.areas.forEach((a, i) => {
     const lbl = mkEl("div", "smx-row", a.label);
-    lbl.title = `${a.label} — ${a.size} notes`;
+    lbl.title = `${a.label} · ${a.size} notes`;
     if (a.path) { lbl.dataset.path = a.path; lbl.classList.add("clickable"); }
     g.appendChild(lbl);
     s.areas.forEach((b, j) => {
@@ -1551,7 +1551,7 @@ function renderAreas(s) {
         // cohesive area read as the least cohesive one on the grid.
         const coh = a.cohesion >= 1 ? "1" : a.cohesion ? a.cohesion.toFixed(2).slice(1) : "";
         const c = mkEl("div", "smx-cell diag", coh);
-        c.title = `${a.label}: cohesion ${a.cohesion} — ${a.intra} linked pairs inside ${a.size} notes`;
+        c.title = `${a.label}: cohesion ${a.cohesion}, ${a.intra} linked pairs inside ${a.size} notes`;
         g.appendChild(c);
         return;
       }
@@ -1896,7 +1896,7 @@ function sessionMatrix(s) {
   g.appendChild(mkEl("div", "smx-corner"));
   for (const a of s.areas) {
     const h = mkEl("div", "smx-col", a.label);
-    h.title = `${a.label} — ${a.total} claims across ${s.days.length} sessions`;
+    h.title = `${a.label} · ${a.total} claims across ${s.days.length} sessions`;
     g.appendChild(h);
   }
   g.appendChild(mkEl("div", "smx-col smx-tot", "total"));
@@ -2815,7 +2815,7 @@ async function openDiff(path) {
   box.appendChild(head);
   if (!d.lines.length) {
     box.appendChild(mkEl("div", "dl-empty", d.kind === "moved"
-      ? "moved — the bytes are unchanged"
+      ? "moved, and the bytes are unchanged"
       : "no difference left: this note is back to how it started"));
   }
   const track = mkEl("div", "dl-track");
@@ -2828,7 +2828,7 @@ async function openDiff(path) {
   box.appendChild(track);
   if (d.clipped)
     box.appendChild(mkEl("div", "dl-empty",
-      `${d.clipped} more lines — open the note for the rest`));
+      `${d.clipped} more lines. Open the note for the rest`));
   box.scrollTop = 0;
   showDrawer(d.name || path);
 }
@@ -2909,7 +2909,7 @@ function cxCloud(concepts) {
     b.type = "button";
     const t = max > min ? ((c.weight || 1) - min) / (max - min) : 0;
     b.style.fontSize = (12 + Math.round(t * span * 8)) + "px";
-    b.title = "weight " + (c.weight || 1) + " — light its notes in the graph";
+    b.title = "weight " + (c.weight || 1) + ": light its notes in the graph";
     b.addEventListener("click", () => lightConcept(c.concept, b));
     box.appendChild(b);
   }
@@ -2967,7 +2967,7 @@ function renderContext(data) {
 
   if (data.ghost) {
     const s = cxSection("unresolved link",
-      "no file carries this name yet — these notes already point at it");
+      "no file carries this name yet, and these notes already point at it");
     box.appendChild(s);
   }
   if (data.hint) box.appendChild(mkEl("div", "cx-hint", data.hint));
@@ -3018,7 +3018,7 @@ function renderContext(data) {
     // which). Naming the machine is what lets you weigh a suggestion instead of
     // reading it as a recommendation.
     const s = cxSection("suggested next",
-      "no LLM — links you wrote + embedding/co-occurrence; a click drafts the turn");
+      "no LLM: links you wrote + embedding/co-occurrence; a click drafts the turn");
     cxList(s, data.suggested, (sg) => {
       const row = cxRow(label(sg), sg.why);
       const act = mkEl("button", "cx-do", sg.kind === "ghost" ? "write" : "link");
@@ -3035,7 +3035,7 @@ function renderContext(data) {
 
   if (!box.childElementCount) {
     box.className = "cx-wait";
-    box.textContent = "nothing indexed for this note yet — run /report or /embed to build the graph";
+    box.textContent = "nothing indexed for this note yet. Run /report or /embed to build the graph";
   }
 }
 

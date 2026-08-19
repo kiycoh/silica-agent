@@ -64,7 +64,7 @@ def _vendored_lib_js() -> str:
         if not res.is_file():
             raise RuntimeError(
                 f"graph_export: vendored {name} is missing from silica/ui/web/static/ "
-                "— packaging bug. Reinstall silica or re-vendor the assets (pinned "
+                "This is a packaging bug. Reinstall silica or re-vendor the assets (pinned "
                 "3d-force-graph@1.80.0, force-graph@1.51.2)."
             )
         out.append(res.read_text(encoding="utf-8"))
@@ -165,7 +165,7 @@ def render_html(
     # Semantic-map edges: only surface the row when present (the links view
     # have none, so the row would just read 0 and confuse).
     similar_row = (
-        f'<label class="filter-row" style="margin-top:4px" title="Embedding k-NN — notes pulled together by semantic similarity">'
+        f'<label class="filter-row" style="margin-top:4px" title="Embedding k-NN: notes pulled together by semantic similarity">'
         f'<input type="checkbox" id="cb-similar" checked onchange="updateEdgeFilter()">'
         f'<div class="dot-edge" style="--c:{_EDGE_COLOR_SIMILAR};--cp:{_EDGE_COLOR_SIMILAR_PAPER}"></div>Similar'
         f'<span class="ct">{n_similar}</span>'
@@ -479,7 +479,7 @@ def render_html(
        you cannot name is a number you cannot act on. -->
   <div class="stat-grid">
     <div class="stat" title="Files in the graph. Unresolved link targets are not files and are counted under Unresolved instead."><div class="val">{n_notes}</div><div class="lbl">Notes</div></div>
-    <div class="stat" title="Wikilinks whose target file exists, counted once per direction between a pair of notes — not once per occurrence in the text."><div class="val">{n_extracted}</div><div class="lbl">Links</div></div>
+    <div class="stat" title="Wikilinks whose target file exists, counted once per direction between a pair of notes, not once per occurrence in the text."><div class="val">{n_extracted}</div><div class="lbl">Links</div></div>
     <div class="stat" title="Louvain communities over the resolved wikilinks. Derived from the structure, never declared by you."><div class="val">{n_communities}</div><div class="lbl">Clusters</div></div>
     <div class="stat" title="Distinct link targets with no file behind them, counted once per name however many notes point at it."><div class="val">{n_ghost}</div><div class="lbl">Unresolved</div></div>
   </div>
@@ -526,13 +526,13 @@ def render_html(
         Resolved
         <span class="ct">{n_extracted}</span>
       </label>
-      <label class="filter-row" style="margin-top:4px" title="A [[wikilink]] pointing at a name no file carries — the link is written, the note is not.">
+      <label class="filter-row" style="margin-top:4px" title="A [[wikilink]] pointing at a name no file carries: the link is written, the note is not.">
         <input type="checkbox" id="cb-ambiguous" onchange="updateEdgeFilter()">
         <div class="dot-edge" style="--c:{_EDGE_COLOR_AMBIGUOUS};--cp:{_EDGE_COLOR_AMBIGUOUS_PAPER}"></div>
         Unresolved
         <span class="ct">{n_ambiguous}</span>
       </label>
-      <label class="filter-row" style="margin-top:4px" title="Well-formed areas with no links between them — a bridge could go here">
+      <label class="filter-row" style="margin-top:4px" title="Well-formed areas with no links between them: a bridge could go here">
         <input type="checkbox" id="cb-gaps" checked onchange="updateEdgeFilter()">
         <div class="dot-edge" style="--c:{_EDGE_COLOR_GAP};--cp:{_EDGE_COLOR_GAP_PAPER}"></div>
         Structural gaps
@@ -555,7 +555,7 @@ def render_html(
          separates hubs there. -->
     <div id="state-legend">
       <div class="section-title" style="margin-bottom:6px" title="What each node IS, on a channel the community colour is not using.">Node state</div>
-      <div class="filter-row" title="Betweenness in the top tenth of the notes that have any — the crossings the vault routes through.">
+      <div class="filter-row" title="Betweenness in the top tenth of the notes that have any: the crossings the vault routes through.">
         <span class="ring" style="border-color:var(--accent)"></span>Hub<span class="ct" id="st-hub"></span>
       </div>
       <div class="filter-row" title="The note exists and no resolved wikilink points at it. Reachable from the file tree, unreachable from the vault.">
@@ -568,7 +568,7 @@ def render_html(
 
     <div>
       <div class="section-title" style="margin-bottom:6px;display:flex;align-items:center;justify-content:space-between"
-           title="Louvain over the resolved wikilinks — the structural partition, the vault as you linked it. Not the semantic zones: the two groupings are independent and share no colour.">
+           title="Louvain over the resolved wikilinks: the structural partition, the vault as you linked it. Not the semantic zones: the two groupings are independent and share no colour.">
         Communities
         <span id="sort-communities" style="color:var(--ash);cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none"
               onclick="toggleCommunitySort()" title="sort by size">size &#8595;</span>

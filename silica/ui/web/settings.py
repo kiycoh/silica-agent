@@ -265,7 +265,7 @@ def _readonly_value(key: str) -> str:
 
         declared = get_active_manifest().write_dir
         if declared is None:
-            return "invalid — see vault.yaml"
+            return "invalid: see vault.yaml"
         return declared or "the vault root"
     return ""
 
