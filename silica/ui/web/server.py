@@ -1844,6 +1844,16 @@ def vault_info():
         "unresolved": sum(1 for n in nodes if n.get("type") == "ghost"),
         "tree": render_tree(nodes),
         "hubs": _top_hubs(nodes, edges),
+        # What the vault is ABOUT, as opposed to how big it is. The chat's
+        # landing states this in one line, and it must be a fact rather than a
+        # generated sentence: these are the co-occurrence topic labels of the
+        # largest structural communities, the same ones the graph HUD keys its
+        # colours on. Singletons are dropped — a one-note community names
+        # itself, which says nothing about the corpus.
+        "topics": [
+            {"label": c.label, "size": c.size}
+            for c in communities if c.size > 1
+        ][:6],
     }
 
 
@@ -1866,6 +1876,106 @@ def _top_hubs(nodes: list[dict], edges: list[dict], top_n: int = 24) -> list[dic
     ]
     hubs.sort(key=lambda h: (-h["degree"], h["name"].lower()))
     return hubs[:top_n]
+
+
+# --- the vault brief ---------------------------------------------------------
+# Two readings of "what is this folder", stacked on the chat's landing. The
+# counted one is always true and always free, and is rendered from /vault_info
+# in the browser. This is the other one: a sentence a model writes over those
+# same counts, which is a convenience and not a fact, so it is a separate
+# request the landing can render without and a toggle can switch off.
+#
+# It caches into the vault's index dir rather than the vault: Silica's own
+# bookkeeping never lands in a folder the user reads.
+
+def _brief_path() -> Path:
+    from silica.kernel.recall import paths
+
+    return paths.index_dir() / "vault_brief.json"
+
+
+@app.get("/vault_brief")
+def vault_brief(refresh: int = 0):
+    """One sentence about what the vault holds, written by the worker model.
+
+    `stamp` is the corpus shape the sentence was written against, so a vault
+    that grew gets a new sentence and a vault that only sat there replays the
+    one on disk. A failure here is never an error on the landing: the counted
+    line above it already answered the question.
+    """
+    if not CONFIG.vault_brief:
+        return {"enabled": False, "text": ""}
+
+    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
+
+    try:
+        nodes, edges = build_graph_data(folder="")
+        communities = detect_communities(nodes, edges)
+    except Exception as exc:
+        return {"enabled": True, "text": "", "error": str(exc)}
+
+    notes = sum(1 for n in nodes if n.get("type") != "ghost")
+    topics = [c.label for c in communities if c.size > 1][:8]
+    stamp = f"{notes}|" + "|".join(topics)
+
+    cache = _brief_path()
+    if not refresh:
+        try:
+            got = json.loads(cache.read_text(encoding="utf-8"))
+            if got.get("stamp") == stamp and got.get("text"):
+                return {"enabled": True, "text": got["text"], "cached": True}
+        except Exception:
+            pass  # no cache, unreadable cache, or a stamp from an older shape
+
+    hubs = [h["name"] for h in _top_hubs(nodes, edges, top_n=12)]
+    text = _write_brief(notes, topics, hubs)
+    if not text:
+        return {"enabled": True, "text": ""}
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({"stamp": stamp, "text": text}), encoding="utf-8")
+    except Exception:
+        pass  # an uncacheable brief is still a usable brief
+    return {"enabled": True, "text": text}
+
+
+def _write_brief(notes: int, topics: list[str], hubs: list[str]) -> str:
+    """Ask the worker model for one sentence over evidence it cannot embellish.
+
+    It is handed labels and note names, never note bodies: the sentence has to
+    say what the collection is about, and a corpus of 1,200 notes has no
+    summary that fits in a landing line anyway. Trimmed hard on the way out —
+    a model asked for one sentence returns three often enough that the landing
+    cannot be built on trusting it.
+    """
+    if not topics and not hubs:
+        return ""
+    from silica.agent.providers import get_provider
+
+    prompt = (
+        "Below are the topic labels of the largest link clusters in a personal "
+        "markdown vault, and the names of its best-connected notes.\n\n"
+        f"Clusters: {', '.join(topics) or 'none'}\n"
+        f"Best-connected notes: {', '.join(hubs) or 'none'}\n"
+        f"Total notes: {notes}\n\n"
+        "Write ONE sentence, at most 24 words, naming what this collection is "
+        "about. Describe only what the labels above support. No preamble, no "
+        "quotes, no note counts, no adjectives of praise. Reply with the "
+        "sentence and nothing else."
+    )
+    try:
+        provider = get_provider(CONFIG, role="worker")
+        reply = provider.call_llm(
+            messages=[{"role": "user", "content": prompt}],
+            tools=None,
+            response_schema=None,
+            max_tokens=200,
+        )
+        out = (reply.text or "").strip().strip('"').split("\n")[0].strip()
+    except Exception as exc:
+        logger.info("vault brief unavailable: %s", exc)
+        return ""
+    return out[:240]
 
 
 @app.get("/messages")

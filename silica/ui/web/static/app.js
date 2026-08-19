@@ -1029,10 +1029,57 @@ async function loadVaultInfo() {
     $("#stat-clusters").textContent = data.clusters;
     $("#stat-unresolved").textContent = data.unresolved;
     $("#tree").innerHTML = data.tree || "";
+    renderVaultFacts(data);           // the chat landing's counted line
     renderMapPicker(data.hubs || []); // map landing: best-connected notes
     buildNoteIndex();                 // explore note search reads the fresh tree
     applySidebarFilter();
   } catch { notify("couldn't refresh vault stats"); }
+}
+
+// --- the chat landing --------------------------------------------------------
+// Two lines about the folder you opened, over the wordmark. The counted one is
+// this function and costs nothing; the written one is loadVaultBrief below and
+// costs a call, so it is the one that can be switched off. When it is off the
+// prose slot falls back to naming the topics — the landing must never describe
+// a vault by its size alone, which is the one thing size cannot say.
+let vaultTopics = [];
+
+function renderVaultFacts(data) {
+  vaultTopics = (data.topics || []).map((t) => t.label).filter(Boolean);
+  const bits = [];
+  if (data.notes) bits.push(nfmt(data.notes) + (data.notes === 1 ? " note" : " notes"));
+  if (data.links) bits.push(nfmt(data.links) + " links");
+  const areas = (data.topics || []).length ? data.clusters : 0;
+  if (areas) bits.push(nfmt(areas) + " areas");
+  $("#vh-facts").textContent = bits.join("  ·  ");
+  if (!$("#vh-brief").dataset.written) renderTopicLine();
+}
+
+// The fallback sentence. The labels are the vault's own words and carry the
+// content colour; everything around them is chrome, which is what keeps a
+// label like "mystery · sophia" readable inside a sentence that also joins
+// with punctuation.
+function renderTopicLine() {
+  const el = $("#vh-brief");
+  el.replaceChildren();
+  const t = vaultTopics.slice(0, 3);
+  if (!t.length) return;
+  el.appendChild(document.createTextNode("Densest around "));
+  t.forEach((label, i) => {
+    if (i) el.appendChild(document.createTextNode(i === t.length - 1 ? " and " : ", "));
+    el.appendChild(mkEl("b", "", label));
+  });
+  el.appendChild(document.createTextNode("."));
+}
+
+async function loadVaultBrief() {
+  try {
+    const d = await (await fetch("/vault_brief")).json();
+    if (!d.enabled || !d.text) return; // off, or the worker had nothing to say
+    const el = $("#vh-brief");
+    el.dataset.written = "1";
+    el.textContent = d.text;
+  } catch { /* the counted line already answered the question */ }
 }
 
 // Tree click routing follows the active view: in explore's map mode a click
@@ -4110,6 +4157,7 @@ async function loadHealth() {
 loadVault();
 loadSessions();
 loadVaultInfo();
+loadVaultBrief(); // a call, so it is its own request: the landing renders without it
 loadChanges(); // the server's ledger outlives the tab — a reload keeps the list
 loadConfig(); // header shows the active model without opening the panel
 loadHealth(); // a chat/embedder/reranker server that isn't up says so, once, here

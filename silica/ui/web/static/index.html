@@ -118,7 +118,20 @@
     </aside>
 
     <section id="view-chat" class="view active">
-      <div id="log" aria-label="conversation transcript" data-caption="vault ready · type below, or drop a file to nucleate"></div>
+      <!-- The landing, shown only while the transcript is empty. The wordmark
+           is the mark here and Sili keeps the tab icon: a mascot at hero size
+           says who made the tool, and what you need on opening it is what is
+           in the folder. Under it, two readings of that folder — a written
+           sentence (worker model, cached, switchable off in settings) and the
+           counts, which are computed and always true. With the sentence off
+           the prose slot states the topics instead, so the landing never
+           describes the vault by its size alone. -->
+      <div id="vault-hero">
+        <div class="vh-mark">SILICA</div>
+        <p class="vh-brief" id="vh-brief"></p>
+        <div class="vh-facts" id="vh-facts"></div>
+      </div>
+      <div id="log" aria-label="conversation transcript"></div>
       <div id="attachments" hidden></div>
       <!-- one control, not four chips: the pill marks what the NEXT message will
            do. It follows the composer's leading command, so a segment can never

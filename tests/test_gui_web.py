@@ -1640,6 +1640,73 @@ def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
     assert dt.date.today().isoformat() in gui[1]
     assert gui[2].startswith("Vault: ")
     assert "language" in gui[-1].lower()
+def test_vault_brief_is_off_when_the_setting_is_off(client, monkeypatch):
+    """The written sentence is the switchable half of the landing. Off, the
+    endpoint answers without touching a provider — the counted line the browser
+    renders beside it is what keeps the landing from going blank."""
+    from silica.config import CONFIG
+    from silica.ui.web import server
+
+    monkeypatch.setattr(CONFIG, "vault_brief", False)
+    monkeypatch.setattr(server, "_write_brief",
+                        lambda *a: pytest.fail("a disabled brief called the model"))
+    assert server.vault_brief() == {"enabled": False, "text": ""}
+
+
+def test_vault_brief_replays_its_cache_until_the_corpus_shape_changes(
+        client, monkeypatch, tmp_path):
+    """The sentence is written against a corpus, so the stamp is the corpus: a
+    vault that only sat there replays, a vault that grew is written again. A
+    brief that regenerated per request would put a model call on every reload
+    of the chat tab.
+
+    The graph is stubbed rather than grown on disk: this is a check on the
+    stamp, and building it out of real notes would make it a check on when the
+    index picks a new file up instead."""
+    from silica.config import CONFIG
+    from silica.kernel.recall import graph_export
+    from silica.ui.web import server
+
+    monkeypatch.setattr(CONFIG, "vault_brief", True)
+    monkeypatch.setattr(server, "_brief_path", lambda: tmp_path / "brief.json")
+
+    nodes = [{"id": "a", "path": "a.md", "label": "a"},
+             {"id": "b", "path": "b.md", "label": "b"}]
+    monkeypatch.setattr(graph_export, "build_graph_data", lambda **_k: (nodes, []))
+    monkeypatch.setattr(graph_export, "detect_communities", lambda *_a: [])
+
+    calls = []
+    monkeypatch.setattr(server, "_write_brief",
+                        lambda n, t, h: calls.append(n) or f"about {n} notes")
+
+    assert server.vault_brief()["text"] == "about 2 notes"
+    assert server.vault_brief() == {"enabled": True, "text": "about 2 notes",
+                                    "cached": True}
+    assert calls == [2], "the second call should have replayed the cache"
+
+    nodes.append({"id": "c", "path": "c.md", "label": "c"})
+    assert server.vault_brief()["text"] == "about 3 notes"
+    assert calls == [2, 3]
+
+
+def test_vault_brief_survives_a_provider_that_is_not_there(
+        client, monkeypatch, tmp_path):
+    """A landing that 500s because a worker model is down would be worse than a
+    landing with one fewer line on it."""
+    from silica.config import CONFIG
+    from silica.ui.web import server
+
+    monkeypatch.setattr(CONFIG, "vault_brief", True)
+    monkeypatch.setattr(server, "_brief_path", lambda: tmp_path / "brief.json")
+
+    def _boom(*_a, **_k):
+        raise ConnectionError("no worker here")
+
+    monkeypatch.setattr("silica.agent.providers.get_provider", _boom)
+    assert server.vault_brief() == {"enabled": True, "text": ""}
+    assert not (tmp_path / "brief.json").exists(), "an empty brief was cached"
+
+
 def test_reduced_motion_is_honoured_for_transitions_not_only_animations():
     """The file carries dozens of transitions and only four were switched off,
     so a session that asked the OS for less motion still got the header, the

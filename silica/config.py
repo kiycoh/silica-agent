@@ -479,6 +479,14 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_GRAPH_SHADING", "True").lower() in ("true", "1", "t")
     )
 
+    # The chat landing's second line: a sentence the worker model writes about
+    # what the vault holds. The counted line above it — notes, areas, the topic
+    # labels themselves — is computed and always shows. This is the part that
+    # costs a call, so it is the part that can be switched off.
+    vault_brief: bool = field(
+        default_factory=lambda: os.getenv("SILICA_VAULT_BRIEF", "True").lower() in ("true", "1", "t")
+    )
+
     # Web UI palette: "auto" follows the OS, "dark" and "light" pin it. Only the
     # browser can answer "auto", so the server ships the preference and a script
     # in <head> resolves it to a concrete data-theme before first paint. The

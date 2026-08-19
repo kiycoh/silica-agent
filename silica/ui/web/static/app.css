@@ -2678,39 +2678,69 @@ body.dragging #drop-hint {
   animation: caret-blink 1.1s steps(1, end) infinite;
 }
 
-/* empty state — the mascot + caption instead of a blank void; the caption lives
-   in data-caption so the server can set it */
+/* --- the landing (empty transcript) -----------------------------------------
+   Sili used to hold this space at 240px, which spent the whole first viewport
+   on the logo of the tool rather than on the folder it just opened. The
+   wordmark states the tool in one line and the rest of the space answers
+   "what is in here", which is the question you actually arrive with.
+   #log itself collapses to nothing while empty. */
 #log:empty {
-  justify-content: center;
+  display: none;
+}
+
+#vault-hero {
+  display: none;
+  flex-direction: column;
   align-items: center;
-  /* the glow below is a 46px drop-shadow, and #log scrolls, so it was clipped to
-     the log's box — which idle shrinks to the art + caption. That clip was the
-     square edge around the mascot. Nothing scrolls in an empty transcript. */
-  overflow: visible;
+  text-align: center;
+  /* The measure is the composer's, so the sentence, the counts and the box you
+     type into all break on the same two edges. */
+  max-width: min(52ch, 100%);
+  padding: 0 1rem;
 }
 
-/* Sili, in colour. This was block-glyph ASCII of the previous mascot, and the
-   current one cannot be that: it is a faceted crystal whose whole identity is a
-   blue-to-magenta split and one lit cyan eye, and a monochrome cell grid keeps
-   neither. 27 KB of WebP against 174 KB for one of the two fonts already here.
-   The glow is a drop-shadow on the alpha, so it hugs the silhouette instead of
-   boxing it, and it is static — no repaint, no animation, no filter per frame. */
-#log:empty::before {
-  content: "";
-  /* 32vh caps the height at ~40vh through the aspect ratio: the log no longer
-     clips (see above), so on a short viewport the art would otherwise ride up
-     over the top bar instead of shrinking. */
-  width: min(240px, 40vw, 32vh);
-  aspect-ratio: 519 / 650;
-  background: url("/static/sili.webp") center / contain no-repeat;
-  filter: drop-shadow(0 8px 46px var(--art-glow));
+#view-chat:has(#log:empty) #vault-hero {
+  display: flex;
 }
 
-#log:empty::after {
-  content: attr(data-caption);
+/* The mark, at the scale's one display step. No sweep: the header's logotype
+   earns its iridescence by being a control you hover, and this one is not
+   touched — an animated gradient sitting permanently on the landing is the
+   loudest thing the page could do with its quietest moment. */
+.vh-mark {
+  font-size: 52px;
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: 0.34em;
+  /* letterspacing pads the right of the last glyph; half of it back centres
+     the word against the sentence under it */
+  text-indent: 0.34em;
+  color: var(--frost);
+}
+
+.vh-brief {
+  margin: 1.5rem 0 0;
+  font-size: 15px;
+  line-height: 1.55;
   color: var(--ash);
-  margin-top: 2rem;
-  font-size: 14px;
+  /* empty until /vault_brief answers, and the reserved line stops the counts
+     from jumping down a row when it does */
+  min-height: 1.55em;
+}
+
+/* the topic labels inside the fallback sentence: the vault's own words, so
+   they read as content and the connective tissue around them stays chrome */
+.vh-brief b {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.vh-facts {
+  margin-top: 0.85rem;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ash-dim);
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- note panel (right overlay drawer; read-only note view) ----------------- */
@@ -3796,19 +3826,14 @@ body.note-open #toasts {
   outline-offset: -1px;
 }
 
-/* idle: an empty transcript centers the mascot and floats the composer right
+/* idle: an empty transcript centers the landing and floats the composer right
    under it as a CONTAINED command island — not a full-width footer dragged up
    the page with dead space beneath it. Contained width + a centered cluster
    reads as an intentional hero, not a stretched empty box. */
 #view-chat:has(#log:empty) {
   justify-content: center;
   align-items: center;
-  gap: 1.4rem;
-}
-
-#view-chat:has(#log:empty) #log {
-  flex: 0 1 auto;
-  /* shrink to the mascot; never stretch the empty transcript */
+  gap: 2.2rem;
 }
 
 /* The composer is on the measure in BOTH states now, so idle no longer has to

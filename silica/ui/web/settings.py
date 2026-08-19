@@ -184,6 +184,9 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 options=("off", "new", "all", "verbose")),
             Row("SILICA_CAPTURE_SESSIONS", "capture_sessions", "capture sessions", "toggle",
                 "keep a transcript of each session"),
+            Row("SILICA_VAULT_BRIEF", "vault_brief", "vault brief", "toggle",
+                "a written sentence about what the vault holds, on the chat "
+                "landing · the counted line above it always shows"),
             Row("SILICA_MAX_CONTEXT", "max_context_tokens", "max context", "int",
                 "tokens before the transcript is compacted"),
             Row("SILICA_GRAPH_PARTICLES", "graph_particles", "graph particles", "toggle",
