@@ -897,7 +897,29 @@ const ALPHA_MIN = 0.001;      // d3's own convergence point, reached at tick ~30
 // CPU) runs that at roughly 19 ticks/s against WebGL's 60. An even split makes
 // 2D take three times as long to settle for the identical layout. Weighting the
 // warmup by the renderer buys back a comparable settle time in both.
-const WARMUP_TICKS = () => is2D() ? 240 : 150;
+//
+// Two things the plain `() => is2D() ? 240 : 150` got wrong on a big vault.
+//
+// It ran a warmup even when the layout was SEEDED. Seeded means FAST_DECAY, and
+// FAST_DECAY reaches ALPHA_MIN at tick 66 — inside either count. So the engine
+// stopped in the middle of the synchronous warmup, before the renderer had ever
+// drawn a frame, and the fit deferred to onEngineStop then measured a scene
+// whose meshes were all still sitting at the origin. Camera 41 units from the
+// centre of a 3,900-unit graph: the 2D -> 3D switch opening fully zoomed in.
+// A cached layout does not need a warmup. It IS the warmup.
+//
+// And the counts were absolute, while the cost of a tick is not. Every warmup
+// tick is a frame the browser cannot paint, and a tick is roughly linear in
+// links: measured 8.94ms at 12,232 links (link 2.5 + charge 6.4), so the 240
+// tuned at ~4.5k links stopped being ~0.8s of freeze and became ~2.1s. Hold the
+// freeze near what it was tuned to be, rather than the number of ticks.
+const WARMUP_REF_EDGES = 4566;   // the graph the counts above were tuned on
+function WARMUP_TICKS(seeded) {{
+  if (seeded) return 0;
+  const base = is2D() ? 240 : 150;
+  const scale = Math.min(1, WARMUP_REF_EDGES / Math.max(1, RAW_EDGES.length));
+  return Math.max(30, Math.round(base * scale));
+}}
 
 // --- Layout cache: pay the 300 ticks once, not once per load ----------------
 // The honest gate above costs about twice the ticks of the wrong one. Cached
@@ -1078,7 +1100,7 @@ function segRGBA(Color, s) {{
     const n = parseInt(s.slice(1), 16);
     r = (n >> 16) & 255; g = (n >> 8) & 255; b = n & 255;
   }} else {{
-    const p = s.match(/rgba?\(([^)]+)\)/)[1].split(",").map(Number);
+    const p = s.match(/rgba?\\(([^)]+)\\)/)[1].split(",").map(Number);
     r = p[0]; g = p[1]; b = p[2];
     if (p.length > 3) a = p[3];
   }}
@@ -1319,7 +1341,120 @@ function wake(ms = WAKE_MS) {{
   renderBudget();
 }}
 
+// --- dynamic resolution: motion may be soft, stillness never ----------------
+// The 2D canvas is fill-bound: a full repaint costs ~15ms per megapixel of
+// backing store on software raster, so a hot simulation on a 2263x1339 canvas
+// delivers 15-22fps with the main thread mostly idle — measured ~8ms of script
+// against 45-90ms between frames, rAF starved by raster back-pressure, which
+// is why no JS profile ever showed it. Pixels are the cost: the same scene at
+// half ratio (a quarter of the pixels) measured ~240fps. So while repaints are
+// STREAMING in full-rate mode the backing store drops to half ratio — softness
+// is invisible in motion — and when the stream ends the full ratio returns
+// with one crisp repaint. A still frame is never soft, and the idle particle
+// tick (parked, 20fps) never triggers this: what it paints IS stillness.
+//
+// One overridden getter keeps every consumer consistent: the lib reads
+// window.devicePixelRatio live for the backing store (resize path), the
+// per-frame canvas transform, and the shadow-canvas picking coords. 2D only —
+// the WebGL renderer is not fill-bound and keeps its native ratio.
+// Captured BEFORE the override, and re-read on resize: a browser zoom or a drag
+// to a HiDPI monitor changes the real ratio, and once the getter below is in
+// place no later read can see it — a one-shot snapshot left the canvas at the
+// old device ratio for the rest of the session.
+const dprNative = (() => {{
+  const d = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
+  const get = d && d.get;
+  const seed = window.devicePixelRatio || 1;
+  return () => (get ? get.call(window) : seed) || 1;
+}})();
+let DPR_REAL = dprNative();
+const DRS_SCALE = 0.5;
+let dprScale = 1;
+Object.defineProperty(window, "devicePixelRatio",
+  {{ get: () => DPR_REAL * dprScale, configurable: true }});
+window.addEventListener("resize", () => {{ DPR_REAL = dprNative(); }});
+
+function setRes(scale) {{
+  if (dprScale === scale || !Graph || !is2D()) return;
+  dprScale = scale;
+  // A same-value set still runs the lib's resize path: it rebuilds both
+  // canvases at the new ratio (verified live) — and leaves them BLANK, so a
+  // repaint must follow. Going low, the stream's next frame is that repaint;
+  // going crisp, paint the one frame here and hand the loop to the budget.
+  //
+  // The resize path also re-centers: it estimates the old CSS size as
+  // canvas.width / devicePixelRatio and shifts the zoom transform by half the
+  // difference. That estimate divides OLD pixels by the NEW ratio, so on a
+  // ratio change (the only reason we are here) it is wrong by exactly the
+  // ratio step and the camera lurches half a screen per transition. The CSS
+  // size never changes in this resize, so the correct shift is zero: save the
+  // camera, let the lib do its arithmetic, put the camera back.
+  const z = Graph.zoom(), c = Graph.centerAt();
+  Graph.width(Graph.width()).height(Graph.height());
+  Graph.zoom(z);
+  Graph.centerAt(c.x, c.y);
+  // Both directions paint one frame right here: the resize left the canvases
+  // blank, and a repaint may not otherwise be due (a grab that has not moved
+  // yet, a restore on a parked loop). That paint re-enters drsOnPaint, which
+  // re-arms the restore timer — an engage with no follow-up stream still finds
+  // its way back to crisp. renderBudget re-derives the loop state the pause
+  // just clobbered.
+  Graph.resumeAnimation(); Graph.pauseAnimation(); renderBudget();
+}}
+
+// The burst detector below covers streams that no pointer announces (layout
+// settle, slider reheat, camera tweens): three rapid repaints in full-rate
+// mode prove a stream. Pointer-driven camera work does NOT wait for that
+// warm-up — its three full-res paints cost 150-270ms at the START of every
+// pan stroke, and with pan-pause-pan exploration each resume paid it again,
+// which read as "panning the settled graph is slow". A drag or a wheel notch
+// is motion by declaration: the graph-wrap listener at the bottom of this
+// file calls setRes(DRS_SCALE) directly, before the first heavy paint.
+let drsTimer = null, drsLast = 0, drsBurst = 0;
+function drsOnPaint() {{
+  const now = performance.now();
+  const streaming = simRunning || now < awakeUntil;
+  if (streaming) {{
+    drsBurst = now - drsLast < 250 ? drsBurst + 1 : 0;
+    // Deferred: resizing from inside the paint would clear the canvas mid-frame.
+    if (drsBurst >= 3 && dprScale === 1) setTimeout(() => setRes(DRS_SCALE));
+  }} else drsBurst = 0;
+  drsLast = now;
+  clearTimeout(drsTimer);
+  // Only a STREAMING paint arms the restore timer. The idle particle tick paints
+  // every 1000/IDLE_FPS = 50ms, which is shorter than this window — so letting it
+  // re-arm meant the timer could never elapse and one pan left the settled graph
+  // permanently soft, inverting this block's whole premise. What the idle tick
+  // paints IS stillness, so it restores immediately instead. The restore paint
+  // re-enters here with dprScale already 1, which arms nothing: no oscillation.
+  if (streaming) drsTimer = setTimeout(() => setRes(1), 250);
+  else if (dprScale !== 1) drsTimer = setTimeout(() => setRes(1));
+}}
+
+// zoomToFit measures the SCENE, not the data. 3d-force-graph's getGraphBbox
+// unions the node meshes' world boxes, and a mesh only takes its node's
+// position on a rendered frame — so fitting before the first frame measures
+// 1,445 meshes stacked at the origin and returns the largest node RADIUS as the
+// graph's extent. Measured: bbox +/-14 against positions spanning +/-2,300, and
+// a camera parked 41 units from the centre of a 3,900-unit graph, which is what
+// "the 3D view opens fully zoomed in" actually is.
+//
+// So the fit waits for a frame it can trust. wake() is first because the budget
+// loop may be parked, and a paused loop paints nothing to wait for; the two
+// frames then cover our own callback landing ahead of the library's render on
+// the same tick.
+function fitWhenPainted(G) {{
+  wake(1200);
+  requestAnimationFrame(() => requestAnimationFrame(() => {{
+    G.zoomToFit(400, 40);
+    wake(600);
+  }}));
+}}
+
 function buildGraph() {{
+  // Direct write, not setRes: the old instance is about to die, and the new
+  // one (either renderer) must initialize its canvas at the native ratio.
+  dprScale = 1;
   const el = document.getElementById("graph");
   if (Graph) {{
     // Loud on failure: a swallowed teardown leaks the WebGL context, and the
@@ -1335,7 +1470,7 @@ function buildGraph() {{
   // graph appears already settled instead of unfolding a layout you have
   // watched unfold before.
   const seeded = loadLayout();
-  G.warmupTicks(WARMUP_TICKS())
+  G.warmupTicks(WARMUP_TICKS(seeded))
     .d3AlphaMin(ALPHA_MIN)
     .d3AlphaDecay(seeded ? FAST_DECAY : 0.0228)
     .cooldownTicks(Infinity)   // alpha is the gate; see ALPHA_MIN
@@ -1386,7 +1521,7 @@ function buildGraph() {{
       simRunning = false;
       saveLayout();
       measureGraphRadius();   // the label thresholds are a fraction of it
-      if (fitPending) {{ fitPending = false; G.zoomToFit(400, 40); wake(600); }}
+      if (fitPending) {{ fitPending = false; fitWhenPainted(G); }}
       else renderBudget();
     }});
 
@@ -1409,7 +1544,9 @@ function buildGraph() {{
       .linkPointerAreaPaint(() => {{}})
       // Pre, not Post: a zone is the ground the notes stand on. 2D only — the
       // 3D bundle hands out no THREE, so there the zones are colour and name.
-      .onRenderFramePre(drawZones);
+      // Every real 2D repaint passes here, which is what makes it the seam
+      // where the resolution governor watches for streams.
+      .onRenderFramePre((ctx, scale) => {{ drsOnPaint(); drawZones(ctx, scale); }});
   }} else {{
     // Perf on big vaults (1200+ notes): the bundle gives every link its own
     // THREE.Line — a draw call and a per-tick buffer write each. The links are
@@ -1493,6 +1630,7 @@ function setMode(m) {{
   computeFocus(focusIds);
   simRunning = true;
   Graph = buildGraph();    // owns the forces now: they must precede graphData
+  window.__G = Graph;      // console/harness handle: frame-cost probes in hidden tabs
   styleScene();            // first frame already lit; a no-op if 2D
   syncZoneLoop();          // the note-name layer is 3D-only, so the mode owns it
   renderBudget();
@@ -2151,6 +2289,13 @@ document.addEventListener("keydown", e => {{
   document.getElementById("graph-wrap").addEventListener(t, e => {{
     wake();
     if (e.type !== "pointermove") fitPending = false;
+    // Camera manipulation drops the resolution BEFORE the first heavy paint:
+    // capture phase runs ahead of d3-zoom's own handlers, so the very frame
+    // this gesture dirties already paints at the motion ratio. A move with a
+    // button held is a drag (camera or node), a wheel notch is a zoom; hover
+    // and plain clicks never blur. Restore rides the usual no-paints timer.
+    if (e.type === "wheel" || (e.type === "pointermove" && e.buttons))
+      setRes(DRS_SCALE);
   }}, {{ capture: true, passive: true }}));
 </script>
 </body>

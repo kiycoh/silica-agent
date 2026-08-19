@@ -1640,6 +1640,8 @@ def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
     assert dt.date.today().isoformat() in gui[1]
     assert gui[2].startswith("Vault: ")
     assert "language" in gui[-1].lower()
+
+
 def test_vault_brief_is_off_when_the_setting_is_off(client, monkeypatch):
     """The written sentence is the switchable half of the landing. Off, the
     endpoint answers without touching a provider — the counted line the browser
@@ -1841,6 +1843,22 @@ def test_a_write_card_meets_the_changes_payload_on_the_resolved_path():
     block = block[:block.index("\n}\n")]
     assert 'replace(/\\.md$/, "")' in block, "no stem key: a bare name never matches"
     assert 'querySelector(".wc-open")' in block, "the card is never re-pointed at the resolved path"
+
+
+def test_the_2d_resolution_governor_cannot_be_held_soft_by_the_idle_tick():
+    """The idle particle tick paints every 1000/IDLE_FPS = 50ms, shorter than
+    the 250ms restore window — so re-arming the restore on EVERY paint meant it
+    could never elapse and one pan left the settled graph permanently at half
+    backing-store resolution, inverting the block's own premise."""
+    from silica.ui.web import graph_view
+
+    src = graph_view.__file__
+    with open(src, encoding="utf-8") as fh:
+        text = fh.read()
+    body = text[text.index("function drsOnPaint()"):]
+    body = body[:body.index("\n}}\n")]
+    assert "if (streaming) drsTimer" in body, "the restore timer re-arms on any paint"
+    assert "else if (dprScale !== 1)" in body, "a parked paint never restores"
 
 
 def test_the_injector_tool_keeps_sources_like_nucleate_does():

@@ -399,6 +399,33 @@ class TestBigVaultPerfKnobs:
         html = render_html(nodes, edges, lib_js="// dummy")
         assert ".nodeResolution(" in html
 
+    def test_dynamic_resolution_governor_wired(self, small_graph):
+        """Streaming 2D repaints drop the backing store to half ratio.
+
+        The 2D canvas is fill-bound (~15ms per megapixel on software raster):
+        a hot simulation on a full-size canvas delivered 15-22fps with the
+        main thread idle, rAF starved by raster back-pressure. The governor
+        overrides window.devicePixelRatio and watches paint bursts from
+        onRenderFramePre; dropping any of the three pieces silently restores
+        the jank, so pin them all.
+        """
+        nodes, edges = small_graph
+        html = render_html(nodes, edges, lib_js="// dummy")
+        assert 'Object.defineProperty(window, "devicePixelRatio"' in html
+        assert "drsOnPaint(); drawZones(ctx, scale);" in html
+        # the crisp restore must repaint AND re-derive the budget state
+        assert "Graph.resumeAnimation(); Graph.pauseAnimation(); renderBudget();" in html
+        # the lib's resize path re-centers using old-pixels / NEW-ratio, wrong by
+        # exactly the ratio step: without the camera save/restore every res
+        # transition lurches the view half a screen (shipped once, 2026-08-17)
+        assert html.index("const z = Graph.zoom(), c = Graph.centerAt();") \
+            < html.index("Graph.width(Graph.width()).height(Graph.height());") \
+            < html.index("Graph.centerAt(c.x, c.y);")
+        # pointer-driven camera work engages BEFORE the first heavy paint;
+        # leaving it to the 3-paint burst warm-up made every pan resume chop
+        # for 150-270ms at full res (user-reported, 2026-08-17)
+        assert '(e.type === "pointermove" && e.buttons)' in html
+
 
 # ---------------------------------------------------------------------------
 # The host page's note drawer overlays this frame's right edge, where the HUD
@@ -472,3 +499,45 @@ class TestGraphEffectToggles:
         assert "(!PARTICLES || l._dim || l._hidden) ? 0" in html
         assert "PARTICLES && RAW_EDGES.some" in html
         assert html.count("if (!SHADING || is2D()") == 2
+
+
+class TestCameraFitAndWarmup:
+    """The 2D -> 3D switch used to land the camera inside the node cloud.
+
+    zoomToFit measures the SCENE, not the data: 3d-force-graph unions the node
+    meshes' world boxes, and a mesh only takes its node's position on a rendered
+    frame. The fit was deferred to onEngineStop, and with a cached layout the
+    engine stopped inside the SYNCHRONOUS warmup (FAST_DECAY reaches ALPHA_MIN
+    at tick 66, warmupTicks was 150 in 3D and 240 in 2D), so it fired before the
+    first frame existed. getGraphBbox then returned the node radii alone
+    (measured +/-14 units against real positions spanning +/-2300), and the
+    camera was placed ~41 units from the centre of a ~3900-unit graph.
+    """
+
+    def test_a_seeded_layout_runs_no_synchronous_warmup(self, small_graph):
+        nodes, edges = small_graph
+        js = render_html(nodes, edges, lib_js="// dummy")
+        assert "function WARMUP_TICKS(seeded)" in js, \
+            "warmup must be able to see whether the positions were seeded"
+        assert "if (seeded) return 0;" in js, \
+            "a seeded layout must not also run a warmup: the cache IS the warmup, " \
+            "and running one consumes the whole alpha schedule before any frame"
+
+    def test_the_deferred_fit_waits_for_a_painted_frame(self, small_graph):
+        nodes, edges = small_graph
+        js = render_html(nodes, edges, lib_js="// dummy")
+        assert "function fitWhenPainted(" in js
+        assert "requestAnimationFrame" in js[js.index("function fitWhenPainted("):][:600], \
+            "the fit must run on the far side of a real frame, or it measures meshes at the origin"
+        stop = js[js.index(".onEngineStop("):][:400]
+        assert "fitWhenPainted(" in stop, "onEngineStop still fits directly"
+        assert "G.zoomToFit(" not in stop, "onEngineStop still calls zoomToFit before a frame exists"
+
+    def test_the_warmup_freeze_is_bounded_by_graph_size(self, small_graph):
+        """The warmup is synchronous: every tick in it is a frame the browser
+        cannot paint. 240 ticks cost ~0.8s at the ~4.5k links these counts were
+        tuned on, and ~2.1s at 12.2k (measured 8.94ms/tick). Hold the freeze,
+        not the tick count."""
+        nodes, edges = small_graph
+        js = render_html(nodes, edges, lib_js="// dummy")
+        assert "WARMUP_REF_EDGES" in js, "warmup does not scale with the graph it runs on"
