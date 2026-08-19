@@ -1707,6 +1707,28 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
     assert not (tmp_path / "brief.json").exists(), "an empty brief was cached"
 
 
+def test_changes_diff_declares_whether_a_baseline_exists(client, tmp_vault):
+    """A note the session never touched and a note reverted to identical bytes
+    both produce an empty line list. They are not the same fact, and the write
+    card has to tell them apart: one has a diff worth showing, the other has no
+    diff at all and must fall back to the note itself.
+    """
+    from silica.kernel.write import session_changes
+
+    tc, _server = client
+    untouched = tmp_vault.note("Untouched.md", "never written by this session")
+    touched = tmp_vault.note("Touched.md", "after")
+
+    d = tc.get("/changes/diff", params={"path": untouched}).json()
+    assert d["baseline"] is False
+    assert d["lines"] == []
+
+    session_changes.touched(touched, "before")
+    d = tc.get("/changes/diff", params={"path": touched}).json()
+    assert d["baseline"] is True
+    assert d["added"] and d["removed"], "a real edit should tally on both sides"
+
+
 def test_graph_document_revalidates_and_compresses(client):
     """/graph inlines both force-graph bundles, so it is megabytes per visit. It
     used to ship with no validator and no encoding, refetched in full every time
@@ -1735,6 +1757,41 @@ def test_graph_document_revalidates_and_compresses(client):
     assert plain.text.lstrip().lower().startswith("<!doctype html")
 
 
+def test_write_card_path_opens_the_diff_not_the_note():
+    """The write card is the product's own claim, rendered.
+
+    Its path used to route through openNote, so clicking the object that
+    announced a change showed the file as it now stands. The diff is the only
+    surface that answers what actually changed rather than what was claimed, and
+    the transcript has to point at it or the user is asked to press `revert` on
+    something they were never shown.
+    """
+    from silica.ui.web.server import STATIC_DIR
+
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert '.note-link, .wc-open' not in js, \
+        "a citation and a change share one handler again, so both open the note"
+
+    i = js.index('e.target.closest(".wc-open")')
+    assert "openDiff(" in js[i:i + 200], "the write card's path no longer routes to the diff"
+
+    # and the diff falls back to the note when the session holds no baseline,
+    # otherwise the card would open an empty pane pretending to be a diff
+    assert "d.baseline === false" in js and "return openNote(path)" in js
+
+
+def test_write_card_does_not_paint_a_landed_write_in_the_caution_colour():
+    """A write that passed the gate, the lint and the re-read is the product
+    working. It announced itself in amber, which is the palette's caution."""
+    from silica.ui.web.server import STATIC_DIR
+
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    block = css[css.index(".wc-op {"):css.index(".wc-path {")]
+    assert "var(--warn)" not in block, "the write-card label is amber again"
+    assert "var(--add)" in css[css.index(".wcard.written .wc-op"):][:120]
+
+
 def test_reduced_motion_is_honoured_for_transitions_not_only_animations():
     """The file carries dozens of transitions and only four were switched off,
     so a session that asked the OS for less motion still got the header, the
@@ -1748,6 +1805,20 @@ def test_reduced_motion_is_honoured_for_transitions_not_only_animations():
     assert blanket, "no blanket rule: coverage is per-selector and will rot"
     assert "transition-duration: 0.01ms !important" in blanket[0]
     assert "animation-duration: 0.01ms !important" in blanket[0]
+
+
+def test_a_write_card_meets_the_changes_payload_on_the_resolved_path():
+    """The card is stamped with the tool's own argument ("Photosynthesis"),
+    /changes reports the path the tool resolved ("Biology/Photosynthesis.md").
+    Keyed on the raw argument alone the tally never filled and every card click
+    fell through openDiff's baseline lookup to openNote."""
+    from silica.ui.web.server import STATIC_DIR
+
+    js = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+    block = js[js.index("function stampWriteTallies"):]
+    block = block[:block.index("\n}\n")]
+    assert 'replace(/\\.md$/, "")' in block, "no stem key: a bare name never matches"
+    assert 'querySelector(".wc-open")' in block, "the card is never re-pointed at the resolved path"
 
 
 def test_the_injector_tool_keeps_sources_like_nucleate_does():

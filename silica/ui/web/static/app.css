@@ -1348,7 +1348,14 @@ details.side-section:hover>summary.side-title {
    with a 12px chip in a row of identical chips, next to an outlined button that
    was the quietest element in its own footer — the highest-stakes moment in the
    app rendered as its cheapest. Each change now carries its own surface, its own
-   operation label in the palette's caution amber, and its own way back. */
+   operation label, its own tally, and its own way back.
+
+   The label was amber, which said "caution" about a write that had already
+   passed the gate, the lint and the re-read — the product working, coloured as
+   the product hesitating. It now takes the diff poles, which is what the label
+   actually names: `written` is lines that arrived, `deleted` is a file that
+   left, and both open the diff that shows them. Measured on --slate-2:
+   add 7.82:1 dark / 5.05:1 light, del 4.81:1 / 5.71:1, ash 5.35:1 / 5.73:1. */
 .writes {
   display: flex;
   flex-direction: column;
@@ -1374,7 +1381,17 @@ details.side-section:hover>summary.side-title {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: var(--warn);
+  color: var(--ash);
+}
+
+/* `moved` keeps the neutral: no line arrived and none left, which is exactly
+   what the diff for a move says too. */
+.wcard.written .wc-op {
+  color: var(--add);
+}
+
+.wcard.deleted .wc-op {
+  color: var(--del);
 }
 
 .wc-path {
@@ -1396,6 +1413,17 @@ details.side-section:hover>summary.side-title {
   text-underline-offset: 3px;
 }
 
+/* Same shape and same tokens as the sidebar's .chg-tally, because it is the
+   same number: how many lines arrived and left since this session's baseline.
+   Mono, so the digits line up down a stack of cards. */
+.wc-tally {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.35rem;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
 .wc-act {
   flex-shrink: 0;
   font-family: var(--sans);
@@ -1409,9 +1437,12 @@ details.side-section:hover>summary.side-title {
   transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
 }
 
+/* Cyan, not amber. Amber here meant "clickable" on the one control the design
+   system says amber must never mean clickable on, and it read as a warning
+   about pressing the button rather than about the state of the vault. */
 .wc-act:hover {
-  color: var(--warn);
-  border-color: var(--warn);
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .wc-act:focus-visible {
@@ -1464,6 +1495,14 @@ details.side-section:hover>summary.side-title {
 }
 
 .undo-turn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* armed is the one place amber is right on this control: it is not saying
+   "clickable", it is saying "the next click takes back twelve notes" */
+.undo-turn.armed,
+.undo-turn.armed:hover {
   color: var(--warn);
   border-color: var(--warn);
 }

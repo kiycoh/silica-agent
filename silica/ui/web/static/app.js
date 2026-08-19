@@ -254,6 +254,15 @@ function writeCard(ref, effect, verb) {
     card.appendChild(n);
     return card;
   }
+  // How big the change was. Filled in by loadChanges() from the same /changes
+  // payload the sidebar reads, so the number on the card, the number on the
+  // sidebar row and the number in the header of the diff this card opens are
+  // one number off one baseline. A card that renders before that payload lands
+  // simply has no tally yet, rather than a wrong one.
+  const tally = document.createElement("span");
+  tally.className = "wc-tally";
+  tally.dataset.for = ref;
+  card.appendChild(tally);
   const b = document.createElement("button");
   b.type = "button";
   b.className = "wc-act";
@@ -266,6 +275,32 @@ function writeCard(ref, effect, verb) {
   });
   card.appendChild(b);
   return card;
+}
+
+// A button that asks before it acts, without a modal. Reverting is itself a
+// mutation of a corpus the user means to keep, and in bulk it was the least
+// guarded action in the app: one click took back every note a turn had written,
+// with no preview and nothing to press to get back. The button arms instead, so
+// the second click is the decision and the first one costs nothing to abandon —
+// doing nothing disarms it. No new markup, no focus trap, and the keyboard path
+// is the one the button already had.
+const ARM_MS = 4000;
+function armThenRun(btn, label, armed, run) {
+  let timer = null;
+  const disarm = () => { timer = null; btn.classList.remove("armed"); btn.textContent = label; };
+  btn.addEventListener("click", () => {
+    if (timer) {
+      clearTimeout(timer);
+      disarm();
+      btn.disabled = true;
+      run();
+      return;
+    }
+    btn.classList.add("armed");
+    btn.textContent = armed;
+    timer = setTimeout(disarm, ARM_MS);
+  });
+  btn.addEventListener("blur", () => { if (timer) { clearTimeout(timer); disarm(); } });
 }
 
 // Raw exception text used to land in the transcript as the agent's own speech:
@@ -630,9 +665,10 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         const u = document.createElement("button");
         u.type = "button";
         u.className = "undo-turn";
-        u.textContent = `revert all ${mutations.length} changes`;
+        const label = `revert all ${mutations.length} changes`;
+        u.textContent = label;
         u.title = "run /undo for every note this turn touched";
-        u.addEventListener("click", () => { u.disabled = true; send("/undo"); });
+        armThenRun(u, label, `click again to revert ${mutations.length}`, () => send("/undo"));
         w.appendChild(u);
       }
       flow.appendChild(w);
@@ -1139,8 +1175,41 @@ async function loadChanges() {
   }
   $("#side-changes").hidden = !rows.length;
   $("#changes-count").textContent = rows.length || "";
+  stampWriteTallies(rows);
   applySidebarFilter();
   syncDrawerMode(); // the diff tab may have just become available for the open note
+}
+
+// Every write card in the transcript, including ones a page reload replayed,
+// takes its tally from the payload above rather than counting anything itself.
+function stampWriteTallies(rows) {
+  // The two halves are keyed differently and have to be made to meet. A card is
+  // stamped with the tool's own argument — silica_patch_note(name:"Photosynthesis")
+  // — while /changes reports the path the tool resolved that to,
+  // "Biology/Photosynthesis.md". Exact path first, then the same path without
+  // .md, then the bare basename but only when it is unambiguous across the
+  // payload. Without this the tally never filled and every card click fell
+  // through openDiff's baseline lookup to openNote, so the diff the card exists
+  // to open was never the thing that opened.
+  const by = new Map(), byBase = new Map();
+  for (const r of rows) {
+    const stem = r.path.replace(/\.md$/, "");
+    by.set(r.path, r);
+    by.set(stem, r);
+    const base = stem.split("/").pop();
+    byBase.set(base, byBase.has(base) ? null : r); // null = ambiguous, never used
+  }
+  for (const el of document.querySelectorAll(".wc-tally")) {
+    const key = el.dataset.for;
+    const r = by.get(key) || byBase.get(key) || null;
+    el.textContent = "";
+    if (!r) continue;
+    // Re-point the card at the resolved path so its click opens the diff.
+    const open = el.parentElement && el.parentElement.querySelector(".wc-open");
+    if (open) open.dataset.path = r.path;
+    if (r.added) el.appendChild(mkEl("span", "chg-add", "+" + r.added));
+    if (r.removed) el.appendChild(mkEl("span", "chg-del", "−" + r.removed));
+  }
 }
 
 $("#changes").addEventListener("click", (e) => {
@@ -2852,6 +2921,9 @@ async function openDiff(path) {
     box.textContent = "couldn't read that diff";
     return;
   }
+  // The session never touched this note, so there is nothing to compare it
+  // against. Show the note rather than an empty diff pretending to be one.
+  if (d.baseline === false) return openNote(path);
   box.className = "";
   box.innerHTML = "";
   const head = mkEl("div", "dl-head");
@@ -3243,7 +3315,14 @@ document.addEventListener("click", (e) => {
   // dismiss the explore note-search dropdown on any click outside it (a result
   // click runs its own handler first, so pickNote still fires)
   if (!e.target.closest("#node-search-wrap")) closeNodeResults();
-  const link = e.target.closest(".note-link, .wc-open");
+  // A citation and a change are two different questions, so they get two
+  // different answers. `.note-link` asks what a note says, and opens the note.
+  // `.wc-open` is the path on a write card, where the only thing worth reading
+  // is what actually changed rather than what was claimed — so it opens the
+  // diff, which falls back to the note when the session holds no baseline.
+  const changed = e.target.closest(".wc-open");
+  if (changed) { e.preventDefault(); openDiff(changed.dataset.path); return; }
+  const link = e.target.closest(".note-link");
   if (link) { e.preventDefault(); openNote(link.dataset.path); return; }
   // An external link opens in its own tab. The app has no internal <a href> of
   // its own — every in-app move is JS — so any href in the flow came out of a

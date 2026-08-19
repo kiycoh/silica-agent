@@ -1529,7 +1529,13 @@ def changes_diff(path: str = ""):
 
     base = session_changes.snapshot().get(path)
     if base is None:
-        return {"path": path, "name": _clean_name(path), "kind": "unchanged", "lines": []}
+        # No baseline: this session never touched the note, so there is no diff
+        # to read and the caller should show the note itself. Distinct from a
+        # note that WAS touched and is now byte-identical again, which has a
+        # baseline and an empty line list — the drawer says so in its own words,
+        # and a write card must not silently degrade one into the other.
+        return {"path": path, "name": _clean_name(path), "kind": "unchanged",
+                "baseline": False, "lines": []}
     before, after = base.before or "", _read_note_text(path)
     added, removed = _tally(before, after or "")
     rows: list[dict] = []
@@ -1549,6 +1555,7 @@ def changes_diff(path: str = ""):
         "name": _clean_name(path),
         "kind": _kind(base.before, after, base.origin, bool(added or removed)),
         "from": base.origin,
+        "baseline": True,
         "added": added,
         "removed": removed,
         "lines": rows[:_MAX_DIFF_LINES],
