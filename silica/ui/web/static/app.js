@@ -2113,67 +2113,142 @@ function renderMetrics(d) {
   const T = d.totals || {};
   $("#metrics-stamp").textContent = d.generated_at ? d.generated_at.slice(0, 16).replace("T", " ") : "";
 
-  // --- hero: E(vault) + the KPI row it summarises ----------------------------
-  const head = mkEl("section", "mcard mhero");
   const e = d.energy || { total: 0, terms: [] };
   const full = d.depth === "full";
-  const hv = mkEl("div", "hero-val", (e.total > 0 ? "+" : "") + e.total.toFixed(2));
-  head.appendChild(mkEl("div", "hero-lbl", "E(vault) · lattice energy"));
-  head.appendChild(hv);
-  head.appendChild(mkEl("p", "hero-sub",
-    "Lower is more coherent. A thermometer, not a target: read it to compare runs, "
-    + "never descend it. "
-    + (full
-      ? "Measured at full depth: comparable only to other full-depth readings."
-      : "Structural depth: integration deficits are not measured, so this is not "
-        + "comparable to a full-depth E.")));
-  if (d.discourse_state) {
-    const chip = mkEl("div", "chip", "discourse: " + d.discourse_state);
-    head.appendChild(chip);
-  }
-  body.appendChild(head);
 
-  // Rates, not counts: notes / links / areas / unresolved already sit in the
-  // sidebar's vault box two panes to the left, and printing them twice on one
-  // screen spends the loudest row in the view on nothing. These are the
-  // numbers that box cannot carry — including the correction to its own
-  // "areas" count, most of which are single notes.
-  const kpi = mkEl("section", "mkpi");
+  // --- the standing: what to do, and how the vault is doing -------------------
+  // This view used to open on E(vault) at 52px — a number its own caption calls
+  // a thermometer and not a target — over six rates, over sixteen cards of
+  // equal weight. Three surfaces, none of them answering the question you open
+  // a metrics tab with. E is now a reading inside Structure, where the terms
+  // that make it up are, and the top of the page is the worklist plus the four
+  // rates that put it in proportion.
   const links = T.links || 0, notes = T.notes || 0;
   const orphans = T.orphans || 0;
   const zeroBin = d.degree_histogram?.[0];
   const isolated = zeroBin && zeroBin.lo === 0 ? zeroBin.count : 0;
   const pct = (n, of) => (of ? Math.round((n / of) * 100) + "%" : "—");
+
+  // Attention abstains when it has nothing to measure. Its score is
+  // (idle+1)(1+misses) / ((1+degree)(1+correct)), so a vault whose notes were
+  // all touched today and never quizzed scores every candidate at exactly 1
+  // with both inputs on the floor — and the view then claimed N notes were
+  // "idle and missed in recall" above a table of identical rows reading
+  // 0 · 0 · 1. Both inputs at their floor is not a measurement. The rows are
+  // ranked best-first, so if the top ones carry no signal, none of them do.
+  const attnRows = d.attention || [];
+  const attnMeasured = attnRows.some((a) => (a.days_idle || 0) > 0 || (a.misses || 0) > 0);
+  const attnCount = attnRows.length && !attnMeasured ? 0 : (T.attention_candidates || 0);
+
+  const head = mkEl("section", "mstand");
+  const work = mkEl("div", "mstand-work");
+  work.appendChild(mkEl("h3", "mstand-h", "What needs attention"));
+  // Counts of things, ranked by how many. No invented weighting across units:
+  // each row names its own unit, and the order is the only claim made.
+  const signals = [
+    [T.orphans, "orphans", "notes nothing links to", "Orphans"],
+    [T.dangling_links, "unresolved links", "wikilinks with no target", "Unresolved links"],
+    [T.lean_notes, "lean notes", "too thin to carry their topic", null],
+    [attnCount, "waiting on attention", "idle and missed in recall", "Attention"],
+    [T.structural_gaps, "structural gaps", "areas that should connect, don't", "Structural gaps"],
+    [T.contested, "contested notes", "frontmatter flags a conflict", "Contested"],
+    [T.source_drift, "drifted sources", "the source moved on without the note", null],
+  ].filter(([n]) => n > 0).sort((a, b) => b[0] - a[0]).slice(0, 4);
+
+  if (signals.length) {
+    for (const [n, label, means, card] of signals) {
+      // The rows that go somewhere are buttons: this list is the metrics view's
+      // whole call to action, and as click-only divs none of it was reachable
+      // without a mouse. The rows that go nowhere stay divs, because a button
+      // that does nothing is worse than a line of text.
+      const row = mkEl(card ? "button" : "div", "mstand-row" + (card ? " clickable" : ""));
+      if (card) row.type = "button";
+      row.appendChild(mkEl("span", "msr-n", nfmt(n)));
+      const t = mkEl("span", "msr-t");
+      t.appendChild(mkEl("b", "", label));
+      t.appendChild(mkEl("i", "", means));
+      row.appendChild(t);
+      if (card) {
+        row.title = "show the " + card.toLowerCase() + " card";
+        row.addEventListener("click", () => revealCard(card));
+      }
+      work.appendChild(row);
+    }
+  } else {
+    work.appendChild(mkEl("p", "mempty", "Nothing is out of place. Every note is "
+      + "reachable, every wikilink resolves."));
+  }
+  head.appendChild(work);
+
+  // The four rates that put those counts in proportion. Not counts: notes,
+  // links, areas and broken links already sit in the sidebar two panes left,
+  // and printing them twice spends a row on nothing.
+  // Three of these tiles and the worklist above them all count something about
+  // links, and the panel used to print "36 orphans", "3% orphaned" and "46 no
+  // link at all" side by side with nothing saying how the three relate. They
+  // are not the same measure: an orphan has nothing pointing AT it and may link
+  // out freely, "no link either way" has neither direction and includes the
+  // staging notes orphans deliberately skips. Each tile now carries its own
+  // definition rather than leaving the reader to guess which number to believe.
+  const kpi = mkEl("div", "mkpi");
   const tiles = [
-    ["Links / note", notes ? (links / notes).toFixed(1) : "0", false],
-    ["Orphaned", pct(orphans, notes), orphans > 0],
-    ["No link at all", nfmt(isolated), isolated > 0],
-    ["Areas > 1 note", nfmt((d.clusters || []).filter((c) => c.size > 1).length), false],
+    ["Links / note", notes ? (links / notes).toFixed(1) : "0", false,
+      "resolved wikilinks divided by notes"],
+    ["Orphaned", pct(orphans, notes), orphans > 0,
+      `share of notes nothing links to (${nfmt(orphans)} of ${nfmt(notes)}). They may still link out.`],
+    ["No link either way", nfmt(isolated), isolated > 0,
+      "notes with no link in and none out. Counted over every note, including the staging folders orphans skips."],
+    ["Areas > 1 note", nfmt((d.clusters || []).filter((c) => c.size > 1).length), false,
+      "structural areas holding more than a single note"],
   ];
-  // Four fixed plus at most two conditional: six is what fits one row at the
-  // 900px floor the .mkpi grid is sized for, and a seventh tile wraps to a row
-  // of its own with five dead cells beside it.
-  if (d.code_coverage) {
-    tiles.push(["Code documented",
-      pct(d.code_coverage.documented, d.code_coverage.total), false]);
-  }
-  if (d.temporal) {
-    tiles.push(["Human tier",
-      pct(d.temporal.by_tier?.["3"] || 0, d.temporal.notes_scanned), false]);
-  }
-  for (const [lbl, val, warn] of tiles) {
+  for (const [lbl, val, warn, why] of tiles) {
     const s = mkEl("div", "stat");
+    if (why) s.title = why;
     s.appendChild(mkEl("div", "val" + (warn ? " warn" : ""), nfmt(val)));
     s.appendChild(mkEl("div", "lbl", lbl));
     kpi.appendChild(s);
   }
-  body.appendChild(kpi);
+  head.appendChild(kpi);
+  body.appendChild(head);
 
-  const grid = mkEl("div", "mgrid");
-  body.appendChild(grid);
+  // --- three sections, one question each -------------------------------------
+  // Health opens because it is the one the worklist above points into. The
+  // other two are readings you come looking for, and sixteen cards unrolled at
+  // once is what made this view unreadable.
+  const sec = (title, sub, open) => {
+    const box = mkEl("details", "msec");
+    box.open = open;
+    const sum = mkEl("summary", "");
+    sum.appendChild(mkEl("span", "msec-t", title));
+    sum.appendChild(mkEl("span", "msec-s", sub));
+    box.appendChild(sum);
+    const g = mkEl("div", "mgrid");
+    box.appendChild(g);
+    body.appendChild(box);
+    return g;
+  };
+  const health = sec("Health", "what is broken, thin or drifting", true);
+  const structure = sec("Structure", "how the vault is shaped, and how tightly", false);
+  const activity = sec("Activity", "what wrote it, and what could be added", false);
+  // Cards route by section from here; `grid` stays the name the card builders
+  // below already use for the one they belong to.
+  let grid = structure;
 
-  // --- energy decomposition --------------------------------------------------
-  const ec = mCard("Energy decomposition", `the ${e.terms.length} terms that sum to E`);
+  // --- E(vault) and its decomposition ----------------------------------------
+  // The reading and the terms that make it up, in one card. Apart they were a
+  // display number with no explanation next to it and an explanation with no
+  // number; the whole point of E is that it is a sum you can open.
+  const ec = mCard("E(vault) · lattice energy",
+    full ? "measured at full depth" : "structural depth · integration deficits not measured");
+  ec.appendChild(mkEl("div", "hero-val", (e.total > 0 ? "+" : "") + e.total.toFixed(2)));
+  ec.appendChild(mkEl("p", "mnote",
+    "Lower is more coherent. A thermometer, not a target: read it to compare runs, "
+    + "never descend it. "
+    + (full
+      ? "Comparable only to other full-depth readings."
+      : "Not comparable to a full-depth E.")));
+  if (d.discourse_state) ec.appendChild(mkEl("div", "chip", "discourse: " + d.discourse_state));
+  ec.appendChild(mkEl("p", "mcard-sub", `the ${e.terms.length} terms that sum to E`));
   ec.appendChild(waterfall(
     e.terms.map((t) => ({ label: t.name, value: t.value })), e.total,
     { negLabel: "bonds formed (lowers E)", posLabel: "entropic cost (raises E)" },
@@ -2233,10 +2308,14 @@ function renderMetrics(d) {
   } else mEmpty(hb, "No connected notes yet.");
   grid.appendChild(hb);
 
+  grid = health;
+
   // --- maintenance -----------------------------------------------------------
   // Heterogeneous counts in different units — a bar chart would imply they are
-  // comparable. A table is the honest form.
-  const mt = mCard("Maintenance", "what the report says needs attention");
+  // comparable. A table is the honest form. The four loudest rows of this table
+  // are the worklist at the top of the view; this is the whole of it, including
+  // the zeroes, which is the part the worklist cannot say.
+  const mt = mCard("Maintenance", "every signal the report measures, zeroes included");
   mt.appendChild(mTable(
     [{ key: "what", label: "Signal" }, { key: "n", label: "Count", num: true },
      { key: "means", label: "Means" }],
@@ -2248,7 +2327,7 @@ function renderMetrics(d) {
       // "—" not "0" when the leg that measures it never ran: a printed zero
       // reads as "measured, came out flat".
       ["Integration deficits", full ? T.integration_deficits : null, "concept-rich, weakly linked"],
-      ["Attention", T.attention_candidates, "idle + missed in recall"],
+      ["Attention", attnCount, "idle + missed in recall"],
       ["Lean notes", T.lean_notes, "too thin to carry their topic"],
       ["Structural gaps", T.structural_gaps, "areas that should connect, don't"],
     ].map(([what, n, means]) => ({ what, n: n === null ? "—" : nfmt(n || 0), means })),
@@ -2278,6 +2357,8 @@ function renderMetrics(d) {
     ));
     grid.appendChild(tc);
   }
+
+  grid = activity;
 
   // --- write sessions --------------------------------------------------------
   // What wrote the vault, not when its subjects happened: only a nucleated note
@@ -2319,6 +2400,8 @@ function renderMetrics(d) {
     grid.appendChild(card);
   }
 
+  grid = structure;
+
   // --- structural gaps + bridges ---------------------------------------------
   // The gap list used to sit in the graph's HUD, next to the colour keys, where
   // a worklist reads as a legend entry. A gap is a fact about the vault, so it
@@ -2351,6 +2434,8 @@ function renderMetrics(d) {
   } else mEmpty(br, "No cross-area links yet.");
   grid.appendChild(br);
 
+  grid = health;
+
   // --- lists that point at a note -------------------------------------------
   const orph = mCard("Orphans", "nothing links to these");
   if (d.orphans?.length) {
@@ -2373,12 +2458,16 @@ function renderMetrics(d) {
   grid.appendChild(dg);
 
   const at = mCard("Attention", "idle × missed in recall ÷ how well linked");
-  if (d.attention?.length) {
+  if (attnRows.length && attnMeasured) {
     at.appendChild(mTable(
       [{ key: "label", label: "Note" }, { key: "days_idle", label: "Idle (d)", num: true },
        { key: "misses", label: "Missed", num: true }, { key: "score", label: "Score", num: true }],
-      d.attention.map((a) => ({ ...a, _path: a.path })),
+      attnRows.map((a) => ({ ...a, _path: a.path })),
     ));
+  } else if (attnRows.length) {
+    mEmpty(at, "No signal yet. Every candidate was touched today and none has "
+      + "been quizzed, so idle days and recall misses are both zero and there "
+      + "is nothing to rank.");
   } else mEmpty(at, "Nothing overdue.");
   grid.appendChild(at);
 
@@ -2402,6 +2491,8 @@ function renderMetrics(d) {
     ));
     grid.appendChild(ct);
   }
+
+  grid = activity;
 
   // --- proposals (not authoritative) -----------------------------------------
   // The co-occurrence leg runs one expanded ranking per note, so it is minutes

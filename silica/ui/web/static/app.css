@@ -3996,7 +3996,14 @@ body.note-open #toasts {
 #metrics-body {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  /* No padding-top on the scrollport, and the same 1rem restored as a margin on
+     whatever lands first. A sticky offset resolves against the scrollport's
+     PADDING box, so with padding-top here the section summaries parked 1rem
+     below the top edge and every table scrolled through the gap above them: a
+     permanent band of half a row of somebody else's column headers, sitting
+     between the metrics bar and the heading that was supposed to have covered
+     it. Identical layout, and `top: -1px` now means what it says. */
+  padding: 0 1rem;
   /* the ask-from-here dock no longer reaches this view, so the 5.5rem it used to
      reserve for the composer is now just a hole under the last card */
   padding-bottom: 1.5rem;
@@ -4007,34 +4014,197 @@ body.note-open #toasts {
   /* refetch holds the previous render at reduced opacity — no skeleton flash */
 }
 
-/* hero: the one number the view leads with. Proportional figures on purpose —
-   tabular-nums makes a display-size number read loose. */
-.mhero {
-  padding: 1.2rem 1.35rem;
+/* --- the standing ------------------------------------------------------------
+   The worklist and the four rates, side by side, sharing one compartment. Two
+   readings of the same question — what to do, and how far along you are — so
+   they are one object split by a hairline rather than two stacked panels. */
+#metrics-body > :first-child {
+  margin-top: 1rem;
 }
 
-.hero-lbl {
-  font-size: 10px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+.mstand {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--page);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.mstand-work {
+  padding: 1rem 1.1rem 1.1rem;
+  min-width: 0;
+}
+
+.mstand-h {
+  margin: 0 0 0.75rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+/* A row is a count, then what it is, then what that means. Three fields on one
+   line: the count is what you compare, the name is what you recognise, and the
+   meaning is what stops the name from needing a glossary. */
+.mstand-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.32rem 0.5rem;
+  margin: 0 -0.5rem;
+  border-radius: var(--r-sm);
+  min-width: 0;
+}
+
+/* a row that reveals a card is a <button>; these put it back to a row */
+.mstand-row.clickable {
+  cursor: pointer;
+  width: calc(100% + 1rem);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+}
+
+.mstand-row.clickable:hover {
+  background: var(--slate-2);
+}
+
+.mstand-row.clickable:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.msr-n {
+  flex: 0 0 4.2rem;
+  text-align: right;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--frost);
+  font-variant-numeric: tabular-nums;
+}
+
+.msr-t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msr-t b {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.msr-t i {
+  font-style: normal;
+  color: var(--ash-dim);
+  margin-left: 0.5rem;
+  font-size: 12px;
+}
+
+/* --- sections ----------------------------------------------------------------
+   Sixteen cards unrolled at once is what made this view unreadable. Health
+   opens because the worklist above points into it; the other two are readings
+   you come looking for. */
+.msec {
+  border-top: 1px solid var(--line);
+  padding-top: 0.9rem;
+}
+
+/* Sticky: Health is long enough that Structure and Activity sit two screens
+   below their own headings, and a closed section you have to scroll past a
+   whole open one to reach is a section you never open. */
+.msec > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  list-style: none;
+  user-select: none;
+  position: sticky;
+  top: -1px;
+  z-index: 2;
+  /* Cards genuinely travel under this one, so it blurs; and it takes the
+     near-opaque chrome tint rather than --glass, because at .78 a table row
+     passing behind stayed legible enough to read as a second line of the
+     heading. A flat --void would have shown its own seam against the body's
+     fixed wash. */
+  background: var(--chrome-glass);
+  backdrop-filter: var(--glass-blur);
+  margin: 0 -1rem;
+  padding-inline: 1rem;
+}
+
+.msec > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* the disclosure mark is drawn, so it can carry the state without a glyph that
+   changes width between the two states */
+.msec > summary::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-left-color: var(--ash-dim);
+  margin-right: 0.1rem;
+  transform-origin: 2px 50%;
+  transition: transform var(--dur) var(--ease);
+}
+
+.msec[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.msec > summary:hover .msec-t {
+  color: var(--accent);
+}
+
+.msec-t {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--frost);
+  transition: color var(--dur) var(--ease);
+}
+
+.msec-s {
+  font-size: 11px;
   color: var(--ash-dim);
 }
 
+.msec[open] > .mgrid {
+  margin-top: 0.9rem;
+}
+
+/* where a worklist row lands. One pass of the accent along the card's own
+   border, so the eye is told which of sixteen compartments answered. */
+@keyframes mcard-flash {
+  from { border-color: var(--accent); }
+  to   { border-color: var(--line); }
+}
+
+.mcard.flash {
+  animation: mcard-flash 1.2s var(--ease);
+}
+
+/* E(vault), inside its own card now rather than at the head of the view.
+   Proportional figures on purpose — tabular-nums makes a large number read
+   loose. 34, not 52: the display step belongs to the chat landing's wordmark,
+   and a thermometer reading is not the loudest thing on a metrics page. */
 .hero-val {
   font-family: var(--sans);
-  font-size: 52px;
+  font-size: 34px;
   font-weight: 600;
   line-height: 1.05;
   letter-spacing: -0.03em;
   color: var(--frost);
-  margin: 0.2rem 0 0.35rem;
-}
-
-.hero-sub {
-  margin: 0;
-  font-size: 12px;
-  color: var(--ash);
-  max-width: 56ch;
+  margin: 0.1rem 0 0.35rem;
 }
 
 .chip {
@@ -4047,17 +4217,51 @@ body.note-open #toasts {
   color: var(--text);
 }
 
+/* The four rates, as the right half of the standing panel. Two by two rather
+   than one row of four: paired with the worklist they are context, and a
+   four-across strip beside a list reads as the louder of the two. */
 .mkpi {
   display: grid;
-  /* 92px, so all six tiles still fit one row at the 900px supported floor —
-     at 110px the sixth wrapped and left a dead cell beside it */
-  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   background: var(--line);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  overflow: hidden;
-  flex-shrink: 0;
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+
+/* Left-aligned and larger than the sidebar's: these four have a 170px cell
+   each, where the sidebar's four share 264px and have to centre to survive it. */
+.mkpi .stat {
+  /* these four stretch to the worklist's height, so the pair has to sit in the
+     middle of the cell or the tile reads as hollow underneath */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0.75rem 0.85rem;
+  text-align: left;
+}
+
+.mkpi .stat .val {
+  font-size: 18px;
+}
+
+.mkpi .stat .lbl {
+  font-size: 10px;
+  margin-top: 2px;
+}
+
+/* the panel stacks under 1100px, where 340px of rates beside a worklist starts
+   truncating the meanings rather than the names */
+@media (max-width: 1100px) {
+  .mstand {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mkpi {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  }
 }
 
 /* Columns, not a grid: the cards run from ~200px to ~700px tall, and on a
@@ -4317,8 +4521,19 @@ body.note-open #toasts {
   min-width: 0;
   overflow: auto;
   /* #graph-bar is absolute over the whole view so it can float on the graph
-     canvas. These panes have content at the top instead, so they clear it. */
-  padding: 3.4rem 1.1rem 1.6rem;
+     canvas. These panes have content at the top instead, so they clear it —
+     and the ask-from-here dock floats over the bottom, so they clear that too
+     or the last row of a scrolled list sits under the composer. */
+  padding: 3.4rem 1.1rem 5.5rem;
+}
+
+/* Every one of these three has content that is wider than tall and narrower
+   than the pane — a treemap, a square matrix, a reading roll — so left-aligned
+   they each sat in the first third of a 1500px screen with the rest blank.
+   Centred, the width reads as margin. */
+.shape-body {
+  max-width: 1180px;
+  margin: 0 auto;
 }
 
 .shape-head {
