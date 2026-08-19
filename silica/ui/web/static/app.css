@@ -2606,7 +2606,9 @@ details.side-section:hover>summary.side-title {
 
 .map-picker-inner {
   width: min(560px, 90%);
-  padding: 1.5rem 0;
+  /* the dock composer floats over the bottom of this pane, so the last row of
+     the launch pad sat underneath it. Same clearance .shape-body reserves. */
+  padding: 1.5rem 0 5.5rem;
 }
 
 .map-picker-title {
@@ -4606,29 +4608,141 @@ body.note-open #toasts {
   font-variant-numeric: tabular-nums;
 }
 
-/* reading path: a roll, not a chart — the order is the whole content */
+/* reading path: a roll, not a chart — the order is the whole content.
+   The rail and the roll centre together as one cluster: a reading measure
+   cannot fill a wide pane, and what the leftover width is worth is a way back
+   into a path that scrolls past its own headings. */
+/* Rail and roll centre as one cluster. Pinning the rail to the pane's left
+   edge instead put 500px of nothing between an index and the thing it indexes;
+   a reading measure cannot fill a 1300px pane and the honest answer is to let
+   the leftover read as margin on both sides. */
+.shape-body.read {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 68ch);
+  grid-template-areas:
+    "head head"
+    "rail roll"
+    "rail note";
+  align-content: start;
+  justify-content: center;
+  column-gap: 2.75rem;
+  max-width: none;
+}
+
+.shape-body.read > .shape-head { grid-area: head; }
+.shape-body.read > .rpath { grid-area: roll; }
+
+.shape-body.read > .mnote {
+  grid-area: note;
+  margin-top: 0.9rem;
+}
+
+.rpath-rail {
+  grid-area: rail;
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  /* the rail is a table of contents, not a list of controls: hairline on the
+     reading side, so the path has an edge to run along */
+  border-left: 1px solid var(--line);
+}
+
+.rpath-rail-i {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: left;
+  padding: 0.32rem 0 0.32rem 0.7rem;
+  margin-left: -1px;
+  border-left: 1px solid transparent;
+  color: var(--ash-dim);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+.rpath-rail-i:hover {
+  color: var(--text);
+}
+
+.rpath-rail-i.here {
+  color: var(--frost);
+  border-left-color: var(--accent);
+}
+
+.rpath-rail-i:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* under the two-column floor the rail would take a third of the measure, so it
+   lies down over the roll as a plain index */
+@media (max-width: 1120px) {
+  .shape-body.read {
+    grid-template-columns: minmax(0, 68ch);
+    grid-template-areas: "head" "rail" "roll" "note";
+    max-width: 1180px;
+  }
+
+  .rpath-rail {
+    position: static;
+    flex-flow: row wrap;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    gap: 0 1rem;
+    margin-bottom: 0.4rem;
+  }
+
+  .rpath-rail-i {
+    padding-left: 0;
+    border-left: 0;
+    border-top: 1px solid transparent;
+    margin: -1px 0 0;
+  }
+
+  .rpath-rail-i.here {
+    border-left-color: transparent;
+    border-top-color: var(--accent);
+  }
+}
+
 .rpath {
   list-style: none;
   margin: 0;
   padding: 0;
-  max-width: 62ch;
 }
 
+/* aligned with the stop NAMES, not with the number gutter they run beside */
 .rpath-area {
-  margin: 1rem 0 0.35rem;
+  margin: 1.3rem 0 0.35rem;
+  padding-left: 2.46rem;
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ash);
 }
 
+.rpath-area:first-child {
+  margin-top: 0;
+}
+
+/* The stop number sits in a gutter the path runs down, so the sequence reads
+   as one line rather than as a digit repeated at the head of every row. */
 .rpath-stop {
-  display: flex;
-  flex-direction: column;
-  gap: 0.1rem;
+  display: grid;
+  grid-template-columns: 1.9rem minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.1rem 0;
   padding: 0.45rem 0.5rem;
-  border-left: 2px solid var(--line-2);
+  border-left: 1px solid var(--line);
   cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 
 .rpath-stop:hover {
@@ -4636,11 +4750,21 @@ body.note-open #toasts {
   background: var(--bubble);
 }
 
+.rpath-n {
+  grid-row: 1 / 3;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ash-dim);
+  font-variant-numeric: tabular-nums;
+  align-self: center;
+}
+
 .rpath-name {
   color: var(--frost);
 }
 
 .rpath-why {
+  grid-column: 2;
   font-size: 11px;
   color: var(--ash);
 }
@@ -4662,6 +4786,11 @@ body.note-open #toasts {
   grid-template-columns: max-content repeat(var(--cols, 1), 30px) 40px;
   gap: 2px;
   width: max-content;
+  /* centre the matrix in the pane the way the reading path centres its rail.
+     Safe against the scroller: auto margins resolve to 0 when there is no free
+     space, so a matrix wider than the pane still starts at its left edge and
+     scrolls from there rather than losing its first column off-screen. */
+  margin-inline: auto;
   font-size: 11px;
 }
 

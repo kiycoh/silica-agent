@@ -1693,13 +1693,20 @@ function renderAreas(s) {
 // layout: it answers "where do I start and what next", which no arrangement of
 // nodes in space can, because space has no order.
 function renderReading(s) {
-  const pane = mkEl("div", "shape-body");
+  const pane = mkEl("div", "shape-body read");
   const head = mkEl("div", "shape-head");
   const r = s.reading;
   head.appendChild(mkEl("strong", null, "A way through"));
   head.appendChild(mkEl("span", "shape-sub",
     `${r.stops.length} stops · areas biggest first, each hub then what it opens onto`));
   pane.appendChild(head);
+  // The path is a roll on a reading measure, so on a wide screen it cannot fill
+  // the pane and should not try. What the width is worth here is a way back:
+  // 24 stops across 8 areas scroll past the top, and the rail is the only place
+  // that can say where in the path you are. Rail and roll centre as one cluster.
+  const rail = mkEl("nav", "rpath-rail");
+  rail.setAttribute("aria-label", "areas in this path");
+  pane.appendChild(rail);
   // The vault holds notes that share a name across folders, so a path can list
   // the same label twice for two different files. Where that happens the parent
   // folder rides along: two identical rows pointing at different notes is worse
@@ -1708,13 +1715,29 @@ function renderReading(s) {
   for (const st of r.stops) seenLabel.set(st.label, (seenLabel.get(st.label) || 0) + 1);
   const ol = mkEl("ol", "rpath");
   let area = null;
+  let ai = 0;
+  let ordinal = 0;
+  const marks = [];
   for (const stop of r.stops) {
     if (stop.area !== area) {
       area = stop.area;
-      ol.appendChild(mkEl("li", "rpath-area", area));
+      const id = "rp-a" + (ai++);
+      const h = mkEl("li", "rpath-area", area);
+      h.id = id;
+      ol.appendChild(h);
+      const link = mkEl("button", "rpath-rail-i", area);
+      link.type = "button";
+      link.title = area;
+      link.addEventListener("click", () => h.scrollIntoView({ block: "start", behavior: "smooth" }));
+      rail.appendChild(link);
+      marks.push([h, link]);
     }
     const li = mkEl("li", "rpath-stop clickable");
     li.dataset.path = stop.path;
+    // The number is not decoration on this one surface: the whole claim of a
+    // reading path is its order, and without the ordinal the roll reads as a
+    // grouped list of hubs, which is what the folders view already is.
+    li.appendChild(mkEl("span", "rpath-n", String(++ordinal)));
     // The full path, not the parent folder: the notes that collide here are
     // forks of each other under `silica/`, so they share every segment except
     // the first, and one parent segment disambiguated nothing.
@@ -1735,6 +1758,24 @@ function renderReading(s) {
     "Derived from link structure alone, so it promises adjacency and not importance: "
     + "each stop is linked to something already read."
     + (cut > 0 ? ` ${nfmt(cut)} smaller areas are past the end of the path.` : "")));
+  // Which area you are in, marked on the rail. Observed rather than measured on
+  // scroll: this pane holds a few hundred rows and a scroll handler reading
+  // offsets off all of them is the one thing that could make a list janky.
+  if (marks.length) {
+    const io = new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        const pair = marks.find(([h]) => h === en.target);
+        if (pair) pair[1].classList.toggle("here", en.isIntersecting);
+      }
+      // Nothing intersecting means every heading is above the fold: keep the
+      // last one that was, so the rail never goes blank mid-area.
+      if (!rail.querySelector(".here")) {
+        const above = marks.filter(([h]) => h.getBoundingClientRect().top < 200).pop();
+        if (above) above[1].classList.add("here");
+      }
+    }, { root: $("#shape-pane"), rootMargin: "-56px 0px -70% 0px" });
+    for (const [h] of marks) io.observe(h);
+  }
   return pane;
 }
 
@@ -1838,11 +1879,27 @@ const mkEl = (tag, cls, text) => {
 // the title and its subtitle onto one line.
 function mCard(title, sub) {
   const c = mkEl("section", "mcard");
+  // The worklist at the top of the view points at cards by their title, so the
+  // title has to be addressable and not just printed.
+  c.dataset.card = title;
   const h = mkEl("div", "mcard-head");
   h.appendChild(mkEl("h3", null, title));
   if (sub) h.appendChild(mkEl("span", "mcard-sub", sub));
   c.appendChild(h);
   return c;
+}
+
+// Open whatever section holds a card and put it in front of you. A worklist row
+// that named a card you then had to go find would be a label, not a control.
+function revealCard(title) {
+  const card = document.querySelector(`#metrics-body [data-card="${CSS.escape(title)}"]`);
+  if (!card) return;
+  const sec = card.closest("details.msec");
+  if (sec) sec.open = true;
+  card.scrollIntoView({ block: "center", behavior: "smooth" });
+  card.classList.remove("flash");
+  void card.offsetWidth; // restart the animation when the same row is clicked twice
+  card.classList.add("flash");
 }
 
 function mEmpty(card, msg) { card.appendChild(mkEl("p", "mempty", msg)); return card; }
