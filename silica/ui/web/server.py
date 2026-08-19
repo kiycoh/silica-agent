@@ -19,8 +19,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
@@ -750,6 +750,13 @@ async def _lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=_lifespan)
 
+# NOT GZipMiddleware. It would also wrap /chat, which is text/event-stream, and
+# Starlette's gzip responder writes each chunk into a zlib compressor that
+# buffers until it has enough to emit — so the SSE frames that make a turn
+# stream would be withheld and the transcript would arrive in bursts. /graph
+# compresses itself instead, at the one route where the payload is large enough
+# to matter (see graph()).
+
 
 @app.post("/chat")
 async def chat(payload: dict):
@@ -1307,7 +1314,25 @@ def metrics(proposals: bool = False):
 
 
 @app.get("/graph")
-def graph():
+def graph(request: Request):
+    """The explore iframe's whole document, force-graph bundles inlined.
+
+    That inlining is what makes this route ~6 MB, and it used to ship
+    uncompressed with no validator at all, so every visit to the explore tab
+    refetched every byte. Two cheap fixes, in this order:
+
+      * an ETag over the payload, so a revisit costs a 304 and nothing else.
+        Content-addressed rather than time-based, because the document changes
+        when the vault does and no clock knows when that was.
+      * gzip when the client asks for it, which measured 6,229,645 -> 766,371
+        bytes on a 1,199-note vault. Done here rather than with GZipMiddleware,
+        which would also wrap the SSE turn stream and stall it.
+
+    no-cache, not no-store: the browser must revalidate (the vault changes under
+    it) but is allowed to keep the bytes and take the 304.
+    """
+    import gzip as _gzip
+    import hashlib
     import tempfile
 
     from silica.tools import TOOLS
@@ -1315,9 +1340,19 @@ def graph():
     out = Path(tempfile.gettempdir()) / "silica_web_graph.html"  # regenerated each request
     try:
         TOOLS["silica_graph_export"].run(output_path=str(out), folder="")
-        return HTMLResponse(out.read_text(encoding="utf-8"))
+        body = out.read_text(encoding="utf-8").encode("utf-8")
     except Exception as exc:
         return HTMLResponse(f"<p style='font-family:monospace'>graph unavailable: {exc}</p>")
+
+    etag = '"' + hashlib.blake2b(body, digest_size=8).hexdigest() + '"'
+    headers = {"ETag": etag, "Cache-Control": "no-cache"}
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+    if "gzip" in request.headers.get("accept-encoding", "").lower():
+        body = _gzip.compress(body, compresslevel=6)
+        headers["Content-Encoding"] = "gzip"
+        headers["Vary"] = "Accept-Encoding"
+    return Response(body, media_type="text/html; charset=utf-8", headers=headers)
 
 
 @app.get("/map")

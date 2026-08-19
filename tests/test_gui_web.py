@@ -1707,6 +1707,34 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
     assert not (tmp_path / "brief.json").exists(), "an empty brief was cached"
 
 
+def test_graph_document_revalidates_and_compresses(client):
+    """/graph inlines both force-graph bundles, so it is megabytes per visit. It
+    used to ship with no validator and no encoding, refetched in full every time
+    the explore tab was opened."""
+    tc, _server = client
+
+    r = tc.get("/graph", headers={"accept-encoding": "gzip"})
+    assert r.status_code == 200
+    etag = r.headers.get("etag")
+    assert etag, "no ETag: every visit refetches the whole document"
+    assert r.headers.get("cache-control") == "no-cache"
+
+    # httpx transparently decodes, so check the wire header rather than the body
+    assert r.headers.get("content-encoding") == "gzip"
+    assert r.headers.get("vary") == "Accept-Encoding"
+
+    # a revisit costs a 304 and no body
+    again = tc.get("/graph", headers={"if-none-match": etag})
+    assert again.status_code == 304
+    assert not again.content
+
+    # and the identity path still serves a real document
+    plain = tc.get("/graph", headers={"accept-encoding": "identity"})
+    assert plain.status_code == 200
+    assert "content-encoding" not in plain.headers
+    assert plain.text.lstrip().lower().startswith("<!doctype html")
+
+
 def test_reduced_motion_is_honoured_for_transitions_not_only_animations():
     """The file carries dozens of transitions and only four were switched off,
     so a session that asked the OS for less motion still got the header, the
