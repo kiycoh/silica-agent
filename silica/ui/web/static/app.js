@@ -4405,6 +4405,8 @@ let calUpcoming = null;       // DayRows of today+7, for the default agenda pane
 
 const CAL_LANE_CAP = 3;       // month mode: visible multi-day lanes per week
 const CAL_CHIP_CAP = 2;       // month mode: visible timed chips per day
+const CAL_DERIVED_CAP = 3;    // month mode: chips + derived lines together
+const CAL_AGENDA_CAP = 6;     // agenda: rows per axis before "show all"
 
 function calFmt(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -4422,6 +4424,11 @@ function calWindow() {
 
 async function loadCalendar() {
   const w = calWindow();
+  // Only on a cold open. Every month step refetches, and flashing a spinner
+  // over a grid that is already on screen would be the louder of the two lies.
+  const frame = $("#cal-loading");
+  const cold = !Object.keys(calDays).length;
+  if (cold) frame.hidden = false;
   try {
     const [grid, up] = await Promise.all([
       fetch(`/calendar?start=${calFmt(w.start)}&days=${w.days}`).then((r) => r.json()),
@@ -4434,6 +4441,7 @@ async function loadCalendar() {
     renderCalendar();
     renderCalAgenda();
   } catch { notify("couldn't load the calendar"); }
+  finally { frame.hidden = true; }
 }
 
 // A bar is anything that must draw as a span: all-day, or crossing midnight.
@@ -4452,6 +4460,45 @@ function calPackLanes(spans) {
     s.lane = lane;
   }
   return lanes.length;
+}
+
+// "nucleate `07-part.md` → 2 new, 26 patch, 2 deferred · run 5e88feb0"
+// The run id is provenance, not reading matter: it rides the row's tooltip and
+// leaves the line. Anything that doesn't match comes through whole rather than
+// being dropped — the log's shape is the agent's to change.
+function calActivity(s) {
+  const at = s.lastIndexOf(" · run ");
+  const body = at > 0 ? s.slice(0, at) : s;
+  const m = body.match(/^(\S+)\s+`(.+?)`\s*(?:→\s*(.*))?$/);
+  if (!m) return { verb: "", what: body, detail: "" };
+  return { verb: m[1], what: m[2], detail: (m[3] || "").trim() };
+}
+
+// What a day's four axes look like in ONE cell. Events are the only axis that
+// is an appointment, so they stay solid chips; the other three are things that
+// already happened or are waiting, and they render as quiet counted lines. A
+// month of a working vault used to be 42 empty boxes beside an agenda holding
+// 60 rows: every axis but `events` was agenda-only.
+function calDerived(row) {
+  const out = [];
+  if (!row) return out;
+  if (row.review?.length) {
+    out.push({ cls: "due", text: row.review.length + " to review",
+               title: row.review.length + " notes the review queue has due" });
+  }
+  const verbs = new Map();
+  for (const a of row.activity || []) {
+    const v = calActivity(a).verb || "wrote";
+    verbs.set(v, (verbs.get(v) || 0) + 1);
+  }
+  for (const [v, n] of [...verbs].sort((a, b) => b[1] - a[1])) {
+    out.push({ cls: "", text: `${v} ×${n}`, title: `${n} ${v} runs on this day` });
+  }
+  if (row.notes?.length) {
+    out.push({ cls: "", text: row.notes.length + (row.notes.length === 1 ? " note" : " notes"),
+               title: row.notes.length + " notes whose claim clock lands here" });
+  }
+  return out;
 }
 
 function calEventEl(e, cls, withTime) {
@@ -4529,6 +4576,17 @@ function calBuildWeek(dates, tall) {
     const cap = tall ? timed.length : CAL_CHIP_CAP;
     timed.slice(0, cap).forEach((e) => chips.appendChild(calEventEl(e, "cal-chip", true)));
     overflow[i] += Math.max(0, timed.length - cap);
+    // The three derived axes, under whatever appointments the day holds. They
+    // are counts of what is already true, so they never take the space an
+    // event wanted: the cap is what is left of the cell after the chips.
+    const derived = calDerived(calDays[date]);
+    const dcap = tall ? derived.length : Math.max(0, CAL_DERIVED_CAP - Math.min(timed.length, cap));
+    derived.slice(0, dcap).forEach((d) => {
+      const el = mkEl("div", "cal-sig" + (d.cls ? " " + d.cls : ""), d.text);
+      el.title = d.title;
+      chips.appendChild(el);
+    });
+    overflow[i] += Math.max(0, derived.length - dcap);
     cell.appendChild(chips);
 
     const more = document.createElement("div");
@@ -4621,39 +4679,57 @@ function calAgendaDay(row) {
     it.addEventListener("click", () => openNote(e.path));
     sec.appendChild(it);
   }
-  for (const n of row.notes) {
+  // An axis renders six rows and then says how many it is holding back. A
+  // nucleation run puts sixty lines on one day, and sixty rows of a path with
+  // a run id after it is not an agenda, it is a log file in a 300px column.
+  const axis = (kind, items, build) => {
+    if (!items?.length) return;
     any = true;
-    const it = document.createElement("div");
-    it.className = "cal-ag-item";
-    const k = document.createElement("span");
-    k.className = "when cal-ag-kind";
-    k.textContent = "note";
-    it.appendChild(k);
-    it.appendChild(document.createTextNode(n.label));
-    sec.appendChild(it);
-  }
-  for (const a of row.activity) {
-    any = true;
-    const it = document.createElement("div");
-    it.className = "cal-ag-item";
-    const k = document.createElement("span");
-    k.className = "when cal-ag-kind";
-    k.textContent = "agent";
-    it.appendChild(k);
-    it.appendChild(document.createTextNode(a));
-    sec.appendChild(it);
-  }
-  for (const r of row.review || []) {
-    any = true;
-    const it = document.createElement("div");
-    it.className = "cal-ag-item";
-    const k = document.createElement("span");
-    k.className = "when cal-ag-kind";
-    k.textContent = "review";
-    it.appendChild(k);
-    it.appendChild(document.createTextNode(r.path || ""));
-    sec.appendChild(it);
-  }
+    const rows = items.map((x) => {
+      const it = mkEl("div", "cal-ag-item");
+      const k = mkEl("span", "when cal-ag-kind", kind);
+      it.appendChild(k);
+      build(it, x);
+      return it;
+    });
+    rows.slice(0, CAL_AGENDA_CAP).forEach((r) => sec.appendChild(r));
+    if (rows.length <= CAL_AGENDA_CAP) return;
+    const more = mkEl("button", "cal-ag-more",
+      `show ${rows.length - CAL_AGENDA_CAP} more`);
+    more.type = "button";
+    more.addEventListener("click", () => {
+      rows.slice(CAL_AGENDA_CAP).forEach((r) => sec.insertBefore(r, more));
+      more.remove();
+    });
+    sec.appendChild(more);
+  };
+
+  axis("note", row.notes, (it, n) => it.appendChild(document.createTextNode(n.label)));
+  // Verb, then the note it touched, then what it did to it — three fields
+  // instead of one sentence, because the file name is the part you scan for.
+  axis("agent", row.activity, (it, a) => {
+    const p = calActivity(a);
+    it.title = a;
+    const t = mkEl("span", "cal-ag-txt");
+    if (p.verb) t.appendChild(mkEl("b", "", p.verb + " "));
+    t.appendChild(document.createTextNode(p.what));
+    if (p.detail) t.appendChild(mkEl("i", "", " " + p.detail));
+    it.appendChild(t);
+  });
+  // The queue names a path; a path in a narrow column ellipsises to its
+  // folder, which is the half you already know. The note leads, the folder
+  // trails at meta weight, and the whole path stays on the tooltip.
+  axis("review", row.review, (it, r) => {
+    const path = r.path || "";
+    const cut = path.lastIndexOf("/");
+    const t = mkEl("span", "cal-ag-txt");
+    t.appendChild(document.createTextNode(path.slice(cut + 1).replace(/\.md$/, "")));
+    if (cut > 0) t.appendChild(mkEl("i", "", " " + path.slice(0, cut)));
+    it.title = path;
+    it.classList.add("clickable");
+    it.addEventListener("click", () => openNote(path));
+    it.appendChild(t);
+  });
   if (!any) {
     const e = document.createElement("div");
     e.className = "cal-ag-empty";

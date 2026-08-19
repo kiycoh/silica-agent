@@ -1807,6 +1807,28 @@ def test_reduced_motion_is_honoured_for_transitions_not_only_animations():
     assert "animation-duration: 0.01ms !important" in blanket[0]
 
 
+def test_every_frame_loading_overlay_has_a_positioned_containing_block():
+    """.frame-loading is `position:absolute; inset:0`, so a view that is not
+    itself positioned lets the overlay resolve against the VIEWPORT and blank
+    the whole app — header and sidebar included — for the length of its fetch.
+    #cal-loading shipped exactly that way."""
+    import re
+
+    from silica.ui.web.server import STATIC_DIR
+
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
+
+    views = set(re.findall(
+        r'<section id="(view-[a-z-]+)"[^>]*>(?:(?!</section>).)*?class="frame-loading"',
+        html, re.S))
+    assert views, "no frame-loading overlays found — the parse drifted"
+    for view in sorted(views):
+        rules = re.findall(rf"#{view}\s*\{{([^}}]*)\}}", css)
+        assert any("position:" in r and "relative" in r for r in rules), \
+            f"#{view} hosts a .frame-loading overlay but is not a containing block"
+
+
 def test_a_write_card_meets_the_changes_payload_on_the_resolved_path():
     """The card is stamped with the tool's own argument ("Photosynthesis"),
     /changes reports the path the tool resolved ("Biology/Photosynthesis.md").

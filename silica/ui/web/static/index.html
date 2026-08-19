@@ -243,9 +243,15 @@
         <div id="cal-title" aria-live="polite"></div>
         <div class="spacer"></div>
         <div id="cal-mode" role="group" aria-label="calendar mode">
-          <button type="button" data-calmode="month" class="active">month</button>
-          <button type="button" data-calmode="week">week</button>
+          <button type="button" data-calmode="month" class="active" aria-pressed="true">month</button>
+          <button type="button" data-calmode="week" aria-pressed="false">week</button>
         </div>
+      </div>
+      <!-- the other four views all name what they are doing while they do it;
+           this one used to open on an empty grid and fill in silently -->
+      <div id="cal-loading" class="frame-loading" hidden>
+        <div class="spinner"></div>
+        <div>Reading the vault's dates.</div>
       </div>
       <div id="cal-main">
         <div id="cal-grid" aria-label="calendar grid"></div>
