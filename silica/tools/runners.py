@@ -8,6 +8,11 @@ inspection, and the dedup/refine/enrich sub-agent passes.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from silica.kernel.workqueue import WorkItem
+
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -268,7 +273,7 @@ def _scan_dedup_pairs(folder: str = "") -> tuple[list[dict], str | None]:
     return pairs, None
 
 
-def _pairs_to_items(pairs: list[dict]) -> list[WorkItem]:
+def _pairs_to_items(pairs: list[dict]) -> list["WorkItem"]:
     """Build dedup WorkItems from {source, target, score} dicts — the single
     place bodies are read and the larger/smaller split is decided. Optional
     full_score/title_score telemetry is propagated into context when present.
@@ -453,10 +458,15 @@ def silica_generate_taxonomy(
     from silica.driver import DRIVER
 
     # Resolve the destination first — merge mode reads the current file from there.
+    # save_path is documented vault-relative and is model-supplied, so it goes
+    # through the vault choke point: to_yaml creates parent dirs and writes, so
+    # an absolute or `..` path would plant a file anywhere on the filesystem.
     if save_path:
-        dest = Path(save_path)
-        if not dest.is_absolute() and CONFIG.vault_path:
-            dest = Path(CONFIG.vault_path) / dest
+        from silica.kernel.recall.paths import contain_in_vault
+        try:
+            dest = Path(CONFIG.vault_path) / contain_in_vault(save_path, Path(CONFIG.vault_path))
+        except ValueError as exc:
+            return {"error": f"Refused save_path '{save_path}': {exc}"}
     else:
         dest = default_taxonomy_path()
 

@@ -12,14 +12,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from silica.agent.providers import model_limits
+from silica.agent.providers import _model_limits_memo, model_limits
 
 
 @pytest.fixture(autouse=True)
 def _clear_cache():
-    model_limits.cache_clear()
+    _model_limits_memo.clear()
     yield
-    model_limits.cache_clear()
+    _model_limits_memo.clear()
 
 
 def _http_response(payload: dict) -> MagicMock:

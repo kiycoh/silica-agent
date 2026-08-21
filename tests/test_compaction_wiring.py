@@ -63,7 +63,6 @@ def _two_turn_llm(tool_name: str):
 def test_eager_tool_result_is_projected_in_history_but_full_in_event():
     fat = json.dumps({"written": 3, "ops": ["op"] * 50})
     tool = _FakeTool("fake_write", collapse="eager", result=fat)
-    tool.summarize = staticmethod(lambda d: f"written={d['written']}")
 
     events = []
     messages = [{"role": "user", "content": "go"}]
@@ -72,7 +71,13 @@ def test_eager_tool_result_is_projected_in_history_but_full_in_event():
         run_agent(messages, model="test", tool_progress_callback=events.append)
 
     tool_msgs = [m for m in messages if m.get("role") == "tool"]
-    assert tool_msgs == [{"role": "tool", "tool_call_id": "c1", "content": "written=3"}]
+    # generic_projection: scalars kept, bulk collapsed to a count the model can
+    # re-call to expand. (Tools used to be able to declare their own
+    # `summarize`; none ever did, so the hook is gone.)
+    assert tool_msgs == [{
+        "role": "tool", "tool_call_id": "c1",
+        "content": "written=3; ops=<50 items> ⟨↻ re-call to expand⟩",
+    }]
     # the TUI event still carried the fat payload
     from silica.agent.events import ToolCompleteEvent
     complete = [e for e in events if isinstance(e, ToolCompleteEvent)]

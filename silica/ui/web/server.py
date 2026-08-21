@@ -18,8 +18,9 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -53,7 +54,7 @@ SESSIONS_DIR = Path.home() / ".silica" / "web_sessions"  # persisted chat transc
 _seed: tuple[list[dict], int] | None = None
 
 
-def _build_seed() -> None:
+def _build_seed() -> tuple[list[dict], int]:
     """Compute the fresh-session seed. Never touches the live session state:
     uses the pure token counter so a background rebuild can't clobber the
     context meter of the conversation in progress."""
@@ -63,6 +64,7 @@ def _build_seed() -> None:
     # The same builder the TUI seeds from, math=True for the MathML renderer.
     msgs = seed_messages(math=True)
     _seed = (msgs, _count_context_tokens(msgs))
+    return _seed
 
 
 def _prewarm_seed() -> None:
@@ -79,15 +81,10 @@ def _prewarm_seed() -> None:
 
 def _reset_session() -> None:
     global current_cancel, current_task, _busy, current_session_id
-    if _seed is None:
-        _build_seed()
-    seed_msgs, seed_tokens = _seed
+    seed_msgs, seed_tokens = _seed if _seed is not None else _build_seed()
     messages[:] = [dict(m) for m in seed_msgs]  # per-message copy; contents are never mutated
     CONFIG.context_tokens = seed_tokens
     _collapsed.clear()
-    from silica.tools.graph import reset_recall_served
-
-    reset_recall_served()  # the new chat saw nothing whole yet
     current_cancel = None
     current_task = None
     _busy = False
@@ -164,16 +161,29 @@ def _list_sessions() -> list[dict]:
 
 import html as _html
 import re
+from html.parser import HTMLParser
 from urllib.parse import quote as _quote
+from urllib.parse import urlsplit as _urlsplit
 
 # A whitespace-delimited path-like token: contains "/" or ends in ".md".
 _PATHLIKE = re.compile(r"[^\s\[\]]*(?:/[^\s\[\]]*|\.md)")
 _WIKILINK = re.compile(r"(!?)\[\[([^\]\[]+)\]\]")  # optional ! marks an embed
 _TRAIL = ".,;:!?)"  # sentence punctuation to peel off a bare path token
 
-# Vault attachments the drawer may inline; served only through /asset, only as
-# <img> (so an SVG's scripts never execute — img context runs no JS).
+# Vault attachments the drawer may inline; served only through /asset.
 _ASSET_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"}
+
+# An SVG is a document, not just a picture: an <img> context runs none of its
+# scripts, but /asset is a same-origin URL a note can link and the address bar
+# can reach, and a navigated SVG runs them on the GUI's origin. `sandbox` puts
+# any such navigation in an opaque origin with scripting off, and default-src
+# 'none' stops the file fetching anything; neither affects an <img> load, so
+# inline vault images keep rendering. nosniff pins the guessed type, which is
+# already correct for every extension above.
+_ASSET_HEADERS = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+    "X-Content-Type-Options": "nosniff",
+}
 
 # --- OFM (Obsidian-flavored markdown) sugar ----------------------------------
 # ==highlight== | #tag (letter-first, so #123 and hex colors stay literal)
@@ -181,6 +191,10 @@ _MARK_OR_TAG = re.compile(r"==([^=\n]+)==|(?<![\w#])#([A-Za-z_][\w/-]*)")
 _COMMENT = re.compile(r"%%.*?%%", re.S)
 _BLOCK_ID = re.compile(r"[ \t]+\^[\w-]+[ \t]*$", re.M)
 _FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
+# Inline code span: a backtick run closed by an equal-length run. Parked
+# before the %%/^ subs so span contents read as code, not markup.
+_CODE_SPAN = re.compile(r"(`+)[\s\S]*?\1")
+_PARKED = re.compile(r"\x00(\d+)\x00")
 _CALLOUT_HEAD = re.compile(r"\[!(\w+)\][+-]?[ \t]*(.*)")  # first line of a callout quote
 _TASK_HEAD = re.compile(r"^\[([ xX])\][ \t]+")  # first inline text of a task list item
 _FRONTMATTER = re.compile(r"\A---\r?\n(.*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|\Z)", re.S)
@@ -229,6 +243,186 @@ def _rewrite_raw_img_src(html: str) -> str:
         return f"{m.group(1)}{m.group(2)}/asset?path={_quote(src)}{m.group(2)}"
 
     return _RAW_IMG_SRC.sub(sub, html)
+
+
+# --- raw-HTML allowlist ------------------------------------------------------
+# markdown-it's commonmark preset passes raw HTML through verbatim, and a note
+# body is untrusted input: it can arrive from a nucleated document written by
+# anyone. app.js writes this render with innerHTML, so whatever is emitted here
+# executes on the GUI's own origin, which can reach /chat, /note and /settings.
+#
+# Raw HTML stays SUPPORTED — <br>, <details>, <img> are ordinary Obsidian markup
+# and the app already post-processes it (_rewrite_raw_img_src) — but it may not
+# execute. The fragment is re-parsed and re-serialized from these allowlists, so
+# an unknown tag or attribute is dropped by construction; nothing is ever matched
+# against a list of known payloads.
+#
+# The families are kept whole on purpose: a note that writes `<b>` rather than
+# `**b**` (every README authored for GitHub does) must still read as bold, and a
+# raw table that keeps `<td>` but loses its `<caption>` is a worse render than no
+# allowlist at all. Every tag below is inert markup — none can carry a URL or a
+# behavior — so admitting the whole family costs nothing the allowlist protects.
+_ALLOWED_TAGS = frozenset({
+    "a", "abbr", "b", "blockquote", "br", "caption", "code", "dd", "details",
+    "div", "dl", "dt", "em", "figcaption", "figure", "h1", "h2", "h3", "h4",
+    "h5", "h6", "hr", "i", "img", "input", "kbd", "li", "mark", "ol", "p",
+    "pre", "s", "small", "span", "strong", "sub", "summary", "sup", "table",
+    "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul",
+})
+# Attributes are allowlisted per tag on top of these two. No `on*` handler and no
+# `style` is listed anywhere below, and that omission IS the rule: an event
+# handler is a script, and a style declaration cannot be vetted from here.
+_ATTRS_ANY = frozenset({"class", "title"})
+_ATTRS_BY_TAG = {
+    "a": frozenset({"href"}),
+    "img": frozenset({"src", "alt", "width", "height"}),
+    "input": frozenset({"type", "checked", "disabled"}),
+    "details": frozenset({"open"}),
+    "ol": frozenset({"start"}),
+    "td": frozenset({"colspan", "rowspan"}),
+    "th": frozenset({"colspan", "rowspan", "scope"}),
+}
+_URL_ATTRS = frozenset({"href", "src"})
+_VOID_TAGS = frozenset({"br", "hr", "img", "input"})
+# script/style bodies are raw text, not prose: HTMLParser hands them to
+# handle_data, so they are dropped with the tag instead of landing in the page.
+_RAW_TEXT_TAGS = frozenset({"script", "style"})
+_URL_SCHEME = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:")
+
+
+def _safe_url(value: str, tag: str) -> str | None:
+    """The URL as written, or None when the attribute must be dropped.
+
+    Relative URLs pass (that is how a note names a vault attachment, and how the
+    app's own /asset route is reached); http/https pass; a data: URL passes only
+    as an image source, which is how a note carries an inline picture. Every
+    other scheme is refused — `javascript:` is the whole reason this exists, and
+    the check is on the value with control characters and spaces removed,
+    because `java\tscript:` is still that scheme to a browser.
+    """
+    probe = "".join(ch for ch in value if ord(ch) > 0x20)
+    if not _URL_SCHEME.match(probe):
+        return value
+    low = probe.lower()
+    if low.startswith(("http://", "https://")):
+        return value
+    if tag == "img" and low.startswith("data:image/"):
+        return value
+    return None
+
+
+class _HtmlAllowlist(HTMLParser):
+    """Re-serialize a raw-HTML fragment, keeping only allowlisted markup.
+
+    Anything not allowlisted is escaped rather than emitted, so it shows as text
+    instead of silently vanishing (and cannot run either way).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.out: list[str] = []
+        # Body of an open raw-text element, held rather than dropped: see close().
+        self._raw_text: list[str] | None = None
+
+    def close(self) -> None:
+        super().close()
+        # A `<script>` that never closes makes markdown-it hand the WHOLE rest of
+        # the note over as one html_block (its raw-text rule runs to the closing
+        # tag or to EOF), so everything after it is prose, not a script body, and
+        # dropping it silently emptied the note from that line down. Only a body
+        # that was actually terminated by its own tag is a script.
+        if self._raw_text:
+            self.out.append(_html.escape("".join(self._raw_text), quote=False))
+        self._raw_text = None
+
+    def result(self) -> str:
+        return "".join(self.out)
+
+    def _emit_tag(self, tag: str, attrs) -> bool:
+        if tag not in _ALLOWED_TAGS:
+            return False
+        # `or ""`: HTMLParser reports a valueless attribute (`<input type>`) as
+        # None, and the drawer promises never to 500 on a note body.
+        if tag == "input" and (dict(attrs).get("type") or "").strip().lower() != "checkbox":
+            return False  # a task checkbox is the only <input> a note renders
+        allowed = _ATTRS_ANY | _ATTRS_BY_TAG.get(tag, frozenset())
+        parts = [tag]
+        for name, value in attrs:
+            name = name.lower()
+            if name not in allowed:
+                continue
+            if value is None:
+                parts.append(name)
+                continue
+            if name in _URL_ATTRS:
+                value = _safe_url(value, tag)
+                if value is None:
+                    continue
+            parts.append(f'{name}="{_html.escape(value, quote=True)}"')
+        self.out.append("<" + " ".join(parts) + ">")
+        return True
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _RAW_TEXT_TAGS and self._raw_text is None:
+            self._raw_text = []
+        if not self._emit_tag(tag, attrs):
+            self.out.append(_html.escape(self.get_starttag_text() or f"<{tag}>"))
+
+    def handle_startendtag(self, tag, attrs):
+        # `<br/>`: the start tag alone, never a stray `</br>`.
+        if not self._emit_tag(tag, attrs):
+            self.out.append(_html.escape(self.get_starttag_text() or f"<{tag}/>"))
+
+    def handle_endtag(self, tag):
+        if tag in _RAW_TEXT_TAGS:
+            self._raw_text = None  # closed by its own tag: that body was a script
+        if tag in _ALLOWED_TAGS:
+            if tag not in _VOID_TAGS:
+                self.out.append(f"</{tag}>")
+            return
+        self.out.append(_html.escape(f"</{tag}>"))
+
+    def handle_data(self, data):
+        if self._raw_text is not None:
+            self._raw_text.append(data)
+            return
+        self.out.append(_html.escape(data, quote=False))
+
+    # Comments, doctypes, CDATA sections and processing instructions carry no
+    # prose and are how markup gets smuggled past a naive parser: dropped.
+    def handle_comment(self, data):
+        pass
+
+    def handle_decl(self, decl):
+        pass
+
+    def unknown_decl(self, data):
+        pass
+
+    def handle_pi(self, data):
+        pass
+
+
+def _sanitize_html(fragment: str) -> str:
+    parser = _HtmlAllowlist()
+    parser.feed(fragment)
+    parser.close()
+    return parser.result()
+
+
+def _sanitize_raw_tokens(tokens) -> None:
+    """Allowlist the note's own raw HTML in the token stream, in place.
+
+    Runs on the parser output and nowhere later: every html_block/html_inline
+    added after this point is built by this module (mermaid, MathML, callout
+    titles, task checkboxes, the linkified prose) and re-sanitizing it would
+    strip the MathML the math renderer just produced.
+    """
+    for tok in tokens:
+        if tok.type in ("html_block", "html_inline"):
+            tok.content = _sanitize_html(tok.content)
+        elif tok.type == "inline" and tok.children:
+            _sanitize_raw_tokens(tok.children)
 
 
 def _linkify_text(text: str, resolve) -> str:
@@ -322,7 +516,7 @@ def _ofm_blocks(tokens) -> None:
             if m:
                 kind = m.group(1).lower()
                 tok.attrJoin("class", f"callout callout-{kind}")
-                rest = kids[1:]
+                rest = kids[1:] if kids else []
                 if rest and rest[0].type == "softbreak":
                     rest = rest[1:]
                 tokens[j].children = rest
@@ -350,16 +544,84 @@ def _ofm_blocks(tokens) -> None:
         i += 1
 
 
+# A math block is injected AFTER the raw-HTML allowlist has run (the allowlist
+# would strip the MathML), so what the converter emits is the last word — and
+# `\text{…}` is copied into <mtext> character for character. <mtext> is a MathML
+# text integration point: the browser switches back to HTML parsing rules inside
+# it, so `$$\text{<img/src=x/onerror=…>}$$` lands a live element with a live
+# handler in the page. These are the tags and attributes latex2mathml itself can
+# emit; anything else in the tree came from the note. `href` and `style` are
+# deliberately absent — `\href{…}` and `\style{…}` put a note-authored URL and a
+# note-authored declaration on the element, and neither can be vetted from here.
+_MATHML_TAGS = frozenset({
+    "math", "menclose", "merror", "mfrac", "mi", "mmultiscripts", "mn", "mo",
+    "mover", "mpadded", "mphantom", "mprescripts", "mroot", "mrow", "ms",
+    "mspace", "msqrt", "mstyle", "msub", "msubsup", "msup", "mtable", "mtd",
+    "mtext", "mtr", "munder", "munderover", "none",
+})
+_MATHML_ATTRS = frozenset({
+    "accent", "accentunder", "border-color", "class", "close", "columnalign", "columnlines",
+    "columnspacing", "columnspan", "depth", "display", "displaystyle", "fence",
+    "form", "height", "largeop", "linebreak", "linethickness", "lspace",
+    "mathbackground", "mathcolor", "mathsize", "mathvariant", "maxsize",
+    "minsize", "movablelimits", "notation", "open", "rowalign", "rowlines",
+    "rowspacing", "rowspan", "rspace", "scriptlevel", "separator", "separators",
+    "stretchy", "symmetric", "voffset", "width", "xmlns",
+})
+
+
+class _MathMLProbe(HTMLParser):
+    """Flags any markup in a converted formula that latex2mathml cannot emit.
+
+    A probe, not a rewriter: the converted string is returned untouched or not at
+    all, so a formula the browser accepts today keeps rendering byte for byte.
+    Comments, declarations and processing instructions count as foreign too —
+    the converter emits none, and an unterminated `<!--` swallows the rest of the
+    note in the browser while HTMLParser reads it as nothing.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.foreign = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag not in _MATHML_TAGS or any(n.lower() not in _MATHML_ATTRS for n, _ in attrs):
+            self.foreign = True
+
+    def handle_endtag(self, tag):
+        if tag not in _MATHML_TAGS:
+            self.foreign = True
+
+    def handle_comment(self, data):
+        self.foreign = True
+
+    def handle_decl(self, decl):
+        self.foreign = True
+
+    def unknown_decl(self, data):
+        self.foreign = True
+
+    def handle_pi(self, data):
+        self.foreign = True
+
+
 def _mathml(tex: str, display: bool) -> str:
     """LaTeX -> MathML, rendered natively by the browser (no client JS/fonts).
-    A failed conversion degrades to the escaped source in a code span."""
+    A failed conversion degrades to the escaped source in a code span, and so
+    does one carrying markup the converter cannot have produced itself."""
     try:
         from latex2mathml.converter import convert
 
-        return convert(tex, display="block" if display else "inline")
+        out = convert(tex, display="block" if display else "inline")
+        probe = _MathMLProbe()
+        probe.feed(out)
+        probe.close()
+        if not probe.foreign:
+            return out
     except Exception:
-        fence = "$$" if display else "$"
-        return f'<code class="math-err">{_html.escape(fence + tex + fence)}</code>'
+        pass
+    fence = "$$" if display else "$"
+    return f'<code class="math-err">{_html.escape(fence + tex + fence)}</code>'
 
 
 def _highlight(code: str, lang: str, _attrs: str) -> str:
@@ -376,19 +638,29 @@ def _highlight(code: str, lang: str, _attrs: str) -> str:
     return highlight(code, lexer, HtmlFormatter(nowrap=True))
 
 
-# ponytail: fence-aware pre-pass, not full token-stream — %% inside inline
-# `code spans` still strips; move into the markdown-it stream if that bites.
+# Inline spans are parked as \x00 sentinels for the length of the sub, the
+# same trick mdLite plays client-side; pathological nested backtick runs can
+# still fool the span regex, which costs a stripped %% inside them, cosmetic.
 def _strip_ofm_meta(text: str) -> str:
-    """Strip %%comments%% and trailing ^block-ids, sparing fenced code where
-    %% and ^ are code (a lone %% in a fence would otherwise pair with a prose
-    %% and swallow everything between)."""
+    """Strip %%comments%% and trailing ^block-ids, sparing fenced code and
+    inline `code spans` where %% and ^ are code (a lone %% in a fence would
+    otherwise pair with a prose %% and swallow everything between)."""
     pieces: list[str] = []
     run: list[str] = []
     fence: tuple[str, int] | None = None  # (marker char, marker length)
 
     def _flush() -> None:
         if run:
-            pieces.append(_BLOCK_ID.sub("", _COMMENT.sub("", "\n".join(run))))
+            spans: list[str] = []
+
+            def _park(m: "re.Match[str]") -> str:
+                spans.append(m.group(0))
+                return f"\x00{len(spans) - 1}\x00"
+
+            parked = _CODE_SPAN.sub(_park, "\n".join(run))
+            cleaned = _BLOCK_ID.sub("", _COMMENT.sub("", parked))
+            pieces.append(
+                _PARKED.sub(lambda m: spans[int(m.group(1))], cleaned))
             run.clear()
 
     for line in text.split("\n"):
@@ -428,10 +700,12 @@ def _linkify(text: str, resolve=None) -> str:
     # fuzzy_link off or `nota.md` in prose resolves to the Moldovan ccTLD and
     # renders as a link to http://nota.md; fuzzy_email off keeps the scope at
     # "a URL is clickable", not "prose opens a mail client".
-    md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+    if md.linkify is not None:  # only present with the [linkify] extra
+        md.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
     # allow_space=False keeps prose prices ("$5 and $10") out of math
     md.use(dollarmath_plugin, allow_space=False, allow_digits=False)
     tokens = md.parse(text)
+    _sanitize_raw_tokens(tokens)  # the note's raw HTML; must precede the injected kind
     _ofm_blocks(tokens)
     for tok in tokens:
         if tok.type == "html_block":
@@ -459,7 +733,7 @@ def _linkify(text: str, resolve=None) -> str:
             if child.type == "image":
                 # vault-relative image: route through /asset (absolute/external
                 # and data: URLs pass untouched)
-                src = child.attrGet("src") or ""
+                src = str(child.attrGet("src") or "")
                 if src and not src.startswith(("http://", "https://", "data:", "/")):
                     child.attrSet("src", "/asset?path=" + _quote(src))
                 new.append(child)
@@ -680,7 +954,10 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
             yield item
 
         answer = await task  # re-raises if run_agent failed
-        if web:
+        # isinstance, not `if web:` — the two are the same condition (watch is
+        # built from it one screen up) but only this one says which half of the
+        # union carries `attribute`.
+        if isinstance(watch, WebTurn):
             # Before _linkify and before the compaction sweep: the Sources block
             # belongs to what the user sees AND to what the history carries.
             answer = watch.attribute(answer, messages)
@@ -701,7 +978,7 @@ async def run_turn(text: str) -> AsyncIterator[dict]:
             "context_tokens": CONFIG.context_tokens,
             "max_context_tokens": CONFIG.max_context_tokens,
         }
-        if not web and watch.thin:
+        if isinstance(watch, RecallWatch) and watch.thin:
             done["hint"] = THIN_COVERAGE_HINT  # muted line under the answer
         yield done
     except Exception as exc:  # never leave the UI stuck on the spinner
@@ -757,8 +1034,48 @@ app = FastAPI(lifespan=_lifespan)
 # compresses itself instead, at the one route where the payload is large enough
 # to matter (see graph()).
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
-@app.post("/chat")
+
+def _authority(value: str) -> tuple[str, str]:
+    """`host[:port]` split into (host, port), with the loopback spellings folded
+    into one host — the browser repeats whatever the user typed, and the server
+    was reached on the loopback interface either way."""
+    raw = value.strip().lower()
+    host, _, port = raw.rpartition(":")
+    if not host or "]" in port:  # no port at all, or a bare IPv6 literal
+        host, port = raw, ""
+    return ("loopback" if host in _LOOPBACK_HOSTS else host), port
+
+
+def _require_same_origin(request: Request) -> None:
+    """Refuse a state-changing request another origin made on the user's behalf.
+
+    The GUI has no auth (localhost, one user), so it answers with the browser's
+    ambient authority, and a multipart POST is CORS-safelisted: it crosses
+    origins with no preflight. Any page the user happened to visit could
+    therefore fetch() an upload into the vault Inbox and run a whole agent turn
+    with the write tools. A browser always sends Origin on a cross-origin POST,
+    so checking it closes that while a client that sends no Origin at all (curl,
+    the tests) keeps working. Every state-changing route must carry this.
+    """
+    site = (request.headers.get("sec-fetch-site") or "").lower()
+    if site and site not in ("same-origin", "none"):
+        raise HTTPException(403, "cross-origin request refused")
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    parsed = _urlsplit(origin)
+    if parsed.scheme not in ("http", "https") or _authority(parsed.netloc) != _authority(
+        request.headers.get("host", "")
+    ):
+        raise HTTPException(403, "cross-origin request refused")
+
+
+_SAME_ORIGIN = [Depends(_require_same_origin)]
+
+
+@app.post("/chat", dependencies=_SAME_ORIGIN)
 async def chat(payload: dict):
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
@@ -787,6 +1104,31 @@ def list_commands():
     ]
 
 
+# A scanned book is the honest ceiling for one drop; past that the file is not
+# something the nucleate lane can chew, and the Inbox is a vault folder, not a
+# dump. The body is streamed in chunks rather than read whole, so an oversized
+# upload is refused after one chunk instead of after materialising it in memory.
+_UPLOAD_MAX_BYTES = 256 * 1024 * 1024
+_UPLOAD_MAX_FILES = 32
+_UPLOAD_CHUNK = 1024 * 1024
+
+
+async def _write_upload(f: UploadFile, dest: Path) -> None:
+    """Stream one upload to `dest`, refusing it past the cap."""
+    written = 0
+    with dest.open("wb") as fh:
+        while chunk := await f.read(_UPLOAD_CHUNK):
+            written += len(chunk)
+            if written > _UPLOAD_MAX_BYTES:
+                fh.close()
+                dest.unlink(missing_ok=True)  # no half file left in the vault
+                raise HTTPException(
+                    413,
+                    f"{dest.name} is over the {_UPLOAD_MAX_BYTES // (1024 * 1024)} MB upload limit",
+                )
+            fh.write(chunk)
+
+
 async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]:
     """Write uploads to Inbox and mechanically stage them, mirroring the inline
     half of `/nucleate` (silica/cli.py): PDFs convert to markdown, code/notebooks
@@ -804,14 +1146,19 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
     from silica.sources.convert import convert
     from silica.sources.registry import adapter_for, stage
 
+    if len(files) > _UPLOAD_MAX_FILES:
+        raise HTTPException(413, f"at most {_UPLOAD_MAX_FILES} files per drop")
     inbox = Path(CONFIG.vault_path or ".") / "Inbox"
     inbox.mkdir(parents=True, exist_ok=True)
     enabled = get_active_manifest().sources
     ready: list[str] = []
     stubs: list[str] = []
     for f in files:
-        dest = inbox / Path(f.filename or "dropped").name
-        dest.write_bytes(await f.read())
+        # `.name` is the containment: a client-chosen filename never contributes
+        # a directory, and one that is nothing but directories ("..") gets the
+        # fallback rather than resolving to the Inbox itself.
+        dest = inbox / (Path(f.filename or "").name or "dropped")
+        await _write_upload(f, dest)
         rel = f"Inbox/{dest.name}"
         adapter = adapter_for(rel, enabled=enabled)
         if adapter is None:  # no source claims it → converter fallback (PDF today)
@@ -848,7 +1195,7 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str]) -> str
     return f"{base}\n\n---\nAttached files:\n{manifest}"
 
 
-@app.post("/nucleate")
+@app.post("/nucleate", dependencies=_SAME_ORIGIN)
 async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
@@ -891,7 +1238,7 @@ def _degree_histogram(degree_map: dict[str, int]) -> list[dict]:
     return out
 
 
-def _shape_reading(adj: dict, deg: dict, areas: list[dict], label_of: dict, stops: int = 24) -> list[dict]:
+def _shape_reading(adj: dict, deg: dict, areas: list[dict], label_of: dict, stops: int = 24) -> dict[str, Any]:
     """A reading order over the vault, derived rather than authored.
 
     Areas biggest first, and inside one the hub then its best-connected
@@ -1121,7 +1468,7 @@ def calendar(start: str = "", days: int = 7):
     return silica_agenda(start=start or "today", days=max(1, min(90, days)))
 
 
-@app.post("/reminders")
+@app.post("/reminders", dependencies=_SAME_ORIGIN)
 def reminders_poll():
     """The front-end poll IS the reminder tick: compute due, advance the
     high-water marks, return the list. POST, not GET — the poll mutates the
@@ -1134,15 +1481,16 @@ def reminders_poll():
     from silica.config import CONFIG
     from silica.kernel.calendar.model import scan_events
     from silica.kernel.calendar.reminders import (
-        advance_marks, due_reminders, load_marks, save_marks,
+        advance_marks, delivery_lock, due_reminders, load_marks, save_marks,
     )
 
     vault = _Path(CONFIG.vault_path)
     events = scan_events(vault)
-    marks = load_marks(vault)
-    due = due_reminders(events, marks, _dt.datetime.now())
-    if due:
-        save_marks(vault, advance_marks(marks, due))
+    with delivery_lock(vault):
+        marks = load_marks(vault)
+        due = due_reminders(events, marks, _dt.datetime.now())
+        if due:
+            save_marks(vault, advance_marks(marks, due))
     return {"due": [{"stem": r["stem"], "title": r["title"],
                      "start": r["start"].isoformat(sep=" "), "late": r["late"]}
                     for r in due]}
@@ -1337,12 +1685,19 @@ def graph(request: Request):
 
     from silica.tools import TOOLS
 
-    out = Path(tempfile.gettempdir()) / "silica_web_graph.html"  # regenerated each request
+    # Per-request directory, not a fixed name in /tmp: the route is a sync def,
+    # so two overlapping requests ran in the threadpool and shared one file — and
+    # a world-writable path anyone can pre-create as a symlink is not somewhere
+    # to write a document we then serve back.
     try:
-        TOOLS["silica_graph_export"].run(output_path=str(out), folder="")
-        body = out.read_text(encoding="utf-8").encode("utf-8")
+        with tempfile.TemporaryDirectory(prefix="silica-graph-") as tmp:
+            out = Path(tmp) / "graph.html"
+            TOOLS["silica_graph_export"].run(output_path=str(out), folder="")
+            body = out.read_text(encoding="utf-8").encode("utf-8")
     except Exception as exc:
-        return HTMLResponse(f"<p style='font-family:monospace'>graph unavailable: {exc}</p>")
+        return HTMLResponse(
+            f"<p style='font-family:monospace'>graph unavailable: {_html.escape(str(exc))}</p>"
+        )
 
     etag = '"' + hashlib.blake2b(body, digest_size=8).hexdigest() + '"'
     headers = {"ETag": etag, "Cache-Control": "no-cache"}
@@ -1377,7 +1732,8 @@ def mindmap(note: str = ""):
         root = note_resolver()(note)
         if root is None:
             return HTMLResponse(
-                f"<p style='font-family:monospace;color:#8a93a3'>'{note}' not found in vault.</p>"
+                f"<p style='font-family:monospace;color:#8a93a3'>"
+                f"'{_html.escape(note)}' not found in vault.</p>"
             )
         materials = gather_materials(root, latent_k=CONFIG.mindmap_latent_k)
         mv = build_mapview(
@@ -1385,12 +1741,16 @@ def mindmap(note: str = ""):
         )
         if len(mv.nodes) <= 1:
             return HTMLResponse(
-                f"<p style='font-family:monospace;color:#8a93a3'>'{root}' has no neighbors to map "
-                "(isolated in the graph).</p>"
+                f"<p style='font-family:monospace;color:#8a93a3'>'{_html.escape(root)}' has no "
+                "neighbors to map (isolated in the graph).</p>"
             )
         return HTMLResponse(render_map_svg(mv, title=f"map · {root}"))
     except Exception as exc:
-        return HTMLResponse(f"<p style='font-family:monospace'>map unavailable: {exc}</p>")
+        # The exception text quotes the caller's `note`, so it is untrusted here
+        # too — this response loads same-origin in the explore iframe.
+        return HTMLResponse(
+            f"<p style='font-family:monospace'>map unavailable: {_html.escape(str(exc))}</p>"
+        )
 
 
 @app.get("/find")
@@ -1404,7 +1764,9 @@ def find(q: str = "", k: int = 5):
     try:
         parsed = json.loads(TOOLS["silica_semantic_search"].run(query=q, k=k))
     except Exception as exc:
-        return HTMLResponse(f"<p style='font-family:monospace'>find unavailable: {exc}</p>")
+        return HTMLResponse(
+            f"<p style='font-family:monospace'>find unavailable: {_html.escape(str(exc))}</p>"
+        )
     if "error" in parsed:
         return HTMLResponse(f"<p style='font-family:monospace;color:#8a93a3'>{_html.escape(parsed['error'])}</p>")
     results = parsed.get("results", [])
@@ -1453,8 +1815,9 @@ def note(path: str = ""):
 # putting the bytes back rather than by anyone remembering to remove it.
 
 _DIFF_CONTEXT = 3
-# ponytail: a hard line cap, tail dropped with a count. Past a few hundred lines a
-# diff stops being reviewable in a drawer and the note itself is one click away.
+# A hard line cap, tail dropped with a count — a decided constant, not a
+# deferral: past a few hundred lines a diff stops being reviewable in a
+# drawer and the note itself is one click away.
 _MAX_DIFF_LINES = 800
 # difflib opens every diff with a hunk header, but a gap marker only *means*
 # something when lines were skipped above it — which is not the case when the
@@ -1672,7 +2035,7 @@ def _ghost_context(name: str) -> dict:
         if _clean_name(link.target).lower() == stem and link.source.path
     })
     merged: Counter = Counter()
-    for src in invokers[:12]:  # ponytail: cap the fan-in; a 12-note cloud is already dense
+    for src in invokers[:12]:  # decided cap: a 12-note cloud is already dense
         for c in _note_concepts(src, k=12):
             merged[c["concept"]] += c.get("weight", 1)
     return {
@@ -1851,11 +2214,12 @@ def asset(path: str = ""):
         raise HTTPException(status_code=404)
     root = Path(CONFIG.vault_path).resolve()
     target = (root / path).resolve()
+    found: Path | None = target
     if not (target.is_relative_to(root) and target.is_file()):
-        target = next((p for p in root.rglob(Path(path).name) if p.is_file()), None)
-    if target is None or not target.is_relative_to(root) or target.suffix.lower() not in _ASSET_EXTS:
+        found = next((p for p in root.rglob(Path(path).name) if p.is_file()), None)
+    if found is None or not found.is_relative_to(root) or found.suffix.lower() not in _ASSET_EXTS:
         raise HTTPException(status_code=404)
-    return FileResponse(target)
+    return FileResponse(found, headers=_ASSET_HEADERS)
 
 
 @app.get("/vault_info")
@@ -2065,7 +2429,7 @@ def list_sessions():
     return JSONResponse(_list_sessions(), headers={"X-Silica-Session": current_session_id or ""})
 
 
-@app.post("/session/load")
+@app.post("/session/load", dependencies=_SAME_ORIGIN)
 def load_session(payload: dict):
     global current_session_id, _collapsed
     if _busy:
@@ -2086,14 +2450,14 @@ def load_session(payload: dict):
     return {"ok": True}
 
 
-@app.post("/reset")
+@app.post("/reset", dependencies=_SAME_ORIGIN)
 def reset():
     _capture_own_session()
     _reset_session()
     return {"ok": True, "vault": CONFIG.vault_path}
 
 
-@app.post("/stop")
+@app.post("/stop", dependencies=_SAME_ORIGIN)
 def stop():
     if current_cancel is not None:
         current_cancel.set()
@@ -2147,7 +2511,7 @@ def stt_status():
     return {"ok": False, "url": url, "detail": f"nothing is answering at {url}"}
 
 
-@app.post("/stt")
+@app.post("/stt", dependencies=_SAME_ORIGIN)
 async def stt(audio: UploadFile = File(...)):
     """Proxy one recorded clip to the transcription endpoint.
 
@@ -2249,7 +2613,7 @@ def _reject_if_busy_or_locked(key: str) -> None:
         raise HTTPException(status_code=409, detail=f"defined in the environment ({key})")
 
 
-@app.post("/settings")
+@app.post("/settings", dependencies=_SAME_ORIGIN)
 def set_setting(payload: dict):
     """Apply one row: live in CONFIG, persisted in the .env that wins at boot."""
     from silica.ui.web import settings as st
@@ -2264,7 +2628,7 @@ def set_setting(payload: dict):
     return result
 
 
-@app.post("/settings/confirm")
+@app.post("/settings/confirm", dependencies=_SAME_ORIGIN)
 async def confirm_setting(payload: dict):
     """The two rows that need a sequence, not an assignment: switching the vault
     and swapping the embedding model.
@@ -2348,7 +2712,7 @@ def get_endpoints():
     return st.endpoint_status()
 
 
-@app.post("/endpoints/start")
+@app.post("/endpoints/start", dependencies=_SAME_ORIGIN)
 async def start_endpoint(payload: dict):
     """Start one local endpoint from the command its own .env key names. Loading
     a model takes tens of seconds, so this waits on a worker thread."""

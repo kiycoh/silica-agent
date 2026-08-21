@@ -22,6 +22,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
+from silica.kernel.recall.paths import resolve_vault_path
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_LOG_FILENAME = "log.md"
@@ -83,17 +85,6 @@ def format_revert_event(source: str, reverted: int, skipped: int) -> str:
     return line
 
 
-def _resolve_vault_path(vault_path: str | None) -> str | None:
-    if vault_path:
-        return vault_path
-    try:
-        from silica.config import CONFIG
-
-        return getattr(CONFIG, "vault_path", None) or None
-    except Exception:
-        return None
-
-
 def append_log_line(
     event: str,
     run_id: str,
@@ -118,7 +109,7 @@ def append_log_line(
 
     Returns True iff a line was appended.
     """
-    resolved = _resolve_vault_path(vault_path)
+    resolved = resolve_vault_path(vault_path)
     if not resolved:
         return False
 
@@ -161,7 +152,7 @@ def tail_log(
     filename: str = DEFAULT_LOG_FILENAME,
 ) -> list[str]:
     """Last `n` non-empty lines of `<vault>/<filename>`; `[]` if missing/unreadable."""
-    resolved = _resolve_vault_path(vault_path)
+    resolved = resolve_vault_path(vault_path)
     if not resolved or n <= 0:
         return []
     log_path = _log_path(resolved, filename)

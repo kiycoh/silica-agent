@@ -13,7 +13,8 @@ from silica.kernel import residue as rs
 
 
 def _reply(text):
-    return SimpleNamespace(text=text)
+    return SimpleNamespace(text=text, finish_reason="stop", usage={},
+                           reasoning=None)
 
 
 class TestDecompose:
@@ -24,6 +25,22 @@ class TestDecompose:
         assert facts == ["Enoch ascends to heaven.",
                          "The Watchers descend on Hermon.",
                          "Azazel teaches metallurgy."]
+
+    def test_asks_the_model_not_to_think(self):
+        # A hybrid model bills thinking against max_tokens: with reasoning on,
+        # a 31KB source burned all 3864 completion tokens on the trace and
+        # returned an empty reply, which reads as "parsed 0 facts".
+        with patch("silica.agent.llm.call_llm", return_value=_reply("- a fact")) as llm:
+            rs.decompose_facts("source text")
+        assert llm.call_args.kwargs["reasoning"] is False
+
+    def test_truncated_reply_drops_its_partial_last_fact(self):
+        # finish_reason "length" means the budget cut the list mid-fact; the
+        # fragment would be judged unsupported and declared missing.
+        cut = SimpleNamespace(text="- Enoch ascends.\n- The Watchers descend on Herm",
+                              finish_reason="length", usage={}, reasoning=None)
+        with patch("silica.agent.llm.call_llm", return_value=cut):
+            assert rs.decompose_facts("source text") == ["Enoch ascends."]
 
     def test_empty_reply_degrades_to_none(self):
         # None = "could not decompose" (skip verification), distinct from
@@ -209,3 +226,44 @@ class TestVerifyMissing:
                                     read_body=lambda p: "")
         dec.assert_not_called()
         assert res["missing"] == ["known fact"]
+
+
+class TestPromptContracts:
+    def test_decompose_prompt_carries_no_apparatus_clause(self):
+        # Measured harmful (2026-08-21): told to skip the header, the model
+        # skimmed the whole text — 143 -> ~47 facts on the same source,
+        # replicated. Apparatus is dropped mechanically instead.
+        assert "apparatus" not in rs._DECOMPOSE_PROMPT.lower()
+
+    def test_judge_prompt_grants_alpha_equivalence(self):
+        # The other measured false-positive class: the same formula under
+        # renamed indices judged "not stated".
+        assert "renamed symbols" in rs._JUDGE_PROMPT
+        assert '"N: yes" or "N: no"' in rs._JUDGE_PROMPT
+
+
+class TestDropApparatus:
+    SRC = ("## Machine Learning (9 CFU)\n\nGiosuè Lo Bosco\n\n"
+           "giosue.lobosco@unipa.it\n\nLezione 14\n\n"
+           "## Back-propagation\n\nLa chain rule calcola i delta.")
+
+    def test_header_restatements_drop_and_content_survives(self):
+        facts = ["The lecture is Lezione 14.",
+                 "The course is Machine Learning (9 CFU).",
+                 "Giosuè Lo Bosco's email is giosue.lobosco@unipa.it.",
+                 "La chain rule calcola i delta dei livelli nascosti.",
+                 "Δw = -η ∂E/∂w."]
+        kept, n = rs.drop_apparatus(facts, self.SRC)
+        assert n == 3
+        assert kept == facts[3:]
+
+    def test_decompose_filters_apparatus(self):
+        out = ("- The lecture is Lezione 14.\n"
+               "- La chain rule calcola i delta dei livelli nascosti.")
+        with patch("silica.agent.llm.call_llm", return_value=_reply(out)):
+            facts = rs.decompose_facts(self.SRC)
+        assert facts == ["La chain rule calcola i delta dei livelli nascosti."]
+
+    def test_headerless_source_is_untouched(self):
+        kept, n = rs.drop_apparatus(["any fact"], "   ")
+        assert (kept, n) == (["any fact"], 0)

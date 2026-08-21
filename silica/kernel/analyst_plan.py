@@ -150,8 +150,8 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
             node_to_cluster[m] = c.cluster_id
 
     def _chunk_groups(group_map: dict[int, list[str]], max_bytes: int = 4096) -> list[list[str]]:
-        chunks = []
-        current_chunk = []
+        chunks: list[list[str]] = []
+        current_chunk: list[str] = []
         current_size = 0
         for _, nodes in group_map.items():
             nodes_size = len(json.dumps(nodes))
@@ -229,16 +229,16 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
     #    an embedding-only proposal (INFERRED) needs confirmation.
     conf_by_source: dict[str, Confidence] = {}
     for ml in report.missing_links:
-        c = classify_missing_link(ml)
+        conf = classify_missing_link(ml)
         prev = conf_by_source.get(ml.source)
         # EXTRACTED wins: a source with any corroborated link is auto-linkable.
-        if prev is None or (c == "EXTRACTED" and prev != "EXTRACTED"):
-            conf_by_source[ml.source] = c
+        if prev is None or (conf == "EXTRACTED" and prev != "EXTRACTED"):
+            conf_by_source[ml.source] = conf
 
     missing_by_tier: dict[Confidence, dict[int, list[str]]] = {"EXTRACTED": {}, "INFERRED": {}}
-    for source, c in conf_by_source.items():
+    for source, conf in conf_by_source.items():
         cid = node_to_cluster.get(source, -1)
-        missing_by_tier[c].setdefault(cid, []).append(source)
+        missing_by_tier[conf].setdefault(cid, []).append(source)
 
     for chunk in _chunk_groups(missing_by_tier["EXTRACTED"]):
         auto.append(TaskCandidate(
@@ -313,8 +313,8 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
                 component_pairs.append(comp_pairs)
 
         def _chunk_components(components: list[list[dict]], max_bytes: int = 4096) -> list[list[dict]]:
-            chunks = []
-            current_chunk = []
+            chunks: list[list[dict]] = []
+            current_chunk: list[dict] = []
             current_size = 0
             for comp in components:
                 comp_size = len(json.dumps(comp))
@@ -329,11 +329,11 @@ def build_task_plan(report: VaultReport) -> AnalystPlan:
                 chunks.append(current_chunk)
             return chunks
 
-        for chunk in _chunk_components(component_pairs):
+        for pair_chunk in _chunk_components(component_pairs):
             propose.append(TaskCandidate(
                 capability_name="silica_dedup_pairs",
-                payload={"pairs": chunk},
-                reason=f"Embedding proposes {len(chunk)} duplicate pairs for merge — confirm before executing",
+                payload={"pairs": pair_chunk},
+                reason=f"Embedding proposes {len(pair_chunk)} duplicate pairs for merge — confirm before executing",
                 tier="propose",
                 priority=2,
             ))

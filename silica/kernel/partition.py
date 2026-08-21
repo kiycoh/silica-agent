@@ -73,9 +73,9 @@ def partition_by_concepts(payload: dict, max_concepts: int, max_bytes: int = 80 
             "batches": [{"inbox_file": k, "concepts": v} for k, v in batches.items()],
         }
 
-    # ponytail: one exact json.dumps per concept (O(n) dumps of O(max_bytes) each).
-    # A running byte counter would need to re-derive json's separator/escaping rules
-    # here; not worth the drift risk unless partitioning shows up in a profile.
+    # One exact json.dumps per concept (O(n) dumps of O(max_bytes) each) is
+    # the decided design: a running byte counter would re-derive json's
+    # separator/escaping rules here, a drift risk no profile has justified.
     chunks: list[dict] = []
     current: list[tuple[str, dict]] = []
     for item in flat:

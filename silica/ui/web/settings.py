@@ -29,7 +29,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from silica import SHELL_ENV
-from silica.config import CONFIG, HOSTED_PROVIDERS, PROVIDER_PREFIXES, USER_ENV
+from silica.config import (
+    CONFIG,
+    HOSTED_PROVIDERS,
+    PROVIDER_PREFIXES,
+    USER_ENV,
+    claim_env,
+)
 
 
 @dataclass(frozen=True)
@@ -211,18 +217,13 @@ def _applicable() -> dict[str, Row]:
 # --- values, origins, options ------------------------------------------------
 
 def _file_keys() -> set[str]:
-    """Keys carried by a .env on disk. Both layers, because a key that only sits
-    in the user-level file still has a value even when the project file is the
-    one a write would land in."""
+    """Keys carried by the .env on disk — the user-level file, the only one
+    config.py layers and so the only one a row can have come from."""
     from dotenv import dotenv_values
 
-    from silica.onboarding.wizard import resolve_env_path
-
-    keys: set[str] = set()
-    for path in {resolve_env_path(), USER_ENV}:
-        if path.exists():
-            keys |= {k for k in dotenv_values(path) if k}
-    return keys
+    if not USER_ENV.exists():
+        return set()
+    return {k for k in dotenv_values(USER_ENV) if k}
 
 
 def locked(key: str) -> bool:
@@ -478,7 +479,7 @@ def apply(key: str, value) -> dict:
                 return {"ok": False, "error": f"{target.label}: {exc}"}
         # Keys with no CONFIG field of their own (the hosted API keys) are read
         # from the environment at call time, so this is what makes them live.
-        os.environ[env_key] = env_val
+        claim_env({env_key: env_val})
     path = write_env(updates)
     return {"ok": True, "path": short_path(path), "values": {
         k: _value(rows[k]) if k in rows else v for k, v in updates.items()
@@ -536,7 +537,7 @@ def bug_report() -> dict:
     for key in _REPORTABLE:
         row = rows.get(key)
         value = _value(row) if row else ""
-        if value:
+        if row is not None and value:
             lines.append(f"{row.label}: {_tilde(value)}")
     lines.append("")
     lines.append("checks:")

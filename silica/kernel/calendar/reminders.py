@@ -18,12 +18,13 @@ enumeration, so a daily closed for a year costs O(1), not a 365-item walk.
 reminder caught on the next tick still reads as on-time.
 
 At-most-once across surfaces: REPL and GUI share the sidecar; whichever
-tick fires first advances the mark.
-# ponytail: no file lock — both surfaces open inside one tick window can
-# double-deliver; add fcntl locking if that ever annoys anyone.
+tick fires first advances the mark. Ticks serialize on `delivery_lock`
+(advisory fcntl on a sibling .lock file), so two surfaces polling inside
+one window cannot both read the pre-advance marks and double-deliver.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import json
 import logging
@@ -86,6 +87,30 @@ def advance_marks(marks: dict[str, str], delivered: list[dict]) -> dict[str, str
 
 def marks_path(vault: Path) -> Path:
     return Path(vault) / ".silica" / "calendar_notified.json"
+
+
+@contextlib.contextmanager
+def delivery_lock(vault: Path):
+    """Serialize one load-compute-save tick across processes (REPL + GUI).
+
+    Advisory fcntl lock on a sibling .lock file, blocking: the window is a
+    few ms, so waiting beats a skipped delivery. Platforms without fcntl
+    (Windows) degrade to the historical unlocked behavior, whose worst case
+    is one duplicate notice.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+    p = marks_path(vault).with_suffix(".lock")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def load_marks(vault: Path) -> dict[str, str]:

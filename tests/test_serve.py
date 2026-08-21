@@ -80,3 +80,33 @@ def test_unset_command_never_probes(monkeypatch):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(serve, "ensure", lambda *a: (_ for _ in ()).throw(AssertionError))
     serve.ensure_local_servers()
+
+
+def test_a_serve_command_in_the_environment_is_spawned(tmp_path, monkeypatch):
+    """The other half of test_unset_command_never_probes: set means spawn.
+
+    Where the command may come from is settled in config.py, which layers only
+    ~/.silica/.env — see test_dotenv_layering. By the time it reaches os.environ
+    it is the user's own, so this reads it directly.
+    """
+    import subprocess
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    for key in ("SILICA_RERANK_SERVE_CMD", "SILICA_PROVIDER_SERVE_CMD",
+                "SILICA_STT_SERVE_CMD"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("SILICA_EMBEDDING_SERVE_CMD", "lms server start")
+    monkeypatch.setattr(serve, "ready", lambda url: False)
+    spawned: list[str] = []
+
+    class FakeProc:
+        def poll(self):
+            return 1  # a failing exit ends ensure() at once, no 180s wait
+
+    monkeypatch.setattr(
+        subprocess, "Popen",
+        lambda command, **kw: (spawned.append(command), FakeProc())[1],
+    )
+    serve.ensure_local_servers()
+
+    assert spawned == ["lms server start"]

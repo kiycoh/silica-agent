@@ -214,8 +214,9 @@ def normalize_ops(ops: list, *, verbatim_source: str | None = None) -> list:
 
 # Bodies carried outside the JSON string, keyed by integer ref. Line-anchored,
 # non-prose sentinel so distilled markdown/LaTeX won't collide with it.
-# ponytail: collides only if a body literally contains a `===SILICA-BODY N===`
-# line — vanishingly rare; upgrade the sentinel if it ever surfaces.
+# Collides only if a body literally contains a `===SILICA-BODY N===` line —
+# vanishingly rare, and the split-tolerant variant below already absorbs the
+# real-world failure mode.
 _BODY_MARKER = re.compile(r"^===SILICA-BODY (\d+)===$", re.MULTILINE)
 # Split-tolerant variant: models occasionally garble the sentinel word
 # (`===SILICA-BILY 5===`, observed 2026-08-15). A strict-only split then folds

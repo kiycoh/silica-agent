@@ -50,7 +50,6 @@ ALLOWED = {
     "kernel/organize/classify.py":           "L1 tokenizer/concept matching, not relatedness ranking",
     "kernel/text/keyphrase.py":          "pairwise cosine (candidate phrase vs document theme) for concept reranking, not note ranking",
     "kernel/recall/episodic.py":           "pairwise cosine on its own fact vecs (episodic recall scoring), not note relatedness ranking",
-    "router/coordinator.py":        "constructs stores to inject into the facade",
     "router/organize_fsm.py":       "L1 co-occurrence classification, not relatedness ranking",
     "router/orchestrator.py":       "co-occurrence index freshness hook (build_index)",
     "router/states/collision.py":   "constructs stores to inject into the facade",

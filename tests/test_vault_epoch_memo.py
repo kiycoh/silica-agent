@@ -24,7 +24,6 @@ def bound_vault(tmp_path, monkeypatch):
     vault.mkdir()
     (vault / "A.md").write_text("# A\n\n[[B]]\n", encoding="utf-8")
     (vault / "B.md").write_text("# B\n\nbody\n", encoding="utf-8")
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault))
     monkeypatch.setattr("silica.driver._driver", None)
     yield vault

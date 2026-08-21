@@ -14,11 +14,36 @@ from dataclasses import dataclass, field
 
 from silica.driver import DRIVER
 from silica.kernel.write.bulk import VerifyMismatchError, execute_one
-from silica.kernel.write.ops import Op, OpType, InverseOp
+from silica.kernel.write.ops import Op, OpType, InverseOp, InverseOpKind
 
 
 def _sha256(text: str | None) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def _revert(txn_id: str, inverses: list[InverseOp]) -> tuple[bool, str | None]:
+    """Apply the micro-snapshot inverses; report whether disk was truly restored.
+
+    silica_restore never raises — it returns {"success", "errors"} — and a
+    restore_version whose prior_content is None (build_txn could read neither
+    the note nor its mirror seed) is SKIPPED with only a warning, never landing
+    in errors. Claiming reverted=True there tells the caller the note was left
+    untouched while the rejected body is still on disk, so a skipped inverse
+    counts as a failed revert here.
+    """
+    from silica.tools.wrapped import silica_restore
+
+    unrestorable = [
+        inv.path for inv in inverses
+        if inv.kind == InverseOpKind.restore_version and inv.prior_content is None
+    ]
+    res = silica_restore(txn_id=txn_id, inverses=[inv.model_dump() for inv in inverses])
+    errors = list(res.get("errors") or [])
+    if unrestorable:
+        errors.append("no snapshot content for " + ", ".join(unrestorable))
+    if errors:
+        return False, "; ".join(errors)
+    return True, None
 
 
 @dataclass
@@ -64,7 +89,7 @@ def commit_note_atomic(op: Op, *, hub: str | None = None, lint: bool = True) -> 
 
 
 def _commit_note_atomic_unlocked(op: Op, *, hub: str | None = None, lint: bool = True) -> NoteCommitResult:
-    from silica.tools.wrapped import build_txn, silica_restore
+    from silica.tools.wrapped import build_txn
     from silica.tools.composed import silica_lint
 
     path = op.touched_ref() or ""
@@ -98,13 +123,11 @@ def _commit_note_atomic_unlocked(op: Op, *, hub: str | None = None, lint: bool =
         # before/without a successful write), "nothing landed" no longer
         # holds here. Revert via the same micro-snapshot inverses the
         # lint-failure branch below uses (built at step 1, before the write).
-        silica_restore(
-            txn_id=txn.id,
-            inverses=[inv.model_dump() for inv in inverses],
-        )
+        reverted, revert_error = _revert(txn.id, inverses)
         return NoteCommitResult(
-            ok=False, path=path, op=op_name, inverses=inverses, error=str(e),
-            reverted=True,
+            ok=False, path=path, op=op_name, inverses=inverses,
+            error=str(e) if reverted else f"{e}; revert failed: {revert_error}",
+            reverted=reverted,
         )
     except Exception as e:
         # Nothing landed (param validation, or the DRIVER call itself raised
@@ -120,17 +143,19 @@ def _commit_note_atomic_unlocked(op: Op, *, hub: str | None = None, lint: bool =
         lr = silica_lint(path, op_type=op_name, hub=hub or op.hub or "")
         new_errors = [e for e in lr.get("errors", []) if e not in baseline_errors]
         if new_errors:
-            silica_restore(
-                txn_id=txn.id,
-                inverses=[inv.model_dump() for inv in inverses],
-            )
+            reverted, revert_error = _revert(txn.id, inverses)
+            error = f"lint failed: {new_errors}"
+            if not reverted:
+                # The rejected body is still on disk. Saying reverted=True here
+                # would tell the caller the note was left untouched.
+                error += f"; revert failed: {revert_error}"
             return NoteCommitResult(
                 ok=False,
                 path=path,
                 op=op_name,
                 inverses=inverses,
-                error=f"lint failed: {new_errors}",
-                reverted=True,
+                error=error,
+                reverted=reverted,
             )
 
     # 4. success — capture post-write content hash

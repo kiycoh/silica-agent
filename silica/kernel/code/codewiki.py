@@ -199,7 +199,7 @@ def subsystem_for_path(graph: CodeGraph, rel: str,
 
 _HUB_CAP = 5
 _REG_DECORATORS = {"command", "route", "tool", "get", "post", "websocket"}
-# ponytail: minimal decorator shortlist; extend when a real framework is missing
+# Minimal decorator shortlist; extend it when a real framework is missing.
 _INBOUND_SEED_CAP = 5
 
 
@@ -234,6 +234,13 @@ def _public_symbols(entry: dict) -> list[dict]:
     back marked `brief`: the renderer spends their signature and first
     docstring line, not the whole doc. Private *methods* still stay out —
     a class's internal helpers are noise at subsystem altitude.
+
+    Every kept symbol is COPIED. `entry` is the store's own dict, and
+    `_spend_doc_budget` stamps `brief` on what this returns; sharing the
+    references wrote a rendering flag back into `graph.files[path]["symbols"]`,
+    which `_struct_sig` hashes. No store round-trip carries that flag, so the
+    digest's own budget decisions would flip the gate that decides whether the
+    LLM regenerates the note.
     """
     allow = entry.get("dunder_all")
     out: list[dict] = []
@@ -244,10 +251,10 @@ def _public_symbols(entry: dict) -> list[dict]:
                 continue
             if allow is not None and s["parent"] not in allow:
                 continue
-            out.append(s)
+            out.append(dict(s))
             continue
         exported = (name in allow) if allow is not None else not name.startswith("_")
-        out.append(s if exported else {**s, "brief": True})
+        out.append(dict(s) if exported else {**s, "brief": True})
     for r in entry.get("reexports", []):
         out.append({"kind": "reexport", "name": r["name"], "parent": "",
                     "signature": f"{r['name']}  # re-exported from {r['from']}",

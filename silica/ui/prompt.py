@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -20,6 +21,18 @@ def _vault_display() -> str:
     if CONFIG.vault_path:
         return Path(CONFIG.vault_path).name
     return CONFIG.vault_name or "—"
+
+
+def _markup_safe(value: str) -> str:
+    """Escape a value before it is interpolated into a prompt_toolkit HTML string.
+
+    HTML() parses its argument as XML, so a folder named "R&D" or a model id
+    holding an angle bracket raises ExpatError on every REPL iteration — and the
+    call site only guards EOFError/KeyboardInterrupt, so the REPL dies at startup
+    and stays dead until the folder is renamed.
+    """
+    return html.escape(value)
+
 
 _METER_WIDTH = 10
 
@@ -44,7 +57,7 @@ def _context_meter() -> str:
 
 def bottom_toolbar() -> HTML:
     # Vault lives in the prompt line — not repeated here. Model shown as slug.
-    model_slug = (CONFIG.model or "—").rsplit("/", 1)[-1]
+    model_slug = _markup_safe((CONFIG.model or "—").rsplit("/", 1)[-1])
     think = "thinking:on" if CONFIG.show_thinking else "thinking:off"
     progress = f"progress:{CONFIG.tool_progress}"
     meter = _context_meter()
@@ -96,5 +109,8 @@ def build_session() -> PromptSession:
 def prompt_text() -> HTML:
     vault = _vault_display()
     if vault != "—":
-        return HTML(f"<ansicyan><b>silica</b></ansicyan> <ansigray>[{vault}]</ansigray> › ")
+        return HTML(
+            f"<ansicyan><b>silica</b></ansicyan> "
+            f"<ansigray>[{_markup_safe(vault)}]</ansigray> › "
+        )
     return HTML("<ansicyan><b>silica</b></ansicyan> › ")

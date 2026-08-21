@@ -101,10 +101,18 @@ def sniff_form(text: str) -> str:
     if key in _sniff_memo:
         return _sniff_memo[key]
     try:
+        # temperature=0 + reasoning=False: this is a one-word classifier, and
+        # a hybrid model bills its thinking against max_tokens. Measured on
+        # 'Lezione 13.md' (2026-08-21 run): ~1900 chars of trace against a 512
+        # budget, and the two files whose sniff thought came back `transcript`
+        # while the twelve identical ones came back `study`. A trace that
+        # overruns the budget returns "" and the lens silently falls back.
         resp = call_llm(
             CONFIG.model,
             [{"role": "user", "content": _SNIFF_PROMPT + text[:2000]}],
             max_tokens=512,
+            temperature=0,
+            reasoning=False,
         )
         word = (resp.text or "").strip().split()[0].strip(".,:;\"'`").lower()
     except Exception as exc:

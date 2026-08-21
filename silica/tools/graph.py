@@ -94,8 +94,9 @@ def silica_mindmap(note_path: str, force: bool = False) -> dict[str, Any]:
     vault = CONFIG.vault_path or "."
     out = Path(vault) / "maps" / f"{stem}.canvas"
 
-    # ponytail: no-clobber v1 = exists + not force → refuse. Diffing the generated
-    # map against a user-rearranged one is v2; here we simply never clobber.
+    # No-clobber: exists + not force → refuse. Diffing the generated map
+    # against a user-rearranged one is a feature for the day someone asks;
+    # here we simply never clobber.
     if out.exists() and not force:
         return {"skipped": str(out), "reason": "exists", "hint": "re-run with force=True to regenerate"}
 
@@ -227,7 +228,7 @@ def silica_autolink(note_paths: list[str] | None = None, note_path: str = "", us
     # `notes_scanned` is the anti-relaunch signal: the whole list is consumed in
     # one call, so a low `notes_linked` means "nothing left to link", not
     # "call me again with the rest".
-    result = {
+    result: dict[str, Any] = {
         "notes_scanned": len(paths),
         "notes_linked": linked,
         "total_links_added": total_added,
@@ -286,6 +287,11 @@ def _peek_stale() -> dict[str, str]:
         return {}
 
 
+# First-stage pool for _facade_search: over-fetch so dropping staging entries
+# still leaves k notes. 20 is the rerank pool the gate is calibrated on.
+_NOTE_POOL = 20
+
+
 def _facade_search(text: str, k: int) -> dict[str, Any]:
     """Fused embeddings + co-occurrence search for a fresh text, then reranked.
 
@@ -299,11 +305,42 @@ def _facade_search(text: str, k: int) -> dict[str, Any]:
     """
     from silica.kernel.recall.perception import facade_retrieve
 
-    results, _query_vec = facade_retrieve(text, k=k)
+    from silica.kernel.recall.paths import is_inbox_path
+
+    # Staging outranks the notes distilled from it: a raw lecture repeats every
+    # term its notes split up, so it wins first-stage retrieval and then eats the
+    # top-k. Measured on the ML vault: asking whether a concept had a note, the
+    # inbox copy of the ASKING document answered its own question at score 1.0,
+    # three times. The inbox stays indexed (staging is source material and
+    # `silica_recall` still reaches it) — it just stops crowding the ranked list
+    # this tool returns, so over-fetch, drop staging, then cut to k.
+    from silica.agent.providers import get_reranker
+    from silica.config import CONFIG
+    from silica.kernel.recall.rerank import rerank_related
+
+    # Filter BEFORE the cross-encoder, not after: reranking the wide pool and
+    # then dropping staging pays for documents that get thrown away, and on a
+    # local GPU a 20-document batch OOMs outright. This way the reranker still
+    # sees exactly k candidates, and they are all notes.
+    results, _query_vec = facade_retrieve(text, k=max(k, _NOTE_POOL), use_rerank=False)
     if results is None:
         return {"error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
+    notes = [r for r in results if not is_inbox_path(r.path or "")]
+    # Never answer empty because everything relevant was staged: if the vault has
+    # nothing else to say, staging IS the answer.
+    rr: dict = {"reranked": False}
+    results = (notes or results)[:k]
+    reranker = get_reranker(CONFIG)
+    if reranker:
+        results = rerank_related(reranker, text, results, k=k, stats=rr)
     stale_map = _peek_stale()
     return {
+        # Which scale `score` is on. The cross-encoder abstains on pools it
+        # cannot read, and the surviving first-stage cosines live around 0.03
+        # where a rerank probability lives around 0.99 — same field, two scales.
+        # Without this a caller reads 0.03 as "nothing here" when it means
+        # "not scored". Never threshold across calls; compare within one.
+        "reranked": bool(rr.get("reranked", False)),
         "results": [
             {
                 "path": r.path,
@@ -333,6 +370,11 @@ def silica_semantic_search(query: str, k: int = 5) -> dict[str, Any]:
     silica_search_context; when the text IS an existing note, prefer
     silica_related. Returns at most k results, best first; verify with
     silica_read_note before acting.
+
+    `score` is comparable only WITHIN one call: `reranked: true` means
+    cross-encoder relevance, `false` means a raw fusion cosine (a different,
+    much smaller scale). A low score never means "absent" — to decide whether
+    a note exists, use silica_exists or silica_search, not a threshold here.
     """
     return {"query": query, **_facade_search(query, k=k)}
 
@@ -340,18 +382,6 @@ def silica_semantic_search(query: str, k: int = 5) -> dict[str, Any]:
 class RecallArgs(BaseModel):
     query: str = Field(description="The question or topic to recall memory for")
     k: int = Field(default=15, description="Maximum number of notes contributing to the context")
-
-
-# Cross-turn recall dedup (active only with CONFIG.recall_deep_ranks > 0):
-# paths served at full tier this session. A conversation reset must call
-# reset_recall_served() — a cooled note from a previous chat would otherwise
-# arrive as an abstract the new conversation never saw whole.
-_SERVED: set[str] = set()
-
-
-def reset_recall_served() -> None:
-    """Forget which notes recall served whole; call on /clear and new sessions."""
-    _SERVED.clear()
 
 
 @tool(RecallArgs, cls="composed")
@@ -365,18 +395,11 @@ def silica_recall(query: str, k: int = 15) -> dict[str, Any]:
     """
     import datetime
 
-    from silica.config import CONFIG
     from silica.kernel.recall.perception import perceive
 
     from silica.kernel.code import codedocs
 
-    deep = int(getattr(CONFIG, "recall_deep_ranks", 0) or 0)
-    p = perceive(query, now=datetime.date.today().isoformat(), k=k,
-                 deep_ranks=deep or None,
-                 served_before=set(_SERVED) if deep else None)
-    if deep:
-        # Only full-tier serves cool: an L0 block was a pointer, not a read.
-        _SERVED.update(b.path for b in p.blocks if not b.abstract)
+    p = perceive(query, now=datetime.date.today().isoformat(), k=k)
     stale_map = _peek_stale()
     flagged = {b.path: lvl for b in p.blocks
                if (lvl := codedocs.peek_level(stale_map, b.path))}
@@ -439,7 +462,9 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
     """
     from silica.config import CONFIG
     from silica.driver import DRIVER
-    from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
+    from silica.kernel.recall.cooccurrence import (
+        CooccurStore, cooccur_key, get_cooccur_store,
+    )
     from silica.kernel.recall.embed import get_store
     from silica.kernel.recall.relatedness import related_notes
 
@@ -459,6 +484,7 @@ def silica_related(note: str, k: int = 5) -> dict[str, Any]:
     query_path = cooccur_key(query_path)
 
     embed_store = get_store()
+    cooccur_store: CooccurStore | None
     try:
         cooccur_store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
         if len(cooccur_store) == 0:
@@ -563,7 +589,7 @@ def silica_concepts(term: str = "", note: str = "", k: int = 10) -> dict[str, An
             path = note
         nodes = store.note_nodes(path)
         top = sorted(nodes.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
-        out = {
+        out: dict[str, Any] = {
             "note": note,
             "concepts": [{"concept": store.node_label(s), "weight": c} for s, c in top],
         }
@@ -585,7 +611,7 @@ def silica_concepts(term: str = "", note: str = "", k: int = 10) -> dict[str, An
     posting = store.stem_postings().get(stem, {})
     notes = sorted(posting.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
 
-    out: dict[str, Any] = {
+    out = {
         "term": term,
         "concept": store.node_label(stem),
         "centrality": round(sum(store.adjacency().get(stem, {}).values()), 1),
@@ -643,16 +669,19 @@ def silica_embed_refresh(folder: str = "", force: bool = False) -> dict[str, Any
 
     try:
         embedder = get_embedder(CONFIG)
-        # prune=True: `notes` is the authoritative live set for `folder`, so
-        # build_index drops entries whose note was deleted out-of-band.
-        store = build_index(embedder, notes, force=force, prune=True, folder=folder)
+        # prune drops every indexed path missing from `notes`, so `notes` may
+        # only be trusted as the live set when EVERY listed note was read. A
+        # transient read failure (non-UTF-8 byte, permission blip, Obsidian
+        # mid-write) would otherwise evict a note that is still on disk, and no
+        # later incremental refresh re-adds what it never read.
+        store = build_index(embedder, notes, force=force, prune=not errors, folder=folder)
     except Exception as e:
         return {"error": f"Index build failed: {e}", "read_errors": errors}
 
     return {
         "indexed": len(store),
         "total_notes": len(notes),
-        "read_errors": len(errors),
+        "read_errors": errors,
         "index_path": str(store._path),
     }
 
@@ -697,6 +726,9 @@ def silica_cooccurrence_refresh(folder: str = "", force: bool = False) -> dict[s
     store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
     seeded_before = set(store.paths())
     try:
+        # prune=not errors: `notes` is the live set only when every listed note
+        # was actually read — see silica_embed_refresh. A note skipped by a
+        # transient read failure must not be un-edged and deleted.
         # refreeze rides on force: `/cooccur --force` is the deliberate rebuild
         # (and the doctor remedy for a wrong-frozen store language) — it
         # re-processes every note, so re-detecting store.lang here is safe.
@@ -704,11 +736,11 @@ def silica_cooccurrence_refresh(folder: str = "", force: bool = False) -> dict[s
         # refreeze: flipping the language without re-stemming existing
         # contributions would mix stemmers across node keys. save=False: one
         # flush at the end after GC + edge refresh.
-        # prune=True: drop nodes+edges for notes deleted out-of-band. save=False:
+        # prune: drop nodes+edges for notes deleted out-of-band. save=False:
         # one flush at the end after the prune and edge refresh below.
         build_index(
             notes, store=store, lang=CONFIG.cooccurrence_lang,
-            force=force, refreeze=force, save=False, prune=True, folder=folder,
+            force=force, refreeze=force, save=False, prune=not errors, folder=folder,
         )
     except Exception as e:
         return {"error": f"Index build failed: {e}", "read_errors": errors}
@@ -727,7 +759,7 @@ def silica_cooccurrence_refresh(folder: str = "", force: bool = False) -> dict[s
     return {
         "indexed": len(store),
         "total_notes": len(notes),
-        "read_errors": len(errors),
+        "read_errors": errors,
         "index_path": str(store._path),
     }
 
@@ -777,7 +809,10 @@ def silica_lexical_refresh(folder: str = "", force: bool = False) -> dict[str, A
         store.upsert(idx_path, name, body)
 
     # GC: drop indexed notes no longer present in the (folder-scoped) vault.
-    current_paths = {idx_path for idx_path, _, _ in notes}
+    # Scoped to the full LISTING, not the notes read this run: a note whose read
+    # failed transiently is still on disk, and evicting it here would silently
+    # cost recall forever (no later incremental refresh re-adds what it skipped).
+    current_paths = {(ref.path or ref.name).removesuffix(".md") for ref in all_refs}
     stale_paths = [
         p for p in store.paths()
         if _in_folder(p, folder) and p not in current_paths
@@ -789,7 +824,7 @@ def silica_lexical_refresh(folder: str = "", force: bool = False) -> dict[str, A
     return {
         "indexed": len(store),
         "total_notes": len(notes),
-        "read_errors": len(errors),
+        "read_errors": errors,
         "index_path": str(store._path),
     }
 

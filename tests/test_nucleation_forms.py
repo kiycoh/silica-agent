@@ -9,6 +9,22 @@ profile resolution never has to guess what the ingress lane already knew.
 from pathlib import Path
 
 
+class TestSniffCallShape:
+    def test_sniff_is_deterministic_and_thinks_none(self):
+        # One-word classifier: thinking is billed against the 512-token budget
+        # and an overrun returns "", which silently picks the fallback lens.
+        from unittest.mock import patch as _patch
+        from types import SimpleNamespace as _NS
+        import silica.kernel.forms as _forms
+
+        _forms._sniff_memo.clear()
+        with _patch("silica.kernel.forms.call_llm",
+                    return_value=_NS(text="study")) as llm:
+            assert _forms.sniff_form("some source text") == "study"
+        assert llm.call_args.kwargs["temperature"] == 0
+        assert llm.call_args.kwargs["reasoning"] is False
+
+
 class TestIngressStamps:
     def test_converted_media_is_stamped_form_transcript(self, tmp_path):
         from silica.sources.convert import _provenance_fm
@@ -721,3 +737,30 @@ def test_a_filed_draft_lands_inside_the_write_dir(tmp_vault, monkeypatch):
 
     assert (Path(CONFIG.vault_path) / "silica" / "Videos" / "vo-pass.md").is_file()
     assert not (Path(CONFIG.vault_path) / "Videos").exists()
+
+
+class TestFileDraftsParallelResolve:
+    def test_order_and_kept_preserved_with_pool(self):
+        # The pool resolves upfront; the printing loop must consume verdicts
+        # in input order and keep non-drafts exactly as the serial loop did.
+        from unittest.mock import patch as _patch
+        import silica.cli as cli
+        import silica.kernel.forms as forms
+
+        files = [f"Inbox/f{i}.md" for i in range(5)]
+        def fake_resolve(text, **kw):
+            return forms.Form("study", "default", "sniff")
+        with _patch.object(forms, "read_source_text", side_effect=lambda f: f), \
+             _patch.object(forms, "resolve", side_effect=fake_resolve):
+            kept = cli._file_drafts(list(files), "Target", None)
+        assert kept == files
+
+    def test_resolve_failure_keeps_the_file(self):
+        from unittest.mock import patch as _patch
+        import silica.cli as cli
+        import silica.kernel.forms as forms
+
+        with _patch.object(forms, "read_source_text",
+                           side_effect=RuntimeError("boom")):
+            kept = cli._file_drafts(["Inbox/x.md"], "Target", None)
+        assert kept == ["Inbox/x.md"]

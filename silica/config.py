@@ -18,27 +18,93 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from dotenv import find_dotenv, load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 # Captured at package import (silica/__init__.py), before any third-party
 # load_dotenv can blur an exported pin into a .env value. Re-exported here
 # because this is where every caller expects to find it.
-from silica import VAULT_PINNED  # noqa: E402,F401
+from silica import SHELL_ENV, VAULT_PINNED  # noqa: E402,F401
 
-# .env layering, first value wins per key (override=False): the project's own
-# .env, found from the working directory upwards, then the user-level
-# ~/.silica/.env the wizard writes when there is no project file. An installed
-# silica has no .env beside its package, so before the user-level file existed
-# every setting evaporated the moment you ran `silica` outside a checkout.
+# The one ambient .env. Layered *under* the real environment (override=False),
+# so a key the shell exported stays a deliberate per-invocation pin. It is the
+# user's own file and follows them between folders; an installed silica has no
+# .env beside its package, so without it every setting evaporated the moment you
+# ran `silica` outside a checkout.
+#
+# There was a second layer above this one: find_dotenv(usecwd=True), the .env
+# found by walking UP from the working directory. Removed, because it has no
+# provenance. It is not "silica's project file" — it is the .env of whatever
+# repository the shell happens to sit in, and it could repoint the model, the
+# endpoints, the vault and the API keys of a user who only cd'd there. The
+# *_SERVE_CMD keys used to carry an exception for exactly that reason (it was
+# arbitrary command execution); the exception is gone with the layer that needed
+# it. Settings that belong to one directory are that directory's job to export —
+# `set -a; source .env; set +a` — which is explicit and outranks this file.
 USER_ENV = Path.home() / ".silica" / ".env"
-for _dotenv_path in (find_dotenv(usecwd=True), USER_ENV):
-    if _dotenv_path:
-        load_dotenv(_dotenv_path, override=False)
+load_dotenv(USER_ENV, override=False)
+
+# Silica's ledger of the SILICA_* keys it owns, derived from the two sources
+# above rather than snapshotted out of os.environ — a snapshot would be right
+# only if nothing had polluted os.environ yet, which makes its correctness a
+# question about import order.
+#
+# Anything under the prefix that is in os.environ but not here did not come from
+# a source silica reads. load_dotenv() is a function third parties call at their
+# own import, and litellm calls it. With override=False it cannot change a key
+# silica already set, but it can ADD one silica deliberately left unset, taken
+# from the .env of whatever directory the process happens to sit in — which
+# would restore the removed layer, one os.getenv call site at a time.
+_SILICA_KEYS = {k for k in SHELL_ENV if k.startswith("SILICA_")}
+if USER_ENV.exists():
+    _SILICA_KEYS |= {
+        k for k in dotenv_values(USER_ENV) if k and k.startswith("SILICA_")
+    }
+
+
+def drop_foreign_env() -> list[str]:
+    """Take back out the SILICA_* keys that appeared behind silica's back.
+
+    Called immediately after every `import litellm`; idempotent, and a plain
+    dict scan, so a call site that runs often costs nothing measurable.
+    """
+    foreign = sorted(
+        k for k in os.environ if k.startswith("SILICA_") and k not in _SILICA_KEYS
+    )
+    for key in foreign:
+        del os.environ[key]
+    return foreign
+
+
+def claim_env(updates: dict[str, str]) -> None:
+    """Make settings live in this process and record them as silica's own.
+
+    The settings panel and the wizard both write a saved key into os.environ so
+    the running session sees it. Without the record the next drop_foreign_env()
+    would read those keys as injected and take them straight back out.
+    """
+    os.environ.update(updates)
+    _SILICA_KEYS.update(k for k in updates if k.startswith("SILICA_"))
+
+
+# One spelling of true for every setting silica reads. Kept as a name because
+# hand-written call sites drifted apart once: one of them accepted "yes" while
+# SILICA_VERBOSE=yes did not work.
+_TRUE_WORDS = ("true", "1", "t")
+
+
+def env_flag(key: str, default: bool) -> bool:
+    """Read a boolean setting from the environment.
+
+    True is spelled "true"/"1"/"t" case-insensitively; anything else the user
+    writes (including "no", "off" and typos) reads as False, which is what
+    every hand-written call site here already did.
+    """
+    return os.getenv(key, "true" if default else "false").lower() in _TRUE_WORDS
 
 
 # Provider prefixes that map a `prefix/model` string to an endpoint and get
 # auto-prefixed onto a bare model. Single source for the three checks below
-# (provider, distill_escalation_provider, _ensure_prefix). "custom" routes to
+# (provider, distill_escalation_provider, ensure_prefix). "custom" routes to
 # SILICA_PROVIDER_BASE_URL/_API_KEY; the rest to PROVIDER_PRESETS in
 # agent.providers (kept a subset of this set — see test_providers).
 PROVIDER_PREFIXES = frozenset({
@@ -46,15 +112,34 @@ PROVIDER_PREFIXES = frozenset({
     "openai", "groq", "deepseek", "mistral", "xai", "custom",
 })
 
+
+def ensure_prefix(model: str, provider: str | None) -> str:
+    """`provider/model`, but only for a provider whose prefix routes somewhere.
+
+    litellm resolves the endpoint from the prefix alone, so a prefix outside
+    PROVIDER_PREFIXES does not name an endpoint — it just makes a bare id that
+    would have worked unroutable. Those keep the id as written.
+
+    Module-level because agent.providers.get_provider re-derives the same prefix
+    from the same fields: two copies of this rule drifted apart once already
+    (the copy without the guard emitted `vllm/qwen`).
+    """
+    if model and provider and provider in PROVIDER_PREFIXES:
+        if not model.startswith(f"{provider}/"):
+            return f"{provider}/{model}"
+    return model
+
 # Hosted providers in fallback order: (API key env var, model ids best first).
 # One table, three readers — `model_from_env` takes the head of the first entry
 # whose key is exported, the wizard offers the whole list as a pick-list, and
 # agent.providers derives its PROVIDER_PRESETS hosted rows from it. Lives here
 # rather than beside PROVIDER_PRESETS because config is imported on every path,
 # including the ones that must not pay for the openai SDK.
-# ponytail: a hand-kept list goes stale as vendors ship — that is the ceiling,
-# and the wizard's `other` entry is the escape hatch. Upgrade path if it rots:
-# fetch /models from the provider instead of hardcoding.
+# The wizard validates this list against each provider's live /models before
+# offering it (wizard._live_hosted_models), so stale ids stop being offered.
+# ponytail: the static heads still back model_from_env, which must stay
+# HTTP-free on config load — a head can rot for env-derived defaults; refresh
+# it when a provider retires a model.
 HOSTED_PROVIDERS: dict[str, tuple[str, tuple[str, ...]]] = {
     "openrouter": ("OPENROUTER_API_KEY", (
         "openrouter/deepseek/deepseek-v4-flash",
@@ -135,7 +220,7 @@ class SilicaConfig:
     # provider than the interactive loop and the other workers. Falls back to
     # OPENROUTER_PROVIDER when unset, so a single pin still covers everything.
     openrouter_provider_distiller: str = field(
-        default_factory=lambda: os.getenv("OPENROUTER_PROVIDER_DISTILLER")
+        default_factory=lambda: os.getenv("OPENROUTER_PROVIDER_DISTILLER", "")
         or os.getenv("OPENROUTER_PROVIDER", "")
     )
 
@@ -250,7 +335,7 @@ class SilicaConfig:
     # itself — promotion is the only path into the vault. /incognito turns it
     # off for the running session without touching this.
     capture_sessions: bool = field(
-        default_factory=lambda: os.getenv("SILICA_CAPTURE_SESSIONS", "False").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_CAPTURE_SESSIONS", False)
     )
 
     # Episodic memory lane (kernel/episodic.py): wall-clock TTL in days from a
@@ -261,25 +346,6 @@ class SilicaConfig:
     )
     episodic_nucleation_runs: int = field(
         default_factory=lambda: int(os.getenv("SILICA_EPISODIC_NUCLEATION_RUNS", "3"))
-    )
-    # Canonical-keys matcher cascade (fase 2): capture-time embed-snap
-    # threshold on KEY embeddings. STAYS 0 (off): the 2026-08-02 snap audit
-    # (bench/snap_replay.py, bench/snap_band_conv26.json) refuted both candidate
-    # taus by replaying conv-26's frozen arrival stream and reading every fire.
-    # 0.83 beats 0.80 (of the 15 merges only 0.80 makes, ~13 are wrong and the
-    # single cross-person merge is among them), but 0.83 is not safe either: of
-    # its 56 fires, 18 are four PING-PONG pairs where two facts supersede each
-    # other in turn (event_date <-> event_topic alternates 8 times), and 21 fire
-    # below the separation probe's own min-gold of 0.8528, merging attribute
-    # against attribute (pets_dog_oliver -> pets_cat_bailey_addition).
-    # Why the probe's 0.7374/0.8528 valley did not transfer: it was measured on
-    # person-first keys (`melanie.family.pic`), while real stores key
-    # `user.melanie.*` and `assistant.session_N.*`. The shared prefix inflates
-    # every pairwise cosine, so a tau calibrated on one schema means nothing on
-    # the other. Re-measure the valley on the shipped schema before any retry,
-    # and fix the two guards first (see episodic._snap_entity / _snap_head).
-    episodic_embed_snap_tau: float = field(
-        default_factory=lambda: float(os.getenv("SILICA_EPISODIC_EMBED_SNAP_TAU", "0"))
     )
     # Supersede gate (key-collision diagnosis 2026-08-02): minimum TEXT cosine
     # between a same-key arrival and the live head it would bury for the
@@ -293,7 +359,7 @@ class SilicaConfig:
     # collision with no internal separation — so if it is ever armed the tau
     # belongs at the band's TOP, i.e. 0.70. A false fork costs one near-duplicate live fact; a
     # missed fork fabricates a retraction, so the asymmetry picks the
-    # aggressive end. Replay evidence (bench/snap_replay.py --gate-tau): on
+    # aggressive end. Replay evidence (bench/gate_replay.py): on
     # conv-26 live facts go 107 → 134, rescuing 27 of 29 burials while keeping
     # 2 real supersedes; on the worst store 20 → 190, rescuing 170 while
     # keeping 20 genuine update chains. Known miss: event_date school→workshop
@@ -329,13 +395,6 @@ class SilicaConfig:
     # 0 = off (pre-floor behavior).
     episodic_recall_floor: float = field(
         default_factory=lambda: float(os.getenv("SILICA_EPISODIC_RECALL_FLOOR", "0.5"))
-    )
-
-    # Driver backend: "fs" (default, filesystem-native, headless) or "ws" (the
-    # Obsidian bridge plugin over a loopback WebSocket, PROTOCOL.md — installed
-    # live by `silica connect`, never set here).
-    backend: str = field(
-        default_factory=lambda: os.getenv("SILICA_BACKEND", "fs")
     )
 
     # Obsidian WebSocket bridge (backend="ws"): port `silica connect` binds (0 →
@@ -379,46 +438,6 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_PDF_OCR_LANG", "en,it,fr,de,es")
     )
 
-    # Speech-to-text backend for audio/video conversion (silica/sources/convert.py).
-    # "endpoint" (default) POSTs to an OpenAI-compatible
-    # `/v1/audio/transcriptions` — whisper.cpp's `whisper-server` and
-    # faster-whisper-server both speak it, and it adds no dependency to Silica:
-    # same posture as the LLM and rerank base URLs. "whispercpp" shells out to a
-    # local whisper.cpp binary instead, for a machine with no server running.
-    # There is no in-process option on purpose: every one of them pulls torch.
-    asr_provider: str = field(
-        default_factory=lambda: os.getenv("SILICA_ASR_PROVIDER", "endpoint")
-    )
-
-    # Base URL of the OpenAI-compatible transcription server. 8080 is
-    # whisper.cpp's `whisper-server` default; `/v1` is appended if absent.
-    asr_base_url: str = field(
-        default_factory=lambda: os.getenv("SILICA_ASR_BASE_URL", "http://127.0.0.1:8080")
-    )
-
-    # Model name sent in the multipart form. Local servers ignore it (they serve
-    # the one model they loaded); it is required by the API shape.
-    asr_model: str = field(
-        default_factory=lambda: os.getenv("SILICA_ASR_MODEL", "whisper-1")
-    )
-
-    # ISO-639-1 language hint for transcription; empty means let the model detect.
-    # Unlike pdf_ocr_lang this CAN be detected from the signal, so auto is the
-    # default and the pin is for when detection picks wrong on a bilingual track.
-    asr_lang: str = field(default_factory=lambda: os.getenv("SILICA_ASR_LANG", ""))
-
-    # Path to (or name on PATH of) the whisper.cpp CLI, for asr_provider=whispercpp.
-    # Upstream renamed `main` to `whisper-cli` in 2024; both names are tried.
-    asr_whispercpp_bin: str = field(
-        default_factory=lambda: os.getenv("SILICA_ASR_WHISPERCPP_BIN", "")
-    )
-
-    # whisper.cpp needs an explicit model file (`-m`); there is no default it can
-    # find on its own, so this is required for that provider.
-    asr_whispercpp_model: str = field(
-        default_factory=lambda: os.getenv("SILICA_ASR_WHISPERCPP_MODEL", "")
-    )
-
     # Tavily API key: the /web-search backstop when DuckDuckGo challenges us.
     # Empty is fine — DuckDuckGo is the primary lane and needs no key.
     tavily_api_key: str = field(
@@ -429,15 +448,6 @@ class SilicaConfig:
     # Maximum context tokens before the agent warns.
     max_context_tokens: int = field(
         default_factory=lambda: int(os.getenv("SILICA_MAX_CONTEXT", "60000"))
-    )
-
-    # Rank-graduated recall depth (gate-pending A/B arm, 0 = off): ranks
-    # beyond this many are served as extractive L0 abstracts instead of the
-    # validated 3x1000 windows, and notes already served whole this session
-    # degrade to L0 on repeat. Do NOT default this on before the LME gate
-    # rules on it — the window grid it bends is eval-validated.
-    recall_deep_ranks: int = field(
-        default_factory=lambda: int(os.getenv("SILICA_RECALL_DEEP_RANKS", "0"))
     )
 
     # Tool progress display level (REPL-runtime, cycled with /verbose)
@@ -451,12 +461,12 @@ class SilicaConfig:
 
     # Debug logging to stderr (--verbose / -v CLI flag, not cycled)
     debug_logging: bool = field(
-        default_factory=lambda: os.getenv("SILICA_VERBOSE", "False").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_VERBOSE", False)
     )
 
     # Shows the model's reasoning blocks (runtime toggle with /thinking)
     show_thinking: bool = field(
-        default_factory=lambda: os.getenv("SILICA_SHOW_THINKING", "True").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_SHOW_THINKING", True)
     )
 
     # Runtime session state — updated by cli.py after each agent turn
@@ -464,7 +474,7 @@ class SilicaConfig:
 
     # Startup banner art (True → wordmark, False → plain one-liner)
     show_banner: bool = field(
-        default_factory=lambda: os.getenv("SILICA_SHOW_BANNER", "True").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_SHOW_BANNER", True)
     )
 
     # Graph viewer: the drifting particles on the GAP and SIMILAR edges (both
@@ -473,10 +483,10 @@ class SilicaConfig:
     # off costs nothing: particles alone hold the canvas awake at IDLE_FPS
     # forever, which on a settled graph is the largest standing cost in that view.
     graph_particles: bool = field(
-        default_factory=lambda: os.getenv("SILICA_GRAPH_PARTICLES", "True").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_GRAPH_PARTICLES", True)
     )
     graph_shading: bool = field(
-        default_factory=lambda: os.getenv("SILICA_GRAPH_SHADING", "True").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_GRAPH_SHADING", True)
     )
 
     # The chat landing's second line: a sentence the worker model writes about
@@ -484,7 +494,7 @@ class SilicaConfig:
     # labels themselves — is computed and always shows. This is the part that
     # costs a call, so it is the part that can be switched off.
     vault_brief: bool = field(
-        default_factory=lambda: os.getenv("SILICA_VAULT_BRIEF", "True").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_VAULT_BRIEF", True)
     )
 
     # Web UI palette: "auto" follows the OS, "dark" and "light" pin it. Only the
@@ -537,32 +547,61 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_RERANK_API_KEY", "lm-studio")
     )
 
-    # Speech-to-text behind the web GUI's dictation button — any OpenAI-compatible
-    # /audio/transcriptions endpoint (whisper.cpp's whisper-server,
-    # faster-whisper-server, OpenAI itself). Next port after embeddings (1234) and
-    # rerank (1235). Empty turns the button off outright.
+    # Speech-to-text: one endpoint for both lanes — the web GUI's dictation
+    # button and /convert's media transcription (audio/video -> inbox note).
+    # Any OpenAI-compatible /audio/transcriptions server (whisper.cpp's
+    # whisper-server, faster-whisper-server, OpenAI itself). Next port after
+    # embeddings (1234) and rerank (1235); SILICA_STT_SERVE_CMD starts it.
+    # Empty turns the dictation button off outright.
+    # The SILICA_ASR_* keys are the pre-merge spelling of this family and are
+    # still honoured, so an existing .env keeps working; SILICA_STT_* wins.
     stt_base_url: str = field(
-        default_factory=lambda: os.getenv("SILICA_STT_BASE_URL", "http://localhost:1236/v1")
+        default_factory=lambda: os.getenv("SILICA_STT_BASE_URL", "")
+        or os.getenv("SILICA_ASR_BASE_URL", "")
+        or "http://localhost:1236/v1"
     )
     # Cosmetic against whisper.cpp, which serves whatever model it was started
     # with; a hosted endpoint needs the real id.
     stt_model: str = field(
-        default_factory=lambda: os.getenv("SILICA_STT_MODEL", "whisper-1")
+        default_factory=lambda: os.getenv("SILICA_STT_MODEL", "")
+        or os.getenv("SILICA_ASR_MODEL", "")
+        or "whisper-1"
     )
     # whisper-server assumes English when a request names no language, so a vault
     # dictated in any other one comes back translated instead of transcribed.
-    # "auto" asks it to detect; a fixed code ("it", "en") is steadier on short clips.
+    # "auto" asks it to detect; a fixed code ("it", "en") is steadier on short
+    # clips. Dictation sends "auto" through; /convert omits the field for it,
+    # which is what its own default (empty) always did.
     stt_lang: str = field(
-        default_factory=lambda: os.getenv("SILICA_STT_LANG", "auto")
+        default_factory=lambda: os.getenv("SILICA_STT_LANG", "")
+        or os.getenv("SILICA_ASR_LANG", "")
+        or "auto"
     )
     stt_api_key: str = field(
         default_factory=lambda: os.getenv("SILICA_STT_API_KEY", "lm-studio")
     )
 
-    # Cosine similarity thresholds for dedup routing (Phase 5)
-    # score >= sim_threshold_high → strong duplicate → patch existing note
-    # score <= sim_threshold_low  → clearly new concept → write new note
-    # between the two → ambiguous → deferred store
+    # "endpoint" (the server above) or "whispercpp" (spawn the CLI locally).
+    # /convert honours this; dictation always goes to the endpoint, since the
+    # browser is already talking to the server.
+    stt_provider: str = field(
+        default_factory=lambda: os.getenv("SILICA_STT_PROVIDER", "")
+        or os.getenv("SILICA_ASR_PROVIDER", "")
+        or "endpoint"
+    )
+    # Path to (or name on PATH of) the whisper.cpp CLI, for stt_provider=whispercpp.
+    # Upstream renamed `main` to `whisper-cli` in 2024; both names are tried.
+    stt_whispercpp_bin: str = field(
+        default_factory=lambda: os.getenv("SILICA_STT_WHISPERCPP_BIN", "")
+        or os.getenv("SILICA_ASR_WHISPERCPP_BIN", "")
+    )
+    # whisper.cpp needs an explicit model file (`-m`); there is no default it can
+    # find on its own, so this is required for that provider.
+    stt_whispercpp_model: str = field(
+        default_factory=lambda: os.getenv("SILICA_STT_WHISPERCPP_MODEL", "")
+        or os.getenv("SILICA_ASR_WHISPERCPP_MODEL", "")
+    )
+
     sim_threshold_high: float = field(
         default_factory=lambda: float(os.getenv("SILICA_SIM_THRESHOLD_HIGH", "0.85"))
     )
@@ -596,10 +635,10 @@ class SilicaConfig:
     # BM25 tf term in the co-occurrence ranking leg (docs/specs/cooccur-scoring.md).
     # Off by default: the probe gate (+4.02pp recall@10, +0.055 mrr, p=0.0015) covers
     # retrieval only, and the same seam feeds autolink, dedup, /map and collision
-    # routing. Fase 2 (those surfaces) and fase 3 (answer-side) promote it, not this
+    # routing. Phase 2 (those surfaces) and phase 3 (answer-side) promote it, not this
     # flag. k1/b stay untuned module constants in relatedness.py, by spec section 8.
     cooccur_bm25: bool = field(
-        default_factory=lambda: os.getenv("SILICA_COOCCUR_BM25", "False").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_COOCCUR_BM25", False)
     )
 
     # Invocation-time index sweep (kernel/recall/sync.py): detect out-of-band
@@ -607,7 +646,7 @@ class SilicaConfig:
     # index freshness via explicit /embed, /cooccur, /lexical (eval harnesses
     # that need byte-identical retrieval across runs set this off).
     index_sweep: bool = field(
-        default_factory=lambda: os.getenv("SILICA_INDEX_SWEEP", "True").lower() in ("true", "1", "t")
+        default_factory=lambda: env_flag("SILICA_INDEX_SWEEP", True)
     )
 
     # Salience gate (Phase 2.05): concept kept only if cosine(concept, doc_centroid) >= threshold
@@ -659,15 +698,10 @@ class SilicaConfig:
         self.debug_logging = v
 
     def __post_init__(self):
-        def _ensure_prefix(model: str | None, provider: str | None) -> str | None:
-            if model and provider and not model.startswith(f"{provider}/"):
-                if provider in PROVIDER_PREFIXES:
-                    return f"{provider}/{model}"
-            return model
-
-        self.model = _ensure_prefix(self.model, self._provider) or self.model
-        self.worker_model = _ensure_prefix(self.worker_model, self.worker_provider) or self.worker_model
-        self.distill_escalation_model = _ensure_prefix(self.distill_escalation_model, self._distill_escalation_provider) or self.distill_escalation_model
+        self.model = ensure_prefix(self.model, self._provider)
+        self.worker_model = ensure_prefix(self.worker_model, self.worker_provider)
+        self.distill_escalation_model = ensure_prefix(
+            self.distill_escalation_model, self._distill_escalation_provider)
 
 
 CONFIG = SilicaConfig()

@@ -12,7 +12,7 @@ plugin's chat turns stream through the transport-neutral `run_turn` (framed as
 `chat_event*` + one `chat_done`/`chat_error`), while DRIVER `rpc` frames
 interleave on the same connection. On handshake the accepted connection is
 wrapped in an attached ObsidianWSBackend and installed as the global driver;
-on drop the driver falls back to the configured local backend (cli/fs).
+on drop the driver falls back to the local fs backend.
 
 Only stdlib at import time — websockets is imported inside start()/run_connect
 so the module loads without the [connect] extra.
@@ -67,6 +67,9 @@ class BridgeServer:
         self._backend: Any = None  # the attached ws driver, while a plugin is connected
         self._bridge_file: Path | None = None
         self._chat_task: Any = None  # the in-flight turn (one at a time — _begin_turn gates)
+        # Set by the auto-start helper below when the TUI hosts the bridge on
+        # its own thread; _stop_bridge_thread needs it to reach that loop.
+        self._host_loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self) -> None:
         from websockets.asyncio.server import serve
@@ -165,7 +168,7 @@ class BridgeServer:
         self._backend = None
         backend.detach("plugin disconnected")
         set_driver(None)
-        logger.info("bridge: plugin disconnected — driver falls back to %r", CONFIG.backend)
+        logger.info("bridge: plugin disconnected — driver falls back to the fs backend")
 
     # ------------------------------------------------------------------
     # Frame routing
@@ -243,8 +246,6 @@ async def maybe_start_bridge(chat_enabled: bool = True) -> BridgeServer | None:
     Returns None when unsupported; caller owns stop()."""
     if not bridge_supported():
         return None
-    if CONFIG.backend == "ws":
-        CONFIG.backend = "fs"  # ws installs on dial-in, not via config; headless fs until the plugin attaches
     server = BridgeServer(chat_enabled=chat_enabled)
     await server.start()
     return server
@@ -256,8 +257,6 @@ def start_bridge_thread() -> BridgeServer | None:
     the discovery file is unlinked on clean exit."""
     if not bridge_supported():
         return None
-    if CONFIG.backend == "ws":
-        CONFIG.backend = "fs"
     server = BridgeServer(chat_enabled=False)
     loop = asyncio.new_event_loop()
     threading.Thread(target=loop.run_forever, name="silica-bridge", daemon=True).start()
@@ -273,7 +272,9 @@ def start_bridge_thread() -> BridgeServer | None:
 
 
 def _stop_bridge_thread(server: BridgeServer) -> None:
-    loop: asyncio.AbstractEventLoop = server._host_loop
+    loop = server._host_loop
+    if loop is None:  # never auto-started: nothing hosts a loop to stop
+        return
     try:
         asyncio.run_coroutine_threadsafe(server.stop(), loop).result(5)
     except Exception:
@@ -291,9 +292,7 @@ def run_connect() -> int:
     if not CONFIG.vault_path:
         print("silica connect needs a vault: set SILICA_VAULT or run inside a repo with .silica/")
         return 1
-    if CONFIG.backend == "ws":
-        CONFIG.backend = "fs"  # ws installs on dial-in, not via config
-    logger.info("bridge: driver fallback while no plugin is attached: %r", CONFIG.backend)
+    logger.info("bridge: serving from the fs backend until a plugin attaches")
 
     async def _main() -> None:
         server = BridgeServer()

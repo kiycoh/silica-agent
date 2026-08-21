@@ -101,7 +101,6 @@ def _point_driver_at(tmp_path):
     from silica.config import CONFIG
 
     CONFIG.vault_path = str(tmp_path)
-    CONFIG.backend = "fs"
     silica.driver._driver = None
 
 

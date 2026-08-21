@@ -13,6 +13,8 @@ quoted from angled.
 """
 from __future__ import annotations
 
+from typing import Any
+
 from silica.kernel.code.codeast.base import (
     _CALL_NAME, Call, ModuleSkeleton, Symbol,
     _block_comment_text, _signature, _text, clean_comment_block,
@@ -32,14 +34,16 @@ def extract(root, src: bytes, path: str, language: str) -> ModuleSkeleton:
     imports: list[str] = []
     symbols: dict[tuple[str, str, str], Symbol] = {}
     calls: dict[tuple[str, str], None] = {}
-    state = {"main": False, "module_doc": None}
+    # _walk fills this in place, so it is a heterogeneous scratch dict; the two
+    # reads below coerce at the boundary rather than trusting the inference.
+    state: dict[str, Any] = {"main": False, "module_doc": None}
     _walk(root, src, imports, symbols, calls, state)
     return ModuleSkeleton(
         path=path, language=language, imports=imports,
         symbols=list(symbols.values()),
-        module_doc=state["module_doc"] or "",
+        module_doc=str(state["module_doc"] or ""),
         calls=[Call(name=k[0], parent=k[1]) for k in calls],
-        has_main_guard=state["main"],
+        has_main_guard=bool(state["main"]),
     )
 
 

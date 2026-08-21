@@ -29,7 +29,12 @@ from enum import Enum, auto
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from concurrent.futures import Future, ThreadPoolExecutor
+
     from silica.driver.base import Txn, GraphSnapshot
+    from silica.driver.base import NoteRef
+    from silica.kernel.write.undo_journal import InverseOp
+    from silica.router.prefetch import DistillPrefetcher
 
 from silica.driver import DRIVER
 from silica.config import CONFIG
@@ -213,6 +218,27 @@ def phase(fsm, task_id: str, capability_name: str):
 class InjectorFSM(BaseFSM[InjectorState]):
     """Deterministic state machine for the Injector pipeline (S2.3 complete)."""
 
+    # The residue lane's state. It lives on the FSM because it spans files
+    # (a decompose dispatched for file N+1 while N is still distilling) but it
+    # is OWNED by silica.router.states.finalize, which is the only module that
+    # writes these. Declared here rather than left to spring into existence on
+    # first assignment: they are part of the FSM's surface, and a reader of this
+    # class could not otherwise know the lane exists.
+    _residue_executor: ThreadPoolExecutor | None = None
+    _residue_decompose: dict[int, Future] | None = None
+    _residue_ready: tuple[int, dict[str, Any]] | None = None
+    _residue_future: tuple[int, list[Any], list[Future]] | None = None
+    _residue_pending: list[tuple] | None = None
+    # File indices already accounted in the run log — the success and failure
+    # paths both conclude a file, and this keeps them from double-recording.
+    _files_logged: set[int] | None = None
+    # Ops the anneal recovered from the deferred store; read by Coordinator.
+    _annealed_ops: int = 0
+    # The distill lane's read-ahead worker, owned by states.distill.
+    _prefetcher: DistillPrefetcher | None = None
+    # One vault listing per run, memoized for the title checks in states.linking.
+    _run_title_refs: list[NoteRef] | None = None
+
     def __init__(
         self,
         inbox_file: str = "",
@@ -277,7 +303,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
         self._tmp_files: list[str] = []
         self._txn: Txn | None = None  # holds the live Txn object for ROLLBACK
         self._undo_run_id: str | None = None          # journal run for this inject
-        self._run_inverses: list[tuple[str, "InverseOp", str | None]] = []  # (path, inverse, post_hash)
+        self._run_inverses: list[tuple[str, InverseOp, str | None]] = []  # (path, inverse, post_hash)
         self._pre_graph: GraphSnapshot | None = None  # S3.2 pre-write graph snapshot
 
         # Optional producer channel to the leashed sub-agent pool.  Set by the
@@ -698,9 +724,9 @@ class InjectorFSM(BaseFSM[InjectorState]):
             cancelled = True
             raise
         finally:
-            if getattr(self, "_prefetcher", None) is not None:
+            if self._prefetcher is not None:
                 self._prefetcher.shutdown()
-            if getattr(self, "_residue_executor", None) is not None:
+            if self._residue_executor is not None:
                 self._residue_executor.shutdown(wait=False, cancel_futures=True)
             if not cancelled:
                 self._boundary_anneal()
@@ -756,6 +782,10 @@ class InjectorFSM(BaseFSM[InjectorState]):
             finally:
                 _current_undo_run.reset(toks[0])
                 _current_ledger_run.reset(toks[1])
+            # Read back by the coordinator's coverage summary: the recovery was
+            # info-level only, so a run that rescued a batch of ops said nothing
+            # about it to the user who asked for the nucleation.
+            self._annealed_ops = int(res.get("written") or 0)
             if res.get("written"):
                 logger.info("boundary anneal: recovered %d deferred op(s)", res.get("written"))
                 self._lift_recovered_partial()
@@ -818,7 +848,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
     def _next_uncommitted_file_idx(self, start: int) -> int:
         """Return the first file index >= start not already committed in the ledger."""
         idx = start
-        committed = getattr(self, "_committed_file_indices", set())
+        committed = self._committed_file_indices  # always set in __init__
         while idx < len(self.inbox_files) and idx in committed:
             logger.info("Skipping already-committed file %d: %s", idx, self.inbox_files[idx])
             idx += 1
@@ -998,7 +1028,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
     def _next_uncommitted_chunk_idx(self, start: int) -> int:
         """Return the first chunk index >= start whose file is not already committed."""
         idx = start
-        committed = getattr(self, "_committed_file_indices", set())
+        committed = self._committed_file_indices  # always set in __init__
         while idx < len(self._chunks):
             fi, _ = self._chunk_flat_to_fi_ci.get(idx, (0, 0))
             if fi not in committed:

@@ -19,6 +19,7 @@ line via run_log.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -30,6 +31,8 @@ from silica.kernel.report.graph_report import compute_report
 from silica.kernel.recall.run_log import append_log_line, format_curate_event
 from silica.kernel.workqueue import WorkItem
 from silica.tools import tool
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -61,12 +64,28 @@ def _read_body(path: str) -> str:
     return content
 
 
-def _orphan_candidates(path: str, k: int = 5) -> list[dict]:
-    """Offer link candidates for an orphan via the relatedness facade.
+def _run_autolink(sources: list[str]) -> dict[str, Any]:
+    """Mechanical, LLM-free autolink of the given source notes (direct commit)."""
+    from silica.tools.graph import silica_autolink
 
-    Mirrors Coordinator._orphan_candidates: fuses the embedding + co-occurrence
-    legs so a candidate survives when either leg is down. The orphan worker only
-    links among offered candidates, so an empty list makes it a safe no-op.
+    return silica_autolink(note_paths=list(dict.fromkeys(sources)))
+
+
+
+def link_candidates(path: str, k: int = 5) -> list[dict]:
+    """Link targets to offer for an orphan note: ``[{"name", "path"}, ...]``.
+
+    Fuses embeddings + co-occurrence (RRF): pure candidate generation, no cosine
+    thresholding, so it still produces targets when the embedding index is empty
+    (the co-occurrence leg carries the routing on its own). A reranker, when one
+    is configured, tightens a wider pool down to `k`.
+
+    Lives here rather than beside `related_notes`: it needs `get_reranker`, and
+    kernel.recall.relatedness must not reach into silica.agent — the structural
+    modules that import it are contractually agent-free (see import-linter).
+
+    Any failure degrades to `[]`, which every caller treats as a safe no-op:
+    the orphan worker only links among the candidates it was offered.
     """
     try:
         from silica.config import CONFIG
@@ -91,16 +110,9 @@ def _orphan_candidates(path: str, k: int = 5) -> list[dict]:
         if reranker:
             results = rerank_related(reranker, link_query(key), results, k=k)
         return [{"name": r.name, "path": r.path} for r in results]
-    except Exception:
+    except Exception as e:
+        logger.debug("link candidate lookup failed for %r (non-fatal): %s", path, e)
         return []
-
-
-def _run_autolink(sources: list[str]) -> dict[str, Any]:
-    """Mechanical, LLM-free autolink of the given source notes (direct commit)."""
-    from silica.tools.graph import silica_autolink
-
-    return silica_autolink(note_paths=list(dict.fromkeys(sources)))
-
 
 # ---------------------------------------------------------------------------
 # plan → WorkItems
@@ -112,7 +124,7 @@ def _orphan_workitems(plan: CurationPlan) -> list[WorkItem]:
         items.append(WorkItem(
             kind="orphan",
             target_path=it.target,
-            context={"candidates": _orphan_candidates(it.target)},
+            context={"candidates": link_candidates(it.target)},
             reason=it.reason or "curate orphan",
         ))
     return items

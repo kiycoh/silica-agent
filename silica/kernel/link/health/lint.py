@@ -84,7 +84,7 @@ _EMPTY_DISPLAY_MATH = re.compile(r"\$\$\s*\$\$")
 _EMPTY_INLINE_MATH = re.compile(r"(?<!\$)\$[ \t]*\$(?!\$)")
 _EMPTY_WIKILINK = re.compile(r"!?\[\[\s*(?:#[^\]]*)?\]\]")   # [[]], ![[]], [[#anchor-only]]
 _BROKEN_ALIAS = re.compile(r"\[\[[^\]|]*\|\s*\]\]")          # [[x|]]
-_ZW_IN_LINK = re.compile(r"\[\[[^\]]*[​‌‍﻿ ][^\]]*\]\]")
+_ZW_IN_LINK = re.compile(r"\[\[[^\]]*[\u200b‌‍﻿ ][^\]]*\]\]")
 _FENCE_WRAP = re.compile(r"\A\s*```(?:markdown|md)\b", re.IGNORECASE)
 _MERMAID_BLOCK = re.compile(r"```mermaid[ \t]*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 _MERMAID_KEYWORDS = (
@@ -182,9 +182,6 @@ def _table_column_mismatch(c: Ctx) -> int:
         # writes wikilink aliases that way): dropping it before any counting makes
         # every check below escape-correct instead of reading it as a delimiter.
         s = line.strip().replace("\\|", "")
-        if not (s.startswith("|") or "|" in s and s.count("|") >= 2):
-            header_cols = None
-            continue
         if not s.startswith("|"):
             header_cols = None
             continue

@@ -3,10 +3,11 @@
 
 """Embedding-based PROPOSED signals: missing links and duplicate pairs.
 
-Both functions degrade to [] when the embedding index is empty or the
-embedder is unavailable. Lazy imports into silica.agent.providers and
-silica.config are a known, pre-existing kernel impurity (see the kernel
-import-linter contract note in pyproject.toml).
+Both functions degrade to [] when the embedding index is empty or unreadable.
+They read stored vectors only and never construct an embedder, so a provider
+that is down does not suppress the proposals: this module reaches nothing
+under silica.agent, which is what lets the P2/DKB contract cover it without
+an exemption.
 """
 from __future__ import annotations
 
@@ -50,8 +51,6 @@ def _compute_missing_links(
         EmbedStore timestamps, capturing the paper's velocity-of-growth signal.
     """
     try:
-        from silica.agent.providers import get_embedder
-        from silica.config import CONFIG
         from silica.kernel.recall.cooccurrence import cooccur_key
         from silica.kernel.recall.embed import get_store
         import networkx as nx
@@ -59,7 +58,6 @@ def _compute_missing_links(
         store = get_store()
         if len(store) == 0:
             return []
-        embedder = get_embedder(CONFIG)
     except Exception as exc:
         logger.debug("graph_report: embeddings unavailable (%s)", exc)
         return []

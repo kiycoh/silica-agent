@@ -19,9 +19,9 @@ in a contest. It is a MAX over the note's stamps: a note fed by nine sources
 sits at its most recent claim, which is the reading a recency-sorted
 chronology wants.
 
-Pure and LLM-free. Full rglob + frontmatter parse per call; the FS body
-cache absorbs most of the read cost.
-# ponytail: no row cache — add an mtime-keyed one only if 10k+ vaults hurt.
+Pure and LLM-free. The walk (rglob + frontmatter parse) runs once per
+file-state epoch: `_all_rows` memoizes on `vault_epoch`, so repeated MCP
+queries between vault changes cost one stat walk, not a re-parse.
 """
 from __future__ import annotations
 

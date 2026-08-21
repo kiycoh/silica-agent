@@ -109,8 +109,6 @@ def derived_vault(tmp_path, monkeypatch):
         "---\ntags:\n  - custom\npinned: yes\n---\n\n# Wiki\n\nold\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("SILICA_BACKEND", "fs")
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
     monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)

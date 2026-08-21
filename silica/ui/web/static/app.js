@@ -427,16 +427,23 @@ function mdLite(src) {
     // before the paragraph branch, or the whole grid collapses into one <p> of
     // pipes — which is what every tool-interrupted turn was showing, since only
     // uninterrupted turns get upgraded to the server render.
-    // ponytail: no escaped `\|` inside a cell, no per-column alignment. Both are
-    // in the server render; add here if a live table ever needs them.
+    // Escaped `\|` cells and per-column alignment match the server render:
+    // the escape parks as U+0001 so the split never sees it, and the delimiter
+    // row's colons become the same inline text-align markdown-it emits.
     if (/^\s*\|/.test(line) && DELIM.test(lines[i + 1] || "")) {
       closeList();
-      const cells = (l) => l.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+      const cells = (l) =>
+        l.trim().replace(/\\\|/g, "\u0001").replace(/^\||\|$/g, "").split("|")
+          .map((c) => c.trim().replace(/\u0001/g, "|"));
       const head = cells(line);
+      const align = cells(lines[i + 1]).map((c) =>
+        /^:-+:$/.test(c) ? "center" : /^-+:$/.test(c) ? "right" : /^:-+$/.test(c) ? "left" : "");
       i += 2;
       const rows = [];
       while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(cells(lines[i++]));
-      const tr = (cs, tag) => `<tr>${cs.map((c) => `<${tag}>${inline(c)}</${tag}>`).join("")}</tr>`;
+      const td = (c, j, tag) =>
+        `<${tag}${align[j] ? ` style="text-align:${align[j]}"` : ""}>${inline(c)}</${tag}>`;
+      const tr = (cs, tag) => `<tr>${cs.map((c, j) => td(c, j, tag)).join("")}</tr>`;
       out.push(
         `<table><thead>${tr(head, "th")}</thead><tbody>${rows.map((r) => tr(r, "td")).join("")}</tbody></table>`
       );

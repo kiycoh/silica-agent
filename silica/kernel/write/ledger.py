@@ -55,11 +55,17 @@ class Ledger:
         self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_source ON ops(source_canonical)"
         )
-        # Unique index enables UPSERT (C2.4)
-        self._conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_src_path "
-            "ON ops(source_canonical, path)"
-        )
+        # Unique index enables UPSERT (C2.4). Guarded like the creation in
+        # _migrate (which de-duplicates first): a ledger.db that still holds
+        # duplicate keys must not raise out of Ledger.__init__, or get_ledger()
+        # aborts every nucleate run for that vault with no recovery path.
+        try:
+            self._conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_src_path "
+                "ON ops(source_canonical, path)"
+            )
+        except sqlite3.IntegrityError:
+            pass
         self._conn.commit()
 
     def _migrate(self) -> None:
@@ -90,7 +96,27 @@ class Ledger:
             for row in self._conn.execute("SELECT * FROM sqlite_master WHERE type='index'")
         }
         if "idx_src_path" not in existing_idx:
+            # A pre-unique-index ledger appended rather than upserted, so it can
+            # hold several rows per (source_canonical, path). Collapse each key
+            # to its newest row — the one an UPSERT would have left behind — or
+            # the index cannot be created and record()'s ON CONFLICT clause has
+            # no constraint to target. rowid is the AUTOINCREMENT id's alias, so
+            # the largest is the last row written for that key. Rows with a NULL
+            # path are left alone: SQLite treats NULLs as distinct in a unique
+            # index, so they never collide.
             try:
+                self._conn.execute(
+                    """
+                    DELETE FROM ops
+                     WHERE path IS NOT NULL
+                       AND rowid NOT IN (
+                           SELECT MAX(rowid) FROM ops
+                            WHERE path IS NOT NULL
+                            GROUP BY source_canonical, path
+                       )
+                    """
+                )
+                self._conn.commit()
                 self._conn.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_src_path "
                     "ON ops(source_canonical, path)"

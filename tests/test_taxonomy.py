@@ -101,13 +101,15 @@ class TestTaxonomyValidation:
 
 class TestGenerateTaxonomyTool:
     @pytest.fixture(autouse=True)
-    def clean_env(self, monkeypatch):
-        # Ensure CONFIG.vault_path doesn't interfere with relative paths in tests
+    def clean_env(self, monkeypatch, tmp_path):
+        # tmp_path IS the vault here: save_path is confined to the vault (it is
+        # a model-supplied argument), so the absolute destinations these tests
+        # pass have to lie inside one.
         from unittest.mock import MagicMock
 
         import silica.driver
         from silica.config import CONFIG
-        monkeypatch.setattr(CONFIG, "vault_path", "")
+        monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
         # patch("silica.driver.DRIVER") reads the attribute to stash the original,
         # and the lazy module __getattr__ answers that read by BUILDING a driver,
         # which the empty vault_path above makes impossible. These tests only ever

@@ -163,7 +163,12 @@ class TestImportSubcommand:
         from silica.config import CONFIG
         from silica.kernel.recall.paths import inbox_dir_for
 
+        # `import` bootstraps the vault like `connect`/`mcp` do, and that
+        # bootstrap lets the working directory outrank a merely-configured
+        # vault_path — so pinning is what states "the active vault is `wal`"
+        # here, exactly as an exported SILICA_VAULT would in a headless run.
         monkeypatch.setattr(CONFIG, "vault_path", str(wal))
+        monkeypatch.setattr("silica.config.VAULT_PINNED", True)
         export = tmp_path / "conversations.json"
         export.write_text(json.dumps(
             [_chatgpt_conversation("c1"), _chatgpt_conversation("c2", text="hi")]),

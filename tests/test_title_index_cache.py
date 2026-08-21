@@ -10,7 +10,7 @@ def _ref(name, path):
 
 
 def test_list_files_called_once_and_cached():
-    fsm = SimpleNamespace()
+    fsm = SimpleNamespace(_run_title_refs=None)  # the FSM declares this; the stub must too
     driver = MagicMock()
     driver.list_files.return_value = [_ref("A", "A.md"), _ref("B", "B.md")]
     with patch("silica.router.orchestrator.DRIVER", driver):
@@ -23,7 +23,7 @@ def test_list_files_called_once_and_cached():
 
 def test_write_appended_stems_visible_to_later_chunks():
     from silica.kernel.link.autolink import build_title_index
-    fsm = SimpleNamespace()
+    fsm = SimpleNamespace(_run_title_refs=None)  # the FSM declares this; the stub must too
     driver = MagicMock()
     driver.list_files.return_value = [_ref("A", "A.md")]
     with patch("silica.router.orchestrator.DRIVER", driver):
@@ -39,7 +39,7 @@ def test_duplicate_basename_still_disambiguated():
     # build_title_index drops conflicting basenames; the cache must preserve
     # that by re-running it over cached refs, not by caching the index itself.
     from silica.kernel.link.autolink import build_title_index
-    fsm = SimpleNamespace()
+    fsm = SimpleNamespace(_run_title_refs=None)  # the FSM declares this; the stub must too
     driver = MagicMock()
     driver.list_files.return_value = [_ref("Foo", "x/Foo.md")]
     with patch("silica.router.orchestrator.DRIVER", driver):

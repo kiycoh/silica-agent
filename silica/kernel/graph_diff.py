@@ -17,6 +17,22 @@ def normalize_ref(ref: NoteRef) -> str:
 def normalize_link(source_ref: NoteRef, target: str) -> tuple[str, str]:
     return (normalize_ref(source_ref), normalize_path(target))
 
+def _is_staging(path: str) -> bool:
+    """True for pipeline bookkeeping notes: inbox sources and done/ archives.
+
+    Recon already refuses them as collision targets ("Inbox notes are
+    staging"); the regression gate owes them the same blindness.
+    """
+    p = path.replace("\\", "/").lower()
+    if p.startswith("done/") or "/done/" in p:
+        return True
+    try:
+        from silica.kernel.recall.paths import is_inbox_path  # lazy: CONFIG-backed
+        return is_inbox_path(path)
+    except Exception:
+        return p.startswith("inbox/") or "/inbox/" in p
+
+
 def check_graph_regression(
     pre: GraphSnapshot,
     post: GraphSnapshot,
@@ -112,9 +128,36 @@ def check_graph_regression(
                 detail_links.append(f"[[{link.source.name}]] -> [[{link.target}]]")
         errors.append(f"New unresolved links introduced: {', '.join(detail_links)}")
         
-    # 3. No broken pre-existing backlinks check
-    pre_lower = {k.lower(): (k, v) for k, v in pre.backlink_counts.items()}
-    post_lower = {k.lower(): v for k, v in post.backlink_counts.items()}
+    # 3. No broken pre-existing backlinks check.
+    # Counted per basename, not per path: [[Name]] resolves to the nearest note
+    # carrying that basename (same folder first, then shortest path), so a twin
+    # born in this chunk — a write_dir mirror, a same-name concept filed under
+    # another folder — takes incoming links over from its older namesake. The
+    # edge re-resolved, nothing was destroyed, and per-path counting read that
+    # migration as vandalism. Basename totals still see a genuine loss.
+    # ponytail: totals only; per-edge attribution would need an edge list the
+    # snapshot does not carry.
+    def fold(counts: dict[str, int]) -> dict[str, tuple[str, int]]:
+        folded: dict[str, tuple[str, int]] = {}
+        for key, count in counts.items():
+            stem = key.replace("\\", "/").rsplit("/", 1)[-1].lower()
+            name, total = folded.get(stem, (key, 0))
+            folded[stem] = (name, total + count)
+        return folded
+
+    # Staging notes (inbox sources, archived done/ copies) stay out of the
+    # comparison, on BOTH sides: their backlinks are `## Sources` pointers the
+    # run itself writes, and archiving a source legitimately drops every one
+    # of them. Counted, a file boundary racing the next chunk's gate window
+    # read as vandalism and rolled back a healthy chunk (2026-08-21 run:
+    # "Broken backlinks for 'Inbox/.../Lezione 4': decreased from 22 to 0").
+    # Filtering only pre would instead let inbox counts on the post side mask
+    # a real loss on a same-stem vault note.
+    pre_lower = fold({k: v for k, v in pre.backlink_counts.items()
+                      if not _is_staging(k)})
+    post_lower = {stem: total for stem, (_, total) in
+                  fold({k: v for k, v in post.backlink_counts.items()
+                        if not _is_staging(k)}).items()}
     shared_keys = set(pre_lower.keys()) & set(post_lower.keys())
     
     for norm_name in sorted(shared_keys):

@@ -93,19 +93,58 @@ def merge_moc_section(content: str, heading: str, note_lines: list[str]) -> str:
     return content.rstrip() + "\n" + moc_block
 
 
+def _safe_cut(line: str, cap: int) -> str:
+    """Largest whitespace cut <= cap that leaves every $...$ and [[...]] span
+    closed, ellipsis appended; "" when no safe point exists (better a bare
+    `- [[Name]]` bullet than broken markup)."""
+    safe = 0
+    in_math = False
+    depth = 0
+    for i, ch in enumerate(line[:cap + 1]):
+        if ch == "$":
+            in_math = not in_math
+        elif line.startswith("[[", i):
+            depth += 1
+        elif line.startswith("]]", i) and depth:
+            depth -= 1
+        elif ch.isspace() and not in_math and depth == 0:
+            safe = i
+    out = line[:safe].rstrip(" \t,;:.-")
+    return out + "…" if out else ""
+
+
 def hub_desc(snippet: str, cap: int = 120) -> str:
-    """First real prose line of a body for a hub bullet — stripped of blockquote,
-    callout ([!NOTE]), heading and list markers, and capped.
+    """First real prose line of a body for a hub bullet — cleaned, and capped
+    at a SAFE boundary.
 
     Guards the MOC bullet from garbage like `> [!NOTE] Documento originale: ...`
     when the distiller opens a body with a fabricated callout (audit finding 3).
+
+    The cap used to be a raw `[:cap]` slice and the edge strip ate one side of
+    a bold pair: the 2026-08-21 hub carried bullets cut mid-word, mid-LaTeX
+    ("$\\boldsymbol{A}^{\\mathsf{T}} \\in \\mathbb{") and mid-link, plus
+    unpaired "Error rate**:" bolds and bare "$$" descriptions. Bold markers now
+    strip pairwise, letterless lines (display-math fences, rules) are skipped,
+    and the cut lands on whitespace outside any $...$ / [[...]] span.
     """
+    fence = False
     for raw in (snippet or "").splitlines():
-        line = re.sub(r'^\s*>+\s*', '', raw.strip())          # blockquote
+        stripped = raw.strip()
+        # Display-math fences: everything between $$ pairs is TeX innards,
+        # never a description ("- [[ha bias]] — $$ \operatorname{bias}(...").
+        odd = stripped.count("$$") % 2 == 1
+        if fence:
+            fence = not odd
+            continue
+        if stripped.startswith("$$"):
+            fence = odd
+            continue
+        line = re.sub(r'^\s*>+\s*', '', stripped)             # blockquote
         line = re.sub(r'^\[![^\]]+\][-+]?\s*', '', line)      # callout tag
         line = re.sub(r'^#{1,6}\s*', '', line)                # heading
         line = re.sub(r'^[-*+]\s+', '', line)                 # list bullet
-        line = line.strip().strip('*_`').strip()
-        if line:
-            return line[:cap].rstrip()
+        line = line.replace("**", "").strip().strip('*_`').strip()
+        if not re.search(r'[A-Za-zÀ-ÿ]{3,}', line):
+            continue  # bare $$ / horizontal rules / lone symbols: not prose
+        return line if len(line) <= cap else _safe_cut(line, cap)
     return ""

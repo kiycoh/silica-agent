@@ -74,21 +74,37 @@ def _verify_landed(op: Op, path: str, intended: str | None) -> str | None:
     return None
 
 
+def _is_note_absent(e: Exception) -> bool:
+    """True only for a backend's genuine "note not found" read failure.
+
+    fs_backend's shape is verified: "File not found: {path}". ws_backend's is
+    NOT — it re-raises the Obsidian plugin's reply verbatim, the plugin is not
+    in this tree, and the only evidence for the wording is a test stub that
+    raises the string the test itself chose. A reply like "Note not found: X"
+    would miss this test, and the two callers want opposite biases when it does:
+    _execute_overwrite fails safe (the op defers), while _verify_deleted reads
+    the miss as "inconclusive" and reverts a delete that actually succeeded.
+    Widening the substring would trade the second bug for the first, so the
+    durable fix is to type the not-found at the ws boundary (raise a dedicated
+    exception in ws_backend.read_note) and test the type here, once the live
+    plugin's exact reply is confirmed.
+
+    A dead read channel (bridge down, socket error) also raises RuntimeError but
+    with a different shape and must NOT be read as "the note isn't there".
+    """
+    msg = str(e).lower()
+    return isinstance(e, RuntimeError) and "file" in msg and "not found" in msg
+
+
 def _verify_deleted(path: str) -> str | None:
     """Falsifiable gate for delete: read-back must now fail (existence negated).
 
     Only a genuine "note not found" style RuntimeError counts as confirmation.
-    Both backends' read_note raise that shape for a missing note — fs_backend:
-    "File not found: {path}"; ws_backend surfaces the plugin's "not found"
-    reply — both contain "file" and "not found". A dead read channel (bridge
-    down, socket error) also raises RuntimeError but with a different shape
-    and must NOT be read as "verified deleted".
     """
     try:
         DRIVER.read_note(path)
     except RuntimeError as e:
-        msg = str(e).lower()
-        if "file" in msg and "not found" in msg:
+        if _is_note_absent(e):
             return None
         return f"post-write verify: delete check inconclusive: {e}"
     return "post-write verify: note still present after delete"
@@ -173,7 +189,10 @@ def _execute_patch(op: Op, path: str) -> dict:
         # Same lint floor as the real-patch path below: a safe-mode skip lands
         # on a freshly-seeded mirror copy of a human note (no `AI` key), and an
         # unstamped copy fails the chunk LINT gate on every later touch.
-        repaired = templates.ensure_ai_flag(templates.ensure_hub_link(nc.content, op.hub))
+        # `partial`: the agent contributed a hub link, not the body — the note
+        # stays human-tier in a contest (contested.reliability_tier).
+        repaired = templates.ensure_ai_flag(
+            templates.ensure_hub_link(nc.content, op.hub), value="partial")
         if repaired != nc.content:
             DRIVER.overwrite(path, repaired)
         return {"path": path, "op": "patch", "success": True, "skipped": "duplicate"}
@@ -189,7 +208,10 @@ def _execute_patch(op: Op, path: str) -> dict:
     if op.contested_by:
         from silica.kernel.write.contested import mark_contested
         new_content = mark_contested(new_content, op.contested_by)
-    new_content = templates.ensure_ai_flag(new_content)
+    # A patch appends one section to a note that was the user's: `partial`
+    # says so, and the note keeps its human reliability tier. A note born
+    # agent-authored already carries `AI: true` and is left untouched.
+    new_content = templates.ensure_ai_flag(new_content, value="partial")
     new_content = templates.stamp_sources(new_content, source_basename)
     from silica.kernel.write.provenance import citation_of
     new_content = templates.stamp_citation(new_content, citation_of(source_basename))
@@ -213,10 +235,18 @@ def _execute_overwrite(op: Op, path: str) -> dict:
         raise ValueError("Missing 'content' for overwrite operation")
 
     had_conflict = False
+    prior: str | None = None
     try:
-        prior: str | None = DRIVER.read_note(path).content
-    except Exception:
-        prior = None
+        prior = DRIVER.read_note(path).content
+    except Exception as e:
+        # Only a genuine "not found" means "no prior note". Every other read
+        # failure (ws bridge down, OSError, a decode error) must not be read as
+        # absent: prior=None disarms the conflict gate AND makes
+        # ensure_system_floor build a minimal frontmatter block instead of
+        # re-injecting the user's tags/aliases — the note is stomped on a read
+        # channel fault. Let it propagate so the op fails and is deferred.
+        if not _is_note_absent(e):
+            raise
     if op.base_content is not None:
         content, had_conflict = three_way_merge(op.base_content, prior, content)
 

@@ -38,8 +38,11 @@ never reached the open web says so instead of reading as a thin answer.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import datetime
 import json
+import logging
 import re
 from dataclasses import replace
 from html import unescape
@@ -64,12 +67,14 @@ from silica.tools import tool
 from silica.sources import web_fetch as _web_fetch  # noqa: F401
 from pydantic import BaseModel
 
+logger = logging.getLogger(__name__)
+
 _TAVILY_URL = "https://api.tavily.com/search"
 _DDG_URL = "https://html.duckduckgo.com/html/"
 _MOJEEK_URL = "https://www.mojeek.com/search"
 _WP_SITE = "https://en.wikipedia.org"
 _WP_TAG_RE = re.compile(r"<[^>]+>")
-_MAX_RESULTS = 5            # ponytail: per-query cap; promote to CONFIG if a real query needs more
+_MAX_RESULTS = 5            # per-query cap; config promotion declined 2026-08-19
 _HTTP_TIMEOUT = 30
 # Fetches spend iterations too, so the budget covers both calls. The flag is
 # still --max-searches: renaming a user-facing flag buys nothing.
@@ -137,8 +142,8 @@ it next. Update the plan whenever remember returns new IDs; the reply names \
 the sections still without evidence. You are saturated when no section that \
 matters is still empty."""
 
-# ponytail: gate seam. evals/probe_web_gate.py flips this to run gate arm A
-# (the exact pre-steering loop) live; product code never touches it.
+# Gate seam. evals/probe_web_gate.py flips this to run gate arm A (the exact
+# pre-steering loop) live; product code never touches it.
 _STEERING = True
 
 
@@ -269,13 +274,22 @@ def web_search(query: str) -> str:
         # same reason DDG leads (its own crawl, keyless, no vendor account), and
         # the encyclopedia last because one encyclopedia is not the web.
         key = (CONFIG.tavily_api_key or "").strip()
-        backstops = [(_mojeek_search, "mojeek"), (_wikipedia_search, "wikipedia")]
+        # Callable[[str], ...], not the concrete function types mypy infers
+        # from the literal: the tavily entry is a closure with its own parameter
+        # name, and a callable's parameter NAMES are part of its type.
+        backstops: list[tuple[Callable[[str], list[dict[str, str]]], str]] = [
+            (_mojeek_search, "mojeek"), (_wikipedia_search, "wikipedia")]
         if key:
             backstops.insert(1, (lambda q: _tavily_search(q, key), "tavily"))
         for backstop, lane in backstops:
             try:
                 compact = backstop(query)
             except Exception:
+                # A lane that is merely challenged and a lane that is broken
+                # (drifted selectors, dead key, changed schema) look identical
+                # from here, and `_lane_line` only ever names who answered. This
+                # is the one place the difference is visible.
+                logger.debug("web_search backstop %s failed", lane, exc_info=True)
                 continue
             _LANES.append(lane)
             _DEAD = 0
@@ -450,7 +464,7 @@ def plan(outline: str) -> str:
 
 
 def _tavily_search(query: str, key: str) -> list[dict[str, str]]:
-    # ponytail: direct REST, no tavily-python SDK until their API changes.
+    # Direct REST, no tavily-python SDK; an API change is its own alarm.
     resp = httpx.post(
         _TAVILY_URL,
         json={
@@ -618,12 +632,11 @@ def _mojeek_search(query: str) -> list[dict[str, str]]:
     cookie jar regardless, so they are not verified against a live answer here.
     Re-check them the first time this lane returns nothing on a working IP.
     """
-    resp = httpx.get(
-        _MOJEEK_URL,
-        params={"q": query},
-        headers=_web_fetch._HEADERS,
-        timeout=_HTTP_TIMEOUT,
-        follow_redirects=True,
+    # Through _fetch, not a raw httpx.get with follow_redirects=True: that flag
+    # is the exact hole _fetch exists to close, since a redirect hop is a URL
+    # nobody validated and 169.254.169.254 is one 302 away.
+    resp, _ = _web_fetch._fetch(
+        f"{_MOJEEK_URL}?{urlencode({'q': query})}", headers=_web_fetch._HEADERS
     )
     if resp.status_code != 200 or "<title>Captcha" in resp.text:
         raise ValueError(f"Mojeek answered HTTP {resp.status_code} (challenged).")

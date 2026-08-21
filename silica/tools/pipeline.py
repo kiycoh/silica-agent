@@ -459,10 +459,9 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
     - Ops that still fail remain in the deferred store.
     - If the bundle is fully cleared, it is removed from the deferred store.
     """
-    import os
     from silica.kernel.recall.deferred import get_deferred_store
     from silica.kernel.write.validate import validate_operations
-    from silica.kernel.write.ops_io import parse_ops, dump_ops
+    from silica.kernel.write.ops_io import parse_ops
     from silica.tools.wrapped import build_txn
     from silica.kernel.write.bulk import execute_operations
 
@@ -499,12 +498,7 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
             "still_deferred": len(still_rejected),
         }
 
-    import uuid
-    from silica.kernel.recall.paths import silica_tmp_dir
-    tmp_path = str(silica_tmp_dir() / f"{uuid.uuid4().hex}.json")
     try:
-        dump_ops(tmp_path, validated)
-
         # Snapshot before writing for rollback safety
         txn = build_txn(validated)
 
@@ -516,11 +510,6 @@ def silica_deferred_retry(content_hash: str) -> dict[str, Any]:
             return {"error": f"Deferred retry write failed: {failures}"}
     except Exception as e:
         return {"error": f"Deferred retry failed: {e}"}
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except Exception:
-            pass
 
     # Recovered writes bypassed the FSM's AUTOLINK/HUB_UPDATE — give them edges.
     _link_recovered_writes(validated, target_dir, hub, bundle.get("source_path", ""))

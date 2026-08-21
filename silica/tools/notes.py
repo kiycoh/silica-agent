@@ -75,6 +75,10 @@ def silica_patch_note(
     into many notes use silica_run_injector. Every successful patch is
     checkpointed and can be reverted with /undo.
     """
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.kernel.recall.paths import contain_in_vault
     from silica.kernel.write import templates as tpl
     from silica.kernel.write.bulk import execute_one
     from silica.kernel.write.checkpoints import get_checkpoint_store
@@ -92,6 +96,14 @@ def silica_patch_note(
         path = DRIVER.read_note(name).ref.path or name
     except Exception as e:
         return {"error": f"Failed to read note '{name}': {e}"}
+
+    # read_note falls back to the resolved absolute path for anything it found
+    # outside the vault, and the patch below writes back to whatever it returned:
+    # confine it before the lease so the patch can never land outside.
+    try:
+        path = contain_in_vault(path, Path(CONFIG.vault_path))
+    except ValueError as e:
+        return {"error": f"Refused note '{name}': {e}"}
 
     op = Op(
         op=OpType.patch,
@@ -261,11 +273,22 @@ def silica_write_note(
     exists: append with silica_patch_note; multi-note nucleation with gates
     and rollback: silica_run_injector. Checkpointed, revertible with /undo.
     """
-    from pathlib import PurePosixPath
+    from pathlib import Path, PurePosixPath
 
+    from silica.config import CONFIG
+    from silica.kernel.recall.paths import contain_in_vault
     from silica.kernel.write import templates as tpl
     from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.workqueue import path_lease
+
+    # `path` is model-supplied and this fast path never runs validate_operations,
+    # so the vault boundary is enforced here — before the lease, so a rejected
+    # path never takes a lock — and as an error dict rather than the driver's
+    # exception, which the model cannot act on.
+    try:
+        path = contain_in_vault(path, Path(CONFIG.vault_path))
+    except ValueError as e:
+        return {"error": f"Refused path '{path}': {e}"}
 
     # `AI:`, `last modified:` and `verified:` are the system floor and the human
     # trust tier — a model writing them would hand the agent a lever on its own
@@ -300,7 +323,10 @@ def silica_write_note(
         content = tpl.render_note(source, fields)
     content = tpl.ensure_system_floor(content)
     if props:
-        content = tpl.upsert_props(content, props)
+        try:
+            content = tpl.upsert_props(content, props)
+        except ValueError as e:
+            return {"error": str(e)}
     if docs:
         content = tpl.stamp_documents(content, docs, code_ref)
 

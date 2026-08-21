@@ -44,24 +44,20 @@ def test_merge_env_writes_many_keys_and_keeps_the_rest(env_file):
     assert "SILICA_PROVIDER=openrouter" in out
 
 
-def test_env_path_resolves_cwd_then_repo_then_user(tmp_path, monkeypatch):
-    """The file a write lands in is the one that would win at the next boot —
-    config.py layers project-then-user with override=False."""
+def test_env_path_is_the_user_file_even_inside_a_repo(tmp_path, monkeypatch):
+    """The file a write lands in is the one that would win at the next boot, and
+    config.py layers only the user-level file. A .env in the working directory
+    or at the repo root must not attract the write: nothing reads it back."""
     repo = tmp_path / "repo"
     sub = repo / "sub"
     sub.mkdir(parents=True)
     user_env = tmp_path / "home" / ".silica" / ".env"
     monkeypatch.setattr("silica.onboarding.wizard.USER_ENV", user_env)
-    monkeypatch.setattr("silica.kernel.code.gitstate.find_repo_root", lambda _cwd: str(repo))
     monkeypatch.chdir(sub)
-
-    assert resolve_env_path() == user_env  # nothing on disk yet
-
     (repo / ".env").write_text("X=1")
-    assert resolve_env_path() == repo / ".env"
-
     (sub / ".env").write_text("X=2")
-    assert resolve_env_path() == sub / ".env"
+
+    assert resolve_env_path() == user_env
 
 
 def test_a_write_is_refused_while_a_turn_runs(client, env_file, monkeypatch):

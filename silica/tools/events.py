@@ -73,7 +73,16 @@ def silica_event_create(title: str, start: str, end: str = "", rrule: str = "",
         return {"error": "; ".join(errors)}
 
     # Recurring events keep a date-free stem: the series has no single day.
-    safe_title = tpl.slugify(title)
+    # slugify strips every path separator, so the stem cannot steer the write out
+    # of the calendar folder — but a recurring title leads the stem, and every
+    # reader of the calendar (scan_events, the timeline walk, ignore_matcher)
+    # skips a path part starting with "." as vault plumbing. A leading dot would
+    # therefore write the note, report success, and leave an event no agenda,
+    # update or reminder can ever see again. A title of nothing but dots and
+    # stripped characters has no filename left at all.
+    safe_title = tpl.slugify(title).lstrip(".")
+    if not safe_title:
+        return {"error": f"title {title!r} has no usable characters for a filename"}
     stem = safe_title if rrule else f"{start.strip()[:10]} {safe_title}"
     folder = in_write_dir("calendar")
 
@@ -175,10 +184,11 @@ def silica_event_update(note: str, start: str = "", end: str = "", rrule: str = 
 
     if "start" in changes or "rrule" in changes:
         # An event moved earlier than its mark would otherwise never remind.
-        marks = rem.load_marks(vault)
-        if target.stem in marks:
-            del marks[target.stem]
-            rem.save_marks(vault, marks)
+        with rem.delivery_lock(vault):
+            marks = rem.load_marks(vault)
+            if target.stem in marks:
+                del marks[target.stem]
+                rem.save_marks(vault, marks)
 
     return {"op": "update", "success": True, "path": target.path,
             "changed": sorted(changes), "checkpoint_ok": checkpoint_ok}
@@ -240,15 +250,15 @@ def silica_agenda(start: str = "today", days: int = 7) -> dict[str, Any]:
 
     rows = agenda(start_date, end_date, occurrences=occurrences,
                   timeline_rows=tl, log_lines=log_lines, review_rows=review_rows,
-                  event_stems={e.stem for e in events}, today=today)
+                  event_stems={ev.stem for ev in events}, today=today)
 
     lines: list[str] = [f"Agenda {start_date.isoformat()} +{days}d"]
     for r in rows:
         content = []
-        for e in r["events"]:
-            when = "all-day" if e["all_day"] else e["start"][11:]
-            mark = f" [{e['status']}]" if e["status"] else ""
-            content.append(f"  {when}  {e['title']}{mark}")
+        for evt in r["events"]:
+            when = "all-day" if evt["all_day"] else evt["start"][11:]
+            mark = f" [{evt['status']}]" if evt["status"] else ""
+            content.append(f"  {when}  {evt['title']}{mark}")
         if r["notes"]:
             content.append("  notes: " + ", ".join(n["label"] for n in r["notes"]))
         for a in r["activity"]:

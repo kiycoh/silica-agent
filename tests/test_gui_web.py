@@ -231,29 +231,20 @@ def test_quick_action_segments_name_real_commands():
 
 
 def _repl_dispatched_commands() -> set[str]:
-    """Command names the REPL's three dispatchers recognise, read off their source.
+    """Command names the REPL's dispatchers recognise.
 
-    ponytail: a source-level lint, because the direct handler does the work inline
-    (calling it to ask "do you know /embed?" would rebuild an index). It breaks if
-    the dispatch stops being a `cmd == "/x"` chain — rewrite it as a dict then, and
-    read the keys.
+    Both dispatchers are tables now, so this reads them: `_DIRECT` is the
+    inline read-only lane, `_SHORTCUTS` the agent-directed one. No inference and
+    no source scraping — a command exists here exactly when it has a row there.
     """
     import inspect
     import re
 
-    from silica.cli import (
-        _REFRESH,
-        _expand_web_turn,
-        _expand_workflow_shortcut,
-        _handle_direct_shortcut,
-    )
+    from silica.cli import _DIRECT, _SHORTCUTS, _expand_web_turn
 
-    src = inspect.getsource(_handle_direct_shortcut) + inspect.getsource(_expand_workflow_shortcut)
-    return set(re.findall(r'cmd (?:==|in \()\s*"(/[a-z-]+)"', src)) | set(
-        re.findall(r'"(/[a-z-]+)"\)', src)
-    ) | set(_REFRESH) | set(  # the three index refreshes dispatch off a dict
-        # The web-escalation expander matches on parts[0], not on a `cmd ==`
-        # chain, and names only the commands it owns: take every literal.
+    return set(_DIRECT) | set(_SHORTCUTS) | set(
+        # The web-escalation expander matches on parts[0], not on a table, and
+        # names only the commands it owns: take every literal.
         re.findall(r'"(/[a-z-]+)"', inspect.getsource(_expand_web_turn))
     )
 
@@ -941,17 +932,56 @@ def test_raw_html_relative_image_src_routes_through_asset():
     html = _linkify('<p align="center"><img src="assets/demo.gif" alt="demo" width="900" /></p>', _fake_resolve)
     assert 'src="/asset?path=assets/demo.gif"' in html
 
-    # inline, single-quoted, and the three forms that must NOT be rewritten
+    # inline, single-quoted, and the three forms that must NOT be rewritten.
+    # The single-quoted input is the point here, not the output quoting: the
+    # sanitizer re-serializes every allowlisted tag from parsed attributes, so
+    # it always emits double quotes whatever the note wrote.
     html = _linkify(
         "text <img src='img/a b.png'> and "
         '<img src="https://x.io/p.png"> and <img src="/asset?path=already.png"> and '
         '<img src="data:image/png;base64,AA">',
         _fake_resolve,
     )
-    assert "src='/asset?path=img/a%20b.png'" in html
+    assert 'src="/asset?path=img/a%20b.png"' in html
     assert 'src="https://x.io/p.png"' in html
     assert 'src="/asset?path=already.png"' in html
     assert 'src="data:image/png;base64,AA"' in html
+
+
+def test_raw_html_allowlist_drops_handlers_and_script_schemes():
+    """The allowlist is the only thing between a nucleated document and the DOM:
+    app.js writes this render with innerHTML, so anything executable that gets
+    through runs on the GUI's own origin."""
+    from silica.ui.web.server import _sanitize_html
+
+    # Case is HTMLParser's problem, whitespace inside the name is the browser's,
+    # and neither may reach the output.
+    assert _sanitize_html("<img src=x ONERROR=alert(1)>") == '<img src="x">'
+    assert _sanitize_html("<img src=x on\nerror=alert(1)>") == '<img src="x">'
+    # A scheme survives spelling: entities are decoded before the check and the
+    # control characters a browser strips are stripped before it too.
+    for href in ("JaVaScRiPt:x", "java\tscript:x", "&#106;avascript:x",
+                 "  javascript:x", "vbscript:x", "data:text/html,x"):
+        assert "href" not in _sanitize_html(f'<a href="{href}">t</a>')
+    assert _sanitize_html('<a href="https://ok/a">t</a>') == '<a href="https://ok/a">t</a>'
+    # A dropped tag shows as text, and a script body never lands as prose.
+    assert _sanitize_html("<script>alert(1)</script>") == "&lt;script&gt;&lt;/script&gt;"
+    assert _sanitize_html("<svg><script>alert(1)</script></svg>").count("alert") == 0
+    assert _sanitize_html("<!--[if IE]><script>alert(1)</script><![endif]-->") == ""
+
+
+def test_unterminated_script_keeps_the_rest_of_the_note():
+    """markdown-it's raw-text rule runs to the closing tag or to EOF, so one
+    stray `<script>` line hands the WHOLE remaining note over as one html_block.
+    Dropping that as a script body emptied every note from that line down."""
+    from silica.ui.web.server import _linkify
+
+    html = _linkify("intro\n\n<script>\n\nthe rest of the note\n\n## a heading", _fake_resolve)
+    assert "the rest of the note" in html
+    assert "## a heading" in html
+    assert "<script" not in html
+    # …while a body that closes with its own tag is still a script, not prose.
+    assert "alert(1)" not in _linkify("intro\n\n<script>alert(1)</script>\n\nafter", _fake_resolve)
 
 
 def test_fence_gets_pygments_spans():
@@ -1012,6 +1042,24 @@ def test_latex_inline_and_block_become_mathml():
     html = _linkify("$$\n\\frac{a}{b}\n$$", _fake_resolve)
     assert '<div class="math">' in html
     assert 'display="block"' in html
+
+
+def test_latex_text_argument_cannot_smuggle_markup_into_mtext():
+    """A math block is injected after the raw-HTML allowlist has run, and
+    latex2mathml copies a `\\text{…}` argument into <mtext> character for
+    character. <mtext> is a MathML text integration point, so the browser parses
+    what it finds there with HTML rules — a live element with a live handler."""
+    from silica.ui.web.server import _linkify
+
+    html = _linkify(r"$$\text{<img/src=x/onerror=alert(1)>}$$", _fake_resolve)
+    assert "<img" not in html and "<mtext>" not in html
+    assert "math-err" in html and "&lt;img/src=x/onerror=alert(1)&gt;" in html
+    # `\href`/`\style` put a note-authored URL and declaration on the element.
+    assert 'href="' not in _linkify(r"$\href{javascript:alert(1)}{x}$", _fake_resolve)
+    assert 'style="' not in _linkify(r"$\style{color:red}{x}$", _fake_resolve)
+    # Ordinary formulas, including the ones whose text really does say "<".
+    assert "<math" in _linkify(r"$\text{a < b}$", _fake_resolve)
+    assert "<math" in _linkify(r"$\fcolorbox{red}{white}{x}$", _fake_resolve)
 
 
 def test_latex_prose_dollars_and_code_stay_literal():

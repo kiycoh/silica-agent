@@ -138,7 +138,6 @@ def _open_stores(vault: Path):
     from silica.kernel.recall.paths import index_dir_for
 
     CONFIG.vault_path = str(vault)
-    CONFIG.backend = "fs"
     silica.driver._driver = None
     store = CooccurStore(path=_index_path_for(str(vault)))
     embed_path = index_dir_for(str(vault)) / "embeddings.json"
@@ -227,8 +226,8 @@ def collect(vault: Path, *, tier: str = "cheap", verbose: bool = False) -> dict:
     # contested} are exactly stable but energy.{gaps,cohesion} carry ~0.5%
     # Louvain-order noise (seed is fixed; input edge order is not). Fine while
     # informational; to gate ΔE, gate those two with a tolerance band, not exact.
-    # ponytail: analytics=True runs PageRank/betweenness; fine on the fixed
-    # test vault, and that scan is the known ceiling if the vault ever grows.
+    # analytics=True runs PageRank/betweenness; fine forever on this vault,
+    # which is a frozen fixture by design.
     from silica.kernel.report.graph_report import compute_report
     from silica.kernel.report.vault_energy import vault_energy
 

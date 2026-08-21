@@ -15,6 +15,15 @@ from pydantic import BaseModel
 from unittest.mock import MagicMock
 
 
+class _Usage(BaseModel):
+    """litellm hands back a pydantic Usage; `dict()` over it is how call_llm
+    reads the counts."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 def litellm_mock_response(
     text: str | None = None,
     *,
@@ -42,5 +51,8 @@ def litellm_mock_response(
 
     response = MagicMock()
     response.choices = [choice]
-    response.usage = MagicMock(prompt_tokens=10, completion_tokens=20, total_tokens=30)
+    # A pydantic model, not a MagicMock: call_llm reads usage with
+    # `dict(response.usage)`, which silently yields {} for a MagicMock and so
+    # would make every token-accounting assertion vacuously pass.
+    response.usage = _Usage(prompt_tokens=10, completion_tokens=20, total_tokens=30)
     return response

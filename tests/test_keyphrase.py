@@ -462,3 +462,89 @@ def test_rerank_abstains_on_ragged_embeddings():
     out = _rerank(pool, "alpha beta gamma body text", DomainOverlay(stopwords=frozenset(), noise_patterns=()), fake)
 
     assert out is None
+
+
+# ---------------------------------------------------------------------------
+# _complete_phrases — boundary snap + edge trim (2026-08-21: 29 of 181 notes
+# in a real run carried a truncated/fragment title verbatim from extraction).
+# ---------------------------------------------------------------------------
+
+_STOP = frozenset({"ha", "il", "la", "lo", "a", "di", "per", "è", "un",
+                   "della", "quando", "sono", "e"})
+
+
+def _cands(*phrases):
+    from silica.kernel.text.keyphrase import ConceptCandidate
+    return [ConceptCandidate(phrase=p, score=0.0) for p in phrases]
+
+
+def _ov():
+    from silica.kernel.text.overlay import DomainOverlay
+    return DomainOverlay(stopwords=frozenset(), noise_patterns=())
+
+
+def test_complete_snaps_truncated_ngram_to_phrase_boundary():
+    # YAKE n=3 cut "stimatore a massima [verosimiglianza]"; every occurrence
+    # continues with the same word, so the walk completes it.
+    from silica.kernel.text.keyphrase import _complete_phrases
+
+    body = ("Lo stimatore a massima verosimiglianza massimizza la likelihood. "
+            "Uno stimatore a massima verosimiglianza esiste sempre.")
+    out = _complete_phrases(body, _cands("stimatore a massima"), _STOP, _ov())
+    assert [c.phrase for c in out] == ["stimatore a massima verosimiglianza"]
+    assert "snap:+1" in out[0].evidence
+
+
+def test_complete_requires_two_occurrences():
+    # One occurrence is zero evidence of a collocation: a singleton walk
+    # absorbed the sentence's verb ("Errore quadratico atteso dipende").
+    from silica.kernel.text.keyphrase import _complete_phrases
+
+    body = "L'errore quadratico atteso dipende dal modello."
+    out = _complete_phrases(body, _cands("errore quadratico atteso"), _STOP, _ov())
+    assert [c.phrase for c in out] == ["errore quadratico atteso"]
+
+
+def test_complete_stops_on_divergent_continuations_and_stopwords():
+    from silica.kernel.text.keyphrase import _complete_phrases
+
+    body = ("il kernel polinomiale e il kernel gaussiano; "
+            "la regressione lineare per i dati e la regressione lineare per tutti")
+    out = _complete_phrases(
+        body, _cands("kernel", "regressione lineare"), _STOP, _ov())
+    assert [c.phrase for c in out] == ["kernel", "regressione lineare"]
+
+
+def test_complete_never_crosses_identifiers():
+    # "Giosuè Lo Bosco\n giosue.lobosco@..." — appending the email stem would
+    # mint a new fragment.
+    from silica.kernel.text.keyphrase import _complete_phrases
+
+    body = ("Giosuè Lo Bosco giosue.lobosco@unipa.it dice. "
+            "Giosuè Lo Bosco giosue.lobosco@unipa.it insegna.")
+    out = _complete_phrases(body, _cands("Giosuè Lo Bosco"), _STOP, _ov())
+    assert [c.phrase for c in out] == ["Giosuè Lo Bosco"]
+
+
+def test_edge_trim_drops_stopword_edges_and_markup_tails():
+    from silica.kernel.text.keyphrase import _complete_phrases
+
+    body = "Il modello ha bias quando la stima è distorta."
+    out = _complete_phrases(
+        body, _cands("ha bias", "proprietà delle svm***"), _STOP, _ov())
+    assert [c.phrase for c in out] == ["bias", "proprietà delle svm"]
+    balanced = _complete_phrases(
+        body, _cands("deep learning (6 crediti)"), _STOP, _ov())
+    assert [c.phrase for c in balanced] == ["deep learning (6 crediti)"]
+
+
+def test_completed_duplicates_collapse_on_best_rank():
+    from silica.kernel.text.keyphrase import _complete_phrases
+
+    body = ("Lo stimatore a massima verosimiglianza domina. "
+            "Lo stimatore a massima verosimiglianza vince.")
+    out = _complete_phrases(
+        body,
+        _cands("stimatore a massima", "stimatore a massima verosimiglianza"),
+        _STOP, _ov())
+    assert [c.phrase for c in out] == ["stimatore a massima verosimiglianza"]

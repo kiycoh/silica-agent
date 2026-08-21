@@ -8,11 +8,14 @@ A vault path is adopted as-is: Silica reads the folder the user pointed at, not 
 subfolder it invented. What still needs deciding is where it may *write*, and the
 answer differs by content:
 
-  * a folder of prose, Obsidian vault included → notes land in `silica`, a
-    staging mirror of the vault's own tree (safe mode, on by default): merging is
-    a plain file-manager paste of its contents over the vault root;
+  * a folder of prose, Obsidian vault included → notes land in place, next to
+    the notes they belong with. Safe mode confines them instead to `silica`, a
+    staging mirror of the vault's own tree, merged by a plain file-manager paste
+    of its contents over the vault root — opt in from the settings toggle or by
+    writing `write_dir: silica` in vault.yaml;
   * a source tree → notes land in `docs/silica`, which is Silica's own folder in
-    that repo rather than a mirror of it.
+    that repo rather than a mirror of it. Not safe mode: a repo has a place for
+    its docs whether or not the staging lane is on.
 
 Either way the choice is declared in `vault.yaml` so it is visible, versionable
 and editable instead of re-guessed every run — and reversible from one toggle in
@@ -79,7 +82,8 @@ def seed_silicaignore(vault: str | Path) -> Path | None:
 
 
 def write_dir_for(vault: str | Path) -> str:
-    """The write boundary this folder's *content* calls for; "" ⇒ in place.
+    """The write boundary this folder's *content* calls for when confined; ""
+    ⇒ in place.
 
     Pure decision, no I/O beyond the detection scan. Callers that compose
     `vault.yaml` themselves (the first-run wizard) use this; `declare_write_dir`
@@ -87,9 +91,10 @@ def write_dir_for(vault: str | Path) -> str:
     rather than restoring a remembered value — there is no "previous write_dir"
     state to go stale.
 
-    Only a folder that is not a folder answers "" now: safe mode is the default,
-    so a prose vault is confined to its mirror like a repo is confined to
-    `docs/silica`, and filing in place is something the user turns ON.
+    This answers where writes go *if* they are confined, which is why the prose
+    branch says `silica` even though safe mode is off by default: it is the
+    toggle's ON value, not the adoption default. `declare_write_dir` is what
+    decides whether a fresh vault starts confined at all.
 
     A `docs/silica` that already holds notes settles it whatever the content
     ratio says: that is a vault from before the write boundary existed, and the
@@ -110,12 +115,13 @@ def declare_write_dir(vault: str | Path) -> str | None:
 
     Returns the declared value when this call wrote it (the caller announces it),
     or None when there was nothing to declare: a manifest already exists (the
-    vault has spoken, never overrule it), or the path is not a folder.
+    vault has spoken, never overrule it), the path is not a folder, or the
+    content only calls for the safe-mode mirror.
 
-    Since safe mode is the default, every already-adopted vault WITHOUT a
-    `vault.yaml` gets one on its next launch. That is the behaviour change, taken
-    knowingly: it is one visible line of YAML and one toggle to undo, and the
-    alternative is a default that only protects vaults adopted after today.
+    That last case is the default: safe mode is OFF until asked for, so a prose
+    vault files in place and gets no `vault.yaml` at all. Only a source tree —
+    which needs a home for its docs either way — is declared here. Turning safe
+    mode on writes the line that this function deliberately does not.
 
     Deliberately creates no directory: an empty `docs/silica` would then read as
     a pre-`write_dir` vault to every back-compat lookup.
@@ -125,7 +131,7 @@ def declare_write_dir(vault: str | Path) -> str | None:
     if not root.is_dir() or manifest.exists():
         return None
     declared = write_dir_for(root)
-    if not declared:
+    if not declared or declared == SAFE_WRITE_DIR:
         return None
     try:
         manifest.write_text(f"write_dir: {declared}\n", encoding="utf-8")

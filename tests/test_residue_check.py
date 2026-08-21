@@ -57,13 +57,22 @@ class TestResidueGate:
         finalize._residue_gate(fsm, 0, "Inbox/a.md", False)
         assert calls == []
 
-    def test_a_failed_file_is_skipped(self, monkeypatch):
-        calls = []
-        monkeypatch.setattr(finalize, "residue_facts",
-                            lambda *a, **k: calls.append(1) or ["x"])
+    def test_a_failed_file_is_still_verified(self, monkeypatch):
+        # A rolled-back chunk's facts are genuinely absent and the deferred
+        # store is their only recovery channel (run 262e6847: the 6 files
+        # without verification were exactly the 6 with a failed chunk).
+        monkeypatch.setattr(finalize, "_verify_now",
+                            lambda fsm, fi, f: {"missing": ["lost fact"],
+                                                "total": 1, "judged": 1,
+                                                "failures": 0, "off_theme": 0})
+        store = MagicMock()
+        monkeypatch.setattr("silica.kernel.recall.deferred.get_deferred_store",
+                            lambda *a, **k: store)
         fsm = _fsm()
         finalize._residue_gate(fsm, 0, "Inbox/a.md", True)
-        assert calls == []
+        finalize.flush_residue_pending(fsm, wait=True)
+        assert fsm.progress.inputs["residue"]["f0"]["missing"] == ["lost fact"]
+        assert store.put_residue_facts.called
 
     def test_empty_residue_parks_then_records_clean_instrument(self, monkeypatch):
         monkeypatch.setattr(finalize, "_verify_now",

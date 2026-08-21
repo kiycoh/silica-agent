@@ -9,6 +9,8 @@ selection for the Distiller's constrained decoding path is in agent/providers.py
 """
 from __future__ import annotations
 
+from types import FrameType
+
 import atexit
 import collections
 import json
@@ -26,6 +28,11 @@ from typing import Callable
 logging.getLogger("LiteLLM").setLevel(logging.ERROR)
 
 import litellm
+
+# litellm calls load_dotenv() at import: undo what it injected under our prefix.
+from silica.config import drop_foreign_env
+
+drop_foreign_env()
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +234,7 @@ _meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0, 0])  # 
 
 
 def _meter_site() -> str:
-    f = sys._getframe(2)  # skip _meter_site + _meter_record
+    f: FrameType | None = sys._getframe(2)  # skip _meter_site + _meter_record
     while f is not None:
         name = f.f_code.co_filename
         if not (name.endswith(("llm.py", "providers.py")) or name == "<string>"):
@@ -409,10 +416,23 @@ def recover_leaked_tool_calls(content: str) -> tuple[str, list[tuple[str, str, s
     """Leaked-as-text tool calls -> (content with them removed, raw triples)."""
     calls = []
     for i, (name, body) in enumerate(_LEAK_INVOKE.findall(content)):
-        # ponytail: every parameter comes back a string — the leaked markup
-        # carries no type we can trust. A tool wanting an int gets "5" and
-        # rejects it visibly; coerce here if that ever shows up in a real trace.
-        args = {k: v.strip() for k, v in _LEAK_PARAM.findall(body)}
+        # The leaked markup types nothing, so scalars stay strings: pydantic's
+        # lax validation already coerces "5"/"true" per the tool's own schema,
+        # and guessing here would turn a string field's "5" into an int it
+        # rejects. Containers are the one shape validation cannot recover from
+        # a string, so a value that parses as JSON dict/list is passed parsed.
+        args: dict[str, object] = {}
+        for k, v in _LEAK_PARAM.findall(body):
+            v = v.strip()
+            if v[:1] in "{[":
+                try:
+                    parsed = json.loads(v)
+                    if isinstance(parsed, (dict, list)):
+                        args[k] = parsed
+                        continue
+                except ValueError:
+                    pass
+            args[k] = v
         calls.append((f"call_leaked_{i}", name, json.dumps(args)))
     if not calls:
         return content, []
@@ -453,6 +473,8 @@ def call_llm(
     on_delta: Callable[[str, str], None] | None = None,
     openrouter_provider: str | None = None,
     cancel: threading.Event | None = None,
+    api_key: str | None = None,
+    reasoning: bool | None = None,
 ) -> LLMResponse:
     """Call the LLM with function-calling support.
 
@@ -471,6 +493,15 @@ def call_llm(
             The final LLMResponse is identical to the non-streaming path.
         cancel: optional abandonment flag, forwarded to retry_transient — set it
             when nobody is waiting on this call anymore so retries stop.
+        api_key: explicit credential, overriding whatever litellm or the prefix
+            blocks below would resolve. The only caller is get_provider's worker
+            role, which lets a leashed sub-agent run on a separate key.
+        reasoning: False asks an OpenRouter hybrid model not to think at all.
+            Thinking is billed against max_tokens, so on a mechanical extraction
+            with a tight budget the whole budget can go to the trace and the
+            reply comes back empty (residue decompose on a 31KB source:
+            3864/3864 completion tokens, zero chars of text). None = leave the
+            model's default alone.
 
     Returns:
         LLMResponse with either text or tool_calls populated
@@ -506,10 +537,17 @@ def call_llm(
         kwargs["response_format"] = response_format
     if temperature is not None:
         kwargs["temperature"] = temperature
-    if model.startswith("openrouter/") and (CONFIG.show_thinking or CONFIG.verbose):
-        kwargs["include_reasoning"] = True
-    if model.startswith("openrouter/") and (rt := openrouter_routing(openrouter_provider)):
-        kwargs["extra_body"] = rt
+    if model.startswith("openrouter/"):
+        if reasoning is not False and (CONFIG.show_thinking or CONFIG.verbose):
+            kwargs["include_reasoning"] = True
+        rt = openrouter_routing(openrouter_provider) or {}
+        if reasoning is False:
+            # `enabled: False` is the knob that lands; `max_tokens: 0` is
+            # accepted and ignored (measured on deepseek-v4-flash: 12208 chars
+            # of trace and an empty reply either way).
+            rt["reasoning"] = {"enabled": False}
+        if rt:
+            kwargs["extra_body"] = rt
 
     # Ollama: route via litellm's `ollama_chat/` provider (/api/chat — native
     # tool calls + chat templating) rather than `ollama/` (/api/generate, which
@@ -545,6 +583,9 @@ def call_llm(
         kwargs["model"] = "openai/" + model.split("/", 1)[1]
         kwargs["api_base"] = preset["base_url"]
         kwargs["api_key"] = preset["api_key"]
+
+    if api_key:
+        kwargs["api_key"] = api_key  # after the prefix blocks, so an override wins
 
     kwargs["timeout"] = 120.0  # litellm's own (fires first if it works); _bounded is the backstop
 
@@ -602,20 +643,20 @@ def call_llm(
     message = choice.message
     finish_reason = getattr(choice, "finish_reason", None)
 
-    # Extract reasoning
-    reasoning = getattr(message, "reasoning_content", None)
-    if not isinstance(reasoning, str):
-        reasoning = getattr(message, "reasoning", None)
-    if not isinstance(reasoning, str) and isinstance(message, dict):
-        reasoning = message.get("reasoning_content") or message.get("reasoning")
-    if not isinstance(reasoning, str):
-        reasoning = None
+    # Extract the model's reasoning trace
+    trace = getattr(message, "reasoning_content", None)
+    if not isinstance(trace, str):
+        trace = getattr(message, "reasoning", None)
+    if not isinstance(trace, str) and isinstance(message, dict):
+        trace = message.get("reasoning_content") or message.get("reasoning")
+    if not isinstance(trace, str):
+        trace = None
 
     blocks = getattr(message, "thinking_blocks", None)
-    if not reasoning and isinstance(blocks, list):
-        reasoning = "\n".join(b.get("thinking", "") for b in blocks if isinstance(b, dict))
-    if not reasoning and streamed_reasoning:
-        reasoning = "".join(streamed_reasoning)
+    if not trace and isinstance(blocks, list):
+        trace = "\n".join(b.get("thinking", "") for b in blocks if isinstance(b, dict))
+    if not trace and streamed_reasoning:
+        trace = "".join(streamed_reasoning)
 
     # Build the assistant message dict for conversation history
     raw = ([(tc.id, tc.function.name, tc.function.arguments) for tc in message.tool_calls]
@@ -628,12 +669,12 @@ def call_llm(
     # Anthropic consumes it, and Anthropic wants thinking_blocks. `_to_wire`
     # strips this one at the wire boundary, so it costs the provider nothing and
     # a reopened chat can still show the thinking that produced the answer.
-    if reasoning:
-        assistant_msg["silica_reasoning"] = reasoning
+    if trace:
+        assistant_msg["silica_reasoning"] = trace
         # Sole observability for non-interactive calls (distiller, steer,
         # subagents): only the interactive loop emits ReasoningEvent, so
         # outside it the trace parked above is never read. A -v run logs it.
-        logger.debug("LLM reasoning: %s", reasoning)
+        logger.debug("LLM reasoning: %s", trace)
     if isinstance(blocks, list):
         assistant_msg["thinking_blocks"] = blocks
 
@@ -651,6 +692,6 @@ def call_llm(
         tool_calls=parsed_calls,
         assistant_message=assistant_msg,
         usage=dict(response.usage) if response.usage else {},
-        reasoning=reasoning,
+        reasoning=trace,
         finish_reason=finish_reason,
     )

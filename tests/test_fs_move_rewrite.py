@@ -7,13 +7,14 @@ Covers:
   4. Unresolved promotion: [[Target]] becomes resolved after rename → Target.md.
   5. Move → undo round-trip: referrer files byte-identical after reverse move.
   6. graph_snapshot non-regression: counts consistent after pure folder move.
-  7. Failure path: referrer write_text failure sets _needs_reindex, index rebuilds.
+  7. Failure path: referrer write failure sets _needs_reindex, index rebuilds.
 """
 from __future__ import annotations
 
 import pytest
 from pathlib import Path
 
+from silica.driver import fs_backend
 from silica.driver.fs_backend import ObsidianFSBackend
 from silica.driver.base import NoteRef
 
@@ -326,7 +327,7 @@ class TestGraphSnapshotNonRegression:
 
 
 # ---------------------------------------------------------------------------
-# Test 7 — failure path: referrer write_text raises mid-move
+# Test 7 — failure path: the referrer write raises mid-move
 # ---------------------------------------------------------------------------
 
 class TestMoveFailurePath:
@@ -348,14 +349,14 @@ class TestMoveFailurePath:
         """move() must propagate the exception when a referrer write fails."""
         b = _make_backend(vault)
         referrer_path = vault / "Referrer.md"
-        original_write_text = Path.write_text
+        original_write = fs_backend.atomic_write_bytes
 
-        def _failing_write_text(self_path, *args, **kwargs):
-            if self_path == referrer_path:
+        def _failing_write(path, data):
+            if path == referrer_path:
                 raise OSError("Simulated disk write failure")
-            return original_write_text(self_path, *args, **kwargs)
+            return original_write(path, data)
 
-        monkeypatch.setattr(Path, "write_text", _failing_write_text)
+        monkeypatch.setattr(fs_backend, "atomic_write_bytes", _failing_write)
 
         with pytest.raises(OSError, match="Simulated disk write failure"):
             b.move("Source.md", "Renamed.md")
@@ -366,14 +367,14 @@ class TestMoveFailurePath:
         """After a mid-move failure, _needs_reindex must be True."""
         b = _make_backend(vault)
         referrer_path = vault / "Referrer.md"
-        original_write_text = Path.write_text
+        original_write = fs_backend.atomic_write_bytes
 
-        def _failing_write_text(self_path, *args, **kwargs):
-            if self_path == referrer_path:
+        def _failing_write(path, data):
+            if path == referrer_path:
                 raise OSError("Simulated disk write failure")
-            return original_write_text(self_path, *args, **kwargs)
+            return original_write(path, data)
 
-        monkeypatch.setattr(Path, "write_text", _failing_write_text)
+        monkeypatch.setattr(fs_backend, "atomic_write_bytes", _failing_write)
 
         try:
             b.move("Source.md", "Renamed.md")
@@ -395,14 +396,14 @@ class TestMoveFailurePath:
         """
         b = _make_backend(vault)
         referrer_path = vault / "Referrer.md"
-        original_write_text = Path.write_text
+        original_write = fs_backend.atomic_write_bytes
 
-        def _failing_write_text(self_path, *args, **kwargs):
-            if self_path == referrer_path:
+        def _failing_write(path, data):
+            if path == referrer_path:
                 raise OSError("Simulated disk write failure")
-            return original_write_text(self_path, *args, **kwargs)
+            return original_write(path, data)
 
-        monkeypatch.setattr(Path, "write_text", _failing_write_text)
+        monkeypatch.setattr(fs_backend, "atomic_write_bytes", _failing_write)
 
         try:
             b.move("Source.md", "Renamed.md")

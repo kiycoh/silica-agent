@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
@@ -88,6 +89,24 @@ def _current_folder(note_path: str) -> str:
 def _note_title(note_path: str) -> str:
     """Stem of the note filename without .md extension."""
     return os.path.splitext(os.path.basename(note_path))[0]
+
+
+def _keyword_hit(keyword: str, title_lower: str) -> bool:
+    """Whole-word (or whole-phrase) keyword match against a lower-cased title.
+
+    Never a substring: FolderRule.keywords are model-generated and routinely
+    two letters long ("ai", "ml", "go"), and a substring test finds "ai" inside
+    "Sustainability". One such collision scores 0.4 and two clear tau_high, so
+    the note is filed as an unambiguous L1 winner and physically moved without
+    ever reaching the LLM arbiter.
+    """
+    if not keyword:
+        return False
+    # The boundary is "letter", not \w: digits and underscores separate words in
+    # a filename ("report_a" and "doc1" must match "report" and "doc"), while a
+    # letter must not — that is what keeps "ai" out of "sustainability". The
+    # class is unicode-aware, so "caf" still does not match inside "café".
+    return re.search(rf"(?<![^\W\d_]){re.escape(keyword)}(?![^\W\d_])", title_lower) is not None
 
 
 def _read_body(note_path: str) -> str | None:
@@ -234,8 +253,8 @@ def _score_note_against_rules(
         score = 0.0
         evidence = "cooccur"
 
-        # --- Keyword hit in title (fast exact match) ---
-        kw_hits = sum(1 for k in rule.keyword_set() if k in title_lower)
+        # --- Keyword hit in title (whole-word match) ---
+        kw_hits = sum(1 for k in rule.keyword_set() if _keyword_hit(k, title_lower))
         kw_score = min(kw_hits * 0.4, 0.8)
         if kw_hits:
             evidence = "keyword"
@@ -325,13 +344,13 @@ def _llm_arbitrate(
     for entry in assignments:
         if not isinstance(entry, dict):
             continue
-        idx = entry.get("index")
+        raw_idx: object = entry.get("index")
         folder = entry.get("folder", "")
         # Reject non-int and out-of-range (incl. negative): a schema-valid -1 would
         # relabel the last note, and a string index raises TypeError on `idx >= len`.
-        if not isinstance(idx, int) or not (0 <= idx < len(ambiguous)):
+        if not isinstance(raw_idx, int) or not (0 <= raw_idx < len(ambiguous)):
             continue
-        note_path = ambiguous[idx][0]
+        note_path = ambiguous[raw_idx][0]
         result[note_path] = folder if folder in valid_folders else taxonomy.uncategorized
 
     # Fill any missing entries

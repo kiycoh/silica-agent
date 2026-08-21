@@ -31,7 +31,8 @@ def test_escalation_role_uses_escalation_config():
         provider="lmstudio", model="local-model",
     )
     p = get_provider(cfg, role="escalation")
-    assert p.model == "big/model"  # provider prefix stripped, vendor path kept
+    # Prefix kept (litellm routes on it), vendor path intact behind it.
+    assert p.model == "openrouter/big/model"
 
 
 def test_escalation_role_falls_back_to_router():
@@ -40,7 +41,7 @@ def test_escalation_role_falls_back_to_router():
         provider="lmstudio", model="qwen3-30b",
     )
     p = get_provider(cfg, role="escalation")
-    assert p.model == "qwen3-30b"
+    assert p.model == "lmstudio/qwen3-30b"
 
 
 import os

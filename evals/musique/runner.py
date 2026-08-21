@@ -88,7 +88,6 @@ def bind_vault(vault: Path) -> None:
     from silica.config import CONFIG
 
     CONFIG.vault_path = str(vault)
-    CONFIG.backend = "fs"
     silica.driver._driver = None
     embed_mod.clear()
     cooc_mod.clear()

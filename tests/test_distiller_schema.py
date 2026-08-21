@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import BaseModel
 
-from silica.agent.providers import get_provider, OpenAICompatibleProvider, PROVIDER_PRESETS
+from silica.agent.providers import get_provider, Provider, PROVIDER_PRESETS
 from silica.agent.llm import LLMResponse
 from silica.kernel.write.ops import Op, OpType, DistillerOutput
 from silica.kernel.text.sanitize import parse_json
@@ -118,8 +118,9 @@ class TestProviderPresets:
             model = "test-model"
 
         p = get_provider(Cfg())
-        assert isinstance(p, OpenAICompatibleProvider)
-        assert p.client.base_url is not None  # openai client stores base_url
+        assert isinstance(p, Provider)
+        assert p.base_url == PROVIDER_PRESETS["lmstudio"]["base_url"]
+        assert p.model == "lmstudio/test-model"
 
     def test_openrouter_preset_same_class(self):
         class Cfg:
@@ -128,8 +129,8 @@ class TestProviderPresets:
 
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
             p = get_provider(Cfg())
-        assert isinstance(p, OpenAICompatibleProvider)
-        assert p.model == "or-model"
+        assert isinstance(p, Provider)
+        assert p.model == "openrouter/or-model"
 
     def test_unknown_preset_falls_back_to_lmstudio(self):
         class Cfg:
@@ -137,7 +138,8 @@ class TestProviderPresets:
             model = "m"
 
         p = get_provider(Cfg())
-        assert isinstance(p, OpenAICompatibleProvider)
+        assert isinstance(p, Provider)
+        assert p.base_url == PROVIDER_PRESETS["lmstudio"]["base_url"]
 
     def test_all_defined_presets_have_base_url(self):
         for name, preset in PROVIDER_PRESETS.items():

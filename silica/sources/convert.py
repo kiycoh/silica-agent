@@ -21,7 +21,7 @@ extension over `DOC_EXTS`, three families with three different backends:
     seam above. Hardened rather than trusted: own profile, hard timeout, doctor
     probe (`probe_soffice`).
   * Audio and video (`MEDIA_EXTS`) — transcribed, not parsed: ffmpeg demuxes to
-    16 kHz mono wav and `ASR_PROVIDERS[CONFIG.asr_provider]` turns that into
+    16 kHz mono wav and `ASR_PROVIDERS[CONFIG.stt_provider]` turns that into
     text. Every provider returns markdown into the same shared tail, so a talk
     gets the same sanitizing, segmentation and provenance a book gets.
 
@@ -56,7 +56,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
-from glob import glob
+from glob import escape as glob_escape, glob
 from pathlib import Path
 
 from silica.config import CONFIG
@@ -718,6 +718,55 @@ def _pdf_via_opendataloader(src: Path, workdir: Path) -> tuple[str, Path]:
 
 # --- office without an office suite: ODF, RTF, legacy .xls ------------------
 
+# Every zip-backed office format is attacker-controlled the moment someone drops
+# a file into the vault folder, and a 200 KB archive can declare a member that
+# inflates to gigabytes. 64 MB is far past any real content.xml (a 500-page .odt
+# with tables lands around 3 MB) and far short of a bomb.
+_MAX_ZIP_MEMBER = 64 * 1024 * 1024
+
+
+def _zip_member(z: zipfile.ZipFile, name: str) -> bytes:
+    """One member of an office archive, refused if it inflates past the ceiling.
+
+    The declared size is checked first so a bomb costs nothing to refuse, and the
+    read is capped anyway because the local header is written by whoever built
+    the archive and may simply lie about it.
+    """
+    if z.getinfo(name).file_size > _MAX_ZIP_MEMBER:
+        raise ValueError(
+            f"{name} declares more than {_MAX_ZIP_MEMBER // (1024 * 1024)} MB "
+            "uncompressed — refusing to read it (decompression bomb)"
+        )
+    with z.open(name) as f:
+        data = f.read(_MAX_ZIP_MEMBER + 1)
+    if len(data) > _MAX_ZIP_MEMBER:
+        raise ValueError(
+            f"{name} inflates past {_MAX_ZIP_MEMBER // (1024 * 1024)} MB — "
+            "refusing to read it (decompression bomb)"
+        )
+    return data
+
+
+class _NoDoctype(ET.TreeBuilder):
+    """TreeBuilder that refuses a DTD.
+
+    xml.etree is documented-vulnerable to entity expansion (billion laughs,
+    quadratic blowup) and the stdlib exposes no knob to bound it. Every one of
+    those attacks needs entity declarations, which need a DOCTYPE, and no office
+    format writes one — so refusing the prolog closes the whole class without a
+    third-party parser. expat calls this at the start of the declaration, before
+    a single entity is expanded.
+    """
+
+    def doctype(self, name, pubid, system) -> None:
+        raise ValueError("XML declares a DOCTYPE — refusing to parse it")
+
+
+def _parse_office_xml(data: bytes) -> ET.Element:
+    """Parse XML that came out of a document, with the DTD refused."""
+    return ET.fromstring(data, parser=ET.XMLParser(target=_NoDoctype()))
+
+
 _ODF_TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 _ODF_TABLE_NS = "urn:oasis:names:tc:opendocument:xmlns:table:1.0"
 _ODF_P = f"{{{_ODF_TEXT_NS}}}p"
@@ -764,7 +813,7 @@ def _via_odf(src: Path, workdir: Path) -> tuple[str, Path]:
     """
     try:
         with zipfile.ZipFile(src) as z:
-            root = ET.fromstring(z.read("content.xml"))
+            root = _parse_office_xml(_zip_member(z, "content.xml"))
     except (zipfile.BadZipFile, KeyError, ET.ParseError) as e:
         raise ValueError(
             f"{src.name} is not a readable ODF document ({type(e).__name__}) — "
@@ -1099,7 +1148,9 @@ def _legacy_office_to_pdf(src: Path, workdir: Path) -> Path:
     # Both remaining formats have a free way out, so the errors below lead with
     # it rather than with the 240 MB install: `.doc`/`.ppt` re-saved as
     # `.docx`/`.pptx` are read by pymupdf and mineru with nothing extra.
-    ooxml = ".docx" if src.suffix == ".doc" else ".pptx"
+    # Lowercased because dispatch is: `Report.DOC` reaches here and was being
+    # told to re-save a Word document as `.pptx`.
+    ooxml = ".docx" if src.suffix.lower() == ".doc" else ".pptx"
     exe = soffice_bin()
     if not exe:
         raise ValueError(
@@ -1219,22 +1270,28 @@ def _asr_via_endpoint(wav: Path) -> str:
 
     from silica.sources.web_fetch import vtt_to_text
 
-    url = f"{_asr_base(CONFIG.asr_base_url)}/audio/transcriptions"
-    data = {"model": CONFIG.asr_model, "response_format": "vtt"}
-    if CONFIG.asr_lang.strip():
-        data["language"] = CONFIG.asr_lang.strip()
+    url = f"{_asr_base(CONFIG.stt_base_url)}/audio/transcriptions"
+    data = {"model": CONFIG.stt_model, "response_format": "vtt"}
+    lang = CONFIG.stt_lang.strip()
+    # "auto" is the dictation lane's way of asking whisper-server to detect;
+    # here that is spelled by omitting the field, which is what this lane has
+    # always sent when unset.
+    if lang and lang != "auto":
+        data["language"] = lang
     try:
         with wav.open("rb") as fh:
             resp = httpx.post(
                 url,
                 files={"file": (wav.name, fh, "audio/wav")},
                 data=data,
+                headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
                 timeout=_ASR_TIMEOUT_S,
             )
     except httpx.HTTPError as e:
         raise ValueError(
             f"no transcription server at {url}: {e}. Start one (whisper.cpp: "
-            "`whisper-server -m <model>`), or set SILICA_ASR_PROVIDER=whispercpp"
+            "`whisper-server -m <model>`), point SILICA_STT_BASE_URL at it, or "
+            "set SILICA_STT_PROVIDER=whispercpp"
         ) from None
     if resp.status_code != 200:
         raise ValueError(f"transcription server returned {resp.status_code}: {resp.text[:200]}")
@@ -1253,26 +1310,26 @@ def _asr_via_whispercpp(wav: Path) -> str:
     """Local whisper.cpp binary, for a machine with no server running."""
     from silica.sources.web_fetch import vtt_to_text
 
-    configured = CONFIG.asr_whispercpp_bin.strip()
+    configured = CONFIG.stt_whispercpp_bin.strip()
     # Upstream renamed `main` to `whisper-cli` in 2024; accept either.
     exe = shutil.which(configured) if configured else (
         shutil.which("whisper-cli") or shutil.which("whisper.cpp")
     )
     if not exe:
         raise ValueError(
-            "whisper.cpp not found — set SILICA_ASR_WHISPERCPP_BIN to its path, "
-            "or use SILICA_ASR_PROVIDER=endpoint with a transcription server"
+            "whisper.cpp not found — set SILICA_STT_WHISPERCPP_BIN to its path, "
+            "or use SILICA_STT_PROVIDER=endpoint with a transcription server"
         )
-    model = CONFIG.asr_whispercpp_model.strip()
+    model = CONFIG.stt_whispercpp_model.strip()
     if not model:
         raise ValueError(
-            "whisper.cpp needs a model file — set SILICA_ASR_WHISPERCPP_MODEL "
+            "whisper.cpp needs a model file — set SILICA_STT_WHISPERCPP_MODEL "
             "(e.g. models/ggml-base.bin); it has no default it can find itself"
         )
     out = wav.with_suffix("")  # whisper.cpp appends .vtt itself
     cmd = [exe, "-m", model, "-f", str(wav), "-ovtt", "-of", str(out), "-np"]
-    if CONFIG.asr_lang.strip():
-        cmd += ["-l", CONFIG.asr_lang.strip()]
+    if CONFIG.stt_lang.strip() and CONFIG.stt_lang.strip() != "auto":
+        cmd += ["-l", CONFIG.stt_lang.strip()]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=_ASR_TIMEOUT_S, preexec_fn=_REAP_WITH_PARENT)
@@ -1300,13 +1357,13 @@ def _via_asr(src: Path, workdir: Path) -> tuple[str, Path]:
     write for free, and a three-hour talk is split like a book instead of
     landing as one note RECON caps at 40 concepts.
     """
-    if CONFIG.asr_provider not in ASR_PROVIDERS:
+    if CONFIG.stt_provider not in ASR_PROVIDERS:
         raise ValueError(
-            f"unknown asr_provider {CONFIG.asr_provider!r} "
+            f"unknown stt_provider {CONFIG.stt_provider!r} "
             f"(known: {', '.join(ASR_PROVIDERS)})"
         )
     wav = _media_to_wav(src, workdir)
-    text = ASR_PROVIDERS[CONFIG.asr_provider](wav)
+    text = ASR_PROVIDERS[CONFIG.stt_provider](wav)
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)  # none, but the tail expects a dir
     if not text.strip():
@@ -1372,7 +1429,11 @@ def _pdf_via_mineru(src: Path, workdir: Path) -> tuple[str, Path]:
         ) from None
     if proc.returncode != 0:
         raise ValueError(f"mineru failed: {_mineru_error(proc.stderr)}")
-    hits = glob(str(out / src.stem / "**" / f"{src.stem}.md"), recursive=True)
+    # The stem is the user's filename: `Smith [2020].pdf` is a character class,
+    # and an unescaped one matches nothing after an hour of OCR, so the output is
+    # thrown away with the tempdir and the user is told mineru produced nothing.
+    stem = glob_escape(src.stem)
+    hits = glob(str(out / stem / "**" / f"{stem}.md"), recursive=True)
     if not hits:
         raise ValueError("mineru produced no markdown")
     md_path = Path(hits[0])
@@ -1404,9 +1465,8 @@ def _source_date(src: Path) -> str | None:
     try:
         if src.suffix.lower() in OFFICE_EXTS:
             # OOXML core properties: <dcterms:created>2024-04-02T09:00:00Z</…>
-            import zipfile
-
-            xml = zipfile.ZipFile(src).read("docProps/core.xml").decode("utf-8", "replace")
+            with zipfile.ZipFile(src) as z:
+                xml = _zip_member(z, "docProps/core.xml").decode("utf-8", "replace")
             m = re.search(r"<dcterms:created[^>]*>(\d{4})-(\d{2})-(\d{2})", xml)
         else:
             # PDF and the other formats MuPDF opens (docx, epub, …):

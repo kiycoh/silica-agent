@@ -107,7 +107,7 @@ def test_capture_without_embedder_or_broken_embedder_skips_silently(tmp_path):
 
 class _KeyedEmbedder:
     """Fixed vec per exact input string; unknown inputs (fact texts) get a
-    distinct axis so only the labeled key reprs can snap."""
+    distinct axis, so key vectors are deterministic in tests."""
 
     _TABLE = {
         "user photo pic": [1.0, 0.0, 0.0],
@@ -119,74 +119,15 @@ class _KeyedEmbedder:
         return [self._TABLE.get(t, [0.0, 0.0, 1.0]) for t in texts]
 
 
-def test_embed_snap_off_by_default_keeps_synonym_chains_apart(tmp_path):
+def test_synonym_keys_start_separate_chains(tmp_path):
+    """Keys match canonically, never by embedding proximity: `photo.pic` and
+    `photo.shot` are two chains, not one (the embed-snap fallback that would
+    have joined them was refuted by the 2026-08-02 audit and removed)."""
     store = _store(tmp_path)
     store.capture([{"key": "user.photo.pic", "text": "a"}],
                   run_id="r1", seen="2026-07-18", embedder=_KeyedEmbedder())
     store.capture([{"key": "user.photo.shot", "text": "b"}],
                   run_id="r2", seen="2026-07-18", embedder=_KeyedEmbedder())
-    assert len(store.live_facts()) == 2
-
-
-def test_embed_snap_joins_synonym_key_and_keeps_coined_spelling(tmp_path):
-    store = _store(tmp_path)
-    store.capture([{"key": "user.photo.pic", "text": "a"}],
-                  run_id="r1", seen="2026-07-18", embedder=_KeyedEmbedder())
-    store.capture([{"key": "user.photo.shot", "text": "b"}],
-                  run_id="r2", seen="2026-07-18", embedder=_KeyedEmbedder(),
-                  snap_tau=0.8)
-    (head,) = store.live_facts()
-    assert head.key == "user.photo.shot"          # Layer A invariant: spelling survives
-    old = next(f for f in store.facts if f.key == "user.photo.pic")
-    assert head.supersedes == old.id and old.status == "superseded"
-
-
-def test_embed_snap_rejects_distinct_key_below_tau(tmp_path):
-    store = _store(tmp_path)
-    store.capture([{"key": "user.photo.pic", "text": "a"}],
-                  run_id="r1", seen="2026-07-18", embedder=_KeyedEmbedder())
-    store.capture([{"key": "user.hobby.piano", "text": "b"}],
-                  run_id="r2", seen="2026-07-18", embedder=_KeyedEmbedder(),
-                  snap_tau=0.8)
-    assert len(store.live_facts()) == 2
-
-
-def test_embed_snap_in_batch_retires_stale_head_lookup(tmp_path):
-    # pic -> shot (snap) -> pic again, all in one batch: the third arrival must
-    # chain onto the live shot head, not resurrect the superseded pic entry.
-    store = _store(tmp_path)
-    store.capture([{"key": "user.photo.pic", "text": "a"},
-                   {"key": "user.photo.shot", "text": "b"},
-                   {"key": "user.photo.pic", "text": "c"}],
-                  run_id="r1", seen="2026-07-18", embedder=_KeyedEmbedder(),
-                  snap_tau=0.8)
-    (head,) = store.live_facts()
-    assert head.text == "c"
-    assert len(store.chain(head)) == 3
-
-
-def test_embed_snap_never_joins_across_entities(tmp_path):
-    # Same attribute, different person: cosine is high by construction, but
-    # supersede across entities falsifies history — the guard is hard.
-    class _SameVec:
-        def embed(self, texts):
-            return [[1.0, 0.0] for _ in texts]
-
-    store = _store(tmp_path)
-    store.capture([{"key": "user.caroline.flower_preferences", "text": "a"},
-                   {"key": "user.melanie.flower_preferences", "text": "b"}],
-                  run_id="r1", seen="2026-07-18", embedder=_SameVec(),
-                  snap_tau=0.5)
-    assert len(store.live_facts()) == 2
-
-
-def test_embed_snap_broken_embedder_is_silent(tmp_path):
-    store = _store(tmp_path)
-    store.capture([{"key": "user.photo.pic", "text": "a"}],
-                  run_id="r1", seen="2026-07-18")
-    store.capture([{"key": "user.photo.shot", "text": "b"}],
-                  run_id="r2", seen="2026-07-18", embedder=_BrokenEmbedder(),
-                  snap_tau=0.8)
     assert len(store.live_facts()) == 2
 
 
@@ -278,32 +219,6 @@ def test_capture_from_distill_wires_supersede_tau_from_config(tmp_path, monkeypa
         {"ephemerals": [{"key": "user.slot", "text": "pottery class started yesterday"}]},
         run_id="r2", seen="2026-08-02")
     assert len(EpisodicStore().live_facts()) == 2
-
-
-def test_snap_stays_off_by_default(monkeypatch):
-    """The 2026-08-02 snap audit (bench/snap_replay.py) refuted every candidate
-    tau on the shipped key schema: ping-pong supersedes at 0.83, attribute-vs-
-    attribute merges below the probe's min-gold. config.py loads ~/.silica/.env
-    at import, so the default_factory reads the developer's own pin unless it is
-    cleared here."""
-    from silica.config import SilicaConfig
-
-    monkeypatch.delenv("SILICA_EPISODIC_EMBED_SNAP_TAU", raising=False)
-    assert SilicaConfig().episodic_embed_snap_tau == 0
-
-
-def test_capture_from_distill_wires_snap_tau_from_config(tmp_path, monkeypatch):
-    import silica.agent.providers as providers
-    from silica.config import CONFIG
-    from silica.kernel.recall.episodic import EpisodicStore, capture_from_distill
-
-    monkeypatch.setattr(CONFIG, "episodic_embed_snap_tau", 0.8, raising=False)
-    monkeypatch.setattr(providers, "get_embedder", lambda cfg: _KeyedEmbedder())
-    capture_from_distill({"ephemerals": [{"key": "user.photo.pic", "text": "a"}]},
-                         run_id="r1", seen="2026-07-18")
-    capture_from_distill({"ephemerals": [{"key": "user.photo.shot", "text": "b"}]},
-                         run_id="r2", seen="2026-07-18")
-    assert len(EpisodicStore().live_facts()) == 1
 
 
 def test_episodic_home_resolves_even_when_active_vault_is_memory_vault(tmp_path, monkeypatch):

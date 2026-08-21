@@ -70,3 +70,44 @@ def test_call_llm_response_format_none_not_forwarded():
         )
     call_kwargs = mock_lit.call_args[1]
     assert "response_format" not in call_kwargs
+
+
+def test_call_llm_returns_the_usage_the_provider_reported():
+    """Token accounting is the whole basis of the context meter and the
+    max-token clamp, so a response whose usage is dropped bills invisibly.
+    This used to be asserted on the OpenAI-SDK provider path, which is gone;
+    litellm is now the only lane and has to carry it."""
+    mock_resp = _mock_completion(text="hi")
+    with patch("litellm.completion", return_value=mock_resp):
+        result = call_llm(model="lmstudio/test-model",
+                          messages=[{"role": "user", "content": "test"}])
+    assert result.usage["prompt_tokens"] == 10
+    assert result.usage["completion_tokens"] == 20
+    assert result.usage["total_tokens"] == 30
+
+
+def test_call_llm_reports_empty_usage_rather_than_raising():
+    """A provider that reports no usage must yield {}, not an exception."""
+    mock_resp = _mock_completion(text="hi")
+    mock_resp.usage = None
+    with patch("litellm.completion", return_value=mock_resp):
+        result = call_llm(model="lmstudio/test-model",
+                          messages=[{"role": "user", "content": "test"}])
+    assert result.usage == {}
+
+
+def test_explicit_api_key_overrides_the_prefix_default():
+    """get_provider's worker role passes a credential litellm cannot resolve
+    on its own; it must survive the per-prefix api_key blocks."""
+    mock_resp = _mock_completion(text="hi")
+    with patch("litellm.completion", return_value=mock_resp) as mock_lit:
+        call_llm(model="custom/m", messages=[{"role": "user", "content": "t"}],
+                 api_key="WORKER-KEY")
+    assert mock_lit.call_args[1]["api_key"] == "WORKER-KEY"
+
+
+def test_no_api_key_leaves_the_prefix_default_alone():
+    mock_resp = _mock_completion(text="hi")
+    with patch("litellm.completion", return_value=mock_resp) as mock_lit:
+        call_llm(model="lmstudio/m", messages=[{"role": "user", "content": "t"}])
+    assert mock_lit.call_args[1]["api_key"] == "lm-studio"

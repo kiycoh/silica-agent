@@ -16,6 +16,7 @@ never raises on odd input.
 from __future__ import annotations
 
 import re
+import threading
 from typing import Any
 
 from silica.kernel.write import frontmatter
@@ -69,8 +70,16 @@ _MD_LINK_RE = re.compile(r"\[([^\[\]]*?)\]\(([^()]*)\)")
 _SENTENCE_SPLIT = re.compile(r"[.!?;\n]+")
 _TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ]+")
 
-# Cache stemmers per language (snowballstemmer objects are reusable).
-_STEMMERS: dict[str, Any] = {}
+# Cache stemmers per language, PER THREAD. A snowballstemmer is reusable but not
+# reentrant: stemWord() is set_current(word) -> _stem() -> get_current(), and
+# set_current mutates the instance (current/cursor/limit/bra/ket). Two threads
+# sharing one object silently swap stems — wrong co-occurrence node keys and a
+# wrong title_key, which is the equivalence the C3 write gate coerces on — with
+# no exception raised. This process runs several pools at once (sub-agent
+# threads under the FSM, the web UI's sync endpoints), so the sharing is real.
+# threading.local rather than a lock: construction is ~0.5 µs (the tables are
+# class-level), so a copy per thread costs nothing and keeps stemming parallel.
+_STEMMERS = threading.local()
 
 
 def _get_stemmer(lang: str) -> Any:
@@ -78,10 +87,14 @@ def _get_stemmer(lang: str) -> Any:
     # here (an unbuilt/empty store) Snowball would KeyError — fall back.
     if lang == "auto":
         lang = "english"
-    if lang not in _STEMMERS:
+    by_lang: dict[str, Any] | None = getattr(_STEMMERS, "by_lang", None)
+    if by_lang is None:
+        by_lang = _STEMMERS.by_lang = {}
+    stemmer = by_lang.get(lang)
+    if stemmer is None:
         import snowballstemmer
-        _STEMMERS[lang] = snowballstemmer.stemmer(lang)
-    return _STEMMERS[lang]
+        stemmer = by_lang[lang] = snowballstemmer.stemmer(lang)
+    return stemmer
 
 
 def stem_word(word: str, *, lang: str) -> str:

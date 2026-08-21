@@ -450,7 +450,10 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
     blocking_error = "Broken backlinks detected for 'NoteA': decreased from 2 to 0"
     with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(False, [blocking_error])) as mock_check:
         fsm.step()
-        mock_check.assert_called_once_with(pre_graph, post_graph, ["notes/NoteA.md"], frozenset(), frozenset())
+        # patched_paths carries every txn-touched path (post-WRITE phases
+        # included), not only op-level patches — see txn_touched_paths.
+        mock_check.assert_called_once_with(pre_graph, post_graph, ["notes/NoteA.md"],
+                                           frozenset(), frozenset({"notes/NoteA.md"}))
         assert fsm.state == InjectorState.ROLLBACK
         assert "Graph regression gate failed: Broken backlinks" in fsm.context["chunk"]["abort_reason"]
 

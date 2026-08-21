@@ -32,14 +32,18 @@ authoritative about vault structure.
 """
 from __future__ import annotations
 
+import logging
 import statistics
 from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Any, Callable
 
 from silica.kernel.recall.cooccurrence import CooccurStore, cooccur_key
 from silica.kernel.recall.embed import EmbedStore
 from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import in_folder
+
+logger = logging.getLogger(__name__)
 
 # Standard RRF damping constant (Cormack et al. 2009). Larger -> flatter weight
 # decay across ranks; 60 is the widely-used default.
@@ -52,7 +56,7 @@ _NOISE_FLOOR = 1e-6
 # BM25 knobs for the cooccur tf term (CONFIG.cooccur_bm25, spec section 9.2).
 # Textbook defaults, DELIBERATELY UNTUNED: the +4.02pp gate is credible precisely
 # because they were not fitted to this vault, so they stay constants rather than
-# config knobs. A sweep, if ever, is pre-declared after fase 3.
+# config knobs. A sweep, if ever, is pre-declared after phase 3.
 BM25_K1 = 1.2
 BM25_B = 0.75
 
@@ -184,7 +188,10 @@ def _embed_ranking(
 
 def _profile_from_seeds(
     cooccur_store: CooccurStore,
-    seeds: dict[str, float],
+    # Mapping, not dict: note_nodes() hands back integer counts and a
+    # dict[str, int] is not a dict[str, float] (invariant), while the body only
+    # ever reads.
+    seeds: Mapping[str, float],
     *,
     scope: str | None,
     expand: bool,
@@ -281,7 +288,7 @@ def _rank_cooccur_from_profile(
     (implicit concept->notes inverted index). Returns None when nothing overlaps.
 
     The tf term is raw count by default and BM25-saturated under
-    CONFIG.cooccur_bm25 (docs/specs/cooccur-scoring.md fase 1). Nothing else moves
+    CONFIG.cooccur_bm25 (docs/specs/cooccur-scoring.md phase 1). Nothing else moves
     with the flag: same IDF, same candidate set, same filters, same abstain, same
     tie-break, so the flag isolates the tf term the probe measured.
     """
@@ -764,3 +771,4 @@ def related_notes_for_query(
         recall_rank=recall_rank,
         lexical_rank=lexical_rank,
     )
+

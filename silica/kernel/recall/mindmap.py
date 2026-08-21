@@ -29,7 +29,31 @@ import heapq
 import math
 import re
 from collections import defaultdict, deque
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from typing import Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from silica.kernel.recall.cooccurrence import CooccurStore
+
+
+class GraphLike(Protocol):
+    """The slice of an nx.Graph this module actually uses.
+
+    A Protocol, not an import: the mindmap is pure geometry and must not pull
+    networkx in. Structural typing states the same contract the caller already
+    satisfies, and now states it where a checker can see it.
+    """
+
+    def __contains__(self, node: object) -> bool: ...
+
+    def neighbors(self, node: str) -> Iterable[str]: ...
+
+
+# (node id, node id) -> cosine.
+SimFn = Callable[[str, str], float]
+# (parent id, child id) -> the anchor line that justifies the link, or None.
+LinkContextFn = Callable[[str, str], "str | None"]
 
 # Fixed node-box size in canvas units. The non-overlap guarantee is stated in
 # terms of these: distance ≥ hypot(W, H) ⇒ the two boxes' AABBs are disjoint.
@@ -84,13 +108,13 @@ class MapMaterials:
     strength) where strength is a native 0-1 signal (embed cosine / edge
     Jaccard), NOT the RRF score — the radius consumes it as 1/strength.
     """
-    graph: object                         # nx.Graph-like: supports `in` and .neighbors()
+    graph: GraphLike
     titles: dict[str, str]                # id -> display title
     community_of: dict[str, int]          # id -> global community (missing ⇒ -1)
     latent: list[tuple[str, str, float]] = field(default_factory=list)
     latent_evidence: dict[str, str] = field(default_factory=dict)  # id -> display "why"
-    sim: object | None = None             # (id, id) -> cosine, or None to abstain
-    link_context: object | None = None    # (parent_id, child_id) -> anchor line | None
+    sim: SimFn | None = None              # None to abstain
+    link_context: LinkContextFn | None = None
 
 
 def node_color(community: int, on_paper: bool = False) -> str:
@@ -117,7 +141,7 @@ def _stem_title(node_id: str) -> str:
     return node_id.rsplit("/", 1)[-1].removesuffix(".md")
 
 
-def _bfs(root: str, graph: object, hops: int) -> dict[str, tuple[int, str | None]]:
+def _bfs(root: str, graph: GraphLike, hops: int) -> dict[str, tuple[int, str | None]]:
     """BFS up to `hops` on the undirected wikilink graph.
 
     Returns id -> (hop, parent_id); root maps to (0, None). Neighbours are
@@ -189,7 +213,7 @@ def _select(
 # Radial association layout (deterministic; the only new algorithmic piece)
 # ---------------------------------------------------------------------------
 
-def _similarity_chain(members: list[MapNode], sim: object | None) -> list[MapNode]:
+def _similarity_chain(members: list[MapNode], sim: SimFn | None) -> list[MapNode]:
     """Greedy nearest-neighbour ordering: each next node is the one most
     similar to the last placed, so angular neighbours are semantic ones.
     Falls back to id order when there is no similarity signal."""
@@ -203,7 +227,7 @@ def _similarity_chain(members: list[MapNode], sim: object | None) -> list[MapNod
     return out
 
 
-def _wedge_order(by_comm: dict[int, list[MapNode]], sim: object | None) -> list[int]:
+def _wedge_order(by_comm: dict[int, list[MapNode]], sim: SimFn | None) -> list[int]:
     """Communities as an angular sequence: largest first, then greedy by mean
     cross-similarity, so related communities share a wedge border."""
     comms = sorted(by_comm)
@@ -230,7 +254,7 @@ _WIKI_COST_SPAN = 0.9
 
 
 def _association_costs(
-    root: str, edges: list[MapEdge], ids: set[str], sim: object | None = None
+    root: str, edges: list[MapEdge], ids: set[str], sim: SimFn | None = None
 ) -> dict[str, float]:
     """Weighted shortest-path cost root → every selected node (Dijkstra).
 
@@ -286,7 +310,7 @@ def _association_costs(
     return dist
 
 
-def _layout(nodes: list[MapNode], *, costs: dict[str, float], sim: object | None = None) -> None:
+def _layout(nodes: list[MapNode], *, costs: dict[str, float], sim: SimFn | None = None) -> None:
     """Place nodes radially, mutating each node's x/y. Root stays at (0, 0).
 
     Angle: 360° is partitioned into one contiguous wedge per community, width
@@ -845,8 +869,8 @@ def reading_path(
     src: str,
     dst: str,
     *,
-    graph: object = None,
-    cooccur_store: object = None,
+    graph: GraphLike | None = None,
+    cooccur_store: "CooccurStore | None" = None,
     weighted: bool = False,
 ) -> list[tuple[str, str]] | None:
     """Shortest reading path src → dst: BFS over wikilinks + latent cooccur edges.
@@ -870,8 +894,8 @@ def reading_path(
     def neighbors(u: str) -> list[tuple[str, tuple[str, float]]]:
         out: dict[str, tuple[str, float]] = {}
         if cooccur_store is not None:
-            # ponytail: note_edges_for is O(E) per node → BFS worst case O(V·E);
-            # fine at vault scale, precompute a two-way adjacency if it drags.
+            # O(deg) per node: the store serves this from a two-way adjacency
+            # built once per mutation, so the walk is O(V+E), not O(V·E).
             for nb, score in cooccur_store.note_edges_for(u).items():
                 out[nb + ".md"] = ("cooccur", max(float(score), 1e-6))
         if u in graph:
@@ -1057,7 +1081,7 @@ def gather_materials(root: str, *, latent_k: int = 10) -> MapMaterials:
     )
 
 
-def _cooccur_store():
+def _cooccur_store() -> "CooccurStore | None":
     """The cooccur store, or None when empty/unavailable ⇒ that leg abstains."""
     try:
         from silica.config import CONFIG

@@ -94,39 +94,47 @@ def extract_skeleton(source: str, language: str, path: str = "") -> ModuleSkelet
     error-tolerant, so partial sources still yield partial skeletons)."""
     if language in BARE_LANGUAGES:
         return ModuleSkeleton(path=path, language=language)
+    # The walk belongs INSIDE the guard, not just the parser setup: every
+    # walker recurses once per AST level with no depth cap, so one deep tree
+    # (a left-nested chain, e.g. the tracked minified bundles under
+    # silica/ui/web/static/) raises RecursionError. Escaping here takes the
+    # whole code lane down (build_codegraph, /wiki, /impact, /stale) instead
+    # of marking one file, since _file_entry only catches OSError.
     try:
         from tree_sitter_language_pack import get_parser
         tree = get_parser(language).parse(source.encode("utf-8"))
+
+        src = source.encode("utf-8")
+        imports: list[str] = []
+        symbols: list[Symbol] = []
+        root = tree.root_node
+        module_doc: str = ""
+        module_comments: list[str] = []
+        dunder_all: list[str] | None = None
+        calls: list[Call] = []
+        aliases: dict[str, str] = {}
+        deferred: list[str] = []
+        has_main_guard = False
+        if language == "java":
+            from silica.kernel.code.codeast import java as _java
+            return _java.extract(root, src, path=path, language=language)
+        if language in ("c", "cpp"):
+            from silica.kernel.code.codeast import c as _c
+            return _c.extract(root, src, path=path, language=language)
+        if language == "python":
+            from silica.kernel.code.codeast import python as _py
+            for i in range(root.named_child_count):
+                _py._py_extract(root.named_child(i), src, imports, symbols, aliases=aliases)
+            module_doc, module_comments = _py._py_module_docs(root, src)
+            dunder_all = _py._py_dunder_all(root, src)
+            calls = _py._py_calls(root, src)
+            deferred = _py._py_deferred_imports(root, src, aliases)
+            has_main_guard = _py._py_has_main_guard(root, src)
+        else:
+            from silica.kernel.code.codeast import ts as _ts
+            return _ts.extract(root, src, path=path, language=language)
     except Exception:
         return ModuleSkeleton(path=path, language=language, parse_error=True)
-
-    src = source.encode("utf-8")
-    imports: list[str] = []
-    symbols: list[Symbol] = []
-    root = tree.root_node
-    module_doc, module_comments, dunder_all = ("", [], None)
-    calls: list[Call] = []
-    aliases: dict[str, str] = {}
-    deferred: list[str] = []
-    has_main_guard = False
-    if language == "java":
-        from silica.kernel.code.codeast import java as _java
-        return _java.extract(root, src, path=path, language=language)
-    if language in ("c", "cpp"):
-        from silica.kernel.code.codeast import c as _c
-        return _c.extract(root, src, path=path, language=language)
-    if language == "python":
-        from silica.kernel.code.codeast import python as _py
-        for i in range(root.named_child_count):
-            _py._py_extract(root.named_child(i), src, imports, symbols, aliases=aliases)
-        module_doc, module_comments = _py._py_module_docs(root, src)
-        dunder_all = _py._py_dunder_all(root, src)
-        calls = _py._py_calls(root, src)
-        deferred = _py._py_deferred_imports(root, src, aliases)
-        has_main_guard = _py._py_has_main_guard(root, src)
-    else:
-        from silica.kernel.code.codeast import ts as _ts
-        return _ts.extract(root, src, path=path, language=language)
     return ModuleSkeleton(path=path, language=language, imports=imports,
                           deferred_imports=deferred,
                           symbols=symbols, module_doc=module_doc,

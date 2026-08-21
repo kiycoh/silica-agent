@@ -9,9 +9,9 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _fresh_setup_env(monkeypatch):
-    # Importing silica.config preloads the dev checkout's .env (SILICA_MODEL
-    # included) into os.environ. These tests simulate fresh setups, where no
-    # chat model is configured yet; the keep-current shortcut has its own test.
+    # Importing silica.config preloads ~/.silica/.env (SILICA_MODEL included)
+    # into os.environ. These tests simulate fresh setups, where no chat model is
+    # configured yet; the keep-current shortcut has its own test.
     monkeypatch.delenv("SILICA_MODEL", raising=False)
 
 
@@ -296,14 +296,17 @@ class TestRunWizard:
         monkeypatch.setattr(wizard.gitstate, "find_repo_root", lambda p: None)
         monkeypatch.setattr(wizard, "run_checks", lambda cfg: [])
         monkeypatch.setattr(wizard.os, "environ", dict(os.environ))
+        # No network in tests: an unreachable /models falls back to the
+        # curated list, which is the path this flow asserts.
+        monkeypatch.setattr(wizard, "endpoint_model_ids", lambda base, api_key="": [])
 
         answers = [
             "",             # setup mode → essential
             str(vault),     # vault path
             "",             # force language? → Enter
             "groq",         # provider
+            "gsk_test",     # Groq API key (asked first: it feeds /models)
             "",             # model → default groq/llama-3.3-70b-versatile
-            "gsk_test",     # Groq API key
             "n",            # high-value gate → skip
             "",             # write → y
         ]
@@ -839,7 +842,7 @@ class TestEndpointModelIds:
             def json():
                 return {"data": [{"id": "a"}, {"id": "b"}, {"no_id": 1}]}
 
-        monkeypatch.setattr("httpx.get", lambda url, timeout=0: _Resp())
+        monkeypatch.setattr("httpx.get", lambda url, headers=None, timeout=0: _Resp())
         assert wizard.endpoint_model_ids("http://x/v1") == ["a", "b"]
 
     def test_returns_empty_on_error(self, monkeypatch):

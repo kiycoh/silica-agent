@@ -29,7 +29,6 @@ def vault(tmp_path, monkeypatch):
     (vault_dir / "Concepts" / "Boats.md").write_text(
         "# Boats\n\nsailing boat harbour\n", encoding="utf-8"
     )
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
     import silica.kernel.recall.lexical as lex_mod
@@ -157,7 +156,6 @@ def test_cli_lexical_command_routes_to_tool():
 def test_refresh_empty_vault_returns_error(tmp_path, monkeypatch):
     vault_dir = tmp_path / "empty_vault"
     vault_dir.mkdir()
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
     import silica.kernel.recall.lexical as lex_mod

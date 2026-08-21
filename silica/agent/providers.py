@@ -11,11 +11,10 @@ from typing import Any
 from urllib.parse import urlsplit
 import httpx
 import openai
-import orjson
 from pydantic import BaseModel
 
-from silica.agent.llm import LLMResponse, build_assistant_message, openrouter_routing, retry_transient
-from silica.config import HOSTED_PROVIDERS
+from silica.agent.llm import LLMResponse
+from silica.config import HOSTED_PROVIDERS, ensure_prefix
 
 logger = logging.getLogger(__name__)
 
@@ -108,11 +107,18 @@ SILICA_CLI_OPEN = "<silica-cli>"
 SILICA_CLI_CLOSE = "</silica-cli>"
 
 
-# ponytail: cached per process — reload the model in LM Studio with a different
-# window and silica needs a restart to see it; TTL cache if that ever bites.
-@lru_cache(maxsize=None)
+# TTL memo, not lru_cache: limits move while silica runs (LM Studio reload
+# with a different context window), and a stale window mis-clamps every
+# request until restart. The TTL also un-sticks the (0,0) an unreachable
+# endpoint used to pin for the whole process. Price: one metadata call per
+# provider+model per window.
+_MODEL_LIMITS_TTL_S = 600.0
+_model_limits_memo: dict[tuple[str, str], tuple[float, tuple[int, int]]] = {}
+
+
 def model_limits(provider: str, model: str) -> tuple[int, int]:
-    """(context_window, max_output_tokens) as reported by the live provider.
+    """(context_window, max_output_tokens) as reported by the live provider,
+    memoized for _MODEL_LIMITS_TTL_S per (provider, model).
 
     lmstudio   → GET {base}/api/v0/models: `loaded_context_length` (the window
                  the model is loaded with RIGHT NOW, often below its max) with
@@ -126,8 +132,21 @@ def model_limits(provider: str, model: str) -> tuple[int, int]:
                  `max_completion_tokens` (often far below the window — e.g.
                  qwen3-8b: 131k ctx, 8k out).
 
-    (0, 0) means unknown/unreachable: callers keep their static defaults.
+    (0, 0) means unknown/unreachable: callers keep their static defaults
+    (and the TTL retries the probe instead of pinning the failure).
     """
+    import time
+
+    now = time.monotonic()
+    hit = _model_limits_memo.get((provider, model))
+    if hit is not None and now < hit[0]:
+        return hit[1]
+    value = _model_limits_fetch(provider, model)
+    _model_limits_memo[(provider, model)] = (now + _MODEL_LIMITS_TTL_S, value)
+    return value
+
+
+def _model_limits_fetch(provider: str, model: str) -> tuple[int, int]:
     try:
         if provider == "ollama":
             base = PROVIDER_PRESETS["ollama"]["base_url"].removesuffix("/v1")
@@ -210,192 +229,28 @@ def _to_wire(msg: dict) -> dict:
     return wire
 
 
-class OpenAICompatibleProvider:
-    def __init__(self, base_url: str, api_key: str, model: str):
-        # Granular timeouts: connect=10s, read=45s per-chunk (streaming inactivity watchdog).
-        # The read timeout applies to each received chunk, so a frozen stream that stops
-        # producing tokens raises APITimeoutError after 45s — triggering the retry loop.
-        _timeout = httpx.Timeout(connect=10.0, read=45.0, write=10.0, pool=5.0)
-        self.client = openai.OpenAI(base_url=base_url, api_key=api_key, timeout=_timeout)
-        self.base_url = base_url
-        self.model = model
+class Provider:
+    """The non-interactive LLM lane: distiller, capability workers, sub-agents.
 
-    def call_llm(
-        self,
-        messages: list[dict],
-        tools: list[dict] | None = None,
-        response_schema: type[BaseModel] | None = None,
-        max_tokens: int | None = None,
-        openrouter_provider: str | None = None,
-        temperature: float | None = None,
-    ) -> LLMResponse:
-        kwargs: dict[str, Any] = {
-            "model": self.model,
-            "messages": [_to_wire(m) for m in messages],
-        }
-        if tools:
-            kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
-        # Structured decoding defaults to greedy: this path exists to extract a
-        # fixed shape, and sampling at the provider default (0.8 on Ollama, 1.0
-        # on OpenAI) buys variety nobody wants in an extraction. Ollama's
-        # structured-outputs doc calls for temperature 0 explicitly. Pass an
-        # explicit temperature to override.
-        if temperature is None and response_schema is not None:
-            temperature = 0.0
-        if temperature is not None:
-            kwargs["temperature"] = temperature
+    One `call_llm(messages, ...) -> LLMResponse`, routed through the same
+    `silica.agent.llm.call_llm` the interactive loop uses, so both lanes share
+    one retry policy, one wire boundary, one max-token clamp and one set of
+    per-provider quirks (ollama's num_ctx, lmstudio's api_base, openrouter's
+    routing pin). This used to be a second stack on the raw openai SDK, which
+    meant those quirks had to be fixed twice — and one of them, Ollama's silent
+    4096-token truncation, was only ever fixed on one side.
 
-
-        provider = "openrouter" if "openrouter.ai" in self.base_url else ""
-        input_chars = len(str(kwargs["messages"])) + (len(str(tools)) if tools else 0)
-        kwargs["max_tokens"] = clamp_max_tokens(provider, self.model, max_tokens, input_chars)
-
-        if "openrouter.ai" in self.base_url and (rt := openrouter_routing(openrouter_provider)):
-            kwargs["extra_body"] = rt
-
-        def _execute_call() -> LLMResponse:
-            if response_schema:
-                try:
-                    response = self.client.beta.chat.completions.parse(
-                        **kwargs,
-                        response_format=response_schema
-                    )
-                    choice = response.choices[0]
-                    message = choice.message
-                    finish_reason = getattr(choice, "finish_reason", None)
-                    
-                    parsed_object = message.parsed
-                    content_str = message.content if message.content else ""
-                    if not content_str and parsed_object:
-                        content_str = orjson.dumps(parsed_object.model_dump()).decode("utf-8")
-                    
-                    raw = ([(tc.id, tc.function.name, tc.function.arguments) for tc in message.tool_calls]
-                           if message.tool_calls else None)
-                    assistant_msg, parsed_calls = build_assistant_message(message.content, raw)
-
-                    return LLMResponse(
-                        text=content_str,
-                        tool_calls=parsed_calls,
-                        assistant_message=assistant_msg,
-                        usage=dict(response.usage) if response.usage else {},
-                        reasoning=getattr(message, "reasoning_content", None),
-                        finish_reason=finish_reason,
-                    )
-                except (openai.APITimeoutError, openai.APIConnectionError, openai.RateLimitError):
-                    # Re-raise transient/network/rate-limit errors to be retried in the outer loop
-                    raise
-                except Exception as e:
-                    logger.warning("Constrained decoding failed: %s", e)
-                    # If the error is due to truncation/parsing failure, try to salvage the partial content
-                    completion = getattr(e, "completion", None)
-                    if completion and completion.choices:
-                        msg = completion.choices[0].message
-                        content_str = msg.content or ""
-                        finish_reason = getattr(completion.choices[0], "finish_reason", None)
-                        if content_str:
-                            logger.info("Extracted partial response text (len=%d) from parsing error.", len(content_str))
-                            return LLMResponse(
-                                text=content_str,
-                                tool_calls=[],
-                                assistant_message={"role": "assistant", "content": content_str},
-                                usage=dict(completion.usage) if getattr(completion, "usage", None) else {},
-                                finish_reason=finish_reason or "length",
-                            )
-                    logger.warning("No partial content salvageable, falling back to non-structured")
-
-            # Non-structured path: stream so the httpx read-timeout acts as a
-            # per-chunk inactivity watchdog rather than a total-body deadline.
-            # stream_options is ignored by providers that don't support it.
-            stream = self.client.chat.completions.create(
-                **kwargs, stream=True, stream_options={"include_usage": True}
-            )
-            content_chunks: list[str] = []
-            tc_acc: dict[int, dict[str, Any]] = {}
-            finish_reason: str | None = None
-            usage_dict: dict[str, int] = {}
-
-            for chunk in stream:
-                # Usage first: the include_usage chunk carries `choices: []` by
-                # contract (verified on Ollama, and OpenAI-style APIs alike), so
-                # reading it after the empty-choices `continue` below dropped it
-                # every time and left usage={} on this whole path.
-                if getattr(chunk, "usage", None) is not None:
-                    u = chunk.usage
-                    usage_dict = {
-                        "prompt_tokens": getattr(u, "prompt_tokens", 0),
-                        "completion_tokens": getattr(u, "completion_tokens", 0),
-                        "total_tokens": getattr(u, "total_tokens", 0),
-                    }
-                    # Keep cache-hit visibility (token meter reads cached_tokens).
-                    ptd = getattr(u, "prompt_tokens_details", None)
-                    cached = getattr(ptd, "cached_tokens", None) if ptd is not None else None
-                    if cached:
-                        usage_dict["prompt_tokens_details"] = {"cached_tokens": cached}
-                if not chunk.choices:
-                    continue
-                _choice = chunk.choices[0]
-                finish_reason = _choice.finish_reason or finish_reason
-                delta = _choice.delta
-                if delta.content:
-                    content_chunks.append(delta.content)
-                if delta.tool_calls:
-                    for _tc in delta.tool_calls:
-                        _i = _tc.index
-                        if _i not in tc_acc:
-                            tc_acc[_i] = {
-                                "id": "",
-                                "type": "function",
-                                "function": {"name": "", "arguments": ""},
-                            }
-                        if _tc.id:
-                            tc_acc[_i]["id"] = _tc.id
-                        if _tc.function:
-                            if _tc.function.name:
-                                tc_acc[_i]["function"]["name"] += _tc.function.name
-                            if _tc.function.arguments:
-                                tc_acc[_i]["function"]["arguments"] += _tc.function.arguments
-
-            content = "".join(content_chunks) or None
-            tool_calls_list = [tc_acc[k] for k in sorted(tc_acc)]
-            raw = ([(t["id"], t["function"]["name"], t["function"]["arguments"]) for t in tool_calls_list]
-                   if tool_calls_list else None)
-            assistant_msg, parsed_calls = build_assistant_message(content, raw)
-
-            return LLMResponse(
-                text=content,
-                tool_calls=parsed_calls,
-                assistant_message=assistant_msg,
-                usage=usage_dict,
-                finish_reason=finish_reason,
-            )
-
-        return retry_transient(
-            _execute_call,
-            (openai.APITimeoutError, openai.APIConnectionError, openai.RateLimitError),
-        )
-
-
-class OllamaNativeProvider:
-    """Ollama through /api/chat instead of the OpenAI-compatible /v1 endpoint.
-
-    /v1 cannot set the context window. It ignores `num_ctx` both bare and inside
-    `options`, loads the model at Ollama's 4096 default, and evicts a wider
-    runner to do it (measured: with a 16384 runner already loaded, one /v1 call
-    reloaded at 4096, kept 2051 of 6645 prompt tokens and returned no tool calls,
-    HTTP 200). Every window-sized prompt on this path — distiller, dedup, refine,
-    codewiki — was therefore truncated in silence, which corrupts notes rather
-    than failing. /api/chat honours a per-request num_ctx and expresses
-    JSON-schema structured outputs through `format`, so it is the only endpoint
-    that can serve this path at all.
-
-    Duck-types OpenAICompatibleProvider: same call_llm keyword contract, same
-    LLMResponse, so every capability call site stays untouched.
+    `model` carries its provider prefix (litellm resolves the endpoint from it);
+    `api_key` is passed only when the role overrides what litellm would resolve.
     """
 
-    def __init__(self, model: str):
+    def __init__(self, base_url: str, api_key: str, model: str):
+        # Diagnostic only — NOT how the call is routed. llm.call_llm derives the
+        # api_base from the model prefix, so changing this steers nothing; it is
+        # kept because it is the endpoint a "which box answered?" question means.
+        self.base_url = base_url
+        self.api_key = api_key
         self.model = model
-        self.base_url = PROVIDER_PRESETS["ollama"]["base_url"]
 
     def call_llm(
         self,
@@ -408,18 +263,22 @@ class OllamaNativeProvider:
     ) -> LLMResponse:
         from silica.agent.llm import call_llm  # lazy: llm.py imports this module
 
-        # Same greedy default as the OpenAI-SDK path: an extraction wants the
-        # fixed shape, not Ollama's 0.8 sampling default.
+        # Structured decoding defaults to greedy: this path exists to extract a
+        # fixed shape, and sampling at the provider default (0.8 on Ollama, 1.0
+        # on OpenAI) buys variety nobody wants in an extraction. Ollama's
+        # structured-outputs doc calls for temperature 0 explicitly. Pass an
+        # explicit temperature to override.
         if temperature is None and response_schema is not None:
             temperature = 0.0
-        # openrouter_provider is an OpenRouter routing pin, inert here.
         return call_llm(
-            model=f"ollama/{self.model}",
-            messages=[_to_wire(m) for m in messages],
+            model=self.model,
+            messages=messages,
             tools=tools,
             max_tokens=max_tokens,
             response_format=response_schema,
             temperature=temperature,
+            openrouter_provider=openrouter_provider,
+            api_key=self.api_key or None,
         )
 
 
@@ -461,6 +320,7 @@ def warn_down_once(
     means the follow-on problem still gets its own line after the first is fixed.
     """
     kind = _failure_kind(exc)
+    args: tuple
     if kind == "down":
         msg, args = "%s unreachable at %s (%s)", (role, where, exc)
     elif kind == "rejected":
@@ -702,8 +562,8 @@ def get_reranker(config: Any) -> Reranker | LocalReranker | FallbackReranker | N
     served = Reranker(
         base_url=base_url, model=model, api_key=getattr(config, "rerank_api_key", ""),
     ) if (base_url and model) else None
-    # ponytail: no per-config override for the local model — one constant until
-    # someone needs two different cross-encoders on one machine.
+    # No per-config override for the local model (declined 2026-08-19): one
+    # constant until someone needs two different cross-encoders on one machine.
     if served is not None and has_local_rerank():
         return FallbackReranker(served, LocalReranker(model=LOCAL_RERANK_MODEL))
     if served is not None:
@@ -713,7 +573,7 @@ def get_reranker(config: Any) -> Reranker | LocalReranker | FallbackReranker | N
     return None
 
 
-def get_provider(config: Any, role: str = "router") -> OpenAICompatibleProvider | OllamaNativeProvider:
+def get_provider(config: Any, role: str = "router") -> Provider:
     """Return an LLM provider for the given role.
 
     role="router" (default) → uses config.provider / config.model (the main model).
@@ -724,23 +584,27 @@ def get_provider(config: Any, role: str = "router") -> OpenAICompatibleProvider 
     When the worker role specifies an explicit worker_api_key it wins over the
     preset; the endpoint always comes from the worker_provider preset.
     """
+    # `or ""` on every read: these fields are Optional on the config, and the
+    # "fall back to the router role" test below is a falsiness test either way.
+    provider_name: str
+    model_name: str
     if role == "escalation":
-        provider_name = getattr(config, "distill_escalation_provider", None)
-        model_name = getattr(config, "distill_escalation_model", None)
+        provider_name = getattr(config, "distill_escalation_provider", "") or ""
+        model_name = getattr(config, "distill_escalation_model", "") or ""
         if not provider_name or not model_name:
-            provider_name = getattr(config, "provider", "lmstudio")
-            model_name = getattr(config, "model", "")
+            provider_name = getattr(config, "provider", "lmstudio") or ""
+            model_name = getattr(config, "model", "") or ""
             role = "router"
     elif role == "worker":
-        provider_name = getattr(config, "worker_provider", None)
-        model_name = getattr(config, "worker_model", None)
+        provider_name = getattr(config, "worker_provider", "") or ""
+        model_name = getattr(config, "worker_model", "") or ""
         if not provider_name or not model_name:
-            provider_name = getattr(config, "provider", "lmstudio")
-            model_name = getattr(config, "model", "")
+            provider_name = getattr(config, "provider", "lmstudio") or ""
+            model_name = getattr(config, "model", "") or ""
             role = "router"
     else:
-        provider_name = getattr(config, "provider", "lmstudio")
-        model_name = getattr(config, "model", "")
+        provider_name = getattr(config, "provider", "lmstudio") or ""
+        model_name = getattr(config, "model", "") or ""
 
     preset = PROVIDER_PRESETS.get(provider_name)
     if preset:
@@ -759,14 +623,23 @@ def get_provider(config: Any, role: str = "router") -> OpenAICompatibleProvider 
     if role == "worker":
         api_key = getattr(config, "worker_api_key", None) or api_key
 
-    # Strip the preset prefix (openrouter/lmstudio/ollama) — the OpenAI-compatible
-    # endpoint wants the bare model id. No-op when the model carries no prefix.
-    # For openrouter this drops only the leading "openrouter/", keeping "vendor/model".
-    model_name = model_name.removeprefix(f"{provider_name}/")
+    # litellm resolves the endpoint from the prefix, so keep it (or restore it
+    # when the user wrote a bare id). Ollama in particular MUST keep it: the
+    # prefix is what routes it to /api/chat with an explicit num_ctx, and the
+    # /v1 endpoint it would otherwise hit cannot size the context window and
+    # truncates window-sized prompts in silence (measured: 2051 of 6645 prompt
+    # tokens kept at Ollama's 4096 default, zero tool calls, HTTP 200).
+    #
+    # Same rule as config.ensure_prefix, guard included: the roles below read
+    # the very fields it already prefixed, so re-deriving it without the guard
+    # made the two disagree. Only a prefix litellm knows can resolve an
+    # endpoint, so an unlisted provider (SILICA_WORKER_PROVIDER=vllm) keeps its
+    # bare id — config leaves it bare for exactly that reason, and pinning
+    # `vllm/` in front of it turns a routable model into a BadRequestError.
+    model_name = ensure_prefix(model_name, provider_name)
 
-    # Ollama never goes through /v1: that endpoint cannot size the context window
-    # and truncates in silence (see OllamaNativeProvider).
-    if provider_name == "ollama":
-        return OllamaNativeProvider(model=model_name)
-
-    return OpenAICompatibleProvider(base_url=base_url, api_key=api_key, model=model_name)
+    # The preset key is only worth passing when it is not what litellm would
+    # resolve on its own — the worker role's explicit override. `custom` needs
+    # no entry here: llm.call_llm reads provider_api_key off CONFIG directly.
+    override = api_key if (role == "worker" and getattr(config, "worker_api_key", None)) else ""
+    return Provider(base_url=base_url, api_key=override, model=model_name)

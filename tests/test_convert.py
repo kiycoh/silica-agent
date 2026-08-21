@@ -1062,10 +1062,10 @@ def test_silent_media_raises_instead_of_writing_an_empty_note(tmp_vault, monkeyp
 
 
 def test_unknown_asr_provider_names_the_known_ones(tmp_vault, monkeypatch):
-    monkeypatch.setattr(CONFIG, "asr_provider", "nope")
+    monkeypatch.setattr(CONFIG, "stt_provider", "nope")
     tmp_vault.note("talk.mp3", "x")
 
-    with pytest.raises(ValueError, match="unknown asr_provider.*endpoint"):
+    with pytest.raises(ValueError, match="unknown stt_provider.*endpoint"):
         conv.convert("talk.mp3")
 
 
@@ -1101,15 +1101,15 @@ def test_endpoint_provider_posts_multipart_and_asks_for_vtt(tmp_vault, monkeypat
     class R:
         status_code, text = 200, _VTT
 
-    def fake_post(url, files=None, data=None, timeout=None):
+    def fake_post(url, files=None, data=None, headers=None, timeout=None):
         seen.update(url=url, data=dict(data or {}), name=files["file"][0],
-                    payload=files["file"][1].read())
+                    payload=files["file"][1].read(), headers=dict(headers or {}))
         return R()
 
     import httpx
     monkeypatch.setattr(httpx, "post", fake_post)
-    monkeypatch.setattr(CONFIG, "asr_base_url", "http://127.0.0.1:9999")
-    monkeypatch.setattr(CONFIG, "asr_lang", "it")
+    monkeypatch.setattr(CONFIG, "stt_base_url", "http://127.0.0.1:9999")
+    monkeypatch.setattr(CONFIG, "stt_lang", "it")
     wav = Path(CONFIG.vault_path) / "a.wav"
     wav.write_bytes(b"RIFF-payload")
 
@@ -1117,6 +1117,7 @@ def test_endpoint_provider_posts_multipart_and_asks_for_vtt(tmp_vault, monkeypat
     assert seen["url"] == "http://127.0.0.1:9999/v1/audio/transcriptions"
     assert seen["data"]["response_format"] == "vtt"
     assert seen["data"]["language"] == "it"
+    assert seen["headers"]["Authorization"] == f"Bearer {CONFIG.stt_api_key}"
     assert seen["payload"] == b"RIFF-payload"   # the file really was sent
     assert "the demux is one call." in out
     assert "-->" not in out and "WEBVTT" not in out
@@ -1152,8 +1153,8 @@ def test_no_server_says_how_to_start_one(tmp_vault, monkeypatch):
 
 
 def test_whispercpp_without_a_model_says_so(tmp_vault, monkeypatch):
-    monkeypatch.setattr(CONFIG, "asr_whispercpp_bin", "")
-    monkeypatch.setattr(CONFIG, "asr_whispercpp_model", "")
+    monkeypatch.setattr(CONFIG, "stt_whispercpp_bin", "")
+    monkeypatch.setattr(CONFIG, "stt_whispercpp_model", "")
     monkeypatch.setattr(conv.shutil, "which", lambda n: "/usr/bin/whisper-cli")
     wav = Path(CONFIG.vault_path) / "a.wav"
     wav.write_bytes(b"x")
@@ -1262,15 +1263,15 @@ def test_a_real_video_becomes_a_real_note_over_a_real_socket(tmp_vault, tmp_path
              "-c:v", "libx264", "-c:a", "aac", "-shortest", str(src)],
             check=True, capture_output=True,
         )
-        CONFIG.asr_base_url = f"http://127.0.0.1:{server.server_port}"
-        CONFIG.asr_provider = "endpoint"
-        CONFIG.asr_lang = ""
+        CONFIG.stt_base_url = f"http://127.0.0.1:{server.server_port}"
+        CONFIG.stt_provider = "endpoint"
+        CONFIG.stt_lang = ""
 
         notes = conv.convert(str(src))
     finally:
         server.shutdown()
-        CONFIG.asr_base_url = SilicaConfig().asr_base_url
-        CONFIG.asr_provider = SilicaConfig().asr_provider
+        CONFIG.stt_base_url = SilicaConfig().stt_base_url
+        CONFIG.stt_provider = SilicaConfig().stt_provider
 
     # the server saw a real multipart upload at the OpenAI-compatible path
     assert received["path"] == b"/v1/audio/transcriptions"

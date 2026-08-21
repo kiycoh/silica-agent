@@ -34,12 +34,32 @@ _RUNS_DIR = Path.home() / ".silica" / "runs"
 logger = logging.getLogger(__name__)
 
 
+def run_dir_for(run_id: str) -> Path:
+    """`~/.silica/runs/<run_id>/`, with run_id confined to the runs root.
+
+    The single choke point for turning a run_id into a filesystem path. run_id
+    is model-supplied (resume_run_id, silica_ledger_next/update), and
+    `_RUNS_DIR / run_id` silently DISCARDS the runs root when run_id is
+    absolute and joins a `../` verbatim — so a crafted id would read or write
+    ledgers anywhere on disk. Containment rather than a format regex: run ids
+    already on disk must keep resuming whatever shape they have.
+    """
+    from silica.kernel.recall.paths import contain_in_vault
+
+    return _RUNS_DIR / contain_in_vault(run_id, _RUNS_DIR)
+
+
 def _save_json(obj: Any, filename: str) -> Path:
     """Serialise a run-scoped dataclass to ~/.silica/runs/<run_id>/<filename>."""
-    run_dir = _RUNS_DIR / obj.run_id
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    run_dir = run_dir_for(obj.run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
     path = run_dir / filename
-    path.write_bytes(orjson.dumps(dataclasses.asdict(obj), option=orjson.OPT_INDENT_2))
+    # ledger.json is rewritten on every task transition; a crash inside a plain
+    # write_bytes leaves a truncated file, load() raises, and Run.resume falls
+    # back to a FRESH run — losing the checkpoint state resumption exists for.
+    atomic_write_bytes(path, orjson.dumps(dataclasses.asdict(obj), option=orjson.OPT_INDENT_2))
     return path
 
 
@@ -94,14 +114,14 @@ class TaskLedger:
 
     def save(self) -> Path:
         """Write to disk only if the file does not yet exist (immutable semantics)."""
-        path = _RUNS_DIR / self.run_id / "task_ledger.json"
+        path = run_dir_for(self.run_id) / "task_ledger.json"
         if path.exists():
             return path  # already written — do not overwrite
         return _save_json(self, "task_ledger.json")
 
     @classmethod
     def load(cls, run_id: str) -> TaskLedger:
-        path = _RUNS_DIR / run_id / "task_ledger.json"
+        path = run_dir_for(run_id) / "task_ledger.json"
         return TypeAdapter(cls).validate_python(orjson.loads(path.read_bytes()))
 
 
@@ -140,7 +160,7 @@ class RunManifest:
 
     @classmethod
     def load(cls, run_id: str) -> "RunManifest":
-        path = _RUNS_DIR / run_id / "manifest.json"
+        path = run_dir_for(run_id) / "manifest.json"
         return TypeAdapter(cls).validate_python(orjson.loads(path.read_bytes()))
 
     def digest_section(self, max_items: int = 30) -> str:
@@ -321,7 +341,7 @@ class ProgressLedger:
     @property
     def run_dir(self) -> Path:
         """Directory that owns all artefacts for this run."""
-        return _RUNS_DIR / self.run_id
+        return run_dir_for(self.run_id)
 
     def is_checkpoint_done(self, task_id: str, content_hash: str) -> str | None:
         """Return the output_ref if task_id is done with a matching content_hash.
@@ -470,9 +490,9 @@ class ProgressLedger:
             from silica.kernel import plans
             if CONFIG.vault_path:
                 from pathlib import Path
-                counts = plans.status_counts(Path(CONFIG.vault_path))
-                if counts:
-                    summary = ", ".join(f"{n} {s}" for s, n in sorted(counts.items()))
+                plan_counts = plans.status_counts(Path(CONFIG.vault_path))
+                if plan_counts:
+                    summary = ", ".join(f"{n} {s}" for s, n in sorted(plan_counts.items()))
                     parts.append(f"PLANS: {summary} — run /plans to inspect")
         except Exception:
             pass
@@ -561,7 +581,7 @@ class ProgressLedger:
 
     @classmethod
     def load(cls, run_id: str) -> ProgressLedger:
-        path = _RUNS_DIR / run_id / "ledger.json"
+        path = run_dir_for(run_id) / "ledger.json"
         return TypeAdapter(cls).validate_python(orjson.loads(path.read_bytes()))
 
     # ------------------------------------------------------------------

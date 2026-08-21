@@ -8,6 +8,7 @@ Terminology:
 import pytest
 from silica.kernel.write.merge import (
     CONFLICT_CALLOUT_HEADER,
+    LEGACY_CONFLICT_CALLOUT_HEADER,
     detect_conflict,
     inject_conflict_callout,
     three_way_merge,
@@ -61,6 +62,15 @@ class TestInjectCallout:
         once = inject_conflict_callout("content")
         twice = inject_conflict_callout(once)
         assert twice.count(CONFLICT_CALLOUT_HEADER) == 1
+
+    def test_legacy_italian_callout_is_not_double_stamped(self):
+        """A note stamped before the header was translated must still match."""
+        existing = (
+            f"{LEGACY_CONFLICT_CALLOUT_HEADER}\n"
+            "> This note was modified concurrently.\n\n"
+            "body"
+        )
+        assert inject_conflict_callout(existing) == existing
 
 
 class TestThreeWayMerge:
@@ -117,4 +127,4 @@ class TestThreeWayMerge:
             incoming="body",
         )
         assert "[!danger]" in merged
-        assert "Conflitto Semantico" in merged
+        assert "Semantic Conflict" in merged

@@ -16,6 +16,7 @@ import re
 import shlex
 import sys
 import uuid
+from collections.abc import Callable
 from contextlib import nullcontext, redirect_stdout
 from typing import NamedTuple
 
@@ -55,6 +56,9 @@ def _count_context_tokens(messages: list[dict]) -> int:
     messages = [_to_wire(m) for m in messages]
     try:
         import litellm
+
+        from silica.config import drop_foreign_env
+        drop_foreign_env()  # litellm calls load_dotenv() at import
         return litellm.token_counter(model=CONFIG.model, messages=messages)
     except Exception:
         return sum(len(m.get("content") or "") for m in messages) // 4
@@ -120,8 +124,8 @@ def _today_line() -> str:
     date in the context is incidental: the run-log tail inside the vault map,
     which is the *last run's* day and is a best-effort block that can be absent.
 
-    # ponytail: session-scoped, like the rest of the seed. A session that spans
-    # midnight keeps the day it started on; re-stamp per turn if that ever bites.
+    Session-scoped, like the rest of the seed: a session that spans midnight
+    keeps the day it started on. Per-turn re-stamping was declined 2026-08-19.
     """
     import datetime as _dt
 
@@ -182,7 +186,7 @@ def seed_messages(math: bool = False) -> list[dict]:
     # detected from the human notes): a slash-command turn carries no language
     # of its own, and defaulting to English on an Italian vault answered /quiz
     # in the wrong language.
-    reply = reply_language_for(CONFIG.vault_path)
+    reply = reply_language_for(CONFIG.vault_path) or ""
     messages: list[dict] = [{"role": "system", "content": system_prompt(reply, math=math)}]
     messages.append({"role": "system", "content": _today_line()})
     messages.append({"role": "system", "content": _vault_scope()})
@@ -482,6 +486,26 @@ def _announce_code_lane() -> None:
         CONSOLE.print(f"  [yellow]⚠ {warn}[/]")
 
 
+def _positional(args: list[str]) -> list[str]:
+    """The tokens that are not flags — anything not starting with `-`.
+
+    Slash commands take their subject positionally and their options as
+    `--key=value`, so this and `_str_flag` are the whole parser. argparse would
+    own sys.argv and exit the REPL on a typo; these two never do.
+    """
+    return [a for a in args if not a.startswith("-")]
+
+
+def _str_flag(args: list[str], flag: str, default: str = "") -> str:
+    """`--flag=value` out of args, or `default` when it is absent.
+
+    `flag` is given without the `=` ("--target"); an empty `--target=` yields ""
+    and is therefore indistinguishable from absent, which every caller wants.
+    """
+    prefix = flag + "="
+    return next((a[len(prefix):] for a in args if a.startswith(prefix)), default)
+
+
 def _int_flag(args: list[str], flag: str, default: int) -> int:
     """`--flag=N` out of args; keeps the default when absent or not a number."""
     raw = next((a[len(flag):] for a in args if a.startswith(flag)), None)
@@ -496,6 +520,735 @@ _REFRESH = {
     "/embed": ("silica_embed_refresh", ""),
     "/cooccur": ("silica_cooccurrence_refresh", " (co-occurrence)"),
     "/lexical": ("silica_lexical_refresh", " (lexical)"),
+}
+
+
+# /contested scan memo: (epoch, rows) — the scan parses every note's
+# frontmatter, so it runs once per file-state epoch.
+_CONTESTED_SCAN_MEMO: dict[str, tuple[str, list]] = {}
+
+
+# --- direct commands ---------------------------------------------------------
+# Read-only work the REPL does itself, with no LLM round-trip. Same shape as the
+# workflow shortcuts below: one handler per command, a table instead of a chain.
+# Each takes the whitespace-split tokens AFTER the command word; `raw_input` (the
+# case-preserved line, which is what a query or a path must be read from) is
+# passed to all of them and absorbed by `**_`.
+
+
+def _dc_vault(args: list[str], **_) -> bool:
+    """/vault [<path>] — show the active vault, or adopt another one."""
+    from silica.driver import driver_kind
+
+    arg = " ".join(args).strip()
+    if arg:
+        r = switch_vault(arg)
+        if r.error:
+            CONSOLE.print(f"  [red]Cannot adopt as a vault — {r.error}[/]")
+            return True
+        if r.created:
+            CONSOLE.print(f"  Created [bold]{r.vault}[/] as the session vault.")
+        if r.write_dir:
+            CONSOLE.print(
+                f"  Source tree — writes confined to [bold]{r.write_dir}/[/]; the rest of "
+                "the vault is read-only context. Change `write_dir` in vault.yaml."
+            )
+        if r.seeded_ignore:
+            CONSOLE.print("  Created [bold].silicaignore[/] — add folders to keep out of the index.")
+        if r.invalid_write_dir:
+            CONSOLE.print(
+                "  [red]⚠ vault.yaml declares an invalid `write_dir` — every write "
+                "will be rejected until it is a relative path inside the vault.[/]"
+            )
+        CONSOLE.print(f"  Vault → [bold]{r.vault}[/] (backend: {driver_kind()})")
+        if r.repo_warning:
+            CONSOLE.print(f"  [yellow]⚠ {r.repo_warning}[/]")
+        # Surface the frozen-language drift here, not only in `/vault` info:
+        # a switch is exactly when a wrong-frozen store (english on an IT
+        # vault) would otherwise stay silent. Reuses the doctor's check.
+        if r.language_drift:
+            CONSOLE.print(
+                f"  [yellow]⚠ Language: {r.language}, co-occurrence store "
+                f"frozen {r.store_language} — run /cooccur --force to rebuild.[/]"
+            )
+        CONSOLE.print(
+            "  [dim]Index namespace follows the vault — run /embed and /cooccur "
+            "if this vault has not been indexed yet.[/]"
+        )
+        return True
+    vault = CONFIG.vault_path or "(not configured)"
+    CONSOLE.print(f"  Vault:   [bold]{vault}[/]")
+    CONSOLE.print(f"  Backend: {driver_kind()}")
+    if CONFIG.vault_path:
+        from pathlib import Path
+
+        count = len(list(Path(CONFIG.vault_path).rglob("*.md")))
+        CONSOLE.print(f"  Notes:   {count}")
+        from silica.onboarding.checks import language_status
+
+        lang, store_lang, drift = language_status(CONFIG.vault_path)
+        if lang and drift:
+            CONSOLE.print(
+                f"  Language: {lang} (store frozen: {store_lang} "
+                "⚠ — run /cooccur --force to rebuild)"
+            )
+        elif lang and store_lang:
+            CONSOLE.print(f"  Language: {lang} (store: {store_lang})")
+        elif lang:
+            CONSOLE.print(f"  Language: {lang}")
+    return True
+
+
+def _dc_status(args: list[str], **_) -> bool:
+    """/status [run_id] — progress of the newest run, or of the one named."""
+    from silica.tools import TOOLS
+
+    run_id = args[0] if (len(args) + 1) > 1 else ""
+    result = TOOLS["silica_ledger_digest"].run(run_id=run_id)
+    try:
+        parsed = json.loads(result)
+        digest = parsed.get("digest", result)
+        # Preformatted plain text: Markdown would reflow every line into one
+        # paragraph, and markup would eat the "[16 checkpoints]" brackets.
+        CONSOLE.print(str(digest), markup=False, highlight=False)
+    except Exception:
+        CONSOLE.print(result)
+    # E(vault) cache line — written by /report (write_report). No cache
+    # file → nothing shown; /status never triggers a VaultReport itself.
+    try:
+        from pathlib import Path as _EP
+        energy_file = _EP(CONFIG.vault_path or "") / ".silica" / "energy.json"
+        if energy_file.is_file():
+            e = json.loads(energy_file.read_text(encoding="utf-8"))
+            line = f"  E(vault): [bold]{e['value']:+.2f}[/]"
+            if e.get("prev") is not None:
+                line += f"  (delta {e['value'] - e['prev']:+.2f} since last report)"
+            CONSOLE.print(line)
+            # Attribute the delta: the six contributions sum to the total, so
+            # naming the terms that moved says WHICH force changed the vault.
+            # Movers only — an unchanged term is noise on this line.
+            terms, prev_terms = e.get("terms") or {}, e.get("prev_terms") or {}
+            movers = sorted(
+                ((t, v - prev_terms[t]) for t, v in terms.items() if t in prev_terms),
+                key=lambda kv: -abs(kv[1]),
+            )
+            movers = [(t, d) for t, d in movers if abs(d) >= 0.01]
+            if movers:
+                CONSOLE.print(
+                    "    moved: " + ", ".join(f"{t} {d:+.2f}" for t, d in movers[:4]),
+                    markup=False,
+                )
+    except Exception:
+        pass
+    return True
+
+
+def _dc_refresh(args: list[str], cmd: str) -> bool:
+    """/embed|/cooccur|/lexical [folder] [--force] — rebuild one index.
+
+    One body, three commands: `_REFRESH` maps each to its tool and its label.
+    """
+    from silica.tools import TOOLS
+
+    tool, label = _REFRESH[cmd]
+    folder = ""
+    for part in args:
+        if part.startswith("--folder="):
+            folder = part[len("--folder="):]
+        elif not part.startswith("-"):
+            folder = part
+    result = TOOLS[tool].run(folder=folder, force="--force" in args)
+    try:
+        parsed = json.loads(result)
+        if "error" in parsed:
+            CONSOLE.print(f"  [red]Error:[/] {parsed['error']}")
+        else:
+            CONSOLE.print(
+                f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / "
+                f"{parsed.get('total_notes', '?')} notes{label}"
+            )
+        if parsed.get("read_errors"):
+            CONSOLE.print(f"  [yellow]Read errors:[/] {parsed['read_errors']}")
+    except Exception:
+        CONSOLE.print(result)
+    return True
+
+
+def _dc_wiki(args: list[str], **_) -> bool:
+    """/wiki [folder] — prose pass over the staged code notes."""
+    args = args
+    folder = next(iter(_positional(args)), "") or None
+    overview_only = "--overview-only" in args
+    force = "--force" in args
+    from silica.capabilities.codewiki import run_wiki
+    result = run_wiki(CONFIG, folder=folder,
+                      overview_only=overview_only, force=force)
+    if result["status"] == "no_repo":
+        CONSOLE.print("  [yellow]wiki: vault is not inside a git repo, nothing to describe.[/]")
+    elif result["status"] == "empty":
+        CONSOLE.print("  [yellow]wiki: no supported source files found "
+                      "(code lane parses Python/TypeScript/JavaScript only).[/]")
+    elif result["status"] == "error":
+        CONSOLE.print(f"  [yellow]wiki: {result.get('reason', 'error')}[/]")
+    else:
+        CONSOLE.print(
+            f"  wiki: {len(result['written'])} note(s) written, "
+            f"{len(result['skipped'])} up-to-date"
+            + (f", {result['parse_errors']} file(s) not analyzable" if result["parse_errors"] else "")
+        )
+        for fail in result.get("failed", []):
+            CONSOLE.print(f"  [red]wiki: write failed:[/] {fail['path']}: {fail['reason']}")
+    return True
+
+
+def _dc_graph(args: list[str], **_) -> bool:
+    """/graph [output.html] [folder] — export the vault graph and open it."""
+    from silica.tools import TOOLS
+
+    output_path = "graph.html"
+    folder = ""
+    positional = _positional(args)
+    if positional:
+        output_path = positional[0]
+    if len(positional) > 1:
+        folder = positional[1]
+    result = TOOLS["silica_graph_export"].run(output_path=output_path, folder=folder)
+    try:
+        parsed = json.loads(result)
+        CONSOLE.print(f"  Graph written to: [bold]{parsed.get('output_path', output_path)}[/]")
+    except Exception:
+        CONSOLE.print(result)
+    return True
+
+
+def _dc_map(args: list[str], **_) -> bool:
+    """/map <note> [--force] — the association field around one note."""
+    from silica.tools import TOOLS
+
+    force = "--force" in args
+    positional = _positional(args)
+    note = " ".join(positional).strip()
+    if not note:
+        CONSOLE.print("  Usage: /map <note> [--force]")
+        return True
+    result = TOOLS["silica_mindmap"].run(note_path=note, force=force)
+    try:
+        parsed = json.loads(result)
+        if parsed.get("skipped"):
+            CONSOLE.print(
+                f"  [yellow]Map already present[/] ({parsed['skipped']}), not "
+                "overwritten. Use [bold]/map <note> --force[/] to regenerate."
+            )
+        elif "error" in parsed:
+            CONSOLE.print(f"  [red]{parsed['error']}[/]")
+        else:
+            CONSOLE.print(
+                f"  Map written: [bold]{parsed.get('path', '?')}[/] "
+                f"({parsed.get('nodes', '?')} nodes, {parsed.get('edges', '?')} edges)"
+            )
+    except Exception:
+        CONSOLE.print(result)
+    return True
+
+
+def _dc_find(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/find <query> [--k=N] — semantic search, printed in the terminal."""
+    from silica.tools import TOOLS
+
+    k = _int_flag(args, "--k=", 5)
+    # original case preserved — raw_input, not the lowered cmd
+    query = " ".join(_positional(args))
+    if not query:
+        CONSOLE.print("  Usage: /find <query> [--k=N]")
+        return True
+    result = TOOLS["silica_semantic_search"].run(query=query, k=k)
+    try:
+        parsed = json.loads(result)
+        results = parsed.get("results", [])
+        if results:
+            CONSOLE.print(f"  Results for [bold]{query}[/] (top {len(results)}):")
+            for r in results:
+                score = r.get("score", 0.0)
+                path = r.get("path", r.get("name", "?"))
+                CONSOLE.print(f"    [{score:.3f}] {path}")
+        elif "error" in parsed:
+            CONSOLE.print(f"  [yellow]{parsed['error']}[/]")
+        else:
+            CONSOLE.print(f"  No results for '{query}'.")
+    except Exception:
+        CONSOLE.print(result)
+    return True
+
+
+def _dc_stale(args: list[str], **_) -> bool:
+    """/stale [folder] — code notes whose source moved on."""
+    from pathlib import Path
+    from silica.kernel.code import codedocs
+    vault = CONFIG.vault_path
+    if not vault:
+        CONSOLE.print("  No vault configured; /stale needs a .silica vault in a git repo.")
+        return True
+    show_all = "--all" in args
+    # /stale is the manual refresh valve: drop the cache, recompute, rewrite.
+    codedocs.invalidate_snapshot(Path(vault))
+    stale = codedocs.snapshot(Path(vault))
+    by_note: dict[str, list] = {}
+    for sd in stale:
+        by_note.setdefault(sd.note_path, []).append(sd)
+    shown = 0
+    for note_path, docs in sorted(by_note.items()):
+        level, details = codedocs.note_verdict(docs)
+        if level != codedocs.CHANGE_STRUCTURAL and not show_all:
+            continue
+        shown += 1
+        CONSOLE.print(f"  · [bold]{note_path}[/] — {level}")
+        for sd in docs:
+            n = len(sd.intervening)
+            CONSOLE.print(
+                f"      documents [bold]{sd.code_path}[/] — {n} new commit(s) "
+                f"since {sd.recorded_ref[:8]}"
+            )
+        for d in details[:6]:
+            CONSOLE.print(f"      {d}")
+    if not shown:
+        hidden = len(by_note)
+        if hidden and not show_all:
+            CONSOLE.print(
+                f"  No structural staleness. {hidden} note(s) have cosmetic-only "
+                "changes — use [bold]/stale --all[/] to list them."
+            )
+        else:
+            CONSOLE.print("  No stale docs — every documents: note matches its code_ref.")
+        return True
+    CONSOLE.print("  Run [bold]/nucleate <path>[/] to regenerate, or edit and re-badge.")
+    return True
+
+
+def _dc_impact(args: list[str], **_) -> bool:
+    """/impact [<git-range>] — which notes a code change touches."""
+    from pathlib import Path
+    from silica.kernel.code.codegraph import compute_impact
+    vault = CONFIG.vault_path
+    if not vault:
+        CONSOLE.print("  No vault configured; /impact needs a vault inside a git repo.")
+        return True
+    range_spec = args[0] if (len(args) + 1) > 1 else None
+    entries = compute_impact(Path(vault), range_spec)
+    if entries is None:
+        CONSOLE.print("  No git repo — impact analysis unavailable.")
+        return True
+    if not entries:
+        scope = range_spec or "working tree vs HEAD"
+        CONSOLE.print(f"  No supported source files changed ({scope}).")
+        return True
+    for e in entries:
+        CONSOLE.print(f"  · [bold]{e.path}[/] — {e.change_level} (fan-in {e.fan_in})")
+        for d in e.details[:4]:
+            CONSOLE.print(f"      {d}")
+        if e.notes:
+            CONSOLE.print(f"      documents: {', '.join(e.notes)}")
+        if e.neighbor_notes:
+            CONSOLE.print(f"      1-hop neighbors documented by: {', '.join(e.neighbor_notes)}")
+    return True
+
+
+def _dc_plans(args: list[str], **_) -> bool:
+    """/plans — the plan ledger: what is queued, running, done."""
+    from pathlib import Path
+
+    from rich.markup import escape
+
+    from silica.kernel import plans as plans_mod
+    if not CONFIG.vault_path:
+        CONSOLE.print("  No vault configured; /plans needs a .silica vault.")
+        return True
+    vault = Path(CONFIG.vault_path)
+    counts = plans_mod.status_counts(vault)
+    if not counts:
+        CONSOLE.print("  No plans found under plans/.")
+        return True
+    summary = ", ".join(f"[bold]{n}[/] {s}" for s, n in sorted(counts.items()))
+    CONSOLE.print(f"  Plans: {summary}")
+    for note_path, data in plans_mod.iter_plan_notes(vault):
+        status = str(data.get("status") or "?").strip()
+        # escape() keeps the literal [status] bracket from being parsed as
+        # rich markup (otherwise [todo] is swallowed as an unknown tag).
+        CONSOLE.print(f"    {escape(f'[{status}] {note_path.stem}')}")
+    return True
+
+
+def _dc_path(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/path <noteA> <noteB> — the shortest link path between two notes."""
+    from silica.kernel.recall.mindmap import note_resolver, reading_path
+    try:
+        toks = shlex.split(raw_input.strip())[1:]  # honours quoted titles with spaces
+    except ValueError:
+        CONSOLE.print('  Unbalanced quotes. Usage: /path "<note A>" "<note B>"')
+        return True
+    endpoints = _positional(toks)
+    if len(endpoints) != 2:
+        CONSOLE.print("  Usage: /path <noteA> <noteB>")
+        return True
+    resolve = note_resolver()
+    src, dst = resolve(endpoints[0]), resolve(endpoints[1])
+    for given, got in zip(endpoints, (src, dst)):
+        if got is None:
+            CONSOLE.print(f"  Note not found: '{given}'")
+    if src is None or dst is None:
+        return True
+    if src == dst:
+        CONSOLE.print("  Both resolve to the same note — nothing to walk.")
+        return True
+    # Weighted: a reading path wants the most coherent chain, not the fewest
+    # hops — A/B on a live vault: weakest-link 0.87→0.97 for +0.14 hops.
+    path = reading_path(src, dst, weighted=True)
+    if path is None:
+        CONSOLE.print(
+            f"  No path between [bold]{src}[/] and [bold]{dst}[/] — "
+            "not connected (try /map on each to see its neighborhood)."
+        )
+        return True
+    CONSOLE.print(f"  Reading path — {len(path) - 1} step(s):")
+    for i, (node, leg) in enumerate(path):
+        if leg != "start":
+            CONSOLE.print(f"        [dim]↓ {leg}[/]")
+        CONSOLE.print(f"    {i + 1}. [bold]{node}[/]")
+    return True
+
+
+def _dc_contested(args: list[str], **_) -> bool:
+    """/contested — notes flagged with an unresolved contradiction."""
+    from silica.driver import DRIVER
+    from silica.kernel.recall.paths import vault_epoch
+    from silica.kernel.write.contested import CONTESTED_KEY, CONTRADICTIONS_KEY
+
+    # The scan frontmatter-parses every note, so it runs once per
+    # file-state epoch; between vault changes a repeat costs a stat walk.
+    epoch = vault_epoch()
+    hit = _CONTESTED_SCAN_MEMO.get("scan") if epoch else None
+    found: list[tuple[str, list[str]]] | None = (
+        hit[1] if hit is not None and hit[0] == epoch else None)
+    if found is None:
+        found = []
+        for ref in DRIVER.list_files(""):
+            try:
+                props = DRIVER.props_of(ref.path)
+            except Exception:
+                continue  # attachments / unreadable frontmatter — not contested
+            if props and props.get(CONTESTED_KEY):
+                contras = [str(c) for c in (props.get(CONTRADICTIONS_KEY) or [])]
+                found.append((ref.path, contras))
+        if epoch:
+            _CONTESTED_SCAN_MEMO["scan"] = (epoch, found)
+    if not found:
+        CONSOLE.print("  No contested notes — no unresolved contradictions.")
+        return True
+    CONSOLE.print(f"  {len(found)} contested note(s):")
+    for note_path, contras in sorted(found):
+        CONSOLE.print(f"  · [bold]{note_path}[/]")
+        for c in contras:
+            CONSOLE.print(f"      conflicts with: {c}")
+    CONSOLE.print(
+        "  Ask the agent to resolve one with silica_flag_note(clear=True, "
+        "ref=…), passing a `conflicts with` line above verbatim; the losing "
+        "claim is filed under `## Superseded` instead of being deleted."
+    )
+    return True
+
+
+def _dc_agenda(args: list[str], **_) -> bool:
+    """/agenda [days] — dated commitments coming up."""
+    from rich.markup import escape
+
+    from silica.tools.events import silica_agenda
+
+    arg = " ".join(args).strip().casefold()
+    # "week" is the default window spelled out; a date moves the start.
+    start = "today" if arg in ("", "today", "week") else arg
+    res = silica_agenda(start=start, days=7)
+    if res.get("error"):
+        CONSOLE.print(f"  [yellow]{escape(res['error'])}[/]")
+        return True
+    CONSOLE.print(escape(res["text"]))
+    return True
+
+
+def _dc_episodes(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/episodes [key] — what episodic memory has accumulated."""
+    from rich.markup import escape
+
+    from silica.kernel.recall.episodic import EpisodicStore, FactHit, render
+
+    store = EpisodicStore()
+    heads = sorted(store.live_facts(), key=lambda f: f.key)
+    if not heads:
+        CONSOLE.print("  No episodic memory yet — nothing has been captured.")
+        return True
+    body = "\n\n".join(
+        f"## {h.key}\n" + render([FactHit(fact=h, score=1.0)], store=store)
+        for h in heads
+    )
+    CONSOLE.print(escape(body))
+    # Re-split the raw line with shlex so `--save="a b/x.md"` honours the
+    # quoted path; a malformed quote falls back to the whitespace split.
+    # (shlex is imported at module scope — a local `import shlex` here
+    # rebinds the name for the WHOLE function, and /path's use of it above
+    # then dies with UnboundLocalError before this branch ever runs.)
+    try:
+        save_args = shlex.split(raw_input.strip())[1:]
+    except ValueError:
+        save_args = args
+    save = _str_flag(save_args, "--save")
+    if save:
+        from pathlib import Path
+
+        out = Path(save).expanduser().resolve()
+        # Empty until a vault is adopted, and Path("") resolves to the cwd:
+        # no vault means nothing to fall inside, not "everything under here".
+        raw_vault = (CONFIG.vault_path or "").strip()
+        vault = Path(raw_vault).expanduser().resolve() if raw_vault else None
+        if vault is not None and out.is_relative_to(vault):
+            # The one door in stays the gate: an episodic render dropped
+            # into the vault would be an unreviewed note that indexes,
+            # links and gets recalled — the echo channel, by hand.
+            CONSOLE.print(
+                "  [yellow]Not inside the vault.[/] Session memory becomes a "
+                "note through [bold]/promote <key>[/]; save this render "
+                "somewhere else."
+            )
+            return True
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(f"# Episodes\n\n{body}\n", encoding="utf-8")
+        except OSError as e:
+            # The REPL calls this handler outside any try: a directory, a
+            # read-only mount or a bad name would end the session.
+            CONSOLE.print(f"  [yellow]save failed: {escape(str(e))}[/]")
+            return True
+        CONSOLE.print(f"  Saved → [bold]{escape(str(out))}[/]")
+    return True
+
+
+def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/undo [note-path] — revert the last write to one note."""
+    from silica.driver import DRIVER
+    from silica.kernel.write.checkpoints import get_checkpoint_store
+
+    store = get_checkpoint_store()
+    # Everything after the command IS the path: `args` is a plain whitespace
+    # split, so `/undo silica/Verdetto reranker.md` used to look up
+    # "silica/Verdetto" and report nothing to undo. Note names with spaces are
+    # the common case in a vault, and the web GUI's per-note revert sends this.
+    rest = raw_input.strip().split(maxsplit=1)
+    note_path = rest[1].strip() if len(rest) > 1 else store.most_recent_path()
+    if not note_path:
+        CONSOLE.print("  Nothing to undo — no patches recorded in this session.")
+        return True
+
+    content = store.undo(note_path)
+    if content is None:
+        CONSOLE.print(f"  [yellow]Nothing to undo for[/] {note_path} (already at original).")
+        return True
+
+    try:
+        DRIVER.overwrite(note_path, content)
+        depth = store.depth(note_path)
+        remaining = max(0, depth - 1)
+        CONSOLE.print(f"  Undone: [bold]{note_path}[/]  [dim]({remaining} undo step(s) remaining)[/]")
+    except Exception as exc:
+        CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+    return True
+
+
+def _dc_revert(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/revert [run-id] — undo a whole journalled run."""
+    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    parts_split = raw_input.strip().split(maxsplit=1)
+    vault = CONFIG.vault_path.strip() or None
+    run_id = parts_split[1].strip() if len(parts_split) > 1 else get_undo_journal().last_active_run(vault=vault)
+    if not run_id:
+        CONSOLE.print("  Nothing to revert — no runs recorded for this vault.")
+        return True
+    # Name WHAT is being reverted: the journal's run ids live in a different
+    # id-space than the progress ledger's (log.md), so a bare id told the
+    # user nothing about which run they were about to undo.
+    info = None
+    try:
+        info = get_undo_journal().run_info(run_id)
+    except Exception:
+        pass
+    source = (info or {}).get("source") or ""
+    when = ""
+    if info and info.get("started_at"):
+        from datetime import datetime as _dt
+        when = _dt.fromtimestamp(info["started_at"]).strftime("%Y-%m-%d %H:%M")
+    label = f" ({source}, started {when})" if source and when else ""
+    res = revert_run(run_id)
+    stale = len(res.get("stale", []))
+    line = (
+        f"  Revert {run_id[:8]}…{label}: {len(res['reverted'])} writes reverted, "
+        f"{len(res['skipped'])} skipped (modified), "
+        f"{stale} stale (vault changed), {len(res['errors'])} errors."
+    )
+    CONSOLE.print(line)
+    # log.md narrated the run's writes; it must narrate the take-back too.
+    try:
+        from silica.kernel.recall.run_log import append_log_line, format_revert_event
+        append_log_line(
+            format_revert_event(source, len(res["reverted"]), len(res["skipped"])),
+            run_id,
+        )
+    except Exception:
+        pass  # the journal is a courtesy, never a failure path
+    return True
+
+
+def _dc_review(args: list[str], **_) -> bool:
+    """/review [target] — the learner model's due/unexplored queue."""
+    from silica.kernel.recall.deferred import get_deferred_store
+    store = get_deferred_store()
+    flush_hash = _str_flag(args, "--flush")
+    if flush_hash:
+        removed = store.remove(flush_hash)
+        if removed:
+            CONSOLE.print(f"  Flushed bundle [bold]{flush_hash[:12]}[/] from review queue.")
+        else:
+            CONSOLE.print(f"  [yellow]No bundle with hash {flush_hash[:12]} found.[/]")
+        return True
+    items = store.list_all()
+    if not items:
+        CONSOLE.print("  Review queue is empty.")
+    else:
+        CONSOLE.print(f"  [bold]Review queue — {len(items)} bundle(s):[/]")
+        for item in items:
+            import datetime as _dt
+            ts = _dt.datetime.fromtimestamp(item["timestamp"]).strftime("%Y-%m-%d %H:%M")
+            CONSOLE.print(
+                f"  · [bold]{item['content_hash'][:12]}[/]  {item['source_path']}  "
+                f"({item['rejected_count']} op(s))  {ts}"
+            )
+        CONSOLE.print("  Use [bold]/review --flush=<hash>[/] to discard a bundle.")
+    return True
+
+
+def _dc_curate(args: list[str], **_) -> bool:
+    """/curate [folder] [--apply] — the curation pass over a folder."""
+    from silica.tools import TOOLS
+
+    apply = any(p == "--apply" for p in args)
+    positional = _positional(args)
+    folder = " ".join(positional)
+    scope = folder or "(vault)"
+    if apply:
+        CONSOLE.print(f"  Curate on [bold]{scope}[/] — applying via the worker seam…")
+    else:
+        CONSOLE.print(f"  Curate on [bold]{scope}[/] — dry-run (nothing is written)…")
+    res = json.loads(TOOLS["silica_curate"].run(apply=apply, folder=folder))
+    if "error" in res:
+        CONSOLE.print(f"  [yellow]{res['error']}[/]")
+        return True
+
+    total = res.get("total", 0)
+    counts = res.get("counts", {})
+    if total == 0:
+        CONSOLE.print("  Nothing to do — the vault is coherent.")
+        return True
+
+    breakdown = ", ".join(f"{v} {k}" for k, v in counts.items())
+    if apply:
+        # Real outcomes (execution["outcome_counts"], derived from the
+        # dispatch batch's per-item status + the mechanical autolink's
+        # actual links-added count) — NOT the planned counts above, which
+        # would report "Applied N" even when e.g. every dedup came back
+        # a distinct verdict and nothing was actually merged.
+        outcome = res.get("execution", {}).get("outcome_counts", {})
+        dispatched = sum(outcome.values())
+        outcome_breakdown = ", ".join(f"{v} {k}" for k, v in outcome.items()) or "no changes"
+        CONSOLE.print(f"  Applied — dispatched [bold]{dispatched}[/] → outcomes: {outcome_breakdown}")
+    else:
+        CONSOLE.print(f"  Plan — [bold]{total}[/] item(s): {breakdown}")
+        for it in res.get("items", []):
+            pair = f" ↔ {it['partner']}" if it.get("partner") else ""
+            CONSOLE.print(f"  · [bold]{it['kind']}[/]  {it['target']}{pair}")
+        CONSOLE.print('  Run [bold]/curate --apply[/] to execute, or ask e.g. "apply only dedup".')
+    return True
+
+
+def _dc_aliases(args: list[str], **_) -> bool:
+    """/aliases [note] — alias coverage, and what is missing."""
+    from silica.tools import TOOLS
+
+    apply = any(p == "--apply" for p in args)
+    positional = _positional(args)
+    folder = " ".join(positional)
+    scope = folder or "(vault)"
+    mode = "applying" if apply else "dry-run (nothing is written)"
+    CONSOLE.print(f"  Alias consolidation on [bold]{scope}[/] — {mode}…")
+    res = json.loads(TOOLS["silica_aliases"].run(apply=apply, folder=folder))
+    if "error" in res:
+        CONSOLE.print(f"  [yellow]{res['error']}[/]")
+        return True
+    groups = res.get("groups", {})
+    if not groups:
+        CONSOLE.print("  No alias groups survived the gate.")
+        return True
+    for canonical, variants in sorted(groups.items()):
+        CONSOLE.print(f"  · [bold]{canonical}[/] ← {', '.join(variants)}")
+    dropped = res.get("dropped", 0)
+    if dropped:
+        CONSOLE.print(f"  ({dropped} proposed variant(s) dropped by the ambiguity gate)")
+    if apply:
+        written = res.get("written", {})
+        n = sum(written.values())
+        CONSOLE.print(f"  Applied — [bold]{n}[/] alias(es) written into {len(written)} note(s).")
+        for it in res.get("skipped", []):
+            CONSOLE.print(f"  [yellow]skipped {it['note']}: {it['reason']}[/]")
+    else:
+        CONSOLE.print("  Run [bold]/aliases --apply[/] to write them into frontmatter.")
+    return True
+
+
+def _dc_keep(args: list[str], **_) -> bool:
+    """/keep — save the last web answer as an inbox note."""
+    from rich.markup import escape
+
+    from silica.sources.web_research import keep_last
+
+    try:
+        note_rel = keep_last()
+        CONSOLE.print(
+            f"  Kept → [bold]{escape(note_rel)}[/]"
+            "  (review, then /nucleate to bring it in)"
+        )
+    except Exception as e:  # empty slot, name collision, write refused
+        CONSOLE.print(f"  [yellow]keep failed: {escape(str(e))}[/]")
+    return True
+
+
+# One row per direct command; a `/word` with no row is not one.
+_DIRECT: dict[str, Callable[..., bool]] = {
+    "/embed": lambda args, *, _c="/embed", **_: _dc_refresh(args, _c),
+    "/cooccur": lambda args, *, _c="/cooccur", **_: _dc_refresh(args, _c),
+    "/lexical": lambda args, *, _c="/lexical", **_: _dc_refresh(args, _c),
+    "/vault": _dc_vault,
+    "/status": _dc_status,
+    "/wiki": _dc_wiki,
+    "/graph": _dc_graph,
+    "/map": _dc_map,
+    "/find": _dc_find,
+    "/stale": _dc_stale,
+    "/impact": _dc_impact,
+    "/plans": _dc_plans,
+    "/path": _dc_path,
+    "/contested": _dc_contested,
+    "/agenda": _dc_agenda,
+    "/episodes": _dc_episodes,
+    "/undo": _dc_undo,
+    "/revert": _dc_revert,
+    "/review": _dc_review,
+    "/curate": _dc_curate,
+    "/aliases": _dc_aliases,
+    "/keep": _dc_keep,
 }
 
 
@@ -526,621 +1279,10 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         return False
     cmd = parts[0].lower()
 
-    if cmd == "/vault":
-        arg = " ".join(parts[1:]).strip()
-        if arg:
-            r = switch_vault(arg)
-            if r.error:
-                CONSOLE.print(f"  [red]Cannot adopt as a vault — {r.error}[/]")
-                return True
-            if r.created:
-                CONSOLE.print(f"  Created [bold]{r.vault}[/] as the session vault.")
-            if r.write_dir:
-                CONSOLE.print(
-                    f"  Source tree — writes confined to [bold]{r.write_dir}/[/]; the rest of "
-                    "the vault is read-only context. Change `write_dir` in vault.yaml."
-                )
-            if r.seeded_ignore:
-                CONSOLE.print("  Created [bold].silicaignore[/] — add folders to keep out of the index.")
-            if r.invalid_write_dir:
-                CONSOLE.print(
-                    "  [red]⚠ vault.yaml declares an invalid `write_dir` — every write "
-                    "will be rejected until it is a relative path inside the vault.[/]"
-                )
-            CONSOLE.print(f"  Vault → [bold]{r.vault}[/] (backend: {CONFIG.backend})")
-            if r.repo_warning:
-                CONSOLE.print(f"  [yellow]⚠ {r.repo_warning}[/]")
-            # Surface the frozen-language drift here, not only in `/vault` info:
-            # a switch is exactly when a wrong-frozen store (english on an IT
-            # vault) would otherwise stay silent. Reuses the doctor's check.
-            if r.language_drift:
-                CONSOLE.print(
-                    f"  [yellow]⚠ Language: {r.language}, co-occurrence store "
-                    f"frozen {r.store_language} — run /cooccur --force to rebuild.[/]"
-                )
-            CONSOLE.print(
-                "  [dim]Index namespace follows the vault — run /embed and /cooccur "
-                "if this vault has not been indexed yet.[/]"
-            )
-            return True
-        vault = CONFIG.vault_path or "(not configured)"
-        CONSOLE.print(f"  Vault:   [bold]{vault}[/]")
-        CONSOLE.print(f"  Backend: {CONFIG.backend}")
-        if CONFIG.vault_path:
-            from pathlib import Path
-
-            count = len(list(Path(CONFIG.vault_path).rglob("*.md")))
-            CONSOLE.print(f"  Notes:   {count}")
-            from silica.onboarding.checks import language_status
-
-            lang, store_lang, drift = language_status(CONFIG.vault_path)
-            if lang and drift:
-                CONSOLE.print(
-                    f"  Language: {lang} (store frozen: {store_lang} "
-                    "⚠ — run /cooccur --force to rebuild)"
-                )
-            elif lang and store_lang:
-                CONSOLE.print(f"  Language: {lang} (store: {store_lang})")
-            elif lang:
-                CONSOLE.print(f"  Language: {lang}")
-        return True
-
-    if cmd == "/status":
-        run_id = parts[1] if len(parts) > 1 else ""
-        result = TOOLS["silica_ledger_digest"].run(run_id=run_id)
-        try:
-            parsed = json.loads(result)
-            digest = parsed.get("digest", result)
-            # Preformatted plain text: Markdown would reflow every line into one
-            # paragraph, and markup would eat the "[16 checkpoints]" brackets.
-            CONSOLE.print(str(digest), markup=False, highlight=False)
-        except Exception:
-            CONSOLE.print(result)
-        # E(vault) cache line — written by /report (write_report). No cache
-        # file → nothing shown; /status never triggers a VaultReport itself.
-        try:
-            from pathlib import Path as _EP
-            energy_file = _EP(CONFIG.vault_path or "") / ".silica" / "energy.json"
-            if energy_file.is_file():
-                e = json.loads(energy_file.read_text(encoding="utf-8"))
-                line = f"  E(vault): [bold]{e['value']:+.2f}[/]"
-                if e.get("prev") is not None:
-                    line += f"  (delta {e['value'] - e['prev']:+.2f} since last report)"
-                CONSOLE.print(line)
-                # Attribute the delta: the six contributions sum to the total, so
-                # naming the terms that moved says WHICH force changed the vault.
-                # Movers only — an unchanged term is noise on this line.
-                terms, prev_terms = e.get("terms") or {}, e.get("prev_terms") or {}
-                movers = sorted(
-                    ((t, v - prev_terms[t]) for t, v in terms.items() if t in prev_terms),
-                    key=lambda kv: -abs(kv[1]),
-                )
-                movers = [(t, d) for t, d in movers if abs(d) >= 0.01]
-                if movers:
-                    CONSOLE.print(
-                        "    moved: " + ", ".join(f"{t} {d:+.2f}" for t, d in movers[:4]),
-                        markup=False,
-                    )
-        except Exception:
-            pass
-        return True
-
-    if cmd in _REFRESH:
-        tool, label = _REFRESH[cmd]
-        folder = ""
-        for part in parts[1:]:
-            if part.startswith("--folder="):
-                folder = part[len("--folder="):]
-            elif not part.startswith("-"):
-                folder = part
-        result = TOOLS[tool].run(folder=folder, force="--force" in parts[1:])
-        try:
-            parsed = json.loads(result)
-            if "error" in parsed:
-                CONSOLE.print(f"  [red]Error:[/] {parsed['error']}")
-            else:
-                CONSOLE.print(
-                    f"  Indexed: [bold]{parsed.get('indexed', '?')}[/] / "
-                    f"{parsed.get('total_notes', '?')} notes{label}"
-                )
-            if parsed.get("read_errors"):
-                CONSOLE.print(f"  [yellow]Read errors:[/] {parsed['read_errors']}")
-        except Exception:
-            CONSOLE.print(result)
-        return True
-
-    if cmd == "/wiki":
-        args = parts[1:]
-        folder = next((a for a in args if not a.startswith("-")), "") or None
-        overview_only = "--overview-only" in args
-        force = "--force" in args
-        from silica.capabilities.codewiki import run_wiki
-        result = run_wiki(CONFIG, folder=folder,
-                          overview_only=overview_only, force=force)
-        if result["status"] == "no_repo":
-            CONSOLE.print("  [yellow]wiki: vault is not inside a git repo, nothing to describe.[/]")
-        elif result["status"] == "empty":
-            CONSOLE.print("  [yellow]wiki: no supported source files found "
-                          "(code lane parses Python/TypeScript/JavaScript only).[/]")
-        elif result["status"] == "error":
-            CONSOLE.print(f"  [yellow]wiki: {result.get('reason', 'error')}[/]")
-        else:
-            CONSOLE.print(
-                f"  wiki: {len(result['written'])} note(s) written, "
-                f"{len(result['skipped'])} up-to-date"
-                + (f", {result['parse_errors']} file(s) not analyzable" if result["parse_errors"] else "")
-            )
-            for fail in result.get("failed", []):
-                CONSOLE.print(f"  [red]wiki: write failed:[/] {fail['path']}: {fail['reason']}")
-        return True
-
-    if cmd == "/graph":
-        output_path = "graph.html"
-        folder = ""
-        positional = [p for p in parts[1:] if not p.startswith("-")]
-        if positional:
-            output_path = positional[0]
-        if len(positional) > 1:
-            folder = positional[1]
-        result = TOOLS["silica_graph_export"].run(output_path=output_path, folder=folder)
-        try:
-            parsed = json.loads(result)
-            CONSOLE.print(f"  Graph written to: [bold]{parsed.get('output_path', output_path)}[/]")
-        except Exception:
-            CONSOLE.print(result)
-        return True
-
-    if cmd == "/map":
-        force = "--force" in parts[1:]
-        positional = [p for p in parts[1:] if not p.startswith("-")]
-        note = " ".join(positional).strip()
-        if not note:
-            CONSOLE.print("  Usage: /map <note> [--force]")
-            return True
-        result = TOOLS["silica_mindmap"].run(note_path=note, force=force)
-        try:
-            parsed = json.loads(result)
-            if parsed.get("skipped"):
-                CONSOLE.print(
-                    f"  [yellow]Map already present[/] ({parsed['skipped']}), not "
-                    "overwritten. Use [bold]/map <note> --force[/] to regenerate."
-                )
-            elif "error" in parsed:
-                CONSOLE.print(f"  [red]{parsed['error']}[/]")
-            else:
-                CONSOLE.print(
-                    f"  Map written: [bold]{parsed.get('path', '?')}[/] "
-                    f"({parsed.get('nodes', '?')} nodes, {parsed.get('edges', '?')} edges)"
-                )
-        except Exception:
-            CONSOLE.print(result)
-        return True
-
-    if cmd == "/find":
-        k = _int_flag(parts[1:], "--k=", 5)
-        # original case preserved — raw_input, not the lowered cmd
-        query = " ".join(p for p in parts[1:] if not p.startswith("-"))
-        if not query:
-            CONSOLE.print("  Usage: /find <query> [--k=N]")
-            return True
-        result = TOOLS["silica_semantic_search"].run(query=query, k=k)
-        try:
-            parsed = json.loads(result)
-            results = parsed.get("results", [])
-            if results:
-                CONSOLE.print(f"  Results for [bold]{query}[/] (top {len(results)}):")
-                for r in results:
-                    score = r.get("score", 0.0)
-                    path = r.get("path", r.get("name", "?"))
-                    CONSOLE.print(f"    [{score:.3f}] {path}")
-            elif "error" in parsed:
-                CONSOLE.print(f"  [yellow]{parsed['error']}[/]")
-            else:
-                CONSOLE.print(f"  No results for '{query}'.")
-        except Exception:
-            CONSOLE.print(result)
-        return True
-
-    if cmd == "/stale":
-        from pathlib import Path
-        from silica.kernel.code import codedocs
-        vault = CONFIG.vault_path
-        if not vault:
-            CONSOLE.print("  No vault configured; /stale needs a .silica vault in a git repo.")
-            return True
-        show_all = "--all" in parts[1:]
-        # /stale is the manual refresh valve: drop the cache, recompute, rewrite.
-        codedocs.invalidate_snapshot(Path(vault))
-        stale = codedocs.snapshot(Path(vault))
-        by_note: dict[str, list] = {}
-        for sd in stale:
-            by_note.setdefault(sd.note_path, []).append(sd)
-        shown = 0
-        for note_path, docs in sorted(by_note.items()):
-            level, details = codedocs.note_verdict(docs)
-            if level != codedocs.CHANGE_STRUCTURAL and not show_all:
-                continue
-            shown += 1
-            CONSOLE.print(f"  · [bold]{note_path}[/] — {level}")
-            for sd in docs:
-                n = len(sd.intervening)
-                CONSOLE.print(
-                    f"      documents [bold]{sd.code_path}[/] — {n} new commit(s) "
-                    f"since {sd.recorded_ref[:8]}"
-                )
-            for d in details[:6]:
-                CONSOLE.print(f"      {d}")
-        if not shown:
-            hidden = len(by_note)
-            if hidden and not show_all:
-                CONSOLE.print(
-                    f"  No structural staleness. {hidden} note(s) have cosmetic-only "
-                    "changes — use [bold]/stale --all[/] to list them."
-                )
-            else:
-                CONSOLE.print("  No stale docs — every documents: note matches its code_ref.")
-            return True
-        CONSOLE.print("  Run [bold]/nucleate <path>[/] to regenerate, or edit and re-badge.")
-        return True
-
-    if cmd == "/impact":
-        from pathlib import Path
-        from silica.kernel.code.codegraph import compute_impact
-        vault = CONFIG.vault_path
-        if not vault:
-            CONSOLE.print("  No vault configured; /impact needs a vault inside a git repo.")
-            return True
-        range_spec = parts[1] if len(parts) > 1 else None
-        entries = compute_impact(Path(vault), range_spec)
-        if entries is None:
-            CONSOLE.print("  No git repo — impact analysis unavailable.")
-            return True
-        if not entries:
-            scope = range_spec or "working tree vs HEAD"
-            CONSOLE.print(f"  No supported source files changed ({scope}).")
-            return True
-        for e in entries:
-            CONSOLE.print(f"  · [bold]{e.path}[/] — {e.change_level} (fan-in {e.fan_in})")
-            for d in e.details[:4]:
-                CONSOLE.print(f"      {d}")
-            if e.notes:
-                CONSOLE.print(f"      documents: {', '.join(e.notes)}")
-            if e.neighbor_notes:
-                CONSOLE.print(f"      1-hop neighbors documented by: {', '.join(e.neighbor_notes)}")
-        return True
-
-    if cmd == "/plans":
-        from pathlib import Path
-
-        from rich.markup import escape
-
-        from silica.kernel import plans as plans_mod
-        if not CONFIG.vault_path:
-            CONSOLE.print("  No vault configured; /plans needs a .silica vault.")
-            return True
-        vault = Path(CONFIG.vault_path)
-        counts = plans_mod.status_counts(vault)
-        if not counts:
-            CONSOLE.print("  No plans found under plans/.")
-            return True
-        summary = ", ".join(f"[bold]{n}[/] {s}" for s, n in sorted(counts.items()))
-        CONSOLE.print(f"  Plans: {summary}")
-        for note_path, data in plans_mod.iter_plan_notes(vault):
-            status = str(data.get("status") or "?").strip()
-            # escape() keeps the literal [status] bracket from being parsed as
-            # rich markup (otherwise [todo] is swallowed as an unknown tag).
-            CONSOLE.print(f"    {escape(f'[{status}] {note_path.stem}')}")
-        return True
-
-    if cmd == "/path":
-        from silica.kernel.recall.mindmap import note_resolver, reading_path
-        try:
-            toks = shlex.split(raw_input.strip())[1:]  # honours quoted titles with spaces
-        except ValueError:
-            CONSOLE.print('  Unbalanced quotes. Usage: /path "<note A>" "<note B>"')
-            return True
-        endpoints = [t for t in toks if not t.startswith("-")]
-        if len(endpoints) != 2:
-            CONSOLE.print("  Usage: /path <noteA> <noteB>")
-            return True
-        resolve = note_resolver()
-        src, dst = resolve(endpoints[0]), resolve(endpoints[1])
-        for given, got in zip(endpoints, (src, dst)):
-            if got is None:
-                CONSOLE.print(f"  Note not found: '{given}'")
-        if src is None or dst is None:
-            return True
-        if src == dst:
-            CONSOLE.print("  Both resolve to the same note — nothing to walk.")
-            return True
-        # Weighted: a reading path wants the most coherent chain, not the fewest
-        # hops — A/B on a live vault: weakest-link 0.87→0.97 for +0.14 hops.
-        path = reading_path(src, dst, weighted=True)
-        if path is None:
-            CONSOLE.print(
-                f"  No path between [bold]{src}[/] and [bold]{dst}[/] — "
-                "not connected (try /map on each to see its neighborhood)."
-            )
-            return True
-        CONSOLE.print(f"  Reading path — {len(path) - 1} step(s):")
-        for i, (node, leg) in enumerate(path):
-            if leg != "start":
-                CONSOLE.print(f"        [dim]↓ {leg}[/]")
-            CONSOLE.print(f"    {i + 1}. [bold]{node}[/]")
-        return True
-
-    if cmd == "/contested":
-        from silica.driver import DRIVER
-        from silica.kernel.write.contested import CONTESTED_KEY, CONTRADICTIONS_KEY
-        # ponytail: frontmatter scan of every note per call; index it if a
-        # 10k-note vault ever makes this command feel slow.
-        found: list[tuple[str, list[str]]] = []
-        for ref in DRIVER.list_files(""):
-            try:
-                props = DRIVER.props_of(ref.path)
-            except Exception:
-                continue  # attachments / unreadable frontmatter — not contested
-            if props and props.get(CONTESTED_KEY):
-                contras = [str(c) for c in (props.get(CONTRADICTIONS_KEY) or [])]
-                found.append((ref.path, contras))
-        if not found:
-            CONSOLE.print("  No contested notes — no unresolved contradictions.")
-            return True
-        CONSOLE.print(f"  {len(found)} contested note(s):")
-        for note_path, contras in sorted(found):
-            CONSOLE.print(f"  · [bold]{note_path}[/]")
-            for c in contras:
-                CONSOLE.print(f"      conflicts with: {c}")
-        CONSOLE.print(
-            "  Ask the agent to resolve one with silica_flag_note(clear=True, "
-            "ref=…), passing a `conflicts with` line above verbatim; the losing "
-            "claim is filed under `## Superseded` instead of being deleted."
-        )
-        return True
-
-    if cmd == "/agenda":
-        from rich.markup import escape
-
-        from silica.tools.events import silica_agenda
-
-        arg = " ".join(parts[1:]).strip().casefold()
-        # "week" is the default window spelled out; a date moves the start.
-        start = "today" if arg in ("", "today", "week") else arg
-        res = silica_agenda(start=start, days=7)
-        if res.get("error"):
-            CONSOLE.print(f"  [yellow]{escape(res['error'])}[/]")
-            return True
-        CONSOLE.print(escape(res["text"]))
-        return True
-
-    if cmd == "/episodes":
-        from rich.markup import escape
-
-        from silica.kernel.recall.episodic import EpisodicStore, FactHit, render
-
-        store = EpisodicStore()
-        heads = sorted(store.live_facts(), key=lambda f: f.key)
-        if not heads:
-            CONSOLE.print("  No episodic memory yet — nothing has been captured.")
-            return True
-        body = "\n\n".join(
-            f"## {h.key}\n" + render([FactHit(fact=h, score=1.0)], store=store)
-            for h in heads
-        )
-        CONSOLE.print(escape(body))
-        # ponytail: `--save=` splits on whitespace like its sibling direct
-        # commands, so a path with spaces needs a rename; shlex it if that bites.
-        save = next((a[len("--save="):] for a in parts[1:] if a.startswith("--save=")), "")
-        if save:
-            from pathlib import Path
-
-            out = Path(save).expanduser().resolve()
-            # Empty until a vault is adopted, and Path("") resolves to the cwd:
-            # no vault means nothing to fall inside, not "everything under here".
-            raw_vault = (CONFIG.vault_path or "").strip()
-            vault = Path(raw_vault).expanduser().resolve() if raw_vault else None
-            if vault is not None and out.is_relative_to(vault):
-                # The one door in stays the gate: an episodic render dropped
-                # into the vault would be an unreviewed note that indexes,
-                # links and gets recalled — the echo channel, by hand.
-                CONSOLE.print(
-                    "  [yellow]Not inside the vault.[/] Session memory becomes a "
-                    "note through [bold]/promote <key>[/]; save this render "
-                    "somewhere else."
-                )
-                return True
-            try:
-                out.parent.mkdir(parents=True, exist_ok=True)
-                out.write_text(f"# Episodes\n\n{body}\n", encoding="utf-8")
-            except OSError as e:
-                # The REPL calls this handler outside any try: a directory, a
-                # read-only mount or a bad name would end the session.
-                CONSOLE.print(f"  [yellow]save failed: {escape(str(e))}[/]")
-                return True
-            CONSOLE.print(f"  Saved → [bold]{escape(str(out))}[/]")
-        return True
-
-    if cmd == "/undo":
-        from silica.driver import DRIVER
-        from silica.kernel.write.checkpoints import get_checkpoint_store
-
-        store = get_checkpoint_store()
-        # Everything after the command IS the path: `parts` is a plain whitespace
-        # split, so `/undo silica/Verdetto reranker.md` used to look up
-        # "silica/Verdetto" and report nothing to undo. Note names with spaces are
-        # the common case in a vault, and the web GUI's per-note revert sends this.
-        rest = raw_input.strip().split(maxsplit=1)
-        note_path = rest[1].strip() if len(rest) > 1 else store.most_recent_path()
-        if not note_path:
-            CONSOLE.print("  Nothing to undo — no patches recorded in this session.")
-            return True
-
-        content = store.undo(note_path)
-        if content is None:
-            CONSOLE.print(f"  [yellow]Nothing to undo for[/] {note_path} (already at original).")
-            return True
-
-        try:
-            DRIVER.overwrite(note_path, content)
-            depth = store.depth(note_path)
-            remaining = max(0, depth - 1)
-            CONSOLE.print(f"  Undone: [bold]{note_path}[/]  [dim]({remaining} undo step(s) remaining)[/]")
-        except Exception as exc:
-            CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
-        return True
-
-    if cmd == "/revert":
-        from silica.kernel.write.undo_journal import get_undo_journal, revert_run
-        parts_split = raw_input.strip().split(maxsplit=1)
-        vault = CONFIG.vault_path.strip() or None
-        run_id = parts_split[1].strip() if len(parts_split) > 1 else get_undo_journal().last_active_run(vault=vault)
-        if not run_id:
-            CONSOLE.print("  Nothing to revert — no runs recorded for this vault.")
-            return True
-        # Name WHAT is being reverted: the journal's run ids live in a different
-        # id-space than the progress ledger's (log.md), so a bare id told the
-        # user nothing about which run they were about to undo.
-        info = None
-        try:
-            info = get_undo_journal().run_info(run_id)
-        except Exception:
-            pass
-        source = (info or {}).get("source") or ""
-        when = ""
-        if info and info.get("started_at"):
-            from datetime import datetime as _dt
-            when = _dt.fromtimestamp(info["started_at"]).strftime("%Y-%m-%d %H:%M")
-        label = f" ({source}, started {when})" if source and when else ""
-        res = revert_run(run_id)
-        stale = len(res.get("stale", []))
-        line = (
-            f"  Revert {run_id[:8]}…{label}: {len(res['reverted'])} writes reverted, "
-            f"{len(res['skipped'])} skipped (modified), "
-            f"{stale} stale (vault changed), {len(res['errors'])} errors."
-        )
-        CONSOLE.print(line)
-        # log.md narrated the run's writes; it must narrate the take-back too.
-        try:
-            from silica.kernel.recall.run_log import append_log_line, format_revert_event
-            append_log_line(
-                format_revert_event(source, len(res["reverted"]), len(res["skipped"])),
-                run_id,
-            )
-        except Exception:
-            pass  # the journal is a courtesy, never a failure path
-        return True
-
-    if cmd == "/review":
-        from silica.kernel.recall.deferred import get_deferred_store
-        store = get_deferred_store()
-        flush_hash = next((p[len("--flush="):] for p in parts[1:] if p.startswith("--flush=")), None)
-        if flush_hash:
-            removed = store.remove(flush_hash)
-            if removed:
-                CONSOLE.print(f"  Flushed bundle [bold]{flush_hash[:12]}[/] from review queue.")
-            else:
-                CONSOLE.print(f"  [yellow]No bundle with hash {flush_hash[:12]} found.[/]")
-            return True
-        items = store.list_all()
-        if not items:
-            CONSOLE.print("  Review queue is empty.")
-        else:
-            CONSOLE.print(f"  [bold]Review queue — {len(items)} bundle(s):[/]")
-            for item in items:
-                import datetime as _dt
-                ts = _dt.datetime.fromtimestamp(item["timestamp"]).strftime("%Y-%m-%d %H:%M")
-                CONSOLE.print(
-                    f"  · [bold]{item['content_hash'][:12]}[/]  {item['source_path']}  "
-                    f"({item['rejected_count']} op(s))  {ts}"
-                )
-            CONSOLE.print("  Use [bold]/review --flush=<hash>[/] to discard a bundle.")
-        return True
-
-    if cmd == "/curate":
-        apply = any(p == "--apply" for p in parts[1:])
-        positional = [p for p in parts[1:] if not p.startswith("-")]
-        folder = " ".join(positional)
-        scope = folder or "(vault)"
-        if apply:
-            CONSOLE.print(f"  Curate on [bold]{scope}[/] — applying via the worker seam…")
-        else:
-            CONSOLE.print(f"  Curate on [bold]{scope}[/] — dry-run (nothing is written)…")
-        res = json.loads(TOOLS["silica_curate"].run(apply=apply, folder=folder))
-        if "error" in res:
-            CONSOLE.print(f"  [yellow]{res['error']}[/]")
-            return True
-
-        total = res.get("total", 0)
-        counts = res.get("counts", {})
-        if total == 0:
-            CONSOLE.print("  Nothing to do — the vault is coherent.")
-            return True
-
-        breakdown = ", ".join(f"{v} {k}" for k, v in counts.items())
-        if apply:
-            # Real outcomes (execution["outcome_counts"], derived from the
-            # dispatch batch's per-item status + the mechanical autolink's
-            # actual links-added count) — NOT the planned counts above, which
-            # would report "Applied N" even when e.g. every dedup came back
-            # a distinct verdict and nothing was actually merged.
-            outcome = res.get("execution", {}).get("outcome_counts", {})
-            dispatched = sum(outcome.values())
-            outcome_breakdown = ", ".join(f"{v} {k}" for k, v in outcome.items()) or "no changes"
-            CONSOLE.print(f"  Applied — dispatched [bold]{dispatched}[/] → outcomes: {outcome_breakdown}")
-        else:
-            CONSOLE.print(f"  Plan — [bold]{total}[/] item(s): {breakdown}")
-            for it in res.get("items", []):
-                pair = f" ↔ {it['partner']}" if it.get("partner") else ""
-                CONSOLE.print(f"  · [bold]{it['kind']}[/]  {it['target']}{pair}")
-            CONSOLE.print('  Run [bold]/curate --apply[/] to execute, or ask e.g. "apply only dedup".')
-        return True
-
-    if cmd == "/aliases":
-        apply = any(p == "--apply" for p in parts[1:])
-        positional = [p for p in parts[1:] if not p.startswith("-")]
-        folder = " ".join(positional)
-        scope = folder or "(vault)"
-        mode = "applying" if apply else "dry-run (nothing is written)"
-        CONSOLE.print(f"  Alias consolidation on [bold]{scope}[/] — {mode}…")
-        res = json.loads(TOOLS["silica_aliases"].run(apply=apply, folder=folder))
-        if "error" in res:
-            CONSOLE.print(f"  [yellow]{res['error']}[/]")
-            return True
-        groups = res.get("groups", {})
-        if not groups:
-            CONSOLE.print("  No alias groups survived the gate.")
-            return True
-        for canonical, variants in sorted(groups.items()):
-            CONSOLE.print(f"  · [bold]{canonical}[/] ← {', '.join(variants)}")
-        dropped = res.get("dropped", 0)
-        if dropped:
-            CONSOLE.print(f"  ({dropped} proposed variant(s) dropped by the ambiguity gate)")
-        if apply:
-            written = res.get("written", {})
-            n = sum(written.values())
-            CONSOLE.print(f"  Applied — [bold]{n}[/] alias(es) written into {len(written)} note(s).")
-            for it in res.get("skipped", []):
-                CONSOLE.print(f"  [yellow]skipped {it['note']}: {it['reason']}[/]")
-        else:
-            CONSOLE.print("  Run [bold]/aliases --apply[/] to write them into frontmatter.")
-        return True
-
-    if cmd == "/keep":
-        from rich.markup import escape
-
-        from silica.sources.web_research import keep_last
-
-        try:
-            note_rel = keep_last()
-            CONSOLE.print(
-                f"  Kept → [bold]{escape(note_rel)}[/]"
-                "  (review, then /nucleate to bring it in)"
-            )
-        except Exception as e:  # empty slot, name collision, write refused
-            CONSOLE.print(f"  [yellow]keep failed: {escape(str(e))}[/]")
-        return True
-
-    return False
+    handler = _DIRECT.get(cmd)
+    if handler is None:
+        return False
+    return handler(parts[1:], raw_input=raw_input)
 
 
 def _chunk_by_json_size(items: list, max_bytes: int = 4000) -> list[list]:
@@ -1240,13 +1382,30 @@ def _file_drafts(
     from silica.tools.wrapped import silica_cleanup
 
     kept: list[str] = []
-    for f in md_files:
+
+    # Resolve every file's form upfront on a small pool: an unstamped file
+    # costs one sniff LLM call and the calls are independent — 14 lecture
+    # files paid ~15s serially for verdicts this loop then consumes in order.
+    # The interactive draft prompt below stays sequential.
+    def _read_and_resolve(f: str):
         try:
             text = forms.read_source_text(f)
-            res = forms.resolve(text)
+            return text, forms.resolve(text)
         except Exception:
+            return None
+
+    if len(md_files) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(8, len(md_files))) as pool:
+            resolved = list(pool.map(_read_and_resolve, md_files))
+    else:
+        resolved = [_read_and_resolve(f) for f in md_files]
+
+    for f, rr in zip(md_files, resolved):
+        if rr is None:
             kept.append(f)
             continue
+        text, res = rr
         if res.form != "draft":
             # Visibility is non-negotiable (nucleation-forms spec): the lens
             # verdict prints where auto-target is announced, never silently.
@@ -1400,7 +1559,7 @@ def _pick_target_folder(md_files: list[str]) -> str:
         str(Path(r.path or r.name).parent)
         for r in DRIVER.list_files("")
     } | _shallow_folders(CONFIG.vault_path)
-    folders = sorted(
+    listed = sorted(
         f for f in folders - {".", inbox}
         if not f.startswith(f"{inbox}/")
         and not any(part.startswith(".") or part in _CENSUS_SKIP
@@ -1416,7 +1575,7 @@ def _pick_target_folder(md_files: list[str]) -> str:
         "content into a knowledge vault. Reply with ONLY the folder path on one "
         "line, no quotes. Prefer an existing folder; invent a sensible new path "
         "only if nothing fits.\n\n"
-        "Existing folders:\n" + "\n".join(f"- {f}" for f in folders[:200]) +
+        "Existing folders:\n" + "\n".join(f"- {f}" for f in listed[:200]) +
         f"\n\nContent excerpt ({md_files[0]}):\n{excerpt}"
     )
     resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=2048)
@@ -1426,24 +1585,22 @@ def _pick_target_folder(md_files: list[str]) -> str:
         raise ValueError("empty folder pick")
     # Same rule VALIDATE applies to every op, asked once here instead of once
     # per rejected op an hour of LLM calls later.
-    from silica.kernel.recall.paths import is_inbox_path
+    from silica.kernel.recall.paths import contain_in_vault, is_inbox_path
 
-    norm = pick.replace("\\", "/").strip("/")
+    # The excerpt above is INGESTED DOCUMENT text, so this reply is an
+    # injection channel and the string it carries becomes a write destination
+    # (`<dest>/<title>.md` → DRIVER.upsert). Contain it here, where the caller
+    # still has a fallback, rather than letting an absolute or `..`-bearing
+    # pick reach the driver: `in_write_dir` only prefixes, it never normalises.
+    norm = contain_in_vault(pick.replace("\\", "/"), Path(CONFIG.vault_path))
     if is_inbox_path(f"{norm}/x.md"):
         raise ValueError(f"folder pick {pick!r} lands in the inbox")
-    return pick
+    return norm
 
 
 def _target_and_save(args: list[str]) -> tuple[str, str]:
     """Split `<free-text target words> [--save=<path>]` into (target, save_path)."""
-    save_path = ""
-    words: list[str] = []
-    for arg in args:
-        if arg.startswith("--save="):
-            save_path = arg[len("--save="):]
-        elif not arg.startswith("-"):
-            words.append(arg)
-    return " ".join(words).strip(), save_path
+    return " ".join(_positional(args)).strip(), _str_flag(args, "--save")
 
 
 def _save_or_readonly_clause(save_path: str) -> str:
@@ -1705,7 +1862,7 @@ def _promote(args: list[str]) -> str:
     from silica.kernel.recall.episodic import EpisodicStore, entity_key
 
     store = EpisodicStore()
-    keys = [a for a in args if not a.startswith("-")]
+    keys = _positional(args)
     if not keys:
         candidates = store.nucleation_candidates()
         if not candidates:
@@ -1823,81 +1980,1074 @@ def _promote(args: list[str]) -> str:
     return ""
 
 
-def _expand_workflow_shortcut(user_input: str) -> str | None:
+# --- shortcut handlers -------------------------------------------------------
+# One per command, module-level and independently readable: the dispatcher below
+# is a table, not a 20-branch chain, and `git log -L` on one command no longer
+# spans every other. Each takes the tokens AFTER the command word. The two extras
+# (`user_input`, `progress`) are passed to every handler and absorbed by `**_`, so
+# a handler's signature names exactly what it reads.
+
+
+def _rejoin_spaced_paths(tokens: list[str]) -> list[str]:
+    """Re-join adjacent tokens that only exist as one spaced path.
+
+    An unquoted `/nucleate Inbox/LLM Agent Memory.pdf` shlex-splits into
+    three tokens, and each then failed separately with an error naming the
+    wrong file ("Skipped Memory.pdf"). Greedy longest-join: a token that
+    does not exist on its own but does exist joined with its neighbours
+    (vault-relative or cwd-relative) becomes that one path. Tokens that
+    exist alone are never merged, so quoted paths keep working unchanged.
+    """
+    from pathlib import Path as _P
+
+    def _exists(s: str) -> bool:
+        vp = CONFIG.vault_path.strip()
+        return _P(s).exists() or bool(vp and (_P(vp) / s).exists())
+
+    out: list[str] = []
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok.startswith("-") or _exists(tok):
+            out.append(tok)
+            i += 1
+            continue
+        joined = None
+        cand = tok
+        for j in range(i + 1, len(tokens)):
+            if tokens[j].startswith("-"):
+                break
+            cand = f"{cand} {tokens[j]}"
+            if _exists(cand):
+                joined = (j, cand)
+        if joined:
+            out.append(joined[1])
+            i = joined[0] + 1
+        else:
+            out.append(tok)
+            i += 1
+    return out
+
+# --- /nucleate: one phase per function --------------------------------------
+# The lane is glob -> folder -> plan -> dispatch. Each phase names its inputs and
+# its outputs instead of reaching into 400 lines of shared locals, so a change to
+# (say) folder expansion no longer has to be read against the dispatch loop.
+
+
+class _NucleatePlan(NamedTuple):
+    """What one /nucleate invocation resolved its arguments into."""
+
+    ready_units: list[tuple[str, list[str]]]   # (label, md files) distillable now
+    to_convert: list[str]                      # sources still owed a conversion
+    staged: int                                # code notes written inline, no LLM
+    needs_agent: bool                          # an argument the flag parser could not read
+
+
+def _nucleate_globs(files: list[str]) -> tuple[list[str], bool]:
+    """Expand glob tokens against the vault root, and report whether one missed.
+
+    A miss is an answer, not a question for the agent, so the caller stops on it.
+    """
+    # B6: a glob token ("Inbox/*", the README's documented batch form) is
+    # expanded here, against the vault root. Unexpanded it would survive as
+    # a literal and fall through to the agent, taking the one batch command
+    # the docs advertise off the deterministic path.
+    import glob as _glob
+    globbed: list[str] = []
+    glob_miss = False
+    for f in files:
+        if any(ch in f for ch in "*?["):
+            hits = sorted(
+                h.replace(os.sep, "/")
+                for h in _glob.glob(f, root_dir=CONFIG.vault_path.strip() or ".")
+            )
+            if hits:
+                CONSOLE.print(f"  {f}: [bold]{len(hits)}[/] match(es)")
+            else:
+                CONSOLE.print(f"  [yellow]{f}: no files match[/]")
+                glob_miss = True
+            globbed.extend(hits)
+        else:
+            globbed.append(f)
+    files = globbed
+    return files, glob_miss
+
+
+def _nucleate_expand_folders(
+    files: list[str], enabled
+) -> tuple[list[str], dict[str, str]]:
+    """Expand folder arguments to the files under them.
+
+    Also returns `run_root`: the folder each code file came from, which is how
+    the code lane names its destination.
+    """
+    from pathlib import Path
+
+    from silica.sources.registry import adapter_for, expand_folder, folder_rel
+    from silica.tools.atomic import notes_under
+
+    # A folder argument is the common way to say "this subsystem": expand it
+    # to the source files under it, then dispatch each exactly like a file.
+    # `run_root` remembers which folder each file came from — the code lane
+    # names its destination folder after it.
+    expanded: list[str] = []
+    run_root: dict[str, str] = {}
+    for f in files:
+        adapter = adapter_for(f, enabled=enabled)
+        group = expand_folder(f, enabled) if adapter is None else []
+        if group:
+            CONSOLE.print(f"  {f}: [bold]{len(group)}[/] source file(s)")
+            # run_root is the code lane's destination naming, so it stays
+            # keyed on code files only.
+            run_root.update(dict.fromkeys(group, folder_rel(f) or ""))
+        elif adapter is None:
+            # A folder of notes. `expand_folder` cannot see one (git-backed
+            # census, and a plain vault is no repo), so this used to fall
+            # through to the agent fallback below with nothing but the
+            # folder name — a listing an LLM had to guess at.
+            group = notes_under(f)
+            # An inbox folder of PDFs answered "0 notes" and went to the
+            # agent as an unresolvable name. Unconverted files are
+            # first-class /nucleate input (each runs through convert below),
+            # so a folder argument picks them up like it picks up notes.
+            from silica.sources.convert import DOC_EXTS, IMG_EXTS
+            from silica.tools.atomic import _unconverted_under
+            pending = [
+                p for p in _unconverted_under(f)
+                if Path(p).suffix.lower() in DOC_EXTS
+            ]
+            # Images stay batch input only inside the inbox (screenshots
+            # dropped there to OCR). In a SOURCE folder they are a book
+            # photographed page by page: converting each page as its own
+            # document is hundreds of one-page runs of garbage.
+            from silica.kernel.recall.paths import is_inbox_path
+            if not is_inbox_path(f.rstrip("/") + "/x.md"):
+                photos = [p for p in pending
+                          if Path(p).suffix.lower() in IMG_EXTS]
+                if photos:
+                    pending = [p for p in pending if p not in photos]
+                    CONSOLE.print(
+                        f"  [dim]{f}: left {len(photos)} image(s) alone — "
+                        f"a photographed book is one artefact, not "
+                        f"{len(photos)} documents; /nucleate an image "
+                        f"explicitly to OCR it on its own[/]"
+                    )
+            if group or pending:
+                detail = f"[bold]{len(group)}[/] note(s)" if group else ""
+                if pending:
+                    detail += (", " if detail else "") + \
+                        f"[bold]{len(pending)}[/] file(s) to convert"
+                CONSOLE.print(f"  {f}: {detail}")
+            group = group + pending
+        expanded.extend(group or [f])
+    files = list(dict.fromkeys(expanded))
+    return files, run_root
+
+
+def _nucleate_plan_units(
+    files: list[str], enabled, run_root: dict[str, str], undo_run
+) -> _NucleatePlan:
+    """Triage every resolved file into staged-now, ready-to-distill, or to-convert."""
+    from pathlib import Path
+
+    from silica.sources.registry import adapter_for, stage
+
+    md_files: list[str] = []
+    staged = 0
+    needs_agent = not files  # only flags given (dropped --folder=) → agent infers
+    prior_conversions: dict[str, dict] | None = None  # built on first need
+    # Pipeline units: loose .md arguments form one ready unit; each source
+    # document is its own unit — ready when its segments already exist,
+    # queued for conversion otherwise. One Coordinator run per unit, so
+    # book N+1 can convert while book N distills.
+    ready_units: list[tuple[str, list[str]]] = []
+    to_convert: list[str] = []
+    for f in files:
+        adapter = adapter_for(f, enabled=enabled)
+        if adapter is None:
+            # No source claims this file type → the converter lane (PDF
+            # today). A bare name or folder (no suffix) is a resolvable
+            # intent the flag parser couldn't read — agent, not converter.
+            if not Path(f).suffix:
+                needs_agent = True
+                continue
+            # Batch resume: conversion is the expensive half (minutes of
+            # OCR per scanned book), so a re-run must not pay it again.
+            # Both identities are already on disk — segments in the inbox
+            # (interrupted run) and the done/ archive (finished book) both
+            # carry `source_file` frontmatter.
+            from silica.sources.convert import _resolve_input
+            try:
+                src_key = str(_resolve_input(f))
+            except ValueError:
+                src_key = ""  # convert() stays the authority on missing files
+            if prior_conversions is None:
+                prior_conversions = _prior_conversions()
+            prior = prior_conversions.get(src_key) if src_key else None
+            if prior and prior["inbox"]:
+                CONSOLE.print(
+                    f"  {f}: reusing [bold]{len(prior['inbox'])}[/] "
+                    f"already-converted segment(s)"
+                )
+                ready_units.append((f, prior["inbox"]))
+                continue
+            if prior and prior["done"]:
+                CONSOLE.print(
+                    f"  [dim]{f}: already nucleated "
+                    f"({prior['done']} segment(s) in done/) — skipped[/]"
+                )
+                continue
+            to_convert.append(f)
+            continue
+        result = stage(adapter, f, run_root.get(f, ""), undo_run)
+        if result["status"] == "distill":
+            md_files.append(f)
+        elif result["status"] == "ok":
+            staged += 1
+            code_ref = result["meta"].get("code_ref", "")
+            if len(files) <= 10:  # a whole subsystem would flood the terminal
+                CONSOLE.print(
+                    f"  Wrote [bold]{result['note_path']}[/] "
+                    f"(code_ref {code_ref[:8]})."
+                )
+        else:
+            CONSOLE.print(f"  [yellow]{f}: {result.get('message', '')}[/]")
+
+    if staged:
+        if len(files) > 10:
+            CONSOLE.print(f"  Wrote [bold]{staged}[/] code note(s). /wiki for prose.")
+        CONSOLE.print("  [dim]/revert undoes this run.[/]")
+
+    # Loose .md arguments distill together, exactly as before the pipeline —
+    # first in line: they are ready, so the first conversion overlaps them.
+    if md_files:
+        ready_units.insert(0, ("", list(dict.fromkeys(md_files))))
+    return _NucleatePlan(ready_units, to_convert, staged, needs_agent)
+
+
+def _nucleate_prepare(
+    mfs: list[str], target_dir: str | None, profile: str | None, undo_run
+) -> list[str]:
+    """refs filter → draft filing → provenance drop, for one unit."""
+    # A folder arg can list both a PDF and its already-converted chunks;
+    # convert() upserts the same chunk paths, so dedup keeps each once.
+    mfs = list(dict.fromkeys(mfs))
+
+    # Apparatus is not content: skip flagged chunks (convert marks them
+    # `references: true` / `boilerplate: true`). The raw chunk stays in
+    # the inbox for lookup — never venue/journal/ethics notes.
+    from silica.sources.convert import is_skippable_chunk
+    ref_chunks = [mf for mf in mfs if is_skippable_chunk(mf)]
+    if ref_chunks:
+        mfs = [mf for mf in mfs if mf not in ref_chunks]
+        CONSOLE.print(
+            f"  [dim]skipped {len(ref_chunks)} apparatus section(s) "
+            f"(references, contents, venue checklists) — "
+            f"kept in the inbox, not distilled into notes[/]"
+        )
+        if not mfs:
+            CONSOLE.print("  [yellow]nothing left to nucleate: only apparatus sections were given[/]")
+            return []
+
+    # Draft filing (docs/specs/nucleation-forms.md): the owner's own
+    # working material is filed, not distilled. Runs before auto-target
+    # so a run that was ONLY drafts never pays the folder-pick call. An
+    # explicit --profile tops the ladder: no resolution, no filing.
+    if not profile:
+        mfs = _file_drafts(mfs, target_dir or "", undo_run)
+        if not mfs:
+            return []  # everything was filed; reported above
+
+    from pathlib import Path as _Path
+    from silica.kernel.write.provenance import (
+        check_renucleate, content_sha256, read_records,
+    )
+
+    kept_md: list[str] = []
+    distilled_prior = 0
+    for mf in mfs:
+        try:
+            incoming_sha = content_sha256(mf)
+            if not incoming_sha:
+                kept_md.append(mf)
+                continue
+            # Same sha as the last record AND that run yielded notes ⇒
+            # this segment is already in the vault — re-distilling it
+            # costs a full LLM pass to write nothing. A zero-yield
+            # record (all ops deferred) is a failure, not a
+            # completion: never skip on it.
+            recs = read_records(_Path(mf).name)
+            last = recs[-1] if recs else None
+            if last and last.get("sha256") == incoming_sha and last.get("notes"):
+                distilled_prior += 1
+                continue
+            modified, prior_notes = check_renucleate(_Path(mf).name, incoming_sha)
+            if modified:
+                CONSOLE.print(
+                    f"  [yellow]re-nucleate of a modified source: {prior_notes} note(s) "
+                    f"derived from the previous version[/]"
+                )
+        except Exception as exc:
+            logger.debug("/nucleate: re-nucleate provenance check skipped for %s (non-fatal): %s", mf, exc)
+        kept_md.append(mf)
+    if distilled_prior:
+        CONSOLE.print(
+            f"  [dim]{distilled_prior} segment(s) already distilled "
+            f"(unchanged since their run) — skipped[/]"
+        )
+    return kept_md
+
+
+def _nucleate_result_line(result: dict) -> str:
+    """The one-line outcome of a Coordinator run, ready to print after the label.
+
+    `label` inside the coverage comprehension is the counter's name, deliberately
+    not the caller's unit label — extracting this is what stops the two sharing
+    a name in one scope.
+    """
+    status = result.get("final_status") or result.get("error") or "done"
+    failed = result.get("failed_chunks") or []
+    extra = f" — {len(failed)} chunk(s) failed" if failed else ""
+    sw = result.get("link_sweep") or {}
+    if sw.get("links_stripped"):
+        extra += (
+            f" — {sw['links_stripped']} dangling link(s) unlinked "
+            f"in {sw['notes_edited']} note(s)"
+        )
+    if sw.get("links_relinked"):
+        extra += f" — {sw['links_relinked']} spelling variant(s) repointed"
+    # Coverage, post-anneal. Silence here read as "everything landed",
+    # and the counts that said otherwise lived in log.md and a bundle
+    # under ~/.silica — neither of which anyone opens after a Success.
+    cov = result.get("coverage") or {}
+    bits = [
+        f"{cov[k]} {label}" for k, label in (
+            ("recovered_ops", "deferred op(s) recovered"),
+            ("deferred_ops", "still deferred"),
+            ("residue_facts", "fact(s) uncovered"),
+        ) if cov.get(k)
+    ]
+    if bits:
+        extra += " — " + ", ".join(bits)
+    return f"[bold]{status}[/]{extra}"
+
+
+def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
+    """/nucleate <file|folder|glob...> [--target=DIR] [--hub=H] [--profile=P]
+    [--seen=YYYY-MM-DD] [--no-keep-sources] — ingest sources into vault notes.
+
+    No arguments drains the write-ahead log instead. Fully inline: returns "" when
+    it dispatched, or an agent-directed message when the target cannot be resolved
+    from the arguments alone.
+    """
+    args = _rejoin_spaced_paths(args)
+    if not args:
+        return _drain_wal()
+    files = _positional(args)  # preserve original case
+    target_dir = _str_flag(args, "--target")
+    hub = _str_flag(args, "--hub")
+    seen = _str_flag(args, "--seen")  # capture clock: the day the events happened
+    # Explicit lens override: tops the whole form ladder
+    # (docs/specs/nucleation-forms.md), filing included.
+    profile = _str_flag(args, "--profile")
+    # On by default: the leaf lives in `sources/`, which is
+    # retrieval-invisible by construction (is_source_leaf excludes it from
+    # search, search_context and embeddings), so it costs disk and nothing
+    # else — and it is what makes a note's verbatim source reachable at all
+    # (reliability_tier reads exactly that). --no-keep-sources opts out.
+    keep_sources = "--no-keep-sources" not in args
+
+    if seen:
+        # Trust boundary: this string becomes the valid_from on every claim
+        # of the run — a typo'd date would poison note_clock vault-wide.
+        import datetime as _dt
+        try:
+            seen = _dt.date.fromisoformat(seen).isoformat()
+        except ValueError:
+            CONSOLE.print(f"  [yellow]--seen ignored: {seen!r} is not YYYY-MM-DD[/]")
+            seen = ""
+
+    from pathlib import Path
+    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.sources.convert import convert
+    from silica.kernel.write.undo_journal import get_undo_journal
+    from silica.sources.registry import adapter_for, expand_folder, folder_rel, stage
+    from silica.tools.atomic import notes_under
+
+    files, glob_miss = _nucleate_globs(files)
+    if not files and glob_miss:
+        return ""  # a miss is an answer, not a question for the agent
+
+    enabled = get_active_manifest().sources
+    files, run_root = _nucleate_expand_folders(files, enabled)
+
+    # One CLI journal run per /nucleate invocation for what the planner writes
+    # itself (staged code, filed drafts). The FSM opens its own journal run per
+    # dispatched unit, so on a multi-book batch /revert undoes one book at a
+    # time, most recent first — run it again for the previous one.
+    undo_run = get_undo_journal().start_run(
+        source="nucleate", vault=CONFIG.vault_path.strip() or None
+    ) if files else None
+    ready_units, to_convert, staged, needs_agent = _nucleate_plan_units(
+        files, enabled, run_root, undo_run)
+
+    if not ready_units and not to_convert:
+        if staged or not needs_agent:
+            # Staged inline, or only genuinely-unsupported files — nothing for the agent.
+            return ""
+        # A dropped --folder=, a directory arg, or connective words the flag
+        # parser can't read. Hand the raw line to the agent so it infers intent
+        # (it already holds the tools + the vault map).
+        return (
+            f"The user typed {user_input!r} to nucleate/ingest, but no ingestible "
+            "file was resolved. The argument may be a folder (call silica_files "
+            "with folder= and nucleate both its notes and its \"code\" entries — "
+            "a code folder holds no .md and is still ingestible), a single note, or carry a "
+            "--target/--folder the flag parser missed. Resolve the inbox file(s), "
+            "then call silica_run_injector with the resolved inbox_files and "
+            "target_dir. If nothing is ingestible, say so briefly."
+        )
+
+    total_units = len(ready_units) + len(to_convert)
+    batch = total_units > 1
+    dispatched = 0
+
+    def _at() -> str:
+        """Clock on the per-unit lines of a batch — a folder of scanned
+        books runs for hours, and the unit boundaries are the only place
+        to read where the time went. Single-unit runs stay unadorned."""
+        from datetime import datetime
+        return f"[dim]{datetime.now().strftime('%H:%M:%S')}[/] " if batch else ""
+
+    # Conversions run with the user-passed destination, as they always did:
+    # an auto-picked target is resolved at first dispatch, after conversion.
+    convert_dest = target_dir
+
+    def _dispatch_unit(label: str, mfs: list[str]) -> str | None:
+        """Prepare and run one unit; a returned string is the agent
+        fallback (unresolvable target) and ends the whole batch."""
+        nonlocal target_dir, dispatched
+        mfs = _nucleate_prepare(mfs, target_dir, profile, undo_run)
+        if not mfs:
+            return None
+
+        if not target_dir:
+            # auto-target: one small folder-pick call, not a full agent
+            # turn; resolved once, every later unit inherits it.
+            try:
+                target_dir = _pick_target_folder(mfs)
+                CONSOLE.print(f"  auto-target: [bold]{_announced_target(target_dir)}[/]")
+            except Exception as exc:
+                logger.debug("/nucleate: auto-target pick failed (non-fatal): %s", exc)
+
+        if not target_dir:
+            # Fallback: hand the folder choice to the agent (legacy behavior).
+            files_json = json.dumps(mfs)
+            msg = (
+                f"Run the Injector pipeline for {len(mfs)} file(s).\n"
+                f"No target folder was given. Skim the inbox file(s) {files_json}, "
+                f"then pick the single most relevant existing vault folder for "
+                f"this content (use the vault map; list folders if unsure). If "
+                f"nothing fits, pick a sensible new folder name. State the chosen "
+                f"folder in one line, then call `silica_run_injector` with "
+                f"inbox_files={files_json}, target_dir=<chosen folder>"
+            )
+            if hub:
+                msg += f", hub={json.dumps(hub)}"
+            return msg + "."
+
+        # Direct FSM dispatch — no LLM orchestrator. The old path
+        # round-tripped the whole session history through the model on
+        # every turn just to relay these arguments to silica_run_injector
+        # (~40% of a nucleate run's tokens for a handful of decision tokens).
+        from silica.router.coordinator import Coordinator
+
+        head = f"{label}: " if (batch and label) else ""
+        CONSOLE.print(
+            f"  {_at()}{head}nucleate: {len(mfs)} file(s) → [bold]{_announced_target(target_dir)}[/]"
+        )
+        try:
+            result = Coordinator(
+                inbox_files=mfs, target_dir=target_dir, hub=hub or None,
+                keep_sources=keep_sources, seen_override=seen or None,
+                distill_profile=profile or None,
+            ).run()
+        except ValueError as exc:
+            # A path outside the vault (or any other rejected argument) is
+            # user error, not a crash: the batch moves to the next unit.
+            CONSOLE.print(f"  [yellow]nucleate: {exc}[/]")
+            return None
+        CONSOLE.print(
+            f"  {_at()}{head}nucleate finished: "
+            f"{_nucleate_result_line(result)} — details in log.md"
+        )
+        dispatched += 1
+        return None
+
+    # Conversion is local OCR, distillation is network LLM — different
+    # resources, so the NEXT book converts while the current unit distills.
+    # One worker, one conversion ahead: further parallel OCR just contends
+    # for the same GPU. Worth ~2% of wall-clock, not the 2x this comment
+    # used to claim: measured 2026-08-16 on 07-religioni-comparate, OCR is
+    # 43-68 s per book against 6+ min of distillation. The 2x ceiling needs
+    # a corpus where OCR time approaches LLM time, which text PDFs never do.
+    from concurrent.futures import ThreadPoolExecutor
+
+    pool = ThreadPoolExecutor(max_workers=1) if to_convert else None
+
+    def _submit(i: int):
+        if pool is None or i >= len(to_convert):
+            return None
+        if batch:
+            CONSOLE.print(
+                f"  {_at()}[{i + 1}/{len(to_convert)}] converting {to_convert[i]}"
+            )
+        return pool.submit(convert, to_convert[i], convert_dest)
+
+    pending = _submit(0)
+    try:
+        for label, segs in ready_units:
+            msg = _dispatch_unit(label, segs)
+            if msg:
+                return msg
+        for i, src in enumerate(to_convert):
+            try:
+                segs = pending.result()
+            except (ValueError, RuntimeError) as e:
+                CONSOLE.print(f"  [yellow]Skipped {src}: {e}[/]")
+                segs = []
+            pending = _submit(i + 1)
+            if segs:
+                msg = _dispatch_unit(src, segs)
+                if msg:
+                    return msg
+    finally:
+        if pool is not None:
+            # wait=False: a mineru run cannot be cancelled; on an early
+            # agent-fallback return the in-flight conversion finishes in
+            # the background and its segments are reused next time.
+            pool.shutdown(wait=False)
+
+    if total_units and not dispatched:
+        CONSOLE.print(
+            "  [dim]nothing left to distill — everything was filed, "
+            "skipped, or already in the vault[/]"
+        )
+    if batch and dispatched > 1:
+        CONSOLE.print(
+            f"  [dim]{dispatched} run(s) — /revert undoes the most recent; "
+            f"run it again for the one before[/]"
+        )
+    return ""
+
+
+def _sc_settings(args: list[str], **_) -> str | None:
+    """/settings [<key> <value|none>] — read or edit vault.yaml without the wizard."""
+    # View/edit vault.yaml without the wizard. ponytail: safe_dump rewrite —
+    # YAML comments are not preserved; hand-edit the file to keep them.
+    import yaml as _yaml
+    from pathlib import Path as _P
+    from silica.kernel.vault_manifest import MANIFEST_REL, reset_manifest_cache
+    _KEYS = {"cooccurrence_lang", "conventions.language",
+             "conventions.reply_language", "conventions.max_tags"}
+    mf = _P(CONFIG.vault_path) / MANIFEST_REL
+    data = _yaml.safe_load(mf.read_text(encoding="utf-8")) if mf.exists() else {}
+    if not isinstance(data, dict):
+        data = {}
+    if not args:
+        CONSOLE.print(f"  [bold]{mf}[/]")
+        body = _yaml.safe_dump(data, allow_unicode=True, sort_keys=False).rstrip() \
+            if data else "(defaults — no vault.yaml yet)"
+        CONSOLE.print(f"  {body}")
+        CONSOLE.print(f"  Keys: {', '.join(sorted(_KEYS))} — /settings <key> <value|none>")
+        return ""
+    if len(args) != 2 or args[0] not in _KEYS:
+        return f"Error: usage /settings <key> <value|none>. Keys: {', '.join(sorted(_KEYS))}"
+    key, raw = args
+    val = None if raw.lower() in ("none", "null") else (int(raw) if raw.isdigit() else raw)
+    node = data
+    *heads, leaf = key.split(".")
+    for h in heads:
+        if not isinstance(node.get(h), dict):
+            node[h] = {}
+        node = node[h]
+    if val is None:
+        node.pop(leaf, None)
+    else:
+        node[leaf] = val
+    # Atomic: a torn vault.yaml parses as defaults, and default write_dir=""
+    # is the whole vault root — the exact boundary this file exists to set.
+    from silica.kernel.recall.paths import atomic_write_bytes
+    atomic_write_bytes(mf, _yaml.safe_dump(
+        data, allow_unicode=True, sort_keys=False).encode("utf-8"))
+    reset_manifest_cache()
+    CONSOLE.print(f"  {key} = {raw} → {mf.name} (comments in the file are not preserved)")
+    return ""
+
+
+def _sc_convert(args: list[str], **_) -> str | None:
+    """/convert <file...> [--target=DIR] — document to inbox notes, no distillation."""
+    args = _rejoin_spaced_paths(args)
+    files = _positional(args)
+    target_dir = _str_flag(args, "--target")
+    if not files:
+        return "Error: /convert requires at least one file path. Usage: /convert <file...> [--target=DIR]"
+    from silica.sources.convert import convert
+    for f in files:
+        try:
+            paths = convert(f, dest_dir=target_dir)
+            CONSOLE.print(
+                f"  Converted {f} → [bold]{len(paths)}[/] note(s): {', '.join(paths)}"
+            )
+        except ValueError as e:
+            CONSOLE.print(f"  [yellow]Skipped {f}: {e}[/]")
+    return ""  # fully handled inline — sentinel: nothing for the agent
+
+
+def _sc_web_search(args: list[str], *, progress=None, **_) -> str | None:
+    """/web-search "<concept>" [--max-searches=N] — research the web into an inbox note."""
+    from rich.markup import escape
+
+    from silica.sources.web_research import web_research, _DEFAULT_MAX_SEARCHES
+    max_searches = _int_flag(args, "--max-searches=", _DEFAULT_MAX_SEARCHES)
+    concept = " ".join(_positional(args)).strip()
+    if not concept:
+        return 'Error: /web-search requires a concept. Usage: /web-search "<concept>" [--max-searches=N]'
+
+    # The REPL's renderer, never a second one: __init__ overwrites the
+    # module-global batch hook and only close() clears it, so a throwaway
+    # renderer left the global pointing at an orphan and /refine, /enrich
+    # and /dedup silently lost their batch panel for the rest of the
+    # session. Own one only when there is nothing to reuse, and close it.
+    renderer = progress
+    if renderer is None:
+        from silica.ui.renderer import make_progress_callback
+        renderer = make_progress_callback()
+    try:
+        note_rel = web_research(
+            concept, max_searches=max_searches,
+            tool_progress_callback=renderer,
+        )
+        # escape(), not markup=False: a note title Rich reads as a tag gets
+        # silently eaten (the user is told a path that is not the file's
+        # name), and a URL carrying `[/x]` raises MarkupError straight out
+        # of the except that exists to report the failure. Escaping only the
+        # interpolated value keeps the styling on the rest of the line.
+        CONSOLE.print(
+            f"  Findings → [bold]{escape(note_rel)}[/]"
+            "  (review, then /nucleate to bring it in)"
+        )
+    except Exception as e:  # missing key, no findings, convergence guard, network
+        CONSOLE.print(f"  [yellow]web-search failed: {escape(str(e))}[/]")
+    finally:
+        if progress is None:
+            renderer.close()
+    return ""  # fully handled inline — sentinel: nothing for the agent
+
+
+def _sc_fetch(args: list[str], **_) -> str | None:
+    """/fetch <url> — one page (or video transcript) into an inbox note."""
+    from rich.markup import escape
+
+    from silica.sources.web_research import fetch_to_inbox
+    url = " ".join(args).strip()
+    if not url:
+        return "Error: /fetch requires a URL. Usage: /fetch <url>"
+
+    try:
+        note_rel = fetch_to_inbox(url)
+        CONSOLE.print(
+            f"  Fetched → [bold]{escape(note_rel)}[/]"
+            "  (review, then /nucleate to bring it in)"
+        )
+    except Exception as e:  # SSRF guard, bot wall, missing yt-dlp, network
+        CONSOLE.print(f"  [yellow]fetch failed: {escape(str(e))}[/]")
+    return ""  # fully handled inline — sentinel: nothing for the agent
+
+
+def _sc_report(args: list[str], **_) -> str | None:
+    """/report [folder] [--top-k=N] [--embeddings] [--cooccurrence] — structural audit."""
+    folder = ""
+    top_k = _int_flag(args, "--top-k=", 10)
+    with_embeddings = False
+    # Off by default like --embeddings: the co-occurrence delta runs a
+    # per-note expanded ranking, the report's other expensive pass. Without
+    # it stale links and missing hubs are never computed at all, so the
+    # escalate rules that read them can never fire.
+    with_cooccurrence = False
+
+    for arg in args:
+        if arg.startswith("--folder="):
+            folder = arg[len("--folder="):]
+        elif arg in ("--embeddings", "--with-embeddings"):
+            with_embeddings = True
+        elif arg in ("--cooccurrence", "--with-cooccurrence"):
+            with_cooccurrence = True
+        elif not arg.startswith("-"):
+            folder = arg  # positional: /report Concepts/ML
+
+    scope_desc = f"scoped to `{folder}`" if folder else "on the whole vault"
+    embed_note = " Also propose missing links via the embedding index." if with_embeddings else ""
+    if with_cooccurrence:
+        embed_note += (" Also read the co-occurrence delta: autolink candidates, stale links"
+                       " and missing hubs.")
+
+    return (
+        f"Run a structural vault audit {scope_desc}.{embed_note}\n"
+        f"Call `silica_vault_report` with "
+        f"folder={json.dumps(folder)}, top_k={top_k}, "
+        f"with_embeddings={'true' if with_embeddings else 'false'}, "
+        f"with_cooccurrence={'true' if with_cooccurrence else 'false'}, seed_ledger=true.\n"
+        f"Then STOP. Write a short, human-readable brief in chat from the returned `digest` "
+        f"(totals, top hubs, and how many fixes are available: auto / propose / issues), and "
+        f"point the user to the GRAPH_REPORT.md that was written.\n"
+        f"Do NOT run the steering loop, do NOT call `silica_ledger_next`, and do NOT apply any "
+        f"autolinks, corrections, renames, or deletions. Instead, ask the user whether they want "
+        f"to apply the changes. Only if they explicitly say yes, resume the run (`run_id`) and "
+        f"follow the steering loop."
+    )
+
+
+def _sc_refine_enrich(args: list[str], cmd: str) -> str | None:
+    """/refine|/enrich [folder] — seed a batch ledger over a folder's notes.
+
+    One body, two commands: they differ only in the capability they seed, and
+    `cmd` is what picks it.
+    """
+    from silica.driver import DRIVER
+    from silica.tools.graph import _in_folder
+
+    folder = next(iter(_positional(args)), "")
+
+    # list_files(folder) pre-filters loosely (startswith); _in_folder tightens
+    # it so /refine Foo never leaks into a sibling FooBar/ folder.
+    paths = [r.path for r in DRIVER.list_files(folder=folder) if _in_folder(r.path, folder)]
+    if not paths:
+        return f"Error: no files found in '{folder}'."
+
+    cap = "silica_refine_batch" if cmd == "/refine" else "silica_enrich_batch"
+    payloads = [{"note_paths": chunk} for chunk in _chunk_by_json_size(paths)]
+    return _seed_batch_ledger(cap, payloads, kind=cmd.strip("/"), label=folder or "vault")
+
+
+def _sc_dedup(args: list[str], **_) -> str | None:
+    """/dedup [folder] — seed a batch ledger over the near-duplicate pairs found."""
+    from silica.tools.runners import _scan_dedup_pairs
+
+    folder = " ".join(_positional(args))
+
+    pairs, err = _scan_dedup_pairs(folder)
+    if err:
+        CONSOLE.print(f"  [yellow]{err}[/]")
+        return ""  # handled inline — nothing for the agent
+    if not pairs:
+        CONSOLE.print(f"  No near-duplicate pairs in [bold]{folder or '(vault)'}[/].")
+        return ""
+
+    payloads = [{"pairs": chunk} for chunk in _chunk_by_json_size(pairs)]
+    return _seed_batch_ledger("silica_dedup_pairs", payloads, kind="dedup", label=folder or "vault")
+
+
+def _sc_organize(args: list[str], **_) -> str | None:
+    """/organize [intent] [--scope=DIR] [--file=TAXONOMY] [--apply] [--merge]
+    [--move-uncategorized] — agent-directed taxonomy build and move plan."""
+    intent_parts = _positional(args)
+    scope = _str_flag(args, "--scope")
+    taxonomy_file = _str_flag(args, "--file")
+    apply_now = "--apply" in args
+    merge = "--merge" in args
+    move_uncat = "--move-uncategorized" in args
+
+    # Both organizer tools filter with `ref.path.startswith(scope)` over
+    # vault-relative paths, so an absolute --scope matches zero notes and the
+    # whole run reports success on an empty plan. Normalize here, where the
+    # user types the path, and refuse a scope outside the vault out loud.
+    if scope:
+        from silica.kernel.recall.paths import to_vault_relative
+        try:
+            scope = to_vault_relative(scope, ensure_md=False)
+        except ValueError as exc:
+            return f"Error: /organize --scope is not usable: {exc}"
+
+    # Re-join intent (handles both quoted and unquoted multi-word)
+    intent = " ".join(intent_parts).strip('"\'')
+    run_extra = ", move_uncategorized=true" if move_uncat else ""
+
+    if taxonomy_file:
+        # Skip taxonomy generation — use existing file
+        dry = "false" if apply_now else "true"
+        scope_str = f", scope={json.dumps(scope)}" if scope else ""
+        msg = (
+            f"Run the vault organizer using the existing taxonomy file {json.dumps(taxonomy_file)}.\n"
+            f"Call `silica_run_organizer` with taxonomy_path={json.dumps(taxonomy_file)}{scope_str}, "
+            f"dry_run={dry}{run_extra}.\n"
+        )
+        if not apply_now:
+            msg += (
+                "Show the move plan to the user and ask for confirmation. "
+                "If confirmed, call `silica_run_organizer` again with dry_run=false."
+            )
+    elif intent:
+        scope_str = f", scope={json.dumps(scope)}" if scope else ""
+        merge_str = ", merge=true" if merge else ""
+        dry_note = (
+            f"Then call `silica_run_organizer` with dry_run=true{run_extra} to preview the moves. "
+            "Show the plan to the user and ask for confirmation before executing."
+        ) if not apply_now else (
+            f"Then call `silica_run_organizer` with dry_run=false{run_extra} to execute the moves."
+        )
+        msg = (
+            f"Organize the vault based on the user's intent: {json.dumps(intent)}.\n"
+            f"Step 1: Call `silica_generate_taxonomy` with user_intent={json.dumps(intent)}{scope_str}{merge_str}.\n"
+            f"Step 2: Show the generated taxonomy to the user and ask if it looks correct.\n"
+            f"Step 3: {dry_note}"
+        )
+    else:
+        msg = (
+            "Help me organize my vault. "
+            "Ask me to describe how I want to group my notes, "
+            "then call `silica_generate_taxonomy` with my answer, "
+            "show me the taxonomy, and run `silica_run_organizer` with dry_run=true to preview."
+        )
+    return msg
+
+# --- reader commands: agent-directed, strictly read-only ---------------------
+
+
+def _sc_summarize(args: list[str], **_) -> str | None:
+    """/summarize <note|folder...> — agent-directed, read-only digest."""
+    targets = _positional(args)
+    if not targets:
+        return "Error: /summarize requires a note or folder. Usage: /summarize <note|folder...>"
+    listing = ", ".join(f"`{t}`" for t in targets)
+    return (
+        f"Summarize {listing} from the vault.\n"
+        f"Resolve each target (note path, note title, or folder — list a folder's notes and "
+        f"read them). Then write a digest in chat: lead with the core ideas, use tables for "
+        f"anything enumerable (comparisons, parameters, timelines), keep it scannable.\n"
+        f"READ-ONLY: do not create, edit, patch, or move any note."
+    )
+
+
+def _sc_explain(args: list[str], **_) -> str | None:
+    """/explain "<concept>" [--level=intro|expert] — agent-directed, vault-grounded."""
+    level = _str_flag(args, "--level")
+    concept = " ".join(_positional(args)).strip()
+    if not concept:
+        return 'Error: /explain requires a concept. Usage: /explain "<concept>" [--level=intro|expert]'
+    register = {
+        "intro": "for a newcomer: plain language, concrete analogies, no unexplained jargon",
+        "expert": "for an expert: precise and technical, no hand-holding",
+    }.get(level, "for a practitioner: clear, correct, minimal jargon")
+    # The attribution clause is a measured defect of this command, not a guess:
+    # evals/probe_explain_spans.py (2026-07-26, 398 claims) found ~4.6% of claims
+    # attributed to a named note that does not support them, and as many drawn
+    # from general knowledge with no note at all.
+    return (
+        f"Explain {json.dumps(concept)} grounded in this vault, {register}.\n"
+        f"Search the vault (semantic search + related notes), read the top matches, and explain "
+        f"the concept in chat, citing every note you drew on as a [[wikilink]]. If the vault has "
+        f"nothing relevant, say so plainly: do not silently answer from general knowledge alone.\n"
+        f"Attribute a claim to a note only if that note states it. A note that merely sits near "
+        f"the topic is not a source for it, and a point no note supports goes in its own "
+        f"sentence, marked as not coming from the vault.\n"
+        f"READ-ONLY: do not create, edit, patch, or move any note."
+    )
+
+
+def _sc_compare(args: list[str], **_) -> str | None:
+    """/compare "<A>" "<B>" [...] — agent-directed comparison table."""
+    subjects = _positional(args)
+    if len(subjects) < 2:
+        return 'Error: /compare requires at least two subjects. Usage: /compare "<A>" "<B>"'
+    listing = ", ".join(f"`{s}`" for s in subjects)
+    return (
+        f"Compare {listing} using the vault.\n"
+        f"Each subject is a note (path or title) or a concept — locate and read the matching "
+        f"note(s) for each. Output in chat: a comparison table (one column per subject, "
+        f"dimensions as rows), then a short similarities/differences rundown. If any involved "
+        f"note carries `contested: true`, or the notes contradict each other, call that out "
+        f"explicitly. A contradiction the reader confirms is worth recording: offer to run "
+        f"silica_flag_note on the note that is wrong, and only run it once they say so.\n"
+        f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
+    )
+
+
+def _sc_quiz(args: list[str], **_) -> str | None:
+    """/quiz [note|folder] [--n=10] — agent-directed active-recall round."""
+    n = _int_flag(args, "--n=", 10)
+    targets = _positional(args)
+    if targets:
+        source = "from " + ", ".join(f"`{t}`" for t in targets)
+        pick = "Read the note(s) (list a folder's notes first)."
+    else:
+        # No target: the learner model picks. Half the round re-tests what
+        # is decaying, half probes what was never measured — every graded
+        # answer feeds the same ledger either way (spec: learner-model).
+        source = "from the learner model's review queue"
+        pick = (
+            "Call silica_review_queue to pick the targets, and read them. Mix both pools: "
+            "'due' rows were known once and are decaying — re-test them; 'unexplored' rows "
+            "were never measured, and the AI-written ones were never learned at all, so "
+            "probe those first. An empty queue means an empty vault: say so."
+        )
+    return (
+        f"Run a {n}-question active-recall quiz {source}.\n"
+        f"{pick}\n"
+        f"Mix recall, comprehension, and application questions; ask only what the notes "
+        f"actually support.\n"
+        f"Ask the numbered questions and STOP. Do not reveal the answers in the same "
+        f"message: retrieving from memory is what makes the round worth running, and a "
+        f"visible answer key destroys it.\n"
+        f"When the reader replies, grade each answer, cite each source note as a "
+        f"[[wikilink]], then call silica_record_quiz once with one entry per question: "
+        f"path, correct, concepts (the 1-3 concepts that question tested), q (the "
+        f"question text), and anchor ('#Heading' when one heading clearly holds the "
+        f"answer). Grade an unanswered or skipped question as incorrect.\n"
+        f"After grading, offer ONE follow-up round drilling what was just missed — run "
+        f"it only if the reader accepts.\n"
+        f"A wrong answer is the reader's miss, not the note's fault, and needs nothing "
+        f"beyond the grade. If grading instead exposes a fault in the note itself (it "
+        f"states something wrong, or contradicts another note you read), offer to record "
+        f"that with silica_flag_note, and only run it once the reader says so.\n"
+        f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
+    )
+
+
+def _sc_learn(args: list[str], **_) -> str | None:
+    """/learn <area|folder|note|topic> — agent-directed syllabus and tutoring loop."""
+    targets = _positional(args)
+    if not targets:
+        return "Error: /learn requires a target. Usage: /learn <area|folder|note|topic>"
+    target = " ".join(targets)
+    # Vault-content targets only (spec: learner-model D6). New-material
+    # tutoring — teaching a topic the vault does not hold, with web research
+    # and generated material — plugs in HERE: resolve `target` against
+    # outside sources before the syllabus search, everything below reuses.
+    return (
+        f"Guide the reader through re-learning `{target}` from their own vault.\n"
+        f"1. Find the plan: look for an existing syllabus note — frontmatter "
+        f"`type: syllabus` with `target:` matching `{target}`.\n"
+        f"2. No syllabus yet: build one. Call silica_review_queue with target= to read "
+        f"the area's retention state, read the notes involved, then write ONE syllabus "
+        f"note via silica_write_note with props={{\"type\": \"syllabus\", \"target\": "
+        f"{json.dumps(target)}}}, body = ordered steps, each a "
+        f"`- [ ]` checkbox with [[wikilinks]] to the note(s) it covers and a one-line "
+        f"goal. Order steps pedagogically, prerequisites first — infer the order from "
+        f"the content you read, the graph stores none. SKIP what the reader still "
+        f"retains (high R): start the plan at the frontier. Optionally end the note "
+        f"with a mermaid diagram of the path. Then STOP and ask whether to begin.\n"
+        f"3. Syllabus exists: resume at the first unchecked step.\n"
+        f"Teaching discipline, for every step: teach ONE logical step per message, no "
+        f"rushing ahead; add a mermaid diagram when the step earns one; close the step "
+        f"with 2-3 gate questions and STOP — no answer key in the same message, the "
+        f"/quiz rule. When the reader replies: grade, cite sources as [[wikilinks]], "
+        f"call silica_record_quiz once (entries carry path, correct, concepts, q, "
+        f"anchor — gates are quizzes). A passed gate ticks the step's checkbox via "
+        f"silica_patch_note; a failed one leaves it unchecked so the next /learn "
+        f"returns there. Then offer the next step; never start it unprompted.\n"
+        f"The ledger is the truth: when checkboxes and graded history disagree, trust "
+        f"the grades."
+    )
+
+
+def _sc_relate(args: list[str], **_) -> str | None:
+    """/relate <note> [--n=8] — agent-directed neighbourhood map."""
+    n = _int_flag(args, "--n=", 8)
+    targets = _positional(args)
+    if not targets:
+        return "Error: /relate requires a note. Usage: /relate <note> [--n=8]"
+    target = targets[0]
+    return (
+        f"Map how and why `{target}` relates to its most relevant neighbors in the vault.\n"
+        f"Resolve the note, then pull its top {n} related notes via silica's relatedness "
+        f"(the fusion of embeddings + co-occurrence). Read the target and each neighbor enough "
+        f"to judge the link, and note which neighbors the target already [[wikilinks]].\n"
+        f"Output in chat a Markdown table: | Neighbor | Relation | Why | Link |. "
+        f"For Relation pick the type that fits — common ones: prerequisite, elaborates, "
+        f"contradicts, sibling, example-of, depends-on, alternative-to. Why is one line grounded "
+        f"in the notes. Link is [[the neighbor]] if already linked, else 'latent'. Cite every "
+        f"neighbor as a [[wikilink]]. If a neighbor is `contested: true` or contradicts the "
+        f"target, say so in the Why column, and offer to record the contradiction with "
+        f"silica_flag_note; only run it once the reader says so.\n"
+        f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
+    )
+
+
+def _sc_schematize(args: list[str], **_) -> str | None:
+    """/schematize <note|folder|topic> [--save=<path>] — agent-directed table."""
+    target, save_path = _target_and_save(args)
+    if not target:
+        return "Error: /schematize requires a target. Usage: /schematize <note|folder|topic> [--save=<path>]"
+    return (
+        f"Schematize {json.dumps(target)} from the vault.\n"
+        f"Resolve the target: it may be a note (path or title), a folder (list and "
+        f"skim its notes), or a general topic (search the vault, then read the top "
+        f"matches).\n"
+        f"Output in chat: a one-line caption, then a Markdown table whose rows/columns "
+        f"best decompose what you found (components, phases, comparison dimensions, "
+        f"whatever shape fits); do not force a fixed template.\n"
+        f"{_save_or_readonly_clause(save_path)}"
+    )
+
+
+def _sc_diagram(args: list[str], **_) -> str | None:
+    """/diagram <note|folder|topic> [--save=<path>] — agent-directed mermaid block."""
+    target, save_path = _target_and_save(args)
+    if not target:
+        return "Error: /diagram requires a target. Usage: /diagram <note|folder|topic> [--save=<path>]"
+    return (
+        f"Diagram {json.dumps(target)} from the vault.\n"
+        f"Resolve the target the same way as /schematize (note, folder, or topic; "
+        f"search and read as needed).\n"
+        f"Pick whichever Mermaid diagram type fits what you found best: flowchart/graph "
+        f"for architectures and processes, mindmap for concept trees, sequence for "
+        f"temporal flows, classDiagram or erDiagram for structured relationships, "
+        f"timeline for chronologies. Do not default to one type mechanically.\n"
+        f"Output in chat: a one-line caption, then a single fenced ```mermaid block "
+        f"and nothing else.\n"
+        f"{_save_or_readonly_clause(save_path)}"
+    )
+
+
+# The dispatch table IS the list of shortcuts: one row per command, nothing to
+# fall through. A `/word` with no row here is not a shortcut and goes to the
+# agent as prose.
+_SHORTCUTS: dict[str, Callable[..., str | None]] = {
+    "/promote": lambda args, **_: _promote(args),
+    "/nucleate": _sc_nucleate,
+    "/settings": _sc_settings,
+    "/convert": _sc_convert,
+    "/web-search": _sc_web_search,
+    "/fetch": _sc_fetch,
+    "/report": _sc_report,
+    "/refine": lambda args, **_: _sc_refine_enrich(args, "/refine"),
+    "/enrich": lambda args, **_: _sc_refine_enrich(args, "/enrich"),
+    "/dedup": _sc_dedup,
+    "/organize": _sc_organize,
+    "/summarize": _sc_summarize,
+    "/explain": _sc_explain,
+    "/compare": _sc_compare,
+    "/quiz": _sc_quiz,
+    "/learn": _sc_learn,
+    "/relate": _sc_relate,
+    "/schematize": _sc_schematize,
+    "/diagram": _sc_diagram,
+}
+
+
+def _expand_workflow_shortcut(user_input: str, progress=None) -> str | None:
     """Expand workflow shortcuts (e.g. /report, /nucleate) into agent-directed messages.
 
     Returns the expanded message string, or None if the input is not a
     recognised shortcut. Expanded messages flow through the normal agentic
     loop so the agent calls the tools and follows the steering protocol.
 
-    Syntax:
-        /report [folder] [--top-k=N] [--embeddings]
-        /nucleate <file|folder...> [--target=DIR] [--hub=H] [--no-keep-sources] [--seen=YYYY-MM-DD]
-        /convert <file...> [--target=DIR]
-        /summarize <note|folder...>
-        /explain "<concept>" [--level=intro|expert]
-        /compare "<A>" "<B>" [...]
-        /quiz [note|folder] [--n=10]
-        /learn <area|folder|note|topic>
-        /relate <note> [--n=8]
-        /schematize <note|folder|topic> [--save=<path>]
-        /diagram <note|folder|topic> [--save=<path>]
-
-    Examples:
-        /report
-        /report Concepts/ML
-        /report --top-k=15 --embeddings
-        /report Inbox --embeddings
-        /nucleate Inbox/notes.md --target=Concepts/AI
-        /nucleate Inbox/notes.md
-        /nucleate silica/cli.py
-        /nucleate silica/kernel                 (folder → one stub per source file)
-        /nucleate paper.pdf --target=Concepts/AI
-        /nucleate "Inbox/papers/With Spaces.pdf" --target=Concepts/AI
-        /convert paper.pdf
-        /schematize "the ingest pipeline"
-        /diagram Concepts/ML --save=Concepts/ML/map.md
+    `progress` is the REPL's own renderer, for the shortcuts that drive work
+    inline. A `_ProgressRenderer` claims the module-global batch hook and
+    subscribes to the BUS for its whole life, so a second one built here would
+    orphan the REPL's — reuse it when the caller has one.
     """
-    def _rejoin_spaced_paths(tokens: list[str]) -> list[str]:
-        """Re-join adjacent tokens that only exist as one spaced path.
-
-        An unquoted `/nucleate Inbox/LLM Agent Memory.pdf` shlex-splits into
-        three tokens, and each then failed separately with an error naming the
-        wrong file ("Skipped Memory.pdf"). Greedy longest-join: a token that
-        does not exist on its own but does exist joined with its neighbours
-        (vault-relative or cwd-relative) becomes that one path. Tokens that
-        exist alone are never merged, so quoted paths keep working unchanged.
-        """
-        from pathlib import Path as _P
-
-        def _exists(s: str) -> bool:
-            vp = CONFIG.vault_path.strip()
-            return _P(s).exists() or bool(vp and (_P(vp) / s).exists())
-
-        out: list[str] = []
-        i = 0
-        while i < len(tokens):
-            tok = tokens[i]
-            if tok.startswith("-") or _exists(tok):
-                out.append(tok)
-                i += 1
-                continue
-            joined = None
-            cand = tok
-            for j in range(i + 1, len(tokens)):
-                if tokens[j].startswith("-"):
-                    break
-                cand = f"{cand} {tokens[j]}"
-                if _exists(cand):
-                    joined = (j, cand)
-            if joined:
-                out.append(joined[1])
-                i = joined[0] + 1
-            else:
-                out.append(tok)
-                i += 1
-        return out
-
     if not user_input.strip().startswith("/"):
         return None  # not a shortcut — skip shlex entirely, plain prose can have stray quotes/apostrophes
     try:
@@ -1909,897 +3059,10 @@ def _expand_workflow_shortcut(user_input: str) -> str | None:
 
     cmd = parts[0].lower()
 
-    if cmd == "/promote":
-        return _promote(parts[1:])
-
-    if cmd == "/nucleate":
-        args = _rejoin_spaced_paths(parts[1:])
-        if not args:
-            return _drain_wal()
-        files: list[str] = []
-        target_dir = ""
-        hub = ""
-        # On by default: the leaf lives in `sources/`, which is
-        # retrieval-invisible by construction (is_source_leaf excludes it from
-        # search, search_context and embeddings), so it costs disk and nothing
-        # else — and it is what makes a note's verbatim source reachable at all
-        # (reliability_tier reads exactly that). --no-keep-sources opts out.
-        keep_sources = True
-        seen = ""
-        profile = ""
-        for arg in args:
-            if arg.startswith("--target="):
-                target_dir = arg[len("--target="):]
-            elif arg.startswith("--hub="):
-                hub = arg[len("--hub="):]
-            elif arg == "--keep-sources":
-                keep_sources = True  # verbatim leaf in sources/ beside the notes
-            elif arg == "--no-keep-sources":
-                keep_sources = False
-            elif arg.startswith("--seen="):
-                seen = arg[len("--seen="):]  # capture clock: the day the described events happened
-            elif arg.startswith("--profile="):
-                # Explicit lens override: tops the whole form ladder
-                # (docs/specs/nucleation-forms.md), filing included.
-                profile = arg[len("--profile="):]
-            elif not arg.startswith("-"):
-                files.append(arg)  # preserve original case
-
-        if seen:
-            # Trust boundary: this string becomes the valid_from on every claim
-            # of the run — a typo'd date would poison note_clock vault-wide.
-            import datetime as _dt
-            try:
-                seen = _dt.date.fromisoformat(seen).isoformat()
-            except ValueError:
-                CONSOLE.print(f"  [yellow]--seen ignored: {seen!r} is not YYYY-MM-DD[/]")
-                seen = ""
-
-        from pathlib import Path
-        from silica.kernel.vault_manifest import get_active_manifest
-        from silica.sources.convert import convert
-        from silica.kernel.write.undo_journal import get_undo_journal
-        from silica.sources.registry import adapter_for, expand_folder, folder_rel, stage
-        from silica.tools.atomic import notes_under
-
-        # B6: a glob token ("Inbox/*", the README's documented batch form) is
-        # expanded here, against the vault root. Unexpanded it would survive as
-        # a literal and fall through to the agent, taking the one batch command
-        # the docs advertise off the deterministic path.
-        import glob as _glob
-        globbed: list[str] = []
-        glob_miss = False
-        for f in files:
-            if any(ch in f for ch in "*?["):
-                hits = sorted(
-                    h.replace(os.sep, "/")
-                    for h in _glob.glob(f, root_dir=CONFIG.vault_path.strip() or ".")
-                )
-                if hits:
-                    CONSOLE.print(f"  {f}: [bold]{len(hits)}[/] match(es)")
-                else:
-                    CONSOLE.print(f"  [yellow]{f}: no files match[/]")
-                    glob_miss = True
-                globbed.extend(hits)
-            else:
-                globbed.append(f)
-        files = globbed
-        if not files and glob_miss:
-            return ""  # a miss is an answer, not a question for the agent
-
-        enabled = get_active_manifest().sources
-        # A folder argument is the common way to say "this subsystem": expand it
-        # to the source files under it, then dispatch each exactly like a file.
-        # `run_root` remembers which folder each file came from — the code lane
-        # names its destination folder after it.
-        expanded: list[str] = []
-        run_root: dict[str, str] = {}
-        for f in files:
-            adapter = adapter_for(f, enabled=enabled)
-            group = expand_folder(f, enabled) if adapter is None else []
-            if group:
-                CONSOLE.print(f"  {f}: [bold]{len(group)}[/] source file(s)")
-                # run_root is the code lane's destination naming, so it stays
-                # keyed on code files only.
-                run_root.update(dict.fromkeys(group, folder_rel(f) or ""))
-            elif adapter is None:
-                # A folder of notes. `expand_folder` cannot see one (git-backed
-                # census, and a plain vault is no repo), so this used to fall
-                # through to the agent fallback below with nothing but the
-                # folder name — a listing an LLM had to guess at.
-                group = notes_under(f)
-                # An inbox folder of PDFs answered "0 notes" and went to the
-                # agent as an unresolvable name. Unconverted files are
-                # first-class /nucleate input (each runs through convert below),
-                # so a folder argument picks them up like it picks up notes.
-                from silica.sources.convert import DOC_EXTS, IMG_EXTS
-                from silica.tools.atomic import _unconverted_under
-                pending = [
-                    p for p in _unconverted_under(f)
-                    if Path(p).suffix.lower() in DOC_EXTS
-                ]
-                # Images stay batch input only inside the inbox (screenshots
-                # dropped there to OCR). In a SOURCE folder they are a book
-                # photographed page by page: converting each page as its own
-                # document is hundreds of one-page runs of garbage.
-                from silica.kernel.recall.paths import is_inbox_path
-                if not is_inbox_path(f.rstrip("/") + "/x.md"):
-                    photos = [p for p in pending
-                              if Path(p).suffix.lower() in IMG_EXTS]
-                    if photos:
-                        pending = [p for p in pending if p not in photos]
-                        CONSOLE.print(
-                            f"  [dim]{f}: left {len(photos)} image(s) alone — "
-                            f"a photographed book is one artefact, not "
-                            f"{len(photos)} documents; /nucleate an image "
-                            f"explicitly to OCR it on its own[/]"
-                        )
-                if group or pending:
-                    detail = f"[bold]{len(group)}[/] note(s)" if group else ""
-                    if pending:
-                        detail += (", " if detail else "") + \
-                            f"[bold]{len(pending)}[/] file(s) to convert"
-                    CONSOLE.print(f"  {f}: {detail}")
-                group = group + pending
-            expanded.extend(group or [f])
-        files = list(dict.fromkeys(expanded))
-
-        md_files: list[str] = []
-        staged = 0
-        needs_agent = not files  # only flags given (dropped --folder=) → agent infers
-        # One CLI journal run per /nucleate invocation for what this loop writes
-        # itself (staged code, filed drafts). The FSM opens its own journal run
-        # per dispatched unit, so on a multi-book batch /revert undoes one book
-        # at a time, most recent first — run it again for the previous one.
-        undo_run = get_undo_journal().start_run(
-            source="nucleate", vault=CONFIG.vault_path.strip() or None
-        ) if files else None
-        prior_conversions: dict[str, dict] | None = None  # built on first need
-        # Pipeline units: loose .md arguments form one ready unit; each source
-        # document is its own unit — ready when its segments already exist,
-        # queued for conversion otherwise. One Coordinator run per unit, so
-        # book N+1 can convert while book N distills.
-        ready_units: list[tuple[str, list[str]]] = []
-        to_convert: list[str] = []
-        for f in files:
-            adapter = adapter_for(f, enabled=enabled)
-            if adapter is None:
-                # No source claims this file type → the converter lane (PDF
-                # today). A bare name or folder (no suffix) is a resolvable
-                # intent the flag parser couldn't read — agent, not converter.
-                if not Path(f).suffix:
-                    needs_agent = True
-                    continue
-                # Batch resume: conversion is the expensive half (minutes of
-                # OCR per scanned book), so a re-run must not pay it again.
-                # Both identities are already on disk — segments in the inbox
-                # (interrupted run) and the done/ archive (finished book) both
-                # carry `source_file` frontmatter.
-                from silica.sources.convert import _resolve_input
-                try:
-                    src_key = str(_resolve_input(f))
-                except ValueError:
-                    src_key = ""  # convert() stays the authority on missing files
-                if prior_conversions is None:
-                    prior_conversions = _prior_conversions()
-                prior = prior_conversions.get(src_key) if src_key else None
-                if prior and prior["inbox"]:
-                    CONSOLE.print(
-                        f"  {f}: reusing [bold]{len(prior['inbox'])}[/] "
-                        f"already-converted segment(s)"
-                    )
-                    ready_units.append((f, prior["inbox"]))
-                    continue
-                if prior and prior["done"]:
-                    CONSOLE.print(
-                        f"  [dim]{f}: already nucleated "
-                        f"({prior['done']} segment(s) in done/) — skipped[/]"
-                    )
-                    continue
-                to_convert.append(f)
-                continue
-            result = stage(adapter, f, run_root.get(f, ""), undo_run)
-            if result["status"] == "distill":
-                md_files.append(f)
-            elif result["status"] == "ok":
-                staged += 1
-                code_ref = result["meta"].get("code_ref", "")
-                if len(files) <= 10:  # a whole subsystem would flood the terminal
-                    CONSOLE.print(
-                        f"  Wrote [bold]{result['note_path']}[/] "
-                        f"(code_ref {code_ref[:8]})."
-                    )
-            else:
-                CONSOLE.print(f"  [yellow]{f}: {result.get('message', '')}[/]")
-
-        if staged:
-            if len(files) > 10:
-                CONSOLE.print(f"  Wrote [bold]{staged}[/] code note(s). /wiki for prose.")
-            CONSOLE.print("  [dim]/revert undoes this run.[/]")
-
-        # Loose .md arguments distill together, exactly as before the pipeline —
-        # first in line: they are ready, so the first conversion overlaps them.
-        if md_files:
-            ready_units.insert(0, ("", list(dict.fromkeys(md_files))))
-
-        if not ready_units and not to_convert:
-            if staged or not needs_agent:
-                # Staged inline, or only genuinely-unsupported files — nothing for the agent.
-                return ""
-            # A dropped --folder=, a directory arg, or connective words the flag
-            # parser can't read. Hand the raw line to the agent so it infers intent
-            # (it already holds the tools + the vault map).
-            return (
-                f"The user typed {user_input!r} to nucleate/ingest, but no ingestible "
-                "file was resolved. The argument may be a folder (call silica_files "
-                "with folder= and nucleate both its notes and its \"code\" entries — "
-                "a code folder holds no .md and is still ingestible), a single note, or carry a "
-                "--target/--folder the flag parser missed. Resolve the inbox file(s), "
-                "then call silica_run_injector with the resolved inbox_files and "
-                "target_dir. If nothing is ingestible, say so briefly."
-            )
-
-        total_units = len(ready_units) + len(to_convert)
-        batch = total_units > 1
-        dispatched = 0
-
-        def _at() -> str:
-            """Clock on the per-unit lines of a batch — a folder of scanned
-            books runs for hours, and the unit boundaries are the only place
-            to read where the time went. Single-unit runs stay unadorned."""
-            from datetime import datetime
-            return f"[dim]{datetime.now().strftime('%H:%M:%S')}[/] " if batch else ""
-
-        # Conversions run with the user-passed destination, as they always did:
-        # an auto-picked target is resolved at first dispatch, after conversion.
-        convert_dest = target_dir
-
-        def _prepare_unit(mfs: list[str]) -> list[str]:
-            """refs filter → draft filing → provenance drop, for one unit."""
-            # A folder arg can list both a PDF and its already-converted chunks;
-            # convert() upserts the same chunk paths, so dedup keeps each once.
-            mfs = list(dict.fromkeys(mfs))
-
-            # Apparatus is not content: skip flagged chunks (convert marks them
-            # `references: true` / `boilerplate: true`). The raw chunk stays in
-            # the inbox for lookup — never venue/journal/ethics notes.
-            from silica.sources.convert import is_skippable_chunk
-            ref_chunks = [mf for mf in mfs if is_skippable_chunk(mf)]
-            if ref_chunks:
-                mfs = [mf for mf in mfs if mf not in ref_chunks]
-                CONSOLE.print(
-                    f"  [dim]skipped {len(ref_chunks)} apparatus section(s) "
-                    f"(references, contents, venue checklists) — "
-                    f"kept in the inbox, not distilled into notes[/]"
-                )
-                if not mfs:
-                    CONSOLE.print("  [yellow]nothing left to nucleate: only apparatus sections were given[/]")
-                    return []
-
-            # Draft filing (docs/specs/nucleation-forms.md): the owner's own
-            # working material is filed, not distilled. Runs before auto-target
-            # so a run that was ONLY drafts never pays the folder-pick call. An
-            # explicit --profile tops the ladder: no resolution, no filing.
-            if not profile:
-                mfs = _file_drafts(mfs, target_dir, undo_run)
-                if not mfs:
-                    return []  # everything was filed; reported above
-
-            from pathlib import Path as _Path
-            from silica.kernel.write.provenance import (
-                check_renucleate, content_sha256, read_records,
-            )
-
-            kept_md: list[str] = []
-            distilled_prior = 0
-            for mf in mfs:
-                try:
-                    incoming_sha = content_sha256(mf)
-                    if not incoming_sha:
-                        kept_md.append(mf)
-                        continue
-                    # Same sha as the last record AND that run yielded notes ⇒
-                    # this segment is already in the vault — re-distilling it
-                    # costs a full LLM pass to write nothing. A zero-yield
-                    # record (all ops deferred) is a failure, not a
-                    # completion: never skip on it.
-                    recs = read_records(_Path(mf).name)
-                    last = recs[-1] if recs else None
-                    if last and last.get("sha256") == incoming_sha and last.get("notes"):
-                        distilled_prior += 1
-                        continue
-                    modified, prior_notes = check_renucleate(_Path(mf).name, incoming_sha)
-                    if modified:
-                        CONSOLE.print(
-                            f"  [yellow]re-nucleate of a modified source: {prior_notes} note(s) "
-                            f"derived from the previous version[/]"
-                        )
-                except Exception as exc:
-                    logger.debug("/nucleate: re-nucleate provenance check skipped for %s (non-fatal): %s", mf, exc)
-                kept_md.append(mf)
-            if distilled_prior:
-                CONSOLE.print(
-                    f"  [dim]{distilled_prior} segment(s) already distilled "
-                    f"(unchanged since their run) — skipped[/]"
-                )
-            return kept_md
-
-        def _dispatch_unit(label: str, mfs: list[str]) -> str | None:
-            """Prepare and run one unit; a returned string is the agent
-            fallback (unresolvable target) and ends the whole batch."""
-            nonlocal target_dir, dispatched
-            mfs = _prepare_unit(mfs)
-            if not mfs:
-                return None
-
-            if not target_dir:
-                # auto-target: one small folder-pick call, not a full agent
-                # turn; resolved once, every later unit inherits it.
-                try:
-                    target_dir = _pick_target_folder(mfs)
-                    CONSOLE.print(f"  auto-target: [bold]{_announced_target(target_dir)}[/]")
-                except Exception as exc:
-                    logger.debug("/nucleate: auto-target pick failed (non-fatal): %s", exc)
-
-            if not target_dir:
-                # Fallback: hand the folder choice to the agent (legacy behavior).
-                files_json = json.dumps(mfs)
-                msg = (
-                    f"Run the Injector pipeline for {len(mfs)} file(s).\n"
-                    f"No target folder was given. Skim the inbox file(s) {files_json}, "
-                    f"then pick the single most relevant existing vault folder for "
-                    f"this content (use the vault map; list folders if unsure). If "
-                    f"nothing fits, pick a sensible new folder name. State the chosen "
-                    f"folder in one line, then call `silica_run_injector` with "
-                    f"inbox_files={files_json}, target_dir=<chosen folder>"
-                )
-                if hub:
-                    msg += f", hub={json.dumps(hub)}"
-                return msg + "."
-
-            # Direct FSM dispatch — no LLM orchestrator. The old path
-            # round-tripped the whole session history through the model on
-            # every turn just to relay these arguments to silica_run_injector
-            # (~40% of a nucleate run's tokens for a handful of decision tokens).
-            from silica.router.coordinator import Coordinator
-
-            head = f"{label}: " if (batch and label) else ""
-            CONSOLE.print(
-                f"  {_at()}{head}nucleate: {len(mfs)} file(s) → [bold]{_announced_target(target_dir)}[/]"
-            )
-            try:
-                result = Coordinator(
-                    inbox_files=mfs, target_dir=target_dir, hub=hub or None,
-                    keep_sources=keep_sources, seen_override=seen or None,
-                    distill_profile=profile or None,
-                ).run()
-            except ValueError as exc:
-                # A path outside the vault (or any other rejected argument) is
-                # user error, not a crash: the batch moves to the next unit.
-                CONSOLE.print(f"  [yellow]nucleate: {exc}[/]")
-                return None
-            status = result.get("final_status") or result.get("error") or "done"
-            failed = result.get("failed_chunks") or []
-            extra = f" — {len(failed)} chunk(s) failed" if failed else ""
-            sw = result.get("link_sweep") or {}
-            if sw.get("links_stripped"):
-                extra += (
-                    f" — {sw['links_stripped']} dangling link(s) unlinked "
-                    f"in {sw['notes_edited']} note(s)"
-                )
-            if sw.get("links_relinked"):
-                extra += f" — {sw['links_relinked']} spelling variant(s) repointed"
-            CONSOLE.print(f"  {_at()}{head}nucleate finished: [bold]{status}[/]{extra} — details in log.md")
-            dispatched += 1
-            return None
-
-        # Conversion is local OCR, distillation is network LLM — different
-        # resources, so the NEXT book converts while the current unit distills.
-        # One worker, one conversion ahead: further parallel OCR just contends
-        # for the same GPU. Worth ~2% of wall-clock, not the 2x this comment
-        # used to claim: measured 2026-08-16 on 07-religioni-comparate, OCR is
-        # 43-68 s per book against 6+ min of distillation. The 2x ceiling needs
-        # a corpus where OCR time approaches LLM time, which text PDFs never do.
-        from concurrent.futures import ThreadPoolExecutor
-
-        pool = ThreadPoolExecutor(max_workers=1) if to_convert else None
-
-        def _submit(i: int):
-            if pool is None or i >= len(to_convert):
-                return None
-            if batch:
-                CONSOLE.print(
-                    f"  {_at()}[{i + 1}/{len(to_convert)}] converting {to_convert[i]}"
-                )
-            return pool.submit(convert, to_convert[i], convert_dest)
-
-        pending = _submit(0)
-        try:
-            for label, segs in ready_units:
-                msg = _dispatch_unit(label, segs)
-                if msg:
-                    return msg
-            for i, src in enumerate(to_convert):
-                try:
-                    segs = pending.result()
-                except (ValueError, RuntimeError) as e:
-                    CONSOLE.print(f"  [yellow]Skipped {src}: {e}[/]")
-                    segs = []
-                pending = _submit(i + 1)
-                if segs:
-                    msg = _dispatch_unit(src, segs)
-                    if msg:
-                        return msg
-        finally:
-            if pool is not None:
-                # wait=False: a mineru run cannot be cancelled; on an early
-                # agent-fallback return the in-flight conversion finishes in
-                # the background and its segments are reused next time.
-                pool.shutdown(wait=False)
-
-        if total_units and not dispatched:
-            CONSOLE.print(
-                "  [dim]nothing left to distill — everything was filed, "
-                "skipped, or already in the vault[/]"
-            )
-        if batch and dispatched > 1:
-            CONSOLE.print(
-                f"  [dim]{dispatched} run(s) — /revert undoes the most recent; "
-                f"run it again for the one before[/]"
-            )
-        return ""
-
-    if cmd == "/settings":
-        # View/edit vault.yaml without the wizard. ponytail: safe_dump rewrite —
-        # YAML comments are not preserved; hand-edit the file to keep them.
-        import yaml as _yaml
-        from pathlib import Path as _P
-        from silica.kernel.vault_manifest import MANIFEST_REL, reset_manifest_cache
-        _KEYS = {"cooccurrence_lang", "conventions.language",
-                 "conventions.reply_language", "conventions.max_tags"}
-        mf = _P(CONFIG.vault_path) / MANIFEST_REL
-        data = _yaml.safe_load(mf.read_text(encoding="utf-8")) if mf.exists() else {}
-        if not isinstance(data, dict):
-            data = {}
-        args = parts[1:]
-        if not args:
-            CONSOLE.print(f"  [bold]{mf}[/]")
-            body = _yaml.safe_dump(data, allow_unicode=True, sort_keys=False).rstrip() \
-                if data else "(defaults — no vault.yaml yet)"
-            CONSOLE.print(f"  {body}")
-            CONSOLE.print(f"  Keys: {', '.join(sorted(_KEYS))} — /settings <key> <value|none>")
-            return ""
-        if len(args) != 2 or args[0] not in _KEYS:
-            return f"Error: usage /settings <key> <value|none>. Keys: {', '.join(sorted(_KEYS))}"
-        key, raw = args
-        val = None if raw.lower() in ("none", "null") else (int(raw) if raw.isdigit() else raw)
-        node = data
-        *heads, leaf = key.split(".")
-        for h in heads:
-            if not isinstance(node.get(h), dict):
-                node[h] = {}
-            node = node[h]
-        if val is None:
-            node.pop(leaf, None)
-        else:
-            node[leaf] = val
-        # Atomic: a torn vault.yaml parses as defaults, and default write_dir=""
-        # is the whole vault root — the exact boundary this file exists to set.
-        from silica.kernel.recall.paths import atomic_write_bytes
-        atomic_write_bytes(mf, _yaml.safe_dump(
-            data, allow_unicode=True, sort_keys=False).encode("utf-8"))
-        reset_manifest_cache()
-        CONSOLE.print(f"  {key} = {raw} → {mf.name} (comments in the file are not preserved)")
-        return ""
-
-    if cmd == "/convert":
-        args = _rejoin_spaced_paths(parts[1:])
-        files = [a for a in args if not a.startswith("-")]
-        target_dir = next((a[len("--target="):] for a in args if a.startswith("--target=")), "")
-        if not files:
-            return "Error: /convert requires at least one file path. Usage: /convert <file...> [--target=DIR]"
-        from silica.sources.convert import convert
-        for f in files:
-            try:
-                paths = convert(f, dest_dir=target_dir)
-                CONSOLE.print(
-                    f"  Converted {f} → [bold]{len(paths)}[/] note(s): {', '.join(paths)}"
-                )
-            except ValueError as e:
-                CONSOLE.print(f"  [yellow]Skipped {f}: {e}[/]")
-        return ""  # fully handled inline — sentinel: nothing for the agent
-
-    if cmd == "/web-search":
-        from rich.markup import escape
-
-        from silica.sources.web_research import web_research, _DEFAULT_MAX_SEARCHES
-        from silica.ui.renderer import make_progress_callback
-        args = parts[1:]
-        max_searches = _int_flag(args, "--max-searches=", _DEFAULT_MAX_SEARCHES)
-        concept = " ".join(a for a in args if not a.startswith("-")).strip()
-        if not concept:
-            return 'Error: /web-search requires a concept. Usage: /web-search "<concept>" [--max-searches=N]'
-
-        try:
-            note_rel = web_research(
-                concept, max_searches=max_searches,
-                tool_progress_callback=make_progress_callback(),
-            )
-            # escape(), not markup=False: a note title Rich reads as a tag gets
-            # silently eaten (the user is told a path that is not the file's
-            # name), and a URL carrying `[/x]` raises MarkupError straight out
-            # of the except that exists to report the failure. Escaping only the
-            # interpolated value keeps the styling on the rest of the line.
-            CONSOLE.print(
-                f"  Findings → [bold]{escape(note_rel)}[/]"
-                "  (review, then /nucleate to bring it in)"
-            )
-        except Exception as e:  # missing key, no findings, convergence guard, network
-            CONSOLE.print(f"  [yellow]web-search failed: {escape(str(e))}[/]")
-        return ""  # fully handled inline — sentinel: nothing for the agent
-
-    if cmd == "/fetch":
-        from rich.markup import escape
-
-        from silica.sources.web_research import fetch_to_inbox
-        url = " ".join(parts[1:]).strip()
-        if not url:
-            return "Error: /fetch requires a URL. Usage: /fetch <url>"
-
-        try:
-            note_rel = fetch_to_inbox(url)
-            CONSOLE.print(
-                f"  Fetched → [bold]{escape(note_rel)}[/]"
-                "  (review, then /nucleate to bring it in)"
-            )
-        except Exception as e:  # SSRF guard, bot wall, missing yt-dlp, network
-            CONSOLE.print(f"  [yellow]fetch failed: {escape(str(e))}[/]")
-        return ""  # fully handled inline — sentinel: nothing for the agent
-
-    if cmd == "/report":
-        args = parts[1:]
-        folder = ""
-        top_k = _int_flag(args, "--top-k=", 10)
-        with_embeddings = False
-        # Off by default like --embeddings: the co-occurrence delta runs a
-        # per-note expanded ranking, the report's other expensive pass. Without
-        # it stale links and missing hubs are never computed at all, so the
-        # escalate rules that read them can never fire.
-        with_cooccurrence = False
-
-        for arg in args:
-            if arg.startswith("--folder="):
-                folder = arg[len("--folder="):]
-            elif arg in ("--embeddings", "--with-embeddings"):
-                with_embeddings = True
-            elif arg in ("--cooccurrence", "--with-cooccurrence"):
-                with_cooccurrence = True
-            elif not arg.startswith("-"):
-                folder = arg  # positional: /report Concepts/ML
-
-        scope_desc = f"scoped to `{folder}`" if folder else "on the whole vault"
-        embed_note = " Also propose missing links via the embedding index." if with_embeddings else ""
-        if with_cooccurrence:
-            embed_note += (" Also read the co-occurrence delta: autolink candidates, stale links"
-                           " and missing hubs.")
-
-        return (
-            f"Run a structural vault audit {scope_desc}.{embed_note}\n"
-            f"Call `silica_vault_report` with "
-            f"folder={json.dumps(folder)}, top_k={top_k}, "
-            f"with_embeddings={'true' if with_embeddings else 'false'}, "
-            f"with_cooccurrence={'true' if with_cooccurrence else 'false'}, seed_ledger=true.\n"
-            f"Then STOP. Write a short, human-readable brief in chat from the returned `digest` "
-            f"(totals, top hubs, and how many fixes are available: auto / propose / issues), and "
-            f"point the user to the GRAPH_REPORT.md that was written.\n"
-            f"Do NOT run the steering loop, do NOT call `silica_ledger_next`, and do NOT apply any "
-            f"autolinks, corrections, renames, or deletions. Instead, ask the user whether they want "
-            f"to apply the changes. Only if they explicitly say yes, resume the run (`run_id`) and "
-            f"follow the steering loop."
-        )
-
-    if cmd in ("/refine", "/enrich"):
-        from silica.driver import DRIVER
-        from silica.tools.graph import _in_folder
-
-        args = parts[1:]
-        folder = next((p for p in args if not p.startswith("-")), "")
-
-        # list_files(folder) pre-filters loosely (startswith); _in_folder tightens
-        # it so /refine Foo never leaks into a sibling FooBar/ folder.
-        paths = [r.path for r in DRIVER.list_files(folder=folder) if _in_folder(r.path, folder)]
-        if not paths:
-            return f"Error: no files found in '{folder}'."
-
-        cap = "silica_refine_batch" if cmd == "/refine" else "silica_enrich_batch"
-        payloads = [{"note_paths": chunk} for chunk in _chunk_by_json_size(paths)]
-        return _seed_batch_ledger(cap, payloads, kind=cmd.strip("/"), label=folder or "vault")
-
-    if cmd == "/dedup":
-        from silica.tools.runners import _scan_dedup_pairs
-
-        args = parts[1:]
-        folder = " ".join(a for a in args if not a.startswith("-"))
-
-        pairs, err = _scan_dedup_pairs(folder)
-        if err:
-            CONSOLE.print(f"  [yellow]{err}[/]")
-            return ""  # handled inline — nothing for the agent
-        if not pairs:
-            CONSOLE.print(f"  No near-duplicate pairs in [bold]{folder or '(vault)'}[/].")
-            return ""
-
-        payloads = [{"pairs": chunk} for chunk in _chunk_by_json_size(pairs)]
-        return _seed_batch_ledger("silica_dedup_pairs", payloads, kind="dedup", label=folder or "vault")
-
-    if cmd == "/organize":
-        args = parts[1:]
-        intent_parts: list[str] = []
-        scope = ""
-        taxonomy_file = ""
-        apply_now = False
-        merge = False
-        move_uncat = False
-
-        i = 0
-        while i < len(args):
-            arg = args[i]
-            if arg.startswith("--scope="):
-                scope = arg[len("--scope="):]
-            elif arg.startswith("--file="):
-                taxonomy_file = arg[len("--file="):]
-            elif arg in ("--apply",):
-                apply_now = True
-            elif arg in ("--merge",):
-                merge = True
-            elif arg in ("--move-uncategorized",):
-                move_uncat = True
-            elif not arg.startswith("-"):
-                intent_parts.append(arg)
-            i += 1
-
-        # Both organizer tools filter with `ref.path.startswith(scope)` over
-        # vault-relative paths, so an absolute --scope matches zero notes and the
-        # whole run reports success on an empty plan. Normalize here, where the
-        # user types the path, and refuse a scope outside the vault out loud.
-        if scope:
-            from silica.kernel.recall.paths import to_vault_relative
-            try:
-                scope = to_vault_relative(scope, ensure_md=False)
-            except ValueError as exc:
-                return f"Error: /organize --scope is not usable: {exc}"
-
-        # Re-join intent (handles both quoted and unquoted multi-word)
-        intent = " ".join(intent_parts).strip('"\'')
-        run_extra = ", move_uncategorized=true" if move_uncat else ""
-
-        if taxonomy_file:
-            # Skip taxonomy generation — use existing file
-            dry = "false" if apply_now else "true"
-            scope_str = f", scope={json.dumps(scope)}" if scope else ""
-            msg = (
-                f"Run the vault organizer using the existing taxonomy file {json.dumps(taxonomy_file)}.\n"
-                f"Call `silica_run_organizer` with taxonomy_path={json.dumps(taxonomy_file)}{scope_str}, "
-                f"dry_run={dry}{run_extra}.\n"
-            )
-            if not apply_now:
-                msg += (
-                    "Show the move plan to the user and ask for confirmation. "
-                    "If confirmed, call `silica_run_organizer` again with dry_run=false."
-                )
-        elif intent:
-            scope_str = f", scope={json.dumps(scope)}" if scope else ""
-            merge_str = ", merge=true" if merge else ""
-            dry_note = (
-                f"Then call `silica_run_organizer` with dry_run=true{run_extra} to preview the moves. "
-                "Show the plan to the user and ask for confirmation before executing."
-            ) if not apply_now else (
-                f"Then call `silica_run_organizer` with dry_run=false{run_extra} to execute the moves."
-            )
-            msg = (
-                f"Organize the vault based on the user's intent: {json.dumps(intent)}.\n"
-                f"Step 1: Call `silica_generate_taxonomy` with user_intent={json.dumps(intent)}{scope_str}{merge_str}.\n"
-                f"Step 2: Show the generated taxonomy to the user and ask if it looks correct.\n"
-                f"Step 3: {dry_note}"
-            )
-        else:
-            msg = (
-                "Help me organize my vault. "
-                "Ask me to describe how I want to group my notes, "
-                "then call `silica_generate_taxonomy` with my answer, "
-                "show me the taxonomy, and run `silica_run_organizer` with dry_run=true to preview."
-            )
-        return msg
-
-    # --- reader commands: agent-directed, strictly read-only ---------------
-
-    if cmd == "/summarize":
-        targets = [a for a in parts[1:] if not a.startswith("-")]
-        if not targets:
-            return "Error: /summarize requires a note or folder. Usage: /summarize <note|folder...>"
-        listing = ", ".join(f"`{t}`" for t in targets)
-        return (
-            f"Summarize {listing} from the vault.\n"
-            f"Resolve each target (note path, note title, or folder — list a folder's notes and "
-            f"read them). Then write a digest in chat: lead with the core ideas, use tables for "
-            f"anything enumerable (comparisons, parameters, timelines), keep it scannable.\n"
-            f"READ-ONLY: do not create, edit, patch, or move any note."
-        )
-
-    if cmd == "/explain":
-        level = ""
-        words: list[str] = []
-        for arg in parts[1:]:
-            if arg.startswith("--level="):
-                level = arg[len("--level="):]
-            elif not arg.startswith("-"):
-                words.append(arg)
-        concept = " ".join(words).strip()
-        if not concept:
-            return 'Error: /explain requires a concept. Usage: /explain "<concept>" [--level=intro|expert]'
-        register = {
-            "intro": "for a newcomer: plain language, concrete analogies, no unexplained jargon",
-            "expert": "for an expert: precise and technical, no hand-holding",
-        }.get(level, "for a practitioner: clear, correct, minimal jargon")
-        # The attribution clause is a measured defect of this command, not a guess:
-        # evals/probe_explain_spans.py (2026-07-26, 398 claims) found ~4.6% of claims
-        # attributed to a named note that does not support them, and as many drawn
-        # from general knowledge with no note at all.
-        return (
-            f"Explain {json.dumps(concept)} grounded in this vault, {register}.\n"
-            f"Search the vault (semantic search + related notes), read the top matches, and explain "
-            f"the concept in chat, citing every note you drew on as a [[wikilink]]. If the vault has "
-            f"nothing relevant, say so plainly: do not silently answer from general knowledge alone.\n"
-            f"Attribute a claim to a note only if that note states it. A note that merely sits near "
-            f"the topic is not a source for it, and a point no note supports goes in its own "
-            f"sentence, marked as not coming from the vault.\n"
-            f"READ-ONLY: do not create, edit, patch, or move any note."
-        )
-
-    if cmd == "/compare":
-        subjects = [a for a in parts[1:] if not a.startswith("-")]
-        if len(subjects) < 2:
-            return 'Error: /compare requires at least two subjects. Usage: /compare "<A>" "<B>"'
-        listing = ", ".join(f"`{s}`" for s in subjects)
-        return (
-            f"Compare {listing} using the vault.\n"
-            f"Each subject is a note (path or title) or a concept — locate and read the matching "
-            f"note(s) for each. Output in chat: a comparison table (one column per subject, "
-            f"dimensions as rows), then a short similarities/differences rundown. If any involved "
-            f"note carries `contested: true`, or the notes contradict each other, call that out "
-            f"explicitly. A contradiction the reader confirms is worth recording: offer to run "
-            f"silica_flag_note on the note that is wrong, and only run it once they say so.\n"
-            f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
-        )
-
-    if cmd == "/quiz":
-        n = _int_flag(parts[1:], "--n=", 10)
-        targets = [a for a in parts[1:] if not a.startswith("-")]
-        if targets:
-            source = "from " + ", ".join(f"`{t}`" for t in targets)
-            pick = "Read the note(s) (list a folder's notes first)."
-        else:
-            # No target: the learner model picks. Half the round re-tests what
-            # is decaying, half probes what was never measured — every graded
-            # answer feeds the same ledger either way (spec: learner-model).
-            source = "from the learner model's review queue"
-            pick = (
-                "Call silica_review_queue to pick the targets, and read them. Mix both pools: "
-                "'due' rows were known once and are decaying — re-test them; 'unexplored' rows "
-                "were never measured, and the AI-written ones were never learned at all, so "
-                "probe those first. An empty queue means an empty vault: say so."
-            )
-        return (
-            f"Run a {n}-question active-recall quiz {source}.\n"
-            f"{pick}\n"
-            f"Mix recall, comprehension, and application questions; ask only what the notes "
-            f"actually support.\n"
-            f"Ask the numbered questions and STOP. Do not reveal the answers in the same "
-            f"message: retrieving from memory is what makes the round worth running, and a "
-            f"visible answer key destroys it.\n"
-            f"When the reader replies, grade each answer, cite each source note as a "
-            f"[[wikilink]], then call silica_record_quiz once with one entry per question: "
-            f"path, correct, concepts (the 1-3 concepts that question tested), q (the "
-            f"question text), and anchor ('#Heading' when one heading clearly holds the "
-            f"answer). Grade an unanswered or skipped question as incorrect.\n"
-            f"After grading, offer ONE follow-up round drilling what was just missed — run "
-            f"it only if the reader accepts.\n"
-            f"A wrong answer is the reader's miss, not the note's fault, and needs nothing "
-            f"beyond the grade. If grading instead exposes a fault in the note itself (it "
-            f"states something wrong, or contradicts another note you read), offer to record "
-            f"that with silica_flag_note, and only run it once the reader says so.\n"
-            f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
-        )
-
-    if cmd == "/learn":
-        targets = [a for a in parts[1:] if not a.startswith("-")]
-        if not targets:
-            return "Error: /learn requires a target. Usage: /learn <area|folder|note|topic>"
-        target = " ".join(targets)
-        # Vault-content targets only (spec: learner-model D6). New-material
-        # tutoring — teaching a topic the vault does not hold, with web research
-        # and generated material — plugs in HERE: resolve `target` against
-        # outside sources before the syllabus search, everything below reuses.
-        return (
-            f"Guide the reader through re-learning `{target}` from their own vault.\n"
-            f"1. Find the plan: look for an existing syllabus note — frontmatter "
-            f"`type: syllabus` with `target:` matching `{target}`.\n"
-            f"2. No syllabus yet: build one. Call silica_review_queue with target= to read "
-            f"the area's retention state, read the notes involved, then write ONE syllabus "
-            f"note via silica_write_note with props={{\"type\": \"syllabus\", \"target\": "
-            f"{json.dumps(target)}}}, body = ordered steps, each a "
-            f"`- [ ]` checkbox with [[wikilinks]] to the note(s) it covers and a one-line "
-            f"goal. Order steps pedagogically, prerequisites first — infer the order from "
-            f"the content you read, the graph stores none. SKIP what the reader still "
-            f"retains (high R): start the plan at the frontier. Optionally end the note "
-            f"with a mermaid diagram of the path. Then STOP and ask whether to begin.\n"
-            f"3. Syllabus exists: resume at the first unchecked step.\n"
-            f"Teaching discipline, for every step: teach ONE logical step per message, no "
-            f"rushing ahead; add a mermaid diagram when the step earns one; close the step "
-            f"with 2-3 gate questions and STOP — no answer key in the same message, the "
-            f"/quiz rule. When the reader replies: grade, cite sources as [[wikilinks]], "
-            f"call silica_record_quiz once (entries carry path, correct, concepts, q, "
-            f"anchor — gates are quizzes). A passed gate ticks the step's checkbox via "
-            f"silica_patch_note; a failed one leaves it unchecked so the next /learn "
-            f"returns there. Then offer the next step; never start it unprompted.\n"
-            f"The ledger is the truth: when checkboxes and graded history disagree, trust "
-            f"the grades."
-        )
-
-    if cmd == "/relate":
-        n = _int_flag(parts[1:], "--n=", 8)
-        targets = [a for a in parts[1:] if not a.startswith("-")]
-        if not targets:
-            return "Error: /relate requires a note. Usage: /relate <note> [--n=8]"
-        target = targets[0]
-        return (
-            f"Map how and why `{target}` relates to its most relevant neighbors in the vault.\n"
-            f"Resolve the note, then pull its top {n} related notes via silica's relatedness "
-            f"(the fusion of embeddings + co-occurrence). Read the target and each neighbor enough "
-            f"to judge the link, and note which neighbors the target already [[wikilinks]].\n"
-            f"Output in chat a Markdown table: | Neighbor | Relation | Why | Link |. "
-            f"For Relation pick the type that fits — common ones: prerequisite, elaborates, "
-            f"contradicts, sibling, example-of, depends-on, alternative-to. Why is one line grounded "
-            f"in the notes. Link is [[the neighbor]] if already linked, else 'latent'. Cite every "
-            f"neighbor as a [[wikilink]]. If a neighbor is `contested: true` or contradicts the "
-            f"target, say so in the Why column, and offer to record the contradiction with "
-            f"silica_flag_note; only run it once the reader says so.\n"
-            f"READ-ONLY apart from that flag: do not create, edit, patch, or move any note."
-        )
-
-    if cmd == "/schematize":
-        target, save_path = _target_and_save(parts[1:])
-        if not target:
-            return "Error: /schematize requires a target. Usage: /schematize <note|folder|topic> [--save=<path>]"
-        return (
-            f"Schematize {json.dumps(target)} from the vault.\n"
-            f"Resolve the target: it may be a note (path or title), a folder (list and "
-            f"skim its notes), or a general topic (search the vault, then read the top "
-            f"matches).\n"
-            f"Output in chat: a one-line caption, then a Markdown table whose rows/columns "
-            f"best decompose what you found (components, phases, comparison dimensions, "
-            f"whatever shape fits); do not force a fixed template.\n"
-            f"{_save_or_readonly_clause(save_path)}"
-        )
-
-    if cmd == "/diagram":
-        target, save_path = _target_and_save(parts[1:])
-        if not target:
-            return "Error: /diagram requires a target. Usage: /diagram <note|folder|topic> [--save=<path>]"
-        return (
-            f"Diagram {json.dumps(target)} from the vault.\n"
-            f"Resolve the target the same way as /schematize (note, folder, or topic; "
-            f"search and read as needed).\n"
-            f"Pick whichever Mermaid diagram type fits what you found best: flowchart/graph "
-            f"for architectures and processes, mindmap for concept trees, sequence for "
-            f"temporal flows, classDiagram or erDiagram for structured relationships, "
-            f"timeline for chronologies. Do not default to one type mechanically.\n"
-            f"Output in chat: a one-line caption, then a single fenced ```mermaid block "
-            f"and nothing else.\n"
-            f"{_save_or_readonly_clause(save_path)}"
-        )
-
-    return None
+    handler = _SHORTCUTS.get(cmd)
+    if handler is None:
+        return None
+    return handler(parts[1:], user_input=user_input, progress=progress)
 
 
 def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
@@ -3002,8 +3265,14 @@ def _dispatch_subcommand(args: list[str]) -> int | None:
         except Exception:
             return 0
     if args[:1] == ["import"]:
+        # Dispatch runs before main()'s setup (like connect/mcp below) — the
+        # vault has to be selected here or CONFIG.vault_path is whatever the
+        # config file last held, and the envelopes land in another vault's
+        # inbox (inbox_dir_for keys by vault digest) where /nucleate never
+        # drains them.
+        _activate_repo_mode()
         import silica.capture as capture_mod
-        target = next((a for a in args[1:] if not a.startswith("-")), "")
+        target = next(iter(_positional(args[1:])), "")
         vault = CONFIG.vault_path.strip()
         if not target or not vault:
             CONSOLE.print(
@@ -3109,16 +3378,19 @@ def _start_reminder_daemon() -> None:
                 vault = _Path(raw)
                 from silica.kernel.calendar.model import scan_events
                 from silica.kernel.calendar.reminders import (
-                    advance_marks, due_reminders, load_marks, save_marks,
+                    advance_marks, delivery_lock, due_reminders, load_marks,
+                    save_marks,
                 )
                 events = scan_events(vault)
                 if not events:
                     continue
-                marks = load_marks(vault)
-                due = due_reminders(events, marks, _dt.datetime.now())
+                with delivery_lock(vault):
+                    marks = load_marks(vault)
+                    due = due_reminders(events, marks, _dt.datetime.now())
+                    if due:
+                        save_marks(vault, advance_marks(marks, due))
                 if not due:
                     continue
-                save_marks(vault, advance_marks(marks, due))
                 for r in due:
                     tag = "[yellow]late reminder[/]" if r["late"] else "[bold cyan]reminder[/]"
                     when = r["start"].strftime("%Y-%m-%d %H:%M")
@@ -3243,7 +3515,7 @@ def main():
         # Expand workflow shortcuts (/report, /nucleate etc.) into agent-directed messages
         is_directive = False
         try:
-            expanded = _expand_workflow_shortcut(user_input)
+            expanded = _expand_workflow_shortcut(user_input, progress=callback)
         except KeyboardInterrupt:
             # /nucleate drives the whole FSM inline on this thread. Without this
             # the Ctrl+C escapes main() and kills the REPL with a raw traceback —
@@ -3294,9 +3566,6 @@ def main():
                 print_home()
                 messages[:] = _fresh_messages()
                 collapsed = set()  # indices reset with the history
-                from silica.tools.graph import reset_recall_served
-
-                reset_recall_served()  # the new chat saw nothing whole yet
                 continue
 
             result = _handle_slash_command(user_input, messages)

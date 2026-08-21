@@ -27,8 +27,8 @@ from typing import Any
 
 MIN_COLLAPSE_CHARS = 200  # don't collapse a body smaller than its own stub
 
-# ponytail: fixed knobs, promote to Config only if someone actually needs to tune
-# them. Here rather than in the CLI because the agent loop compacts too.
+# Fixed knobs (config promotion declined 2026-08-19; revisit only with a real
+# tuner). Here rather than in the CLI because the agent loop compacts too.
 COMPACT_FRACTION = 0.6   # collapse old reads once history crosses 60% of the window
 COMPACT_FLOOR_TURNS = 3  # the last N assistant turns are never collapsed
 STUB_FIELD_CHARS = 500   # per-field budget in a collapsed read stub
@@ -126,9 +126,9 @@ def read_stub(
 def eager_stub(tool: Any, result_str: str) -> str:
     """Project a write/gate tool's JSON result to its one-line summary.
 
-    Uses the tool's own `summarize(dict)->str` when declared, else a generic
-    projection. Non-JSON / non-dict payloads pass through unchanged so a tool
-    that returns a bare string is never corrupted.
+    Non-JSON / non-dict payloads pass through unchanged so a tool that returns
+    a bare string is never corrupted. `tool` is accepted (and ignored) to keep
+    the call shape uniform with read_stub.
     """
     try:
         parsed = json.loads(result_str)
@@ -136,12 +136,6 @@ def eager_stub(tool: Any, result_str: str) -> str:
         return result_str
     if not isinstance(parsed, dict):
         return result_str
-    summarize = getattr(tool, "summarize", None)
-    if summarize is not None:
-        try:
-            return summarize(parsed)
-        except Exception:
-            return generic_projection(parsed)
     return generic_projection(parsed)
 
 

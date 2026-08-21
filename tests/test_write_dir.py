@@ -173,13 +173,18 @@ def test_a_pre_write_dir_layout_declares_itself(tmp_path):
     assert resolve_vault_switch(str(tmp_path)).vault == str(tmp_path.resolve())
 
 
-def test_declare_write_dir_stages_prose_in_the_mirror(tmp_path):
-    # Safe mode is the default: prose is confined to `silica/` rather than
-    # filed in place, and the declaration says so out loud.
+def test_declare_write_dir_leaves_prose_in_place(tmp_path):
+    # Safe mode is OFF by default: a prose vault files where its notes already
+    # live and gets no manifest at all. The mirror is opt-in.
+    from silica.onboarding.adopt import write_dir_for
+
     (tmp_path / "nota.md").write_text("# nota")
-    assert declare_write_dir(tmp_path) == "silica"
-    assert (tmp_path / "vault.yaml").read_text(encoding="utf-8") == "write_dir: silica\n"
-    assert not (tmp_path / "silica").exists()  # declaring is not creating
+    assert declare_write_dir(tmp_path) is None
+    assert not (tmp_path / "vault.yaml").exists()
+    assert load_manifest(str(tmp_path)).write_dir == ""
+    # ...but that is the default, not the boundary: the toggle still knows where
+    # confined prose goes.
+    assert write_dir_for(tmp_path) == "silica"
 
 
 def test_declare_write_dir_never_overrules_an_existing_manifest(tmp_path):
@@ -190,12 +195,13 @@ def test_declare_write_dir_never_overrules_an_existing_manifest(tmp_path):
     assert load_manifest(str(tmp_path)).write_dir == "notes"
 
 
-def test_an_obsidian_vault_is_confined_like_any_prose_vault(tmp_path):
-    # The early-return that used to force "" here is gone: being an Obsidian
-    # vault is exactly the case safe mode exists for — someone's own notes.
+def test_an_obsidian_vault_is_left_in_place_like_any_prose_vault(tmp_path):
+    # Someone's own notes are the case safe mode exists for, which is not the
+    # same as the case it should be forced on: adoption stays out of the way.
     (tmp_path / ".obsidian").mkdir()
     (tmp_path / "nota.md").write_text("# nota")
-    assert declare_write_dir(tmp_path) == "silica"
+    assert declare_write_dir(tmp_path) is None
+    assert not (tmp_path / "vault.yaml").exists()
 
 
 def test_safe_mode_never_overrules_a_code_vaults_own_boundary(tmp_path):

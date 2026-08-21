@@ -515,9 +515,12 @@ class TestAggregation:
 
         monkeypatch.setattr(checks.httpx, "get", boom)
         monkeypatch.setattr(checks.gitstate, "find_repo_root", lambda p: None)
+        # From a directory with no .env above it: the "stray .env" row is
+        # conditional, and running this from the checkout picked up its own.
+        monkeypatch.chdir(tmp_path)
         results = checks.run_checks(_cfg(vault_path=str(tmp_path)))
         assert [r.name for r in results] == [
-            "chat model", "chat endpoint", "vault", "vault manifest",
+            "chat model", "chat endpoint", "vault", "memory lane", "vault manifest",
             "language", "embeddings", "rerank", "quarantine", "converters", "OKF §11",
             "session capture", "own sessions",
         ]
@@ -895,3 +898,78 @@ class TestConvertersReportsThePdfLane:
         monkeypatch.setattr(CONFIG, "pdf_provider", "mineru")
         detail = check_converters(CONFIG).detail
         assert "mineru" in detail and "OCR" in detail
+
+
+class TestIgnoredEnv:
+    """config.py reads only ~/.silica/.env. A .env sitting in the working
+    directory is therefore inert, and inert-in-silence is the same defect as
+    the untrusted layer it replaced — so the doctor has to name it."""
+
+    def test_a_dotenv_in_the_working_directory_is_found(self, tmp_path, monkeypatch):
+        from silica.onboarding.checks import ignored_env_path
+        (tmp_path / ".env").write_text("SILICA_NOT_A_REAL_KEY=x\n")
+        monkeypatch.chdir(tmp_path)
+
+        assert ignored_env_path() == tmp_path / ".env"
+
+    def test_nothing_is_found_when_no_dotenv_sits_above_the_cwd(
+        self, tmp_path, monkeypatch
+    ):
+        from silica.onboarding.checks import ignored_env_path
+        monkeypatch.chdir(tmp_path)
+
+        assert ignored_env_path() is None
+
+    def test_the_user_level_file_is_never_reported_as_ignored(
+        self, tmp_path, monkeypatch
+    ):
+        """`silica doctor` run from inside ~/.silica must not accuse the one
+        file silica actually reads."""
+        from silica.onboarding import checks
+        user_env = tmp_path / ".silica" / ".env"
+        user_env.parent.mkdir(parents=True)
+        user_env.write_text("SILICA_NOT_A_REAL_KEY=x\n")
+        monkeypatch.setattr(checks, "USER_ENV", user_env)
+        monkeypatch.chdir(user_env.parent)
+
+        assert checks.ignored_env_path() is None
+
+    def test_the_settings_it_fails_to_set_are_named(self, tmp_path, monkeypatch):
+        from silica.onboarding.checks import check_ignored_env
+        (tmp_path / ".env").write_text(
+            "SILICA_GRAPH_SHADING=True\nSILICA_NOT_A_REAL_KEY=x\n")
+        monkeypatch.delenv("SILICA_GRAPH_SHADING", raising=False)
+        monkeypatch.delenv("SILICA_NOT_A_REAL_KEY", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        r = check_ignored_env(_cfg())
+
+        assert r.status == "warn"
+        assert "SILICA_GRAPH_SHADING" in r.detail
+        assert "SILICA_NOT_A_REAL_KEY" in r.detail
+        assert str(tmp_path / ".env") in r.detail
+        assert "~/.silica/.env" in r.hint
+
+    def test_a_dotenv_that_changes_nothing_is_not_a_warning(
+        self, tmp_path, monkeypatch
+    ):
+        """Every key already live with the same value: the file is redundant,
+        not a lost setting. Warning here would cry wolf in every checkout that
+        keeps a copy of the same config."""
+        from silica.onboarding.checks import check_ignored_env
+        (tmp_path / ".env").write_text("SILICA_NOT_A_REAL_KEY=same\n")
+        monkeypatch.setenv("SILICA_NOT_A_REAL_KEY", "same")
+        monkeypatch.chdir(tmp_path)
+
+        assert check_ignored_env(_cfg()).status == "ok"
+
+    def test_the_row_appears_only_when_a_dotenv_is_being_ignored(
+        self, tmp_path, monkeypatch
+    ):
+        from silica.onboarding.checks import run_checks
+        monkeypatch.chdir(tmp_path)
+        assert not [r for r in run_checks(_cfg()) if r.name == "stray .env"]
+
+        (tmp_path / ".env").write_text("SILICA_NOT_A_REAL_KEY=x\n")
+        monkeypatch.delenv("SILICA_NOT_A_REAL_KEY", raising=False)
+        assert [r for r in run_checks(_cfg()) if r.name == "stray .env"]

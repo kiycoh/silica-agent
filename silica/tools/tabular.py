@@ -300,5 +300,5 @@ def silica_query_table(
         **({"note": note} if note else {}),
     }
 
-# ponytail: one file per call, so no joins across files. Bind a dict of
-# path→name as t1..tn when a real question needs two tables at once.
+# One file per call, so no joins across files. Binding a dict of path→name as
+# t1..tn is the design for the day a real question needs two tables at once.

@@ -26,7 +26,24 @@ _LIST_CAP = 30     # max bullet/row items for long lists (orphans, dangling, …
 _MIN_CLUSTER = 2   # size-1 clusters are noise — summarised, never listed
 
 
-def _short(p: str) -> str:
+def append_energy_point(series_path: Path, record: dict,
+                        prev: float | None, prev_terms: dict | None) -> bool:
+    """Append one energy point to the series unless nothing moved.
+
+    `prev`/`prev_terms` are the head file's last state: equal value and terms
+    mean a re-render of an unchanged vault, which must not grow the series.
+    A missing series file always takes the point (the trend has to start
+    somewhere). One line per write; a torn tail is skipped by readers the way
+    quiz.jsonl's is. Returns True when a line landed.
+    """
+    if series_path.is_file() and prev == record["value"] and prev_terms == record["terms"]:
+        return False
+    with series_path.open("ab") as fh:
+        fh.write(orjson.dumps(record) + b"\n")
+    return True
+
+
+def _short(p: str | None) -> str:
     return p.rsplit("/", 1)[-1].removesuffix(".md") if p else "—"
 
 
@@ -221,9 +238,9 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add("| Area A | Area B | Links | Gap score |")
         add("|---|---|---|---|")
         for g in r.structural_gaps:
-            a = hub_of.get(g.cluster_a, f"#{g.cluster_a}")
-            b = hub_of.get(g.cluster_b, f"#{g.cluster_b}")
-            add(f"| {a} | {b} | {g.inter_edges} | {g.gap_score} |")
+            area_a = hub_of.get(g.cluster_a, f"#{g.cluster_a}")
+            area_b = hub_of.get(g.cluster_b, f"#{g.cluster_b}")
+            add(f"| {area_a} | {area_b} | {g.inter_edges} | {g.gap_score} |")
     else:
         add("_No disconnected areas (or too few clusters to compare)._")
     add("")
@@ -304,9 +321,9 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add("\n## Autolink Candidates _(co-occurrence − wikilink — not authoritative)_")
         add("| Source | Target | Via | Weight | Hubs | Shared Concepts |")
         add("|---|---|---|---|---|---|")
-        for a in r.autolink_candidates:
-            shared = ", ".join(a.shared) if a.shared else "_(associative)_"
-            add(f"| [[{_short(a.source)}]] | [[{_short(a.target)}]] | {a.provenance} | {a.weight} | {a.convergence} | {shared} |")
+        for cand in r.autolink_candidates:
+            shared = ", ".join(cand.shared) if cand.shared else "_(associative)_"
+            add(f"| [[{_short(cand.source)}]] | [[{_short(cand.target)}]] | {cand.provenance} | {cand.weight} | {cand.convergence} | {shared} |")
 
     if r.stale_links:
         add("\n## Stale Links _(wikilink − co-occurrence — review)_")
@@ -317,8 +334,8 @@ def to_markdown(r: VaultReport, title: str = "Silica Vault Report") -> str:
         add("\n## Missing Hubs _(central concepts with no hub note)_")
         add("| Concept | Centrality |")
         add("|---|---|")
-        for h in r.missing_hubs:
-            add(f"| {h.concept} | {h.centrality} |")
+        for miss in r.missing_hubs:
+            add(f"| {miss.concept} | {miss.centrality} |")
 
     if r.integration_deficits:
         add("\n## Integration Deficit _(concept-rich, weakly linked — not authoritative)_")
@@ -474,21 +491,25 @@ def write_report(report: VaultReport, output_path: str) -> dict:
                 # makes ΔE ATTRIBUTABLE ("orphans fell, cohesion held") instead of a
                 # bare number that moved. Storing only `value` made the decomposition
                 # the docstring promises unobservable across runs.
-                # ponytail: one step of history, not a series. If a trend is ever
-                # wanted, append these payloads to energy.jsonl and keep this file as
-                # the head.
-                payload: dict = {
+                record: dict = {
                     "value": e.total,
                     "terms": {t: getattr(e, t) for t in
                               ("cohesion", "orphans", "dangling", "gaps", "deficits", "contested")},
                     "at": _dt.datetime.now().isoformat(timespec="seconds"),
                 }
+                payload = dict(record)
                 if prev is not None:
                     payload["prev"] = prev
                 if prev_terms:
                     payload["prev_terms"] = prev_terms
                 energy_path.parent.mkdir(parents=True, exist_ok=True)
                 energy_path.write_bytes(orjson.dumps(payload, option=orjson.OPT_INDENT_2))
+                # The trend lives beside the head: energy.jsonl gets one line
+                # per actual movement, so re-rendering an unchanged vault
+                # never grows it. The series only exists from the day the
+                # append starts, which is why it ships before any UI reads it.
+                append_energy_point(
+                    energy_path.with_suffix(".jsonl"), record, prev, prev_terms)
         except Exception as exc:
             logger.debug("graph_report: energy.json persist skipped (%s)", exc)
 

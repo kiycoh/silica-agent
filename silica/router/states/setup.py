@@ -359,7 +359,7 @@ def _assemble_file_chunks(fsm: "InjectorFSM", recon_cur: dict) -> tuple[dict, li
         # Every concept diverted: one empty chunk carries the file through the
         # normal pipeline (DELEGATE skips the LLM, VALIDATE short-circuits).
         # Falling through would resurrect the unfiltered fallback chunks.
-        new_chunks = [{"schema_version": raw_payload.get("schema_version", 1),
+        new_chunks = [{"schema_version": (raw_payload or {}).get("schema_version", 1),
                        "batches": []}]
 
     if not new_chunks:
@@ -473,7 +473,7 @@ def handle_payload(fsm: "InjectorFSM") -> None:
     inbox_file = fsm.inbox_files[fi] if fi < len(fsm.inbox_files) else fsm.inbox_file
     fsm._progress_note("payload", "payload", "running")
 
-    if fi in fsm._file_chunks:
+    if fsm._file_chunks.get(fi, {}).get("chunks"):
         # Warmed early by the distill prefetch window: chunks, pins and tasks
         # are attached — position the cursor where the normal path would have.
         fsm.context["payload"] = fsm.context.pop(
@@ -489,6 +489,23 @@ def handle_payload(fsm: "InjectorFSM") -> None:
 
     # Current file's recon only — appended last by RECON
     recon_cur = fsm.context["recon"][-1]
+
+    # The novelty gate runs inside _assemble_file_chunks and defers the concepts
+    # it diverts through _defer_ops, which attributes the bundle to whatever file
+    # the CHUNK CURSOR points at. Until this file's chunks are attached the cursor
+    # still sits on the previous file's last chunk, so file N's diversions would be
+    # filed under file N-1's content hash and source path. Park the cursor on the
+    # flat index this file's first chunk is about to take (the same value
+    # _attach_file_chunks computes and returns) and claim the file's identity now:
+    # a populated `chunks` list, not the key's presence, is what marks a file as
+    # attached, and _attach_file_chunks replaces the whole entry a few lines below.
+    fsm._current_chunk_idx = len(fsm._chunks)
+    fsm._chunk_flat_to_fi_ci[fsm._current_chunk_idx] = (fi, 0)
+    fsm._file_chunks[fi] = {"source_file": inbox_file, "chunks": []}
+    # Same attribution reason: the stale entry here is the PREVIOUS file's payload,
+    # and _defer_ops falls back to it when the cursor has no chunk yet.
+    fsm.context.pop("payload", None)
+
     try:
         res, new_chunks = _assemble_file_chunks(fsm, recon_cur)
     except RuntimeError as _pe:
@@ -533,7 +550,7 @@ def warm_next_file(fsm: "InjectorFSM") -> bool:
             # divert ahead of the file's own turn. Stand down.
             return False
         fi = fsm._next_uncommitted_file_idx(fsm._current_file_idx + 1)
-        if fi >= len(fsm.inbox_files) or fi in fsm._file_chunks:
+        if fi >= len(fsm.inbox_files) or fsm._file_chunks.get(fi, {}).get("chunks"):
             return False
         inbox_file = fsm.inbox_files[fi]
         res = orch.silica_recon(inbox_file)

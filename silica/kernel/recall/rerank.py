@@ -26,8 +26,12 @@ _WINDOW_CHARS = 800  # cross-encoder document budget (chars): excerpt window + g
 # margin, while ~81% of vault queries keep the reranker; the ~19% vault tail that
 # fires holds >6.4k-char bodies, unreadable for the same reason chat sessions are.
 _RERANK_WINDOW_FACTOR = 8
-# Calibration hook: harnesses set it to capture {"median_len", "window", "fired"}
-# per query; production leaves it None.
+# Calibration hook: harnesses set it to capture {"median_len", "min_len",
+# "window", "fired"} per query; production leaves it None. The factor above was
+# frozen against the MEDIAN; the gate now votes on `min_len` (see rerank_related),
+# which keeps every all-long pool firing — the LME chat sessions the factor was
+# calibrated on are uniformly 9.2k+ chars, so their min fires too — while a pool
+# holding even one window-sized note keeps its cross-encoder scores.
 RERANK_GATE_PROBE: Callable[[dict], None] | None = None
 
 
@@ -110,22 +114,6 @@ def _read_body(path: str, *, origin: str = "vault") -> tuple[str, str]:
     return name, (body or content)
 
 
-def note_document(path: str, *, query: str = "", max_chars: int = _WINDOW_CHARS) -> str:
-    """Title + body excerpt for one note, as the reranker's document text.
-
-    With `query`, the excerpt is the query-densest ``max_chars`` window of the
-    body (see `_best_window`) rather than the head slice, so a long note's
-    relevant passage reaches the cross-encoder. Returns '' when the note is
-    unreadable (the reranker scores '' as irrelevant, the right default for a
-    candidate we cannot open).
-    """
-    name, text = _read_body(path)
-    if not text:
-        return ""
-    excerpt = best_window(text, query, max_chars) if query else text[:max_chars]
-    return f"{name}\n{excerpt}".strip()
-
-
 # Obsidian's default capture names: a real word the informativeness check below
 # would wave through. ponytail: en + it only — an unlisted locale's default name
 # falls through to the measured body-window branch, never to a wrong answer.
@@ -192,6 +180,7 @@ def rerank_related(
     *,
     k: int,
     document_of: Callable[[Any], str] | None = None,
+    stats: dict | None = None,
 ) -> list:
     """Reorder the first-stage top-k of `results` by cross-encoder relevance.
 
@@ -204,6 +193,12 @@ def rerank_related(
     cross-encoder window, the model cannot read the evidence and its ordering
     is noise — skip the call, keep first-stage order.
 
+    `stats` is an optional out-dict: `rerank_related` sets `stats["reranked"]`
+    to whether the cross-encoder actually scored this pool. Callers that DISPLAY
+    the score need it — on abstention the surviving numbers are first-stage
+    fusion cosines (~0.03), on a real rerank they are relevance probabilities
+    (~0.99), and nothing in the list itself distinguishes the two scales.
+
     Each result is any object/dict exposing a note path (`.path` or `["path"]`).
     Abstention — no reranker, empty query, gate fired, or the reranker erroring
     — falls back to the pool's existing order, so a disabled or down reranker
@@ -211,6 +206,8 @@ def rerank_related(
     (its lengths then feed gate 2b as-is); it defaults to reading the note.
     """
     pool = results[:k]
+    if stats is not None:
+        stats["reranked"] = False
     if reranker is None or not pool or not query_text:
         return pool
     if document_of is not None:
@@ -220,11 +217,24 @@ def rerank_related(
         bodies = [_read_body(_path_of(it), origin=_origin_of(it)) for it in pool]
         lengths = [len(text) for _name, text in bodies]
         docs = None
+    # Gate 2b is about whether the cross-encoder can READ the evidence, which is
+    # a property of a candidate, not of a pool. On the median it was a majority
+    # vote: a vault that indexes its verbatim lectures beside the notes distilled
+    # from them puts two 20k-char sources in a top-5, and every short note beside
+    # them lost its cross-encoder score to their length. Fire only when NO
+    # candidate fits the window — then the ordering really is noise. One short
+    # note in the pool is enough for the reranker to produce a real ordering
+    # (measured on the ML vault: same query, gold at rank 5 scoring 0.025
+    # un-reranked, rank 1 scoring 0.9999 once the gate stopped firing).
+    min_len = min(lengths)
     median_len = statistics.median(lengths)
-    fired = median_len > _RERANK_WINDOW_FACTOR * _WINDOW_CHARS
+    fired = min_len > _RERANK_WINDOW_FACTOR * _WINDOW_CHARS
     if RERANK_GATE_PROBE:
-        RERANK_GATE_PROBE({"median_len": median_len, "window": _WINDOW_CHARS,
-                           "fired": fired})
+        RERANK_GATE_PROBE({"median_len": median_len, "min_len": min_len,
+                           "window": _WINDOW_CHARS, "fired": fired})
+    if stats is not None:
+        stats["gate_fired"] = fired
+        stats["reranked"] = not fired
     if fired:
         return pool
     if docs is None:
@@ -232,6 +242,8 @@ def rerank_related(
                 for name, text in bodies]
     scores = reranker.scores(query_text, docs)
     if scores is None or len(scores) != len(pool):
+        if stats is not None:
+            stats["reranked"] = False  # reranker down/short reply: cosines survive
         return pool
     order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
     out = [pool[i] for i in order]

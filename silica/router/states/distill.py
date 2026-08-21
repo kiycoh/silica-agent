@@ -18,7 +18,8 @@ import hashlib
 import json
 import time
 import typing
-from typing import TYPE_CHECKING
+from functools import partial
+from typing import Any, TYPE_CHECKING
 
 from silica.router import orchestrator as orch
 from silica.kernel.prep_delegation import payload_inbox_text, run_distiller
@@ -49,7 +50,8 @@ def _doc_date(fsm: "InjectorFSM", idx: int) -> str:
     """
     try:
         fi = fsm._chunk_flat_to_fi_ci.get(idx, (None, None))[0]
-        src = (fsm._file_chunks.get(fi) or {}).get("source_file") or fsm.inbox_file
+        chunk = fsm._file_chunks.get(fi) if fi is not None else None
+        src = (chunk or {}).get("source_file") or fsm.inbox_file
         text = orch.DRIVER.read_note(src).content or ""
         fm = _FM_BLOCK_RE.match(text)
         m = _FM_DATE_RE.search(fm.group(1)) if fm else None
@@ -361,9 +363,10 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
     k = int(getattr(orch.CONFIG, "distill_concurrency", 1) or 1)
     if k <= 1:
         return
-    if getattr(fsm, "_prefetcher", None) is None:
+    if fsm._prefetcher is None:
         from silica.router.prefetch import DistillPrefetcher
         fsm._prefetcher = DistillPrefetcher(max_workers=k)
+    prefetcher = fsm._prefetcher
 
     from silica.router.states.collision import collision_pass
     from silica.router.states.setup import warm_next_file
@@ -392,7 +395,7 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
             # burns a full distill call for nothing.
             j += 1
             continue
-        if j in fsm._prefetcher:
+        if j in prefetcher:
             j += 1
             continue
         if j > idx and not fsm.context.get(f"chunk_{j}_collision_done"):
@@ -419,7 +422,10 @@ def _prefetch_ahead(fsm: "InjectorFSM", idx: int) -> None:
             j += 1
             continue
         kwargs = _distill_inputs(fsm, j)
-        fsm._prefetcher.submit(j, lambda kw=kwargs: run_distiller(**kw))
+        # partial, not `lambda kw=kwargs:` — the default-argument trick existed
+        # to capture this turn's kwargs before j moves on, and partial does that
+        # by binding them, without inventing a parameter the callee never takes.
+        prefetcher.submit(j, partial(run_distiller, **kwargs))
         j += 1
 
 
@@ -493,6 +499,7 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
 
     try:
         _t0 = time.monotonic()
+        chunk_result: dict[str, Any]
         if _chunk_concept_count(current_chunk) == 0:
             # Empty chunk: the novelty gate emptied the file, or COLLISION
             # routed every concept away. Nothing to distill; synthesize an
@@ -500,11 +507,11 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
             # no-actionable-ops path finishes the chunk. (Also fixes the
             # latent waste: a COLLISION-emptied chunk used to burn a call.)
             logger.info("DELEGATE chunk %d: zero concepts, skipping distiller call", idx)
-            if getattr(fsm, "_prefetcher", None):
+            if fsm._prefetcher is not None:
                 fsm._prefetcher.pop(idx)  # discard any stale prefetched future
             chunk_result = {"updates": []}
         else:
-            fut = fsm._prefetcher.pop(idx) if getattr(fsm, "_prefetcher", None) else None
+            fut = fsm._prefetcher.pop(idx) if fsm._prefetcher is not None else None
             if fut is not None and kwargs["steer_context"] is None:
                 try:
                     chunk_result = fut.result()
@@ -814,7 +821,11 @@ def handle_validate(fsm: "InjectorFSM") -> None:
 
     fsm._chunk_ctx["ops_path"] = kb_path
     fsm._progress_note(
-        f"chunk_{fsm._current_chunk_idx}_validate",
+        # Same id the resume check reads (handle_delegate / _prefetch_ahead call
+        # is_checkpoint_done on _chunk_task_id("validate")): a checkpoint filed
+        # under any other id is invisible, and the real f{fi}_c{ci}_validate task
+        # — set to "running" at the top of this handler — would never leave it.
+        fsm._chunk_task_id("validate"),
         "validate",
         "done",
         output_ref=kb_path,

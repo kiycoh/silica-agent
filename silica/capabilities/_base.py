@@ -41,14 +41,21 @@ def emit_feedback(item: WorkItem, phase: str, detail: str = "") -> None:
     BUS.publish("work/feedback", WorkFeedbackEvent(item.id, item.kind, phase, detail))
 
 
-def read_or_skip(path: str) -> tuple[str | None, dict | None]:
+def read_or_skip(path: str) -> tuple[str, dict | None]:
     """Read a note body. Returns ``(body, None)`` on success, or
-    ``(None, {"status": "skipped", ...})`` if the note is unreadable."""
+    ``("", {"status": "skipped", ...})`` if the note is unreadable.
+
+    The failure body is "" and not None on purpose: a tuple return cannot say
+    "the body is a str exactly when skip is None", so every caller was left
+    holding an Optional it then had to re-narrow. Both are falsy and every
+    caller either returns on `skip` or tests the body for truth, so the two
+    spellings were already interchangeable — this one is checkable.
+    """
     from silica.driver import DRIVER
     try:
         return DRIVER.read_note(path).content or "", None
     except Exception as e:
-        return None, {"status": "skipped", "reason": f"unreadable: {e}"}
+        return "", {"status": "skipped", "reason": f"unreadable: {e}"}
 
 
 def load_prompt(name: str) -> str:

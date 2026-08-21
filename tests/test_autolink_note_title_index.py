@@ -75,6 +75,7 @@ class _FakeFSM:
         self._current_chunk_idx = 0
         self.context: dict = {}
         self._chunk_ctx_dict = {"ops_path": ops_path}
+        self._run_title_refs = None  # the FSM declares this; the stand-in must too
 
     def _progress_note(self, *args, **kwargs):
         pass

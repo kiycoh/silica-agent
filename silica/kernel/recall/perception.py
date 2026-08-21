@@ -18,13 +18,18 @@ context would score as a memory miss with no signal.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from silica.kernel.recall.cooccurrence import CooccurStore
+
 import logging
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-# ponytail: perception-grid winners as plain defaults; promote to CONFIG only
-# when a real vault needs different values.
+# Perception-grid winners as plain defaults (config promotion declined
+# 2026-08-19; revisit only when a real vault needs different values).
 DEFAULT_K = 15
 # Window grid decided 2026-07-30 (bench/window_sweep_150.json + the paired A/B in
 # bench/ab_win_*.metrics.json). 3x1000 beats the old 1x3000 on answer accuracy:
@@ -48,59 +53,6 @@ class NoteBlock:
     body: str       # full body, frontmatter stripped
     excerpt: str    # query-densest window of the body
     contested: str | None = None  # correction reason when flagged, else None
-    abstract: bool = False  # served at the L0 tier (rank tail / already served)
-
-
-# L0 abstract shape (OpenViking doc_overview, leaner): enough headings to show
-# the note's skeleton, one paragraph to say what it is about.
-L0_CAP_CHARS = 400
-L0_MAX_HEADINGS = 8
-
-
-def l0_excerpt(body: str, *, cap_chars: int = L0_CAP_CHARS,
-               max_headings: int = L0_MAX_HEADINGS) -> str:
-    """Extractive L0 abstract of a note body: heading tree + first paragraph.
-
-    Deterministic and LLM-free by verdict, not convenience — distill-vs-verbatim
-    and the extractive-ingest arm both scored extractive over generated text.
-    Serves the rank tail (and already-served notes) so a hit keeps its slot at
-    a fraction of the window cost; the model re-reads on demand via `partial`.
-    """
-    import re
-
-    if not body or not body.strip():
-        return ""
-    headings = re.findall(r"^#{1,6}[ \t].+$", body, flags=re.MULTILINE)
-    lines = headings[:max_headings]
-    paragraph = ""
-    for block in re.split(r"\n\s*\n", body):
-        candidate = "\n".join(
-            ln for ln in block.strip().splitlines()
-            if not ln.lstrip().startswith("#")
-        ).strip()
-        if candidate:
-            paragraph = candidate
-            break
-    out = "\n".join(part for part in ("\n".join(lines), paragraph) if part)
-    return out[:cap_chars].strip()
-
-
-def _apply_tiers(blocks: list[NoteBlock], *, deep_ranks: int | None,
-                 served: set[str]) -> None:
-    """Degrade the rank tail and already-served notes to the L0 tier in place.
-
-    Rank counts the FINAL order (what the model sees as #n). A block whose L0
-    comes back empty keeps its window — an empty excerpt would be dropped as
-    contentless, and the slot exists precisely because the tail carries gold.
-    """
-    for rank, b in enumerate(blocks, 1):
-        beyond = deep_ranks is not None and rank > deep_ranks
-        if not beyond and b.path not in served:
-            continue
-        l0 = l0_excerpt(b.body)
-        if l0:
-            b.excerpt = l0
-            b.abstract = True
 
 
 @dataclass
@@ -129,10 +81,7 @@ class Perception:
                 head = f"[#{rank}" + (f" | {b.evidence}" if b.evidence else "")
                 head += (f" | dated {b.date}" if b.date else "")
                 head += (f" | contested: {b.contested}" if b.contested else "")
-                head += (f" | stale:{lvl}" if lvl else "")
-                # L0-tier block: the marker tells the model this is a summary
-                # and the note holds more (re-read via `partial`).
-                head += (" | abstract" if b.abstract else "") + "]"
+                head += (f" | stale:{lvl}" if lvl else "") + "]"
                 parts.append(f"{head}\n{b.excerpt}")
             else:
                 marks = ([f"dated {b.date}"] if b.date else []) \
@@ -149,7 +98,7 @@ class Perception:
 
 def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
                     use_rerank: bool = True, use_recall_weights: bool = False,
-                    use_lexical: bool = False):
+                    use_lexical: bool = False, rerank_stats: dict | None = None):
     """Fused first-stage retrieval + cross-encoder rerank for a fresh text query.
 
     The single retrieval path shared by the chat tools
@@ -170,6 +119,12 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     ``use_lexical`` (default off, opt-in like ``use_recall_weights``): when
     True, folds the hand-written BM25/fuzzy leg into fusion as an extra leg.
     Abstains when the lexical index is absent or empty.
+
+    ``rerank_stats`` is an optional out-dict filled with ``{"reranked": bool}``
+    (see ``rerank_related``): the returned ``.score`` is a cross-encoder
+    relevance when True and a first-stage fusion cosine when False, and the two
+    are an order of magnitude apart. A caller that shows the number, or
+    thresholds on it, has to know which one it got.
     """
     from silica.agent.providers import get_embedder, get_reranker
     from silica.config import CONFIG
@@ -185,10 +140,10 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     sweep()
 
     embed_store = get_store()
+    cooccur_store: CooccurStore | None
     try:
-        cooccur_store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        if len(cooccur_store) == 0:
-            cooccur_store = None
+        loaded = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
+        cooccur_store = loaded if len(loaded) else None  # empty store ⇒ abstain
     except Exception:
         cooccur_store = None
     mem_embed, mem_cooccur = memory_stores()
@@ -227,10 +182,12 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
         lexical_rank=lexical_rank,
     ) or []
     reranker = get_reranker(CONFIG) if use_rerank else None
+    if rerank_stats is not None:
+        rerank_stats["reranked"] = False  # no reranker configured ⇒ cosines stand
     if reranker:
         # Default document path: gate 2b sees full body lengths, the scored
         # docs are query-densest windows, memory-lane bodies resolve by origin.
-        results = rerank_related(reranker, query, results, k=k)
+        results = rerank_related(reranker, query, results, k=k, stats=rerank_stats)
     return results, query_vec
 
 
@@ -386,12 +343,25 @@ def _assemble_blocks(blocks: list[NoteBlock], query: str) -> list[NoteBlock]:
     out: list[NoteBlock] = []
     for ab in res.blocks:
         head = by_path.get(ab.members[0])
+        # `contested` is a trust signal, not decoration: perceive() promises a
+        # flagged note is never dropped, only marked, so the answer step can
+        # distrust it. Folding lost it twice — off the head, and off every
+        # periphery member whose text is squashed into this block with no
+        # NoteBlock of its own. A periphery member is not a seed, so its flag
+        # costs one frontmatter read; seeds carry it already.
+        reasons: list[str] = []
+        for member in ab.members:
+            seed = by_path.get(member)
+            reason = seed.contested if seed is not None else _read_dated_body(member)[1]
+            if reason and reason not in reasons:
+                reasons.append(reason)
         out.append(NoteBlock(
             path=ab.members[0],
             date=head.date if head else "",
             evidence=head.evidence if head else "",
             body=ab.text,
             excerpt=ab.text,   # assembled text is already budgeted
+            contested="; ".join(reasons) or None,
         ))
     return out
 
@@ -404,9 +374,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
              paths: list[str] | None = None,
              use_recall_weights: bool = False,
              assemble: bool = False,
-             use_lexical: bool = False,
-             deep_ranks: int | None = None,
-             served_before: set[str] | None = None) -> Perception:
+             use_lexical: bool = False) -> Perception:
     """Retrieve + assemble the answer-time context for `query`.
 
     ``paths`` skips retrieval and assembles the given notes in order (the eval
@@ -420,12 +388,6 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     bypasses retrieval).
     ``use_lexical`` (default off) forwards to `facade_retrieve`'s lexical leg;
     no effect when ``paths`` is set.
-    ``deep_ranks`` (default None = off, byte-identical): ranks beyond it are
-    served as an extractive L0 abstract instead of the query windows — the
-    tail keeps its slot (the rank probe showed it carries gold) at a fraction
-    of the cost. ``served_before``: paths degraded to L0 whatever their rank,
-    because the reader already holds their body (cross-turn dedup). Both are
-    gate-pending A/B arms; --assemble overrides them (it re-budgets blocks).
     """
     from silica.kernel.recall.rerank import best_windows
 
@@ -453,9 +415,6 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     # Correction loop: contested notes are demoted behind clean ones (stable),
     # never dropped — the render marks them so the answer step can distrust them.
     blocks = [b for b in blocks if not b.contested] + [b for b in blocks if b.contested]
-
-    if deep_ranks is not None or served_before:
-        _apply_tiers(blocks, deep_ranks=deep_ranks, served=served_before or set())
 
     if paths is None:
         blocks = _maybe_assemble(blocks, assemble=assemble, query=query)

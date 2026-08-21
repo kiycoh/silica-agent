@@ -546,7 +546,7 @@ def collision_pass(fsm: "InjectorFSM", idx: int) -> None:
             _is_hub = _vault_ctx.get(_match_key, {}).get("is_hub", False)
             τ_eff = τ_high - (0.08 if _is_hub else 0.0)
 
-            names_agree = _names_agree(concept_text, top["name"])
+            names_agree = _names_agree(concept_text, str(top["name"]))
             decision = route_concept(
                 score, names_agree=names_agree,
                 is_hub=_is_hub, tau_high=τ_high, tau_low=τ_low,

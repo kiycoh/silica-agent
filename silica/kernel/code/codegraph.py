@@ -23,6 +23,8 @@ from __future__ import annotations
 import posixpath
 from dataclasses import dataclass, field as _field
 from pathlib import Path
+from collections.abc import Set as AbstractSet
+from typing import Any
 
 import orjson
 
@@ -55,7 +57,7 @@ def _py_candidates(parts: list[str]) -> list[str]:
     return out
 
 
-def _resolve_python(module: str, importer: str, files: set[str]) -> str | None:
+def _resolve_python(module: str, importer: str, files: AbstractSet[str]) -> str | None:
     if module.startswith("."):
         dots = len(module) - len(module.lstrip("."))
         rest = [p for p in module[dots:].split(".") if p]
@@ -72,7 +74,7 @@ def _resolve_python(module: str, importer: str, files: set[str]) -> str | None:
     return None
 
 
-def _resolve_ts(module: str, importer: str, files: set[str]) -> str | None:
+def _resolve_ts(module: str, importer: str, files: AbstractSet[str]) -> str | None:
     base = posixpath.normpath(posixpath.join(posixpath.dirname(importer), module))
     candidates = [base] if base.lower().endswith(_TS_EXTS) else []
     candidates += [f"{base}{ext}" for ext in _TS_EXTS]
@@ -88,7 +90,10 @@ _JDK_ROOTS = frozenset({"java", "javax", "jdk", "sun", "android", "androidx"})
 
 
 def classify_import(
-    module: str, importer: str, files: set[str], language: str, root: Path
+    # AbstractSet, not set: the only use is membership, and the code lane holds
+    # its census as a frozenset — copying it per import inside the loop would be
+    # O(files) work to satisfy an annotation.
+    module: str, importer: str, files: AbstractSet[str], language: str, root: Path
 ) -> tuple[str, str]:
     """Classify one import string → ("resolved", path) | ("external", top)
     | ("unresolved", module). A resolved path is always a member of `files`
@@ -187,7 +192,7 @@ def supported_files(root: Path) -> list[str]:
     )
 
 
-def _resolve_calls(sk, rel: str, files: set[str], root: Path,
+def _resolve_calls(sk, rel: str, files: AbstractSet[str], root: Path,
                    language: str = "python") -> list[dict]:
     """Import-scoped call edges: a call whose spelled name matches an imported
     first-party name is a near-certain usage edge. No scope resolution, no MRO,
@@ -253,7 +258,7 @@ def _resolve_calls(sk, rel: str, files: set[str], root: Path,
     return [{"target": t, "callee": ce, "caller": ca} for (t, ce, ca) in sorted(edges)]
 
 
-def _resolve_calls_ts(sk, rel: str, files: set[str], root: Path,
+def _resolve_calls_ts(sk, rel: str, files: AbstractSet[str], root: Path,
                       language: str) -> list[dict]:
     """TS/JS call edges. The specifier is a path (`./util`), not a dotted
     module, so the import-scoped spell-matcher cannot see it; the alias table
@@ -278,7 +283,7 @@ def _resolve_calls_ts(sk, rel: str, files: set[str], root: Path,
     return [{"target": t, "callee": c, "caller": p} for (t, c, p) in sorted(edges)]
 
 
-def _reexports(sk, rel: str, files: set[str], root: Path,
+def _reexports(sk, rel: str, files: AbstractSet[str], root: Path,
                language: str) -> list[dict]:
     """Names a facade re-exports without defining them. `__init__.py` and
     `index.ts` otherwise render as an empty file: an `__all__` of twenty names
@@ -307,11 +312,11 @@ def _reexports(sk, rel: str, files: set[str], root: Path,
     return out
 
 
-_EMPTY_V2 = {"module_doc": "", "module_comments": [], "dunder_all": None,
+_EMPTY_V2: dict[str, Any] = {"module_doc": "", "module_comments": [], "dunder_all": None,
              "has_main_guard": False, "calls": [], "deferred": [], "reexports": []}
 
 
-def _file_entry(root: Path, rel: str, files: set[str]) -> tuple[dict, list[tuple[str, str]]]:
+def _file_entry(root: Path, rel: str, files: AbstractSet[str]) -> tuple[dict, list[tuple[str, str]]]:
     """One store entry, plus the raw (name, parent) call sites for C/C++ —
     those resolve later in build_codegraph's include join, once every file's
     symbols exist."""
@@ -333,6 +338,12 @@ def _file_entry(root: Path, rel: str, files: set[str]) -> tuple[dict, list[tuple
             return {"language": cells.language, "imports": [], "external": [],
                     "unresolved": [], "symbols": [], "parse_error": False, **_EMPTY_V2}, []
         sk = codeast.extract_skeleton(cells.code, language, path=rel)
+    elif language is None:
+        # build_codegraph only walks files language_for() claims (or notebooks),
+        # so this is unreachable through it — but the invariant lives at that
+        # call site, 130 lines away, and there is no skeleton without a language.
+        return {"language": None, "imports": [], "external": [],
+                "unresolved": [], "symbols": [], "parse_error": True, **_EMPTY_V2}, []
     else:
         sk = codeast.extract_skeleton(source, language, path=rel)
     imports: list[str] = []
@@ -414,7 +425,7 @@ def _join_c_calls(rel: str, raw: list[tuple[str, str]], entries: dict[str, dict]
 
 def build_codegraph(root: Path) -> CodeGraph:
     """Full rebuild — the only write path. The index is never repaired,
-    only recomputed (spec: Decisioni.2).
+    only recomputed (spec-code-lane, scope decision 2).
     # ponytail: full rebuild (~ms/file); incremental per-file if a real repo makes it slow
     """
     current = supported_files(root)
@@ -481,7 +492,7 @@ def code_vocabulary(graph: CodeGraph, cap: int = 30) -> list[str]:
     module stems + public symbol names from the top-`cap` files by fan-in.
     Names only, never edges — the vocabulary channel is one of the two
     sanctioned structural→semantic contact points (spec §4a). The effect:
-    the distiller reuses the canonical grafia (InjectorFSM, not injector-fsm)
+    the distiller reuses the canonical spelling (InjectorFSM, not injector-fsm)
     so co-occurrence latches onto it."""
     from collections import Counter
 
@@ -528,6 +539,7 @@ def compute_impact(vault: Path | str, range_spec: str | None = None) -> list[Imp
         for p in codedocs.documents_of(data):
             docmap.setdefault(p, []).append(note_path)
 
+    new_ref: str | None
     if range_spec and ".." in range_spec:
         base_ref, _, new_ref = range_spec.partition("..")
         new_ref = new_ref.lstrip(".") or None   # tolerate A...B

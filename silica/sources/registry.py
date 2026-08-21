@@ -93,6 +93,8 @@ def expand_folder(target: str, enabled: Sequence[str] | None = None) -> list[str
     if rel is None:
         return []
     root = repo_root_for(CONFIG.vault_path)
+    if root is None:  # not a git checkout ⇒ the census has nothing to walk
+        return []
     prefix = f"{rel}/" if rel else ""
     return [
         f for f in supported_files(root)

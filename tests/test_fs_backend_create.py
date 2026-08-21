@@ -34,3 +34,17 @@ def test_upsert_creates_then_overwrites(backend):
     assert backend.read_note("U.md").content == "v1"
     backend.upsert("U.md", "v2")
     assert backend.read_note("U.md").content == "v2"
+
+
+def test_a_created_note_is_no_more_private_than_a_hand_written_one(backend, tmp_path):
+    """The note write goes through the atomic tmp+replace helper, whose tmp file
+    is born 0600. A vault is read by things that are not this process — a sync
+    daemon under its own account, Obsidian on a shared mount — so a note Silica
+    creates has to carry the same mode the user's own editor would give it."""
+    reference = tmp_path / "reference.md"
+    reference.write_text("hand-written")
+
+    backend.create("Perm.md", "body")
+
+    created = backend.vault_path / "Perm.md"
+    assert (created.stat().st_mode & 0o777) == (reference.stat().st_mode & 0o777)

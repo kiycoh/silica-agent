@@ -2,6 +2,7 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 import io
+from typing import Any, cast
 import logging
 import sys
 
@@ -101,7 +102,10 @@ class AnsiHumanFriendlyFormatter(HumanFriendlyFormatter):
             # highlight stays on: RichHandler applies its ReprHighlighter to
             # main-thread records, so worker records get the same treatment here.
             force_terminal=CONSOLE.is_terminal,
-            color_system=CONSOLE.color_system,
+            # Rich's getter widens to str|None while the ctor wants its own
+            # Literal; the value comes straight off a live Console, so it is
+            # one of them by construction.
+            color_system=cast(Any, CONSOLE.color_system),
             width=CONSOLE.width,
         ).print(markup, end="", soft_wrap=True)
         return buf.getvalue()

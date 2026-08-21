@@ -102,15 +102,24 @@ def _created_and_ai(text: str, mtime: float) -> tuple[float, bool]:
     return ts, bool((data or {}).get("AI"))
 
 
+_meta_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, meta)
+
+
 def _notes_meta(vault: Path) -> dict[str, dict]:
     """{relative path: {"created": ts, "ai": bool}} for every readable note.
 
     Timeline's walk verbatim: dot-dirs, .silicaignore matches and the verbatim
-    sources dir are not the reader's notes.
-    # ponytail: full walk + frontmatter parse per call, like timeline._all_rows;
-    # add its epoch memo when a profile shows this in the digest path.
+    sources dir are not the reader's notes. Memoized on the vault's file-state
+    epoch like timeline._all_rows: repeated digest reads between vault changes
+    cost one stat walk instead of a full re-parse.
     """
-    from silica.kernel.recall.paths import SOURCES_DIR, ignore_matcher
+    from silica.kernel.recall.paths import SOURCES_DIR, ignore_matcher, vault_epoch
+
+    epoch = vault_epoch(str(vault))
+    if epoch:
+        hit = _meta_memo.get(str(vault))
+        if hit is not None and hit[0] == epoch:
+            return hit[1]
 
     ignored = ignore_matcher(vault)
     out: dict[str, dict] = {}
@@ -129,6 +138,10 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
             continue  # one unreadable note must not blind the view
         created, ai = _created_and_ai(text, mtime)
         out["/".join(parts)] = {"created": created, "ai": ai}
+
+    if epoch:
+        _meta_memo.clear()
+        _meta_memo[str(vault)] = (epoch, out)
     return out
 
 

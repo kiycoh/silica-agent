@@ -35,11 +35,9 @@ def _run_title_refs(fsm: "InjectorFSM") -> list[typing.Any]:
     per-chunk disk scan this cache removes. ponytail: no invalidation beyond
     append/remove — the ingest path never renames vault notes mid-run.
     """
-    refs = getattr(fsm, "_run_title_refs", None)
-    if refs is None:
-        refs = list(orch.DRIVER.list_files())
-        fsm._run_title_refs = refs
-    return refs
+    if fsm._run_title_refs is None:
+        fsm._run_title_refs = list(orch.DRIVER.list_files())
+    return fsm._run_title_refs
 
 
 def _backlink_neighbourhood(new_titles: list[str], touched_abs: set[str]) -> list[str]:

@@ -12,6 +12,11 @@ silica runs that command itself and waits for it to load instead of degrading.
 One key per endpoint (SILICA_*_SERVE_CMD), run through the shell so a script
 path, `lms server start`, or a chained command all work as written. Unset means
 "I start it myself" — the behaviour before this module, unchanged, and no probe.
+
+A serve command is a command silica SPAWNS, so where it comes from is a trust
+boundary. It is held at the source rather than here: config.py layers
+~/.silica/.env and nothing else, so the .env of whatever checkout the shell
+happens to sit in never reaches os.environ to begin with.
 """
 from __future__ import annotations
 
@@ -123,7 +128,10 @@ def ensure(label: str, base_url: str, command: str) -> bool:
     with open(log_path, "ab") as log:
         # start_new_session: the server is a daemon the next silica run should
         # find already up, so it must outlive this process and ignore its Ctrl-C.
-        proc = subprocess.Popen(  # noqa: S602 — the command comes from the user's own .env
+        # shell=True is the feature (a script path, `lms server start`, a chained
+        # command), and it is only defensible because the only .env silica
+        # reads is the user's own — see the layering note in config.py.
+        proc = subprocess.Popen(  # noqa: S602 — trusted source only, see above
             command, shell=True, stdout=log, stderr=subprocess.STDOUT,
             start_new_session=True,
         )

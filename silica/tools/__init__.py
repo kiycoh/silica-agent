@@ -71,7 +71,7 @@ def _strip_titles(node: Any, *, in_map: bool = False) -> Any:
 class Tool:
     """Metadata and executor for a single registered tool."""
 
-    __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "summarize", "sensitive", "internal")
+    __slots__ = ("fn", "name", "description", "params_model", "cls", "collapse", "sensitive", "internal")
 
     def __init__(
         self,
@@ -81,7 +81,6 @@ class Tool:
         params_model: type[BaseModel],
         cls: str,
         collapse: str = "lazy",
-        summarize: Callable[[dict], str] | None = None,
         sensitive: bool = False,
         internal: bool = False,
     ):
@@ -91,7 +90,6 @@ class Tool:
         self.params_model = params_model
         self.cls = cls  # "atomic" | "composed" | "wrapped"
         self.collapse = collapse  # "lazy" | "eager" | "never"
-        self.summarize = summarize
         # classified once at definition; the default toolset filters
         # on this so a sensitive tool can never leak into the main agent by
         # mere registration. New sensitive tools are covered automatically.
@@ -153,7 +151,6 @@ def tool(
     params_model: type[BaseModel],
     cls: str = "atomic",
     collapse: str = "lazy",
-    summarize: Callable[[dict], str] | None = None,
     sensitive: bool = False,
     internal: bool = False,
 ):
@@ -177,7 +174,7 @@ def tool(
         tool_desc = inspect.cleandoc(fn.__doc__ or "")
         TOOLS[tool_name] = Tool(
             fn, tool_name, tool_desc, params_model, cls,
-            collapse=collapse, summarize=summarize, sensitive=sensitive,
+            collapse=collapse, sensitive=sensitive,
             internal=internal,
         )
         logger.debug("Registered tool: %s (class=%s, collapse=%s)", tool_name, cls, collapse)

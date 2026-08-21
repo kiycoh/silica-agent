@@ -53,6 +53,7 @@ def stopwords_for(lang: str) -> frozenset[str]:
         return _stopwords_cache[lang]
 
     iso = SNOWBALL_TO_ISO.get(lang)
+    result: frozenset[str]
     if iso is None:
         result = frozenset()
     else:

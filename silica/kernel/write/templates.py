@@ -11,6 +11,8 @@ import logging
 import os
 import re
 
+import yaml
+
 from silica.kernel.write import frontmatter
 from silica.kernel.write.frontmatter import clean_tag  # canonical; do not redefine
 
@@ -378,17 +380,22 @@ def patch_snippet(heading: str, snippet: str, source_basename: str, hub: str | N
 _AI_KEY_RE = re.compile(r"^AI:\s", re.MULTILINE)
 
 
-def ensure_ai_flag(content: str) -> str:
-    """Stamp `AI: true` into an existing frontmatter block that lacks the field.
+def ensure_ai_flag(content: str, value: str = "true") -> str:
+    """Stamp `AI: <value>` into an existing frontmatter block lacking the field.
 
     patch/overwrite touch user-authored notes that predate the `AI` convention;
-    the OFM lint (ofm.py) requires a boolean `AI` on the *whole* note, so a patch
-    to a legacy note would be reverted. Marking `AI: true` is honest provenance —
-    the agent is now contributing content. String-level (no YAML round-trip) so
-    the rest of the user's frontmatter is left byte-for-byte intact.
+    the OFM lint (ofm.py) requires the `AI` key on the *whole* note, so a patch
+    to a legacy note would be reverted. The value says how much the agent now
+    owns: `true` for a body the agent wrote (overwrite, floor under fresh
+    writes), `partial` for a section appended to a note that was the user's —
+    the bulk patch path passes it so the note keeps its human reliability tier
+    (contested.reliability_tier) instead of decaying on the first touch.
+    String-level (no YAML round-trip) so the rest of the user's frontmatter is
+    left byte-for-byte intact.
 
     No-ops when there is no frontmatter (fresh writes carry it via template_spoke)
-    or the `AI` key already exists (never overwrites the user's own value).
+    or the `AI` key already exists (never overwrites the user's own value, and
+    never upgrades an earlier `partial` to `true`).
     """
     if not content.startswith("---\n"):
         return content
@@ -397,7 +404,7 @@ def ensure_ai_flag(content: str) -> str:
         return content  # unterminated frontmatter — leave for the lint to flag
     if _AI_KEY_RE.search(content[4:end_idx]):
         return content
-    return content[:end_idx] + "\nAI: true" + content[end_idx:]
+    return content[:end_idx] + f"\nAI: {value}" + content[end_idx:]
 
 
 _LAST_MODIFIED_RE = re.compile(r"^last modified:.*$", re.MULTILINE)
@@ -521,6 +528,35 @@ def stamp_citation(content: str, cite: dict[str, str]) -> str:
     return "---\n" + head + tail
 
 
+# Every character YAML scans as a line break. `\n` and `\r` are the obvious
+# two; NEL, LINE SEPARATOR and PARAGRAPH SEPARATOR are the ones a threat model
+# built on "no newlines" misses, and the parser this vault reads with honours
+# all five (verified against the frontmatter round-trip, not from the spec).
+_YAML_BREAKS = "\n\r\x85\u2028\u2029"
+
+
+def _yaml_scalar(value) -> str:
+    """`value` as ONE line of YAML, round-trip exact.
+
+    Quotes only what YAML would otherwise misread, so a plain word stays plain
+    and the frontmatter a person reads is unchanged. Two ways out of one line
+    are closed: `width` is set past any real value, because the emitter folds
+    long scalars across lines by default; and anything carrying a line break is
+    forced to double quotes, because the single-quoted style writes those as
+    REAL lines (`'a\\n\\n  b'`), and the replace branch in `upsert_props` — one
+    regex over one line — would later leave the continuation behind as an
+    orphan that folds into whatever value replaced it.
+    """
+    text = str(value)
+    style = '"' if any(c in text for c in _YAML_BREAKS) else None
+    dumped = yaml.safe_dump({"k": text}, allow_unicode=True, sort_keys=False,
+                            width=10 ** 9, default_flow_style=False,
+                            default_style=style)
+    # `default_style` quotes the key too, so slice on the separator rather than
+    # a fixed width: neither `k` nor `"k"` can contain one.
+    return dumped.split(": ", 1)[1].rstrip("\n")
+
+
 def upsert_props(content: str, props: dict[str, str]) -> str:
     """Insert (or replace) scalar caller-supplied keys in the frontmatter block.
 
@@ -528,6 +564,15 @@ def upsert_props(content: str, props: dict[str, str]) -> str:
     intact. Callers run this after `ensure_system_floor`, so a block always
     exists; content without one is returned unchanged. Reserved-key policy is
     the caller's (the tool layer rejects `AI`/`last modified`/`verified`).
+
+    `props` is a model-controlled tool argument, so every pair goes out as one
+    line of emitted YAML and is read back before it is kept: a raw value
+    carrying a newline would open a SECOND frontmatter key, and a forged
+    `verified: [{by: human:…}]` block — or a second `AI:` that re-declares the
+    note as not-agent-written — is what `contested.reliability_tier` reads as
+    TIER_HUMAN, a model handing itself the trust tier reserved for a person.
+    One line also keeps the replace branch below (a one-line regex) honest on
+    the next upsert.
     """
     if not props or not content.startswith("---\n"):
         return content
@@ -536,11 +581,35 @@ def upsert_props(content: str, props: dict[str, str]) -> str:
         return content
     head = content[:end]
     for key, value in props.items():
+        scalar = _yaml_scalar(value)
+        line = f"{key}: {scalar}"
+        # The KEY goes out raw (the replace branch below matches on it), so a
+        # blocklist of characters is the wrong shape here: ':' and '\n' are not
+        # the only ways out of one pair. A '#' comments the rest of the line
+        # away, a leading indicator retypes the node, and NEL/LS/PS are line
+        # breaks the parser honours: a key of "#x", one U+2028, then "AI" emits
+        # a comment plus a SECOND `AI:` that re-declares the note as not
+        # agent-written, which `contested.reliability_tier` reads as TIER_HUMAN.
+        # So read the line back instead of enumerating YAML's syntax: it is safe
+        # exactly when it parses to the one pair that went in.
+        try:
+            reparsed = yaml.safe_load(line)
+        except yaml.YAMLError:
+            reparsed = None
+        if any(c in key for c in ":\n\r") or reparsed != {key: str(value)}:
+            raise ValueError(
+                f"Unsafe frontmatter key {key!r}: a key must be a plain YAML "
+                "scalar — no ':', no comment, no line break."
+            )
         line_re = re.compile(rf"^{re.escape(key)}:.*$", re.MULTILINE)
         if line_re.search(head[4:]):
-            head = head[:4] + line_re.sub(f"{key}: {value}", head[4:], count=1)
+            # re.sub calls the replacement eagerly, so the default-argument
+            # capture the lambda used to carry was pinning values that cannot
+            # change before it runs.
+            head = head[:4] + line_re.sub(
+                lambda _m: f"{key}: {scalar}", head[4:], count=1)
         else:
-            head += f"\n{key}: {value}"
+            head += f"\n{key}: {scalar}"
     return head + content[end:]
 
 

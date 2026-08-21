@@ -229,23 +229,18 @@ def enforce_key_schema(key: str, schema) -> str:
     return ".".join(segs)
 
 
-# Calibration hook (COOCCUR_GATE_PROBE idiom): harnesses set it to capture each
-# snap fire as {"key", "head_key", "cos", "tau"}; production leaves it None.
-SNAP_PROBE: Callable[[dict], None] | None = None
-
-# Same idiom for the supersede gate: every measured gate decision as {"key",
-# "cos", "action" ("supersede"|"fork"), "tau", "head_seen", "seen"}. Abstains
-# (missing vec, embedder down) are not emitted — they are legacy behavior.
+# Calibration hook (COOCCUR_GATE_PROBE idiom): harnesses set it to capture every
+# measured supersede-gate decision as {"key", "cos", "action"
+# ("supersede"|"fork"), "tau", "head_seen", "seen"}; production leaves it None.
+# Abstains (missing vec, embedder down) are not emitted — they are legacy
+# behavior.
 GATE_PROBE: Callable[[dict], None] | None = None
 
 
-def _snap_entity(key: str) -> tuple:
-    """Entity namespace of a key, the HARD constraint of the snap fallback:
-    cosine may never merge across entities (same attribute of two people
-    embeds close by construction — superseding across them falsifies
-    history). `user.<name>.*` keys are per-person; any other first segment
-    is the entity itself (so assistant.* observations may chain across
-    sessions)."""
+def _entity_segments(key: str) -> tuple:
+    """Entity namespace of a key, as segments. `user.<name>.*` keys are
+    per-person; any other first segment is the entity itself (so assistant.*
+    observations belong to one entity across sessions)."""
     segs = [s for s in key.casefold().split(".") if s]
     if not segs:
         return ()
@@ -261,7 +256,7 @@ def entity_key(key: str) -> str:
     about the dog beats two notes about its fields, and the fields alone are too
     thin to clear the write gate.
     """
-    return ".".join(_snap_entity(key))
+    return ".".join(_entity_segments(key))
 
 
 def key_tokens(key: str) -> set[str]:
@@ -399,7 +394,6 @@ class EpisodicStore:
         self.next_id = 1
         self.facts: list[Fact] = []
         self.lang: str | None = None  # frozen key-stemming language, see _freeze_lang
-        self._key_vecs: dict[str, list[float]] = {}  # spaced key -> vec (snap cache)
         self._load()
 
     # ------------------------------------------------------------------
@@ -439,8 +433,7 @@ class EpisodicStore:
     # ------------------------------------------------------------------
 
     def capture(self, facts: list[dict], *, run_id: str, seen: str,
-                embedder=None, schema=None, snap_tau: float = 0.0,
-                supersede_tau: float = 0.0,
+                embedder=None, schema=None, supersede_tau: float = 0.0,
                 vault: str | None = None,
                 notes: list[str] | None = None) -> None:
         """Merge distiller ephemerals into the store. Mechanical, no LLM.
@@ -459,13 +452,6 @@ class EpisodicStore:
         sibling family: a genuine update of an OLDER sibling forks instead of
         chaining to it — both stay live, only the chain link is lost.
         Abstains to legacy supersede when either vector is unavailable.
-
-        `snap_tau` > 0 arms the fallback of the matcher cascade (canonical
-        keys, fase 1/2): a coined key with no exact canonical match joins the
-        nearest live head by KEY-embedding cosine >= snap_tau. 0 is
-        bit-identical to the pre-cascade store and is what CONFIG ships: the
-        snap audit refuted every candidate tau on the shipped key schema (see
-        config.py, and bench/snap_replay.py to re-run it).
 
         `schema` (ADR-0021): an `EpisodicKeySchema` shapes stored keys via
         `enforce_key_schema` before merge; None means no enforcement —
@@ -494,8 +480,6 @@ class EpisodicStore:
                 key = shaped
             nkey = normalize_key(key, lang=lang)
             head = heads.get(nkey)
-            if head is None and snap_tau > 0 and embedder is not None:
-                head = self._snap_head(key, heads, embedder, snap_tau)
             if head is not None and _normalize(head.text) == _normalize(text):
                 head.last_seen = seen
                 if run_id not in head.runs:
@@ -519,9 +503,6 @@ class EpisodicStore:
                 buried.append((fact, head))
                 fact.supersedes = head.id
                 head.status = "superseded"
-                old_nkey = normalize_key(head.key, lang=lang)
-                if old_nkey != nkey and heads.get(old_nkey) is head:
-                    del heads[old_nkey]  # snap join: retire the stale lookup
             self.facts.append(fact)
             heads[nkey] = fact
             created.append(fact)
@@ -591,12 +572,11 @@ class EpisodicStore:
         """TEXT cosine between an arrival and the head it would bury; None =
         abstain (either vector unavailable), which falls back to the legacy
         supersede. TEXT, not key: the value difference IS the referent signal
-        here — the inversion of _snap_head's key-only rule, measured in
-        bench/supersede_gate_probe.py."""
+        here, measured in bench/supersede_gate_probe.py."""
         if embedder is None or not head.vec:
             return None
         if text not in cache:
-            # ponytail: one embed round trip per gated arrival, cached per
+            # One embed round trip per gated arrival, cached per
             # capture and reused as the fact's own vec, so the token count is
             # unchanged — only the request count rises, and only on collisions.
             # Batch the gated arrivals up front if a hosted embedder makes the
@@ -607,44 +587,6 @@ class EpisodicStore:
                 logger.debug("episodic gate: embedding skipped (%s)", e)
                 return None
         return _cosine(cache[text], head.vec)
-
-    def _snap_head(self, key: str, heads: dict[str, Fact], embedder,
-                   tau: float) -> Fact | None:
-        """Fallback arm of the capture matcher cascade (canonical keys):
-        nearest live head by KEY-embedding cosine, joined when >= tau. Keys
-        embed spaced (`a.b_c` -> "a b c") and NEVER the fact text — text mixes
-        attribute with value and kills knowledge-update chains (probe-gated,
-        bench/locomo_embed_identity_gates.md). Embedding failure is silent:
-        the arrival simply starts its own chain."""
-        ent = _snap_entity(key)
-        candidates = [h for h in heads.values() if _snap_entity(h.key) == ent]
-        if not candidates:
-            return None
-        spaced = {k: k.replace(".", " ").replace("_", " ")
-                  for k in (key, *(h.key for h in candidates))}
-        missing = [k for k in spaced if spaced[k] not in self._key_vecs]
-        # ponytail: one embed batch per fallback arrival, cache per store
-        # instance; persist the cache in the store file if capture gets hot.
-        if missing:
-            try:
-                vecs = embedder.embed([spaced[k] for k in missing])
-            except Exception as e:
-                logger.debug("episodic snap: embedding skipped (%s)", e)
-                return None
-            for k, v in zip(missing, vecs):
-                self._key_vecs[spaced[k]] = list(v)
-        kv = self._key_vecs[spaced[key]]
-        best, best_cos = None, 0.0
-        for h in candidates:
-            c = _cosine(kv, self._key_vecs[spaced[h.key]])
-            if c > best_cos:
-                best, best_cos = h, c
-        if best_cos < tau:
-            return None
-        if SNAP_PROBE is not None:
-            SNAP_PROBE({"key": key, "head_key": best.key,
-                        "cos": round(best_cos, 4), "tau": tau})
-        return best
 
     # ------------------------------------------------------------------
     # TTL sweep
@@ -678,7 +620,8 @@ class EpisodicStore:
     def chain(self, head: Fact) -> list[Fact]:
         """The supersede chain from `head` back to its oldest ancestor."""
         by_id = {f.id: f for f in self.facts}
-        out, cur = [], head
+        out: list[Fact] = []
+        cur: Fact | None = head
         while cur is not None:
             out.append(cur)
             cur = by_id.get(cur.supersedes) if cur.supersedes else None
@@ -798,17 +741,16 @@ def capture_from_distill(result: dict, *, run_id: str, seen: str,
             schema = load_manifest(episodic_home()).conventions.episodic_keys
         except Exception:
             pass
-        snap_tau = supersede_tau = 0.0
+        supersede_tau = 0.0
         try:
             from silica.config import CONFIG
 
-            snap_tau = float(getattr(CONFIG, "episodic_embed_snap_tau", 0.0))
             supersede_tau = float(getattr(CONFIG, "episodic_supersede_tau", 0.0))
         except Exception:
             pass
         EpisodicStore().capture(ephemerals, run_id=run_id, seen=seen,
                                 embedder=embedder, schema=schema,
-                                snap_tau=snap_tau, supersede_tau=supersede_tau,
+                                supersede_tau=supersede_tau,
                                 vault=vault, notes=notes)
     except Exception as e:
         logger.warning("episodic capture failed (ingest continues): %s", e)

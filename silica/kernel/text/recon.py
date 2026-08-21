@@ -29,6 +29,18 @@ _LEADING_ARTICLE = re.compile(
 )
 
 
+# Tail twin of _LEADING_ARTICLE: function words that can never END a concept
+# name. Closed class on purpose — see _dangles for why the overlay's stopword
+# set is the wrong instrument here.
+_TRAILING_FUNCTION_WORDS = frozenset("""
+il lo la i gli le un uno una del dello della dei degli delle al allo alla ai
+agli alle nel nello nella nei negli nelle dal dallo dalla dai dagli dalle sul
+sullo sulla sui sugli sulle di a da in con su per tra fra e o ed od ma che chi
+cui come se non piu ogni quindi cioe ovvero oppure mentre perche quando dove
+the an of on at to for with and or but as by from that which into over under
+""".split())
+
+
 def normalize(s: str) -> str:
     s = LEADING_GARBAGE.sub('', s)
     s = _LEADING_ARTICLE.sub('', s)
@@ -52,6 +64,8 @@ def is_concept(s: str, overlay: DomainOverlay | None = None) -> bool:
         return False
     if _stutters(s):
         return False
+    if _dangles(s):
+        return False
     return not any(p.search(s) for p in overlay.noise_patterns)
 
 
@@ -71,6 +85,37 @@ def _stutters(s: str) -> bool:
 
 
 # Math stripping migrated to the kernel/text seam (C1): see text.strip_math.
+
+
+def _dangles(s: str) -> bool:
+    """True when the phrase ENDS on a function word — a clause, not a name.
+
+    `normalize` already strips a LEADING article, because YAKE and markup both
+    drag them in. The tail needed the same rule and never had it, so a lecture
+    slide headed `## Da notare che` became a note called `Da notare che`, and
+    YAKE n-grams cut mid-sentence (`intera presentazione del`, `Hidden Layer
+    Nel`) survived beside real concepts. A concept name never ends on a
+    conjunction, preposition or article — `Chain rules per le derivate`,
+    `Algoritmi di apprendimento` and `Kernel trick` all end on content words.
+
+    Closed class, hand-written, like `_LEADING_ARTICLE` — NOT `overlay.stopwords`.
+    The overlay carries domain noise ("cfu") and generic nouns ("analysis"), and
+    testing the tail against it deleted `Fisher discriminant analysis` and
+    `Machine Learning (9 CFU)`. The all-caps guard is the other half: Italian
+    "ai" is a preposition and "AI" is the field, and only case tells them apart
+    — without it `Paradigmi di AI` and `Storia dell'AI` died too.
+
+    ponytail: reject, don't strip. `Hidden Layer Nel` -> `Hidden Layer` would
+    recover one good name, but `Da notare che` -> `Da notare` recovers nothing
+    and the tail-stripped form is a new string to dedup against.
+    """
+    tokens = re.findall(r"[\w'’]+", s)
+    if len(tokens) < 2:
+        return False
+    last = tokens[-1]
+    if last.isupper():  # acronym, not a preposition: "Paradigmi di AI"
+        return False
+    return last.lower() in _TRAILING_FUNCTION_WORDS
 
 
 def is_title_match(c: str, stem: str) -> bool:

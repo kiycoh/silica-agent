@@ -35,8 +35,6 @@ def fs_vault(tmp_path, monkeypatch):
     (vault_dir / "Hubs").mkdir(parents=True)
     (vault_dir / "Hubs" / "AI.md").write_text("# AI\n", encoding="utf-8")
 
-    monkeypatch.setenv("SILICA_BACKEND", "fs")
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
 

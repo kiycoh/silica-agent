@@ -16,6 +16,11 @@ index) so callers can safely skip the section.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from silica.kernel.recall.cooccurrence import CooccurStore
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -99,9 +104,8 @@ def build_substrate(
         if exclude:
             exclude_lower.update(s.lower() for s in exclude)
 
-        cooccur_store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        if len(cooccur_store) == 0:
-            cooccur_store = None
+        loaded = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
+        cooccur_store: CooccurStore | None = loaded if len(loaded) else None
 
         from silica.kernel.recall.memory_lane import memory_stores
 

@@ -24,7 +24,7 @@ from silica.agent.providers import (
     has_local_rerank,
     model_limits,
 )
-from silica.config import SilicaConfig
+from silica.config import USER_ENV, SilicaConfig
 from silica.kernel.code import gitstate
 from silica.kernel.scrub import scrub_credentials
 
@@ -62,6 +62,65 @@ class CheckResult:
 # state it must say so softly, not imply the thing is live. Folding the two
 # together is how a run reported "rerank ready" and marked rerank unreachable in
 # the same session. It is not a failure either — nothing is known to be broken.
+
+
+def ignored_env_path() -> Path | None:
+    """A `.env` in the working directory, or above it — a file silica does not read.
+
+    config.py layers ~/.silica/.env and nothing else, deliberately: a .env found
+    by walking up from the cwd belongs to whatever repository the shell happens
+    to sit in. But a config file that is inert *in silence* is that same defect
+    seen from the other side, and dropping the layer left one on every machine
+    that kept a project .env. So the doctor goes looking for exactly the file
+    config.py refuses to load.
+
+    None when there is nothing to report, the user's own file included:
+    find_dotenv returns it when the doctor runs from inside ~/.silica.
+    """
+    from dotenv import find_dotenv
+
+    found = find_dotenv(usecwd=True)
+    if not found:
+        return None
+    path = Path(found)
+    return None if path == USER_ENV else path
+
+
+# How many key names the row spells out before it stops counting.
+_STRANDED_SHOWN = 6
+
+
+def check_ignored_env(config: SilicaConfig) -> CheckResult:
+    """Name the settings that a .env silica does not read would have applied.
+
+    Key names only. The values in an unread file are exactly as untrusted as the
+    file is, and one of them is routinely an API key.
+
+    A file whose keys are all live with the same value already is reported `ok`:
+    it is redundant, not lost, and warning there would cry wolf in every checkout
+    that keeps a copy of the same config.
+    """
+    from dotenv import dotenv_values
+
+    path = ignored_env_path()
+    if path is None:
+        return CheckResult("stray .env", "ok", "none above the working directory")
+    stranded = sorted(
+        k for k, v in dotenv_values(path).items()
+        if k and v is not None and os.getenv(k) != v
+    )
+    if not stranded:
+        return CheckResult(
+            "stray .env", "ok", f"{path} is not read, but sets nothing new")
+    shown = ", ".join(stranded[:_STRANDED_SHOWN])
+    if len(stranded) > _STRANDED_SHOWN:
+        shown += f", +{len(stranded) - _STRANDED_SHOWN} more"
+    return CheckResult(
+        "stray .env", "warn",
+        f"{path} is not read — {len(stranded)} setting(s) inactive: {shown}",
+        "silica reads only ~/.silica/.env — move them there, or export them for "
+        "this directory: set -a; source .env; set +a",
+    )
 
 
 def check_chat_model(config: SilicaConfig) -> CheckResult:
@@ -495,6 +554,29 @@ def check_manifest(config: SilicaConfig) -> CheckResult:
     return CheckResult("vault manifest", "ok", detail)
 
 
+def check_memory_lane(config: SilicaConfig) -> CheckResult:
+    """The second recall lane (ADR-0019), and the seam it opens when it diverges.
+
+    Recall fuses the memory vault's legs; every path-taking tool (search,
+    exists, read_note) resolves inside the ACTIVE vault only. When the two are
+    different trees a note can be served by recall and denied by exists in the
+    same session — read as "the note is missing" by anyone who does not know a
+    second vault is in play. Legitimate configuration, so it warns rather than
+    fails, but it must have a surface: doctor named one vault and stopped.
+    """
+    from silica.kernel.recall.memory_lane import memory_vault
+
+    mem = memory_vault()  # None ⇒ absent, or same tree as the active vault
+    if mem is None:
+        return CheckResult("memory lane", "ok", "off — single vault")
+    return CheckResult(
+        "memory lane", "warn",
+        f"recall also answers from {mem}",
+        "search/exists/read_note resolve in the active vault only, so recall "
+        "may name notes they deny; unset SILICA_MEMORY_VAULT to use one vault",
+    )
+
+
 def check_quarantine(config: SilicaConfig) -> CheckResult:
     """Corrupt state files quarantined as *.corrupt.* — preserved, not lost."""
     from silica.kernel.recall.paths import index_dir_for
@@ -699,11 +781,16 @@ def _guarded(name: str, check: Callable[[SilicaConfig], CheckResult],
 
 def run_checks(config: SilicaConfig) -> list[CheckResult]:
     checks: list[tuple[str, Callable[[SilicaConfig], CheckResult]]] = [
+        # Listed only when there is one to list: a row reading "no stray .env"
+        # on every run is noise, and this is the row that explains why any of
+        # the rows below it might be reporting the wrong thing.
+        *([("stray .env", check_ignored_env)] if ignored_env_path() else []),
         ("chat model", check_chat_model),
         ("chat endpoint", check_chat_endpoint),
         # Ollama-only: the silent-truncation trap is specific to it.
         *([("ollama context", check_ollama_context)] if config.provider == "ollama" else []),
         ("vault", check_vault),
+        ("memory lane", check_memory_lane),
         ("vault manifest", check_manifest),
         ("language", check_language),
         ("embeddings", check_embeddings),

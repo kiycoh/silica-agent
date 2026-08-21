@@ -162,9 +162,14 @@ class TestRunDistillerSalvage:
 class TestRunDistillerDynamicBudget:
     @patch("silica.agent.providers.model_limits", return_value=(0, 0))
     @patch("silica.agent.providers.get_provider")
-    def test_passes_headroom_above_old_ceiling(self, mock_get_provider, _limits, monkeypatch):
+    def test_default_ask_bounded_by_max_tokens(self, mock_get_provider, _limits, monkeypatch):
+        # 2026-08-21: the "use all headroom" default is refuted — the June
+        # truncation story was hub_desc's raw slice, not the output budget
+        # (run 262e6847: 0 salvage at a 250k ask). The default ask aligns
+        # with the audited MAX_TOKENS; DISTILLER_MAX_TOKENS overrides.
         monkeypatch.setenv("MODEL_CONTEXT_WINDOW", "262144")
         monkeypatch.delenv("DISTILLER_MAX_TOKENS", raising=False)
+        monkeypatch.delenv("MAX_TOKENS", raising=False)
         mock_provider = MagicMock()
         mock_get_provider.return_value = mock_provider
         mock_provider.call_llm.return_value = LLMResponse(
@@ -174,9 +179,7 @@ class TestRunDistillerDynamicBudget:
         run_distiller(payload={"schema_version": 1, "batches": []}, target="t")
 
         sent = mock_provider.call_llm.call_args.kwargs["max_tokens"]
-        # No longer artificially pinned at the old 32768; uses real headroom.
-        assert sent > 32768
-        assert sent <= 262144
+        assert sent == 32768
 
     @patch("silica.agent.providers.model_limits", return_value=(100_000, 8_000))
     @patch("silica.agent.providers.get_provider")
@@ -201,6 +204,7 @@ class TestRunDistillerDynamicBudget:
     def test_provider_unknown_falls_back_to_default_window(self, mock_get_provider, _limits, monkeypatch):
         monkeypatch.delenv("MODEL_CONTEXT_WINDOW", raising=False)
         monkeypatch.delenv("DISTILLER_MAX_TOKENS", raising=False)
+        monkeypatch.delenv("MAX_TOKENS", raising=False)
         mock_provider = MagicMock()
         mock_get_provider.return_value = mock_provider
         mock_provider.call_llm.return_value = LLMResponse(
@@ -210,8 +214,8 @@ class TestRunDistillerDynamicBudget:
         run_distiller(payload={"schema_version": 1, "batches": []}, target="t")
 
         sent = mock_provider.call_llm.call_args.kwargs["max_tokens"]
-        assert sent > 32768
-        assert sent <= 262144
+        # Unknown provider: default window fallback, ask still MAX_TOKENS-bound.
+        assert sent == 32768
 
     @patch("silica.agent.providers.model_limits", return_value=(999_999, 999_999))
     @patch("silica.agent.providers.get_provider")

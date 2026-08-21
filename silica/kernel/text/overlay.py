@@ -185,7 +185,7 @@ def load_overlay(path: Path) -> DomainOverlay:
 
 _OVERLAY_REL = "overlay.yaml"
 _LEGACY_OVERLAY_REL = "_silica/overlay.yaml"
-_BUNDLED_OVERLAYS = Path(__file__).resolve().parents[2] / "overlays"  # ponytail: fs path, swap to importlib.resources only if shipped as a zip
+_BUNDLED_OVERLAYS = Path(__file__).resolve().parents[2] / "overlays"  # fs path; wheels keep it valid (importlib.resources only if ever zipped)
 _cached_overlay: DomainOverlay | None = None
 _lang_overlay_cache: dict[str, DomainOverlay] = {}
 

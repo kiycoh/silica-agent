@@ -271,7 +271,11 @@ def validate_operations(
         if op.path:
             folder, filename = os.path.split(op.path)
             name, ext = os.path.splitext(filename)
-            sanitized = slugify(name) + ext
+            # lstrip("."): a leading dot hides the note from every vault walker
+            # (the calendar scan, the timeline and ignore_matcher all skip a
+            # dot-prefixed part), so a model-supplied ".secret.md" would be
+            # written, reported as a success, and never read back again.
+            sanitized = (slugify(name).lstrip(".") or "note") + ext
             if sanitized != filename:
                 new_path = (os.path.join(folder, sanitized) if folder else sanitized).replace("\\", "/")
                 logger.debug("validate: sanitized path '%s' → '%s'", op.path, new_path)
@@ -750,7 +754,22 @@ def validate_operations(
             if not path:
                 rejected_ops.append(Rejection(op=op, reason="Missing 'path' field for patch operation"))
                 continue
-                
+
+            # Safe mode: the model reads TARGET in mirror space and hands the
+            # collision back mirror-prefixed. Undo the prefix so every check
+            # below judges the note actually enriched, symmetric with the rebase
+            # that re-applies it at the bottom of this branch. Only an exact
+            # mirror image of the path the payload named is repaired — a patch
+            # aimed at a different note stays a rejection.
+            if mirror_patch and write_root and within(path, write_root):
+                expected = expected_collision_paths.get((source_basename, heading))
+                unmirrored = path.replace("\\", "/").strip("/")[len(write_root) + 1:]
+                if expected and unmirrored == expected.replace("\\", "/").strip("/"):
+                    logger.debug("validate: mirror patch un-rebase '%s' → '%s'",
+                                 path, unmirrored)
+                    _repaired("mirror_patch_unrebase")
+                    op.path = path = unmirrored
+
             path_abs = os.path.abspath(path)
             if has_payloads:
                 expected_path = expected_collision_paths.get((source_basename, heading))
@@ -780,9 +799,9 @@ def validate_operations(
             # enriches. Only the landing moves: under safe mode the append goes
             # to the mirror copy (`_execute_patch` seeds it from the original),
             # so the vault note itself is untouched until the user pastes.
-            if mirror_patch and not within(op.path, write_root):
-                rebased = write_root + "/" + op.path.replace("\\", "/").strip("/")
-                logger.debug("validate: mirror patch rebase '%s' → '%s'", op.path, rebased)
+            if mirror_patch and not within(path, write_root):
+                rebased = write_root + "/" + path.replace("\\", "/").strip("/")
+                logger.debug("validate: mirror patch rebase '%s' → '%s'", path, rebased)
                 _repaired("mirror_patch_rebase")
                 op.path = rebased
             validated_ops.append(op)
@@ -806,9 +825,9 @@ def validate_operations(
             # decides — never a hard block, never a silent fourth duplicate.
             from silica.kernel.text.title import near_titles
             stem = os.path.splitext(os.path.basename(path))[0]
-            near = near_titles(stem, _target_dir_title_list())
-            if near:
-                cand_title, ratio = near[0]
+            near_hits = near_titles(stem, _target_dir_title_list())
+            if near_hits:
+                cand_title, ratio = near_hits[0]
                 cand_path = next(
                     (p for (t, p) in _target_dir_titles().values() if t == cand_title), ""
                 )

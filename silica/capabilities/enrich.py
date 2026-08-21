@@ -17,8 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 def run_enrich(item: WorkItem, config: Any) -> dict[str, Any]:
-    target_path = item.target_path
-    hub = item.context.get("hub") or os.path.splitext(os.path.basename(target_path))[0]
+    # The hub reaches refiner_bounds as a FORBIDDEN path, and allows_path expands
+    # a bare entry against the incoming path's basename — so defaulting it to the
+    # target's own title made every note forbid itself and the enriching
+    # overwrite was always dropped as out of bounds. No declared hub => None,
+    # exactly as run_refine does.
+    hub = item.context.get("hub") or None
     return run_note_rewrite(
         item, config,
         reason="semantic enrichment",
@@ -28,20 +32,34 @@ def run_enrich(item: WorkItem, config: Any) -> dict[str, Any]:
     )
 
 
-def _enrich_note(config: Any, target_path: str, original: str, hub: str) -> NoteContent:
+def _enrich_note(config: Any, target_path: str, original: str, hub: str | None) -> NoteContent:
     from silica.agent.providers import get_provider
     from silica.kernel.context_builder import build_context
+
+    rules = [
+        "1. Produce a rigorous, complete, and exhaustive academic text.",
+        "2. Preserve all factual information and concepts already present in the note (anti-deletion policy). Do not remove pre-existing information, but expand upon it.",
+        "3. Perform structuring in Obsidian Flavored Markdown: use callouts (> [!tip], > [!note]), LaTeX equation blocks ($$ ... $$) if appropriate, lists, and bold text.",
+    ]
+    # Only a real parent earns the wikilink rule: with no declared hub the note
+    # would be told to link to itself.
+    if hub:
+        rules.append(
+            f"{len(rules) + 1}. You must include a wikilink [[{hub}]] to the hub/parent note"
+            " (for example in a final section called '# Relations' or '# Connections')."
+        )
+    rules.append(
+        f"{len(rules) + 1}. Return the result structured in JSON format containing a single key"
+        " 'content' with the full body of the note (including normalized and updated YAML"
+        " frontmatter tags, and the enriched body)."
+    )
 
     system_prompt = (
         "You are an academic assistant expert in writing and structuring notes in Obsidian Flavored Markdown (OFM) in English.\n"
         "Your task is to enrich the note specified by the target.\n"
         "Fundamental rules:\n"
-        "1. Produce a rigorous, complete, and exhaustive academic text in English.\n"
-        "2. Preserve all factual information and concepts already present in the note (anti-deletion policy). Do not remove pre-existing information, but expand upon it.\n"
-        "3. Perform structuring in Obsidian Flavored Markdown: use callouts (> [!tip], > [!note]), LaTeX equation blocks ($$ ... $$) if appropriate, lists, and bold text.\n"
-        f"4. You must include a wikilink [[{hub}]] to the hub/parent note (for example in a final section called '# Relations' or '# Connections').\n"
-        "5. Return the result structured in JSON format containing a single key 'content' with the full body of the note (including normalized and updated YAML frontmatter tags, and the enriched body)."
-        "\n\n" + load_prompt("_anti_slop.txt")
+        + "\n".join(rules)
+        + "\n\n" + load_prompt("_anti_slop.txt")
     )
 
     title = os.path.splitext(os.path.basename(target_path))[0]

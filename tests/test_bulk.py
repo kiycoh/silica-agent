@@ -28,8 +28,6 @@ def vault(tmp_path, monkeypatch):
     (vault_dir / "Hubs" / "AI.md").write_text("# AI\n", encoding="utf-8")
 
     # Point the global DRIVER at this fs vault (same pattern as test_fsm.fs_vault).
-    monkeypatch.setenv("SILICA_BACKEND", "fs")
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
 

@@ -3,11 +3,11 @@
 
 """Obsidian Driver package — exposes the global DRIVER instance.
 
-The backend is selected at import time based on CONFIG.backend (from config.py),
-which reads the SILICA_BACKEND environment variable:
-  - "fs" (default): ObsidianFSBackend — direct filesystem access, headless, no Obsidian required
-  - "ws": ObsidianWSBackend — installed live by `silica connect` when the Obsidian
-    plugin dials in (never built from config)
+Two backends, one of which is never built from config:
+  - ObsidianFSBackend — direct filesystem access, headless, no Obsidian
+    required. Built here, always.
+  - ObsidianWSBackend — installed live by `silica connect` via set_driver()
+    when the Obsidian plugin dials in.
 
 Usage:
     from silica.driver import DRIVER
@@ -33,25 +33,11 @@ logger = logging.getLogger(__name__)
 
 
 def _create_driver() -> ObsidianDriver:
-    """Create the appropriate driver backend based on config."""
+    """Build the filesystem backend against the configured vault."""
     from silica.config import CONFIG
+    from silica.driver.fs_backend import ObsidianFSBackend
 
-    if CONFIG.backend == "fs":
-        from silica.driver.fs_backend import ObsidianFSBackend
-
-        return ObsidianFSBackend(vault_path=CONFIG.vault_path)
-    elif CONFIG.backend == "ws":
-        raise ValueError(
-            "backend='ws' is installed by `silica connect` when the plugin dials in; "
-            "run `silica connect`, or leave SILICA_BACKEND=fs"
-        )
-    else:
-        raise ValueError(
-            f"Unknown backend: {CONFIG.backend!r}"
-            + (" (the cli backend was removed — set SILICA_BACKEND=fs; "
-               "`silica connect` provides the live-Obsidian ws backend)"
-               if CONFIG.backend == "cli" else "")
-        )
+    return ObsidianFSBackend(vault_path=CONFIG.vault_path)
 
 
 # Lazy initialization — created on first access, protected by lock for thread safety
@@ -70,10 +56,18 @@ def get_driver() -> ObsidianDriver:
     return _driver
 
 
+def driver_kind() -> str:
+    """"ws" while `silica connect` has a plugin attached, else "fs".
+
+    Reads the cached instance rather than CONFIG so it reports what is actually
+    serving reads, and never forces driver construction just to answer.
+    """
+    return "ws" if type(_driver).__name__ == "ObsidianWSBackend" else "fs"
+
+
 def reset_driver() -> None:
     """Drop the cached driver so the next get_driver() rebuilds against the
-    current CONFIG.vault_path / CONFIG.backend. Used by the runtime /vault
-    switch."""
+    current CONFIG.vault_path. Used by the runtime /vault switch."""
     global _driver
     with _driver_lock:
         _driver = None
@@ -81,7 +75,7 @@ def reset_driver() -> None:
 
 def set_driver(driver: ObsidianDriver | None) -> None:
     """Install a live driver instance — `silica connect`'s attached ws backend.
-    None falls back to building from CONFIG.backend on next access."""
+    None falls back to building the fs backend on next access."""
     global _driver
     with _driver_lock:
         _driver = driver

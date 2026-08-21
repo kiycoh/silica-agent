@@ -44,7 +44,8 @@ from silica.kernel.recall.paths import atomic_write_bytes
 # source by get_deferred_store(), never written to again.
 _LEGACY_DEFERRED_DIR = Path.home() / ".silica" / "deferred"
 
-# ponytail: fixed 30-day TTL, make it a vault.yaml knob if per-vault retention matters
+# Fixed 30-day TTL (vault.yaml knob declined 2026-08-19; revisit only if
+# per-vault retention ever matters).
 _DEFERRED_TTL_SECONDS = 30 * 24 * 3600
 
 

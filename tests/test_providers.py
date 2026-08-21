@@ -8,7 +8,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pydantic import BaseModel
 
-from silica.agent.providers import get_provider, OpenAICompatibleProvider
+from silica.agent.providers import get_provider, Provider
+from silica.config import PROVIDER_PREFIXES
 from silica.agent.llm import LLMResponse
 
 
@@ -25,18 +26,18 @@ class SchemaModel(BaseModel):
 
 class TestProviders(unittest.TestCase):
     def test_get_provider_presets(self):
-        # Test default preset (lmstudio)
+        # The model keeps (or regains) its provider prefix: litellm resolves the
+        # endpoint from it, so a bare id would route nowhere.
         config_lm = DummyConfig("lmstudio", "my-model")
         provider_lm = get_provider(config_lm)
-        self.assertIsInstance(provider_lm, OpenAICompatibleProvider)
-        self.assertEqual(provider_lm.model, "my-model")
+        self.assertIsInstance(provider_lm, Provider)
+        self.assertEqual(provider_lm.model, "lmstudio/my-model")
 
-        # Test openrouter preset
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "test-key"}):
             config_or = DummyConfig("openrouter", "or-model")
             provider_or = get_provider(config_or)
-            self.assertIsInstance(provider_or, OpenAICompatibleProvider)
-            self.assertEqual(provider_or.model, "or-model")
+            self.assertIsInstance(provider_or, Provider)
+            self.assertEqual(provider_or.model, "openrouter/or-model")
 
     def test_get_provider_custom_uses_config_endpoint(self):
         class CustomConfig:
@@ -46,10 +47,37 @@ class TestProviders(unittest.TestCase):
             provider_api_key = "sk-local"
 
         provider = get_provider(CustomConfig())
-        self.assertIsInstance(provider, OpenAICompatibleProvider)
-        self.assertEqual(provider.model, "my-model")  # custom/ prefix stripped
-        self.assertIn("localhost:8000", str(provider.client.base_url))
-        self.assertEqual(provider.client.api_key, "sk-local")
+        self.assertIsInstance(provider, Provider)
+        # `custom/` is the prefix llm.call_llm turns into openai/ + api_base
+        # from provider_base_url, so it must survive.
+        self.assertEqual(provider.model, "custom/my-model")
+        self.assertIn("localhost:8000", provider.base_url)
+
+    def test_get_provider_leaves_unknown_prefix_off(self):
+        """A provider outside PROVIDER_PREFIXES must not be prefixed onto the model.
+
+        config._ensure_prefix guards on that set on purpose: litellm resolves an
+        endpoint only from a prefix it knows, so pinning e.g. `vllm/` in front of
+        the id turns a bare model into a BadRequestError. get_provider re-derives
+        the same prefix and must apply the same guard.
+        """
+        class UnknownWorkerConfig:
+            provider = "lmstudio"
+            model = "lmstudio/qwen3-8b"
+            worker_provider = "vllm"          # not in PROVIDER_PREFIXES
+            worker_model = "qwen3-4b"         # so config leaves it bare
+            worker_api_key = None
+            provider_base_url = "http://box:8000/v1"
+            provider_api_key = "k"
+
+        self.assertNotIn("vllm", PROVIDER_PREFIXES)
+        provider = get_provider(UnknownWorkerConfig(), role="worker")
+        self.assertEqual(provider.model, "qwen3-4b")
+
+    def test_get_provider_empty_model_stays_empty(self):
+        """No model configured is not a model named after its provider."""
+        provider = get_provider(DummyConfig("lmstudio", ""))
+        self.assertEqual(provider.model, "")
 
     def test_get_provider_worker(self):
         class DummyWorkerConfig:
@@ -64,130 +92,102 @@ class TestProviders(unittest.TestCase):
         config_fallback = DummyWorkerConfig("openrouter", "or-model")
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "or-key"}):
             provider = get_provider(config_fallback, role="worker")
-            self.assertEqual(provider.model, "or-model")
-            self.assertIn("openrouter.ai", str(provider.client.base_url))
+            self.assertEqual(provider.model, "openrouter/or-model")
+            self.assertIn("openrouter.ai", provider.base_url)
+            # No override: litellm resolves OPENROUTER_API_KEY itself.
+            self.assertEqual(provider.api_key, "")
 
         # 2. Worker explicit preset (openrouter) without overrides
         config_worker_or = DummyWorkerConfig("lmstudio", "lm-model", worker_provider="openrouter", worker_model="worker-or-model")
         with patch.dict("os.environ", {"OPENROUTER_API_KEY": "worker-or-key"}):
             provider = get_provider(config_worker_or, role="worker")
-            self.assertEqual(provider.model, "worker-or-model")
-            self.assertIn("openrouter.ai", str(provider.client.base_url))
+            self.assertEqual(provider.model, "openrouter/worker-or-model")
+            self.assertIn("openrouter.ai", provider.base_url)
 
-        # 3. Worker explicit api-key override (endpoint always from the preset)
+        # 3. Worker explicit api-key override — the one case that must reach the
+        # wire as an explicit credential, since litellm cannot know about it.
         config_worker_override = DummyWorkerConfig(
             "lmstudio", "lm-model",
             worker_provider="openrouter", worker_model="worker-or-model",
             worker_api_key="custom-key"
         )
         provider = get_provider(config_worker_override, role="worker")
-        self.assertEqual(provider.model, "worker-or-model")
-        self.assertIn("openrouter.ai", str(provider.client.base_url))
-        self.assertEqual(provider.client.api_key, "custom-key")
+        self.assertEqual(provider.model, "openrouter/worker-or-model")
+        self.assertIn("openrouter.ai", provider.base_url)
+        self.assertEqual(provider.api_key, "custom-key")
 
 
-    @patch("openai.OpenAI")
-    def test_call_llm_structured_success(self, mock_openai_cls):
-        # Setup mock client
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+    def test_provider_forwards_every_argument_to_the_llm_layer(self):
+        """The whole class is a delegation now: anything it drops is a feature
+        the distiller/worker lane silently loses."""
+        from silica.agent import llm as llm_mod
+        from silica.agent.providers import Provider
 
-        # Mock beta.chat.completions.parse
-        mock_parsed_response = MagicMock()
-        mock_choice = MagicMock()
-        mock_message = MagicMock()
-        mock_parsed_obj = SchemaModel(key="test", value=123)
-        
-        mock_message.content = '{"key": "test", "value": 123}'
-        mock_message.parsed = mock_parsed_obj
-        mock_message.tool_calls = None
-        mock_choice.message = mock_message
-        mock_parsed_response.choices = [mock_choice]
-        mock_parsed_response.usage = {"prompt_tokens": 10}
-        
-        mock_client.beta.chat.completions.parse.return_value = mock_parsed_response
+        captured: dict = {}
 
-        # Execute
-        provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="test-model")
-        response = provider.call_llm(
-            messages=[{"role": "user", "content": "hi"}],
-            response_schema=SchemaModel
-        )
+        def fake_call_llm(**kw):
+            captured.update(kw)
+            return LLMResponse(text="ok", tool_calls=[],
+                               assistant_message={"role": "assistant"},
+                               usage={"prompt_tokens": 7})
 
-        # Assertions
-        mock_client.beta.chat.completions.parse.assert_called_once()
-        self.assertIsInstance(response, LLMResponse)
-        self.assertEqual(response.text, '{"key": "test", "value": 123}')
+        with patch.object(llm_mod, "call_llm", fake_call_llm):
+            provider = Provider(base_url="http://dummy", api_key="KEY",
+                                model="openrouter/vendor/m")
+            resp = provider.call_llm(
+                messages=[{"role": "user", "content": "hi"}],
+                tools=[{"type": "function"}],
+                response_schema=SchemaModel,
+                max_tokens=512,
+                openrouter_provider="together",
+            )
 
-    @patch("openai.OpenAI")
-    def test_call_llm_structured_fallback(self, mock_openai_cls):
-        # Setup mock client
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        self.assertEqual(captured["model"], "openrouter/vendor/m")
+        self.assertEqual(captured["messages"], [{"role": "user", "content": "hi"}])
+        self.assertEqual(captured["tools"], [{"type": "function"}])
+        self.assertEqual(captured["max_tokens"], 512)
+        self.assertIs(captured["response_format"], SchemaModel)
+        self.assertEqual(captured["openrouter_provider"], "together")
+        self.assertEqual(captured["api_key"], "KEY")
+        # Structured decoding stays greedy — sampling buys variety nobody wants
+        # in an extraction.
+        self.assertEqual(captured["temperature"], 0.0)
+        self.assertEqual(resp.text, "ok")
+        self.assertEqual(resp.usage, {"prompt_tokens": 7})
 
-        # beta.chat.completions.parse raises an exception (not supported, e.g., older server)
-        mock_client.beta.chat.completions.parse.side_effect = Exception("Not supported")
+    def test_provider_sends_no_api_key_when_it_has_none(self):
+        """An empty key must arrive as None, not "": litellm treats the empty
+        string as an explicit credential and stops resolving the env var."""
+        from silica.agent import llm as llm_mod
+        from silica.agent.providers import Provider
 
-        # Non-structured fallback path now streams.
-        mock_delta = MagicMock()
-        mock_delta.content = '{"key": "fallback", "value": 456}'
-        mock_delta.tool_calls = None
-        mock_chunk_choice = MagicMock()
-        mock_chunk_choice.finish_reason = "stop"
-        mock_chunk_choice.delta = mock_delta
-        mock_chunk = MagicMock()
-        mock_chunk.choices = [mock_chunk_choice]
+        captured: dict = {}
 
-        mock_client.chat.completions.create.return_value = [mock_chunk]
+        def fake_call_llm(**kw):
+            captured.update(kw)
+            return LLMResponse(text="", tool_calls=[],
+                               assistant_message={"role": "assistant"}, usage={})
 
-        # Execute
-        provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="test-model")
-        response = provider.call_llm(
-            messages=[{"role": "user", "content": "hi"}],
-            response_schema=SchemaModel
-        )
+        with patch.object(llm_mod, "call_llm", fake_call_llm):
+            Provider(base_url="http://dummy", api_key="", model="lmstudio/m").call_llm(
+                messages=[{"role": "user", "content": "hi"}])
+        self.assertIsNone(captured["api_key"])
 
-        # Assertions
-        mock_client.beta.chat.completions.parse.assert_called_once()
-        mock_client.chat.completions.create.assert_called_once()
-        self.assertIsInstance(response, LLMResponse)
-        self.assertEqual(response.text, '{"key": "fallback", "value": 456}')
+    def test_unstructured_call_sends_no_temperature(self):
+        from silica.agent import llm as llm_mod
+        from silica.agent.providers import Provider
 
-    @patch("openai.OpenAI")
-    @patch("time.sleep", return_value=None)
-    def test_call_llm_retries_on_timeout(self, mock_sleep, mock_openai_cls):
-        import openai
-        # Setup mock client
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        captured: dict = {}
 
-        # First two calls raise APITimeoutError, third call succeeds.
-        # Non-structured path now streams: successful response is an iterable of chunks.
-        mock_delta = MagicMock()
-        mock_delta.content = "Success after retries"
-        mock_delta.tool_calls = None
-        mock_chunk_choice = MagicMock()
-        mock_chunk_choice.finish_reason = "stop"
-        mock_chunk_choice.delta = mock_delta
-        mock_chunk = MagicMock()
-        mock_chunk.choices = [mock_chunk_choice]
-        success_stream = [mock_chunk]
+        def fake_call_llm(**kw):
+            captured.update(kw)
+            return LLMResponse(text="", tool_calls=[],
+                               assistant_message={"role": "assistant"}, usage={})
 
-        # Set up side effect to fail twice then succeed
-        mock_client.chat.completions.create.side_effect = [
-            openai.APITimeoutError(request=MagicMock()),
-            openai.APIConnectionError(request=MagicMock(), message="Connection issue"),
-            success_stream,
-        ]
-
-        provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="test-model")
-        response = provider.call_llm(
-            messages=[{"role": "user", "content": "hi"}]
-        )
-
-        self.assertEqual(mock_client.chat.completions.create.call_count, 3)
-        self.assertEqual(response.text, "Success after retries")
-        self.assertEqual(mock_sleep.call_count, 2)
+        with patch.object(llm_mod, "call_llm", fake_call_llm):
+            Provider(base_url="http://d", api_key="", model="lmstudio/m").call_llm(
+                messages=[{"role": "user", "content": "hi"}])
+        self.assertIsNone(captured["temperature"])
 
 
 def test_presets_are_a_subset_of_known_prefixes():
@@ -337,8 +337,10 @@ def test_get_provider_ollama_avoids_the_v1_endpoint(monkeypatch):
     config = SimpleNamespace(provider="ollama", model="ollama/gemma3:4b")
     provider = providers.get_provider(config)
 
-    assert isinstance(provider, providers.OllamaNativeProvider)
-    assert provider.model == "gemma3:4b"
+    assert isinstance(provider, providers.Provider)
+    # The `ollama/` prefix is load-bearing: llm.call_llm rewrites it to
+    # ollama_chat/ + num_ctx. Stripping it would send this to /v1.
+    assert provider.model == "ollama/gemma3:4b"
 
     captured: dict = {}
 
@@ -360,147 +362,6 @@ def test_get_provider_ollama_avoids_the_v1_endpoint(monkeypatch):
     assert captured["temperature"] == 0.0  # extraction stays greedy, not Ollama's 0.8
 
 
-def test_streaming_path_collects_usage():
-    """Non-structured streaming must return real token counts from the final usage chunk."""
-    from unittest.mock import MagicMock, patch
-    from silica.agent.providers import OpenAICompatibleProvider
-
-    # Simulate: first chunk has content, second (final) chunk has usage
-    mock_chunk_content = MagicMock()
-    mock_chunk_content.choices = [MagicMock()]
-    mock_chunk_content.choices[0].delta.content = "hello"
-    mock_chunk_content.choices[0].delta.tool_calls = None
-    mock_chunk_content.choices[0].finish_reason = None
-    mock_chunk_content.usage = None
-
-    mock_chunk_usage = MagicMock()
-    mock_chunk_usage.choices = [MagicMock()]
-    mock_chunk_usage.choices[0].delta.content = None
-    mock_chunk_usage.choices[0].delta.tool_calls = None
-    mock_chunk_usage.choices[0].finish_reason = "stop"
-    mock_chunk_usage.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
-
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = iter([mock_chunk_content, mock_chunk_usage])
-
-    provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
-    provider.client = mock_client
-    provider.model = "test-model"
-    provider.base_url = "http://dummy"
-    provider.timeout = 30
-    provider.max_tokens = 1000
-
-    resp = provider.call_llm([{"role": "user", "content": "hi"}])
-
-    assert resp.text == "hello"
-    assert resp.usage.get("prompt_tokens") == 10, f"Expected 10, got: {resp.usage}"
-    assert resp.usage.get("completion_tokens") == 5
-    assert resp.usage.get("total_tokens") == 15
-    # Confirm stream_options was passed to request usage data
-    call_kwargs = mock_client.chat.completions.create.call_args
-    assert call_kwargs.kwargs.get("stream_options") == {"include_usage": True}, \
-        f"stream_options not passed: {call_kwargs}"
-
-
-def test_streaming_path_usage_empty_when_no_usage_chunk():
-    """When no streaming chunk carries usage, resp.usage must be {} (not raise)."""
-    from unittest.mock import MagicMock
-    from silica.agent.providers import OpenAICompatibleProvider
-
-    mock_chunk = MagicMock()
-    mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = "hi"
-    mock_chunk.choices[0].delta.tool_calls = None
-    mock_chunk.choices[0].finish_reason = "stop"
-    mock_chunk.usage = None  # no usage on any chunk
-
-    mock_client = MagicMock()
-    mock_client.chat.completions.create.return_value = iter([mock_chunk])
-
-    provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
-    provider.client = mock_client
-    provider.model = "test-model"
-    provider.base_url = "http://dummy"
-    provider.timeout = 30
-    provider.max_tokens = 1000
-
-    resp = provider.call_llm([{"role": "user", "content": "hi"}])
-    assert resp.usage == {}, f"Expected empty usage dict, got: {resp.usage}"
-
-
-@patch("openai.OpenAI")
-@patch("time.sleep", return_value=None)
-def test_call_llm_retries_on_rate_limit(mock_sleep, mock_openai_cls):
-    import openai
-    # Setup mock client
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
-
-    # First attempt raises RateLimitError, second attempt succeeds.
-    mock_chunk = MagicMock()
-    mock_chunk.choices = [MagicMock()]
-    mock_chunk.choices[0].delta.content = "Success after rate limit retry"
-    mock_chunk.choices[0].delta.tool_calls = None
-    mock_chunk.choices[0].finish_reason = "stop"
-    mock_chunk.usage = None
-    success_stream = [mock_chunk]
-
-    # Set up side effect to fail once with 429 then succeed
-    mock_client.chat.completions.create.side_effect = [
-        openai.RateLimitError(
-            message="Rate limit hit",
-            response=MagicMock(status_code=429),
-            body={}
-        ),
-        success_stream,
-    ]
-
-    provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="test-model")
-    response = provider.call_llm(
-        messages=[{"role": "user", "content": "hi"}]
-    )
-
-    assert mock_client.chat.completions.create.call_count == 2
-    assert response.text == "Success after rate limit retry"
-    assert mock_sleep.call_count == 1
-
-
-@patch("openai.OpenAI")
-@patch("time.sleep", return_value=None)
-def test_call_llm_structured_rate_limit_propagates_without_fallback(mock_sleep, mock_openai_cls):
-    import openai
-    # Setup mock client
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
-
-    # structured parse raises RateLimitError on all attempts
-    mock_client.beta.chat.completions.parse.side_effect = openai.RateLimitError(
-        message="Rate limit hit in parse",
-        response=MagicMock(status_code=429),
-        body={}
-    )
-
-    provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="test-model")
-    
-    # We expect the RateLimitError to propagate out of call_llm once the 429 retry
-    # budget (_RATE_LIMIT_ATTEMPTS) is exhausted.
-    import pytest
-    from silica.agent.llm import _RATE_LIMIT_ATTEMPTS
-    with pytest.raises(openai.RateLimitError):
-        provider.call_llm(
-            messages=[{"role": "user", "content": "hi"}],
-            response_schema=SchemaModel
-        )
-
-    # Verifies it exhausted the 429 budget and never fell back to chat.completions.create.
-    assert mock_client.beta.chat.completions.parse.call_count == _RATE_LIMIT_ATTEMPTS
-    assert mock_client.chat.completions.create.call_count == 0
-    assert mock_sleep.call_count == _RATE_LIMIT_ATTEMPTS - 1  # backoff between attempts
-
-
-
-# --- Ollama seam: OLLAMA_HOST, streamed usage, structured-decode temperature ---
-
 @pytest.mark.parametrize(
     "env, expected",
     [
@@ -521,71 +382,6 @@ def test_ollama_base_url_honours_ollama_host(env, expected, monkeypatch):
     if env is not None:
         monkeypatch.setenv("OLLAMA_HOST", env)
     assert _ollama_base_url() == expected
-
-
-@patch("silica.agent.providers.openai.OpenAI")
-def test_stream_usage_chunk_with_empty_choices_is_recorded(mock_openai_cls):
-    """The include_usage chunk carries choices: [] — it must not be skipped.
-
-    Regression: the empty-choices `continue` ran before the usage read, so
-    LLMResponse.usage came back {} on every streamed call (verified against a
-    live Ollama, which does send this chunk).
-    """
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
-
-    text_chunk = MagicMock(usage=None)
-    text_chunk.choices = [MagicMock(finish_reason=None, delta=MagicMock(content="hi", tool_calls=None))]
-
-    usage_chunk = MagicMock()
-    usage_chunk.choices = []  # exactly what OpenAI-compatible servers send
-    usage_chunk.usage = MagicMock(
-        prompt_tokens=26, completion_tokens=5, total_tokens=31, prompt_tokens_details=None
-    )
-
-    mock_client.chat.completions.create.return_value = iter([text_chunk, usage_chunk])
-
-    provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="m")
-    resp = provider.call_llm(messages=[{"role": "user", "content": "hi"}])
-
-    assert resp.text == "hi"
-    assert resp.usage == {"prompt_tokens": 26, "completion_tokens": 5, "total_tokens": 31}
-
-
-@patch("silica.agent.providers.openai.OpenAI")
-def test_structured_decode_defaults_to_temperature_zero(mock_openai_cls):
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
-    parsed = MagicMock(
-        content='{"key":"k","value":1}', tool_calls=None, parsed=SchemaModel(key="k", value=1)
-    )
-    mock_client.beta.chat.completions.parse.return_value = MagicMock(
-        choices=[MagicMock(message=parsed, finish_reason="stop")], usage=None
-    )
-
-    provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="m")
-    provider.call_llm(messages=[{"role": "user", "content": "hi"}], response_schema=SchemaModel)
-    assert mock_client.beta.chat.completions.parse.call_args.kwargs["temperature"] == 0.0
-
-    # An explicit temperature still wins over the greedy default.
-    provider.call_llm(
-        messages=[{"role": "user", "content": "hi"}], response_schema=SchemaModel, temperature=0.7
-    )
-    assert mock_client.beta.chat.completions.parse.call_args.kwargs["temperature"] == 0.7
-
-
-@patch("silica.agent.providers.openai.OpenAI")
-def test_unstructured_call_sends_no_temperature_by_default(mock_openai_cls):
-    """The agentic/text path keeps the provider default — only extraction goes greedy."""
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
-    chunk = MagicMock(usage=None)
-    chunk.choices = [MagicMock(finish_reason="stop", delta=MagicMock(content="ok", tool_calls=None))]
-    mock_client.chat.completions.create.return_value = iter([chunk])
-
-    provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="m")
-    provider.call_llm(messages=[{"role": "user", "content": "hi"}])
-    assert "temperature" not in mock_client.chat.completions.create.call_args.kwargs
 
 
 @pytest.fixture

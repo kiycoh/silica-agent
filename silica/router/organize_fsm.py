@@ -222,7 +222,7 @@ class OrganizerFSM(BaseFSM[OrganizerState]):
             self._transition_success()
             return
 
-        ambiguous = [
+        ambiguous: list[tuple[str, str, list]] = [
             (c.note_path, "", [])
             for c in classifications
             if c.evidence not in ("keyword", "llm") and _DEFAULT_TAU_LOW <= c.confidence < _DEFAULT_TAU_HIGH

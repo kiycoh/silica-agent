@@ -25,6 +25,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -41,6 +42,16 @@ from silica.tools import tool
 _MAX_CHARS = 30_000
 _MAX_REDIRECTS = 3
 _HTTP_TIMEOUT = 30
+# _MAX_CHARS bounds what reaches the model; this bounds what reaches memory,
+# which nothing did before: a buffered GET materialises the whole body (and then
+# a whole str) before any ceiling of ours runs, so one hostile or merely enormous
+# URL OOMs the process while `_truncate` waits its turn. ~270x the char ceiling,
+# so no real page meets it.
+_MAX_BODY_BYTES = 8 * 1024 * 1024
+# `timeout` is per socket operation, not a deadline: an endless stream dripping
+# one byte before each timeout window never trips it and never ends, so the body
+# gets its own wall clock.
+_BODY_DEADLINE = 120
 _YT_DOMAINS: tuple[str, ...] = ("youtube.com", "youtu.be")
 # Languages only: `--sub-lang` does not choose between auto-generated and
 # uploaded subs (that is `--write-auto-sub` / `--write-sub`, and we ask for
@@ -413,22 +424,89 @@ def _raise_for_status(resp: httpx.Response, url: str) -> None:
     resp.raise_for_status()
 
 
+def content_type(resp: httpx.Response) -> str:
+    """The bare media type, lowercased, without parameters."""
+    return resp.headers.get("content-type", "").split(";")[0].strip().lower()
+
+
+def _refuse_binary(resp: httpx.Response, url: str) -> None:
+    """Decided on the headers, before a byte of the body is spent: a PDF or a
+    video is refused either way, and refusing it after buffering it is the
+    expensive way to reach the same answer."""
+    ctype = content_type(resp)
+    if ctype and not ctype.startswith(_TEXT_TYPES):
+        raise ValueError(f"refusing to read {ctype} content at {url}")
+
+
+def _decoded_headers(headers: httpx.Headers) -> httpx.Headers:
+    """The response headers minus the ones that describe the wire body.
+
+    `iter_bytes` hands back DECODED bytes, so carrying `Content-Encoding: gzip`
+    onto the rebuilt response makes httpx decompress an already-decompressed
+    body — every gzip site (i.e. most of the web) died on `.text` with
+    "Error -3 while decompressing data: incorrect header check". Content-Length
+    describes the compressed body too, and is equally a lie once decoded.
+    """
+    out = httpx.Headers(headers)
+    for name in ("content-encoding", "content-length"):
+        if name in out:
+            del out[name]
+    return out
+
+
+def _read_capped(resp: httpx.Response, url: str) -> bytes:
+    """Accumulate the body against a size ceiling and a wall clock, aborting on
+    either. Content-Length is not consulted: it is the server's claim, and a
+    chunked response makes none."""
+    chunks: list[bytes] = []
+    total = 0
+    deadline = time.monotonic() + _BODY_DEADLINE
+    for chunk in resp.iter_bytes():
+        total += len(chunk)
+        if total > _MAX_BODY_BYTES:
+            raise ValueError(
+                f"body at {url} passed {_MAX_BODY_BYTES} bytes; refusing to read on"
+            )
+        if time.monotonic() > deadline:
+            raise ValueError(
+                f"body at {url} still arriving after {_BODY_DEADLINE}s; giving up"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _fetch(url: str, headers: dict[str, str] = _HEADERS) -> tuple[httpx.Response, str]:
-    """GET with redirects followed by hand, revalidating every hop.
+    """GET with redirects followed by hand, revalidating every hop, and a body
+    read under a ceiling instead of buffered whole.
 
     Open WebUI validates the first URL and then hands it to a client that
     follows redirects itself, so a perfectly global URL can 302 into link-local
     space. Following them here closes that.
+
+    Streamed, so the two cheap refusals (wrong content type, oversized body)
+    happen while the body is still on the wire. The response handed back carries
+    the bytes we accepted, so callers keep reading `.text` / `.json()`.
     """
     for _ in range(_MAX_REDIRECTS + 1):
         _validated(url)
-        resp = httpx.get(
-            url, follow_redirects=False, timeout=_HTTP_TIMEOUT, headers=headers
-        )
-        if not resp.is_redirect or resp.next_request is None:
+        with httpx.stream(
+            "GET", url, follow_redirects=False, timeout=_HTTP_TIMEOUT, headers=headers
+        ) as resp:
+            if resp.is_redirect and resp.next_request is not None:
+                url = str(resp.next_request.url)
+                continue
             _raise_for_status(resp, url)
-            return resp, url
-        url = str(resp.next_request.url)
+            _refuse_binary(resp, url)
+            body = _read_capped(resp, url)
+            return (
+                httpx.Response(
+                    resp.status_code,
+                    headers=_decoded_headers(resp.headers),
+                    content=body,
+                    request=resp.request,
+                ),
+                url,
+            )
     raise ValueError(f"more than {_MAX_REDIRECTS} redirects, giving up at {url}")
 
 
@@ -539,9 +617,8 @@ def fetch_page(url: str) -> Page:
             extract, title = article
             return Page(_render(url, _truncate(extract)), title)
     resp, final_url = _fetch(url)
-    ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
-    if ctype and not ctype.startswith(_TEXT_TYPES):
-        raise ValueError(f"refusing to read {ctype} content at {final_url}")
+    # the type gate already ran in _fetch, on the headers, before the body
+    ctype = content_type(resp)
     # no charset sniffing, httpx already decoded from the header.
     body = resp.text
     is_html = "html" in ctype or not ctype

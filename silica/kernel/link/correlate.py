@@ -15,7 +15,8 @@ note's row a pure function of that note alone).
 """
 from __future__ import annotations
 
-# ponytail: module constants; promote to CONFIG if a second vault ever needs different
+# Module constants (config promotion declined 2026-08-19; revisit only if a
+# second vault ever needs different values).
 _TOP_K = 30
 _TAU = 0.25
 

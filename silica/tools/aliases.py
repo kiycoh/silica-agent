@@ -74,8 +74,28 @@ def gate_alias_groups(
     return {c: sorted(v) for c, v in out.items()}
 
 
+# Titles per proposal call. Bounds the prompt: a vault beyond the chunk pays
+# more calls, never a longer prompt. One chunk = today's single-call behavior
+# (the rule "never propose a variant that is a title" is enforced by the gate
+# against the FULL title set, so chunking costs no correctness).
+_PROPOSE_CHUNK_TITLES = 2000
+
+
 def _propose_groups(titles: list[str], config: Any) -> dict:
-    """One LLM call over the whole title list → {canonical: [variants]}."""
+    """{canonical: [variants]} over the title list, one LLM call per chunk."""
+    merged: dict = {}
+    for i in range(0, len(titles), _PROPOSE_CHUNK_TITLES):
+        part = _propose_groups_single(titles[i:i + _PROPOSE_CHUNK_TITLES], config)
+        for key, variants in part.items():
+            if isinstance(merged.get(key), list) and isinstance(variants, list):
+                merged[key] += [v for v in variants if v not in merged[key]]
+            else:
+                merged.setdefault(key, variants)
+    return merged
+
+
+def _propose_groups_single(titles: list[str], config: Any) -> dict:
+    """One LLM call over one title chunk → {canonical: [variants]}."""
     from silica.agent.providers import get_provider
     from silica.kernel.text.sanitize import parse_json
 
@@ -139,8 +159,8 @@ def silica_aliases(apply: bool = False, folder: str = "", cancel_token: Any = No
     scoped_titles = build_title_index(scoped_refs)
     if not scoped_titles:
         return {"error": "no notes in scope"}
-    # ponytail: one call over the whole scoped index; chunk-and-merge when a
-    # vault beyond ~2k titles shows up here.
+    # Proposals chunk at _PROPOSE_CHUNK_TITLES per LLM call; the ambiguity
+    # gate below always judges against the FULL title set, whatever the chunking.
     all_refs = DRIVER.list_files("") if folder else scoped_refs
     all_title_lowers = {r.name.lower() for r in all_refs if getattr(r, "name", "")}
 

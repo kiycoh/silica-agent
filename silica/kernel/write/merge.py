@@ -15,10 +15,18 @@ Terminology:
 """
 from __future__ import annotations
 
-CONFLICT_CALLOUT_HEADER = "> [!danger] Conflitto Semantico"
+CONFLICT_CALLOUT_HEADER = "> [!danger] Semantic Conflict"
 
-_CALLOUT_BODY = """\
-> [!danger] Conflitto Semantico
+# Emitted until 2026-08. Recognized forever: this header line is the idempotency
+# key for inject_conflict_callout, so a note that already carries a callout in
+# the old spelling must keep matching or the next conflict stacks a second
+# callout on top of the first. Never emitted — read side only.
+LEGACY_CONFLICT_CALLOUT_HEADER = "> [!danger] Conflitto Semantico"
+
+CONFLICT_CALLOUT_HEADERS = (CONFLICT_CALLOUT_HEADER, LEGACY_CONFLICT_CALLOUT_HEADER)
+
+_CALLOUT_BODY = f"""\
+{CONFLICT_CALLOUT_HEADER}
 > This note was modified concurrently. Review and merge the sections below manually.
 
 """
@@ -33,7 +41,7 @@ def detect_conflict(base: str | None, current: str | None) -> bool:
 
 def inject_conflict_callout(content: str) -> str:
     """Prepend the conflict callout to content (idempotent)."""
-    if CONFLICT_CALLOUT_HEADER in content:
+    if any(header in content for header in CONFLICT_CALLOUT_HEADERS):
         return content
     return _CALLOUT_BODY + content
 

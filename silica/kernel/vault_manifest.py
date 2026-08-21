@@ -129,6 +129,11 @@ def _safe_rel_dir(value) -> str | None:
     if raw.startswith("/"):
         return None
     parts = [p for p in raw.split("/") if p and p != "."]
+    # `./` and `././` filter down to nothing: still the vault root, never an
+    # IndexError out of load_manifest — this module's contract is that a
+    # malformed manifest degrades softly, and it is read at vault activation.
+    if not parts:
+        return ""
     if ".." in parts or ":" in parts[0]:
         return None
     return "/".join(parts)

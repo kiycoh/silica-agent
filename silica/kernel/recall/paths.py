@@ -45,21 +45,33 @@ def in_folder(path: str, folder: str | None) -> bool:
     return p == f or p.startswith(f + "/")
 
 
+# The mode an ordinary `open(path, "w")` would have produced, snapshotted once:
+# mkstemp opens 0600, so a file this helper CREATES would otherwise be private
+# where every other tool's would not. Read at import (before the pools start)
+# because os.umask is process-global and read-modify-write — probing it later
+# would hand a concurrent creator a 0666 window.
+_UMASK = os.umask(0o022)  # os.umask only reads by writing; put it straight back
+os.umask(_UMASK)
+_NEW_FILE_MODE = 0o666 & ~_UMASK
+
+
 def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Torn-write-proof write: tmp file in the same dir, fsync, os.replace.
 
     For derived indexes and bundles rewritten in place — a crash or full
     disk mid-write must leave the previous file intact, not a truncated one.
 
-    Three edges beyond the naive tmp+replace (each one a fielded failure in
+    Four edges beyond the naive tmp+replace (each one a fielded failure in
     graphify's sibling helper): resolve symlinks first so the tmp lands on the
     destination's filesystem and the write goes THROUGH the link instead of
-    replacing it; preserve an existing destination's mode instead of leaving
-    mkstemp's 0600; and when os.replace hits a locked destination (Windows:
-    antivirus or an open reader) retry briefly — the hold is transient — and
-    only then degrade to copy2, which is NOT atomic (it truncates before it
-    copies), so the degradation is logged instead of silently voiding the
-    guarantee this function is named after.
+    replacing it; preserve an existing destination's mode, and give a brand-new
+    one the umask default, instead of leaving mkstemp's 0600 — notes are the
+    user's own files and an external syncer or a second account has to keep the
+    access an ordinary create would have granted; and when os.replace hits a
+    locked destination (Windows: antivirus or an open reader) retry briefly —
+    the hold is transient — and only then degrade to copy2, which is NOT atomic
+    (it truncates before it copies), so the degradation is logged instead of
+    silently voiding the guarantee this function is named after.
     """
     real = Path(os.path.realpath(path))
     real.parent.mkdir(parents=True, exist_ok=True)
@@ -69,8 +81,12 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        try:
+            mode = os.stat(real).st_mode & 0o7777
+        except OSError:
+            mode = _NEW_FILE_MODE  # the destination does not exist yet
         with contextlib.suppress(OSError):
-            os.chmod(tmp, os.stat(real).st_mode & 0o7777)
+            os.chmod(tmp, mode)
         try:
             os.replace(tmp, real)
         except PermissionError:
@@ -96,6 +112,24 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
     # ponytail: no directory fsync — post-power-loss rename durability is
     # filesystem-dependent, and every caller's file is rebuildable or
     # re-produceable; upgrade if a real loss is ever traced here.
+
+
+def resolve_vault_path(vault_path: str | None = None) -> str | None:
+    """An explicit vault path, else the live CONFIG's, else None.
+
+    The `vault_path=None means "the active vault"` convention shared by the
+    kernel's on-disk ledgers (provenance, run_log). CONFIG is read lazily and
+    defensively: a caller running before config import must get None, not an
+    ImportError.
+    """
+    if vault_path:
+        return vault_path
+    try:
+        from silica.config import CONFIG
+
+        return getattr(CONFIG, "vault_path", None) or None
+    except Exception:
+        return None
 
 
 def vault_epoch(vault: str | None = None) -> str:
@@ -189,9 +223,25 @@ SOURCES_MARKER = "## Sources"
 
 
 def is_source_leaf(path: str) -> bool:
-    """True when `path` (vault-relative, any separator) lives under sources/."""
+    """True when `path` (vault-relative, any separator) lives under sources/.
+
+    A vault whose writes are confined to `silica/` stores its leaves at
+    `silica/sources/`, and those were answering every search: the bare-root
+    check missed them, so the verbatim lectures competed with the notes
+    distilled from them and won, being longer. Both roots answer, like
+    `run_log` composes its journal path — legacy root leaves stay invisible
+    forever.
+    """
     norm = (path or "").replace("\\", "/").lstrip("/")
-    return norm.startswith(SOURCES_DIR + "/")
+    if norm.startswith(SOURCES_DIR + "/"):
+        return True
+    try:
+        from silica.kernel.vault_manifest import in_write_dir
+
+        composed = in_write_dir(SOURCES_DIR).replace("\\", "/").strip("/")
+    except Exception:  # config not resolvable — the bare root is the honest guess
+        return False
+    return bool(composed) and norm.startswith(composed + "/")
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +510,64 @@ def index_dir() -> Path:
     return index_dir_for(getattr(CONFIG, "vault_path", "") or "")
 
 
+def _is_under(base: Path, target: Path) -> bool:
+    """True when `target` is strictly inside `base` (both already normalized)."""
+    return target != base and base in target.parents
+
+
+def contain_in_vault(path: str, vault: Path) -> str:
+    """The vault containment choke point: `path` as a safe POSIX vault-relative
+    path, or ``ValueError``.
+
+    Every driver write MUST pass its caller-supplied path through here before
+    joining it onto the vault root. ``Path(vault) / rel`` silently DISCARDS the
+    vault root when `rel` is absolute, and joins a `../..` verbatim, so a path
+    that merely *looks* vault-relative is not a boundary — this is.
+
+    Accepted: ordinary relative paths, and absolute paths under the vault
+    (relativized). Rejected: absolute paths outside the vault, any ``..`` that
+    escapes, a symlink whose target leaves the vault, and the vault root itself
+    (a note is never the directory).
+
+    Containment is decided on the fully resolved paths — a note that is a
+    symlink out of the vault escapes on write even though its own path reads as
+    vault-relative. Existence is NOT required: resolving a not-yet-created file
+    only normalizes, which is what `create()` needs.
+    """
+    raw = str(path or "").strip()
+    if not raw:
+        raise ValueError("Empty path is not a valid vault reference")
+
+    root = Path(vault)
+    candidate = Path(raw.replace("\\", "/"))
+    if not candidate.is_absolute():
+        candidate = root / candidate
+
+    real_root = Path(os.path.realpath(root))
+    real = Path(os.path.realpath(candidate))
+    if not _is_under(real_root, real):
+        raise ValueError(
+            f"Path {path!r} escapes the vault {root.as_posix()!r}"
+        )
+
+    # Prefer the lexical form so an intra-vault symlinked folder keeps the key
+    # the index already uses; fall back to the resolved one (an unresolved or
+    # symlinked vault root), which is contained by construction.
+    #
+    # The lexical form is only usable when it still names the file containment
+    # was decided on: `normpath` cancels `a/..` textually, which is a LIE as
+    # soon as `a` is a symlink. `out/back/../x.md`, with `out` leaving the vault
+    # and `back` pointing into it, resolves inside (so it passes above) yet
+    # collapses to `out/x.md` — and the caller rejoins that onto the vault root,
+    # writing through `out` to the outside. Comparing the two resolutions costs
+    # one realpath and closes that gap.
+    root_norm = Path(os.path.normpath(str(root)))
+    cand_norm = Path(os.path.normpath(str(candidate)))
+    if _is_under(root_norm, cand_norm) and Path(os.path.realpath(cand_norm)) == real:
+        return cand_norm.relative_to(root_norm).as_posix()
+    return real.relative_to(real_root).as_posix()
+
+
 def to_vault_relative(path: str, *, ensure_md: bool = True) -> str:
     """Normalize an arbitrary note path to POSIX vault-relative form.
 
@@ -467,9 +575,10 @@ def to_vault_relative(path: str, *, ensure_md: bool = True) -> str:
       - already-relative paths pass through (POSIX-normalized, leading
         slashes stripped);
       - absolute paths *under* the configured vault root are relativized;
-      - absolute paths *outside* the vault raise ``ValueError`` with a
-        clear diagnostic — they would otherwise become a silent
-        "File not found" when the CLI fails to resolve them;
+      - absolute paths *outside* the vault, and relative paths whose ``..``
+        segments walk out of it, raise ``ValueError`` with a clear diagnostic —
+        they would otherwise become a silent "File not found" when the CLI
+        fails to resolve them, or worse, a write outside the vault;
       - if ``ensure_md`` is True (default) and the result does not end in
         ``.md``, the extension is appended.
 
@@ -480,22 +589,25 @@ def to_vault_relative(path: str, *, ensure_md: bool = True) -> str:
         raise ValueError("Empty path is not a valid vault reference")
 
     p = Path(path)
-    if p.is_absolute():
-        vault_str = getattr(CONFIG, "vault_path", None) or ""
-        if not vault_str:
+    vault_str = getattr(CONFIG, "vault_path", None) or ""
+    if not vault_str:
+        if p.is_absolute():
             raise ValueError(
                 f"Absolute path {path!r} provided but SILICA_VAULT is not configured"
             )
-        vault = Path(vault_str)
+        # No vault to contain against: the historical pass-through, unchanged.
+        rel = p.as_posix().strip("/")
+    else:
         try:
-            p = p.relative_to(vault)
+            rel = contain_in_vault(path, Path(vault_str))
         except ValueError as exc:
+            # Wording kept verbatim: this diagnostic is what the CLI surfaces to
+            # the user for a bad /organize --scope, and it is asserted on.
             raise ValueError(
                 f"Path {path!r} is outside the configured vault "
-                f"{vault.as_posix()!r}"
+                f"{Path(vault_str).as_posix()!r}"
             ) from exc
 
-    rel = p.as_posix().strip("/")
     if ensure_md and not rel.endswith(".md"):
         rel += ".md"
     return rel

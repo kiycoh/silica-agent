@@ -218,8 +218,8 @@ def _arm(body: str, trace_values: list[str], bank: dict[str, wr._Quote],
     )
     pages = [t for t in trace_values if t.startswith("Source: ")]
     fs = factscore_any_page(judge_model, bound, pages)
-    # ponytail: a transient judge failure yields score None with no retry;
-    # the summary counts unjudged arms, rerunning replay is the retry.
+    # A transient judge failure yields score None with no retry, by design:
+    # the summary counts unjudged arms, and rerunning replay is the retry.
     return {
         "body": bound,
         "effective_citations": effective_citations(bound),

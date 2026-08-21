@@ -252,7 +252,6 @@ def bind_vault(vault: Path) -> None:
     # while memory_lane keeps abstaining bit-identically (coincident-vault rule)
     # so the "personal-memory lane is never passed" guarantee holds.
     CONFIG.memory_vault = str(vault)
-    CONFIG.backend = "fs"
     silica.driver._driver = None
     embed_mod.clear()
     cooc_mod.clear()

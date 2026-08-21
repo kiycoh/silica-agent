@@ -285,3 +285,44 @@ def test_graph_diff_minor_backlink_drop_is_drift_not_blocking():
     assert len(errors) == 1
     assert errors[0].startswith("Backlink drift for 'DARPA'")  # ...but as drift
     assert "Broken backlinks" not in errors[0]
+
+
+def test_graph_diff_backlinks_migrating_to_a_twin_not_blocking():
+    # A twin note with the same basename is born in this chunk (write_dir
+    # mirror). [[Apprendimento supervisionato]] resolves to the nearest one, so
+    # five incoming links move from the older namesake to the twin. No edge was
+    # destroyed — the basename total is unchanged — so the gate must not fire.
+    pre = GraphSnapshot(
+        orphans=[], unresolved=[],
+        backlink_counts={"Informatica/Machine learning/Apprendimento supervisionato": 15},
+    )
+    post = GraphSnapshot(
+        orphans=[], unresolved=[],
+        backlink_counts={
+            "Informatica/Machine learning/Apprendimento supervisionato": 10,
+            "silica/Informatica/Machine learning/Apprendimento supervisionato": 5,
+        },
+    )
+
+    success, errors = check_graph_regression(pre, post, created_paths=[])
+    assert success, errors
+
+
+def test_graph_diff_real_loss_still_caught_across_twins():
+    # Same twin split, but two edges genuinely disappeared: 15 -> 8 + 5.
+    pre = GraphSnapshot(
+        orphans=[], unresolved=[],
+        backlink_counts={"Informatica/Machine learning/Apprendimento supervisionato": 15},
+    )
+    post = GraphSnapshot(
+        orphans=[], unresolved=[],
+        backlink_counts={
+            "Informatica/Machine learning/Apprendimento supervisionato": 8,
+            "silica/Informatica/Machine learning/Apprendimento supervisionato": 5,
+        },
+    )
+
+    success, errors = check_graph_regression(pre, post, created_paths=[])
+    assert not success
+    assert "Broken backlinks detected" not in errors[0]  # 2 of 15 is drift, not vandalism
+    assert "decreased from 15 to 13" in errors[0]

@@ -428,7 +428,6 @@ def _bind_small_vault(tmp_path, monkeypatch):
     vault.mkdir()
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
     monkeypatch.setattr(CONFIG, "memory_vault", str(vault))
-    monkeypatch.setattr(CONFIG, "backend", "fs")
     monkeypatch.setattr(silica.driver, "_driver", None)
     from silica.driver import DRIVER
     DRIVER.create("sessions/s1.md", '---\ndate: "2023-05-08"\n---\n\nAnn got a puppy.\n')

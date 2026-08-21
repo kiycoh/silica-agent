@@ -10,7 +10,10 @@ notes[:6000]) refuted by the 2026-08-16 ROI audit: its declared residue was
 question into the narrow, reliable one:
 
 1. decompose the SOURCE into atomic facts once (prompt kept in parity with
-   evals/factscore.py, which the product cannot import);
+   evals/factscore.py, which the product cannot import), then drop header
+   apparatus mechanically — see drop_apparatus. The judge prompt adds an
+   alpha-equivalence rule for renamed math symbols, the other false-positive
+   class measured on the 2026-08-21 run;
 2. per fact, retrieve candidate evidence with the vault's own embed index
    (refreshed at every WRITE) plus lexical paragraph windowing, instead of
    stuffing a truncated note dump into the prompt;
@@ -47,7 +50,9 @@ _JUDGE_PROMPT = (
     "implied by ITS OWN evidence block (notes from a knowledge vault). Judge "
     "each fact only from its evidence: a fact that is plausible, or that you "
     "know to be true from elsewhere, but that the evidence does not state, is "
-    "\"no\". Do not argue for the fact on the evidence's behalf.\n\n"
+    "\"no\". For mathematical facts judge the mathematical content: the same "
+    "statement written with renamed symbols or indices is stated. Do not "
+    "argue for the fact on the evidence's behalf.\n\n"
     "{items}\n\n"
     "Answer with one line per fact, exactly \"N: yes\" or \"N: no\". "
     "No other text."
@@ -57,30 +62,85 @@ _FACT_RE = re.compile(r"^-\s+(.+)$", re.M)
 _VERDICT_RE = re.compile(r"^\s*(\d+)\s*[:.)]\s*(yes|no)\b", re.M | re.I)
 
 
-def _llm(prompt: str, max_tokens: int) -> str:
+def _llm(prompt: str, max_tokens: int) -> tuple[str, str | None]:
     from silica.agent.llm import call_llm
     from silica.config import CONFIG
 
-    # temperature=0: factscore-judge parity. Free temperature on a
-    # reasoning-class router model let the thinking eat the output budget and
-    # returned empty/misnumbered replies in-run (45/45 and 92/92 judge
-    # failures, run 5e88feb0).
+    # temperature=0: factscore-judge parity. reasoning=False: both calls here
+    # are mechanical extraction, and a hybrid model bills its thinking against
+    # max_tokens — with thinking on, a 31KB source spent all 3864 completion
+    # tokens on the trace and returned an empty reply (the "parsed 0 facts"
+    # and the 45/45 / 92/92 judge failures of run 5e88feb0). temperature=0
+    # alone never fixed it: whether the model thinks is the router's call, not
+    # the temperature's.
     resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}],
-                    max_tokens=max_tokens, temperature=0)
-    return resp.text or ""
+                    max_tokens=max_tokens, temperature=0, reasoning=False)
+    if not resp.text:
+        logger.warning("residue: empty reply (finish=%s, completion=%s tokens, "
+                       "%d chars of reasoning, budget %d)", resp.finish_reason,
+                       (resp.usage or {}).get("completion_tokens"),
+                       len(resp.reasoning or ""), max_tokens)
+    return resp.text or "", resp.finish_reason
+
+
+# 4+ chars: 3-letter tokens are dominated by function words ("the", "una")
+# whose absence from the header would shield an apparatus fact from the
+# containment test. Acronyms the cut drops (CFU) live in the vocabulary.
+_APPARATUS_WORD = re.compile(r"[a-zà-ÿ0-9]{4,}")
+# Closed cross-language vocabulary of document-furniture words: a fact built
+# ONLY of these plus words already in the source's header is apparatus.
+_APPARATUS_VOCAB = frozenset((
+    "course", "corso", "lecture", "lezione", "lecturer", "instructor",
+    "teacher", "docente", "professor", "professore", "email", "mail",
+    "contact", "contatto", "page", "pagina", "file", "titled", "title",
+    "titolo", "credits", "crediti", "cfu", "number", "numero", "type",
+    "tipo",
+))
+
+
+def drop_apparatus(facts: list[str], source: str) -> tuple[list[str], int]:
+    """Drop facts that only restate the document header. Returns (kept, n).
+
+    "The lecture is Lezione 14" and the lecturer's email were declared
+    missing on every file of the 2026-08-21 run: the distiller drops header
+    apparatus deliberately, so it is never residue. Mechanical containment
+    test — every content word of the fact must already sit in the source's
+    first lines or in the closed furniture vocabulary. A prompt-side
+    exclusion was measured harmful instead: told to skip the header, the
+    model skimmed everything (143 -> ~47 facts on the same source, x2)."""
+    head_lines = [l for l in source.splitlines() if l.strip()][:6]
+    header_words = set(_APPARATUS_WORD.findall(" ".join(head_lines).lower()))
+    if not header_words:
+        return facts, 0
+    allowed = header_words | _APPARATUS_VOCAB
+    kept = [f for f in facts
+            if not (w := set(_APPARATUS_WORD.findall(f.lower()))) or not w <= allowed]
+    return kept, len(facts) - len(kept)
 
 
 def decompose_facts(source: str) -> list[str] | None:
     """SOURCE -> atomic fact lines. None when decomposition failed (skip
     verification), distinct from [] (a legitimately fact-free source)."""
     # Output scales with input; ceiling keeps a book chapter's list bounded.
-    budget = min(8192, max(1024, len(source) // 8))
+    # //4, not //8: a fact list restates its context on every line, so measured
+    # complete answers land right at source_chars/8 tokens with zero headroom
+    # (16KB source -> 1941 of 1996 tokens) and a denser one truncates mid-fact.
+    budget = min(16384, max(2048, len(source) // 4))
     # One retry on an empty parse: same nondeterministic reasoning/format
     # flake as the judge (2/10 files failed decompose in run 4dabf989).
     for attempt in (1, 2):
-        out = _llm(_DECOMPOSE_PROMPT.format(text=source), budget)
+        out, finish = _llm(_DECOMPOSE_PROMPT.format(text=source), budget)
         facts = [f for f in (m.group(1).strip() for m in _FACT_RE.finditer(out)) if f]
         if facts:
+            # A budget-truncated reply cuts its last fact mid-sentence, and a
+            # fragment ("...we can describe the hyperplane as K") is judged
+            # unsupported and declared missing — the false positive this
+            # module exists to kill. Seen twice in run 74805aa3.
+            if finish == "length" and len(facts) > 1:
+                facts.pop()
+            facts, n_app = drop_apparatus(facts, source)
+            if n_app:
+                logger.debug("residue: %d header-apparatus fact(s) dropped", n_app)
             return facts
         logger.warning("residue: decompose parsed 0 facts (reply head: %r)%s",
                        out[:80], " — retrying once" if attempt == 1 else "")
@@ -214,7 +274,7 @@ def judge_covered(facts: list[str], evidence: list[str]) -> list[bool | None]:
             try:
                 # 4096 out: verdict lines are tiny but a reasoning model's
                 # thinking shares the budget.
-                out = _llm(_JUDGE_PROMPT.format(items=items), 4096)
+                out, _ = _llm(_JUDGE_PROMPT.format(items=items), 4096)
             except Exception as _e:
                 logger.warning("residue: judge call failed (%s)", _e)
                 break

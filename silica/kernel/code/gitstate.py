@@ -10,6 +10,7 @@ callers. Silica without git behaves exactly as it does today.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,24 @@ _TIMEOUT_S = 10
 
 # Field separator unlikely to appear in a commit subject (ASCII unit separator).
 _FS = "\x1f"
+
+# A rev is the LEADING positional argument of `git log`/`git show`, so anything
+# shaped like an option is parsed as one. Refs are not always ours: `code_ref`
+# is read back out of note frontmatter, which is model-authored YAML with no
+# key allowlist, so a recorded ref of "--output=FILE" would make git create or
+# truncate FILE (verified: `git show --output=F` exits 0 and writes F). The
+# allowlist below is git's own refname character set minus a leading "-", and
+# the call sites additionally pass `--end-of-options` so position alone can
+# never re-open the hole if the set is ever widened.
+# `\Z`, not `$`: `$` also matches before a trailing newline, so a ref ending in
+# one would pass an allowlist that names no newline at all.
+_REF_CHARS = re.compile(r"^[0-9A-Za-z._/^~@{}+-]+\Z")
+
+
+def _is_rev(ref: str) -> bool:
+    """True when `ref` can be passed to git as a rev. False degrades the caller
+    to its own "unknown" answer instead of running git at all."""
+    return bool(ref) and not ref.startswith("-") and bool(_REF_CHARS.match(ref))
 
 
 def _run(args: list[str], cwd: Path | str) -> subprocess.CompletedProcess | None:
@@ -114,6 +133,7 @@ def latest_shas(root: Path | str, paths: list[str]) -> dict[str, str]:
     the walk stops early once every path is resolved. Paths absent from the
     result have no history (or git failed) — callers treat them as unknown.
     # ponytail: paths as argv, fine up to ARG_MAX (~2 MB); chunk if ever hit
+    # (covers changed_since too, which passes argv the same way)
     """
     if not paths:
         return {}
@@ -144,7 +164,8 @@ def latest_shas(root: Path | str, paths: list[str]) -> dict[str, str]:
         pass
     finally:
         try:
-            proc.stdout.close()
+            if proc.stdout is not None:
+                proc.stdout.close()
             proc.wait(timeout=_TIMEOUT_S)
         except Exception:
             proc.kill()
@@ -163,11 +184,15 @@ def paths_touched_since(root: Path | str, since_ref: str, paths: list[str]) -> s
     (rebased or squashed history, shallow clone) or no git. Callers must keep
     that distinct from "nothing was touched": unverifiable is conservatively
     stale, verified-untouched is not.
-    # ponytail: paths as argv, same ARG_MAX ceiling as latest_shas
+    # Paths as argv, same ARG_MAX ceiling as latest_shas; its marker tracks
+    # both, chunk both if ever hit
     """
-    if not since_ref or not paths:
-        return None if not since_ref else set()
-    proc = _run(["log", "--format=", "--name-only", f"{since_ref}..HEAD", "--", *paths], root)
+    if not _is_rev(since_ref):
+        return None   # unusable ref: unverifiable, which callers read as stale
+    if not paths:
+        return set()
+    proc = _run(["log", "--format=", "--name-only", "--end-of-options",
+                 f"{since_ref}..HEAD", "--", *paths], root)
     if proc is None or proc.returncode != 0:
         return None
     wanted = set(paths)
@@ -177,10 +202,11 @@ def paths_touched_since(root: Path | str, since_ref: str, paths: list[str]) -> s
 def commits_since(root: Path | str, since_ref: str, path: str) -> list[CommitInfo]:
     """Commits touching `path` after `since_ref` (newest-first, `since_ref`
     excluded). Empty on failure or when `since_ref` is unknown."""
-    if not since_ref:
+    if not _is_rev(since_ref):
         return []
     proc = _run(
-        ["log", f"--format=%H{_FS}%cI{_FS}%s", f"{since_ref}..HEAD", "--", path],
+        ["log", f"--format=%H{_FS}%cI{_FS}%s", "--end-of-options",
+         f"{since_ref}..HEAD", "--", path],
         root,
     )
     if proc is None or proc.returncode != 0:
@@ -204,9 +230,9 @@ def show_file(root: Path | str, ref: str, path: str) -> str | None:
     """Content of `path` at `ref` (`git show ref:path`), or None when the ref
     or path is unknown (shallow clone, deleted file, bad ref). The git-native
     staleness baseline: no fingerprint store, git already has the bytes."""
-    if not ref:
+    if not _is_rev(ref):
         return None
-    proc = _run(["show", f"{ref}:{path}"], root)
+    proc = _run(["show", "--end-of-options", f"{ref}:{path}"], root)
     if proc is None or proc.returncode != 0:
         return None
     return proc.stdout
@@ -217,8 +243,14 @@ def changed_paths(root: Path | str, range_spec: str | None = None) -> list[str] 
     working tree vs HEAD when range_spec is None (uncommitted changes).
     Untracked new files are not diffs and do not appear — a brand-new file has
     no documenting note nor importers yet, so /impact loses nothing.
-    None on any git failure."""
-    proc = _run(["diff", "--name-only", range_spec if range_spec else "HEAD"], root)
+    None on any git failure.
+
+    `range_spec` is a rev like every other one here — `git diff --output=FILE`
+    truncates FILE — so it goes through the same gate, whatever typed it."""
+    if range_spec is not None and not _is_rev(range_spec):
+        return None
+    proc = _run(["diff", "--name-only", "--end-of-options",
+                 range_spec if range_spec else "HEAD"], root)
     if proc is None or proc.returncode != 0:
         return None
     return [ln for ln in proc.stdout.splitlines() if ln.strip()]

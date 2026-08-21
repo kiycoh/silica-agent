@@ -10,6 +10,8 @@ From SILICA.md §4.2:
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -136,7 +138,7 @@ def silica_search_context(query: str) -> dict:
         stale_map = codedocs.peek(CONFIG.vault_path)
     except Exception:
         stale_map = {}
-        codedocs = None  # peek import itself failed: no flags this call
+        codedocs = None  # type: ignore[assignment]  # peek import failed: no flags this call
 
     out: dict = {
         "hits": [
@@ -334,7 +336,7 @@ def _unconverted_under(folder: str) -> list[str]:
         return []
     inbox = active_inbox_dir()
     if inbox and in_folder(scope, inbox):
-        paths = (r.path for r in DRIVER.list_inbox_files())
+        paths: Iterable[str] = (r.path for r in DRIVER.list_inbox_files())
     else:
         paths = _vault_files_under(scope)
     return sorted(
@@ -685,7 +687,7 @@ def silica_graph_explain(note: str, depth: int = 1) -> dict:
     # All of it is already on the report — the signals existed only as vault
     # aggregates or as rows in GRAPH_REPORT.md, with no way to ask "how well is
     # this one note integrated". Composition only, no extra computation.
-    # ponytail: the co-occurrence signals (integration deficit, stale links) need
+    # The co-occurrence signals (integration deficit, stale links) need
     # with_cooccurrence, which this tool does not pay for; they read `null` here.
     # Flip the compute_report call above if the diagnosis ever needs them.
     cluster_stat = next((c for c in report.clusters if c.cluster_id == cluster_id), None)
@@ -740,9 +742,9 @@ class LedgerNextArgs(BaseModel):
     run_id: str = Field(description="Run ID returned by silica_vault_report")
 
 
-# ponytail: fixed byte budget per drain — payloads carry ~4KB path chunks, and
-# a 40-task run would otherwise land ~40k tokens in one tool result. Make it a
-# tool arg only if a caller ever wants a different slice.
+# Fixed byte budget per drain — payloads carry ~4KB path chunks, and a 40-task
+# run would otherwise land ~40k tokens in one tool result. Tool-arg promotion
+# declined 2026-08-19: no caller wants a different slice.
 LEDGER_DRAIN_BYTES = 12000
 
 

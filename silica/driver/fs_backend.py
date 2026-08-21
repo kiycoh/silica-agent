@@ -42,7 +42,12 @@ from silica.kernel.write import frontmatter as fm
 from silica.kernel.write import session_changes
 from silica.kernel.link import ofm
 from silica.kernel.recall.graph_export import is_vault_artifact
-from silica.kernel.recall.paths import ignore_matcher, is_source_leaf
+from silica.kernel.recall.paths import (
+    atomic_write_bytes,
+    contain_in_vault,
+    ignore_matcher,
+    is_source_leaf,
+)
 from silica.kernel.write.notetype import stamp_type
 logger = logging.getLogger(__name__)
 
@@ -50,6 +55,48 @@ logger = logging.getLogger(__name__)
 # snippets per note and ranks notes by hit count; 20 saturates that ranking
 # while bounding a pathological query at 20·N Hits instead of lines·N.
 _MAX_HITS_PER_NOTE = 20
+
+# Body-cache LRU bound, in notes. Sized so every realistic vault fits whole
+# (zero evictions, zero cost: measured neutral at 1.2k and 10k with cap
+# above N) while a pathological one is bounded at ~100-200 MB instead of
+# unbounded. Below N the LRU pays the sequential-scan pathology (measured
+# +45% on a 10k double scan at cap 4096), which is the deliberate trade:
+# the cap exists against OOM, not for speed. The bench
+# (scripts/bench_scale_levers.py) reads and flips this seam.
+_BODY_CACHE_CAP = 16384
+
+# Buffered embed-vector deletes per npz save. A move/delete sweep on a big
+# vault was paying one whole-index serialization per note; buffering trades
+# that for a bounded staleness window: another process sees the phantom
+# vector until the threshold or exit flush lands. In-process reads stay
+# exact (the store's memory is updated per op).
+_EMBED_FLUSH_EVERY = 32
+
+
+# Deferred embed-delete flush state (see _drop_embed_vector).
+_embed_deletes_pending = 0
+_embed_flush_registered = False
+
+
+def _flush_pending_embed_deletes() -> None:
+    """Persist buffered embed deletes; safe to call with nothing pending."""
+    global _embed_deletes_pending
+    if _embed_deletes_pending <= 0:
+        return
+    try:
+        from silica.kernel.recall.embed import get_store
+        get_store().save()
+        _embed_deletes_pending = 0
+    except Exception as exc:
+        logger.debug("deferred embed flush failed (non-fatal): %s", exc)
+
+
+def _register_embed_flush() -> None:
+    global _embed_flush_registered
+    if not _embed_flush_registered:
+        import atexit
+        atexit.register(_flush_pending_embed_deletes)
+        _embed_flush_registered = True
 
 
 def _locked(method):
@@ -89,8 +136,11 @@ class ObsidianFSBackend(GraphIndexMixin):
         self._title_trie: dict = {}                    # char trie of note titles (mention matching)
         self._needs_reindex: bool = True
         self._dirty_paths: set[str] = set()           # paths patched since last full rebuild
-        # ponytail: unbounded — grows to the whole vault's bodies in RAM; add
-        # an LRU bound only if a very large vault OOMs.
+        # LRU-bounded at _BODY_CACHE_CAP entries (a note is a few KB, so the
+        # cap is tens of MB worst case): a vault larger than the cap trades
+        # re-reads for a bounded footprint instead of growing to every body
+        # in RAM. Plain dict as the LRU: hits reinsert, eviction pops the
+        # oldest key (insertion order).
         self._body_cache: dict[str, tuple[float, str]] = {}  # abs-path str -> (mtime, content)
 
     def _path_of(self, ref: NoteRef | str) -> str | None:
@@ -378,11 +428,13 @@ class ObsidianFSBackend(GraphIndexMixin):
         except OSError:
             self._body_cache.pop(key, None)
             raise
-        hit = self._body_cache.get(key)
+        hit = self._body_cache.pop(key, None)
         if hit is not None and hit[0] == mtime:
+            self._body_cache[key] = hit  # reinsert: most recently used
             return hit[1]
-        content = full.read_text(encoding="utf-8")
-        self._body_cache[key] = (mtime, content)
+        self._body_cache[key] = (mtime, content := full.read_text(encoding="utf-8"))
+        while len(self._body_cache) > _BODY_CACHE_CAP:
+            del self._body_cache[next(iter(self._body_cache))]
         return content
 
     def _invalidate_body(self, rel_path: str) -> None:
@@ -721,14 +773,7 @@ class ObsidianFSBackend(GraphIndexMixin):
 
     def create(self, path: str, content: str) -> NoteRef:
         """Create a new note at the given vault-relative path."""
-        p = Path(path)
-        if p.is_absolute():
-            try:
-                rel_path = p.relative_to(self.vault_path).as_posix()
-            except ValueError:
-                rel_path = p.as_posix()
-        else:
-            rel_path = p.as_posix()
+        rel_path = contain_in_vault(path, self.vault_path)
 
         full_path = self.vault_path / rel_path
         # Base contract: "Raises if file exists" (base.py). Unconditional
@@ -743,7 +788,10 @@ class ObsidianFSBackend(GraphIndexMixin):
 
         content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
         session_changes.touched(rel_path, None)  # no baseline: the note is new
-        full_path.write_text(content, encoding="utf-8")
+        # Notes are irreplaceable and this backend keeps no version history
+        # (snapshot_versions returns an empty Txn), so a truncating write_text
+        # has nothing to roll back to when it dies mid-write.
+        atomic_write_bytes(full_path, content.encode("utf-8"))
         self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
         if self._needs_reindex:
@@ -767,14 +815,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         stub emulating the Obsidian plugin, which is a verbatim pipe and does
         no stamping of its own).
         """
-        p = Path(path)
-        if p.is_absolute():
-            try:
-                rel_path = p.relative_to(self.vault_path).as_posix()
-            except ValueError:
-                rel_path = p.as_posix()
-        else:
-            rel_path = p.as_posix()
+        rel_path = contain_in_vault(path, self.vault_path)
 
         full_path = self.vault_path / rel_path
         if not full_path.exists():
@@ -783,7 +824,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         if stamp:
             content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
         session_changes.touched(rel_path, self._read_cached(full_path))
-        full_path.write_text(content, encoding="utf-8")
+        atomic_write_bytes(full_path, content.encode("utf-8"))
         self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
         if self._needs_reindex:
@@ -826,8 +867,13 @@ class ObsidianFSBackend(GraphIndexMixin):
         path = self._resolve_path(ref)
         if not path.exists():
             raise RuntimeError(f"File not found: {path}")
-            
-        rel_path_str = path.relative_to(self.vault_path).as_posix()
+
+        # Same boundary as create/overwrite: `ref` is caller-supplied and
+        # `_resolve_path` happily joins it onto the vault, so a note that is a
+        # symlink out of the vault reads as vault-relative while the append
+        # lands on the target. relative_to() alone only catches the absolute
+        # case — it compares strings and never resolves the link.
+        rel_path_str = contain_in_vault(str(path), self.vault_path)
         session_changes.touched(rel_path_str, self._read_cached(path))
         with open(path, "a", encoding="utf-8") as f:
             f.write(content)
@@ -844,20 +890,25 @@ class ObsidianFSBackend(GraphIndexMixin):
         path = self._resolve_path(ref)
         if not path.exists():
             raise RuntimeError(f"File not found: {path}")
-            
+
+        # Contained before the read, for the reason append() gives: the write
+        # below resolves symlinks (atomic_write_bytes writes THROUGH them), so
+        # an unresolved boundary check here would rewrite a file outside.
+        rel_path_str = contain_in_vault(str(path), self.vault_path)
         content = path.read_text(encoding="utf-8")
         data, delim, body = fm.split(content)
-        
+
         if data is None:
             data = {}
-            
+
         data[name] = value
-        
+
         new_content = fm.dump(data, body)
-        session_changes.touched(path.relative_to(self.vault_path).as_posix(), content)
-        path.write_text(new_content, encoding="utf-8")
+        session_changes.touched(rel_path_str, content)
+        atomic_write_bytes(path, new_content.encode("utf-8"))
         self._body_cache.pop(str(path), None)
 
+    @_locked
     def move(self, ref: NoteRef | str, to: str) -> None:
         """Move/rename a note, rewriting incoming wikilinks in all referrers.
 
@@ -883,9 +934,11 @@ class ObsidianFSBackend(GraphIndexMixin):
         if not src.exists():
             raise RuntimeError(f"File not found: {src}")
 
-        # Step 2: vault-relative paths
-        old_rel = src.relative_to(self.vault_path).as_posix()
-        new_rel = Path(to).as_posix()  # caller always passes vault-relative
+        # Step 2: vault-relative paths. Both ends go through the containment
+        # choke point: `ref` may be a NoteRef carrying an absolute path, and
+        # `to` is caller-supplied, so neither is trusted to stay in the vault.
+        old_rel = contain_in_vault(str(src), self.vault_path)
+        new_rel = contain_in_vault(to, self.vault_path)
         old_basename = old_rel.rsplit("/", 1)[-1].removesuffix(".md")
 
         # Step 3: collect referrers BEFORE moving so graph is still accurate
@@ -930,6 +983,23 @@ class ObsidianFSBackend(GraphIndexMixin):
                     continue
                 referrer_content = referrer_path.read_text(encoding="utf-8")
 
+                # The referrers are the third write target of a move, and the
+                # only one that is discovered rather than passed in — so it is
+                # the one the containment at step 2 does not cover. A referrer
+                # that is a symlink out of the vault would be rewritten THROUGH
+                # the link, editing a file the boundary does not own. Withhold
+                # only the disk write: its edges are still re-indexed below, so
+                # the graph stays correct while the foreign file keeps the old
+                # link text.
+                try:
+                    contain_in_vault(referrer_rel, self.vault_path)
+                except ValueError:
+                    logger.warning(
+                        "move: referrer %s leaves the vault — its links to %s "
+                        "were left unrewritten", referrer_rel, old_rel)
+                    referrer_updates.append((referrer_rel, referrer_content))
+                    continue
+
                 # Determine whether name-based rewrites are safe for this referrer
                 if basename_is_unique:
                     allow_name = True
@@ -947,7 +1017,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 if n > 0:
                     # Write directly — avoids re-entrant overwrite() logic
                     session_changes.touched(referrer_rel, referrer_content)
-                    referrer_path.write_text(new_content, encoding="utf-8")
+                    atomic_write_bytes(referrer_path, new_content.encode("utf-8"))
                     self._invalidate_body(referrer_rel)
                     referrer_updates.append((referrer_rel, new_content))
                 else:
@@ -973,7 +1043,10 @@ class ObsidianFSBackend(GraphIndexMixin):
             # unresolvable may now resolve because the new name/path matches them.
             # Collect affected sources first, then patch (avoid mutating while iterating).
             sources_to_promote: list[tuple[str, str]] = []
-            for source, target in self._unresolved_links:
+            # Snapshot, not the live set: @_locked keeps another MCP thread's
+            # _patch_index out, but this loop must survive any future in-loop
+            # patch too — a set mutated while iterated raises.
+            for source, target in list(self._unresolved_links):
                 resolved = self._resolve_target(target, source_path=source)
                 if resolved is not None and resolved.path == new_rel:
                     sources_to_promote.append((source, target))
@@ -996,16 +1069,25 @@ class ObsidianFSBackend(GraphIndexMixin):
         """Remove a note's embedding vector when it is deleted/renamed, so
         cosine_top_k stops returning it as a phantom candidate before the next
         full /embed rebuild (audit A13). Best-effort: retrieval quality, never fatal.
+
+        The in-memory store updates per op (this process never sees the
+        phantom); the npz save is buffered every _EMBED_FLUSH_EVERY deletes
+        plus once at exit, because each save serializes the whole index and a
+        bulk /organize was paying that per note.
         """
-        # ponytail: per-op npz save; if /organize on a 10k vault gets slow, batch
-        # these behind a dirty flag flushed once at end of run.
+        global _embed_deletes_pending
         try:
             from silica.kernel.recall.embed import get_store
             store = get_store()
             key = rel_path.removesuffix(".md")
             if store.get_vec(key) is not None:  # skip non-embedding vaults / unindexed notes
                 store.delete(key)
-                store.save()
+                _embed_deletes_pending += 1
+                if _EMBED_FLUSH_EVERY is None or _embed_deletes_pending >= _EMBED_FLUSH_EVERY:
+                    store.save()
+                    _embed_deletes_pending = 0
+                else:
+                    _register_embed_flush()
         except Exception as exc:
             logger.debug("embed vector cleanup failed for %s (non-fatal): %s", rel_path, exc)
 

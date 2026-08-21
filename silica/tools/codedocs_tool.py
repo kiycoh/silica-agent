@@ -57,6 +57,26 @@ class CodePackArgs(BaseModel):
     )
 
 
+def _stamp_code_pack_use() -> None:
+    """Kill-gate evidence for codepack (kill by 2026-10-28 if unused): one
+    timestamp line per invocation, whatever the surface reached it (MCP or a
+    summoned chat turn), so the kill-date check reads usage data instead of
+    chat silence. Grep ~/.silica/index/*/codepack_usage.log at the date.
+    Best-effort: never fails the tool."""
+    try:
+        import datetime as _dt
+
+        from silica.config import CONFIG
+        from silica.kernel.recall.paths import index_dir_for
+
+        p = index_dir_for(CONFIG.vault_path) / "codepack_usage.log"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as fh:
+            fh.write(_dt.datetime.now().isoformat(timespec="seconds") + "\n")
+    except Exception:
+        pass
+
+
 @tool(CodePackArgs, cls="composed")
 def silica_code_pack(target: str, budget_chars: int = 24000) -> dict:
     """Deterministic context pack for one source file inside a character
@@ -79,6 +99,7 @@ def silica_code_pack(target: str, budget_chars: int = 24000) -> dict:
     vault = str(getattr(CONFIG, "vault_path", "") or "").strip()
     if not vault:
         return {"status": "error", "message": "no vault configured"}
+    _stamp_code_pack_use()
     try:
         pack = codepack.code_pack(vault, target, budget_chars)
     except (ValueError, OSError) as e:

@@ -19,7 +19,11 @@ def _r(path, origin="vault", score=0.9):
 def _patch_retrieve(monkeypatch, results):
     import silica.kernel.recall.perception as perception_mod
     monkeypatch.setattr(perception_mod, "facade_retrieve",
-                        lambda text, k: (results, None), raising=False)
+                        lambda text, k, **kw: (results, None), raising=False)
+    # The facade reranks the surviving notes itself now; these tests assert the
+    # stale-flag projection, so keep the cross-encoder out of the payload.
+    import silica.agent.providers as providers_mod
+    monkeypatch.setattr(providers_mod, "get_reranker", lambda cfg: None)
 
 
 def test_stale_entry_flags_vault_results():

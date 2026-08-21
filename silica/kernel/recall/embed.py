@@ -17,6 +17,7 @@ Embeddings substrate rule (from the plan):
 from __future__ import annotations
 
 import heapq
+import threading
 import time
 from collections import Counter
 from pathlib import Path
@@ -77,7 +78,8 @@ def centroid(vectors: list[list[float]]) -> list[float]:
 # Theme vectors are requested twice per inbox file (RECON rerank + SALIENCE
 # gate) with an identical cleaned body — cache by content so the second call
 # is free. ponytail: crude clear-at-cap bound, fine for per-run lifetimes.
-_theme_cache: dict[tuple[str, str, int], list[float]] = {}
+# (model, body sha1, segment_chars, max_segments) -> centroid.
+_theme_cache: dict[tuple[str, str, int, int], list[float]] = {}
 _THEME_CACHE_MAX = 64
 
 
@@ -231,6 +233,19 @@ class EmbedStore:
     def __init__(self, path: Path | None = None):
         # Resolve lazily so tests can monkeypatch `_index_path` after import
         self._path = path if path is not None else _index_path()
+        # get_store() hands ONE instance to every thread, and the FSM mutates it
+        # (WRITE -> refresh_note -> upsert, DRIVER.delete -> delete) while the
+        # residue executor and the sub-agent pool search it. Reentrant because
+        # cosine_top_k_batch delegates its degenerate tail to cosine_top_k.
+        #
+        # WHAT IT GUARDS, so the next reader does not have to infer it from which
+        # methods happen to take it: every mutation of _notes, every read that
+        # spans more than one attribute (the matrices and _notes must describe
+        # one generation), and every iteration over the dict. A single-key lookup
+        # (has/get_vec/get_ts/get_content_hash/__len__) does NOT take it — one
+        # dict access is atomic under the GIL, and the value read is either the
+        # old entry or the new one, never a torn one.
+        self._lock = threading.RLock()
         self._notes: dict[str, dict[str, Any]] = {}
         # Lazily-built, unit-normalized search matrix (numpy). Invalidated on any
         # mutation; rebuilt on the next cosine_top_k. Keeps _notes authoritative
@@ -244,12 +259,13 @@ class EmbedStore:
         self._load()
 
     def _invalidate_matrix(self) -> None:
-        self._mat = None
-        self._mat_paths = []
-        self._mat_dim = None
-        self._tmat = None
-        self._tmat_paths = []
-        self._tmat_dim = None
+        with self._lock:
+            self._mat = None
+            self._mat_paths = []
+            self._mat_dim = None
+            self._tmat = None
+            self._tmat_paths = []
+            self._tmat_dim = None
 
     # ------------------------------------------------------------------
     # I/O
@@ -298,7 +314,16 @@ class EmbedStore:
         # flush passes ~2 s (~12k notes), and the answer there is sqlite or an
         # append-only shard, NOT a vector DB. See cosine_top_k_batch for why the
         # search side is not the limit.
-        atomic_write_bytes(self._path, _serialize_notes(self._notes))
+        #
+        # Serialize a SHALLOW SNAPSHOT, not the live dict: _serialize_notes walks
+        # it in a Python loop for ~250 ms, so a concurrent upsert/delete raised
+        # "dictionary changed size during iteration". dict(...) copies pointers in
+        # C under one lock acquisition, and entries are replaced wholesale (never
+        # mutated in place), so the snapshot is a consistent view — and the long
+        # serialize then runs outside the lock instead of stalling every search.
+        with self._lock:
+            snapshot = dict(self._notes)
+        atomic_write_bytes(self._path, _serialize_notes(snapshot))
         return self._path
 
     # ------------------------------------------------------------------
@@ -318,26 +343,30 @@ class EmbedStore:
         `_embed_signature`); build_index uses it to skip unchanged notes and
         re-embed edited ones. Omitting it preserves any existing hash.
         """
-        existing = self._notes.get(path, {})
-        # Stored as a float32 row, matching what _load produces: the list only
-        # exists at the get_vec/get_title_vec boundary.
-        entry: dict[str, Any] = {
-            "vec": np.asarray(vec, dtype=np.float32).ravel(),
-            "name": name, "ts": time.time(),
-        }
-        # Preserve existing title_vec if not explicitly provided
-        resolved_tv = title_vec if title_vec is not None else existing.get("title_vec")
-        if resolved_tv is not None:
-            entry["title_vec"] = np.asarray(resolved_tv, dtype=np.float32).ravel()
-        resolved_ch = content_hash if content_hash is not None else existing.get("content_hash")
-        if resolved_ch is not None:
-            entry["content_hash"] = resolved_ch
-        self._notes[path] = entry
-        self._invalidate_matrix()
+        # Read-modify-write of `existing`: the preserve-if-absent contract above
+        # is lost if another thread upserts the same path in between.
+        with self._lock:
+            existing = self._notes.get(path, {})
+            # Stored as a float32 row, matching what _load produces: the list only
+            # exists at the get_vec/get_title_vec boundary.
+            entry: dict[str, Any] = {
+                "vec": np.asarray(vec, dtype=np.float32).ravel(),
+                "name": name, "ts": time.time(),
+            }
+            # Preserve existing title_vec if not explicitly provided
+            resolved_tv = title_vec if title_vec is not None else existing.get("title_vec")
+            if resolved_tv is not None:
+                entry["title_vec"] = np.asarray(resolved_tv, dtype=np.float32).ravel()
+            resolved_ch = content_hash if content_hash is not None else existing.get("content_hash")
+            if resolved_ch is not None:
+                entry["content_hash"] = resolved_ch
+            self._notes[path] = entry
+            self._invalidate_matrix()
 
     def delete(self, path: str) -> None:
-        self._notes.pop(path, None)
-        self._invalidate_matrix()
+        with self._lock:
+            self._notes.pop(path, None)
+            self._invalidate_matrix()
 
     # ------------------------------------------------------------------
     # Lookup
@@ -388,7 +417,8 @@ class EmbedStore:
         return path in self._notes
 
     def paths(self) -> list[str]:
-        return list(self._notes.keys())
+        with self._lock:
+            return list(self._notes.keys())
 
     def __len__(self) -> int:
         return len(self._notes)
@@ -411,10 +441,12 @@ class EmbedStore:
         # drops out of OpenBLAS into a software loop. Measured on this store:
         # matvec 0.03 ms -> 12.4 ms, mat@mat.T 10 ms -> 15.3 s. Do not retry without
         # a BLAS that speaks fp16.
-        vecs = {p: self._notes[p].get(vec_key) for p in self._notes}
         # `is not None and len(v)`, never bare truthiness: rows are ndarrays
-        # now, and an ndarray raises on bool().
-        paths = [p for p, v in vecs.items() if v is not None and len(v)]
+        # now, and an ndarray raises on bool(). Filtered into its own dict so
+        # the reads below cannot see the None this drops.
+        vecs = {p: v for p in self._notes
+                if (v := self._notes[p].get(vec_key)) is not None and len(v)}
+        paths = list(vecs)
         if not paths:
             return np.zeros((0, 0), dtype=np.float32), [], None
         # Modal dimension, not the first note's: in a mixed-dim store (post model
@@ -433,10 +465,11 @@ class EmbedStore:
         Both are built and invalidated together under one guard, so every
         mutation that resets _mat also refreshes the title matrix.
         """
-        if self._mat is not None:
-            return
-        self._mat, self._mat_paths, self._mat_dim = self._build_matrix("vec")
-        self._tmat, self._tmat_paths, self._tmat_dim = self._build_matrix("title_vec")
+        with self._lock:
+            if self._mat is not None:
+                return
+            self._mat, self._mat_paths, self._mat_dim = self._build_matrix("vec")
+            self._tmat, self._tmat_paths, self._tmat_dim = self._build_matrix("title_vec")
 
     def _search(
         self,
@@ -485,8 +518,13 @@ class EmbedStore:
         Search is a single normalized matrix-vector product (numpy/BLAS); this
         is the hot path for COLLISION and AUTOLINK on large vaults.
         """
-        self._ensure_matrix()
-        return self._search(self._mat, self._mat_paths, self._mat_dim, query_vec, k, exclude)
+        # Build and read the matrix under ONE acquisition. A mutation landing
+        # between _ensure_matrix() and the three attribute loads left _search
+        # with mat=None or a stale _mat_paths, so every candidate scored 0.0 and
+        # the caller got arbitrary notes back with nothing logged.
+        with self._lock:
+            self._ensure_matrix()
+            return self._search(self._mat, self._mat_paths, self._mat_dim, query_vec, k, exclude)
 
     def title_cosine_top_k(
         self,
@@ -502,8 +540,9 @@ class EmbedStore:
         novel concepts (their cosine distributions overlap). Notes predating the
         title_vec feature score 0.0.
         """
-        self._ensure_matrix()
-        return self._search(self._tmat, self._tmat_paths, self._tmat_dim, query_vec, k, exclude)
+        with self._lock:
+            self._ensure_matrix()
+            return self._search(self._tmat, self._tmat_paths, self._tmat_dim, query_vec, k, exclude)
 
     def cosine_top_k_batch(
         self,
@@ -530,49 +569,53 @@ class EmbedStore:
 
         `block` bounds the peak: block × N float32 (256 × 12k notes = 12 MB).
         """
-        self._ensure_matrix()
-        mat, mpaths = self._mat, self._mat_paths
-        if mat is None or not mat.size or k <= 0:
-            return {}
-        row_of = {p: i for i, p in enumerate(mpaths)}
-        present = [key for key in keys if key in row_of]
-        if not present:
-            return {}
-        rows = np.fromiter((row_of[key] for key in present), dtype=np.intp, count=len(present))
-        out: dict[str, list[dict[str, Any]]] = {}
-        for start in range(0, len(present), block):
-            chunk = rows[start:start + block]
-            sims = mat[chunk] @ mat.T          # rows are already unit-normalized
-            if exclude_self:
-                # -inf, not deletion: keeps column indices aligned with mpaths, and
-                # argpartition below takes the k largest, so it can never be picked.
-                sims[np.arange(len(chunk)), chunk] = -np.inf
-            for r, key in enumerate(present[start:start + block]):
-                row = sims[r]
-                if k >= row.size:
-                    cand = np.arange(row.size)
-                else:
-                    part = np.argpartition(-row, k - 1)[:k]
-                    kth = float(row[part].min())
-                    if kth <= 0.0:
-                        # Degenerate: fewer than k strictly-positive neighbours, so
-                        # _search's full-vault branch (0.0-scored off-matrix notes,
-                        # their ordering) decides the tail. Delegate rather than
-                        # reimplement it.
-                        out[key] = self.cosine_top_k(
-                            self._notes[key]["vec"], k=k,
-                            exclude={key} if exclude_self else None,
-                        )
-                        continue
-                    # Every index tied at the k-th score, so the (score, path)
-                    # tie-break below matches _search exactly.
-                    cand = np.flatnonzero(row >= kth)
-                top = heapq.nlargest(k, ((float(row[j]), mpaths[j]) for j in cand.tolist()))
-                out[key] = [
-                    {"path": p, "name": self._notes[p]["name"], "score": round(score, 4)}
-                    for score, p in top
-                ]
-        return out
+        # Same one-acquisition rule as cosine_top_k: mat, mpaths and _notes must
+        # describe the same generation of the index, and a concurrent delete
+        # between them would KeyError on _notes[p]["name"].
+        with self._lock:
+            self._ensure_matrix()
+            mat, mpaths = self._mat, self._mat_paths
+            if mat is None or not mat.size or k <= 0:
+                return {}
+            row_of = {p: i for i, p in enumerate(mpaths)}
+            present = [key for key in keys if key in row_of]
+            if not present:
+                return {}
+            rows = np.fromiter((row_of[key] for key in present), dtype=np.intp, count=len(present))
+            out: dict[str, list[dict[str, Any]]] = {}
+            for start in range(0, len(present), block):
+                chunk = rows[start:start + block]
+                sims = mat[chunk] @ mat.T          # rows are already unit-normalized
+                if exclude_self:
+                    # -inf, not deletion: keeps column indices aligned with mpaths, and
+                    # argpartition below takes the k largest, so it can never be picked.
+                    sims[np.arange(len(chunk)), chunk] = -np.inf
+                for r, key in enumerate(present[start:start + block]):
+                    row = sims[r]
+                    if k >= row.size:
+                        cand = np.arange(row.size)
+                    else:
+                        part = np.argpartition(-row, k - 1)[:k]
+                        kth = float(row[part].min())
+                        if kth <= 0.0:
+                            # Degenerate: fewer than k strictly-positive neighbours, so
+                            # _search's full-vault branch (0.0-scored off-matrix notes,
+                            # their ordering) decides the tail. Delegate rather than
+                            # reimplement it.
+                            out[key] = self.cosine_top_k(
+                                self._notes[key]["vec"], k=k,
+                                exclude={key} if exclude_self else None,
+                            )
+                            continue
+                        # Every index tied at the k-th score, so the (score, path)
+                        # tie-break below matches _search exactly.
+                        cand = np.flatnonzero(row >= kth)
+                    top = heapq.nlargest(k, ((float(row[j]), mpaths[j]) for j in cand.tolist()))
+                    out[key] = [
+                        {"path": p, "name": self._notes[p]["name"], "score": round(score, 4)}
+                        for score, p in top
+                    ]
+            return out
 
 
 # ---------------------------------------------------------------------------
@@ -583,6 +626,10 @@ class EmbedStore:
 # (not the raw vault) is a superset of per-vault keying: it follows a /vault
 # switch automatically and respects tests that monkeypatch `_index_path`.
 _STORE_CACHE: dict[str, "EmbedStore"] = {}
+# The singleton lookup is check-then-set. Two threads racing the first access
+# each built a store, and every upsert made against the loser was dropped at
+# flush — the shared-instance guarantee below is the whole point of the cache.
+_STORE_CACHE_LOCK = threading.Lock()
 
 
 def get_store() -> "EmbedStore":
@@ -593,7 +640,8 @@ def get_store() -> "EmbedStore":
     every reader sees (no reload needed for consistency). Use `clear()` in tests.
     """
     from silica.kernel.recall.paths import path_keyed_singleton
-    return path_keyed_singleton(_STORE_CACHE, str(_index_path()), EmbedStore)
+    with _STORE_CACHE_LOCK:
+        return path_keyed_singleton(_STORE_CACHE, str(_index_path()), EmbedStore)
 
 
 def clear() -> None:

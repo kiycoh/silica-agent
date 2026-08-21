@@ -60,7 +60,8 @@ class FlatMarkdown(Markdown):
         # fuzzy_link off or `nota.md` in prose resolves to the Moldovan ccTLD and
         # renders as a link to http://nota.md; fuzzy_email off keeps the scope at
         # "a URL is clickable", not "prose opens a mail client".
-        parser.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
+        if parser.linkify is not None:  # only present with the [linkify] extra
+            parser.linkify.set({"fuzzy_link": False, "fuzzy_email": False})
         self.parsed = parser.parse(markup)
 
 GROUP_STYLE: dict[str, str] = {

@@ -56,3 +56,16 @@ def test_an_existing_destinations_mode_is_preserved(tmp_path):
     atomic_write_bytes(dest, b"y")
 
     assert (dest.stat().st_mode & 0o777) == 0o640
+
+
+def test_a_new_destination_gets_the_umask_default(tmp_path):
+    """There is no destination mode to preserve on a create, and mkstemp's 0600
+    is nobody's intent: notes are the user's own files, so a syncer or a second
+    account must keep the access an ordinary write would have granted."""
+    reference = tmp_path / "reference.bin"
+    reference.write_bytes(b"x")  # whatever this process's umask yields
+
+    dest = tmp_path / "new.bin"
+    atomic_write_bytes(dest, b"y")
+
+    assert (dest.stat().st_mode & 0o777) == (reference.stat().st_mode & 0o777)

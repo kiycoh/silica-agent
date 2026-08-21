@@ -32,8 +32,6 @@ def vault(tmp_path, monkeypatch):
 
     vault_dir = tmp_path / "vault"
     vault_dir.mkdir()
-    monkeypatch.setenv("SILICA_BACKEND", "fs")
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
     monkeypatch.setattr("silica.kernel.write.checkpoints._store", None)

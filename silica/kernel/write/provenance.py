@@ -35,20 +35,11 @@ from pathlib import Path
 from collections.abc import Callable
 from typing import Any
 
+from silica.kernel.recall.paths import resolve_vault_path
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_PROVENANCE_FILENAME = "provenance.json"
-
-
-def _resolve_vault_path(vault_path: str | None) -> str | None:
-    if vault_path:
-        return vault_path
-    try:
-        from silica.config import CONFIG
-
-        return getattr(CONFIG, "vault_path", None) or None
-    except Exception:
-        return None
 
 
 def _store_path(vault_path: str | None) -> Path | None:
@@ -57,7 +48,7 @@ def _store_path(vault_path: str | None) -> Path | None:
     this: pointing Silica at an existing library used to leave both this and
     `log.md` in the user's root, beside their own README.
     """
-    resolved = _resolve_vault_path(vault_path)
+    resolved = resolve_vault_path(vault_path)
     if not resolved:
         return None
     root = Path(resolved)
@@ -103,11 +94,12 @@ def source_event_date(source_text: str, seen_override: str | None = None) -> str
     return None
 
 
-# ponytail: single-entry memo keyed on (path, mtime_ns, size) — a big re-ingest
+# Single-entry memo keyed on (path, mtime_ns, size) — a big re-ingest
 # calls this once per patch op (bulk._execute_patch → note_authored_by) and would
 # otherwise re-parse the whole ledger every time. Self-invalidating: any writer,
-# in-process or not, moves mtime/size. Widen to an LRU only if two vaults ever
-# interleave reads in one process.
+# in-process or not, moves mtime/size. An LRU would only matter if two vaults
+# ever interleaved reads in one process, which the one-vault-per-process
+# invariant rules out.
 _records_memo: tuple[tuple[str, int, int], list[dict[str, Any]]] | None = None
 
 
@@ -478,7 +470,10 @@ def ungrounded_spans(body: str, source: str) -> list[str]:
         spans += [(s, _norm_math) for s in _DISPLAY_MATH_RE.findall(rest)]
         spans += [(s, _norm_math) for s in _INLINE_MATH_RE.findall(_DISPLAY_MATH_RE.sub("", rest))]
 
-    sources = {_norm_ws: _norm_ws(source), _norm_math: _norm_math(source)}
+    # The key type must be the general callable, not the two specific function
+    # objects mypy infers from the literal, since `norm` below is either one.
+    sources: dict[Callable[[str], str], str] = {
+        _norm_ws: _norm_ws(source), _norm_math: _norm_math(source)}
     out: list[str] = []
     for span, norm in spans:
         s, src = norm(span), sources[norm]
@@ -701,7 +696,7 @@ def citation_of(source_basename: str, *, vault_path: str | None = None) -> dict[
         from silica.kernel.vault_manifest import active_inbox_dir
         from silica.kernel.write import frontmatter
 
-        root = _resolve_vault_path(vault_path)
+        root = resolve_vault_path(vault_path)
         inbox = active_inbox_dir()
         if root and inbox:
             hits = sorted((Path(root) / inbox).rglob(source_basename))

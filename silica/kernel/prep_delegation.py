@@ -245,14 +245,14 @@ def render_steer_feedback(
     for i, r in enumerate(rejected, 1):
         if not isinstance(r, dict):
             continue
-        op = r.get("op") if isinstance(r.get("op"), dict) else None
-        label = f"[{op.get('op', '?')}] \"{op.get('title') or op.get('heading', '?')}\"" if op else "(op not recorded)"
+        rej_op: dict | None = r.get("op") if isinstance(r.get("op"), dict) else None
+        label = f"[{rej_op.get('op', '?')}] \"{rej_op.get('title') or rej_op.get('heading', '?')}\"" if rej_op else "(op not recorded)"
         lines.append(f"\n### Rejected op {i} — {label}")
         lines.append(f"Verdict: REJECTED — {r.get('reason') or 'no reason recorded'}")
-        if op:
+        if rej_op:
             lines.append("Your op was:")
             lines.append("```json")
-            lines.append(json.dumps(_truncate_op_echo(op), ensure_ascii=False, indent=2))
+            lines.append(json.dumps(_truncate_op_echo(rej_op), ensure_ascii=False, indent=2))
             lines.append("```")
 
     if ungrounded:
@@ -305,9 +305,13 @@ def compute_distiller_max_tokens(
     `max_tokens = min(ceiling?, context_window - prompt_tokens - safety_margin)`,
     floored at `_MIN_DISTILLER_OUTPUT_TOKENS`.
 
-    `ceiling <= 0` means "no manual cap" — use all available headroom. This
-    removes the artificial 32k ceiling that was truncating dense batches while
-    still letting an operator pin a hard limit via DISTILLER_MAX_TOKENS.
+    `ceiling <= 0` means "no manual cap" — use all available headroom.
+
+    A 2026-06 note here blamed a 32k ceiling for "truncating dense batches";
+    refuted 2026-08-21: the truncation users see in notes was hub_desc's raw
+    120-char slice, and a 250k ask never once finished for length across a
+    14-file run (0 salvage calls, ~3k mean completion). The caller bounds the
+    default ask with MAX_TOKENS; DISTILLER_MAX_TOKENS pins it explicitly.
     """
     available = context_window - estimate_prompt_tokens(prompt_text) - safety_margin
     available = max(_MIN_DISTILLER_OUTPUT_TOKENS, available)
@@ -442,7 +446,7 @@ def _stitch_bodies(parsed: dict, raw: str) -> None:
     for i, op in enumerate(_body_ops(parsed), 1):
         body = bodies.get(i)
         if body:
-            op[_BODY_FIELD.get(op.get("op"), "snippet")] = body
+            op[_BODY_FIELD.get(str(op.get("op") or ""), "snippet")] = body
             op[VERBATIM_BODY] = True
         else:
             logger.warning(
@@ -512,7 +516,6 @@ def run_distiller(
     from silica.kernel.write.ops import DistillerOutput, DistillerStructure
     from silica.kernel.text.sanitize import parse_json
 
-    _profile = profile or active_distill_profile()
     # Extractive-class runs used to be excluded here, on the claim that a
     # corrupted body breaks the verbatim substring match so the validator
     # rejects it. Measured false for the newline class: the expansion splits
@@ -581,7 +584,7 @@ def run_distiller(
             "escalate": escalate,
             "model": (CONFIG.distill_escalation_model if escalate
                       else CONFIG.worker_model) or CONFIG.model,
-            # ponytail: max_tokens deliberately out of the key. It is derived
+            # max_tokens deliberately out of the key. It is derived
             # from live provider limits, so including it would turn an
             # unreachable provider into a cache miss instead of a replay. Put
             # it in the key if an arm ever needs to vary the output budget on
@@ -607,6 +610,7 @@ def run_distiller(
     # unreachable or the model unmapped.
     context_window = int(os.getenv("MODEL_CONTEXT_WINDOW", "0"))
     ceiling = int(os.getenv("DISTILLER_MAX_TOKENS", "0"))
+    explicit_ceiling = ceiling > 0
     if not context_window or not ceiling:
         from silica.agent.providers import model_limits
         # Same fallback chain as get_provider for the active role.
@@ -620,6 +624,17 @@ def run_distiller(
         window, out_cap = model_limits(w_provider, w_model)
         context_window = context_window or window or 262144
         ceiling = ceiling or out_cap
+    if not explicit_ceiling:
+        # Bound the default ask with the audited MAX_TOKENS (32768: the
+        # token-cost audit measured 256k bad / 32k good on the router pool)
+        # instead of the provider's own out_cap (384k on deepseek). The bare
+        # out_cap ask was justified by a truncation story refuted on run
+        # 262e6847 (see compute_distiller_max_tokens), and it has real costs:
+        # OpenRouter drops pool endpoints advertising less than max_tokens,
+        # and a reasoning model may bill its whole trace against the ask.
+        # DISTILLER_MAX_TOKENS stays the explicit override, both directions;
+        # a genuine length cut still recovers via salvage_distiller_json.
+        ceiling = min(ceiling or (1 << 30), int(os.getenv("MAX_TOKENS", "32768")))
     safety_margin = int(os.getenv("DISTILLER_TOKEN_SAFETY_MARGIN", "2048"))
     max_tokens = compute_distiller_max_tokens(
         budget_text,
@@ -712,7 +727,7 @@ def run_distiller(
                 "body pass failed (%s) — %d op(s) left bodyless; the validate "
                 "floor rejects them downstream, ephemerals survive",
                 e, len(body_ops))
-        if any(not op.get(_BODY_FIELD.get(op.get("op"), "snippet"))
+        if any(not op.get(_BODY_FIELD.get(str(op.get("op") or ""), "snippet"))
                for op in body_ops):
             # A missing ===SILICA-BODY N=== block left an op bodyless; the
             # floor would reject that op again on every replay.
@@ -723,6 +738,6 @@ def run_distiller(
     # and cache_ok gates out salvaged/truncated/bodyless/fallback replies.
     # cache_key doubles as the enabled() witness — it exists only under the
     # flag, so a mid-run flag flip cannot store under a key never computed.
-    if cache_key is not None and cache_ok:
+    if cache_ns is not None and cache_key is not None and cache_ok:
         distill_cache.store(cache_ns, cache_key, parsed)
     return parsed

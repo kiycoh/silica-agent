@@ -109,9 +109,13 @@ def ofm_lint(content, stem=None):
         if len(tag_list) > limits["max_tags"]:
             F.append(f"too many tags ({len(tag_list)}); max {limits['max_tags']}")
 
-    # AI field: must be explicitly boolean
-    if not isinstance(data.get("AI"), bool):
-        V.append("frontmatter 'AI' missing or not boolean")
+    # AI field: explicitly boolean, or the string `partial` (an agent section
+    # appended to a user-authored note — see contested.reliability_tier)
+    _ai = data.get("AI")
+    if not isinstance(_ai, bool) and not (
+        isinstance(_ai, str) and _ai.strip().lower() == "partial"
+    ):
+        V.append("frontmatter 'AI' missing or not boolean/partial")
 
     # last modified: date prefix required, time suffix tolerated
     lm = data.get("last modified")

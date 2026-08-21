@@ -225,6 +225,9 @@ class CooccurStore:
         self._stem_postings: dict[str, dict[str, int]] | None = None
         # ({path: total stem count}, mean) for the BM25 length term
         self._doc_lengths: tuple[dict[str, int], float] | None = None
+        # two-way note_edges adjacency (mirrors the _adj cache); also reset
+        # by the note-edge writers, which skip _invalidate on purpose
+        self._note_edges_adj: dict[str, dict[str, float]] | None = None
         self._load()
 
     # --- caches ---
@@ -236,6 +239,7 @@ class CooccurStore:
         self._note_nodes_cache = {}
         self._stem_postings = None
         self._doc_lengths = None
+        self._note_edges_adj = None
 
     # --- I/O ---
     def _load(self) -> None:
@@ -283,6 +287,7 @@ class CooccurStore:
         """Record one derived edge under its ordered pair (min, max)."""
         lo, hi = sorted((cooccur_key(a), cooccur_key(b)))
         self._note_edges.setdefault(lo, {})[hi] = score
+        self._note_edges_adj = None
 
     def clear_note_edges(self, path: str) -> None:
         """Drop every edge that touches `path` (both directions)."""
@@ -292,6 +297,7 @@ class CooccurStore:
             nbrs.pop(key, None)          # edges where key is the max endpoint
             if not nbrs:
                 self._note_edges.pop(lo, None)
+        self._note_edges_adj = None
 
     def _prune_orphan_edges(self) -> None:
         """Drop edges whose endpoint has no contribution (integrity, on load).
@@ -313,16 +319,20 @@ class CooccurStore:
     def note_edges_for(self, path: str) -> dict[str, float]:
         """All derived neighbours of `path` -> score, both directions.
 
-        ponytail: O(E) scan for the reverse direction; E ~ 0.57*N (sparse), so
-        cheap. If a consumer ever hot-loops this, cache a two-way adjacency
-        invalidated on set/clear (mirrors the _adj cache).
+        Served from a two-way adjacency built once per mutation (one O(E)
+        pass) instead of an O(E) reverse scan per call: path walks hot-loop
+        this (mindmap.reading_path calls it per visited node), which made
+        them O(V*E). Fresh dict per call, like note_nodes: callers may
+        mutate their result without corrupting the cache.
         """
-        key = cooccur_key(path)
-        out = dict(self._note_edges.get(key, {}))  # key is the min endpoint
-        for lo, nbrs in self._note_edges.items():
-            if lo != key and key in nbrs:          # key is the max endpoint
-                out[lo] = nbrs[key]
-        return out
+        if self._note_edges_adj is None:
+            adj: dict[str, dict[str, float]] = {}
+            for lo, nbrs in self._note_edges.items():
+                for hi, score in nbrs.items():
+                    adj.setdefault(lo, {})[hi] = score
+                    adj.setdefault(hi, {})[lo] = score
+            self._note_edges_adj = adj
+        return dict(self._note_edges_adj.get(cooccur_key(path), {}))
 
     # --- lookup ---
     def paths(self) -> list[str]:
@@ -509,10 +519,10 @@ class CooccurStore:
         # Steps 5–7 — score, rank, surface, label
         result: dict[int, str] = {}
         ranked_by_i: dict[int, list[str]] = {}
-        for orig_i, tf in zip(valid_indices, tf_list):
+        for orig_i, counts in zip(valid_indices, tf_list):
             scored = [
                 (stem, count * math.log(1 + N / df[stem]))
-                for stem, count in tf.items()
+                for stem, count in counts.items()
             ]
             ranked = sorted(scored, key=lambda kv: (-kv[1], kv[0]))
             ranked_by_i[orig_i] = [stem for stem, _score in ranked]

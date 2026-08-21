@@ -113,9 +113,19 @@ def handle_lint(fsm: "InjectorFSM") -> None:
             deferred_stems = set(fsm._chunk_ctx.get("deferred_stems", []))
             deferred_stems |= fsm._run_concept_stems
 
+            # Exempt every path a phase of THIS chunk mutated, from the
+            # rollback transaction (the single source of truth: SNAPSHOT
+            # seeds it, every mutating phase appends). ops alone missed the
+            # HUB_UPDATE/AUTOLINK/BACKLINK edits, so a pre-existing dangling
+            # link in the hub's own planned-topic list read as "introduced"
+            # and rolled back a healthy chunk (3 of the 6 rollbacks, run
+            # 262e6847). validate deliberately keeps unresolved wikilinks in
+            # run-authored content as forward-refs, so rule 2's business is
+            # only notes this chunk never touched.
             patched_paths = frozenset(
-                p for op in ops
-                if op.op in (OpType.patch, OpType.overwrite) and (p := op.touched_ref())
+                {p for op in ops
+                 if op.op in (OpType.patch, OpType.overwrite) and (p := op.touched_ref())}
+                | txn_touched_paths(fsm._txn)
             )
 
             success, errors = check_graph_regression(
@@ -435,6 +445,21 @@ def _residue_pool(fsm: "InjectorFSM"):
     return pool
 
 
+def txn_touched_paths(txn) -> set[str]:
+    """Every path the chunk's transaction recorded a mutation for, any phase.
+
+    Reads Txn.inverses (InverseOp .path / .to_path), tolerating the serialized
+    dict form the persisted snapshot fallback carries.
+    """
+    out: set[str] = set()
+    for inv in getattr(txn, "inverses", None) or []:
+        for key in ("path", "to_path"):
+            val = inv.get(key) if isinstance(inv, dict) else getattr(inv, key, None)
+            if val:
+                out.add(val)
+    return out
+
+
 def maybe_dispatch_residue_decompose(fsm: "InjectorFSM", fi: int,
                                      inbox_file: str) -> None:
     """PAYLOAD-attach seam: start decomposing the source into atomic facts.
@@ -468,8 +493,9 @@ def maybe_dispatch_residue_check(fsm: "InjectorFSM") -> None:
     evidence on the MAIN thread (reads snapshotted, so the background judge
     calls never race autolink/backlink edits of the same notes), then submit
     the judge batches to the pool; _residue_gate assembles the verdicts.
-    Mirrors the gate's own refusals (mid-file chunk, draft form, failed
-    file). When decompose is missing or still running, the gate simply runs
+    Mirrors the gate's own refusals (mid-file chunk, draft form). Failed
+    files are verified like any other — see _residue_gate.
+    When decompose is missing or still running, the gate simply runs
     the whole verification inline. Best-effort: never raises."""
     try:
         fi, ci = fsm._chunk_flat_to_fi_ci.get(
@@ -479,10 +505,6 @@ def maybe_dispatch_residue_check(fsm: "InjectorFSM") -> None:
             return
         if fsm.context.get(f"file_{fi}_form") == "draft":
             return
-        fi_prefix = f"f{fi}_"
-        if any(t.status == "failed" for t in fsm.progress.tasks
-               if t.id.startswith(fi_prefix)):
-            return  # the gate refuses failed files anyway
         fut = getattr(fsm, "_residue_decompose", {}).get(fi)
         if fut is None or not fut.done():
             return
@@ -604,10 +626,20 @@ def _residue_gate(
     round: the round was refuted by the 2026-08-16 ROI audit (it re-added
     already-present facts at 60-170s each; the old open-enumeration check
     read 1.4-4% of the notes it judged). Draft files skip (body intact by
-    construction); failed files keep the existing retry semantics untouched.
+    construction). Files with failed chunks are verified like any other: a
+    rolled-back chunk's facts are genuinely absent and the deferred store is
+    their ONLY recovery channel — rollback does not re-queue ops, and
+    provenance marks the file nucleated so a folder re-run skips it. The old
+    silent skip lost exactly that recovery (run 262e6847: the 6 files without
+    verification were the 6 with a failed chunk). put_residue_facts keys the
+    bundle by content hash, so a deliberate full re-nucleate stays idempotent.
     """
     if file_has_failure:
-        return
+        logger.info(
+            "CLEANUP: %s had failed chunk(s) — residue verification proceeds "
+            "(missing facts route to the deferred store).",
+            os.path.basename(inbox_file),
+        )
     if fsm.context.get(f"file_{fi}_form") == "draft":
         return
     # The round is gone, so nothing forces this gate to wait for the judge:

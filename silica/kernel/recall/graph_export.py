@@ -23,6 +23,8 @@ silica.ui.web.graph_view — kept out of the kernel so this layer stays offline.
 """
 from __future__ import annotations
 
+from typing import Any
+
 import colorsys
 import logging
 from collections import Counter
@@ -837,7 +839,13 @@ def ctx_from_report(report) -> dict[str, dict]:
     return ctx
 
 
-_distance_graph_memo: dict[tuple[str, str], object] = {}  # (epoch, folder) -> nx.Graph
+# (epoch, folder) -> nx.Graph. `Any`, not `object`: the value IS a graph and is
+# used as one three lines below the read, and `object` only moved the knowledge
+# into a comment.
+_distance_graph_memo: dict[tuple[str, str], Any] = {}
+# Entry bound: the epoch sweep already drops stale epochs, so this only caps
+# how many FOLDER scopes can pin a graph at once inside one epoch. Oldest out.
+_DISTANCE_MEMO_CAP = 8
 
 
 def graph_distances(source: str, *, folder: str = "") -> dict[str, int] | None:
@@ -852,9 +860,9 @@ def graph_distances(source: str, *, folder: str = "") -> dict[str, int] | None:
     silica_related call pays one of these, and building the decorated
     node/edge payload dominated it. A hit costs one vault stat walk (~10 ms
     per 1k notes) instead of the full build; the BFS reads the cached graph,
-    never mutates it.
-    # ponytail: the memo pins one whole nx.Graph per (epoch, folder) in RAM
-    # for the epoch's lifetime; evict on size if a huge vault ever minds.
+    never mutates it. The memo is bounded at _DISTANCE_MEMO_CAP folder
+    scopes (oldest evicted), so many scoped calls cannot pin one graph per
+    folder for the epoch's lifetime.
     """
     try:
         import networkx as nx
@@ -870,6 +878,8 @@ def graph_distances(source: str, *, folder: str = "") -> dict[str, int] | None:
                 for k in [k for k in _distance_graph_memo if k[0] != epoch]:
                     del _distance_graph_memo[k]
                 _distance_graph_memo[(epoch, folder)] = G
+                while len(_distance_graph_memo) > _DISTANCE_MEMO_CAP:
+                    del _distance_graph_memo[next(iter(_distance_graph_memo))]
     except Exception:
         return None
     src = source if source in G else source + ".md"

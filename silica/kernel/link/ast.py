@@ -53,12 +53,17 @@ def extract_links(content: str) -> list[str]:
             t = t.strip().replace("''", "'")
             if not t:
                 continue
-            # If it's an internal link, keep it as is
+            # [[#Heading]] / [[^block]] point INSIDE the note that carries
+            # them: they are not note links, and no resolver downstream can
+            # ever match one, so each landed in the backends' unresolved set
+            # and read to the graph gate as a newly introduced dangling link —
+            # 2 of the 6 chunk rollbacks in the 2026-08-21 machine_learning run
+            # were an intra-note anchor. link/sweep.py's regex already refuses
+            # to match them; this is the outlier that did not.
             if t.startswith('#') or t.startswith('^'):
-                pass
-            else:
-                # Split off heading/section part
-                t = t.split('#', 1)[0].strip()
+                continue
+            # Split off heading/section part
+            t = t.split('#', 1)[0].strip()
             if not t:
                 continue
             if t.lower().endswith(NON_MD_EXTENSIONS):

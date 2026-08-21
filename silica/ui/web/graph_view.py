@@ -155,6 +155,10 @@ def render_html(
     nodes_json = json.dumps(nodes, ensure_ascii=False).replace("</", "<\\/")
     edges_json = json.dumps(edges, ensure_ascii=False).replace("</", "<\\/")
 
+    # The title is a tool argument the model chooses, so it is untrusted markup
+    # in both slots it lands in (<title> and the sidebar <h1>).
+    title = html.escape(title)
+
     n_notes      = sum(1 for n in nodes if n.get("type") != "ghost")
     n_ghost      = sum(1 for n in nodes if n.get("type") == "ghost")
     n_extracted  = sum(1 for e in edges if e.get("type") == "EXTRACTED")
@@ -407,8 +411,6 @@ def render_html(
     .drawer-section{{display:flex;flex-direction:column;gap:4px}}
     .drawer-label{{font-size:10px;color:var(--ash-dim);text-transform:uppercase;letter-spacing:.18em}}
     .drawer-val{{font-size:13px;color:var(--frost)}}
-    .tag{{display:inline-block;padding:2px 7px;background:var(--slate-2);border:1px solid var(--line);
-           font-size:11px;color:var(--ash);margin:2px}}
     #close-drawer{{align-self:flex-end;cursor:pointer;color:var(--ash-dim);font-size:18px;line-height:1}}
     #close-drawer:hover{{color:var(--frost)}}
     #search-results{{display:none;flex-direction:column;gap:1px;max-height:260px;overflow-y:auto;
@@ -616,10 +618,6 @@ def render_html(
     <div class="drawer-label">Backlinks</div>
     <div id="drawer-in" class="drawer-val">&#8212;</div>
   </div>
-  <div id="drawer-tags-section" class="drawer-section" style="display:none">
-    <div class="drawer-label">Tags</div>
-    <div id="drawer-tags"></div>
-  </div>
 </div>
 
 <script>
@@ -785,8 +783,8 @@ let showNotes = true;    // the macro read: zones alone in the frame
 // One hue per community: every node in a community shares the exact color,
 // hub or leaf. Degree is shown by size, never by washing the hue out.
 function nodeColor(n) {{
-  // ponytail: solid darken-to-background dim; switch to rgba() only if visual
-  // verification shows 3d-force-graph honours per-node alpha.
+  // Solid darken-to-background dim, decided: rgba() only if visual
+  // verification ever shows 3d-force-graph honours per-node alpha.
   // Neutrals are blue-violet, never gray: the mascot has no gray facet, only
   // unlit ones. Each value below holds the luminance of the gray it replaces.
   if (n._dim) return GP.dim;
@@ -794,8 +792,8 @@ function nodeColor(n) {{
   // The node's colour is the STRUCTURAL community, always, whatever else is on
   // screen. It used to hand the channel over to the semantic partition while
   // the zone layer was up, which read as a bug and was one: ADR-0023 says the
-  // two partitions "coesistono e non si sostituiscono mai" and "non condividono
-  // ne' chiave colore ne' spazio di id", and a channel that swaps between them
+  // two partitions "coexist and never substitute for each other" and "share
+  // neither colour key nor id space", and a channel that swaps between them
   // is a substitution by definition. The semantic layer owns the hulls and the
   // names; it does not get to repaint the notes.
   const c = n.color || {{}};
@@ -1519,6 +1517,7 @@ function buildGraph() {{
     .onNodeDragEnd(() => G.d3AlphaMin(ALPHA_MIN))
     .onEngineStop(() => {{
       simRunning = false;
+      for (const k in mstMemo) delete mstMemo[k];  // positions just moved
       saveLayout();
       measureGraphRadius();   // the label thresholds are a fraction of it
       if (fitPending) {{ fitPending = false; fitWhenPainted(G); }}
@@ -1784,9 +1783,12 @@ const ZONE_ALPHA = 0.13;   // a backdrop; the notes stay the figure
 // Prim, O(m²) — the textbook array form, not the naive rescan: with the tree
 // scanned per candidate it is O(m³) and cost 7.9ms a frame on the largest zone
 // here, against 1.0ms for all 18 zones this way.
-// ponytail: recomputed every frame, no cache. It is a millisecond and the
-// positions move for most of the time a zone is on screen; memoize on a
-// settled-layout flag only if a vault ten times this size ever complains.
+//
+// While the engine is stopped the positions are frozen, so drawZones serves
+// each zone's tree from mstMemo (cleared on every onEngineStop, bypassed
+// while simRunning): a pan or zoom over a settled layout stops paying Prim
+// per frame. Member count guards a same-id zone whose membership changed.
+const mstMemo = {{}};
 function zoneMST(ms) {{
   if (ms.length < 2) return [];
   const n = ms.length, used = new Array(n).fill(false),
@@ -1844,7 +1846,12 @@ function drawZones(ctx) {{
       ctx.moveTo(n.x + R, n.y);
       ctx.arc(n.x, n.y, R, 0, 2 * Math.PI, true);
     }});
-    zoneMST(members).forEach(([a, b]) => {{
+    let mst = !simRunning && mstMemo[z.id];
+    if (!mst || mst.n !== members.length) {{
+      mst = {{ n: members.length, seg: zoneMST(members) }};
+      if (!simRunning) mstMemo[z.id] = mst;
+    }}
+    mst.seg.forEach(([a, b]) => {{
       const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 1;
       const nx = -dy / len * w, ny = dx / len * w;
       ctx.moveTo(a.x + nx, a.y + ny);
@@ -2080,8 +2087,8 @@ function toggleCommunitySort() {{
 }}
 
 // --- Search → ranked results → fly-to-focus -------------------------------
-// Search by what people actually remember: title first, then path, then
-// #tags, then the cluster they were browsing. Choosing a result flies the
+// Search by what people actually remember: title first, then path, then the
+// cluster they were browsing. Choosing a result flies the
 // camera to the node and selects it — the graph answers "where is it", not
 // just "is it somewhere in this cloud".
 let results = [], selIdx = -1;
@@ -2093,7 +2100,6 @@ function scoreNode(n, q) {{
   if (label.startsWith(q))    return 4;
   if (label.includes(q))      return 3;
   if ((n.path || '').toLowerCase().includes(q)) return 2;
-  if ((n.tags || []).some(t => t.toLowerCase().includes(q))) return 2;
   const cl = COMM_LABELS[n.group];
   if (cl && cl.toLowerCase().includes(q)) return 1;
   return 0;
@@ -2200,16 +2206,6 @@ function selectNode(node) {{
   document.getElementById("drawer-meta").textContent = `${{node.type}}${{commText}}${{betwText}}`;
   document.getElementById("drawer-out").textContent = outDeg[node.id] || 0;
   document.getElementById("drawer-in").textContent  = inDeg[node.id]  || 0;
-
-  const tagsSection = document.getElementById("drawer-tags-section");
-  const tags = node.tags || [];
-  if (tags.length) {{
-    document.getElementById("drawer-tags").innerHTML =
-      tags.map(t => `<span class="tag">#${{t}}</span>`).join("");
-    tagsSection.style.display = "flex";
-  }} else {{
-    tagsSection.style.display = "none";
-  }}
 
   document.getElementById("drawer").classList.add("open");
 }}

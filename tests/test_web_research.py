@@ -154,13 +154,29 @@ class _MojeekCaptcha:
     text = '<html><head><title>Captcha</title></head><body>...</body></html>'
 
 
-def _fake_get(resp):
-    def fake_get(url, params=None, headers=None, timeout=None, follow_redirects=None):
-        assert url == wr._MOJEEK_URL
-        assert params == {"q": "graph theory"}
-        return resp
+def _serve_lanes(monkeypatch, *, mojeek=None, wikipedia=None) -> list[tuple]:
+    """Stub the two lanes that go through `_web_fetch._fetch`.
 
-    return fake_get
+    Mojeek runs through it as well as Wikipedia — it is the fetcher that
+    revalidates every redirect hop, and a raw `follow_redirects=True` get is
+    exactly the SSRF hole it exists to close — so httpx.get no longer sees that
+    lane at all. One fake serves both and dispatches on the URL; an Exception
+    stands for a lane that is down, and a lane left unstubbed must not run.
+    Returns the (url, headers) pairs it was called with.
+    """
+    seen: list[tuple] = []
+
+    def fake_fetch(url, headers=None):
+        seen.append((url, headers))
+        resp = mojeek if url.startswith(wr._MOJEEK_URL) else wikipedia
+        if resp is None:
+            raise AssertionError(f"lane must not run: {url}")
+        if isinstance(resp, Exception):
+            raise resp
+        return resp, url
+
+    monkeypatch.setattr(wr._web_fetch, "_fetch", fake_fetch)
+    return seen
 
 
 def test_web_search_falls_back_to_mojeek_when_ddg_challenges(monkeypatch):
@@ -168,11 +184,11 @@ def test_web_search_falls_back_to_mojeek_when_ddg_challenges(monkeypatch):
     own crawl with its own rate limits, so it is tried before the encyclopedia."""
     monkeypatch.setattr(CONFIG, "tavily_api_key", "")
     monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
-    monkeypatch.setattr(wr.httpx, "get", _fake_get(_FakeMojeekResp()))
-    monkeypatch.setattr(wr._web_fetch, "_fetch", _wikipedia_must_not_run)
+    seen = _serve_lanes(monkeypatch, mojeek=_FakeMojeekResp())
 
     items = json.loads(wr.web_search("graph theory"))
 
+    assert seen[0][0] == f"{wr._MOJEEK_URL}?q=graph+theory"
     assert items == [
         {"title": "Mojeek One", "url": "https://m1.test/page",
          "content": "Snippet one & a bit."},
@@ -191,7 +207,7 @@ def test_mojeek_runs_ahead_of_a_set_key(monkeypatch):
         return _Challenged()  # only DDG should be posted to at all
 
     monkeypatch.setattr(wr.httpx, "post", fake_post)
-    monkeypatch.setattr(wr.httpx, "get", _fake_get(_FakeMojeekResp()))
+    _serve_lanes(monkeypatch, mojeek=_FakeMojeekResp())
 
     items = json.loads(wr.web_search("graph theory"))
 
@@ -215,7 +231,7 @@ def test_mojeek_parse_does_not_depend_on_anchor_order(monkeypatch):
     class _Swapped(_FakeMojeekResp):
         text = swapped
 
-    monkeypatch.setattr(wr.httpx, "get", _fake_get(_Swapped()))
+    _serve_lanes(monkeypatch, mojeek=_Swapped())
 
     assert wr._mojeek_search("graph theory")[0] == {
         "title": "Mojeek One",
@@ -228,14 +244,14 @@ def test_mojeek_captcha_and_empty_page_both_raise(monkeypatch):
     """A 200 captcha and a 200 whose markup no longer parses must both raise: a
     silent [] would spend the loop's whole budget on a lane that stopped
     answering and never reach the ones that still do."""
-    monkeypatch.setattr(wr.httpx, "get", _fake_get(_MojeekCaptcha()))
+    _serve_lanes(monkeypatch, mojeek=_MojeekCaptcha())
     with pytest.raises(ValueError, match="challenged"):
         wr._mojeek_search("graph theory")
 
     class _Renamed(_FakeMojeekResp):
         text = _MOJEEK_HTML.replace("results-standard", "results-v2")
 
-    monkeypatch.setattr(wr.httpx, "get", _fake_get(_Renamed()))
+    _serve_lanes(monkeypatch, mojeek=_Renamed())
     with pytest.raises(ValueError, match="no parseable results"):
         wr._mojeek_search("graph theory")
 
@@ -260,20 +276,15 @@ def test_web_search_falls_back_to_wikipedia_when_ddg_challenges(monkeypatch):
     too, the encyclopedia is what is left."""
     monkeypatch.setattr(CONFIG, "tavily_api_key", "")
     monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
-    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _MojeekCaptcha())
-    seen = []
-
-    def fake_fetch(url, headers=None):
-        seen.append((url, headers))
-        return _FakeWPResp(), url
-
-    monkeypatch.setattr(wr._web_fetch, "_fetch", fake_fetch)
+    seen = _serve_lanes(monkeypatch, mojeek=_MojeekCaptcha(), wikipedia=_FakeWPResp())
 
     items = json.loads(wr.web_search("graph theory"))
 
-    assert seen[0][0].startswith("https://en.wikipedia.org/w/api.php?")
-    assert "list=search" in seen[0][0] and "srsearch=graph+theory" in seen[0][0]
-    assert "silica-agent" in seen[0][1]["User-Agent"]  # Wikimedia UA policy
+    # Both lanes now share one fetcher, and mojeek is tried first, so the
+    # encyclopedia's call is picked out by URL rather than by position.
+    wp = next(s for s in seen if s[0].startswith("https://en.wikipedia.org/w/api.php?"))
+    assert "list=search" in wp[0] and "srsearch=graph+theory" in wp[0]
+    assert "silica-agent" in wp[1]["User-Agent"]  # Wikimedia UA policy
     assert items == [
         {"title": "Graph theory",
          "url": "https://en.wikipedia.org/wiki/Graph_theory",
@@ -573,7 +584,7 @@ def test_web_research_note_names_the_lanes_that_answered(tmp_vault, monkeypatch)
     rather than as a thin web."""
     monkeypatch.setattr(CONFIG, "tavily_api_key", "")
     monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
-    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _FakeMojeekResp())
+    _serve_lanes(monkeypatch, mojeek=_FakeMojeekResp())
     _patch_run_agent_calling_web_search(monkeypatch, calls=2)
 
     body = (Path(CONFIG.vault_path) / wr.web_research("graph theory")).read_text(
@@ -602,7 +613,7 @@ def test_lane_line_is_per_turn_not_cumulative(tmp_vault, monkeypatch):
     the record before the loop, so a recovered DDG stops reporting a fallback."""
     monkeypatch.setattr(CONFIG, "tavily_api_key", "")
     monkeypatch.setattr(wr.httpx, "post", lambda *a, **k: _Challenged())
-    monkeypatch.setattr(wr.httpx, "get", lambda *a, **k: _FakeMojeekResp())
+    _serve_lanes(monkeypatch, mojeek=_FakeMojeekResp())
     _patch_run_agent_calling_web_search(monkeypatch, calls=1)
     wr.web_research("graph theory")
 

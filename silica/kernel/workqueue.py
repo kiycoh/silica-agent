@@ -253,17 +253,26 @@ class WorkQueue:
             return dict(Counter(it.status for it in self._items))
 
     def _persist(self) -> None:
-        # ponytail: write-only debug dump — workqueue.json has no reader/from_dict,
-        # so this is post-mortem inspection only. Add atomic_write_bytes + a loader
-        # if programmatic resume is ever built (until then, no resume path exists).
+        # Atomic (tmp + rename): a crash mid-dump must not leave the one
+        # post-mortem artifact torn.
+        # Write-only debug dump — workqueue.json has no reader/from_dict, so
+        # this is post-mortem inspection only; a loader arrives with resume,
+        # if resume is ever built (until then, no resume path exists).
         if not self._run_dir:
             return
         try:
+            from silica.kernel.recall.paths import atomic_write_bytes
+
             self._run_dir.mkdir(parents=True, exist_ok=True)
+            # The rename stays INSIDE the lock: snapshotting under it and
+            # replacing outside lets a thread that snapshotted an older list
+            # win the race to os.replace and clobber a fresher dump with a
+            # stale one — atomic per write, lost update across writes.
             with self._lock:
                 payload = [it.to_dict() for it in self._items]
-                (self._run_dir / "workqueue.json").write_bytes(
-                    orjson.dumps(payload, option=orjson.OPT_INDENT_2)
+                atomic_write_bytes(
+                    self._run_dir / "workqueue.json",
+                    orjson.dumps(payload, option=orjson.OPT_INDENT_2),
                 )
         except Exception:
             # Persistence is best-effort; never break the pipeline over it.
@@ -271,7 +280,7 @@ class WorkQueue:
 
 
 _BATCH_CONCEPT_KEYS = ("concept", "excerpt", "score", "full_score", "title_score", "inbox_file")
-# ponytail: fixed cap bounds the batch prompt; raise if real families outgrow it
+# Fixed cap bounds the batch prompt; raise it the day real families outgrow it.
 _MAX_FAMILY_BATCH = 8
 
 

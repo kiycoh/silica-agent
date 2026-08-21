@@ -49,14 +49,8 @@ def test_read_stub_names_the_call():
     assert '{"name": "Foo"}' in out
 
 
-def test_eager_stub_uses_tool_summarize_when_present():
-    tool = SimpleNamespace(summarize=lambda r: f"validated={r['validated_count']}")
-    result_str = json.dumps({"validated_count": 7, "rejected_ops": [1, 2, 3]})
-    assert eager_stub(tool, result_str) == "validated=7"
-
-
-def test_eager_stub_falls_back_to_generic_without_summarize():
-    tool = SimpleNamespace(summarize=None)
+def test_eager_stub_projects_a_dict_result_generically():
+    tool = SimpleNamespace()
     result_str = json.dumps({"ok": True, "items": list(range(40))})
     out = eager_stub(tool, result_str)
     assert "ok=True" in out
@@ -64,7 +58,7 @@ def test_eager_stub_falls_back_to_generic_without_summarize():
 
 
 def test_eager_stub_passes_through_non_dict_payloads():
-    tool = SimpleNamespace(summarize=None)
+    tool = SimpleNamespace()
     assert eager_stub(tool, "plain string body") == "plain string body"
 
 

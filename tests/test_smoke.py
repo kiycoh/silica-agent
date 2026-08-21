@@ -27,8 +27,10 @@ def test_tool_json_schema():
 def test_config_loads():
     """Config singleton should load without errors."""
     from silica.config import CONFIG
+    from silica.driver import driver_kind
     # model may legitimately be empty (fail-fast default — see test_config_failfast)
-    assert CONFIG.backend == "fs"
+    assert driver_kind() == "fs"
+    assert CONFIG.vault_path is not None
 
 
 def test_driver_base_types():
@@ -135,11 +137,9 @@ def test_inbox_indexing_and_external_reads(tmp_path):
     
     # Save original config
     orig_inbox = CONFIG.inbox_dir
-    orig_backend = CONFIG.backend
     orig_vault = CONFIG.vault_path
     
     CONFIG.inbox_dir = "Inbox"
-    CONFIG.backend = "fs"
     CONFIG.vault_path = str(vault_dir)
     
     try:
@@ -177,7 +177,6 @@ def test_inbox_indexing_and_external_reads(tmp_path):
         
     finally:
         CONFIG.inbox_dir = orig_inbox
-        CONFIG.backend = orig_backend
         CONFIG.vault_path = orig_vault
 
 

@@ -357,7 +357,6 @@ def tmp_vault(tmp_path, monkeypatch):
 
     vault_dir = tmp_path / "vault"
     vault_dir.mkdir()
-    monkeypatch.setattr(silica.config.CONFIG, "backend", "fs")
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault_dir))
     silica.driver._driver = None  # reset lazy singleton
 

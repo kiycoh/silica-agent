@@ -212,6 +212,23 @@ def dedup_bounds(larger_path: str, *, hub: str | None = None) -> CapabilityBound
     )
 
 
+def _single_overwrite_bounds(path: str, name: str, *, hub: str | None) -> CapabilityBounds:
+    """One-note overwrite envelope: a single `overwrite` of the framework-derived
+    `path`, hub never touchable. `name` sets log attribution.
+
+    The three callers below all guard framework-computed content (a frontmatter
+    key), never a model-authored body — which is why they may overwrite where
+    dedup_bounds must stay patch-only. They differ ONLY in that log name.
+    """
+    key = _norm_path(path)
+    return CapabilityBounds(
+        name=name,
+        allowed_ops=frozenset({OpType.overwrite}),
+        target_predicate=lambda p: _norm_path(p) == key,
+        forbidden_paths=frozenset({hub} if hub else set()),
+    )
+
+
 def dedup_supersede_bounds(loser_path: str, *, hub: str | None = None) -> CapabilityBounds:
     """Supersede bounds: one `overwrite` of the note a merge just absorbed.
 
@@ -219,45 +236,26 @@ def dedup_supersede_bounds(loser_path: str, *, hub: str | None = None) -> Capabi
     key), never model-authored — the envelope exists so the write cannot drift
     onto another path if that ever changes.
     """
-    loser_key = _norm_path(loser_path)
-    return CapabilityBounds(
-        name="dedup_supersede",
-        allowed_ops=frozenset({OpType.overwrite}),
-        target_predicate=lambda p: _norm_path(p) == loser_key,
-        forbidden_paths=frozenset({hub} if hub else set()),
-    )
+    return _single_overwrite_bounds(loser_path, "dedup_supersede", hub=hub)
 
 
 def dedup_alias_bounds(winner_path: str, *, hub: str | None = None) -> CapabilityBounds:
     """Alias bounds: one `overwrite` of the note a merge just absorbed INTO.
 
-    Sibling of dedup_supersede_bounds on the other side of the merge. Same
-    reason for existing separately from dedup_bounds: the content is
-    framework-computed (one frontmatter alias key), while dedup_bounds guards a
-    model-authored body and must stay patch-only, or a merge could rewrite the
-    note it was supposed to append to.
+    Sibling of dedup_supersede_bounds on the other side of the merge. Separate
+    from dedup_bounds, which guards a model-authored body and must stay
+    patch-only, or a merge could rewrite the note it was supposed to append to.
     """
-    winner_key = _norm_path(winner_path)
-    return CapabilityBounds(
-        name="dedup_alias",
-        allowed_ops=frozenset({OpType.overwrite}),
-        target_predicate=lambda p: _norm_path(p) == winner_key,
-        forbidden_paths=frozenset({hub} if hub else set()),
-    )
+    return _single_overwrite_bounds(winner_path, "dedup_alias", hub=hub)
 
 
 def alias_consolidation_bounds(canonical_path: str) -> CapabilityBounds:
     """One `overwrite` of the note gaining framework-computed `aliases:` keys.
 
-    Same envelope shape as dedup_alias_bounds, own name for log attribution:
-    this write comes from the /aliases consolidation pass, not from a merge.
+    Same envelope as dedup_alias_bounds, own name for log attribution: this
+    write comes from the /aliases consolidation pass, not from a merge.
     """
-    canonical_key = _norm_path(canonical_path)
-    return CapabilityBounds(
-        name="alias_consolidation",
-        allowed_ops=frozenset({OpType.overwrite}),
-        target_predicate=lambda p: _norm_path(p) == canonical_key,
-    )
+    return _single_overwrite_bounds(canonical_path, "alias_consolidation", hub=None)
 
 
 def _single_write_bounds(spoke_path: str, name: str, *, hub: str | None) -> CapabilityBounds:

@@ -23,7 +23,6 @@ def vault(tmp_path, monkeypatch):
     (vault_dir / "Concepts" / "Boats.md").write_text(
         "# Boats\n\nsailing boat harbour\n", encoding="utf-8"
     )
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
     yield vault_dir
@@ -112,7 +111,6 @@ def test_force_rebuild_refreezes_wrong_frozen_language(tmp_path, monkeypatch):
         "# Algoritmi\n\nGli algoritmi della rete sono ottimizzati per la performance.\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.config.CONFIG.cooccurrence_lang", "auto")
     monkeypatch.setattr("silica.driver._driver", None)
@@ -134,7 +132,6 @@ def test_force_rebuild_refreezes_wrong_frozen_language(tmp_path, monkeypatch):
 def test_refresh_empty_vault_returns_error(tmp_path, monkeypatch):
     vault_dir = tmp_path / "empty_vault"
     vault_dir.mkdir()
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
     from silica.tools.composed import silica_cooccurrence_refresh

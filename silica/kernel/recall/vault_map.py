@@ -140,10 +140,10 @@ def build_vault_map(
                 )
                 cluster_labels: list[str] = []
                 for members in communities[:max_clusters]:
-                    top = sorted(
-                        members, key=lambda s: deg.get(s, 0.0), reverse=True
+                    top_nodes = sorted(
+                        members, key=lambda n: deg.get(n, 0.0), reverse=True
                     )[:2]
-                    label = " · ".join(store.node_label(s) for s in top)
+                    label = " · ".join(store.node_label(n) for n in top_nodes)
                     if label:
                         cluster_labels.append(label)
                 if cluster_labels:

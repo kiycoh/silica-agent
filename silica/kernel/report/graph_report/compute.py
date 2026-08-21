@@ -63,13 +63,16 @@ def _is_staging(path: str) -> bool:
     return bool(done) and p.casefold().startswith(done + "/")
 
 
-def _index_stores_sig(with_embeddings: bool, with_cooccurrence: bool) -> tuple:
+def _index_stores_sig(with_embeddings: bool, with_cooccurrence: bool,
+                      analytics: bool = False) -> tuple:
     """(mtime_ns, size) of the index-side stores these flags pull in.
 
     They live in ~/.silica/index/, outside the vault walk `vault_epoch`
-    hashes, so a re-embed or a co-occurrence refresh changes the report
-    without touching any note. Absent file or failed stat -> None slot: still
-    a stable key, and it moves the moment the file appears.
+    hashes, so a re-embed, a co-occurrence refresh, or a graded quiz answer
+    changes the report without touching any note. The quiz log rides the
+    analytics flag because only the attention section reads it. Absent file
+    or failed stat -> None slot: still a stable key, and it moves the moment
+    the file appears.
     """
     files = []
     if with_embeddings:
@@ -78,13 +81,16 @@ def _index_stores_sig(with_embeddings: bool, with_cooccurrence: bool) -> tuple:
     if with_cooccurrence:
         from silica.kernel.recall.cooccurrence import _index_path as _cooccur_path
         files.append(_cooccur_path())
-    sig = []
+    if analytics:
+        from silica.kernel.report.quiz import log_path
+        files.append(log_path())
+    sig: list[tuple[int, int] | None] = []
     for p in files:
         try:
             st = p.stat()
             sig.append((st.st_mtime_ns, st.st_size))
         except OSError:
-            sig.append(None)
+            sig.append(None)  # a vanished file is its own signature
     return tuple(sig)
 
 
@@ -127,8 +133,9 @@ def compute_report(
     # every body + runs PageRank and betweenness — seconds on a real vault, to
     # answer a question about one note. Any file change bumps the epoch; the
     # override seams (tests, custom feeds) bypass the memo entirely.
-    # ponytail: quiz/contested stores can move without a file change, so those
-    # report sections can lag one epoch; split their keys if it ever bites.
+    # The quiz log lives outside the epoch walk, so its stat rides the key
+    # (analytics only — nothing else reads it). Every other analytics input,
+    # the contested/temporal scan included, is note text the epoch hashes.
     overrides = (_nodes_edges_override, _cooccur_store_override,
                  _mtimes_override, _quiz_override)
     memo_key = None
@@ -137,7 +144,8 @@ def compute_report(
 
         if epoch := vault_epoch():
             memo_key = (epoch,
-                        _index_stores_sig(with_embeddings, with_cooccurrence),
+                        _index_stores_sig(with_embeddings, with_cooccurrence,
+                                          analytics),
                         folder, top_k, analytics, with_embeddings,
                         with_cooccurrence)
             if (hit := _report_memo.get(memo_key)) is not None:
@@ -224,8 +232,11 @@ def compute_report(
                         lean_notes.append(nid)
                     elif data is None or frontmatter.lint_tags(data):
                         reformat_notes.append(nid)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Silent here made a systematic regression render as a clean
+                    # vault: `scanned` is already incremented, so the note lands
+                    # in notes_scanned while contributing to no counter.
+                    logger.debug("graph_report: triage skipped '%s' — %s", nid, exc)
 
             temporal = TemporalStat(
                 notes_scanned=scanned,
@@ -274,8 +285,8 @@ def compute_report(
     # at k<=400 pivots so it stays bounded on big vaults; k==n (small vaults) is
     # exact. seed fixed for deterministic output. Distinct from degree: it flags
     # bottleneck nodes whose removal fragments the discourse.
-    # ponytail: k-sampled approximation; drop k= for exact if a vault is small
-    # and you need the last digit.
+    # k-sampled approximation, decided: exact betweenness buys only the last
+    # digit at a cost no report reader has asked for.
     bet: dict[str, float] = {}
     if analytics and G_und.number_of_edges() > 0:
         try:
@@ -544,6 +555,9 @@ def compute_report(
     totals = {
         "notes": len(real_ids),
         "links": n_links,
+        # Every unresolved wikilink REFERENCE (the digest header's `unresolved=`),
+        # not the count of distinct missing targets — that is `dangling_links`.
+        "unresolved": n_unresolved,
         "dangling_links": len(dangling),
         "missing_links": len(report.missing_links),
         "duplicate_pairs": len(report.duplicate_pairs),

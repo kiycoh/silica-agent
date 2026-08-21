@@ -8,6 +8,8 @@ dropped in v1 (return None -> the callback skips them).
 """
 from __future__ import annotations
 
+from typing import Any
+
 import json
 
 from silica.agent.events import (
@@ -116,7 +118,8 @@ def event_to_json(ev) -> dict | None:
         notes = _note_refs(ev.args)
         if ev.name == "silica_move" and isinstance(ev.args.get("to"), str):
             notes = [ev.args["to"].strip()]
-        out = {"type": "tool_start", "name": _tool_verb(ev.name), "id": ev.call_id,
+        out: dict[str, Any] = {
+               "type": "tool_start", "name": _tool_verb(ev.name), "id": ev.call_id,
                "target": _tool_target(ev.name, ev.args),
                "effect": _TOOL_EFFECT.get(ev.name, "read"),
                "notes": notes}
@@ -124,7 +127,7 @@ def event_to_json(ev) -> dict | None:
             out["pipeline"] = _PHASE_TRACKS
         return out
     if isinstance(ev, ToolCompleteEvent):
-        out = {"type": "tool_done", "name": _tool_verb(ev.name), "id": ev.call_id}
+        out = {"type": "tool_done", "name": _tool_verb(ev.name), "id": ev.call_id}  # noqa: F841 (same shape)
         if ev.name == "silica_run_injector":
             out["summary"] = _injector_summary(ev.result)
         return out

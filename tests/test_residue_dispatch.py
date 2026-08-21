@@ -131,16 +131,31 @@ class TestCheckDispatch:
         assert fi == 0 and res["missing"] == [] and res.get("skipped")
         _shutdown(fsm)
 
-    def test_guards_mid_file_draft_failed(self):
+    def test_guards_mid_file_and_draft(self):
         for fsm in (_residue_fsm(ci=0),
-                    _residue_fsm(form="draft"),
-                    _residue_fsm(failed_task="f0_c0_write")):
+                    _residue_fsm(form="draft")):
             self._decomposed(fsm, ["f"]) if not fsm.context.get("file_0_form") \
                 else None
             with patch("silica.driver.DRIVER", _driver_stub()):
                 real_check_dispatch(fsm)
             assert getattr(fsm, "_residue_future", None) is None
+            assert getattr(fsm, "_residue_ready", None) is None
             _shutdown(fsm)
+
+    def test_failed_file_still_dispatches(self):
+        # A failed chunk no longer refuses verification: the deferred store
+        # is the rolled-back content's only recovery channel (run 262e6847).
+        fsm = _residue_fsm(failed_task="f0_c0_write")
+        self._decomposed(fsm, ["f"])
+        with patch("silica.driver.DRIVER", _driver_stub()), \
+             patch("silica.kernel.residue.judge_covered", return_value=[True]):
+            real_check_dispatch(fsm)
+            fut = getattr(fsm, "_residue_future", None)
+            if fut is not None:
+                [f.result(timeout=5) for f in fut[2]]
+        assert (getattr(fsm, "_residue_future", None) is not None
+                or getattr(fsm, "_residue_ready", None) is not None)
+        _shutdown(fsm)
 
 
 class TestResidueFactsConsumption:

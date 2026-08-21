@@ -117,7 +117,7 @@ def run_subagent_batch(
         for it in items:
             it.cancel_token = cancel_token
 
-    mw = max(1, int(max_workers or getattr(config, "subagent_max_concurrent", 3)))
+    mw = max(1, int(max_workers or getattr(config, "subagent_max_concurrent", 3) or 3))
     agent = BoundedSubAgent(config)
 
     wq = WorkQueue()

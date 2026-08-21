@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 from silica.config import SilicaConfig
-from silica.agent.providers import get_provider, OpenAICompatibleProvider
+from silica.agent.providers import get_provider, Provider
 from silica.agent.llm import LLMResponse, ToolCall, call_llm
 from silica.agent.loop import run_agent, _is_tool_failure
 from silica.tools import TOOLS, Tool
@@ -81,73 +81,57 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
             call_llm(model="openrouter/xiaomi/mimo-v2.5", messages=[])
         self.assertNotIn("extra_body", mock_completion.call_args[1])
 
-    @patch("openai.OpenAI")
-    def test_max_tokens_and_finish_reason_in_provider(self, mock_openai_cls):
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+    @patch("litellm.completion")
+    def test_max_tokens_and_finish_reason_in_provider(self, mock_completion):
+        from tests.llm_mocks import litellm_mock_response
 
-        # Non-structured path now streams: return an iterable of one chunk
-        # whose last choice carries finish_reason="length".
-        mock_delta = MagicMock()
-        mock_delta.content = "Truncated structured"
-        mock_delta.tool_calls = None
+        mock_completion.return_value = litellm_mock_response(
+            text="Truncated structured", finish_reason="length")
 
-        mock_chunk_choice = MagicMock()
-        mock_chunk_choice.finish_reason = "length"
-        mock_chunk_choice.delta = mock_delta
-
-        mock_chunk = MagicMock()
-        mock_chunk.choices = [mock_chunk_choice]
-
-        mock_client.chat.completions.create.return_value = [mock_chunk]
-
-        # Instantiate provider
-        provider = OpenAICompatibleProvider(base_url="http://dummy", api_key="dummy", model="test-model")
+        provider = Provider(base_url="http://dummy", api_key="dummy",
+                            model="lmstudio/test-model")
         resp = provider.call_llm(messages=[], max_tokens=4000)
 
-        # Check call arguments (stream=True is now added)
-        mock_client.chat.completions.create.assert_called_once()
-        kwargs = mock_client.chat.completions.create.call_args[1]
-        self.assertEqual(kwargs.get("max_tokens"), 4000)
-        self.assertTrue(kwargs.get("stream"))
+        self.assertEqual(mock_completion.call_args[1].get("max_tokens"), 4000)
+        # A truncated answer must be reported as such: the distiller decides
+        # whether to salvage a partial on exactly this field.
         self.assertEqual(resp.finish_reason, "length")
 
-    @patch("openai.OpenAI")
-    def test_distiller_path_honors_openrouter_provider(self, mock_openai_cls):
-        # The distiller uses the openai SDK directly; the provider pin must
-        # reach it too (not only the litellm call_llm path). The distiller
-        # passes its own pin explicitly via openrouter_provider=.
+    @patch("litellm.completion")
+    def test_distiller_path_honors_openrouter_provider(self, mock_completion):
+        # The distiller lane routes through the same call_llm as the chat loop
+        # now, but its own pin (openrouter_provider=) must still reach the wire
+        # — and must not leak onto a local endpoint.
         from silica.config import CONFIG
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        chunk = MagicMock()
-        chunk.choices = [MagicMock(finish_reason="stop", delta=MagicMock(content="ok", tool_calls=None))]
-        mock_client.chat.completions.create.return_value = [chunk]
+        from tests.llm_mocks import litellm_mock_response
 
-        prov = OpenAICompatibleProvider(
-            base_url="https://openrouter.ai/api/v1", api_key="k", model="xiaomi/mimo-v2.5")
+        mock_completion.return_value = litellm_mock_response(text="ok")
+
+        prov = Provider(base_url="https://openrouter.ai/api/v1", api_key="k",
+                        model="openrouter/xiaomi/mimo-v2.5")
         prov.call_llm(messages=[], openrouter_provider="DigitalOcean")
         self.assertEqual(
-            mock_client.chat.completions.create.call_args[1].get("extra_body"),
+            mock_completion.call_args[1].get("extra_body"),
             {"provider": {"order": ["DigitalOcean"], "allow_fallbacks": False}},
         )
 
         # No explicit override: falls back to CONFIG.openrouter_provider.
-        mock_client.chat.completions.create.reset_mock()
+        mock_completion.reset_mock()
         with patch.object(CONFIG, "openrouter_provider", "Together"):
-            prov = OpenAICompatibleProvider(
-                base_url="https://openrouter.ai/api/v1", api_key="k", model="m")
+            prov = Provider(base_url="https://openrouter.ai/api/v1", api_key="k",
+                            model="openrouter/m")
             prov.call_llm(messages=[])
         self.assertEqual(
-            mock_client.chat.completions.create.call_args[1].get("extra_body"),
+            mock_completion.call_args[1].get("extra_body"),
             {"provider": {"order": ["Together"], "allow_fallbacks": False}},
         )
 
-        # Local (non-openrouter) base_url: never injected.
-        mock_client.chat.completions.create.reset_mock()
-        prov = OpenAICompatibleProvider(base_url="http://localhost:1234/v1", api_key="k", model="m")
+        # Local (non-openrouter) model: never injected.
+        mock_completion.reset_mock()
+        prov = Provider(base_url="http://localhost:1234/v1", api_key="k",
+                        model="lmstudio/m")
         prov.call_llm(messages=[], openrouter_provider="DigitalOcean")
-        self.assertNotIn("extra_body", mock_client.chat.completions.create.call_args[1])
+        self.assertNotIn("extra_body", mock_completion.call_args[1])
 
     def test_distiller_provider_config_falls_back_to_general_pin(self):
         # OPENROUTER_PROVIDER_DISTILLER wins when set; otherwise inherits

@@ -11,7 +11,6 @@ def test_vault_is_registered():
 
 def test_vault_no_args_shows_status_without_mutating(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    monkeypatch.setattr(CONFIG, "backend", "fs")
     (tmp_path / "a.md").write_text("# a")
     (tmp_path / "b.md").write_text("# b")
 
@@ -27,7 +26,6 @@ def test_vault_no_args_shows_status_without_mutating(tmp_path, monkeypatch, caps
 
 def test_vault_no_args_shows_detected_language(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    monkeypatch.setattr(CONFIG, "backend", "fs")
     (tmp_path / "a.md").write_text(
         "Questo è un appunto scritto in italiano con molte parole comuni "
         "come il, la, di, che, per, con, sono, questo, quella.",
@@ -46,7 +44,6 @@ def test_vault_no_args_warns_on_frozen_store_mismatch(tmp_path, monkeypatch, cap
     from silica.kernel.recall.cooccurrence import CooccurStore
 
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    monkeypatch.setattr(CONFIG, "backend", "fs")
     (tmp_path / "a.md").write_text(
         "Questo è un appunto scritto in italiano con molte parole comuni "
         "come il, la, di, che, per, con, sono, questo, quella.",

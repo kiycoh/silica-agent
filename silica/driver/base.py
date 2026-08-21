@@ -62,9 +62,10 @@ def trie_remove(trie: dict, title_lower: str) -> None:
         return
     node = trie
     for ch in title_lower:
-        node = node.get(ch)
-        if node is None:
+        child = node.get(ch)
+        if child is None:
             return
+        node = child
     node.pop(_TITLE, None)
 
 
@@ -187,10 +188,30 @@ class GraphIndexMixin:
 
     Subclasses build the in-memory index in ``_ensure_graph()`` and expose
     the ``_notes``/``_mention_index``/``_unresolved_links``/``_graph``
-    attributes it populates.
+    attributes it populates, plus the three note primitives ``upsert`` needs.
+
+    Both halves of that contract are declared below rather than left implicit:
+    a mixin that reads names it does not define is only safe while every
+    subclass happens to define them, and nothing was checking that.
     """
 
+    # Built by the subclass's _ensure_graph(); read by every helper here.
+    _notes: dict[str, NoteRef]
+    _mention_index: dict[str, set[str]]
+    _unresolved_links: set
+    _graph: Any
+
     def _ensure_graph(self) -> None:
+        raise NotImplementedError
+
+    # Provided by the concrete backend; upsert() composes them.
+    def read_note(self, path: str) -> Any:
+        raise NotImplementedError
+
+    def create(self, path: str, content: str) -> NoteRef:
+        raise NotImplementedError
+
+    def overwrite(self, path: str, content: str) -> NoteRef:
         raise NotImplementedError
 
     def _node_ref(self, path: str) -> NoteRef:

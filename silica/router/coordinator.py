@@ -121,6 +121,10 @@ class Coordinator:
         # are unlinked back to plain text (deterministic; only this run's notes).
         self._sweep_dangling_links(result)
 
+        # Post-anneal coverage: what is still parked or uncovered, so the
+        # completion line is not the only place that omits it.
+        self._coverage_summary(result)
+
         # Surface any consumer-thread crashes (handle() already swallows per-item
         # errors, so this only catches unexpected pool failures).
         for f in futures:
@@ -164,39 +168,10 @@ class Coordinator:
             return set()
 
     def _orphan_candidates(self, path: str, k: int = 3) -> list[dict]:
-        """Related notes for an orphan, via the relatedness facade.
+        """Link targets for an orphan, via the relatedness facade."""
+        from silica.tools.curate import link_candidates
 
-        Fuses embeddings + co-occurrence (RRF): pure candidate generation, no
-        cosine thresholding, so the facade is a clean drop-in. Still produces
-        link targets when the embedding index is empty — the co-occurrence leg
-        carries the routing on its own.
-        """
-        try:
-            from silica.config import CONFIG
-            from silica.kernel.recall.cooccurrence import cooccur_key, get_cooccur_store
-            from silica.kernel.recall.embed import get_store
-            from silica.kernel.recall.relatedness import related_notes
-
-            from silica.agent.providers import get_reranker
-            from silica.kernel.recall.rerank import link_query, rerank_related
-
-            # cooccur_key (case-PRESERVED, .md-stripped) is the store keyspace; _norm_path
-            # would lowercase and miss the case-preserving stored keys -> empty results.
-            key = cooccur_key(path)
-            reranker = get_reranker(CONFIG)
-            pool = max(k, 20) if reranker else k
-            results = related_notes(
-                key,
-                embed_store=get_store(),
-                cooccur_store=get_cooccur_store(lang=CONFIG.cooccurrence_lang),
-                k=pool,
-            )
-            if reranker:
-                results = rerank_related(reranker, link_query(key), results, k=k)
-            return [{"name": r.name, "path": r.path} for r in results]
-        except Exception as e:
-            logger.debug("orphan candidate lookup failed (non-fatal): %s", e)
-            return []
+        return link_candidates(path, k=k)
 
     def _enqueue_orphan_repairs(self, wq: Any, result: dict) -> None:
         from silica.agent.bounds import _norm_path
@@ -237,6 +212,49 @@ class Coordinator:
             "enqueued": enqueued,
         }
 
+    def _coverage_summary(self, result: dict) -> None:
+        """What the run did NOT cover, alongside what it recovered.
+
+        Reads post-anneal state (`fsm.run()` sweeps the deferred store in its
+        own `finally`), so these are the numbers after the mechanical second
+        chance, not before it. Every one of them was already recorded — run
+        report, log.md, the bundle — and none reached the line the user reads:
+        a run that covered part of a lecture announced the same verdict as one
+        that covered all of it. Absent key ⇒ nothing outstanding, so a clean
+        run's output is unchanged.
+        """
+        try:
+            inputs = getattr(getattr(self.fsm, "progress", None), "inputs", None) or {}
+            facts = sum(
+                len(v.get("missing") or [])
+                for v in (inputs.get("residue") or {}).values()
+                if isinstance(v, dict)
+            )
+            recovered = int(getattr(self.fsm, "_annealed_ops", 0) or 0)
+            parked = self._parked_ops()
+            if facts or parked or recovered:
+                result["coverage"] = {
+                    "residue_facts": facts,
+                    "deferred_ops": parked,
+                    "recovered_ops": recovered,
+                }
+        except Exception as e:
+            logger.debug("coverage summary failed (non-fatal): %s", e)
+
+    def _parked_ops(self) -> int:
+        """Ops still deferred for THIS run's sources after the anneal.
+
+        Keyed on the run's own content hashes: the store is per-vault, so an
+        unrelated bundle from another file must not read as this run's debt.
+        """
+        from silica.kernel.recall.deferred import get_deferred_store
+
+        hashes = set(getattr(self.fsm, "_file_content_hashes", None) or [])
+        if not hashes:
+            return 0
+        return sum(b.get("rejected_count", 0) for b in get_deferred_store().list_all()
+                   if b.get("content_hash") in hashes)
+
     def _sweep_dangling_links(self, result: dict) -> None:
         """Unlink wikilinks still dangling after the whole run committed.
 
@@ -263,10 +281,10 @@ class Coordinator:
                 for n in (r.get("notes") or [])
             }
             notes.update(self._run_written_under_target())
-            notes = sorted(notes)
-            if not notes:
+            ordered = sorted(notes)
+            if not ordered:
                 return
-            summary = sweep_dangling_links(notes)
+            summary = sweep_dangling_links(ordered)
             if summary["links_stripped"] or summary["links_relinked"]:
                 result["link_sweep"] = {
                     "notes_edited": summary["notes_edited"],

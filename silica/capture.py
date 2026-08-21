@@ -293,11 +293,11 @@ def capture_session(messages: list[dict], *, session_id: str, driver: str,
         if not vault:
             return None
         turns = [
-            # ponytail: no per-turn clock — the TUI keeps none, and stamping
-            # every message for a default-off feature costs every session.
-            # `captured_at` dates the conversation; add real per-turn ts when
-            # something reads it.
-            {"role": m.get("role"), "content": m.get("content"), "ts": ""}
+            # No per-turn clock (declined 2026-08-19): the TUI keeps none, and
+            # stamping every message for a default-off feature costs every
+            # session. `captured_at` dates the conversation; real per-turn ts
+            # only when something reads it.
+            {"role": str(m["role"]), "content": str(m["content"]), "ts": ""}
             for m in messages
             if m.get("role") in ("user", "assistant")
             and isinstance(m.get("content"), str) and m["content"].strip()

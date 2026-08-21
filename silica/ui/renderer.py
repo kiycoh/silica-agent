@@ -13,8 +13,8 @@ from rich.padding import Padding
 from rich.spinner import Spinner
 from rich.text import Text
 from rich.markup import escape
-from rich.console import Group
-from rich.progress import Progress, BarColumn, MofNCompleteColumn, TimeElapsedColumn
+from rich.console import Group, RenderableType
+from rich.progress import Progress, BarColumn, MofNCompleteColumn, TaskID, TimeElapsedColumn
 from silica.agent.events import (
     ToolStartEvent,
     ToolCompleteEvent,
@@ -306,8 +306,10 @@ def _stage_track(pipeline_phases: list[dict], console_width: int) -> "Text":
         if st == "done":
             t.append(f"✓ {phase}", style="dim")
         elif st == "running":
-            start = start_map.get(phase)
-            suffix = f" {_fmt_dur(time.monotonic() - start)}" if start else ""
+            # Not `start`: that name is the window's lower bound, and rebinding
+            # it mid-loop is only harmless because range() was already evaluated.
+            phase_start = start_map.get(phase)
+            suffix = f" {_fmt_dur(time.monotonic() - phase_start)}" if phase_start else ""
             t.append(f"◉ {phase}{suffix}", style="bold #22d3ee")
         elif st == "failed":
             t.append(f"✗ {phase}", style="bold red")
@@ -357,7 +359,7 @@ class _ProgressRenderer:
         self._inject_inbox_label: str = ""
         self._inject_file_count: int = 0
         self._inject_progress: Progress | None = None
-        self._inject_task_id = None
+        self._inject_task_id: TaskID | None = None
         # Batch run progress (refine/enrich)
         self._batch: dict | None = None
         # Pending ✓ line — consecutive completions of the same tool collapse into one
@@ -510,7 +512,7 @@ class _ProgressRenderer:
                 self._live.update(Spinner("dots", text="  thinking…", style="dim cyan"))
             return
 
-        renderables = []
+        renderables: list[RenderableType] = []
         for cid, tinfo in self._active_tools.items():
             name = tinfo["name"]
             args = tinfo["args"]
@@ -797,7 +799,12 @@ class _ProgressRenderer:
                         bits.append(f"{_data['yield_links']} links")
                     yield_str = " [dim]·[/] ".join(bits)
                     if failed_phases:
-                        last_phase = self._pipeline_phases[-1]["phase"] if self._pipeline_phases else "?"
+                        # The phase that FAILED, not the last one seen:
+                        # _pipeline_phases is ordered by first appearance and
+                        # its tail is whatever ran afterwards (cleanup, or
+                        # rollback), which sends the user to a phase that
+                        # succeeded.
+                        last_phase = failed_phases[-1].get("phase") or "?"
                         CONSOLE.print(
                             f"  [tool.err]✗[/] [bold]injector[/] [dim]·[/] {lbl}"
                             f"   {yield_str} [dim]·[/] failed at {last_phase} [dim]·[/] {inject_dur}"

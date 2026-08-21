@@ -1,9 +1,11 @@
 """web_fetch: URL guards, HTML extraction, the fetch loop, the YouTube branch.
 
-No real network (httpx.get and socket.getaddrinfo are monkeypatched) and no
+No real network (httpx.stream and socket.getaddrinfo are monkeypatched) and no
 real subprocess (subprocess.run is monkeypatched).
 """
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -191,16 +193,37 @@ from silica.tools import TOOLS
 
 
 class _Resp:
-    """Minimal stand-in for httpx.Response."""
+    """Minimal stand-in for a streamed httpx.Response.
+
+    `_fetch` streams, so the stand-in is a context manager whose body arrives
+    through `iter_bytes()`; `text` is what those bytes decode back to.
+    """
+
+    request = None
 
     def __init__(self, status=200, text="", ctype="text/html", location=None,
-                 payload=None):
+                 payload=None, extra_headers=None):
         self.status_code = status
         self.text = text
         self.headers = {"content-type": ctype} if ctype else {}
+        # A real server's headers describe the WIRE body; iter_bytes hands back
+        # the decoded one. Tests that need that mismatch pass it in here.
+        self.headers.update(extra_headers or {})
         self.is_redirect = location is not None
         self.next_request = SimpleNamespace(url=location) if location else None
         self._payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_bytes(self):
+        if self._payload is not None:
+            yield json.dumps(self._payload).encode()
+        else:
+            yield self.text.encode()
 
     def json(self):
         return self._payload
@@ -213,16 +236,17 @@ class _Resp:
 
 
 def _serve(monkeypatch, *responses, allow_all_dns=True):
-    """Queue responses for successive httpx.get calls; record requested URLs."""
+    """Queue responses for successive httpx.stream calls; record requested URLs."""
     seen: list[str] = []
     queue = list(responses)
 
-    def fake_get(url, **kw):
+    def fake_stream(method, url, **kw):
         seen.append(url)
+        assert method == "GET"
         assert kw.get("follow_redirects") is False, "redirects must be manual"
         return queue.pop(0)
 
-    monkeypatch.setattr(wf.httpx, "get", fake_get)
+    monkeypatch.setattr(wf.httpx, "stream", fake_stream)
     if allow_all_dns:
         monkeypatch.setattr(
             wf.socket, "getaddrinfo",
@@ -234,6 +258,23 @@ def _serve(monkeypatch, *responses, allow_all_dns=True):
 def test_web_fetch_registered_and_sensitive():
     assert "web_fetch" in TOOLS
     assert TOOLS["web_fetch"].sensitive is True
+
+
+def test_fetch_drops_the_wire_encoding_headers_from_the_rebuilt_response(monkeypatch):
+    """`iter_bytes()` yields DECODED bytes, so the rebuilt response must not keep
+    the header saying they are still gzipped — httpx would try to decompress the
+    plain body and every gzip site (most of the web) died on `.text` with
+    "Error -3 while decompressing data: incorrect header check"."""
+    _serve(monkeypatch, _Resp(
+        text="<html><body><p>Hello world.</p></body></html>",
+        extra_headers={"content-encoding": "gzip", "content-length": "31"},
+    ))
+    resp, _url = wf._fetch("https://example.com/a")
+    assert "content-encoding" not in resp.headers
+    # httpx restamps content-length from the body it was handed, so the stale
+    # wire length ("31") must not survive either.
+    assert resp.headers["content-length"] == str(len(resp.content))
+    assert "Hello world." in resp.text  # the read httpx used to raise on
 
 
 def test_web_fetch_returns_extracted_text_under_a_source_header(monkeypatch):
@@ -258,7 +299,7 @@ def test_web_fetch_revalidates_every_redirect_hop(monkeypatch):
     """A global first hop must not launder a redirect into link-local space."""
     seen: list[str] = []
 
-    def fake_get(url, **kw):
+    def fake_stream(method, url, **kw):
         seen.append(url)
         return _Resp(status=302, location="http://169.254.169.254/latest/meta-data/")
 
@@ -266,7 +307,7 @@ def test_web_fetch_revalidates_every_redirect_hop(monkeypatch):
         ip = "169.254.169.254" if host == "169.254.169.254" else "93.184.216.34"
         return [(2, 1, 6, "", (ip, port))]
 
-    monkeypatch.setattr(wf.httpx, "get", fake_get)
+    monkeypatch.setattr(wf.httpx, "stream", fake_stream)
     monkeypatch.setattr(wf.socket, "getaddrinfo", fake_dns)
 
     with pytest.raises(ValueError, match="non-global"):
@@ -337,11 +378,11 @@ def test_web_fetch_truncates_long_pages(monkeypatch):
 def test_web_fetch_rejects_a_private_target_before_any_request(monkeypatch):
     called = {"n": 0}
 
-    def fake_get(url, **kw):
+    def fake_stream(method, url, **kw):
         called["n"] += 1
         return _Resp()
 
-    monkeypatch.setattr(wf.httpx, "get", fake_get)
+    monkeypatch.setattr(wf.httpx, "stream", fake_stream)
     monkeypatch.setattr(
         wf.socket, "getaddrinfo",
         lambda host, port, *a, **kw: [(2, 1, 6, "", ("127.0.0.1", port))],
@@ -387,9 +428,9 @@ def test_youtube_never_takes_the_http_path(monkeypatch):
     monkeypatch.setattr(wf.shutil, "which", lambda name: None)
 
     def boom(*a, **kw):
-        raise AssertionError("httpx.get must not run for a YouTube URL")
+        raise AssertionError("no HTTP request must run for a YouTube URL")
 
-    monkeypatch.setattr(wf.httpx, "get", boom)
+    monkeypatch.setattr(wf.httpx, "stream", boom)
     with pytest.raises(ValueError, match="yt-dlp"):
         wf.web_fetch("https://youtu.be/abc")
 
@@ -532,11 +573,11 @@ def test_wikipedia_sends_a_descriptive_user_agent_not_a_browser_string(monkeypat
     is one. Only this branch opts out, so pin it."""
     sent: list[dict] = []
 
-    def fake_get(url, **kw):
+    def fake_stream(method, url, **kw):
         sent.append(kw.get("headers") or {})
         return _Resp(payload=_wp_page(extract="Prose."))
 
-    monkeypatch.setattr(wf.httpx, "get", fake_get)
+    monkeypatch.setattr(wf.httpx, "stream", fake_stream)
     monkeypatch.setattr(
         wf.socket, "getaddrinfo",
         lambda host, port, *a, **kw: [(2, 1, 6, "", ("93.184.216.34", port))],

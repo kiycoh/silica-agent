@@ -25,7 +25,6 @@ def vault_fsm(tmp_path, monkeypatch):
     """Minimal FSM setup against a temp vault for write-phase unit tests."""
     vault_dir = tmp_path / "vault"
     vault_dir.mkdir()
-    monkeypatch.setattr(silica.config.CONFIG, "backend", "fs")
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault_dir))
     silica.driver._driver = None
 
@@ -132,7 +131,6 @@ def test_clean_batch_parity_old_vs_new(tmp_path, monkeypatch):
     for name in ("X.md", "Y.md", "Z.md"):
         (vault_a / name).write_text(f"---\n---\nseed_{name}\n", encoding="utf-8")
 
-    monkeypatch.setattr(silica.config.CONFIG, "backend", "fs")
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault_a))
     silica.driver._driver = None
 
@@ -181,7 +179,6 @@ def test_revert_restores_clean_batch(tmp_path, monkeypatch):
     vault.mkdir()
     (vault / "X.md").write_text("ORIGINAL x", encoding="utf-8")
 
-    monkeypatch.setattr(silica.config.CONFIG, "backend", "fs")
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault))
     silica.driver._driver = None
 

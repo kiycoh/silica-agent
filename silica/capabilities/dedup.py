@@ -24,6 +24,11 @@ from silica.capabilities._base import emit_feedback, load_prompt, read_or_skip
 logger = logging.getLogger(__name__)
 
 
+# The three labels the judge may return; anything else is coerced to "distinct"
+# at the parse boundary. (`DedupVerdict` below is the wire schema, not the label.)
+VerdictLabel = Literal["duplicate", "distinct", "contradicts"]
+
+
 class DedupVerdict(BaseModel):
     """Wire schema for the judge-only path — no authoring fields.
 
@@ -34,9 +39,9 @@ class DedupVerdict(BaseModel):
     """
     # duplicate    → append only the genuinely-new info
     # distinct     → pipeline concepts: author the spoke note in the same call
-    #                (giudice+autore); ad-hoc pairs: no write
+    #                (judge+author); ad-hoc pairs: no write
     # contradicts  → record the conflicting claim as a contested patch (never resolve)
-    verdict: Literal["duplicate", "distinct", "contradicts"] = "distinct"
+    verdict: VerdictLabel = "distinct"
     rationale: str = ""
     addition: str = ""
 
@@ -561,7 +566,7 @@ def _decide_dedup(
 
     prompt = load_prompt("dedup_prompt.txt")
     if author_spoke:
-        # Giudice+autore (C2): the same call that judges "distinct" also
+        # Judge+author (C2): the same call that judges "distinct" also
         # authors the spoke note — a second pass would just re-read the
         # context this call already has.
         hub_hint = f" and to the parent note [[{hub}]]" if hub else ""
@@ -594,11 +599,14 @@ def _decide_dedup(
     try:
         parsed, _ = parse_json(raw, strict=False)
         if isinstance(parsed, dict):
-            verdict = parsed.get("verdict")
-            if verdict not in ("duplicate", "distinct", "contradicts"):
+            raw_verdict = parsed.get("verdict")
+            verdict: VerdictLabel
+            if raw_verdict not in ("duplicate", "distinct", "contradicts"):
                 # Legacy binary schema, or anything unrecognised → conservative.
                 legacy = parsed.get("is_duplicate")
                 verdict = "duplicate" if legacy is True else "distinct"
+            else:
+                verdict = raw_verdict
             return DedupDecision(
                 verdict=verdict,
                 rationale=str(parsed.get("rationale", "")),
@@ -718,10 +726,13 @@ def _parse_batch(raw: str, n: int) -> list[DedupDecision]:
                 if not isinstance(e, dict):
                     decisions.append(fallback())
                     continue
-                verdict = e.get("verdict")
-                if verdict not in ("duplicate", "distinct", "contradicts"):
+                raw_verdict = e.get("verdict")
+                verdict: VerdictLabel
+                if raw_verdict not in ("duplicate", "distinct", "contradicts"):
                     # Legacy binary schema, or anything unrecognised → conservative.
                     verdict = "duplicate" if e.get("is_duplicate") is True else "distinct"
+                else:
+                    verdict = raw_verdict
                 decisions.append(DedupDecision(
                     verdict=verdict,
                     rationale=str(e.get("rationale", "")),

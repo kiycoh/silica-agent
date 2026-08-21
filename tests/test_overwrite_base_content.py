@@ -53,8 +53,6 @@ def vault(tmp_path, monkeypatch):
     """Isolated fs vault (same pattern as test_bulk.vault)."""
     vault_dir = tmp_path / "vault"
     (vault_dir / "Notes").mkdir(parents=True)
-    monkeypatch.setenv("SILICA_BACKEND", "fs")
-    monkeypatch.setattr("silica.config.CONFIG.backend", "fs")
     monkeypatch.setattr("silica.config.CONFIG.vault_path", str(vault_dir))
     monkeypatch.setattr("silica.driver._driver", None)
     yield vault_dir

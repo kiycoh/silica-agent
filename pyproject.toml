@@ -224,16 +224,15 @@ source_modules = [
   "silica.kernel.report.graph_report.render",
   "silica.kernel.report.graph_report.code_signals",
   "silica.kernel.code.codegraph",
+  # embed_signals reads stored vectors only; it stopped constructing an embedder
+  # (the call was an availability probe whose result was never used), so it no
+  # longer reaches silica.agent and the exemption it used to need is gone.
+  "silica.kernel.report.graph_report.embed_signals",
 ]
 forbidden_modules = ["silica.agent"]
-# embed_signals e run_substrate NON sono in lista: importano get_embedder
-# (overlay di embedding, lecito). classify/prep_delegation chiamano LLM ma
-# non costruiscono struttura del grafo — fuori scope di questo contratto.
-ignore_imports = [
-  # embed_signals e' overlay di embedding (lecito, escluso dai source_modules);
-  # compute lo importa per assemblare il report, non per costruire struttura.
-  "silica.kernel.report.graph_report.embed_signals -> silica.agent.providers",
-]
+# run_substrate is NOT listed: it imports get_embedder, a legitimate embedding
+# overlay. classify/prep_delegation call an LLM but do not build graph
+# structure, so they are out of scope for this contract.
 
 [[tool.importlinter.contracts]]
 name = "structural is not semantic — codegraph never enters the fusion legs"
@@ -291,5 +290,12 @@ module = [
     # Legacy office readers: both ship no stubs (xlrd has been feature-frozen
     # since 2.0 dropped .xlsx, which is exactly why it is safe to depend on).
     "xlrd", "striprtf.*",
+    # No stubs and no py.typed: the NLP trio (stop-words, snowballstemmer, yake)
+    # plus three that DO have stub packages on PyPI — types-python-dateutil,
+    # types-Pygments, types-openpyxl. Listed here rather than installed because
+    # each is reached from one narrow call site; add the stub package instead if
+    # any of these three ever grows a real surface.
+    "stop_words", "snowballstemmer", "yake",
+    "dateutil.*", "pygments", "pygments.*", "openpyxl", "openpyxl.*",
 ]
 ignore_missing_imports = true

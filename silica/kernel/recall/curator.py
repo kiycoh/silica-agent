@@ -208,7 +208,8 @@ def compose_curation_plan(report: VaultReport) -> CurationPlan:
     for dp in list(report.confirmed_duplicate_pairs) + list(report.duplicate_pairs):
         if _is_vault_artifact(dp.source) or _is_vault_artifact(dp.target):
             continue
-        key = tuple(sorted((dp.source, dp.target)))
+        lo, hi = sorted((dp.source, dp.target))
+        key = (lo, hi)
         if key in seen_pairs:
             continue
         seen_pairs.add(key)

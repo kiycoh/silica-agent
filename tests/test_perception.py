@@ -26,7 +26,6 @@ def _bind(vault: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     vault.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
     monkeypatch.setattr(CONFIG, "memory_vault", str(vault))  # coincident: lane abstains
-    monkeypatch.setattr(CONFIG, "backend", "fs")
     monkeypatch.setattr(silica.driver, "_driver", None)
     embed_mod.clear()
     cooc_mod.clear()

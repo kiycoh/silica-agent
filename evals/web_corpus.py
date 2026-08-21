@@ -90,9 +90,8 @@ class Corpus:
         body = self.pages[url].split("\n", 1)[1] if "\n" in self.pages[url] else ""
         lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
         title = (lines[0] if lines else url)[:_TITLE_LEN]
-        # ponytail: the snippet is the line with the most distinct query terms,
-        # not a highlighter passage — upgrade if models start fetching the
-        # wrong result for lack of context.
+        # The snippet is the line with the most distinct query terms, not a
+        # highlighter passage; the corpus is frozen, so this is settled with it.
         pool = lines[1:] or lines
         best = max(pool, key=lambda ln: len(q & set(_tokens(ln))), default="")
         return {"title": title, "url": url, "content": best[:_SNIPPET_LEN]}

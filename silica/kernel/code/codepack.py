@@ -12,10 +12,14 @@ codegraph._serialize.
 The asymmetry that makes the pack worth its budget: verbatim only what you are
 about to rewrite, signatures for everything around it (D5).
 
-# ponytail: kill by 2026-10-28 if unused. Exposure (verified 2026-08-02): in
-# the chat agent's DEFAULT toolset (constraints.chat_tools — not excluded) and
-# behind `silica mcp --all`. Not hidden, so absence of use by the kill date is
-# real disuse, not lack of surface.
+# ponytail: kill by 2026-10-28 if unused. Exposure (re-verified 2026-08-19):
+# NOT in the chat agent's default toolset. `silica_code_pack` is in
+# constraints._CHAT_EXCLUDED, so a chat turn only sees it when the user names
+# it (constraints._summoned). Reachable otherwise behind `silica mcp --all`.
+# Instrumented 2026-08-19: every invocation stamps a timestamp line to
+# <index>/codepack_usage.log (codedocs_tool._stamp_code_pack_use), so at the
+# kill date `grep -c . ~/.silica/index/*/codepack_usage.log` answers the
+# disuse question with data instead of chat silence.
 """
 from __future__ import annotations
 
@@ -414,6 +418,16 @@ def code_pack(vault: Path | str, target: str,
     """
     path, _, selector = target.partition("#")
     root = _paths.repo_root_for(vault) or Path(vault)
+    # `target` arrives raw from a model (silica_code_pack), and `root / path`
+    # silently discards the root when `path` is absolute and joins a `..`
+    # verbatim, so the read below is the exfiltration seam: without this the
+    # pack serves /etc/passwd or ~/.ssh/id_rsa into the caller's context.
+    # Same boundary the code source adapter enforces (sources/code.py), through
+    # the shared containment choke point rather than a second copy of the rule.
+    try:
+        path = _paths.contain_in_vault(path, root)
+    except ValueError as exc:
+        raise ValueError(f"target escapes the repository: {path!r} ({exc})") from exc
     try:
         source = (root / path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:

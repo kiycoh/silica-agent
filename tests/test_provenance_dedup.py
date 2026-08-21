@@ -77,11 +77,12 @@ def test_patch_proceeds_for_a_different_source(tmp_vault):
 
 def test_duplicate_skip_stamps_ai_flag(tmp_vault):
     """The duplicate-skip path must leave the note lint-clean like the real
-    patch path does (which stamps `AI: true` via ensure_ai_flag). In safe mode
-    the skip lands on a freshly-seeded mirror copy of a human note that has no
-    `AI` key, so the copy stayed lint-dirty forever and the chunk LINT gate
-    aborted whole chunks on it (run 880b9aa9: f1_c0/f1_c1 both died with
-    "frontmatter 'AI' missing or not boolean" on notes no op had changed)."""
+    patch path does (which stamps `AI: partial` via ensure_ai_flag: the body
+    stays the user's). In safe mode the skip lands on a freshly-seeded mirror
+    copy of a human note that has no `AI` key, so the copy stayed lint-dirty
+    forever and the chunk LINT gate aborted whole chunks on it (run 880b9aa9:
+    f1_c0/f1_c1 both died with "frontmatter 'AI' missing or not boolean" on
+    notes no op had changed)."""
     target = tmp_vault.note(  # legacy header on purpose: pre-translation vault
         "Topics/AsyncIO.md",
         "---\ntags:\n  - async\n---\nseed\n\n[[Hub]]\n\n"
@@ -93,7 +94,7 @@ def test_duplicate_skip_stamps_ai_flag(tmp_vault):
     res = execute_one(op)
 
     assert res.get("skipped") == "duplicate"
-    assert "AI: true" in tmp_vault.read(target)
+    assert "AI: partial" in tmp_vault.read(target)
 
 
 def test_duplicate_block_still_repairs_hub_link(tmp_vault):

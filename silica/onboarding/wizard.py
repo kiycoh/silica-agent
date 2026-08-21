@@ -10,7 +10,13 @@ import sys
 from pathlib import Path
 from typing import Callable
 
-from silica.config import HOSTED_PROVIDERS, USER_ENV, SilicaConfig, model_from_env
+from silica.config import (
+    HOSTED_PROVIDERS,
+    USER_ENV,
+    SilicaConfig,
+    claim_env,
+    model_from_env,
+)
 from silica.kernel.code import gitstate
 from silica.kernel.vault_manifest import MANIFEST_REL
 from silica.onboarding.checks import has_failures, render_report, run_checks
@@ -102,38 +108,78 @@ def _find_env_example(repo_root: Path | str | None) -> Path | None:
     return next((c for c in candidates if c.is_file()), None)
 
 
-def endpoint_model_ids(base_url: str) -> list[str]:
+def endpoint_model_ids(base_url: str, api_key: str = "") -> list[str]:
     """Model ids advertised by an OpenAI-compatible `/models` endpoint, best-effort
-    ([] on any error). Powers LM Studio autodetect and the local-embeddings
-    suggestion, mirroring _ollama_installed_models / check_chat_endpoint."""
+    ([] on any error). Powers LM Studio autodetect, the local-embeddings
+    suggestion, and the hosted pick-list validation (_live_hosted_models);
+    `api_key` becomes a Bearer header for the hosted endpoints that demand one."""
     import httpx
 
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
-        data = httpx.get(f"{base_url.rstrip('/')}/models", timeout=3.0).json()
+        data = httpx.get(
+            f"{base_url.rstrip('/')}/models", headers=headers, timeout=3.0
+        ).json()
         return [m["id"] for m in data.get("data", []) if m.get("id")]
     except Exception:
         return []
 
 
+# OpenAI-compatible /models base per hosted provider. Hand-kept like the model
+# lists were, but base URLs outlive model generations by years; a wrong or dead
+# entry only costs the live validation, never the wizard (fetch failure falls
+# back to the static list).
+_MODELS_BASE = {
+    "openrouter": "https://openrouter.ai/api/v1",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+    "openai": "https://api.openai.com/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    "deepseek": "https://api.deepseek.com",
+    "mistral": "https://api.mistral.ai/v1",
+    "xai": "https://api.x.ai/v1",
+}
+
+
+def _live_hosted_models(provider: str, api_key: str, curated: list[str]) -> list[str]:
+    """The hosted pick-list, validated against the provider's live `/models`.
+
+    Curated entries keep their order and litellm prefixes; ids the provider no
+    longer serves are dropped (the staleness a hand-kept list accrues). If the
+    whole curated list has rotted, the first live ids stand in — prefixed, so
+    whatever gets picked is a usable litellm model string. An unreachable
+    /models must never block onboarding: the curated list returns verbatim.
+    """
+    base = _MODELS_BASE.get(provider)
+    if not base:
+        return list(curated)
+    live = endpoint_model_ids(base, api_key=api_key)
+    if not live:
+        return list(curated)
+    # Gemini's OpenAI-compat endpoint prefixes ids with "models/".
+    norm = {m.removeprefix("models/") for m in live}
+    alive = [m for m in curated if m.split("/", 1)[1] in norm]
+    dropped = len(curated) - len(alive)
+    if alive and dropped:
+        CONSOLE.print(
+            f"      [dim]{dropped} suggested id(s) no longer served — hidden[/]")
+    if alive:
+        return alive
+    return [f"{provider}/{m.removeprefix('models/')}" for m in live[:8]]
+
+
 def resolve_env_path() -> Path:
     """The `.env` a settings write must land in — the one that would win at boot.
 
-    An existing project .env is updated in place; otherwise the settings go to
-    the user-level file, which config.py loads from any directory. The old
-    "cwd/.env" default dropped a config file into whatever folder the shell sat
-    in, and one an installed silica would never read again.
+    Always the user-level file, because config.py layers that one and nothing
+    else: it is the only path where a write is still there at the next launch.
+    This used to prefer a project .env when one existed, so a settings edit made
+    inside any checkout landed in that checkout's file — and, once the project
+    layer was removed, would have landed in a file nobody reads.
 
-    Same precedence config.py layers with, so what is written here is what the
-    next launch reads back. Creates the parent directory, never the file.
+    Creates the parent directory, never the file.
     """
-    cwd = Path.cwd()
-    repo_root = gitstate.find_repo_root(cwd)
-    path = next(
-        (p for p in (cwd / ".env", Path(repo_root or cwd) / ".env") if p.exists()),
-        USER_ENV,
-    )
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    USER_ENV.parent.mkdir(parents=True, exist_ok=True)
+    return USER_ENV
 
 
 def merge_env(existing: str, updates: dict[str, str]) -> str:
@@ -537,11 +583,14 @@ def _run_wizard_inner(
                         f"conventions:\n  language: {lang_answer}\n",
                         encoding="utf-8",
                     )
-        _warn_unindexable(repo_vault if use_repo_mode else resolved)
+        vault_dir = repo_vault if use_repo_mode else resolved
+        if vault_dir is None:  # neither path resolved: nothing to inspect
+            return True
+        _warn_unindexable(vault_dir)
         # nucleation-forms wizard step: proposal only, written only on yes,
         # and only when the stamped distribution is skewed — a fresh or mixed
         # vault asks nothing, so existing flows are untouched.
-        _offer_form_fallback(input_fn, repo_vault if use_repo_mode else resolved)
+        _offer_form_fallback(input_fn, vault_dir)
         return True
 
     def step_provider() -> bool:
@@ -592,11 +641,17 @@ def _run_wizard_inner(
         state["provider"] = provider
         if provider in _HOSTED:
             key_env, models, key_prompt = _HOSTED[provider]
-            model = _pick(input_fn, "Model — pick a number or type an id", models)
+            # Key before model: with the key in hand the pick-list validates
+            # against the provider's live /models instead of trusting the
+            # hand-kept suggestions to still exist.
             key = ""
             while not key:
                 key = _ask(input_fn, key_prompt, os.getenv(key_env, ""), secret=True)
             updates[key_env] = key
+            model = _pick(
+                input_fn, "Model — pick a number or type an id",
+                _live_hosted_models(provider, key, models),
+            )
         elif provider == "custom":
             base_url = ""
             while not base_url:
@@ -888,7 +943,7 @@ def _run_wizard_inner(
     # Doctor checks against the values just chosen.
     CONSOLE.print()
     CONSOLE.print(f"  [bold brand.cyan]{GLYPHS['run']} Checking your setup[/]")
-    os.environ.update(updates)
+    claim_env(updates)
     results = run_checks(SilicaConfig())
     render_report(results)
 

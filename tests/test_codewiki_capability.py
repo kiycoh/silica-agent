@@ -141,7 +141,6 @@ def wiki_env(tmp_path, monkeypatch):
     # bind the write channel (DRIVER) at the tmp vault (canonical tmp_vault setup)
     import silica.config
     import silica.driver
-    monkeypatch.setattr(silica.config.CONFIG, "backend", "fs")
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault))
     silica.driver._driver = None
     yield root, vault, fake
@@ -169,7 +168,6 @@ def test_no_supported_source_aborts_before_llm(tmp_path, monkeypatch):
     (vault / ".index").mkdir(parents=True, exist_ok=True)
     import silica.config
     import silica.driver
-    monkeypatch.setattr(silica.config.CONFIG, "backend", "fs")
     monkeypatch.setattr(silica.config.CONFIG, "vault_path", str(vault))
     silica.driver._driver = None
     try:

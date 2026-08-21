@@ -251,24 +251,28 @@ def reliability_tier(content: str, *, has_source_leaf: bool | None = None) -> in
     win a contest. `has_source_leaf` overrides the note-side signal for a claim
     that is not a note yet (an incoming excerpt has no `## Sources` block).
 
-    The human tier used to decay: ensure_ai_flag stamps `AI: true` on a legacy
-    user note the first time the agent patches it, so a note the agent had only
-    touched read as agent-authored from then on. OKF §5.2 `verified` is the way
-    back — a person who vouches for the note (`verified: {by: human:…, at: …}`)
-    restores the tier the patch cost it. A machine verifier does not: a pipeline
-    re-reading its own output is not a second opinion.
+    The human tier no longer decays on a touch: the bulk patch path stamps
+    `AI: partial` on a legacy user note (the agent appended a section, the
+    body stays the user's), and partial ranks human here. `AI: true` means
+    the agent authored the body and reads as before. Notes stamped `true` by
+    patches that predate the partial convention are recognized forever; OKF
+    §5.2 `verified` is their way back — a person who vouches for the note
+    (`verified: {by: human:…, at: …}`) restores the tier the old stamp cost
+    it. A machine verifier does not: a pipeline re-reading its own output is
+    not a second opinion.
     """
-    # ponytail: three ordinal levels off signals that already exist, not a
-    # calibrated score. Known ceiling: a legacy user note decays to T2 the first
-    # time the agent patches it, because ensure_ai_flag stamps `AI: true` with no
-    # way to say "partly". Upgrade path if that ever costs a real contest:
-    # `AI: partial` on the first patch of a note that had no AI key.
+    # Three ordinal levels off signals that already exist, not a calibrated
+    # score — deliberate: the signals are coarse and a number would be false
+    # precision.
     data, raw, _body = frontmatter.split(content or "")
     if data is None:
         if raw is not None:  # frontmatter present but broken YAML
             return TIER_DISTILLED
         return TIER_HUMAN  # no frontmatter at all: the agent always stamps one
-    if not data.get("AI") or is_human_verified(data):
+    ai = data.get("AI")
+    if isinstance(ai, str) and ai.strip().lower() == "partial":
+        return TIER_HUMAN  # the agent touched the note, the user wrote it
+    if not ai or is_human_verified(data):
         return TIER_HUMAN
     if has_source_leaf is None:
         from silica.kernel.recall.paths import SOURCES_MARKER
@@ -414,6 +418,7 @@ def resolve_contested(
         source = ref_source(source_ref)
 
     live, tail = _split_at_superseded(body)
+    callouts: list[str]
     if source_ref is not None and not source:
         # A `flagged:` ref carries no body block — the ref drops, nothing moves.
         kept, callouts = live, []

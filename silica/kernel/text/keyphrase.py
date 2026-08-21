@@ -241,6 +241,101 @@ def _seed_structural(
     return seeded + pool
 
 
+_PHRASE_WORD = r"[\w\u00C0-\u00FF'-]+"
+
+
+def _complete_phrases(
+    body: str,
+    ranked: list[ConceptCandidate],
+    stop: frozenset[str],
+    overlay: DomainOverlay,
+    max_words: int = 6,
+) -> list[ConceptCandidate]:
+    """Snap truncated candidates to their phrase boundary, mechanically.
+
+    YAKE's n=3 window cuts 4+-word terms mid-phrase and the fragment becomes
+    a note title verbatim ("stimatore a massima" [verosimiglianza] — 29 of
+    181 notes in the 2026-08-21 run carried one). Two deterministic repairs,
+    no LLM:
+
+    - completion: while EVERY occurrence of the phrase in the body is
+      followed by the same next word (same line, nothing but spaces between)
+      and that word is not a stopword, append it. Divergent continuations or
+      a punctuation boundary stop the walk, so a singleton only absorbs the
+      rest of its own noun phrase.
+    - edge trim: drop leading/trailing stopwords ("ha bias" -> "bias") —
+      YAKE screens candidate edges against its own list, but the structural
+      seed leg does not share it.
+
+    Candidates that complete onto an already-present phrase collapse onto
+    the best-ranked survivor; a candidate the repairs empty out is dropped.
+    """
+    body_l = body.lower()
+    out: list[ConceptCandidate] = []
+    seen: set[str] = set()
+    for c in ranked:
+        # Markup remnants at the tail ("proprietà delle svm***", "variabile
+        # discreta."): strip trailing non-word chars, keeping a ")" that
+        # closes a "(" inside the phrase.
+        ph = c.phrase
+        while ph and re.match(r"[\W_]", ph[-1]) and not (ph[-1] == ")" and "(" in ph):
+            ph = ph[:-1].rstrip()
+        words = ph.split()
+        # edge trim first: a stopword edge is never part of the term
+        while words and words[0].lower() in stop:
+            words.pop(0)
+        while words and words[-1].lower() in stop:
+            words.pop()
+        if not words:
+            continue
+        grew = 0
+        while len(words) < max_words:
+            phrase_l = " ".join(words).lower()
+            occ = re.compile(
+                r"(?<![\w\u00C0-\u00FF])" + re.escape(phrase_l)
+                + r"(?![\w\u00C0-\u00FF])")
+            nexts: set[str | None] = set()
+            n_occ = 0
+            for m in occ.finditer(body_l):
+                n_occ += 1
+                nm = re.compile(r"[ \t]+(" + _PHRASE_WORD + ")").match(
+                    body_l, m.end())
+                if nm and nm.end() < len(body_l) and body_l[nm.end()] in ".@":
+                    # Mid-identifier cut (emails, dotted names): appending
+                    # would mint a new fragment ("Giosuè Lo Bosco giosue").
+                    nm = None
+                nexts.add(nm.group(1) if nm else None)
+            # >= 2 occurrences: one occurrence is zero evidence of a stable
+            # collocation, and a singleton walk absorbed the sentence's verb
+            # ("Errore quadratico atteso dipende", measured on Lezione 7).
+            if n_occ < 2 or len(nexts) != 1:
+                break
+            nxt = nexts.pop()
+            if nxt is None or nxt in stop:
+                break
+            # Commit the word only if the longer phrase still qualifies:
+            # recon's closed-class tail check (_dangles) knows function words
+            # the language stop list may miss, and a candidate must never be
+            # dropped for having grown badly.
+            if not is_concept(normalize(" ".join(words + [nxt])), overlay=overlay):
+                break
+            words.append(nxt)
+            grew += 1
+        phrase = normalize(" ".join(words))
+        if not phrase or phrase.lower() in seen:
+            continue
+        seen.add(phrase.lower())
+        if phrase != c.phrase:
+            if not is_concept(phrase, overlay=overlay):
+                continue
+            c = ConceptCandidate(
+                phrase=phrase, score=c.score,
+                evidence=c.evidence + ([f"snap:+{grew}"] if grew else ["trim"]),
+                confidence=c.confidence)
+        out.append(c)
+    return out
+
+
 def _cutoff(content: str, ranked: list[ConceptCandidate]) -> list[ConceptCandidate]:
     # Operator knobs, same idiom as YAKE_POOL. Read at call time (not import) so a
     # harness A/B arm can coarsen extraction in-process without an import-timing
@@ -281,6 +376,11 @@ def extract_keyphrases(
     ranked = _rerank(pool, body, overlay, embedder)
     if ranked is None:
         ranked = pool  # fallback: structural-first, then YAKE rank
+    # Boundary snap + edge trim before the confidence stamp, so a completed
+    # phrase that now equals a heading earns its EXTRACTED tier.
+    ranked = _complete_phrases(
+        body, ranked, language.stopwords_for(lang) | set(overlay.stopwords),
+        overlay)
 
     # Stamp the corroboration tier from the second (embedder-free) axis: a concept
     # present in author markup is corroborated → EXTRACTED; otherwise INFERRED.
