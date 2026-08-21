@@ -160,3 +160,26 @@ def test_the_ws_backend_records_what_the_plugin_writes(tmp_vault):
     assert rows["Notes/New.md"]["kind"] == "created"
     assert rows["Notes/Draft.md"]["from"] == "Inbox/Draft.md"
     assert "Inbox/Draft.md" not in rows
+
+
+def test_the_repl_lists_what_the_session_wrote(tmp_vault, capsys):
+    """/changes is the TUI's half of the GUI drawer: same ledger, one line each."""
+    from silica.cli import _dc_changes
+    from silica.driver import DRIVER
+
+    tmp_vault.note("Notes/Ada.md", "one\ntwo\n")
+    DRIVER.overwrite("Notes/Ada.md", "one\ntwo\nthree\n")
+    DRIVER.create("Notes/New.md", "fresh\n")
+
+    assert _dc_changes([]) is True
+    out = capsys.readouterr().out
+    assert "M Notes/Ada.md" in out and "+1" in out
+    assert "A Notes/New.md" in out
+    assert "2 note(s)" in out
+
+
+def test_the_repl_says_nothing_happened_rather_than_printing_an_empty_list(tmp_vault, capsys):
+    from silica.cli import _dc_changes
+
+    assert _dc_changes([]) is True
+    assert "Nothing changed this session." in capsys.readouterr().out

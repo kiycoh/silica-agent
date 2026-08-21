@@ -240,6 +240,13 @@ COMMANDS: tuple[Command, ...] = (
         summary="semantic search",
     ),
     Command(
+        name="/changes",
+        group="direct",
+        usage="",
+        summary="notes this session wrote to, with added/removed line counts",
+        repl_only=True,  # the GUI has its own Changes drawer, off the same ledger
+    ),
+    Command(
         name="/undo",
         group="direct",
         usage="[note-path]",

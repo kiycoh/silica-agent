@@ -450,6 +450,7 @@ One artifact, two readers: a human reads it as a current map of the repository, 
 
 | Command | What it does |
 | :--- | :--- |
+| `/changes` | Every note this session wrote to, with added/removed line counts |
 | `/undo [note]` | Undo the last patch on a note |
 | `/revert [run-id]` | Revert a whole injection (per-run, LIFO) |
 | `/status [run-id]` | Progress digest of the current/last batch run |

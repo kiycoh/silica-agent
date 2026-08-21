@@ -30,6 +30,7 @@ from silica.agent.loop import _is_tool_failure, run_agent
 from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
 from silica.config import CONFIG
 from silica.kernel.recall.mindmap import note_resolver
+from silica.kernel.write import session_changes
 from silica.sources.web_research import WebTurn
 from silica.ui.web.callback import event_to_json, tool_calls_to_json
 
@@ -1808,11 +1809,9 @@ def note(path: str = ""):
 
 
 # --- what this session changed (GET /changes, /changes/diff) ------------------
-# The ledger is the driver's (silica.kernel.write.session_changes): the note as it
-# stood before silica first touched it. The *after* side is read off disk on every
-# request, so the list is never a claim about the past — it is the difference
-# between then and the file as it is right now, and an /undo empties a row by
-# putting the bytes back rather than by anyone remembering to remove it.
+# The ledger and the tally are the driver's (silica.kernel.write.session_changes),
+# shared with the REPL's /changes. All that is added here is a display name and
+# the line-by-line rendering, which only a drawer needs.
 
 _DIFF_CONTEXT = 3
 # A hard line cap, tail dropped with a count — a decided constant, not a
@@ -1825,56 +1824,8 @@ _MAX_DIFF_LINES = 800
 _HUNK_AT_TOP = re.compile(r"^@@ -[01](?:,\d+)? \+[01](?:,\d+)? @@")
 
 
-def _read_note_text(rel: str) -> str | None:
-    """The note's bytes as they are now, or None if it is no longer there."""
-    try:
-        return (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8")
-    except OSError:
-        return None
-
-
-def _tally(before: str, after: str) -> tuple[int, int]:
-    """Lines added and removed — the same opcodes the unified diff walks."""
-    import difflib
-
-    added = removed = 0
-    sm = difflib.SequenceMatcher(None, before.splitlines(), after.splitlines(), autojunk=False)
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag in ("replace", "delete"):
-            removed += i2 - i1
-        if tag in ("replace", "insert"):
-            added += j2 - j1
-    return added, removed
-
-
-def _kind(before: str | None, after: str | None, origin: str | None, changed: bool) -> str:
-    if before is None:
-        return "created"
-    if after is None:
-        return "deleted"
-    return "moved" if origin and not changed else "modified"
-
-
 def _change_rows() -> list[dict]:
-    from silica.kernel.write import session_changes
-
-    rows = []
-    for path, base in session_changes.snapshot().items():
-        after = _read_note_text(path)
-        if base.before is None and after is None:
-            continue  # created and then rolled back: nothing happened
-        added, removed = _tally(base.before or "", after or "")
-        if not (added or removed or base.origin):
-            continue  # written with the same bytes it already had
-        rows.append({
-            "path": path,
-            "name": _clean_name(path),
-            "kind": _kind(base.before, after, base.origin, bool(added or removed)),
-            "added": added,
-            "removed": removed,
-            "from": base.origin,
-        })
-    return rows
+    return [{**r, "name": _clean_name(r["path"])} for r in session_changes.rows()]
 
 
 @app.get("/changes")
@@ -1888,8 +1839,6 @@ def changes_diff(path: str = ""):
     """One note's diff as flat rows: `-` removed, `+` added, ` ` context, `@` gap."""
     import difflib
 
-    from silica.kernel.write import session_changes
-
     base = session_changes.snapshot().get(path)
     if base is None:
         # No baseline: this session never touched the note, so there is no diff
@@ -1899,8 +1848,8 @@ def changes_diff(path: str = ""):
         # and a write card must not silently degrade one into the other.
         return {"path": path, "name": _clean_name(path), "kind": "unchanged",
                 "baseline": False, "lines": []}
-    before, after = base.before or "", _read_note_text(path)
-    added, removed = _tally(before, after or "")
+    before, after = base.before or "", session_changes.current_text(path)
+    added, removed = session_changes.tally(before, after or "")
     rows: list[dict] = []
     diff = difflib.unified_diff(before.splitlines(), (after or "").splitlines(),
                                 lineterm="", n=_DIFF_CONTEXT)
@@ -1916,7 +1865,7 @@ def changes_diff(path: str = ""):
     return {
         "path": path,
         "name": _clean_name(path),
-        "kind": _kind(base.before, after, base.origin, bool(added or removed)),
+        "kind": session_changes.kind(base.before, after, base.origin, bool(added or removed)),
         "from": base.origin,
         "baseline": True,
         "added": added,
@@ -2652,7 +2601,6 @@ async def confirm_setting(payload: dict):
 
 def _apply_vault_switch(path: str) -> dict:
     from silica.cli import switch_vault
-    from silica.kernel.write import session_changes
     from silica.ui.web import settings as st
 
     switched = switch_vault(path)

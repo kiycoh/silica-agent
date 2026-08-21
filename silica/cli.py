@@ -1029,6 +1029,45 @@ def _dc_episodes(args: list[str], *, raw_input: str = "", **_) -> bool:
     return True
 
 
+def _dc_changes(args: list[str], **_) -> bool:
+    """/changes — every note this session wrote to, with its line tally."""
+    from rich.markup import escape
+
+    from silica.kernel.write import session_changes
+
+    rows = session_changes.rows()
+    if not rows:
+        CONSOLE.print("  Nothing changed this session.")
+        return True
+    # Single letters, not words: the point of the column is that the eye skips it
+    # unless something is unusual, and `git status`'s letters are already learned.
+    letter = {"created": "A", "modified": "M", "deleted": "D", "moved": "R"}
+    # Padding is computed on the plain text and applied by hand: rich markup adds
+    # characters that f-string alignment would count, so `:>` would stagger the
+    # columns by the length of whichever colour tag happens to be on the row.
+    width = max(len(r["path"]) for r in rows)
+    add_w = max(len(f"+{r['added']}") for r in rows)
+    del_w = max(len(f"-{r['removed']}") for r in rows)
+    total_add = total_del = 0
+    for r in rows:
+        total_add += r["added"]
+        total_del += r["removed"]
+        plus = f"+{r['added']}" if r["added"] else ""
+        minus = f"-{r['removed']}" if r["removed"] else ""
+        cells = (f"{' ' * (add_w - len(plus))}[green]{plus}[/] "
+                 f"[red]{minus}[/]{' ' * (del_w - len(minus))}")
+        origin = f"  [dim]← {escape(r['from'])}[/]" if r["from"] else ""
+        CONSOLE.print(
+            (f"  [dim]{letter.get(r['kind'], '?')}[/] [bold]{escape(r['path'])}[/]"
+             f"{' ' * (width - len(r['path']))}  {cells}{origin}").rstrip()
+        )
+    CONSOLE.print(
+        f"  [dim]{len(rows)} note(s), +{total_add} -{total_del} — "
+        f"/undo <note-path> takes one back, /revert the whole run.[/]"
+    )
+    return True
+
+
 def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     """/undo [note-path] — revert the last write to one note."""
     from silica.driver import DRIVER
@@ -1243,6 +1282,7 @@ _DIRECT: dict[str, Callable[..., bool]] = {
     "/contested": _dc_contested,
     "/agenda": _dc_agenda,
     "/episodes": _dc_episodes,
+    "/changes": _dc_changes,
     "/undo": _dc_undo,
     "/revert": _dc_revert,
     "/review": _dc_review,
@@ -1270,6 +1310,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         /impact [<git-range>]
         /path <noteA> <noteB>
         /contested
+        /changes
         /undo [note-path]
     """
     from silica.tools import TOOLS
