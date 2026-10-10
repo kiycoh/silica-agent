@@ -1,0 +1,1480 @@
+/* --- the drawer's head: where the strip's left end was (ADR-0084) -----------
+   The top strip is gone: its views are rows of the drawer, its vault chip,
+   gear and help mark are the drawer's foot, and the note drawer's toggle is
+   the corner of the view. What is left of its left end is this row. */
+#side-head {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  flex-shrink: 0;
+  padding: 0.5rem 0.6rem 0.1rem 0.45rem;
+}
+
+.side-toggle {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ash);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.side-toggle:hover {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
+.brand {
+  font-family: var(--sans);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  font-size: 14px;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  background: transparent;
+  color: var(--frost);
+  transition: color var(--dur) var(--ease);
+}
+
+/* Was a three-stop gradient animated across the letters, and its own comment
+   admitted it was the loudest AI tell on the page. The logotype hovers to
+   --accent like every other control. */
+.brand:hover {
+  color: var(--accent);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* --- the vault at the drawer's foot (ADR-0084, alternative A) ----------------
+   One row at rest: the health dot, the vault's name, the count of notices.
+   Amber lives in the dot and nowhere else, so the eye reaches the exception
+   and not a bar of it. Everything else about the vault is behind it. */
+#side-foot {
+  margin-top: auto;
+  flex: none;
+  padding: 0.35rem 0.45rem 0.45rem;
+  background: var(--slate);
+}
+
+#vault-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 40px;
+  padding: 0.3rem 0.55rem;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-family: var(--sans);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  transition: background-color var(--dur) var(--ease);
+}
+
+#vault-chip:hover,
+#vault-chip[aria-expanded="true"] {
+  background: var(--sel-hover);
+}
+
+#vault-chip:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.vdot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--add);
+}
+
+[data-health="warn"] .vdot {
+  background: var(--warn);
+}
+
+#vault-chip .vtext {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+#vault-chip .vname {
+  color: var(--frost);
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#vault-chip .vnotes {
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+}
+
+#vault-chip .vnotes:empty {
+  display: none;
+}
+
+#vault-chip .vchev {
+  margin-left: auto;
+  flex: none;
+  color: var(--ash-dim);
+}
+
+/* The vault's panel and the help panel open over whatever opened them, the
+   foot of the drawer or the foot of the rail, upward: app-settings.js sets
+   left and bottom from the opener. Fixed and outside the drawer, because the
+   rail opens them while the drawer is folded to nothing. Same rule as the
+   toast strip they share a z-order with: a panel you opened wins over it. */
+#vault-panel,
+#help-panel {
+  display: block;
+  position: fixed;
+  z-index: 130;
+  width: min(360px, calc(100vw - 2 * var(--gutter)));
+  max-height: calc(100vh - 6rem);
+  overflow-y: auto;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--lift), var(--glass-edge);
+  padding: 0.3rem;
+}
+
+#vp-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.55rem 0.55rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.25rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+#vp-notices > summary {
+  display: flex;
+  list-style: none;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.55rem;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* The disclosure's own mark, as the tree's folders wear it: display:flex on
+   the summary drops the browser's marker. */
+#vp-notices > summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--ash-dim);
+}
+
+#vp-notices[open] > summary::before {
+  content: "▾";
+}
+
+#vp-notices > summary::-webkit-details-marker {
+  display: none;
+}
+
+#vp-notices > summary:hover {
+  background: var(--sel-hover);
+}
+
+#vp-count {
+  margin-left: auto;
+  color: var(--ash-dim);
+}
+
+[data-health="warn"] #vp-count {
+  color: var(--warn);
+}
+
+.vp-rule {
+  height: 1px;
+  background: var(--line);
+  margin: 0.25rem 0.4rem;
+}
+
+.vp-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  padding: 0.5rem 0.55rem;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vp-item:hover {
+  background: var(--sel-hover);
+  color: var(--frost);
+}
+
+.vp-item:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.vp-item svg {
+  color: var(--ash);
+  flex: none;
+}
+
+.vp-item kbd {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+#boot-notices:empty::after {
+  content: "nothing needs configuring";
+  display: block;
+  padding: 0.6rem 0.8rem;
+  font-size: 12px;
+  color: var(--ash-dim);
+}
+
+/* The one number here you can act on: it opens the view that lists what it
+   counts. Amber is caution, not a link, so the affordance is the underline on
+   hover rather than a second vivid. */
+.vp-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.55rem 0.8rem 0.7rem;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--warn);
+  cursor: pointer;
+}
+
+.vp-row:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.vp-row:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+
+.ghost,
+.commands button,
+#send,
+#dock-send {
+  font-family: var(--sans);
+  /* Sentence case at the control size: see --fs-ctl for why the tracked caps
+     went. */
+  font-size: var(--fs-ctl);
+  background: transparent;
+  color: var(--ash);
+  border: none;
+  padding: 0.65rem 0.9rem;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+/* --- the views: rows of the drawer (ADR-0084) -------------------------------
+   Claude's drawer shape, which the owner pointed at: a full-width New chat,
+   then one row per view with its glyph. The view showing wears the --sel box
+   the open note and the current chat wear, because that box means "you are
+   here" everywhere it appears. */
+.side-new,
+#views .tab {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: calc(100% - 0.9rem);
+  margin: 0 0.45rem;
+  min-height: 34px;
+  padding: 0 0.6rem;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.side-new {
+  margin-bottom: 0.35rem;
+  background: var(--slate-2);
+  color: var(--frost);
+}
+
+#views {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex-shrink: 0;
+  margin: 0 0.45rem 0.3rem;
+  /* the compartments start after a gutter of their own: the views are the
+     app's places, the compartments are what is in this vault */
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line);
+}
+
+#views .tab {
+  width: 100%;
+  margin: 0;
+}
+
+.side-new:hover,
+#views .tab:hover {
+  background: var(--sel-hover);
+  color: var(--frost);
+}
+
+#views .tab svg,
+.side-new svg {
+  flex: none;
+  color: var(--ash);
+}
+
+#views .tab.active {
+  background: var(--sel);
+  color: var(--frost);
+}
+
+#views .tab.active svg {
+  color: var(--accent);
+}
+
+.side-new:focus-visible,
+.side-toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.ghost:hover,
+.commands button:hover {
+  color: var(--frost);
+}
+
+/* tactile press — a hard 1px key-travel, no soft scale (keeps the grid rigid) */
+.tab:active,
+.ghost:active,
+.commands button:active,
+.linklike:active,
+#send:active,
+#dock-send:active {
+  transform: translateY(1px);
+}
+
+/* keyboard focus: a hard accent ring, suppressed for the mouse.
+   Every focusable in the app chrome belongs on this list. The ones added below
+   the first group were falling through to the browser's own ring, which on this
+   substrate measured about 1:1 against the surface behind it, so the app had a
+   focus indicator everywhere except the places you would find by tabbing. */
+.tab:focus-visible,
+.ghost:focus-visible,
+.commands button:focus-visible,
+.linklike:focus-visible,
+.undo-turn:focus-visible,
+#send:focus-visible,
+#dock-send:focus-visible,
+.brand:focus-visible,
+.copy-btn:focus-visible,
+.stab:focus-visible,
+#cal-mode button:focus-visible,
+.cal-ag-more:focus-visible,
+#metrics-proposals:focus-visible,
+#tree-collapse:focus-visible,
+.na:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The pointer floor, on the same principle as the list above it: one rule that
+   every control too small to hold its own belongs on. #metrics-proposals named
+   24px in a comment and nothing enforced it, so five controls sat under it,
+   measured 2026-08-23. #top-broken carries no vertical padding at all and
+   collapsed to its 12.8px line box — the smallest target in the app. The three
+   chip-sized buttons stopped two pixels short of the floor. (#work-close was on
+   this list until the work panel became a mode of the drawer, which closes from
+   the drawer's own ✕.) min-height and not height, because a <button>
+   centres its own content: the text lands without touching a single value of
+   their type, padding or border. */
+:is(#vault-chip, .mini, .wk-mini, .s-more, #new-chat) {
+  min-height: 24px;
+}
+
+/* the one control that matters while a turn is running, so it stops being a
+   ghost among ghosts and reads as a button for as long as it is on screen. It
+   sits at the end of the run line, in the composer's column (audit P1). */
+.rl-stop {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  padding: 0.35rem 0.7rem;
+  min-height: 24px;
+  color: var(--frost);
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.rl-stop:hover {
+  color: var(--on-vivid);
+  background: var(--warn);
+  border-color: var(--warn);
+}
+
+.rl-stop:disabled {
+  color: var(--ash-dim);
+  background: transparent;
+  cursor: default;
+}
+
+.rl-stop:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  /* The gutters ARE the separation between rail and view; see --gutter. */
+  gap: var(--gutter);
+  padding: var(--gutter);
+}
+
+/* The chat view IS the reading surface now (see .view): the answer flows on it
+   with no card of its own (app-chat.css .msg.silica>.body) and only the user's
+   turn keeps a bubble. The wash shows in the gutters around it, not through it. */
+#view-chat {
+  /* The inset SNAPS, deliberately: unlike the header, this element holds the
+     whole transcript, and animating its padding would reflow every message on
+     every frame of the drawer's slide. One reflow, not eight. */
+}
+
+/* The drawer is position: fixed and overlays, and #log had no measure cap, so an
+   open note hid the right part of every transcript line — and with it the tail of
+   #composer, including #send. header and #dock already reserved this exact gap;
+   the reading surface was the one that did not. */
+body.note-open .view {
+  /* MARGIN, not padding: padding kept the view's --sheet running under a note
+     of the same colour and the two read as one slab. The margin ends the view
+     a gutter before the note, so the canvas shows between them top to bottom.
+     Every view, explore included: the frame used to stay under the drawer and
+     hide its own HUD instead, which is a special case the margin retires. */
+  margin-right: calc(var(--note-w, 630px) + var(--gutter));
+}
+
+/* Metrics joined that rule for the same reason chat did, one theme later. The
+   drawer is translucent, which is only safe over something that does not
+   scroll behind it — header, dock and chat all reserve the gap, #view-graph is
+   the deliberate exception (it hides its own HUD instead, see
+   syncDrawerToViews). The calendar joined a theme after metrics: a month grid
+   has no measure to give back, so what the drawer took was the seventh column,
+   and Sunday was simply not on screen while the work panel was folded open.
+   Metrics reserved nothing, so an open note sat over live
+   cards and read their numbers through itself. Invisible on crystal, where the
+   bleed-through is dark on dark; on paper it is dark text on white glass, and
+   the first light build showed it immediately. */
+
+.view {
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  min-height: 0;
+  /* One of the three surfaces (rail --slate, view --sheet, note --sheet). The
+     view is the brightest plane because it is where the reading happens; the
+     rail recedes one step. `clip` and not `hidden`: the corners must cut the
+     children (a transcript, an iframe, a month grid) but the view must not
+     become a scroll container, its children already are. */
+  background: var(--sheet);
+  border-radius: var(--r);
+  overflow: clip;
+  /* without this the pane cannot shrink below its min-content width, so a narrow
+     window pushed the composer past the viewport edge and
+     the body scrolled sideways instead of the layout tightening */
+  min-width: 0;
+}
+
+.view.active {
+  display: flex;
+}
+
+/* --- unified left sidebar: search · files · history · work ------------------
+   The column does NOT scroll. It used to, and the cost was paid at the bottom
+   by the one line that says which vault you are reading: with the tree open,
+   the vault path was below the fold and its own text was clipped by 264px.
+   Compartments negotiate instead — a closed one is a summary row, an open one
+   takes a share and scrolls INSIDE itself — so every compartment's title is
+   always on screen and the foot never leaves it. */
+#sidebar {
+  position: relative;
+  flex: 0 0 var(--side-w);
+  display: flex;
+  flex-direction: column;
+  /* The quiet surface: one plane under the view's --sheet, no edge drawn. */
+  background: var(--slate);
+  border-radius: var(--r);
+  overflow: hidden;
+  transition: flex-basis var(--dur) var(--ease);
+}
+
+/* The mirror of #note-resize at the other edge. Outside the padding rather than
+   over it, so it never eats a click meant for a tree row. */
+#side-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+body.sidebar-collapsed #side-resize {
+  display: none;
+}
+
+body.sidebar-collapsed #sidebar {
+  flex-basis: 0;
+  /* A zero-width flex item still owns its gap; swallow it, or the view sits a
+     gutter further from the window edge than its neighbour above it. */
+  margin-right: calc(-1 * var(--gutter));
+}
+
+.side-section {
+  /* Compartments separate by space, not by rules: on a surface the rule was
+     the only line left in the rail and it read as a table. One rhythm
+     (ADR-0072): a 34px title row, its body, and the same 0.4rem between any
+     two compartments, whatever is in them. It was 0.8rem over and 1rem under
+     every title plus 0.6rem under an open one, 58px between "This chat" and
+     "Chats" with nothing in between. */
+  padding: 0.2rem 0.5rem;
+  flex-shrink: 0;
+}
+
+.side-section + .side-section {
+  margin-top: 0.4rem;
+}
+
+/* An open compartment is a box that scrolls itself. `0 1 auto` and not `1 1 0`:
+   Pinned and This session are three rows each, and a share of the column is a
+   share of empty space taken from the three below them. */
+details.side-section[open] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 0 1 auto;
+}
+
+/* The two worth the height. Chats and the vault are lists with no natural end,
+   so each gets an equal share of whatever is left and scrolls inside it.
+   `1 1 0` and not `1 1 auto` so the share does not depend on how much is
+   currently in them: a rail whose proportions change as a list grows is a
+   rail that moves under the cursor. "This chat" takes what it needs up to a
+   cap and scrolls past it: it is the compartment read most and it must never
+   push the other two off the column. */
+#side-chats[open],
+#side-vault[open] {
+  flex: 2 1 0;
+  min-height: 5rem;
+}
+
+/* The vault is the list every view reads, so with both open it takes three
+   fifths of what is left and the chats two (ADR-0072). Still a share and not
+   its content's height, for the reason above. */
+#side-vault[open] {
+  flex-grow: 3;
+}
+
+#side-chat[open] {
+  flex: 0 1 auto;
+  max-height: 38%;
+}
+
+/* the resting line of "this chat", and its count once something changed */
+#chat-head {
+  font-size: 12px;
+  color: var(--ash-dim);
+  padding: 0 0.55rem 0.4rem;
+}
+
+#chat-head:empty {
+  display: none;
+}
+
+#chat-head.review {
+  color: var(--warn);
+}
+
+/* a group label inside a compartment: pinned in the vault, a day in the chats */
+.side-bucket {
+  font-family: var(--sans);
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  padding: 0.5rem 0.55rem 0.2rem;
+}
+
+.side-bucket:first-child {
+  padding-top: 0;
+}
+
+/* the filter heads the rail at a compartment's inset, and it never shrinks
+   when the compartments below fight for height. No rule under it: the gap is
+   the separation, as it is between the compartments. */
+#side-filter {
+  padding: 0.6rem 0.6rem 0.5rem;
+  flex-shrink: 0;
+}
+
+/* the note open in the drawer, and the current chat: the same inset the
+   active tab wears, because cyan means "you are here" everywhere it appears */
+/* Selected = the frosted box (--sel), heavier text, and nothing else: no
+   accent bar, which repeated what the box already says. Hover is the fainter
+   fill so the two states stay two. Keyboard focus keeps its outline: a third
+   state, drawn a third way. */
+.tree-note.open,
+.session.active,
+.tree-note.open:hover,
+.session.active:hover,
+.session.active:focus-within {
+  color: var(--frost);
+  font-weight: 500;
+  background: var(--sel);
+}
+
+/* a folder's note count, at the end of its summary line */
+.tree-n {
+  float: right;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  padding-left: 0.5rem;
+}
+
+/* the review state on a ledger row (audit P4): amber on the mark and the word */
+.chg-row.review .chg-mark,
+.chg-review {
+  color: var(--warn);
+}
+
+/* the shared tooltip (audit P9): shown on hover and on focus, above its control */
+#tip {
+  position: fixed;
+  z-index: 200;
+  max-width: 260px;
+  padding: 0.35rem 0.55rem;
+  background: var(--slate);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xs);
+  font-family: var(--sans);
+  font-size: 11px;
+  line-height: 1.4;
+  box-shadow: var(--lift);
+  pointer-events: none;
+}
+
+#tip[hidden] {
+  display: none;
+}
+
+/* Chrome wraps everything after <summary> in an anonymous ::details-content
+   box, so THAT is the flex item of the compartment and .side-body is a child of
+   it. Measured: a 316px compartment holding a 1637px body that painted straight
+   over the two compartments under it. Both rules stand, and they agree: an
+   engine without ::details-content makes .side-body the item itself, which the
+   rule above already sizes the same way. */
+details.side-section[open]::details-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.side-title {
+  color: var(--ash-dim);
+  font-size: var(--fs-ctl);
+  margin-bottom: 0.6rem;
+  user-select: none;
+}
+
+/* The compartment's mark, the same glyph #railmini uses for it. 12px and not
+   the rail's 15px: there it IS the label, here it sits beside one, and a mark
+   as tall as the cap height it precedes competes with the word. Dimmer than
+   the word too — the icon is how you FIND the compartment when scanning the
+   column, the word is what you read once you have. */
+.side-title .si {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  margin-right: 0.45rem;
+  opacity: 0.62;
+}
+
+details.side-section:hover>summary.side-title .si {
+  opacity: 1;
+}
+
+
+/* No scrollbar-width here: a non-auto value makes Chromium drop the app's own
+   ::-webkit-scrollbar thumb and draw the native bar, arrow buttons and all
+   (ADR-0072). Firefox gets the thin bar from the gated block in app-base.css. */
+.side-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* The title is the toggle (ADR-0072). It carried a trailing ▸/▾ beside its own
+   button (+ new, collapse), and the two read as one control; the name already
+   opens and closes the compartment, as a <summary> does, so the mark went. A
+   shut compartment still says so: its name steps down a tone. */
+details.side-section>summary.side-title {
+  cursor: pointer;
+  list-style: none;
+  margin-bottom: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: 34px;
+  /* no right padding: the title's button ends its pill on the column's edge,
+     so its text ends where the tree's counts and the chats' times do */
+  padding: 0 0 0 0.55rem;
+  border-radius: var(--r-sm);
+  color: var(--ash);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+details.side-section>summary.side-title::-webkit-details-marker {
+  display: none;
+}
+
+details.side-section:not([open])>summary.side-title {
+  color: var(--ash-dim);
+}
+
+details.side-section[open]>summary.side-title {
+  margin-bottom: 0.15rem;
+}
+
+details.side-section>summary.side-title:hover {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
+details.side-section>summary.side-title:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The four tiles the metrics standing panel builds. They were the sidebar's 2x2
+   board too, until the top strip took identity and counts: one statement of the
+   vault's size, in the one place that is true on every view. */
+.stat {
+  background: var(--slate-2);
+  padding: 0.4rem 0.25rem;
+  text-align: center;
+  min-width: 0;
+}
+
+.stat .val {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--frost);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat .val.warn {
+  color: var(--warn);
+}
+
+.stat .lbl {
+  /* 10px, the chrome meta step: the label of a figure is chrome and sits one
+     step under the tab strip, never below every step the scale defines. */
+  font-size: 10px;
+  color: var(--ash-dim);
+  margin-top: 1px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- the rail's own compartments -------------------------------------------
+   What is left in the rail after identity and counts moved to the strip: the
+   notes you named, what this session wrote, the vault's own grouping. Each is
+   something only the rail can hold, and none of them is stated anywhere else. */
+
+.pin-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  height: 26px;
+  padding: 0 0.35rem;
+  border-radius: var(--r-xs);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.pin-row:hover {
+  background: var(--slate-2);
+}
+
+/* A bar, not a dot: at 3x13 it reads as the note's edge in the list and costs
+   no colour of its own beyond the one vivid this app allows. */
+.pin-row .sw {
+  width: 3px;
+  height: 13px;
+  flex: none;
+  background: var(--accent);
+}
+
+.pin-row .t {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Unpin appears on hover and on focus. It is the destructive half of a row
+   whose main action is "read this", so it must not be the first thing the eye
+   lands on, and it must still be reachable from the keyboard. */
+.pin-x {
+  margin-left: auto;
+  flex: none;
+  background: none;
+  border: none;
+  padding: 0 0.2rem;
+  color: var(--ash-dim);
+  font-size: 10px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.pin-row:hover .pin-x,
+.pin-x:focus-visible {
+  opacity: 1;
+}
+
+.pin-x:hover {
+  color: var(--del);
+}
+
+/* Clipped at the START (ADR-0072): the end of a path is the folder that names
+   the vault, and an end-ellipsis kept "/home/user/Documents/Obsi…" and lost
+   it. rtl moves the ellipsis to the left; the LRM marks setVaultPath wraps the
+   text in keep the slashes in path order. */
+#vp-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+
+#vault-switch {
+  flex: none;
+  padding: 0.25rem 0.4rem;
+  color: var(--accent);
+}
+
+/* --- boot notices: configuration, behind the chip that counts it ------------ */
+#boot-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.7rem 0.7rem;
+  /* Five warn cards were half the sidebar, pushing FILES below the fold on
+     first load. In the popover the stack scrolls; every notice stays reachable. */
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.notice {
+  position: relative;
+  padding: 0.5rem 1.6rem 0.55rem 0.6rem;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.notice-text {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* remedy collapsed behind a one-line disclosure until asked for */
+.notice details > summary {
+  margin-top: 0.25rem;
+  color: var(--ash-dim);
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.notice details > summary:hover {
+  color: var(--frost);
+}
+
+/* the fix is usually a config blob: keep it selectable, cap how much it takes */
+.notice-hint {
+  margin-top: 0.3rem;
+  color: var(--ash-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  max-height: 5.5rem;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.notice-x {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  background: transparent;
+  border: none;
+  color: var(--ash-dim);
+  font-size: 11px;
+  line-height: 1;
+  padding: 0.2rem 0.25rem;
+  cursor: pointer;
+  border-radius: var(--r-xs);
+}
+
+.notice-x:hover {
+  color: var(--frost);
+  background: var(--line);
+}
+
+.notice-x:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+}
+
+#side-search {
+  width: 100%;
+  font-family: var(--sans);
+  font-size: 12px;
+  background: var(--slate-2);
+  color: var(--frost);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.45rem 0.6rem;
+  transition: border-color var(--dur) var(--ease);
+}
+
+/* One focus vocabulary for text fields, everywhere. There were four: ash-dim
+   here and in settings search, frost on the graph bar, accent on the settings
+   controls — so "this field has the caret" looked like a different fact
+   depending on which pane you were in. Accent, because cyan is the app's one
+   interactive colour and focus is interactivity; measured 7.58:1 on slate-2. */
+#side-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#side-search::placeholder {
+  color: var(--ash-dim);
+}
+
+/* file tree (markup from /vault_info — same emitter as the graph viewer)
+   No max-height and no scroll of its own: .side-body is the box that scrolls,
+   and a viewport cap inside it was the old arrangement's answer to a rail that
+   scrolled as a whole. Two scrolls nested one inside the other is a tree you
+   have to scroll twice to reach the bottom of. */
+#tree {
+  font-size: 13px;
+}
+
+/* A tidy-up, not a destination: shown while the pointer or the focus is in
+   the Vault, and the same quiet pill as + new (ADR-0072). */
+#tree-collapse {
+  margin-left: auto;
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  opacity: 0;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease), opacity var(--dur) var(--ease);
+}
+
+#side-vault[open]:is(:hover, :focus-within) #tree-collapse {
+  opacity: 1;
+}
+
+#side-vault:not([open]) #tree-collapse {
+  visibility: hidden;
+}
+
+#tree-collapse:hover {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
+#tree-collapse:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#tree:empty::after {
+  content: "no notes indexed";
+  color: var(--ash-dim);
+  font-size: 11px;
+}
+
+#tree summary {
+  cursor: pointer;
+  color: var(--ash);
+  padding: 2px 0;
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  list-style: none;
+}
+
+#tree summary::-webkit-details-marker {
+  display: none;
+}
+
+#tree details:not([open])>summary::before {
+  content: "▸ ";
+  color: var(--ash-dim);
+}
+
+#tree details[open]>summary::before {
+  content: "▾ ";
+  color: var(--ash-dim);
+}
+
+#tree summary:hover {
+  color: var(--frost);
+}
+
+#tree details details,
+#tree .tree-note {
+  margin-left: 12px;
+}
+
+/* the row is a <button>, so it has to be told to fill its column rather than
+   shrink-wrap its filename */
+#tree .tree-note {
+  width: calc(100% - 12px);
+}
+
+/* selection reads from the fill, not from a coloured rule down the left edge:
+   a 2px accent bar on every hovered row was the loudest thing in the column.
+   The row is a <button> (see render_tree): reachable, announced as a button,
+   and reset here back to the shape of a row. */
+/* --- a note in the tree, with the one action the rail can take on it --------
+   The pin appears on hover (and on keyboard focus, which is the half a hover
+   rule always forgets) and stays lit once made, because pinned is a state of
+   the note and not of the pointer. */
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.tree-row .tree-note {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.tree-pin {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.tree-row:hover .tree-pin,
+.tree-pin:focus-visible,
+.tree-pin.on {
+  opacity: 1;
+}
+
+.tree-pin:hover {
+  color: var(--frost);
+}
+
+/* Plan this folder (ADR-0081 §17): the folder row's one action, on hover and
+   keyboard focus like the pin, floated beside the count it shares the line with */
+.tree-plan {
+  float: right;
+  padding: 0 0.35rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+#tree summary:hover .tree-plan,
+.tree-plan:focus-visible {
+  opacity: 1;
+}
+
+.tree-plan:hover {
+  color: var(--accent);
+}
+
+.tree-pin.on {
+  color: var(--accent);
+}
+
+.tree-note {
+  display: block;
+  text-align: left;
+  font: inherit;
+  background: none;
+  border: 0;
+  box-sizing: border-box;
+  color: var(--ash);
+  text-decoration: none; /* a row, not a link in prose, though it is an <a> (P7) */
+  cursor: pointer;
+  padding: 2px 7px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.tree-note:hover {
+  background: var(--sel-hover);
+  color: var(--frost);
+}
+
+/* changes — one row per note this session touched. Same row geometry as the
+   tree, because it is the same object seen from a different question ("what is
+   in the vault" / "what did we just do to it"); what it adds is a leading mark
+   and a +/− tally, so a glance answers how big the change was without opening it. */
+/* the count is a flex item in the summary, so a leading space in its text is
+   collapsed away and it welds itself to the label. Margin, not whitespace. */
+#sessions-count,
+#vault-count {
+  margin-left: 0.6em;
+  letter-spacing: 0;
+  color: var(--ash-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+#changes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chg-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  color: var(--ash);
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: var(--r-sm);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.chg-row:hover {
+  background: var(--slate-2);
+  color: var(--frost);
+}
+
+.chg-mark {
+  flex-shrink: 0;
+  width: 0.75rem;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.chg-row.created .chg-mark {
+  color: var(--add);
+}
+
+.chg-row.deleted .chg-mark {
+  color: var(--del);
+}
+
+.chg-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chg-tally {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.35rem;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+}
+
+.chg-add {
+  color: var(--add);
+}
+
+.chg-del {
+  color: var(--del);
+}
+
+.chg-quiet {
+  color: var(--ash-dim);
+}
+
+/* history — same as the tree above: the compartment's share is the cap, and the
+   body inside it is the one scroll. */
+#sessions {
+  display: flex;
+  flex-direction: column;
+}
+
+#sessions:empty::after {
+  content: "no past chats";
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+}
+
+/* a chat row (audit P18): a link, with the working dot, the title, the
+   relative time, and the "…" that appears on hover and on focus */
+.session {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.55rem;
+  cursor: pointer;
+  color: var(--ash);
+  font-size: 13px;
+  flex-shrink: 0;
+  border-radius: var(--r-sm);
+  text-decoration: none;
+  min-width: 0;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.session:hover,
+.session:focus-within {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
+.session:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.session .t {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The rail's one family (ADR-0072): a time is a figure, so tabular sans at the
+   meta step, not the monospace face at 10px beside a 13px sans title. */
+.session .m {
+  flex: none;
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--ash-dim);
+}
+
+.session .s-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* The … stands where the time is, and only while the row is hovered or
+   focused (ADR-0072): at rest it held an invisible 22px slot, so every time
+   in Chats ended 37px short of the edge the tree's counts and "+ new" end on. */
+.s-more {
+  position: absolute;
+  right: 0.3rem;
+  top: 50%;
+  translate: 0 -50%;
+  width: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ash-dim);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  border-radius: var(--r-xs);
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.session:hover .s-more,
+.session:focus-within .s-more,
+.session.menu-open .s-more {
+  opacity: 1;
+}
+
+.session:is(:hover, :focus-within, .menu-open) .m {
+  visibility: hidden;
+}
+
+.s-more:hover,
+.s-more:focus-visible {
+  color: var(--frost);
+  outline: none;
+}
+
+.s-menu {
+  position: absolute;
+  right: 0.4rem;
+  top: calc(100% - 2px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 0.25rem;
+  background: var(--slate);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  box-shadow: var(--lift);
+}
+
+.s-item {
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--r-xs);
+  padding: 0.4rem 0.6rem;
+  font-family: var(--sans);
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.s-item:hover,
+.s-item:focus-visible {
+  background: var(--slate-2);
+  color: var(--frost);
+  outline: none;
+}
+
+.s-item.danger {
+  color: var(--del);
+}
+
+.s-item.armed {
+  background: color-mix(in srgb, var(--del) 12%, transparent);
+}
+
+.s-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  font-size: 12px;
+  color: var(--frost);
+  background: var(--slate-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-xs);
+  padding: 0.15rem 0.4rem;
+  outline: none;
+}
+
+#sessions-more {
+  position: sticky;
+  bottom: 0;
+  flex-shrink: 0;
+  width: 100%;
+  background: var(--slate);
+  border-top: 1px solid var(--line);
+}
+
+.linklike {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  color: var(--ash-dim);
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+}
+
+.linklike:hover {
+  color: var(--frost);
+}
+
+
+

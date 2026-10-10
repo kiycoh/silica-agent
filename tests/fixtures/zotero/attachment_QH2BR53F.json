@@ -1,0 +1,51 @@
+{
+ "key": "QH2BR53F",
+ "version": 1984,
+ "library": {
+  "type": "user",
+  "id": 0,
+  "name": "My Library",
+  "links": {
+   "self": {
+    "href": "http://localhost:23119/api/users/0",
+    "type": "application/json"
+   }
+  }
+ },
+ "links": {
+  "self": {
+   "href": "http://localhost:23119/api/users/0/items/QH2BR53F",
+   "type": "application/json"
+  },
+  "up": {
+   "href": "http://localhost:23119/api/users/0/items/8H4AC8GW",
+   "type": "application/json"
+  },
+  "enclosure": {
+   "href": "file:///home/user/Zotero/storage/QH2BR53F/Packer%20et%20al.%20-%202024%20-%20MemGPT%20Towards%20LLMs%20as%20Operating%20Systems.pdf",
+   "type": "application/pdf",
+   "title": "Packer et al. - 2024 - MemGPT Towards LLMs as Operating Systems.pdf",
+   "length": 663708
+  }
+ },
+ "meta": {
+  "numChildren": 0
+ },
+ "data": {
+  "key": "QH2BR53F",
+  "version": 1984,
+  "itemType": "attachment",
+  "title": "PDF",
+  "parentItem": "8H4AC8GW",
+  "linkMode": "imported_file",
+  "contentType": "application/pdf",
+  "charset": "",
+  "filename": "Packer et al. - 2024 - MemGPT Towards LLMs as Operating Systems.pdf",
+  "tags": [],
+  "relations": {},
+  "dateAdded": "2026-09-16T21:00:44Z",
+  "dateModified": "2026-09-16T21:01:15Z",
+  "mtime": 1789592444314,
+  "md5": "16e65f7cc5c1d647eb6acffdf085ce62"
+ }
+}

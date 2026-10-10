@@ -1,0 +1,850 @@
+[
+  {
+    "id": "coercion-order",
+    "origin": "Reduced from test_validate_body_field_coercion.py (A17/A18/A21) and test_superseded_redirect.py (run f30ace50, 2026-09-03).",
+    "files": {
+      "vault.yaml": "write_dir: \"\"\n",
+      "Course/Winner.md": "---\naliases: [Alias]\n---\n# Winner\nOld body.\n",
+      "Course/Machine Learning.md": "# Machine Learning\nExisting lesson.\n",
+      "Course/Existing overwrite.md": "# Existing overwrite\nOriginal body.\n",
+      "Course/Loser.md": "---\nsuperseded_by: \"[[Winner]]\"\n---\n# Loser\nOld body.\n",
+      "Course/Duplicate.md": "# Duplicate\nExisting content.\n"
+    },
+    "ops": [
+      {
+        "op": "write",
+        "heading": "Old",
+        "source_basename": "lesson.md",
+        "path": "Course/Old.md",
+        "snippet": "The later lesson has a longer contribution.",
+        "title": "Alias"
+      },
+      {
+        "op": "write",
+        "heading": "Loser",
+        "source_basename": "lesson.md",
+        "path": "Course/Loser.md",
+        "snippet": "A small addition."
+      },
+      {
+        "op": "write",
+        "heading": "Winner",
+        "source_basename": "lesson.md",
+        "path": "Course/Winner.md",
+        "snippet": "Short."
+      },
+      {
+        "op": "write",
+        "heading": "Machine Learning (9 CFU)",
+        "source_basename": "lesson.md",
+        "path": "Course/Machine Learning (9 CFU).md",
+        "snippet": "First candidate."
+      },
+      {
+        "op": "write",
+        "heading": "Machine Learning [2024]",
+        "source_basename": "lesson.md",
+        "path": "Course/Machine Learning [2024].md",
+        "snippet": "Second candidate is substantially longer."
+      },
+      {
+        "op": "patch",
+        "heading": "Missing",
+        "source_basename": "lesson.md",
+        "path": "Course/Missing.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "overwrite",
+        "heading": "New overwrite",
+        "source_basename": "lesson.md",
+        "path": "Course/New overwrite.md",
+        "snippet": "",
+        "content": "Overwrite content survives degradation."
+      },
+      {
+        "op": "overwrite",
+        "heading": "Existing overwrite",
+        "source_basename": "lesson.md",
+        "path": "Course/Existing overwrite.md",
+        "snippet": "",
+        "content": "Replacement body."
+      },
+      {
+        "op": "skip",
+        "heading": "Discarded",
+        "source_basename": "lesson.md",
+        "path": "Course/Discarded.md",
+        "snippet": "A concrete fact about the concept.",
+        "reason": "Explicit no-op"
+      },
+      {
+        "op": "overwrite",
+        "heading": "Duplicate",
+        "source_basename": "lesson.md",
+        "path": "Course/Duplicate.md",
+        "content": "Short."
+      },
+      {
+        "op": "write",
+        "heading": "Duplicate",
+        "source_basename": "lesson.md",
+        "path": "Course/Duplicate.md",
+        "snippet": "The write body is longer than the overwrite and wins."
+      }
+    ],
+    "payloads": [],
+    "options": {
+      "target_dir": "Course",
+      "profile": "default"
+    }
+  },
+  {
+    "id": "payload-and-references",
+    "origin": "Reduced from test_regression_validation.py (2026-07-17), test_soft_gate.py (2026-09-02), test_snippet_gate.py (run 5d0a3350), test_validate_links.py.",
+    "files": {
+      "vault.yaml": "write_dir: \"\"\n",
+      "Course/Descriptor.md": "# Descriptor\nExisting concept.\n"
+    },
+    "ops": [
+      {
+        "op": "write",
+        "heading": "description",
+        "source_basename": "typo.md",
+        "path": "Wrong/Heading.md",
+        "snippet": "A short fact links [[Companion]], [[Future]] and [[Unresolved]].",
+        "parent": "Missing parent",
+        "title": "Description"
+      },
+      {
+        "op": "write",
+        "heading": "Companion",
+        "source_basename": "lesson.md",
+        "path": "Course/Companion.md",
+        "snippet": "A second fact links [[Description]].",
+        "parent": "Description"
+      },
+      {
+        "op": "write",
+        "heading": "Empty",
+        "source_basename": "lesson.md",
+        "path": "Course/Empty.md",
+        "snippet": ""
+      },
+      {
+        "op": "write",
+        "heading": "Mention",
+        "source_basename": "lesson.md",
+        "path": "Course/Mention.md",
+        "snippet": ""
+      },
+      {
+        "op": "write",
+        "heading": "Outside",
+        "source_basename": "lesson.md",
+        "path": "CourseSibling/Outside.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Unregistered",
+        "source_basename": "lesson.md",
+        "path": "Course/Unregistered.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Forbidden",
+        "source_basename": "lesson.md",
+        "path": "Inbox/other/Forbidden.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Malformed",
+        "source_basename": "lesson.md"
+      },
+      {
+        "op": "skip",
+        "heading": "Skip",
+        "source_basename": "lesson.md",
+        "path": "Inbox/Skip.md",
+        "snippet": "A concrete fact about the concept."
+      }
+    ],
+    "payloads": [
+      {
+        "batches": [
+          {
+            "inbox_file": "Inbox/lesson.md",
+            "concepts": [
+              {
+                "name": "Description",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Companion",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Empty",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Mention",
+                "inbox_excerpt": "",
+                "vault_collision": null
+              },
+              {
+                "name": "Outside",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Forbidden",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "options": {
+      "target_dir": "Course",
+      "profile": "default",
+      "future_ref_whitelist": [
+        "Future"
+      ]
+    }
+  },
+  {
+    "id": "mirror-collisions",
+    "origin": "Reduced from test_mirror_patch_collision.py: mirror-only mismatch accounted for 22/32 observed collision rejections.",
+    "files": {
+      "vault.yaml": "write_dir: silica\n",
+      "Math/Correlation.md": "# Correlation\nExisting.\n",
+      "Math/Variance.md": "# Variance\nExisting.\n",
+      "Math/Other.md": "# Other\nExisting.\n"
+    },
+    "ops": [
+      {
+        "op": "patch",
+        "heading": "Correlation",
+        "source_basename": "lesson.md",
+        "path": "silica/Math/Correlation.md",
+        "snippet": "A concrete fact about the concept.",
+        "parent": "Missing"
+      },
+      {
+        "op": "patch",
+        "heading": "Variance",
+        "source_basename": "lesson.md",
+        "path": "Math/Variance.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "patch",
+        "heading": "Wrong",
+        "source_basename": "lesson.md",
+        "path": "silica/Math/Other.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Signal",
+        "source_basename": "lesson.md",
+        "path": "Course/Signal: Noise.md",
+        "snippet": "A concrete fact about the concept.",
+        "title": null
+      }
+    ],
+    "payloads": [
+      {
+        "batches": [
+          {
+            "inbox_file": "Inbox/lesson.md",
+            "concepts": [
+              {
+                "name": "Correlation",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": {
+                  "path": "Math/Correlation.md",
+                  "excerpt": "Existing."
+                }
+              },
+              {
+                "name": "Variance",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": {
+                  "path": "Math/Variance.md",
+                  "excerpt": "Existing."
+                }
+              },
+              {
+                "name": "Wrong",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": {
+                  "path": "Math/Expected.md",
+                  "excerpt": "Existing."
+                }
+              },
+              {
+                "name": "Signal",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "options": {
+      "target_dir": "Course",
+      "profile": "default"
+    }
+  },
+  {
+    "id": "mirror-folders",
+    "origin": "Reduced from test_write_dir.py: justify a new folder once per batch, independently of op order.",
+    "files": {
+      "vault.yaml": "write_dir: silica\n",
+      "Course/Existing/Old.md": "# Old\n"
+    },
+    "ops": [
+      {
+        "op": "write",
+        "heading": "First",
+        "source_basename": "lesson.md",
+        "path": "Course/Justified/First.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Second",
+        "source_basename": "lesson.md",
+        "path": "Course/Justified/Second.md",
+        "snippet": "A concrete fact about the concept.",
+        "reason": "No existing folder covers this subject."
+      },
+      {
+        "op": "write",
+        "heading": "Unjustified",
+        "source_basename": "lesson.md",
+        "path": "Course/Invented/Unjustified.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Known",
+        "source_basename": "lesson.md",
+        "path": "Course/Existing/Known.md",
+        "snippet": "A concrete fact about the concept."
+      }
+    ],
+    "payloads": [],
+    "options": {
+      "target_dir": "Course",
+      "profile": "default"
+    }
+  },
+  {
+    "id": "write-boundary",
+    "origin": "Reduced from test_write_dir.py and test_regression_validation.py; includes unsupported move/delete at this validation seam.",
+    "files": {
+      "vault.yaml": "write_dir: Notes\n",
+      "Outside/Protected.md": "# Protected\nHuman note.\n"
+    },
+    "ops": [
+      {
+        "op": "write",
+        "heading": "Fresh",
+        "source_basename": "lesson.md",
+        "path": "Course/Fresh.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "patch",
+        "heading": "Protected",
+        "source_basename": "lesson.md",
+        "path": "Outside/Protected.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "move",
+        "heading": "Move",
+        "source_basename": "lesson.md",
+        "from_path": "Notes/Course/A.md",
+        "to_path": "Outside/A.md"
+      },
+      {
+        "op": "delete",
+        "heading": "Delete",
+        "source_basename": "lesson.md",
+        "path": "Notes/Course/Delete.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Inbox",
+        "source_basename": "lesson.md",
+        "path": "Notes/0 Inbox/Inbox.md",
+        "snippet": "A concrete fact about the concept."
+      }
+    ],
+    "payloads": [],
+    "options": {
+      "target_dir": "Course",
+      "profile": "default"
+    }
+  },
+  {
+    "id": "grounding-default",
+    "origin": "Reduced from test_span_grounding.py (IDK.md, 2026-08-05), test_grounding_score.py, and test_distill_profile_per_run.py. Archive-only source models validation after CLEANUP.",
+    "files": {
+      "vault.yaml": "write_dir: \"\"\n",
+      "Done/lesson.md": "Adam uses $\\beta_1 = 0.9$ for the first moment.\nMomentum uses $v_t = \\gamma v_{t-1} + \\eta \\nabla L(w_t)$ as usual.\n"
+    },
+    "ops": [
+      {
+        "op": "write",
+        "heading": "Grounded",
+        "source_basename": "lesson.md",
+        "path": "Course/Grounded.md",
+        "snippet": "Adam uses $\\beta_1 = 0.9$ for the first moment."
+      },
+      {
+        "op": "write",
+        "heading": "Invented",
+        "source_basename": "lesson.md",
+        "path": "Course/Invented.md",
+        "snippet": "Adam uses $\\epsilon_{stability} = 10^{-8}$ for stability.",
+        "parent": "Missing parent"
+      },
+      {
+        "op": "write",
+        "heading": "Archived",
+        "source_basename": "lesson.md",
+        "path": "Course/Archived.md",
+        "snippet": "Momentum uses $v_t = \\gamma v_{t-1} + \\eta \\nabla L(w_t)$ as usual."
+      }
+    ],
+    "payloads": [
+      {
+        "batches": [
+          {
+            "inbox_file": "Inbox/lesson.md",
+            "concepts": [
+              {
+                "name": "Grounded",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              },
+              {
+                "name": "Invented",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              },
+              {
+                "name": "Archived",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "options": {
+      "target_dir": "Course",
+      "profile": "default"
+    }
+  },
+  {
+    "id": "grounding-extractive",
+    "origin": "Reduced from test_span_grounding.py (IDK.md, 2026-08-05), test_grounding_score.py, and test_distill_profile_per_run.py. Archive-only source models validation after CLEANUP.",
+    "files": {
+      "vault.yaml": "write_dir: \"\"\n",
+      "Done/lesson.md": "Adam uses $\\beta_1 = 0.9$ for the first moment.\nMomentum uses $v_t = \\gamma v_{t-1} + \\eta \\nabla L(w_t)$ as usual.\n"
+    },
+    "ops": [
+      {
+        "op": "write",
+        "heading": "Grounded",
+        "source_basename": "lesson.md",
+        "path": "Course/Grounded.md",
+        "snippet": "Adam uses $\\beta_1 = 0.9$ for the first moment."
+      },
+      {
+        "op": "write",
+        "heading": "Invented",
+        "source_basename": "lesson.md",
+        "path": "Course/Invented.md",
+        "snippet": "Adam uses $\\epsilon_{stability} = 10^{-8}$ for stability.",
+        "parent": "Missing parent"
+      },
+      {
+        "op": "write",
+        "heading": "Archived",
+        "source_basename": "lesson.md",
+        "path": "Course/Archived.md",
+        "snippet": "Momentum uses $v_t = \\gamma v_{t-1} + \\eta \\nabla L(w_t)$ as usual."
+      }
+    ],
+    "payloads": [
+      {
+        "batches": [
+          {
+            "inbox_file": "Inbox/lesson.md",
+            "concepts": [
+              {
+                "name": "Grounded",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              },
+              {
+                "name": "Invented",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              },
+              {
+                "name": "Archived",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "options": {
+      "target_dir": "Course",
+      "profile": "extractive"
+    }
+  },
+  {
+    "id": "grounding-promotion",
+    "origin": "Reduced from test_span_grounding.py (IDK.md, 2026-08-05), test_grounding_score.py, and test_distill_profile_per_run.py. Archive-only source models validation after CLEANUP.",
+    "files": {
+      "vault.yaml": "write_dir: \"\"\n",
+      "Done/lesson.md": "Adam uses $\\beta_1 = 0.9$ for the first moment.\nMomentum uses $v_t = \\gamma v_{t-1} + \\eta \\nabla L(w_t)$ as usual.\n"
+    },
+    "ops": [
+      {
+        "op": "write",
+        "heading": "Grounded",
+        "source_basename": "lesson.md",
+        "path": "Course/Grounded.md",
+        "snippet": "Adam uses $\\beta_1 = 0.9$ for the first moment."
+      },
+      {
+        "op": "write",
+        "heading": "Invented",
+        "source_basename": "lesson.md",
+        "path": "Course/Invented.md",
+        "snippet": "Adam uses $\\epsilon_{stability} = 10^{-8}$ for stability.",
+        "parent": "Missing parent"
+      },
+      {
+        "op": "write",
+        "heading": "Archived",
+        "source_basename": "lesson.md",
+        "path": "Course/Archived.md",
+        "snippet": "Momentum uses $v_t = \\gamma v_{t-1} + \\eta \\nabla L(w_t)$ as usual."
+      }
+    ],
+    "payloads": [
+      {
+        "batches": [
+          {
+            "inbox_file": "Inbox/lesson.md",
+            "concepts": [
+              {
+                "name": "Grounded",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              },
+              {
+                "name": "Invented",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              },
+              {
+                "name": "Archived",
+                "inbox_excerpt": "Adam uses $\\beta_1 = 0.9$ for the first moment.",
+                "vault_collision": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "options": {
+      "target_dir": "Course",
+      "profile": "promotion"
+    }
+  },
+  {
+    "id": "field-lesson-12",
+    "origin": "Captured ops: ~/.silica/tmp/0e6eaec560a74a07b4cb7148e7793bf6.json; matching concept excerpts: 31c7a92597fa498eb20dfadc1c848ef8.json. Ops unchanged; payload reduced to their three concepts. Empty vault is reconstructed, NOT the historical pre-write vault.",
+    "files": {
+      "vault.yaml": "write_dir: \"\"\n"
+    },
+    "ops": [
+      {
+        "op": "write",
+        "heading": "FNR",
+        "source_basename": "Lezione 12.md",
+        "path": "Informatica/Intelligenza artificiale/Machine learning/FNR.md",
+        "title": "FNR",
+        "snippet": "**FNR (False Negative Rate)** è il tasso di falsi negativi, cioè la percentuale di elementi positivi riconosciuti come negativi dal classificatore.\n\nNel caso di una diagnosi medica, l'errore FNR rappresenta la percentuale di pazienti *malati* (*positivi*) che vengono riconosciuti come *sani* (*negativi*).\n\nLa soglia *q* della curva ROC può essere scelta in modo da ottimizzare un certo compromesso tra gli errori FPR e FNR. In una diagnosi medica può essere più importante minimizzare l'errore FNR piuttosto che l'errore FPR, poiché FPR rappresenta la percentuale di *sani* (*negativi*) riconosciuti come *malati* (*positivi*).",
+        "hub": "Machine learning",
+        "content": null,
+        "base_content": null,
+        "tags": [
+          "FNR",
+          "curva ROC",
+          "classificazione binaria"
+        ],
+        "related": [
+          "FPR",
+          "Specificità e Sensibilità"
+        ],
+        "concepts": [
+          "tasso di falsi negativi",
+          "FNR",
+          "errore di classificazione",
+          "curva ROC",
+          "soglia di decisione"
+        ],
+        "reason": null,
+        "review": null,
+        "linked_axis": "metriche di errore di classificazione",
+        "parent": null,
+        "contested_by": null,
+        "valid_from": null,
+        "from_path": null,
+        "to_path": null
+      },
+      {
+        "op": "write",
+        "heading": "FPR",
+        "source_basename": "Lezione 12.md",
+        "path": "Informatica/Intelligenza artificiale/Machine learning/FPR.md",
+        "title": "FPR",
+        "snippet": "**FPR (False Positive Rate)** è il tasso di falsi positivi, cioè la percentuale di elementi negativi riconosciuti come positivi dal classificatore. Nel caso di una diagnosi medica, FPR rappresenta la percentuale di *sani* (*negativi*) riconosciuti come *malati* (*positivi*).\n\nLa **curva ROC** si ottiene rappresentando in ascissa FPR e in ordinata TPR (*Sensibilità*). Ogni punto del piano viene trovato a partire dai valori di [[Specificità e Sensibilità]] ottenuti per ogni soglia.\n\nTestando il classificatore binario su soglie crescenti $q_1 \\leq q_2 \\leq \\dots \\leq q_n$ si ottengono TPR1, TNR1, TPR2, TNR2, ..., TPRn, TNRn. L'andamento della curva è dovuto al fatto che i valori delle soglie sono crescenti; l'andamento ideale (di un classificatore perfetto) è quello di colore rosso.\n\nLa **Specificità** è la percentuale di negativi che vengono riconosciuti come tali (TNR).\n\nL'equivalenza tra l'AUC e la statistica di Wilcoxon viene dimostrata in: Hanley J.A., McNeil B.J., *The meaning and Use of the Area under a Receiver Operating Characteristic (ROC) Curve*, Radiology, Vol. 143, N. 1, pp 29-36, 1982.",
+        "hub": "Machine learning",
+        "content": null,
+        "base_content": null,
+        "tags": [
+          "FPR",
+          "curva ROC",
+          "AUC"
+        ],
+        "related": [
+          "FNR",
+          "Specificità e Sensibilità"
+        ],
+        "concepts": [
+          "tasso di falsi positivi",
+          "FPR",
+          "curva ROC",
+          "sensibilità",
+          "specificità",
+          "AUC",
+          "statistica di Wilcoxon"
+        ],
+        "reason": null,
+        "review": null,
+        "linked_axis": "curve ROC e AUC",
+        "parent": null,
+        "contested_by": null,
+        "valid_from": null,
+        "from_path": null,
+        "to_path": null
+      },
+      {
+        "op": "write",
+        "heading": "Misura della misclassificazione",
+        "source_basename": "Lezione 12.md",
+        "path": "Informatica/Intelligenza artificiale/Machine learning/Misura della misclassificazione.md",
+        "title": "Misura della misclassificazione",
+        "snippet": "La **matrice di confusione** è lo strumento per misurare la misclassificazione di un classificatore.\n\nPer calcolare la matrice di confusione occorre un insieme preclassificato $V = \\{V_1, V_2, \\dots, V_K\\}$ dove $V_i$ è l'insieme dei dati per la classe $i$ e $K$ è l'insieme delle classi.\n\n$c_{ij}$ = numero di elementi appartenenti alla classe $i$ riconosciuti dal classificatore come classe $j$.",
+        "hub": "Machine learning",
+        "content": null,
+        "base_content": null,
+        "tags": [
+          "matrice di confusione",
+          "misclassificazione",
+          "classificazione"
+        ],
+        "related": [],
+        "concepts": [
+          "matrice di confusione",
+          "misura della misclassificazione",
+          "classificazione",
+          "insieme preclassificato"
+        ],
+        "reason": null,
+        "review": null,
+        "linked_axis": "matrice di confusione",
+        "parent": null,
+        "contested_by": null,
+        "valid_from": null,
+        "from_path": null,
+        "to_path": null
+      }
+    ],
+    "payloads": [
+      {
+        "batches": [
+          {
+            "inbox_file": "Inbox/machine_learning/Lezione 12.md",
+            "concepts": [
+              {
+                "name": "FNR",
+                "action_hint": "create",
+                "inbox_excerpt": "Questo viene dimostrato stabilendo l’equivalenza tra l’AUC e la statistica di Wilcoxon[1].\n\n[1] Hanley J.A., McNeil B.J., *The meaning and Use of the Area under a Receiver Operating Characteristic (ROC) Curve*, Radiology, Vol. 143, N. 1, pp 29-36, 1982\n\nMachine Learning,9 CFU, AA 24-25\n\n## ***Curve ROC:Receiving Operating Characteristic***\n\nInoltre, la curva ROC può servire come metodo di selezione\n\nIn particolare, possiamo scegliere la soglia *q*  in modo tale che *ottimizzi* un certo compromesso tra gli errori *FPR* e *FNR*.\n\nAd esempio, nel caso di una diagnosi medica, l’errore *FNR* rappresenta la percentuale di falsi negativi, cioè la percentuale di pazienti *malati* (*positivi*) che vengono riconosciuti come *sani (negativi)*.\n\nIn questo caso, potremmo essere più interessati a minimizzare l’errore *FNR* piuttosto che l’errore *FPR* poiché *FPR* rappresenta invece la percentuale di *sani* (*negativi*) riconosciuti come *malati* (*positivi*).\n\nMachine Learning,9 CFU, AA 24-25",
+                "vault_collision": null
+              },
+              {
+                "name": "FPR",
+                "action_hint": "create",
+                "inbox_excerpt": "*Specificità = percentuale di negativi che vengono riconosciuti come tali (TNR).*\n\nMachine Learning,9 CFU, AA 24-25\n\n## ***Curve ROC:Receiving Operating Characteristic***\n\nSupponiamo adesso di testare il nostro classificatore binario su diverse soglie *q*1£ *q*2£...£ *q*n(crescenti).\n\nOtterremo TPR1, TNR1, TPR2, TNR2,... , TPRn, TNRn.\n\nMachine Learning,9 CFU, AA 24-25\n\n## ***Curve ROC:Receiving Operating Characteristic***\n\nLa curva ROC si ottiene andando a rappresentare in ascissa *FPR* e in ordinata TPR (*Sensibilità*).\n\nTPR\n\n1\n\nOgni punto del piano viene trovato a partire dai valori di [[Specificità e Sensibilità]] ottenuti per ogni soglia.\n\n*TPR*5\n\n*FPR*5\n\n1\n\n*FPR*\n\nMachine Learning,9 CFU, AA 24-25\n\n## ***Curve ROC:Receiving Operating Characteristic***\n\nTPR\n\n1\n\n*TPR*5\n\nL’andamento è dovuto al fatto che i valori delle soglie sono crescenti.\n\n*FPR*5\n\n1\n\n*FPR*\n\nL’andamento ideale (di un classificatore perfetto) è quello di colore rosso.\n\n[...]\n\nQuesto viene dimostrato stabilendo l’equivalenza tra l’AUC e la statistica di Wilcoxon[1].\n\n[1] Hanley J.A., McNeil B.J., *The meaning and Use of the Area under a Receiver Operating Characteristic (ROC) Curve*, Radiology, Vol. 143, N. 1, pp 29-36, 1982\n\nMachine Learning,9 CFU, AA 24-25\n\n## ***Curve ROC:Receiving Operating Characteristic***\n\nInoltre, la curva ROC può servire come metodo di selezione\n\nIn particolare, possiamo scegliere la soglia *q*  in modo tale che *ottimizzi* un certo compromesso tra gli errori *FPR* e *FNR*.\n\nAd esempio, nel caso di una diagnosi medica, l’errore *FNR* rappresenta la percentuale di falsi negativi, cioè la percentuale di pazienti *malati* (*positivi*) che vengono riconosciuti come *sani (negativi)*.\n\nIn questo caso, potremmo essere più interessati a minimizzare l’errore *FNR* piuttosto che l’errore *FPR* poiché *FPR* rappresenta invece la percentuale di *sani* (*negativi*) riconosciuti come *malati* (*positivi*).\n\nMachine Learning,9 CFU, AA 24-25",
+                "vault_collision": null
+              },
+              {
+                "name": "Misura della misclassificazione",
+                "action_hint": "create",
+                "inbox_excerpt": "## ***Misura della misclassificazione***\n\n**Matrice di confusione**\n\n### ***Per calcolare la matrice di confusione occorre un insieme preclassificato V={V1,V2,…,VK} dove Vi è l’insieme dei dati per la classe i, K è l’insieme delle classi.***\n\n### ***cij=numero di elementi appartenenti alla classe i riconosciuti dal classificatore come classe j.***\n\nMachine Learning,9 CFU, AA 24-25",
+                "vault_collision": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "options": {
+      "target_dir": "Informatica/Intelligenza artificiale/Machine learning",
+      "profile": "default"
+    }
+  },
+  {
+    "id": "malformed-ops",
+    "origin": "Added 2026-09-19 for the rejection reasons no test reached (pytest-cov on validate.py): missing heading, missing and unknown source_basename with two sources in the chunk, missing path on each op type, overwrite outside the target folder.",
+    "files": {
+      "vault.yaml": "write_dir: \"\"\n",
+      "Course/Existing.md": "# Existing\nA note that is already there.\n",
+      "Outside/Elsewhere.md": "# Elsewhere\nHuman note outside the target folder.\n"
+    },
+    "ops": [
+      {
+        "op": "patch",
+        "heading": "",
+        "source_basename": "lesson.md",
+        "path": "Course/Existing.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Alpha",
+        "source_basename": "",
+        "path": "Course/Alpha.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Beta",
+        "source_basename": "unknown.md",
+        "path": "Course/Beta.md",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "patch",
+        "heading": "Gamma",
+        "source_basename": "lesson.md",
+        "path": "",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "write",
+        "heading": "Delta",
+        "source_basename": "lesson.md",
+        "path": "",
+        "snippet": "A concrete fact about the concept."
+      },
+      {
+        "op": "overwrite",
+        "heading": "Epsilon",
+        "source_basename": "lesson.md",
+        "path": "",
+        "content": "A concrete fact about the concept."
+      },
+      {
+        "op": "overwrite",
+        "heading": "Zeta",
+        "source_basename": "lesson.md",
+        "path": "Outside/Elsewhere.md",
+        "content": "A concrete fact about the concept."
+      }
+    ],
+    "payloads": [
+      {
+        "batches": [
+          {
+            "inbox_file": "Inbox/lesson.md",
+            "concepts": [
+              {
+                "name": "Alpha",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Beta",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Gamma",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Delta",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Epsilon",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              },
+              {
+                "name": "Zeta",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              }
+            ]
+          },
+          {
+            "inbox_file": "Inbox/other.md",
+            "concepts": [
+              {
+                "name": "Theta",
+                "inbox_excerpt": "Source contains an actual explanation.",
+                "vault_collision": null
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "options": {
+      "target_dir": "Course",
+      "profile": "default"
+    }
+  }
+]

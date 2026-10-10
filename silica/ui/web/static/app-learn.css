@@ -1,0 +1,2525 @@
+/* --- learn tab ---------------------------------------------------------------
+   learn-suite §5.2: tokens from app-base.css, no new colour. Laid out by
+   ADR-0061: each fact once, as a figure or a mark, at the moment it is
+   expected. The type is the shell's scale and nothing under it: meta 12
+   (--fs-meta), controls 13 (--fs-ctl), body 13, a lead line 14, an answer
+   and the note's line 15, a question 16, titles 18, figures 34. A learning
+   state is a mark (○ ◐ ●) in the text's own colour, never --add or --del,
+   which app-base.css keeps for the diff; --warn only for caution; --accent
+   only for what is pressed or clickable. Radii by name: the sheet at --r,
+   buttons and boxes at --r-sm, the bars square. One primary per view. */
+
+/* the loading overlay is position:absolute; inset:0 and needs this containing
+   block, or it blanks the whole app for the length of the fetch */
+#view-learn {
+  position: relative;
+}
+
+#learn-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--slate);
+  flex-shrink: 0;
+}
+
+#learn-body {
+  flex: 1;
+  overflow-y: auto;
+  /* the ask-from-here dock reaches this view (app-shell.js showTab), so the
+     last card keeps clear of it the way the chat transcript does */
+  padding: 1rem 1rem 6.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* the list/detail grid stacks on the pane's width, not the viewport's: with
+     the drawer open at 1000px the pane is 640px wide and a viewport query
+     still said "two columns" (seen 2026-09-07, detail squeezed to 102px) */
+  container-type: inline-size;
+}
+
+/* a link in Learn is the accent, never the browser's blue and underline
+   (ADR-0061, the session's `read` and `open note` seen 2026-10-06) */
+#view-learn a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+#view-learn a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* --- the bar: the place, a return, End session ------------------------------ */
+.lr-crumb {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  margin-right: auto;
+  min-width: 0;
+}
+
+.lr-crumb b {
+  color: var(--frost);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lr-crumb .sep {
+  color: var(--line-2);
+}
+
+.lr-crumb .vault {
+  font-family: var(--sans);
+  font-size: var(--fs-meta);
+  margin-left: 0.6rem;
+  white-space: nowrap;
+}
+
+/* list rows and quiet controls are buttons for the keyboard, not for the
+   agent's grey fill or the browser's 2px outset border, which drew the
+   heaviest lines on Create plan (seen 2026-09-21 and 2026-10-06) */
+.lr-pl,
+.lr-sg .pick,
+.lr-sg .act,
+.lr-create,
+.lr-more,
+.lr-back,
+.lr-end,
+.lr-q,
+.lr-link,
+.lr-exp,
+.lr-seg button,
+.lr-send {
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  border: 0;
+}
+
+.lr-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--fs-ctl);
+  color: var(--ash);
+  padding: 0.35rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+
+.lr-back:hover {
+  color: var(--frost);
+  border-color: var(--line);
+}
+
+/* the one control that ends work: red on hover, never by default */
+.lr-end {
+  color: var(--ash);
+  font-size: var(--fs-ctl);
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+
+.lr-end:hover,
+.lr-end[aria-expanded="true"] {
+  color: var(--del);
+  border-color: var(--del);
+}
+
+/* --- controls ------------------------------------------------------------- */
+.lr-send {
+  background: var(--accent);
+  color: var(--on-vivid);
+  font-size: var(--fs-ctl);
+  font-weight: 600;
+  height: 32px;
+  padding: 0 1rem;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.lr-send.off,
+.lr-send:disabled {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+.lr-send:active {
+  transform: translateY(1px);
+}
+
+.ghost.box {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  height: 32px;
+  padding: 0 0.75rem;
+  font-size: var(--fs-ctl);
+  white-space: nowrap;
+}
+
+.ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* a quiet control: text, the accent on hover */
+.lr-q {
+  font-size: var(--fs-ctl);
+  color: var(--ash);
+  padding: 0.35rem 0.45rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--dur) var(--ease);
+}
+
+.lr-q:hover,
+.lr-q:focus-visible {
+  color: var(--accent);
+}
+
+.lr-q.on {
+  color: var(--frost);
+  background: var(--sel);
+}
+
+.lr-q:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+/* a link that is a button: it acts, it does not navigate */
+.lr-link {
+  padding: 0;
+  font-size: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.lr-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* the key a button answers to, on the button */
+.lr-k {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  opacity: 0.7;
+  margin-left: 0.45rem;
+}
+
+.lr-seg {
+  display: inline-flex;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.lr-seg button {
+  height: 30px;
+  padding: 0 0.75rem;
+  border-left: 1px solid var(--line-2);
+  font-size: var(--fs-ctl);
+  color: var(--ash);
+  white-space: nowrap;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.lr-seg button:first-child {
+  border-left: 0;
+}
+
+.lr-seg button:hover {
+  color: var(--frost);
+}
+
+.lr-seg button.on {
+  color: var(--frost);
+  background: var(--sel);
+}
+
+.lr-seg .num {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-help {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  margin: 0;
+}
+
+.lr-help b {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.eyebrow {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-mv .num,
+.lr-session .num,
+.lr-receipt .num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- the grammar: marks, figures, disclosures ------------------------------ */
+/* ○ open or missed, ◐ met with help (not counted), ● met without help: drawn,
+   so they read the same in both themes and without colour vision */
+.lr-mk {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border: 1.4px solid currentColor;
+  border-radius: 50%;
+  margin-right: 0.45rem;
+  vertical-align: -1px;
+  color: var(--ash);
+  box-sizing: border-box;
+}
+
+.lr-mk.full {
+  background: currentColor;
+}
+
+.lr-mk.half {
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+}
+
+/* the one amber mark: caution (a source mismatch, plans that cannot be read) */
+.lr-mk.warn {
+  width: 10px;
+  border: 0;
+  border-radius: 0;
+  background: var(--warn);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.lr-figs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.lr-fig {
+  display: grid;
+  gap: 0.1rem;
+  align-content: start;
+  min-width: 0;
+}
+
+.lr-fig .n {
+  font-family: var(--sans);
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--frost);
+  white-space: nowrap;
+}
+
+.lr-fig .l {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-fig .s {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+/* a disclosure is a hairline row with its count; what it holds is on request */
+.lr-discs {
+  display: grid;
+}
+
+/* on the home detail the readings sit at the foot, under the invitation */
+.lr-discs.end {
+  margin-top: auto;
+}
+
+.lr-dr {
+  border-top: 1px solid var(--line);
+}
+
+.lr-discs > .lr-dr:last-child {
+  border-bottom: 1px solid var(--line);
+}
+
+.lr-dr > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 34px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lr-dr > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* the disclosure mark is drawn, so it carries the state without a glyph that
+   changes width between the two */
+.lr-dr > summary::before,
+.lr-prev > summary .chev,
+.lr-ob summary .chev,
+.lr-exp .chev {
+  content: "";
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-left-color: var(--ash-dim);
+  border-right-width: 0;
+  transform-origin: 2px 50%;
+  transition: transform var(--dur) var(--ease);
+}
+
+.lr-dr[open] > summary::before,
+.lr-prev[open] > summary .chev,
+.lr-ob details[open] summary .chev,
+.lr-exp[aria-expanded="true"] .chev {
+  transform: rotate(90deg);
+}
+
+.chev.none {
+  visibility: hidden;
+}
+
+.lr-dr > summary:hover .t {
+  color: var(--accent);
+}
+
+.lr-dr > summary .c {
+  margin-left: auto;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-dr > .in {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0 0 0.9rem 1.15rem;
+  min-width: 0;
+}
+
+.lr-dr > .in > p {
+  margin: 0;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+  max-width: var(--prose-measure, 43rem);
+}
+
+.lr-dr > .in > p b {
+  color: var(--frost);
+  font-weight: 500;
+}
+
+.lr-dr.side > summary {
+  padding: 0 1rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-dr.side > .in {
+  padding: 0;
+}
+
+/* a key and its value, for what a disclosure holds */
+.lr-kv {
+  display: grid;
+  grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr);
+  gap: 0.25rem 1rem;
+  margin: 0;
+  font-size: var(--fs-meta);
+}
+
+.lr-kv dt {
+  color: var(--ash-dim);
+}
+
+.lr-kv dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.lr-kv dd.lr-said {
+  color: var(--frost);
+  font-size: 15px;
+  white-space: pre-wrap;
+}
+
+.lr-mkey {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.2rem;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-sec {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.lr-sec h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0 0 0.2rem;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-sec h3 .num,
+.lr-sec h3 .c {
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  color: var(--ash-dim);
+}
+
+.lr-sec h3 .c {
+  font-variant-numeric: tabular-nums;
+}
+
+.lr-sec > .lr-help {
+  margin-bottom: 0.3rem;
+}
+
+/* a heading of the note, named once over its points */
+.lr-grp {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  margin-top: 0.45rem;
+}
+
+/* --- the list: your plans, then suggested practice --------------------------- */
+.mv.lr-mv {
+  grid-template-columns: 340px minmax(0, 1fr);
+}
+
+.lr-mv .mv-l {
+  padding: 0.6rem 0 1rem;
+}
+
+.lr-mv .mv-r {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.4rem 1.9rem 1.9rem;
+}
+
+.lr-lh {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem 0.3rem;
+  font-size: 13px;
+  color: var(--ash);
+}
+
+.lr-lh .cnt {
+  margin-left: auto;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-lh2 {
+  margin-top: 1rem;
+}
+
+.lr-lh-sub {
+  margin: 0;
+  padding: 0 1rem 0.35rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+/* Create plan sits under the title of Your plans, so it stays findable with
+   many plans (refinement §3) */
+.lr-create {
+  margin: 0.25rem 1rem 0.5rem;
+  height: 32px;
+  padding: 0 0.8rem;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-ctl);
+  color: var(--text);
+}
+
+.lr-create:hover,
+.lr-create.on {
+  color: var(--frost);
+  border-style: solid;
+  border-color: var(--accent);
+}
+
+/* an error is not an empty vault (refinement §4): amber where the plans would be */
+.lr-errbox {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0.25rem 1rem 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+.lr-errbox b {
+  display: flex;
+  align-items: center;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.lr-errbox span:not(.lr-mk) {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-errbox .ghost.box {
+  justify-self: start;
+  height: 28px;
+}
+
+/* a suggestion row: the click selects (the preview on the right), the
+   always-visible action starts (refinement §2, §10) */
+.lr-sg {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin: 0 0.5rem;
+  border-radius: var(--r-sm);
+  transition: background var(--dur) var(--ease);
+}
+
+.lr-sg:hover {
+  background: var(--sel-hover);
+}
+
+.lr-sg.on {
+  background: var(--sel);
+}
+
+.lr-sg .pick {
+  display: grid;
+  gap: 0.05rem;
+  min-width: 0;
+  padding: 0.5rem 0.5rem 0.5rem 0.5rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lr-sg .t {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lr-sg.on .t {
+  color: var(--frost);
+  font-weight: 500;
+}
+
+.lr-sg .r {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+/* the action shows on hover, on focus and on the selected row (ADR-0081 §1):
+   twelve rows each with a visible Practice read as twelve buttons, and a
+   touch screen selects the row first, which shows it */
+.lr-sg .act {
+  font-size: var(--fs-ctl);
+  color: var(--accent);
+  padding: 0.35rem 0.5rem;
+  margin-right: 0.25rem;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.lr-sg:hover .act,
+.lr-sg:focus-within .act,
+.lr-sg.on .act {
+  opacity: 1;
+}
+
+.lr-sg .act:hover,
+.lr-sg .act:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.lr-sg .r {
+  line-height: 1.45;
+}
+
+/* the view's one primary above the groups: the picker's session, its mix under it */
+.lr-primary {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.4rem 1rem 0.6rem;
+}
+
+.lr-primary > .lr-send,
+.lr-primary > .ghost.box {
+  width: 100%;
+}
+
+.lr-primary .lr-lh-sub {
+  padding: 0;
+}
+
+/* a row inside a detail (Lately, After this) keeps the list's grammar, flush */
+.lr-sg.lr-inrow {
+  margin: 0 -0.5rem;
+}
+
+.lr-again {
+  display: flex;
+  padding-top: 0.3rem;
+}
+
+.lr-more {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 1rem 0.7rem;
+  font-size: var(--fs-ctl);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.lr-more:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.lr-pl {
+  display: grid;
+  gap: 0.25rem;
+  width: calc(100% - 1rem);
+  margin: 0 0.5rem;
+  padding: 0.6rem 0.5rem;
+  text-align: left;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.lr-pl:hover {
+  background: var(--sel-hover);
+}
+
+.lr-pl.on {
+  background: var(--sel);
+}
+
+.lr-pl .t {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--frost);
+}
+
+/* the deadline shows only when chosen (refinement §17) */
+.lr-pl .t span {
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  color: var(--ash-dim);
+  white-space: nowrap;
+}
+
+.lr-pl .n {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-pl .n.num {
+  font-family: var(--sans);
+  color: var(--ash-dim);
+}
+
+/* the track is a hairline, not the chart track: at 0 of 15 the chart's teal
+   track read as a bar already filled */
+.lr-meter {
+  display: block;
+  height: 4px;
+  background: var(--line);
+}
+
+.lr-meter i {
+  display: block;
+  height: 100%;
+  background: var(--c-accent);
+}
+
+/* --- the detail: a head that answers "what now?" ---------------------------- */
+.lr-phead {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.lr-phead .phead-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.lr-phead h2 {
+  margin: 0 auto 0 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--frost);
+}
+
+.lr-phead .meta {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
+}
+
+.lr-phead .goal {
+  margin: 0.45rem 0 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.lr-phead .goal b {
+  color: var(--frost);
+  font-weight: 600;
+}
+
+.lr-phead .next {
+  margin: 0.15rem 0 0;
+  font-size: 13px;
+}
+
+.lr-phead .next .k {
+  color: var(--ash-dim);
+  margin-right: 0.9rem;
+}
+
+.lr-phead .next .v {
+  color: var(--frost);
+}
+
+.lr-phead .next .m,
+.lr-phead .where .m {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-phead .where {
+  margin: 0.3rem 0 0;
+  font-size: var(--fs-meta);
+}
+
+.lr-phead .where .path {
+  font-family: var(--mono);
+  color: var(--ash);
+  margin-right: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.lr-phead > .lr-help {
+  margin-top: 0.15rem;
+}
+
+/* a session left open: one strip, Resume its only primary (refinement §9) */
+.lr-resume {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--r-sm);
+  background: var(--sel);
+}
+
+.lr-resume .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.lr-resume .t {
+  flex: 1;
+  display: grid;
+  min-width: 0;
+}
+
+.lr-resume .t b {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--frost);
+}
+
+.lr-resume .t span {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-invite {
+  display: grid;
+  gap: 0.55rem;
+  max-width: 30rem;
+  margin-top: 2rem;
+}
+
+.lr-invite h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-invite p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.lr-invite .row {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin-top: 0.4rem;
+}
+
+/* --- the tree: topic, practised, one column per objective (ADR-0061 §4) ----- */
+.lr-tree {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.lr-tree thead th {
+  padding: 0 0.6rem 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  color: var(--ash-dim);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.lr-tree tbody tr {
+  border-bottom: 1px solid var(--line);
+}
+
+.lr-tree tbody th,
+.lr-tree tbody td {
+  height: 32px;
+  padding: 0.2rem 0.6rem 0.2rem 0;
+  font-weight: 400;
+  text-align: left;
+  vertical-align: middle;
+  color: var(--text);
+}
+
+.lr-tree .pr {
+  width: 11rem;
+  white-space: nowrap;
+}
+
+.lr-tree .ob {
+  width: 7rem;
+  white-space: nowrap;
+}
+
+.lr-tree td.pr .lr-meter {
+  display: inline-block;
+  vertical-align: middle;
+  width: 6rem;
+  margin-right: 0.6rem;
+}
+
+.lr-tree .num {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-tree .num.zero {
+  color: var(--ash-dim);
+}
+
+.lr-tree th .m,
+.lr-tree td .m,
+.lr-tree td.m {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-tree th .m {
+  margin-left: 0.6rem;
+}
+
+.lr-exp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0;
+  font-size: 13px;
+  text-align: left;
+}
+
+button.lr-exp {
+  cursor: pointer;
+}
+
+button.lr-exp:hover {
+  color: var(--frost);
+}
+
+.lr-tree tr.leaf th {
+  padding-left: 1.3rem;
+}
+
+.lr-tree tr.leaf .lr-link {
+  color: var(--text);
+}
+
+.lr-tree tr.leaf .lr-link:hover {
+  color: var(--accent);
+}
+
+/* a leaf's Practice shows on hover and focus: it is what you could do here */
+.lr-tree tr.leaf .lr-link.act {
+  margin-left: 0.8rem;
+  color: var(--accent);
+  opacity: 0;
+}
+
+.lr-tree tr.leaf:hover .lr-link.act,
+.lr-tree tr.leaf:focus-within .lr-link.act {
+  opacity: 1;
+}
+
+/* --- objectives: a row each, how it is checked closed under it --------------- */
+.lr-ob {
+  position: relative;
+  border-bottom: 1px solid var(--line);
+}
+
+.lr-ob summary,
+.lr-ob.gap {
+  display: grid;
+  grid-template-columns: 10px minmax(7rem, 11rem) 4.2rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.5rem 5.5rem 0.5rem 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lr-ob summary::-webkit-details-marker {
+  display: none;
+}
+
+.lr-ob.gap {
+  cursor: default;
+}
+
+.lr-ob .n {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  overflow-wrap: anywhere;
+}
+
+.lr-ob .t {
+  font-size: 13px;
+  color: var(--frost);
+}
+
+.lr-ob.gap .t {
+  color: var(--ash);
+}
+
+.lr-ob .lr-kv {
+  margin: 0 0 0.75rem 1.35rem;
+}
+
+.lr-ob .ed {
+  position: absolute;
+  top: 0.5rem;
+  right: 0;
+  display: flex;
+  gap: 0.7rem;
+  font-size: var(--fs-meta);
+  opacity: 0;
+}
+
+.lr-ob:hover .ed,
+.lr-ob:focus-within .ed {
+  opacity: 1;
+}
+
+.lr-ob.editing {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+}
+
+.lr-ob.editing .ghost.box {
+  justify-self: start;
+}
+
+/* --- readings inside the disclosures --------------------------------------- */
+.lr-chart td.bar {
+  width: 40%;
+}
+
+.lr-chart .cell {
+  height: 10px;
+  background: var(--c-track);
+}
+
+.lr-chart .cell i {
+  display: block;
+  height: 100%;
+  background: var(--c-accent);
+}
+
+.lr-chart .cell i.amber {
+  background: var(--c-amber);
+}
+
+.lr-chart .cell i.o2 {
+  background: var(--c-ord-2);
+}
+
+.lr-stack {
+  display: flex;
+  height: 10px;
+  background: var(--c-track);
+  gap: 1px;
+}
+
+.lr-stack i,
+.lr-legend i {
+  display: block;
+  height: 100%;
+}
+
+.lr-stack .r1,
+.lr-legend .r1 { background: var(--c-ord-1); }
+.lr-stack .r2,
+.lr-legend .r2 { background: var(--c-ord-2); }
+.lr-stack .r3,
+.lr-legend .r3 { background: var(--c-accent); }
+.lr-stack .r4,
+.lr-legend .r4 { background: var(--accent); }
+
+.lr-legend {
+  display: flex;
+  gap: 0.9rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  flex-wrap: wrap;
+}
+
+.lr-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 0.3rem;
+  vertical-align: middle;
+}
+
+/* the key points a session covers, grouped by heading (ADR-0061 §9) */
+.lr-points {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr) auto 9rem;
+  gap: 0.25rem 0.9rem;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lr-points .i {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  text-align: right;
+}
+
+.lr-points .h,
+.lr-points .k {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
+}
+
+.lr-points .k {
+  color: var(--ash);
+}
+
+/* --- the composer: the question order (ADR-0061 §13) ------------------------ */
+.lr-composer {
+  display: grid;
+  gap: 1.6rem;
+  max-width: 44rem;
+}
+
+.lr-composer .lr-phead h2 {
+  margin: 0;
+}
+
+.lr-fs {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.lr-fs h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-fs h3 .c {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  font-weight: 400;
+  color: var(--ash-dim);
+}
+
+.lr-field {
+  height: 34px;
+  padding: 0 0.65rem;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  font: inherit;
+  font-size: 13px;
+  color: var(--frost);
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.lr-field::placeholder {
+  color: var(--ash-dim);
+}
+
+.lr-field.w {
+  width: 18rem;
+  max-width: 100%;
+}
+
+.lr-field.textarea {
+  min-height: 4.5rem;
+  height: auto;
+  padding: 0.5rem 0.65rem;
+  resize: vertical;
+  width: 100%;
+}
+
+.lr-field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.lr-flab {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.lr-cta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.lr-cta > .lr-help {
+  flex: 1;
+}
+
+.lr-cta .path {
+  font-family: var(--mono);
+  color: var(--ash);
+}
+
+/* --- session: the question, your answer, the verdict, in one column -------- */
+.lr-session,
+.lr-receipt {
+  width: 100%;
+  max-width: 48rem;
+  margin: 0 auto;
+  display: grid;
+  gap: 0.9rem;
+  padding: 0.4rem 0 1rem;
+}
+
+.lr-receipt {
+  gap: 1.5rem;
+}
+
+/* the progress strip replaces the dot rail and the bar's counter (ADR-0061 §17) */
+.lr-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.lr-strip .segs {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+}
+
+.lr-strip .segs i {
+  flex: 1;
+  height: 4px;
+  background: var(--line);
+}
+
+.lr-strip .segs i.done {
+  background: var(--ash);
+}
+
+.lr-strip .segs i.cur {
+  background: var(--accent);
+}
+
+.lr-strip .segs i.skip {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
+.lr-strip .num {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+/* the previous question stays readable, never re-graded (refinement §22) */
+.lr-prev {
+  border-bottom: 1px solid var(--line);
+}
+
+.lr-prev > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 32px;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--fs-meta);
+}
+
+.lr-prev > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lr-prev .k {
+  color: var(--ash-dim);
+}
+
+.lr-prev .v {
+  color: var(--ash);
+}
+
+.lr-prev .lr-mk {
+  margin-right: 0;
+}
+
+.lr-prev .in {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0 0 0.8rem 1.25rem;
+}
+
+.lr-prev .in p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ash);
+  max-width: var(--prose-measure, 43rem);
+}
+
+.lr-prev .in .you {
+  color: var(--frost);
+  white-space: pre-wrap;
+}
+
+.lr-prev .in .fb {
+  color: var(--text);
+}
+
+.lr-sheet {
+  display: grid;
+  gap: 1rem;
+  padding: 1.4rem 1.6rem;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  min-width: 0;
+}
+
+.lr-sheet.dim {
+  opacity: 0.5;
+}
+
+.lr-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.lr-eyebrow .eyebrow {
+  flex: 1;
+}
+
+.lr-read {
+  display: inline-grid;
+  place-items: center;
+  padding: 0.3rem;
+}
+
+.lr-read.on {
+  color: var(--accent);
+}
+
+/* the question keeps 16px after the answer; its markdown is rendered and a
+   cloze's blank drawn as a gap (ADR-0061 §18) */
+.lr-sheet .q {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--frost);
+  max-width: var(--prose-measure, 43rem);
+  text-wrap: pretty;
+}
+
+.lr-sheet .q b,
+.lr-prev .q b {
+  font-weight: 600;
+}
+
+.lr-sheet .q code,
+.lr-prev .q code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+}
+
+.lr-gap {
+  display: inline-block;
+  min-width: 4.5rem;
+  height: 0.9em;
+  margin: 0 0.2em;
+  border-bottom: 1.5px solid var(--ash);
+  vertical-align: baseline;
+}
+
+.lr-hint {
+  border-left: 2px solid var(--line-2);
+  padding-left: 0.7rem;
+  font-size: 13px;
+  color: var(--ash);
+  max-width: var(--prose-measure, 43rem);
+}
+
+.lr-hint b {
+  color: var(--ash-dim);
+  font-weight: 500;
+  font-size: var(--fs-meta);
+  margin-right: 0.4rem;
+}
+
+.lr-answer {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.lr-input {
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.6rem 0.75rem;
+  min-height: 6.6rem;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--frost);
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+}
+
+.lr-input.short {
+  min-height: 2.9rem;
+}
+
+.lr-input:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--wash-a, rgba(34, 180, 204, 0.16));
+  border-color: var(--accent);
+}
+
+/* The microphone sits inside the answer box's bottom-right corner (ADR-0049),
+   where a hand looking for "say it" finds it without leaving the field, and the
+   text keeps clear of it. Sized through --field-row and not a width on .lr-mic:
+   the composer's :is(#attach, .mic) rule carries an id's specificity, so it
+   outranks any class here and drew the button at 17px. */
+.lr-inwrap {
+  --field-row: 32px;
+  position: relative;
+  max-width: var(--prose-measure, 43rem);
+}
+
+/* block: an inline-block textarea leaves a baseline gap under it, and the
+   absolutely placed mic then hangs a pixel below the box */
+.lr-inwrap .lr-input {
+  display: block;
+  padding-right: 3.2rem;
+}
+
+/* clear of the textarea's resize grip, which owns the last ~12px of the corner */
+.lr-mic {
+  position: absolute;
+  right: 0.8rem;
+  bottom: 0.45rem;
+}
+
+.lr-conf {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem 0.75rem;
+  flex-wrap: wrap;
+}
+
+.lr-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.lr-actions .sp,
+.lr-confirm .sp {
+  flex: 1;
+}
+
+.lr-actions > .lr-help {
+  margin-right: 0.4rem;
+}
+
+/* the primary keeps the right edge when the row wraps on a narrow pane */
+.lr-actions > .lr-send {
+  margin-left: auto;
+}
+
+/* checking says what it waits for, and the bar runs to the self-rating */
+.lr-check {
+  display: grid;
+  gap: 0.5rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.lr-check .t {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lr-wait {
+  height: 2px;
+  background: var(--line);
+  max-width: 20rem;
+}
+
+.lr-wait i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  animation-name: lr-wait;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes lr-wait {
+  to { width: 100%; }
+}
+
+/* the verdict, stated once (ADR-0061 §21) */
+.lr-verdict {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.lr-verdict:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.lr-verdict .h {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.lr-verdict .h .lr-mk {
+  margin-right: 0;
+  color: var(--frost);
+}
+
+.lr-verdict .h b {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-verdict.warn .h b {
+  color: var(--warn);
+}
+
+.lr-verdict .h .m {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-verdict .fb {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  max-width: var(--prose-measure, 43rem);
+}
+
+/* your words beside the note's line */
+.lr-cmp {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.lr-cmp > div {
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+  padding: 0.85rem 1rem;
+  min-width: 0;
+}
+
+.lr-cmp > .you {
+  border-right: 1px solid var(--line);
+}
+
+.lr-cmp .lab {
+  display: flex;
+  gap: 0.6rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-cmp .lab > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.lr-cmp .txt {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.lr-cmp .you .txt {
+  color: var(--frost);
+  white-space: pre-wrap;
+}
+
+.lr-cmp .key {
+  color: var(--frost);
+  font-weight: 600;
+  border-bottom: 1.5px solid var(--accent);
+}
+
+.lr-cmp .ref {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ash);
+}
+
+.lr-cmp .ref .lab {
+  display: inline;
+}
+
+.lr-cmp > .crit {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 1rem;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-cmp.col {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.lr-cmp.col > div + div {
+  border-top: 1px solid var(--line);
+}
+
+.lr-cmp.col > .you {
+  border-right: 0;
+}
+
+.lr-sheet .lr-dr {
+  border-top: 0;
+}
+
+.lr-sheet .lr-dr > summary {
+  min-height: 28px;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-rate b {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-rate > .lr-help {
+  margin-right: 0.3rem;
+}
+
+.lr-momentum {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* End session asks only when a draft or an unrecorded reveal would be lost */
+.lr-confirm {
+  display: grid;
+  gap: 0.65rem;
+  padding: 1.1rem 1.3rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--sheet);
+}
+
+.lr-confirm > b {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-confirm .facts {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lr-confirm .facts li {
+  display: flex;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lr-confirm .row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.3rem;
+}
+
+.lr-draft {
+  margin: 0;
+  font-size: 15px;
+  color: var(--frost);
+  white-space: pre-wrap;
+}
+
+/* --- receipt ---------------------------------------------------------------- */
+.lr-followup {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.lr-followup .t {
+  flex: 1;
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.lr-followup .t b {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--frost);
+}
+
+.lr-pts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem 1rem;
+  align-items: baseline;
+}
+
+.lr-pts .p {
+  display: flex;
+  align-items: baseline;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lr-pts .p .m {
+  margin-left: 0.6rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-pts .k {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-moved {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 0.3rem 1rem;
+  align-items: baseline;
+}
+
+.lr-moved .lbl {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lr-moved .n {
+  font-size: var(--fs-meta);
+  color: var(--ash);
+  white-space: nowrap;
+}
+
+.lr-moved .n b {
+  font-weight: 400;
+  color: var(--frost);
+}
+
+.lr-defect {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.4rem 0;
+  font-size: 13px;
+}
+
+.lr-defect .t {
+  color: var(--text);
+}
+
+.lr-defect .t b {
+  color: var(--frost);
+  font-weight: 500;
+}
+
+.lr-defect .fn {
+  display: block;
+  margin-top: 0.1rem;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-tbl th,
+.lr-tbl td {
+  font-size: var(--fs-meta);
+}
+
+/* --- the bar's segments (ADR-0081): Next, Plans, Map ------------------------- */
+.lr-segs {
+  margin-right: 0.4rem;
+}
+
+.lr-segs button {
+  height: 28px;
+}
+
+/* --- a note's why and its history (ADR-0081 §3) ------------------------------ */
+.lr-reason,
+.lr-lead {
+  margin: 0.5rem 0 0;
+  max-width: 70ch;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.lr-lead {
+  margin: 0;
+}
+
+.lr-hist {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.lr-hist td {
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--line);
+  vertical-align: baseline;
+  color: var(--text);
+}
+
+.lr-hist td.d {
+  width: 4rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
+}
+
+.lr-hist td.q {
+  color: var(--frost);
+  padding-right: 1rem;
+}
+
+.lr-hist td.rt {
+  text-align: right;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
+}
+
+/* --- the map: a mark per note, a row per folder (ADR-0081 §7) ----------------- */
+/* the map needs the width the list does not: its pane takes half the view */
+.mv.lr-mv.lr-mapv {
+  grid-template-columns: minmax(340px, 1fr) minmax(0, 1fr);
+}
+
+.lr-mapv .mv-l {
+  padding-right: 1rem;
+}
+
+.lr-map {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0 1rem;
+}
+
+.lr-maprow {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.3rem 0;
+}
+
+.lr-maprow .f {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 13px;
+  color: var(--text);
+  min-width: 0;
+}
+
+.lr-maprow .fn {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lr-maprow .cnt {
+  font-size: var(--fs-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--ash-dim);
+  white-space: nowrap;
+}
+
+.lr-maprow .act {
+  margin-left: auto;
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.lr-maprow:hover .act,
+.lr-maprow .act:focus-visible {
+  opacity: 1;
+}
+
+.lr-maprow .cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* a cell is a mark drawn like .lr-mk, larger: dashed never asked, open, half
+   met with help, full met without help. Drawn, so it reads without colour */
+.lr-cell {
+  display: inline-block;
+  flex: none;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 1.4px solid var(--ash);
+  border-radius: 50%;
+  background: transparent;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+i.lr-cell {
+  cursor: default;
+}
+
+.lr-cell.never {
+  border-style: dashed;
+  border-color: var(--ash-dim);
+}
+
+.lr-cell.full {
+  background: var(--ash);
+}
+
+.lr-cell.half {
+  background: linear-gradient(90deg, var(--ash) 50%, transparent 50%);
+}
+
+button.lr-cell:hover {
+  border-color: var(--frost);
+}
+
+.lr-cell.on,
+button.lr-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.lr-map.lr-pmap {
+  padding: 0;
+}
+
+.lr-map.lr-pmap .lr-maprow {
+  grid-template-columns: minmax(8rem, 13rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 0 1rem;
+  padding: 0.15rem 0;
+}
+
+.lr-map.lr-pmap .f {
+  justify-content: space-between;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.lr-map.lr-pmap .cells {
+  gap: 4px;
+}
+
+.lr-map.lr-pmap .lr-cell {
+  width: 11px;
+  height: 11px;
+}
+
+.lr-mapkey {
+  padding: 0.8rem 1rem 0;
+}
+
+.lr-mapkey .lr-cell {
+  margin-right: 0.4rem;
+  vertical-align: -2px;
+  cursor: default;
+}
+
+/* chips: the map's plan filter, the intentions, the nearby concepts */
+.lr-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.lr-mapf {
+  padding: 0.2rem 1rem 0.7rem;
+}
+
+.lr-chip {
+  height: 28px;
+  padding: 0 0.8rem;
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-ctl);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.lr-chip:hover {
+  border-color: var(--ash);
+}
+
+.lr-chip.on {
+  background: var(--sel);
+  border-color: var(--accent);
+  color: var(--frost);
+}
+
+.lr-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- create plan: the sentence, then the fields (ADR-0081 §10 to §17) --------- */
+.lr-sentence {
+  min-height: 5.5rem;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* the name is the head's title, editable in place */
+.lr-title {
+  width: 100%;
+  margin: 0;
+  padding: 0.1rem 0;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-title:hover,
+.lr-title:focus-visible {
+  outline: 0;
+  border-bottom-color: var(--line-2);
+}
+
+.lr-title::placeholder {
+  color: var(--ash-dim);
+}
+
+/* the sentence kept above the fields (.lr-read is the session's read-aloud) */
+.lr-readback {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.6rem 0.8rem;
+  border-left: 2px solid var(--line-2);
+}
+
+.lr-readback .s {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.lr-studyrow,
+.lr-asides {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.lr-asides {
+  gap: 0.5rem;
+}
+
+.lr-studyrow .lr-link,
+.lr-asides .lr-link,
+.lr-readback .lr-link {
+  font-size: var(--fs-ctl);
+}
+
+.lr-tok {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 30px;
+  padding: 0 0.3rem 0 0.7rem;
+  border-radius: 15px;
+  background: var(--sel);
+  color: var(--frost);
+  font-size: 13px;
+  max-width: 100%;
+}
+
+.lr-tok i {
+  font-style: normal;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-tok.sm {
+  height: 26px;
+  font-size: var(--fs-meta);
+}
+
+.lr-x {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ash);
+  font: inherit;
+  cursor: pointer;
+}
+
+.lr-x:hover,
+.lr-x:focus-visible {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
+.lr-ta {
+  position: relative;
+  flex: 1 1 18rem;
+  max-width: 28rem;
+}
+
+.lr-ta .lr-field {
+  width: 100%;
+}
+
+.lr-opts {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.lr-opts li {
+  display: grid;
+  grid-template-columns: 4.2rem minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.lr-opts li.on,
+.lr-opts li:hover {
+  background: var(--sel);
+  color: var(--frost);
+}
+
+.lr-opts i {
+  font-style: normal;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-opts .l {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lr-opts .c {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-pline {
+  margin: 0.2rem 0 0;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-pline b {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--frost);
+}
+
+/* a syllabus line: its words, what it resolved to, how, and "not this" (§13) */
+.lr-steps2 {
+  display: grid;
+  grid-template-columns: 1.4rem minmax(8rem, 13rem) minmax(0, 1fr) auto auto;
+  gap: 0.35rem 0.9rem;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.lr-steps2 .n {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-steps2 .s {
+  color: var(--frost);
+}
+
+.lr-steps2 .to {
+  color: var(--text);
+}
+
+.lr-steps2 .to.gap {
+  color: var(--ash);
+}
+
+.lr-steps2 .to .lr-cell {
+  width: 10px;
+  height: 10px;
+  margin-right: 0.4rem;
+  vertical-align: -1px;
+}
+
+.lr-steps2 .how {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
+}
+
+.lr-steps2 .how.amb {
+  color: var(--warn);
+}
+
+.lr-steps2 .lr-link {
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+}
+
+.lr-help.warn {
+  color: var(--warn);
+}
+
+/* the objectives wait in one closed row (§16) */
+.lr-objrow {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.lr-objrow > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.55rem 0;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.lr-objrow > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lr-objrow > summary .chev {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  color: var(--ash-dim);
+  transition: transform var(--dur) var(--ease);
+}
+
+.lr-objrow[open] > summary .chev {
+  transform: rotate(90deg);
+}
+
+.lr-objrow > summary .m {
+  margin-left: auto;
+  font-size: var(--fs-meta);
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+.lr-objrow > summary .m.mute {
+  color: var(--ash-dim);
+}
+
+.lr-objrow > .in {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0 0 0.6rem;
+}
+
+.lr-ob .i {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  margin-right: 0.5rem;
+}
+
+.lr-ob em.amb {
+  font-style: normal;
+  font-size: var(--fs-meta);
+  color: var(--warn);
+  margin-left: 0.5rem;
+  white-space: nowrap;
+}
+
+/* the receipt's open questions: where each rests, how it comes back (§9) */
+.lr-openrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: baseline;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+}
+
+.lr-openrow .t {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.lr-openrow .q {
+  color: var(--frost);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lr-openrow .m {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
+}
+
+/* the grid stacks below 980px of pane like metrics does below 1100px of
+   viewport; the session sheet is single-column everywhere */
+@container (max-width: 980px) {
+  .mv.lr-mv,
+  .mv.lr-mv.lr-mapv {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mv.lr-mv .mv-l {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .lr-mv .mv-r {
+    padding: 1.2rem 1.1rem 1.4rem;
+  }
+}
+
+@container (max-width: 640px) {
+  .lr-steps2 {
+    grid-template-columns: 1.4rem minmax(0, 1fr) auto;
+  }
+
+  .lr-steps2 .to {
+    grid-column: 2 / 4;
+  }
+
+  .lr-hist td.rt {
+    white-space: normal;
+  }
+
+  .lr-cmp {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .lr-cmp > .you {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .lr-tree td.pr .lr-meter {
+    display: none;
+  }
+
+  .lr-tree .pr {
+    width: auto;
+  }
+
+  .lr-points {
+    grid-template-columns: 1.6rem minmax(0, 1fr) auto;
+  }
+
+  .lr-points .h {
+    display: none;
+  }
+
+  .lr-sheet {
+    padding: 1.1rem 1.1rem;
+  }
+}
+
+@container (max-width: 380px) {
+  .lr-figs {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.9rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lr-wait i {
+    animation: none;
+    width: 100%;
+    opacity: 0.4;
+  }
+}

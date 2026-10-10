@@ -1,0 +1,207 @@
+/* --- notifications: hairline status strip (bottom-right). Two levels only —
+   info = accent, error = gold (caution). The palette reserves no third UI
+   signal, so errors read as caution, not a new red. Fills the silent-catch
+   gaps: a failed background fetch is now visible instead of a stale "—". */
+#toasts {
+  position: fixed;
+  /* Top right, under the note drawer's toggle (ADR-0084), not over the
+     composer: bottom-right put a 360px strip across #send at every width
+     the composer's own --measure left room for, so the app's resting state
+     was a diagnostic covering its primary control. Inset by the drawer the
+     same way #dock is, so the two never stack. */
+  top: calc(var(--gutter) + 3.5rem);
+  right: 1rem;
+  z-index: 120;
+  /* above drawer (50), drop-hint (100), scanline (90) */
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-width: min(300px, 90vw);
+  pointer-events: none;
+  transition: right var(--dur) var(--ease);
+}
+
+body.note-open #toasts {
+  right: calc(var(--note-w, 630px) + var(--gutter) + 1rem);
+}
+
+/* the roll-up: older toasts collapse behind it rather than stacking */
+.toast-more {
+  align-self: flex-end;
+  pointer-events: auto;
+  font-family: var(--sans);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ash);
+  background: var(--slate);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  cursor: pointer;
+}
+
+.toast-more:hover {
+  color: var(--frost);
+  border-color: var(--ash-dim);
+}
+
+.toast {
+  pointer-events: auto;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  color: var(--frost);
+  border: 1px solid var(--line-2);
+  border-left: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  padding: 0.5rem 0.7rem;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgb(var(--shadow-rgb) / .35);
+  animation: toast-in var(--dur) var(--ease);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.toast.error {
+  border-left-color: var(--warn);
+}
+
+@keyframes toast-in {
+  from {
+    transform: translateX(8px);
+    opacity: 0;
+  }
+}
+
+/* screen-reader-only: the polite a11y status region (turn state + notifications),
+   so the streaming transcript itself needn't be a chatty live region */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.sp-title {
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--line-2);
+}
+
+/* --- help panel: the app's only answer to "what can I do here" --------------
+   Placed and framed with the vault's panel (app-shell.css), which opens it. */
+#help-panel .sp-title {
+  border-top: 1px solid var(--line);
+}
+
+#help-panel .sp-title:first-child {
+  border-top: none;
+}
+
+.hp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.7rem;
+  padding: 0.45rem 0.8rem;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.hp-row kbd {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--frost);
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xs);
+  padding: 0.1rem 0.35rem;
+}
+
+.hp-row>span:last-child {
+  color: var(--ash);
+}
+
+.hp-row .hp-what {
+  flex-shrink: 0;
+  min-width: 6.5rem;
+  color: var(--frost);
+}
+
+/* --- sidebar filter status: the filter says what it did --------------------- */
+#side-search-status {
+  margin-top: 0.45rem;
+  font-size: 11px;
+  color: var(--ash-dim);
+  line-height: 1.5;
+}
+
+#side-search-status.empty {
+  color: var(--ash);
+}
+
+#side-search-status .linklike {
+  display: block;
+  padding: 0.25rem 0 0;
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 11px;
+}
+
+#side-search-status .linklike:hover {
+  color: var(--frost);
+}
+
+
+/* idle: an empty transcript centers the landing and floats the composer right
+   under it as a CONTAINED command island — not a full-width footer dragged up
+   the page with dead space beneath it. Contained width + a centered cluster
+   reads as an intentional hero, not a stretched empty box. */
+#view-chat:has(#log:empty) {
+  justify-content: center;
+  align-items: center;
+  gap: 2.2rem;
+}
+
+/* The composer is on the measure in BOTH states now, so idle no longer has to
+   resize it — that switch was the whole defect. Idle only drops the scrim,
+   since nothing scrolls under the composer when the transcript is empty. */
+/* align-items:center above makes every child shrink to its own content, which
+   collapsed the composer to the width of its placeholder. The shell already
+   carries the measure, so the row just has to span the pane and let it centre. */
+#view-chat:has(#log:empty) :is(#composer, #chat-models) {
+  align-self: stretch;
+}
+
+#view-chat:has(#log:empty) #composer::before {
+  display: none;
+}
+
+/* honor reduced-motion for the animated bits added/kept here */
+@media (prefers-reduced-motion: reduce) {
+
+  .caret,
+  .tool:not(.done):not(.error),
+  .spinner,
+  .toast,
+  .msg {
+    animation: none !important;
+  }
+
+  #note-panel,
+  .composer-shell {
+    transition: none;
+  }
+}
+

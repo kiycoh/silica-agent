@@ -1,0 +1,99 @@
+{
+ "key": "8H4AC8GW",
+ "version": 1985,
+ "library": {
+  "type": "user",
+  "id": 0,
+  "name": "My Library",
+  "links": {
+   "self": {
+    "href": "http://localhost:23119/api/users/0",
+    "type": "application/json"
+   }
+  }
+ },
+ "links": {
+  "self": {
+   "href": "http://localhost:23119/api/users/0/items/8H4AC8GW",
+   "type": "application/json"
+  },
+  "attachment": {
+   "href": "http://localhost:23119/api/users/0/items/QH2BR53F",
+   "type": "application/json",
+   "attachmentType": "application/pdf",
+   "attachmentSize": 663708
+  }
+ },
+ "meta": {
+  "creatorSummary": "Packer et al.",
+  "parsedDate": "2024-02-12",
+  "numChildren": 2
+ },
+ "data": {
+  "key": "8H4AC8GW",
+  "version": 1985,
+  "itemType": "preprint",
+  "title": "MemGPT: Towards LLMs as Operating Systems",
+  "abstractNote": "Large language models (LLMs) have revolutionized AI, but are constrained by limited context windows, hindering their utility in tasks like extended conversations and document analysis. To enable using context beyond limited context windows, we propose virtual context management, a technique drawing ",
+  "date": "2024-02-12",
+  "DOI": "10.48550/arXiv.2310.08560",
+  "citationKey": "packerMemGPTLLMsOperating2024",
+  "url": "http://arxiv.org/abs/2310.08560",
+  "accessDate": "2026-09-16T21:01:14Z",
+  "shortTitle": "MemGPT",
+  "language": "en",
+  "libraryCatalog": "arXiv.org",
+  "extra": "arXiv:2310.08560 [cs.AI]",
+  "repository": "arXiv",
+  "archiveID": "arXiv:2310.08560",
+  "creators": [
+   {
+    "firstName": "Charles",
+    "lastName": "Packer",
+    "creatorType": "author"
+   },
+   {
+    "firstName": "Sarah",
+    "lastName": "Wooders",
+    "creatorType": "author"
+   },
+   {
+    "firstName": "Kevin",
+    "lastName": "Lin",
+    "creatorType": "author"
+   },
+   {
+    "firstName": "Vivian",
+    "lastName": "Fang",
+    "creatorType": "author"
+   },
+   {
+    "firstName": "Shishir G.",
+    "lastName": "Patil",
+    "creatorType": "author"
+   },
+   {
+    "firstName": "Ion",
+    "lastName": "Stoica",
+    "creatorType": "author"
+   },
+   {
+    "firstName": "Joseph E.",
+    "lastName": "Gonzalez",
+    "creatorType": "author"
+   }
+  ],
+  "tags": [
+   {
+    "tag": "Computer Science - Artificial Intelligence",
+    "type": 1
+   }
+  ],
+  "collections": [
+   "X7DB9QVX"
+  ],
+  "relations": {},
+  "dateAdded": "2026-09-16T21:01:14Z",
+  "dateModified": "2026-09-16T21:01:14Z"
+ }
+}

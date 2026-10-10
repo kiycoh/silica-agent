@@ -1,0 +1,367 @@
+/* --- Zotero (ADR-0055) -------------------------------------------------------
+   Explore › Library and the rail's count. Settings › Zotero needs nothing of
+   its own: it is built from the panel's existing row, note and button classes. */
+
+/* The Library tab's count of papers new since the last session: the one place
+   on the web where session-open detection surfaces (decision 9). */
+.stab .lay-count {
+  margin-left: 0.4rem;
+  min-width: 1.1rem;
+  padding: 0 0.3rem;
+  border-radius: var(--r-xs);
+  background: var(--accent);
+  color: var(--on-vivid);
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  text-align: center;
+}
+
+.zl .shape-head {
+  align-items: center;
+}
+
+.zl-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 650;
+  color: var(--frost);
+}
+
+.zl .shape-head .zl-btn {
+  margin-left: auto;
+}
+
+/* Tree, table, side: three columns only when the PANE is wide, which is a
+   container query and not a media one: the pane is the window minus the rail
+   and the legend band, so at a 1440px window the three columns left the titles
+   ten characters wide (measured 2026-10-05). Narrower, the side card sits above
+   the table while it has something to say, and below 640px everything stacks. */
+.zl {
+  container-type: inline-size;
+}
+
+.zl-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 230px) minmax(0, 1fr) minmax(220px, 300px);
+  gap: 0.9rem;
+  align-items: start;
+}
+
+.zl-side:empty {
+  display: none;
+}
+
+@container (max-width: 1150px) {
+  .zl-grid { grid-template-columns: minmax(160px, 200px) minmax(0, 1fr); }
+  .zl-side { grid-column: 1 / -1; order: -1; }
+}
+
+@container (max-width: 640px) {
+  .zl-grid { grid-template-columns: minmax(0, 1fr); }
+  .zl-tree { max-height: 14rem; overflow: auto; }
+}
+
+/* The pane reserves 236px on the right for the legend band. On a phone that
+   band is the whole width, and the Library's rows were left 60px. */
+@media (max-width: 900px) {
+  #shape-pane:has(> .zl) { padding-right: 1.1rem; }
+}
+
+.zl-tree,
+.zl-main,
+.zl-side {
+  min-width: 0;
+  background: var(--bubble);
+  border-radius: var(--r);
+  padding: 0.7rem;
+}
+
+.zl-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.zl-col {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 1.9rem;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.zl-col:hover { background: var(--sel-hover); }
+.zl-col.on { background: var(--sel); color: var(--frost); }
+
+.zl-col-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zl-col-count {
+  flex: none;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.zl-col-count.full { color: var(--add); }
+
+/* A collection's tick picks it for the graph's scope, a set (ADR-0066
+   decision 5); the button beside it keeps opening the collection here. */
+.zl-col-row { display: flex; align-items: center; gap: 0.35rem; }
+.zl-col-row > input { flex: none; margin: 0; accent-color: var(--accent); }
+.zl-col-row > .zl-col { flex: 1; min-width: 0; padding-left: 0.3rem; }
+.zl-tree > .zl-btn { align-self: flex-start; margin-top: 0.5rem; }
+
+.zl-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.7rem;
+  margin-bottom: 0.6rem;
+}
+
+.zl-col-title {
+  margin: 0 0.4rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+  color: var(--frost);
+}
+
+.zl-btn {
+  min-height: 2rem;
+  padding: 0 0.8rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--well);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.zl-btn.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--on-vivid);
+  font-weight: 600;
+}
+
+.zl-btn.armed,
+.st-btn.armed {
+  border-color: var(--warn);
+  background: var(--well);
+  color: var(--warn);
+}
+
+.zl-btn:disabled { opacity: 0.45; cursor: default; }
+.zl-btn:focus-visible,
+.zl-col:focus-visible,
+.zl-open:focus-visible,
+.zl-sug:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The table scrolls sideways inside its card rather than the pane: a title
+   column squeezed under 12rem stops being readable at all. */
+.zl-table {
+  overflow-x: auto;
+}
+
+.zl-row {
+  display: grid;
+  grid-template-columns: 1.8rem 1.4rem minmax(5.5rem, 8rem) 3rem minmax(12rem, 1fr) 4.5rem;
+  gap: 0 0.6rem;
+  align-items: center;
+  min-height: 2.6rem;
+  min-width: 34rem;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-ctl);
+}
+
+.zl-row.inbox {
+  grid-template-columns: 1.8rem 1.4rem minmax(5rem, 7rem) 3rem minmax(11rem, 1fr) minmax(9rem, 13rem);
+}
+
+.zl-th {
+  min-height: 2rem;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.zl-mark { font-size: 14px; color: var(--ash); }
+.zl-mark.in { color: var(--add); }
+.zl-mark.changed { color: var(--warn); }
+.zl-mark.new { color: var(--accent); }
+.zl-mark.there { color: var(--ash); }
+
+.zl-sur {
+  color: var(--frost);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zl-num {
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.zl-open {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.zl-open:hover { color: var(--frost); text-decoration: underline; }
+
+.zl-sug {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  min-height: 1.9rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--frost);
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+
+.zl-sug-to {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zl-sug-vote { flex: none; color: var(--ash); }
+.zl-sug-vote.sure { color: var(--add); }
+
+.zl-side {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-size: var(--fs-ctl);
+  line-height: 1.55;
+}
+
+.zl-side p { margin: 0; }
+
+.zl-kicker {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ash);
+}
+
+.zl-ptitle {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
+  color: var(--frost);
+}
+
+.zl-by { color: var(--ash); }
+
+.zl-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.zl-group {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--r-sm);
+  background: var(--well);
+  color: var(--frost);
+}
+
+.zl-hint {
+  margin: 0;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}
+
+.zl-empty { color: var(--ash); }
+
+/* A leaf of the linked vault, read by peek: its text as written, scrolled in
+   place rather than rendered, since nothing here may act on it. */
+.zl-peek {
+  margin: 0;
+  max-height: 28rem;
+  overflow: auto;
+  padding: 0.6rem;
+  border-radius: var(--r-sm);
+  background: var(--well);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  white-space: pre-wrap;
+}
+
+/* --- the paper in the Node panel ---------------------------------------------- */
+.wk-paper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.7rem;
+  margin-top: 0.3rem;
+}
+
+.wk-paper-a {
+  color: var(--accent);
+  font-size: var(--fs-meta);
+  text-decoration: none;
+}
+
+.wk-paper-a:hover { text-decoration: underline; }
+
+/* The Node panel's own row inset (app-work.css .wk rows: 0.85rem), so a
+   reference reads as one more row of the panel and not as a stray link. */
+.wk-ext {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.3rem 0.85rem;
+}
+
+/* --- the paper in the drawer --------------------------------------------------- */
+.note-paper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.8rem;
+  margin: 0 0 0.9rem;
+  font-size: var(--fs-meta);
+  color: var(--ash);
+}

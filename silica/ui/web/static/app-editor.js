@@ -1,0 +1,657 @@
+// The drawer's editor: Obsidian's Live Preview on CodeMirror 6 (ADR-0051),
+// and since ADR-0059 the only way the drawer shows a note.
+//
+// Loaded with the first note the drawer opens, after static/codemirror.min.js
+// (built by scripts/vendor_codemirror.sh), which puts CodeMirror on `window.CM`.
+//
+// What makes it a live preview and not a source view is one rule, Obsidian's:
+// markup is hidden and its effect drawn wherever the selection is NOT, and
+// shown as typed wherever it is. An inline element (bold, a link) opens when
+// the caret touches it, a line mark (`#`, `>`) when the caret is on its line,
+// a block (table, code, math, callout, properties) when the caret enters it.
+// Nothing is rendered twice: a block is drawn by the server's own reader
+// renderer (POST /note/render), so a table or a formula reads the same in the
+// editor as in the reader, and the editor carries no second markdown engine.
+//
+// ponytail: decorations are rebuilt over the whole document on every change
+// and every caret move. Vault notes are a few KB; reopen at 200 KB, where the
+// upgrade is building over `view.visibleRanges` in a ViewPlugin for the inline
+// part and keeping only the block widgets in this StateField.
+(() => {
+  const {
+    EditorState, StateField, StateEffect, Transaction, Prec,
+    EditorView, Decoration, WidgetType, keymap, drawSelection,
+    defaultKeymap, history, historyKeymap, indentMore, indentLess,
+    Language, LanguageSupport, syntaxTree, ensureSyntaxTree,
+    markdownLanguage, markdownKeymap,
+  } = window.CM;
+
+  // --- the Obsidian syntax Lezer does not know ------------------------------
+  // Frontmatter is not here: it is found by a regex on the document head (see
+  // frontmatterEnd), because a block parser that meets an unterminated `---`
+  // has already consumed the lines it would have to give back.
+  const WIKI = /^!?\[\[([^[\]\n]+?)\]\]/;
+  // A tag is `#` plus letters, digits, `_`, `-`, `/`, with at least one
+  // non-digit, after a space or at the start: Obsidian's rule, so `#1` and
+  // `a#b` stay text.
+  const TAG = /^#[\p{L}\p{N}_/-]*[\p{L}_/-][\p{L}\p{N}_/-]*/u;
+  // Inline math mirrors the server's dollarmath options (allow_space=False,
+  // allow_digits=False), so a `$5 and $10` the reader leaves alone is not a
+  // formula here either.
+  const MATH = /^\$(?=[^\s$])((?:\\.|[^$\\\n])*?[^\s$])\$(?!\d)/;
+
+  // One object for both ends: Lezer pairs an opening and a closing delimiter
+  // by identity, so a fresh literal per call never closes.
+  const HIGHLIGHT = { resolve: "Highlight", mark: "HighlightMark" };
+  // Footnotes, as the reader's footnote_plugin reads them: a definition is a
+  // line opening with `[^label]:`, and it ends the paragraph above it, as
+  // markdown-it-footnote's does; a reference is `[^label]` anywhere else.
+  // Without the definition parser, `[^L]: [[sources/X]]` was a link
+  // reference to the literal `[[sources/X]]`, and nothing in it was drawn.
+  const FN_DEF = /^\[\^([^\]\s]+)\]:[ \t]?/;
+  const FN_REF = /^\[\^([^\]\s]+)\]/;
+  const footnoteDefinition = {
+    nextLine: () => false,
+    finish(cx, leaf) {
+      const m = FN_DEF.exec(leaf.content), at = leaf.start + m[0].length;
+      cx.addLeafElement(leaf, cx.elt("FootnoteDefinition", leaf.start, leaf.start + leaf.content.length,
+        [cx.elt("FootnoteMark", leaf.start, at), ...cx.parser.parseInline(leaf.content.slice(m[0].length), at)]));
+      return true;
+    },
+  };
+
+  const Obsidian = {
+    defineNodes: ["WikiLink", "Embed", "Highlight", "HighlightMark", "HashTag", "InlineMath", "MathBlock",
+                  "FootnoteRef", "FootnoteDefinition", "FootnoteMark"],
+    parseInline: [
+      {
+        name: "FootnoteRef",
+        before: "Link", // `[^1]` is not a link reference, though it reads like one
+        parse(cx, next, pos) {
+          if (next !== 91 || cx.char(pos + 1) !== 94) return -1; // `[^`
+          const m = FN_REF.exec(cx.slice(pos, cx.end));
+          return m ? cx.addElement(cx.elt("FootnoteRef", pos, pos + m[0].length)) : -1;
+        },
+      },
+      {
+        name: "WikiLink",
+        before: "Link", // `[[` must not reach the link parser, which reads `[x]`
+        parse(cx, next, pos) {
+          if (next !== 91 && next !== 33) return -1; // `[` or `!`
+          const m = WIKI.exec(cx.slice(pos, cx.end));
+          if (!m) return -1;
+          return cx.addElement(cx.elt(m[0][0] === "!" ? "Embed" : "WikiLink", pos, pos + m[0].length));
+        },
+      },
+      {
+        name: "Highlight",
+        after: "Emphasis",
+        parse(cx, next, pos) {
+          if (next !== 61 || cx.char(pos + 1) !== 61 || cx.char(pos + 2) === 61) return -1; // `==`
+          const before = cx.slice(pos - 1, pos), after = cx.slice(pos + 2, pos + 3);
+          return cx.addDelimiter(HIGHLIGHT, pos, pos + 2,
+            !/\s|^$/.test(after), !/\s|^$/.test(before));
+        },
+      },
+      {
+        name: "HashTag",
+        parse(cx, next, pos) {
+          if (next !== 35 || (pos > cx.offset && !/[\s(]/.test(cx.slice(pos - 1, pos)))) return -1;
+          const m = TAG.exec(cx.slice(pos, cx.end));
+          return m ? cx.addElement(cx.elt("HashTag", pos, pos + m[0].length)) : -1;
+        },
+      },
+      {
+        name: "InlineMath",
+        parse(cx, next, pos) {
+          if (next !== 36 || cx.char(pos + 1) === 36 || /\d/.test(cx.slice(pos - 1, pos))) return -1;
+          const m = MATH.exec(cx.slice(pos, cx.end));
+          return m ? cx.addElement(cx.elt("InlineMath", pos, pos + m[0].length)) : -1;
+        },
+      },
+    ],
+    parseBlock: [{
+      name: "FootnoteDefinition",
+      before: "LinkReference",
+      leaf: (cx, leaf) => (FN_DEF.test(leaf.content) ? footnoteDefinition : null),
+      endLeaf: (cx, line) => FN_DEF.test(line.text.slice(line.pos)),
+    }, {
+      name: "MathBlock",
+      before: "FencedCode",
+      // `$$` opens a display formula that runs to the next line ending in `$$`,
+      // or to the end of its container: the same shape as a code fence, and
+      // the same container check FencedCode makes.
+      parse(cx, line) {
+        const text = line.text.slice(line.pos);
+        if (!text.startsWith("$$")) return false;
+        const from = cx.lineStart + line.pos;
+        const done = (to) => { cx.addElement(cx.elt("MathBlock", from, to)); return true; };
+        if (text.length > 4 && /\$\$\s*$/.test(text.slice(2))) {
+          const to = cx.lineStart + line.text.length;
+          cx.nextLine();
+          return done(to);
+        }
+        while (cx.nextLine() && line.depth >= cx.stack.length) {
+          if (/\$\$\s*$/.test(line.text)) {
+            const to = cx.lineStart + line.text.length;
+            cx.nextLine();
+            return done(to);
+          }
+        }
+        return done(cx.prevLineEnd());
+      },
+    }],
+  };
+
+  const language = new Language(markdownLanguage.data, markdownLanguage.parser.configure([Obsidian]), [], "markdown");
+
+  // --- widgets --------------------------------------------------------------
+  // One editor per page (the drawer's), so the hooks it was built with are
+  // module state rather than a facet threaded through every widget.
+  let HOOKS = {};
+  const renderCache = new Map(); // source -> html; a block redrawn is not refetched
+
+  function rendered(source) {
+    if (renderCache.has(source)) return Promise.resolve(renderCache.get(source));
+    return HOOKS.render(source).then((html) => { renderCache.set(source, html); return html; });
+  }
+
+  // A link inside something the server drew (a wikilink in a table cell, a
+  // URL in a callout) opens; any other press puts the caret at the start of
+  // the block, which is what opens it for editing. Click is swallowed too, or
+  // the app's delegated `.note-link` handler reopens the note in the reader.
+  function followOrReveal(view, el, e) {
+    if (e.button !== 0) return;
+    const link = e.target.closest(".note-link, a[href]");
+    if (link) {
+      e.preventDefault();
+      if (link.classList.contains("note-link")) { if (link.dataset.path) HOOKS.openNote(link.dataset.path); }
+      else window.open(link.href, "_blank", "noopener");
+      return;
+    }
+    if (e.target.closest("summary")) return; // the properties box folds, natively
+    e.preventDefault();
+    view.dispatch({ selection: { anchor: view.posAtDOM(el) } });
+    view.focus();
+  }
+
+  class Rendered extends WidgetType {
+    constructor(source, block) { super(); this.source = source; this.block = block; }
+    eq(o) { return o.source === this.source && o.block === this.block; }
+    toDOM(view) {
+      const el = document.createElement(this.block ? "div" : "span");
+      el.className = "cm-rendered " + (this.block ? "cm-rendered-block" : "cm-rendered-inline");
+      const fill = (html) => {
+        el.innerHTML = this.block ? html : html.replace(/^\s*<p>([\s\S]*)<\/p>\s*$/, "$1");
+        if (HOOKS.decorate) HOOKS.decorate(el, view);
+        view.requestMeasure();
+      };
+      if (renderCache.has(this.source)) fill(renderCache.get(this.source));
+      else {
+        el.textContent = this.source; // the source, dimmed, until the server answers
+        el.classList.add("cm-rendering");
+        rendered(this.source).then((h) => { el.classList.remove("cm-rendering"); fill(h); },
+          () => el.classList.remove("cm-rendering")); // unrendered stays readable source
+      }
+      el.addEventListener("mousedown", (e) => followOrReveal(view, el, e));
+      el.addEventListener("click", (e) => { if (!e.target.closest("summary")) { e.preventDefault(); e.stopPropagation(); } });
+      return el;
+    }
+    ignoreEvent() { return true; }
+  }
+
+  class Bullet extends WidgetType {
+    eq() { return true; }
+    toDOM() { const s = document.createElement("span"); s.className = "cm-bullet"; s.textContent = "•"; return s; }
+  }
+
+  class Rule extends WidgetType {
+    eq() { return true; }
+    toDOM() { const s = document.createElement("span"); s.className = "cm-hr"; return s; }
+  }
+
+  // The checkbox is the task marker: pressing it rewrites `[ ]` <-> `[x]` in the
+  // text, so there is no checkbox state apart from the note's own bytes.
+  class Checkbox extends WidgetType {
+    constructor(checked) { super(); this.checked = checked; }
+    eq(o) { return o.checked === this.checked; }
+    toDOM(view) {
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.className = "cm-task";
+      box.checked = this.checked;
+      box.setAttribute("aria-label", this.checked ? "done" : "to do");
+      box.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const at = view.posAtDOM(box) + 1;
+        view.dispatch({ changes: { from: at, to: at + 1, insert: this.checked ? " " : "x" } });
+      });
+      box.addEventListener("click", (e) => e.preventDefault()); // the text decides, not the input
+      return box;
+    }
+    ignoreEvent() { return true; }
+  }
+
+  // A footnote reference draws as the reader's does, a superscript number in
+  // first-reference order, and a press goes to its definition, as the
+  // reader's `#fn` anchor scrolls there.
+  class FootnoteRef extends WidgetType {
+    constructor(n, def) { super(); this.n = n; this.def = def; }
+    eq(o) { return o.n === this.n && o.def === this.def; }
+    toDOM(view) {
+      const s = document.createElement("sup");
+      s.className = "footnote-ref";
+      s.textContent = String(this.n);
+      s.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        view.dispatch({ effects: EditorView.scrollIntoView(this.def, { y: "center" }) });
+      });
+      return s;
+    }
+    ignoreEvent() { return true; }
+  }
+
+  class FootnoteLabel extends WidgetType {
+    constructor(text) { super(); this.text = text; }
+    eq(o) { return o.text === this.text; }
+    toDOM() { const s = document.createElement("span"); s.className = "cm-fn-label"; s.textContent = this.text; return s; }
+  }
+
+  // What heads the note without being its bytes (a paper's strip, ADR-0055):
+  // a block before the first line, so it scrolls with the text as it did in
+  // the reader, and no keystroke can reach it.
+  class Top extends WidgetType {
+    constructor(el) { super(); this.el = el; }
+    eq(o) { return o.el === this.el; }
+    toDOM() { return this.el; }
+    ignoreEvent() { return true; }
+  }
+
+  const HIDE = Decoration.replace({});
+  const BULLET = Decoration.replace({ widget: new Bullet() });
+  const RULE = Decoration.replace({ widget: new Rule() });
+  const line = (cls) => Decoration.line({ class: cls });
+  const LINE = {
+    h: [null, 1, 2, 3, 4, 5, 6].map((n) => n && line("cm-h cm-h" + n)),
+    quote: line("cm-quote"), fm: line("cm-fm"), code: line("cm-codeblock"),
+    table: line("cm-table"), math: line("cm-mathblock"), hr: line("cm-hr-line"),
+    fn: line("cm-footnote"),
+  };
+  const MARK = {
+    Emphasis: Decoration.mark({ tagName: "em" }),
+    StrongEmphasis: Decoration.mark({ tagName: "strong" }),
+    Strikethrough: Decoration.mark({ tagName: "s" }),
+    Highlight: Decoration.mark({ tagName: "mark" }),
+    InlineCode: Decoration.mark({ tagName: "code" }),
+    HashTag: Decoration.mark({ class: "tag" }),
+    InlineMath: Decoration.mark({ class: "cm-math-src" }),
+    FootnoteRef: Decoration.mark({ class: "cm-fn-src" }),
+  };
+  const HIDDEN_MARKS = {
+    Emphasis: "EmphasisMark", StrongEmphasis: "EmphasisMark", Strikethrough: "StrikethroughMark",
+    Highlight: "HighlightMark", InlineCode: "CodeMark",
+  };
+  // A link is only clickable while it is drawn as one; with the caret in it,
+  // it is text you are editing and a press has to place the caret. A wikilink
+  // also wears the reader's `note-link`, so the two draw it alike.
+  const linkMark = (attrs, live, cls = "") => Decoration.mark({
+    tagName: "a", class: (live ? "cm-link cm-link-live " : "cm-link ") + cls, attributes: live ? attrs : {},
+  });
+  const WIKI_BROKEN = Decoration.mark({ tagName: "a", class: "cm-link note-link broken" });
+
+  // --- the rule -------------------------------------------------------------
+  const focusEffect = StateEffect.define();
+  // Marks the one transaction that only brings the field in line with the
+  // disk (the server's stamped bytes): not an edit, so it neither saves nor
+  // lands in the undo history.
+  const adoptEffect = StateEffect.define();
+  const focused = StateField.define({
+    create: () => false,
+    update: (v, tr) => tr.effects.reduce((a, e) => (e.is(focusEffect) ? e.value : a), v),
+  });
+  // The wikilink targets the vault does not resolve. The server answers it
+  // (GET /note/raw, and every save), since only its resolver knows the vault;
+  // the reader drew these `note-link broken`, and so does this.
+  const brokenEffect = StateEffect.define();
+  const broken = StateField.define({
+    create: () => new Set(),
+    update: (v, tr) => tr.effects.reduce((a, e) => (e.is(brokenEffect) ? new Set(e.value) : a), v),
+  });
+  let TOP = null; // the element heading the note, set per load()
+  const linkKey = (target) => target.split("#")[0].trim();
+
+  const FRONTMATTER = /^---[ \t]*\n(?:[\s\S]*?\n)?(?:---|\.\.\.)[ \t]*(?=\n|$)/;
+  // Obsidian's frontmatter only counts at byte 0 and only when it closes.
+  // `head` is the document's first 64 KB, which no properties block outgrows.
+  function frontmatterEnd(head) {
+    const m = FRONTMATTER.exec(head);
+    return m ? m[0].length : -1;
+  }
+  const HEAD = 65536;
+
+  function buildDecorations(state) {
+    const doc = state.doc;
+    const tree = ensureSyntaxTree(state, doc.length, 200) || syntaxTree(state);
+    // Unfocused, nothing is open: the note reads as rendered while you are
+    // in the chat or the note's menu, and opens again where you left it.
+    const sel = state.field(focused) ? state.selection.ranges : [];
+    const touches = (from, to) => sel.some((r) => r.from <= to && r.to >= from);
+    const lineTouched = (pos) => { const l = doc.lineAt(pos); return touches(l.from, l.to); };
+    const out = [];
+    const add = (deco, from, to = from) => out.push(deco.range(from, to));
+    const hide = (from, to) => { if (to > from) add(HIDE, from, to); };
+    const eachLine = (from, to, deco) => {
+      for (let p = from; p <= to;) { const l = doc.lineAt(p); add(deco, l.from); p = l.to + 1; }
+    };
+    // A block widget has to own whole lines. One that starts after a `> ` or
+    // a list indent that is not blank is left as styled source instead.
+    const blockOrLines = (from, to, deco) => {
+      const a = doc.lineAt(from), b = doc.lineAt(to);
+      const whole = !doc.sliceString(a.from, from).trim() && !doc.sliceString(to, b.to).trim();
+      if (whole && !touches(a.from, b.to)) {
+        add(Decoration.replace({ widget: new Rendered(doc.sliceString(a.from, b.to), true), block: true }), a.from, b.to);
+      } else {
+        eachLine(from, to, deco);
+      }
+    };
+
+    const missing = state.field(broken);
+    const refs = [], defs = []; // footnotes, numbered once the whole tree is seen
+    if (TOP) add(Decoration.widget({ widget: new Top(TOP), block: true, side: -1 }), 0);
+    const fmEnd = frontmatterEnd(doc.sliceString(0, HEAD));
+    if (fmEnd > 0) blockOrLines(0, fmEnd, LINE.fm);
+
+    tree.iterate({
+      enter(n) {
+        const name = n.name, node = n.node;
+        if (name === "Document") return;
+        if (n.from < fmEnd) return false;
+        const live = !touches(n.from, n.to);
+        if (name.startsWith("ATXHeading")) {
+          add(LINE.h[+name.slice(-1)], doc.lineAt(n.from).from);
+          if (!lineTouched(n.from)) {
+            for (let c = node.firstChild; c; c = c.nextSibling) {
+              if (c.name !== "HeaderMark") continue;
+              if (c.from === n.from) hide(c.from, Math.min(c.to + 1, n.to)); // `# ` with its space
+              else hide(doc.sliceString(c.from - 1, c.from) === " " ? c.from - 1 : c.from, c.to); // closing `##`
+            }
+          }
+          return;
+        }
+        if (name.startsWith("SetextHeading")) {
+          const under = node.getChild("HeaderMark");
+          eachLine(n.from, under ? under.from - 1 : n.to, LINE.h[+name.slice(-1)]);
+          if (under && live) hide(under.from, under.to);
+          return;
+        }
+        if (MARK[name] && HIDDEN_MARKS[name] !== undefined) {
+          add(MARK[name], n.from, n.to);
+          if (live) {
+            for (let c = node.firstChild; c; c = c.nextSibling) if (c.name === HIDDEN_MARKS[name]) hide(c.from, c.to);
+          }
+          return;
+        }
+        switch (name) {
+          case "HashTag":
+            add(MARK.HashTag, n.from, n.to);
+            return false;
+          case "Escape":
+            if (live) hide(n.from, n.from + 1); // `\*` reads as `*`
+            return false;
+          case "Link": {
+            const marks = node.getChildren("LinkMark"), url = node.getChild("URL");
+            if (!url || marks.length < 2) return; // `[x][ref]` and `[x]` stay text
+            const textFrom = marks[0].to, textTo = marks[1].from;
+            if (textTo > textFrom) add(linkMark({ "data-href": doc.sliceString(url.from, url.to) }, live), textFrom, textTo);
+            if (live) { hide(n.from, textFrom); hide(textTo, n.to); }
+            return;
+          }
+          case "URL": {
+            const parent = node.parent && node.parent.name;
+            if (parent === "Link" || parent === "Image" || parent === "LinkReference") return false;
+            add(linkMark({ "data-href": doc.sliceString(n.from, n.to) }, live), n.from, n.to);
+            return false;
+          }
+          case "Autolink":
+            if (live) for (const m of node.getChildren("LinkMark")) hide(m.from, m.to); // the `<` `>`
+            return;
+          case "WikiLink": {
+            const inner = doc.sliceString(n.from + 2, n.to - 2), bar = inner.indexOf("|");
+            const target = (bar < 0 ? inner : inner.slice(0, bar)).trim();
+            const shownFrom = bar < 0 ? n.from + 2 : n.from + 2 + bar + 1;
+            // A broken link is never live: there is nothing to open, so a
+            // press places the caret, as in any other text.
+            const dead = missing.has(linkKey(target));
+            if (n.to - 2 > shownFrom) {
+              add(dead ? WIKI_BROKEN : linkMark({ "data-target": target }, live, "note-link"), shownFrom, n.to - 2);
+            }
+            if (live) { hide(n.from, shownFrom); hide(n.to - 2, n.to); }
+            return false;
+          }
+          case "FootnoteRef":
+            refs.push([n.from, n.to, live]);
+            return false;
+          case "FootnoteDefinition": {
+            const mark = node.getChild("FootnoteMark");
+            defs.push([mark.from, mark.to, !lineTouched(n.from)]);
+            eachLine(n.from, n.to, LINE.fn);
+            return;
+          }
+          case "FootnoteMark":
+            return false;
+          case "Embed":
+          case "Image":
+          case "InlineMath":
+            if (live) add(Decoration.replace({ widget: new Rendered(doc.sliceString(n.from, n.to), false) }), n.from, n.to);
+            else if (name === "InlineMath") add(MARK.InlineMath, n.from, n.to);
+            return false;
+          case "ListMark": {
+            const item = node.parent, list = item && item.parent;
+            const task = item && item.getChild("Task"), marker = task && task.getChild("TaskMarker");
+            if (marker) {
+              // `- [ ] ` draws as one checkbox: the bullet goes, the marker is the box.
+              if (!touches(n.from, marker.to)) {
+                hide(n.from, marker.from);
+                const done = doc.sliceString(marker.from + 1, marker.to - 1).toLowerCase() === "x";
+                add(Decoration.replace({ widget: new Checkbox(done) }), marker.from, marker.to);
+              }
+            } else if (list && list.name === "BulletList" && live) {
+              add(BULLET, n.from, n.to);
+            }
+            return false;
+          }
+          case "QuoteMark":
+            if (!lineTouched(n.from)) hide(n.from, doc.sliceString(n.to, n.to + 1) === " " ? n.to + 1 : n.to);
+            return false;
+          case "Blockquote": {
+            const first = doc.lineAt(n.from);
+            if (/^\s*>\s*\[![\w-]+\]/.test(first.text)) { blockOrLines(n.from, n.to, LINE.quote); return false; }
+            eachLine(n.from, n.to, LINE.quote);
+            return;
+          }
+          case "HorizontalRule":
+            add(LINE.hr, doc.lineAt(n.from).from);
+            if (!lineTouched(n.from)) add(RULE, n.from, n.to);
+            return false;
+          case "FencedCode":
+            blockOrLines(n.from, n.to, LINE.code);
+            return false;
+          case "CodeBlock":
+            eachLine(n.from, n.to, LINE.code);
+            return false;
+          case "Table":
+            blockOrLines(n.from, n.to, LINE.table);
+            return false;
+          case "MathBlock":
+            blockOrLines(n.from, n.to, LINE.math);
+            return false;
+          case "HTMLBlock":
+            blockOrLines(n.from, n.to, LINE.code);
+            return false;
+        }
+      },
+    });
+    // markdown-it numbers a footnote by its first reference and drops a
+    // reference with no definition back to text; the same here.
+    const label = (from, to) => FN_REF.exec(doc.sliceString(from, to))[1];
+    const defAt = new Map(defs.map(([from, to]) => [label(from, to), from]));
+    const num = new Map();
+    for (const [from, to, live] of refs) {
+      const key = label(from, to);
+      if (!defAt.has(key)) continue;
+      if (!num.has(key)) num.set(key, num.size + 1);
+      if (live) add(Decoration.replace({ widget: new FootnoteRef(num.get(key), defAt.get(key)) }), from, to);
+      else add(MARK.FootnoteRef, from, to);
+    }
+    for (const [from, to, live] of defs) {
+      const key = label(from, to);
+      if (live) add(Decoration.replace({ widget: new FootnoteLabel(String(num.get(key) || key)) }), from, to);
+    }
+    return Decoration.set(out, true);
+  }
+
+  const livePreview = StateField.define({
+    create: buildDecorations,
+    update(decos, tr) {
+      if (tr.docChanged || tr.selection || tr.effects.some((e) => e.is(focusEffect) || e.is(brokenEffect)) ||
+          syntaxTree(tr.state) !== syntaxTree(tr.startState)) return buildDecorations(tr.state);
+      return decos;
+    },
+    provide: (f) => EditorView.decorations.from(f),
+  });
+
+  // --- keys -----------------------------------------------------------------
+  // Mod-B / Mod-I wrap the selection, or unwrap it when it is already wrapped;
+  // on a bare caret they leave it between the two marks, as Obsidian does.
+  function toggleWrap(mark) {
+    return (view) => {
+      const s = view.state, n = mark.length;
+      view.dispatch(s.changeByRange((r) => {
+        const text = s.sliceDoc(r.from, r.to);
+        if (s.sliceDoc(r.from - n, r.from) === mark && s.sliceDoc(r.to, r.to + n) === mark) {
+          return { changes: [{ from: r.from - n, to: r.from }, { from: r.to, to: r.to + n }],
+                   range: CM.EditorSelection.range(r.from - n, r.to - n) };
+        }
+        if (text.length > 2 * n && text.startsWith(mark) && text.endsWith(mark)) {
+          return { changes: { from: r.from, to: r.to, insert: text.slice(n, -n) },
+                   range: CM.EditorSelection.range(r.from, r.to - 2 * n) };
+        }
+        return { changes: [{ from: r.from, insert: mark }, { from: r.to, insert: mark }],
+                 range: CM.EditorSelection.range(r.from + n, r.to + n) };
+      }));
+      return true;
+    };
+  }
+
+  // Tab indents a list item, the one place Obsidian needs it. Anywhere else it
+  // is not bound, so it still moves focus out of the editor: an editor that
+  // eats Tab everywhere is a keyboard trap (WCAG 2.1.2).
+  const inList = (state) => {
+    for (let n = syntaxTree(state).resolveInner(state.selection.main.head, -1); n; n = n.parent) {
+      if (n.name === "ListItem") return true;
+    }
+    return false;
+  };
+
+  function keys() {
+    return [
+      { key: "Mod-s", run: () => { HOOKS.save(); return true; } },
+      { key: "Mod-b", run: toggleWrap("**") },
+      { key: "Mod-i", run: toggleWrap("*") },
+      { key: "Tab", run: (v) => inList(v.state) && indentMore(v) },
+      { key: "Shift-Tab", run: (v) => inList(v.state) && indentLess(v) },
+      ...markdownKeymap, // Enter continues a list or a quote, Backspace undoes the markup
+    ];
+  }
+
+  // A drawn link opens on press; with the caret inside it, it is text.
+  const linkPress = EditorView.domEventHandlers({
+    mousedown(e) {
+      const a = e.target.closest && e.target.closest("a.cm-link-live");
+      if (!a || e.button !== 0) return false;
+      e.preventDefault();
+      if (a.dataset.target) HOOKS.openNote(a.dataset.target);
+      else if (a.dataset.href) {
+        const href = a.dataset.href;
+        if (/^[a-z][\w+.-]*:/i.test(href)) window.open(href, "_blank", "noopener");
+        else HOOKS.openNote(decodeURIComponent(href)); // `[x](Other note.md)` is a note
+      }
+      return true;
+    },
+  });
+
+  function extensions() {
+    return [
+      history(),
+      drawSelection(),
+      EditorView.lineWrapping,
+      new LanguageSupport(language),
+      focused,
+      broken,
+      EditorView.focusChangeEffect.of((_s, on) => focusEffect.of(on)),
+      livePreview,
+      linkPress,
+      Prec.high(keymap.of(keys())),
+      keymap.of([...defaultKeymap, ...historyKeymap]),
+      EditorView.contentAttributes.of({ spellcheck: "true", "aria-label": "note text" }),
+      EditorView.updateListener.of((u) => {
+        if (u.docChanged && !u.transactions.some((t) => t.effects.some((e) => e.is(adoptEffect)))) HOOKS.change();
+        if (u.focusChanged && !u.view.hasFocus) HOOKS.blur();
+        if ((u.selectionSet || u.focusChanged) && HOOKS.select) HOOKS.select(u.view);
+      }),
+    ];
+  }
+
+  // hooks: render(source) -> Promise<html>, openNote(target), change(), blur(),
+  // save(), decorate(el, view), select(view). The only caller is app-notes.js.
+  function create(parent, hooks) {
+    HOOKS = hooks;
+    const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions: extensions() }) });
+    return {
+      view,
+      getText: () => view.state.doc.toString(),
+      // A fresh state per note: the undo history of one note must not reach
+      // into the next. The caret starts under the properties, on the text;
+      // it does not take focus, which only a click in the text gives it
+      // (ADR-0059). `top` is what heads the note, `missing` its broken links.
+      load(text, { top = null, missing = [] } = {}) {
+        TOP = top;
+        const fm = frontmatterEnd(text.slice(0, HEAD));
+        const at = fm > 0 ? Math.min(fm + 1, text.length) : 0;
+        const state = EditorState.create({ doc: text, selection: { anchor: at }, extensions: extensions() });
+        view.setState(state.update({ effects: brokenEffect.of(missing) }).state);
+        view.scrollDOM.scrollTop = 0;
+      },
+      setMissing: (missing) => view.dispatch({ effects: brokenEffect.of(missing) }),
+      // The disk's bytes differ from the field's by what the server added (a
+      // `type:` stamp), or by what an agent or /undo wrote under an unchanged
+      // field: apply that difference as one change, so the caret and the
+      // scroll are mapped through it instead of reset.
+      adopt(text) {
+        const cur = view.state.doc.toString();
+        if (cur === text) return;
+        let a = 0;
+        while (a < cur.length && a < text.length && cur[a] === text[a]) a++;
+        let b = 0;
+        while (b < cur.length - a && b < text.length - a && cur[cur.length - 1 - b] === text[text.length - 1 - b]) b++;
+        view.dispatch({
+          changes: { from: a, to: cur.length - b, insert: text.slice(a, text.length - b) },
+          annotations: Transaction.addToHistory.of(false),
+          effects: adoptEffect.of(null),
+        });
+      },
+      focus: () => view.focus(),
+      // The caret to line n, scrolled to the middle; a line past the end (the
+      // note changed since the agenda read it) is left alone.
+      revealLine(n) {
+        const doc = view.state.doc;
+        if (!(n >= 1 && n <= doc.lines)) return;
+        const pos = doc.line(n).from;
+        view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      },
+    };
+  }
+
+  window.LiveEditor = { create, extensions, buildDecorations, frontmatterEnd, language, focusEffect, brokenEffect };
+})();

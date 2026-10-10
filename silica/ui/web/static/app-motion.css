@@ -1,0 +1,184 @@
+/* --- motion ------------------------------------------------------------------
+   Last in the cascade on purpose: every rule here is a layer over a component
+   that already works without it, and the reduced-motion backstop in
+   app-work.css collapses all of it (transitions and keyframes both) to 0.01ms.
+   The one thing that backstop cannot reach is the Web Animations API, so the
+   Areas morph (app-explore.js) asks matchMedia itself.
+
+   One easing, the house --ease, at four durations by distance travelled: --dur
+   for a state, 220ms for a surface arriving, 260ms for a whole view, 420ms for
+   the Areas recentre, the one authored moment. Exits are instant everywhere:
+   a panel you closed is not something you wait for. The dock's fold is the one
+   exception on both counts (1050ms, and a 300ms wait before it folds), and it
+   lives with its component in app-panels.css: it is one object changing shape,
+   not a panel arriving or leaving. */
+
+/* --- the glide: the selection travels -----------------------------------------
+   The tab strips drew a --sel box per button, so a switch was a box vanishing in
+   one place and appearing in another. Here the box is one pseudo-element per
+   segment, placed from measured rects by glide() in app-shell.js, and the
+   buttons go transparent only once that has run: without JS the per-button box
+   is still there. A pseudo and not a child, because #surface-tabs is rebuilt
+   with innerHTML when the Zotero library registers and a child would go with it. */
+.glide {
+  position: relative;
+  isolation: isolate;
+}
+
+.glide::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: var(--gw, 0);
+  height: var(--gh, 0);
+  translate: var(--gx, 0) var(--gy, 0);
+  border-radius: var(--glide-r, var(--r-sm));
+  background: var(--sel);
+  pointer-events: none;
+  /* Width is a layout property on purpose: the segments differ in width, and
+     scaleX would stretch the radius into ovals. One childless out-of-flow box. */
+  /* impeccable-disable-next-line layout-transition -- one childless absolute pseudo; scaleX would stretch the radius into ovals */
+  transition: translate var(--dur) var(--ease), width var(--dur) var(--ease), height var(--dur) var(--ease);
+}
+
+/* a resize or the first placement lands, it does not travel */
+.glide.glide-snap::before {
+  transition: none;
+}
+
+#surface-tabs.glide>.stab.active,
+#metrics-tabs.glide>.stab.active,
+#cal-mode.glide>button.active {
+  background: transparent;
+}
+
+#cal-mode.glide {
+  --glide-r: var(--r-xs);
+}
+
+/* --- arrival: a view, a surface ------------------------------------------------
+   From the side of the strip you came from, so the five tabs and the explore
+   surfaces read as places in a row rather than pages swapped in one spot. --from
+   is -1, 0 or 1, written by showTab() and setGraphMode(). `translate` and not
+   `transform`, so the keyframe composes with whatever transform the element
+   already wears, and only while it runs: a transform left on a .view would make
+   it the containing block of every position: fixed descendant. */
+@keyframes arrive {
+  from {
+    opacity: 0;
+    translate: calc(var(--from, 0) * var(--travel, 10px)) 0;
+  }
+}
+
+.view.active {
+  --from: var(--tab-from, 0);
+  --travel: 14px;
+  animation: arrive 260ms var(--ease);
+}
+
+#shape-pane>.surface-in,
+#graph-frame:not([hidden]),
+#map-frame:not([hidden]),
+#map-picker:not([hidden]) {
+  /* both set here: the .view around it declares its own, and they inherit */
+  --from: var(--surface-from, 0);
+  --travel: 10px;
+  animation: arrive 220ms var(--ease);
+}
+
+/* --- a panel unrolls from the edge it hangs on ---------------------------------
+   The search results hang from their field and open downward; the composer's
+   panels and the vault's open upward from the foot they hang on. The clip runs 40px past the three free edges
+   so the --lift shadow is never cut while it reveals, and lands on a value that
+   draws the same as no clip at all. */
+@keyframes unroll-down {
+  from {
+    opacity: 0;
+    clip-path: inset(0 -40px 100% -40px);
+  }
+
+  to {
+    clip-path: inset(0 -40px -40px -40px);
+  }
+}
+
+@keyframes unroll-up {
+  from {
+    opacity: 0;
+    clip-path: inset(100% -40px -40px -40px);
+  }
+
+  to {
+    clip-path: inset(-40px -40px -40px -40px);
+  }
+}
+
+#node-results:not([hidden]),
+.s-menu {
+  animation: unroll-down 200ms var(--ease);
+}
+
+#vault-panel:not([hidden]),
+#help-panel:not([hidden]),
+#commands:not([hidden]),
+#ctx-panel:not([hidden]) {
+  animation: unroll-up 200ms var(--ease);
+}
+
+/* The modal has no edge to hang on, so it settles instead: a hair of scale on
+   the individual property, which composes with the translate(-50%, -50%) that
+   centres it rather than replacing it. */
+@keyframes settle {
+  from {
+    opacity: 0;
+    scale: 0.985;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+#st-modal:not([hidden]) {
+  animation: settle 220ms var(--ease);
+}
+
+#st-backdrop:not([hidden]) {
+  animation: fade-in 220ms var(--ease);
+}
+
+/* --- Areas ---------------------------------------------------------------------
+   Discs scale about their own centre during the recentre, not about the SVG
+   origin, so the transform box is the circle. The ghost is the previous
+   drawing, kept over the new one for the length of its fade (morphEgo). */
+.ego-disc,
+.ego-nb,
+.ego-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.ego-ghost {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* the index's selection fades like every other --sel row in the app */
+.ego-gh,
+.ego-row {
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+/* --- theme ----------------------------------------------------------------------
+   A theme change is a crossfade of the whole document (applyThemePref starts a
+   view transition). The default is 250ms linear; the house curve instead. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 320ms;
+  animation-timing-function: var(--ease);
+}

@@ -1,0 +1,86 @@
+# Python & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build & Packaging
+build/
+dist/
+*.egg-info/
+silica/_version.py
+
+# Virtual Environments
+.env
+.venv
+
+# Testing, Linting & Coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hatch/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.hypothesis/
+.import_linter_cache/
+.grimp_cache/
+# built by tests/vault_factory.py at run time, never by hand
+tests/fixtures/synthetic_vault/*
+
+# Editors & IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+.ipynb_checkpoints
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Documentation
+# docs/ is a private repository of its own (ADR-0071 point 1): the ADRs and the
+# evaluation records stay out of the published history, which was rewritten
+# without them on 2026-10-09. Its corpora rules live in docs/.gitignore.
+/docs/
+/site
+
+# Silica & Agent Specific
+# .agents/ is local agent tooling, except the Codex plugin marketplace, which
+# Codex looks for at exactly .agents/plugins/marketplace.json.
+/.agents/*
+!/.agents/plugins/
+# .claude/ holds the shared harness contract (settings.json + hooks/, both
+# $CLAUDE_PROJECT_DIR-relative); only the per-machine halves stay out.
+.claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+.impeccable
+/memory
+.superpowers
+.silica/
+.silicaignore
+.obsidian
+
+# Databases & Locks
+ruvector.db
+agentdb.rvf
+*.rvf.lock
+
+# Evals & Benchmarks
+evals/.oracle/
+evals/golden/metrics.json
+evals/*/metrics.*.json
+bench/
+# downloaded benchmark corpora (LongMemEval s is 265 MB)
+data/
+
+# Generated Files & Reports
+graph.html
+CONTEXT.md
+PRODUCT.md
+DESIGN.md
+# Per-machine compose overrides.
+/compose.override.yaml

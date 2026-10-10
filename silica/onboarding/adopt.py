@@ -1,0 +1,183 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (C) 2026 Alessandro Carosia
+
+"""Vault adoption — declare the write boundary once, at the moment a path becomes
+the vault.
+
+A vault path is adopted as-is: Silica reads the folder the user pointed at, not a
+subfolder it invented. What still needs deciding is where it may *write*, and the
+answer differs by content:
+
+  * a folder of prose, Obsidian vault included → notes land in place, next to
+    the notes they belong with. Safe mode confines them instead to `silica`, a
+    staging mirror of the vault's own tree, merged by a plain file-manager paste
+    of its contents over the vault root — opt in from the settings toggle or by
+    writing `write_dir: silica` in vault.yaml;
+  * a source tree → notes land in `docs/silica`, which is Silica's own folder in
+    that repo rather than a mirror of it. Not safe mode: a repo has a place for
+    its docs whether or not the staging lane is on.
+
+Either way the choice is declared in `vault.yaml` so it is visible, versionable
+and editable instead of re-guessed every run — and reversible from one toggle in
+the settings panel, which writes this same field.
+
+No prompt: the detection picks a default, the caller prints it, and `vault.yaml`
+makes it changeable. A question at adoption time would block the GUI and MCP
+entry points for a decision one line of YAML already expresses.
+"""
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from silica.kernel.recall.paths import (
+    NOISE_DIRS,
+    SILICAIGNORE_REL,
+    looks_like_code,
+)
+from silica.kernel.vault_manifest import MANIFEST_REL
+
+logger = logging.getLogger(__name__)
+
+# Where notes go in a source tree: visible and committable next to the code.
+CODE_WRITE_DIR = "docs/silica"
+# Where notes go in a prose vault: a staging folder that MIRRORS the vault tree,
+# so `silica/Projects/foo.md` becomes `Projects/foo.md` by pasting the folder's
+# contents over the root. This one name is also the switch for the mirror rules
+# (prompt wording, new-folder check) — `docs/silica` is Silica's own tree in a
+# repo, not a mirror of it, so those rules do not apply there.
+SAFE_WRITE_DIR = "silica"
+
+_SILICAIGNORE_HEADER = """\
+# .silicaignore — directory names Silica never walks when indexing this vault.
+#
+# One name or glob per line; `#` starts a comment. Matched against the directory
+# NAME at any depth, not against a path. Hidden dirs (.git, .venv, .obsidian)
+# are always skipped, and .gitignore is deliberately NOT honoured — a gitignored
+# folder is often exactly where private notes live.
+#
+# The list below is built in. It is here to be read and extended, so
+# uncommenting a line changes nothing; add your own below it.
+"""
+
+
+def seed_silicaignore(vault: str | Path) -> Path | None:
+    """Write the `.silicaignore` template into a source-tree vault, once.
+
+    Returns the path when this call created it, else None: the file is already
+    there (never overwrite a hand-edited one), the vault reads as prose (a notes
+    folder has no vendored trees to prune), or the root is unwritable.
+    """
+    root = Path(vault)
+    target = root / SILICAIGNORE_REL
+    if not root.is_dir() or target.exists() or not looks_like_code(root):
+        return None
+    body = "".join(f"# {d}\n" for d in sorted(NOISE_DIRS))
+    try:
+        target.write_text(_SILICAIGNORE_HEADER + body, encoding="utf-8")
+    except OSError as exc:
+        logger.warning("could not write %s (%s) — built-in ignores still apply", target, exc)
+        return None
+    return target
+
+
+def write_dir_for(vault: str | Path) -> str:
+    """The write boundary this folder's *content* calls for when confined; ""
+    ⇒ in place.
+
+    Pure decision, no I/O beyond the detection scan. Callers that compose
+    `vault.yaml` themselves (the first-run wizard) use this; `declare_write_dir`
+    is the persisting variant, and the settings toggle re-derives from here
+    rather than restoring a remembered value — there is no "previous write_dir"
+    state to go stale.
+
+    This answers where writes go *if* they are confined, which is why the prose
+    branch says `silica` even though safe mode is off by default: it is the
+    toggle's ON value, not the adoption default. `declare_write_dir` is what
+    decides whether a fresh vault starts confined at all.
+
+    A `docs/silica` that already holds notes settles it whatever the content
+    ratio says: that is a vault from before the write boundary existed, and the
+    same declaration every new repo gets is also its migration — the notes stay
+    where they are, the vault goes back to being the folder you launched in.
+    """
+    root = Path(vault)
+    if not root.is_dir():
+        return ""
+    # glob is lazy and stops at the first hit; a missing dir yields nothing.
+    if next((root / CODE_WRITE_DIR).glob("**/*.md"), None):
+        return CODE_WRITE_DIR
+    return CODE_WRITE_DIR if looks_like_code(root) else SAFE_WRITE_DIR
+
+
+def declare_write_dir(vault: str | Path) -> str | None:
+    """Persist `write_dir` in `<vault>/vault.yaml` when the vault needs one.
+
+    Returns the declared value when this call wrote it (the caller announces it),
+    or None when there was nothing to declare: a manifest already exists (the
+    vault has spoken, never overrule it), the path is not a folder, or the
+    content only calls for the safe-mode mirror.
+
+    That last case is the default: safe mode is OFF until asked for, so a prose
+    vault files in place and gets no `vault.yaml` at all. Only a source tree —
+    which needs a home for its docs either way — is declared here. Turning safe
+    mode on writes the line that this function deliberately does not.
+
+    Deliberately creates no directory: an empty `docs/silica` would then read as
+    a pre-`write_dir` vault to every back-compat lookup.
+    """
+    root = Path(vault)
+    manifest = root / MANIFEST_REL
+    if not root.is_dir() or manifest.exists():
+        return None
+    declared = write_dir_for(root)
+    if not declared or declared == SAFE_WRITE_DIR:
+        return None
+    try:
+        manifest.write_text(f"write_dir: {declared}\n", encoding="utf-8")
+    except OSError as exc:
+        # A read-only or unwritable vault root is the user's business, not a
+        # crash: fall through to the in-place default and say nothing new.
+        logger.warning("could not write %s (%s) — write_dir stays the default", manifest, exc)
+        return None
+    return declared
+
+# Lives here and not in cli.py, which startup reads it from: doctor
+# (onboarding.checks) must apply the same rule, and checks is imported by
+# tools.atomic, so reaching it through cli pulled every capability worker
+# under tools and broke the P9 contract (lint-imports, 2026-10-02).
+def resolve_cwd_vault(cwd, home=None):
+    """Pure resolver for the vault a `silica` launched in `cwd` curates.
+
+    Returns the directory to adopt, or None when this place is not a vault and
+    the caller should fall back. The shell already says which vault you mean, so
+    the working directory decides — a SILICA_VAULT constant in a .env would
+    otherwise follow you into every other project.
+
+    - inside a git repo → the repo root (one project is one vault, from any of
+      its subdirectories);
+    - anywhere else → cwd itself;
+    - $HOME or the filesystem root → None: a vault is a folder of notes, not
+      everything you own. The root is not reachable by launching a shell there
+      but a GUI client can spawn a stdio server with cwd ``/``, and indexing
+      the whole disk is never what that meant.
+    - a system directory itself (`recall.paths.SYSTEM_DIRS`: /tmp, /usr, the
+      temp dir...) → None, same reason; a folder inside one is still a vault.
+
+    Adoption of the returned path (a pre-existing ``docs/silica`` under it still
+    wins for back-compat) belongs to ``resolve_vault_switch``; where writes may
+    land inside it is the separate `write_dir` axis (`onboarding.adopt`).
+    """
+    from pathlib import Path
+    from silica.kernel.code import gitstate
+    from silica.kernel.recall.paths import is_system_dir
+
+    cwd = Path(cwd).resolve()
+    if cwd == Path(home or Path.home()).resolve() or cwd == Path(cwd.anchor):
+        return None
+    if is_system_dir(cwd):
+        return None
+    root = gitstate.find_repo_root(cwd)
+    if root is None:
+        return str(cwd)
+    return str(Path(root).resolve())

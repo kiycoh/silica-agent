@@ -1,0 +1,1528 @@
+/* --- explore: the tabs and the line under them (ADR-0058) ------------------
+   The top of the view says what you look at: the surfaces as tabs, the note
+   search at the end of their row, and under them one line that is the
+   surface's own (its key, or the Graph's scope and compare). The Graph's
+   panel at the right is how to read it, and the frame's foot how the picture
+   is made. The bar has no fill of its own and floats over the picture, so its
+   gaps pass clicks through to the graph. */
+#graph-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  /* 12px, the inset every block over the picture shares (ADR-0072): the
+     right column, the frame's key and both foot groups sit on the same lines */
+  padding: 12px 12px 0;
+  pointer-events: none;
+}
+
+/* Over a pane surface there is no picture to float on: the bar takes its
+   height in the view's column and the pane starts under it. */
+#graph-bar.in-flow {
+  position: relative;
+}
+
+/* The right column owns the top-right corner on the graph, the map and the
+   path (216px + 12px inset + 12px gap); the surfaces with no picture hide it
+   and the bar takes the width. Padding and not `right`: on the path the bar is
+   in flow, and `right` on a relative box moves it instead of narrowing it. */
+#graph-bar.by-side {
+  padding-right: 240px;
+}
+
+/* --- the right column (ADR-0072) --------------------------------------------
+   Find, then narrow and compare, then the frame's key under them: one width
+   (the key's 216px), one inset, so the column reads top to bottom as the
+   order of the task. The search ended the tab row before, 236px short of the
+   edge, and so hung in the middle of the top band; scope and compare sat on a
+   second row under the tabs, three blocks at three unrelated positions. */
+#graph-side {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 4;
+  width: 216px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#node-search-wrap {
+  width: 100%;
+}
+
+/* Scope and compare: two rows of one group, the label above its select so a
+   long area name has the column's whole width and is never cut to "Mach…". */
+#graph-picks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-edge);
+}
+
+#graph-top,
+#surface-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  pointer-events: none;
+}
+
+#graph-top {
+  gap: 1rem;
+}
+
+#graph-top>*,
+#surface-line>* {
+  pointer-events: auto;
+}
+
+/* When the tabs do not fit they scroll sideways in their row rather than
+   wrap: a second row would push the view's top edge down per window width. */
+#surface-tabs {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 12rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+/* Glass under the words that sit over a picture: on the graph and the map the
+   tabs crossed note names and read as one more label, and the map's key line
+   crosses its cards. 10px is r-sm plus the group's 2px inset, so a selected
+   tab's corner sits concentric in the group's. */
+#surface-tabs,
+.sl-key {
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-edge);
+}
+
+.sl-key {
+  padding: 0.2rem 0.6rem;
+}
+
+.stab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ash);
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.stab:hover {
+  color: var(--frost);
+}
+
+.stab.active {
+  background: var(--sel);
+  color: var(--frost);
+  font-weight: 500;
+}
+
+/* The groups are split by space, not by labels: pictures of the links,
+   readings of the shape, the library. */
+.stab-gap {
+  margin-left: 1.1rem;
+}
+
+#surface-line {
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  min-height: 1.6rem;
+}
+
+/* On the Graph the line is empty (its scope and compare are in the right
+   column), and an empty row of 1.6rem is a band the focus banner would have
+   to clear for nothing. */
+#surface-line:empty {
+  display: none;
+}
+
+/* A key is read once per surface and never clicked, so it takes the meta
+   size and none of the contrast. */
+.sl-key {
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+  line-height: 1.45;
+}
+
+.sl-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+  white-space: nowrap;
+}
+
+.sl-pick select {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--fs-ctl);
+  color: var(--text);
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.3rem 0.4rem;
+  cursor: pointer;
+}
+
+.sl-pick select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Offer, not alarm: the graph on screen is not wrong, only older than the
+   vault. Accent outline rather than an accent fill, so it reads as available
+   next to the filled ACTIVE mode button and never competes with it. */
+#graph-refresh {
+  background: var(--slate-2);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  flex-shrink: 0;
+}
+
+#graph-refresh:hover {
+  background: var(--accent);
+  color: var(--on-vivid);
+}
+
+#graph-refresh:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* per-mode control cluster (note search), pushed to the right */
+.gbar-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  flex: 0 0 auto;
+  min-width: 0;
+  position: relative;
+}
+
+/* The find field is the column's head, in the glass of the blocks under it. */
+#node-search {
+  font-family: var(--sans);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-edge);
+  color: var(--frost);
+  /* a field's hairline, the scope and compare selects' own: over a flat pane
+     (path, map's picker) the glass alone is the colour of the surface */
+  border: 1px solid var(--line-2);
+  height: 34px;
+  width: 100%;
+  transition: border-color var(--dur) var(--ease);
+}
+
+#node-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#node-search::placeholder {
+  color: var(--ash-dim);
+}
+
+/* note-search ranked dropdown — drops below the toolbar, same idiom as the
+   graph viewer's internal search results */
+#node-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: var(--lift);
+}
+
+.node-result {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.node-result:hover,
+.node-result.sel {
+  background: var(--sel);
+}
+
+.node-result .nr-name {
+  font-size: 12px;
+  color: var(--frost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-result .nr-path {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* map landing (hub picker) — fills the frame area until a note is rooted */
+/* The tab bar floats over the top of this pane, so the launch pad starts below
+   it (the bar with its key line is ~72px; a key that wraps adds a line). Centred
+   by auto margins, not align-items: a centred flex item taller than its box
+   overflows upward too, and the top of it could not be scrolled back to. */
+#map-picker {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  padding-top: 112px;
+  background: var(--void);
+  overflow-y: auto;
+}
+
+#map-picker[hidden] {
+  display: none;
+}
+
+.map-picker-inner {
+  width: min(560px, 90%);
+  margin: auto;
+  /* the dock composer floats over the bottom of this pane, so the last row of
+     the launch pad sat underneath it. Same clearance .shape-body reserves. */
+  padding: 1.5rem 0 5.5rem;
+}
+
+.map-picker-title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--frost);
+}
+
+
+.map-picker-hint {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  margin: 0.3rem 0 0.9rem;
+}
+
+#map-picker-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+}
+
+#map-picker-list:empty::after {
+  content: "no linked notes yet. Pick one from Files in the sidebar.";
+  grid-column: 1 / -1;
+  background: var(--slate-2);
+  color: var(--ash-dim);
+  font-size: 11px;
+  padding: 0.8rem;
+}
+
+/* Each row carries its own bar along its foot, on the chart ramp: the list is
+   a ranking, and the bar says by how much without reading the numbers
+   (DESIGN.md, Charts). The hover is the frosted --sel-hover every other row
+   in the app wears; the inset accent stripe here was the last one left. */
+.hub-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  background: linear-gradient(var(--c-ord-2), var(--c-ord-2)) 0 100% / calc(var(--w, 0) * 100%) 2px no-repeat,
+    var(--slate-2);
+  padding: 0.55rem 0.7rem 0.6rem;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease);
+}
+
+.hub-row:hover {
+  background-color: color-mix(in srgb, var(--frost) 6%, var(--slate-2));
+}
+
+.hub-name {
+  font-size: 13px;
+  color: var(--frost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hub-deg {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.hub-deg::after {
+  content: " links";
+}
+
+#drop-hint {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--drop-scrim);
+  color: var(--accent);
+  border: 2px dashed var(--accent);
+  /* the headline step, stated in px like every other step: 1.2rem resolves to
+     the same 18px at the 15px root and reads as a sixteenth step to anything
+     that checks the ramp */
+  font-size: 18px;
+  letter-spacing: 0.14em;
+  pointer-events: none;
+}
+
+body.dragging #drop-hint {
+  display: flex;
+}
+
+/* streaming caret — the live-status readout. A slow
+   oil-slick color drift through the SiC reflection hues, no blink. */
+@keyframes pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@keyframes caret-blink {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* one physical element, re-parented by JS onto the live tail (thinking body,
+   tool group, or text segment) so it is always visible while streaming */
+.caret {
+  margin-left: 1px;
+  user-select: none;
+  color: var(--accent);
+  animation: caret-blink 1.1s steps(1, end) infinite;
+}
+
+/* --- the landing (empty transcript) -----------------------------------------
+   Sili used to hold this space at 240px, which spent the whole first viewport
+   on the logo of the tool rather than on the folder it just opened. The
+   wordmark states the tool in one line and the rest of the space answers
+   "what is in here", which is the question you actually arrive with.
+   #log itself collapses to nothing while empty. */
+#log:empty {
+  display: none;
+}
+
+#vault-hero {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  /* The measure is the composer's, so the sentence, the counts and the box you
+     type into all break on the same two edges. */
+  max-width: min(52ch, 100%);
+  padding: 0 1rem;
+}
+
+#view-chat:has(#log:empty) #vault-hero {
+  display: flex;
+}
+
+/* The presence (ADR-0048). The glass is 60% of its canvas and the rest is the
+   contact glow and the containment falloff, so the negative margins pull the
+   wordmark up under the body rather than under the canvas. It shrinks on short
+   windows before the landing starts to scroll. */
+.vh-presence {
+  --vh-p: clamp(150px, 24vh, 220px);
+  display: block;
+  width: var(--vh-p);
+  height: var(--vh-p);
+  margin: calc(var(--vh-p) * -0.14) auto calc(var(--vh-p) * -0.08);
+  pointer-events: none;
+}
+
+/* The mark, at the scale's one display step. Nothing to opt out of any more:
+   the header logotype's animated sweep is deleted along with the mark's
+   gradient, so this is simply the mark at rest like everywhere else. */
+.vh-mark {
+  font-size: 52px;
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: 0.34em;
+  /* letterspacing pads the right of the last glyph; half of it back centres
+     the word against the sentence under it */
+  text-indent: 0.34em;
+  color: var(--frost);
+}
+
+.vh-brief {
+  margin: 1.5rem 0 0;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--ash);
+  /* empty until /vault_brief answers, and the reserved line stops the counts
+     from jumping down a row when it does */
+  min-height: 1.55em;
+}
+
+/* the topic labels inside the fallback sentence: the vault's own words, so
+   they read as content and the connective tissue around them stays chrome */
+.vh-brief b {
+  font-weight: 500;
+  color: var(--text);
+}
+
+.vh-facts {
+  margin-top: 0.85rem;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ash-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- note panel (right overlay drawer; read-only note view) ----------------- */
+:is(.msg, #peek-body, #note-edit) .note-link {
+  color: var(--frost);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent);
+}
+
+:is(.msg, #peek-body, #note-edit) .note-link.broken {
+  color: var(--ash);
+  border-bottom-color: var(--warn);
+}
+
+.note-link {
+  color: var(--frost);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent);
+}
+
+.note-link:hover {
+  background: var(--slate-2);
+}
+
+/* unresolved wikilink — same shape as a live link, underline drops to a neutral */
+.note-link.broken {
+  border-bottom-color: var(--line-2);
+  color: var(--ash);
+  cursor: default;
+}
+
+.note-link.broken:hover {
+  background: none;
+}
+
+#note-panel {
+  /* Still position: fixed, and deliberately: the whole reservation machinery
+     (views pad by --note-w, the dock and toasts inset by it, explore resizes
+     its frame, fitPanes negotiates against the prose floor) assumes an overlay
+     measured from the window's right edge, and it all still holds with the
+     panel inset by a gutter. Making it a flex sibling of the views would buy
+     the same picture for a rewrite of that machinery. */
+  position: fixed;
+  /* The third surface on the canvas, at the same top edge as the other two:
+     a gutter from the window, now that no strip runs above them (ADR-0084). */
+  top: var(--gutter);
+  right: var(--gutter);
+  bottom: var(--gutter);
+  z-index: 50;
+  width: 630px;
+  min-width: 280px;
+  /* 55vw, not 90vw: at the 900px floor a 630px drawer left 270px of transcript,
+     so the reading surface lost to the drawer that is meant to serve it. */
+  max-width: 55vw;
+  display: flex;
+  flex-direction: column;
+  /* The reading surface, opaque: the same plane as the view, because the note
+     is read the way the answer is. The glass and its blur went with the
+     overlay: a surface with a gutter around it has nothing to be glass over. */
+  background: var(--sheet);
+  border-radius: var(--r);
+  overflow: hidden;
+  /* Its own width plus the gutter it is inset by, or a 12px sliver of it stays
+     on screen when closed. */
+  transform: translateX(calc(100% + var(--gutter)));
+  transition: transform var(--dur) var(--ease);
+}
+
+#note-panel.open {
+  transform: translateX(0);
+}
+
+/* The note drawer's toggle (ADR-0084): the view's top-right corner, 12px in,
+   level with Explore's find box, which is the most exact edge it meets. The
+   drawer's own close takes the same corner while it is open, so the toggle
+   is hidden then; under the drawer (50) and over the views. */
+#drawer-toggle {
+  position: fixed;
+  top: calc(var(--gutter) + 12px);
+  right: calc(var(--gutter) + 12px);
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--slate-2);
+  color: var(--ash);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+
+#drawer-toggle:hover {
+  color: var(--frost);
+  border-color: var(--accent);
+}
+
+#drawer-toggle:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The corner belongs to the drawer while its toggle shows: each view's top
+   bar stops 44px short of it, Explore's find box included, which keeps the
+   right column one block (ADR-0072). */
+body.drawer-recall #node-search-wrap {
+  width: calc(100% - 40px);
+}
+
+body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
+  padding-right: 52px;
+}
+
+#note-resize {
+  position: absolute;
+  top: 0;
+  /* Inside the edge: the panel clips its corners, so a handle hung 3px outside
+     was a 3px handle. */
+  left: 0;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 51;
+}
+
+#note-panel>header {
+  /* The menu hangs from it. */
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+  padding: 0.9rem 1.25rem 0.1rem;
+  /* No band height to match and no rule under it: the panel starts under the
+     app header now, not beside it, so this is a title row on the note's own
+     surface, and space separates it from the text. */
+  background: transparent;
+}
+
+/* The note's handle (ADR-0059): the title is the button that opens what can
+   be done with the note. It reads as the title at rest; the chevron and the
+   hover fill say it opens. The negative margin keeps its text on the inset
+   the note's text starts on. */
+#note-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: -0.45rem;
+  padding: 0.25rem 0.45rem;
+  font-family: var(--sans);
+  font-size: 13px;
+  color: var(--frost);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease);
+}
+
+#note-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#note-title .chev {
+  flex: none;
+  color: var(--ash-dim);
+  transition: color var(--dur) var(--ease);
+}
+
+#note-title:hover,
+#note-title[aria-expanded="true"] {
+  background: var(--sel-hover);
+}
+
+#note-title:hover .chev {
+  color: var(--accent);
+}
+
+/* The tree row's pin, at the 24px target floor: lit while the note is in the
+   rail, which is what tells you the pin took. */
+#note-pin {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+
+#note-pin:hover {
+  color: var(--frost);
+}
+
+/* The note's two views (ADR-0075): the info glyph on the text, the read glyph
+   in details, in the same slot and at the pin's size, so the title keeps its
+   width whichever view is up. */
+#note-info,
+#note-read {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+
+#note-info:hover,
+#note-read:hover {
+  color: var(--frost);
+}
+
+/* The one warning a note carries, at rest: amber, ringed in the sheet so it
+   reads as on the glyph and not as part of it. */
+#note-info .ic-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--warn);
+  box-shadow: 0 0 0 2px var(--sheet);
+}
+
+#note-pin.on {
+  color: var(--accent);
+}
+
+#note-changes {
+  margin-left: 0.3rem;
+  cursor: pointer;
+}
+
+#note-title:focus-visible,
+#note-info:focus-visible,
+#note-read:focus-visible,
+#note-pin:focus-visible,
+#note-changes:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#note-panel>header .ghost {
+  margin-left: auto;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--slate);
+}
+
+#note-panel>header .ghost:hover {
+  border-color: var(--ash-dim);
+  background: var(--slate-2);
+}
+
+/* The note's menu and a passage's bar: one raised surface, the --bubble step
+   above the sheet, so it reads as over the text and not part of it. */
+#note-menu,
+#note-selbar {
+  position: absolute;
+  z-index: 52;
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+}
+
+#note-menu {
+  /* Block, against app-shell's `header > *`, which lays a header's children
+     out in a row and would set the menu's groups side by side. */
+  display: block;
+  top: calc(100% + 2px);
+  left: 0.8rem;
+  width: 15rem;
+  max-width: calc(100% - 1.6rem);
+  box-sizing: border-box;
+  padding: 6px;
+  border-radius: var(--r);
+}
+
+.nm-head {
+  padding: 0.35rem 0.6rem 0.2rem;
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+:is(#note-menu, #attach-menu) [role="separator"] {
+  height: 1px;
+  margin: 6px 0.6rem;
+  background: var(--line);
+}
+
+:is(#note-menu, #attach-menu) [role="menuitem"] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 28px;
+  padding: 0.3rem 0.6rem;
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+:is(#note-menu, #attach-menu) [role="menuitem"]:is(:hover, :focus-visible) {
+  color: var(--frost);
+  background: var(--sel-hover);
+  outline: none;
+}
+
+#note-menu .arw {
+  color: var(--ash-dim);
+}
+
+#note-menu [role="menuitem"]:is(:hover, :focus-visible) .arw {
+  color: var(--accent);
+}
+
+#note-selbar {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-sm);
+}
+
+/* Quiet buttons, on the selection bar only now: the hover fill says which
+   one is aimed at. */
+.na {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--sans);
+  font-size: var(--fs-meta);
+  color: var(--ash);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 0.32rem 0.55rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.na:hover {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
+.na:active {
+  transform: translateY(1px);
+}
+
+.na:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The editor: CodeMirror in the reader's inset, size and leading, so flipping
+   between the two moves nothing but the markup. The marks and the blocks it
+   draws take the reader's own typesetting (the shared `:is(...)` rules in
+   app-chat.css list #note-edit); what is here is only what a line of source
+   needs that a rendered element does not. ID selectors on purpose: they beat
+   CodeMirror's injected base theme without an !important. */
+#note-edit {
+  flex: 1;
+  min-height: 0;
+  font-size: 16px;
+  line-height: 1.72;
+}
+
+#note-edit .cm-editor {
+  height: 100%;
+  color: inherit;
+  background: transparent;
+}
+
+/* No focus ring: the caret is the state, and the whole pane is the field. */
+#note-edit .cm-editor.cm-focused {
+  outline: none;
+}
+
+#note-edit .cm-scroller {
+  font-family: inherit;
+  line-height: inherit;
+  overflow-y: auto;
+}
+
+#note-edit .cm-content {
+  padding: 0.4rem 1.25rem 2rem;
+}
+
+#note-edit .cm-line {
+  padding: 0;
+}
+
+#note-edit .cm-cursor {
+  border-left: 2px solid var(--accent);
+}
+
+/* CodeMirror brackets every hidden run with a zero-width <img> it places the
+   caret against. The reader's `img` rule (border, height auto) reaches them
+   through the shared selector and gave each hidden `**` a 2px gap: put back
+   what CodeMirror's own theme sets. */
+#note-edit img.cm-widgetBuffer {
+  border: 0;
+  border-radius: 0;
+  height: 1em;
+}
+
+#note-edit .cm-selectionBackground,
+#note-edit .cm-focused .cm-selectionBackground {
+  background: var(--sel);
+}
+
+/* Headings keep their size with the caret on them, as Obsidian's do: only the
+   `#` comes and goes, so the line does not jump when you step onto it. */
+#note-edit .cm-line.cm-h {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--frost);
+  line-height: 1.25;
+  padding-top: 0.7em;
+  padding-bottom: 0.15em;
+}
+
+#note-edit .cm-line.cm-h1 { font-size: 1.72em; }
+#note-edit .cm-line.cm-h2 { font-size: 1.45em; }
+#note-edit .cm-line.cm-h3 { font-size: 1.15em; }
+
+#note-edit .cm-line.cm-quote {
+  border-left: 2px solid var(--line-2);
+  padding-left: 0.7rem;
+  color: var(--ash);
+  font-style: italic;
+}
+
+/* Source that is being edited as source: a code block, a table, a formula or
+   the properties with the caret inside. The grid font says "this is literal". */
+#note-edit .cm-line:is(.cm-codeblock, .cm-table, .cm-mathblock, .cm-fm) {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  background: var(--slate-2);
+  padding: 0 0.85rem;
+}
+
+#note-edit .cm-line.cm-fm {
+  color: var(--ash);
+}
+
+#note-edit .cm-math-src {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  color: var(--ash);
+}
+
+#note-edit .cm-bullet {
+  color: var(--ash-dim);
+  display: inline-block;
+  width: 0.6em;
+}
+
+#note-edit .cm-task {
+  margin: 0 0.45em 0 0;
+  vertical-align: -0.1em;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+#note-edit .cm-hr {
+  display: inline-block;
+  width: 100%;
+  vertical-align: middle;
+  border-top: 1px solid var(--line);
+}
+
+#note-edit .cm-link-live {
+  cursor: pointer;
+}
+
+/* A block the server drew: a table, a callout, a code listing, a formula, the
+   properties. It reads as the reader's, and says it is one click from source
+   the way Obsidian's embeds do, with a hairline on hover. */
+/* `normal` because CodeMirror lines are pre-wrap, and the server's HTML has a
+   newline between every two tags: inherited, each one drew as a blank line
+   inside callouts and around tables. A <pre> keeps its own. */
+#note-edit .cm-rendered {
+  white-space: normal;
+}
+
+#note-edit .cm-rendered-block {
+  padding: 0.35em 0;
+  border-radius: var(--r-sm);
+  cursor: text;
+}
+
+#note-edit .cm-rendered-block:hover {
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+#note-edit .cm-rendering {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  color: var(--ash-dim);
+  white-space: pre-wrap;
+}
+
+/* A note written for GitHub centres its header with <div align="center">, and in
+   a 630px drawer that turns the whole intro into centred prose with a ragged
+   left edge. The drawer reads left-aligned, whatever the file was formatted
+   for. Presentational attribute only, so a real centred block (display math,
+   a mermaid figure) keeps its own alignment. */
+/* Footnotes, which the reader drew and the editor did not until ADR-0059: a
+   reference is a superscript number, cyan because a press goes to its
+   definition; a definition is a quieter line under its number. */
+#note-edit sup.footnote-ref {
+  padding: 0 0.1em;
+  font-size: 0.72em;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+#note-edit .cm-fn-src {
+  color: var(--ash);
+}
+
+#note-edit .cm-line.cm-footnote {
+  font-size: 0.88em;
+  color: var(--ash);
+}
+
+#note-edit .cm-fn-label {
+  margin-right: 0.5em;
+  color: var(--ash-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+#note-edit .cm-fn-label::after {
+  content: ".";
+}
+
+#note-edit [align="center"],
+#note-edit [align="center"] * {
+  text-align: start;
+}
+
+/* frontmatter properties box — native <details>, same collapse idiom as .thinking */
+details.fm {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--slate-2);
+  margin-bottom: 0.9rem;
+  font-size: 12px;
+}
+
+details.fm summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.35rem 0.6rem;
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+  transition: color var(--dur) var(--ease);
+}
+
+details.fm summary::-webkit-details-marker {
+  display: none;
+}
+
+details.fm:not([open]) summary::before {
+  content: "▸ ";
+}
+
+details.fm[open] summary::before {
+  content: "▾ ";
+}
+
+details.fm summary:hover {
+  color: var(--frost);
+}
+
+.fm-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.fm-key {
+  color: var(--ash-dim);
+  min-width: 9ch;
+}
+
+.fm-val {
+  color: var(--frost);
+  background: var(--slate);
+  border: 1px solid var(--line);
+  padding: 0 0.4rem;
+}
+
+.find-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.find-result:last-child {
+  border-bottom: none;
+}
+
+.find-score {
+  color: var(--ash-dim);
+  font-size: 12px;
+}
+
+/* --- diff mode --------------------------------------------------------------
+   A code well, not a document: monospace, no wrapping, one scroller. The tint on
+   a changed line does the reading and the leading +/− carries it for anyone the
+   colour does not reach — which is also what makes a copied diff still parse. */
+#note-diff {
+  padding: 0.4rem 1.25rem 2rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+#note-diff[hidden] {
+  display: none;
+}
+
+#note-diff.dl-wait {
+  display: block;
+  color: var(--ash-dim);
+  font-size: 13px;
+}
+
+.dl-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-family: var(--mono);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.dl-kind {
+  color: var(--ash-dim);
+}
+
+.dl-kind.created {
+  color: var(--add);
+}
+
+.dl-kind.deleted {
+  color: var(--del);
+}
+
+.dl-from {
+  flex: 1;
+  min-width: 0;
+  color: var(--ash-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-track {
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0;
+  overflow-x: auto;
+}
+
+.dl-line {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.65;
+  white-space: pre;
+  padding: 0 0.8rem;
+  color: var(--text);
+}
+
+.dl-add {
+  color: var(--add);
+  background: color-mix(in srgb, var(--add) 12%, transparent);
+}
+
+.dl-del {
+  color: var(--del);
+  background: color-mix(in srgb, var(--del) 12%, transparent);
+}
+
+.dl-ctx {
+  color: var(--ash);
+}
+
+/* the elision itself, not a line of the note: centred, no fill, no text to read */
+.dl-gap {
+  color: var(--ash-dim);
+  text-align: center;
+  padding: 0.15rem 0;
+}
+
+.dl-empty {
+  color: var(--ash-dim);
+  font-size: 12px;
+}
+
+/* The one action a metrics row carries. It used to be `.cx-do`, borrowed from
+   the note drawer's context mode; that mode is gone (the work panel is the one
+   place a note's concepts and neighbours are stated now) and this button is
+   not, so it owns its rule rather than outliving the block it borrowed from. */
+.m-do {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  padding: 0.22rem 0.6rem;
+  color: var(--ash-dim);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+
+.m-do:hover {
+  color: var(--frost);
+  border-color: var(--accent);
+  background: var(--slate-2);
+}
+
+.m-do:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- bottom dock (graph/map): ask-from-here composer + rendered answer card -- */
+/* A lens onto the SAME conversation: the card holds only the latest exchange,
+   the full transcript lives one click away in chat. Fixed strip between the
+   sidebar (left mirrors its flex-basis) and the note drawer (right insets by
+   --note-w while the drawer is open, so neither ever covers the other).
+   z-index below the drawer (50) so the drawer's slide passes cleanly over. */
+#dock {
+  position: fixed;
+  /* Two gutters: the window's and the one between rail and view. */
+  left: calc(var(--side-w) + 2 * var(--gutter));
+  right: var(--gutter);
+  bottom: var(--gutter);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  /* No strip. The composer hovers over the graph exactly as it does over the
+     transcript, and the card beside it is a card, so neither needs a bar drawn
+     behind it. The consequence is that this box is now invisible but still
+     hit-testable across the full width of the view, which would eat clicks on
+     the graph underneath it — hence pointer-events, restored on the two things
+     that are actually there. */
+  pointer-events: none;
+  transition: right var(--dur) var(--ease), left var(--dur) var(--ease);
+  /* match drawer + sidebar */
+}
+
+#dock .composer-shell,
+#peek {
+  pointer-events: auto;
+  /* the graph is a bright, busy canvas: without a shadow the composer reads as
+     painted onto it rather than held above it */
+  box-shadow: var(--lift);
+}
+
+/* Collapsed, the drawer is the rail (ADR-0084), so the view starts after it. */
+body.sidebar-collapsed #dock {
+  left: calc(52px + 2 * var(--gutter));
+}
+
+body.note-open #dock {
+  /* The note's width, its inset from the window, and the gap to the view. */
+  right: calc(var(--note-w, 630px) + 2 * var(--gutter));
+}
+
+/* --- the dock at rest: the composer folded into its stone ----------------------
+   Off the chat a 58rem bar nobody is typing in crossed the graph. Now the
+   composer rests as its own stone in a round glass disc at the foot of the view,
+   where the field will open, and unfolds around it on hover, focus or a tap,
+   the stone travelling to its seat at the head of the row. It stays open while
+   anything is in it: a draft, a turn's run line, the answer card. Disc over the
+   bare crystal, and the numbers (a 42 px stone at rest, 36 px in the row,
+   1050 ms) are the user's, set on the prototype (ADR-0048, amendment
+   2026-10-06).
+
+   One registered number drives the morph. Width, corners, the stone's travel
+   and scale and the controls' fade are each a calc() of --unfold, and only
+   --unfold transitions, so no two of them can drift out of step. The rest's
+   float and halo are scaled by (1 - --unfold) instead of switched off, so their
+   animation runs on and nothing snaps when a hover takes it. */
+@property --unfold {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --bob {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+#dock {
+  /* unitless, because the stone's scale is their ratio; --open is the row's
+     own stone, .cp-presence in app-chat.css */
+  --rest: 42;
+  --open: 36;
+  /* the disc at rest: the stone's box plus the shell's padding and border */
+  --pod: calc(var(--rest) * 1px + 0.6rem + 2px);
+}
+
+#dock-composer {
+  /* The folded disc is 6px taller than the open row, so the form keeps the
+     disc's height in both shapes and the open shell sits on its foot: the dock
+     is one height whether folded or not, and the graph frame's corner bars,
+     which park above it (silica-host-dock), never move on a hover. */
+  min-height: calc(var(--pod) + 1.6rem);
+  align-items: flex-end;
+  --unfold: 1;
+  /* 80 ms of hover intent: a pointer crossing the stone on its way across the
+     graph leaves before the transition starts, so it never twitches open */
+  transition: --unfold 1050ms var(--ease) 80ms;
+  animation: dock-bob 3.2s ease-in-out infinite alternate;
+}
+
+@keyframes dock-bob {
+  to {
+    --bob: 1;
+  }
+}
+
+/* Exits are instant everywhere else (app-motion.css). The fold waits 300 ms
+   because it is the same object changing shape under a pointer that may have
+   slipped off by a few px, not a panel the reader closed. It rests only where
+   there is a stone to rest as: without WebGL2 the canvas removes itself, a lost
+   context hides it (app-presence.js), and an empty disc would be a control with
+   no face, so the composer stays the composer. */
+#dock:not(:has(#peek:not([hidden]), #dock-run-line:not([hidden])))
+  #dock-composer:has(.cp-presence:not([hidden])):not(:hover, :focus-within, :has(#dock-input:not(:placeholder-shown))) {
+  --unfold: 0;
+  transition-delay: 300ms;
+}
+
+/* The unfolded width (ADR-0072). Over the Graph and the Map the frame's two
+   foot groups sit at the bottom corners, on the stone's own baseline, so the
+   composer opens only to the width between them and they never have to move:
+   248px a side from the dock's edge (the 12px inset, a group of at most 220px,
+   a 16px gap), 218px of it inside the composer's own 30px padding. A container query,
+   because the dock is as wide as the view and not the window: under 912px of
+   dock the cap would leave the field under 26rem, and there the frames park
+   their corners above the dock instead; syncDockToViews tells them, reading
+   the same width this query reads (app-notes.js). */
+#dock {
+  container-type: inline-size;
+  --open-w: min(100%, var(--measure));
+}
+
+@container (min-width: 912px) {
+  body:has(#view-graph.active :is(#graph-frame, #map-frame):not([hidden])) #dock-composer {
+    --open-w: min(100% - 436px, var(--measure));
+  }
+}
+
+#dock .composer-shell {
+  width: calc(var(--pod) + (var(--open-w) - var(--pod)) * var(--unfold));
+  border-radius: calc(var(--r) + (var(--pod) / 2 - var(--r)) * (1 - var(--unfold)));
+  overflow: clip;
+  translate: 0 calc(-2.5px * var(--bob) * (1 - var(--unfold)));
+  /* --art-glow is the stone's halo already: emission on graphite, a contact
+     shadow on paper. Its own alpha is the landing's; the disc breathes from 1.1x
+     to 2.2x of it. */
+  box-shadow: var(--lift),
+    0 0 calc(20px + 14px * var(--bob)) -2px
+    rgb(from var(--art-glow) r g b / calc(alpha * (1.1 + 1.1 * var(--bob)) * (1 - var(--unfold))));
+  /* the shadow follows --unfold and --bob every frame, so the base rule's
+     transition on it would only trail them */
+  transition: border-color var(--dur) var(--ease);
+}
+
+/* The stone keeps its 42 px box in both shapes and is SCALED to 36 px when the
+   composer opens, not resized: a resize reallocates the WebGL backing store,
+   which clears it, after that frame was drawn, so the stone would blank on every
+   frame of the morph. The margins seat the scaled box on the row's 2 px inset.
+   At rest the stone IS the row, so the disc is round; open, its box overhangs
+   the field's row equally above and below, so the shell is back at the
+   composer's own height. */
+#dock .cp-presence {
+  width: calc(var(--rest) * 1px);
+  height: calc(var(--rest) * 1px);
+  margin-block: calc((var(--field-row) - var(--rest) * 1px) / 2 * var(--unfold));
+  margin-left: calc((2px - (var(--rest) - var(--open)) * 0.5px) * var(--unfold));
+  margin-right: calc((var(--open) - var(--rest)) * 0.5px * var(--unfold));
+  scale: calc(1 - (1 - var(--open) / var(--rest)) * var(--unfold));
+}
+
+/* the controls arrive in the second half of the unfold, once there is room */
+#dock .composer-shell > :not(.cp-presence) {
+  opacity: clamp(0, (var(--unfold) - 0.45) / 0.55, 1);
+}
+
+/* the answer card is now a free-standing card on the same measure as the
+   composer under it, not the top half of a docked strip */
+#peek {
+  width: min(var(--measure), calc(100% - 4rem));
+  margin: 0 auto 0.55rem;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  overflow: hidden;
+  /* let the header's fill respect the top corners; #peek-body scrolls itself */
+}
+
+#peek>header {
+  gap: 0.5rem;
+  padding: 0.2rem 0.2rem 0.2rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--slate-2);
+}
+
+#peek-title {
+  flex: 1;
+  min-width: 0;
+  /* same clip idiom as #note-title */
+  color: var(--frost);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* header actions read as real buttons — same outlined chips as the drawer's */
+#peek>header .ghost {
+  padding: 0.35rem 0.5rem;
+  font-size: 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--slate);
+}
+
+#peek>header .ghost:hover {
+  border-color: var(--ash-dim);
+  background: var(--slate-2);
+}
+
+/* the rendered answer: full OFM typesetting via the shared :is(...) rules,
+   height-capped so the graph stays the protagonist — the card scrolls inside */
+#peek-body {
+  padding: 0.6rem 0.9rem;
+  font-size: 13px;
+  max-height: 38vh;
+  overflow-y: auto;
+}
+
+#peek-body.error {
+  color: var(--accent);
+  /* same signal as .tool.error */
+}
+
+#dock-composer {
+  border-top: none;
+  /* nothing to separate from: the shell carries its own edge */
+}
+
+
+/* The find field is an input like the others: control size; 10px like the
+   glass blocks it heads, not the small radius of a field inside a group. */
+#node-search {
+  font-size: var(--fs-ctl);
+  border-radius: 10px;
+  padding: 0.4rem 0.7rem;
+}
