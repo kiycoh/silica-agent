@@ -117,7 +117,7 @@ connect = [
 # SDK 2.0 (protocol 2026-07-28) drops the @server.list_tools/@server.call_tool
 # decorators for constructor handlers, so silica/ui/mcp.py needs a rewrite before
 # the cap lifts. 1.x still negotiates fine with 2026-07-28 clients.
-mcp = ["mcp>=1.0,<2"]
+mcp = ["mcp>=2.3.0,<3"]
 # Opt-in in-process cross-encoder rerank (the precision pass over fused recall).
 # Neither LM Studio nor Ollama can serve a cross-encoder, so the alternative is a
 # llama-server the user runs by hand; this extra removes that. Pulls torch, and
