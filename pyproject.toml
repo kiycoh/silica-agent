@@ -123,7 +123,7 @@ mcp = ["mcp>=1.0,<2"]
 # llama-server the user runs by hand; this extra removes that. Pulls torch, and
 # downloads ~2GB of weights on first rerank, so it stays opt-in.
 # SILICA_RERANK_BASE_URL still overrides it with a served endpoint.
-rerank = ["sentence-transformers>=3.0"]
+rerank = ["sentence-transformers>=6.1.0"]
 # Opt-in in-process speech-to-text for the web GUI's dictation button (ADR-0049),
 # the same move as [rerank]: without it the microphone needs a whisper-server the
 # user starts by hand. CTranslate2 and not openai-whisper: no torch, int8 on CPU.
