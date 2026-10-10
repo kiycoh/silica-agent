@@ -362,7 +362,7 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
     return CheckResult(
         "rerank", "warn",
         "disabled (no cross-encoder available): recall keeps the fused order and silica_vaults cannot rank vaults",
-        "`pip install silica-harness[rerank]` sharpens recall; LM Studio and Ollama cannot serve one",
+        "`pip install silica-agent[rerank]` sharpens recall; LM Studio and Ollama cannot serve one",
     )
 
 
@@ -768,7 +768,7 @@ def check_stt(config: SilicaConfig) -> CheckResult:
     down = f"nothing answering at {url}" if url else "no endpoint configured"
     return CheckResult(
         "dictation", "unknown", f"off: {down}, [stt] extra not installed",
-        "optional: `pip install 'silica-harness[stt]'` transcribes in process "
+        "optional: `pip install 'silica-agent[stt]'` transcribes in process "
         "(~480 MB model on first use), or set SILICA_STT_SERVE_CMD to start a whisper-server",
     )
 
@@ -1123,7 +1123,7 @@ def render_report(results: list[CheckResult]) -> None:
     table = Table(show_header=False, box=None, padding=(0, 1))
     for r in results:
         glyph, style = _STATUS_GLYPH[r.status]
-        # escape: detail/hint carry data (paths, model ids, `silica-harness[rerank]`), and
+        # escape: detail/hint carry data (paths, model ids, `silica-agent[rerank]`), and
         # rich reads a bare [word] as a style tag and swallows it.
         hint = f"[dim]→ {escape(r.hint)}[/]" if r.hint else ""
         table.add_row(f"[{style}]{glyph}[/]", f"[bold]{r.name}[/]", escape(r.detail), hint)

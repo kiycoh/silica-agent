@@ -1,0 +1,60 @@
+# The redirect for the old distribution name. `silica-harness` shipped 0.5.0
+# to 0.6.1 before the project took the repository's name, `silica-agent`
+# (2026-10-10), and PyPI has no forwarding: without this, `uv tool upgrade
+# silica-harness` keeps resolving to 0.6.1 forever and never says why.
+#
+# Deliberately NOT deleted from PyPI instead. Deleting frees the name for
+# anyone to register, and a package that reads the user's vault is worth
+# squatting; the release that follows a deletion is the supply-chain attack.
+#
+# No modules of its own: the wheel is metadata plus the console script, which
+# resolves against the `silica` package that `silica-agent` installs. That
+# keeps `uv tool install silica-harness` and `pipx install silica-harness`
+# working rather than leaving them with a tool that has no executable.
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "silica-harness"
+version = "0.7.0"
+description = "Renamed to silica-agent. This package installs it."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "Alessandro Carosia" }]
+keywords = ["obsidian", "knowledge-graph", "memory", "mcp", "agent"]
+classifiers = [
+  "Environment :: Console",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+# `>=` and not `==`: one shim release has to keep redirecting to every version
+# that follows it, so `uv tool upgrade silica-harness` re-resolves to the
+# current silica-agent instead of pinning whatever was newest the day this
+# shipped.
+dependencies = ["silica-agent>=0.7.0"]
+
+# Every extra forwarded: MCP configs written before the rename run
+# `uvx --from 'silica-harness[mcp]' silica mcp`, and an extra the shim does not
+# declare is dropped with a warning, leaving `silica mcp` without its SDK.
+[project.optional-dependencies]
+gui = ["silica-agent[gui]>=0.7.0"]
+mcp = ["silica-agent[mcp]>=0.7.0"]
+connect = ["silica-agent[connect]>=0.7.0"]
+rerank = ["silica-agent[rerank]>=0.7.0"]
+stt = ["silica-agent[stt]>=0.7.0"]
+all = ["silica-agent[all]>=0.7.0"]
+
+[project.urls]
+Homepage = "https://github.com/kiycoh/silica-agent"
+Repository = "https://github.com/kiycoh/silica-agent"
+Issues = "https://github.com/kiycoh/silica-agent/issues"
+
+[project.scripts]
+silica = "silica.entry:main"
+
+[tool.setuptools]
+# Nothing to find: this distribution owns no import package. Stated rather than
+# left to autodiscovery, which would otherwise walk the repo root above it.
+packages = []

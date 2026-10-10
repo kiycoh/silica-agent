@@ -108,7 +108,7 @@ def test_plugin_manifest_launches_silica_mcp():
 
 
 def test_plugin_serves_its_own_tree_not_the_published_wheel():
-    """ADR-0025 amendment: `uvx --from silica-harness` resolved the PyPI wheel,
+    """ADR-0025 amendment: `uvx --from silica-agent` resolved the PyPI wheel,
     so a tool added to the checkout was unreachable from every client and
     `/plugin marketplace update` did not fix it (three live versions, measured
     2026-08-29). The plugin must run the code it shipped with."""
@@ -120,14 +120,14 @@ def test_plugin_serves_its_own_tree_not_the_published_wheel():
     # --project selects the environment and leaves the working directory alone;
     # --directory would serve the silica checkout as every project's vault.
     assert "--project" in args and "--directory" not in args
-    assert not any("silica-harness" in a for a in args), "back on the PyPI wheel"
+    assert not any("silica-agent" in a for a in args), "back on the PyPI wheel"
 
     # Codex is not a plugin host: it has no ${CLAUDE_PLUGIN_ROOT} to expand, so
     # its manifest deliberately keeps the published wheel.
     codex = json.loads((ROOT / "mcp.codex.json").read_text(encoding="utf-8"))
     codex_args = codex["mcp_servers"]["silica"]["args"]
     assert "${CLAUDE_PLUGIN_ROOT}" not in codex_args
-    assert any("silica-harness" in a for a in codex_args)
+    assert any("silica-agent" in a for a in codex_args)
     marketplace = json.loads(
         (ROOT / ".claude-plugin" / "marketplace.json").read_text(encoding="utf-8")
     )

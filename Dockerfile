@@ -14,7 +14,7 @@ WORKDIR /src
 COPY . .
 # The escape hatch for a context without .git (see .dockerignore): declared
 # so setuptools-scm can read it as an env var during the wheel build.
-ARG SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SILICA_HARNESS
+ARG SETUPTOOLS_SCM_PRETEND_VERSION_FOR_SILICA_AGENT
 RUN pip wheel --no-deps --no-cache-dir . -w /wheels
 
 FROM python:3.11-slim
@@ -29,10 +29,10 @@ ENV HOME=/data \
 COPY --from=build /wheels /wheels
 # By wheel path, never by name: between two tags setuptools-scm versions the
 # wheel as a `.devN` pre-release, which pip skips when a name resolves, so
-# `--find-links ... "silica-harness[...]"` installed the PyPI release instead.
+# `--find-links ... "silica-agent[...]"` installed the PyPI release instead.
 # Measured 2026-10-02: the image built from 2aaa39f shipped 0.6.1 from PyPI,
 # without silica_core. A path takes extras too; dependencies still come from PyPI.
-RUN set -- /wheels/silica_harness-*.whl \
+RUN set -- /wheels/silica_agent-*.whl \
  && pip install --no-cache-dir "$1[gui,mcp]" \
  && rm -rf /wheels \
  && mkdir -p /data /vault

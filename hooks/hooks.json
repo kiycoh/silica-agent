@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx --from 'silica-harness[mcp]' silica hook SessionStart",
+            "command": "uvx --from 'silica-agent[mcp]' silica hook SessionStart",
             "timeout": 60
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx --from 'silica-harness[mcp]' silica capture"
+            "command": "uvx --from 'silica-agent[mcp]' silica capture"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uvx --from 'silica-harness[mcp]' silica capture"
+            "command": "uvx --from 'silica-agent[mcp]' silica capture"
           }
         ]
       }

@@ -76,7 +76,7 @@ def test_both_marketplaces_offer_the_same_plugin_from_the_repo_root():
 
 
 def test_hooks_fire_only_shipped_subcommands():
-    launcher = " ".join(MCP_COMMAND[:-1]).replace("silica-harness[mcp]", "'silica-harness[mcp]'")
+    launcher = " ".join(MCP_COMMAND[:-1]).replace("silica-agent[mcp]", "'silica-agent[mcp]'")
     hooks = _hooks()
     assert set(hooks) == {"SessionStart", "SessionEnd", "PreCompact"}
     for entries in hooks.values():

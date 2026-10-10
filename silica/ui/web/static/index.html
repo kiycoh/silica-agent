@@ -595,7 +595,7 @@
     <div class="sp-title">dictation is off</div>
     <p id="stt-why"></p>
     <p>It needs a transcriber on this machine. The simplest runs inside silica, about 480 MB downloaded on first use:</p>
-    <pre>pip install 'silica-harness[stt]'</pre>
+    <pre>pip install 'silica-agent[stt]'</pre>
     <p>Or any OpenAI-compatible endpoint; with the second line set, silica starts it on the next launch:</p>
     <pre>SILICA_STT_BASE_URL=http://localhost:1236/v1
 SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236"</pre>

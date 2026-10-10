@@ -329,7 +329,7 @@ class TestCheckStt:
         monkeypatch.setattr(stt, "has_local_stt", lambda: False)
         r = checks.check_stt(_cfg(stt_base_url="http://x:1236/v1"))
         assert r.status == "unknown"
-        assert "silica-harness[stt]" in r.hint and "SILICA_STT_SERVE_CMD" in r.hint
+        assert "silica-agent[stt]" in r.hint and "SILICA_STT_SERVE_CMD" in r.hint
 
     def test_the_row_is_in_the_doctor(self):
         import inspect
@@ -383,7 +383,7 @@ class TestCheckRerank:
         monkeypatch.setattr(checks, "has_local_rerank", lambda: False)
         r = checks.check_rerank(self._rr_cfg())
         assert r.status == "warn"
-        assert "silica-harness[rerank]" in r.hint
+        assert "silica-agent[rerank]" in r.hint
         # The scoreboard's ordering is the one feature that is silently OFF
         # without a reranker (ranked: false on every reply): the doctor says so.
         assert "silica_vaults" in r.detail

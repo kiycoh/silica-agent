@@ -25,7 +25,7 @@ jobs:
     # human instead of shipping.
     environment:
       name: pypi
-      url: https://pypi.org/p/silica-harness
+      url: https://pypi.org/p/silica-agent
     permissions:
       contents: write   # create the GitHub Release
       id-token: write   # OIDC for PyPI Trusted Publishing (no stored token)

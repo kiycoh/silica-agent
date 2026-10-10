@@ -19,7 +19,7 @@ of the folder it is opened in). With no `silica` on PATH, the same thing by
 hand:
 
 ```bash
-claude mcp add --scope user --transport stdio silica -- uvx --from 'silica-harness[mcp]' silica mcp
+claude mcp add --scope user --transport stdio silica -- uvx --from 'silica-agent[mcp]' silica mcp
 ```
 
 ## Recall: search before answering

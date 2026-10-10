@@ -384,7 +384,7 @@ def run_mcp(all_tools: bool = False, extended: bool = False) -> int:
         from mcp.server.stdio import stdio_server
     except ImportError:
         print(
-            "silica mcp needs the [mcp] extra: uv pip install 'silica-harness[mcp]'",
+            "silica mcp needs the [mcp] extra: uv pip install 'silica-agent[mcp]'",
             file=sys.stderr,
         )
         return 1

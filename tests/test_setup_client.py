@@ -27,7 +27,7 @@ def test_codex_appends_block(tmp_path):
     assert parsed["mcp_servers"]["silica"]["command"] == "uvx"
     # The [mcp] extra is the point of the block, and rich markup eats it if the
     # payload is ever printed or written through a markup-enabled path.
-    assert parsed["mcp_servers"]["silica"]["args"] == ["--from", "silica-harness[mcp]", "silica", "mcp"]
+    assert parsed["mcp_servers"]["silica"]["args"] == ["--from", "silica-agent[mcp]", "silica", "mcp"]
 
 
 def test_no_client_gets_a_pinned_vault(tmp_path):
@@ -107,16 +107,16 @@ def test_previews_survive_rich_markup(tmp_path):
     installs the wrong package, and one that drops the TOML headers shows a
     block the writer never produces."""
     out = _printed(["codex", "--config", str(tmp_path / "config.toml"), "--dry-run"])
-    assert "silica-harness[mcp]" in out
+    assert "silica-agent[mcp]" in out
     assert "[mcp_servers.silica]" in out
 
     out = _printed(["opencode", "--config", str(tmp_path / "opencode.json"), "--dry-run"])
-    assert "silica-harness[mcp]" in out
+    assert "silica-agent[mcp]" in out
 
     out = _printed(["dsh", "--config", str(tmp_path / "cordis.patch.yml"), "--dry-run"])
-    assert "silica-harness[mcp]" in out
+    assert "silica-agent[mcp]" in out
 
-    assert "silica-harness[mcp]" in _printed(["claude", "--dry-run"])
+    assert "silica-agent[mcp]" in _printed(["claude", "--dry-run"])
     assert "[--dry-run]" in _printed(["nonsense"])
 
 
@@ -135,7 +135,7 @@ def test_unknown_client_is_an_error(tmp_path):
 
 def test_codex_block_outlives_a_cold_uvx(tmp_path):
     # Codex gives a stdio server 10 s to answer `initialize`; a first-run uvx
-    # resolve of silica-harness[mcp] takes longer than that on a cold cache.
+    # resolve of silica-agent[mcp] takes longer than that on a cold cache.
     cfg = tmp_path / "config.toml"
     setup_client.run_setup(["codex", "--config", str(cfg)])
     parsed = tomllib.loads(cfg.read_text(encoding="utf-8"))

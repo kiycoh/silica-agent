@@ -31,13 +31,13 @@ from silica.ui.console import CONSOLE
 # Everything this module prints carries a payload full of square brackets: the
 # `[mcp]` extra, TOML table headers, a parser error quoting a `]`. rich reads a
 # bracketed word as a style tag and drops it, which silently turned the printed
-# install command into `--from silica-harness` — a command that runs and installs
+# install command into `--from silica-agent` — a command that runs and installs
 # the wrong thing. Every interpolated value goes through escape(), and the
 # config block (which has no styling of its own) prints with markup off.
 
 # What every client is told to run. uvx keeps the server at one command with no
 # install step of its own, which is the whole point of the generated block.
-MCP_COMMAND = ["uvx", "--from", "silica-harness[mcp]", "silica", "mcp"]
+MCP_COMMAND = ["uvx", "--from", "silica-agent[mcp]", "silica", "mcp"]
 
 # No SILICA_VAULT in the generated block, deliberately. Claude Code, Codex and
 # opencode are CLIs launched from a project and spawn the stdio server with
@@ -54,7 +54,7 @@ MCP_COMMAND = ["uvx", "--from", "silica-harness[mcp]", "silica", "mcp"]
 CLIENTS = ("claude", "codex", "opencode", "dsh")
 
 # Codex gives a stdio server `startup_timeout_sec` (default 10) to answer
-# `initialize`. A cold `uvx` resolves and installs silica-harness[mcp] first,
+# `initialize`. A cold `uvx` resolves and installs silica-agent[mcp] first,
 # which takes longer than that on a first run, and a server that misses the
 # window is simply absent for that session, with one line in a log nobody
 # reads.

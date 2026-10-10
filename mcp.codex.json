@@ -2,7 +2,7 @@
   "mcp_servers": {
     "silica": {
       "command": "uvx",
-      "args": ["--from", "silica-harness[mcp]", "silica", "mcp"]
+      "args": ["--from", "silica-agent[mcp]", "silica", "mcp"]
     }
   }
 }

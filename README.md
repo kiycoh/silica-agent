@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/silica-harness/"><img src="https://img.shields.io/pypi/v/silica-harness?logo=pypi&logoColor=white&label=PyPI" alt="silica-harness on PyPI" /></a>
+  <a href="https://pypi.org/project/silica-agent/"><img src="https://img.shields.io/pypi/v/silica-agent?logo=pypi&logoColor=white&label=PyPI" alt="silica-agent on PyPI" /></a>
   <a href="https://deepwiki.com/kiycoh/silica-agent"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" /></a>
   <a href="https://github.com/kiycoh/silica-agent/blob/main/pyproject.toml#L13"><img src="https://img.shields.io/badge/python-%3E%3D3.11-blue?logo=python&logoColor=white" alt="Python >=3.11" /></a>
   <a href="https://obsidian.md"><img src="https://img.shields.io/badge/Obsidian-Native-7a46e6" alt="Obsidian Native" /></a>
@@ -54,14 +54,14 @@ Silica is a multi-agent framework that allows one and more agents (human or arti
   a real vault nucleated, read, and mapped, in three minutes. <i>A "vault" is just a folder of markdown (<code>.md</code>) files.</i></sub>
 </p>
 
-**Try it** (needs [uv](https://docs.astral.sh/uv/) and git):
+**Try it** (needs [uv](https://docs.astral.sh/uv/)):
 
 ```bash
-uv tool install "silica-harness[gui,mcp] @ git+https://github.com/kiycoh/silica-agent"
+uv tool install "silica-agent[gui,mcp]"
 cd ~/path/to/your/notes && silica init && silica --gui
 ```
 
-pipx, PyPI, Docker, the Claude Code and Codex plugins, and a dev checkout: [Install](#install).
+pipx, the latest commit, Docker, the Claude Code and Codex plugins, and a dev checkout: [Install](#install).
 
 ---
 
@@ -306,7 +306,7 @@ A live bridge into the Obsidian desktop app: Silica reads and writes the vault y
 
 ### 4. Agent memory &nbsp;·&nbsp; `silica mcp`
 
-Silica serves your vault over stdio to any MCP client, so an assistant recalls your real notes and real decisions before it answers. One command line, `uvx --from 'silica-harness[mcp]' silica mcp`, and no model or API key on the read path: search, recall, and note reading run on the vault alone.
+Silica serves your vault over stdio to any MCP client, so an assistant recalls your real notes and real decisions before it answers. One command line, `uvx --from 'silica-agent[mcp]' silica mcp`, and no model or API key on the read path: search, recall, and note reading run on the vault alone.
 
 The vault is the folder the client was started in, the way a coding agent already works: open a project, get that project's vault. No path is written into the config, so the same entry serves every project.
 
@@ -322,7 +322,7 @@ codex plugin marketplace add kiycoh/silica-agent
 codex plugin add silica@silica
 ```
 
-The Claude Code plugin runs the server from the plugin's own copy of this repository; Codex, the hooks and `silica setup` below run the latest PyPI release through `uvx`.
+The Claude Code plugin runs the server from the plugin's own copy of this repository; Codex, the hooks and `silica setup` below run the PyPI release through `uvx`.
 
 `silica setup <client>` is the server-only path, and the one for clients without a plugin format. It writes the MCP entry into the client's config, and for Codex and DeepSeek Harness it also copies the skill to `~/.agents/skills/silica/`, the user root both discover:
 
@@ -347,7 +347,7 @@ It backs the file up before touching it, leaves an existing `silica` entry alone
 ```toml
 [mcp_servers.silica]
 command = "uvx"
-args = ["--from", "silica-harness[mcp]", "silica", "mcp"]
+args = ["--from", "silica-agent[mcp]", "silica", "mcp"]
 startup_timeout_sec = 60
 ```
 
@@ -361,7 +361,7 @@ startup_timeout_sec = 60
         serverName: silica
         transport: stdio
         command: uvx
-        args: ['--from', 'silica-harness[mcp]', 'silica', 'mcp']
+        args: ['--from', 'silica-agent[mcp]', 'silica', 'mcp']
 ```
 
 **opencode** (`opencode.json`):
@@ -371,7 +371,7 @@ startup_timeout_sec = 60
   "mcp": {
     "silica": {
       "type": "local",
-      "command": ["uvx", "--from", "silica-harness[mcp]", "silica", "mcp"],
+      "command": ["uvx", "--from", "silica-agent[mcp]", "silica", "mcp"],
       "enabled": true
     }
   }
@@ -390,21 +390,21 @@ Silica needs Python 3.11 or newer and [uv](https://docs.astral.sh/uv/) (or [pipx
 
 | You want | Run |
 | :--- | :--- |
-| **The app**, terminal and web GUI, from this repository | `uv tool install "silica-harness[gui,mcp] @ git+https://github.com/kiycoh/silica-agent"` |
-| The same with pipx | `pipx install "silica-harness[gui,mcp] @ git+https://github.com/kiycoh/silica-agent"` |
-| The latest PyPI release | `uv tool install "silica-harness[gui,mcp]"` (0.6.1: older than this repository until the next release) |
+| **The app**, terminal and web GUI | `uv tool install "silica-agent[gui,mcp]"` |
+| The same with pipx | `pipx install "silica-agent[gui,mcp]"` |
+| The latest commit instead of the latest release | `uv tool install "silica-agent[gui,mcp] @ git+https://github.com/kiycoh/silica-agent"` (needs `git`) |
 | **Memory for Claude Code**: server, skill and hooks | `claude plugin marketplace add kiycoh/silica-agent`, then `claude plugin install silica@silica` |
 | **Memory for Codex** | `codex plugin marketplace add kiycoh/silica-agent`, then `codex plugin add silica@silica` |
 | Memory for any other MCP client | `silica setup <client>` once the app is installed, or the entry by hand ([details](#4-agent-memory--silica-mcp)) |
 | **Docker** | [Docker](#docker), below |
 | **Development** | [From source](#from-source), below |
 
-Installing from the repository needs `git` on your PATH. The PyPI name is `silica-harness`; `silica-agent` on PyPI is an old name that redirects to it.
+Up to 0.6.1 the package was called `silica-harness`. That name now installs this one, so `uv tool upgrade silica-harness` carries an old install across; new installs should use `silica-agent`.
 
 ### Quickstart
 
 ```bash
-uv tool install "silica-harness[gui,mcp] @ git+https://github.com/kiycoh/silica-agent"
+uv tool install "silica-agent[gui,mcp]"
 cd ~/path/to/your/notes   # any folder of .md files, adopted as it is
 silica init               # pick a model: a hosted API key, or a local LM Studio / Ollama model
 silica --gui              # http://localhost:8765; plain `silica` opens the terminal instead
@@ -431,7 +431,7 @@ Make a read-only audit your first move. It touches none of your notes (the repor
   which is the part a single snapshot cannot tell you.</sub>
 </p>
 
-**Upgrading.** `uv tool upgrade silica-harness` (pipx: `pipx upgrade silica-harness`) pulls the latest commit for a repository install and the latest release for a PyPI one. `silica update --check` tells you whether one is due, and the home screen and the About panel surface the same nudge on their own, at most one check a day.
+**Upgrading.** `uv tool upgrade silica-agent` (pipx: `pipx upgrade silica-agent`) pulls the latest release, or the latest commit for an install from the repository. `silica update --check` tells you whether one is due, and the home screen and the About panel surface the same nudge on their own, at most one check a day.
 
 ### Docker
 
@@ -460,7 +460,7 @@ Prefix every command with `uv run`. On a checkout, `silica update` is the upgrad
 
 <br/>
 
-Extras install alone or combined, for example `"silica-harness[gui,mcp] @ git+https://github.com/kiycoh/silica-agent"`:
+Extras install alone or combined, for example `"silica-agent[gui,mcp]"`:
 
 | Extra | Adds |
 | :--- | :--- |

@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for the silica-harness test suite."""
+"""Shared pytest fixtures for the silica-agent test suite."""
 from __future__ import annotations
 
 from pathlib import Path

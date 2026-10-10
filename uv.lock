@@ -3139,33 +3139,7 @@ wheels = [
 ]
 
 [[package]]
-name = "silica-core"
-version = "0.10.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "httpx" },
-    { name = "mammoth" },
-    { name = "markdown-it-py" },
-    { name = "networkx" },
-    { name = "orjson" },
-    { name = "pydantic" },
-    { name = "pypdfium2" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "snowballstemmer" },
-    { name = "stop-words" },
-    { name = "striprtf" },
-    { name = "tree-sitter" },
-    { name = "tree-sitter-language-pack" },
-    { name = "xlrd" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/9d/6a/074a076a7226e629b42bc677987abdedab3eda137d31e318a67b130d07f6/silica_core-0.10.1.tar.gz", hash = "sha256:dcaf9919001e301115461b4c9aa9618d5c61f70902f8d429e88a17a871adc5d8", size = 3749984, upload-time = "2026-10-08T16:34:03.483Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f6/7b/86df3967df9f89fd3145603c5d1821bdd8201612bb9f54b76b70cef6133d/silica_core-0.10.1-py3-none-any.whl", hash = "sha256:0d8c895a14d1caa0697aaf8641ee1a3812bf5996e36cf2fba41a93282b0eff9e", size = 251850, upload-time = "2026-10-08T16:34:01.518Z" },
-]
-
-[[package]]
-name = "silica-harness"
+name = "silica-agent"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
@@ -3268,8 +3242,8 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16" },
     { name = "scipy", marker = "extra == 'dev'", specifier = ">=1.17.1" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=3.0" },
+    { name = "silica-agent", extras = ["connect", "gui", "mcp", "rerank", "stt"], marker = "extra == 'all'" },
     { name = "silica-core", specifier = ">=0.10.1" },
-    { name = "silica-harness", extras = ["connect", "gui", "mcp", "rerank", "stt"], marker = "extra == 'all'" },
     { name = "snowballstemmer" },
     { name = "stop-words", specifier = ">=2025.11.4" },
     { name = "striprtf", specifier = ">=0.0.29" },
@@ -3281,6 +3255,32 @@ requires-dist = [
     { name = "xlrd", specifier = ">=2.0" },
 ]
 provides-extras = ["gui", "dev", "connect", "mcp", "rerank", "stt", "all"]
+
+[[package]]
+name = "silica-core"
+version = "0.10.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "mammoth" },
+    { name = "markdown-it-py" },
+    { name = "networkx" },
+    { name = "orjson" },
+    { name = "pydantic" },
+    { name = "pypdfium2" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "snowballstemmer" },
+    { name = "stop-words" },
+    { name = "striprtf" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-language-pack" },
+    { name = "xlrd" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9d/6a/074a076a7226e629b42bc677987abdedab3eda137d31e318a67b130d07f6/silica_core-0.10.1.tar.gz", hash = "sha256:dcaf9919001e301115461b4c9aa9618d5c61f70902f8d429e88a17a871adc5d8", size = 3749984, upload-time = "2026-10-08T16:34:03.483Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f6/7b/86df3967df9f89fd3145603c5d1821bdd8201612bb9f54b76b70cef6133d/silica_core-0.10.1-py3-none-any.whl", hash = "sha256:0d8c895a14d1caa0697aaf8641ee1a3812bf5996e36cf2fba41a93282b0eff9e", size = 251850, upload-time = "2026-10-08T16:34:01.518Z" },
+]
 
 [[package]]
 name = "six"

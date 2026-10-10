@@ -41,6 +41,6 @@ except ImportError:  # pragma: no cover - source tree without a build
         from importlib.metadata import PackageNotFoundError
         from importlib.metadata import version as _pkg_version
 
-        __version__ = _pkg_version("silica")
+        __version__ = _pkg_version("silica-agent")
     except (ImportError, PackageNotFoundError):  # pragma: no cover
         __version__ = "0.0.0+unknown"

@@ -1,11 +1,12 @@
 name: release-shim
 
-# Publishes `silica-agent`, the redirect to `silica-harness` (see
-# packaging/silica-agent/pyproject.toml for why the old name is kept alive
-# rather than deleted).
+# Publishes `silica-harness`, the redirect to `silica-agent` (see
+# packaging/silica-harness/pyproject.toml for why the old name is kept alive
+# rather than deleted). Run it after the silica-agent release it depends on is
+# on PyPI: the check below installs it from there.
 #
 # Manual, not tag-driven: the shim's job is to point at a moving target, so one
-# release keeps working for every silica-harness that follows it. Run this only
+# release keeps working for every silica-agent that follows it. Run this only
 # when the shim's own metadata changes, which should be close to never.
 on:
   workflow_dispatch:
@@ -20,12 +21,12 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     # Same environment as release.yml, so PyPI's trusted publisher for
-    # silica-agent narrows to it the same way. NOTE: that publisher must name
+    # silica-harness narrows to it the same way. NOTE: that publisher must name
     # THIS repository (kiycoh/silica-agent) and this workflow file, or the
     # OIDC claim cannot match it.
     environment:
       name: pypi
-      url: https://pypi.org/p/silica-agent
+      url: https://pypi.org/p/silica-harness
     permissions:
       id-token: write   # OIDC for PyPI Trusted Publishing (no stored token)
     steps:
@@ -40,7 +41,7 @@ jobs:
       # finds there.
       - name: Build the shim
         run: uv build --out-dir "$GITHUB_WORKSPACE/shim-dist" && rm -f "$GITHUB_WORKSPACE/shim-dist/.gitignore"
-        working-directory: packaging/silica-agent
+        working-directory: packaging/silica-harness
 
       # The only thing this distribution does is resolve to another one and
       # keep the `silica` command working, so that is what gets checked before
@@ -50,7 +51,7 @@ jobs:
         run: |
           uv venv /tmp/shim-check
           VIRTUAL_ENV=/tmp/shim-check uv pip install "$GITHUB_WORKSPACE"/shim-dist/*.whl
-          VIRTUAL_ENV=/tmp/shim-check uv pip show silica-harness > /dev/null
+          VIRTUAL_ENV=/tmp/shim-check uv pip show silica-agent > /dev/null
           /tmp/shim-check/bin/silica --version
 
       - name: Publish to PyPI
