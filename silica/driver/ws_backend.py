@@ -19,6 +19,7 @@ import json
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import networkx as nx
@@ -419,7 +420,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         # the reply is in — so this one records after the write, with no baseline
         # read: a create had nothing to be a baseline.
         session_changes.touched(ref.path, None)
-        self._patch_graph_add(ref.path, ref, content)
+        self._patch_create(ref.path, ref, content)
         return ref
 
     def overwrite(self, path: str, content: str) -> NoteRef:
@@ -475,7 +476,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         path = self._path_arg(ref)
         session_changes.touched_from_disk(path)
         self._rpc("delete", path=path)
-        self._patch_graph_remove(path)
+        self._patch_delete(path)
 
     def autolink_note(
         self,
@@ -532,6 +533,61 @@ class ObsidianWSBackend(GraphIndexMixin):
                 r for r in self._notes_by_name[name_lower] if r.path != path
             ]
         self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
+
+    def _patch_delete(self, path: str) -> None:
+        """`_patch_graph_remove`, then every note that linked it.
+
+        The fs backend's repair (ADR-0092), with each referrer's body read
+        from disk: the plugin's delete replies as soon as `trashFile` returns,
+        before Obsidian's metadata cache settles, so asking it for links now
+        would answer with no settled timing. The referrers' bytes did not
+        change, and the plugin has the folder CONFIG points at open (the
+        assumption `session_changes.touched_from_disk` already makes).
+        """
+        if not self._is_graph_built:
+            return
+        referrers = ([p for p in self._graph.predecessors(path) if p != path]
+                     if path in self._graph else [])
+        self._patch_graph_remove(path)
+        self._repatch_from_disk(referrers)
+
+    def _patch_create(self, path: str, ref: NoteRef, content: str) -> None:
+        """`_patch_graph_add`, then the sources of unresolved pairs that now
+        resolve to the new note, filtered by name first. The fs backend also
+        re-patches the referrers of a namesake; this index resolves a bare
+        name to the first note of that name, so a new namesake takes no link
+        here until this resolver follows the fs one (ADR-0092 point 1)."""
+        self._patch_graph_add(path, ref, content)
+        if not self._is_graph_built:
+            return
+        name = ref.name.lower()
+        sources: set[str] = set()
+        for source, target in list(self._unresolved_links):
+            if target.rsplit("/", 1)[-1].removesuffix(".md").lower() != name:
+                continue
+            hit = self._resolve_link(target, source_path=source)
+            if hit is not None and hit.path == path:
+                sources.add(source)
+        sources.discard(path)
+        self._repatch_from_disk(sorted(sources))
+
+    def _repatch_from_disk(self, paths: list[str]) -> None:
+        from silica.config import CONFIG
+
+        root = (getattr(CONFIG, "vault_path", "") or "").strip()
+        for path in paths:
+            try:
+                if not root:
+                    raise OSError("no vault path configured")
+                content = (Path(root) / path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                # The disk does not hold what the plugin has open: drop the
+                # index and let the next read rebuild it from the plugin, the
+                # same fallback move() and autolink_note() take.
+                logger.debug("index repair: %s not re-read (%s); rebuilding", path, exc)
+                self._is_graph_built = False
+                return
+            self._patch_graph_add(path, self._node_ref(path), content)
 
     def _add_link_edges(self, path: str, content: str) -> None:
         for target, scaffold in extract_links_typed(content).items():
