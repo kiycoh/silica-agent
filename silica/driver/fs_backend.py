@@ -1040,11 +1040,18 @@ class ObsidianFSBackend(GraphIndexMixin):
         the touched notes and their 1-hop neighborhood.
         """
         self._ensure_index()
+        # One pass over the unresolved pairs, grouped by source: each note
+        # used to scan them all for its own count, O(notes x pairs), 6.0 ms on
+        # the 730-note test vault and about 18.7 million pair visits at 5,000
+        # notes (ADR-0092 point 4).
+        by_source: dict[str, list[str]] = {}
+        for s, t in self._unresolved_links:
+            by_source.setdefault(s, []).append(t)
         if refs is None:
             link_counts = {}
             for path, ref in self._notes.items():
                 resolved_count = self._graph.out_degree(path) if path in self._graph else 0
-                unresolved_count = sum(1 for s, t in self._unresolved_links if s == path)
+                unresolved_count = len(by_source.get(path, ()))
                 # Key by canonical path (no .md) — unique even with duplicate basenames.
                 # graph_diff.normalize_path() strips .md and lowercases, so path-keyed
                 # snapshots compare identically to name-keyed ones in the diff.
@@ -1057,7 +1064,8 @@ class ObsidianFSBackend(GraphIndexMixin):
             }
             return GraphSnapshot(
                 orphans=self.orphans(),
-                unresolved=self.unresolved(),
+                unresolved=[Link(source=self._node_ref(s), target=t.removesuffix(".md"))
+                            for s, targets in by_source.items() for t in targets],
                 link_counts=link_counts,
                 backlink_counts=backlink_counts
             )
@@ -1082,7 +1090,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             note = self._notes.get(path)
             if note:
                 resolved_count = self._graph.out_degree(path) if path in self._graph else 0
-                unresolved_count = sum(1 for s, t in self._unresolved_links if s == path)
+                unresolved_count = len(by_source.get(path, ()))
                 key = path.removesuffix(".md")
                 link_counts[key] = resolved_count + unresolved_count
                 backlink_counts[key] = self._graph.in_degree(path) if path in self._graph else 0
@@ -1096,9 +1104,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         for path in neighborhood:
             if path in self._notes:
                 source_ref = self._notes[path]
-                for s, t in self._unresolved_links:
-                    if s == path:
-                        unresolved.append(Link(source=source_ref, target=t.removesuffix(".md")))
+                for t in by_source.get(path, ()):
+                    unresolved.append(Link(source=source_ref, target=t.removesuffix(".md")))
 
         return GraphSnapshot(
             orphans=orphans,

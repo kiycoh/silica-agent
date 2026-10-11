@@ -188,8 +188,10 @@ class ObsidianDriver(Protocol):
 
     Freshness contract (NORMATIVE from SILICA.md):
       The Driver MUST declare read-after-write semantics. After a create/
-      set_prop/move, the Driver guarantees that the next read reflects the
-      mutation. If the underlying cache updates asynchronously, the backend
+      set_prop/move/delete, the Driver guarantees that the next read reflects
+      the mutation, graph reads included: a delete leaves its referrers' links
+      unresolved and a create resolves the links that were waiting for it
+      (ADR-0092). If the underlying cache updates asynchronously, the backend
       MUST wait/poll until settled. A method that doesn't respect the same
       freshness contract on both backends is a bug, not a difference.
     """

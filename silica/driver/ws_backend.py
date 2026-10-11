@@ -387,13 +387,17 @@ class ObsidianWSBackend(GraphIndexMixin):
                     neighborhood.update(self._graph.predecessors(r.path))
 
         paths = self._notes.keys() if neighborhood is None else neighborhood
+        # One pass, grouped by source, as in the fs backend (ADR-0092 point 4).
+        by_source: dict[str, list[str]] = {}
+        for s, t in self._unresolved_links:
+            by_source.setdefault(s, []).append(t)
         link_counts: dict[str, int] = {}
         backlink_counts: dict[str, int] = {}
         for path in paths:
             if path not in self._notes:
                 continue
             resolved = self._graph.out_degree(path) if path in self._graph else 0
-            unresolved = sum(1 for s, _t in self._unresolved_links if s == path)
+            unresolved = len(by_source.get(path, ()))
             key = path.removesuffix(".md")
             link_counts[key] = resolved + unresolved
             backlink_counts[key] = self._graph.in_degree(path) if path in self._graph else 0
@@ -401,7 +405,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         orphans = [self._notes[p] for p in paths
                    if p in self._notes and (p not in self._graph or self._graph.in_degree(p) == 0)]
         unresolved_links = [Link(source=self._node_ref(s), target=t.removesuffix(".md"))
-                            for s, t in self._unresolved_links
+                            for s, targets in by_source.items() for t in targets
                             if s in self._notes and (neighborhood is None or s in neighborhood)]
         return GraphSnapshot(
             orphans=orphans, unresolved=unresolved_links,
