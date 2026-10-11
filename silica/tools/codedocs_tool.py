@@ -34,7 +34,10 @@ def silica_document(path: Annotated[str, Field(description='Repo-relative path t
         stub = CODE.to_stub(item)
     except ValueError as e:
         return {"status": "error", "message": str(e)}
-    DRIVER.upsert(stub.note_path, stub.body)  # re-running on the same file refreshes the stub
+    from silica.kernel.write.preserve import Loss
+
+    # STAGED holds only inside the inbox, which check_write tests at run time.
+    DRIVER.upsert(stub.note_path, stub.body, loss=Loss.STAGED)  # re-running refreshes the stub
     return {
         "status": "ok",
         "note_path": stub.note_path,

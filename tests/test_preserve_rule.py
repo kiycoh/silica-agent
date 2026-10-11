@@ -209,3 +209,26 @@ def test_the_plan_sections_are_the_ones_plans_generates():
     from silica.kernel.write.preserve import PLAN_SECTIONS
 
     assert PLAN_SECTIONS == frozenset(_GENERATED)
+
+
+def test_resolve_drops_the_provenance_header_left_empty_by_the_move():
+    # contested._extract_contradiction_callouts prunes a pre-2026-09-04 patch
+    # header whose only content was the callout it moved (found by the
+    # suite's census of would-refuse lines, test_superseded.py).
+    from silica.kernel.write.contested import mark_contested, resolve_contested
+
+    note = ("---\nAI: true\n---\n\n# Warfarin\n\nThe dose is 5mg.\n\n"
+            "## Additional notes: Warfarin (from a.md)\n\n"
+            "> [!warning] Contradiction — from a.md\n> The dose is 50mg.\n>\n"
+            "> Conflicts with this note. Unresolved.\n")
+    before = mark_contested(note, "source: a.md")
+    after = resolve_contested(before, resolved_by="user", valid_to="2026-10-11")
+    assert lost(before, after, loss=Loss.RESOLVE) is None
+    assert lost(before, after.replace("The dose is 5mg.\n", ""), loss=Loss.RESOLVE)
+
+
+def test_the_header_prefixes_are_the_ones_templates_writes():
+    from silica.kernel.write.preserve import PROVENANCE_HEADERS
+    from silica.kernel.write.templates import PROVENANCE_HEADER_PREFIXES
+
+    assert PROVENANCE_HEADERS == PROVENANCE_HEADER_PREFIXES

@@ -620,6 +620,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     body = _rewrite_image_links(_respace_prose(strip_degenerate_runs(md_text)), renamed)
     from silica.driver import DRIVER
     from silica.kernel.vault_manifest import active_inbox_dir
+    from silica.kernel.write.preserve import Loss
 
     inbox = active_inbox_dir() or "Inbox"
     stem = src.stem
@@ -664,7 +665,8 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     # segment because it fits under _MAX_SEGMENT_CHARS — was distilled in full.
     if len(segments) == 1:
         note_rel = f"{inbox}/{stem}.md"
-        DRIVER.upsert(note_rel, _flag(flagged[0][1]) + body.lstrip("\n"))  # re-converting the same source refreshes its inbox note
+        DRIVER.upsert(note_rel, _flag(flagged[0][1]) + body.lstrip("\n"),  # a re-convert refreshes it
+                      loss=Loss.STAGED)
         return [note_rel]
 
     width = len(str(len(segments)))
@@ -676,7 +678,8 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         # an Introduction each produced `1-introduction.md`, and the second
         # one's sha256 marked the first one's notes as drifted.
         note_rel = f"{inbox}/{stem}/{stem}-{i:0{width}d}-{slug}.md"
-        DRIVER.upsert(note_rel, _flag(kind) + seg.lstrip("\n"))  # re-converting the same source refreshes its segments
+        DRIVER.upsert(note_rel, _flag(kind) + seg.lstrip("\n"),  # a re-convert refreshes it
+                      loss=Loss.STAGED)
         paths.append(note_rel)
     logger.info("PDF %s split into %d inbox segment(s)", src.name, len(segments))
     return paths
@@ -1714,7 +1717,9 @@ def _convert_tabular(src: Path) -> list[str]:
     stem = _family_stem(members) if len(members) > 1 else src.stem
     fm = _provenance_fm(src, md, tabular_members=members)
     note_rel = f"{inbox}/{stem}.md"
-    DRIVER.upsert(note_rel, fm + md.lstrip("\n"))  # re-converting any member refreshes it
+    from silica.kernel.write.preserve import Loss
+
+    DRIVER.upsert(note_rel, fm + md.lstrip("\n"), loss=Loss.STAGED)  # any member's re-convert refreshes it
     return [note_rel]
 
 
@@ -2336,8 +2341,11 @@ def _write_leaf(src: Path, body: str, name: str, fields: dict) -> None:
     from silica.kernel.vault_manifest import in_write_dir
     from silica.kernel.write import frontmatter
 
+    from silica.kernel.write.preserve import Loss
+
     data = {**fields, "source_id": name, "source_file": str(src)}
-    DRIVER.upsert(f"{in_write_dir(SOURCES_DIR)}/{name}", frontmatter.dump(data, body))
+    DRIVER.upsert(f"{in_write_dir(SOURCES_DIR)}/{name}", frontmatter.dump(data, body),
+                  loss=Loss.STAGED)
 
 
 def _resolve_input(target: str) -> Path:

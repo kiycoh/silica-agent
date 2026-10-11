@@ -187,8 +187,12 @@ def sweep_note(rel_path: str, resolves) -> dict | None:
         dropped = []
     if new == content:
         return None
+    from silica.kernel.write.preserve import Loss
+
     try:
-        DRIVER.overwrite(rel_path, new)
+        # UNLINK relaxes only the related: entries that resolve nowhere; the
+        # body's unlinks pass the rule as they are, alias for alias.
+        DRIVER.overwrite(rel_path, new, loss=Loss.UNLINK)
     except Exception as e:
         logger.warning("link sweep: overwrite failed for %s (left as-is): %s", rel_path, e)
         return None

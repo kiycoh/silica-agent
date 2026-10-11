@@ -981,7 +981,9 @@ def _dc_verify(args: list[str], **_) -> bool:
     if new == prior:
         CONSOLE.print(f"  {path}: nothing to change.")
         return True
-    DRIVER.overwrite(path, new)
+    from silica.kernel.write.preserve import Loss
+
+    DRIVER.overwrite(path, new, loss=Loss.PERSON)  # the person's own attestation
     get_checkpoint_store().push(path, prior, new)  # /undo reaches it; the edited lane knows it
     if "--clear" in args:
         CONSOLE.print(f"  {path}: human attestations cleared.")
@@ -1477,8 +1479,10 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         except Exception as exc:
             CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
         return True
+    from silica.kernel.write.preserve import Loss
+
     try:
-        DRIVER.overwrite(note_path, content)
+        DRIVER.overwrite(note_path, content, loss=Loss.RESTORE)
         depth = store.depth(note_path)
         remaining = max(0, depth - 1)
         CONSOLE.print(f"  Undone: [bold]{note_path}[/]  [dim]({remaining} undo step(s) remaining)[/]")
@@ -2333,8 +2337,10 @@ def _stage_envelope(body: str, stem: str, inbox: str) -> str:
     """
     from silica.driver import DRIVER
 
+    from silica.kernel.write.preserve import Loss
+
     rel = f"{inbox}/{stem}.md"
-    DRIVER.upsert(rel, body)
+    DRIVER.upsert(rel, body, loss=Loss.STAGED)
     return rel
 
 
@@ -2580,7 +2586,9 @@ def _promote(args: list[str]) -> str:
     # keep it to one path segment so no key can stage outside the inbox.
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", entity).strip(".-") or "episodic"
     rel = f"{inbox}/{stem}.md"
-    DRIVER.upsert(rel, promotion_stub(heads, store=store))
+    from silica.kernel.write.preserve import Loss
+
+    DRIVER.upsert(rel, promotion_stub(heads, store=store), loss=Loss.STAGED)
     try:
         target_dir = _pick_target_folder([rel])
     except Exception as exc:

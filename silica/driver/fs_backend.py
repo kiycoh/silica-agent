@@ -687,8 +687,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         hit = self._body_cache.get(str(full))
         return bool(hit and hit[2])
 
-    def _guard_write(self, rel_path: str, prior: str | None, content: str, crlf: bool,
-                     loss: preserve.Loss | None, free) -> bytes:
+    def _guard_write(self, rel_path: str, prior: str | None, content: str, crlf: bool, *,
+                     loss: preserve.Loss | None = None, free=()) -> bytes:
         """ADR-0093 at the write site: the rule on the composed text (it
         raises only once preserve.REFUSE is on), then the bytes in the prior's
         own line terminator, since every composer reads and writes LF."""
@@ -1122,7 +1122,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         if stamp:
             content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
         prior = self._read_cached(full_path)
-        data = self._guard_write(rel_path, prior, content, self._crlf(full_path), loss, free)
+        data = self._guard_write(rel_path, prior, content, self._crlf(full_path),
+                                 loss=loss, free=free)
         session_changes.touched(rel_path, prior)
         atomic_write_bytes(full_path, data)
         self._invalidate_body(rel_path)
@@ -1204,7 +1205,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         data[name] = value
 
         new_content = fm.dump(data, body)
-        raw = self._guard_write(rel_path_str, content, new_content, crlf, None, (name,))
+        raw = self._guard_write(rel_path_str, content, new_content, crlf, free=(name,))
         session_changes.touched(rel_path_str, content)
         atomic_write_bytes(path, raw)
         self._body_cache.pop(str(path), None)
@@ -1325,7 +1326,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 if n > 0:
                     # Write directly — avoids re-entrant overwrite() logic
                     raw = self._guard_write(referrer_rel, referrer_content, new_content,
-                                            referrer_crlf, preserve.Loss.RENAME, ())
+                                            referrer_crlf, loss=preserve.Loss.RENAME)
                     session_changes.touched(referrer_rel, referrer_content)
                     atomic_write_bytes(referrer_path, raw)
                     self._invalidate_body(referrer_rel)
