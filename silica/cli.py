@@ -4580,7 +4580,7 @@ def main():
         # recall misses for the thin-coverage hint.
         # A /web turn is not checked for numbers, but its pages were read: the
         # RecallWatch under its WebTurn collects them for the session set.
-        read = RecallWatch(callback)
+        read = RecallWatch(callback, surface="repl")
         watch = WebTurn(web[0], read) if web else read
 
         try:

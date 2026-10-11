@@ -60,9 +60,10 @@ Refine with those when `recall` is the wrong shape:
   and `silica_semantic_search` scopes the answer to that vault folder, e.g.
   `folder: "docs/adr"` or `folder: "silica"`. `memory=false` cannot do this:
   those notes are in the active vault.
-- A reply carrying `degraded: ["rerank"]` was ordered by first-stage fusion,
-  not by the cross-encoder: the notes are candidates, not a ranking. Say so
-  when citing, and pass the `hint` on to the user (the reranker is down).
+- A reply carrying `degraded` ran without a leg, named with its cause:
+  `{"embed": ...}` means it searched by words only, `{"rerank": ...}` that the
+  order is first-stage fusion, not a ranking. Say so when citing, and pass the
+  `hint` on to the user: it names the cause and where to fix it.
 - A header token `documents: a.py, b.py` names the source files the note
   documents: on a code question, open those before answering from prose.
 - Known title: `silica_search {query}`, then read it.

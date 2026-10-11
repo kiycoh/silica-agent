@@ -291,6 +291,22 @@ def _peek_stale() -> dict[str, str]:
         return {}
 
 
+def degraded_fields(leg_stats: dict) -> dict[str, Any]:
+    """`degraded` and its `hint` for a retrieval reply, {} when no leg failed.
+
+    Spread right after `query` (ADR-0094 point 3): the GUI card keeps the first
+    1,200 characters of a result and the median recall result is 22,567 long
+    (2026-10-11), so a flag after `context` never reached the screen; an MCP
+    client's raw view and a compaction stub both keep the head too.
+    """
+    degraded = leg_stats.get("degraded")
+    if not degraded:
+        return {}
+    from silica.agent.recall_watch import degraded_lines
+
+    return {"degraded": dict(degraded), "hint": " · ".join(degraded_lines(degraded, "tool"))}
+
+
 # First-stage pool for _facade_search: over-fetch so dropping staging entries
 # still leaves k notes. 20 is the rerank pool the gate is calibrated on.
 _NOTE_POOL = 20
@@ -327,10 +343,15 @@ def _facade_search(text: str, k: int, memory: bool = True, folder: str = "") -> 
     # then dropping staging pays for documents that get thrown away, and on a
     # local GPU a 20-document batch OOMs outright. This way the reranker still
     # sees exactly k candidates, and they are all notes.
+    # One record for both calls (ADR-0094): the query embed marks `embed` in
+    # facade_retrieve, the cross-encoder marks `rerank` below. Kept apart, a
+    # search that lost its embedder read `reranked: true` and looked healthy.
+    rr: dict = {"reranked": False}
     results, _query_vec = facade_retrieve(text, k=max(k, _NOTE_POOL), use_rerank=False,
-                                          use_memory=memory)
+                                          use_memory=memory, leg_stats=rr)
     if results is None:
-        return {"error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
+        return {**degraded_fields(rr),
+                "error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
     # is_inbox_path answers for the ACTIVE vault's staging roots; a memory-lane
     # note whose vault happens to use the same folder name is not this vault's
     # staging, and dropping it here silently shrank the guest lane (ADR-0019).
@@ -344,13 +365,13 @@ def _facade_search(text: str, k: int, memory: bool = True, folder: str = "") -> 
     # Never answer empty because everything relevant was staged: if the vault has
     # nothing else to say, staging IS the answer. A folder scope is different:
     # empty there is the true answer, not a staging artefact.
-    rr: dict = {"reranked": False}
     results = (notes or (results if not folder else []))[:k]
     reranker = get_reranker(CONFIG)
     if reranker:
         results = rerank_related(reranker, text, results, k=k, stats=rr)
     stale_map = _peek_stale()
     return {
+        **degraded_fields(rr),
         # Which scale `score` is on. The cross-encoder abstains on pools it
         # cannot read, and the surviving first-stage cosines live around 0.03
         # where a rerank probability lives around 0.99 — same field, two scales.
@@ -439,7 +460,7 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     # with material the question did not ask about.
     p = perceive(query, now=datetime.date.today().isoformat(), k=k,
                  paths=named,
-                 use_memory=memory and named is None, vault=peek, rerank_stats=rr,
+                 use_memory=memory and named is None, vault=peek, leg_stats=rr,
                  folder=folder.strip() or None,
                  min_trust=min_trust or None, lifecycle=lifecycle or None,
                  mark_used=True)
@@ -451,7 +472,8 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     # render(windowed=True) emits b.excerpt, so a note whose window IS its body
     # was delivered complete — measured: 3 of 9 calls in a chat were re-reads of
     # notes recall had already handed over whole.
-    out = {"query": query, "context": p.render(stale=stale_map or None),
+    out = {"query": query, **degraded_fields(rr),
+           "context": p.render(stale=stale_map or None),
            "notes": [b.path for b in p.blocks],
            # Active-vault and peeked notes: the caller can re-read both (the
            # latter with vault=). Memory-lane notes stay out (ADR-0032) — they
@@ -466,15 +488,6 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
         out["filtered"] = p.filtered  # the model must know it saw less than retrieval found
     if p.all_non_active:
         out["all_non_active"] = True  # the context opens with the abstain rule (M3)
-    if not rr.get("reranked"):
-        # A top-level key, not a per-hit flag: the caller reads `context` and
-        # never looks at scores, so the one place it can learn the ordering is
-        # a fusion one is here. The autostart already exists (`silica mcp`
-        # runs ensure_local_servers); it only fires when the env names a
-        # command, which is what the hint says.
-        out["degraded"] = ["rerank"]
-        out["hint"] = ("ordering is first-stage fusion, not reranked: start the reranker, "
-                       "or set SILICA_RERANK_SERVE_CMD so `silica mcp` starts it")
     mem_paths = [b.path for b in p.blocks if b.origin == "memory"]
     if mem_paths:
         out["memory"] = mem_paths
@@ -494,12 +507,15 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
             # An empty answer from a cold index reads as "that vault knows
             # nothing about this"; what it means is that nobody indexed it.
             out["coverage"] = cov["level"]
-            out["hint"] = (
+            cov_hint = (
                 "no recall index yet: open the vault once (SILICA_VAULT=<path> silica) "
                 "and run /embed and /cooccur"
                 if cov["level"] == "cold" else
                 "only the lexical index exists (silica_vaults can score it); run /embed "
                 "and /cooccur in that vault for recall to see it")
+            # Appended: it used to overwrite the degraded line, the one hint
+            # that says the answer above it was made without a leg.
+            out["hint"] = f"{out['hint']} · {cov_hint}" if out.get("hint") else cov_hint
     return out
 
 

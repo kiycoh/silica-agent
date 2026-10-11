@@ -203,7 +203,7 @@ def _peek_dir(vault: str | None) -> str | None:
 
 
 def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
-                    use_rerank: bool = True, rerank_stats: dict | None = None,
+                    use_rerank: bool = True, leg_stats: dict | None = None,
                     use_memory: bool = True, vault: str | None = None,
                     recall_rank: list[tuple[str, float]] | None = None,
                     lexical_rank: list[tuple[str, float]] | None = None):
@@ -225,11 +225,15 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
     than a boolean is what keeps their sources out of this module while the
     harness still measures this function and not a copy of it.
 
-    ``rerank_stats`` is an optional out-dict filled with ``{"reranked": bool}``
+    ``leg_stats`` is an optional out-dict filled with ``{"reranked": bool}``
     (see ``rerank_related``): the returned ``.score`` is a cross-encoder
     relevance when True and a first-stage fusion cosine when False, and the two
     are an order of magnitude apart. A caller that shows the number, or
-    thresholds on it, has to know which one it got.
+    thresholds on it, has to know which one it got. Its ``degraded`` maps a leg
+    this call ran without to the cause (ADR-0094): ``embed`` from the query
+    embed here, ``rerank`` from ``rerank_related``, the first cause per leg
+    winning. A leg that was never asked (no index, no reranker configured,
+    gate 2b) is not degraded: that is configuration or design, not a failure.
 
     ``vault`` (peek): the path of ANOTHER adopted vault whose stores stand in
     for the active legs, read-only and read as they lie on disk. The memory
@@ -280,8 +284,12 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
                          or mem_embed is not None):
         try:
             query_vec = get_embedder(CONFIG).embed([query], query=True)[0]
-        except Exception:
+        except Exception as exc:
             query_vec = None  # embed leg abstains; co-occurrence may still carry
+            if leg_stats is not None:
+                from silica.agent.providers import why_of
+
+                leg_stats.setdefault("degraded", {}).setdefault("embed", why_of(exc))
 
     if query_vec is None and cooccur_store is None and mem_cooccur is None:
         return None, None
@@ -305,12 +313,12 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
             if r.origin == "vault":
                 r.origin = peek
     reranker = get_reranker(CONFIG) if use_rerank else None
-    if rerank_stats is not None:
-        rerank_stats["reranked"] = False  # no reranker configured ⇒ cosines stand
+    if leg_stats is not None:
+        leg_stats["reranked"] = False  # no reranker configured ⇒ cosines stand
     if reranker:
         # Default document path: gate 2b sees full body lengths, the scored
         # docs are query-densest windows, memory-lane bodies resolve by origin.
-        results = rerank_related(reranker, query, results, k=k, stats=rerank_stats)
+        results = rerank_related(reranker, query, results, k=k, stats=leg_stats)
     return results, query_vec
 
 
@@ -530,7 +538,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
              paths: list[str] | None = None,
              use_memory: bool = True,
              vault: str | None = None,
-             rerank_stats: dict | None = None,
+             leg_stats: dict | None = None,
              recall_rank: list[tuple[str, float]] | None = None,
              lexical_rank: list[tuple[str, float]] | None = None,
              folder: str | None = None,
@@ -557,10 +565,11 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     question the market-research notes (35% of this vault) took 6 of 15 slots
     by co-occurrence, and they live in the ACTIVE vault.
 
-    ``rerank_stats`` is `facade_retrieve`'s out-dict, forwarded untouched: the
-    tool surface has to tell a reranked ordering from a fusion one, and this
-    was the only hop where that bit got lost (measured 2026-09-03: recall
-    answered for a day with :1235 down and nothing in the reply said so).
+    ``leg_stats`` is `facade_retrieve`'s out-dict, forwarded untouched: the
+    tool surface has to tell a reranked ordering from a fusion one, and which
+    leg the call ran without, and this was the only hop where that got lost
+    (measured 2026-09-03: recall answered for a day with :1235 down and
+    nothing in the reply said so).
 
     ``recall_rank``/``lexical_rank`` are forwarded to `facade_retrieve`
     untouched: extra ranked legs the caller computed, never built here.
@@ -582,7 +591,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
         results, query_vec = facade_retrieve(
             query, k=k * 3 if folder else k, use_embedder=use_embedder,
             use_rerank=use_rerank, use_memory=use_memory, vault=vault,
-            rerank_stats=rerank_stats, recall_rank=recall_rank,
+            leg_stats=leg_stats, recall_rank=recall_rank,
             lexical_rank=lexical_rank)
         if folder:
             from silica.kernel.recall.paths import in_folder
