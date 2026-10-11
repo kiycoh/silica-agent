@@ -117,3 +117,21 @@ def test_the_rule_catches_every_corruption_that_changed_a_note(corrupt):
             changed += 1
             assert lost(text, after) is not None, (note.stem, after)
     assert changed, "no fixture exercises this corruption"
+
+
+def test_t5_joins_the_integrity_rate(tmp_path, monkeypatch):
+    import shutil
+
+    from silica.kernel.link.health import integrity_probe, preservation as pv
+
+    for name in ("human mixed.md", "related null.md"):
+        shutil.copy(FIXTURES / name, tmp_path / name)
+    res = integrity_probe(tmp_path)
+    assert (res["rate"], res["preservation_notes_losing"]) == (1.0, 0)
+
+    def lossy(rel, text, ctx):  # a composer that starts dropping the last line
+        return text.rstrip("\n").rsplit("\n", 1)[0] + "\n"
+
+    monkeypatch.setitem(pv.COMPOSERS, "moc", (lossy, None))
+    res = integrity_probe(tmp_path)
+    assert res["rate"] == 0.0 and res["preservation_notes_losing"] == 2
