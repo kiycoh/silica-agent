@@ -328,8 +328,10 @@ def test_the_tabs_are_the_only_place_the_surfaces_are_named():
     modes = _modes(app)
     # ADR-0064: Bridges took the name Areas and the matrix with it, so the
     # mode id that names one part and its neighbours is "areas"
-    assert [m for m, _ in modes] == ["graph", "map", "path", "folders", "areas", "read"], modes
-    assert [g for _, g in modes] == ["0", "0", "0", "1", "1", "1"], "pictures of the links, then readings of the shape"
+    # ADR-0088: the Map is what a click on a note lays out in the graph, so it
+    # is no longer a surface of its own.
+    assert [m for m, _ in modes] == ["graph", "path", "folders", "areas", "read"], modes
+    assert [g for _, g in modes] == ["0", "0", "1", "1", "1"], "pictures of the links, then readings of the shape"
     # ADR-0066: the Library tab is pushed wherever Zotero answers, read-only
     # where this vault does not hold the link, and always in the third group.
     lib = app[app.index('LAYOUT_MODES.push(["library", "Library"'):]
@@ -734,3 +736,16 @@ def test_details_links_name_every_neighbour_once_with_its_relations_as_tags(tmp_
     assert tags["RD"] == ["+1", "similar", "behind"]
     assert tags["Psi"] == ["-1"] and tags["Ghost"] == ["unwritten"]
     assert [r["name"] for r in rows if r["unreachable"]] == ["L23"]
+
+
+def test_the_map_is_a_click_in_the_graph_and_no_surface_of_its_own():
+    """ADR-0088: a click on a note arranges what it lights as the Map, so the
+    radial page, its hub picker and its frame are gone, and the drawer's "the
+    map" item opens the graph focused on the note."""
+    html, app, css = INDEX.read_text(), app_js(), app_css()
+    for gone in ("map-frame", "map-picker", "map-loading"):
+        assert gone not in html and gone not in app and gone not in css, gone
+    for gone in ("rootMap", "mapRootedPath", "renderMapPicker"):
+        assert gone not in app, gone
+    handler = _block(app, '$("#note-map").addEventListener("click"', "\n});")
+    assert 'graphMode = "graph"' in handler and "focusGraphNode(note)" in handler

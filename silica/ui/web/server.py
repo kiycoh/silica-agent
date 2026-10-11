@@ -2165,48 +2165,31 @@ def graph(request: Request):
     return Response(body, media_type="text/html; charset=utf-8", headers=headers)
 
 
-@app.get("/map")
-def mindmap(note: str = ""):
-    """Static-SVG radial map rooted on `note` — ephemeral, in-session (not written).
+# A note lights its degree over the layers on show: 86 at most on the 730-note
+# test vault. The bound is for a body no frame would send, since the placement
+# checks each note against every one placed before it.
+_MAP_LAYOUT_MAX = 2000
 
-    Consumes the same precomputed positions as the .canvas serializer, so the two
-    surfaces cannot diverge. Empty/unknown note degrades to a message, like /graph.
+
+@app.post("/map/layout", dependencies=_SAME_ORIGIN)
+def map_layout(payload: dict):
+    """The graph frame's lit set, arranged as the Map (ADR-0088).
+
+    The frame sends what it lit and the community each dot is painted with, so
+    the set is the graph's and a wedge cannot disagree with its dots; only the
+    geometry is computed here, by the builder the .canvas export uses. POST
+    because a hub lights dozens of paths; guarded like a write because it reads
+    the vault on another page's say-so.
     """
-    from silica.config import CONFIG
-    from silica.kernel.recall.mindmap import (
-        build_mapview,
-        gather_materials,
-        note_resolver,
-        render_map_svg,
-    )
+    from silica.kernel.recall.mindmap import arrange_in_vault
 
-    if not note.strip():
-        return HTMLResponse("<p style='font-family:monospace;color:#8a93a3'>enter a note: /map?note=…</p>")
-    try:
-        # Accept a title or a path — the input field usually gives a title.
-        root = note_resolver()(note)
-        if root is None:
-            return HTMLResponse(
-                f"<p style='font-family:monospace;color:#8a93a3'>"
-                f"'{_html.escape(note)}' not found in vault.</p>"
-            )
-        materials = gather_materials(root, latent_k=CONFIG.mindmap_latent_k)
-        mv = build_mapview(
-            root, materials, max_nodes=CONFIG.mindmap_max_nodes, hops=CONFIG.mindmap_hops
-        )
-        if len(mv.nodes) <= 1:
-            return HTMLResponse(
-                f"<p style='font-family:monospace;color:#8a93a3'>'{_html.escape(root)}' has no "
-                "neighbors to map (isolated in the graph).</p>"
-            )
-        return HTMLResponse(render_map_svg(mv, title=f"map · {root}"))
-    except Exception as exc:
-        # The exception text quotes the caller's `note`, so it is untrusted here
-        # too — this response loads same-origin in the explore iframe.
-        return HTMLResponse(
-            f"<p style='font-family:monospace'>map unavailable: {_html.escape(_failure(exc)['error'])}"
-            f"<br><small>{_html.escape(_failure(exc)['detail'])}</small></p>"
-        )
+    root, ids, groups = payload.get("root"), payload.get("ids"), payload.get("groups") or {}
+    if not isinstance(root, str) or not isinstance(ids, list) or not isinstance(groups, dict):
+        raise HTTPException(400, "expected {root: str, ids: [str], groups: {id: int}}")
+    community_of = {k: v for k, v in groups.items()
+                    if isinstance(k, str) and isinstance(v, int) and not isinstance(v, bool)}
+    lit = [i for i in ids if isinstance(i, str)][:_MAP_LAYOUT_MAX]
+    return arrange_in_vault(root, lit, community_of)
 
 
 @app.get("/path")

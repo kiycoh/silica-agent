@@ -323,8 +323,8 @@
            so this column's height is posted to it (silica-host-side) and the
            key starts under it. -->
       <div id="graph-side">
-        <!-- graph, map and path: fuzzy note search. Pick → fly the graph
-             camera (graph), root the radial map (map) or the ladder (path). -->
+        <!-- graph and path: fuzzy note search. Pick → fly the graph camera
+             and arrange the note as the Map (graph), or root the ladder (path). -->
         <div id="node-search-wrap" class="gbar-controls">
           <input id="node-search" type="text" placeholder="find a note…" aria-label="find a note" autocomplete="off" />
           <div id="node-results" hidden></div>
@@ -336,20 +336,6 @@
         <div class="spinner"></div>
         <div>Building the graph. Large vaults take a moment.</div>
       </div>
-      <div id="map-loading" class="frame-loading" hidden>
-        <div class="spinner"></div>
-        <div>Building the map.</div>
-      </div>
-
-      <!-- map landing: a radial map needs a root, so before one is picked we
-           show the vault's best-connected notes as a launch pad -->
-      <div id="map-picker" hidden>
-        <div class="map-picker-inner">
-          <div class="map-picker-title">Pick a note to map</div>
-          <div class="map-picker-hint">The vault's best-connected notes. Or search above, or pick any note in the Vault list.</div>
-          <div id="map-picker-list"></div>
-        </div>
-      </div>
 
       <div id="shape-loading" class="frame-loading" hidden>
         <div class="spinner"></div>
@@ -357,11 +343,10 @@
       </div>
 
       <!-- folders / areas / read all render in-page from one /shape load, so
-           unlike graph and map they share a pane instead of owning an iframe -->
+           unlike the graph they share a pane instead of owning an iframe -->
       <div id="shape-pane" hidden></div>
 
       <iframe id="graph-frame" title="vault graph"></iframe>
-      <iframe id="map-frame" title="radial map" hidden></iframe>
     </section>
 
     <!-- metrics: everything the L1 graph report measures, rendered as charts.
@@ -476,7 +461,7 @@
       <div class="sp-title">explore</div>
       <div class="hp-row"><span class="hp-what">3D</span><span>spatial layout of the whole vault; a node names itself when you hover it</span></div>
       <div class="hp-row"><span class="hp-what">2D</span><span>names appear as you zoom in, biggest notes first, and semantic zones in the graph's panel draws the zones as hulls</span></div>
-      <div class="hp-row"><span class="hp-what">the tabs</span><span>top of explore: Graph, Map and Path draw the links, Folders, Areas and Read read the shape. The line under them is the key, and on the graph the panel at the right is</span></div>
+      <div class="hp-row"><span class="hp-what">the tabs</span><span>top of explore: Graph and Path draw the links (a click on a note in the Graph lays it out as its map), Folders, Areas and Read read the shape. The line under them is the key, and on the graph the panel at the right is</span></div>
   </div>
   <!-- The note drawer's one control while it is shut (ADR-0084): the corner
        of the view, where the drawer's own close sits while it is open, so the
@@ -519,7 +504,7 @@
       <button id="note-close" class="ghost" title="close" aria-label="close this note">&#10005;</button>
       <!-- What can be done with the note lives behind its name (ADR-0059), and
            since ADR-0075 that is two things: a question about it in the
-           composer that is showing, and the map rooted on it. The four asks
+           composer that is showing, and the graph arranged on it (ADR-0088). The four asks
            that stood here are still typed commands (/summarize, /explain,
            /quiz, /relate), and practice starts from Learn's own rows. The
            diff is listed only when this session changed the note: with a

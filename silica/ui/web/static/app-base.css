@@ -380,7 +380,7 @@ body {
    `balance` instead, further down, because a heading is short and centred-ish
    raggedness reads as a title. */
 :is(.mnote, .mband-p, .mempty, .mcard-sub, .msec-s, .wl-d, .wk-empty-d,
-    .map-picker-hint, .meter-lbl, .st-banner) {
+    .meter-lbl, .st-banner) {
   text-wrap: pretty;
 }
 

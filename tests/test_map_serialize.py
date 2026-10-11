@@ -10,7 +10,6 @@ from silica.kernel.recall.mindmap import (
     _resolve_in,
     build_mapview,
     mapview_to_canvas,
-    render_map_svg,
 )
 
 _MUTED = "#5a6372"
@@ -85,13 +84,6 @@ def test_resolve_accepts_title_and_path_in_subfolder():
     assert _resolve_in("nope", paths, titles) is None
 
 
-def test_svg_renders_and_dashes_latent():
-    mv = build_mapview("root.md", _materials([("lat.md", "Lat", 0.9)]))
-    svg = render_map_svg(mv)
-    assert "<svg" in svg and "</svg>" in svg
-    assert "stroke-dasharray" in svg  # the latent edge is dashed
-
-
 def _two_area_view():
     g = nx.Graph()
     for i in range(4):
@@ -104,7 +96,6 @@ def _two_area_view():
         titles={p: p[:-3] for p in g.nodes},
         community_of=community_of,
         latent=[("lat.md", "Lat", 0.9)],
-        community_label={0: "Area zero", 1: "Area one", 7: "Not on this map"},
     ))
 
 
@@ -121,13 +112,3 @@ def test_wedges_tile_the_circle_and_hold_their_notes():
         for n in members:
             a = math.atan2(n.y, n.x) % (2 * math.pi)
             assert a0 - 1e-9 <= a <= a1 + 1e-9 or a0 - 1e-9 <= a - 2 * math.pi <= a1 + 1e-9
-
-
-def test_map_names_its_areas_and_marks_related_notes():
-    mv = _two_area_view()
-    assert mv.areas == {0: "Area zero", 1: "Area one"}   # only areas on the map
-    page = render_map_svg(mv)
-    assert "Area zero" in page                 # a wedge of several notes is named
-    assert "Area one" not in page              # a one-note wedge is named by its note
-    assert 'class="dot root"' in page
-    assert 'class="dot hop1 latent"' in page   # related, no link: the hollow dot

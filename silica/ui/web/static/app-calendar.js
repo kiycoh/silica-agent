@@ -482,7 +482,6 @@ function markVaultChanged() {
   shapeData = null;
   if (activeTab !== "graph") return; // rebuilt on the way back into the tab
   if (graphMode in SHAPE_VIEWS) drawShape();
-  else if (graphMode === "map" && mapRootedPath) rootMap(mapRootedPath);
   syncRefreshCue();
 }
 

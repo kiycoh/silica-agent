@@ -1,35 +1,3 @@
-// --- map landing: root the radial map on a note; hub-picker until one is set --
-function rootMap(path) {
-  mapRootedPath = path;
-  if (graphMode !== "map") setGraphMode("map");
-  $("#map-picker").hidden = true;
-  $("#map-frame").hidden = false;
-  $("#map-loading").hidden = false;
-  $("#map-frame").src = "/map?note=" + encodeURIComponent(path)
-    + "&theme=" + liveTheme() + "&t=" + Date.now();
-  closeNodeResults();
-}
-
-function renderMapPicker(hubs) {
-  const box = $("#map-picker-list");
-  box.innerHTML = "";
-  const most = Math.max(1, ...hubs.map((h) => h.degree));
-  for (const h of hubs) {
-    const row = document.createElement("div");
-    row.className = "hub-row";
-    row.dataset.path = h.path;
-    row.style.setProperty("--w", (h.degree / most).toFixed(3)); // the row's own bar
-    row.innerHTML = '<span class="hub-name"></span><span class="hub-deg"></span>';
-    row.querySelector(".hub-name").textContent = h.name;
-    row.querySelector(".hub-deg").textContent = h.degree;
-    box.appendChild(row);
-  }
-}
-$("#map-picker-list").addEventListener("click", (e) => {
-  const row = e.target.closest(".hub-row");
-  if (row) rootMap(row.dataset.path);
-});
-
 // --- path: the reading order around one note (V2, RefD) ----------------------
 // The sixth surface, and the only directed one. Rungs are LONGEST-path depth,
 // not hop count: on a ladder a shortcut edge would otherwise put a note on the
@@ -81,7 +49,7 @@ function renderPath(d) {
     wrap.appendChild(mkEl("p", "pl-empty", d.error));
     return wrap;
   }
-  // The landing. Same job as the map picker and a different ranking: a note
+  // The landing. A picker of notes to start from, ranked differently: a note
   // roots a ladder by what reads around it, which the file tree cannot say.
   if (d.picks) {
     wrap.appendChild(mkEl("div", "pl-h", "Pick a note to place in its reading order"));
@@ -196,7 +164,7 @@ $("#shape-pane").addEventListener("click", (e) => {
   if (b) rootPath(b.dataset.root);
 });
 
-// --- explore note search (network: fly the camera · map: root the map) --------
+// --- explore note search (graph: fly the camera · path: root the ladder) -------
 // A fuzzy ranked picker over the vault's notes, indexed from the sidebar tree —
 // same title→prefix→substring→path ranking the graph viewer's own search uses.
 let noteIdx = [];      // [{name, path, ln, lp}]
@@ -254,9 +222,7 @@ function moveNodeSel(d) {
 }
 
 function pickNote(path) {
-  if (graphMode === "map") {
-    rootMap(path);
-  } else if (graphMode === "path") {
+  if (graphMode === "path") {
     rootPath(path);
   } else { // network: locate the note and fly the graph camera to it
     const f = $("#graph-frame");
@@ -385,7 +351,7 @@ nucleateInput.addEventListener("change", () => {
   nucleateInput.value = ""; // reset so re-picking the same file fires change again
 });
 
-// --- note panel (right overlay drawer; opens from .note-link, the graph, and the map) -
+// --- note panel (right overlay drawer; opens from .note-link and the graph) ---
 const notePanel = $("#note-panel");
 let lastNotePath = null;   // note currently open in the drawer
 let lastViewedPath = null; // survives close — feeds the corner toggle
@@ -396,15 +362,13 @@ function setNoteW(w) {
   syncDrawerToViews(); // the frame parks its focus bar against the drawer's edge
 }
 
-// Mirror the open note onto the graph + map iframes: the matching node + its
-// 1-hop neighbours go full-opacity, everything else dims. No-op harmlessly if
+// Mirror the open note onto the graph iframe, which arranges it and what it
+// lights as the Map (ADR-0088). No-op harmlessly if
 // a tab was never opened (contentWindow still exists, message just has no
 // listener yet).
 function postToViews(msg) {
-  for (const id of ["#graph-frame", "#map-frame"]) {
-    const frame = $(id);
-    if (frame.contentWindow) frame.contentWindow.postMessage(msg, "*");
-  }
+  const frame = $("#graph-frame");
+  if (frame.contentWindow) frame.contentWindow.postMessage(msg, "*");
 }
 // The last focus INTENT, replayed whenever a view (re)loads. A frame that is
 // still loading drops the message, and /graph is rebuilt on every entry into
@@ -420,8 +384,7 @@ function focusGraphNodes(paths) {
   graphFocus = paths || [];
   replayGraphFocus();
 }
-// Both shapes, in order: the radial map only speaks the single-path message,
-// the graph speaks both and the set arrives second, so it wins there.
+// Both shapes, in order: the set arrives second, so it wins.
 function replayGraphFocus() {
   postToViews({ type: "silica-focus-path", path: graphFocus[0] || null });
   if (graphFocus.length > 1) postToViews({ type: "silica-focus-paths", paths: graphFocus });
@@ -441,7 +404,7 @@ function syncDrawerToViews() {
   postToViews({ type: "silica-host-drawer", open: false, width: 0 });
 }
 
-// The dock floats over the foot of the graph and map frames, which park their
+// The dock floats over the foot of the graph frame, which parks its
 // corner bars above it (graph-frame.css --foot). Its height is not one number:
 // a run line, the answer card and a multi-row draft stack it taller during a
 // turn. Folded and open it is the same height (app-panels.css), so a hover
@@ -482,7 +445,7 @@ let mermaidLoad = null;
 // `base` is the theme that exists to be driven entirely by those variables, so
 // nothing has to be re-derived and there is one code path instead of two.
 //
-// The look is the diagram theme of ADR-0069, the same one the radial map wears:
+// The look is the diagram theme of ADR-0069, the same one the graph's Map wears:
 // a diagram sits on the reading surface with no frame of its own, a node is a
 // raised fill with a crisp edge, a line is a neutral the eye can follow, and
 // colour is spent on the few marks a reader starts from. Names are set in the
@@ -726,7 +689,7 @@ function restoreYieldedSidebar() {
 //
 // No segment switches them (ADR-0059). Since ADR-0075 the drawer opens on the
 // note's TEXT for every gesture with a note behind it - a wikilink, the file
-// tree, a search hit, a calendar task, a graph node, a map card, a metrics or
+// tree, a search hit, a calendar task, a graph node, a metrics or
 // shape row - so naming a note and pointing at one land on the same view, and
 // "a second click reads it" is gone. The note's second view, its DETAILS
 // (Content, Links, Place), is behind the info button beside the title: on for
@@ -939,7 +902,7 @@ function paperStripEl(paper) {
 // still means "what is this". What moved is the ANSWER, which used to be drawn
 // twice - here for explore and in the drawer's context mode for every other
 // view - off the one /context call. One reader now, so a node answers the same
-// on the graph, the map, a metrics row and a shape row.
+// on the graph, a metrics row and a shape row.
 //
 // The head facts (degree, state, area) ride in on the frame's message rather
 // than being asked for again: the frame computed all three to draw the node you
@@ -1162,17 +1125,16 @@ function prefillChat(text) {
   box.dispatchEvent(new Event("input")); // let the autosize/palette hooks see it
 }
 
-// "map" button in the drawer header — jump to explore's map mode, rooted here.
-// Capture the path FIRST: the programmatic tab .click() bubbles to the document
-// outside-click handler, which closes the drawer and nulls lastNotePath
-// synchronously before rootMap runs (else note=null). Pre-set graphMode so the
-// tab-enter goes straight to map instead of loading the graph first.
+// "the map" in the drawer's menu: the Map is the graph arranged on the note
+// (ADR-0088). Capture the path FIRST: the programmatic tab .click() bubbles to
+// the document's outside-click handler, which closes the drawer, nulls
+// lastNotePath and clears the graph focus, so the focus is set again after it.
 $("#note-map").addEventListener("click", () => {
   const note = lastNotePath;
   if (!note) return;
-  graphMode = "map";
+  graphMode = "graph";
   document.querySelector('.tab[data-tab="graph"]').click();
-  rootMap(note);
+  focusGraphNode(note);
 });
 
 // The same jump for the reading order, which the node panel's ladder footer
@@ -1181,9 +1143,8 @@ $("#note-map").addEventListener("click", () => {
 // that knows how to enter Path rooted somewhere.
 window.openLadder = (note) => {
   if (!note) return;
-  // rootPath BEFORE the tab, and no pre-set graphMode: the map button can
-  // pre-set its mode because rootMap is replayed on tab-enter, and path has no
-  // such replay - showTab's setGraphMode(graphMode) draws off pathRootedPath
+  // rootPath BEFORE the tab, and no pre-set graphMode: path has no replay on
+  // tab-enter - showTab's setGraphMode(graphMode) draws off pathRootedPath
   // and nothing else. Pre-setting the mode therefore started an UNROOTED draw
   // first, and the landing measures forty ladders, so it also finished last
   // and overwrote the rooted one: Path opened on the picker every time.

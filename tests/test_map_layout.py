@@ -132,49 +132,101 @@ def test_sibling_order_follows_similarity():
     assert [n.id for n in ordered] == ["a.md", "z.md", "b.md"]
 
 
-def test_subtitle_shows_link_context():
-    m = _materials()
-    m.link_context = lambda p, c: f"{p}→{c}"
-    mv = build_mapview("root.md", m)
-    subs = {n.id: n.subtitle for n in mv.nodes}
-    assert subs["a.md"] == "root.md→a.md"
-    assert subs["c.md"] == "a.md→c.md"
+def test_the_cap_keeps_a_strong_related_note_over_a_hop_two_note():
+    # ADR-0088 point 7. The strongest related tie costs exactly one wikilink
+    # (1.0) and any hop-2 note at least two, so with one slot left after hop 1
+    # the related note is the nearer one and has to be the one kept. The old
+    # tier order kept every hop-2 note ahead of every related one.
+    mv = build_mapview("root.md", _materials([("e.md", "E", 0.9)]), max_nodes=4)
+    assert {n.id for n in mv.nodes} == {"root.md", "a.md", "b.md", "e.md"}
 
 
-def test_latent_subtitle_shows_evidence():
-    m = _materials([("e.md", "E", 0.9)])
-    m.latent_evidence = {"e.md": "≈ embed:0.90"}
-    m.link_context = lambda p, c: "should not be used for latent"
-    mv = build_mapview("root.md", m)
-    e = next(n for n in mv.nodes if n.id == "e.md")
-    assert e.subtitle == "≈ embed:0.90"
-
-
-def test_degree_recorded():
-    mv = build_mapview("root.md", _materials([("e.md", "E", 0.9)]))
-    deg = {n.id: n.degree for n in mv.nodes}
-    assert deg["root.md"] == 2 and deg["a.md"] == 2 and deg["c.md"] == 1
-    assert deg["e.md"] == 0  # latent-only, not in the wikilink graph
-
-
-def test_clean_snippet_unwraps_wikilinks_and_truncates():
-    from silica.kernel.recall.mindmap import _clean_snippet
-
-    assert _clean_snippet("- See [[path/to/note|the alias]] for context") == (
-        "See the alias for context"
+def test_hop_one_beyond_the_cap_is_cut_by_cost_not_by_path():
+    # A hub with more wikilinks than the cap: the old sort fell back to the
+    # path, so "a" and "b" stayed whatever they cost. The cheapest stay now.
+    g = nx.Graph()
+    for x in ("a.md", "b.md", "z.md"):
+        g.add_edge("root.md", x)
+    sims = {"z.md": 0.9, "b.md": 0.5, "a.md": 0.1}
+    m = MapMaterials(
+        graph=g,
+        titles={p: p for p in g.nodes},
+        community_of={p: 0 for p in g.nodes},
+        sim=lambda p, q: sims.get(q if p == "root.md" else p, 0.0),
     )
-    assert _clean_snippet("## About [[grafo]]") == "About grafo"
-    long = "x" * 200
-    assert len(_clean_snippet(long)) == 96 and _clean_snippet(long).endswith("…")
+    mv = build_mapview("root.md", m, max_nodes=3)
+    assert {n.id for n in mv.nodes} == {"root.md", "z.md", "b.md"}
 
 
-def test_anchor_snippet_keeps_the_explanation_not_the_restated_title():
-    from silica.kernel.recall.mindmap import _anchor_snippet
+# --- the graph's lit set, arranged as it is given (ADR-0088) -------------------
 
-    line = "- **[[Devianza]] (scomposizione)**: la devianza totale si scompone in due parti"
-    assert _anchor_snippet(line, {"devianza"}) == (
-        "la devianza totale si scompone in due parti"
-    )
-    # No title restatement before the colon ⇒ the whole line survives.
-    line2 = "- vedi anche [[Devianza]] per il calcolo"
-    assert _anchor_snippet(line2, {"altro"}) == "vedi anche Devianza per il calcolo"
+def _star(n: int) -> nx.Graph:
+    g = nx.Graph()
+    for i in range(n):
+        g.add_edge("root.md", f"n{i:02d}.md")
+    return g
+
+
+def test_arrange_keeps_every_given_note_and_adds_none():
+    # No cap: the graph already draws the whole lit set, so all of it is laid
+    # out, and a note of the vault the caller did not light stays out.
+    from silica.kernel.recall.mindmap import arrange_mapview
+
+    g = _star(40)
+    g.add_edge("n00.md", "elsewhere.md")
+    ids = [f"n{i:02d}.md" for i in range(40)]
+    mv = arrange_mapview("root.md", ids, graph=g, community_of={}, sim=None)
+    assert {n.id for n in mv.nodes} == {"root.md", *ids}
+
+
+def test_arrange_reads_the_community_it_is_given():
+    # The frame sends the group each dot is painted with, so a wedge and the
+    # dots inside it cannot disagree on colour.
+    from silica.kernel.recall.mindmap import arrange_mapview
+
+    mv = arrange_mapview("root.md", ["n00.md", "n01.md"], graph=_star(2),
+                         community_of={"root.md": 3, "n00.md": 7, "n01.md": 9}, sim=None)
+    assert {n.id: n.community for n in mv.nodes} == {"root.md": 3, "n00.md": 7, "n01.md": 9}
+
+
+def test_arrange_prices_an_unlinked_note_by_its_similarity_to_the_root():
+    # A note lit by the k-NN, a gap or a proposal has no wikilink to the root;
+    # it is a latent tie with the strength of its similarity, as on the Map.
+    from silica.kernel.recall.mindmap import arrange_mapview
+
+    sims = {"x.md": 0.9, "y.md": 0.45}
+    mv = arrange_mapview("root.md", ["x.md", "y.md"], graph=nx.Graph(), community_of={},
+                         sim=lambda p, q: sims.get(q if p == "root.md" else p, 0.0))
+    cost = {n.id: n.cost for n in mv.nodes}
+    assert cost["x.md"] == 1.0 and cost["x.md"] < cost["y.md"]
+
+
+def test_arrange_parks_what_it_cannot_price_on_the_rim():
+    # An unresolved link has no file and no vector: nothing says how near it
+    # is, so it sits past every note that has a price.
+    from silica.kernel.recall.mindmap import arrange_mapview
+
+    ghost = "__unresolved__Pattern recognition"
+    mv = arrange_mapview("root.md", ["n00.md", "n01.md", ghost], graph=_star(2),
+                         community_of={}, sim=lambda p, q: 0.0)
+    r = {n.id: math.hypot(n.x, n.y) for n in mv.nodes}
+    cost = {n.id: n.cost for n in mv.nodes}
+    assert cost[ghost] > max(cost["n00.md"], cost["n01.md"])
+    assert r[ghost] >= max(r["n00.md"], r["n01.md"])
+
+
+def test_the_arrangement_payload_carries_positions_and_wedges_that_tile_the_circle():
+    from silica.kernel.recall.mindmap import arrange_mapview, arrangement_payload
+
+    g = _star(6)
+    groups = {f"n{i:02d}.md": i % 3 for i in range(6)}
+    mv = arrange_mapview("root.md", list(groups), graph=g, community_of=groups, sim=None)
+    out = arrangement_payload(mv)
+    assert set(out["nodes"]) == {"root.md", *groups}
+    assert out["nodes"]["root.md"] == [0, 0, 0.0]
+    spans = sum(w["a1"] - w["a0"] for w in out["wedges"])
+    assert abs(spans - 2 * math.pi) < 1e-6
+    for w in out["wedges"]:
+        members = [n for n in mv.nodes if n.hop > 0 and n.community == w["area"]]
+        assert w["n"] == len(members)
+        assert w["r"] > max(math.hypot(n.x, n.y) for n in members)

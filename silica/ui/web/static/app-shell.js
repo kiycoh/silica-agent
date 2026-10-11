@@ -123,7 +123,6 @@ async function loadVaultInfo() {
     syncTreePins();          // a fresh tree knows nothing about the pins yet
     markOpenNote();          // …nor about the note the drawer is on
     renderVaultFacts(data);           // the chat landing's counted line
-    renderMapPicker(data.hubs || []); // map landing: best-connected notes
     buildNoteIndex();                 // explore note search reads the fresh tree
     applySidebarFilter();
     applyHashNote();                  // a ?note= deep link can open now that the tree knows it
@@ -221,13 +220,12 @@ $("#vault-switch").addEventListener("click", async () => {
 // labels: pictures of the links, readings of the shape, then the library.
 const LAYOUT_MODES = [
   ["graph", "Graph", "wikilink structure + semantic k-NN overlay; the panel at the right is its key", 0],
-  ["map", "Map", "radial map rooted on one note", 0],
   // The only surface that is not undirected: the others lay notes out by how
   // they connect, where they are filed, or how two groups couple, and none of
   // them can answer "what do I read BEFORE this".
   ["path", "Path", "reading order around one note: what RefD says comes before it, and what it unlocks", 0],
-  // Three surfaces over the same graph that are NOT link-space: graph and map
-  // both lay notes out by how they connect, so neither can show where a note
+  // Three surfaces over the same graph that are NOT link-space: the graph
+  // lays notes out by how they connect, so it cannot show where a note
   // SITS, how two areas couple as a whole, or what order the vault could be
   // read in.
   ["folders", "Folders", "the vault as folders, shaded by how much each folder mixes areas", 1],
@@ -404,9 +402,8 @@ async function loadVaultBrief() {
   }
 }
 
-// Tree click routing follows the active view: in explore's map mode a click
-// roots the radial map on the note; otherwise it opens the note drawer (which
-// also mirrors focus into the graph iframe via focusGraphNode).
+// A tree click opens the note drawer, which also mirrors the focus into the
+// graph iframe (focusGraphNode), where it is arranged as the Map (ADR-0088).
 $("#tree").addEventListener("click", (e) => {
   // The pin sits inside the row, so it is tested first: otherwise the row's own
   // click wins and pinning a note would also open it, which is the opposite of
@@ -424,8 +421,7 @@ $("#tree").addEventListener("click", (e) => {
   if (!plainClick(e)) return;
   e.preventDefault();
   const path = leaf.dataset.id;
-  if (activeTab === "graph" && graphMode === "map") rootMap(path);
-  else openNote(path);
+  openNote(path);
 });
 
 // A left click with no modifier is the app's to handle; anything else is the
@@ -964,7 +960,7 @@ function showTab(tab) {
   $("main").style.setProperty("--tab-from", String(Math.sign(step)));
   activeTab = tab;
   if (tab === "chat") closePeek(); // stream visible → card redundant
-  // ask-from-here lives on the graph + map, and on learn, where the peek
+  // ask-from-here lives on the graph, and on learn, where the peek
   // card mirrors a session the drawer sent to chat (learn-suite §5.3).
   $("#dock").hidden = !["graph", "learn"].includes(tab);
   // The views are navigation now (ADR-0084), so the one showing is the
@@ -1048,9 +1044,6 @@ function applyThemePref(pref) {
 new MutationObserver(() => {
   repaintMermaid();
   graphStale = true;
-  if (activeTab === "graph") {
-    setGraphMode(graphMode);
-    if (graphMode === "map" && mapRootedPath) rootMap(mapRootedPath);
-  }
+  if (activeTab === "graph") setGraphMode(graphMode);
 }).observe(document.documentElement, { attributeFilter: ["data-theme"] });
 

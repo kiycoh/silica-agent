@@ -49,16 +49,26 @@ RAW_EDGES.forEach(e => {
 const NODE_BY_ID = {};
 ALL_NODES.forEach(n => { NODE_BY_ID[n.id] = n; });
 
-// Covers included: focusing a paper lights the notes that cover it, and
-// focusing a note fades every line but its own (ADR-0066 "Consequences").
+// Every link a note has, whatever is on show: the held layout's follow force
+// (_follow) reads this, since a hidden link still places a note in its area.
 const neighbors = {};
 ALL_EDGES.forEach(e => {
   (neighbors[e.from] = neighbors[e.from] || new Set()).add(e.to);
   (neighbors[e.to]   = neighbors[e.to]   || new Set()).add(e.from);
 });
+// What a focus reads: the edges themselves, so litSet can ask each one whether
+// the filters draw it (ADR-0088). Covers included: focusing a paper lights the
+// notes that cover it while the rim shows (ADR-0066 "Consequences").
+const incident = {};
+ALL_EDGES.forEach(e => {
+  (incident[e.from] = incident[e.from] || []).push(e);
+  (incident[e.to]   = incident[e.to]   || []).push(e);
+});
 
 let focusIds = [];  // the focused set; [] = nothing focused
-const NO_NEIGHBOURS = new Set();
+// The arrangement (ADR-0088): {root, layout: {id: [x, y, cost]}, wedges, rIn,
+// centre} while a single-note focus is laid out as the Map, else null.
+let ARR = null;
 
 // Highlight a SET of nodes and their 1-hop neighbours; dim everything else.
 // A set, not one id: the context drawer lights every note carrying a concept,
@@ -71,14 +81,38 @@ const NO_NEIGHBOURS = new Set();
 // repaint is not free (see refreshPaint).
 function computeFocus(ids) {
   focusIds = (ids == null ? [] : [].concat(ids)).filter(id => NODE_BY_ID[id]);
-  const on = new Set(focusIds);
-  // Lit = the focused nodes plus their 1-hop neighbours; an edge stays lit when
-  // EITHER endpoint is focused (neighbour-to-neighbour edges dim, as before).
-  const lit = new Set(focusIds);
-  focusIds.forEach(id => (neighbors[id] || NO_NEIGHBOURS).forEach(nb => lit.add(nb)));
-  ALL_NODES.forEach(n => { n._dim = on.size > 0 && !lit.has(n.id); });
-  ALL_EDGES.forEach(e => { e._dim = on.size > 0 && !on.has(e.from) && !on.has(e.to); });
+  paintDim();
   updateFocusBar();
+}
+
+// The lit set on screen: the hovered note's while the pointer rests on one,
+// else the focus's (ADR-0088 amendment). Since a click arranges, the hover is
+// where the old click's look went, and it is that look exactly (markDim).
+function paintDim() {
+  markDim(hoverId ? [hoverId] : focusIds, incident, ALL_NODES, ALL_EDGES);
+}
+
+// A hover is a look, not a focus: focusIds, the banner and an arrangement stay
+// as they are, and the pointer leaving puts the focus's own lighting back.
+// While notes or the camera move (an arrangement opening or closing) a note
+// slides under a still pointer every frame, and each one would relight the
+// graph: the hover waits until the motion is over (hoverQuietUntil).
+let hoverId = null, hoverWant = null, hoverTimer = 0, hoverQuietUntil = 0;
+// 3D re-runs the node digest on every repaint (refreshPaint), so passing over a
+// cluster would pay it once per note crossed: there the pointer has to rest.
+const HOVER_REST_3D = 90;
+function hoverNote(n) {
+  hoverWant = n && !n._hidden ? n.id : null;
+  clearTimeout(hoverTimer);
+  const wait = Math.max(hoverQuietUntil - performance.now(), is2D() ? 0 : HOVER_REST_3D);
+  if (wait > 0) hoverTimer = setTimeout(paintHover, wait);
+  else paintHover();
+}
+function paintHover() {
+  if (hoverWant === hoverId) return;
+  hoverId = hoverWant;
+  paintDim();
+  if (Graph) refreshPaint();
 }
 
 // --- The banner: say out loud that you are not looking at the whole vault ---
@@ -99,8 +133,7 @@ function updateFocusBar() {
     parts.push("area <b>" + escHtml(COMM_HUBS[SCOPE.id] || "#" + SCOPE.id) + "</b> · " + n + " notes");
   }
   if (focusIds.length) {
-    const lit = new Set(focusIds);
-    focusIds.forEach(id => (neighbors[id] || NO_NEIGHBOURS).forEach(nb => lit.add(nb)));
+    const lit = litSet(focusIds, incident);
     const nearby = Math.max(0, lit.size - focusIds.length);
     // One note focused: its name is already on screen above this bar, in the
     // drawer header. Repeating it here is noise, so only a set says what it is.
@@ -408,9 +441,374 @@ function ribbonPairs(pairs, min = RIBBON_MIN) {
 // cut figure draws the same blobs (ADR-0075), and graph_view inlines the file
 // ahead of this one.
 
+// --- what a focus lights, and the Map it is arranged as (ADR-0088) ----------
+// incident: id -> the edges that touch it. An edge lights its far end only
+// while the filters draw it, so the lit set is what is on screen. Before the
+// first filter pass no edge carries the flag, and absent reads as shown.
+function litSet(ids, incident) {
+  const lit = new Set(ids);
+  for (const id of ids)
+    for (const e of incident[id] || [])
+      if (!e._hidden) lit.add(e.from === id ? e.to : e.from);
+  return lit;
+}
+
+// The focus look, on the shared objects: the notes `ids` lights stay, the rest
+// dims, and an edge stays lit when EITHER end is in `ids` (neighbour to
+// neighbour dims). A click's focus and a hover's look both land here.
+function markDim(ids, incident, nodes, edges) {
+  const on = new Set(ids);
+  const lit = litSet(ids, incident);
+  nodes.forEach(n => { n._dim = on.size > 0 && !lit.has(n.id); });
+  edges.forEach(e => { e._dim = on.size > 0 && !on.has(e.from) && !on.has(e.to); });
+}
+
+// The note under a point, in graph units: the nearest visible one whose hit
+// radius (`radius(n)`) reaches it, or null.
+function nearestHit(nodes, p, radius) {
+  let best = null, bd = Infinity;
+  for (const n of nodes) {
+    if (n._hidden || n.x == null) continue;
+    const d = Math.hypot(n.x - p.x, n.y - p.y);
+    if (d <= radius(n) && d < bd) { bd = d; best = n; }
+  }
+  return best;
+}
+
+// One frame of the dim's fade: `f` moves `k` toward 1 (dim) or 0 (lit) and
+// stops there. Absent reads as lit, which is where every note starts.
+function fadeToward(f, dim, k) {
+  const v = f || 0;
+  return dim ? Math.min(1, v + k) : Math.max(0, v - k);
+}
+
+// `a` taken `t` of the way to `b`, both "#rrggbb". Anything else comes back as
+// it was: a colour this cannot mix shows lit until the fade ends, never wrong.
+function mixHex(a, b, t) {
+  const hex = /^#[0-9a-f]{6}$/i;
+  if (!hex.test(a) || !hex.test(b)) return a;
+  const p = parseInt(a.slice(1), 16), q = parseInt(b.slice(1), 16);
+  const ch = sh => {
+    const x = (p >> sh) & 255;
+    return Math.round(x + (((q >> sh) & 255) - x) * t);
+  };
+  return "#" + ((ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).padStart(6, "0");
+}
+
+// Pins every note the layout names at `centre` plus its offset, on the plane
+// through the centre in 3D. `saved` holds where every note stood before the
+// FIRST arrangement: re-rooting on an arranged note must not make the arranged
+// positions the ones to come back to. Notes the layout does not name are saved
+// too, since a running simulation moves them while they are hidden.
+function placeArranged(nodes, layout, centre, saved, threeD) {
+  for (const n of nodes) {
+    if (!saved.has(n.id))
+      saved.set(n.id, { x: n.x, y: n.y, z: n.z, fx: n.fx, fy: n.fy, fz: n.fz });
+    const p = layout[n.id];
+    if (!p) continue;
+    n.x = n.fx = centre.x + p[0];
+    n.y = n.fy = centre.y + p[1];
+    if (threeD) n.z = n.fz = centre.z || 0;
+  }
+}
+
+// Velocities are zeroed with the positions: a note let go with the speed the
+// simulation gave it while pinned would fly off the spot it was put back on.
+// `keep`: the force layout stays saved, for a re-root or a return still to play.
+function restoreArranged(nodes, saved, keep = false) {
+  for (const n of nodes) {
+    const s = saved.get(n.id);
+    if (!s) continue;
+    n.x = s.x; n.y = s.y; n.z = s.z;
+    n.fx = s.fx; n.fy = s.fy; n.fz = s.fz;
+    n.vx = n.vy = n.vz = 0;
+  }
+  if (!keep) saved.clear();
+}
+
+// boxes in priority order -> keep[i]. Greedy, so an earlier name always wins
+// a collision and a later one waits for room (ADR-0069 rule 3). `area`, when
+// given, is what the reader can see: a name reaching past it would be cut, so
+// it waits too.
+function keepLabels(boxes, area) {
+  const kept = [];
+  return boxes.map(b => {
+    const inside = !area || (b.x0 >= area.x0 && b.x1 <= area.x1 && b.y0 >= area.y0 && b.y1 <= area.y1);
+    const clear = inside && kept.every(k => b.x0 >= k.x1 || b.x1 <= k.x0 || b.y0 >= k.y1 || b.y1 <= k.y0);
+    if (clear) kept.push(b);
+    return clear;
+  });
+}
+
+// The server's Map, made to sit in the graph it opens in (ADR-0088 amendment).
+// `home`: id -> where the note stands in the force layout.
+// Scale: the server's unit makes the ring about twice the spread its notes came
+// from (radius 1013 against a median 470 on "Machine learning"), and laid over
+// the graph at that size it covered 195 grey notes. So the ring is ARR_FIT
+// times the median distance its notes stood at, between ARR_FIT_MIN and 1 of
+// its own size; the framing zooms to it, so on screen it is as large as before.
+// Turn: the server's angles say nothing about the picture on screen, and the
+// one rotation that best matches where the notes stood (Procrustes, closed
+// form) cuts the median trip on "Machine learning" from 681 units to 414.
+const ARR_FIT = 1.1, ARR_FIT_MIN = 0.3;
+function fitArrangement(layout, wedges, rIn, home, root) {
+  const o = home[root] || { x: 0, y: 0 };
+  let R = Math.max(rIn, 1, ...wedges.map(w => w.r));
+  const dist = [];
+  let dot = 0, cross = 0;
+  for (const id in layout) {
+    const p = layout[id], h = home[id];
+    R = Math.max(R, Math.hypot(p[0], p[1]));
+    if (id === root || !h) continue;
+    const ax = h.x - o.x, ay = h.y - o.y;
+    dist.push(Math.hypot(ax, ay, (h.z || 0) - (o.z || 0)));
+    dot += p[0] * ax + p[1] * ay;
+    cross += p[0] * ay - p[1] * ax;
+  }
+  dist.sort((a, b) => a - b);
+  const med = dist.length ? dist[dist.length >> 1] : R;
+  const s = Math.min(R, Math.max(ARR_FIT_MIN * R, ARR_FIT * med)) / R;
+  const th = Math.atan2(cross, dot), co = Math.cos(th), si = Math.sin(th);
+  const out = {};
+  for (const id in layout) {
+    const [x, y, ...rest] = layout[id];
+    out[id] = [s * (x * co - y * si), s * (x * si + y * co), ...rest];
+  }
+  return { layout: out, s, th, rIn: rIn * s,
+           wedges: wedges.map(w => ({ ...w, r: w.r * s, a0: w.a0 + th, a1: w.a1 + th })) };
+}
+
+// The clearing: a note within ARR_CLEAR_OUT radii of the centre is pressed into
+// the band from ARR_CLEAR_IN to ARR_CLEAR_OUT, on its own bearing and in its
+// own order, so the ring stands on empty ground and the vault around it keeps
+// its shape. Past the band nothing moves: measured on the test vault
+// (2026-10-11), 25 notes for the median Map, 77 to 122 of 698 around "Machine
+// learning" across three 2D settles, 183 in 3D, where more of the vault stands
+// in front of the plane. In the plane only: 3D looks at the ring down z, so a
+// note in front of it is cleared like one beside it. Returns id -> [x, y].
+const ARR_CLEAR_IN = 1.08, ARR_CLEAR_OUT = 1.6;
+function clearRing(points, centre, R) {
+  const inner = ARR_CLEAR_IN * R, outer = ARR_CLEAR_OUT * R, out = {};
+  points.forEach((p, i) => {
+    const dx = p.x - centre.x, dy = p.y - centre.y, d = Math.hypot(dx, dy);
+    if (d >= outer) return;
+    // A note on the centre itself has no bearing: the golden angle spreads them.
+    const a = d > 1e-9 ? Math.atan2(dy, dx) : i * 2.399963;
+    const r = inner + (outer - inner) * d / outer;
+    out[p.id] = [centre.x + r * Math.cos(a), centre.y + r * Math.sin(a)];
+  });
+  return out;
+}
+
 // frame-pure:end
 
-function applyFocus(ids) { computeFocus(ids); refreshPaint(); }
+function applyFocus(ids) { computeFocus(ids); refreshPaint(); arrangeFocus(); }
+
+// --- the arrangement (ADR-0088) ---------------------------------------------
+// A single-note focus lays out what it lights as the Map. The geometry is the
+// server's (POST /map/layout, the builder the .canvas export uses), so it has
+// one implementation; the frame fits it to the neighbourhood, pins the notes
+// there and clears the ground under it, with the rest of the vault left in
+// place and dimmed (the amendment: it used to be hidden). Esc, an empty click
+// or closing the note plays the force layout back; a scope, a compare or a mode
+// switch puts it back at once. A set focus (a concept's notes) has no centre
+// and only dims.
+const ARR_SAVED = new Map();   // where every note stood before the first one
+let arrSeq = 0;                // a newer focus drops the answer to an older one
+
+const arrangeable = n => !!n && !!n.path && !isRim(n) && n.type !== "ghost" && n.type !== "missing";
+
+function arrangeFocus() {
+  const seq = ++arrSeq;
+  const root = focusIds.length === 1 ? NODE_BY_ID[focusIds[0]] : null;
+  if (!arrangeable(root)) { disarrange(true, true); return; }
+  const lit = [...litSet(focusIds, incident)].filter(id => id !== root.id);
+  // The same note lit the same way is already on screen (the app echoes a
+  // click back as silica-focus-path): a second answer would only refit.
+  if (ARR && ARR.root === root.id && Object.keys(ARR.layout).length === lit.length + 1 &&
+      lit.every(id => id in ARR.layout)) return;
+  const groups = {};
+  for (const id of [root.id, ...lit]) {
+    const g = NODE_BY_ID[id] && NODE_BY_ID[id].group;
+    if (Number.isInteger(g) && g >= 0) groups[id] = g;
+  }
+  fetch("/map/layout", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ root: root.id, ids: lit, groups }),
+  })
+    .then(r => r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)))
+    .then(out => { if (seq === arrSeq) applyArrangement(root, out); })
+    // Tolerated: a graph exported to a file (silica_graph_export) has no
+    // server to ask, and a failed request leaves the focus as it was before
+    // ADR-0088, lit and dimmed in place. That is the graph without the Map,
+    // not a broken view, so it is said in the console and nowhere else.
+    .catch(err => console.warn("arrangement unavailable:", err.message));
+}
+
+function applyArrangement(root, out) {
+  // Around the root where it stands now, so re-rooting on an arranged note
+  // moves the picture as little as it can.
+  const centre = { x: root.x || 0, y: root.y || 0, z: root.z || 0 };
+  // Sized and turned by where its notes stand in the force layout, not by
+  // where the last ring put them.
+  const home = {};
+  for (const id in out.nodes) {
+    const h = ARR_SAVED.get(id) || NODE_BY_ID[id];
+    if (h) home[id] = h;
+  }
+  const fit = fitArrangement(out.nodes, out.wedges || [], out.r_in || 0, home, root.id);
+  ARR = { root: root.id, layout: fit.layout, wedges: fit.wedges, rIn: fit.rIn, centre };
+  const from = positionsNow();
+  restoreArranged(ALL_NODES, ARR_SAVED, true);   // a re-root lets the last clearing go
+  placeArranged(ALL_NODES, ARR.layout, centre, ARR_SAVED, !is2D());
+  const around = ALL_NODES.filter(n => !(n.id in ARR.layout) && !n._hidden && n.x != null);
+  const cleared = clearRing(around, centre, arrRadius());
+  for (const n of around) {
+    const p = cleared[n.id];
+    if (!p) continue;
+    n.x = n.fx = p[0]; n.y = n.fy = p[1];
+    if (!is2D()) n.fz = n.z;
+  }
+  applyFilters();
+  playFrom(from);
+  frameArrangement();
+}
+
+// `refilter` false: the caller runs the filters itself right after (a scope,
+// a compare) or a rebuild reads the flags (a mode switch). `play`: slide back
+// instead of jumping, for a return the reader asked for.
+function disarrange(refilter = true, play = false) {
+  arrSeq++;   // an answer still in flight is for a focus that is gone
+  // The saved layout outlives ARR while a return is playing: a scope arriving
+  // mid-slide still has to put it back.
+  if (!ARR && !ARR_SAVED.size) return;
+  ARR = null;
+  ALL_NODES.forEach(n => { if (n.__threeObj) n.__threeObj.scale.setScalar(1); });
+  const settle = () => {
+    restoreArranged(ALL_NODES, ARR_SAVED);
+    measureGraphRadius();
+    if (Graph) pushPositions();
+  };
+  if (play && Graph) {
+    const from = positionsNow();
+    restoreArranged(ALL_NODES, ARR_SAVED, true);
+    playFrom(from, settle);
+  } else {
+    stopPlay();
+    settle();
+  }
+  if (refilter) applyFilters();
+}
+
+// The move, played: every note slides from where it stood (`from`) to where
+// it stands now. On the way it is pinned at each step, so a simulation still
+// running cannot pull it off the path; at the end it gets the pins it was
+// given. A jump read as the picture being swapped for another one.
+const ARR_PLAY_MS = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 650;
+let playRaf = 0;
+function positionsNow() {
+  const at = new Map();
+  for (const n of ALL_NODES) if (n.x != null) at.set(n.id, [n.x, n.y, n.z || 0]);
+  return at;
+}
+function stopPlay() { cancelAnimationFrame(playRaf); playRaf = 0; }
+function playFrom(from, done) {
+  stopPlay();
+  const moves = [];
+  for (const n of ALL_NODES) {
+    const a = from.get(n.id);
+    if (!a || (a[0] === n.x && a[1] === n.y && a[2] === (n.z || 0))) continue;
+    moves.push([n, a, { x: n.x, y: n.y, z: n.z, fx: n.fx, fy: n.fy, fz: n.fz }]);
+  }
+  // The camera frames over 700-900 ms while the notes slide: no hover until
+  // both have stopped (see hoverNote).
+  hoverQuietUntil = performance.now() + Math.max(ARR_PLAY_MS, 900) + 100;
+  const t0 = performance.now(), flat = is2D();
+  const step = now => {
+    const u = ARR_PLAY_MS ? Math.min(1, Math.max(0, now - t0) / ARR_PLAY_MS) : 1;
+    const e = u < 0.5 ? 4 * u * u * u : 1 - Math.pow(2 - 2 * u, 3) / 2;
+    for (const [n, a, b] of moves) {
+      if (u === 1) { Object.assign(n, b); continue; }
+      n.x = n.fx = a[0] + (b.x - a[0]) * e;
+      n.y = n.fy = a[1] + (b.y - a[1]) * e;
+      if (!flat) n.z = n.fz = a[2] + ((b.z || 0) - a[2]) * e;
+    }
+    pushMeshes();
+    if (u < 1) { playRaf = requestAnimationFrame(step); return; }
+    playRaf = 0;
+    if (done) done();
+  };
+  // The first step now, not on the next frame: the caller has already put
+  // every note at its end, and a paint before the step would show it there.
+  step(t0);
+  if (Graph) wake(ARR_PLAY_MS + 200);
+}
+
+// 3D moves a mesh only inside an engine tick, and a settled graph runs none;
+// the 3D wrapper exposes no resetCountdown to give it one (measured: undefined
+// on the bundled 3d-force-graph), and a reheat would run the whole layout. So
+// the meshes are moved here, through __threeObj, the lib's handle on each
+// node's object. The merged links follow n.x on their own (linkSegStep), and
+// 2D paints straight from n.x: both need only the frames.
+function pushMeshes() {
+  if (Graph && !is2D()) ALL_NODES.forEach(n => {
+    if (n.__threeObj) n.__threeObj.position.set(n.x || 0, n.y || 0, n.z || 0);
+  });
+}
+function pushPositions() { pushMeshes(); wake(1000); }
+
+// How far the ring reaches from its centre, in graph units: the farthest of
+// its notes, its wedges and its hole.
+function arrRadius() {
+  const { layout, wedges, rIn } = ARR;
+  return Math.max(rIn, 1, ...wedges.map(w => w.r),
+    ...Object.values(layout).map(p => Math.hypot(p[0], p[1])));
+}
+
+// The canvas the reader can see: the key (#hud) and the app's column above it
+// stand over the frame's right edge (ADR-0072), so the Map is framed in what
+// is left of it. In canvas pixels, from the left edge.
+function freeWidth() {
+  const W = Graph.width(), hud = document.getElementById("hud");
+  const r = hud && hud.offsetParent ? hud.getBoundingClientRect() : null;
+  const left = document.querySelector("#graph canvas").getBoundingClientRect().left;
+  return r && r.width ? Math.max(1, Math.min(W, r.left - left)) : W;
+}
+
+// The ring takes this share of the free width and the names the rest: a name
+// is up to ~170px at 12.5px, and at 1400px with the drawer shut the free width
+// is ~880px, which leaves 176px a side. Narrower, the outer names wait.
+const ARR_RING_W = 0.6, ARR_RING_H = 0.84;
+function frameArrangement() {
+  if (!ARR) return;
+  const { centre: c, layout } = ARR;
+  const R = arrRadius();
+  const W = Graph.width(), H = Graph.height(), free = freeWidth();
+  // pixels per graph unit
+  const k = Math.min(free * ARR_RING_W, H * ARR_RING_H) / (2 * R);
+  // centre c sits at the middle of the free width, left of the canvas middle
+  const dx = (W - free) / 2 / k;
+  if (is2D()) {
+    Graph.centerAt(c.x + dx, c.y, 700);
+    Graph.zoom(k, 700);
+  } else {
+    // The same scale at the plane's distance: H pixels span 2 D tan(fov/2).
+    const tan = Math.tan(((Graph.camera().fov || 50) * Math.PI) / 360);
+    const D = H / (2 * k * tan);
+    const at = { x: c.x + dx, y: c.y, z: c.z };
+    Graph.cameraPosition({ x: at.x, y: at.y, z: c.z + D }, at, 900);
+    // A sphere keeps its graph size (cube root of its value, times the
+    // bundle's nodeRelSize of 4), a pixel or two from this far: it takes the
+    // 2D floor instead, and disarrange gives every mesh its scale back.
+    for (const id in layout) {
+      const n = NODE_BY_ID[id], o = n && n.__threeObj;
+      if (!o) continue;
+      const px = id === ARR.root ? ARR_ROOT_PX : ARR_DOT_PX;
+      o.scale.setScalar(Math.max(1, px / (k * Math.cbrt(nodeVal3D(n)) * 4)));
+    }
+  }
+  wake(1000);
+}
 
 function fitGraph() { Graph.zoomToFit(400, 40); wake(600); }
 
@@ -543,6 +941,44 @@ function refreshPaint() {
   if (is2D() || PARTICLES) Graph.linkColor(Graph.linkColor());
   if (!is2D()) repaintLinkSeg();
   wake(120);
+  startFade();
+}
+
+// The dim, faded (the owner, 2026-10-11): a note leaving the lit set goes dark
+// over FADE_MS instead of at once, and one coming back lights the same way.
+// `_fade` is what the colours paint; `_dim` stays the decision, and everything
+// that is not a colour (names, rings, particles) still reads it at once.
+const FADE_MS = matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 320;
+// A link's colour string is cached per fade step (linkPaint), so the steps are
+// what a fade costs in strings: 16 over 320 ms is one per frame at 50 fps.
+const FADE_STEPS = 16;
+let fadeRaf = 0, fadeAt = 0;
+function startFade() {
+  if (fadeRaf || !Graph) return;
+  fadeAt = performance.now();
+  fadeRaf = requestAnimationFrame(fadeStep);
+}
+function fadeStep(now) {
+  const k = FADE_MS ? Math.max(0, now - fadeAt) / FADE_MS : 1;
+  fadeAt = now;
+  let moving = false;
+  for (const list of [ALL_NODES, ALL_EDGES]) for (const o of list) {
+    if ((o._fade || 0) === (o._dim ? 1 : 0)) continue;
+    o._fade = fadeToward(o._fade, o._dim, k);
+    moving = true;
+  }
+  fadeRaf = 0;
+  if (!Graph) return;
+  // 2D paints from the accessors and only has to be told; 3D reads a note's
+  // fade in its shader on every draw, and the merged links from their buffer.
+  if (is2D()) Graph.nodeColor(Graph.nodeColor());
+  else repaintLinkSeg();
+  wake(200);
+  if (moving) fadeRaf = requestAnimationFrame(fadeStep);
+}
+// A rebuild reads the flags in its first digest with no repaint to fade from.
+function snapFade() {
+  for (const list of [ALL_NODES, ALL_EDGES]) for (const o of list) o._fade = o._dim ? 1 : 0;
 }
 
 // --- the canvas's own palette ----------------------------------------------
@@ -618,10 +1054,19 @@ let showNotes = true;    // the macro read: zones alone in the frame
 // hub or leaf. Degree is shown by size, never by washing the hue out.
 function nodeColor(n) {
   // Solid darken-to-background dim, decided: rgba() only if visual
-  // verification ever shows 3d-force-graph honours per-node alpha.
+  // verification ever shows 3d-force-graph honours per-node alpha. It fades
+  // in (fadeStep): 2D mixes toward it by `_fade`. 3D with the flat shader mixes
+  // in the shader instead (U_DIM), because a colour per frame here would
+  // rebuild the node materials per frame; without that shader the note takes
+  // the dim at once, as it always did.
+  const c = litColor(n);
+  const f = is2D() ? n._fade || 0 : SHADING ? 0 : n._dim ? 1 : 0;
+  return f >= 1 ? GP.dim : f > 0 ? mixHex(c, GP.dim, f) : c;
+}
+
+function litColor(n) {
   // Neutrals are blue-violet, never gray: the mascot has no gray facet, only
   // unlit ones. Each value below holds the luminance of the gray it replaces.
-  if (n._dim) return GP.dim;
   if (n.type === 'ghost') return GP.ghost;
   // The vault around the rim (ADR-0066 amendment): the area's hue mixed
   // CTX_MIX of the way toward the floor, solid because 3D takes no alpha.
@@ -821,6 +1266,9 @@ function saveLayout() {
   // The cache holds the layout the frame opens on, and it opens with the areas
   // off: a held layout saved here would open as the free one (ADR-0074).
   if (areasOn()) return;
+  // Nor an arrangement (ADR-0088): it is a state of one focus, put back by
+  // Esc, and an engine stop lands inside it whenever a tick moves its pins.
+  if (ARR) return;
   const pos = {};
   // Rounded to whole graph units: the layout is thousands of units across, the
   // decimals are noise, and they triple the size of what goes into storage.
@@ -846,6 +1294,8 @@ const nodeRadius = n => Math.sqrt(Math.max(0, n.size || 16)) * NODE_REL_SIZE;
 // and the labels outnumber the pixels); 0.6-1.5 the standouts; above 1.5 all of
 // them. Font size divides by the zoom so text keeps a constant SCREEN size.
 function drawNode(n, ctx, scale) {
+  // The vault around an arrangement is drawn as it always is, dimmed.
+  if (ARR && ARR.layout[n.id]) { drawArrangedNode(n, ctx, scale); return; }
   if (isRim(n)) { drawRimPaper(n, ctx, scale); return; }
   // A note a scoped paper's line ends on is what the reader came to the rim
   // for, and at the zoom that fits the rim it is a pixel with no name: it
@@ -899,6 +1349,127 @@ function drawNode(n, ctx, scale) {
   }
   if (scale < 1.5 && (n.size || 16) <= BASE_SIZE) return;  // mid zoom: standouts
   drawNodeLabel(n, ctx, scale, r);
+}
+
+// --- an arrangement, drawn (ADR-0088, after ADR-0069) -----------------------
+// The Map fits a ring of dozens of notes into one screen, where a node at its
+// graph size is a pixel: a dot keeps 4px on screen, the root 7px and the
+// signal ring (ADR-0069 rule 1). The names are drawn after, all together,
+// because holding one back depends on every name before it.
+const ARR_DOT_PX = 4, ARR_ROOT_PX = 7;
+const arrangedRadius = (n, scale) =>
+  Math.max(nodeRadius(n), (n.id === ARR.root ? ARR_ROOT_PX : ARR_DOT_PX) / scale);
+function drawArrangedNode(n, ctx, scale) {
+  const root = n.id === ARR.root;
+  const r = arrangedRadius(n, scale);
+  markPath(ctx, n, r);
+  ctx.fillStyle = nodeColor(n);
+  ctx.fill();
+  if (!root) return;
+  markPath(ctx, n, r + 3 / scale);
+  ctx.lineWidth = 2 / scale;
+  ctx.strokeStyle = GP.accent;
+  ctx.stroke();
+}
+
+// An area's hue for its wedge: the colour its notes are painted with, read off
+// the first arranged one, so a wedge and its dots cannot disagree.
+function wedgeColor(area) {
+  if (area < 0) return GP.line;
+  for (const id in ARR.layout) {
+    const n = NODE_BY_ID[id];
+    if (n && n.group === area) return baseColor(n);
+  }
+  return GP.line;
+}
+
+// Each area is a wedge reaching as far as its farthest note, outlined in its
+// colour (ADR-0069 decision 5); the spokes divide them. Canvas and the layout
+// measure angles the same way (from +x toward +y), so they are used as given.
+function drawWedges(ctx, scale) {
+  const { centre: c, wedges, rIn } = ARR;
+  ctx.save();
+  for (const w of wedges) {
+    const col = wedgeColor(w.area);
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, w.r, w.a0, w.a1);
+    ctx.arc(c.x, c.y, rIn, w.a1, w.a0, true);
+    ctx.closePath();
+    ctx.globalAlpha = 0.06;
+    ctx.fillStyle = col;
+    ctx.fill();
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = 1.5 / scale;
+    ctx.strokeStyle = col;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, w.r, w.a0, w.a1);
+    ctx.stroke();
+    if (wedges.length > 1) {
+      ctx.globalAlpha = 0.4;
+      ctx.lineWidth = 1 / scale;
+      ctx.strokeStyle = GP.line;
+      ctx.beginPath();
+      ctx.moveTo(c.x + rIn * Math.cos(w.a0), c.y + rIn * Math.sin(w.a0));
+      ctx.lineTo(c.x + w.r * Math.cos(w.a0), c.y + w.r * Math.sin(w.a0));
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+// Priority as on the Map: the root, then the ring by how linked each note is,
+// then the area names. A name that would collide waits for zoom (keepLabels).
+function drawArrangedNames(ctx, scale) {
+  const { centre: c, wedges, root } = ARR;
+  const items = [];
+  const deg = id => (outDeg[id] || 0) + (inDeg[id] || 0);
+  const ids = Object.keys(ARR.layout).filter(id => NODE_BY_ID[id])
+    .sort((a, b) => (b === root) - (a === root) || deg(b) - deg(a) || (a < b ? -1 : 1));
+  for (const id of ids) {
+    const n = NODE_BY_ID[id], isRoot = id === root;
+    const px = isRoot ? 15 : 12.5;
+    const gap = (isRoot ? ARR_ROOT_PX + 6 : ARR_DOT_PX + 4) / scale;
+    // The root's name sits under it, centred: every other name is read
+    // against it. The rest face outward, away from the root.
+    const align = isRoot ? "center" : n.x >= c.x ? "left" : "right";
+    const x = isRoot ? n.x : n.x + (align === "left" ? gap : -gap);
+    const y = isRoot ? n.y + gap + px / 2 / scale : n.y;
+    items.push({ text: n.label, px, x, y, align,
+      // A name a hover does not light stays, quieter: the ring keeps its
+      // words while the pointer reads one of its notes.
+      ink: n._dim || n.type === "ghost" || n.type === "missing" ? GP.ghostLabel : GP.label });
+  }
+  for (const w of wedges) {
+    const name = w.n > 1 && w.area >= 0 ? COMM_HUBS[w.area] : "";
+    if (!name) continue;   // a one-note wedge is named by its note already
+    const a = (w.a0 + w.a1) / 2, cos = Math.cos(a);
+    const align = cos > 0.25 ? "left" : cos < -0.25 ? "right" : "center";
+    items.push({ text: name + " · " + w.n, px: 12, x: c.x + (w.r + 8 / scale) * cos,
+      y: c.y + (w.r + 8 / scale) * Math.sin(a), align, ink: GP.ghostLabel });
+  }
+  ctx.save();
+  ctx.textBaseline = "middle";
+  const boxes = items.map(it => {
+    ctx.font = (it.px / scale) + "px Lexend, system-ui, sans-serif";
+    const w = ctx.measureText(it.text).width, h = it.px * 1.2 / scale;
+    const x0 = it.align === "left" ? it.x : it.align === "right" ? it.x - w : it.x - w / 2;
+    return { x0, y0: it.y - h / 2, x1: x0 + w, y1: it.y + h / 2 };
+  });
+  const tl = Graph.screen2GraphCoords(0, 0), br = Graph.screen2GraphCoords(freeWidth(), Graph.height());
+  const keep = keepLabels(boxes, { x0: tl.x, y0: tl.y, x1: br.x, y1: br.y });
+  ctx.lineJoin = "round";
+  items.forEach((it, i) => {
+    if (!keep[i]) return;
+    ctx.font = (it.px / scale) + "px Lexend, system-ui, sans-serif";
+    ctx.textAlign = it.align;
+    // A halo in the floor's colour masks the lines under a name (rule 4).
+    ctx.lineWidth = 3 / scale;
+    ctx.strokeStyle = GP.bg;
+    ctx.strokeText(it.text, it.x, it.y);
+    ctx.fillStyle = it.ink;
+    ctx.fillText(it.text, it.x, it.y);
+  });
+  ctx.restore();
 }
 
 function drawNodeLabel(n, ctx, scale, r) {
@@ -1011,12 +1582,32 @@ function drawCiteArrow(l, ctx) {
 function paintNodeArea(n, color, ctx, scale) {
   ctx.fillStyle = color;
   ctx.beginPath();
-  // A rim paper is drawn at a screen size, so it is hit at one too.
-  const k = scale || 1;
-  const r = isRim(n) ? rimHalf(n, k) * 1.5
-    : COVERING && COVERING.has(n.id) ? Math.max(nodeRadius(n), 3.5 / k) + 2 : nodeRadius(n) + 2;
-  ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+  ctx.arc(n.x, n.y, hitRadius(n, scale || 1), 0, 2 * Math.PI);
   ctx.fill();
+}
+// In graph units at zoom k. A rim paper is drawn at a screen size, so it is
+// hit at one too; an arranged note too (ADR-0088), with 3px of slack round
+// its dot.
+function hitRadius(n, k) {
+  return ARR && ARR.layout[n.id] ? arrangedRadius(n, k) + 3 / k
+    : isRim(n) ? rimHalf(n, k) * 1.5
+    : COVERING && COVERING.has(n.id) ? Math.max(nodeRadius(n), 3.5 / k) + 2 : nodeRadius(n) + 2;
+}
+
+// 2D's hover, picked off the positions with the click's own hit radius rather
+// than read from force-graph's picking canvas. The lib re-reads that canvas
+// every frame, and a resolution drop (setRes) blanks it until its 800 ms
+// redraw: with the pointer resting on a note the hover flipped to nothing and
+// back. A relight is a repaint stream, which drops the resolution, so each
+// flip set off the next (looping in the owner's tab, 2026-10-11). Asked on a
+// pointer move only, so a note sliding under a still pointer relights nothing.
+function pickHover2D(e) {
+  if (!Graph || !is2D()) return;
+  const cv = document.querySelector("#graph canvas");
+  if (e.target !== cv) { hoverNote(null); return; }   // over the key, not the graph
+  const c = cv.getBoundingClientRect(), k = Graph.zoom();
+  const p = Graph.screen2GraphCoords(e.clientX - c.left, e.clientY - c.top);
+  hoverNote(nearestHit(ALL_NODES, p, n => hitRadius(n, k)));
 }
 
 // --- Edge weight: what you wrote outranks what was inferred -----------------
@@ -1099,13 +1690,18 @@ function linkPaint(l) {
   // comparison on, a link inside either part paints as dimmed and one between
   // them at full weight; nothing is told apart by width (ADR-0058).
   const on = !!AB && !!l._ab;
-  const key = (l._dim ? "d" : "") + (l._ctx ? "x" : "") + (is2D() ? "2" : "3") +
+  // The dim fades (fadeStep), in steps so the cache still holds. A 3D link the
+  // lib owns (a particle carrier) takes a colour only on a full link digest,
+  // so it takes the dim at once.
+  const f = !is2D() && libOwnsLink(l) ? (l._dim ? 1 : 0) : l._fade || 0;
+  const q = Math.round(f * FADE_STEPS);
+  const key = (q ? "d" + q : "") + (l._ctx ? "x" : "") + (is2D() ? "2" : "3") +
     (AB ? (l._ab ? "C" : "c") : "");
   if (l.__paintKey === key) return l.__paint;
   let out;
   // A context wikilink under the rim (ADR-0066 amendment) is drawn as the
   // focus dims one: the structure is there, and it is not what is being read.
-  if (l._dim || l._ctx || (AB && !on)) out = GP.linkDim;
+  if (q >= FADE_STEPS || l._ctx || (AB && !on)) out = GP.linkDim;
   else {
     const c = l.color || {};
     // A covers line is the accent, read from the theme's own token.
@@ -1117,8 +1713,10 @@ function linkPaint(l) {
     // One scale factor rather than a second table: the RANK is what is worth
     // preserving between the two views, not the absolute values.
     const a = (on ? 0.95 : (c.opacity == null ? 0.6 : c.opacity)) * (is2D() ? LINK_ALPHA_2D : 1);
-    out = "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," +
-          (n & 255) + "," + a.toFixed(3) + ")";
+    // Partway dimmed: toward the dim's colour and toward its full opacity.
+    const t = q / FADE_STEPS, d = parseInt(GP.linkDim.slice(1), 16);
+    const ch = sh => Math.round(((n >> sh) & 255) + (((d >> sh) & 255) - ((n >> sh) & 255)) * t);
+    out = "rgba(" + ch(16) + "," + ch(8) + "," + ch(0) + "," + (a + (1 - a) * t).toFixed(3) + ")";
   }
   l.__paintKey = key; l.__paint = out;
   return out;
@@ -1466,6 +2064,9 @@ const U_STATE = new Float32Array(4);   // rgb + width in px; 0 = no ring
 const U_CUT   = new Float32Array(4);
 const U_BANDS = new Float32Array(2);   // knockout width, gap width
 const U_SHAPE = new Float32Array(2);   // shapeOf value (0 = disc), outline px of a broken one
+// The focus dim (fadeStep): its colour in the working space, and how far this
+// note has faded toward it. Per draw, so a fade costs no material rebuild.
+const U_DIM   = new Float32Array(4);
 const MISSING_PX = 1.5;                // the broken square's outline: 2D's 1.5 graph units at zoom 1
 
 // Built once, from the first Color the scene hands over. The injection lands
@@ -1491,7 +2092,7 @@ function buildFlatPatch(Color) {
   // than fwidth() because fwidth sums the two axes and would make the ring up
   // to 41% thinner on the diagonals than on the axes - invisible on the 1.2px
   // knockout alone, a wobble once there are three bands stacked.
-  const FLAT = "vec3 outgoingLight = diffuseColor.rgb;\n" +
+  const FLAT = "vec3 outgoingLight = mix(diffuseColor.rgb, uSilDim.rgb, uSilDim.w);\n" +
     "float _f = abs(dot(normalize(normal), normalize(vViewPosition)));\n" +
     "float _rho = sqrt(max(0.0, 1.0 - _f * _f));\n" +
     "float _d = (1.0 - _rho) / max(length(vec2(dFdx(_rho), dFdy(_rho))), 1e-6);\n" +
@@ -1554,13 +2155,14 @@ function buildFlatPatch(Color) {
     "outgoingLight = mix(_c, outgoingLight, smoothstep(_e4 - 0.5, _e4 + 0.5, _d));\n" +
     "}";
   const DECL = "uniform vec4 uSilState;\nuniform vec4 uSilCut;\n" +
-               "uniform vec2 uSilBands;\nuniform vec2 uSilShape;\n";
+               "uniform vec2 uSilBands;\nuniform vec2 uSilShape;\nuniform vec4 uSilDim;\n";
   return sh => {
     // Not a swallowed failure: a bundle upgrade that rewrites the lambert
     // shader leaves the notes lit, which is a LOOK and not a break, and this
-    // view has no other way to say the patch stopped landing.
+    // view has no other way to say the patch stopped landing. The focus dim
+    // rides this patch too (nodeColor), so it would stop showing in 3D.
     if (sh.fragmentShader.indexOf(LIT) < 0) {
-      console.warn("node flat patch: lambert outgoingLight anchor is gone");
+      console.warn("node flat patch: lambert outgoingLight anchor is gone; 3D focus dim is off");
       return;
     }
     sh.fragmentShader = DECL + sh.fragmentShader.replace(LIT, FLAT);
@@ -1568,6 +2170,7 @@ function buildFlatPatch(Color) {
     sh.uniforms.uSilCut = { value: U_CUT };
     sh.uniforms.uSilBands = { value: U_BANDS };
     sh.uniforms.uSilShape = { value: U_SHAPE };
+    sh.uniforms.uSilDim = { value: U_DIM };
   };
 }
 
@@ -1600,6 +2203,7 @@ function nodeUniforms(o, renderer, camera) {
   const n = o.__data, r = o.geometry.parameters;
   // Before the ring gates below: a dimmed or distant paper is still a square.
   U_SHAPE[0] = (n && shapeOf(n)) || 0; U_SHAPE[1] = MISSING_PX * dpr;
+  U_DIM[3] = (n && n._fade) || 0;
   // __data is the bundle's own back-pointer from the mesh to the note, the same
   // one its click and tooltip paths read. No ring rather than a throw if a
   // future bundle stops setting it.
@@ -1628,8 +2232,8 @@ function nodeUniforms(o, renderer, camera) {
 // own area came out round, and a ring leaked to its neighbour the same way.
 // Unbinding the program makes setProgram rebind it and upload in full, and it
 // is paid only when the values differ from what the program last received.
-const U_ALL = [U_STATE, U_CUT, U_BANDS, U_SHAPE];
-const U_HELD = new Float32Array(12);
+const U_ALL = [U_STATE, U_CUT, U_BANDS, U_SHAPE, U_DIM];
+const U_HELD = new Float32Array(16);
 let U_HELD_MAT = null;
 function nodeRingStep(renderer, scene, camera) {
   nodeUniforms(this, renderer, camera);
@@ -1652,7 +2256,7 @@ function flattenNodes() {
     const o = n.__threeObj, m = o && o.material;
     if (!m) continue;
     if (!Color) Color = m.color.constructor;
-    if (!RING_RGB) RING_RGB = buildRingRGB(Color);
+    if (!RING_RGB) { RING_RGB = buildRingRGB(Color); U_DIM.set(segRGBA(Color, GP.dim).slice(0, 3)); }
     if (!flatPatch) flatPatch = buildFlatPatch(Color);
     if (n.__rings === undefined) n.__rings = nodeRings(n);
     // Outside the material guard: the hook rides the MESH, and a mesh can be
@@ -1980,6 +2584,9 @@ function buildGraph() {
     .nodeVisibility(n => !n._hidden)
     .linkVisibility(l => !l._hidden && !quietNow(l))
     .onNodeClick((node) => { selectNode(node); applyFocus(node.id); })
+    // 3D only: 2D picks its hover itself (pickHover2D). One argument, since
+    // the lib's second is the previous node.
+    .onNodeHover(n => { if (!is2D()) hoverNote(n); })
     .onBackgroundClick(() => { closeDrawer(); clearFocus(); })
     // The alpha gate and a drag deadlock each other. Both bundles reheat a drag
     // the d3 way — d3AlphaTarget(0.3).resetCountdown() on every drag event — but
@@ -2053,11 +2660,15 @@ function buildGraph() {
       // 3D bundle hands out no THREE, so there the zones are colour and name.
       // Every real 2D repaint passes here, which is what makes it the seam
       // where the resolution governor watches for streams.
+      // An arrangement is its own picture: its wedges replace the areas, the
+      // zones and the rim, which are all drawings of the free layout.
       .onRenderFramePre((ctx, scale) => {
-        drsOnPaint(); drawAreaBlobs(ctx, scale); drawAreaRibbons(ctx, scale); drawZones(ctx, scale);
+        drsOnPaint();
+        if (ARR) { drawWedges(ctx, scale); return; }
+        drawAreaBlobs(ctx, scale); drawAreaRibbons(ctx, scale); drawZones(ctx, scale);
         drawRim(ctx, scale);
       })
-      .onRenderFramePost(drawAreaNames);
+      .onRenderFramePost((ctx, scale) => ARR ? drawArrangedNames(ctx, scale) : drawAreaNames(ctx, scale));
   } else {
     // Perf on big vaults (1200+ notes): the bundle gives every link its own
     // THREE.Line — a draw call and a per-tick buffer write each. The links are
@@ -2139,6 +2750,10 @@ function buildGraph() {
 function setMode(m) {
   if (m === mode && Graph) return;
   const rebuild = Graph !== null;   // a switch always refits; a first build may not
+  // The plane of a 3D arrangement is not a 2D one: put the layout back, build,
+  // and arrange the same focus again in the new mode.
+  const rearrange = !!ARR;
+  disarrange(false);
   leaveAreas();
   mode = m;
   try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
@@ -2156,12 +2771,14 @@ function setMode(m) {
   // four more full digests to arrive at the state the build already had.
   computeFilters();
   computeFocus(focusIds);
+  snapFade();
   simRunning = true;
   Graph = buildGraph();    // owns the forces now: they must precede graphData
   window.__G = Graph;      // console/harness handle: frame-cost probes in hidden tabs
   styleScene();            // first frame already lit; a no-op if 2D
   syncZoneLoop();          // the note-name layer is 3D-only, so the mode owns it
   renderBudget();
+  if (rearrange) arrangeFocus();
 }
 
 // The scope picker is the app's, and its Folders, Areas and Zones come from
@@ -2365,6 +2982,7 @@ function setAreas(on) {
   applyFilters();
 }
 function updateAreaFilter() {
+  disarrange();   // the areas hold the free layout, not an arrangement of it
   const cb = document.getElementById("cb-areas");
   setAreas(!!(cb && cb.checked));
 }
@@ -2709,6 +3327,9 @@ function updateEdgeFilter() {
   // The ghost row has no switch of its own; it states that it follows this one.
   document.getElementById("st-ghost-row").classList.toggle("off", !showAmbiguous);
   applyFilters();
+  // A focus lights what is on show (ADR-0088), so a switch changes what it
+  // lights, and a single focus is arranged again over the new set.
+  if (focusIds.length) applyFocus(focusIds);
 }
 
 // --- areas: named by their hub note ----------------------------------------
@@ -2959,33 +3580,54 @@ function positionNodeLabels() {
   const p = cam.position;
   const cand = [];
   for (const n of RAW_NODES) {
-    if (n._hidden || n._dim || n.x == null) continue;
+    if (n._hidden || n.x == null) continue;
+    // An arrangement names its own notes, lit or not (the 2D ring does the
+    // same); the vault around it stays unnamed, as the focus left it.
+    if (ARR ? !(n.id in ARR.layout) : n._dim) continue;
     const d = Math.hypot(n.x - p.x, n.y - p.y, (n.z || 0) - p.z);
-    if (d > far) continue;
+    // An arrangement (ADR-0088) is looked at from as far as it takes to hold
+    // it, and every note on its plane is one the reader asked for: no
+    // distance rule, only the pool.
+    if (!ARR && d > far) continue;
     // Between near and far only the standouts, exactly the rule 2D applies
     // between zoom 0.6 and 1.5. Ghosts are names nothing carries; they are
     // already the most numerous thing in the frame and stay unnamed.
-    if (d > near && ((n.size || 16) <= BASE_SIZE || n.type === "ghost")) continue;
+    if (!ARR && d > near && ((n.size || 16) <= BASE_SIZE || n.type === "ghost")) continue;
     if (!inFrontOfCamera(n)) continue;
     cand.push([d, n]);
   }
   // Nearest first, then the pool cuts the tail: when more notes qualify than
   // there are slots, the ones you flew towards are the ones that get named.
-  cand.sort((a, b) => a[0] - b[0]);
+  // An arrangement ranks its names as the 2D one does (the root, then by how
+  // linked each note is), since every note on its plane is equally near.
+  const deg = id => (outDeg[id] || 0) + (inDeg[id] || 0);
+  cand.sort(ARR
+    ? (a, b) => (b[1].id === ARR.root) - (a[1].id === ARR.root) || deg(b[1].id) - deg(a[1].id)
+    : (a, b) => a[0] - b[0]);
   const shown = Math.min(cand.length, LABEL_POOL);
+  const boxes = [];
   for (let i = 0; i < shown; i++) {
     const d = cand[i][0], n = cand[i][1];
     const el = labelEls[i];
     const s = Graph.graph2ScreenCoords(n.x, n.y, n.z || 0);
-    if (el._id !== n.id) { el.textContent = n.label; el._id = n.id; }
+    if (el._id !== n.id) { el.textContent = n.label; el._id = n.id; el._w = 0; }
     el.style.display = "block";
     // Fade with distance so names arrive instead of popping. Floored, because a
-    // label at 5% is a smudge, not a word.
-    el.style.opacity = Math.max(0.35, Math.min(1, 1.15 - d / far));
-    el.style.color = (n.type === "ghost" || n.type === "missing") ? GP.ghostLabel : GP.label;
+    // label at 5% is a smudge, not a word. Not on an arrangement's one plane.
+    el.style.opacity = ARR ? 1 : Math.max(0.35, Math.min(1, 1.15 - d / far));
+    el.style.color = (n._dim || n.type === "ghost" || n.type === "missing") ? GP.ghostLabel : GP.label;
     el.style.transform =
       "translate(" + s.x + "px," + s.y + "px) translate(-50%,6px)";
+    if (!ARR) continue;
+    // Measured once per name, not per frame: the width does not move with the
+    // transform, and a read after every write would lay the page out 60 times
+    // a second.
+    if (!el._w) { el._w = el.offsetWidth; el._h = el.offsetHeight; }
+    boxes.push({ x0: s.x - el._w / 2, y0: s.y + 6, x1: s.x + el._w / 2, y1: s.y + 6 + el._h });
   }
+  // A name that would collide or run under the key waits, as in 2D.
+  if (ARR) keepLabels(boxes, { x0: 0, y0: 0, x1: freeWidth(), y1: Graph.height() })
+    .forEach((k, i) => { if (!k) labelEls[i].style.display = "none"; });
   for (let i = shown; i < labelEls.length; i++) labelEls[i].style.display = "none";
 }
 
@@ -3078,6 +3720,7 @@ function setScope(scope) {
   // Into or out of a collection the context colours change, and 3D reads a
   // node's colour only on an accessor re-pass (refreshPaint).
   const repaint = (SCOPE && SCOPE.kind === "collection") || (scope && scope.kind === "collection");
+  disarrange(false);   // the filters and the fit below read the free layout
   SCOPE = scope || null;
   placeRim();   // before the filters and the fit, which both read its positions
   document.querySelectorAll(".legend-item[data-community]").forEach(el =>
@@ -3123,6 +3766,9 @@ function syncCanvasSize(G) {
 window.addEventListener("resize", () => {
   syncCanvasSize();
   if (scopeFitPending) requestAnimationFrame(fitScope);
+  // The click that arranges also opens the note drawer, which narrows this
+  // frame a moment later: the arrangement is framed again for the new size.
+  if (ARR) requestAnimationFrame(frameArrangement);
 });
 
 // --- Communities legend: sort by size, toggling ascending <-> descending ----
@@ -3312,6 +3958,7 @@ window.addEventListener("message", e => {
   }
   // The app's compare picker: two parts on show, the links inside each faded.
   if (e.data && e.data.type === "silica-compare") {
+    disarrange(false);   // two parts where they sit, not around one note
     const d = e.data.a && e.data.b ? { a: new Set(e.data.a), b: new Set(e.data.b) } : null;
     AB = d;
     RAW_EDGES.forEach(l => {
@@ -3414,6 +4061,7 @@ document.addEventListener("keydown", e => {
   document.getElementById("graph-wrap").addEventListener(t, e => {
     wake();
     if (e.type !== "pointermove") fitPending = false;
+    else if (!e.buttons) pickHover2D(e);   // a held button is a pan or a drag
     // Camera manipulation drops the resolution BEFORE the first heavy paint:
     // capture phase runs ahead of d3-zoom's own handlers, so the very frame
     // this gesture dirties already paints at the motion ratio. A move with a
@@ -3422,3 +4070,7 @@ document.addEventListener("keydown", e => {
     if (e.type === "wheel" || (e.type === "pointermove" && e.buttons))
       setRes(DRS_SCALE);
   }, { capture: true, passive: true }));
+
+// The renderer reports a hover only from a frame under the pointer, so a
+// pointer that leaves the frame over a note would keep it lit until it came back.
+document.getElementById("graph-wrap").addEventListener("pointerleave", () => hoverNote(null));

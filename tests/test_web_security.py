@@ -4,7 +4,7 @@ Every string this file feeds in can reach the browser without a human ever
 having typed it: a note body is whatever document got nucleated, a graph title
 is a tool argument the model chose, and a POST can be issued by any page the
 user happens to have open. app.js writes the rendered note with innerHTML and
-/graph, /map are same-origin documents, so anything that executes here executes
+/graph is a same-origin document, so anything that executes here executes
 with the GUI's own authority over /chat, /note and /settings.
 
 The sanitizer assertions are deliberately written as "this specific payload is
@@ -276,37 +276,6 @@ def test_a_note_body_reaches_the_drawer_already_sanitized(client, tmp_vault):
     tmp_vault.note("evil.md", "# Hi\n\n<img src=x onerror=alert(1)>\n\n<script>alert(2)</script>")
     body = tc.get("/note", params={"path": "evil.md"}).json()["html"].lower()
     assert "onerror" not in body and "<script" not in body
-
-
-# --- /map: the query the caller typed and the error it caused -----------------
-
-
-def test_map_escapes_an_unknown_note_in_its_message(client):
-    tc, _server = client
-    payload = "<script>alert(1)</script>"
-    resp = tc.get("/map", params={"note": payload})
-    assert resp.status_code == 200
-    assert "<script>" not in resp.text
-    assert "&lt;script&gt;" in resp.text
-
-
-def test_map_escapes_the_failure_text_that_quotes_the_note(client, monkeypatch):
-    """The exception message repeats the caller's input, and /map loads
-    same-origin in the explore iframe."""
-    from silica.kernel.recall import mindmap
-
-    def exploding_resolver():
-        def _resolve(ref):
-            raise RuntimeError(f"no index entry for {ref}")
-
-        return _resolve
-
-    monkeypatch.setattr(mindmap, "note_resolver", exploding_resolver)
-    tc, _server = client
-    resp = tc.get("/map", params={"note": "<img src=x onerror=alert(1)>"})
-    assert resp.status_code == 200
-    assert "<img" not in resp.text
-    assert "&lt;img" in resp.text
 
 
 # --- same-origin guard on the state-changing routes ---------------------------

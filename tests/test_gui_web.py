@@ -2375,8 +2375,7 @@ def test_the_vault_poll_never_rebuilds_the_graph_on_screen():
     body = body[:body.index("\n}\n") + 3]
     assert "#graph-frame" not in body, \
         "markVaultChanged touches the graph iframe — it may only offer"
-    assert "drawShape()" in body and "rootMap(" in body, \
-        "the cheap surfaces stopped redrawing themselves"
+    assert "drawShape()" in body, "the cheap surfaces stopped redrawing themselves"
 
 
 def test_the_vault_poll_skips_a_hidden_tab():

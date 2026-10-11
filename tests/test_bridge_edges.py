@@ -53,7 +53,7 @@ def test_compare_fades_the_links_inside_each_part():
     else a comparison shows paints as dimmed, at the same width."""
     js = FRAME_JS.read_text()
     paint = js[js.index("function linkPaint("):js.index("// --- 3D: every link")]
-    assert "if (l._dim || l._ctx || (AB && !on)) out = GP.linkDim;" in paint
+    assert "if (q >= FADE_STEPS || l._ctx || (AB && !on)) out = GP.linkDim;" in paint
     assert "const on = !!AB && !!l._ab;" in paint
 
 

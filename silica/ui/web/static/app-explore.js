@@ -1,8 +1,8 @@
-// --- explore tab: network graph | radial map ---------------------------------
-// Two modes in one view, one toolbar. "graph" is one build (wikilink structure
-// + semantic k-NN overlay, layers toggled in the frame's HUD); "map" is a radial
-// map rooted on one note (/map), which needs a root, so it opens on a hub-picker
-// landing. Each mode owns its iframe so switching back doesn't rebuild the graph.
+// --- explore tab: the graph and the surfaces beside it -----------------------
+// "graph" is one build (wikilink structure + semantic k-NN overlay, layers
+// toggled in the frame's HUD); a click on a note there arranges it as the Map
+// (ADR-0088). The other surfaces render in-page and keep the frame alive, so
+// switching back doesn't rebuild the graph.
 let graphMode = "graph";
 // The surface a pasted #explore/<mode> names, read before the boot click: that
 // click runs setGraphMode(graphMode) and rewrites the hash, so a reload of
@@ -15,7 +15,6 @@ let graphMode = "graph";
     else pendingGraphMode = arg;
   }
 }
-let mapRootedPath = null; // note the radial map is rooted on, or null → picker
 
 // Show one mode: toggle which frame/picker is visible, and rebuild /graph only
 // when the vault changed under us. Also the entry point when switching INTO the
@@ -30,10 +29,9 @@ function setGraphMode(m) {
   syncRefreshCue(); // the offer belongs to the graph surface alone
   syncSurfaceTabs();
   buildSurfaceLine();
-  const isMap = m === "map";
-  // folders / areas / read render in-page. They take the whole pane, so both
-  // iframes hide and the note search goes with them: it flies the graph camera
-  // and roots the map, and neither means anything on a treemap or a matrix.
+  // folders / areas / read render in-page. They take the whole pane, so the
+  // frame hides and the note search goes with it: it flies the graph camera,
+  // which means nothing on a treemap or a matrix.
   const isShape = m in SHAPE_VIEWS;
   // path renders in the same pane as the three shape views and is NOT one of
   // them: it is rooted on a note, so it keeps the search the shape views hide.
@@ -44,7 +42,7 @@ function setGraphMode(m) {
   $("#shape-pane").hidden = !(isShape || isPath || isLibrary);
   if (!isShape) delete $("#shape-pane").dataset.mode;   // see drawShape
   $("#node-search-wrap").hidden = isShape || isLibrary;
-  // The right column (ADR-0072) holds the search on the graph, map and path,
+  // The right column (ADR-0072) holds the search on the graph and path,
   // and the bar at the left keeps out of its band wherever it shows.
   $("#graph-side").hidden = isShape || isLibrary;
   $("#graph-bar").classList.toggle("by-side", !(isShape || isLibrary));
@@ -52,35 +50,25 @@ function setGraphMode(m) {
   // whatever its height: a fixed top padding let a key that wraps (a narrow
   // pane, the note column open) sit on the surface's own title.
   $("#graph-bar").classList.toggle("in-flow", isShape || isPath || isLibrary);
-  $("#graph-frame").hidden = isMap || isShape || isPath || isLibrary;
-  $("#map-frame").hidden = !isMap || !mapRootedPath;
-  $("#map-picker").hidden = !isMap || !!mapRootedPath;
+  $("#graph-frame").hidden = isShape || isPath || isLibrary;
   closeNodeResults();
   // #explore/<mode>: the surface is state (P7). Before the pane views return,
-  // not after: on the last line it ran for graph and map only, so
+  // not after: on the last line it ran for the graph only, so
   // #explore/areas never appeared in the URL and Back skipped four of the
   // seven surfaces (measured 2026-09-22).
   if (activeTab === "graph") syncUrl(false);
   if (isShape || isPath || isLibrary) {
     $("#graph-loading").hidden = true;
-    $("#map-loading").hidden = true;
     if (isLibrary) drawLibrary();
     else if (isPath) { drawPath(); $("#node-search").focus(); } else { drawShape(); }
     return;
   }
   $("#shape-loading").hidden = true;
-  if (isMap) {
-    $("#graph-loading").hidden = true;
-    if (mapRootedPath) $("#map-loading").hidden = true;
-    $("#node-search").focus();
-  } else {
-    $("#map-loading").hidden = true;
-    if (graphStale) {
-      $("#graph-loading").hidden = false;
-      $("#graph-frame").src = "/graph?theme=" + liveTheme() + "&t=" + Date.now();
-      graphStale = false;
-      syncRefreshCue(); // …and this rebuild is what it was offering
-    }
+  if (graphStale) {
+    $("#graph-loading").hidden = false;
+    $("#graph-frame").src = "/graph?theme=" + liveTheme() + "&t=" + Date.now();
+    graphStale = false;
+    syncRefreshCue(); // …and this rebuild is what it was offering
   }
 }
 
@@ -98,9 +86,6 @@ $("#graph-refresh").addEventListener("click", () => {
 // no key line: its key is its panel, and its line is scope and compare, which
 // choose what you look at.
 const SURFACE_KEYS = {
-  // The radius is the association cost, not the hop count (mindmap._layout):
-  // this line said "ring = hops" while the drawing measured something else.
-  map: "nearer the centre = stronger tie · wedge = an area · solid line = wikilink · dashed, hollow dot = related, no link · pick another root from the search",
   folders: "tile area = notes in the folder · fill = how much the folder mixes areas · click a folder to descend",
   areas: "disc = an area, or a zone · dot = a note with a link out · line = one wikilink · cell = the links between two parts · neighbours clockwise from the top, fewest links first",
   read: "stops in area order, biggest first · each hub then what it opens onto",
@@ -266,22 +251,9 @@ $("#graph-frame").addEventListener("load", () => {
   syncDockToViews(); // and the dock's height, which its corner bars park above
   syncSideToViews(); // and the right column's, which its key starts under
 });
-$("#map-frame").addEventListener("load", () => {
-  $("#map-loading").hidden = true;
-  syncDockToViews(); // the map's corner bar parks above the dock, like the graph's
-  syncBarToViews();
-});
-// The tab bar and its key line float over the map's top edge, and the key
-// wraps on a narrow pane, so the map is told the height and fits below it.
-function syncBarToViews() {
-  if (typeof postToViews !== "function") return; // app-notes.js has not run yet
-  postToViews({ type: "silica-host-bar", h: $("#graph-bar").getBoundingClientRect().bottom
-    - $("#view-graph").getBoundingClientRect().top });
-}
-new ResizeObserver(syncBarToViews).observe($("#graph-bar"));
 
 // --- explore: three surfaces that are not link-space -------------------------
-// graph and map both lay notes out by how they CONNECT. Three questions that
+// the graph lays notes out by how they CONNECT. Three questions that
 // shape cannot answer: where does a note sit, how do two areas couple as a
 // whole, and in what order could this be read. One /shape load feeds all three.
 let shapeData = null;

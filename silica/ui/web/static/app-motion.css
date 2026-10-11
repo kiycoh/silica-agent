@@ -79,9 +79,7 @@
 }
 
 #shape-pane>.surface-in,
-#graph-frame:not([hidden]),
-#map-frame:not([hidden]),
-#map-picker:not([hidden]) {
+#graph-frame:not([hidden]) {
   /* both set here: the .view around it declares its own, and they inherit */
   --from: var(--surface-from, 0);
   --travel: 10px;

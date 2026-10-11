@@ -420,7 +420,9 @@ class TestBigVaultPerfKnobs:
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
         assert 'Object.defineProperty(window, "devicePixelRatio"' in html
-        assert "drsOnPaint(); drawAreaBlobs(ctx, scale); drawAreaRibbons(ctx, scale); drawZones(ctx, scale);" in html
+        # first thing in the pre-paint hook, ahead of the arrangement's own
+        # early return (ADR-0088), so every 2D repaint is seen
+        assert ".onRenderFramePre((ctx, scale) => {\n        drsOnPaint();\n        if (ARR)" in html
         # the crisp restore must repaint AND re-derive the budget state
         assert "Graph.resumeAnimation(); Graph.pauseAnimation(); renderBudget();" in html
         # the lib's resize path re-centers using old-pixels / NEW-ratio, wrong by
