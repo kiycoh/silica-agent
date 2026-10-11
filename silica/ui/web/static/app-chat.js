@@ -1374,6 +1374,9 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         // it says who stopped it, after how long, and what had landed. It is
         // never the reply: "(silica: cancelled)" used to replace the answer.
         close("");
+        // Drawn here only: a stopped turn has no answer to store them on.
+        const notes = turnNotes(ev.notes);
+        if (notes) flow.appendChild(notes);
         const o = document.createElement("div");
         o.className = "turn-outcome";
         const secs = (performance.now() - turnT0) / 1000;
@@ -1422,14 +1425,8 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       }
       close(""); // collapse any open thinking, end all segments
       drawDiagrams(body);
-      if (ev.hint) {
-        // Informational only: every recall call this turn came back empty. It
-        // arms nothing — /web works the same with or without it.
-        const h = document.createElement("div");
-        h.className = "turn-hint";
-        h.textContent = ev.hint;
-        flow.appendChild(h);
-      }
+      const notes = turnNotes(ev.notes);
+      if (notes) flow.appendChild(notes);
       setCtxTokens(ev.context_tokens, ev.max_context_tokens, ev.context_parts, ev.compact_at);
       peekDone(ev); // card gets the canonical OFM render
       announce("response ready");
@@ -1447,6 +1444,23 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     }
     followBottom();
   }
+}
+
+// The lines under an answer (ADR-0094 point 8): one muted block, one line per
+// turn note, in the order the server already put them in (retrieval, numbers,
+// graph). Informational only: a note arms nothing. Shared with the replay in
+// app-boot.js, which reads the same notes off the stored answer.
+function turnNotes(notes) {
+  if (!notes || !notes.length) return null;
+  const block = document.createElement("div");
+  block.className = "turn-notes";
+  for (const n of notes) {
+    const line = document.createElement("div");
+    line.className = "turn-note " + n.kind;
+    line.textContent = n.text;
+    block.appendChild(line);
+  }
+  return block;
 }
 
 // Read chips, unique by RESOLVED path: the live stream names a note by the
