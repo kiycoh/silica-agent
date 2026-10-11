@@ -568,6 +568,16 @@ def answer_question_agent(model: str, question: str, now: str,
     if exhausted:
         # The product's real behavior under budget: no answer = abstention.
         response = _ABSTAIN
+    # ADR-0095 point 8, the number published next to abstention: the chat's own
+    # check, against what this answer's calls returned plus the question and the
+    # system messages, which carry `now`. Not a hallucination rate: most such
+    # numbers are not wrong (9 of 10 on real answers, 2026-10-11).
+    from silica.agent.recall_watch import result_numbers, unfounded_in_turn
+
+    read: set[str] = set()
+    for e in events:
+        read |= result_numbers(e.result, e.args)
+    unfounded = None if err else unfounded_in_turn(response or "", read, messages, set())
     return {
         "response": (response or "").strip(),
         "iterations": (_AGENT_MAX_ITERATIONS if exhausted
@@ -576,6 +586,7 @@ def answer_question_agent(model: str, question: str, now: str,
         "notes_read": sorted(notes_read),
         "budget_exhausted": exhausted,
         "error": err,
+        "unfounded_numbers": unfounded,
     }
 
 
@@ -607,6 +618,8 @@ def _agent_aggregate(rows: list[dict]) -> dict | None:
     # how those scored — every retrieval metric is invisible on rows the
     # agent never retrieved for. chained_n = rows that composed >=2 calls.
     no_tool = [r for r in agent_rows if not r.get("tools_used")]
+    # Rows from before ADR-0095 carry no list, and an errored answer was never checked.
+    checked = [r for r in agent_rows if r.get("unfounded_numbers") is not None]
     return {
         "iterations_mean": round(sum(r["iterations"] for r in agent_rows)
                                  / len(agent_rows), 2),
@@ -617,6 +630,14 @@ def _agent_aggregate(rows: list[dict]) -> dict | None:
         "budget_exhausted_n": sum(bool(r.get("budget_exhausted")) for r in agent_rows),
         "budget_exhausted_by_type": dict(exhausted_by_type),
         "error_n": sum(bool(r.get("error")) for r in agent_rows),
+        # Two buckets because a temporal answer computes dates the conversation
+        # never states, and the rule flags every computed number (ADR-0095 point 8).
+        "answers_with_unfounded_number": {
+            bucket: {"answers": len(rs), "with_number": sum(bool(r["unfounded_numbers"]) for r in rs)}
+            for bucket, rs in (
+                ("temporal", [r for r in checked if r.get("question_type") == "temporal"]),
+                ("rest", [r for r in checked if r.get("question_type") != "temporal"]))
+        },
     }
 
 
@@ -758,6 +779,7 @@ def run_question(qa: dict, qid: str, index: dict[str, dict], *, model: str,
         "tools_used": agent["tools_used"] if agent else None,
         "notes_read": agent["notes_read"] if agent else None,
         "budget_exhausted": agent["budget_exhausted"] if agent else None,
+        "unfounded_numbers": agent.get("unfounded_numbers") if agent else None,
         "error": err,
     }
 

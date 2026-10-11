@@ -29,7 +29,12 @@ from starlette.background import BackgroundTask
 from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
 from silica.agent.loop import _is_tool_failure, run_agent
 from silica.agent import turn_notes
-from silica.agent.recall_watch import RecallWatch
+from silica.agent.recall_watch import (
+    RecallWatch,
+    numbers_notes,
+    numbers_of_session,
+    unfounded_in_turn,
+)
 from silica.config import CONFIG
 from silica.kernel.recall.mindmap import note_resolver
 from silica.kernel.write import session_changes
@@ -46,6 +51,9 @@ messages: list[dict] = []
 current_cancel: threading.Event | None = None  # cancel token of the in-flight turn
 current_task: asyncio.Task | None = None  # in-flight worker; owns the busy-gate release
 _collapsed: set[int] = set()  # message indices elided by compaction, across turns
+# Number tokens of every result this session read, raw (ADR-0095): compaction
+# and a relevance verdict stub the tool messages, and must not decide what grounds.
+_seen_numbers: set[str] = set()
 _busy = False  # one turn at a time; a second /chat is refused with 409
 current_session_id: str | None = None  # narration sid of the live conversation
 # The store moved to ~/.silica/narration (docs/specs/narration/spec.md §5);
@@ -116,6 +124,7 @@ def _reset_session() -> None:
     user_memory.set_incognito(False)
     messages[:], CONFIG.context_tokens = _seeded()
     _collapsed.clear()
+    _seen_numbers.clear()
     current_cancel = None
     current_task = None
     _busy = False
@@ -1003,7 +1012,10 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         # Both wrappers forward every event to `cb` untouched: WebTurn records the
         # trace the citations are built from, RecallWatch counts recall misses for
         # the thin-coverage hint.
-        watch = WebTurn(web[0], cb) if web else RecallWatch(cb)
+        # A /web turn is not checked for numbers, but its pages were read: the
+        # RecallWatch under its WebTurn collects them for the session set.
+        read = RecallWatch(cb)
+        watch = WebTurn(web[0], read) if web else read
 
         sentinel = object()
         task = asyncio.create_task(
@@ -1035,6 +1047,9 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
                 break
             yield item
 
+        # Before the await, which re-raises: a turn that failed still read what
+        # its results showed, and the narration a reload rebuilds from has them.
+        _seen_numbers.update(read.numbers)
         answer = await task  # re-raises if run_agent failed
         # Stop is an outcome, not an answer (audit P3): the loop hands back its
         # sentinel once the token is set, and the text that had streamed stays
@@ -1043,6 +1058,11 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         # keeps the sentinel: the WS bridge (silica connect) reads it as the
         # turn's text and has no row to draw.
         stopped = current_cancel.is_set()
+        # ADR-0095: the answer as the model wrote it, before attribution and
+        # figures add text it did not; not a stopped turn's, not a /web turn's,
+        # whose answer is bound to banked verbatim quotes.
+        unread = ([] if stopped or web else
+                  unfounded_in_turn(answer, read.numbers, messages, _seen_numbers))
         # isinstance, not `if web:` — the two are the same condition (watch is
         # built from it one screen up) but only this one says which half of the
         # union carries `attribute`.
@@ -1067,6 +1087,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         # beat below so a reopened chat draws them too. A stopped turn has no
         # answer to carry them: they are drawn live only.
         notes = watch.notes() if isinstance(watch, RecallWatch) else []
+        notes += numbers_notes(unread)
         notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
         # Final-assistant turn beat, post-attribution (see loop.py).
         if messages and messages[-1].get("role") == "assistant":
@@ -3615,6 +3636,8 @@ def load_session(payload: dict):
     # /resume already put a fresh seed in front; this is the same.
     messages[:] = _seeded()[0] + replayed
     _collapsed = set()
+    _seen_numbers.clear()
+    _seen_numbers.update(numbers_of_session(current_session_id))
     _update_context_tokens(messages)
     return {"ok": True}
 

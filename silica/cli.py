@@ -27,7 +27,12 @@ from silica.ui.style import FlatMarkdown
 from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
 from silica.agent.loop import run_agent
 from silica.agent import turn_notes
-from silica.agent.recall_watch import RecallWatch
+from silica.agent.recall_watch import (
+    RecallWatch,
+    numbers_notes,
+    numbers_of_session,
+    unfounded_in_turn,
+)
 from silica.config import CONFIG
 from silica.onboarding.adopt import resolve_cwd_vault
 from silica.prompts import _lang_prefer, system_prompt
@@ -4433,6 +4438,9 @@ def main():
     user_memory.set_incognito(False)
     messages = _fresh_messages()
     collapsed: set[int] = set()  # message indices already elided by compaction
+    # Number tokens of every result this session read, raw (ADR-0095): compaction
+    # and a relevance verdict stub the tool messages, and must not decide what grounds.
+    seen_numbers: set[str] = set()
     # This session's own identity, for the capture lane. Random, not a clock:
     # two silica processes started in the same second share the same vault WAL,
     # and a deterministic name would have one overwrite the other's envelope.
@@ -4517,12 +4525,20 @@ def main():
                 print_home()
                 messages[:] = _fresh_messages()
                 collapsed = set()  # indices reset with the history
+                seen_numbers = set()
                 from silica.agent import narration as _narr
                 _narr.NARRATOR.close()          # next user turn opens a fresh sid
                 session_id = uuid.uuid4().hex[:12]
                 continue
 
             result = _handle_slash_command(user_input, messages)
+            if cmd.startswith("/resume"):
+                # From the narration the history came back from. A /resume that
+                # failed left the narrator on this session, whose narration holds
+                # what the live set does.
+                from silica.agent import narration as _narr
+
+                seen_numbers = numbers_of_session(_narr.NARRATOR.sid)
             if result is False:
                 print("  (_  _)。˚")
                 break
@@ -4562,7 +4578,10 @@ def main():
         # Both wrappers forward every event to the renderer untouched: WebTurn
         # records the trace the citations are built from, RecallWatch counts
         # recall misses for the thin-coverage hint.
-        watch = WebTurn(web[0], callback) if web else RecallWatch(callback, surface="repl")
+        # A /web turn is not checked for numbers, but its pages were read: the
+        # RecallWatch under its WebTurn collects them for the session set.
+        read = RecallWatch(callback, surface="repl")
+        watch = WebTurn(web[0], read) if web else read
 
         try:
             answer = run_agent(
@@ -4579,6 +4598,10 @@ def main():
                                           deferred=chat_deferred(messages), interactive=True)
                 ),
             )
+            # ADR-0095: the answer as the model wrote it, before attribution adds
+            # text it did not; not a /web turn's, whose answer is bound to banked
+            # verbatim quotes.
+            unread = [] if web else unfounded_in_turn(answer, read.numbers, messages, seen_numbers)
             if web:
                 answer = watch.attribute(answer, messages)
             elif watch.web_answer:
@@ -4587,7 +4610,7 @@ def main():
                 answer = relay_sources(answer, messages)
             # The lines under the answer, stored on it before the beat below
             # so the session keeps them (ADR-0094 point 8).
-            notes = turn_notes.attach(messages, [] if web else watch.notes())
+            notes = turn_notes.attach(messages, ([] if web else watch.notes()) + numbers_notes(unread))
             # Final-assistant turn beat, post-attribution (see loop.py): the
             # replay must carry what the user actually read, sources included.
             if messages and messages[-1].get("role") == "assistant":
@@ -4611,6 +4634,9 @@ def main():
             callback.close()
             logger.exception("Agent error")
             CONSOLE.print(f"\n  [bold red]Error:[/] {e}\n")
+        # After the except arms too: an interrupted or failed turn still read
+        # what its results showed, and the narration /resume rebuilds from has them.
+        seen_numbers |= read.numbers
 
     # Every exit from the REPL passes here: /exit, Ctrl+D, Ctrl+C at the prompt.
     if not user_memory.incognito():
