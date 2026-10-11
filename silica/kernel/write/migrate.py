@@ -326,6 +326,7 @@ def apply(vault: Path | str, plans: list[Plan], migration: Migration = PROVENANC
     no empty run for /revert to find."""
     from silica.driver import DRIVER
     from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.kernel.write.preserve import Loss
     from silica.kernel.write.undo_journal import get_undo_journal
 
     journal = get_undo_journal()
@@ -343,7 +344,8 @@ def apply(vault: Path | str, plans: list[Plan], migration: Migration = PROVENANC
             continue
         if not run_id:
             run_id = journal.start_run(source="migrate", vault=str(vault))
-        DRIVER.overwrite(p.path, after)
+        # Confirmed per run and journaled as one revertible run (ADR-0039).
+        DRIVER.overwrite(p.path, after, loss=Loss.MIGRATE)
         post = DRIVER.read_note(p.path).content or ""
         journal.record(
             run_id,

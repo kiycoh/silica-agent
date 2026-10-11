@@ -319,6 +319,13 @@ def run_agent(
         compact_by_relevance(messages, TOOLS)
     # What a tool may need to know about the turn it serves (read_scope.py).
     read_scope.set_requests(messages)
+    if constraints is None or constraints.interactive:
+        # A chat turn opens here: a create at a path the chat deleted since is
+        # judged against the deleted body (ADR-0093). A batch sub-loop opens
+        # none, so it cannot shrink the window of the chat turn it runs in.
+        from silica.kernel.write import preserve
+
+        preserve.begin_turn()
     # Not read_scope's REQUESTS for the user-memory gates (ADR-0076): those
     # strings drop `origin`, and a directive's own "Note that ..." would read
     # as the user asking to remember.

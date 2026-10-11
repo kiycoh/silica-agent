@@ -106,6 +106,7 @@ def commit_derived(rel: str, content: str) -> dict[str, Any]:
     Returns {"status": committed | rolled_back | error, "reason": ...}.
     """
     from silica.driver import DRIVER
+    from silica.kernel.write.preserve import Loss
     from silica.kernel.write.templates import ensure_system_floor
     from silica.kernel.workqueue import path_lease
     from silica.tools.composed import silica_lint
@@ -120,7 +121,8 @@ def commit_derived(rel: str, content: str) -> dict[str, Any]:
             if prior is None:
                 DRIVER.create(rel, content)
             else:
-                DRIVER.overwrite(rel, content)
+                # DERIVED: the wiki is the code's, and a regen may shrink it.
+                DRIVER.overwrite(rel, content, loss=Loss.DERIVED)
         except Exception as e:
             return {"status": "error", "reason": str(e)}
         lr = silica_lint(rel, op_type="overwrite")
@@ -130,7 +132,7 @@ def commit_derived(rel: str, content: str) -> dict[str, Any]:
                 if prior is None:
                     DRIVER.delete(rel)
                 else:
-                    DRIVER.overwrite(rel, prior)
+                    DRIVER.overwrite(rel, prior, loss=Loss.RESTORE)
             except Exception as e:
                 logger.error("commit_derived rollback failed for %s: %s", rel, e)
                 return {"status": "error", "reason": f"{reason}; rollback failed: {e}"}

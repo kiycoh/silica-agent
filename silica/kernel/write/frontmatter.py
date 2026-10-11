@@ -153,6 +153,11 @@ def lint_tags(data):
     return issues
 
 def dump(data, body):
-    """Re-emit a full note: --- yaml --- + blank line + body."""
+    """Re-emit a full note: --- yaml --- + blank line + body.
+
+    Only the body's leading NEWLINES go: until 2026-10-11 this was
+    `body.lstrip()`, which also took the indent of a first body line written
+    with one (2 of 730 test-vault notes, ADR-0093), and an indent is list
+    nesting or code."""
     fm = yaml.safe_dump(data, allow_unicode=True, sort_keys=False).strip()
-    return f"---\n{fm}\n---\n\n{body.lstrip()}"
+    return f"---\n{fm}\n---\n\n{body.lstrip(chr(10))}"

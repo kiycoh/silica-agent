@@ -155,7 +155,8 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
 
         new_content = upsert_props(prior, {_FIELD_TO_KEY[k]: v for k, v in changes.items()})
         try:
-            DRIVER.overwrite(target.path, new_content)
+            # The event keys are what an update is for (ADR-0093 `free`).
+            DRIVER.overwrite(target.path, new_content, free=tuple(_FIELD_TO_KEY.values()))
         except Exception as e:
             return {"error": f"Failed to update '{target.path}': {e}"}
 

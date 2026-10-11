@@ -2446,7 +2446,9 @@ def note_save(payload: dict):
                              "etag": _etag(current)}, status_code=409)
     text = str(payload.get("text", ""))
     if text != current:
-        DRIVER.overwrite(canon, text)
+        from silica.kernel.write.preserve import Loss
+
+        DRIVER.overwrite(canon, text, loss=Loss.PERSON)  # the person typed it
     # overwrite() may stamp a derived `type:` into the frontmatter, so what
     # landed is read back rather than assumed: the editor's next etag has to be
     # the disk's, or its next save refuses itself.

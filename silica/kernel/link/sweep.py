@@ -129,9 +129,12 @@ def _unlink_body(body: str, resolves) -> tuple[str, list[str], list[str]]:
             # The display text is what the reader already sees; only the target
             # moves, so the note reads exactly as before and the edge is real.
             relinked.append(hit)
-            return f"[[{hit}{anchor or ''}|{(alias or t).strip()}]]"
+            return f"[[{hit}{anchor or ''}|{alias or t}]]"
         stripped.append(t)
-        return (alias or t).strip()
+        # The alias as written: until 2026-10-11 it was stripped, which glued
+        # `word[[X| next]]` into "wordnext" (ADR-0093). Its spaces are part of
+        # what the reader sees.
+        return alias or t
 
     return _WIKILINK_RE.sub(_sub, body), stripped, relinked
 
@@ -184,8 +187,12 @@ def sweep_note(rel_path: str, resolves) -> dict | None:
         dropped = []
     if new == content:
         return None
+    from silica.kernel.write.preserve import Loss
+
     try:
-        DRIVER.overwrite(rel_path, new)
+        # UNLINK relaxes only the related: entries that resolve nowhere; the
+        # body's unlinks pass the rule as they are, alias for alias.
+        DRIVER.overwrite(rel_path, new, loss=Loss.UNLINK)
     except Exception as e:
         logger.warning("link sweep: overwrite failed for %s (left as-is): %s", rel_path, e)
         return None

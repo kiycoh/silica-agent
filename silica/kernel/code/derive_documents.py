@@ -143,14 +143,20 @@ def propose(vault: Path | str, repo_root: Path | str | None = None,
 
 def apply(vault: Path | str, proposals: list[Proposal]) -> int:
     """Stamp each proposal into its note; the count written. A note without
-    frontmatter gets a block of exactly these two keys above its first line."""
+    frontmatter gets a block of exactly these two keys above its first line.
+
+    Through the driver, so the preservation check, the Changes list and a
+    CRLF note's endings see the write (ADR-0093): until 2026-10-11 this was
+    `write_text`, the one note writer outside the driver. `vault` is the
+    active vault, the one the driver writes."""
+    from silica.driver import DRIVER
+
     vault = Path(vault)
     n = 0
     for p in proposals:
-        md = vault / p.note_path
         try:
-            content = md.read_text(encoding="utf-8")
-        except OSError:
+            content = DRIVER.read_note(p.note_path).content
+        except Exception:  # noqa: BLE001 - gone or unreadable since propose(): nothing to stamp
             continue
         if content.startswith("---\n"):
             stamped = templates.stamp_documents(content, p.documents, p.code_ref)
@@ -159,7 +165,7 @@ def apply(vault: Path | str, proposals: list[Proposal]) -> int:
                                         "code_ref": p.code_ref}, content)
         if stamped == content:
             continue
-        md.write_text(stamped, encoding="utf-8")
+        DRIVER.overwrite(p.note_path, stamped)
         n += 1
     if n:
         codedocs.invalidate_snapshot(vault)

@@ -290,6 +290,8 @@ def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to r
     Accepts the 'inverses' list produced by silica_snapshot — fully
     JSON-serialisable, no hidden Python objects.
     """
+    from silica.kernel.write.preserve import Loss
+
     errors: list[str] = []
     applied: list[str] = []
 
@@ -316,7 +318,7 @@ def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to r
             elif inv.kind == InverseOpKind.restore_version:
                 if inv.prior_content is not None:
                     # Overwrite with captured content (reliable across backends).
-                    DRIVER.overwrite(path, inv.prior_content)
+                    DRIVER.overwrite(path, inv.prior_content, loss=Loss.RESTORE)
                     applied.append(f"restored_content:{path}")
                 else:
                     logger.warning("restore_version: no prior_content for %s — skipped", path)
@@ -325,7 +327,7 @@ def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to r
                 if inv.prior_content is not None:
                     # upsert: a re-run restore (partial rollback retry) finds the
                     # note already recreated — restoring content is still correct.
-                    DRIVER.upsert(path, inv.prior_content)
+                    DRIVER.upsert(path, inv.prior_content, loss=Loss.RESTORE)
                     applied.append(f"recreated_deleted:{path}")
                 else:
                     errors.append(f"recreate_deleted missing prior_content for {path}")

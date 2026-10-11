@@ -36,7 +36,7 @@ from silica.driver.base import (
     Txn,
 )
 from silica.kernel.write import frontmatter as fm
-from silica.kernel.write import session_changes
+from silica.kernel.write import preserve, session_changes
 from silica.kernel.link import ofm
 from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import (
@@ -83,6 +83,14 @@ _EMBED_FLUSH_EVERY = 32
 # Deferred embed-delete flush state (see _drop_embed_vector).
 _embed_deletes_pending = 0
 _embed_flush_registered = False
+
+
+def _read_lf(full: Path) -> tuple[str, bool]:
+    """A note as every composer reads it, on LF (what read_text's universal
+    newlines gave before 2026-10-11), and whether its bytes were CRLF, so the
+    write can put the user's terminator back (ADR-0093 decision 8)."""
+    raw = full.read_bytes()
+    return preserve.lf(raw.decode("utf-8")), preserve.crlf_dominant(raw)
 
 
 def _flush_pending_embed_deletes() -> None:
@@ -158,7 +166,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         # re-reads for a bounded footprint instead of growing to every body
         # in RAM. Plain dict as the LRU: hits reinsert, eviction pops the
         # oldest key (insertion order).
-        self._body_cache: dict[str, tuple[float, str]] = {}  # abs-path str -> (mtime, content)
+        # abs-path str -> (mtime, content read on LF, the bytes were CRLF-dominant)
+        self._body_cache: dict[str, tuple[float, str, bool]] = {}
         # {directory -> mtime} as of the last full rebuild. POSIX bumps a
         # directory's mtime when a file inside it is created, deleted or
         # renamed, and NOT when one is edited in place — which is exactly the
@@ -667,10 +676,24 @@ class ObsidianFSBackend(GraphIndexMixin):
         if hit is not None and hit[0] == mtime:
             self._body_cache[key] = hit  # reinsert: most recently used
             return hit[1]
-        self._body_cache[key] = (mtime, content := full.read_text(encoding="utf-8"))
+        content, crlf = _read_lf(full)
+        self._body_cache[key] = (mtime, content, crlf)
         while len(self._body_cache) > _BODY_CACHE_CAP:
             del self._body_cache[next(iter(self._body_cache))]
         return content
+
+    def _crlf(self, full: Path) -> bool:
+        """Whether the bytes `_read_cached` last read at `full` were CRLF."""
+        hit = self._body_cache.get(str(full))
+        return bool(hit and hit[2])
+
+    def _guard_write(self, rel_path: str, prior: str | None, content: str, crlf: bool, *,
+                     loss: preserve.Loss | None = None, free=()) -> bytes:
+        """ADR-0093 at the write site: the rule on the composed text (it
+        raises only once preserve.REFUSE is on), then the bytes in the prior's
+        own line terminator, since every composer reads and writes LF."""
+        preserve.check_write(rel_path, prior, content, loss=loss, free=free)
+        return preserve.encode(content, crlf).encode("utf-8")
 
     def _invalidate_body(self, rel_path: str) -> None:
         """Drop the cached body for a vault-relative path (write just landed)."""
@@ -1040,7 +1063,8 @@ class ObsidianFSBackend(GraphIndexMixin):
     # Write (graph-safe)
     # ------------------------------------------------------------------
 
-    def create(self, path: str, content: str) -> NoteRef:
+    def create(self, path: str, content: str, *, loss: preserve.Loss | None = None,
+               free=()) -> NoteRef:
         """Create a new note at the given vault-relative path."""
         rel_path = contain_in_vault(path, self.vault_path)
 
@@ -1056,6 +1080,9 @@ class ObsidianFSBackend(GraphIndexMixin):
         full_path.parent.mkdir(parents=True, exist_ok=True)
 
         content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
+        # A path the chat deleted earlier in this turn: the body that delete
+        # saved is the before-state (ADR-0093 decision 4).
+        preserve.check_recreate(rel_path, content, loss=loss, free=free)
         session_changes.touched(rel_path, None)  # no baseline: the note is new
         # Notes are irreplaceable and this backend keeps no version history
         # (snapshot_versions returns an empty Txn), so a truncating write_text
@@ -1069,16 +1096,18 @@ class ObsidianFSBackend(GraphIndexMixin):
             self._patch_index(rel_path, content)
         return NoteRef(name=name, path=rel_path)
 
-    def overwrite(self, path: str, content: str) -> NoteRef:
+    def overwrite(self, path: str, content: str, *, loss: preserve.Loss | None = None,
+                  free=()) -> NoteRef:
         """Overwrite an existing note in-place.
 
         The FS backend does this as a direct write — history is not tracked
         in FS mode, so overwrite and patch rollback via versions is a no-op
         (see restore()). For write-op rollback, created_paths is used instead.
         """
-        return self._overwrite_raw(path, content, stamp=True)
+        return self._overwrite_raw(path, content, stamp=True, loss=loss, free=free)
 
-    def _overwrite_raw(self, path: str, content: str, stamp: bool = False) -> NoteRef:
+    def _overwrite_raw(self, path: str, content: str, stamp: bool = False, *,
+                       loss: preserve.Loss | None = None, free=()) -> NoteRef:
         """The write itself. `stamp=False` writes the bytes as given — for
         callers replaying content that already exists (a rollback, or the WS
         stub emulating the Obsidian plugin, which is a verbatim pipe and does
@@ -1092,8 +1121,11 @@ class ObsidianFSBackend(GraphIndexMixin):
 
         if stamp:
             content = stamp_type(rel_path, content)   # OKF §4.1 `type`, if absent
-        session_changes.touched(rel_path, self._read_cached(full_path))
-        atomic_write_bytes(full_path, content.encode("utf-8"))
+        prior = self._read_cached(full_path)
+        data = self._guard_write(rel_path, prior, content, self._crlf(full_path),
+                                 loss=loss, free=free)
+        session_changes.touched(rel_path, prior)
+        atomic_write_bytes(full_path, data)
         self._invalidate_body(rel_path)
         name = rel_path.rsplit("/", 1)[-1].removesuffix(".md")
         if self._needs_reindex:
@@ -1164,7 +1196,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         # below resolves symlinks (atomic_write_bytes writes THROUGH them), so
         # an unresolved boundary check here would rewrite a file outside.
         rel_path_str = contain_in_vault(str(path), self.vault_path)
-        content = path.read_text(encoding="utf-8")
+        content, crlf = _read_lf(path)
         data, delim, body = fm.split(content)
 
         if data is None:
@@ -1173,8 +1205,9 @@ class ObsidianFSBackend(GraphIndexMixin):
         data[name] = value
 
         new_content = fm.dump(data, body)
+        raw = self._guard_write(rel_path_str, content, new_content, crlf, free=(name,))
         session_changes.touched(rel_path_str, content)
-        atomic_write_bytes(path, new_content.encode("utf-8"))
+        atomic_write_bytes(path, raw)
         self._body_cache.pop(str(path), None)
 
     @_locked
@@ -1257,7 +1290,7 @@ class ObsidianFSBackend(GraphIndexMixin):
                 referrer_path = self.vault_path / referrer_rel
                 if not referrer_path.exists():
                     continue
-                referrer_content = referrer_path.read_text(encoding="utf-8")
+                referrer_content, referrer_crlf = _read_lf(referrer_path)
 
                 # The referrers are the third write target of a move, and the
                 # only one that is discovered rather than passed in — so it is
@@ -1292,8 +1325,10 @@ class ObsidianFSBackend(GraphIndexMixin):
                 )
                 if n > 0:
                     # Write directly — avoids re-entrant overwrite() logic
+                    raw = self._guard_write(referrer_rel, referrer_content, new_content,
+                                            referrer_crlf, loss=preserve.Loss.RENAME)
                     session_changes.touched(referrer_rel, referrer_content)
-                    atomic_write_bytes(referrer_path, new_content.encode("utf-8"))
+                    atomic_write_bytes(referrer_path, raw)
                     self._invalidate_body(referrer_rel)
                     referrer_updates.append((referrer_rel, new_content))
                 else:

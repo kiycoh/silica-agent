@@ -15,7 +15,10 @@ global DRIVER instance selected at runtime.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from silica.kernel.write.preserve import Loss
 
 
 # ---------------------------------------------------------------------------
@@ -145,10 +148,12 @@ class GraphIndexMixin:
     def read_note(self, path: str) -> Any:
         raise NotImplementedError
 
-    def create(self, path: str, content: str) -> NoteRef:
+    def create(self, path: str, content: str, *, loss: Loss | None = None,
+               free=()) -> NoteRef:
         raise NotImplementedError
 
-    def overwrite(self, path: str, content: str) -> NoteRef:
+    def overwrite(self, path: str, content: str, *, loss: Loss | None = None,
+                  free=()) -> NoteRef:
         raise NotImplementedError
 
     def _node_ref(self, path: str) -> NoteRef:
@@ -162,20 +167,22 @@ class GraphIndexMixin:
         self._ensure_graph()
         return self._notes, self._unresolved_links, self._graph
 
-    def upsert(self, path: str, content: str) -> NoteRef:
+    def upsert(self, path: str, content: str, *, loss: Loss | None = None,
+               free=()) -> NoteRef:
         """Write content unconditionally: create when missing, overwrite when present.
 
         For callers whose semantics are "refresh this staging/derived note"
         (inbox conversion, source stubs, undo restore) — NOT for vault write
         ops, which must fail loudly on an unexpected existing note (create).
         Existence-probe via read_note keeps this backend-agnostic (create's
-        raise type differs across backends).
+        raise type differs across backends). `loss` and `free` reach whichever
+        of the two runs (ADR-0093 decision 6).
         """
         try:
             self.read_note(path)
         except Exception:
-            return self.create(path, content)
-        return self.overwrite(path, content)
+            return self.create(path, content, loss=loss, free=free)
+        return self.overwrite(path, content, loss=loss, free=free)
 
 
 # ---------------------------------------------------------------------------
@@ -264,11 +271,18 @@ class ObsidianDriver(Protocol):
 
     # -- write (graph-safe) ------------------------------------------------
 
-    def create(self, path: str, content: str) -> NoteRef:
-        """Create a new note. Path is relative to vault root. Raises if file exists."""
+    def create(self, path: str, content: str, *, loss: Loss | None = None,
+               free=()) -> NoteRef:
+        """Create a new note. Path is relative to vault root. Raises if file exists.
+
+        `loss` and `free`, here and on upsert/overwrite, are ADR-0093's: the
+        closed reason a call site declares for what its write may remove, and
+        the frontmatter keys it may change. Never set from an op or a tool
+        argument."""
         ...
 
-    def upsert(self, path: str, content: str) -> NoteRef:
+    def upsert(self, path: str, content: str, *, loss: Loss | None = None,
+               free=()) -> NoteRef:
         """Write content unconditionally: create when missing, overwrite when present.
 
         Concrete implementation in GraphIndexMixin (Protocol bodies are not
@@ -276,7 +290,8 @@ class ObsidianDriver(Protocol):
         """
         ...
 
-    def overwrite(self, path: str, content: str) -> NoteRef:
+    def overwrite(self, path: str, content: str, *, loss: Loss | None = None,
+                  free=()) -> NoteRef:
         """Overwrite an existing note in-place, preserving history.
 
         Unlike delete+create, this MUST NOT destroy Obsidian's version history
