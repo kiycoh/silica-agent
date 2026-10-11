@@ -198,6 +198,25 @@ class UndoJournalStore:
                 return row["run_id"], row["path"], row["started_at"]
         return None
 
+    def newest_post_hash(self, path: str, vault: str | None) -> str | None:
+        """The post-write hash of the newest un-reverted inverse for `path`
+        in `vault` (any spelling, via provenance.note_key): what the agent last
+        landed there. ADR-0093's draft pass compares it with the note now."""
+        from silica.kernel.write.provenance import note_key
+
+        query = ("SELECT i.path, i.post_hash FROM inverses i JOIN runs r ON r.run_id = i.run_id "
+                 "WHERE r.reverted_at IS NULL")
+        params: list = []
+        if vault is not None:
+            query += " AND r.vault = ?"
+            params.append(vault)
+        query += " ORDER BY i.id DESC"
+        want = note_key(path)
+        for row in self._conn().execute(query, params):
+            if note_key(row["path"]) == want:
+                return row["post_hash"]
+        return None
+
     def last_chat_move(self, vault: str | None, ref: str | None = None
                        ) -> tuple[str, str, str, float] | None:
         """(run_id, from, to, started_at) of the newest un-reverted chat move in
