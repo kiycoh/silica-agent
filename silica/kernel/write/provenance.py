@@ -739,6 +739,75 @@ def _span_verdicts(body: str, source: str) -> list[tuple[str, bool]]:
     return out
 
 
+# --- Numbers a chat answer states that no evidence holds (ADR-0095) ---------
+# The numeral leg of _span_verdicts, lifted out of the math span: in a chat
+# answer the numbers that matter sit in prose. The locality leg stays with
+# distill, because a chat model re-notates formulas freely (19 of 22 real flags
+# on 2026-10-11 were the evidence's own formulas re-typeset).
+#
+# The look-behind makes a hyphen after a letter or a digit a range or a
+# compound, not a sign ("1-10" yields 10, never -10), and keeps a digit run
+# glued to a letter before it (`v2`, `x12`, a hash) out of both sides. Letting
+# such runs in as evidence let hashes ground numbers: 9.4% of probe answers
+# warned with them against 11.0% without (2026-10-11).
+_NUMBER_RE = re.compile(r"(?<![0-9A-Za-z])-?\d+(?:[.,]\d+)*")
+_GROUPED_RE = re.compile(r"-?\d{1,3}(?:[.,]\d{3})+")
+_DECIMAL_COMMA_RE = re.compile(r"-?\d+,\d+")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _number_spellings(tok: str) -> set[str]:
+    """One number as written, without digit grouping when the groups are threes
+    ("2,583", the Italian "1.067"), and with a decimal comma read as a point.
+    "1,067" is both 1067 and 1.067: which one the writer meant is not in the
+    token, so either reading grounds it."""
+    out = {tok}
+    if _GROUPED_RE.fullmatch(tok):
+        out.add(re.sub(r"[.,]", "", tok))
+    if _DECIMAL_COMMA_RE.fullmatch(tok):
+        out.add(tok.replace(",", "."))
+    return out
+
+
+def number_tokens(text: str) -> set[str]:
+    """Every spelling of every number in *text*: the evidence side of
+    `unfounded_numbers`. Nothing is excluded here, code and links included,
+    because a number a tool result shows anywhere was read."""
+    out: set[str] = set()
+    for tok in _NUMBER_RE.findall(text):
+        out |= _number_spellings(tok)
+    return out
+
+
+def unfounded_numbers(text: str, evidence_tokens: set[str]) -> list[str]:
+    """The distinct numbers of *text* none of whose spellings is among
+    *evidence_tokens* (from `number_tokens`), in order of appearance.
+
+    Not checked: fenced code (mermaid included) and inline code, which are
+    examples and drawings the model writes; wikilinks and embeds, which name
+    notes; URLs; the leading list or heading marker of a line, which numbers
+    the answer's own layout; and any number of fewer than 2 digits, for the
+    reason `_NUMERAL_RE` gives. Arithmetic is not exempted: a correct sum is
+    flagged unless the sum itself was read, because no mechanical rule tells it
+    from an invented figure. A flag means "not read", never "wrong".
+    """
+    # _LEADING_MARKER_RE and _ANY_WIKILINK_RE are the extractive check's own,
+    # defined below: one notion of "layout" and "a link" across both checks.
+    prose = _FENCE_RE.sub(" ", text)
+    prose = _INLINE_CODE_RE.sub(" ", prose)
+    prose = _ANY_WIKILINK_RE.sub(" ", prose)
+    prose = _URL_RE.sub(" ", prose)
+    out: list[str] = []
+    for line in prose.splitlines():
+        for tok in _NUMBER_RE.findall(_LEADING_MARKER_RE.sub("", line)):
+            if len(tok.lstrip("-").replace(".", "").replace(",", "")) < 2:
+                continue
+            if tok not in out and not (_number_spellings(tok) & evidence_tokens):
+                out.append(tok)
+    return out
+
+
 # Extractive invariant: markers the model may prepend to a copied span (list
 # bullets, ordered markers, headings, blockquotes) and inline wikilinks the
 # autolink phase injects later — stripped before the substring check so added
