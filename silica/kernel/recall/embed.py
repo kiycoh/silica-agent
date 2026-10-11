@@ -441,6 +441,15 @@ class EmbedStore(DiskSynced):
     def __len__(self) -> int:
         return len(self._notes)
 
+    def dim(self) -> int | None:
+        """The width search uses, the store's modal one; None when empty.
+
+        Modal and not the first row's because search keeps only the modal width
+        (_build_matrix), so this is the width a query must have to score at all.
+        """
+        self._ensure_matrix()
+        return self._mat_dim
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------

@@ -309,10 +309,36 @@ def check_embeddings(config: SilicaConfig) -> CheckResult:
             "the server is running another model: load the configured one, or set "
             "SILICA_EMBEDDING_MODEL to the model it runs",
         )
+    # An index built by an embedder of another width (ADR-0078's new default can
+    # leave one) scores every query at 0.0: the embed leg abstains on every call
+    # and recall runs on words while the endpoint looks healthy (ADR-0094).
+    held = _index_width()
+    if held and held != got:
+        return CheckResult(
+            "embeddings", "warn",
+            f"the index holds {held}-dim vectors and `{config.embedding_model}` returns "
+            f"{got}: recall searches by words only until /embed rebuilds it",
+            # --force: the model id is cosmetic to llama-server, so an index made
+            # under the same id by another model matches its hashes and /embed
+            # alone would skip every note.
+            "run /embed --force to rebuild the index with this model",
+        )
     return CheckResult(
         "embeddings", "ok",
         f"{config.embedding_model} @ {config.embedding_base_url}",
     )
+
+
+def _index_width() -> int | None:
+    """The active vault's embedding index width, None when there is none."""
+    try:
+        from silica.kernel.recall.embed import get_store
+
+        return get_store().dim()
+    except Exception:
+        # No vault configured, or an index that does not load: the recall-index
+        # check reports those, and a width this check cannot read is no mismatch.
+        return None
 
 
 def check_rerank(config: SilicaConfig) -> CheckResult:

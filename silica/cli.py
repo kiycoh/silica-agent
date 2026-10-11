@@ -4562,7 +4562,7 @@ def main():
         # Both wrappers forward every event to the renderer untouched: WebTurn
         # records the trace the citations are built from, RecallWatch counts
         # recall misses for the thin-coverage hint.
-        watch = WebTurn(web[0], callback) if web else RecallWatch(callback)
+        watch = WebTurn(web[0], callback) if web else RecallWatch(callback, surface="repl")
 
         try:
             answer = run_agent(

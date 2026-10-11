@@ -332,6 +332,28 @@ def _failure_kind(exc: Exception) -> str:
     return "failed"
 
 
+# The cause a retrieval call records for a leg it ran without (ADR-0094),
+# finer than `_failure_kind` where the fix differs: a timeout is a server that is
+# up and slow (raise the timeout, do not start it), and a 503 is llama.cpp still
+# loading its weights, which `serve.ready` already reads the same way.
+_WHY = {"down": "unreachable", "rejected": "rejected", "failed": "failed"}
+
+
+def why_of(exc: Exception) -> str:
+    """'slow' | 'loading' | 'unreachable' | 'rejected' | 'failed'."""
+    # Before the status check and before `_failure_kind`: APITimeoutError is an
+    # APIConnectionError, and httpx's timeouts are transport errors, so both
+    # would otherwise read as "unreachable".
+    if isinstance(exc, (openai.APITimeoutError, httpx.TimeoutException)):
+        return "slow"
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 503:
+        return "loading"
+    return _WHY[_failure_kind(exc)]
+
+
 def warn_down_once(role: str, where: str, exc: Exception, model: str = "") -> None:
     """Report a degraded relatedness leg once per (role, kind), then at DEBUG.
 
@@ -453,14 +475,19 @@ class Reranker:
         self.model = model
         self.headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
         self.timeout = timeout
+        # Why the last `scores` call abstained (`why_of`), None when it scored.
+        # One call's worth: get_reranker builds a client per retrieval call.
+        self.failure: str | None = None
 
     def scores(self, query: str, documents: list[str]) -> list[float] | None:
         """Relevance score per document in input order, or None to abstain.
 
         Abstains (None) on any transport or response-shape failure so the caller
-        keeps its prior ordering rather than dropping candidates. The short
-        timeout keeps a slow reranker from stalling an interactive path.
+        keeps its prior ordering rather than dropping candidates, and says why in
+        `failure`. The short timeout keeps a slow reranker from stalling an
+        interactive path.
         """
+        self.failure = None
         if not query or not documents:
             return None
         try:
@@ -473,15 +500,23 @@ class Reranker:
             resp.raise_for_status()
             results = resp.json().get("results")
             if not isinstance(results, list):
+                self.failure = "failed"
                 return None
-            scored = [0.0] * len(documents)
+            scored: list[float | None] = [None] * len(documents)
             for r in results:
                 i = r.get("index")
                 if isinstance(i, int) and 0 <= i < len(documents):
                     scored[i] = float(r.get("relevance_score", r.get("score", 0.0)))
-            return scored
+            if any(s is None for s in scored):
+                # A reply that skips documents used to be padded with 0.0, which
+                # passed the caller's length check and reranked the pool on zeros
+                # (ADR-0094): abstain, so the fused order stands and is marked.
+                self.failure = "failed"
+                return None
+            return scored  # type: ignore[return-value]  # every slot was filled above
         except Exception as e:
             warn_down_once("reranker", self.url, e, self.model)
+            self.failure = why_of(e)
             return None
 
 
