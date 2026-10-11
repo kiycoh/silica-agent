@@ -37,7 +37,7 @@ def test_identical_and_inserted_lines_pass():
     NOTE.replace("First line.", "First lane."),               # edited
     NOTE.replace("First line.\n\n- item\n", "- item\n\nFirst line.\n"),  # reordered
     NOTE.replace("  - nested", "- nested"),                   # indentation is nesting
-    NOTE.replace("First line.", "First line — here.").replace("—", "-"),  # folded dash
+    NOTE.replace("First line.", "First line \u2014 here.").replace("\u2014", "-"),  # folded dash
 ])
 def test_a_dropped_edited_or_moved_body_line_is_a_loss(after):
     why = lost(NOTE, after)
@@ -219,7 +219,7 @@ def test_resolve_drops_the_provenance_header_left_empty_by_the_move():
 
     note = ("---\nAI: true\n---\n\n# Warfarin\n\nThe dose is 5mg.\n\n"
             "## Additional notes: Warfarin (from a.md)\n\n"
-            "> [!warning] Contradiction — from a.md\n> The dose is 50mg.\n>\n"
+            "> [!warning] Contradiction \u2014 from a.md\n> The dose is 50mg.\n>\n"
             "> Conflicts with this note. Unresolved.\n")
     before = mark_contested(note, "source: a.md")
     after = resolve_contested(before, resolved_by="user", valid_to="2026-10-11")

@@ -68,7 +68,7 @@ def _split_head(t: str) -> tuple[str, str]:
 
 
 def dashes(t):  # Khoj interact_with_files.ts:630, applied to the whole file
-    return [t.replace("—", "-").replace("–", "-")]
+    return [t.replace("\u2014", "-").replace("\u2013", "-")]
 
 
 def highlights(t):  # Khoj chat_view.ts:2312, every == of the file
