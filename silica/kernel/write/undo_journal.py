@@ -27,6 +27,12 @@ ABSENT_HASH = "absent"
 # A move from the chat, the same way: one move_back inverse. Until 2026-10-11
 # a move recorded nothing, and the GUI's "move this note back" did nothing.
 CHAT_MOVE_SOURCE = "chat:silica_move"
+# A delete the user ran (/delete, or the card's "delete anyway"): a note other
+# notes link to is the user's to delete, not the model's (ADR-0092). Its own
+# source, so a check that judges the chat's deletes (ADR-0093's re-create)
+# can leave the user's out by name.
+USER_DELETE_SOURCE = "user:/delete"
+DELETE_SOURCES = (CHAT_DELETE_SOURCE, USER_DELETE_SOURCE)
 
 
 class UndoJournalStore:
@@ -182,12 +188,20 @@ class UndoJournalStore:
                          path: str | None = None) -> tuple[str, str, float] | None:
         """(run_id, path, started_at) of the newest un-reverted chat delete in
         `vault`, of `path` when given (any spelling, via provenance.note_key)."""
+        return self.last_delete(vault, path, sources=(CHAT_DELETE_SOURCE,))
+
+    def last_delete(self, vault: str | None, path: str | None = None,
+                    sources: tuple[str, ...] = DELETE_SOURCES
+                    ) -> tuple[str, str, float] | None:
+        """The same over every source in `sources`: by default a chat delete
+        or one the user ran with /delete, both of which /undo takes back."""
         from silica.kernel.write.provenance import note_key
 
+        marks = ",".join("?" * len(sources))
         query = ("SELECT r.run_id, i.path, r.started_at FROM runs r "
                  "JOIN inverses i ON i.run_id = r.run_id "
-                 "WHERE r.reverted_at IS NULL AND r.source = ? AND i.kind = ?")
-        params: list = [CHAT_DELETE_SOURCE, InverseOpKind.recreate_deleted.value]
+                 f"WHERE r.reverted_at IS NULL AND r.source IN ({marks}) AND i.kind = ?")
+        params: list = [*sources, InverseOpKind.recreate_deleted.value]
         if vault is not None:
             query += " AND r.vault = ?"
             params.append(vault)
