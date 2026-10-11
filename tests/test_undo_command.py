@@ -47,7 +47,7 @@ def _run(monkeypatch, line):
     monkeypatch.setattr("silica.kernel.write.undo_journal.get_undo_journal", lambda: _Journal())
 
     class _Driver:
-        def overwrite(self, path, content):
+        def overwrite(self, path, content, *, loss=None, free=()):
             written["path"] = path
 
     monkeypatch.setattr("silica.driver.DRIVER", _Driver())

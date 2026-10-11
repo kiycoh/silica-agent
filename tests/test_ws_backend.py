@@ -130,7 +130,11 @@ class StubPluginServer:
         if method == "overwrite":
             # Verbatim, like the real plugin: the Obsidian side is a dumb pipe
             # and does no stamping of its own (the WS backend already did it).
-            fs._overwrite_raw(params["path"], params["content"])
+            # Unchecked too, as the plugin is: the ws side judged the write
+            # (ADR-0093), and a second judgement here would log it twice.
+            from silica.kernel.write.preserve import Loss
+
+            fs._overwrite_raw(params["path"], params["content"], loss=Loss.RESTORE)
             return {"ok": True}
         if method == "append":
             fs.append(self._ref(params["path"]), params["content"])
@@ -331,9 +335,12 @@ def test_create_on_existing_path_raises(wbe):
     # No 30 KB special case exists: JSON framing carries any size in one write.
     pytest.param("x" * 1_000_000, id="1mb"),
 ])
-def test_create_round_trips_hostile_bodies_verbatim(wbe, body):
+def test_create_round_trips_hostile_bodies_verbatim(wbe, write_stub, body):
     ref = wbe.create("Stress/Body.md", body)
-    assert wbe.read_note(ref).content == body
+    # The bytes land as sent; the read hands them back on LF, as the fs read
+    # does, because every composer assumes `\n` (ADR-0093 decision 8).
+    assert (write_stub._fs.vault_path / "Stress/Body.md").read_bytes() == body.encode("utf-8")
+    assert wbe.read_note(ref).content == body.replace("\r\n", "\n")
 
 
 def test_overwrite_replaces_content_in_place(wbe):

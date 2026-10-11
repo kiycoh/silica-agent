@@ -75,7 +75,7 @@ class _FakeDriver:
             raise RuntimeError(f"File not found: {path}")
         return MagicMock(content=self.notes[path], path=path)
 
-    def overwrite(self, ref, content):
+    def overwrite(self, ref, content, *, loss=None, free=()):
         # Real, not a no-op: HUB_UPDATE polls read_note for 5s waiting for its
         # MOC block to settle, and a MagicMock write makes every test pay it.
         self.notes[getattr(ref, "path", ref)] = content

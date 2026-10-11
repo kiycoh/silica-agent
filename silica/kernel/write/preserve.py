@@ -107,7 +107,9 @@ _H2 = re.compile(r"^##\s+(.*?)\s*#*\s*$")
 _TARGET = "\x01"
 
 
-def _lf(text: str) -> str:
+def lf(text: str) -> str:
+    """`text` on LF, as Python's universal newlines read it: the one input
+    every composer is written for (decision 8)."""
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
@@ -276,7 +278,7 @@ def lost(before: str, after: str, *, loss: Loss | None = None, free=()) -> str |
     never compared."""
     if loss in _RELAX_ALL:
         return None
-    before, after = _lf(before), _lf(after)
+    before, after = lf(before), lf(after)
     if before == after:
         return None
     b_data, b_raw, b_body = frontmatter.split(before)
@@ -382,7 +384,7 @@ def check_write(path: str, before: str | None, after: str, *,
             logger.debug("preservation: %s under %s: %s", path, loss.name, why)
             return
         why = relaxed
-    if _untouched_draft(path, _lf(before)):
+    if _untouched_draft(path, lf(before)):
         logger.debug("preservation: %s re-authored as an untouched draft", path)
         return
     mod, fn = _caller()
@@ -427,5 +429,5 @@ def crlf_dominant(raw: bytes) -> bool:
 
 def encode(content: str, crlf: bool) -> str:
     """`content` (composed on LF) with the prior's terminator put back."""
-    content = _lf(content)
+    content = lf(content)
     return content.replace("\n", "\r\n") if crlf else content

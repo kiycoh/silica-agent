@@ -62,11 +62,11 @@ class _CorruptingDriver:
     def _corrupt(content: str) -> str:
         return content.replace("\\", "\\\\")
 
-    def create(self, path: str, content: str) -> NoteRef:
+    def create(self, path: str, content: str, *, loss=None, free=()) -> NoteRef:
         self._notes[path] = self._corrupt(content)
         return NoteRef(name=path, path=path)
 
-    def overwrite(self, path: str, content: str) -> NoteRef:
+    def overwrite(self, path: str, content: str, *, loss=None, free=()) -> NoteRef:
         self._notes[path] = self._corrupt(content)
         return NoteRef(name=path, path=path)
 
@@ -89,11 +89,11 @@ class _SnippetDroppingDriver:
     def __init__(self, seed: dict[str, str] | None = None):
         self._notes: dict[str, str] = dict(seed or {})
 
-    def create(self, path: str, content: str) -> NoteRef:
+    def create(self, path: str, content: str, *, loss=None, free=()) -> NoteRef:
         self._notes[path] = content
         return NoteRef(name=path, path=path)
 
-    def overwrite(self, path: str, content: str) -> NoteRef:
+    def overwrite(self, path: str, content: str, *, loss=None, free=()) -> NoteRef:
         # Drops whatever was actually merged in and writes an unrelated stub —
         # a genuine corruption of the payload, not a passthrough.
         self._notes[path] = "# Stub\n\nThe merge silently lost the snippet.\n"
@@ -135,11 +135,11 @@ class _EdgeStrippingDriver:
     def __init__(self, seed: dict[str, str] | None = None):
         self._notes: dict[str, str] = dict(seed or {})
 
-    def create(self, path: str, content: str) -> NoteRef:
+    def create(self, path: str, content: str, *, loss=None, free=()) -> NoteRef:
         self._notes[path] = content
         return NoteRef(name=path, path=path)
 
-    def overwrite(self, path: str, content: str) -> NoteRef:
+    def overwrite(self, path: str, content: str, *, loss=None, free=()) -> NoteRef:
         self._notes[path] = content
         return NoteRef(name=path, path=path)
 
