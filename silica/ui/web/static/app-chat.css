@@ -412,9 +412,13 @@
 }
 
 /* armed is the one place amber is right on this control: it is not saying
-   "clickable", it is saying "the next click takes back twelve notes" */
+   "clickable", it is saying "the next click takes back twelve notes". A
+   refused delete's "delete anyway" arms the same way: the next click leaves
+   other notes' links pointing nowhere (ADR-0092). */
 .undo-turn.armed,
-.undo-turn.armed:hover {
+.undo-turn.armed:hover,
+.wc-act.armed,
+.wc-act.armed:hover {
   color: var(--warn);
   border-color: var(--warn);
 }

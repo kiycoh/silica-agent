@@ -18,6 +18,11 @@ import re
 # (pattern, sentence). First match wins; order matters only where two could
 # both match (a 401 inside a "connection" message is a credentials problem).
 _CLASSES: list[tuple[re.Pattern[str], str]] = [
+    # First: the refusal's raw text is a JSON body that carries note paths,
+    # and a note named "Connection pooling" would otherwise read as an
+    # endpoint failure (ADR-0092).
+    (re.compile(r"not deleted: \d+ notes? links? to"),
+     "Not deleted: other notes link to this note. Deleting it is yours to do, from its card or with /delete."),
     (re.compile(r"\b(401|403|unauthorized|forbidden|api[_ -]?key)\b", re.I),
      "The provider rejected the credentials. Check the API key for this endpoint in settings."),
     (re.compile(r"\b(429|rate limit)\b", re.I),

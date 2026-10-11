@@ -79,6 +79,28 @@ def _card_text(value: Any) -> dict | None:
     return {"text": text[:_CARD_CHARS], "cut": max(0, len(text) - _CARD_CHARS)}
 
 
+def _refusal(name: str, result: Any) -> dict | None:
+    """A delete refused because other notes link the note (ADR-0092): the
+    line its card shows in place of "delete failed", and the path the card's
+    "delete anyway" hands to /delete. None for anything else. The card's
+    label already says "not deleted", so the line is the rest of the
+    refusal's first line, and the card reads as that line whole."""
+    if name != "silica_delete":
+        return None
+    try:
+        data = json.loads(result) if isinstance(result, str) else result
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(data, dict) or not data.get("error"):
+        return None
+    links, path = data.get("linked_from"), data.get("path")
+    if not isinstance(links, list) or not links or not isinstance(path, str):
+        return None
+    n = len(links)
+    return {"text": f"{n} {'note links' if n == 1 else 'notes link'} to it",
+            "path": path}
+
+
 def _note_refs(args: dict) -> list[str]:
     refs = [args[k].strip() for k in _NOTE_KEYS
             if isinstance(args.get(k), str) and args[k].strip()]
@@ -172,6 +194,15 @@ def event_to_json(ev) -> dict | None:
             out["output"] = card
         if ev.name == "silica_run_injector":
             out["summary"] = _injector_summary(ev.result)
+        # A tool that returns {"error": ...} still completes, and the chat
+        # claimed its notes as landed while a reloaded chat, which reads the
+        # stored result, drew the same call as failed.
+        from silica.agent.loop import _is_tool_failure
+
+        if _is_tool_failure(ev.result):
+            out["failed"] = True
+            if (refused := _refusal(ev.name, ev.result)):
+                out["refused"] = refused
         if ev.name == "silica_remember":
             # Every write is visible and undoable (ADR-0076 §7): the row's card
             # is collapsed by default, so the write also gets a line of its own.
@@ -243,6 +274,8 @@ def tool_calls_to_json(
             raw = str(results.get(tc.get("id", "")) or "")
             if raw:
                 line["reason"] = sentence(raw)
+            if (refused := _refusal(name, raw)):
+                line["refused"] = refused
         if name == "silica_run_injector" and results:
             line["summary"] = _injector_summary(results.get(tc.get("id", "")))
         out.append(line)

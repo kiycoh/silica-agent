@@ -70,6 +70,7 @@ def test_a_linked_note_is_not_deleted_and_the_refusal_names_its_referrers(vault)
     res = silica_delete("Autoencoders")
     assert res["error"] == "not deleted: 2 notes link to Autoencoders"
     assert res["linked_from"] == ["Corso/Linker.md", "Corso/Linker2.md"]
+    assert res["path"] == "Corso/Autoencoders.md"
     assert "/delete Corso/Autoencoders.md" in res["next"]
     assert (vault / "Corso" / "Autoencoders.md").exists()
     assert get_undo_journal().last_delete(CONFIG.vault_path) is None

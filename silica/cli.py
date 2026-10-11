@@ -1517,20 +1517,23 @@ def _dc_delete(args: list[str], *, raw_input: str = "", **_) -> bool:
         res = {"error": str(exc)}
     if "error" in res:
         err = res["error"].removeprefix("not deleted: ")
-        CONSOLE.print(f"  [yellow]Not deleted:[/] {escape(ref)} ({escape(err)})")
+        CONSOLE.print(f"  [yellow]Not deleted:[/] {escape(ref)} ({escape(err)})", soft_wrap=True)
         return True
-    CONSOLE.print(f"  Deleted: [bold]{escape(path)}[/]")
+    # soft_wrap: a vault path is long, and a link cut across two lines in
+    # the GUI's code block reads as two entries.
+    CONSOLE.print(f"  Deleted: [bold]{escape(path)}[/]", soft_wrap=True)
     if dangling := res["dangling"]:
         CONSOLE.print(f"  {len(dangling)} link{'s' if len(dangling) != 1 else ''} now point"
                       f"{'' if len(dangling) != 1 else 's'} to no note:")
         for d in dangling:
-            CONSOLE.print(f"    {escape(d['note'])} → {escape('[[' + d['link'] + ']]')}")
+            CONSOLE.print(f"    {escape(d['note'])} → {escape('[[' + d['link'] + ']]')}",
+                          soft_wrap=True)
     if orphaned := res["orphaned"]:
         CONSOLE.print(f"  {len(orphaned)} note{'s' if len(orphaned) != 1 else ''} left with "
                       "no incoming link:")
         for o in orphaned:
-            CONSOLE.print(f"    {escape(o)}")
-    CONSOLE.print(f"  [dim]/undo {escape(path)} brings it back.[/]")
+            CONSOLE.print(f"    {escape(o)}", soft_wrap=True)
+    CONSOLE.print(f"  [dim]/undo {escape(path)} brings it back.[/]", soft_wrap=True)
     return True
 
 

@@ -114,6 +114,9 @@ def silica_delete(ref: Annotated[str, Field(description='Name or path of the not
         return {
             "error": f"not deleted: {n} {'note links' if n == 1 else 'notes link'} to {Path(path).stem}",
             "linked_from": referrers,
+            # The note the refusal is about, resolved: the chat card's "delete
+            # anyway" sends /delete with it, where `ref` may be a bare name.
+            "path": path,
             "next": ("Deleting a note other notes link to is the user's act. Tell the user "
                      f"which notes link to it. They delete it with /delete {path}, and "
                      "/undo brings it back."),
