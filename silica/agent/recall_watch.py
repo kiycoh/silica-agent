@@ -169,11 +169,24 @@ def unfounded_in_turn(answer: str, turn_numbers: set[str], messages: list[dict],
     return unfounded_numbers(answer, turn_evidence(turn_numbers, messages, session_numbers))
 
 
-def numbers_note(flagged: list[str]) -> str:
-    """The text of the `numbers` turn note, or "" when nothing was flagged."""
+def numbers_notes(flagged: list[str]) -> list[dict]:
+    """The turn's `numbers` note for the end-of-turn channel (turn_notes), or
+    none when nothing was flagged: no line ever says the numbers are fine,
+    because the rule cannot know that."""
     if not flagged:
-        return ""
+        return []
     shown = ", ".join(flagged[:NUMBERS_NOTE_MAX])
     rest = len(flagged) - NUMBERS_NOTE_MAX
     more = f" and {rest} more" if rest > 0 else ""
-    return f"numbers not in what this turn read: {shown}{more}"
+    return [{"kind": "numbers", "text": f"numbers not in what this turn read: {shown}{more}"}]
+
+
+def numbers_of_session(sid: str | None) -> set[str]:
+    """`numbers_from_beats` over the narration of session *sid*: what
+    /session/load and /resume rebuild the session set from. Empty for no
+    session, and for a legacy snapshot, which kept no raw results."""
+    from silica.agent import narration
+
+    if not sid:
+        return set()
+    return numbers_from_beats(narration.read_beats(narration.narration_dir() / f"{sid}.jsonl"))

@@ -12,7 +12,8 @@ from silica.agent.events import ToolCompleteEvent, ToolStartEvent
 from silica.agent.recall_watch import (
     RecallWatch,
     numbers_from_beats,
-    numbers_note,
+    numbers_notes,
+    numbers_of_session,
     result_numbers,
     unfounded_in_turn,
 )
@@ -80,10 +81,11 @@ def test_evidence_is_the_seed_the_user_and_the_session_never_the_model():
 
 
 def test_the_note_names_at_most_five_numbers():
-    assert numbers_note([]) == ""
-    assert numbers_note(["243", "1.96"]) == "numbers not in what this turn read: 243, 1.96"
+    assert numbers_notes([]) == []
+    assert numbers_notes(["243", "1.96"]) == [
+        {"kind": "numbers", "text": "numbers not in what this turn read: 243, 1.96"}]
     many = ["11", "12", "13", "14", "15", "16", "17"]
-    assert numbers_note(many) == (
+    assert numbers_notes(many)[0]["text"] == (
         "numbers not in what this turn read: 11, 12, 13, 14, 15 and 2 more")
 
 
@@ -104,4 +106,6 @@ def test_the_session_set_rebuilt_from_narration_equals_the_live_one(_fresh_narra
         live |= watch.numbers
     beats = list(narr.read_beats(narr.narration_dir() / f"{_fresh_narrator.sid}.jsonl"))
     assert numbers_from_beats(beats) == live
+    assert numbers_of_session(_fresh_narrator.sid) == live
+    assert numbers_of_session(None) == set() == numbers_of_session("deadbeef")
     assert "404" not in live and {"242", "1067", "31"} <= live
