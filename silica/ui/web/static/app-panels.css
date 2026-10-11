@@ -300,103 +300,6 @@
   text-overflow: ellipsis;
 }
 
-/* map landing (hub picker) — fills the frame area until a note is rooted */
-/* The tab bar floats over the top of this pane, so the launch pad starts below
-   it (the bar with its key line is ~72px; a key that wraps adds a line). Centred
-   by auto margins, not align-items: a centred flex item taller than its box
-   overflows upward too, and the top of it could not be scrolled back to. */
-#map-picker {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  padding-top: 112px;
-  background: var(--void);
-  overflow-y: auto;
-}
-
-#map-picker[hidden] {
-  display: none;
-}
-
-.map-picker-inner {
-  width: min(560px, 90%);
-  margin: auto;
-  /* the dock composer floats over the bottom of this pane, so the last row of
-     the launch pad sat underneath it. Same clearance .shape-body reserves. */
-  padding: 1.5rem 0 5.5rem;
-}
-
-.map-picker-title {
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--frost);
-}
-
-
-.map-picker-hint {
-  font-size: var(--fs-meta);
-  color: var(--ash-dim);
-  margin: 0.3rem 0 0.9rem;
-}
-
-#map-picker-list {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  background: var(--line);
-  border: 1px solid var(--line);
-}
-
-#map-picker-list:empty::after {
-  content: "no linked notes yet. Pick one from Files in the sidebar.";
-  grid-column: 1 / -1;
-  background: var(--slate-2);
-  color: var(--ash-dim);
-  font-size: 11px;
-  padding: 0.8rem;
-}
-
-/* Each row carries its own bar along its foot, on the chart ramp: the list is
-   a ranking, and the bar says by how much without reading the numbers
-   (DESIGN.md, Charts). The hover is the frosted --sel-hover every other row
-   in the app wears; the inset accent stripe here was the last one left. */
-.hub-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.6rem;
-  background: linear-gradient(var(--c-ord-2), var(--c-ord-2)) 0 100% / calc(var(--w, 0) * 100%) 2px no-repeat,
-    var(--slate-2);
-  padding: 0.55rem 0.7rem 0.6rem;
-  cursor: pointer;
-  transition: background-color var(--dur) var(--ease);
-}
-
-.hub-row:hover {
-  background-color: color-mix(in srgb, var(--frost) 6%, var(--slate-2));
-}
-
-.hub-name {
-  font-size: 13px;
-  color: var(--frost);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.hub-deg {
-  font-size: var(--fs-meta);
-  color: var(--ash-dim);
-  font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
-
-.hub-deg::after {
-  content: " links";
-}
-
 #drop-hint {
   position: fixed;
   inset: 0;
@@ -1411,7 +1314,7 @@ body.note-open #dock {
 }
 
 @container (min-width: 912px) {
-  body:has(#view-graph.active :is(#graph-frame, #map-frame):not([hidden])) #dock-composer {
+  body:has(#view-graph.active #graph-frame:not([hidden])) #dock-composer {
     --open-w: min(100% - 436px, var(--measure));
   }
 }
