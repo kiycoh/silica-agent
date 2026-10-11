@@ -803,7 +803,13 @@ def stamp_sources(content: str, source_basename: str) -> str:
     end = content.find("\n---\n", 4)
     if end == -1:
         return content  # unterminated frontmatter — leave for the lint to flag
-    data, _, _ = frontmatter.split(content)
+    data, raw, _ = frontmatter.split(content)
+    if data is None and raw is not None:
+        # A block that does not parse has no prior list to union with: the
+        # splice below replaced the user's `sources:` with this one entry
+        # (1 of 284 agent notes, ADR-0093). A missing provenance entry is a
+        # lint finding; a dropped one is a loss.
+        return content
     prior = data.get("sources") if isinstance(data, dict) else None
     if isinstance(prior, str):
         prior = [prior]
@@ -832,7 +838,9 @@ def stamp_citation(content: str, cite: dict[str, str]) -> str:
     end = content.find("\n---\n", 4)
     if end == -1:
         return content  # unterminated frontmatter — leave for the lint to flag
-    data, _, _ = frontmatter.split(content)
+    data, raw, _ = frontmatter.split(content)
+    if data is None and raw is not None:
+        return content  # unparseable: nothing to check first-writer-wins against
     existing = set(data.keys()) if isinstance(data, dict) else set()
     out = {(k if k.startswith("source_") else f"source_{k}"): v for k, v in cite.items()}
     if existing & out.keys():

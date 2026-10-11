@@ -129,9 +129,12 @@ def _unlink_body(body: str, resolves) -> tuple[str, list[str], list[str]]:
             # The display text is what the reader already sees; only the target
             # moves, so the note reads exactly as before and the edge is real.
             relinked.append(hit)
-            return f"[[{hit}{anchor or ''}|{(alias or t).strip()}]]"
+            return f"[[{hit}{anchor or ''}|{alias or t}]]"
         stripped.append(t)
-        return (alias or t).strip()
+        # The alias as written: until 2026-10-11 it was stripped, which glued
+        # `word[[X| next]]` into "wordnext" (ADR-0093). Its spaces are part of
+        # what the reader sees.
+        return alias or t
 
     return _WIKILINK_RE.sub(_sub, body), stripped, relinked
 
