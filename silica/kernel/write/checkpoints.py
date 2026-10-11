@@ -77,7 +77,7 @@ class CheckpointStore:
         as the floor entry before ``new_content``, so undo can reach the
         pre-patch state. ``None`` means the write created the note: the floor
         is then marked absent (see ``absent_floor``). Subsequent pushes append
-        only ``new_content`` (``prior_content`` is ignored — it already sits on
+        only ``new_content`` (``prior_content`` is ignored: it already sits on
         top of the stack).
 
         Returns the resulting stack depth.

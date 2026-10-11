@@ -1415,7 +1415,7 @@ def _dc_changes(args: list[str], **_) -> bool:
 
 
 def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
-    """/undo [note-path] — revert the last write to one note, bring back a
+    """/undo [note-path]: revert the last write to one note, bring back a
     note the chat or /delete deleted, or move back a note the chat moved."""
     from silica.driver import DRIVER
     from silica.kernel.write.checkpoints import get_checkpoint_store

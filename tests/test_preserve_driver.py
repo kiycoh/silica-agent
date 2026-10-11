@@ -123,7 +123,8 @@ def test_a_move_rewrites_referrers_under_rename(vault, caplog):
 
 def _chat_delete(path: str) -> None:
     from silica.tools.wrapped import silica_delete
-    assert silica_delete(path, confirm=True).get("success")
+    # ADR-0092 removed `confirm`; Notes/N.md has no referrer, so the chat deletes it.
+    assert silica_delete(path).get("success")
 
 
 def test_a_create_after_a_chat_delete_in_the_same_turn_is_judged(vault, caplog):
