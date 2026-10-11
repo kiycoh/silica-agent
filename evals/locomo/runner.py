@@ -576,7 +576,7 @@ def answer_question_agent(model: str, question: str, now: str,
 
     read: set[str] = set()
     for e in events:
-        read |= result_numbers(e.result)
+        read |= result_numbers(e.result, e.args)
     unfounded = None if err else unfounded_in_turn(response or "", read, messages, set())
     return {
         "response": (response or "").strip(),

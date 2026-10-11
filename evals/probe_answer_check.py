@@ -148,8 +148,11 @@ def session_turns(path: Path) -> tuple[dict, list[dict]]:
             "model": max(models, key=models.__getitem__) if models else None}
     turns: list[dict] = []
     cur: dict | None = None
+    args: dict = {}  # a tool span's opening beat holds the call's arguments
     for r in rows:
         kind, payload = r.get("kind"), r.get("payload") or {}
+        if kind == "tool" and r.get("status") == "running":
+            args[r.get("id")] = payload.get("args") or {}
         if kind == "turn":
             m = payload.get("message") or {}
             if m.get("role") == "user":
@@ -162,7 +165,7 @@ def session_turns(path: Path) -> tuple[dict, list[dict]]:
         elif kind == "tool" and r.get("status") == "done" and cur is not None:
             cur["tools"].append(payload.get("name"))
             if isinstance(payload.get("result"), str):
-                cur["results"].append(payload["result"])
+                cur["results"].append((payload["result"], args.get(r.get("id"))))
     return meta, turns
 
 
@@ -185,7 +188,7 @@ def answers_of(src: str, session: str, meta: dict, turns: list[dict],
     users: list[str] = []
     line = date_line(meta.get("ts"))
     for k, t in enumerate(turns):
-        decoded = [result_text(r) for r in t["results"]]
+        decoded = [result_text(r, a) for r, a in t["results"]]
         turn_numbers: set[str] = set()
         for d in decoded:
             turn_numbers |= number_tokens(d)
@@ -465,8 +468,8 @@ def session_set_sizes(narration: Path) -> dict:
             continue
         s: set[str] = set()
         for t in turns:
-            for r in t["results"]:
-                s |= number_tokens(result_text(r))
+            for r, args in t["results"]:
+                s |= number_tokens(result_text(r, args))
         sizes.append(len(s))
     return {"sessions": len(sizes), "median": statistics.median(sizes),
             "p90": _pct(sizes, .9), "max": max(sizes)}

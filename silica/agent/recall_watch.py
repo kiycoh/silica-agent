@@ -53,7 +53,7 @@ class RecallWatch:
         if isinstance(event, ToolCompleteEvent):
             if event.name == "silica_web_answer":
                 self.web_answer = True
-            self.numbers |= result_numbers(event.result)
+            self.numbers |= result_numbers(event.result, event.args)
             self._inspect(event)
         if self._inner is not None:
             self._inner(event)
@@ -104,7 +104,7 @@ def _leaves(obj, out: list[str]) -> None:
             _leaves(value, out)
 
 
-def result_text(result: str) -> str:
+def result_text(result: str, args: dict | None = None) -> str:
     """One successful tool result as the session read it, "" for a failed one.
 
     A JSON result is read by its string and number leaves: raw JSON doubles
@@ -113,6 +113,12 @@ def result_text(result: str) -> str:
     is evidence as it stands. A write tool's result counts too: it reports what
     happened ("notes created: 20" was flagged when writes were left out, probe
     of 2026-10-11, session 87c32572c511).
+
+    A string leaf equal to one of the call's own string *args* is dropped: the
+    argument is the model's text, and a result that echoes it ("query") let the
+    model ground the dates it had guessed by searching for them (GUI check,
+    2026-10-11, "Giordano Bruno 1548 1600"). Exact leaves only, and strings
+    only: a count that happens to equal `k` is still a count.
     """
     if _is_tool_failure(result):
         return ""
@@ -122,12 +128,25 @@ def result_text(result: str) -> str:
         return str(result)
     out: list[str] = []
     _leaves(obj, out)
+    if args:
+        echoed = _string_leaves(args)
+        out = [leaf for leaf in out if leaf not in echoed]
     return "\n".join(out)
 
 
-def result_numbers(result: str) -> set[str]:
+def _string_leaves(obj) -> set[str]:
+    if isinstance(obj, str):
+        return {obj}
+    if isinstance(obj, dict):
+        obj = list(obj.values())
+    if isinstance(obj, list):
+        return set().union(*(_string_leaves(v) for v in obj)) if obj else set()
+    return set()
+
+
+def result_numbers(result: str, args: dict | None = None) -> set[str]:
     """The number tokens of one tool result, raw (`result_text`)."""
-    return number_tokens(result_text(result))
+    return number_tokens(result_text(result, args))
 
 
 def numbers_from_beats(beats) -> set[str]:
@@ -135,12 +154,15 @@ def numbers_from_beats(beats) -> set[str]:
     whose payload keeps `ToolCompleteEvent.result` whole. The same events fed
     the live watch, so a reopened chat checks against what the live one did."""
     out: set[str] = set()
+    args: dict[str, dict] = {}  # the span's opening beat holds the call's arguments
     for beat in beats:
-        if beat.get("kind") != "tool" or beat.get("status") != "done":
+        if beat.get("kind") != "tool":
             continue
-        result = (beat.get("payload") or {}).get("result")
-        if isinstance(result, str):
-            out |= result_numbers(result)
+        payload = beat.get("payload") or {}
+        if beat.get("status") == "running":
+            args[beat.get("id")] = payload.get("args") or {}
+        elif beat.get("status") == "done" and isinstance(payload.get("result"), str):
+            out |= result_numbers(payload["result"], args.get(beat.get("id")))
     return out
 
 
@@ -180,7 +202,11 @@ def numbers_notes(flagged: list[str]) -> list[dict]:
     because the rule cannot know that."""
     if not flagged:
         return []
-    shown = ", ".join(flagged[:NUMBERS_NOTE_MAX])
+    # " · " and not ", ": "95, 1,067" reads as three numbers, and a grouped
+    # number is how a model writes a count (seen on the first GUI check,
+    # 2026-10-11). The app's other inline lists already use it ("730 notes ·
+    # 1,385 links").
+    shown = " · ".join(flagged[:NUMBERS_NOTE_MAX])
     rest = len(flagged) - NUMBERS_NOTE_MAX
     more = f" and {rest} more" if rest > 0 else ""
     return [{"kind": "numbers", "text": f"numbers not in what this turn read: {shown}{more}"}]

@@ -22,7 +22,7 @@ THIN = {"kind": "retrieval", "text": THIN_COVERAGE_HINT}
 
 
 def _note(*numbers: str) -> dict:
-    return {"kind": "numbers", "text": "numbers not in what this turn read: " + ", ".join(numbers)}
+    return {"kind": "numbers", "text": "numbers not in what this turn read: " + " · ".join(numbers)}
 
 
 def _read_sse(response) -> list[dict]:

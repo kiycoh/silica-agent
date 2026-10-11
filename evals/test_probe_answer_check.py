@@ -28,11 +28,11 @@ def _session(path: Path, driver: str, ts: float, turns: list[tuple]) -> None:
     seq = 0
     lines = []
 
-    def beat(kind, payload, status="done"):
+    def beat(kind, payload, status="done", id=None):
         nonlocal seq
         seq += 1
         lines.append(json.dumps({"seq": seq, "ts": ts + seq, "kind": kind, "status": status,
-                                 "id": None, "parent": None, "payload": payload}))
+                                 "id": id, "parent": None, "payload": payload}))
 
     beat("session", {"driver": driver, "vault": "/v"})
     beat("call", {"model": "custom/qwen3.5-9b"})
@@ -41,7 +41,10 @@ def _session(path: Path, driver: str, ts: float, turns: list[tuple]) -> None:
         for i, (name, result) in enumerate(results):
             beat("turn", {"message": {"role": "assistant", "content": "", "tool_calls": [
                 {"id": f"c{i}", "function": {"name": name, "arguments": "{\"x\": 9876}"}}]}})
-            beat("tool", {"name": name, "result": result})
+            seq_id = f"c{seq}"
+            beat("tool", {"name": name, "args": {"x": "9876", "query": "born 1548"}},
+                 status="running", id=seq_id)
+            beat("tool", {"name": name, "result": result}, id=seq_id)
         beat("turn", {"message": {"role": "assistant", "content": answer}})
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -50,9 +53,10 @@ def _session(path: Path, driver: str, ts: float, turns: list[tuple]) -> None:
 def narration(tmp_path):
     d = tmp_path / "narration-src"
     d.mkdir()
-    mail = json.dumps({"path": "Mail.md", "body": "the sensor table\n242 columns"})
+    mail = json.dumps({"path": "Mail.md", "body": "the sensor table\n242 columns",
+                       "query": "born 1548"})
     _session(d / "aaa111.jsonl", "gui", DAY, [
-        ("how many variables?", [("silica_read_note", mail)], "It has 243+ variables."),
+        ("how many variables?", [("silica_read_note", mail)], "It has 243+ variables, born 1548."),
         # turn two reads nothing: 242 came from turn one, 9876 only from a call's
         # arguments, 243 only from the model's own earlier answer
         ("and columns?", [], "242 columns, 243 again, 9876 args."),
@@ -84,7 +88,8 @@ def evaluation(tmp_path):
 def test_the_evidence_is_the_products(narration, tmp_path):
     real = pac.load_real(pac.copy_narration(narration, tmp_path / "scratch"))
     by_id = {a.id: a for a in real}
-    assert by_id["aaa111#0"].flagged == ["243"]
+    # 1548 came back only as the echo of the call's own argument
+    assert by_id["aaa111#0"].flagged == ["243", "1548"]
     assert by_id["aaa111#1"].flagged == ["243", "9876"]
     # a failed result is not evidence; the user's message is
     assert by_id["bbb222#0"].flagged == ["31"]
@@ -129,10 +134,10 @@ def test_build_then_score(narration, evaluation, tmp_path, monkeypatch):
     out = tmp_path / "out"
     gate = pac.build(narration, evaluation, tmp_path / "scratch", out)
     assert gate["R"]["answers"] == 4
-    assert gate["rates"]["R"]["warned"] == 4  # 243; 243 + 9876; 31; 77
+    assert gate["rates"]["R"]["warned"] == 4  # 243 + 1548; 243 + 9876; 31; 77
     assert gate["rates"]["probes"] == {"answers": 3, "warned": 2, "rate": 2 / 3, "numbers": 4}
     r_rows, p_rows = gate["R"]["rows"], gate["P"]["rows"]
-    assert len(r_rows) == 5 and len(p_rows) == 4
+    assert len(r_rows) == 6 and len(p_rows) == 4
     labels_r = (out / "labels-R.md").read_text(encoding="utf-8")
     assert "- label:\n" in labels_r and "242 columns" in labels_r
 

@@ -32,6 +32,23 @@ def test_a_json_result_is_read_by_its_string_and_number_leaves():
     assert result_numbers("plain text with 77 items") >= {"77"}
 
 
+def test_a_result_that_echoes_the_calls_argument_does_not_ground_it():
+    # The model's own query came back as the result's "query" field and
+    # grounded the dates it had guessed (GUI check, 2026-10-11: "Giordano
+    # Bruno 1548 1600"). An argument is the model's text, echoed or not.
+    raw = json.dumps({"query": "Giordano Bruno 1548 1600", "notes": [], "total": 1600})
+    assert result_numbers(raw, {"query": "Giordano Bruno 1548 1600", "k": 10}) == {"1600"}
+    assert "1548" in result_numbers(raw)  # with no arguments known, nothing is stripped
+
+
+def test_the_watch_strips_the_echo_too():
+    watch = RecallWatch()
+    watch(ToolCompleteEvent(name="silica_recall", args={"query": "born 1548"}, call_id="c1",
+                            result=json.dumps({"query": "born 1548", "notes": []}),
+                            duration_s=0.0, iteration=0))
+    assert "1548" not in watch.numbers
+
+
 def test_a_failed_result_is_not_evidence():
     assert result_numbers(json.dumps({"error": "no note 999"})) == set()
 
@@ -83,16 +100,20 @@ def test_evidence_is_the_seed_the_user_and_the_session_never_the_model():
 def test_the_note_names_at_most_five_numbers():
     assert numbers_notes([]) == []
     assert numbers_notes(["243", "1.96"]) == [
-        {"kind": "numbers", "text": "numbers not in what this turn read: 243, 1.96"}]
+        {"kind": "numbers", "text": "numbers not in what this turn read: 243 · 1.96"}]
     many = ["11", "12", "13", "14", "15", "16", "17"]
     assert numbers_notes(many)[0]["text"] == (
-        "numbers not in what this turn read: 11, 12, 13, 14, 15 and 2 more")
+        "numbers not in what this turn read: 11 · 12 · 13 · 14 · 15 and 2 more")
 
 
 def test_the_session_set_rebuilt_from_narration_equals_the_live_one(_fresh_narrator, monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.vault_path", "/v/demo", raising=False)
     _fresh_narrator.ensure_session(driver="gui")
+    echo = ToolCompleteEvent(name="silica_recall", args={"query": "born 1548"}, call_id="e",
+                             result=json.dumps({"query": "born 1548", "notes": ["n 77"]}),
+                             duration_s=0.0, iteration=0)
     events = [
+        echo,
         done("silica_read_note", json.dumps({"body": "242 columns, 1,067 rows"}), "a"),
         done("silica_search", "plain 31 hits", "b"),
         done("silica_read_note", json.dumps({"error": "no such note 404"}), "c"),
@@ -101,6 +122,8 @@ def test_the_session_set_rebuilt_from_narration_equals_the_live_one(_fresh_narra
     for turn in (events[:2], events[2:]):
         watch = RecallWatch()
         for ev in turn:
+            _fresh_narrator.on_render_event(ToolStartEvent(name=ev.name, args=ev.args,
+                                                           call_id=ev.call_id, iteration=0))
             _fresh_narrator.on_render_event(ev)
             watch(ev)
         live |= watch.numbers
@@ -108,4 +131,5 @@ def test_the_session_set_rebuilt_from_narration_equals_the_live_one(_fresh_narra
     assert numbers_from_beats(beats) == live
     assert numbers_of_session(_fresh_narrator.sid) == live
     assert numbers_of_session(None) == set() == numbers_of_session("deadbeef")
-    assert "404" not in live and {"242", "1067", "31"} <= live
+    assert "404" not in live and {"242", "1067", "31", "77"} <= live
+    assert "1548" not in live
