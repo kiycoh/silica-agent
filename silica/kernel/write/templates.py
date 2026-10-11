@@ -335,6 +335,48 @@ def resolve_template(name: str | None = None) -> str:
     return BUILTIN_TEMPLATE
 
 
+# The `related:` key with its list items, indented or flush left.
+_RELATED_BLOCK_RE = re.compile(r"^related:[^\n]*(?:\n[ \t]*-[^\n]*)*", re.MULTILINE)
+
+
+def _add_to_related(content: str, end_idx: int, link: str) -> str:
+    """Rewrite the `related:` block, in place, as a list ending in `link`.
+
+    Splicing an item after a bare "related:" line, as this did until
+    2026-10-11, appended a second `related:` key whenever the value sat on the
+    key's own line (null, `[]`, one link: 170 of 730 test-vault notes, read by
+    PyYAML as the last key only) and broke the YAML of a flush-left list (5 of
+    284 agent-written notes). Frontmatter that does not parse, or a block this
+    cannot rewrite into a list that parses, is left as it was: a missing hub
+    link is a lint warning, a broken frontmatter loses every property."""
+    data, _raw, _body = frontmatter.split(content)
+    if data is None:
+        return content
+    prior = data.get("related")
+    items = [] if prior in (None, "", []) else (prior if isinstance(prior, list) else [prior])
+    items = [*items, link]
+
+    def _item(x) -> str:
+        # A value that is not a string (an unquoted [[A]] is a nested list to
+        # YAML) is kept as it is, in flow form, never turned into its repr.
+        if isinstance(x, str):
+            return '"%s"' % x.replace("\\", "\\\\").replace('"', '\\"')
+        return yaml.safe_dump(x, default_flow_style=True, allow_unicode=True).strip()
+
+    block = "related:\n" + "\n".join(f"  - {_item(x)}" for x in items)
+    head = content[4:end_idx]
+    new_head, n = _RELATED_BLOCK_RE.subn(lambda _m: block, head, count=1)
+    if not n:
+        new_head = f"{head}\n{block}"
+    out = "---\n" + new_head + content[end_idx:]
+    check, _r, _b = frontmatter.split(out)
+    if check is None or check.get("related") != items:
+        logger.warning("ensure_hub_link: could not add %s to related: without "
+                       "breaking the frontmatter; left as it was", link)
+        return content
+    return out
+
+
 def ensure_hub_link(content: str, hub: str | None) -> str:
     """Guarantee the hub wikilink in a note's frontmatter `related:` list.
 
@@ -349,10 +391,7 @@ def ensure_hub_link(content: str, hub: str | None) -> str:
         end_idx = content.find("\n---\n", 4)
         if end_idx == -1:
             return content
-        if "\nrelated:\n" in content[:end_idx]:
-            parts = content.split("\nrelated:\n", 1)
-            return parts[0] + f'\nrelated:\n  - "[[{hub}]]"\n' + parts[1]
-        return content[:end_idx] + f'\nrelated:\n  - "[[{hub}]]"' + content[end_idx:]
+        return _add_to_related(content, end_idx, f"[[{hub}]]")
     today = datetime.date.today().isoformat()
     frontmatter = f"""---
 parent note: "[[{hub}]]"
