@@ -52,21 +52,36 @@ def silica_move(ref: Annotated[str, Field(description='Name or path of the note 
     # literally the first made a file Obsidian does not list and the second
     # renamed the note to Archivio.md. What moves is a note, so the target is
     # one, and a last part that is not the note's name is where it goes.
+    from silica.config import CONFIG
+    from silica.kernel.write.undo_journal import CHAT_MOVE_SOURCE, get_undo_journal
+
+    try:
+        origin = DRIVER.read_note(ref).ref.path or str(ref)
+    except Exception as e:
+        return {"error": str(e)}  # the same refusal DRIVER.move would give
     target = to.strip()
     if not target.lower().endswith(".md"):
-        try:
-            name = Path(DRIVER.read_note(ref).ref.path or "").name
-        except Exception as e:
-            return {"error": str(e)}  # the same refusal DRIVER.move would give
+        name = Path(origin).name
         last = target.rstrip("/").rsplit("/", 1)[-1]
         if not target.endswith("/") and last.casefold() == Path(name).stem.casefold():
             target += ".md"
         else:
             target = f"{target.rstrip('/')}/{name}" if target.rstrip("/") else name
+    # The restore point first, as silica_delete does: /undo and the GUI's
+    # "move this note back" find the move here.
+    try:
+        journal = get_undo_journal()
+        run_id = journal.start_run(source=CHAT_MOVE_SOURCE,
+                                   vault=(CONFIG.vault_path or "").strip() or None)
+        journal.record(run_id, InverseOp(kind=InverseOpKind.move_back, path=origin,
+                                         to_path=target), post_hash=None)
+    except Exception as e:
+        return {"error": f"not moved: no restore point could be recorded ({e})"}
     try:
         DRIVER.move(ref, target)
         return {"success": True, "moved": ref, "to": target}
     except Exception as e:
+        journal.mark_reverted(run_id)  # nothing moved: nothing to move back
         return {"error": str(e)}
 
 

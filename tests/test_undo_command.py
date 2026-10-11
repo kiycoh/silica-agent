@@ -28,14 +28,20 @@ class _Store:
     def depth(self, path):
         return 1
 
+    def absent_floor(self, path):
+        return False
+
 
 def _run(monkeypatch, line):
     store = _Store()
     written = {}
     monkeypatch.setattr("silica.kernel.write.checkpoints.get_checkpoint_store", lambda: store)
 
-    class _Journal:  # no chat deletes: these tests are about the checkpoint path
+    class _Journal:  # no chat deletes or moves: these tests are about the checkpoint path
         def last_chat_delete(self, vault, path=None):
+            return None
+
+        def last_chat_move(self, vault, ref=None):
             return None
 
     monkeypatch.setattr("silica.kernel.write.undo_journal.get_undo_journal", lambda: _Journal())

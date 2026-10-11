@@ -1395,8 +1395,8 @@ def _dc_changes(args: list[str], **_) -> bool:
 
 
 def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
-    """/undo [note-path] — revert the last write to one note, or bring back a
-    note the chat deleted."""
+    """/undo [note-path] — revert the last write to one note, bring back a
+    note the chat deleted, or move back a note the chat moved."""
     from silica.driver import DRIVER
     from silica.kernel.write.checkpoints import get_checkpoint_store
     from silica.kernel.write.undo_journal import get_undo_journal, revert_run
@@ -1413,22 +1413,42 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     # split, so `/undo silica/Verdetto reranker.md` used to look up
     # "silica/Verdetto" and report nothing to undo. Note names with spaces are
     # the common case in a vault, and the web GUI's per-note revert sends this.
+    def _written_since(p: str, t: float) -> bool:
+        return any((store.latest_at(q) or 0.0) > t for q in (p, f"{p}.md"))
+
     rest = raw_input.strip().split(maxsplit=1)
-    deleted = None
+    deleted = moved = None
     note_path: str | None
     if len(rest) > 1:
         note_path = rest[1].strip()
         if not _on_disk(note_path):
             deleted = journal.last_chat_delete(vault, note_path)
+        # A patch the note took after it landed is undone before the move.
+        move = None if deleted else journal.last_chat_move(vault, note_path)
+        if move and not _written_since(move[2], move[3]):
+            moved = move
     else:
-        # The newest action wins, a write or a delete: a delete lives in the
-        # undo journal, not in the checkpoint store the writes use.
+        # The newest action wins, a write, a delete or a move: a delete and a
+        # move live in the undo journal, not in the checkpoint store.
         last_write = store.most_recent()
+        newest = last_write[1] if last_write else None
         last_delete = journal.last_chat_delete(vault)
         if last_delete and not _on_disk(last_delete[1]) and (
-                last_write is None or last_delete[2] >= last_write[1]):
-            deleted = last_delete
+                newest is None or last_delete[2] >= newest):
+            deleted, newest = last_delete, last_delete[2]
+        last_move = journal.last_chat_move(vault)
+        if last_move and (newest is None or last_move[3] >= newest):
+            deleted, moved = None, last_move
         note_path = deleted[1] if deleted else (last_write[0] if last_write else None)
+    if moved:
+        res = revert_run(moved[0])
+        if res["reverted"]:
+            CONSOLE.print(f"  Moved back: [bold]{moved[2]}[/] → {moved[1]}")
+        else:
+            why = (res["skipped"] or res["errors"] or [{"reason": "unknown"}])[0]
+            CONSOLE.print(f"  [yellow]Not moved back:[/] {moved[2]} "
+                          f"({why.get('reason') or why.get('error')})")
+        return True
     if deleted:
         res = revert_run(deleted[0])
         if res["reverted"]:
@@ -1447,6 +1467,16 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         CONSOLE.print(f"  [yellow]Nothing to undo for[/] {note_path} (already at original).")
         return True
 
+    if store.absent_floor(note_path):
+        # The chat created this note: before it there was nothing, so undo
+        # removes it rather than leave a 0-byte note that keeps taking links.
+        try:
+            DRIVER.delete(note_path)
+            store.clear(note_path)
+            CONSOLE.print(f"  Undone: [bold]{note_path}[/] removed (the chat created it)")
+        except Exception as exc:
+            CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+        return True
     try:
         DRIVER.overwrite(note_path, content)
         depth = store.depth(note_path)

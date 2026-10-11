@@ -49,31 +49,41 @@ class CheckpointStore:
                 ON checkpoints(path);
             """
         )
+        # A floor for a note that did not exist before the first write: /undo
+        # down to it removes the note. Before 2026-10-11 that floor was "" and
+        # undo wrote a 0-byte note that kept taking name links. Stores made
+        # before the column read every legacy floor as present.
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(checkpoints)")}
+        if "absent" not in cols:
+            self._conn.execute(
+                "ALTER TABLE checkpoints ADD COLUMN absent INTEGER NOT NULL DEFAULT 0")
         self._conn.commit()
 
     # -- internals ---------------------------------------------------------
 
-    def _insert(self, path: str, content: str) -> None:
+    def _insert(self, path: str, content: str, absent: bool = False) -> None:
         self._conn.execute(
-            "INSERT INTO checkpoints (path, content, created_at) VALUES (?, ?, ?)",
-            (path, content, time.time()),
+            "INSERT INTO checkpoints (path, content, created_at, absent) VALUES (?, ?, ?, ?)",
+            (path, content, time.time(), int(absent)),
         )
         self._conn.commit()
 
     # -- write -------------------------------------------------------------
 
-    def push(self, path: str, prior_content: str, new_content: str) -> int:
+    def push(self, path: str, prior_content: str | None, new_content: str) -> int:
         """Record a restore point after a patch.
 
         On the first push for ``path`` the original ``prior_content`` is seeded
         as the floor entry before ``new_content``, so undo can reach the
-        pre-patch state. Subsequent pushes append only ``new_content``
-        (``prior_content`` is ignored — it already sits on top of the stack).
+        pre-patch state. ``None`` means the write created the note: the floor
+        is then marked absent (see ``absent_floor``). Subsequent pushes append
+        only ``new_content`` (``prior_content`` is ignored — it already sits on
+        top of the stack).
 
         Returns the resulting stack depth.
         """
         if self.depth(path) == 0:
-            self._insert(path, prior_content)
+            self._insert(path, prior_content or "", absent=prior_content is None)
         self._insert(path, new_content)
         return self.depth(path)
 
@@ -95,6 +105,22 @@ class CheckpointStore:
             "SELECT content FROM checkpoints WHERE path = ?", (path,)
         ).fetchall()
         return {hashlib.sha256((r["content"] or "").encode("utf-8")).hexdigest() for r in rows}
+
+    def absent_floor(self, path: str) -> bool:
+        """True when only the floor is left and it stands for a note that did
+        not exist: the caller removes the note instead of writing "" to it."""
+        rows = self._conn.execute(
+            "SELECT absent FROM checkpoints WHERE path = ? ORDER BY id LIMIT 2", (path,)
+        ).fetchall()
+        return len(rows) == 1 and bool(rows[0]["absent"])
+
+    def latest_at(self, path: str) -> float | None:
+        """When the newest restore point for ``path`` was taken: /undo <path>
+        compares it with a chat move that landed the note there."""
+        row = self._conn.execute(
+            "SELECT MAX(created_at) AS t FROM checkpoints WHERE path = ?", (path,)
+        ).fetchone()
+        return row["t"] if row else None
 
     def most_recent(self) -> tuple[str, float] | None:
         """(path, created_at) of the newest restore point: /undo compares it

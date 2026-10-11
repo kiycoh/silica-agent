@@ -356,7 +356,7 @@ def silica_write_note(
         checkpoint_depth = None
         checkpoint_ok = False
         try:
-            checkpoint_depth = get_checkpoint_store().push(path, "", content)
+            checkpoint_depth = get_checkpoint_store().push(path, None, content)  # None: created, /undo removes it
             checkpoint_ok = True
         except Exception as e:
             logger.warning("checkpoint push failed for '%s': %s — /undo has no "
