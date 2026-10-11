@@ -28,7 +28,8 @@ from starlette.background import BackgroundTask
 
 from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
 from silica.agent.loop import _is_tool_failure, run_agent
-from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
+from silica.agent import turn_notes
+from silica.agent.recall_watch import RecallWatch
 from silica.config import CONFIG
 from silica.kernel.recall.mindmap import note_resolver
 from silica.kernel.write import session_changes
@@ -1062,6 +1063,11 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
             from silica.agent.figures import place_figures
 
             answer = place_figures(answer, messages, exists=lambda f: _find_asset(f) is not None)
+        # The lines under the answer (ADR-0094 point 8), stored on it before the
+        # beat below so a reopened chat draws them too. A stopped turn has no
+        # answer to carry them: they are drawn live only.
+        notes = watch.notes() if isinstance(watch, RecallWatch) else []
+        notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
         # Final-assistant turn beat, post-attribution (see loop.py).
         if messages and messages[-1].get("role") == "assistant":
             from silica.agent import narration as _narr
@@ -1080,8 +1086,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         }
         if stopped:
             done["stopped"] = True
-        if isinstance(watch, RecallWatch) and watch.thin:
-            done["hint"] = THIN_COVERAGE_HINT  # muted line under the answer
+        if notes:
+            done["notes"] = notes
         yield done
     except Exception as exc:  # never leave the UI stuck on the spinner
         logger.exception("web turn failed")
@@ -3476,6 +3482,7 @@ def get_messages():
             content, images = _attached_images(content)
         data.append({"role": m["role"], "content": content, "tools": tools,
                      "thinking": thinking, "images": images,
+                     "notes": turn_notes.of(m) if m["role"] == "assistant" else [],
                      "html": _linkify(content, resolve) if content else ""})
     # Vault label + context usage ride headers so the body stays a plain list.
     # The breakdown goes as JSON in one header rather than three: it is one

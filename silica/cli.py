@@ -26,7 +26,8 @@ from silica.ui.style import FlatMarkdown
 
 from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
 from silica.agent.loop import run_agent
-from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
+from silica.agent import turn_notes
+from silica.agent.recall_watch import RecallWatch
 from silica.config import CONFIG
 from silica.onboarding.adopt import resolve_cwd_vault
 from silica.prompts import _lang_prefer, system_prompt
@@ -164,6 +165,18 @@ def _context_breakdown(messages: list[dict]) -> dict[str, int]:
     schemas = _chat_tool_schemas(messages)
     counts["tool_specs"] = _count_context_tokens([], schemas) if schemas else 0
     return counts
+
+
+def _print_turn_notes(notes: list[dict]) -> None:
+    """The lines under an answer, dim, in the channel's order (ADR-0094 point 8):
+    the same notes the GUI draws, which arrive already ordered by attach()."""
+    from rich.markup import escape
+
+    if not notes:
+        return
+    for note in notes:
+        CONSOLE.print(f"  [dim]{escape(note['text'])}[/]")
+    CONSOLE.print()
 
 
 def _compact_context(messages: list[dict], collapsed: set[int]) -> set[int]:
@@ -4572,6 +4585,9 @@ def main():
                 from silica.sources.web_research import relay_sources
 
                 answer = relay_sources(answer, messages)
+            # The lines under the answer, stored on it before the beat below
+            # so the session keeps them (ADR-0094 point 8).
+            notes = turn_notes.attach(messages, [] if web else watch.notes())
             # Final-assistant turn beat, post-attribution (see loop.py): the
             # replay must carry what the user actually read, sources included.
             if messages and messages[-1].get("role") == "assistant":
@@ -4581,8 +4597,7 @@ def main():
                 CONSOLE.print("[role.assistant]⏺ silica[/]")
                 CONSOLE.print(FlatMarkdown(answer))
                 CONSOLE.print()
-            if not web and watch.thin:
-                CONSOLE.print(f"  [dim]{THIN_COVERAGE_HINT}[/]\n")
+            _print_turn_notes(notes)
             # run_agent already appended the final assistant message to the
             # history — re-appending `answer` here would store it twice.
             _update_context_tokens(messages)
