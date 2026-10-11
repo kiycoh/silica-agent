@@ -218,6 +218,7 @@ Every verb the registry knows, which is what `tests/test_readme_sync.py` compare
 | `/find <query> [--k=N] [--min-trust=T] [--lifecycle=L]` | semantic search; the two epistemic flags filter after the search, so the count says what they cost |
 | `/changes` | notes this session wrote to, with added/removed line counts |
 | `/undo [note-path]` | undo the last patch on a note |
+| `/delete <path>` | delete a note, even one other notes link to; says which links it left pointing nowhere, /undo brings it back |
 | `/review [--flush=HASH]` | inspect the async review queue (deferred ops) |
 | `/anneal [--steer] [--limit=N]` | retry every deferred bundle against the current vault; --steer escalates what still fails |
 | `/revert [run-id | --source <file>]` | revert a whole injection (per-run, LIFO), or every run derived from one source |

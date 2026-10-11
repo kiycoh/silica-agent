@@ -1396,10 +1396,10 @@ def _dc_changes(args: list[str], **_) -> bool:
 
 def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     """/undo [note-path] — revert the last write to one note, bring back a
-    note the chat deleted, or move back a note the chat moved."""
+    note the chat or /delete deleted, or move back a note the chat moved."""
     from silica.driver import DRIVER
     from silica.kernel.write.checkpoints import get_checkpoint_store
-    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal, revert_run
 
     store = get_checkpoint_store()
     journal = get_undo_journal()
@@ -1422,7 +1422,7 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     if len(rest) > 1:
         note_path = rest[1].strip()
         if not _on_disk(note_path):
-            deleted = journal.last_chat_delete(vault, note_path)
+            deleted = journal.last_delete(vault, note_path)
         # A patch the note took after it landed is undone before the move.
         move = None if deleted else journal.last_chat_move(vault, note_path)
         if move and not _written_since(move[2], move[3]):
@@ -1432,7 +1432,7 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         # move live in the undo journal, not in the checkpoint store.
         last_write = store.most_recent()
         newest = last_write[1] if last_write else None
-        last_delete = journal.last_chat_delete(vault)
+        last_delete = journal.last_delete(vault)
         if last_delete and not _on_disk(last_delete[1]) and (
                 newest is None or last_delete[2] >= newest):
             deleted, newest = last_delete, last_delete[2]
@@ -1450,9 +1450,11 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
                           f"({why.get('reason') or why.get('error')})")
         return True
     if deleted:
+        user_deleted = (journal.run_info(deleted[0]) or {}).get("source") == USER_DELETE_SOURCE
         res = revert_run(deleted[0])
         if res["reverted"]:
-            CONSOLE.print(f"  Restored: [bold]{deleted[1]}[/] (deleted from the chat)")
+            how = "deleted with /delete" if user_deleted else "deleted from the chat"
+            CONSOLE.print(f"  Restored: [bold]{deleted[1]}[/] ({how})")
         else:
             why = (res["skipped"] or res["errors"] or [{"reason": "unknown"}])[0]
             CONSOLE.print(f"  [yellow]Not restored:[/] {deleted[1]} "
@@ -1484,6 +1486,51 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         CONSOLE.print(f"  Undone: [bold]{note_path}[/]  [dim]({remaining} undo step(s) remaining)[/]")
     except Exception as exc:
         CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+    return True
+
+
+def _dc_delete(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/delete <path>: delete a note as the user's own act (ADR-0092). The
+    model's silica_delete refuses a note other notes link to; this is where
+    the user deletes it, with no model in between, the way /remember writes
+    past the memory gate. Journaled under user:/delete, so /undo brings it
+    back; it prints each link the delete left pointing to no note and each
+    note it left with no incoming link."""
+    from rich.markup import escape
+
+    from silica.driver import DRIVER
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE
+    from silica.tools.wrapped import delete_with_restore_point
+
+    # Everything after the command is the path, as for /undo: note names
+    # with spaces are the common case.
+    rest = raw_input.strip().split(maxsplit=1)
+    ref = rest[1].strip() if len(rest) > 1 else ""
+    if not ref:
+        CONSOLE.print("  Usage: /delete <path>  [dim](the note to delete; /undo brings it back)[/]")
+        return True
+    try:
+        nc = DRIVER.read_note(ref)
+        path = nc.ref.path or ref
+        res = delete_with_restore_point(path, nc.content, USER_DELETE_SOURCE)
+    except Exception as exc:
+        res = {"error": str(exc)}
+    if "error" in res:
+        err = res["error"].removeprefix("not deleted: ")
+        CONSOLE.print(f"  [yellow]Not deleted:[/] {escape(ref)} ({escape(err)})")
+        return True
+    CONSOLE.print(f"  Deleted: [bold]{escape(path)}[/]")
+    if dangling := res["dangling"]:
+        CONSOLE.print(f"  {len(dangling)} link{'s' if len(dangling) != 1 else ''} now point"
+                      f"{'' if len(dangling) != 1 else 's'} to no note:")
+        for d in dangling:
+            CONSOLE.print(f"    {escape(d['note'])} → {escape('[[' + d['link'] + ']]')}")
+    if orphaned := res["orphaned"]:
+        CONSOLE.print(f"  {len(orphaned)} note{'s' if len(orphaned) != 1 else ''} left with "
+                      "no incoming link:")
+        for o in orphaned:
+            CONSOLE.print(f"    {escape(o)}")
+    CONSOLE.print(f"  [dim]/undo {escape(path)} brings it back.[/]")
     return True
 
 
@@ -1882,6 +1929,7 @@ _DIRECT: dict[str, Callable[..., bool]] = {
     "/episodes": _dc_episodes,
     "/changes": _dc_changes,
     "/undo": _dc_undo,
+    "/delete": _dc_delete,
     "/revert": _dc_revert,
     "/zotero": lambda args, **kw: _dc_zotero(args, **kw),
     "/review": _dc_review,
@@ -1916,6 +1964,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         /verify <note> [--clear]
         /changes
         /undo [note-path]
+        /delete <path>
     """
 
     parts = raw_input.strip().split()
