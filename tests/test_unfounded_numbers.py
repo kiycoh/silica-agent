@@ -4,7 +4,7 @@
 """The numbers rule of ADR-0095: which numbers in a chat answer no evidence holds."""
 from __future__ import annotations
 
-from silica.kernel.write.provenance import number_tokens, unfounded_numbers
+from silica.kernel.write.provenance import checked_numbers, number_tokens, unfounded_numbers
 
 
 def flag(answer: str, *evidence: str) -> list[str]:
@@ -100,3 +100,8 @@ def test_number_tokens_carries_every_spelling():
     toks = number_tokens("n = 1,067 and z = 1,96 in v2")
     assert {"1,067", "1067", "1.067", "1,96", "1.96"} <= toks
     assert "2" not in toks
+
+
+def test_checked_numbers_keeps_every_occurrence_the_rule_judges():
+    assert checked_numbers("242 and 242, `99`, 7, [[Note 12]]\n3. it is 1.96") == [
+        "242", "242", "1.96"]

@@ -780,17 +780,15 @@ def number_tokens(text: str) -> set[str]:
     return out
 
 
-def unfounded_numbers(text: str, evidence_tokens: set[str]) -> list[str]:
-    """The distinct numbers of *text* none of whose spellings is among
-    *evidence_tokens* (from `number_tokens`), in order of appearance.
+def checked_numbers(text: str) -> list[str]:
+    """Every number `unfounded_numbers` judges in *text*, each occurrence, in
+    order.
 
     Not checked: fenced code (mermaid included) and inline code, which are
     examples and drawings the model writes; wikilinks and embeds, which name
     notes; URLs; the leading list or heading marker of a line, which numbers
     the answer's own layout; and any number of fewer than 2 digits, for the
-    reason `_NUMERAL_RE` gives. Arithmetic is not exempted: a correct sum is
-    flagged unless the sum itself was read, because no mechanical rule tells it
-    from an invented figure. A flag means "not read", never "wrong".
+    reason `_NUMERAL_RE` gives.
     """
     # _LEADING_MARKER_RE and _ANY_WIKILINK_RE are the extractive check's own,
     # defined below: one notion of "layout" and "a link" across both checks.
@@ -801,10 +799,23 @@ def unfounded_numbers(text: str, evidence_tokens: set[str]) -> list[str]:
     out: list[str] = []
     for line in prose.splitlines():
         for tok in _NUMBER_RE.findall(_LEADING_MARKER_RE.sub("", line)):
-            if len(tok.lstrip("-").replace(".", "").replace(",", "")) < 2:
-                continue
-            if tok not in out and not (_number_spellings(tok) & evidence_tokens):
+            if len(tok.lstrip("-").replace(".", "").replace(",", "")) >= 2:
                 out.append(tok)
+    return out
+
+
+def unfounded_numbers(text: str, evidence_tokens: set[str]) -> list[str]:
+    """The distinct `checked_numbers` of *text* none of whose spellings is among
+    *evidence_tokens* (from `number_tokens`), in order of appearance.
+
+    Arithmetic is not exempted: a correct sum is flagged unless the sum itself
+    was read, because no mechanical rule tells it from an invented figure. A
+    flag means "not read", never "wrong".
+    """
+    out: list[str] = []
+    for tok in checked_numbers(text):
+        if tok not in out and not (_number_spellings(tok) & evidence_tokens):
+            out.append(tok)
     return out
 
 

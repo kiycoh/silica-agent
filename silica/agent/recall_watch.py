@@ -104,25 +104,30 @@ def _leaves(obj, out: list[str]) -> None:
             _leaves(value, out)
 
 
-def result_numbers(result: str) -> set[str]:
-    """The number tokens of one successful tool result, raw.
+def result_text(result: str) -> str:
+    """One successful tool result as the session read it, "" for a failed one.
 
     A JSON result is read by its string and number leaves: raw JSON doubles
     every backslash and writes a newline as `\\n`, which glues the next digits
     to a letter and hides them, and a number field (a count, a table statistic)
     is evidence as it stands. A write tool's result counts too: it reports what
     happened ("notes created: 20" was flagged when writes were left out, probe
-    of 2026-10-11, session 87c32572c511). A failed result is not evidence.
+    of 2026-10-11, session 87c32572c511).
     """
     if _is_tool_failure(result):
-        return set()
+        return ""
     try:
         obj = json.loads(result)
     except (ValueError, TypeError):
-        return number_tokens(str(result))
+        return str(result)
     out: list[str] = []
     _leaves(obj, out)
-    return number_tokens("\n".join(out))
+    return "\n".join(out)
+
+
+def result_numbers(result: str) -> set[str]:
+    """The number tokens of one tool result, raw (`result_text`)."""
+    return number_tokens(result_text(result))
 
 
 def numbers_from_beats(beats) -> set[str]:
