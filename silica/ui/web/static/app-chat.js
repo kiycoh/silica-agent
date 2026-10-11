@@ -360,6 +360,9 @@ const WRITE_COPY = {
   moved: { label: "moved", act: "revert", hint: "move this note back" },
   deleted: { label: "deleted", act: "restore", hint: "bring this note back" },
   failed: { label: "not written", act: null, hint: "" },
+  // A delete the tool refused because other notes link the note (ADR-0092):
+  // deleting it is the user's act, so the card offers it, behind a second click.
+  refused: { label: "not deleted", act: "delete anyway", hint: "other notes keep their links to it, which then point nowhere; /undo brings it back" },
 };
 
 // One rule for claiming a tool's refs into a turn's footer, shared by the
@@ -371,7 +374,11 @@ function claimRefs(t, touched, failed) {
   const refs = t.notes || [];
   const effect = t.effect || "read";
   if (t.error) {
-    if (effect !== "read") for (const r of refs) if (!touched.has(r)) failed.set(r, t.name || "write");
+    const why = { verb: t.name || "write", refused: t.refused || null };
+    // A refused delete keeps its card even when the turn also wrote the note
+    // (a model flagged Autoencoders, then tried to delete it, 2026-10-11):
+    // the card is where the user deletes it, not a record of a failure.
+    if (effect !== "read") for (const r of refs) if (why.refused || !touched.has(r)) failed.set(r, why);
     return;
   }
   for (const r of refs) if (effect !== "read" || !touched.has(r)) touched.set(r, effect);
@@ -388,7 +395,7 @@ function turnFooter(touched, failed) {
     const w = document.createElement("div");
     w.className = "writes";
     for (const [ref, effect] of mutations) w.appendChild(writeCard(ref, effect, null));
-    for (const [ref, verb] of failed) w.appendChild(writeCard(ref, "failed", verb));
+    for (const [ref, why] of failed) w.appendChild(writeCard(ref, "failed", why.verb, why.refused));
     // One button for the whole turn stays, but only when there is more than one
     // card: with a single write, per-card revert already says it better.
     if (mutations.length > 1) {
@@ -409,8 +416,8 @@ function turnFooter(touched, failed) {
   return frag.childElementCount ? frag : null;
 }
 
-function writeCard(ref, effect, verb) {
-  const copy = WRITE_COPY[effect] || WRITE_COPY.written;
+function writeCard(ref, effect, verb, refused) {
+  const copy = WRITE_COPY[refused ? "refused" : effect] || WRITE_COPY.written;
   const card = document.createElement("div");
   card.className = "wcard " + effect;
   card.dataset.ref = ref;
@@ -432,6 +439,23 @@ function writeCard(ref, effect, verb) {
   path.textContent = ref;
   path.title = ref;
   card.append(op, path);
+  if (refused) {
+    // The refusal's own line, not "delete failed": nothing failed, the note
+    // is the user's to delete. The button arms first, as the bulk revert
+    // does, because a delete that leaves links pointing nowhere is the one
+    // act on this card that edits what other notes say.
+    const n = document.createElement("span");
+    n.className = "wc-note";
+    n.textContent = refused.text;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "wc-act";
+    b.textContent = copy.act;
+    b.dataset.tip = copy.hint;
+    armThenRun(b, copy.act, "click again to delete", () => send("/delete " + refused.path));
+    card.append(n, b);
+    return card;
+  }
   if (!copy.act) {
     const n = document.createElement("span");
     n.className = "wc-note";
@@ -1330,7 +1354,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         delete pipes[ev.id];
       }
       const t = toolEls[ev.id];
-      if (t) { t.section("out", ev.output); t.finish("done", ev.ms); }
+      if (t) { t.section("out", ev.output); t.finish(ev.failed ? "error" : "done", ev.ms); }
       if (ev.memory || ev.memory_suggest) {
         const line = ev.memory ? memoryLine(ev.memory) : memorySuggestLine(ev.memory_suggest);
         if (t) t.el.after(line); else toolsGroup().appendChild(line);
@@ -1338,7 +1362,10 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       toolsDone++;
       const c = claimed[ev.id];
       if (c) {
-        claimRefs({ notes: c.refs, effect: c.effect, error: false }, touched, failed);
+        // A result that is an error landed nothing, as the replay of the same
+        // turn already says (ev.failed is the server's _is_tool_failure).
+        claimRefs({ notes: c.refs, effect: c.effect, error: !!ev.failed, name: c.verb,
+                    refused: ev.refused }, touched, failed);
         delete claimed[ev.id];
       }
     } else if (ev.type === "tool_error") {

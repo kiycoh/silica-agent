@@ -38,7 +38,7 @@ def _run(monkeypatch, line):
     monkeypatch.setattr("silica.kernel.write.checkpoints.get_checkpoint_store", lambda: store)
 
     class _Journal:  # no chat deletes or moves: these tests are about the checkpoint path
-        def last_chat_delete(self, vault, path=None):
+        def last_delete(self, vault, path=None):
             return None
 
         def last_chat_move(self, vault, ref=None):

@@ -605,6 +605,77 @@ class ObsidianFSBackend(GraphIndexMixin):
 
         self._dirty_paths.add(rel_path)
 
+    @_locked
+    def _patch_delete(self, rel_path: str) -> None:
+        """`_patch_index(rel_path, None)`, then every note that linked it.
+
+        Dropping the node drops its incoming edges, and until 2026-10-11
+        nothing put the referrers' links back: they pointed at no note while
+        the index said they pointed nowhere, so the graph gate's rule 2 passed
+        every delete and `/undo` brought a note back with none of its edges
+        (ADR-0092). Re-patching each referrer from its unchanged body is the
+        move's step 5b: the link becomes an unresolved pair, or goes to a
+        namesake the resolver now picks. About 1 ms a referrer, 24.6 ms for
+        the 23 of the test vault's most linked note.
+        """
+        referrers = ([p for p in self._graph.predecessors(rel_path) if p != rel_path]
+                     if rel_path in self._graph else [])
+        self._patch_index(rel_path, None)
+        self._repatch_from_disk(referrers)
+
+    @_locked
+    def _patch_create(self, rel_path: str, content: str) -> None:
+        """`_patch_index` for a new note, then the notes its name now reaches.
+
+        (a) Every source of an unresolved pair that now resolves to it: the
+        move's step 7, filtered by name before resolving, so a create pays for
+        the pairs that could match and not for all 546 of the test vault.
+        (b) Every referrer of a namesake, because the resolver prefers the
+        referrer's folder and then the shortest path, so a new note can take
+        a name link that resolved elsewhere. A `NNNN-` note also answers
+        `ADR-NNNN`, so for it the namesakes are the notes sharing that number.
+        """
+        self._patch_index(rel_path, content)
+        ref = self._notes.get(rel_path)
+        if ref is None:
+            return  # a vault artifact: never indexed, so no link can reach it
+        name = ref.name.lower()
+        adr = name[:4] if name[:4].isdigit() and name[4:5] == "-" else ""
+        sources: set[str] = set()
+        for source, target in list(self._unresolved_links):
+            base = target.rsplit("/", 1)[-1].removesuffix(".md")
+            if base.lower() != name and not (
+                    adr and (m := ADR_REF_RE.fullmatch(base)) and m.group(1) == adr):
+                continue
+            hit = self._resolve_target(target, source_path=source)
+            if hit is not None and hit.path == rel_path:
+                sources.add(source)
+        namesakes = [r.path for r in self._notes_by_name.get(name, ())]
+        if adr:
+            namesakes += [r.path for n, rs in self._notes_by_name.items()
+                          if n.startswith(adr + "-") for r in rs]
+        for other in namesakes:
+            if other != rel_path and other in self._graph:
+                sources.update(self._graph.predecessors(other))
+        sources.discard(rel_path)
+        self._repatch_from_disk(sorted(sources))
+
+    def _repatch_from_disk(self, paths: list[str]) -> None:
+        """Re-index notes whose bytes did not change but whose links may now
+        resolve differently, from their bodies on disk."""
+        for path in paths:
+            try:
+                content = self._read_cached(self.vault_path / path)
+            except (OSError, UnicodeDecodeError) as exc:
+                # A referrer gone from disk left the vault out of band, which
+                # the roster check turns into a rebuild; one that cannot be
+                # decoded has no edges after a rebuild either. Its edges to the
+                # note that changed are already off the graph, so skipping it
+                # never leaves the index claiming a link to nothing.
+                logger.debug("index repair: %s not re-read (%s)", path, exc)
+                continue
+            self._patch_index(path, content)
+
     def _resolve_path(self, ref: NoteRef | str) -> Path:
         """Resolve a NoteRef or name to a full filesystem path inside the vault.
 
@@ -992,11 +1063,18 @@ class ObsidianFSBackend(GraphIndexMixin):
         the touched notes and their 1-hop neighborhood.
         """
         self._ensure_index()
+        # One pass over the unresolved pairs, grouped by source: each note
+        # used to scan them all for its own count, O(notes x pairs), 6.0 ms on
+        # the 730-note test vault and about 18.7 million pair visits at 5,000
+        # notes (ADR-0092 point 4).
+        by_source: dict[str, list[str]] = {}
+        for s, t in self._unresolved_links:
+            by_source.setdefault(s, []).append(t)
         if refs is None:
             link_counts = {}
             for path, ref in self._notes.items():
                 resolved_count = self._graph.out_degree(path) if path in self._graph else 0
-                unresolved_count = sum(1 for s, t in self._unresolved_links if s == path)
+                unresolved_count = len(by_source.get(path, ()))
                 # Key by canonical path (no .md) — unique even with duplicate basenames.
                 # graph_diff.normalize_path() strips .md and lowercases, so path-keyed
                 # snapshots compare identically to name-keyed ones in the diff.
@@ -1009,7 +1087,8 @@ class ObsidianFSBackend(GraphIndexMixin):
             }
             return GraphSnapshot(
                 orphans=self.orphans(),
-                unresolved=self.unresolved(),
+                unresolved=[Link(source=self._node_ref(s), target=t.removesuffix(".md"))
+                            for s, targets in by_source.items() for t in targets],
                 link_counts=link_counts,
                 backlink_counts=backlink_counts
             )
@@ -1034,7 +1113,7 @@ class ObsidianFSBackend(GraphIndexMixin):
             note = self._notes.get(path)
             if note:
                 resolved_count = self._graph.out_degree(path) if path in self._graph else 0
-                unresolved_count = sum(1 for s, t in self._unresolved_links if s == path)
+                unresolved_count = len(by_source.get(path, ()))
                 key = path.removesuffix(".md")
                 link_counts[key] = resolved_count + unresolved_count
                 backlink_counts[key] = self._graph.in_degree(path) if path in self._graph else 0
@@ -1048,9 +1127,8 @@ class ObsidianFSBackend(GraphIndexMixin):
         for path in neighborhood:
             if path in self._notes:
                 source_ref = self._notes[path]
-                for s, t in self._unresolved_links:
-                    if s == path:
-                        unresolved.append(Link(source=source_ref, target=t.removesuffix(".md")))
+                for t in by_source.get(path, ()):
+                    unresolved.append(Link(source=source_ref, target=t.removesuffix(".md")))
 
         return GraphSnapshot(
             orphans=orphans,
@@ -1093,7 +1171,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         if self._needs_reindex:
             self._rebuild_index()
         else:
-            self._patch_index(rel_path, content)
+            self._patch_create(rel_path, content)
         return NoteRef(name=name, path=rel_path)
 
     def overwrite(self, path: str, content: str, *, loss: preserve.Loss | None = None,
@@ -1415,7 +1493,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         if self._needs_reindex:
             self._rebuild_index()
         else:
-            self._patch_index(rel_path_str, None)
+            self._patch_delete(rel_path_str)
         self._drop_embed_vector(rel_path_str)
 
     # ------------------------------------------------------------------
