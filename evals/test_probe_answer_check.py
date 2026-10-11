@@ -169,3 +169,48 @@ def test_seeded_recall_catches_a_changed_value_only_when_it_was_never_read(tmp_p
     # 243 is in the evidence, so 242 changed to 243 escapes; 0.026 is caught
     assert out["last_digit_plus_one_every"] == {"caught": 1, "of": 2, "rate": 0.5}
     assert out["decimal_point_moved"]["of"] == 2
+
+
+def test_a_rebuild_keeps_the_labels_already_written(narration, evaluation, tmp_path):
+    out = tmp_path / "out"
+    gate = pac.build(narration, evaluation, tmp_path / "scratch", out)
+    first = next(iter(gate["R"]["rows"]))
+    _label(out / "labels-R.md", {first: "derivable"})
+    # a real answer arrives after the cut: R grows, the written label stays
+    _session(narration / "eee555.jsonl", "tui", LATER + 60, [("q", [], "and 4242 more")])
+    gate = pac.build(narration, evaluation, tmp_path / "scratch", out)
+    assert pac.read_labels(out / "labels-R.md")[first] == "derivable"
+    assert len(gate["R"]["rows"]) == 7
+
+
+def test_turn_context_cuts_before_the_turns_answer(narration):
+    msgs = pac.turn_context(narration / "aaa111.jsonl", 0)
+    assert msgs[0] == {"role": "user", "content": "how many variables?"}
+    assert not any(m.get("role") == "assistant" and not m.get("tool_calls") for m in msgs)
+    assert len(pac.turn_context(narration / "aaa111.jsonl", 1)) > len(msgs)
+
+
+def test_replays_fill_the_shortfall_only_from_their_day(narration, evaluation, tmp_path, monkeypatch):
+    monkeypatch.setattr(pac, "R_SIZE", 6)  # 4 real answers: a shortfall of 2
+    scratch, out = tmp_path / "scratch", tmp_path / "out"
+    pac.build(narration, evaluation, scratch, out)
+    seen = []
+
+    def call(messages):
+        seen.append(messages)
+        return "Replayed: 5150 rows."
+
+    with pytest.raises(SystemExit):
+        pac.replay(scratch / "narration", out, "stub", call=call,
+                   today=pac.R_REPLAY_FROM - datetime.timedelta(days=1))
+    done = pac.replay(scratch / "narration", out, "stub", call=call, today=pac.R_REPLAY_FROM)
+    # recorded turns in time order; never one after the cut
+    assert len({(d["session"], d["turn"]) for d in done}) == 2
+    assert all(d["session"] != "ddd444" for d in done)
+    assert len(seen) == 2
+    # a second call pays for nothing already replayed
+    assert pac.replay(scratch / "narration", out, "stub", call=call, today=pac.R_REPLAY_FROM) == done
+    assert len(seen) == 2
+    gate = pac.build(narration, evaluation, scratch, out)
+    assert gate["R"]["answers"] == 6
+    assert sum(1 for aid in gate["R"]["rows"].values() if aid.endswith("~replay")) == 2

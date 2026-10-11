@@ -24,10 +24,18 @@ chat-probe sets. It writes only under --scratch and --out.
       --narration ~/.silica/narration --evaluation <copy of docs/evaluation> \\
       --scratch <dir> --out <dir>
   uv run python -m evals.probe_answer_check score --out <dir>
+
+From R_REPLAY_FROM, if R still holds fewer than R_SIZE real answers, `replay`
+re-issues recorded real turns to the default local model with their context
+fixed, one replay per turn, and the next `build` puts them in R:
+
+  SILICA_VAULT=<the sessions' vault> uv run python -m evals.probe_answer_check \
+      replay --scratch <dir> --out <dir>
 """
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import datetime
 import json
 import random
@@ -89,10 +97,11 @@ class Answer:
     date_line: str = ""
     evidence: set[str] = field(default_factory=set)
     flagged: list[str] = field(default_factory=list)
+    tag: str = ""       # "~replay" for a fixed-context replay of the turn
 
     @property
     def id(self) -> str:
-        return f"{self.session}#{self.turn}"
+        return f"{self.session}#{self.turn}{self.tag}"
 
     def evidence_text(self) -> str:
         return "\n".join([*self.results, *self.users, self.date_line])
@@ -355,22 +364,136 @@ def _quote(s: str) -> str:
     return "\n".join("> " + line for line in s.splitlines() or [""])
 
 
+_ROW_RE = re.compile(r"^## (\S+) · ", re.M)
+_LABEL_RE = re.compile(r"^- label:[ \t]*(\S*)[ \t]*$", re.M)
+_NOTE_RE = re.compile(r"^- note:[ \t]*(.*)$", re.M)
+_ANSWER_RE = re.compile(r"^- answer: (\S+) · ", re.M)
+
+
+def _rows_of(path: Path) -> list[tuple[str, str]]:
+    """(row id, row body) of a label file, in order."""
+    text = path.read_text(encoding="utf-8")
+    heads = list(_ROW_RE.finditer(text))
+    return [(h.group(1), text[h.end():heads[i + 1].start() if i + 1 < len(heads) else len(text)])
+            for i, h in enumerate(heads)]
+
+
+def written(path: Path) -> dict[tuple[str, str], tuple[str, str]]:
+    """{(answer id, number): (label, note)} already in a label file. A rebuild
+    carries them over by answer and number, never by row id: R grows as real
+    answers arrive, and the owner's labels must survive that."""
+    if not path.exists():
+        return {}
+    out = {}
+    for _rid, body in _rows_of(path):
+        number = body.split("\n", 1)[0].strip()
+        answer, label, note = (_ANSWER_RE.search(body), _LABEL_RE.search(body),
+                               _NOTE_RE.search(body))
+        if answer and ((label and label.group(1)) or (note and note.group(1).strip())):
+            out[(answer.group(1), number)] = (label.group(1) if label else "",
+                                              note.group(1).strip() if note else "")
+    return out
+
+
 def write_labels(path: Path, name: str, title: str, rows: list[tuple[str, Answer, str]],
                  intro: str) -> None:
+    keep = written(path)
     parts = [f"# ADR-0095 labels, set {name}: {title}\n", intro,
              f"Label each number on its `- label:` line with one of {', '.join(LABELS)}. "
              f"A blank label keeps the row pending. Due {LABELS_DUE.isoformat()}.\n",
              LABEL_HELP]
     for rid, a, num in rows:
         when = datetime.date.fromtimestamp(a.ts).isoformat() if a.ts else "?"
+        label, note = keep.get((a.id, num), ("", ""))
         parts.append(
             f"\n## {rid} · {num}\n"
-            f"- label:\n- note:\n"
+            f"- label:{' ' + label if label else ''}\n- note:{' ' + note if note else ''}\n"
             f"- answer: {a.id} · {a.src} · {a.driver} · {a.model} · {when}\n"
             f"- question: {' '.join(a.question.split())[:300]}\n\n"
             f"answer:\n{_quote(answer_window(a, num))}\n"
             + "".join(f"\nevidence, {how}:\n{_quote(w)}\n" for how, w in evidence_windows(a, num)))
     path.write_text("\n".join(parts), encoding="utf-8")
+
+
+# --- the replays that fill R's shortfall ------------------------------------
+
+def turn_context(path: Path, k: int) -> list[dict]:
+    """The recorded messages of a session up to turn *k*'s answer: everything
+    the model had when it wrote it, the answer itself out. System messages are
+    left out as `probe_study_plan_replay.load_turn` leaves them: the replay puts
+    today's seed in front instead."""
+    msgs = [b["payload"]["message"] for b in _beats(path)
+            if b.get("kind") == "turn" and isinstance((b.get("payload") or {}).get("message"), dict)]
+    out: list[dict] = []
+    users = -1
+    for m in msgs:
+        if m.get("role") == "user":
+            users += 1
+            if users > k:
+                break
+        if m.get("role") != "system":
+            out.append(m)
+    while out and out[-1].get("role") == "assistant" and not out[-1].get("tool_calls"):
+        out.pop()
+    return out
+
+
+def replay(narration: Path, out: Path, model: str, *, call=None,
+           today: datetime.date | None = None) -> list[dict]:
+    """Replay recorded real turns, in time order, until R holds R_SIZE answers.
+
+    Not before R_REPLAY_FROM: until then the shortfall may still fill with real
+    answers, which are the distribution the gate is about. Each replay is saved
+    as it lands, so a failure costs the turns not yet called, and a second run
+    pays for nothing already replayed.
+    """
+    path = out / "replays.json"
+    done: list[dict] = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+    real = load_real(narration)
+    r, _ = set_r(real)
+    short = R_SIZE - len(r)
+    if len(done) >= short:
+        return done
+    if (today or datetime.date.today()) < R_REPLAY_FROM:
+        raise SystemExit(f"R holds {len(r)} of {R_SIZE}: replays start on "
+                         f"{R_REPLAY_FROM.isoformat()}, while real answers may still arrive")
+    if call is None:
+        from silica.agent.llm import call_llm
+        from silica.cli import seed_messages
+
+        seed = seed_messages(math=True)
+
+        def call(messages: list[dict]) -> str:
+            return call_llm(model, seed + messages).text or ""
+    have = {(d["session"], d["turn"]) for d in done}
+    cutoff = datetime.datetime.combine(R_RECORDED_TO, datetime.time.max).timestamp()
+    out.mkdir(parents=True, exist_ok=True)
+    for a in (a for a in real if a.ts <= cutoff and (a.session, a.turn) not in have):
+        if len(done) >= short:
+            break
+        text = call(turn_context(narration / f"{a.session}.jsonl", a.turn))
+        done.append({"session": a.session, "turn": a.turn, "model": model, "answer": text,
+                     "replayed": (today or datetime.date.today()).isoformat()})
+        path.write_text(json.dumps(done, indent=1, ensure_ascii=False), encoding="utf-8")
+    return done
+
+
+def replayed_answers(real: list[Answer], out: Path) -> list[Answer]:
+    """The saved replays as answers: the recorded turn's evidence, the new text."""
+    path = out / "replays.json"
+    if not path.exists():
+        return []
+    by_turn = {(a.session, a.turn): a for a in real}
+    answers = []
+    for d in json.loads(path.read_text(encoding="utf-8")):
+        a = by_turn.get((d["session"], d["turn"]))
+        text = (d.get("answer") or "").strip()
+        if a is None or not text or text.startswith("(silica:"):
+            continue
+        answers.append(dataclasses.replace(
+            a, src="replay", tag="~replay", model=d.get("model") or a.model, text=text,
+            flagged=[] if a.web else unfounded_numbers(text, a.evidence)))
+    return answers
 
 
 # --- what needs no label ------------------------------------------------------
@@ -489,6 +612,8 @@ def build(narration_src: Path, evaluation: Path, scratch: Path, out: Path) -> di
     real = load_real(narration)
     probes = load_probes(evaluation)
     r, recorded = set_r(real)
+    replays = replayed_answers(real, out)[:max(0, R_SIZE - len(r))]
+    r += replays
     p = set_p(probes)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -498,7 +623,8 @@ def build(narration_src: Path, evaluation: Path, scratch: Path, out: Path) -> di
     today = datetime.date.today().isoformat()
     write_labels(out / "labels-R.md", "R", "real answers", r_rows, (
         f"Built {today} from {len(r)} real GUI and TUI answers ({recorded} recorded to "
-        f"{R_RECORDED_TO.isoformat()}, {len(r) - recorded} after); "
+        f"{R_RECORDED_TO.isoformat()}, {len(r) - recorded - len(replays)} after, "
+        f"{len(replays)} fixed-context replays); "
         f"{sum(1 for a in r if a.flagged)} warned; {len(r_rows)} flagged numbers, every one.\n"))
     write_labels(out / "labels-P.md", "P", "probe numbers", p_rows, (
         f"Built {today}: {len(p_rows)} of the numbers flagged in {len(probes)} probe answers, "
@@ -506,7 +632,8 @@ def build(narration_src: Path, evaluation: Path, scratch: Path, out: Path) -> di
 
     gate = {
         "built": today,
-        "R": {"answers": len(r), "recorded_to_cutoff": recorded, "size": R_SIZE,
+        "R": {"answers": len(r), "recorded_to_cutoff": recorded, "replays": len(replays),
+              "size": R_SIZE,
               "replay_from": R_REPLAY_FROM.isoformat(),
               "warned": sum(1 for a in r if a.flagged),
               "rows": {rid: a.id for rid, a, _n in r_rows}},
@@ -527,23 +654,16 @@ def build(narration_src: Path, evaluation: Path, scratch: Path, out: Path) -> di
     return gate
 
 
-_ROW_RE = re.compile(r"^## (\S+) · ", re.M)
-_LABEL_RE = re.compile(r"^- label:[ \t]*(\S*)[ \t]*$", re.M)
-
-
 def read_labels(path: Path) -> dict[str, str | None]:
     """{row id: label or None}. An unknown label raises: a typo must not count
     as pending or as any class."""
-    text = path.read_text(encoding="utf-8")
-    heads = list(_ROW_RE.finditer(text))
     out: dict[str, str | None] = {}
-    for i, h in enumerate(heads):
-        body = text[h.end():heads[i + 1].start() if i + 1 < len(heads) else len(text)]
+    for rid, body in _rows_of(path):
         m = _LABEL_RE.search(body)
         label = (m.group(1).lower() if m else "") or None
         if label is not None and label not in LABELS:
-            raise ValueError(f"{path.name} {h.group(1)}: unknown label {label!r}")
-        out[h.group(1)] = label
+            raise ValueError(f"{path.name} {rid}: unknown label {label!r}")
+        out[rid] = label
     return out
 
 
@@ -635,9 +755,18 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--out", type=Path, required=True)
     s = sub.add_parser("score")
     s.add_argument("--out", type=Path, required=True)
+    rp = sub.add_parser("replay")
+    rp.add_argument("--scratch", type=Path, required=True, help="where build copied the narration")
+    rp.add_argument("--out", type=Path, required=True)
+    rp.add_argument("--model", default=None, help="defaults to SILICA_MODEL, the local chat model")
     a = ap.parse_args(argv)
     if a.cmd == "build":
         _print_build(build(a.narration.expanduser(), a.evaluation, a.scratch, a.out))
+    elif a.cmd == "replay":
+        from silica.config import CONFIG
+
+        done = replay(a.scratch / "narration", a.out, a.model or CONFIG.model)
+        print(f"{len(done)} replays in {a.out / 'replays.json'}")
     else:
         print(json.dumps(score(a.out), indent=1))
     return 0
