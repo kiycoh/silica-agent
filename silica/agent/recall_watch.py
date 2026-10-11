@@ -141,10 +141,10 @@ def _text_of(content) -> str:
     return str(content or "")
 
 
-def unfounded_in_turn(answer: str, turn_numbers: set[str], messages: list[dict],
-                      session_numbers: set[str]) -> list[str]:
-    """The numbers of *answer* that neither this turn's results, the earlier
-    turns' results, the seed nor the user's messages hold.
+def turn_evidence(turn_numbers: set[str], messages: list[dict],
+                  session_numbers: set[str]) -> set[str]:
+    """What a turn's answer may state: this turn's results, the earlier turns'
+    results, the seed and the user's messages.
 
     The seed and the user's messages are read from *messages* here, because
     compaction never touches them. Tool messages are not read: compaction and a
@@ -156,7 +156,13 @@ def unfounded_in_turn(answer: str, turn_numbers: set[str], messages: list[dict],
     for m in messages:
         if m.get("role") in ("system", "user"):
             evidence |= number_tokens(_text_of(m.get("content")))
-    return unfounded_numbers(answer, evidence)
+    return evidence
+
+
+def unfounded_in_turn(answer: str, turn_numbers: set[str], messages: list[dict],
+                      session_numbers: set[str]) -> list[str]:
+    """The numbers of *answer* that `turn_evidence` does not hold."""
+    return unfounded_numbers(answer, turn_evidence(turn_numbers, messages, session_numbers))
 
 
 def numbers_note(flagged: list[str]) -> str:
