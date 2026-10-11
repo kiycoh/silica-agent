@@ -497,3 +497,35 @@ def test_improve_with_stuff_rejected_by_cli():
     rc = runner.main(["--data", "nonexistent.json", "--run-root", "/tmp/nonexistent",
                       "--stuff", "--improve"])
     assert rc == 2
+
+
+def test_agent_answer_names_the_numbers_it_did_not_read(monkeypatch):
+    """ADR-0095 point 8: the evidence is the results the runner collects, the
+    question and the system messages, which carry `now`."""
+    import silica.agent.loop as loop_mod
+
+    script = {
+        "events": [("silica_read_note", {"name": "Trip"},
+                    json.dumps({"body": "Ann drove 340 km in 2023"}), 0)],
+        "answer": "Ann drove 340 km on 2023-05-09, then 120 more, 18 days after Q42.",
+    }
+    monkeypatch.setattr(loop_mod, "run_agent", _scripted_run_agent(script))
+    a = runner.answer_question_agent("stub", "How far did Ann drive in 2023?",
+                                     "2023-05-09", ("Ann", "Bob"))
+    assert a["unfounded_numbers"] == ["120", "18"]
+
+
+def test_agent_aggregate_counts_unfounded_answers_in_two_buckets():
+    rows = [
+        {"iterations": 2, "question_type": "temporal", "unfounded_numbers": ["18"]},
+        {"iterations": 2, "question_type": "temporal", "unfounded_numbers": []},
+        {"iterations": 2, "question_type": "single-hop", "unfounded_numbers": []},
+        {"iterations": 2, "question_type": "multi-hop", "unfounded_numbers": ["7", "12"]},
+        {"iterations": 2, "question_type": "multi-hop", "unfounded_numbers": None,
+         "error": "RuntimeError: boom"},
+    ]
+    agg = runner._agent_aggregate(rows)
+    assert agg["answers_with_unfounded_number"] == {
+        "temporal": {"answers": 2, "with_number": 1},
+        "rest": {"answers": 2, "with_number": 1},
+    }
