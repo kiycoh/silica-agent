@@ -457,7 +457,8 @@ def test_bare_web_without_a_question_yields_one_usage_error(client):
 
 
 def test_done_carries_the_hint_when_every_recall_missed(client, monkeypatch):
-    """The thin-coverage hint is an optional field on the existing done event."""
+    """The thin-coverage hint is a `retrieval` turn note on the done event
+    (ADR-0094 point 8; it was the `hint` field before)."""
     tc, server = client
     from silica.agent.recall_watch import THIN_COVERAGE_HINT
 
@@ -472,7 +473,7 @@ def test_done_carries_the_hint_when_every_recall_missed(client, monkeypatch):
     monkeypatch.setattr(server, "run_agent", fake_run_agent)
 
     done = _read_sse(tc.post("/chat", json={"text": "what is graph rewiring?"}))[-1]
-    assert done["hint"] == THIN_COVERAGE_HINT
+    assert done["notes"] == [{"kind": "retrieval", "text": THIN_COVERAGE_HINT}]
 
 
 def test_a_turn_that_found_notes_carries_no_hint(client, monkeypatch):
@@ -489,7 +490,7 @@ def test_a_turn_that_found_notes_carries_no_hint(client, monkeypatch):
     monkeypatch.setattr(server, "run_agent", fake_run_agent)
 
     done = _read_sse(tc.post("/chat", json={"text": "what about RAG?"}))[-1]
-    assert "hint" not in done
+    assert "notes" not in done
 
 
 def test_an_unknown_slash_command_is_still_reported_as_unavailable(client):

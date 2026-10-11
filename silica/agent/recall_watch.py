@@ -79,6 +79,10 @@ class RecallWatch:
         """True when the turn searched the vault and every search missed."""
         return self.calls > 0 and self.calls == self.misses
 
+    def notes(self) -> list[dict]:
+        """This turn's `retrieval` notes for the end-of-turn channel (turn_notes)."""
+        return [{"kind": "retrieval", "text": THIN_COVERAGE_HINT}] if self.thin else []
+
 
 # --- ADR-0095: the numbers an answer states that its session never read -----
 

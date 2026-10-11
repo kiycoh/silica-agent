@@ -200,9 +200,10 @@
   outline-offset: 2px;
 }
 
-/* thin-coverage hint: every vault search this turn came back empty. Muted on
-   purpose — it reports, it does not ask. */
-.turn-hint {
+/* turn notes (ADR-0094): the lines under an answer, such as a search that ran
+   without a leg or a turn whose every search missed. Muted on purpose: they
+   report, they do not ask. */
+.turn-notes {
   margin-top: 0.6rem;
   color: var(--ash-dim);
   font-size: 12px;

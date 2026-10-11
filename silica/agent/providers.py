@@ -212,8 +212,10 @@ def clamp_max_tokens(provider: str, model: str, requested: int | None, input_cha
 # `origin` is turn provenance; `silica_reasoning` is the model's thinking, kept
 # so a reopened chat can replay the trace it showed while streaming — sending it
 # back would re-bill a multi-thousand-token trace on every later iteration of the
-# tool loop, which is exactly why it used to be thrown away.
-INTERNAL_KEYS = ("origin", "silica_reasoning")
+# tool loop, which is exactly why it used to be thrown away. `silica_turn_notes`
+# is what the chat drew under an answer (ADR-0094, agent/turn_notes.py): the
+# reader's line, never the model's.
+INTERNAL_KEYS = ("origin", "silica_reasoning", "silica_turn_notes")
 
 
 def _to_wire(msg: dict) -> dict:
