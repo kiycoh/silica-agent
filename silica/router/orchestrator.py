@@ -745,6 +745,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             # deferred by earlier runs — and none of them journalled for /revert
             # (CLEANUP never ran). The bundles keep, so the next run recovers them.
             cancelled = True
+            self._mark_interrupted()
             raise
         finally:
             if self._prefetcher is not None:
@@ -752,6 +753,23 @@ class InjectorFSM(BaseFSM[InjectorState]):
             if not cancelled:
                 self._boundary_anneal()
             self._flush_indexes()
+
+    def _mark_interrupted(self) -> None:
+        """Leave `interrupted` in this run's ledger dir, outside the vault.
+
+        The end-of-run link sweep never runs after Ctrl+C, so the files that
+        did land keep their forward refs to ideas that never came: 34 dangling
+        after a 14-lecture run stopped at Lezione 6 (2026-10-12). The next
+        run's sweep takes this run's notes in (Coordinator._sweep_dangling_links).
+        """
+        try:
+            run_dir = self.progress.run_dir
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "interrupted").touch()
+        except Exception as exc:  # noqa: BLE001
+            # No ledger dir to write (read-only home, a stub progress): the
+            # landed notes keep their forward refs, as before this marker.
+            logger.debug("interrupt marker not written: %s", exc)
 
     def _on_step_error(self, exc: Exception) -> bool:
         """Best-effort phases skip to the next one; per-chunk phases route to
