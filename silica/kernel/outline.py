@@ -906,7 +906,7 @@ def skeleton(src: str, *, language: str, ask: Callable[..., dict]) -> Outline:
     outline = parse_outline(ask(STAGE_A.format(lang=language, rels=rels), src, max_tokens=8000))
     gaps = coverage_gaps(outline, source_headings(src))
     if not gaps:
-        return outline
+        return _unshout(outline, src)
     extra = ask(STAGE_GAP.format(gaps="\n".join(f"- {g}" for g in gaps), lang=language, rels=rels),
                 "IDEAS SO FAR:\n" + "\n".join(f"{i.title} | {i.section}" for i in outline.ideas)
                 + "\n\nSOURCE:\n" + src, max_tokens=4000)
@@ -921,7 +921,52 @@ def skeleton(src: str, *, language: str, ask: Callable[..., dict]) -> Outline:
     merged = parse_outline({"lesson_title": outline.lesson_title, "spine": outline.spine,
                             "ideas": [i.__dict__ for i in outline.ideas] + filled})
     merged.skips = [s for s in (extra.get("skips") or []) if isinstance(s, dict)]
-    return merged
+    return _unshout(merged, src)
+
+
+_WORD_RE = re.compile(r"[^\W\d_]+")
+_HEADING_LINE_RE = re.compile(r"(?m)^[ \t]*#{1,6}\s.*$")
+
+
+def _unshout(outline: Outline, src: str) -> Outline:
+    """An idea titled in capitals gets each word as the lecture's body spells it.
+
+    Qwen3.5-9B copied 33 slide headings as titles in the coverage pass ("STORIA
+    DELL'AI: TEST DI TURING", 2026-10-12). The body decides, not a rule on word
+    length, which would keep the Italian "DI" and "DELL" as acronyms: a word the
+    body writes in lower or title case takes its commonest such spelling, one
+    the body only writes in capitals is an acronym and stays, one only the
+    headings use goes lower case. Spine and depends_on follow the rename.
+    """
+    from collections import Counter
+
+    shouted = [i for i in outline.ideas
+               if (letters := "".join(_WORD_RE.findall(i.title))) and letters.isupper() and len(letters) > 1]
+    if not shouted:
+        return outline
+    forms: dict[str, Counter] = {}
+    for w in _WORD_RE.findall(_HEADING_LINE_RE.sub("", src)):
+        forms.setdefault(w.casefold(), Counter())[w] += 1
+
+    def spell(m: re.Match) -> str:
+        seen = forms.get(m.group(0).casefold())
+        if not seen:
+            return m.group(0).lower()
+        quiet = [w for w, _ in seen.most_common() if not w.isupper()]
+        return quiet[0] if quiet else m.group(0)
+
+    rename: dict[str, str] = {}
+    for idea in shouted:
+        new = _WORD_RE.sub(spell, idea.title)
+        new = new[:1].upper() + new[1:]
+        if new not in outline.titles():
+            rename[idea.title] = new
+    for idea in outline.ideas:
+        idea.title = rename.get(idea.title, idea.title)
+        for d in idea.depends_on:
+            d["title"] = rename.get(d.get("title"), d.get("title"))
+    outline.spine = [rename.get(t, t) for t in outline.spine]
+    return outline
 
 
 def run_outliner(*, source_text: str, source_basename: str, target: str, hub: str | None,

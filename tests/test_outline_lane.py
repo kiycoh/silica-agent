@@ -1066,3 +1066,32 @@ def test_outline_calls_skip_the_sdk_retries(monkeypatch):
     monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _P())
     ol._default_ask(ol.STAGE_GAP_TAG, "u", max_tokens=10)
     assert seen.get("sdk_retries") == 0
+
+
+def test_skeleton_writes_a_shouted_heading_the_way_the_lecture_spells_it():
+    """Qwen3.5-9B copied 33 slide headings as note titles in the coverage pass,
+    "STORIA DELL'AI: TEST DI TURING" among them (2026-10-12). Each word takes
+    the spelling the lecture's body uses; one the body only writes in capitals
+    is an acronym, one only the headings use goes lower case."""
+    src = ("## STORIA DELL'AI: TEST DI TURING\n\nIl test di Turing chiede se una macchina "
+           "imita l'AI di una persona; Turing lo propose nel 1950.\n\n"
+           "## Percettrone di Rosenblatt\n\nIl percettrone classifica.\n")
+
+    def ask(system: str, user: str, *, max_tokens: int, **kw) -> dict:
+        if system.startswith(ol.STAGE_A_TAG):
+            return {"lesson_title": "t", "spine": ["Percettrone di Rosenblatt"],
+                    "ideas": [{"title": "Percettrone di Rosenblatt", "section": "Percettrone di Rosenblatt",
+                               "claim": "c", "depends_on": []}]}
+        return {"ideas": [
+            {"title": "STORIA DELL'AI: TEST DI TURING", "section": "STORIA DELL'AI: TEST DI TURING",
+             "claim": "c", "depends_on": []},
+            {"title": "Criterio di Turing", "section": "STORIA DELL'AI: TEST DI TURING", "claim": "c",
+             "depends_on": [{"title": "STORIA DELL'AI: TEST DI TURING", "relation": "derives",
+                             "why": "il criterio nasce dal test"}]},
+        ], "skips": []}
+
+    out = ol.skeleton(src, language="Italian", ask=ask)
+    assert "Storia dell'AI: test di Turing" in out.titles()
+    assert "STORIA DELL'AI: TEST DI TURING" not in out.titles()
+    crit = next(i for i in out.ideas if i.title == "Criterio di Turing")
+    assert [d["title"] for d in crit.depends_on] == ["Storia dell'AI: test di Turing"]
