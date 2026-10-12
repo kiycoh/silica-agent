@@ -916,13 +916,17 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
             f'- "{t}" (section: {section_of[t]})' for t in batch)
         if steer_context:
             user += "\n\nPREVIOUS ATTEMPT WAS REJECTED:\n" + steer_context
+        from litellm import InternalServerError
         try:
             reply = ask(STAGE_BODIES.format(lang=language), user, max_tokens=12000, raw=True)
-        except (ValueError, TimeoutError) as exc:
+        except (ValueError, TimeoutError, InternalServerError) as exc:
             # One batch must not take the lecture down: Lezione 8 landed 0
             # notes when a batch failed twice (2026-09-05). Its titles go to
             # the re-ask and, at worst, land as claim-only notes flagged for
             # review, which the source kept in the inbox does not.
+            # InternalServerError since 2026-10-12: llama-server b10053 500s a
+            # finished Qwen3.5 reply its chat parser cannot read, the same reply
+            # on every retry at temperature 0, and it rolled back Lezione 8 whole.
             logger.warning("outline bodies: batch of %d failed (%s); asking again for its titles", len(batch), exc)
             return {}
         bodies = _parse_bodies_text(reply["text"], batch) if "text" in reply else reply
@@ -952,10 +956,20 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     edges: list[dict] = []
     existing = {r["title"]: r["path"] for r in vault_outline}
     if vault_outline and only_titles is None:
-        reply = ask(STAGE_B.format(lang=language, rels=", ".join(CROSS_RELATIONS)),
-                    "EXISTING NOTES:\n" + "\n".join(f"{r.get('lesson', '')} | {r['title']} | {r.get('claim', '')}" for r in vault_outline)
-                    + "\n\nNEW SOURCE IDEAS:\n" + "\n".join(f"{i.title} | {i.claim}" for i in outline.ideas),
-                    max_tokens=4000)
+        from litellm import InternalServerError
+        try:
+            reply = ask(STAGE_B.format(lang=language, rels=", ".join(CROSS_RELATIONS)),
+                        "EXISTING NOTES:\n" + "\n".join(f"{r.get('lesson', '')} | {r['title']} | {r.get('claim', '')}" for r in vault_outline)
+                        + "\n\nNEW SOURCE IDEAS:\n" + "\n".join(f"{i.title} | {i.claim}" for i in outline.ideas),
+                        max_tokens=4000)
+        except (ValueError, TimeoutError, InternalServerError) as exc:
+            # The cross-lecture edges are the one optional stage: the ideas and
+            # bodies above are the lecture. Qwen3.5-9B ran stage B past 30k chars
+            # twice (finish=length at 4000 and 8000 tokens, 2026-10-12) and the
+            # raise rolled back Lezioni 9 and 11 whole. Without the edges the
+            # notes still land; links to earlier lectures are what is lost.
+            logger.warning("outline stage B failed (%s); the lecture lands without cross edges", exc)
+            reply = {}
         edges = select_edges(reply.get("edges") or [], ideas=set(outline.titles()), existing=existing,
                              spine_titles={r["title"] for r in vault_outline if r.get("spine")})
     ops = outline_ops(outline, target=target, hub=hub, source_basename=source_basename,

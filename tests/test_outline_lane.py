@@ -305,6 +305,31 @@ def test_run_outliner_call_plan_and_result_shape():
     assert "Support vector machines" in res["outline"]["skips"][0]["section"]
 
 
+def test_run_outliner_lands_the_lecture_when_stage_b_fails():
+    """2026-10-12, Qwen3.5-9B on llama-server: stage B ran away past 30k chars
+    of edges twice (finish=length at 4000 and 8000 tokens) and the ValueError
+    rolled back Lezioni 9 and 11 with every idea and body already written."""
+    def ask(system: str, user: str, *, max_tokens: int, **kw) -> dict:
+        if system.startswith(ol.STAGE_A_TAG):
+            return _OUTLINE_JSON
+        if system.startswith(ol.STAGE_GAP_TAG):
+            return {"ideas": [], "skips": []}
+        if system.startswith(ol.STAGE_BODIES_TAG):
+            titles = re.findall(r'^- "(.+?)" \(section: ', user.split("IDEAS:\n", 1)[1], re.M)
+            return {"bodies": {t: f"corpo di {t}" for t in titles}}
+        raise ValueError("outline stage returned no JSON after retry (finish=length)")
+
+    res = ol.run_outliner(
+        source_text=_SRC, source_basename="Lezione 11.md", target="ML", hub="Machine learning",
+        language="Italian",
+        vault_outline=[{"title": "Margine", "claim": "Distanza.", "lesson": "Lezione 10", "path": "ML/Margine.md"}],
+        ask=ask,
+    )
+    heads = {o["heading"] for o in res["updates"] if o["op"] == "write"}
+    assert {"Margine geometrico", "Errore del percettrone online"} <= heads
+    assert not any(o["path"] == "ML/Margine.md" for o in res["updates"])  # no cross edge was invented
+
+
 def test_run_outliner_bodies_in_batches_and_no_stage_b_on_empty_vault():
     big = {"lesson_title": "t", "spine": [f"Idea {i}" for i in range(11)],
            "ideas": [{"title": f"Idea {i}", "section": "S", "claim": "c", "depends_on": []} for i in range(11)]}
@@ -437,6 +462,34 @@ def test_run_outliner_survives_a_failed_bodies_batch():
     res = ol.run_outliner(source_text=_SRC, source_basename="L.md", target="T", hub="H",
                           language="Italian", vault_outline=[], ask=ask)
     assert len(calls) == 2 and set(calls[1]) == set(calls[0])  # the re-ask names the whole batch
+    assert res["missing_bodies"] == ["Errore del percettrone online"]
+    assert any(o["heading"] == "Margine geometrico" and "corpo 1" in o["snippet"] for o in res["updates"])
+
+
+def test_run_outliner_survives_a_server_error_on_a_bodies_batch():
+    """2026-10-12, llama-server b10053 + Qwen3.5-9B: the chat parser rejected a
+    finished plain-markdown reply with a 500 ("does not match the expected
+    peg-native format"), the same reply on every retry at temperature 0, and
+    the exception rolled back the whole lecture (Lezione 8)."""
+    import litellm
+
+    replies = [litellm.InternalServerError(
+        message="The model produced output that does not match the expected peg-native format",
+        llm_provider="openai", model="custom/qwen3.5-9b"),
+        {"bodies": {"Margine geometrico": "corpo 1"}}]
+
+    def ask(system: str, user: str, *, max_tokens: int, **kw) -> dict:
+        if system.startswith(ol.STAGE_A_TAG):
+            return _OUTLINE_JSON
+        if system.startswith(ol.STAGE_GAP_TAG):
+            return {"ideas": [], "skips": []}
+        r = replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    res = ol.run_outliner(source_text=_SRC, source_basename="L.md", target="T", hub="H",
+                          language="Italian", vault_outline=[], ask=ask)
     assert res["missing_bodies"] == ["Errore del percettrone online"]
     assert any(o["heading"] == "Margine geometrico" and "corpo 1" in o["snippet"] for o in res["updates"])
 

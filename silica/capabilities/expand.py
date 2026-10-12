@@ -149,5 +149,8 @@ def _author_body(
         tools=None,
         response_schema=NoteContent,
         max_tokens=4096,
+        # Thinking on, Qwen3.5-9B spent the whole 4096 on its trace in 2 of 3
+        # expands and returned "" (finish=length, 2026-10-12). Same knob as dedup.py.
+        reasoning=False,
     )
     return parse_content(response.text or "")

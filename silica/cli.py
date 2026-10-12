@@ -2253,7 +2253,11 @@ def _pick_target_folder(md_files: list[str]) -> str:
                  "sensible new top-level folder)"
         ) + f"\n\nContent excerpt ({md_files[0]}):\n{excerpt}"
     )
-    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=2048)
+    # reasoning=False: the answer is one line, and a hybrid model left to think
+    # spent all 2048 tokens on its trace and answered "" (Qwen3.5-9B on
+    # llama-server, 2026-10-12), which dropped the batch to a full agent turn.
+    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=2048,
+                    reasoning=False)
     lines = [ln.strip().strip('"').strip("`").rstrip("/") for ln in (resp.text or "").splitlines()]
     pick = next((ln for ln in lines if ln), "")
     if not pick:

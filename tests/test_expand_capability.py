@@ -182,3 +182,20 @@ def test_enqueue_expand_noop_without_queue():
     fsm = _FSM()
     fsm.work_queue = None
     _enqueue_short_snippet_expands(fsm, [_rejected_short()])  # must not raise
+
+
+def test_author_body_turns_thinking_off():
+    """2026-10-12, /nucleate on llama-server Qwen3.5-9B: 2 of 3 expand calls
+    spent the whole 4096-token cap thinking and came back empty
+    (finish=length, text=''), so the thin note stayed thin."""
+    from silica.capabilities.expand import _author_body
+
+    class _Provider:
+        def call_llm(self, **kw):
+            self.kw = kw
+            return type("R", (), {"text": '{"content": "corpo"}'})()
+
+    provider = _Provider()
+    with patch("silica.agent.providers.get_provider", return_value=provider):
+        assert _author_body(CONFIG, concept="X", excerpt="e", source_basename="lez.md") == "corpo"
+    assert provider.kw.get("reasoning") is False
