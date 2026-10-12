@@ -12,7 +12,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from silica.agent import providers as _providers
 from silica.agent.providers import _model_limits_memo, model_limits
+
+# Taken at import, before conftest's autouse stub replaces it for every test.
+_REAL_PROPS_WINDOW = _providers._llama_props_window
 
 
 @pytest.fixture(autouse=True)
@@ -217,3 +221,26 @@ class TestCliContextBudget:
         monkeypatch.setattr(CONFIG, "max_context_tokens", 60000)
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 60000
+
+
+class TestLlamaCpp:
+    """`custom/` is llama-server here: /props names the window a request gets.
+    Before it, (0, 0) sent the distiller's budget to the 262144 fallback and
+    left the bodies pool blind to a 32k unified KV (2026-10-12)."""
+
+    @patch("silica.agent.providers.httpx.get")
+    def test_props_window(self, mock_get, monkeypatch):
+        from silica.config import CONFIG
+        monkeypatch.setattr(_providers, "_llama_props_window", _REAL_PROPS_WINDOW)
+        monkeypatch.setattr(CONFIG, "provider_base_url", "http://127.0.0.1:1237/v1")
+        mock_get.return_value = _http_response(
+            {"total_slots": 4, "default_generation_settings": {"n_ctx": 32768}})
+        assert model_limits("custom", "custom/qwen3.5-4b") == (32768, 0)
+        assert mock_get.call_args.args[0] == "http://127.0.0.1:1237/props"
+
+    @patch("silica.agent.providers.httpx.get", side_effect=ConnectionError("not llama.cpp"))
+    def test_no_props_is_unknown(self, _get, monkeypatch):
+        from silica.config import CONFIG
+        monkeypatch.setattr(_providers, "_llama_props_window", _REAL_PROPS_WINDOW)
+        monkeypatch.setattr(CONFIG, "provider_base_url", "http://127.0.0.1:8000/v1")
+        assert model_limits("custom", "custom/vllm-model") == (0, 0)

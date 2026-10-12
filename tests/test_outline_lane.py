@@ -1032,3 +1032,37 @@ def test_the_language_pin_reads_the_whole_first_chunk(monkeypatch):
         math + "## Margine\nIl margine geometrico è la distanza euclidea dall'iperpiano di separazione.")])
     assert len(math) > 4000
     assert fsm.context["file_0_language"] == "Italian"
+
+
+def test_bodies_pool_fits_the_local_window(monkeypatch):
+    """Four bodies calls of ~8.2k tokens filled a 4B's unified 32k KV and 500d
+    "Context size has been exceeded" 39 times (2026-10-12)."""
+    from silica.config import CONFIG
+    monkeypatch.setattr(CONFIG, "worker_provider", None)
+    monkeypatch.setattr(CONFIG, "worker_model", None)
+    monkeypatch.setattr(CONFIG, "_provider", "custom")
+    monkeypatch.setattr(CONFIG, "model", "custom/qwen3.5-4b")
+    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (32768, 0))
+    src = "x" * 16000                     # a 16 KB lecture
+    assert ol.bodies_workers_for(src) == 2
+    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (65536, 0))
+    assert ol.bodies_workers_for(src) == 5
+    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (0, 0))
+    assert ol.bodies_workers_for(src) == ol.BODIES_WORKERS   # unknown window: as before
+    monkeypatch.setattr(CONFIG, "_provider", "openrouter")
+    assert ol.bodies_workers_for(src) == ol.BODIES_WORKERS   # hosted: independent contexts
+
+
+def test_outline_calls_skip_the_sdk_retries(monkeypatch):
+    """Every outline call runs at temperature 0, so a server 500 retried by the
+    client regenerates the same reply: the stage's own re-ask is the retry."""
+    seen: dict = {}
+
+    class _P:
+        def call_llm(self, **kw):
+            seen.update(kw)
+            return type("R", (), {"text": '{"ideas": []}', "finish_reason": "stop"})()
+
+    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _P())
+    ol._default_ask(ol.STAGE_GAP_TAG, "u", max_tokens=10)
+    assert seen.get("sdk_retries") == 0

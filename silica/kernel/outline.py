@@ -61,6 +61,8 @@ BODIES_BATCH = 4            # ideas per bodies call. Was 8: the wall time of a l
                             # flash (2026-09-05); four ideas halve the stream, the pool below runs them.
 BODIES_WORKERS = 6          # concurrent bodies calls per file: the batches are independent, and one
                             # lecture of 4 batches spent 12 of its 13 minutes on them in series (2026-09-05)
+BODIES_REPLY_TOKENS = 4000  # what one bodies call adds to the KV beyond its prompt: four 4-idea calls
+                            # overflowed a 32k unified KV at ~8.2k tokens each on a 4.6k prompt (2026-10-12)
 MAX_EDGES_PER_TARGET = 3    # a target with more is a hub in disguise, not three real dependencies
 MIN_WHY_CHARS = 20          # "e' collegato" is not a reason
 MAX_OUTLINE_ROWS = 400      # ponytail: folder-scoped outline; reopen at 400 notes in one folder, then seed with cosine top-k
@@ -768,6 +770,30 @@ def _unwrap_string_encoded(text: str) -> str:
         return text
 
 
+def bodies_workers_for(source_text: str) -> int:
+    """How many bodies calls the worker's context holds at once.
+
+    A hosted provider gives each request its own context, so BODIES_WORKERS
+    stands. llama-server shares one KV across its slots: a 4B at 32k took four
+    concurrent calls of ~8.2k tokens and 500d "Context size has been exceeded"
+    39 times (2026-10-12). Unknown window: BODIES_WORKERS, as before.
+    """
+    from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
+    from silica.agent.providers import model_limits
+    from silica.config import CONFIG
+
+    provider, model = CONFIG.worker_provider, CONFIG.worker_model
+    if not provider or not model:
+        provider, model = CONFIG.provider, CONFIG.model
+    if provider != "custom":
+        return BODIES_WORKERS
+    window, _ = model_limits(provider, model or "")
+    if not window:
+        return BODIES_WORKERS
+    per_call = (len(STAGE_BODIES) + len(source_text)) // TEXT_CHARS_PER_TOKEN + BODIES_REPLY_TOKENS
+    return max(1, min(BODIES_WORKERS, window // per_call))
+
+
 def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False) -> dict:
     """One JSON reply from the worker model, no tools, no thinking; `raw`
     returns {"text": reply} for the marker-delimited bodies stage (one retry
@@ -799,6 +825,10 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False) 
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
             tools=None, response_schema=schema, max_tokens=max_tokens, temperature=0.0,
             reasoning=False, openrouter_provider=CONFIG.openrouter_provider_distiller, cancel=abandoned,
+            # Temperature 0: a 500 the client retried came back as the same
+            # reply, three times on Lezione 8 (llama-server, 2026-10-12). This
+            # loop and the stage's re-ask are the retries.
+            sdk_retries=0,
         ), float(os.getenv("DISTILLER_TIMEOUT", "300")), abandoned)
         if resp is None:
             raise TimeoutError("outline stage call abandoned")
@@ -905,8 +935,10 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     bodies, so only those are regenerated (with the feedback appended) and the
     outline, spine and edges are not paid for again.
     """
-    ask = ask or _default_ask
     src = strip_images(source_text)
+    # Sized only for the real worker: an injected `ask` is a test or a probe.
+    workers = BODIES_WORKERS if ask else bodies_workers_for(src)
+    ask = ask or _default_ask
     if outline is None:
         outline = skeleton(src, language=language, ask=ask)
     titles = [i.title for i in outline.ideas if only_titles is None or i.title in only_titles]
@@ -944,7 +976,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     from concurrent.futures import ThreadPoolExecutor
     batches = [titles[k:k + BODIES_BATCH] for k in range(0, len(titles), BODIES_BATCH)]
     got: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=max(1, min(BODIES_WORKERS, len(batches)))) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(batches)))) as pool:
         for part in pool.map(_bodies, batches):
             got.update(part)
     missing = [t for t in titles if t not in got]

@@ -161,6 +161,17 @@ def _no_real_server_autostart(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_llama_props(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test asks the developer's llama-server for its window.
+
+    The real ~/.silica/.env names SILICA_PROVIDER_BASE_URL, and since
+    model_limits reads /props for `custom/` (2026-10-12) every custom call's
+    max_tokens clamp would hit the live chat server. Unknown, as before.
+    tests/test_model_limits.py puts the real function back where it tests it."""
+    monkeypatch.setattr("silica.agent.providers._llama_props_window", lambda base_url: 0)
+
+
+@pytest.fixture(autouse=True)
 def _no_real_zotero_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """No test holds the developer's Zotero write key.
 

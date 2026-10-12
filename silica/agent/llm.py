@@ -803,6 +803,7 @@ def call_llm(
     cancel: threading.Event | None = None,
     api_key: str | None = None,
     reasoning: bool | None = None,
+    sdk_retries: int | None = None,
 ) -> LLMResponse:
     """Narrating wrapper around the real call (`_call_llm`).
 
@@ -844,7 +845,7 @@ def call_llm(
                 resp = _call_llm(used, messages, tools, max_tokens, response_format,
                                  temperature, on_delta, openrouter_provider, cancel,
                                  api_key if used == model else None, reasoning,
-                                 on_retry=_on_retry)
+                                 on_retry=_on_retry, sdk_retries=sdk_retries)
                 break
             except Exception as e:
                 if (n + 1 == len(chain) or not _falls_back(e)
@@ -918,6 +919,7 @@ def _call_llm(
     api_key: str | None = None,
     reasoning: bool | None = None,
     on_retry=None,
+    sdk_retries: int | None = None,
 ) -> LLMResponse:
     """Call the LLM with function-calling support.
 
@@ -980,6 +982,11 @@ def _call_llm(
         "messages": _with_prompt_cache(model, messages),
         "max_tokens": clamp_max_tokens(model.split("/", 1)[0], model, max_tokens, input_chars),
     }
+    if sdk_retries is not None:
+        # The OpenAI client retries every 5xx twice on its own, below
+        # retry_transient (measured: 3 requests per 500). A caller whose ask
+        # is deterministic gets the same reply back each time and says so.
+        kwargs["max_retries"] = sdk_retries
     if tools:
         kwargs["tools"] = tools
         kwargs["tool_choice"] = "auto"
