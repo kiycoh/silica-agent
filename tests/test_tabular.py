@@ -22,6 +22,17 @@ def test_refuses_a_data_file_outside_the_vault(tmp_path):
         outside.unlink()
 
 
+def test_refuses_silicas_own_folder_inside_a_home_vault(tmp_path, monkeypatch):
+    """A vault at $HOME holds ~/.silica; a JSON there is still not vault data."""
+    creds = tmp_path / ".silica" / "credentials" / "t.json"
+    creds.parent.mkdir(parents=True)
+    creds.write_text('{"tok": "secret456"}')
+    monkeypatch.setattr("silica.config.USER_ENV", tmp_path / ".silica" / ".env")
+
+    with pytest.raises(ValueError, match="Silica's own configuration"):
+        silica_query_table(".silica/credentials/t.json", "SELECT * FROM t")
+
+
 @pytest.fixture
 def sales(tmp_path):
     p = tmp_path / "sales.csv"

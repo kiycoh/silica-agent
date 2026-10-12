@@ -291,6 +291,18 @@ def test_read_note_refuses_an_absolute_path_outside(backend, outside):
         backend.read_note(str(outside / "secret.txt"))
 
 
+def test_read_note_refuses_silicas_own_folder_in_a_home_vault(backend, vault, monkeypatch):
+    """Vault and cwd at $HOME: `.silica/.env` is an existing file inside the
+    vault, so the lexical check passed it (probe 2026-10-11)."""
+    env = vault / ".silica" / ".env"
+    env.parent.mkdir()
+    env.write_text("SILICA_X=OUTSIDE-MARKER\n")
+    monkeypatch.setattr("silica.config.USER_ENV", env)
+    monkeypatch.chdir(vault)
+    with pytest.raises(RuntimeError, match="Silica's own configuration"):
+        backend.read_note(".silica/.env")
+
+
 def test_read_note_refuses_proc_environ(backend):
     with pytest.raises(RuntimeError, match="outside the vault"):
         backend.read_note("/proc/self/environ")

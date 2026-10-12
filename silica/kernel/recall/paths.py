@@ -61,7 +61,7 @@ os.umask(_UMASK)
 _NEW_FILE_MODE = 0o666 & ~_UMASK
 
 
-def atomic_write_bytes(path: Path, data: bytes) -> None:
+def atomic_write_bytes(path: Path, data: bytes, mode: int | None = None) -> None:
     """Torn-write-proof write: tmp file in the same dir, fsync, os.replace.
 
     For derived indexes and bundles rewritten in place — a crash or full
@@ -87,10 +87,14 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        try:
-            mode = os.stat(real).st_mode & 0o7777
-        except OSError:
-            mode = _NEW_FILE_MODE  # the destination does not exist yet
+        # `mode` overrides both for a file whose secrecy outranks that access:
+        # the .env holds every API key, and the umask default is 0664 under
+        # the common 0002. Set on the tmp, so the replace never exposes it.
+        if mode is None:
+            try:
+                mode = os.stat(real).st_mode & 0o7777
+            except OSError:
+                mode = _NEW_FILE_MODE  # the destination does not exist yet
         with contextlib.suppress(OSError):
             os.chmod(tmp, mode)
         try:

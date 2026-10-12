@@ -244,6 +244,22 @@ def resolve_env_path() -> Path:
     return USER_ENV
 
 
+def write_env(updates: dict[str, str]) -> Path:
+    """Persist keys into the user .env, atomically, readable by its owner only.
+
+    The one writer for a key: the settings panel and the Zotero grant both call
+    it, because the grant had its own copy and missed the 0600 the panel got
+    (2026-10-11). The file holds every API key the user has, so a crash
+    mid-write must not truncate it and a group must not read it.
+    """
+    from silica.kernel.recall.paths import atomic_write_bytes
+
+    path = resolve_env_path()
+    base = path.read_text(encoding="utf-8") if path.exists() else ""
+    atomic_write_bytes(path, merge_env(base, updates).encode("utf-8"), mode=0o600)
+    return path
+
+
 def merge_env(existing: str, updates: dict[str, str]) -> str:
     """Update KEY=VALUE lines in place — uncommenting a `# KEY=default` line when
     KEY is collected — preserve every other line untouched, and append keys that
@@ -1070,7 +1086,7 @@ def _run_wizard_inner(
     # Atomic: a crash mid-write here would truncate the live .env — every API
     # key the user has — not just the values being merged.
     from silica.kernel.recall.paths import atomic_write_bytes
-    atomic_write_bytes(env_path, merge_env(base, updates).encode("utf-8"))
+    atomic_write_bytes(env_path, merge_env(base, updates).encode("utf-8"), mode=0o600)
     CONSOLE.print(f"  [green]{GLYPHS['ok']} Wrote {env_path}[/]")
 
     # Doctor checks against the values just chosen.

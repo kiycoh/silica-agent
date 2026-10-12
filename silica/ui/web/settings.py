@@ -429,19 +429,14 @@ def provider_group(provider: str) -> dict[str, str]:
 
 
 def write_env(updates: dict[str, str]) -> Path:
-    """Persist keys into the .env that wins at boot, atomically.
+    """Persist keys into the .env that wins at boot (wizard.write_env).
 
-    Atomic because a crash mid-write truncates the live .env — every API key the
-    user has — not just the values being merged. merge_env never deletes a line
-    it did not write, so hand-edits and comments survive.
+    merge_env never deletes a line it did not write, so hand-edits and comments
+    survive.
     """
-    from silica.kernel.recall.paths import atomic_write_bytes
-    from silica.onboarding.wizard import merge_env, resolve_env_path
+    from silica.onboarding.wizard import write_env as _write_env
 
-    path = resolve_env_path()
-    base = path.read_text(encoding="utf-8") if path.exists() else ""
-    atomic_write_bytes(path, merge_env(base, updates).encode("utf-8"))
-    return path
+    return _write_env(updates)
 
 
 def apply_safe_mode(on: bool) -> dict:

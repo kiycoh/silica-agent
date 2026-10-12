@@ -456,7 +456,6 @@ def authorize(zot: Zotero) -> bool:
     user-level .env, outside the vault. A single-use key is consumed by its
     first write, so keeping it would only make the next write fail.
     """
-    from silica.kernel.recall.paths import atomic_write_bytes
     from silica.onboarding import wizard
 
     server = zot.server_id or zot.library_id()
@@ -468,9 +467,6 @@ def authorize(zot: Zotero) -> bool:
     zot.api_key = data.get("key", "")
     remember = bool(data.get("remember"))
     if remember and zot.api_key:
-        path = wizard.resolve_env_path()
-        base = path.read_text(encoding="utf-8") if path.exists() else ""
-        atomic_write_bytes(path, wizard.merge_env(base, {"SILICA_ZOTERO_API_KEY": zot.api_key})
-                           .encode("utf-8"))
+        wizard.write_env({"SILICA_ZOTERO_API_KEY": zot.api_key})
         os.environ["SILICA_ZOTERO_API_KEY"] = zot.api_key
     return remember

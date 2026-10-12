@@ -43,6 +43,18 @@ def test_merge_env_writes_many_keys_and_keeps_the_rest(env_file):
     assert "SILICA_PROVIDER=openrouter" in out
 
 
+def test_the_env_holds_keys_so_only_its_owner_reads_it(env_file):
+    """A .env the write creates, and one an older release left group-readable,
+    both end 0600: the file holds every API key the user has."""
+    import os
+
+    st.write_env({"SILICA_MODEL": "a"})
+    assert os.stat(env_file).st_mode & 0o777 == 0o600
+    os.chmod(env_file, 0o664)
+    st.write_env({"SILICA_MODEL": "b"})
+    assert os.stat(env_file).st_mode & 0o777 == 0o600
+
+
 def test_env_path_is_the_user_file_even_inside_a_repo(tmp_path, monkeypatch):
     """The file a write lands in is the one that would win at the next boot, and
     config.py layers only the user-level file. A .env in the working directory

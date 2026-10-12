@@ -6,6 +6,7 @@ is guarded, and how /revert takes it back by state."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -249,6 +250,7 @@ def test_always_allow_keeps_the_key_outside_the_vault(fake, tmp_path, monkeypatc
 
     assert remember is True
     assert f"SILICA_ZOTERO_API_KEY={fake.api_key}" in env.read_text(encoding="utf-8")
+    assert os.stat(env).st_mode & 0o777 == 0o600  # the key opens the user's library
 
 
 def test_a_single_use_key_is_not_kept(fake, tmp_path, monkeypatch):

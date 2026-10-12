@@ -363,6 +363,14 @@ def silica_read(
     also serves PDFs (`section="p. 8"`, `extract_path` for grep) and anything
     else that is not a note.
     """
+    from silica.config import CONFIG, in_config_dir
+
+    # Refused here, not in silica-core: the engine's containment only refuses
+    # what leaves the vault, and the config folder is this app's, not the
+    # engine's (see in_config_dir).
+    if in_config_dir(Path(CONFIG.vault_path or ".", path)):
+        return {"error": {"code": "out_of_root",
+                          "hint": f"{path!r} is Silica's own configuration, not vault content"}}
     return _engine().read(path, start=start, end=end, section=section,
                           max_chars=max_chars, expect_version=expect_version)
 

@@ -615,6 +615,11 @@ class ObsidianFSBackend(GraphIndexMixin):
         if root not in norm.parents:
             raise RuntimeError(f"Path {str(ref.path if isinstance(ref, NoteRef) else ref)!r} "
                                f"is outside the vault {root.as_posix()!r}")
+        from silica.config import in_config_dir
+
+        if in_config_dir(norm):  # a vault at $HOME holds ~/.silica and its keys
+            raise RuntimeError(f"Path {str(ref.path if isinstance(ref, NoteRef) else ref)!r} "
+                               "is Silica's own configuration, not vault content")
         return norm
 
     def _resolve_unchecked(self, ref: NoteRef | str) -> Path:

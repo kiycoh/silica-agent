@@ -61,6 +61,22 @@ def test_read_serves_a_section_and_refuses_a_stale_citation(vault):
     assert stale["error"]["code"] == "changed" and stale["version"] != hit["version"]
 
 
+def test_a_vault_opened_at_home_does_not_serve_silicas_own_keys(vault, monkeypatch):
+    """With the vault at $HOME, `.silica/.env` is a vault-relative path; the
+    engine's containment allows it, and the file holds every API key."""
+    from silica.tools.atomic import silica_read
+
+    env = vault / ".silica" / ".env"
+    env.parent.mkdir()
+    env.write_text("SILICA_X=secret123\n", encoding="utf-8")
+    monkeypatch.setattr("silica.config.USER_ENV", env)
+
+    for path in (".silica/.env", "./.silica/../.silica/.env"):
+        r = silica_read(path)
+        assert "secret123" not in str(r)
+        assert r["error"]["code"] == "out_of_root"
+
+
 def test_the_engine_indexes_apart_from_the_fusion_leg(vault):
     """Its build drops every path its own walk did not produce: pointed at the
     fusion store it would prune the notes the sync lane maintains. The seam

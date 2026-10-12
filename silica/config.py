@@ -44,6 +44,16 @@ from silica import SHELL_ENV, VAULT_PINNED  # noqa: E402,F401
 USER_ENV = Path.home() / ".silica" / ".env"
 
 
+def in_config_dir(path: str | Path) -> bool:
+    """True when `path` resolves inside ~/.silica, Silica's own state: the .env
+    with every API key, the narration of every chat, the runs. A vault opened
+    at $HOME contains that folder, and containment in the vault does not
+    exclude it: on 2026-10-11 silica_read served `.silica/.env` whole and
+    silica_query_table a JSON under it. Read tools that take a model-named path
+    ask this after their vault check."""
+    return Path(path).expanduser().resolve().is_relative_to(USER_ENV.parent.resolve())
+
+
 def load_user_env(path: Path) -> None:
     """Layer `path` under the shell, above anything a foreign loader injected.
 

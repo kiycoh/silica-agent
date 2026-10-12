@@ -244,6 +244,10 @@ def silica_query_table(
     root = Path(vault or os.getcwd()).resolve()
     if root not in src.parents:
         raise ValueError(f"{path} is outside the vault {root.as_posix()}")
+    from silica.config import in_config_dir
+
+    if in_config_dir(src):
+        raise ValueError(f"{path} is Silica's own configuration, not vault content")
     if not src.is_file():
         raise ValueError(f"{src} is not a file")
     suffix = src.suffix.lower()
