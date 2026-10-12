@@ -243,7 +243,8 @@ class _ConnectorTool(Tool):
     __slots__ = ("key",)
 
     def __init__(self, key: str, names: list[str]) -> None:
-        def connector(request: Annotated[str, _REQUEST_FIELD], cancel_token=None, progress=None) -> str:
+        def connector(request: Annotated[str, _REQUEST_FIELD], cancel_token=None,
+                      progress=None) -> dict[str, Any]:
             return _run(key, request, cancel_token, progress)
 
         super().__init__(connector, mcp_config.tool_name(key), _description(key, names),

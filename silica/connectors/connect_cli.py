@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import sys
 import time
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from silica.connectors.mcp_block import McpBlock
 
 USAGE = "usage: /connect [list|add <json>|secure <key>|login <key>|logout <key>|remove <key>|reload]"
 
@@ -34,10 +37,16 @@ def _yes(prompt: str) -> bool:
     return ask(prompt).strip().lower() in ("y", "yes")
 
 
-def _list(console) -> None:
-    from silica.connectors import find
+def _block() -> McpBlock:
+    # The block itself, not `find("mcp")`: find is Optional for a name outside
+    # the static tuple, and "mcp" is always in it.
+    from silica.connectors.mcp_block import MCP_BLOCK
 
-    st = find("mcp").status()
+    return MCP_BLOCK
+
+
+def _list(console) -> None:
+    st = _block().status()
     if not st["rows"]:
         console.print(f"  {st['detail']} ({st['file']})")
         return
@@ -48,9 +57,9 @@ def _list(console) -> None:
 
 def _secure(key: str, console, ask_secret: Callable[[str], str] | None,
             ask_yes: Callable[[str], bool] | None) -> None:
-    from silica.connectors import credentials, find, mcp_config
+    from silica.connectors import credentials, mcp_config
 
-    block = find("mcp")
+    block = _block()
     out = block.act("secure", {"key": key})
     if not out["ok"]:
         console.print(f"  [yellow]{out['error']}[/]")
@@ -89,7 +98,7 @@ def _secure(key: str, console, ask_secret: Callable[[str], str] | None,
 
 def _login(key: str, console, poll_s: float, ask_line: Callable[[str], str] | None,
            ask_yes: Callable[[str], bool] | None) -> None:
-    from silica.connectors import find, mcp_oauth
+    from silica.connectors import mcp_oauth
     from silica.connectors.mcp_client import CallFailed
 
     try:
@@ -99,13 +108,13 @@ def _login(key: str, console, poll_s: float, ask_line: Callable[[str], str] | No
         if str(exc).startswith("needs a credentials store"):
             if ask_yes is None or not ask_yes("  keep this login in a 0600 file under ~/.silica/credentials? [y/N] "):
                 return
-            find("mcp").act("store_in_file", {"key": key})
+            _block().act("store_in_file", {"key": key})
         elif str(exc).startswith("needs a client ID") and ask_line is not None:
             # The spec's last registration step: a client ID registered by hand.
             client_id = ask_line(f"  client ID registered by hand for {key} (empty to skip): ").strip()
             if not client_id:
                 return
-            find("mcp").act("client_id", {"key": key, "client_id": client_id})
+            _block().act("client_id", {"key": key, "client_id": client_id})
         else:
             return
         try:
@@ -153,7 +162,7 @@ def run(line: str, console, *, ask_secret: Callable[[str], str] | None = None,
     """One /connect line. `ask_secret`/`ask_yes` default to hidden prompts
     when stdin is a terminal, and to None (never ask) when it is not: the GUI
     runs direct commands under a captured console with no one to type."""
-    from silica.connectors import credentials, find, mcp_config
+    from silica.connectors import credentials, mcp_config
 
     if mcp_config.hosted():
         console.print("  connectors are local only")
@@ -165,7 +174,7 @@ def run(line: str, console, *, ask_secret: Callable[[str], str] | None = None,
     _, _, rest = line.strip().partition(" ")
     verb, _, arg = rest.strip().partition(" ")
     verb, arg = verb.lower() or "list", arg.strip()
-    block = find("mcp")
+    block = _block()
     if verb == "list":
         _list(console)
     elif verb == "add":

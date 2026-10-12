@@ -23,6 +23,7 @@ import asyncio
 import concurrent.futures
 import contextvars
 import datetime as _dt
+import functools
 import json
 import logging
 import os
@@ -465,8 +466,13 @@ class Clients:
                 asyncio.wait_for(self._list(key), WARM_OPEN_TIMEOUT_S), self._get_loop())
             # A server that does not answer in time is left for the first call
             # to open; its row reads what the failure was.
-            fut.add_done_callback(lambda f, k=key: f.cancelled() or f.exception() is None
-                                  or logger.info("mcp warm %s: %s", k, f.exception()))
+            fut.add_done_callback(functools.partial(_log_warm_failure, key))
+
+
+def _log_warm_failure(key: str, fut: concurrent.futures.Future) -> None:
+    # cancelled() first: exception() raises on a cancelled future.
+    if not fut.cancelled() and fut.exception() is not None:
+        logger.info("mcp warm %s: %s", key, fut.exception())
 
 
 def _describe_open_error(exc: BaseException | None) -> str:

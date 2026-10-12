@@ -37,7 +37,7 @@ import time
 import webbrowser
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from urllib.parse import parse_qs, urlsplit
 
 from silica.connectors import credentials, mcp_config
@@ -218,7 +218,10 @@ def _pinning_provider() -> type:
                 return issuer
             if info.issuer is None:
                 info.issuer = issuer
-                credentials.put(self.context.storage.scope, _CLIENT, info.model_dump_json())
+                # The SDK types storage as its TokenStorage protocol; provider()
+                # below is the one place this class is built, always with ours.
+                scope = cast(KeyringTokenStorage, self.context.storage).scope
+                credentials.put(scope, _CLIENT, info.model_dump_json())
             elif not issuers_match(info.issuer, issuer):
                 raise IssuerMoved(
                     f"the authorization server moved from {info.issuer} to {issuer}, and the client "
@@ -232,10 +235,11 @@ def _pinning_provider() -> type:
 def provider(key: str, spec: dict[str, Any], clients: Any) -> Any:
     """The httpx2 auth for one HTTP server's session."""
     from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata
+    from pydantic import AnyUrl
 
     oauth = spec.get("oauth") or {}
     port = callback_port(spec)
-    redirect = f"http://127.0.0.1:{port}/callback"
+    redirect = AnyUrl(f"http://127.0.0.1:{port}/callback")
     scopes = oauth.get("scopes")
     metadata = OAuthClientMetadata(
         client_name="Silica", redirect_uris=[redirect],
@@ -312,6 +316,7 @@ def _gated(inner: Any, key: str, clients: Any, page: _Page | None = None) -> Any
 
     class GatedAuth(httpx2.Auth):
         requires_response_body = True
+        context: Any
 
         async def async_auth_flow(self, request):
             in_login = key in clients.interactive_login

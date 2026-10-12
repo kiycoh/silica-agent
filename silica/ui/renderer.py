@@ -194,7 +194,7 @@ def _tool_target(name: str, args: dict) -> str:
         return f'{args.get("ref", "")} {GLYPHS["arrow"]} {args.get("to", "")}'.strip()
     if name == "silica_run_injector":
         return _injector_label(args)
-    _, key = _connector_desc(name) or _TOOL_DESC.get(name, (None, None))
+    _, key = _connector_desc(name) or _TOOL_DESC.get(name, ("", None))
     val = str(args.get(key) or "").strip() if key else ""
     return _TARGET_FMT.get(name, str)(val) if val else ""
 
