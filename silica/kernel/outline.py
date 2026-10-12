@@ -979,7 +979,8 @@ def _unshout(outline: Outline, src: str) -> Outline:
     for idea in outline.ideas:
         idea.title = rename.get(idea.title, idea.title)
         for d in idea.depends_on:
-            d["title"] = rename.get(d.get("title"), d.get("title"))
+            if d.get("title") in rename:
+                d["title"] = rename[d["title"]]
     outline.spine = [rename.get(t, t) for t in outline.spine]
     return outline
 
