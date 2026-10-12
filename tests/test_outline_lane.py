@@ -1095,3 +1095,35 @@ def test_skeleton_writes_a_shouted_heading_the_way_the_lecture_spells_it():
     assert "STORIA DELL'AI: TEST DI TURING" not in out.titles()
     crit = next(i for i in out.ideas if i.title == "Criterio di Turing")
     assert [d["title"] for d in crit.depends_on] == ["Storia dell'AI: test di Turing"]
+
+
+def test_a_reply_the_server_cannot_parse_is_asked_once_more_off_temperature_zero(monkeypatch):
+    """llama-server b10053 500s a finished Qwen3.5 reply its chat parser cannot
+    read. At temperature 0 every retry is that reply again: Lezione 8 failed the
+    same batch twice and lost 4 ideas (2026-10-12). One ask at 0.3 is a
+    different reply; any other 500 is raised as before."""
+    import litellm
+
+    seen: list[float] = []
+
+    class _P:
+        def __init__(self, fail_with: str):
+            self.fail_with = fail_with
+
+        def call_llm(self, **kw):
+            seen.append(kw["temperature"])
+            if kw["temperature"] == 0.0:
+                raise litellm.InternalServerError(message=self.fail_with, llm_provider="openai", model="m")
+            return type("R", (), {"text": "### IDEA: A\ncorpo", "finish_reason": "stop"})()
+
+    parse = "The model produced output that does not match the expected peg-native format"
+    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _P(parse))
+    assert ol._default_ask(ol.STAGE_BODIES_TAG, "u", max_tokens=10, raw=True) == {"text": "### IDEA: A\ncorpo"}
+    assert seen == [0.0, 0.3]
+
+    seen.clear()
+    monkeypatch.setattr("silica.agent.providers.get_provider",
+                        lambda *a, **k: _P("Context size has been exceeded."))
+    with pytest.raises(litellm.InternalServerError):
+        ol._default_ask(ol.STAGE_BODIES_TAG, "u", max_tokens=10, raw=True)
+    assert seen == [0.0]

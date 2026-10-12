@@ -820,16 +820,31 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False) 
         # Wall-clock bound, same helper and knob as run_distiller: a dead
         # upstream keeps the socket alive with keep-alive bytes, and the first
         # live run of this lane (2026-09-02) sat ten minutes on one such call.
-        abandoned = threading.Event()
-        resp = _call_with_deadline(lambda: provider.call_llm(
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            tools=None, response_schema=schema, max_tokens=max_tokens, temperature=0.0,
-            reasoning=False, openrouter_provider=CONFIG.openrouter_provider_distiller, cancel=abandoned,
-            # Temperature 0: a 500 the client retried came back as the same
-            # reply, three times on Lezione 8 (llama-server, 2026-10-12). This
-            # loop and the stage's re-ask are the retries.
-            sdk_retries=0,
-        ), float(os.getenv("DISTILLER_TIMEOUT", "300")), abandoned)
+        def _once(temperature: float, schema=schema):
+            abandoned = threading.Event()
+            return _call_with_deadline(lambda: provider.call_llm(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                tools=None, response_schema=schema, max_tokens=max_tokens, temperature=temperature,
+                reasoning=False, openrouter_provider=CONFIG.openrouter_provider_distiller, cancel=abandoned,
+                # Temperature 0: a 500 the client retried came back as the same
+                # reply, three times on Lezione 8 (llama-server, 2026-10-12). This
+                # loop and the stage's re-ask are the retries.
+                sdk_retries=0,
+            ), float(os.getenv("DISTILLER_TIMEOUT", "300")), abandoned)
+
+        from litellm import InternalServerError
+        try:
+            resp = _once(0.0)
+        except InternalServerError as exc:
+            # llama-server b10053 500s a finished Qwen3.5 reply its chat parser
+            # cannot read ("does not match the expected peg-native format").
+            # At temperature 0 every retry is that reply again: Lezione 8 lost
+            # the same 4 ideas twice (2026-10-12). One ask off zero is a
+            # different reply; any other 500 is the caller's, as before.
+            if "does not match the expected" not in str(exc):
+                raise
+            logger.warning("outline stage: server could not parse the reply, asking once at 0.3")
+            resp = _once(0.3)
         if resp is None:
             raise TimeoutError("outline stage call abandoned")
         if raw:
