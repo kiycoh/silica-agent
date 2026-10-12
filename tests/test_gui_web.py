@@ -2461,6 +2461,27 @@ def test_serve_keeps_a_handle_on_the_server_it_runs(monkeypatch):
     assert server._SERVER.config.timeout_graceful_shutdown == 1
 
 
+def test_a_hosted_tenant_listens_on_its_socket_and_answers_to_its_public_name(monkeypatch, tmp_path):
+    """ADR-0085 points 1 and 4: the unit names a socket, and the proxy in front
+    forwards the public Host unchanged, which the loopback check would refuse."""
+    import uvicorn
+
+    from silica.ui.web import server
+
+    sock = str(tmp_path / "gui.sock")
+    monkeypatch.setenv("SILICA_GUI_SOCKET", sock)
+    monkeypatch.setenv("SILICA_GUI_HOSTS", " Silica.Example.dev , ")
+    monkeypatch.setattr(server, "_SERVER", None)
+    monkeypatch.setattr(uvicorn.Server, "run", lambda self, sockets=None: None)
+    monkeypatch.setattr(server, "_reset_session", lambda: None)
+    monkeypatch.setattr(server, "_capture_own_session", lambda: None)
+    monkeypatch.setattr("silica.ui.banner.print_banner", lambda *a, **k: None)
+
+    server.serve(port=8799)
+    assert server._SERVER.config.uds == sock
+    assert server._public_hosts() == {"silica.example.dev"}
+
+
 def test_serve_exits_quietly_on_the_signal_uvicorn_re_raises(monkeypatch, tmp_path):
     """uvicorn re-raises the SIGINT it captured once it HAS shut down cleanly.
 

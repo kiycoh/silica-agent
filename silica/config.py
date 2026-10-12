@@ -154,6 +154,13 @@ def env_flag(key: str, default: bool) -> bool:
     return os.getenv(key, "true" if default else "false").lower() in _TRUE_WORDS
 
 
+def hosted() -> bool:
+    """Hosted mode (ADR-0086 point 2): one variable, set only by the tenant's
+    unit. Not an env_flag: "true" or "t" in a user's .env must not switch a
+    laptop into it. Read per call: the flag is the process environment's."""
+    return os.environ.get("SILICA_HOSTED", "").strip() == "1"
+
+
 # Provider prefixes that map a `prefix/model` string to an endpoint and get
 # auto-prefixed onto a bare model. Single source for the three checks below
 # (provider, distill_escalation_provider, ensure_prefix). "custom" routes to

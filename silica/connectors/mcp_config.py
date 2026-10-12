@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from silica.config import hosted  # noqa: F401  callers read it as mcp_config.hosted()
 from silica.connectors import credentials
 
 # The words scrub_credentials already treats as secret (silica/kernel/scrub.py),
@@ -56,13 +57,6 @@ class Entry:
     problem: str = ""               # why it cannot start, before any secret
     needs: list[str] = field(default_factory=list)   # secrets missing from the store
     inline: list[str] = field(default_factory=list)  # "env.API_KEY", "headers.Authorization"
-
-
-def hosted() -> bool:
-    """The hosted service (ADR-0086 point 2) runs no connector: a stdio entry is
-    arbitrary code on the operator's host and an HTTP URL is an SSRF route
-    (ADR-0091 point 8). Read per call: the flag is the process environment's."""
-    return os.environ.get("SILICA_HOSTED", "").strip() == "1"
 
 
 def path() -> Path:

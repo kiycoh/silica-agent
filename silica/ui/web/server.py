@@ -13,6 +13,7 @@ import asyncio
 import glob
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -1196,7 +1197,15 @@ _SAME_ORIGIN = [Depends(_require_same_origin)]
 # other name got here by DNS rebinding (its name re-resolved to 127.0.0.1), and
 # Origin cannot tell: the page sets Origin and Host to its own name alike
 # (audit 2026-10-09, S3). Tests add TestClient's "testserver" in conftest.
-_ALLOWED_HOSTS = {"loopback"}
+# A hosted tenant also answers to the public names its unit lists in
+# SILICA_GUI_HOSTS: the proxy forwards Host unchanged (ADR-0085 point 4), and
+# the socket it listens on is reachable by the proxy alone (serve()). An
+# environment variable and not a setting, so the GUI can never widen itself.
+def _public_hosts() -> set[str]:
+    return {h.strip().lower() for h in os.environ.get("SILICA_GUI_HOSTS", "").split(",") if h.strip()}
+
+
+_ALLOWED_HOSTS = {"loopback", *_public_hosts()}
 
 
 @app.middleware("http")
@@ -4301,8 +4310,16 @@ def serve(port: int = 8765) -> None:
 
     _reset_session()
 
+    # A hosted tenant listens on a Unix socket in its own directory, never on a
+    # TCP port (ADR-0085 point 1): loopback is open to every tenant, because the
+    # shared embedder lives there, so a port would let one tenant's process
+    # reach another's GUI. uvicorn makes the socket 0666; the directory's
+    # permissions are what keep it the proxy's alone.
+    sock = os.environ.get("SILICA_GUI_SOCKET", "").strip() or None
+
     print_banner()
-    CONSOLE.print(f"  [dim]GUI live at[/] [cyan]http://127.0.0.1:{port}[/]\n")
+    where = f"unix:{sock}" if sock else f"http://127.0.0.1:{port}"
+    CONSOLE.print(f"  [dim]GUI live at[/] [cyan]{where}[/]\n")
 
     global _SERVER
     # Built here rather than through uvicorn.run(), which keeps the Server to
@@ -4322,7 +4339,7 @@ def serve(port: int = 8765) -> None:
     # ("Started server process [%d]", "Uvicorn running on %s://%s:%d"). Piped
     # output escaped it, which is why it never showed in a captured log.
     _SERVER = uvicorn.Server(uvicorn.Config(
-        app, host="127.0.0.1", port=port, timeout_graceful_shutdown=1,
+        app, host="127.0.0.1", port=port, uds=sock, timeout_graceful_shutdown=1,
         log_config=None))
     try:
         try:

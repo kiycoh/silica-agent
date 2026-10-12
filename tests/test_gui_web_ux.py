@@ -158,6 +158,14 @@ def test_no_route_serialises_str_exc_into_a_user_facing_field():
     assert "4f2a" in out["detail"] and "4f2a" not in out["error"]
 
 
+def test_a_hosted_failure_keeps_its_raw_text_from_the_browser(monkeypatch):
+    """ADR-0085 point 5: a provider's error can carry a key fragment."""
+    from silica.ui.web.failures import explain
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    out = explain(RuntimeError("401 Unauthorized: key sk-or-v1-abc123 is invalid"))
+    assert out["detail"] == "" and "sk-or" not in out["error"]
+
+
 def test_a_transport_failure_never_draws_an_assistant_row():
     js = app_js()
     catch = js[js.index("  } catch (e) {\n    // The transport failed"):]

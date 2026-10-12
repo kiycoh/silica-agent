@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import re
 
+from silica.config import hosted
+
 # (pattern, sentence). First match wins; order matters only where two could
 # both match (a 401 inside a "connection" message is a credentials problem).
 _CLASSES: list[tuple[re.Pattern[str], str]] = [
@@ -56,6 +58,10 @@ def sentence(raw: str) -> str:
 def explain(exc: BaseException | str) -> dict[str, str]:
     """`{"error": <sentence>, "detail": <raw>}` for a response body or a
     stream frame. `error` is what the person reads; `detail` is what the
-    person debugging reads, and it is never the same field."""
+    person debugging reads, and it is never the same field.
+
+    Hosted, `detail` is empty (ADR-0085 point 5): a provider's error text can
+    carry a fragment of the platform's key, and the person reading it there is
+    a student, not the operator, who has the log."""
     raw = str(exc)
-    return {"error": sentence(raw), "detail": raw}
+    return {"error": sentence(raw), "detail": "" if hosted() else raw}
