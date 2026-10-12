@@ -303,8 +303,11 @@ class TestFocusDim:
         no click counter left to read."""
         nodes, edges = small_graph
         html = render_html(nodes, edges, lib_js="// dummy")
-        assert ".onNodeClick((node) => {" in html
-        assert "selectNode(node); applyFocus(node.id);" in html
+        assert ".onNodeClick((n, e) => clickNote(n, e))" in html
+        body = html[html.index("function clickNote("):]
+        body = body[:body.index("\n}\n")]
+        assert "selectNode(node); applyFocus(node.id);" in body
+        assert "focusNode(" not in body
 
     def test_parent_can_sync_focus_by_path(self, small_graph):
         """The embedding page (note-panel navigation) can tell the graph which

@@ -330,6 +330,20 @@ def test_2d_hovers_off_the_positions_not_the_picking_canvas():
     move only; 3D raycasts, which nothing blanks."""
     wrap = FRAME_JS[FRAME_JS.index('["pointerdown", "pointermove", "wheel", "touchstart"]'):]
     assert "pickHover2D(e)" in wrap[:wrap.index("}, { capture: true")]
-    assert "nearestHit(" in _fn("pickHover2D") and "hitRadius(" in _fn("pickHover2D")
+    assert "noteAt2D(e)" in _fn("pickHover2D")
+    assert "nearestHit(" in _fn("noteAt2D") and "hitRadius(" in _fn("noteAt2D")
     assert "hitRadius(" in _fn("paintNodeArea")
     assert ".onNodeHover(n => { if (!is2D()) hoverNote(n); })" in FRAME_JS
+
+
+def test_2d_clicks_off_the_positions_not_the_picking_canvas():
+    """force-graph takes its click from the same picking canvas: at pointer-up
+    it calls onNodeClick for the note it last read there, else
+    onBackgroundClick. That canvas is blank after a relight and lags a played
+    move by up to 800 ms, so a click on a ring note landed as an empty click:
+    the Map played back, and the hover left the clicked note lit with its
+    neighbours over the force layout (owner, 2026-10-11). 2D asks the positions;
+    3D keeps the lib's raycast."""
+    assert ".onNodeClick((n, e) => clickNote(n, e))" in FRAME_JS
+    assert ".onBackgroundClick(e => clickNote(null, e))" in FRAME_JS
+    assert "is2D()" in _fn("clickNote") and "noteAt2D(e)" in _fn("clickNote")

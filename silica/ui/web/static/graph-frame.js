@@ -1603,11 +1603,25 @@ function hitRadius(n, k) {
 // pointer move only, so a note sliding under a still pointer relights nothing.
 function pickHover2D(e) {
   if (!Graph || !is2D()) return;
-  const cv = document.querySelector("#graph canvas");
-  if (e.target !== cv) { hoverNote(null); return; }   // over the key, not the graph
-  const c = cv.getBoundingClientRect(), k = Graph.zoom();
+  if (e.target !== document.querySelector("#graph canvas")) { hoverNote(null); return; }   // over the key, not the graph
+  hoverNote(noteAt2D(e));
+}
+function noteAt2D(e) {
+  const c = document.querySelector("#graph canvas").getBoundingClientRect(), k = Graph.zoom();
   const p = Graph.screen2GraphCoords(e.clientX - c.left, e.clientY - c.top);
-  hoverNote(nearestHit(ALL_NODES, p, n => hitRadius(n, k)));
+  return nearestHit(ALL_NODES, p, n => hitRadius(n, k));
+}
+
+// The click, off the positions in 2D for the same reason: force-graph calls
+// onNodeClick for the note its picking canvas last showed under the pointer,
+// else onBackgroundClick. After a relight that canvas is blank, and after a
+// played move it still holds the old layout, so a click on a ring note landed
+// as an empty click: the Map played back and the hover left the note lit over
+// the force layout (owner, 2026-10-11). 3D raycasts and keeps the lib's note.
+function clickNote(node, e) {
+  if (is2D() && e) node = noteAt2D(e);
+  if (node) { selectNode(node); applyFocus(node.id); }
+  else { closeDrawer(); clearFocus(); }
 }
 
 // --- Edge weight: what you wrote outranks what was inferred -----------------
@@ -2583,11 +2597,11 @@ function buildGraph() {
     .linkDirectionalParticleWidth(l => l.type === "SIMILAR" ? 1.5 : 2)
     .nodeVisibility(n => !n._hidden)
     .linkVisibility(l => !l._hidden && !quietNow(l))
-    .onNodeClick((node) => { selectNode(node); applyFocus(node.id); })
+    .onNodeClick((n, e) => clickNote(n, e))
     // 3D only: 2D picks its hover itself (pickHover2D). One argument, since
     // the lib's second is the previous node.
     .onNodeHover(n => { if (!is2D()) hoverNote(n); })
-    .onBackgroundClick(() => { closeDrawer(); clearFocus(); })
+    .onBackgroundClick(e => clickNote(null, e))
     // The alpha gate and a drag deadlock each other. Both bundles reheat a drag
     // the d3 way — d3AlphaTarget(0.3).resetCountdown() on every drag event — but
     // alpha only climbs toward that target INSIDE tick(), and tick() is exactly
