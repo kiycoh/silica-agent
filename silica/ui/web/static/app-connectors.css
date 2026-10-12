@@ -1,0 +1,111 @@
+/* --- Settings › Connectors (ADR-0089 point 8) ------------------------------ */
+.st-connector + .st-connector {
+  margin-top: 1rem;
+}
+
+.st-conn-title {
+  color: var(--frost);
+  font-size: var(--fs-ctl);
+  padding: 0.4rem 0 0.2rem;
+}
+
+.st-mcp-secret {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 0.4rem;
+}
+
+.st-mcp-secret input,
+.st-mcp-paste {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--well);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xs);
+  color: var(--frost);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 0.35rem 0.5rem;
+}
+
+.st-mcp-paste {
+  grid-column: 1 / -1;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.st-mcp-secret input:focus,
+.st-mcp-paste:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.st-mcp-tools {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.st-mcp-tools summary {
+  cursor: pointer;
+  width: max-content;
+}
+
+.st-mcp-tool {
+  font-family: var(--mono);
+  color: var(--text);
+  padding: 0.1rem 0 0.1rem 1rem;
+  overflow-wrap: anywhere;
+}
+
+.st-mcp-tool.off {
+  color: var(--ash-dim);
+}
+
+.st-mcp-tool-note {
+  font-family: var(--sans);
+}
+
+/* --- the approval card (ADR-0091 point 6) ---------------------------------- */
+/* A decision, not a step: the one card in a turn drawn in the accent, so it is
+   not read past like the rows around it. */
+.approval {
+  margin: 0.3rem 0 0.5rem 1.25rem;
+  padding: 0.55rem 0.7rem;
+  background: var(--well);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+}
+
+.approval[data-settled] {
+  border-color: var(--line);
+}
+
+.approval-head {
+  color: var(--frost);
+  font-size: var(--fs-meta);
+}
+
+.approval-args {
+  margin: 0.4rem 0 0.5rem;
+  max-height: 18rem;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.approval-state {
+  font-size: 11px;
+  color: var(--ash-dim);
+}

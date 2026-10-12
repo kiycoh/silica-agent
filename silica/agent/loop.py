@@ -275,8 +275,9 @@ def run_agent(
     """
     # Effective tool registry: full global, or the constrained subset.
     if constraints is not None:
+        source = TOOLS if constraints.registry is None else constraints.registry
         allowed: dict[str, "Tool"] = {
-            name: TOOLS[name] for name in constraints.tools if name in TOOLS
+            name: source[name] for name in constraints.tools if name in source
         }
     else:
         # Non-ambient authority: the main agent's default toolset excludes
@@ -657,7 +658,7 @@ def run_agent(
                     result = f'{{"error": "{type(e).__name__}: {str(e)}"}}'
             # Failed or not: a fetch that errored halfway may still have put
             # page text in its error, and the gate errs toward refusing.
-            memory_gate.after_tool(memory_turn, tc.name)
+            taint = memory_gate.after_tool(memory_turn, tc.name)
 
             # Eager projection: a write/gate tool's fat JSON never enters the
             # history — the TUI already got the full result via the event above.
@@ -688,6 +689,10 @@ def run_agent(
                 "tool_call_id": tc.id,
                 "content": result,
             }
+            if taint:
+                # A taint learnt from a returned path (ADR-0090 point 8) has
+                # no tool name to find again at the next turn's start.
+                tool_msg[memory_gate.TAINT_KEY] = taint
             messages.append(tool_msg)
             _narr_mod.NARRATOR.turn(tool_msg)
 

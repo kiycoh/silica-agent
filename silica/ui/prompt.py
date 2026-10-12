@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import html
+import os
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -14,7 +15,7 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.styles import Style
 
 from silica.config import CONFIG
-from silica.ui.commands import commands
+from silica.ui.commands import commands, unrecorded
 
 
 def _vault_display() -> str:
@@ -40,7 +41,23 @@ _METER_WIDTH = 10
 def _history_path() -> Path:
     p = Path.home() / ".silica"
     p.mkdir(parents=True, exist_ok=True)
-    return p / "history"
+    path = p / "history"
+    # 0600 from the first byte: FileHistory appends with the umask's mode, and
+    # every line ever typed is in this file. An older file is brought down too.
+    os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600))
+    path.chmod(0o600)
+    return path
+
+
+class _History(FileHistory):
+    """The REPL's history, minus every line a command marks as able to carry
+    a secret (`commands.unrecorded`): not in the file, and not in this
+    session's up-arrow either, so it cannot be recalled and re-sent."""
+
+    def append_string(self, string: str) -> None:
+        if unrecorded(string):
+            return
+        super().append_string(string)
 
 
 def _context_meter() -> str:
@@ -97,7 +114,7 @@ class SlashCommandCompleter(Completer):
 
 def build_session() -> PromptSession:
     return PromptSession(
-        history=FileHistory(str(_history_path())),
+        history=_History(str(_history_path())),
         auto_suggest=AutoSuggestFromHistory(),
         completer=FuzzyCompleter(SlashCommandCompleter()),
         # Kill the default reverse-video strip — the toolbar renders flat on the

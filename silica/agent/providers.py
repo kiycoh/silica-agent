@@ -212,8 +212,10 @@ def clamp_max_tokens(provider: str, model: str, requested: int | None, input_cha
 # `origin` is turn provenance; `silica_reasoning` is the model's thinking, kept
 # so a reopened chat can replay the trace it showed while streaming — sending it
 # back would re-bill a multi-thousand-token trace on every later iteration of the
-# tool loop, which is exactly why it used to be thrown away.
-INTERNAL_KEYS = ("origin", "silica_reasoning")
+# tool loop, which is exactly why it used to be thrown away. `silica_taint`
+# marks the tool message whose result tainted the conversation by a path
+# (user_memory.TAINT_KEY, ADR-0090 point 8).
+INTERNAL_KEYS = ("origin", "silica_reasoning", "silica_taint")
 
 
 def _to_wire(msg: dict) -> dict:

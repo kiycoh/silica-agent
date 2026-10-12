@@ -1133,6 +1133,10 @@ async def _lifespan(app: FastAPI):
     # since the last session, for the Library tab's count. Off the loop, because
     # it is HTTP to Zotero; silent on failure, like the hook's line.
     asyncio.get_running_loop().run_in_executor(None, _zotero_detect)
+    # MCP servers open in the background (ADR-0091), off the loop: reading
+    # mcp.json and the keyring is file and D-Bus I/O.
+    from silica.connectors.mcp_tools import start as _start_connectors
+    asyncio.get_running_loop().run_in_executor(None, _start_connectors)
     yield
     if bridge is not None:
         await bridge.stop()
@@ -1276,10 +1280,13 @@ async def chat(payload: dict):
 
 @app.get("/supported_types")
 def supported_types():
-    """Extensions the nucleate picker offers — drives the `+` button's `accept`."""
+    """Extensions the nucleate picker offers: they drive the `+` button's `accept`.
+    `mail` is the Mail row's picker, kept apart: the composer stages no mail
+    (`_is_mail`)."""
+    from silica.sources.mail import SUFFIXES
     from silica.sources.registry import supported_nucleate_extensions
 
-    return {"extensions": supported_nucleate_extensions()}
+    return {"extensions": supported_nucleate_extensions(), "mail": list(SUFFIXES)}
 
 
 @app.get("/commands")
@@ -1303,22 +1310,58 @@ def list_commands():
 _UPLOAD_MAX_BYTES = 256 * 1024 * 1024
 _UPLOAD_MAX_FILES = 32
 _UPLOAD_CHUNK = 1024 * 1024
+# A mail export is no drop: Google Takeout's "All mail" file runs to gigabytes,
+# and the drop cap above refused every real one (2026-10-12). The ceiling here
+# is RAM, not the nucleate lane: mail.plan() holds every message body.
+# ponytail: measured 2026-10-12 on a synthetic Takeout, 1 GiB took 17 s to a
+# first dry run and held 290 MB, so 8 GiB holds about 2.3 GB, twice that for
+# non-ASCII mail. The upgrade is a headers-first pass that reads bodies only
+# for the threads written; reopen at ADR-0090's gate 4 review.
+_MAIL_UPLOAD_MAX_BYTES = 8 * 1024 ** 3
 
 
 async def _write_upload(f: UploadFile, dest: Path) -> None:
-    """Stream one upload to `dest`, refusing it past the cap."""
-    written = 0
-    with dest.open("wb") as fh:
+    """Stream one dropped file to `dest`, refusing it past the drop cap."""
+    async def chunks():
         while chunk := await f.read(_UPLOAD_CHUNK):
-            written += len(chunk)
-            if written > _UPLOAD_MAX_BYTES:
-                fh.close()
-                dest.unlink(missing_ok=True)  # no half file left in the vault
-                raise HTTPException(
-                    413,
-                    f"{dest.name} is over the {_UPLOAD_MAX_BYTES // (1024 * 1024)} MB upload limit",
-                )
-            fh.write(chunk)
+            yield chunk
+
+    await _write_stream(chunks(), dest, _UPLOAD_MAX_BYTES,
+                        f"{dest.name} is over the {_UPLOAD_MAX_BYTES // (1024 * 1024)} MB upload limit")
+
+
+async def _write_stream(chunks, dest: Path, cap: int, too_big: str) -> None:
+    """Write `chunks` to `dest`, refusing past `cap` bytes with `too_big`.
+
+    Opened without following a link: a symlink planted at Inbox/<name> made
+    an upload overwrite the file it pointed to, outside the vault (found end
+    to end 2026-10-12). O_NOFOLLOW makes the check and the open one step; the
+    is_symlink() check stands in where the platform has no O_NOFOLLOW."""
+    import errno
+    import os
+
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if dest.is_symlink():
+        raise HTTPException(400, f"{dest.name} in the inbox is a link; not writing through it")
+    try:
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | nofollow, 0o666)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise HTTPException(400, f"{dest.name} in the inbox is a link; not writing through it") from None
+        raise
+    written = 0
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            async for chunk in chunks:
+                written += len(chunk)
+                if written > cap:
+                    raise HTTPException(413, too_big)
+                fh.write(chunk)
+    except BaseException:
+        # No half file left in the vault, whatever stopped it: the cap, a full
+        # disk, or a browser that stopped sending a multi-gigabyte export.
+        dest.unlink(missing_ok=True)
+        raise
 
 
 async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]:
@@ -1334,13 +1377,19 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
     /stop for the whole conversion, leaving a visible Stop button that could not
     be served.
     """
-    from silica.kernel.vault_manifest import get_active_manifest
+    from silica.kernel.vault_manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
     from silica.sources.convert import convert
     from silica.sources.registry import adapter_for, stage
 
     if len(files) > _UPLOAD_MAX_FILES:
         raise HTTPException(413, f"at most {_UPLOAD_MAX_FILES} files per drop")
-    inbox = Path(CONFIG.vault_path or ".") / "Inbox"
+    # The inbox inside the write boundary, as active_inbox_dir() composes it; a
+    # literal root Inbox/ staged drops outside a vault that writes only under
+    # docs/silica. "Inbox" stands in when SILICA_INBOX_DIR switches the inbox
+    # off, because a drop still needs a folder and that one is composed too.
+    vault = CONFIG.vault_path or "."
+    inbox_rel = resolve_inbox_dir(vault, active_write_dir(), CONFIG.inbox_dir or "Inbox")
+    inbox = Path(vault) / inbox_rel
     inbox.mkdir(parents=True, exist_ok=True)
     enabled = get_active_manifest().sources
     ready: list[str] = []
@@ -1350,8 +1399,10 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
         # a directory, and one that is nothing but directories ("..") gets the
         # fallback rather than resolving to the Inbox itself.
         dest = inbox / (Path(f.filename or "").name or "dropped")
+        if _is_mail(dest.name):
+            continue  # never written: see _is_mail
         await _write_upload(f, dest)
-        rel = f"Inbox/{dest.name}"
+        rel = f"{inbox_rel}/{dest.name}"
         adapter = adapter_for(rel, enabled=enabled)
         if adapter is None:  # no source claims it → converter fallback (PDF today)
             try:
@@ -1369,7 +1420,19 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
     return ready, stubs
 
 
-def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str]) -> str:
+def _is_mail(name: str) -> bool:
+    """A mail export dropped into the chat (ADR-0090 point 5): never staged.
+    Staged, it wrote a note outside any undo run (so /revert took back the
+    import before it) with no dry run and no address filter, and a refusal
+    reached only the log (found end to end 2026-10-12). Mail goes through the
+    Mail row or /mail import, which have both."""
+    from silica.sources.mail import SUFFIXES
+
+    return Path(name).suffix.lower() in SUFFIXES
+
+
+def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
+                           mail: Sequence[str] = ()) -> str:
     """The agent turn for a batch of attached files: the user's instruction plus
     a factual manifest of what got staged. Empty instruction defaults to nucleate."""
     lines: list[str] = []
@@ -1379,6 +1442,11 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str]) -> str
     if stubs:
         lines.append("Code skeleton stubs already staged in the vault:")
         lines += [f"- {p}" for p in stubs]
+    if mail:
+        lines.append("Not staged, mail files: mail is imported through Settings › Connectors › Mail "
+                     "or /mail import <file>, which show a dry run first and keep the threads the "
+                     "user took part in. Tell the user so:")
+        lines += [f"- {n}" for n in mail]
     manifest = "\n".join(lines) if lines else "(no files could be staged)"
     base = text.strip() or (
         "Nucleate the attached file(s) into an appropriate folder; "
@@ -1396,7 +1464,33 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     except Exception:
         _end_turn()  # release the slot the staging never got to use
         raise
-    return _turn_response(_compose_nucleate_turn(text, ready, stubs))
+    mail = [Path(f.filename or "").name for f in files if _is_mail(Path(f.filename or "").name)]
+    return _turn_response(_compose_nucleate_turn(text, ready, stubs, mail))
+
+
+@app.post("/mail/upload", dependencies=_SAME_ORIGIN)
+async def mail_upload(request: Request, name: str):
+    """The Mail row's export (ADR-0090 point 5), saved into the inbox inside
+    the write boundary as `_stage_uploads` saves a drop, and not staged: the
+    row's dry run comes next, and nothing is written before its Import.
+
+    The body is the file itself and `name` its name, not a multipart form:
+    Starlette spools a form's file to the temp dir first, which is RAM where
+    /tmp is a tmpfs, and an export runs to gigabytes."""
+    from silica.kernel.vault_manifest import active_write_dir, resolve_inbox_dir
+    from silica.sources.mail import SUFFIXES
+
+    name = Path(name).name  # a client-chosen name never adds a directory
+    if Path(name).suffix.lower() not in SUFFIXES:
+        raise HTTPException(400, "the Mail row imports an .mbox or .eml file")
+    vault = CONFIG.vault_path or "."
+    inbox_rel = resolve_inbox_dir(vault, active_write_dir(), CONFIG.inbox_dir or "Inbox")
+    (Path(vault) / inbox_rel).mkdir(parents=True, exist_ok=True)
+    gb = _MAIL_UPLOAD_MAX_BYTES // 1024 ** 3
+    await _write_stream(request.stream(), Path(vault) / inbox_rel / name, _MAIL_UPLOAD_MAX_BYTES,
+                        f"{name} is over the {gb} GB the Mail row takes: export one Gmail label "
+                        "from Takeout, or run /mail import with the file's path")
+    return {"path": f"{inbox_rel}/{name}"}
 
 
 # How many rows of an uncapped list the metrics view receives. The report caps
@@ -4114,6 +4208,31 @@ def zotero_labels():
 def zotero_unlink():
     from silica.ui.web import zotero_web
     return _zotero_call(zotero_web.unlink)
+
+
+# Settings › Connectors (ADR-0089 point 8): every block's status, and one
+# action of one block. Sync GET on purpose: FastAPI runs it in the threadpool,
+# and a status reads the keyring, which may block on a D-Bus round trip.
+@app.get("/connectors")
+def connectors_status():
+    from silica.connectors import connectors
+    return [c.status() for c in connectors()]
+
+
+@app.post("/connectors/{name}/{action}", dependencies=_SAME_ORIGIN)
+async def connectors_act(name: str, action: str, request: Request):
+    from silica.connectors import find
+
+    block = find(name)
+    if block is None:
+        raise HTTPException(404, f"no connector named {name}")
+    try:
+        payload = await request.json()
+    except ValueError:
+        payload = {}  # an action without a body (reload) posts nothing
+    # Off the loop: Add lists a new server (up to 20 s) and a refusal is an
+    # `ok: false` body, never a 5xx the panel would read as the server dying.
+    return await asyncio.to_thread(block.act, action, payload if isinstance(payload, dict) else {})
 
 
 @app.get("/endpoints")

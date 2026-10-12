@@ -68,4 +68,4 @@ def test_malformed_notebook_read_raises(tmp_path, monkeypatch):
 def test_default_sources_includes_notebook_in_git_repo(tmp_path):
     from silica.kernel.vault_manifest import default_sources
     _init_repo(tmp_path)
-    assert set(default_sources(tmp_path)) == {"prose", "code", "notebook"}
+    assert set(default_sources(tmp_path)) == {"prose", "mail", "code", "notebook"}

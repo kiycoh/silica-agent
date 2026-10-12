@@ -446,6 +446,14 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
     # Staleness is the ACTIVE vault's code lane; a peeked vault's paths would
     # only ever match it by coincidence.
     stale_map = {} if peek else _peek_stale()
+    if not peek:
+        from silica.tools.user_memory import returned_notes
+
+        # From the blocks, not `context`: the rendered text carries no
+        # frontmatter, so a mail note's stamp is not in it (ADR-0090 point 8).
+        # Memory-lane paths resolve in another vault, whose imports are not
+        # this vault's record.
+        returned_notes(b.path for b in p.blocks if b.origin != "memory")
     flagged = {b.path: lvl for b in p.blocks
                if (lvl := codedocs.peek_level(stale_map, b.path))}
     # render(windowed=True) emits b.excerpt, so a note whose window IS its body

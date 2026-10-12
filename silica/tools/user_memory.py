@@ -24,7 +24,8 @@ from __future__ import annotations
 import json
 import re
 from contextvars import ContextVar
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
 
 from pydantic import Field
@@ -47,6 +48,15 @@ INGRESS = frozenset({
     "silica_session_search",
 })
 
+# An MCP connector (ADR-0091) brings a third party's text in, whatever the
+# server is: its tools are `mcp__<key>`, one per configured server, so the
+# set above cannot name them and the prefix does.
+_INGRESS_PREFIX = "mcp__"
+
+
+def _ingress(name: str) -> bool:
+    return name in INGRESS or name.startswith(_INGRESS_PREFIX)
+
 # The bare `/remember` expands to this (cli._SHORTCUTS), and the asked gate
 # recognises it by this head: a directive is harness text, so it opens the
 # gate only when it is this one.
@@ -65,6 +75,16 @@ class _Turn:
     directive: bool         # that message is a harness directive (origin cli)
     chat: bool              # an interactive chat turn, not a batch or worker loop
     tainted_by: str = ""    # the first ingress tool this conversation ran
+    # Vault paths the running tool's result holds, handed over by the tool
+    # itself (returned_notes) and checked by after_tool (ADR-0090 point 8).
+    returned: list[str] = field(default_factory=list)
+
+
+# The key a tool message carries once its call tainted the conversation by a
+# path, which no tool name in the history records. Stripped from the wire
+# (providers.INTERNAL_KEYS) and kept by the narration, so a reopened chat stays
+# tainted. Compaction rewrites a message's content, never its other keys.
+TAINT_KEY = "silica_taint"
 
 
 # Set by run_agent at entry, like read_scope.REQUESTS: tools run on the loop's
@@ -88,18 +108,49 @@ def begin_turn(messages: list[dict], *, chat: bool) -> _Turn:
             request, directive = str(m.get("content") or ""), m.get("origin") == "cli"
             break
     turn = _Turn(request, directive, chat,
-                 next((n for n in _called(messages) if n in INGRESS), ""))
+                 next((n for n in _called(messages) if _ingress(n)), "")
+                 or next((str(m[TAINT_KEY]) for m in messages
+                          if m.get("role") == "tool" and m.get(TAINT_KEY)), ""))
     _TURN.set(turn)
     return turn
 
 
-def after_tool(turn: _Turn, name: str) -> None:
-    if name in INGRESS and not turn.tainted_by:
+def returned_notes(paths: Iterable[str]) -> None:
+    """A note-reading tool hands the gate the vault paths its result holds,
+    from its own result objects: recall strips frontmatter from the text the
+    model sees, so the mail stamp could never be read off it (ADR-0090
+    point 8). Outside a turn there is nothing to taint."""
+    turn = _TURN.get()
+    if turn is not None:
+        turn.returned.extend(str(p) for p in paths if p)
+
+
+def after_tool(turn: _Turn, name: str) -> str:
+    """Taint the turn on what the call brought in; returns the taint this call
+    added, "" when it added none, for the loop to mark the tool message with."""
+    before = turn.tainted_by
+    if _ingress(name) and not turn.tainted_by:
         turn.tainted_by = name
+    returned, turn.returned = turn.returned, []
+    if returned and not turn.tainted_by:
+        from silica.sources.mail import mail_note_among
+
+        try:
+            hit = mail_note_among(returned)
+        except (OSError, ValueError):
+            # The import record cannot be read, so no returned note can be
+            # told apart from a mail note: refusing memory for this
+            # conversation is the failure the gate can afford (/remember stays
+            # open), a turn that crashes on every note read is not.
+            turn.tainted_by = "an unreadable mail import record"
+        else:
+            if hit:
+                turn.tainted_by = f"the mail note {hit}"
     # silica_web_answer runs a run_agent of its own on this thread, which
     # opened its own turn; without this the rest of the outer turn would be
     # judged against the inner one's request.
     _TURN.set(turn)
+    return turn.tainted_by if turn.tainted_by != before else ""
 
 
 # ponytail: two languages, by pattern. The first hosted user (ADR-0071) whose

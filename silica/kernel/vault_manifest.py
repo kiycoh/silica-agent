@@ -167,7 +167,9 @@ def within(rel_path: str, root: str) -> bool:
 
 
 def default_sources(vault: str | Path) -> tuple[str, ...]:
-    out = ["prose"]
+    # mail by default (ADR-0090): it reads only a file the user names, needs
+    # no link or credential, and /nucleate reaches it only when it is enabled.
+    out = ["prose", "mail"]
     try:
         if vault and paths.repo_root_for(vault) is not None:
             out += ["code", "notebook"]

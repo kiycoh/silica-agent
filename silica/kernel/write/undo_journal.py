@@ -212,20 +212,24 @@ class UndoJournalStore:
         return out
 
     def run_info(self, run_id: str) -> dict | None:
-        """`{source, vault, started_at}` for a run, or None when unknown.
+        """`{source, vault, started_at, ledger_run_id, reverted_at}` for a run,
+        or None when unknown.
 
         /revert shows this next to the id: the journal's run ids live in a
         different id-space than the progress ledger's (log.md), so a bare id
-        never tells the user WHAT they are about to revert.
+        never tells the user WHAT they are about to revert. `reverted_at` is
+        what lets a surface offer an undo only while there is one.
         """
         row = self._conn().execute(
-            "SELECT source, vault, started_at, ledger_run_id FROM runs WHERE run_id = ?",
+            "SELECT source, vault, started_at, ledger_run_id, reverted_at FROM runs "
+            "WHERE run_id = ?",
             (run_id,),
         ).fetchone()
         if row is None:
             return None
         return {"source": row["source"], "vault": row["vault"],
-                "started_at": row["started_at"], "ledger_run_id": row["ledger_run_id"]}
+                "started_at": row["started_at"], "ledger_run_id": row["ledger_run_id"],
+                "reverted_at": row["reverted_at"]}
 
     def refresh_post_hashes(self, run_id: str) -> int:
         """Re-hash every journalled path from the vault's CURRENT content.

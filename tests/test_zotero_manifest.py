@@ -28,7 +28,7 @@ def test_a_zotero_block_adds_zotero_to_the_derived_sources(tmp_path):
 
     m = load_manifest(tmp_path)
 
-    assert m.sources == ("prose", "zotero")
+    assert m.sources == ("prose", "mail", "zotero")
     assert m.zotero.library == "dc8XI1gaCC7j"
     assert m.zotero.inbox == "00_inbox"
     assert m.zotero.backlinks is True

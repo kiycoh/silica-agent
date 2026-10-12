@@ -40,7 +40,7 @@ jobs:
       # importorskip (fastapi/uvicorn, websockets, mcp).
       # [rerank] stays out: 2 GB of torch to run tests that skip. There is no
       # [pdf] extra any more — the mineru subprocess is patched in the suite.
-      - run: uv sync --locked --extra dev --extra gui --extra connect --extra mcp
+      - run: uv sync --locked --extra dev --extra gui --extra connect --extra mcp --extra connectors
 
       - run: uv run pytest -q
 

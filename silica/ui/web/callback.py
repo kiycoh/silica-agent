@@ -13,6 +13,7 @@ from typing import Any
 import json
 
 from silica.agent.events import (
+    ApprovalRequestEvent,
     BatchRunStartEvent,
     LLMStreamEvent,
     PhaseEvent,
@@ -139,6 +140,11 @@ def _injector_summary(result: str | None) -> dict:
 
 
 def event_to_json(ev) -> dict | None:
+    if isinstance(ev, ApprovalRequestEvent):
+        # The full arguments, uncut: they are what leaves the machine, and the
+        # user's reading of them is the only check (ADR-0091, residual risk).
+        return {"type": "approval", "id": ev.id, "server": ev.server, "tool": ev.tool,
+                "args": ev.args, "timeout_s": ev.timeout_s}
     if isinstance(ev, LLMStreamEvent):
         return {"type": "delta", "kind": ev.chunk_type, "text": ev.content}
     if isinstance(ev, ToolStartEvent):

@@ -9,7 +9,7 @@ Silica uses [uv](https://github.com/astral-sh/uv). Everything runs through it:
 ```bash
 git clone https://github.com/kiycoh/silica-agent.git
 cd silica-agent
-uv sync --extra dev --extra gui --extra mcp   # the extras CI tests with; add --extra connect for the Obsidian bridge
+uv sync --extra dev --extra gui --extra mcp --extra connectors   # the extras CI tests with; add --extra connect for the Obsidian bridge
 uv run silica doctor                          # sanity-check the environment
 ```
 

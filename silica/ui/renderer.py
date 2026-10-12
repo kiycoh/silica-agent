@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import json
 import logging
+import sys
 import time
 from typing import Callable
 from urllib.parse import urlsplit
@@ -16,6 +17,7 @@ from rich.markup import escape
 from rich.console import Group, RenderableType
 from rich.progress import Progress, BarColumn, MofNCompleteColumn, TaskID, TimeElapsedColumn
 from silica.agent.events import (
+    ApprovalRequestEvent,
     ToolStartEvent,
     ToolCompleteEvent,
     ToolErrorEvent,
@@ -170,8 +172,15 @@ _TARGET_FMT: dict[str, Callable[[str], str]] = {
 }
 
 
+def _connector_desc(name: str) -> tuple[str, str] | None:
+    """An MCP connector (ADR-0091) is named by its server, and its target is
+    the request it carried: one per configured server, so no table holds it."""
+    return (name[len("mcp__"):], "request") if name.startswith("mcp__") else None
+
+
 def _tool_verb(name: str) -> str:
-    verb, _ = _TOOL_DESC.get(name, (name.removeprefix("silica_").replace("_", " "), None))
+    verb, _ = _connector_desc(name) or _TOOL_DESC.get(
+        name, (name.removeprefix("silica_").replace("_", " "), None))
     return verb
 
 
@@ -185,7 +194,7 @@ def _tool_target(name: str, args: dict) -> str:
         return f'{args.get("ref", "")} {GLYPHS["arrow"]} {args.get("to", "")}'.strip()
     if name == "silica_run_injector":
         return _injector_label(args)
-    _, key = _TOOL_DESC.get(name, (None, None))
+    _, key = _connector_desc(name) or _TOOL_DESC.get(name, (None, None))
     val = str(args.get(key) or "").strip() if key else ""
     return _TARGET_FMT.get(name, str)(val) if val else ""
 
@@ -221,7 +230,8 @@ def _synthetic_tool_desc(name: str, args: dict) -> str:
     if name == "silica_run_injector":
         label = _injector_label(args)
         return f'injector [bold]"{escape(label)}"[/bold]' if label else "injector"
-    verb, key = _TOOL_DESC.get(name, (name.removeprefix("silica_").replace("_", " "), None))
+    verb, key = _connector_desc(name) or _TOOL_DESC.get(
+        name, (name.removeprefix("silica_").replace("_", " "), None))
     val = args.get(key, "") if key else ""
     if val:
         val = _TARGET_FMT.get(name, str)(str(val))
@@ -607,6 +617,22 @@ class _ProgressRenderer:
                 f"   {done}/{total} batches [dim]·[/] {elapsed}"
             )
 
+    def _ask_approval(self, event: ApprovalRequestEvent) -> None:
+        """A connector call waiting for a yes (ADR-0091 point 6), answered in
+        place: this runs on the REPL thread, the one the call waits on, so the
+        answer is in before the waiting starts. The Live is stopped first or
+        it would redraw over the question."""
+        self._stop_spinner()
+        CONSOLE.print(f"  [bold]{escape(event.server)} › {escape(event.tool)}[/] wants to run")
+        CONSOLE.print(Padding(Text(json.dumps(event.args, indent=2, ensure_ascii=False)), (0, 0, 0, 4)))
+        typed = _ask_yes_no("  run? [y]es / [N]o ", event.timeout_s)
+        event.approved = None if typed is None else typed.strip().lower() in ("y", "yes")
+        event.decided.set()
+        if event.approved is None:
+            CONSOLE.print("  [dim]not run: no answer[/]")
+        elif not event.approved:
+            CONSOLE.print("  [dim]not run: declined[/]")
+
     def __call__(self, event: RenderEvent) -> None:
         try:
             self._dispatch(event)
@@ -615,6 +641,10 @@ class _ProgressRenderer:
 
     def _dispatch(self, event: RenderEvent) -> None:
         mode = CONFIG.tool_progress
+
+        if isinstance(event, ApprovalRequestEvent):
+            self._ask_approval(event)
+            return
 
         # Any output other than a further completion breaks a ✓-aggregation run.
         # ToolStartEvent is exempt: interactively it only redraws the live region.
@@ -905,6 +935,26 @@ class _ProgressRenderer:
             self._inject_progress = None
             self._inject_task_id = None
         self._stop_spinner()
+
+
+def _ask_yes_no(message: str, timeout: float) -> str | None:
+    """One line typed at the terminal within `timeout` seconds; None when the
+    time ran out or there is no terminal to ask at. prompt_toolkit and not
+    input(): a timed-out input() leaves a thread blocked on stdin that would
+    eat the next line typed at the REPL."""
+    if not sys.stdin.isatty():
+        return None
+    import asyncio
+
+    from prompt_toolkit import PromptSession
+
+    async def ask() -> str:
+        return await PromptSession().prompt_async(message)
+
+    try:
+        return asyncio.run(asyncio.wait_for(ask(), timeout))
+    except (asyncio.TimeoutError, EOFError, KeyboardInterrupt):
+        return None
 
 
 def make_progress_callback() -> _ProgressRenderer:

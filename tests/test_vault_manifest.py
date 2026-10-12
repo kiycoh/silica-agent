@@ -19,9 +19,9 @@ def _fresh_cache():
     reset_manifest_cache()
 
 
-def test_defaults_prose_only_outside_git(tmp_path):
+def test_defaults_prose_and_mail_outside_git(tmp_path):
     m = load_manifest(tmp_path)
-    assert m.sources == ("prose",)
+    assert m.sources == ("prose", "mail")
     assert m.cooccurrence_lang is None
 
 
@@ -29,7 +29,7 @@ def test_defaults_include_code_inside_git(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     vault = tmp_path / ".silica"
     vault.mkdir()
-    assert load_manifest(vault).sources == ("prose", "code", "notebook")
+    assert load_manifest(vault).sources == ("prose", "mail", "code", "notebook")
 
 
 def test_manifest_file_overrides_defaults(tmp_path):
@@ -44,7 +44,7 @@ def test_manifest_file_overrides_defaults(tmp_path):
 
 def test_malformed_manifest_degrades_to_defaults(tmp_path):
     (tmp_path / "vault.yaml").write_text("sources: 42\n", encoding="utf-8")
-    assert load_manifest(tmp_path).sources == ("prose",)
+    assert load_manifest(tmp_path).sources == ("prose", "mail")
 
 
 def test_episodic_keys_absent_means_no_schema(tmp_path):
@@ -98,14 +98,14 @@ def test_episodic_keys_bad_fields_fall_back_to_defaults(tmp_path):
     assert ks.default_prefix == "user"
     assert ks.max_depth == 3
     (tmp_path / "vault.yaml").write_text(":\n  - not yaml mapping [", encoding="utf-8")
-    assert load_manifest(tmp_path).sources == ("prose",)
+    assert load_manifest(tmp_path).sources == ("prose", "mail")
 
 
 def test_get_active_manifest_caches_until_reset(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "vault_path", str(tmp_path))
-    assert get_active_manifest().sources == ("prose",)
+    assert get_active_manifest().sources == ("prose", "mail")
     (tmp_path / "vault.yaml").write_text("sources: [prose, code]\n", encoding="utf-8")
-    assert get_active_manifest().sources == ("prose",)  # cached
+    assert get_active_manifest().sources == ("prose", "mail")  # cached
     reset_manifest_cache()
     assert get_active_manifest().sources == ("prose", "code")
 

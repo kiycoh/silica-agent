@@ -1582,6 +1582,26 @@ def _dc_zotero(args: list[str], *, raw_input: str = "", **_) -> bool:
     return True
 
 
+def _dc_mail(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/mail [import <file> ...]: mail threads from a file the user exported (ADR-0090)."""
+    from silica.sources import mail_cli
+
+    # The raw line, not `args`: a Takeout file is "All mail Including Spam
+    # and Trash.mbox", and whitespace splitting would cut it in five.
+    mail_cli.run(raw_input or " ".join(["/mail", *args]), CONSOLE)
+    return True
+
+
+def _dc_connect(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/connect [list|add <json>|secure|login|logout|remove <key>|reload]: MCP servers (ADR-0091)."""
+    from silica.connectors import connect_cli
+
+    # The raw line: `add` takes a JSON object whose spaces whitespace
+    # splitting would scatter.
+    connect_cli.run(raw_input or " ".join(["/connect", *args]), CONSOLE)
+    return True
+
+
 def _dc_review(args: list[str], **_) -> bool:
     """/review [--flush=<hash>] — the deferred store: write bundles parked
     by a gate, listed or flushed. Not the study queue: that is /learn."""
@@ -1854,6 +1874,8 @@ _DIRECT: dict[str, Callable[..., bool]] = {
     "/undo": _dc_undo,
     "/revert": _dc_revert,
     "/zotero": lambda args, **kw: _dc_zotero(args, **kw),
+    "/mail": _dc_mail,
+    "/connect": _dc_connect,
     "/review": _dc_review,
     "/anneal": _dc_anneal,
     "/curate": _dc_curate,
@@ -2889,10 +2911,9 @@ def _nucleate_plan_units(
             staged += 1
             code_ref = result["meta"].get("code_ref", "")
             if len(files) <= 10:  # a whole subsystem would flood the terminal
-                CONSOLE.print(
-                    f"  Wrote [bold]{result['note_path']}[/] "
-                    f"(code_ref {code_ref[:8]})."
-                )
+                # Only a code stub has a code_ref; a mail thread printed "(code_ref )".
+                ref = f" (code_ref {code_ref[:8]})" if code_ref else ""
+                CONSOLE.print(f"  Wrote [bold]{result['note_path']}[/]{ref}.")
         else:
             CONSOLE.print(f"  [yellow]{f}: {result.get('message', '')}[/]")
 
@@ -4384,6 +4405,9 @@ def main():
     session = build_session() if not oneshot else None
     if not oneshot:
         _start_reminder_daemon()
+        # MCP servers open in the background (ADR-0091); never waited on here.
+        from silica.connectors.mcp_tools import start as _start_connectors
+        _start_connectors()
     # /incognito is the user memory module's flag (_dc_incognito), read below
     # for capture too, so one toggle covers both. A session starts on the record.
     from silica.kernel import user_memory

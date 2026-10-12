@@ -37,7 +37,9 @@ FALLBACK = "Something went wrong on this turn. The detail says what."
 # Text that is already a sentence someone wrote for the person: a command's
 # usage line, or a route's own "not available" verdict. Rewriting those into
 # the fallback would replace the one message that says what to type.
-_AUTHORED = re.compile(r"\bUsage:|not available in this session|has nothing to search for")
+# "not run: declined" is a connector call the user refused (ADR-0091): an
+# outcome they chose, which the fallback would misread as a fault.
+_AUTHORED = re.compile(r"\bUsage:|not available in this session|has nothing to search for|^not run: ")
 
 
 def sentence(raw: str) -> str:

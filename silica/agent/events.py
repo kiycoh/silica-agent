@@ -2,7 +2,8 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 from __future__ import annotations
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, field
 from typing import Any
 
 @dataclass(slots=True)
@@ -56,7 +57,23 @@ class BatchRunStartEvent:
     label: str   # display label, e.g. "Concepts/ML"
     total: int   # total number of batches
 
-RenderEvent = ToolProgressEvent | ReasoningEvent | ThinkingStartEvent | ThinkingEndEvent | LLMStreamEvent | BatchRunStartEvent
+@dataclass(slots=True)
+class ApprovalRequestEvent:
+    """A call that would leave the vault, waiting for the user's yes (ADR-0091
+    point 6). Emitted through the frontend callback from a connector's
+    sub-loop; the surface that draws it answers by setting `approved` and then
+    `decided`, from any thread. The emitter waits on `decided` for at most
+    `timeout_s`; no answer is a no."""
+    id: str
+    server: str
+    tool: str
+    args: dict[str, Any]
+    timeout_s: float
+    decided: threading.Event = field(default_factory=threading.Event)
+    approved: bool | None = None
+
+RenderEvent = (ToolProgressEvent | ReasoningEvent | ThinkingStartEvent | ThinkingEndEvent
+               | LLMStreamEvent | BatchRunStartEvent | ApprovalRequestEvent)
 
 
 # --- work-queue events (published on silica.agent.bus.BUS) -------------------

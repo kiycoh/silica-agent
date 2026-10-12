@@ -676,6 +676,25 @@ def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatc
     assert "Inbox/note.md" in user["content"]
 
 
+def test_a_dropped_file_lands_in_the_inbox_inside_the_write_boundary(client, monkeypatch):
+    """A vault that writes only under docs/silica stages a drop there, not in a
+    root Inbox/ outside the one folder writes are supposed to land in."""
+    from silica.config import CONFIG
+    from silica.kernel.vault_manifest import reset_manifest_cache
+
+    tc, server = client
+    monkeypatch.setattr(server, "run_agent", lambda messages, *a, **kw: "ok")
+    root = Path(CONFIG.vault_path)
+    (root / "vault.yaml").write_text("write_dir: docs/silica\n", encoding="utf-8")
+    reset_manifest_cache()
+
+    resp = tc.post("/nucleate", files=[("files", ("note.md", b"# Hi\n\nbody", "text/markdown"))])
+
+    assert resp.status_code == 200
+    assert (root / "docs/silica/Inbox/note.md").exists()
+    assert not (root / "Inbox/note.md").exists()
+
+
 def test_compose_nucleate_turn_defaults_empty_text_and_lists_files():
     from silica.ui.web.server import _compose_nucleate_turn
 

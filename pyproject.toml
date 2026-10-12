@@ -113,11 +113,18 @@ dev = ["pytest>=8.0", "mypy>=1.10", "import-linter>=2.0", "scipy>=1.17.1", "ruff
 connect = [
     "websockets>=16.0",
 ]
-# Opt-in stdio MCP server (`silica mcp`) — Silica as vault memory for MCP clients:
-# SDK 2.0 (protocol 2026-07-28) drops the @server.list_tools/@server.call_tool
-# decorators for constructor handlers, so silica/ui/mcp.py needs a rewrite before
-# the cap lifts. 1.x still negotiates fine with 2026-07-28 clients.
-mcp = ["mcp>=1.0,<2"]
+# Opt-in MCP: the stdio server (`silica mcp`, Silica as vault memory for other
+# agents) and the client that reaches other servers (ADR-0091). 2.x and not the
+# 1.x maintenance line: 1.x is a legacy-era client and its OAuth lacks the RFC
+# 9207 check of the authorization response's `iss`, while a 2.x server still
+# serves today's `initialize` clients (`Server.run` is dual-era). The line was
+# ten weeks old at the pin (2.0.0 on 2026-07-28), so `<3`, and every minor bump
+# reruns ADR-0091's Gate 0 (tests/test_agent_identity.py, test_mcp_*).
+mcp = ["mcp>=2.3,<3"]
+# Opt-in store for Class B secrets (ADR-0089 point 7): a credential that opens an
+# account of the owner beyond Silica (an MCP server's token, its OAuth grant)
+# goes to the OS keyring and never into os.environ or the .env.
+connectors = ["keyring>=25"]
 # Opt-in in-process cross-encoder rerank (the precision pass over fused recall).
 # Neither LM Studio nor Ollama can serve a cross-encoder, so the alternative is a
 # llama-server the user runs by hand; this extra removes that. Pulls torch, and
@@ -141,7 +148,7 @@ stt = ["faster-whisper>=1.2"]
 # Everything except [dev]. Self-referential extra: pip resolves it back to this
 # same project. Note it inherits [rerank], so it pulls torch and downloads
 # ~2 GB of weights on first rerank, and [stt], ~480 MB on first dictation.
-all = ["silica-agent[gui,connect,mcp,rerank,stt]"]
+all = ["silica-agent[gui,connect,mcp,connectors,rerank,stt]"]
 
 [project.scripts]
 silica = "silica.entry:main"

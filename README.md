@@ -222,6 +222,8 @@ Every verb the registry knows, which is what `tests/test_readme_sync.py` compare
 | `/anneal [--steer] [--limit=N]` | retry every deferred bundle against the current vault; --steer escalates what still fails |
 | `/revert [run-id | --source <file>]` | revert a whole injection (per-run, LIFO), or every run derived from one source |
 | `/zotero [file|group|unlink|grant] [--apply|--yes]` | the linked Zotero library: status, file the inbox, write groups, unlink |
+| `/mail [import <file.mbox|file.eml> [--label=X] [--me=ADDR] [--all] [--limit=N] [--apply]]` | mail threads you took part in, from a file you exported (a client's export or Google Takeout), kept as notes under `sources/mail/`; a dry run until `--apply`; bare, your addresses and imports so far |
+| `/connect [list|add <json>|secure <key>|login <key>|logout <key>|remove <key>|reload]` | MCP servers Silica connects to, from `~/.silica/mcp.json` in Claude Code's shape: list them, add a pasted entry, move an inline secret to the keyring, log in to an HTTP server; each server is one loadable tool and every call it makes asks first |
 | `/dedup [folder]` | deduplicate (sub-agent) |
 | `/curate [folder] [--apply]` | curate the vault: plan autolink/orphan/dedup work (dry-run; --apply executes) |
 | `/aliases [folder] [--apply]` | propose frontmatter aliases for note titles (abbreviations, spellings); dry-run, --apply writes |
@@ -448,7 +450,7 @@ The first `up` builds the image. The model defaults to `openrouter/anthropic/cla
 
 ```bash
 git clone https://github.com/kiycoh/silica-agent && cd silica-agent
-uv sync --extra dev --extra gui --extra mcp
+uv sync --extra dev --extra gui --extra mcp --extra connectors
 uv run silica doctor
 uv run pytest -q
 ```

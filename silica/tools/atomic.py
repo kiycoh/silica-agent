@@ -125,6 +125,9 @@ def silica_search(query: Annotated[str, Field(description='Text to search for in
     literal = [row for row in scored if row[0] < 4]
     ranked = literal or scored
     out: dict = {"paths": [row[-1] for row in ranked[:_SEARCH_CAP]], "matched": len(ranked)}
+    from silica.tools.user_memory import returned_notes
+
+    returned_notes(out["paths"])  # a mail note's subject is a stranger's text (ADR-0090 point 8)
     if not ranked:
         # A bare 0 reads as "the vault does not have this". It does not: on the
         # 2026-08-27 run `boosting` had no title but five notes mentioning it,
@@ -320,6 +323,9 @@ def silica_search_context(
             hit["stale"] = lvl
         hits.append(hit)
 
+    from silica.tools.user_memory import returned_notes
+
+    returned_notes(h["path"] for h in hits)  # the taint gate's paths (ADR-0090 point 8)
     out: dict = {
         "hits": hits,
         # The zero recall_watch escalates on. Documents in contention, not notes
@@ -457,6 +463,9 @@ def silica_read_note(
                     + body)
     nc = DRIVER.read_note(name)
     body, path = nc.content or "", nc.ref.path or ""
+    from silica.tools.user_memory import returned_notes
+
+    returned_notes([path])  # the taint gate's path (ADR-0090 point 8)
     whole = _with_stale_banner(body, path=path)
     narrowed = None
     if query.strip() and len(body) > READ_QUERY_WHOLE_UNDER:
@@ -523,16 +532,32 @@ def _with_stale_banner(content: str, path: str = "", vault: str | None = None) -
     return "".join(f"> {b}\n\n" for b in banners) + content
 
 
+def _returned_by_name(name: str) -> None:
+    """Hand the taint gate the path `name` resolves to (ADR-0090 point 8):
+    props and outline return a mail note's subject and sender, a stranger's
+    text, and tainted nothing (found end to end 2026-10-12)."""
+    from silica.tools.user_memory import returned_notes
+
+    try:
+        path = DRIVER.read_note(name).ref.path or ""
+    except Exception:
+        return  # no note resolved, so the tool returned none's text either
+    returned_notes([path])
+
+
 @tool(cls="atomic")
 def silica_props(name: Annotated[str, Field(description='Name of the note to read the frontmatter properties from')]) -> dict:
     """Reads the frontmatter properties of a note (saves tokens, does not read the body)."""
-    return DRIVER.props_of(name)
+    props = DRIVER.props_of(name)
+    _returned_by_name(name)
+    return props
 
 
 @tool(cls="atomic")
 def silica_outline(name: Annotated[str, Field(description='Name of the note to display the heading tree of')]) -> list:
     """Displays the heading tree (H1-H6) of a note."""
     headings = DRIVER.outline(name)
+    _returned_by_name(name)
     return [{"level": h.level, "text": h.text} for h in headings]
 
 

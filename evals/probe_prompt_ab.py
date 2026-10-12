@@ -1006,6 +1006,14 @@ def main(argv=None) -> int:
     ap.add_argument("--ablate", action="store_true", help="run every rule's minus arm against current")
     ap.add_argument("--isolate", action="store_true",
                     help="each run gets a fresh HOME and, on a local model, erased server slots")
+    ap.add_argument("--mcp-home", default=None,
+                    help="with --isolate: copy this HOME's .silica/mcp.json and its MCP tool "
+                         "cache into every run's HOME (ADR-0091 Gate 1: the probe with a "
+                         "configured server)")
+    ap.add_argument("--keep-slots", action="store_true",
+                    help="with --isolate on a server started without --slot-save-path (the "
+                         "owner's daily one): skip the slot erase, so a run may reuse the cached "
+                         "system-prompt prefix of the previous one; its own turns still differ")
     ap.add_argument("--resume", action="store_true",
                     help="skip run i of (arm, case) when --out already holds more than i of them")
     ap.add_argument("--ablation-table", action="store_true", help="print per-rule rates over --out and exit")
@@ -1049,8 +1057,14 @@ def main(argv=None) -> int:
             if done.get((arm, case), 0) > i:
                 continue
             home = fresh_home(scratch.parent / "home") if args.isolate else None
+            if home is not None and args.mcp_home:
+                src = Path(args.mcp_home) / ".silica"
+                for rel in ("mcp.json", "connectors/mcp-tools.json"):
+                    if (src / rel).exists():
+                        (home / ".silica" / rel).parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src / rel, home / ".silica" / rel)
             reset_vault(scratch, CASES[case].get("plant"), home)
-            if args.isolate:
+            if args.isolate and not args.keep_slots:
                 erase_slots(model)
             run_env = {**env, "HOME": str(home), "HF_HOME": str(Path.home() / ".cache" / "huggingface")} \
                 if home else env

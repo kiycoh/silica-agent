@@ -9,7 +9,9 @@ run_agent stays domain-agnostic (Rune 1 / ADR set).
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,12 @@ class AgentConstraints:
     # route lets a model call a tool it read about; refusing that call would
     # turn a permitted tool into a dead end).
     deferred: tuple[str, ...] = ()
+    # Where `tools` are looked up, when not the global TOOLS. An MCP
+    # connector's sub-loop (ADR-0091) holds one server's tools under the
+    # server's own names; registered globally they would sit beside every
+    # other server's and the vault's, and a `send_message` of two servers
+    # would collide.
+    registry: "Mapping[str, Any] | None" = None
 
 
 # Batch/maintenance tools the conversational loop does not need to *choose*: the
@@ -143,7 +151,11 @@ _REVIEW_APPLY = ("silica_ledger_next", "silica_ledger_update")
 def _eligible() -> dict:
     from silica.tools import TOOLS
     import silica.tools.loader  # noqa: F401  the core names it; register before reading TOOLS
+    from silica.connectors.mcp_tools import ensure_registered
 
+    # One `mcp__<key>` per configured server (ADR-0091), from the file alone
+    # and once per process, so the loadable catalog it joins stays static.
+    ensure_registered()
     return {n: t for n, t in TOOLS.items() if not t.sensitive and not t.internal}
 
 

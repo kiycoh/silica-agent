@@ -261,7 +261,15 @@ function renderAttachments() {
   });
 }
 function addFiles(fileList) {
-  for (const f of fileList) staged.push(f);
+  // A mail export is not a chip: the import has a dry run and keeps only the
+  // threads the user took part in (ADR-0090 point 5), and the composer has
+  // neither. Dropped here it wrote a note /revert could not find (2026-10-12).
+  const mail = [];
+  for (const f of fileList) (/\.(eml|mbox)$/i.test(f.name) ? mail : staged).push(f);
+  if (mail.length) {
+    notify(`${mail.map((f) => f.name).join(", ")}: mail is imported in Settings › Connectors › Mail, `
+      + "or with /mail import <file>, which show a dry run first", "warn");
+  }
   renderAttachments();
 }
 

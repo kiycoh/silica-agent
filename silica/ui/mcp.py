@@ -223,8 +223,12 @@ def exposed_tools(all_tools: bool = False, extended: bool = False) -> dict[str, 
             #       still documents the verdict for when they can
     from silica.tools import TOOLS
 
+    # Never a connector (ADR-0091 point 7), --all included: serving a third
+    # party's tools under Silica's name to another agent is the confused
+    # deputy the MCP spec warns about, and exposure is a declaration (ADR-0033).
     allowed = {n: t for n, t in TOOLS.items()
-               if not t.sensitive and not t.internal and n not in MCP_EXCLUDED}
+               if not t.sensitive and not t.internal and n not in MCP_EXCLUDED
+               and not n.startswith("mcp__")}
     if all_tools:
         return allowed
     out: dict[str, Any] = {}
@@ -236,7 +240,7 @@ def exposed_tools(all_tools: bool = False, extended: bool = False) -> dict[str, 
     return out
 
 
-# The server's own account of itself, sent in the initialize reply. Claude
+# The server's own account of itself, sent in the initialize or discover reply. Claude
 # Code and Codex put it in front of the model; a client with no skill surface
 # at all (opencode) has nothing else to go on. The skill is the long form,
 # this is the loop, and `silica hook SessionStart` opens a session with the
@@ -286,16 +290,18 @@ def parse_cli_args(args: list[str]) -> dict[str, Any]:
 
 
 def client_identity(client_params, env) -> str:
-    """The name a tool write is signed with, from the initialize handshake.
+    """The name a tool write is signed with, from the client's own account.
 
-    `clientInfo.name` is what the client calls itself ("claude-code", "codex",
-    ...). Claude Code also exports its session id to child processes, and the
-    server is one, so two sessions of the same client stay tellable apart in
-    `agent:` and `flagged:`. No handshake at all is still an agent, hence
-    `agent:unknown` and never `user`. One line, because the value lands in
-    YAML frontmatter.
+    `client_info.name` is what the client calls itself ("claude-code", "codex",
+    ...). The 2.x SDK fills `client_params` from either era: from `initialize`
+    on a legacy connection, from the first request's `_meta` envelope on a
+    2026-07-28 one, where the spec makes the field a SHOULD (ADR-0091). Claude
+    Code also exports its session id to child processes, and the server is
+    one, so two sessions of the same client stay tellable apart in `agent:`
+    and `flagged:`. No name at all is still an agent, hence `agent:unknown`
+    and never `user`. One line, because the value lands in YAML frontmatter.
     """
-    info = getattr(client_params, "clientInfo", None)
+    info = getattr(client_params, "client_info", None)
     name = (getattr(info, "name", "") or "").strip().splitlines()
     name = name[0].strip() if name else ""
     if not name:
@@ -319,34 +325,38 @@ def make_server(all_tools: bool = False, extended: bool = False):
     # two silica servers apart.
     vault = str(getattr(CONFIG, "vault_path", "") or "").strip()
     instructions = INSTRUCTIONS + (f" This server's vault: {vault}" if vault else "")
-    server = Server("silica", instructions=instructions)
 
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return [
+    async def on_list_tools(ctx, params) -> types.ListToolsResult:
+        return types.ListToolsResult(tools=[
             types.Tool(
                 name=t.name,
                 description=t.description,
-                inputSchema=t.json_schema()["function"]["parameters"],
-                annotations=types.ToolAnnotations(**tool_annotations(t.name)),
+                input_schema=t.json_schema()["function"]["parameters"],
+                # tool_annotations speaks the wire's camelCase, which the 2.x
+                # models accept by alias; test_mcp_surface pins those keys.
+                annotations=types.ToolAnnotations.model_validate(tool_annotations(t.name)),
             )
             for t in tools.values()
-        ]
+        ])
 
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, Any] | None) -> list[types.TextContent]:
-        t = tools.get(name)
+    async def on_call_tool(ctx, params) -> types.CallToolResult:
+        t = tools.get(params.name)
         if t is None:
-            raise ValueError(f"Unknown tool: {name}")
-        # Per call, not once at startup: the handshake has not happened when
-        # make_server runs, and request_context only exists inside a handler.
-        set_mcp_client(client_identity(server.request_context.session.client_params, os.environ))
+            # An error result, not a raise: the 1.x decorator turned the raise
+            # into exactly this, and a client reads isError as "tell the model".
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=f"Unknown tool: {params.name}")],
+                is_error=True)
+        # Per call, not once at startup: the client names itself after
+        # make_server runs, and on a 2026-07-28 connection per request.
+        set_mcp_client(client_identity(ctx.session.client_params, os.environ))
         # Tool.run validates args via pydantic and always returns a JSON string
         # (errors included) — exactly what a text content block wants.
-        out = await anyio.to_thread.run_sync(lambda: run_tool_narrated(t, arguments))
-        return [types.TextContent(type="text", text=out)]
+        out = await anyio.to_thread.run_sync(lambda: run_tool_narrated(t, params.arguments))
+        return types.CallToolResult(content=[types.TextContent(type="text", text=out)])
 
-    return server
+    return Server("silica", instructions=instructions,
+                  on_list_tools=on_list_tools, on_call_tool=on_call_tool)
 
 
 def run_tool_narrated(t: Any, arguments: dict[str, Any] | None) -> str:

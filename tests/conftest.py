@@ -489,3 +489,42 @@ def _user_memory_on_the_record(monkeypatch: pytest.MonkeyPatch) -> None:
     already sandboxed by _isolate_silica_home."""
     from silica.kernel import user_memory
     monkeypatch.setattr(user_memory, "_INCOGNITO", False)
+
+
+class MemoryKeyring:
+    """An in-memory keyring backend: the connectors' Class B store (ADR-0089
+    point 7) under test, without the developer's real one."""
+
+    priority = 1
+
+    def __init__(self) -> None:
+        self.data: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self.data.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self.data[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        import keyring.errors
+        if self.data.pop((service, username), None) is None:
+            raise keyring.errors.PasswordDeleteError(username)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_keyring():
+    """A connector test that saves a token would otherwise write the
+    developer's real OS keyring, and one that reads would find their tokens.
+    Without the [connectors] extra there is nothing to swap."""
+    try:
+        import keyring
+        from keyring.backend import KeyringBackend
+    except ImportError:
+        yield None
+        return
+    backend = type("_Memory", (MemoryKeyring, KeyringBackend), {})()
+    previous = keyring.get_keyring()
+    keyring.set_keyring(backend)
+    yield backend
+    keyring.set_keyring(previous)

@@ -12,7 +12,8 @@ const stTabs = $("#st-tabs");
 const stSearch = $("#st-search");
 const settingsBtn = $("#settings-btn");
 // Zotero first: it is a source of the vault, the rest are about the machine.
-const ST_EXTRA = ["Zotero", "Endpoints", "Diagnostics", "About"];
+// Connectors right after it (ADR-0089 point 8): accounts beyond the vault.
+const ST_EXTRA = ["Zotero", "Connectors", "Endpoints", "Diagnostics", "About"];
 const stState = { data: null, section: "Session", controls: [], uid: 0 };
 
 function stEl(tag, cls, text) {
@@ -539,6 +540,7 @@ function stRender(data) {
   renderAbout(stPanel.querySelector('[data-section="About"]'), data);
   renderEndpoints(stPanel.querySelector('[data-section="Endpoints"]'));
   renderZotero(stPanel.querySelector('[data-section="Zotero"]'));
+  renderConnectors(stPanel.querySelector('[data-section="Connectors"]'));
   const memory = stPanel.querySelector('[data-section="Memory"]');
   if (memory) renderMemory(memory);
   const diagnostics = stPanel.querySelector('[data-section="Diagnostics"]');

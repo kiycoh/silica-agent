@@ -76,8 +76,8 @@ def _params(name: str | None):
         return None
     import mcp.types as types
     return types.InitializeRequestParams(
-        protocolVersion="2025-06-18", capabilities=types.ClientCapabilities(),
-        clientInfo=types.Implementation(name=name, version="0"),
+        protocol_version="2025-06-18", capabilities=types.ClientCapabilities(),
+        client_info=types.Implementation(name=name, version="0"),
     )
 
 
@@ -104,23 +104,55 @@ def test_client_identity_is_one_yaml_safe_line():
     assert client_identity(_params("x\ninjected: true"), {}) == "x"
 
 
-def test_served_tool_signs_with_the_handshake_identity(tmp_vault):
-    """End to end over the in-memory transport: the client names itself once
-    in initialize, and a later silica_flag_note carries that name."""
+def _flag_over_streams(tmp_vault, client_name: str, *, modern: bool) -> list[str]:
+    """One silica_flag_note through the real dual-era server loop, over the
+    SDK's in-memory streams. `modern=False` opens with `initialize` (Claude
+    Code, Codex, DeepSeek Harness today); `modern=True` probes
+    `server/discover` and then names itself only in each request's `_meta`
+    envelope (the 2026-07-28 era), so both ways of filling `client_params`
+    reach the signature."""
     import mcp.types as types
-    from mcp.shared.memory import create_connected_server_and_client_session
+    from mcp.client.session import ClientSession
+    from mcp.shared.memory import create_client_server_memory_streams
 
     from silica.ui.mcp import make_server
 
     path = tmp_vault.note("area/T.md", NOTE)
+    server = make_server(all_tools=True)
 
     async def go():
-        async with create_connected_server_and_client_session(
-            make_server(all_tools=True),
-            client_info=types.Implementation(name="probe-client", version="1"),
-        ) as session:
-            await session.call_tool("silica_flag_note", {"name": "area/T.md", "reason": "stale"})
+        async with create_client_server_memory_streams() as (client_streams, server_streams):
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(lambda: server.run(
+                    server_streams[0], server_streams[1],
+                    server.create_initialization_options()))
+                async with ClientSession(
+                    client_streams[0], client_streams[1],
+                    client_info=types.Implementation(name=client_name, version="1"),
+                ) as session:
+                    if modern:
+                        await session.discover()
+                        assert session.initialize_result is None
+                    else:
+                        await session.initialize()
+                    res = await session.call_tool(
+                        "silica_flag_note", {"name": "area/T.md", "reason": "stale"})
+                    assert not res.is_error, res
+                tg.cancel_scope.cancel()
 
     anyio.run(go)
-    refs = contested_refs(tmp_vault.read(path))
+    return contested_refs(tmp_vault.read(path))
+
+
+def test_served_tool_signs_with_the_handshake_identity(tmp_vault):
+    """A legacy-era client names itself once in initialize, and a later
+    silica_flag_note carries that name."""
+    refs = _flag_over_streams(tmp_vault, "probe-client", modern=False)
     assert refs and "(by probe-client, " in refs[0], refs
+
+
+def test_modern_client_signs_with_its_envelope_identity(tmp_vault):
+    """A 2026-07-28 client sends no initialize: its clientInfo rides in the
+    request envelope, and the write is signed with that name all the same."""
+    refs = _flag_over_streams(tmp_vault, "modern-probe", modern=True)
+    assert refs and "(by modern-probe, " in refs[0], refs

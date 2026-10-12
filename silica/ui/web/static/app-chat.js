@@ -1254,6 +1254,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     caret.remove(); // no-op if a rerender already detached it
     freezePeek(); // done or aborted — stop mirroring, keep the preview up
     if (curThink) curThink.details.open = false; // aborted mid-thought — still collapse
+    settleApprovalCards(); // the turn is over: a card still open was never answered
     // A mutation is an object, a read is a citation, and they no longer share a
     // row of identical chips. The product's whole claim is that a write to your
     // vault is safe to delegate, and a write used to announce itself as a 12px
@@ -1365,6 +1366,11 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       delete claimed[ev.id]; // it failed: do not claim its notes
     } else if (ev.type === "batch") {
       toolsGroup().appendChild(makeToolRow(ev.kind + " · " + ev.label).el);
+      curTools.appendChild(caret);
+    } else if (ev.type === "approval") {
+      // A connector call waiting for a yes (ADR-0091 point 6); the card and
+      // its answer live in app-connectors.js.
+      toolsGroup().appendChild(approvalCard(ev));
       curTools.appendChild(caret);
     } else if (ev.type === "done") {
       flushPaint(); // the live segment is complete before anything supersedes it

@@ -14,15 +14,17 @@ from collections.abc import Sequence
 
 from silica.sources.base import SourceAdapter
 from silica.sources.code import CODE
+from silica.sources.mail import MAIL
 from silica.sources.notebook import NOTEBOOK
 from silica.sources.prose import PROSE
 from silica.sources.zotero import ZOTERO
 
 logger = logging.getLogger(__name__)
 
-# ZOTERO last: its `@citekey` form would also match a vault note named `@x.md`,
-# which is prose.
-ALL_ADAPTERS: tuple[SourceAdapter, ...] = (PROSE, CODE, NOTEBOOK, ZOTERO)
+# ZOTERO after PROSE: its `@citekey` form would also match a vault note named
+# `@x.md`, which is prose. MAIL claims only `.eml`/`.mbox`, which no other
+# adapter does, so its place is just the end of the list.
+ALL_ADAPTERS: tuple[SourceAdapter, ...] = (PROSE, CODE, NOTEBOOK, ZOTERO, MAIL)
 
 
 def enabled_adapters(enabled: Sequence[str] | None = None) -> list[SourceAdapter]:

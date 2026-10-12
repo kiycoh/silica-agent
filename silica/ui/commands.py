@@ -17,6 +17,13 @@ class Command:
     # it as a chat turn (it has its own affordance instead — new chat, the header
     # panel, the thinking toggle). Kept out of the GUI's command picker.
     repl_only: bool = False
+    # The first words after the name that make a line able to carry a secret
+    # (`/connect add` takes a pasted entry with its API key in it). The REPL's
+    # history never records such a line: ~/.silica/history is plain text kept
+    # for years, and a Class B secret lives in the keyring only (ADR-0089
+    # point 7). Named here, beside the usage that takes the secret, so a new
+    # verb that takes one is marked where it is written.
+    secret_verbs: tuple[str, ...] = ()
 
 
 COMMANDS: tuple[Command, ...] = (
@@ -247,6 +254,23 @@ COMMANDS: tuple[Command, ...] = (
         examples=("/zotero", "/zotero file", "/zotero file --apply", "/zotero group --apply"),
     ),
     Command(
+        name="/mail",
+        group="direct",
+        usage="[import <file.mbox|file.eml> [--label=X] [--me=ADDR] [--all] [--limit=N] [--apply]]",
+        summary="mail threads you took part in, from a file you exported, kept as notes; "
+                "bare, your addresses and imports so far",
+        examples=("/mail", "/mail import ~/Downloads/inbox.mbox",
+                  "/mail import takeout.mbox --label=Thesis --apply"),
+    ),
+    Command(
+        name="/connect",
+        group="direct",
+        usage="[list|add <json>|secure <key>|login <key>|logout <key>|remove <key>|reload]",
+        summary="MCP connectors: list, add, move inline secrets to the keyring, log in",
+        examples=("/connect", "/connect secure github", "/connect login gmail"),
+        secret_verbs=("add", "secure"),
+    ),
+    Command(
         name="/dedup",
         group="direct",
         usage="[folder]",
@@ -443,6 +467,17 @@ def commands() -> tuple[Command, ...]:
 
 def command_names() -> tuple[str, ...]:
     return tuple(c.name for c in commands())
+
+
+def unrecorded(line: str) -> bool:
+    """Whether a typed line is one a command marks as able to carry a secret
+    (`secret_verbs`), so no history may keep it. Matched the way dispatch
+    reads a line: the name case-folded, then the first word after it."""
+    parts = line.split(maxsplit=2)
+    if len(parts) < 2:
+        return False
+    name, verb = parts[0].lower(), parts[1].lower()
+    return any(c.name == name and verb in c.secret_verbs for c in COMMANDS)
 
 
 def render_help() -> None:
