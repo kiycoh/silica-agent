@@ -2819,6 +2819,17 @@ def _nucleate_expand_folders(
                         f"{len(photos)} documents; /nucleate an image "
                         f"explicitly to OCR it on its own[/]"
                     )
+            # A converted document's own figures are not sources: 14 lectures
+            # in Inbox/machine_learning queued the 129 images/ they embed as
+            # 129 more runs (2026-10-12). What a note of this batch embeds
+            # stays put; a screenshot no note embeds is still OCR input.
+            paths, names = _embedded_in(group)
+            figures = [p for p in pending
+                       if p in paths or Path(p).name.casefold() in names]
+            if figures:
+                pending = [p for p in pending if p not in figures]
+                CONSOLE.print(f"  [dim]{f}: left {len(figures)} file(s) "
+                              f"its notes embed alone[/]")
             if group or pending:
                 detail = f"[bold]{len(group)}[/] note(s)" if group else ""
                 if pending:
@@ -2829,6 +2840,35 @@ def _nucleate_expand_folders(
         expanded.extend(group or [f])
     files = list(dict.fromkeys(expanded))
     return files, run_root
+
+
+_MD_EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)>\s]+)")
+_WIKI_EMBED_RE = re.compile(r"!\[\[([^\]|#]+)")
+
+
+def _embedded_in(notes: list[str]) -> tuple[set[str], set[str]]:
+    """What `notes` embed: vault-relative paths from `![](rel)` (resolved
+    against the note's folder) and the names in `![[name]]`, which Obsidian
+    resolves by name anywhere in the vault, casefolded."""
+    import posixpath
+    from urllib.parse import unquote
+
+    paths: set[str] = set()
+    names: set[str] = set()
+    root = Path(CONFIG.vault_path)
+    for note in notes:
+        try:
+            text = (root / note).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # A note gone between the listing and this read embeds nothing;
+            # its figures then convert as before, which is today's behaviour.
+            continue
+        base = posixpath.dirname(note)
+        for target in _MD_EMBED_RE.findall(text):
+            if "://" not in target:
+                paths.add(posixpath.normpath(posixpath.join(base, unquote(target))))
+        names.update(t.strip().rsplit("/", 1)[-1].casefold() for t in _WIKI_EMBED_RE.findall(text))
+    return paths, names
 
 
 def _nucleate_zotero(
@@ -3290,6 +3330,17 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
                 segs = pending.result()
             except (ValueError, RuntimeError) as e:
                 CONSOLE.print(f"  [yellow]Skipped {src}: {e}[/]")
+                if "CUDA out of memory" in str(e):
+                    # The GPU stays full until something else lets go of it, so
+                    # every later file fails the same way: 129 in a row at ~8 s
+                    # each beside a 9B chat server (2026-10-12). They stay in
+                    # the inbox for a run once the GPU is free.
+                    left = len(to_convert) - i - 1
+                    if left:
+                        CONSOLE.print(f"  [yellow]GPU out of memory: left {left} "
+                                      f"file(s) unconverted; free the GPU and "
+                                      f"/nucleate again[/]")
+                    break
                 segs = []
             if i in leaf_prior and segs and undo_run:  # leaf_prior fills only under an undo_run
                 from silica.sources.registry import _record_inverse

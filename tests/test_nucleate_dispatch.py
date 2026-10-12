@@ -664,6 +664,55 @@ def test_folder_batch_converts_documents_and_leaves_page_photos_alone(
     ]
 
 
+def test_an_inbox_folder_leaves_the_images_its_notes_embed_alone(
+        tmp_vault, monkeypatch, stub_coordinator):
+    """2026-10-12: `/nucleate Inbox/machine_learning` on 14 converted lectures
+    queued their 129 images/ attachments as sources to convert, one /nucleate
+    each. A screenshot no note embeds stays OCR input."""
+    import silica.cli as cli_mod
+
+    tmp_vault.note("Inbox/ml/L1.md", "# L1\n\n![](images/a.jpg)\n\n![[b.png]]\n")
+    tmp_vault.note("Inbox/ml/images/a.jpg", "img")
+    tmp_vault.note("Inbox/ml/images/b.png", "img")
+    tmp_vault.note("Inbox/ml/shot.png", "img")
+    converted: list[str] = []
+
+    def _fake_convert(target, dest_dir=""):
+        converted.append(target)
+        rel = f"Inbox/{Path(target).stem}.md"
+        tmp_vault.note(rel, "ocr text\n")
+        return [rel]
+
+    monkeypatch.setattr("silica.sources.convert.convert", _fake_convert)
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "T")
+
+    _expand_workflow_shortcut("/nucleate Inbox/ml")
+
+    assert converted == ["Inbox/ml/shot.png"]
+
+
+def test_a_gpu_out_of_memory_stops_the_conversions_after_the_first(
+        tmp_vault, monkeypatch, stub_coordinator):
+    """2026-10-12: with a 9B chat server holding the GPU, MinerU failed with
+    CUDA out of memory 129 times in a row, about 8 s each, one per file."""
+    import silica.cli as cli_mod
+
+    for name in ("a", "b", "c"):
+        tmp_vault.note(f"Inbox/lib/{name}.pdf", "%PDF")
+    tried: list[str] = []
+
+    def _oom(target, dest_dir=""):
+        tried.append(target)
+        raise ValueError("mineru failed: CUDA out of memory. Tried to allocate 20.00 MiB")
+
+    monkeypatch.setattr("silica.sources.convert.convert", _oom)
+    monkeypatch.setattr(cli_mod, "_pick_target_folder", lambda files: "T")
+
+    _expand_workflow_shortcut("/nucleate Inbox/lib")
+
+    assert tried == ["Inbox/lib/a.pdf"]
+
+
 def test_an_already_ingested_book_is_not_reconverted(
         tmp_vault, monkeypatch, stub_coordinator):
 
