@@ -161,6 +161,17 @@ def _no_real_server_autostart(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_real_zotero_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test holds the developer's Zotero write key.
+
+    An "always allow" grant writes it to the real ~/.silica/.env, which
+    reaches os.environ, and the status route reads write access off it:
+    test_zotero_web's unlinked vault reported `write: True` on 2026-10-12.
+    Tests that exercise the key set it themselves."""
+    monkeypatch.delenv("SILICA_ZOTERO_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def _disable_index_sweep(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Disable the invocation-time index sweep and sandbox its stamp sidecar.
 
