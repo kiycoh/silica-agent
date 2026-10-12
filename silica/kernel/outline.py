@@ -567,7 +567,11 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
             path, score = str(h["path"]), float(h["score"])
             if score < tau:
                 break
-            if path == o["path"] or is_inbox_path(path) or hidden(path):
+            # The store keys a note without `.md` (WRITE refreshes it under
+            # `path.removesuffix(".md")`) and the op carries it: compared raw,
+            # an idea matched its own landed note at .96 (2026-10-12).
+            if path.removesuffix(".md") == o["path"].removesuffix(".md") \
+                    or is_inbox_path(path) or hidden(path):
                 continue
             o["review"] = f"near_title candidate='{h['name']}' path='{path}' ratio={score:.2f}"
             flagged += 1

@@ -960,6 +960,28 @@ def test_flag_cosine_near_titles_sends_a_look_alike_to_the_judge():
     assert "review" not in ops[5]                                      # a superseded loser is not a target
 
 
+def test_flag_cosine_near_titles_never_flags_a_note_against_itself_in_the_store_shape():
+    """The embed store keys notes without `.md` (WRITE's refresh_note gets
+    `path.removesuffix(".md")`) while ops carry it, so the self-exclusion never
+    matched: probed 2026-10-12 on a landed lecture, an idea was flagged as the
+    duplicate of its own note at cosine .96."""
+    ops = [{"op": "write", "path": "ML/Stesso.md", "heading": "Stesso", "title": "Stesso",
+            "snippet": "corpo", "section": "S"}]
+
+    class Store:
+        def cosine_top_k(self, vec, k=5, exclude=None):
+            return [{"path": "ML/Stesso", "name": "Stesso", "score": 0.96},
+                    {"path": "ML/Vicino", "name": "Vicino", "score": 0.90}]
+
+    class Emb:
+        def embed(self, texts, query=False):
+            return list(texts)
+
+    assert ol.flag_cosine_near_titles(ops, tau=0.85, embedder=Emb(), store=Store(),
+                                      hidden=lambda p: False) == 1
+    assert "candidate='Vicino'" in ops[0]["review"]
+
+
 def test_flag_cosine_near_titles_fails_open_without_an_embedder():
     ops = [{"op": "write", "path": "ML/A.md", "heading": "A", "title": "A", "snippet": "corpo", "section": "S"}]
 
