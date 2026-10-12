@@ -2251,7 +2251,9 @@ def _pick_target_folder(md_files: list[str]) -> str:
             # before guessing (473 completion tokens for two words, 2026-08-23).
             else "(no folders yet: this vault holds only its inbox, so name a "
                  "sensible new top-level folder)"
-        ) + f"\n\nContent excerpt ({md_files[0]}):\n{excerpt}"
+        # The file's name, not its inbox path: shown `Inbox/machine_learning/
+        # Lezione 1.md`, a Qwen3.5-9B answered `machine_learning` (2026-10-12).
+        ) + f"\n\nContent excerpt ({Path(md_files[0]).name}):\n{excerpt}"
     )
     # reasoning=False: the answer is one line, and a hybrid model left to think
     # spent all 2048 tokens on its trace and answered "" (Qwen3.5-9B on
@@ -2272,7 +2274,27 @@ def _pick_target_folder(md_files: list[str]) -> str:
     # still has a fallback, rather than letting an absolute or `..`-bearing
     # pick reach the driver: `in_write_dir` only prefixes, it never normalises.
     norm = contain_in_vault(pick.replace("\\", "/"), Path(CONFIG.vault_path))
-    if is_inbox_path(f"{norm}/x.md"):
+    # The same folder spelt another way lands in the one the vault has: three
+    # runs of the same 14 lectures answered `machine_learning`, `Inbox/
+    # machine_learning` and `Machine learning` for the existing `Machine
+    # learning` (2026-10-12), and a new sibling splits the notes from their hub.
+    # A full-path match first, then a unique folder of the same name anywhere.
+    # A pick inside the inbox is matched on what follows the inbox and kept
+    # only when it matches: otherwise it is the source's own folder echoed
+    # back, and the agent fallback chooses instead of a new inbox-named folder.
+    parts = Path(norm).parts
+    in_inbox = bool(parts) and parts[0] == inbox
+    if in_inbox:
+        norm = "/".join(parts[1:])
+    if norm and norm not in listed:
+        def fold(s: str) -> str:
+            return re.sub(r"[\s_\-]+", " ", s).strip().casefold()
+        same = [f for f in listed if fold(f) == fold(norm)]
+        if not same and "/" not in norm:
+            same = [f for f in listed if fold(Path(f).name) == fold(norm)]
+        if len(same) == 1:
+            norm = same[0]
+    if not norm or (in_inbox and norm not in listed) or is_inbox_path(f"{norm}/x.md"):
         raise ValueError(f"folder pick {pick!r} lands in the inbox")
     return norm
 
