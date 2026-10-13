@@ -131,8 +131,12 @@
            tree. Pinned is a group of THIS list and not a compartment of its
            own: it is the notes you named, and they are notes. -->
       <details class="side-section" id="side-vault" open>
-        <summary class="side-title"><svg class="si" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Vault<span id="vault-count"></span><button type="button" id="tree-collapse" title="collapse all folders" aria-label="collapse all folders">collapse</button></summary>
+        <summary class="side-title"><svg class="si" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Vault<span id="vault-count"></span><button type="button" id="tree-collapse" title="collapse all folders" aria-label="collapse all folders">collapse</button><button type="button" id="vault-add" aria-label="add to the vault" aria-haspopup="menu" aria-expanded="false" aria-controls="vault-add-menu" title="add files or a folder"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button></summary>
         <div class="side-body">
+          <!-- What the last import did (ADR-0098 point 5): in the compartment it
+               was started from, not in a toast that leaves before the student
+               has read which files were refused and why. -->
+          <div id="vault-import" role="status" aria-live="polite" hidden></div>
           <div id="pinned-group" hidden>
             <div class="side-bucket">pinned</div>
             <div id="pinned"></div>
@@ -140,6 +144,15 @@
           <div id="tree"></div>
         </div>
       </details>
+      <!-- The vault's + (ADR-0098): two entries, because one browser picker takes
+           files or a folder and never both. Outside the <details> so a shut
+           Vault still opens it, and fixed under the + when it opens. -->
+      <div id="vault-add-menu" role="menu" aria-label="add to the vault" hidden>
+        <button type="button" role="menuitem" id="vam-files" title="pick files; each becomes a note in the Inbox">files…</button>
+        <button type="button" role="menuitem" id="vam-folder" title="pick a folder; the files Silica reads keep its tree in the Inbox">a folder…</button>
+      </div>
+      <input id="vault-files" type="file" multiple hidden />
+      <input id="vault-folder" type="file" webkitdirectory multiple hidden />
 
       <!-- The chats, by day, newest first, with the one running marked (audit
            P18). -->

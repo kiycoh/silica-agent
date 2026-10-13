@@ -74,7 +74,9 @@ dependencies = [
   # the words of pymupdf4llm in 1/75 of the time; headings come from the
   # outline or a line heuristic (sources/convert.py), images are not extracted
   # (mineru, installed separately, does layout and figures).
-  "pypdfium2>=5",
+  # 5.14 is a security floor, not a feature one: it bundles PDFium 8076,
+  # past the 2026 memory-safety fixes 5.10's 7891 lacked (ADR-0087 point 1).
+  "pypdfium2>=5.14",
   # DOCX -> HTML, BSD-2, pure python. Its HTML goes through the same
   # HTML-to-markdown pass as EPUB chapters; its own markdown writer escapes
   # every period. EPUB and FB2 need nothing: a ZIP of XHTML and an XML file.

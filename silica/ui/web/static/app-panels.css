@@ -725,13 +725,13 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
   color: var(--ash-dim);
 }
 
-:is(#note-menu, #attach-menu) [role="separator"] {
+:is(#note-menu, #attach-menu, #vault-add-menu) [role="separator"] {
   height: 1px;
   margin: 6px 0.6rem;
   background: var(--line);
 }
 
-:is(#note-menu, #attach-menu) [role="menuitem"] {
+:is(#note-menu, #attach-menu, #vault-add-menu) [role="menuitem"] {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -748,7 +748,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
   cursor: pointer;
 }
 
-:is(#note-menu, #attach-menu) [role="menuitem"]:is(:hover, :focus-visible) {
+:is(#note-menu, #attach-menu, #vault-add-menu) [role="menuitem"]:is(:hover, :focus-visible) {
   color: var(--frost);
   background: var(--sel-hover);
   outline: none;

@@ -670,7 +670,7 @@ def test_the_view_showing_is_marked_as_the_current_place():
 def test_the_chrome_reads_in_sentence_case_on_the_type_floor():
     css = app_css()
     assert "--fs-meta: 12px;" in css and "--fs-ctl: 13px;" in css
-    for sel in (".side-title {", ".side-bucket {", ':is(#note-menu, #attach-menu) [role="menuitem"] {', ".sources-label {",
+    for sel in (".side-title {", ".side-bucket {", ':is(#note-menu, #attach-menu, #vault-add-menu) [role="menuitem"] {', ".sources-label {",
                 ".thinking summary {", "details.fm summary {", ".sp-title {"):
         # a selector may be ruled more than once across the cut sheets; none of
         # its blocks may set caps, and the one that sizes it sizes it on the scale

@@ -1068,11 +1068,117 @@ details.side-section>summary.side-title:focus-visible {
   outline-offset: 1px;
 }
 
-#tree:empty::after {
-  content: "no notes indexed";
+/* The vault's + (ADR-0098): shown always, unlike collapse beside it, because
+   collapse is a tidy-up and the + is a door, the only one on the server
+   besides a drop, and a touch screen has no hover. The New chat glyph at the
+   title's mark size plus two, so it reads as an action and not a label. */
+#vault-add {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  margin-left: 0.1rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--r-sm);
   color: var(--ash-dim);
-  font-size: 11px;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
+
+#vault-add:hover,
+#vault-add[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--sel-hover);
+}
+
+#vault-add:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* The note menu's surface, fixed under the + (placeVaultAddMenu sets top and
+   right): the drawer scrolls and clips, and a shut Vault shows its title only. */
+#vault-add-menu {
+  position: fixed;
+  z-index: 120;
+  width: 11rem;
+  box-sizing: border-box;
+  padding: 6px;
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+}
+
+#vault-add-menu[hidden] {
+  display: none;
+}
+
+/* The last import's outcome, above the tree it changed. */
+#vault-import {
+  flex-shrink: 0;
+  margin: 0.1rem 0 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--r-sm);
+  background: var(--sel-hover);
+  font-size: var(--fs-meta);
+  color: var(--ash);
+  line-height: 1.45;
+}
+
+#vault-import[hidden] {
+  display: none;
+}
+
+#vault-import .vi-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.6rem;
+}
+
+#vault-import .vi-head > span {
+  flex: 1 1 10rem;
+}
+
+#vault-import .vi-x {
+  margin-left: auto;
+  padding: 0 0.2rem;
+  background: none;
+  border: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+}
+
+#vault-import .vi-x:hover {
+  color: var(--frost);
+}
+
+#vault-import ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1rem;
+  color: var(--ash-dim);
+  overflow-wrap: anywhere;
+}
+
+/* The two actions read as words in their sentence, in the one colour that
+   says clickable. */
+:is(.vault-empty, #vault-import) .linklike {
+  padding: 0;
+  color: var(--accent);
+  font-size: inherit;
+}
+
+.vault-empty {
+  margin: 0.3rem 0.55rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+  line-height: 1.5;
+}
+
 
 #tree summary {
   cursor: pointer;

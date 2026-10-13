@@ -359,6 +359,176 @@ nucleateInput.addEventListener("change", () => {
   nucleateInput.value = ""; // reset so re-picking the same file fires change again
 });
 
+// --- the vault's + (ADR-0098) ---------------------------------------------------
+// Files or a folder into the Inbox, each through its lane, and no agent turn:
+// a folder the student only wants searchable should not spend a turn. Two
+// entries because one browser picker takes files or a folder, never both.
+const vaultAddBtn = $("#vault-add");
+const vaultAddMenu = $("#vault-add-menu");
+const vaultFilesInput = $("#vault-files");
+const vaultFolderInput = $("#vault-folder");
+const vaultImportBox = $("#vault-import");
+// The server's cap per request (_UPLOAD_MAX_FILES), and ADR-0098 H2's cap per
+// import, the free tier's note count: past it a folder is a job, not a pick.
+const VAULT_IMPORT_BATCH = 32;
+const VAULT_IMPORT_MAX = 500;
+// From /supported_types. A folder picker ignores `accept`, so the same list
+// filters what a folder hands over before anything is sent; while it is empty
+// nothing is filtered here, and the server's own check still holds.
+let vaultImportTypes = [];
+fetch("/supported_types")
+  .then((r) => r.json())
+  .then((d) => { vaultImportTypes = d.import || []; vaultFilesInput.accept = vaultImportTypes.join(","); })
+  .catch(() => {});
+
+// Fixed under the +, not inside the drawer: the drawer scrolls and clips, and
+// a shut Vault hides everything but its title.
+function placeVaultAddMenu() {
+  const r = vaultAddBtn.getBoundingClientRect();
+  vaultAddMenu.style.top = `${Math.round(r.bottom + 4)}px`;
+  vaultAddMenu.style.right = `${Math.max(8, Math.round(innerWidth - r.right))}px`;
+}
+let closeVaultAddMenu = () => false;
+if ("webkitdirectory" in HTMLInputElement.prototype) {
+  closeVaultAddMenu = menuButton(vaultAddMenu, vaultAddBtn, placeVaultAddMenu);
+} else {
+  // No folder picker in this browser: a menu of one entry is a detour.
+  vaultAddBtn.removeAttribute("aria-haspopup");
+  vaultAddBtn.addEventListener("click", () => vaultFilesInput.click());
+}
+vaultAddMenu.addEventListener("click", (e) => {
+  const item = e.target.closest('[role="menuitem"]');
+  if (item?.id === "vam-files") vaultFilesInput.click();
+  if (item?.id === "vam-folder") vaultFolderInput.click();
+});
+// Its own Escape: the app's one list (app-settings.js) would go on to close
+// the drawer, and the student only meant the menu.
+vaultAddMenu.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  e.stopPropagation();
+  closeVaultAddMenu(true);
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#vault-add-menu, #vault-add")) closeVaultAddMenu();
+});
+vaultFilesInput.addEventListener("change", () => {
+  const files = [...vaultFilesInput.files];
+  vaultFilesInput.value = ""; // the same pick again must fire change again
+  importToVault(files, false);
+});
+vaultFolderInput.addEventListener("change", () => {
+  const files = [...vaultFolderInput.files];
+  vaultFolderInput.value = "";
+  importToVault(files, true);
+});
+
+async function importToVault(files, fromFolder) {
+  // A File from a folder carries its path under the picked folder; Safari can
+  // hand over single files in folder mode, and those go in as files.
+  const relOf = (f) => (fromFolder && f.webkitRelativePath) || "";
+  const extOf = (name) => (name.match(/\.[^./]+$/) || [""])[0].toLowerCase();
+  const skipped = [];
+  const wanted = files.filter((f) => {
+    const path = relOf(f) || f.name;
+    // .git, .obsidian, .silica: the folders the index walk skips too
+    const ok = !path.split("/").some((s) => s.startsWith("."))
+      && (!vaultImportTypes.length || vaultImportTypes.includes(extOf(f.name)));
+    if (!ok) skipped.push(path);
+    return ok;
+  });
+  const folder = fromFolder && wanted[0] ? relOf(wanted[0]).split("/")[0] : "";
+  $("#side-vault").open = true;
+  if (wanted.length > VAULT_IMPORT_MAX) {
+    renderVaultImport({ failed: `${wanted.length} files Silica reads are in it, and one import takes at most ${VAULT_IMPORT_MAX}: pick a smaller folder` });
+    return;
+  }
+  const rows = [];
+  let failed = "";
+  for (let i = 0; i < wanted.length; i += VAULT_IMPORT_BATCH) {
+    renderVaultImport({ progress: `importing ${i} of ${wanted.length}…` });
+    const fd = new FormData();
+    for (const f of wanted.slice(i, i + VAULT_IMPORT_BATCH)) {
+      fd.append("files", f, f.name);
+      if (fromFolder) fd.append("paths", relOf(f));
+    }
+    if (i + VAULT_IMPORT_BATCH >= wanted.length) fd.append("last", "1");
+    let r;
+    try {
+      r = await fetch("/vault/import", { method: "POST", body: fd });
+    } catch {
+      failed = "the server could not be reached";
+      break;
+    }
+    if (!r.ok) {
+      failed = (await r.json().catch(() => ({}))).detail || `the server answered ${r.status}`;
+      break;
+    }
+    rows.push(...(await r.json()).files);
+  }
+  renderVaultImport({ rows, skipped, failed, folder });
+  if (rows.length) loadVaultInfo();
+}
+
+// One line of counts with its two actions, then the files that need a word:
+// refused with their reason, and hidden text left out (ADR-0098 H6).
+function renderVaultImport({ progress = "", rows = [], skipped = [], failed = "", folder = "" }) {
+  vaultImportBox.hidden = false;
+  vaultImportBox.replaceChildren();
+  const head = document.createElement("div");
+  head.className = "vi-head";
+  vaultImportBox.append(head);
+  if (progress) {
+    head.textContent = progress;
+    return;
+  }
+  const done = rows.filter((r) => r.status === "note");
+  const refused = rows.filter((r) => r.status === "refused");
+  const notTaken = skipped.length + rows.filter((r) => r.status === "skipped").length;
+  const where = folder ? `${(done[0]?.path || "").split("/")[0] || "Inbox"}/${folder}` : "the Inbox";
+  const parts = [done.length ? `${done.length} imported into ${where}` : "nothing imported"];
+  if (notTaken) parts.push(`${notTaken} not a type Silica reads`);
+  if (refused.length) parts.push(`${refused.length} refused`);
+  const text = document.createElement("span");
+  text.textContent = (failed ? `import stopped: ${failed}. ` : "") + parts.join(" · ");
+  head.append(text);
+  if (done.length) {
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "linklike";
+    go.textContent = "nucleate them";
+    go.title = "prefill /nucleate in the chat with what was imported";
+    go.addEventListener("click", () => {
+      const target = folder ? where : done.flatMap((r) => r.notes || []).join(" ");
+      showTab("chat");
+      input.value = `/nucleate ${target}`;
+      input.focus();
+      input.dispatchEvent(new Event("input"));
+    });
+    head.append(go);
+  }
+  const x = document.createElement("button");
+  x.type = "button";
+  x.className = "vi-x";
+  x.setAttribute("aria-label", "dismiss");
+  x.textContent = "✕";
+  x.addEventListener("click", () => { vaultImportBox.hidden = true; });
+  head.append(x);
+  const notes = [
+    ...refused.map((r) => `${r.name}: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`),
+    ...rows.filter((r) => r.hidden).flatMap((r) => r.hidden.map((h) =>
+      `${r.name}, page ${h.page}: ${h.characters} characters of hidden text left out`)),
+  ];
+  if (notes.length) {
+    const list = document.createElement("ul");
+    for (const n of notes) {
+      const li = document.createElement("li");
+      li.textContent = n;
+      list.append(li);
+    }
+    vaultImportBox.append(list);
+  }
+}
+
 // --- note panel (right overlay drawer; opens from .note-link and the graph) ---
 const notePanel = $("#note-panel");
 let lastNotePath = null;   // note currently open in the drawer

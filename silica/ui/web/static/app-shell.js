@@ -119,6 +119,17 @@ async function loadVaultInfo() {
     if (data.error) return;
     if (data.path) setVaultPath(data.path); // follows a /vault switch
     $("#tree").innerHTML = data.tree || "";
+    if (!$("#tree .tree-note")) {
+      // An empty vault has one next step (ADR-0098 point 1), and on the server
+      // the + is the only door besides a drop: the line's words open its menu.
+      // Not `!data.tree`: an empty vault's tree is still its <div id=file-tree>,
+      // which is also why `#tree:empty` never matched.
+      const p = document.createElement("p");
+      p.className = "vault-empty";
+      p.innerHTML = 'Nothing here yet: <button type="button" class="linklike">add files or a folder</button>, or drop them anywhere.';
+      p.querySelector("button").addEventListener("click", (e) => { e.stopPropagation(); $("#vault-add").click(); });
+      $("#tree").append(p);
+    }
     renderVaultHealth(data);          // the chip's dot, the panel's link count, the compartment's size
     syncTreePins();          // a fresh tree knows nothing about the pins yet
     markOpenNote();          // …nor about the note the drawer is on

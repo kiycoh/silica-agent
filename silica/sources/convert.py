@@ -310,6 +310,27 @@ def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = Non
     return _doc_to_md(target, dest_dir, leaf)
 
 
+def _note_dir(src: Path, inbox: str) -> str:
+    """The folder a converted note goes to: the source's own folder when the
+    source sits under the inbox, else the inbox itself.
+
+    Writing to the inbox root whatever the source's folder made
+    `CorsoA/Lezione 1.pdf` and `CorsoB/Lezione 1.pdf` the same note, the second
+    overwriting the first (reproduced 2026-10-13, ADR-0098 point 6), and a
+    folder import is made of exactly such folders.
+    ponytail: a source outside the inbox (a library folder given to /convert)
+    still lands at the inbox root, so two such sources with one name still
+    collide; the upgrade is the same rule against the vault root, due when a
+    /convert of a library reports it.
+    """
+    try:
+        root = (Path(CONFIG.vault_path or ".") / inbox).resolve()
+        rel = src.resolve().parent.relative_to(root)
+    except (ValueError, OSError):
+        return inbox
+    return inbox if rel == Path(".") else f"{inbox}/{rel.as_posix()}"
+
+
 def _split_on_headings(md: str) -> list[str]:
     """Split markdown at level-1/2 headings (fence-aware). Always ≥1 segment.
 
@@ -621,7 +642,7 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     from silica.driver import DRIVER
     from silica.kernel.vault_manifest import active_inbox_dir
 
-    inbox = active_inbox_dir() or "Inbox"
+    inbox = _note_dir(src, active_inbox_dir() or "Inbox")
     stem = src.stem
     if leaf is not None:
         _write_leaf(src, body, *leaf)
@@ -697,63 +718,22 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     either (the images dir comes back empty): PDFium exposes image objects, but
     turning them into files needs Pillow, which the base install does not carry;
     mineru (installed separately) is the path for a document whose figures are
-    the point.
+    the point. The file itself is opened only in `pdf_extract`, in a child with
+    limits on the server (ADR-0087, ADR-0098 H1).
     """
     try:
-        import pypdfium2 as pdfium
-        import pypdfium2.raw as pdfium_c
+        import pypdfium2  # noqa: F401
     except ImportError:
         raise ValueError(
             "pypdfium2 not installed — `pip install 'pypdfium2>=5'`, "
             "or set SILICA_PDF_PROVIDER to mineru/docling/opendataloader"
         ) from None
+    from silica.sources import pdf_extract
 
-    pdf = pdfium.PdfDocument(str(src))
-    try:
-        toc: list[tuple[int, str, int]] = []
-        for bookmark in pdf.get_toc():
-            title = " ".join((bookmark.get_title() or "").split())
-            dest = bookmark.get_dest()
-            index = dest.get_index() if dest is not None else None
-            if title and index is not None and index >= 0:
-                toc.append((bookmark.level, title, index))
-        pages: list[list[tuple[str, float]]] = []
-        for i in range(len(pdf)):
-            page = pdf[i]
-            textpage = page.get_textpage()
-            try:
-                pages.append(_pdf_page_lines(textpage, pdfium_c))
-            finally:
-                textpage.close()
-                page.close()
-    finally:
-        pdf.close()
+    data = pdf_extract.read(src)
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
-    return _pdf_markdown(pages, toc), images
-
-
-def _pdf_page_lines(textpage, pdfium_c) -> list[tuple[str, float]]:
-    """(text, font size) per non-blank line of a page.
-
-    One font-size call per line, at the line's first glyph, rather than one per
-    character: PDFium's text index is one unit per character, so the offset of
-    a line in the page string IS its character index (a surrogate pair shifts it
-    by one glyph, which lands on a neighbouring character of the same line).
-    """
-    text = textpage.get_text_range()
-    n = textpage.count_chars()
-    lines: list[tuple[str, float]] = []
-    pos = 0
-    for raw in text.split("\n"):
-        line = raw.rstrip("\r")
-        stripped = line.strip()
-        if stripped:
-            first = pos + (len(line) - len(line.lstrip()))
-            size = float(pdfium_c.FPDFText_GetFontSize(textpage, first)) if first < n else 0.0
-            lines.append((stripped, size))
-        pos += len(raw) + 1
-    return lines
+    return _pdf_markdown(data["pages"], data["toc"]), images
 
 
 # Section headings a paper carries whether or not it has an outline. The first
@@ -1710,7 +1690,7 @@ def _convert_tabular(src: Path) -> list[str]:
     from silica.driver import DRIVER
     from silica.kernel.vault_manifest import active_inbox_dir
 
-    inbox = active_inbox_dir() or "Inbox"
+    inbox = _note_dir(src, active_inbox_dir() or "Inbox")
     stem = _family_stem(members) if len(members) > 1 else src.stem
     fm = _provenance_fm(src, md, tabular_members=members)
     note_rel = f"{inbox}/{stem}.md"
@@ -2201,13 +2181,9 @@ def _source_date(src: Path) -> str | None:
             m = re.search(r"<dcterms:created[^>]*>(\d{4})-(\d{2})-(\d{2})", xml)
         elif suffix == ".pdf":
             # Info dictionary date, "D:20240402093000+02'00'"
-            import pypdfium2 as pdfium
+            from silica.sources.pdf_extract import metadata
 
-            pdf = pdfium.PdfDocument(str(src))
-            try:
-                stamp = pdf.get_metadata_value("CreationDate") or ""
-            finally:
-                pdf.close()
+            stamp = metadata(src).get("CreationDate", "")
             m = re.search(r"(\d{4})(\d{2})(\d{2})", stamp)
         elif suffix == ".epub":
             # Dublin Core <dc:date>2019-05-06T00:00:00Z</dc:date>
@@ -2238,14 +2214,10 @@ def _doc_citation(src: Path, md_text: str) -> dict[str, str]:
         suffix = src.suffix.lower()
         title = authors = ""
         if suffix == ".pdf":
-            import pypdfium2 as pdfium
+            from silica.sources.pdf_extract import metadata
 
-            pdf = pdfium.PdfDocument(str(src))
-            try:
-                title = pdf.get_metadata_value("Title") or ""
-                authors = pdf.get_metadata_value("Author") or ""
-            finally:
-                pdf.close()
+            meta = metadata(src)
+            title, authors = meta.get("Title", ""), meta.get("Author", "")
         elif suffix == ".docx":
             # OOXML core properties: <dc:title>, <dc:creator>
             import html as _html
@@ -2283,9 +2255,27 @@ def _provenance_fm(src: Path, md_text: str = "",
     citation fields it declares (doi/arxiv/authors/title) — what a researcher
     needs to cite the source without reopening the original file. `cite`
     replaces what the file declares when a curated record exists."""
-    quoted = str(src).replace("\\", "\\\\").replace('"', '\\"')
+    from silica.config import hosted
+
+    # On the server the absolute path is /srv/silica/<tenant>/..., which says
+    # nothing to the student, and the PDF itself is deleted once converted
+    # (ADR-0098 point 7): the name, the size, the pages and the hash are what
+    # identify the original, and let a second upload of it be recognised.
+    quoted = (src.name if hosted() else str(src)).replace("\\", "\\\\").replace('"', '\\"')
     date = _source_date(src)
     lines = [f"date: {date}\n"] if date else []
+    if hosted():
+        import hashlib
+
+        with open(src, "rb") as fh:
+            lines.append(f"source_sha256: {hashlib.file_digest(fh, 'sha256').hexdigest()}\n")
+        lines.append(f"source_bytes: {src.stat().st_size}\n")
+        if src.suffix.lower() == ".pdf":
+            from silica.sources.pdf_extract import cached
+
+            seen = cached(src)
+            if seen:
+                lines.append(f"source_pages: {seen['n_pages']}\n")
     # Form stamp (docs/specs/nucleation-forms.md): a converted media file is a
     # transcript by construction, so the profile ladder never has to sniff it.
     # A document's form is not knowable at ingress; it gets no stamp.
