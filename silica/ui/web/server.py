@@ -964,7 +964,11 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
                 # the agent below, which appends the expanded turn itself.
                 messages.append({"role": "user", "content": text, "origin": "cli"})
                 _narrate_user_turn(messages[-1])
-                out = captured_out.strip()
+                # A GUI started from a terminal renders CONSOLE in colour and the
+                # capture keeps the escape codes, which the chat showed verbatim
+                # around /fetch's note path. The browser gets the text alone.
+                from rich.text import Text
+                out = Text.from_ansi(captured_out).plain.strip()
                 answer = f"```text\n{out}\n```" if out else "```text\n(done)\n```"
                 messages.append({"role": "assistant", "content": answer})
                 from silica.agent import narration as _narr

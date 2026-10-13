@@ -401,6 +401,26 @@ def test_inline_slash_command_reports_its_own_result_not_an_error(client, monkey
     assert "Inbox/Example Domain.md" in done["answer"]
 
 
+def test_inline_slash_command_reaches_the_browser_without_terminal_codes(client, monkeypatch):
+    """A GUI started from a terminal renders CONSOLE in colour, and the capture
+    kept the escape codes: /fetch's bold note path reached the chat as
+    `\\x1b[1mInbox/...\\x1b[0m` (seen 2026-10-07, read 2026-10-13)."""
+    tc, server = client
+    import silica.sources.web_research as wr
+    from rich.color import ColorSystem
+
+    from silica.ui.console import CONSOLE
+
+    monkeypatch.setattr(CONSOLE, "_force_terminal", True)
+    monkeypatch.setattr(CONSOLE, "_color_system", ColorSystem.TRUECOLOR)
+    monkeypatch.setattr(wr, "fetch_to_inbox", lambda url: "Inbox/Example Domain.md")
+
+    events = _read_sse(tc.post("/chat", json={"text": "/fetch https://example.test/"}))
+    answer = events[-1]["answer"]
+    assert "Inbox/Example Domain.md" in answer
+    assert "\x1b" not in answer
+
+
 def test_inline_slash_command_reports_its_failure_too(client, monkeypatch):
     """Truthfully: a fetch that raises must surface as the failure it was, not
     as a silent success and not as 'not available in this session'."""
