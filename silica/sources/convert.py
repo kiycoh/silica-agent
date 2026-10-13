@@ -2049,8 +2049,16 @@ def _via_asr(src: Path, workdir: Path) -> tuple[str, Path]:
             f"unknown stt_provider {CONFIG.stt_provider!r} "
             f"(known: {', '.join(ASR_PROVIDERS)})"
         )
-    wav = _media_to_wav(src, workdir)
-    text = ASR_PROVIDERS[CONFIG.stt_provider](wav)
+    from silica.sources import media_admission as admission
+
+    # Here and not at an entry point: the chat drop, /convert, the nucleate
+    # tool and the vault import all arrive at this one call.
+    with admission.one_at_a_time(src.name):
+        admission.admit(src)
+        wav = _media_to_wav(src, workdir)
+        seconds = admission.admit_wav(wav, src.name)
+        text = ASR_PROVIDERS[CONFIG.stt_provider](wav)
+        admission.charge(seconds)
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)  # none, but the tail expects a dir
     if not text.strip():
