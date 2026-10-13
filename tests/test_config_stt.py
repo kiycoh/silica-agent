@@ -60,10 +60,10 @@ def test_defaults_when_nothing_is_set(clean_env):
     assert cfg.stt_local_model == ""
 
 
-def test_auto_language_is_omitted_on_the_convert_lane(clean_env, monkeypatch, tmp_path):
-    """The two lanes spell "let the server detect" differently: dictation sends
-    language=auto, /convert omits the field. One config value, both behaviours
-    preserved."""
+def test_auto_language_is_sent_on_the_convert_lane(clean_env, monkeypatch, tmp_path):
+    """/convert used to omit the field for "auto", and whisper-server then
+    transcribed as English (its default, server.cpp:113): an Italian lecture
+    came back translated. Both lanes now send "auto" the way dictation does."""
     from silica.config import CONFIG
     import silica.sources.convert as conv
 
@@ -82,7 +82,7 @@ def test_auto_language_is_omitted_on_the_convert_lane(clean_env, monkeypatch, tm
     wav = tmp_path / "a.wav"
     wav.write_bytes(b"RIFF")
     conv._asr_via_endpoint(wav)
-    assert "language" not in seen["data"]
+    assert seen["data"]["language"] == "auto"
 
     monkeypatch.setattr(CONFIG, "stt_lang", "it")
     conv._asr_via_endpoint(wav)

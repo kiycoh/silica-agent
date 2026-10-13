@@ -1959,12 +1959,11 @@ def _asr_via_endpoint(wav: Path) -> str:
 
     url = f"{_asr_base(CONFIG.stt_base_url)}/audio/transcriptions"
     data = {"model": CONFIG.stt_model, "response_format": "vtt"}
-    lang = CONFIG.stt_lang.strip()
-    # "auto" is the dictation lane's way of asking whisper-server to detect;
-    # here that is spelled by omitting the field, which is what this lane has
-    # always sent when unset.
-    if lang and lang != "auto":
-        data["language"] = lang
+    # Always named, never omitted: whisper-server and whisper-cli both fall back
+    # to "en" when a request names no language (server.cpp:113, cli.cpp:84,
+    # read 2026-10-13), so omitting it turned an Italian lecture into English.
+    # Dictation has sent "auto" to this same endpoint since ADR-0049.
+    data["language"] = CONFIG.stt_lang.strip() or "auto"
     try:
         with wav.open("rb") as fh:
             resp = httpx.post(
@@ -2014,9 +2013,16 @@ def _asr_via_whispercpp(wav: Path) -> str:
             "(e.g. models/ggml-base.bin); it has no default it can find itself"
         )
     out = wav.with_suffix("")  # whisper.cpp appends .vtt itself
-    cmd = [exe, "-m", model, "-f", str(wav), "-ovtt", "-of", str(out), "-np"]
-    if CONFIG.stt_lang.strip() and CONFIG.stt_lang.strip() != "auto":
-        cmd += ["-l", CONFIG.stt_lang.strip()]
+    # `-l` always: without it whisper-cli transcribes as English (see the
+    # endpoint lane above), and "auto" is a value it takes as-is.
+    # `-t` too: unasked, whisper-cli runs min(4, cores) threads (cli.cpp:36),
+    # and 4 -> 8 threads took a 120 s clip from 185 s to 111 s (large-v3-turbo,
+    # i9-14900HX, 2026-10-13). The affinity mask and not cpu_count, so a process
+    # pinned to a cpuset does not oversubscribe it; a CFS quota (docker --cpus)
+    # is not a mask and is not seen here.
+    threads = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else os.cpu_count() or 4
+    cmd = [exe, "-m", model, "-f", str(wav), "-ovtt", "-of", str(out), "-np",
+           "-l", CONFIG.stt_lang.strip() or "auto", "-t", str(threads)]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=_ASR_TIMEOUT_S, preexec_fn=_REAP_WITH_PARENT)

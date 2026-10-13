@@ -1240,6 +1240,34 @@ def test_endpoint_provider_posts_multipart_and_asks_for_vtt(tmp_vault, monkeypat
     assert "-->" not in out and "WEBVTT" not in out
 
 
+def test_whispercpp_is_told_auto_rather_than_left_on_english(tmp_vault, monkeypatch):
+    """whisper-cli defaults to `-l en` (cli.cpp:84), so leaving "auto" out
+    transcribed an Italian lecture as English. The endpoint half of this is
+    test_config_stt.test_auto_language_is_sent_on_the_convert_lane."""
+    seen = {}
+
+    class R:
+        returncode, stderr, stdout = 0, "", ""
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        Path(cmd[cmd.index("-of") + 1] + ".vtt").write_text(_VTT, encoding="utf-8")
+        return R()
+
+    monkeypatch.setattr(conv.subprocess, "run", fake_run)
+    monkeypatch.setattr(conv.shutil, "which", lambda n: "/usr/bin/whisper-cli")
+    monkeypatch.setattr(CONFIG, "stt_whispercpp_bin", "")
+    monkeypatch.setattr(CONFIG, "stt_whispercpp_model", "ggml-small.bin")
+    monkeypatch.setattr(CONFIG, "stt_lang", "auto")
+    wav = Path(CONFIG.vault_path) / "a.wav"
+    wav.write_bytes(b"x")
+
+    assert "the demux is one call." in conv._asr_via_whispercpp(wav)
+    assert seen["cmd"][seen["cmd"].index("-l") + 1] == "auto"
+    # and every core it may run on, not whisper-cli's own min(4, cores)
+    assert int(seen["cmd"][seen["cmd"].index("-t") + 1]) >= 1
+
+
 def test_endpoint_provider_survives_a_server_that_ignores_response_format(tmp_vault, monkeypatch):
     """Some OpenAI-compatible servers answer json whatever you ask for. Writing
     `{"text": ...}` into the vault would be worse than reading it out."""

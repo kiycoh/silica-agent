@@ -771,8 +771,10 @@ class SilicaConfig:
     # whisper-server assumes English when a request names no language, so a vault
     # dictated in any other one comes back translated instead of transcribed.
     # "auto" asks it to detect; a fixed code ("it", "en") is steadier on short
-    # clips. Dictation sends "auto" through; /convert omits the field for it,
-    # which is what its own default (empty) always did.
+    # clips. Dictation and /convert both send it through. whisper.cpp detects
+    # once, on the first 30 s of the file, and keeps that language to the end,
+    # so a lecture that opens on silence or chatter can come out in the wrong
+    # one: a vault that only ever records one language should fix the code.
     stt_lang: str = field(
         default_factory=lambda: os.getenv("SILICA_STT_LANG", "")
         or os.getenv("SILICA_ASR_LANG", "")
