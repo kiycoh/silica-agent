@@ -40,8 +40,7 @@ function jobWhat(j, ahead) {
     const since = t < 0 ? "" : t < 60 ? " · under a minute so far" : ` · ${Math.round(t / 60)} min so far`;
     return verb + len + since;
   }
-  // ADR-0087 point 3: the note names them, and so does the row that offers it.
-  if (j.state === "done") return j.pages_not_read ? `ready, but ${j.pages_not_read}` : "ready";
+  if (j.state === "done") return "ready";
   return j.error || (j.state === "interrupted" ? "the server restarted during this conversion" : "it could not be converted");
 }
 
@@ -112,6 +111,9 @@ function jobRow(j, ahead) {
       const a = jobButton(n.split("/").pop().replace(/\.md$/, ""), "job-note linklike", "open " + n, () => openNote(n));
       what.append(" ", a);
     }
+    // ADR-0087 point 3: the note names the pages no model read, and so does
+    // the row that offers it, after the note it names them in.
+    if (j.pages_not_read) what.append(" · " + j.pages_not_read);
     acts.append(jobButton("Nucleate it", "job-go", "nucleate it into the vault, in this chat", () => jobOffer(j, false)));
     if ((j.text || "").trim()) {
       acts.append(jobButton("ask again", "job-alt linklike",
