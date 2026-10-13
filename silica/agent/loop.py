@@ -527,7 +527,9 @@ def run_agent(
             # `if answer:`, which prints nothing — a failed turn rendered
             # exactly like no turn at all. Same shape as the cancelled and
             # max-iterations sentinels: the caller always gets text back.
-            answer = resp.text or _EMPTY_COMPLETION
+            # strip(): glm-5.3-flash answered " " on 2026-10-13, and a truthy
+            # space walked past `or` into an empty bubble.
+            answer = resp.text if (resp.text or "").strip() else _EMPTY_COMPLETION
             return _declare_links(answer) if _interactive else answer
 
         # Tool calls, so whatever text this iteration streamed was a preamble and
