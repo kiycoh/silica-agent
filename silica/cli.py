@@ -402,8 +402,15 @@ def _attach_file_log() -> None:
     loses a line that mattered.
     """
     from logging.handlers import RotatingFileHandler
+    from silica.config import hosted
     from silica.kernel.recall.paths import _SILICA_HOME
 
+    # A hosted tenant keeps no file of its own (ADR-0100 point 1): the privacy
+    # notice promises the system journal and 14 days, and this file held the
+    # model's reasoning and every tool call's arguments with no age limit. Its
+    # WARNING lines still reach the journal through the stderr handler.
+    if hosted():
+        return
     root = logging.getLogger()
     if any(isinstance(h, RotatingFileHandler) for h in root.handlers):
         return

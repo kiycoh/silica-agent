@@ -342,3 +342,32 @@ def test_attach_file_log_freezes_the_terminal_level_before_opening_root(tmp_path
         for h in saved:
             root.addHandler(h)
         root.setLevel(level)
+
+
+def test_a_hosted_tenant_opens_no_file_log(tmp_path, monkeypatch):
+    """ADR-0100 point 1: the notice promises the journal and 14 days, so under
+    SILICA_HOSTED=1 no silica.log is opened and root keeps the terminal's level
+    instead of dropping to DEBUG for a file that does not exist."""
+    import io
+    import silica.kernel.recall.paths as paths
+    from silica.cli import _attach_file_log
+
+    root = logging.getLogger()
+    saved, level = root.handlers[:], root.level
+    try:
+        for h in root.handlers[:]:
+            root.removeHandler(h)
+        monkeypatch.setattr(paths, "_SILICA_HOME", tmp_path)
+        monkeypatch.setenv("SILICA_HOSTED", "1")
+        logging.basicConfig(stream=io.StringIO(), level=logging.WARNING)
+        _attach_file_log()
+        assert root.level == logging.WARNING
+        assert not any(isinstance(h, logging.FileHandler) for h in root.handlers)
+        assert not (tmp_path / "logs").exists()
+    finally:
+        for h in root.handlers[:]:
+            root.removeHandler(h)
+            h.close()
+        for h in saved:
+            root.addHandler(h)
+        root.setLevel(level)
