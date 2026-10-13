@@ -815,6 +815,31 @@ def build_assistant_message(
     return msg, parsed
 
 
+# An image part's share of the request, in tokens, for the output clamp. Its
+# base64 counted as text read a 120 KB page PNG (160k characters of data URL)
+# as about 80k tokens, left no window, and cut the reply to the clamp's 1024
+# floor: a page reading stopped at 621 of 673 words with max_tokens 2500 and
+# 6000 alike (2026-10-13). Qwen3.5-9B counted 1,874 prompt tokens for a 1600 px
+# page with its prompt; 2,000 keeps the estimate on the side of a smaller reply.
+_IMAGE_TOKENS = 2000
+
+
+def _request_chars(messages: list) -> int:
+    """The request's size as the output clamp should read it: the serialized
+    messages, with each inline image counted as `_IMAGE_TOKENS` instead of its
+    data URL's length."""
+    from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
+
+    chars = len(str(messages))
+    for m in messages:
+        parts = m.get("content") if isinstance(m, dict) else None
+        for part in parts if isinstance(parts, list) else ():
+            url = (part.get("image_url") or {}).get("url", "") if isinstance(part, dict) else ""
+            if isinstance(url, str) and url.startswith("data:"):
+                chars += _IMAGE_TOKENS * TEXT_CHARS_PER_TOKEN - len(url)
+    return max(chars, 0)
+
+
 def call_llm(
     model: str,
     messages: list[dict],
@@ -1000,7 +1025,7 @@ def _call_llm(
     if jinja:
         messages = _one_leading_system(messages)
 
-    input_chars = len(str(messages)) + (len(str(tools)) if tools else 0)
+    input_chars = _request_chars(messages) + (len(str(tools)) if tools else 0)
     kwargs: dict = {
         "model": model,
         "messages": _with_prompt_cache(model, messages),
