@@ -138,6 +138,21 @@
   padding: 0.4rem 0.55rem;
   border-radius: var(--r-sm);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Quieter than the name beside it at rest, the same colour once the tab is
+   hovered or chosen: the glyph helps find a row, the word is the row. */
+.st-tab-icon {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+.st-tab:hover .st-tab-icon,
+.st-tab.active .st-tab-icon {
+  opacity: 1;
 }
 
 .st-tab:hover {
@@ -542,4 +557,159 @@
 
 .st-mem-count.over {
   color: var(--warn);
+}
+
+/* --- Skills (ADR-0097 point 4) ----------------------------------------------
+   Direction: docs/design/skills/skills-in-settings.html. A row reads like the
+   / picker: the command in the grid face, its hint dimmer beside it. */
+.sk-cmd {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--frost);
+}
+
+/* One unit that never breaks inside: a browser breaks after any hyphen, and
+   `[--level=intro|expert]` split after its `--` reads as two arguments. It
+   moves to its own line whole, with no indent (the space before it is a text
+   node, which a line start swallows), and past the column it ends in an
+   ellipsis, the full hint in its title. */
+.sk-hint {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.sk-row .st-help {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.sk-also {
+  color: var(--ash);
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 0.2rem;
+}
+
+.sk-group {
+  margin-top: 1rem;
+}
+
+.sk-group-help {
+  color: var(--ash-dim);
+  font-size: 11px;
+  padding: 0 0 0.45rem;
+}
+
+.sk-group-help code {
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+/* the one write a reader just made, found again without searching for it */
+.sk-row.sk-fresh {
+  animation: sk-fresh 1.6s var(--ease);
+}
+
+@keyframes sk-fresh {
+  from { background: var(--sel); }
+  to { background: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-row.sk-fresh { animation: none; }
+}
+
+/* the install row is also where a file is dropped */
+.sk-install.sk-over {
+  outline: 1px dashed var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--r-xs);
+}
+
+.sk-preview-host {
+  grid-column: 1 / -1;
+}
+
+.sk-preview-host:empty {
+  display: none;
+}
+
+/* What will be written, shown before it is: the turn's text, not a summary. */
+.sk-preview {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.75rem 0.8rem;
+  margin-top: 0.2rem;
+  background: var(--sheet);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+.sk-preview.sk-bad {
+  border-color: var(--warn);
+}
+
+.sk-pv-head .sk-cmd {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.sk-pv-desc {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sk-pv-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.sk-pv-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ash-dim);
+}
+
+.sk-pv-body {
+  margin: 0;
+  max-height: 15rem;
+  overflow: auto;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  padding: 0.55rem 0.65rem;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.sk-pv-err {
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.sk-pv-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem;
 }

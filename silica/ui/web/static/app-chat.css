@@ -1245,6 +1245,17 @@
   flex-shrink: 0;
 }
 
+/* A note in the @ list (ADR-0097): a title is prose, so the reading face, not
+   the command's grid face, and not the accent, which stays the thing a / runs. */
+.commands .cmd-item .cmd-note {
+  color: var(--frost);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+  flex-shrink: 0;
+}
+
 /* The palette used to inherit the chrome buttons' uppercase + wide tracking, so
    a 90-character description was SHOUTED and then cut mid-word ("SURFACES
    CONTRADI…"). The affordance built to relieve recall could not finish its own

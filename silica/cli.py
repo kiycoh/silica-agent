@@ -4546,6 +4546,7 @@ def main():
         user_input = user_input.strip()
         if not user_input:
             continue
+        typed = user_input   # the expansions below rewrite user_input; the named notes are read from this
 
         # Direct shortcuts bypass the LLM entirely (case-sensitive args preserved)
         if user_input.startswith("/") and _handle_direct_shortcut(user_input, messages):
@@ -4623,6 +4624,14 @@ def main():
         if not _model_configured():
             CONSOLE.print(_NO_MODEL_HINT)
             continue
+
+        # The notes the user named, as paths (ADR-0097 point 2), the same block
+        # the GUI's run_turn adds. Not on a /web turn: its tools cannot read a note.
+        if web is None:
+            from silica.agent.mentions import named_notes
+
+            if block := named_notes(typed):
+                user_input += "\n\n" + block
 
         # Normal user message → agentic loop. CLI-expanded shortcuts carry an
         # `origin` so the wire boundary (and our own bookkeeping) can tell a
