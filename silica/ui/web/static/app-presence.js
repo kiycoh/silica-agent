@@ -53,6 +53,9 @@ uniform float uStateTau;
 uniform float uThink;
 uniform float uRespond; // text is arriving: the run line's own signal, decays in JS
 uniform float uCrystalOnly; // 1 = the crystal without the glass body: the composers
+uniform float uSway;   // the orb's float, from JS: a roll added on the view axis (rad)
+uniform float uBob;    // and a drop inside the glass, in body radii (+ = down)
+uniform float uSpark;  // the catchlight's strength this frame, 0..1
 uniform vec4 uSeedA;   // roll, pitch, yaw offset, z-face inset
 uniform vec4 uSeedB;   // upper and lower prism half-lengths, phantom scale and shift
 uniform float uJit[6]; // how far each prism face sits off the regular hexagon
@@ -556,10 +559,12 @@ void main() {
   }
   vec4 fl = mh_flourish(t, 19.0, 10.2);
 
-  float roll = uSeedA.x + 0.05 * sin(t * 0.033);
+  float roll = uSeedA.x + 0.05 * sin(t * 0.033) + uSway;
   float pitch = uSeedA.y + 0.08 * sin(t * 0.041);
   float yaw = uSeedA.z + uYaw + 0.19 * sin(0.2196 * t + 3.42);
-  vec3 Pc = toC(b.P, roll, pitch, yaw);
+  // the crystal moves inside a glass that stays put, so only the ray's origin
+  // shifts: the body, its rim and its catchlight are not translated with it
+  vec3 Pc = toC(b.P - vec3(0.0, uBob, 0.0), roll, pitch, yaw);
   vec3 Rc = toC(rd, roll, pitch, yaw);
   vec3 keyC = toC(mh_key(t), roll, pitch, yaw);
 
@@ -644,6 +649,7 @@ void main() {
   Surf sf = mh_surface(b, t, small, pal.paper);
   // rim, catchlight and halo are all the glass's
   if (bare) { sf.rim = 0.0; sf.spec = 0.0; sf.glow = 0.0; }
+  sf.spec *= uSpark;
   float e = interior + sf.rim + sf.spec + sf.glow;
   fragColor = mh_present(interior + sf.rim, sf.spec, sf.glow, Hn * 0.92 / max(e, 1e-4), uv, pal, uGlow);
 }`;
@@ -682,7 +688,8 @@ function mountPresence(canvas, { crystalOnly = false } = {}) {
   gl.vertexAttribPointer(attr, 2, gl.FLOAT, false, 0, 0);
   const u = {};
   for (const n of ["uRes", "uSizePt", "uTime", "uYaw", "uInk", "uTone", "uDepth", "uGlow",
-    "uStateIndex", "uStateTau", "uThink", "uRespond", "uCrystalOnly", "uSeedA", "uSeedB", "uJit"]) u[n] = gl.getUniformLocation(prog, n);
+    "uStateIndex", "uStateTau", "uThink", "uRespond", "uCrystalOnly", "uSeedA", "uSeedB", "uJit",
+    "uSway", "uBob", "uSpark"]) u[n] = gl.getUniformLocation(prog, n);
   // A lost context is not worth a rebuild for a landing ornament: hide the canvas
   // and the landing reads as it did without one.
   canvas.addEventListener("webglcontextlost", () => { running = false; canvas.hidden = true; });
@@ -756,8 +763,20 @@ function mountPresence(canvas, { crystalOnly = false } = {}) {
     }
   }
 
+  // The orb floats (owner, 2026-10-13): 10 degrees of roll either side over 16 s
+  // and a drop of 0.05 body radii over 11 s. Both run on `drift`, wall-clock
+  // seconds, and not on `phase`, which idles at 0.30 and would stretch the sway
+  // to 53 s and change its pace at every state. 16 and 11 share no multiple
+  // under 176 s, so the two never fall into one visible beat. The composers'
+  // stone does not float: it is framed by its own length at 0.40 of a 36 px
+  // box, and a drop would walk its tips into the box's edge.
+  const SWAY = (10 * Math.PI) / 180, SWAY_S = 16, BOB = 0.05, BOB_S = 11;
+  // The catchlight breathes between 0.24 and 1.0 of its strength on two
+  // periods with no common beat, so it glints rather than blinks like a beacon.
+  const sparkAt = (s) => 0.62 + 0.38 * (0.65 * Math.sin((2 * Math.PI * s) / 6.1)
+    + 0.35 * Math.sin((2 * Math.PI * s) / 3.7 + 1.7));
   let cur = "idle", prev = "idle", changedAt = performance.now() / 1000, back = 0;
-  let phase = 0, yaw = 0, act = 0, typing = 0, speak = 0, last = changedAt;
+  let phase = 0, yaw = 0, act = 0, typing = 0, speak = 0, last = changedAt, drift = 0;
   let running = false, raf = 0, dirty = true, sizePt = 0;
 
   function frame(ms) {
@@ -787,7 +806,9 @@ function mountPresence(canvas, { crystalOnly = false } = {}) {
     if (!reduced) {
       phase += dt * tempo * (1 + 0.25 * act);
       yaw += dt * tempo * 0.088 * (1 + 0.8 * Math.pow(act, 0.85) * 0.6);
+      drift += dt;
     }
+    const floats = crystalOnly ? 0 : 1;
     if (seeded && sizePt && (dirty || !reduced)) {
       dirty = false;
       gl.viewport(0, 0, canvas.width, canvas.height);
@@ -807,6 +828,9 @@ function mountPresence(canvas, { crystalOnly = false } = {}) {
       gl.uniform4fv(u.uSeedA, seed.A);
       gl.uniform4fv(u.uSeedB, seed.B);
       gl.uniform1fv(u.uJit, seed.jit);
+      gl.uniform1f(u.uSway, floats * SWAY * Math.sin((2 * Math.PI * drift) / SWAY_S));
+      gl.uniform1f(u.uBob, floats * BOB * Math.sin((2 * Math.PI * drift) / BOB_S + 1.0));
+      gl.uniform1f(u.uSpark, sparkAt(drift));
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
