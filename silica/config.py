@@ -705,6 +705,16 @@ class SilicaConfig:
     embedding_base_url: str = field(
         default_factory=lambda: os.getenv("SILICA_EMBEDDING_BASE_URL", "http://localhost:1234/v1")
     )
+    # Where search queries are embedded, when not at embedding_base_url (empty).
+    # llama-server queues requests first in, first out, so a query sent during
+    # a 64-input index batch waits for the rest of it. Measured 2026-10-13,
+    # EmbeddingGemma 2 Q8_0 on 2 threads of 4 pinned cores, batches of 180 s:
+    # a query took 0.17 s on an idle server, p50 130 s and p95 161 s behind
+    # batches, and p95 0.49 s on a second 1-thread server beside the busy one.
+    # Same weights, so the vectors and the store do not change.
+    embedding_query_base_url: str = field(
+        default_factory=lambda: os.getenv("SILICA_EMBEDDING_QUERY_BASE_URL", "")
+    )
 
     # API key for embeddings endpoint (local runtimes ignore it; any non-empty
     # value satisfies the OpenAI SDK)
@@ -749,7 +759,8 @@ class SilicaConfig:
     )
 
     # Speech-to-text: one endpoint for both lanes — the web GUI's dictation
-    # button and /convert's media transcription (audio/video -> inbox note).
+    # button and /convert's media transcription (audio/video -> inbox note),
+    # unless stt_dictation_base_url below gives dictation its own.
     # Any OpenAI-compatible /audio/transcriptions server (whisper.cpp's
     # whisper-server, faster-whisper-server, OpenAI itself). Next port after
     # embeddings (1234) and rerank (1235); SILICA_STT_SERVE_CMD starts it.
@@ -760,6 +771,16 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_STT_BASE_URL", "")
         or os.getenv("SILICA_ASR_BASE_URL", "")
         or "http://localhost:1236/v1"
+    )
+    # Dictation's own endpoint. whisper-server transcribes one request at a time
+    # (one mutex around inference, examples/server/server.cpp), so on a server
+    # shared with /convert a 30 s clip waits behind a whole lecture. Unset means
+    # stt_base_url, the one endpoint both lanes shared until 2026-10-13. Empty
+    # means no endpoint for dictation: the in-process and browser lanes remain.
+    # None and not a copy of stt_base_url, so the fallback follows that value
+    # when it changes after start; read it through agent.stt.dictation_endpoint.
+    stt_dictation_base_url: str | None = field(
+        default_factory=lambda: os.environ.get("SILICA_STT_DICTATION_BASE_URL")
     )
     # Cosmetic against whisper.cpp, which serves whatever model it was started
     # with; a hosted endpoint needs the real id.

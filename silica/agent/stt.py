@@ -35,6 +35,16 @@ def has_local_stt() -> bool:
     return importlib.util.find_spec("faster_whisper") is not None
 
 
+def dictation_endpoint(config: Any) -> tuple[str, str]:
+    """`(url, env key)` of the endpoint the microphone sends to: its own setting
+    when present, even an empty one, which turns the endpoint lane off; else
+    the one /convert uses. The key is for the sentence that says it is empty."""
+    own = getattr(config, "stt_dictation_base_url", None)
+    if own is None:
+        return config.stt_base_url, "SILICA_STT_BASE_URL"
+    return own, "SILICA_STT_DICTATION_BASE_URL"
+
+
 def local_stt_model(config: Any) -> str:
     """A faster-whisper size ("small", "large-v3-turbo"), a HuggingFace repo id,
     or a local CTranslate2 directory. One place, so the doctor names what runs."""
