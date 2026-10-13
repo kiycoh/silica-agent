@@ -4137,12 +4137,19 @@ async def _stt_via_endpoint(clip: bytes) -> tuple[str, str]:
         form["language"] = CONFIG.stt_lang
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                f"{CONFIG.stt_base_url.rstrip('/')}/audio/transcriptions",
-                files={"file": ("clip.wav", clip, "audio/wav")},
-                data=form,
-                headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
-            )
+            for _ in range(2):
+                resp = await client.post(
+                    f"{CONFIG.stt_base_url.rstrip('/')}/audio/transcriptions",
+                    files={"file": ("clip.wav", clip, "audio/wav")},
+                    data=form,
+                    headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
+                )
+                # whisper-server needs "auto" named, a hosted API rejects it
+                # with 400 and detects the language itself without the field:
+                # the same retry as convert._asr_via_endpoint.
+                if resp.status_code != 400 or form.get("language") != "auto":
+                    break
+                del form["language"]
     except Exception as exc:
         return "", f"transcription endpoint unreachable: {exc}"
     if resp.status_code != 200:

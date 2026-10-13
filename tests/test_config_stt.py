@@ -87,3 +87,36 @@ def test_auto_language_is_sent_on_the_convert_lane(clean_env, monkeypatch, tmp_p
     monkeypatch.setattr(CONFIG, "stt_lang", "it")
     conv._asr_via_endpoint(wav)
     assert seen["data"]["language"] == "it"
+
+
+def test_a_server_that_rejects_auto_is_asked_again_without_it(clean_env, monkeypatch, tmp_path):
+    """whisper-server needs "auto" named, but OpenRouter answers 400 to it on
+    every model tried (2026-10-13) and detects the language when the field is
+    absent. A fixed code is never dropped: that 400 is a real error."""
+    from silica.config import CONFIG
+    import silica.sources.convert as conv
+
+    calls: list[dict] = []
+
+    class R:
+        def __init__(self, code):
+            self.status_code, self.text = code, '{"text": "ciao"}'
+
+    def fake_post(url, files=None, data=None, headers=None, timeout=None):
+        calls.append(dict(data or {}))
+        return R(400 if "language" in (data or {}) else 200)
+
+    import httpx
+    monkeypatch.setattr(httpx, "post", fake_post)
+    audio = tmp_path / "a.mp3"
+    audio.write_bytes(b"ID3")
+
+    monkeypatch.setattr(CONFIG, "stt_lang", "auto")
+    assert conv._asr_via_endpoint(audio) == "ciao"
+    assert calls[0]["language"] == "auto" and "language" not in calls[1]
+
+    calls.clear()
+    monkeypatch.setattr(CONFIG, "stt_lang", "it")
+    with pytest.raises(ValueError, match="returned 400"):
+        conv._asr_via_endpoint(audio)
+    assert len(calls) == 1

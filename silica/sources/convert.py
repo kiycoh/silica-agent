@@ -275,6 +275,10 @@ CONVERTIBLE_DOC_EXTS = (
 # would swallow the TUI's keystrokes (or block) when run under a prompt.
 _FFMPEG_ARGS = ("-nostdin", "-loglevel", "error", "-y")
 _ASR_SAMPLE_RATE = "16000"
+# 24 kbps: against 32 kbps on 17 min of FLEURS Italian it moved WER by at most
+# 0.2 points on MAI-Transcribe-2, Scribe v2 and Qwen3-ASR-1.7B (2026-10-13), and
+# a two-hour lecture stays at 21.6 MB, under OpenRouter's 25 MB upload cap.
+_ASR_MP3_BITRATE = "24k"
 # Generous: transcribing is minutes of audio, not one page. omniparse's
 # equivalent subprocess call has no timeout at all, so a stuck decoder there
 # hangs the request forever.
@@ -1902,8 +1906,12 @@ def _via_legacy_office(src: Path, workdir: Path) -> tuple[str, Path]:
 # --- media: ffmpeg demux + a speech-to-text provider ------------------------
 
 
-def _media_to_wav(src: Path, workdir: Path) -> Path:
-    """Any container → 16 kHz mono wav, the one input every ASR accepts.
+def _media_to_audio(src: Path, workdir: Path, mp3: bool = False) -> Path:
+    """Any container → 16 kHz mono wav for whisper-cli, or mp3 for an endpoint.
+
+    mp3 for an endpoint because a wav is 115 MB an hour: a two-hour lecture is
+    230 MB on a hosted tenant's disk and over OpenRouter's 25 MB upload cap,
+    where the same lecture in mp3 is 21.6 MB (see _ASR_MP3_BITRATE).
 
     One ffmpeg call for audio and video alike: `-vn` drops a video stream that
     may not be there, which is cheaper than branching on the extension. Not
@@ -1916,23 +1924,27 @@ def _media_to_wav(src: Path, workdir: Path) -> Path:
             "reading audio/video needs ffmpeg on PATH — install it with your "
             "package manager (`apt install ffmpeg` / `brew install ffmpeg`)"
         )
-    wav = workdir / "audio.wav"
+    out = workdir / ("audio.mp3" if mp3 else "audio.wav")
+    # No Xing frame and no ID3 tag, so an mp3 with no samples is 0 bytes and the
+    # empty check below needs no header size for it.
+    codec = (["-c:a", "libmp3lame", "-b:a", _ASR_MP3_BITRATE, "-write_xing", "0",
+              "-id3v2_version", "0", "-f", "mp3"] if mp3 else ["-f", "wav"])
     try:
         proc = subprocess.run(
             [exe, *_FFMPEG_ARGS, "-i", str(src), "-vn",
-             "-ac", "1", "-ar", _ASR_SAMPLE_RATE, "-f", "wav", str(wav)],
+             "-ac", "1", "-ar", _ASR_SAMPLE_RATE, *codec, str(out)],
             capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_S,
             preexec_fn=_REAP_WITH_PARENT,
         )
     except subprocess.TimeoutExpired:
         raise ValueError(f"ffmpeg timed out after {_FFMPEG_TIMEOUT_S}s on {src.name}") from None
-    if proc.returncode != 0 or not wav.exists():
+    if proc.returncode != 0 or not out.exists():
         tail = (proc.stderr or proc.stdout or "").strip().splitlines()
         detail = tail[-1][:200] if tail else f"exit {proc.returncode}"
         raise ValueError(f"ffmpeg could not read {src.name}: {detail}")
-    if wav.stat().st_size <= 44:  # a wav header and no samples
+    if out.stat().st_size <= (0 if mp3 else 44):  # a header and no samples
         raise ValueError(f"{src.name} carries no audio track")
-    return wav
+    return out
 
 
 def _asr_base(url: str) -> str:
@@ -1945,51 +1957,108 @@ def _asr_base(url: str) -> str:
     return base if base.endswith("/v1") else f"{base}/v1"
 
 
-def _asr_via_endpoint(wav: Path) -> str:
-    """OpenAI-compatible `/v1/audio/transcriptions`, asking for VTT.
+def _paragraphs_at_pauses(payload: dict, gap_s: float) -> str:
+    """A verbose_json transcript's own text, with a blank line at every pause.
 
-    VTT rather than the default json: the cue timings are what
-    `vtt_to_text(paragraph_gap_s=...)` turns into paragraph breaks, and a
-    transcript with no paragraph breaks is one oversized inbox note. The text is
-    thrown away either way, only the boundaries survive.
+    The cut is found through the word timings, but the text kept is `text`:
+    words come without punctuation (MAI-Transcribe-2, Scribe v2), and segments
+    are too coarse to cut on (MAI-Transcribe-2 gave 25 in 68 min, Scribe v2 one
+    for the whole file, 2026-10-13). So each timed unit is located in `text` in
+    order, and a pause of `gap_s` cuts the text just before the unit after it.
+    Top-level words only: whisper-server nests its own inside segments, and
+    those token times cut mid-sentence ("gli | elettroni" on ggml-small,
+    2026-10-13), so it cuts on segment gaps, as its vtt cues always did. A
+    unit that is not found (a sub-word token) is skipped, which only drops one
+    candidate cut. Line breaks inside
+    a paragraph are the server's own (MAI-Transcribe-2 puts one between
+    phrases, whisper-server one every ~60 characters, even mid-word) and
+    become spaces: only a pause makes a paragraph.
+    """
+    text = str(payload.get("text") or "")
+    units = payload.get("words") or payload.get("segments") or []
+    parts, cut, pos, prev_end = [], 0, 0, None
+    for unit in units:
+        token = str(unit.get("word") or unit.get("text") or "").strip()
+        # a bare punctuation token (whisper-server times "." too) can only be
+        # matched somewhere further on, and would drag `pos` past real words
+        if not re.search(r"\w", token) or unit.get("start") is None:
+            continue
+        # word-initial only, so a dropped "e" does not land inside "che", nor
+        # "altra" after the elision in "un'altra"
+        hit = re.compile(r"(?<![\w'’])" + re.escape(token)).search(text, pos)
+        if not hit:
+            continue
+        if prev_end is not None and unit["start"] - prev_end >= gap_s and hit.start() > cut:
+            parts.append(text[cut:hit.start()].strip())
+            cut = hit.start()
+        pos, prev_end = hit.end(), unit.get("end", unit["start"])
+    parts.append(text[cut:].strip())
+    return "\n\n".join(" ".join(p.split()) for p in parts if p.strip())
+
+
+def _asr_via_endpoint(audio: Path) -> str:
+    """OpenAI-compatible `/v1/audio/transcriptions`, asking for verbose_json.
+
+    verbose_json and not vtt: OpenRouter answers 400 to vtt, srt and text (its
+    speech-to-text guide, read 2026-10-13), while it and whisper-server both
+    time every word in verbose_json, and those pauses are the paragraph breaks.
+    A transcript with no paragraph break is one oversized inbox note.
     """
     import httpx
 
     from silica.sources.web_fetch import vtt_to_text
 
     url = f"{_asr_base(CONFIG.stt_base_url)}/audio/transcriptions"
-    data = {"model": CONFIG.stt_model, "response_format": "vtt"}
-    # Always named, never omitted: whisper-server and whisper-cli both fall back
-    # to "en" when a request names no language (server.cpp:113, cli.cpp:84,
-    # read 2026-10-13), so omitting it turned an Italian lecture into English.
-    # Dictation has sent "auto" to this same endpoint since ADR-0049.
-    data["language"] = CONFIG.stt_lang.strip() or "auto"
-    try:
-        with wav.open("rb") as fh:
-            resp = httpx.post(
+    data = {"model": CONFIG.stt_model, "response_format": "verbose_json",
+            "timestamp_granularities[]": ["word", "segment"]}
+    # Named, not omitted: whisper-server and whisper-cli both fall back to "en"
+    # when a request names no language (server.cpp:113, cli.cpp:84, read
+    # 2026-10-13), so omitting it turned an Italian lecture into English.
+    lang = CONFIG.stt_lang.strip() or "auto"
+    data["language"] = lang
+    mime = "audio/mpeg" if audio.suffix == ".mp3" else "audio/wav"
+
+    def post() -> httpx.Response:
+        with audio.open("rb") as fh:
+            return httpx.post(
                 url,
-                files={"file": (wav.name, fh, "audio/wav")},
+                files={"file": (audio.name, fh, mime)},
                 data=data,
                 headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
                 timeout=_ASR_TIMEOUT_S,
             )
+
+    try:
+        resp = post()
+        # ...but a hosted API takes an ISO-639-1 code or nothing: OpenRouter
+        # answered 400 to "auto" on MAI-Transcribe-2, whisper-large-v3,
+        # qwen3-asr-1.7b and scribe-v2 (2026-10-13), and detects the language
+        # itself when the field is absent. The retry costs one more upload;
+        # telling the two servers apart by their URL is a guess.
+        if resp.status_code == 400 and lang == "auto":
+            del data["language"]
+            resp = post()
     except httpx.HTTPError as e:
         raise ValueError(
+            # whisper-server serves /inference unless told otherwise, and
+            # answers 404 on this path (measured 2026-10-13)
             f"no transcription server at {url}: {e}. Start one (whisper.cpp: "
-            "`whisper-server -m <model>`), point SILICA_STT_BASE_URL at it, or "
+            "`whisper-server -m <model> --inference-path /v1/audio/transcriptions`), "
+            "point SILICA_STT_BASE_URL at it, or "
             "set SILICA_STT_PROVIDER=whispercpp"
         ) from None
     if resp.status_code != 200:
         raise ValueError(f"transcription server returned {resp.status_code}: {resp.text[:200]}")
     body = resp.text
-    # A server that ignored response_format answers json; read the text out of it
-    # rather than writing `{"text": ...}` into the vault.
-    if body.lstrip().startswith("{"):
-        try:
-            body = str(json.loads(body).get("text", ""))
-        except ValueError:
-            pass
-    return vtt_to_text(body, paragraph_gap_s=_ASR_PARAGRAPH_GAP_S)
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        # A server that ignored response_format and answered vtt still carries
+        # its pauses in the cue timings.
+        return vtt_to_text(body, paragraph_gap_s=_ASR_PARAGRAPH_GAP_S)
+    if not isinstance(payload, dict):
+        return ""
+    return _paragraphs_at_pauses(payload, _ASR_PARAGRAPH_GAP_S)
 
 
 def _asr_via_whispercpp(wav: Path) -> str:
@@ -2055,8 +2124,8 @@ def _via_asr(src: Path, workdir: Path) -> tuple[str, Path]:
             f"unknown stt_provider {CONFIG.stt_provider!r} "
             f"(known: {', '.join(ASR_PROVIDERS)})"
         )
-    wav = _media_to_wav(src, workdir)
-    text = ASR_PROVIDERS[CONFIG.stt_provider](wav)
+    audio = _media_to_audio(src, workdir, mp3=CONFIG.stt_provider == "endpoint")
+    text = ASR_PROVIDERS[CONFIG.stt_provider](audio)
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)  # none, but the tail expects a dir
     if not text.strip():

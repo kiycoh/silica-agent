@@ -4,6 +4,7 @@ Providers are mocked: docling/opendataloader are injected as fake modules and th
 mineru subprocess is patched, so no ML models / real PDFs / installs are needed.
 """
 import io
+import json
 import os
 import re
 import shutil
@@ -1123,6 +1124,19 @@ is that the demux is one call.
 After a long pause, a new thought.
 """
 
+# The same talk as OpenRouter's verbose_json gives it back: punctuation in
+# `text` only, never in the timed words.
+_VERBOSE = {
+    "text": "The first thing to know is that the demux is one call. "
+            "After a long pause, a new thought.",
+    "words": [{"word": w, "start": s, "end": s + 0.3} for w, s in [
+        ("The", 0.0), ("first", 0.4), ("thing", 0.8), ("to", 1.2), ("know", 1.6),
+        ("is", 2.1), ("that", 2.4), ("the", 2.7), ("demux", 3.0), ("is", 3.3),
+        ("one", 3.5), ("call", 3.7),
+        ("After", 19.0), ("a", 19.4), ("long", 19.6), ("pause", 19.9),
+        ("a", 20.3), ("new", 20.5), ("thought", 20.7)]],
+}
+
 
 def _fake_asr(monkeypatch, vtt=_VTT):
     """Stand in for the transcription server, at the provider seam."""
@@ -1136,12 +1150,12 @@ def _fake_asr(monkeypatch, vtt=_VTT):
 
 
 def _fake_wav(monkeypatch):
-    """Stand in for ffmpeg: write a wav with more than a bare header."""
-    def to_wav(src, workdir):
-        wav = Path(workdir) / "audio.wav"
-        wav.write_bytes(b"RIFF" + b"\0" * 64)
-        return wav
-    monkeypatch.setattr(conv, "_media_to_wav", to_wav)
+    """Stand in for ffmpeg: write audio with more than a bare header."""
+    def to_audio(src, workdir, mp3=False):
+        out = Path(workdir) / ("audio.mp3" if mp3 else "audio.wav")
+        out.write_bytes(b"RIFF" + b"\0" * 64)
+        return out
+    monkeypatch.setattr(conv, "_media_to_audio", to_audio)
 
 
 @pytest.mark.parametrize("ext", conv.MEDIA_EXTS)
@@ -1210,16 +1224,16 @@ def test_asr_base_url_is_normalised(base, expected):
     assert conv._asr_base(base) == expected
 
 
-def test_endpoint_provider_posts_multipart_and_asks_for_vtt(tmp_vault, monkeypatch):
-    """VTT rather than the default json: the cue timings are the only thing that
-    can become paragraph breaks downstream."""
+def test_endpoint_provider_posts_multipart_and_asks_for_verbose_json(tmp_vault, monkeypatch):
+    """verbose_json and not vtt: OpenRouter answers 400 to vtt, and the word
+    timings are the only thing that can become paragraph breaks downstream."""
     seen = {}
 
     class R:
-        status_code, text = 200, _VTT
+        status_code, text = 200, json.dumps(_VERBOSE)
 
     def fake_post(url, files=None, data=None, headers=None, timeout=None):
-        seen.update(url=url, data=dict(data or {}), name=files["file"][0],
+        seen.update(url=url, data=dict(data or {}), name=files["file"][0], mime=files["file"][2],
                     payload=files["file"][1].read(), headers=dict(headers or {}))
         return R()
 
@@ -1227,16 +1241,23 @@ def test_endpoint_provider_posts_multipart_and_asks_for_vtt(tmp_vault, monkeypat
     monkeypatch.setattr(httpx, "post", fake_post)
     monkeypatch.setattr(CONFIG, "stt_base_url", "http://127.0.0.1:9999")
     monkeypatch.setattr(CONFIG, "stt_lang", "it")
-    wav = Path(CONFIG.vault_path) / "a.wav"
-    wav.write_bytes(b"RIFF-payload")
+    audio = Path(CONFIG.vault_path) / "a.mp3"
+    audio.write_bytes(b"ID3-payload")
 
-    out = conv._asr_via_endpoint(wav)
+    out = conv._asr_via_endpoint(audio)
     assert seen["url"] == "http://127.0.0.1:9999/v1/audio/transcriptions"
-    assert seen["data"]["response_format"] == "vtt"
+    assert seen["data"]["response_format"] == "verbose_json"
+    assert seen["data"]["timestamp_granularities[]"] == ["word", "segment"]
     assert seen["data"]["language"] == "it"
     assert seen["headers"]["Authorization"] == f"Bearer {CONFIG.stt_api_key}"
-    assert seen["payload"] == b"RIFF-payload"   # the file really was sent
-    assert "the demux is one call." in out
+    assert seen["payload"] == b"ID3-payload" and seen["mime"] == "audio/mpeg"
+    assert out == ("The first thing to know is that the demux is one call.\n\n"
+                   "After a long pause, a new thought.")
+
+    # a server that ignored response_format and answered vtt keeps its pauses
+    R.text = _VTT
+    out = conv._asr_via_endpoint(audio)
+    assert "is that the demux is one call.\n\nAfter a long pause" in out
     assert "-->" not in out and "WEBVTT" not in out
 
 
@@ -1283,6 +1304,36 @@ def test_endpoint_provider_survives_a_server_that_ignores_response_format(tmp_va
     assert conv._asr_via_endpoint(wav) == "plain json answer"
 
 
+def test_pauses_cut_the_punctuated_text_at_a_word_start():
+    """Words carry no punctuation, so the cut is found in `text`, and only at
+    the start of a word: a short word like "e" must not land inside "che"."""
+    payload = {"text": "Lo so che ora e poi parte.",
+               "words": [{"word": "so", "start": 0.0, "end": 0.5},
+                         {"word": "e", "start": 3.0, "end": 3.1},
+                         {"word": "parte", "start": 3.5, "end": 3.9}]}
+    assert conv._paragraphs_at_pauses(payload, 2.0) == "Lo so che ora\n\ne poi parte."
+
+    # nor after an elision, and a server's own line breaks are not paragraphs
+    elided = {"text": "Disegnata un'altra\nvolta.",
+              "words": [{"word": "Disegnata", "start": 0.0, "end": 0.5},
+                        {"word": "altra", "start": 3.0, "end": 3.4}]}
+    assert conv._paragraphs_at_pauses(elided, 2.0) == "Disegnata un'altra volta."
+
+
+def test_whisper_server_cuts_on_segment_gaps_not_on_its_token_times():
+    """whisper-server nests token times inside its segments, and those cut
+    mid-sentence on ggml-small; its segment gaps are the pauses its vtt cues
+    always carried. A payload with no timings at all is one paragraph."""
+    nested = {"text": " Primo punto, gli\n elettroni. Secondo punto.", "segments": [
+        {"start": 0.0, "end": 1.5, "text": " Primo punto, gli", "words": [
+            {"word": " gli", "start": 0.0, "end": 0.2}]},
+        {"start": 1.6, "end": 2.6, "text": " elettroni.", "words": [
+            {"word": " elettroni", "start": 6.0, "end": 6.4}]},
+        {"start": 5.0, "end": 6.0, "text": " Secondo punto.", "words": []}]}
+    assert conv._paragraphs_at_pauses(nested, 2.0) == "Primo punto, gli elettroni.\n\nSecondo punto."
+    assert conv._paragraphs_at_pauses({"text": "solo testo"}, 2.0) == "solo testo"
+
+
 def test_no_server_says_how_to_start_one(tmp_vault, monkeypatch):
     import httpx
 
@@ -1311,7 +1362,7 @@ def test_whispercpp_without_a_model_says_so(tmp_vault, monkeypatch):
 def test_missing_ffmpeg_names_the_install(tmp_vault, monkeypatch):
     monkeypatch.setattr(conv.shutil, "which", lambda n: None)
     with pytest.raises(ValueError, match="needs ffmpeg on PATH"):
-        conv._media_to_wav(Path("a.mp3"), Path(CONFIG.vault_path))
+        conv._media_to_audio(Path("a.mp3"), Path(CONFIG.vault_path))
 
 
 _HAS_FFMPEG = pytest.mark.skipif(
@@ -1333,7 +1384,7 @@ def test_real_ffmpeg_demuxes_a_video_to_mono_16k_wav(tmp_vault, tmp_path):
         check=True, capture_output=True,
     )
 
-    wav = conv._media_to_wav(src, tmp_path)
+    wav = conv._media_to_audio(src, tmp_path)
     assert wav.is_file() and wav.stat().st_size > 1000
     probe = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
@@ -1341,6 +1392,16 @@ def test_real_ffmpeg_demuxes_a_video_to_mono_16k_wav(tmp_vault, tmp_path):
         capture_output=True, text=True, check=True,
     ).stdout.strip()
     assert probe.startswith("pcm_s16le,16000,1"), probe
+
+    mp3 = conv._media_to_audio(src, tmp_path, mp3=True)
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+         "stream=channels,sample_rate,codec_name", "-of", "csv=p=0", str(mp3)],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    assert probe.startswith("mp3,16000,1"), probe
+    # a fifth of the wav: what keeps a two-hour lecture under a 25 MB upload cap
+    assert 0 < mp3.stat().st_size < wav.stat().st_size / 5
 
 
 @_HAS_FFMPEG
@@ -1355,7 +1416,9 @@ def test_real_ffmpeg_rejects_a_file_with_no_audio_track(tmp_vault, tmp_path):
     )
 
     with pytest.raises(ValueError, match="no audio track|could not read"):
-        conv._media_to_wav(src, tmp_path)
+        conv._media_to_audio(src, tmp_path)
+    with pytest.raises(ValueError, match="no audio track|could not read"):
+        conv._media_to_audio(src, tmp_path, mp3=True)
 
 
 @_HAS_FFMPEG
@@ -1363,7 +1426,7 @@ def test_real_ffmpeg_reports_a_file_that_is_not_media(tmp_vault, tmp_path):
     src = tmp_path / "fake.mp3"
     src.write_text("this is not audio", encoding="utf-8")
     with pytest.raises(ValueError, match="could not read fake.mp3"):
-        conv._media_to_wav(src, tmp_path)
+        conv._media_to_audio(src, tmp_path)
 
 
 @_HAS_FFMPEG
@@ -1372,7 +1435,7 @@ def test_a_real_video_becomes_a_real_note_over_a_real_socket(tmp_vault, tmp_path
 
     Everything here is the real thing: ffmpeg demuxes a real mp4, httpx encodes
     a real multipart body over a real TCP socket, and a stdlib HTTP server
-    answers with VTT the way whisper-server does. That leaves exactly one fake —
+    answers verbose_json the way OpenRouter does. That leaves exactly one fake —
     the transcription itself — so the multipart encoding, the response parsing,
     the paragraph breaks and the inbox write are all verified rather than
     asserted. The monkeypatched-httpx test above cannot see any of that.
@@ -1387,9 +1450,9 @@ def test_a_real_video_becomes_a_real_note_over_a_real_socket(tmp_vault, tmp_path
             received["path"] = self.path.encode()
             received["ctype"] = (self.headers.get("content-type") or "").encode()
             received["body"] = self.rfile.read(int(self.headers["content-length"]))
-            payload = _VTT.encode("utf-8")
+            payload = json.dumps(_VERBOSE).encode("utf-8")
             self.send_response(200)
-            self.send_header("content-type", "text/vtt")
+            self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -1421,8 +1484,9 @@ def test_a_real_video_becomes_a_real_note_over_a_real_socket(tmp_vault, tmp_path
     # the server saw a real multipart upload at the OpenAI-compatible path
     assert received["path"] == b"/v1/audio/transcriptions"
     assert received["ctype"].startswith(b"multipart/form-data")
-    assert b'name="file"' in received["body"] and b"RIFF" in received["body"]
-    assert b'name="response_format"' in received["body"] and b"vtt" in received["body"]
+    assert b'name="file"' in received["body"] and b"RIFF" not in received["body"]
+    assert b"Content-Type: audio/mpeg" in received["body"]  # mp3, not a 115 MB/h wav
+    assert b'name="response_format"' in received["body"] and b"verbose_json" in received["body"]
 
     body = _inbox_note(notes[0]).read_text(encoding="utf-8")
     assert body.startswith('---\n')                     # frontmatter block

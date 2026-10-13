@@ -584,7 +584,7 @@
     <pre>pip install 'silica-agent[stt]'</pre>
     <p>Or any OpenAI-compatible endpoint; with the second line set, silica starts it on the next launch:</p>
     <pre>SILICA_STT_BASE_URL=http://localhost:1236/v1
-SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236"</pre>
+SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-path /v1/audio/transcriptions"</pre>
     <p>Or the browser's own recognizer: settings, Language, browser speech.</p>
     <button type="button" id="stt-close" class="ghost">close</button>
   </div>

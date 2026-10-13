@@ -1846,6 +1846,44 @@ def test_stt_forwards_the_clip_and_returns_the_text(client, monkeypatch, local_s
     assert seen["bytes"] == b"RIFFfake"
 
 
+def test_stt_asks_again_without_auto_when_the_endpoint_rejects_it(client, monkeypatch, local_stt):
+    """A hosted API (OpenRouter) answers 400 to language="auto", which
+    whisper-server needs named; dictation retries without the field."""
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(server.CONFIG, "stt_lang", "auto", raising=False)
+    langs = []
+
+    class _Resp:
+        def __init__(self, code):
+            self.status_code, self.text = code, ""
+
+        @staticmethod
+        def json():
+            return {"text": "ciao"}
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, files, data, headers):
+            langs.append(data.get("language"))
+            return _Resp(400 if "language" in data else 200)
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFfake", "audio/wav")})
+    assert resp.json() == {"text": "ciao", "via": "endpoint"}
+    assert langs == ["auto", None]
+
+
 def test_stt_rejects_an_empty_recording(client, monkeypatch):
     app, server = client
     monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
