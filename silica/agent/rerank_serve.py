@@ -170,7 +170,7 @@ class _Handler(BaseHTTPRequestHandler):
         })
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002 - stdlib signature
-        logger.debug("%s " + format, self.address_string(), *args)
+        logger.debug("%s %s", self.address_string(), format % args)
 
 
 def main() -> int:

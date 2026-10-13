@@ -181,7 +181,17 @@ testpaths = ["tests"]
 # --select BLE001 alone reports 594 blind excepts, which is the CLAUDE.md
 # "a swallowed exception must name what it tolerates" rule. That is a work list,
 # not a merge blocker.
-select = ["F", "E9"]
+# G is the one deliberate widening: a hosted tenant's journal keeps a record's
+# template and never its arguments (ADR-0100 point 2), and an f-string, a
+# concatenation or a .format() puts the arguments into the template. It binds
+# silica/ alone, the only code a tenant runs. Measured 2026-10-13: 3 findings,
+# all fixed the same day.
+select = ["F", "E9", "G"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["G"]
+"scripts/**" = ["G"]
+"evals/**" = ["G"]
 
 [tool.importlinter]
 root_packages = ["silica", "silica_core"]

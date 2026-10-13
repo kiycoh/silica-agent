@@ -28,10 +28,13 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
 from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
-from silica.agent.loop import _is_tool_failure, run_agent
+from silica.agent.events import LLMStreamEvent, ToolErrorEvent, ToolStartEvent
+from silica.agent.llm import meter_totals
+from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
 from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
 from silica.config import CONFIG
 from silica.kernel.recall.mindmap import note_resolver
+from silica.metrics import emit
 from silica.kernel.write import session_changes
 from silica.sources.web_research import WebTurn
 from silica.ui.web.callback import event_to_json, tool_calls_to_json
@@ -861,6 +864,21 @@ def _sweep_if_orphaned() -> None:
         _end_turn()
 
 
+def _turn_kind(text: str) -> str:
+    """The turn line's kind: "chat", a built-in command's name, or "slash".
+
+    Only names from COMMANDS pass: a skill installed into the vault
+    (ADR-0097) is a slash command its user named, and an unknown one is
+    whatever the user typed, so both stay "slash" and no free text reaches
+    the journal."""
+    if not text.startswith("/"):
+        return "chat"
+    from silica.ui.commands import COMMANDS
+
+    word = text.split(None, 1)[0].lower()
+    return word[1:] if any(c.name == word for c in COMMANDS) else "slash"
+
+
 async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterator[dict]:
     """One agent turn as a stream of transport-neutral wire dicts.
 
@@ -884,8 +902,22 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
     loop = asyncio.get_running_loop()
     current_cancel = threading.Event()  # module-level so /stop can see it
     task: asyncio.Task | None = None
+    # The turn's usage line (ADR-0100 point 3), written in the finally.
+    # Abandonment ends the stream without a verdict, so "cancelled" until a
+    # terminal frame says otherwise.
+    started, tokens_before = time.monotonic(), meter_totals()
+    first_token: list[float] = []
+    tools: dict[str, int] = {}
+    tool_errors: dict[str, int] = {}
+    outcome = "cancelled"
 
     def cb(ev):  # runs in the agent/LLM worker thread
+        if isinstance(ev, ToolStartEvent):
+            tools[ev.name] = tools.get(ev.name, 0) + 1
+        elif isinstance(ev, ToolErrorEvent):
+            tool_errors[ev.name] = tool_errors.get(ev.name, 0) + 1
+        elif not first_token and isinstance(ev, LLMStreamEvent) and ev.chunk_type == "text" and ev.content:
+            first_token.append(time.monotonic())
         data = event_to_json(ev)
         if data is not None:
             loop.call_soon_threadsafe(q.put_nowait, data)
@@ -937,6 +969,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
             done = {"type": "done", "answer": answer, "html": _linkify(answer), **_ctx_meter()}
             if (saved := user_memory.undo_payload(out)) is not None:
                 done["memory"] = saved
+            outcome = "done"
             yield done
             return
         elif text.startswith("/"):
@@ -968,13 +1001,14 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
                 # capture keeps the escape codes, which the chat showed verbatim
                 # around /fetch's note path. The browser gets the text alone.
                 from rich.text import Text
-                out = Text.from_ansi(captured_out).plain.strip()
-                answer = f"```text\n{out}\n```" if out else "```text\n(done)\n```"
+                shown = Text.from_ansi(captured_out).plain.strip()
+                answer = f"```text\n{shown}\n```" if shown else "```text\n(done)\n```"
                 messages.append({"role": "assistant", "content": answer})
                 from silica.agent import narration as _narr
                 _narr.NARRATOR.turn(messages[-1])
 
                 # Yield a fake agent turn with the direct result
+                outcome = "done"
                 yield {
                     "type": "done",
                     "answer": answer,
@@ -984,6 +1018,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
                 return
 
             if expanded is None:
+                outcome = "error"
                 yield {"type": "error", "error": f"'{text}' not available in this session"}
                 return
             agent_msg = expanded
@@ -1040,6 +1075,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
             yield item
 
         answer = await task  # re-raises if run_agent failed
+        # Read before attribution and figures append to it.
+        empty = answer == _EMPTY_COMPLETION
         # Stop is an outcome, not an answer (audit P3): the loop hands back its
         # sentinel once the token is set, and the text that had streamed stays
         # in the transcript untouched. The frame says who stopped it and the GUI
@@ -1087,12 +1124,27 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
             done["stopped"] = True
         if isinstance(watch, RecallWatch) and watch.thin:
             done["hint"] = THIN_COVERAGE_HINT  # muted line under the answer
+        outcome = "cancelled" if stopped else "empty" if empty else "done"
         yield done
     except Exception as exc:  # never leave the UI stuck on the spinner
         logger.exception("web turn failed")
+        outcome = "error"
         yield {"type": "error", **_failure(exc)}
     finally:
         BUS.unsubscribe("work/phase", on_phase)
+        # ponytail: the tokens are the difference of the process totals, so a
+        # background job running during the turn is charged to it (its own
+        # llm_call lines still name it by call-site), and an abandoned turn's
+        # worker spends past this line uncounted. A context variable per turn
+        # is the upgrade, due when ADR-0099's jobs are built.
+        tokens_after = meter_totals()
+        emit("turn", kind=_turn_kind(text), outcome=outcome,
+             ms=round((time.monotonic() - started) * 1000),
+             first_token_ms=round((first_token[0] - started) * 1000) if first_token else None,
+             calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
+             cached=tokens_after[3] - tokens_before[3],
+             completion=tokens_after[2] - tokens_before[2],
+             tools=dict(tools), tool_errors=dict(tool_errors))
         _prewarm_seed()  # the turn may have written notes — refresh the new-chat seed
         if task is not None and not task.done():
             current_cancel.set()  # abandonment: stop the zombie...
@@ -1414,23 +1466,51 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
         dest = inbox / (Path(f.filename or "").name or "dropped")
         if _is_mail(dest.name):
             continue  # never written: see _is_mail
-        await _write_upload(f, dest)
-        rel = f"{inbox_rel}/{dest.name}"
-        adapter = adapter_for(rel, enabled=enabled)
-        if adapter is None:  # no source claims it → converter fallback (PDF today)
-            try:
-                ready.extend(await asyncio.to_thread(convert, rel))
-            except ValueError as exc:
-                logger.warning("nucleate: skipped %s: %s", dest.name, exc)
-            continue
-        result = await asyncio.to_thread(stage, adapter, rel)
-        if result["status"] == "distill":       # prose → injector re-reads it
-            ready.append(rel)
-        elif result["status"] == "ok":            # code/notebook → stub written
-            stubs.append(result["note_path"])
-        else:
-            logger.warning("nucleate: %s: %s", dest.name, result.get("message", ""))
+        # The file's ingest line (ADR-0100 point 3). pages and
+        # pages_without_text stay null: convert() keeps PDFium's pages to
+        # itself on main, and a second parse here would double the untrusted
+        # PDF work ADR-0087 wants in a child. ADR-0087 point 3's per-file
+        # outcome (branch adr/0098-vault-import) is where they get filled.
+        ingest: dict[str, Any] = {"ext": _ingest_ext(dest.name), "bytes": None, "pages": None,
+                  "pages_without_text": None, "outcome": "error"}
+        try:
+            await _write_upload(f, dest)
+            ingest["bytes"] = dest.stat().st_size
+            rel = f"{inbox_rel}/{dest.name}"
+            adapter = adapter_for(rel, enabled=enabled)
+            if adapter is None:  # no source claims it → converter fallback (PDF today)
+                try:
+                    ready.extend(await asyncio.to_thread(convert, rel))
+                    ingest["outcome"] = "ok"
+                except ValueError as exc:
+                    logger.warning("nucleate: skipped %s: %s", dest.name, exc)
+                continue
+            result = await asyncio.to_thread(stage, adapter, rel)
+            if result["status"] == "distill":       # prose → injector re-reads it
+                ready.append(rel)
+                ingest["outcome"] = "ok"
+            elif result["status"] == "ok":            # code/notebook → stub written
+                stubs.append(result["note_path"])
+                ingest["outcome"] = "ok"
+            else:
+                logger.warning("nucleate: %s: %s", dest.name, result.get("message", ""))
+        finally:
+            emit("ingest", **ingest)
     return ready, stubs
+
+
+# Extensions the ingest line may name. A suffix is part of the file's name,
+# which is the student's text, so anything outside this list is "other".
+_INGEST_EXTS = frozenset({
+    ".pdf", ".md", ".markdown", ".txt", ".docx", ".pptx", ".xlsx", ".odt", ".ods",
+    ".epub", ".rtf", ".html", ".htm", ".csv", ".json", ".ipynb", ".py",
+    ".png", ".jpg", ".jpeg", ".mp3", ".m4a", ".wav",
+})
+
+
+def _ingest_ext(name: str) -> str:
+    ext = Path(name).suffix.lower()
+    return ext if ext in _INGEST_EXTS else "other"
 
 
 def _is_mail(name: str) -> bool:

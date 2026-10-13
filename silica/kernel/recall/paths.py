@@ -642,7 +642,9 @@ def _repo_root_resolved(vault: str | Path) -> tuple[Path | None, str | None]:
         return hit
     root, warn = resolve_repo_root(raw)
     if warn:
-        logger.warning(warn)
+        # A fixed template, the warning its argument: hosted logs keep the
+        # template only (ADR-0100 point 2), and this one names two paths.
+        logger.warning("repo root: %s", warn)
     if root is not None or warn is not None:
         _REPO_ROOT_CACHE[key] = (root, warn)
     return root, warn

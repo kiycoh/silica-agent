@@ -543,7 +543,7 @@ def handle_delegate(fsm: "InjectorFSM") -> None:
 
     _prefetch_ahead(fsm, idx)
 
-    logger.info(f"--- DISTILLING BATCH {idx + 1}/{len(fsm._chunks)} ---")
+    logger.info("--- DISTILLING BATCH %d/%d ---", idx + 1, len(fsm._chunks))
     fsm._progress_note(fsm._chunk_task_id("distill"), "distill", "running")
 
     # Phase 6: pass steering correction if VALIDATE sent us back here.

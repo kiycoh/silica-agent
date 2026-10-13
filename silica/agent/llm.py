@@ -32,7 +32,8 @@ import functools
 
 logger = logging.getLogger(__name__)
 
-from silica.config import CONFIG
+from silica.config import CONFIG, hosted
+from silica.metrics import emit
 
 
 @functools.cache
@@ -484,8 +485,20 @@ class ToolCall:
 # __post_init__ captures all of them with zero wiring. atexit dumps a sorted
 # table. Off = one bool check, no stack-walk.
 # profiling aid, not a live endpoint — dump on process exit only.
-_METER_ON = os.getenv("SILICA_TOKEN_METER") == "1"
+# A hosted tenant meters always and writes each call as an llm_call line
+# (ADR-0100 point 3): its process dies by SIGTERM, so the atexit table never
+# printed there.
+_METER_ON = os.getenv("SILICA_TOKEN_METER") == "1" or hosted()
 _meter: dict[str, list[int]] = collections.defaultdict(lambda: [0, 0, 0, 0])  # site -> [calls, prompt, completion, cached]
+# The same four counts over every call-site, so a chat turn's usage is the
+# difference between two readings (meter_totals, ui/web/server.py run_turn).
+_meter_totals = [0, 0, 0, 0]
+
+
+def meter_totals() -> tuple[int, int, int, int]:
+    """(calls, prompt, completion, cached) since the process started."""
+    calls, prompt, completion, cached = _meter_totals
+    return calls, prompt, completion, cached
 
 
 def _meter_site() -> str:
@@ -599,12 +612,17 @@ def _cached_tokens(usage: dict) -> int:
     return cached or usage.get("cache_read_input_tokens") or usage.get("prompt_cache_hit_tokens") or 0
 
 
-def _meter_record(usage: dict) -> None:
-    slot = _meter[_meter_site()]
-    slot[0] += 1
-    slot[1] += usage.get("prompt_tokens") or 0
-    slot[2] += usage.get("completion_tokens") or 0
-    slot[3] += _cached_tokens(usage)
+def _meter_record(usage: dict) -> tuple[str, int, int, int]:
+    """Add one call to its call-site and to the totals; (site, prompt,
+    completion, cached) for the caller's llm_call line."""
+    site = _meter_site()
+    counts = (1, usage.get("prompt_tokens") or 0, usage.get("completion_tokens") or 0,
+              _cached_tokens(usage))
+    slot = _meter[site]
+    for i, n in enumerate(counts):
+        slot[i] += n
+        _meter_totals[i] += n
+    return site, counts[1], counts[2], counts[3]
 
 
 @atexit.register
@@ -639,7 +657,13 @@ class LLMResponse:
 
     def __post_init__(self):
         if _METER_ON and self.usage:
-            _meter_record(self.usage)
+            site, prompt, completion, cached = _meter_record(self.usage)
+            # usage carries OpenRouter's cost only on a non-streamed call:
+            # stream_chunk_builder rebuilds usage without it (ADR-0100 Context).
+            cost = self.usage.get("cost")
+            emit("llm_call", site=site, model=self.request.get("model"), prompt=prompt,
+                 cached=cached, completion=completion, finish=self.finish_reason,
+                 usd=float(cost) if cost is not None else None)
 
 
 def _split_arg_objects(cid: str, name: str, arg_str: str) -> list[tuple[str, dict, str]]:

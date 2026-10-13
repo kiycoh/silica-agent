@@ -330,7 +330,22 @@ def _setup_logging(debug: bool = False) -> None:
             h.close()   # a re-setup (tests, /verbose) must not leak the previous fd
 
     handler: logging.Handler
-    if debug:
+    from silica.config import hosted
+    if hosted():
+        from silica.ui.logging import HostedJsonFormatter, LiveAwareStreamHandler
+        # A hosted tenant's stderr is its journal, which the privacy notice
+        # declares (ADR-0100 point 2): templates, never arguments, whatever
+        # --verbose or SILICA_DEBUG ask for, since DEBUG records carry the
+        # model's reasoning and tool arguments. The handler opens at INFO only
+        # for silica.metrics, whose logger is raised to INFO here because root
+        # stays at WARNING now that the hosted file log is gone.
+        handler = LiveAwareStreamHandler()
+        handler.setFormatter(HostedJsonFormatter())
+        handler.setLevel(logging.INFO)
+        handler.addFilter(lambda r: r.levelno >= logging.WARNING or r.name == "silica.metrics")
+        logging.getLogger("silica.metrics").setLevel(logging.INFO)
+        level = logging.WARNING
+    elif debug:
         from rich.logging import RichHandler
         from silica.ui.logging import (
             AnsiHumanFriendlyFormatter,

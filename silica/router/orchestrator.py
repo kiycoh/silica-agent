@@ -919,7 +919,7 @@ class InjectorFSM(BaseFSM[InjectorState]):
             == self._current_file_idx
         ):
             self._current_chunk_idx = next_idx
-            logger.info(f"✔ Batch completed successfully. Advancing to batch {self._current_chunk_idx + 1}")
+            logger.info("✔ Batch completed successfully. Advancing to batch %d", self._current_chunk_idx + 1)
             # Restart per-chunk loop from COLLISION (Phase 5) if present, else DELEGATE
             self.state = InjectorState.COLLISION if self._has_collision_phase else InjectorState.DELEGATE
         elif self._advance_file_or_done():

@@ -2,6 +2,10 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 import io
+import json
+import os
+import traceback
+from datetime import datetime, timezone
 from typing import Any, cast
 import logging
 import sys
@@ -109,3 +113,48 @@ class AnsiHumanFriendlyFormatter(HumanFriendlyFormatter):
             width=CONSOLE.width,
         ).print(markup, end="", soft_wrap=True)
         return buf.getvalue()
+
+
+def _module_of(filename: str) -> str:
+    """Dotted module for a traceback frame's file, best effort: the longest
+    sys.path entry that holds it, else the bare file stem."""
+    for root in sorted((p for p in sys.path if p), key=len, reverse=True):
+        prefix = root.rstrip(os.sep) + os.sep
+        if filename.startswith(prefix):
+            return filename[len(prefix):].removesuffix(".py").replace(os.sep, ".")
+    return os.path.splitext(os.path.basename(filename))[0]
+
+
+class HostedJsonFormatter(logging.Formatter):
+    """One JSON line per record for a hosted tenant's journal (ADR-0085 point 8,
+    built by ADR-0100 point 2).
+
+    A record keeps its template and never its arguments: `msg` is the format
+    string before `%`, an exception is its type and its frames, and str(exc),
+    args and locals are never written, because any of them can carry a
+    student's notes or a provider's key. A logger outside `silica.*` loses
+    `msg` as well: litellm builds its messages with f-strings, the exception's
+    text included, so there is no template to keep. `silica.metrics` records
+    (silica/metrics.py) are written as their event and fields.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        ts = datetime.fromtimestamp(record.created, timezone.utc).isoformat(
+            timespec="milliseconds").replace("+00:00", "Z")
+        if record.name == "silica.metrics":
+            return json.dumps({"ts": ts, "event": str(record.msg), **getattr(record, "metrics", {})},
+                              ensure_ascii=False, separators=(",", ":"))
+        out: dict[str, Any] = {"ts": ts, "logger": record.name, "level": record.levelname}
+        if record.name == "silica" or record.name.startswith("silica."):
+            # logger.warning(exc) passes the exception itself as msg: its
+            # str() is the text the template rule keeps out, so only its type.
+            out["msg"] = record.msg if isinstance(record.msg, str) else f"<{type(record.msg).__name__}>"
+        if record.exc_info and record.exc_info[0] is not None:
+            cls, tb = record.exc_info[0], record.exc_info[2]
+            out["exc"] = {
+                "type": cls.__qualname__ if cls.__module__ == "builtins"
+                else f"{cls.__module__}.{cls.__qualname__}",
+                "frames": [f"{_module_of(f.filename)}:{f.name}:{f.lineno}"
+                           for f in traceback.extract_tb(tb)],
+            }
+        return json.dumps(out, ensure_ascii=False, separators=(",", ":"))
