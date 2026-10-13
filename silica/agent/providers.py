@@ -148,6 +148,16 @@ def model_limits(provider: str, model: str) -> tuple[int, int]:
     return value
 
 
+def _llama_props_window(base_url: str) -> int:
+    """llama-server's /props: the window one request gets. With a unified KV
+    (`kv_unified = 'true'` in b10053's load log, 4 slots) every slot reports
+    the whole cache, which concurrent requests share. Raises on a server that
+    has no /props (any other OpenAI-compatible one): the caller's (0, 0)."""
+    base = base_url.rstrip("/").removesuffix("/v1")
+    props = httpx.get(f"{base}/props", timeout=5.0).json()
+    return int((props.get("default_generation_settings") or {}).get("n_ctx") or 0)
+
+
 def _model_limits_fetch(provider: str, model: str) -> tuple[int, int]:
     try:
         if provider == "ollama":
@@ -168,6 +178,9 @@ def _model_limits_fetch(provider: str, model: str) -> tuple[int, int]:
             entry = next(m for m in data if m["id"] == wanted)
             window = entry.get("loaded_context_length") or entry.get("max_context_length") or 0
             return int(window), 0
+        if provider == "custom":
+            from silica.config import CONFIG
+            return _llama_props_window(CONFIG.provider_base_url or ""), 0
         if provider == "openrouter":
             data = httpx.get("https://openrouter.ai/api/v1/models", timeout=5.0).json()["data"]
             wanted = model.removeprefix("openrouter/")
@@ -267,6 +280,7 @@ class Provider:
         temperature: float | None = None,
         reasoning: bool | None = None,
         cancel: "threading.Event | None" = None,
+        sdk_retries: int | None = None,
     ) -> LLMResponse:
         """`cancel` marks the call abandoned: a caller that bounds this with its
         own wall-clock deadline sets it when that deadline fires, so retry_transient
@@ -296,6 +310,7 @@ class Provider:
             # lane's: the distiller's output is prose the trace may improve.
             reasoning=reasoning,
             cancel=cancel,
+            sdk_retries=sdk_retries,
         )
 
 

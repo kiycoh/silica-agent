@@ -106,3 +106,14 @@ def test_custom_host_that_rejects_the_switch_is_retried_without():
     with patch("litellm.completion", side_effect=_strict) as second:
         call_llm(model="custom/strict-host", messages=[{"role": "user", "content": "hi"}], reasoning=False)
     assert second.call_count == 1, "the refusal is paid once per process"
+
+
+def test_sdk_retries_reach_the_client():
+    """The OpenAI client retries every 5xx twice by itself: at temperature 0 a
+    llama-server parse 500 regenerated the same reply three times (2026-10-12)."""
+    with patch("litellm.completion", return_value=litellm_mock_response("ok")) as completion:
+        call_llm(model="custom/qwen-local", messages=[{"role": "user", "content": "hi"}], sdk_retries=0)
+    assert completion.call_args.kwargs.get("max_retries") == 0
+    with patch("litellm.completion", return_value=litellm_mock_response("ok")) as completion:
+        call_llm(model="custom/qwen-local", messages=[{"role": "user", "content": "hi"}])
+    assert "max_retries" not in completion.call_args.kwargs

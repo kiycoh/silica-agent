@@ -285,13 +285,21 @@ class Coordinator:
             from silica.kernel.link.sweep import sweep_dangling_links
             from silica.kernel.write.provenance import read_records
 
+            from silica.kernel import progress as _progress
+
             run_id = getattr(getattr(self.fsm, "progress", None), "run_id", None)
             if not run_id:
                 return
+            records = read_records()
+            # Runs a Ctrl+C stopped never reached this sweep (their marker is
+            # Orchestrator._mark_interrupted). Only those this vault holds
+            # records of are taken in and cleared: another vault's stays.
+            stopped = {p.parent.name for p in _progress._RUNS_DIR.glob("*/interrupted")}
+            stopped &= {r.get("run_id") for r in records}
             notes = {
                 n
-                for r in read_records()
-                if r.get("run_id") == run_id
+                for r in records
+                if r.get("run_id") == run_id or r.get("run_id") in stopped
                 for n in (r.get("notes") or [])
             }
             notes.update(self._run_written_under_target())
@@ -299,6 +307,8 @@ class Coordinator:
             if not ordered:
                 return
             summary = sweep_dangling_links(ordered)
+            for rid in stopped:
+                (_progress.run_dir_for(rid) / "interrupted").unlink(missing_ok=True)
             if summary["links_stripped"] or summary["links_relinked"]:
                 result["link_sweep"] = {
                     "notes_edited": summary["notes_edited"],

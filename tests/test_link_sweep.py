@@ -167,3 +167,35 @@ class TestPunctuationVariantsAreRelinked:
 
         assert summary["links_stripped"] == 1
         assert "[[" not in (vault / "A.md").read_text().split("---\n")[-1]
+
+
+def test_the_next_run_sweeps_what_an_interrupted_run_landed(tmp_vault, monkeypatch, tmp_path):
+    """2026-10-12: a 14-lecture run stopped by Ctrl+C after Lezione 5 left 34
+    links to ideas that never landed; its sweep never ran and the resumed run
+    swept only the notes it wrote itself."""
+    import time
+
+    import silica.kernel.progress as prog
+    from silica.kernel.write.provenance import append_record
+    from silica.router.coordinator import Coordinator
+
+    monkeypatch.setattr(prog, "_RUNS_DIR", tmp_path / "runs")
+    tmp_vault.note("T/A.md", "---\nAI: true\n---\n\nSee [[Never Written]] here.\n")
+    append_record("Lezione 1.md", "sha-1", "stopped-run", ["T/A"])
+    marker = prog.run_dir_for("stopped-run") / "interrupted"
+    marker.parent.mkdir(parents=True)
+    marker.touch()
+    foreign = prog.run_dir_for("other-vault-run") / "interrupted"
+    foreign.parent.mkdir(parents=True)
+    foreign.touch()
+
+    coord = Coordinator(inbox_files=["Inbox/x.md"], target_dir="T")
+    coord._run_started = time.time()
+    coord._sweep_dangling_links({})
+
+    from pathlib import Path
+    from silica.config import CONFIG
+    text = (Path(CONFIG.vault_path) / "T/A.md").read_text(encoding="utf-8")
+    assert "[[Never Written]]" not in text and "Never Written" in text
+    assert not marker.exists()
+    assert foreign.exists()   # no record of it in this vault: not this vault's to clear

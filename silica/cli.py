@@ -2273,9 +2273,15 @@ def _pick_target_folder(md_files: list[str]) -> str:
             # before guessing (473 completion tokens for two words, 2026-08-23).
             else "(no folders yet: this vault holds only its inbox, so name a "
                  "sensible new top-level folder)"
-        ) + f"\n\nContent excerpt ({md_files[0]}):\n{excerpt}"
+        # The file's name, not its inbox path: shown `Inbox/machine_learning/
+        # Lezione 1.md`, a Qwen3.5-9B answered `machine_learning` (2026-10-12).
+        ) + f"\n\nContent excerpt ({Path(md_files[0]).name}):\n{excerpt}"
     )
-    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=2048)
+    # reasoning=False: the answer is one line, and a hybrid model left to think
+    # spent all 2048 tokens on its trace and answered "" (Qwen3.5-9B on
+    # llama-server, 2026-10-12), which dropped the batch to a full agent turn.
+    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=2048,
+                    reasoning=False)
     lines = [ln.strip().strip('"').strip("`").rstrip("/") for ln in (resp.text or "").splitlines()]
     pick = next((ln for ln in lines if ln), "")
     if not pick:
@@ -2290,7 +2296,27 @@ def _pick_target_folder(md_files: list[str]) -> str:
     # still has a fallback, rather than letting an absolute or `..`-bearing
     # pick reach the driver: `in_write_dir` only prefixes, it never normalises.
     norm = contain_in_vault(pick.replace("\\", "/"), Path(CONFIG.vault_path))
-    if is_inbox_path(f"{norm}/x.md"):
+    # The same folder spelt another way lands in the one the vault has: three
+    # runs of the same 14 lectures answered `machine_learning`, `Inbox/
+    # machine_learning` and `Machine learning` for the existing `Machine
+    # learning` (2026-10-12), and a new sibling splits the notes from their hub.
+    # A full-path match first, then a unique folder of the same name anywhere.
+    # A pick inside the inbox is matched on what follows the inbox and kept
+    # only when it matches: otherwise it is the source's own folder echoed
+    # back, and the agent fallback chooses instead of a new inbox-named folder.
+    parts = Path(norm).parts
+    in_inbox = bool(parts) and parts[0] == inbox
+    if in_inbox:
+        norm = "/".join(parts[1:])
+    if norm and norm not in listed:
+        def fold(s: str) -> str:
+            return re.sub(r"[\s_\-]+", " ", s).strip().casefold()
+        same = [f for f in listed if fold(f) == fold(norm)]
+        if not same and "/" not in norm:
+            same = [f for f in listed if fold(Path(f).name) == fold(norm)]
+        if len(same) == 1:
+            norm = same[0]
+    if not norm or (in_inbox and norm not in listed) or is_inbox_path(f"{norm}/x.md"):
         raise ValueError(f"folder pick {pick!r} lands in the inbox")
     return norm
 
@@ -2815,6 +2841,17 @@ def _nucleate_expand_folders(
                         f"{len(photos)} documents; /nucleate an image "
                         f"explicitly to OCR it on its own[/]"
                     )
+            # A converted document's own figures are not sources: 14 lectures
+            # in Inbox/machine_learning queued the 129 images/ they embed as
+            # 129 more runs (2026-10-12). What a note of this batch embeds
+            # stays put; a screenshot no note embeds is still OCR input.
+            paths, names = _embedded_in(group)
+            figures = [p for p in pending
+                       if p in paths or Path(p).name.casefold() in names]
+            if figures:
+                pending = [p for p in pending if p not in figures]
+                CONSOLE.print(f"  [dim]{f}: left {len(figures)} file(s) "
+                              f"its notes embed alone[/]")
             if group or pending:
                 detail = f"[bold]{len(group)}[/] note(s)" if group else ""
                 if pending:
@@ -2825,6 +2862,35 @@ def _nucleate_expand_folders(
         expanded.extend(group or [f])
     files = list(dict.fromkeys(expanded))
     return files, run_root
+
+
+_MD_EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)>\s]+)")
+_WIKI_EMBED_RE = re.compile(r"!\[\[([^\]|#]+)")
+
+
+def _embedded_in(notes: list[str]) -> tuple[set[str], set[str]]:
+    """What `notes` embed: vault-relative paths from `![](rel)` (resolved
+    against the note's folder) and the names in `![[name]]`, which Obsidian
+    resolves by name anywhere in the vault, casefolded."""
+    import posixpath
+    from urllib.parse import unquote
+
+    paths: set[str] = set()
+    names: set[str] = set()
+    root = Path(CONFIG.vault_path)
+    for note in notes:
+        try:
+            text = (root / note).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # A note gone between the listing and this read embeds nothing;
+            # its figures then convert as before, which is today's behaviour.
+            continue
+        base = posixpath.dirname(note)
+        for target in _MD_EMBED_RE.findall(text):
+            if "://" not in target:
+                paths.add(posixpath.normpath(posixpath.join(base, unquote(target))))
+        names.update(t.strip().rsplit("/", 1)[-1].casefold() for t in _WIKI_EMBED_RE.findall(text))
+    return paths, names
 
 
 def _nucleate_zotero(
@@ -3286,6 +3352,17 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
                 segs = pending.result()
             except (ValueError, RuntimeError) as e:
                 CONSOLE.print(f"  [yellow]Skipped {src}: {e}[/]")
+                if "CUDA out of memory" in str(e):
+                    # The GPU stays full until something else lets go of it, so
+                    # every later file fails the same way: 129 in a row at ~8 s
+                    # each beside a 9B chat server (2026-10-12). They stay in
+                    # the inbox for a run once the GPU is free.
+                    left = len(to_convert) - i - 1
+                    if left:
+                        CONSOLE.print(f"  [yellow]GPU out of memory: left {left} "
+                                      f"file(s) unconverted; free the GPU and "
+                                      f"/nucleate again[/]")
+                    break
                 segs = []
             if i in leaf_prior and segs and undo_run:  # leaf_prior fills only under an undo_run
                 from silica.sources.registry import _record_inverse

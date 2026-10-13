@@ -305,6 +305,31 @@ def test_run_outliner_call_plan_and_result_shape():
     assert "Support vector machines" in res["outline"]["skips"][0]["section"]
 
 
+def test_run_outliner_lands_the_lecture_when_stage_b_fails():
+    """2026-10-12, Qwen3.5-9B on llama-server: stage B ran away past 30k chars
+    of edges twice (finish=length at 4000 and 8000 tokens) and the ValueError
+    rolled back Lezioni 9 and 11 with every idea and body already written."""
+    def ask(system: str, user: str, *, max_tokens: int, **kw) -> dict:
+        if system.startswith(ol.STAGE_A_TAG):
+            return _OUTLINE_JSON
+        if system.startswith(ol.STAGE_GAP_TAG):
+            return {"ideas": [], "skips": []}
+        if system.startswith(ol.STAGE_BODIES_TAG):
+            titles = re.findall(r'^- "(.+?)" \(section: ', user.split("IDEAS:\n", 1)[1], re.M)
+            return {"bodies": {t: f"corpo di {t}" for t in titles}}
+        raise ValueError("outline stage returned no JSON after retry (finish=length)")
+
+    res = ol.run_outliner(
+        source_text=_SRC, source_basename="Lezione 11.md", target="ML", hub="Machine learning",
+        language="Italian",
+        vault_outline=[{"title": "Margine", "claim": "Distanza.", "lesson": "Lezione 10", "path": "ML/Margine.md"}],
+        ask=ask,
+    )
+    heads = {o["heading"] for o in res["updates"] if o["op"] == "write"}
+    assert {"Margine geometrico", "Errore del percettrone online"} <= heads
+    assert not any(o["path"] == "ML/Margine.md" for o in res["updates"])  # no cross edge was invented
+
+
 def test_run_outliner_bodies_in_batches_and_no_stage_b_on_empty_vault():
     big = {"lesson_title": "t", "spine": [f"Idea {i}" for i in range(11)],
            "ideas": [{"title": f"Idea {i}", "section": "S", "claim": "c", "depends_on": []} for i in range(11)]}
@@ -437,6 +462,34 @@ def test_run_outliner_survives_a_failed_bodies_batch():
     res = ol.run_outliner(source_text=_SRC, source_basename="L.md", target="T", hub="H",
                           language="Italian", vault_outline=[], ask=ask)
     assert len(calls) == 2 and set(calls[1]) == set(calls[0])  # the re-ask names the whole batch
+    assert res["missing_bodies"] == ["Errore del percettrone online"]
+    assert any(o["heading"] == "Margine geometrico" and "corpo 1" in o["snippet"] for o in res["updates"])
+
+
+def test_run_outliner_survives_a_server_error_on_a_bodies_batch():
+    """2026-10-12, llama-server b10053 + Qwen3.5-9B: the chat parser rejected a
+    finished plain-markdown reply with a 500 ("does not match the expected
+    peg-native format"), the same reply on every retry at temperature 0, and
+    the exception rolled back the whole lecture (Lezione 8)."""
+    import litellm
+
+    replies = [litellm.InternalServerError(
+        message="The model produced output that does not match the expected peg-native format",
+        llm_provider="openai", model="custom/qwen3.5-9b"),
+        {"bodies": {"Margine geometrico": "corpo 1"}}]
+
+    def ask(system: str, user: str, *, max_tokens: int, **kw) -> dict:
+        if system.startswith(ol.STAGE_A_TAG):
+            return _OUTLINE_JSON
+        if system.startswith(ol.STAGE_GAP_TAG):
+            return {"ideas": [], "skips": []}
+        r = replies.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    res = ol.run_outliner(source_text=_SRC, source_basename="L.md", target="T", hub="H",
+                          language="Italian", vault_outline=[], ask=ask)
     assert res["missing_bodies"] == ["Errore del percettrone online"]
     assert any(o["heading"] == "Margine geometrico" and "corpo 1" in o["snippet"] for o in res["updates"])
 
@@ -907,6 +960,28 @@ def test_flag_cosine_near_titles_sends_a_look_alike_to_the_judge():
     assert "review" not in ops[5]                                      # a superseded loser is not a target
 
 
+def test_flag_cosine_near_titles_never_flags_a_note_against_itself_in_the_store_shape():
+    """The embed store keys notes without `.md` (WRITE's refresh_note gets
+    `path.removesuffix(".md")`) while ops carry it, so the self-exclusion never
+    matched: probed 2026-10-12 on a landed lecture, an idea was flagged as the
+    duplicate of its own note at cosine .96."""
+    ops = [{"op": "write", "path": "ML/Stesso.md", "heading": "Stesso", "title": "Stesso",
+            "snippet": "corpo", "section": "S"}]
+
+    class Store:
+        def cosine_top_k(self, vec, k=5, exclude=None):
+            return [{"path": "ML/Stesso", "name": "Stesso", "score": 0.96},
+                    {"path": "ML/Vicino", "name": "Vicino", "score": 0.90}]
+
+    class Emb:
+        def embed(self, texts, query=False):
+            return list(texts)
+
+    assert ol.flag_cosine_near_titles(ops, tau=0.85, embedder=Emb(), store=Store(),
+                                      hidden=lambda p: False) == 1
+    assert "candidate='Vicino'" in ops[0]["review"]
+
+
 def test_flag_cosine_near_titles_fails_open_without_an_embedder():
     ops = [{"op": "write", "path": "ML/A.md", "heading": "A", "title": "A", "snippet": "corpo", "section": "S"}]
 
@@ -957,3 +1032,98 @@ def test_the_language_pin_reads_the_whole_first_chunk(monkeypatch):
         math + "## Margine\nIl margine geometrico è la distanza euclidea dall'iperpiano di separazione.")])
     assert len(math) > 4000
     assert fsm.context["file_0_language"] == "Italian"
+
+
+def test_bodies_pool_fits_the_local_window(monkeypatch):
+    """Four bodies calls of ~8.2k tokens filled a 4B's unified 32k KV and 500d
+    "Context size has been exceeded" 39 times (2026-10-12)."""
+    from silica.config import CONFIG
+    monkeypatch.setattr(CONFIG, "worker_provider", None)
+    monkeypatch.setattr(CONFIG, "worker_model", None)
+    monkeypatch.setattr(CONFIG, "_provider", "custom")
+    monkeypatch.setattr(CONFIG, "model", "custom/qwen3.5-4b")
+    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (32768, 0))
+    src = "x" * 16000                     # a 16 KB lecture
+    assert ol.bodies_workers_for(src) == 2
+    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (65536, 0))
+    assert ol.bodies_workers_for(src) == 5
+    monkeypatch.setattr("silica.agent.providers.model_limits", lambda p, m: (0, 0))
+    assert ol.bodies_workers_for(src) == ol.BODIES_WORKERS   # unknown window: as before
+    monkeypatch.setattr(CONFIG, "_provider", "openrouter")
+    assert ol.bodies_workers_for(src) == ol.BODIES_WORKERS   # hosted: independent contexts
+
+
+def test_outline_calls_skip_the_sdk_retries(monkeypatch):
+    """Every outline call runs at temperature 0, so a server 500 retried by the
+    client regenerates the same reply: the stage's own re-ask is the retry."""
+    seen: dict = {}
+
+    class _P:
+        def call_llm(self, **kw):
+            seen.update(kw)
+            return type("R", (), {"text": '{"ideas": []}', "finish_reason": "stop"})()
+
+    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _P())
+    ol._default_ask(ol.STAGE_GAP_TAG, "u", max_tokens=10)
+    assert seen.get("sdk_retries") == 0
+
+
+def test_skeleton_writes_a_shouted_heading_the_way_the_lecture_spells_it():
+    """Qwen3.5-9B copied 33 slide headings as note titles in the coverage pass,
+    "STORIA DELL'AI: TEST DI TURING" among them (2026-10-12). Each word takes
+    the spelling the lecture's body uses; one the body only writes in capitals
+    is an acronym, one only the headings use goes lower case."""
+    src = ("## STORIA DELL'AI: TEST DI TURING\n\nIl test di Turing chiede se una macchina "
+           "imita l'AI di una persona; Turing lo propose nel 1950.\n\n"
+           "## Percettrone di Rosenblatt\n\nIl percettrone classifica.\n")
+
+    def ask(system: str, user: str, *, max_tokens: int, **kw) -> dict:
+        if system.startswith(ol.STAGE_A_TAG):
+            return {"lesson_title": "t", "spine": ["Percettrone di Rosenblatt"],
+                    "ideas": [{"title": "Percettrone di Rosenblatt", "section": "Percettrone di Rosenblatt",
+                               "claim": "c", "depends_on": []}]}
+        return {"ideas": [
+            {"title": "STORIA DELL'AI: TEST DI TURING", "section": "STORIA DELL'AI: TEST DI TURING",
+             "claim": "c", "depends_on": []},
+            {"title": "Criterio di Turing", "section": "STORIA DELL'AI: TEST DI TURING", "claim": "c",
+             "depends_on": [{"title": "STORIA DELL'AI: TEST DI TURING", "relation": "derives",
+                             "why": "il criterio nasce dal test"}]},
+        ], "skips": []}
+
+    out = ol.skeleton(src, language="Italian", ask=ask)
+    assert "Storia dell'AI: test di Turing" in out.titles()
+    assert "STORIA DELL'AI: TEST DI TURING" not in out.titles()
+    crit = next(i for i in out.ideas if i.title == "Criterio di Turing")
+    assert [d["title"] for d in crit.depends_on] == ["Storia dell'AI: test di Turing"]
+
+
+def test_a_reply_the_server_cannot_parse_is_asked_once_more_off_temperature_zero(monkeypatch):
+    """llama-server b10053 500s a finished Qwen3.5 reply its chat parser cannot
+    read. At temperature 0 every retry is that reply again: Lezione 8 failed the
+    same batch twice and lost 4 ideas (2026-10-12). One ask at 0.3 is a
+    different reply; any other 500 is raised as before."""
+    import litellm
+
+    seen: list[float] = []
+
+    class _P:
+        def __init__(self, fail_with: str):
+            self.fail_with = fail_with
+
+        def call_llm(self, **kw):
+            seen.append(kw["temperature"])
+            if kw["temperature"] == 0.0:
+                raise litellm.InternalServerError(message=self.fail_with, llm_provider="openai", model="m")
+            return type("R", (), {"text": "### IDEA: A\ncorpo", "finish_reason": "stop"})()
+
+    parse = "The model produced output that does not match the expected peg-native format"
+    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: _P(parse))
+    assert ol._default_ask(ol.STAGE_BODIES_TAG, "u", max_tokens=10, raw=True) == {"text": "### IDEA: A\ncorpo"}
+    assert seen == [0.0, 0.3]
+
+    seen.clear()
+    monkeypatch.setattr("silica.agent.providers.get_provider",
+                        lambda *a, **k: _P("Context size has been exceeded."))
+    with pytest.raises(litellm.InternalServerError):
+        ol._default_ask(ol.STAGE_BODIES_TAG, "u", max_tokens=10, raw=True)
+    assert seen == [0.0]

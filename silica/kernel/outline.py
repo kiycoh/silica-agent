@@ -61,6 +61,8 @@ BODIES_BATCH = 4            # ideas per bodies call. Was 8: the wall time of a l
                             # flash (2026-09-05); four ideas halve the stream, the pool below runs them.
 BODIES_WORKERS = 6          # concurrent bodies calls per file: the batches are independent, and one
                             # lecture of 4 batches spent 12 of its 13 minutes on them in series (2026-09-05)
+BODIES_REPLY_TOKENS = 4000  # what one bodies call adds to the KV beyond its prompt: four 4-idea calls
+                            # overflowed a 32k unified KV at ~8.2k tokens each on a 4.6k prompt (2026-10-12)
 MAX_EDGES_PER_TARGET = 3    # a target with more is a hub in disguise, not three real dependencies
 MIN_WHY_CHARS = 20          # "e' collegato" is not a reason
 MAX_OUTLINE_ROWS = 400      # ponytail: folder-scoped outline; reopen at 400 notes in one folder, then seed with cosine top-k
@@ -567,7 +569,11 @@ def flag_cosine_near_titles(ops: list[dict], *, tau: float, embedder=None, store
             path, score = str(h["path"]), float(h["score"])
             if score < tau:
                 break
-            if path == o["path"] or is_inbox_path(path) or hidden(path):
+            # The store keys a note without `.md` (WRITE refreshes it under
+            # `path.removesuffix(".md")`) and the op carries it: compared raw,
+            # an idea matched its own landed note at .96 (2026-10-12).
+            if path.removesuffix(".md") == o["path"].removesuffix(".md") \
+                    or is_inbox_path(path) or hidden(path):
                 continue
             o["review"] = f"near_title candidate='{h['name']}' path='{path}' ratio={score:.2f}"
             flagged += 1
@@ -764,6 +770,30 @@ def _unwrap_string_encoded(text: str) -> str:
         return text
 
 
+def bodies_workers_for(source_text: str) -> int:
+    """How many bodies calls the worker's context holds at once.
+
+    A hosted provider gives each request its own context, so BODIES_WORKERS
+    stands. llama-server shares one KV across its slots: a 4B at 32k took four
+    concurrent calls of ~8.2k tokens and 500d "Context size has been exceeded"
+    39 times (2026-10-12). Unknown window: BODIES_WORKERS, as before.
+    """
+    from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
+    from silica.agent.providers import model_limits
+    from silica.config import CONFIG
+
+    provider, model = CONFIG.worker_provider, CONFIG.worker_model
+    if not provider or not model:
+        provider, model = CONFIG.provider, CONFIG.model
+    if provider != "custom":
+        return BODIES_WORKERS
+    window, _ = model_limits(provider, model or "")
+    if not window:
+        return BODIES_WORKERS
+    per_call = (len(STAGE_BODIES) + len(source_text)) // TEXT_CHARS_PER_TOKEN + BODIES_REPLY_TOKENS
+    return max(1, min(BODIES_WORKERS, window // per_call))
+
+
 def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False) -> dict:
     """One JSON reply from the worker model, no tools, no thinking; `raw`
     returns {"text": reply} for the marker-delimited bodies stage (one retry
@@ -790,12 +820,31 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False) 
         # Wall-clock bound, same helper and knob as run_distiller: a dead
         # upstream keeps the socket alive with keep-alive bytes, and the first
         # live run of this lane (2026-09-02) sat ten minutes on one such call.
-        abandoned = threading.Event()
-        resp = _call_with_deadline(lambda: provider.call_llm(
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            tools=None, response_schema=schema, max_tokens=max_tokens, temperature=0.0,
-            reasoning=False, openrouter_provider=CONFIG.openrouter_provider_distiller, cancel=abandoned,
-        ), float(os.getenv("DISTILLER_TIMEOUT", "300")), abandoned)
+        def _once(temperature: float, schema=schema):
+            abandoned = threading.Event()
+            return _call_with_deadline(lambda: provider.call_llm(
+                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                tools=None, response_schema=schema, max_tokens=max_tokens, temperature=temperature,
+                reasoning=False, openrouter_provider=CONFIG.openrouter_provider_distiller, cancel=abandoned,
+                # Temperature 0: a 500 the client retried came back as the same
+                # reply, three times on Lezione 8 (llama-server, 2026-10-12). This
+                # loop and the stage's re-ask are the retries.
+                sdk_retries=0,
+            ), float(os.getenv("DISTILLER_TIMEOUT", "300")), abandoned)
+
+        from litellm import InternalServerError
+        try:
+            resp = _once(0.0)
+        except InternalServerError as exc:
+            # llama-server b10053 500s a finished Qwen3.5 reply its chat parser
+            # cannot read ("does not match the expected peg-native format").
+            # At temperature 0 every retry is that reply again: Lezione 8 lost
+            # the same 4 ideas twice (2026-10-12). One ask off zero is a
+            # different reply; any other 500 is the caller's, as before.
+            if "does not match the expected" not in str(exc):
+                raise
+            logger.warning("outline stage: server could not parse the reply, asking once at 0.3")
+            resp = _once(0.3)
         if resp is None:
             raise TimeoutError("outline stage call abandoned")
         if raw:
@@ -872,7 +921,7 @@ def skeleton(src: str, *, language: str, ask: Callable[..., dict]) -> Outline:
     outline = parse_outline(ask(STAGE_A.format(lang=language, rels=rels), src, max_tokens=8000))
     gaps = coverage_gaps(outline, source_headings(src))
     if not gaps:
-        return outline
+        return _unshout(outline, src)
     extra = ask(STAGE_GAP.format(gaps="\n".join(f"- {g}" for g in gaps), lang=language, rels=rels),
                 "IDEAS SO FAR:\n" + "\n".join(f"{i.title} | {i.section}" for i in outline.ideas)
                 + "\n\nSOURCE:\n" + src, max_tokens=4000)
@@ -887,7 +936,53 @@ def skeleton(src: str, *, language: str, ask: Callable[..., dict]) -> Outline:
     merged = parse_outline({"lesson_title": outline.lesson_title, "spine": outline.spine,
                             "ideas": [i.__dict__ for i in outline.ideas] + filled})
     merged.skips = [s for s in (extra.get("skips") or []) if isinstance(s, dict)]
-    return merged
+    return _unshout(merged, src)
+
+
+_WORD_RE = re.compile(r"[^\W\d_]+")
+_HEADING_LINE_RE = re.compile(r"(?m)^[ \t]*#{1,6}\s.*$")
+
+
+def _unshout(outline: Outline, src: str) -> Outline:
+    """An idea titled in capitals gets each word as the lecture's body spells it.
+
+    Qwen3.5-9B copied 33 slide headings as titles in the coverage pass ("STORIA
+    DELL'AI: TEST DI TURING", 2026-10-12). The body decides, not a rule on word
+    length, which would keep the Italian "DI" and "DELL" as acronyms: a word the
+    body writes in lower or title case takes its commonest such spelling, one
+    the body only writes in capitals is an acronym and stays, one only the
+    headings use goes lower case. Spine and depends_on follow the rename.
+    """
+    from collections import Counter
+
+    shouted = [i for i in outline.ideas
+               if (letters := "".join(_WORD_RE.findall(i.title))) and letters.isupper() and len(letters) > 1]
+    if not shouted:
+        return outline
+    forms: dict[str, Counter] = {}
+    for w in _WORD_RE.findall(_HEADING_LINE_RE.sub("", src)):
+        forms.setdefault(w.casefold(), Counter())[w] += 1
+
+    def spell(m: re.Match) -> str:
+        seen = forms.get(m.group(0).casefold())
+        if not seen:
+            return m.group(0).lower()
+        quiet = [w for w, _ in seen.most_common() if not w.isupper()]
+        return quiet[0] if quiet else m.group(0)
+
+    rename: dict[str, str] = {}
+    for idea in shouted:
+        new = _WORD_RE.sub(spell, idea.title)
+        new = new[:1].upper() + new[1:]
+        if new not in outline.titles():
+            rename[idea.title] = new
+    for idea in outline.ideas:
+        idea.title = rename.get(idea.title, idea.title)
+        for d in idea.depends_on:
+            if d.get("title") in rename:
+                d["title"] = rename[d["title"]]
+    outline.spine = [rename.get(t, t) for t in outline.spine]
+    return outline
 
 
 def run_outliner(*, source_text: str, source_basename: str, target: str, hub: str | None,
@@ -901,8 +996,10 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     bodies, so only those are regenerated (with the feedback appended) and the
     outline, spine and edges are not paid for again.
     """
-    ask = ask or _default_ask
     src = strip_images(source_text)
+    # Sized only for the real worker: an injected `ask` is a test or a probe.
+    workers = BODIES_WORKERS if ask else bodies_workers_for(src)
+    ask = ask or _default_ask
     if outline is None:
         outline = skeleton(src, language=language, ask=ask)
     titles = [i.title for i in outline.ideas if only_titles is None or i.title in only_titles]
@@ -916,13 +1013,17 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
             f'- "{t}" (section: {section_of[t]})' for t in batch)
         if steer_context:
             user += "\n\nPREVIOUS ATTEMPT WAS REJECTED:\n" + steer_context
+        from litellm import InternalServerError
         try:
             reply = ask(STAGE_BODIES.format(lang=language), user, max_tokens=12000, raw=True)
-        except (ValueError, TimeoutError) as exc:
+        except (ValueError, TimeoutError, InternalServerError) as exc:
             # One batch must not take the lecture down: Lezione 8 landed 0
             # notes when a batch failed twice (2026-09-05). Its titles go to
             # the re-ask and, at worst, land as claim-only notes flagged for
             # review, which the source kept in the inbox does not.
+            # InternalServerError since 2026-10-12: llama-server b10053 500s a
+            # finished Qwen3.5 reply its chat parser cannot read, the same reply
+            # on every retry at temperature 0, and it rolled back Lezione 8 whole.
             logger.warning("outline bodies: batch of %d failed (%s); asking again for its titles", len(batch), exc)
             return {}
         bodies = _parse_bodies_text(reply["text"], batch) if "text" in reply else reply
@@ -936,7 +1037,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     from concurrent.futures import ThreadPoolExecutor
     batches = [titles[k:k + BODIES_BATCH] for k in range(0, len(titles), BODIES_BATCH)]
     got: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=max(1, min(BODIES_WORKERS, len(batches)))) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(batches)))) as pool:
         for part in pool.map(_bodies, batches):
             got.update(part)
     missing = [t for t in titles if t not in got]
@@ -952,10 +1053,20 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     edges: list[dict] = []
     existing = {r["title"]: r["path"] for r in vault_outline}
     if vault_outline and only_titles is None:
-        reply = ask(STAGE_B.format(lang=language, rels=", ".join(CROSS_RELATIONS)),
-                    "EXISTING NOTES:\n" + "\n".join(f"{r.get('lesson', '')} | {r['title']} | {r.get('claim', '')}" for r in vault_outline)
-                    + "\n\nNEW SOURCE IDEAS:\n" + "\n".join(f"{i.title} | {i.claim}" for i in outline.ideas),
-                    max_tokens=4000)
+        from litellm import InternalServerError
+        try:
+            reply = ask(STAGE_B.format(lang=language, rels=", ".join(CROSS_RELATIONS)),
+                        "EXISTING NOTES:\n" + "\n".join(f"{r.get('lesson', '')} | {r['title']} | {r.get('claim', '')}" for r in vault_outline)
+                        + "\n\nNEW SOURCE IDEAS:\n" + "\n".join(f"{i.title} | {i.claim}" for i in outline.ideas),
+                        max_tokens=4000)
+        except (ValueError, TimeoutError, InternalServerError) as exc:
+            # The cross-lecture edges are the one optional stage: the ideas and
+            # bodies above are the lecture. Qwen3.5-9B ran stage B past 30k chars
+            # twice (finish=length at 4000 and 8000 tokens, 2026-10-12) and the
+            # raise rolled back Lezioni 9 and 11 whole. Without the edges the
+            # notes still land; links to earlier lectures are what is lost.
+            logger.warning("outline stage B failed (%s); the lecture lands without cross edges", exc)
+            reply = {}
         edges = select_edges(reply.get("edges") or [], ideas=set(outline.titles()), existing=existing,
                              spine_titles={r["title"] for r in vault_outline if r.get("spine")})
     ops = outline_ops(outline, target=target, hub=hub, source_basename=source_basename,

@@ -345,6 +345,62 @@ def test_folder_pick_prompt_says_when_the_vault_has_no_folders(tmp_vault, monkey
     assert "no folders yet" in prompt
 
 
+def test_folder_pick_turns_thinking_off(tmp_vault, monkeypatch):
+    """2026-10-12, /nucleate on llama-server Qwen3.5-9B: the pick thought for
+    30 s, hit its 2048-token cap with no answer (finish=length, text='') and
+    the batch fell back to a full agent turn to choose the folder."""
+    import silica.agent.llm as llm
+    from silica.cli import _pick_target_folder
+
+    captured: dict = {}
+
+    def fake(model, messages, **kw):
+        captured.update(kw)
+        return _Reply("Concepts")
+
+    monkeypatch.setattr(llm, "call_llm", fake)
+    tmp_vault.note("Concepts/existing.md", "census non-empty\n")
+    tmp_vault.note("Inbox/01-src.md", "body\n")
+
+    assert _pick_target_folder(["Inbox/01-src.md"]) == "Concepts"
+    assert captured.get("reasoning") is False
+
+
+@pytest.mark.parametrize("reply", ["machine_learning", "Inbox/machine_learning", "Machine learning"])
+def test_folder_pick_lands_on_the_existing_folder_it_spells_differently(tmp_vault, monkeypatch, reply):
+    """2026-10-12, three runs of the same 14 lectures, three answers: the 9B
+    made a new `machine_learning` beside the vault's `Machine learning`, a 4B
+    named the inbox folder itself and the batch fell back to an agent turn."""
+    monkeypatch.setattr("silica.agent.llm.call_llm", lambda *a, **k: _Reply(reply))
+    from silica.cli import _pick_target_folder
+
+    tmp_vault.note("Machine learning/Machine learning.md", "hub\n")
+    tmp_vault.note("Inbox/machine_learning/Lezione 1.md", "body\n")
+
+    assert _pick_target_folder(["Inbox/machine_learning/Lezione 1.md"]) == "Machine learning"
+
+
+def test_folder_pick_prompt_names_the_file_not_its_inbox_folder(tmp_vault, monkeypatch):
+    """The excerpt header carried `Inbox/machine_learning/Lezione 1.md` and the
+    model answered with the folder it read there."""
+    import silica.agent.llm as llm
+    from silica.cli import _pick_target_folder
+
+    captured: dict = {}
+
+    def fake(model, messages, **kw):
+        captured["prompt"] = messages[0]["content"]
+        return _Reply("Machine learning")
+
+    monkeypatch.setattr(llm, "call_llm", fake)
+    tmp_vault.note("Machine learning/Machine learning.md", "hub\n")
+    tmp_vault.note("Inbox/machine_learning/Lezione 1.md", "body\n")
+
+    _pick_target_folder(["Inbox/machine_learning/Lezione 1.md"])
+    assert "Lezione 1.md" in captured["prompt"]
+    assert "Inbox/machine_learning" not in captured["prompt"]
+
+
 def test_folder_pick_prompt_lists_existing_folders(tmp_vault, monkeypatch):
     import silica.agent.llm as llm
     from silica.cli import _pick_target_folder
