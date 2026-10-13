@@ -789,6 +789,10 @@ def run_agent(
             final_kwargs["cancel"] = _abandon
             final = _interruptible_llm(final_kwargs)
     except Exception as e:
+        from silica.agent.usage_limits import UsageLimited
+
+        if isinstance(e, UsageLimited):
+            raise  # the student is owed the reset time, not "maximum iterations" (ADR-0102)
         logger.warning("Forced final turn failed (%s)", e)
         return "(silica: maximum iterations reached)"
     finally:
