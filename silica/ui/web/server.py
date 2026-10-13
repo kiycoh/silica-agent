@@ -1522,13 +1522,15 @@ async def _write_stream(chunks, dest: Path, cap: int, too_big: str) -> None:
         raise
 
 
-async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]:
+async def _stage_uploads(
+        files: list[UploadFile]) -> tuple[list[str], list[str], list[tuple[str, str]]]:
     """Write uploads to Inbox and mechanically stage them, mirroring the inline
     half of `/nucleate` (silica/cli.py): PDFs convert to markdown, code/notebooks
-    become skeleton stubs, prose stays as-is. Returns (ready, stubs): markdown
-    notes ready for the injector/reading, and code stub note paths already
-    written to the vault. The semantic step (nucleate? summarize?) is the agent's,
-    driven by the user's message — see `_compose_nucleate_turn`.
+    become skeleton stubs, prose stays as-is. Returns (ready, stubs, skipped):
+    markdown notes ready for the injector/reading, code stub note paths already
+    written to the vault, and (file name, reason) for each file no lane took.
+    The semantic step (nucleate? summarize?) is the agent's, driven by the
+    user's message: see `_compose_nucleate_turn`.
 
     convert() shells out to mineru (can be minutes on a book) and stage() reads
     whole files, so both run in a worker thread: on the loop thread they blocked
@@ -1552,6 +1554,7 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
     enabled = get_active_manifest().sources
     ready: list[str] = []
     stubs: list[str] = []
+    skipped: list[tuple[str, str]] = []
     for f in files:
         # `.name` is the containment: a client-chosen filename never contributes
         # a directory, and one that is nothing but directories ("..") gets the
@@ -1577,6 +1580,7 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
                     ingest["outcome"] = "ok"
                 except ValueError as exc:
                     logger.warning("nucleate: skipped %s: %s", dest.name, exc)
+                    skipped.append((dest.name, _skip_reason(exc)))
                 continue
             result = await asyncio.to_thread(stage, adapter, rel)
             if result["status"] == "distill":       # prose → injector re-reads it
@@ -1587,9 +1591,25 @@ async def _stage_uploads(files: list[UploadFile]) -> tuple[list[str], list[str]]
                 ingest["outcome"] = "ok"
             else:
                 logger.warning("nucleate: %s: %s", dest.name, result.get("message", ""))
+                skipped.append((dest.name, _skip_reason(result.get("message") or "no lane could read it")))
         finally:
             emit("ingest", **ingest)
-    return ready, stubs
+    return ready, stubs, skipped
+
+
+def _skip_reason(exc: Exception | str) -> str:
+    """Why a dropped file was not staged, as the agent will repeat it.
+
+    A refusal admission wrote for the user goes as it is. Any other converter
+    text can carry a host path or an internal URL (the transcriber's address,
+    ffmpeg's stderr), so hosted, where raw errors stay in the log (ADR-0085
+    point 5), it becomes the vault import's sentence for the same case."""
+    from silica.config import hosted
+    from silica.sources.media_admission import MediaRefused
+
+    if isinstance(exc, MediaRefused) or not hosted():
+        return str(exc)
+    return "it could not be converted"
 
 
 # Extensions the ingest line may name. A suffix is part of the file's name,
@@ -1618,7 +1638,8 @@ def _is_mail(name: str) -> bool:
 
 
 def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
-                           mail: Sequence[str] = ()) -> str:
+                           mail: Sequence[str] = (),
+                           skipped: Sequence[tuple[str, str]] = ()) -> str:
     """The agent turn for a batch of attached files: the user's instruction plus
     a factual manifest of what got staged. Empty instruction defaults to nucleate."""
     lines: list[str] = []
@@ -1633,6 +1654,11 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
                      "or /mail import <file>, which show a dry run first and keep the threads the "
                      "user took part in. Tell the user so:")
         lines += [f"- {n}" for n in mail]
+    if skipped:
+        # Named in the turn and not only in the log: a refused or failed file
+        # otherwise vanished, and the user saw an answer about the others.
+        lines.append("Not staged, each with the reason. Tell the user which files and why:")
+        lines += [f"- {n}: {why}" for n, why in skipped]
     manifest = "\n".join(lines) if lines else "(no files could be staged)"
     base = text.strip() or (
         "Nucleate the attached file(s) into an appropriate folder; "
@@ -1646,12 +1672,12 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     try:
-        ready, stubs = await _stage_uploads(files)
+        ready, stubs, skipped = await _stage_uploads(files)
     except Exception:
         _end_turn()  # release the slot the staging never got to use
         raise
     mail = [Path(f.filename or "").name for f in files if _is_mail(Path(f.filename or "").name)]
-    return _turn_response(_compose_nucleate_turn(text, ready, stubs, mail))
+    return _turn_response(_compose_nucleate_turn(text, ready, stubs, mail, skipped))
 
 
 @app.post("/mail/upload", dependencies=_SAME_ORIGIN)
