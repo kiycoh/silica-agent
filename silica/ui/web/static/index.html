@@ -620,6 +620,23 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236"</pre>
     </div>
   </div>
 
+  <!-- flagging an answer (ADR-0100 point 6): hosted only, opened from under an
+       answer; the settings sheet's own card on a scrim of its own, since the
+       chat has no modal to hold it -->
+  <div id="flag-sheet" hidden role="dialog" aria-modal="true" aria-labelledby="flag-sheet-title">
+    <div class="st-sheet-inner">
+      <div class="st-sheet-title" id="flag-sheet-title">flag this answer as wrong?</div>
+      <p class="st-sheet-text">Sending this lets the person who runs Silica read this question, this answer, and the passages and tool calls of this turn. Nothing else from your chats.</p>
+      <p class="st-sheet-text">It is your consent for this one answer. Deleting the chat withdraws it, and the flag is dropped after 90 days. <a href="/privacy" target="_blank" rel="noopener">Privacy notice</a></p>
+      <label class="flag-label" for="flag-note">What was wrong? (optional)</label>
+      <input id="flag-note" class="flag-note" type="text" maxlength="300" autocomplete="off" />
+      <div class="st-sheet-actions">
+        <button type="button" class="st-btn" id="flag-cancel">cancel</button>
+        <button type="button" class="st-btn primary" id="flag-send">send flag</button>
+      </div>
+    </div>
+  </div>
+
   <div id="sr-status" class="sr-only" role="status" aria-live="polite"></div>
   <div id="toasts" aria-hidden="true"></div>
 

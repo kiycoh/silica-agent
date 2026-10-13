@@ -208,6 +208,83 @@
   font-size: 12px;
 }
 
+/* Flagging an answer (ADR-0100 point 6). The control stays as quiet as the
+   hint above it, because most answers never need it; it brightens on hover
+   like the copy button and never takes the accent, which stays for the one
+   action the sheet asks for. */
+.flag-btn,
+.flag-done {
+  display: block;
+  margin-top: 0.6rem;
+  color: var(--ash-dim);
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+.flag-btn {
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+
+.flag-btn:hover {
+  color: var(--frost);
+}
+
+.flag-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#flag-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--scrim);
+}
+
+#flag-sheet[hidden] {
+  display: none;
+}
+
+#flag-sheet .st-sheet-text + .st-sheet-text {
+  margin-top: 0.5rem;
+}
+
+#flag-sheet a {
+  color: var(--accent);
+}
+
+.flag-label {
+  display: block;
+  margin-top: 0.9rem;
+  color: var(--ash);
+  font-size: 12px;
+}
+
+.flag-note {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--well);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--frost);
+  font-family: var(--sans);
+  font-size: 13px;
+}
+
+.flag-note:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
 /* sources footer — notes this turn touched, click opens the drawer */
 .writes+.sources {
   border-top: none;

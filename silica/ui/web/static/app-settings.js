@@ -601,7 +601,7 @@ function stSetBusy(busy) {
 // let Tab walk out under the panel. The trap is one function over whichever
 // is open, innermost first (a sheet inside the settings modal wins), and every
 // close hands focus back to its opener.
-const DIALOGS = ["#st-sheet", "#st-modal", "#stt-panel", "#help-panel", "#vault-panel", "#ctx-panel"];
+const DIALOGS = ["#flag-sheet", "#st-sheet", "#st-modal", "#stt-panel", "#help-panel", "#vault-panel", "#ctx-panel"];
 function openDialogScope() {
   for (const sel of DIALOGS) {
     const el = $(sel);
@@ -663,6 +663,8 @@ document.addEventListener("keydown", stTrapFocus);
 // so a single press with a panel open over a note closed both at once.
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  // The flag sheet (ADR-0100) sits over everything, on its own scrim.
+  if (closeFlagSheet()) return;
   // The settings modal is the only surface with a backdrop: whatever is under
   // it is unreachable, so it answers first, and its own sheet before it.
   if (!stSheet.hidden) { closeSheet(); return; }

@@ -1158,7 +1158,19 @@ def _turn_response(text: str, attachments: "Sequence[Path]" = ()) -> StreamingRe
     `_begin_turn()` first; `_sweep_if_orphaned` frees it if the body never runs."""
 
     async def gen():
+        from silica.config import hosted
+
+        # The done frame names the turn a flag would point at (ADR-0100 point
+        # 6), hosted only: the one place a flag exists. Read where the session
+        # stood first, since the _busy gate lets only this turn narrate in it.
+        flaggable = hosted()
+        sid0 = current_session_id
+        seq0 = await asyncio.to_thread(_session_head, sid0) if flaggable else 0
         async for item in run_turn(text, attachments):
+            if flaggable and item.get("type") == "done":
+                turn = await asyncio.to_thread(_turn_since, sid0, seq0)
+                if turn:
+                    item["turn"] = turn
             yield _sse(item)
 
     return StreamingResponse(
@@ -3647,6 +3659,22 @@ def get_messages():
         for m in messages
         if m.get("role") == "tool" and m.get("tool_call_id")
     }
+    # Each user row names its turn for the flag (ADR-0100 point 6), hosted
+    # only. The seed is all system messages, so the session's user messages
+    # and its user beats pair one to one; when they do not (a turn narrated
+    # nowhere because another process held the session), no row is named,
+    # because a flag pointing at the neighbouring turn is worse than none.
+    from silica.config import hosted
+
+    turn_of: dict[int, dict] = {}
+    sid = _plain_sid(current_session_id) if hosted() else ""
+    if sid:
+        seqs = _user_turn_seqs(_session_beats(sid))
+        users = [m for m in messages if m.get("role") == "user"]
+        if len(users) == len(seqs):
+            done = _flagged(sid)
+            turn_of = {id(m): {"session": sid, "seq": s, "flagged": s in done}
+                       for m, s in zip(users, seqs)}
     data = []
     for m in messages:
         if m.get("role") not in ("user", "assistant"):
@@ -3664,6 +3692,8 @@ def get_messages():
         data.append({"role": m["role"], "content": content, "tools": tools,
                      "thinking": thinking, "images": images,
                      "html": _linkify(content, resolve) if content else ""})
+        if id(m) in turn_of:
+            data[-1]["turn"] = turn_of[id(m)]
     # Vault label + context usage ride headers so the body stays a plain list.
     # The breakdown goes as JSON in one header rather than three: it is one
     # reading of one number, and splitting it invites a client to read two of
@@ -3836,6 +3866,116 @@ def delete_session(payload: dict):
         raise HTTPException(status_code=409, detail=str(e)) from None
     if not ok:
         raise HTTPException(status_code=404, detail="no such session")
+    return {"ok": True}
+
+
+# --- flagged answers (ADR-0100 point 6) ---------------------------------------
+# A hosted student marks one answer as wrong, and that consent is the only way
+# the owner reads a turn for research. What is stored is a pointer, never a
+# copy: the session id and the narration seq of the user beat that opened the
+# turn. Deleting the chat therefore withdraws the flag (the pointer leads
+# nowhere, and `bin/flags prune` drops it), and the owner reads the turn where
+# it already lives. The seq and not an ordinal of bubbles: the page draws a
+# bubble for a send the server never stored (an unknown command, /find, a
+# retry), so any count the browser keeps drifts from the file.
+
+_FLAG_NOTE_MAX = 300
+
+
+def _session_beats(sid: str) -> list[dict]:
+    from silica.agent import narration as _narr
+
+    return list(_narr.read_beats(_narr.narration_dir() / f"{sid}.jsonl"))
+
+
+def _user_turn_seqs(beats: list[dict]) -> list[int]:
+    """The seqs of the user `turn` beats, in file order."""
+    out = []
+    for b in beats:
+        p = b.get("payload")
+        m = p.get("message") if isinstance(p, dict) else None
+        if b.get("kind") == "turn" and isinstance(m, dict) and m.get("role") == "user" and b.get("seq"):
+            out.append(b["seq"])
+    return out
+
+
+def _flagged(sid: str) -> set[int]:
+    """The answers of `sid` already flagged, so a reopened chat says so and a
+    second click is not a second flag."""
+    from silica.kernel.recall.paths import _SILICA_HOME
+
+    try:
+        lines = (_SILICA_HOME / "flags.jsonl").read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return set()
+    out = set()
+    for raw in lines:
+        try:
+            rec = json.loads(raw)
+        except ValueError:
+            continue  # a torn last line from a full disk: the other flags still count
+        if isinstance(rec, dict) and rec.get("session") == sid and isinstance(rec.get("answer"), int):
+            out.add(rec["answer"])
+    return out
+
+
+def _plain_sid(sid: object) -> str:
+    """A session id as a file stem, or "" when it could name anything else."""
+    s = str(sid or "")
+    return s if s.isascii() and s.isalnum() else ""
+
+
+def _session_head(sid: str | None) -> int:
+    """The last seq written to `sid`, 0 for a session not yet opened."""
+    sid = _plain_sid(sid)
+    return max((b.get("seq") or 0 for b in _session_beats(sid)), default=0) if sid else 0
+
+
+def _turn_since(sid0: str | None, seq0: int) -> dict | None:
+    """The turn a flag would point at: the first user beat narrated past where
+    the session stood before the turn. None when this turn narrated none (the
+    session was busy in another process), so no flag can point at a neighbour."""
+    sid = _plain_sid(current_session_id)
+    if not sid:
+        return None
+    after = seq0 if sid == sid0 else 0
+    seqs = [s for s in _user_turn_seqs(_session_beats(sid)) if s > after]
+    return {"session": sid, "seq": seqs[0]} if seqs else None
+
+
+@app.post("/flag", dependencies=_SAME_ORIGIN)
+def flag_answer(payload: dict):
+    """Append one flag to `<home>/flags.jsonl`: time, session, the seq of the
+    user beat that opened the turn, and the student's own line."""
+    from silica.config import hosted
+    from silica.kernel.recall.paths import _SILICA_HOME
+
+    if not hosted():
+        raise HTTPException(status_code=404, detail="Not Found")
+    sid = _plain_sid(payload.get("session"))
+    if not sid:
+        raise HTTPException(status_code=400, detail="that is not a chat id")
+    seq = payload.get("seq")
+    if not isinstance(seq, int) or isinstance(seq, bool):
+        raise HTTPException(status_code=400, detail="that is not an answer id")
+    note = str(payload.get("note") or "").strip()
+    if len(note) > _FLAG_NOTE_MAX:
+        raise HTTPException(status_code=400, detail=f"keep the note under {_FLAG_NOTE_MAX} characters")
+    if seq not in _user_turn_seqs(_session_beats(sid)):
+        raise HTTPException(status_code=404, detail="that answer is not in this chat")
+    if seq in _flagged(sid):
+        return {"ok": True, "already": True}  # one flag per answer; a second click is not news
+    path = _SILICA_HOME / "flags.jsonl"
+    rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "session": sid,
+           "answer": seq, "note": note}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import fcntl
+
+    with open(path, "a", encoding="utf-8") as fh:
+        # The host's nightly `bin/flags prune` rewrites this file in place under
+        # the same lock; without it a flag sent in that instant could be lost.
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     return {"ok": True}
 
 

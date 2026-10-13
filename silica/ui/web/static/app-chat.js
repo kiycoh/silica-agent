@@ -642,6 +642,70 @@ function addCopyBtn(bodyEl, getText) {
   bodyEl.appendChild(b);
 }
 
+// --- flagging an answer (ADR-0100 point 6) -----------------------------------
+// The server names a turn ({ session, seq }) in its done frame and on a reopened
+// chat's user rows only when it runs hosted, so the turn id is the whole switch:
+// a local install never draws the control. A flag is the student's consent for
+// the owner to read this one turn, so the sheet says what that covers before
+// anything is sent, and nothing is sent until Send.
+let flagOpener = null;
+
+function flagControl(turn) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "flag-btn";
+  b.textContent = "this answer was wrong";
+  b.addEventListener("click", () => openFlagSheet(turn, b));
+  return b;
+}
+
+function openFlagSheet(turn, opener) {
+  const note = $("#flag-note");
+  const send = $("#flag-send");
+  flagOpener = opener;
+  note.value = "";
+  send.disabled = false;
+  send.onclick = async () => {
+    send.disabled = true;
+    try {
+      const r = await fetch("/flag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session: turn.session, seq: turn.seq, note: note.value.trim() }),
+      });
+      if (!r.ok) throw new Error(String(r.status));
+      const done = mkFlagDone();
+      opener.replaceWith(done);
+      flagOpener = null;
+      closeFlagSheet();
+    } catch {
+      send.disabled = false;
+      notify("couldn't send the flag. Try again.");
+    }
+  };
+  $("#flag-sheet").hidden = false;
+  note.focus();
+}
+
+function mkFlagDone() {
+  const s = document.createElement("span");
+  s.className = "flag-done";
+  s.textContent = "flagged as wrong, thank you";
+  return s;
+}
+
+// True when it closed something, for the app's one Escape handler.
+function closeFlagSheet() {
+  const sheet = $("#flag-sheet");
+  if (!sheet || sheet.hidden) return false;
+  sheet.hidden = true;
+  if (flagOpener && flagOpener.isConnected) flagOpener.focus();
+  flagOpener = null;
+  return true;
+}
+$("#flag-cancel").addEventListener("click", closeFlagSheet);
+$("#flag-sheet").addEventListener("click", (e) => { if (e.target === e.currentTarget) closeFlagSheet(); });
+
 // A chat answer's diagrams run the way a note's do (ADR-0082). Until then the
 // server's <pre class="mermaid"> reached the transcript as its source, in every
 // answer, because renderMermaid only ever ran on the note body (3f5d43c9
@@ -1100,6 +1164,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
 
   const toolEls = {};
   const texts = [];    // every text segment { el, raw }, for the copy button
+  let flagTurn = null; // { session, seq } from the done frame, hosted only (ADR-0100)
   // ref → effect ("read" | "written" | "moved" | "deleted"), for the footer.
   // A ref is only recorded once its tool SUCCEEDS: a failed write must not be
   // reported as written, in the one place the user looks to trust the agent.
@@ -1223,6 +1288,20 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   try {
     const resp = await fetchPromise;
     if (resp.status === 409) { flowMsg("(a turn is already in progress)"); return; }
+    // Any other refusal used to be read as an event stream, yield no event and
+    // vanish without a word: Cloudflare's 524 after its 125 s read timeout, the
+    // proxy's 502 while a tenant restarts, a 413 or 400 that carries a sentence
+    // (found 2026-10-13, ADR-0099).
+    if (!resp.ok) {
+      let said = "";
+      try {
+        const d = await resp.json();
+        said = d.error || (typeof d.detail === "string" ? d.detail : "");
+      } catch {
+        // A proxy's HTML page carries no sentence; the status in the detail does.
+      }
+      throw Object.assign(new Error(`HTTP ${resp.status}`), { said });
+    }
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
@@ -1242,7 +1321,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     // The transport failed, not the agent: the failure rides the message that
     // was sent, and no assistant row is drawn for words nobody said.
     peekError(String(e));
-    attachFailure(lastUserBody, "the server didn't answer. Try again.", String(e), retry);
+    attachFailure(lastUserBody, e.said || "the server didn't answer. Try again.", String(e), retry);
     announce("the turn failed");
     outcome = "error";
   } finally {
@@ -1265,6 +1344,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     if (footer) flow.appendChild(footer);
     const answer = texts.map((t) => t.raw).join("\n\n").trim();
     if (answer) addCopyBtn(body, () => answer);
+    if (answer && flagTurn) flow.appendChild(flagControl(flagTurn));
     // A bubble that never got a word, a step or a footer is an empty sheet
     // attributed to the agent; the failure that emptied it already sits on the
     // person's message.
@@ -1374,6 +1454,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       curTools.appendChild(caret);
     } else if (ev.type === "done") {
       flushPaint(); // the live segment is complete before anything supersedes it
+      flagTurn = ev.turn || null;
       if (!ev.stopped) outcome = "success";
       if (ev.stopped) {
         // Stop is an outcome (P3): what streamed stays, and a dashed row under

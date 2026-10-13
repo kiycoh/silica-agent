@@ -15,10 +15,14 @@ async function loadVault() {
     // touched/failed maps runTurn keeps, filled from the stored tool calls,
     // closed at the next user message or at the end of the transcript.
     let turn = null;
+    // The turn the next answer belongs to, for the flag (ADR-0100 point 6):
+    // the server names it on the user row, hosted only.
+    let flagTurn = null;
     const closeTurn = () => {
       if (!turn) return;
       const f = turnFooter(turn.touched, turn.failed);
       if (f) turn.body.appendChild(f);
+      if (turn.flag && turn.raw.length) turn.body.appendChild(turn.flag.flagged ? mkFlagDone() : flagControl(turn.flag));
       turn = null;
     };
     for (const m of msgs) {
@@ -27,10 +31,11 @@ async function loadVault() {
         const body = bubble("user");
         body.textContent = m.content;
         addTurnImages(body, m.images || []);
+        flagTurn = m.turn || null;
         continue;
       }
       if (!turn) {
-        turn = { body: bubble("silica"), raw: [], touched: new Map(), failed: new Map() };
+        turn = { body: bubble("silica"), raw: [], touched: new Map(), failed: new Map(), flag: flagTurn };
         const t = turn;
         addCopyBtn(t.body, () => t.raw.join("\n\n"));
       }
