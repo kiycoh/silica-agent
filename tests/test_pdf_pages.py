@@ -356,3 +356,40 @@ def test_few_function_words_only_warn(pdfium_vault, caplog):
 
     assert "Termodinamica" in body
     assert any("function words" in r.getMessage() for r in caplog.records)
+
+
+def test_an_image_part_does_not_count_as_its_base64_in_the_output_budget():
+    """A 120 KB page PNG is 160k characters of data URL; read as text it left
+    no window, and the reply was cut to the clamp's 1024 floor (2026-10-13:
+    completion_tokens 1024 at max_tokens 2500 and at 6000)."""
+    from silica.agent import llm
+
+    data = "data:image/png;base64," + "A" * 160_000
+    with_image = [{"role": "user", "content": [
+        {"type": "image_url", "image_url": {"url": data}}, {"type": "text", "text": "read it"}]}]
+    text_only = [{"role": "user", "content": [{"type": "text", "text": "read it"}]}]
+    chars = llm._request_chars(with_image)
+    assert chars < 20_000  # an image is a few thousand tokens, not 80k characters of text
+    assert chars > llm._request_chars(text_only)  # but it is not free either
+
+
+def test_a_page_is_asked_for_all_its_words_with_room_to_answer(pdfium_vault, monkeypatch):
+    """The figure prompt gave back a page's figure or table and dropped its
+    prose (30 of 533 words, 2026-10-13), and 700 tokens cut a dense page short."""
+    from silica.agent import vision
+    from silica.kernel.recall import image_readings
+    from silica.sources import convert as conv
+
+    seen: list = []
+
+    def ask(messages, max_tokens=700):
+        seen.append(max_tokens)
+        (text,) = [p["text"] for p in messages[0]["content"] if p["type"] == "text"]
+        seen.append(text)
+        return json.dumps(READING)
+
+    monkeypatch.setattr(vision, "ask_chat_model", ask)
+    _write(pdfium_vault, "mixed.pdf", pdf_bytes([TEXT, ""], images={1: gray_lines()}))
+    conv.convert("Inbox/mixed.pdf")
+    assert seen[0] == conv._PAGE_MAX_TOKENS > 700
+    assert "every word" in seen[1] and seen[1] != image_readings._PROMPT.format(language="English")

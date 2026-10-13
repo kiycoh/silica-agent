@@ -813,7 +813,9 @@ def _read_pages(data: dict, workdir: Path) -> None:
             png = workdir / f"page-{i + 1}.png"
             png.write_bytes(images[i])
             try:
-                return image_readings.read_image(png, language, ask=ask_chat_model)
+                return image_readings.read_image(
+                    png, language, prompt=image_readings.PAGE_PROMPT,
+                    ask=lambda messages: ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS))
             finally:
                 png.unlink(missing_ok=True)
 
@@ -849,6 +851,13 @@ def _read_pages(data: dict, workdir: Path) -> None:
     data["readings"] = readings
     data["read"] = sorted(readings)
     data["unread"] = [i for i in data["no_text"] if i not in readings and i not in blank]
+
+
+# A page reading's output budget. A dense paper page took 1,074 tokens as JSON
+# (673 words, Qwen3.5-9B, 2026-10-13), past the figure reading's 700; and
+# glm-5.3-flash refuses reasoning=False, so its thinking spends from the same
+# budget. At its $0.90 a million out, 2,500 caps a page at $0.00225.
+_PAGE_MAX_TOKENS = 2500
 
 
 def _page_reading_md(page: int, reading: dict) -> str:
