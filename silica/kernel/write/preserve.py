@@ -30,6 +30,7 @@ import sys
 import time
 from collections import Counter
 from contextvars import ContextVar
+from types import FrameType
 
 from silica.kernel.write import frontmatter
 
@@ -290,7 +291,7 @@ def lost(before: str, after: str, *, loss: Loss | None = None, free=()) -> str |
         return None
     b_data, b_raw, b_body = frontmatter.split(before)
     a_data, a_raw, a_body = frontmatter.split(after)
-    exempt = SYSTEM_KEYS | frozenset(free) | _LOSS_KEYS.get(loss, frozenset())
+    exempt = SYSTEM_KEYS | frozenset(free) | (_LOSS_KEYS.get(loss, frozenset()) if loss else frozenset())
 
     dups = _dup_keys(a_raw) - _dup_keys(b_raw)
     if dups:
@@ -340,7 +341,7 @@ def _staged_path(path: str) -> bool:
 def _caller() -> tuple[str, str]:
     """The first frame outside the driver and this module: the site that
     asked for the write, which is what the review needs to name."""
-    f = sys._getframe(2)
+    f: FrameType | None = sys._getframe(2)
     while f is not None:
         mod = f.f_globals.get("__name__", "")
         if not (mod.startswith("silica.driver") or mod == __name__):
