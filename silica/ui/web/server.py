@@ -19,6 +19,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -174,6 +175,18 @@ def _capture_own_session() -> None:
         return
     capture_session(messages, session_id=current_session_id or uuid.uuid4().hex[:12],
                     driver="gui")
+
+
+def _open_session() -> str | None:
+    """The live chat's session, opened now when its first turn has not come
+    yet; idempotent, as the turn's own `ensure_session` is."""
+    global current_session_id
+    from silica.agent import narration as _narr
+    try:
+        current_session_id = _narr.NARRATOR.ensure_session(driver="gui", sid=current_session_id)
+    except _narr.SessionBusy as e:   # another process owns it: the turn will say so
+        logger.warning("narration unavailable for this drop: %s", e)
+    return current_session_id
 
 
 def _narrate_user_turn(msg: dict) -> None:
@@ -1292,7 +1305,13 @@ async def _lifespan(app: FastAPI):
     the driver hot-swaps to ws (falls back on drop). No-op without the
     [connect] extra or when the vault has no .obsidian/."""
     from silica.ui.connect import maybe_start_bridge
+    from silica.ui.web import jobs
 
+    # Before the first request (ADR-0099 point 4): a job this process did not
+    # queue and that never ended was cut by the restart, and the student is
+    # shown that, never a file that silently stopped.
+    if n := jobs.recover():
+        logger.warning("%d conversion(s) interrupted by the restart", n)
     bridge = None
     try:
         bridge = await maybe_start_bridge()
@@ -1468,7 +1487,27 @@ async def chat(payload: dict):
     attachments = _save_attachments(payload.get("images") or [])
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
-    return _turn_response(payload.get("text", ""), attachments)
+    text = payload.get("text", "")
+    # /convert and /nucleate <file> typed here convert as jobs and answer at
+    # once (ADR-0099 point 1), with the 202 a drop of files alone gets.
+    from silica.ui.web import jobs
+
+    try:
+        queued = await asyncio.to_thread(jobs.from_command, text, current_session_id)
+    except BaseException:
+        _end_turn()
+        raise
+    if queued is not None:
+        _end_turn()
+        return JSONResponse(queued, status_code=202)
+    return _turn_response(text, attachments)
+
+
+# The body a request may carry through Cloudflare on the Free and Pro plans
+# (Error 413 page, read 2026-10-13; it names no exception for Tunnel traffic).
+# On the server the browser refuses a file over it before sending, with this
+# reason, rather than show the edge's own 413 page (ADR-0099 Consequences).
+_EDGE_MAX_MB = 100
 
 
 @app.get("/supported_types")
@@ -1485,7 +1524,8 @@ def supported_types():
 
     on_server = hosted()
     exts = list(HOSTED_EXTENSIONS) if on_server else supported_nucleate_extensions()
-    return {"extensions": exts, "import": importable_extensions(on_server), "mail": list(SUFFIXES)}
+    return {"extensions": exts, "import": importable_extensions(on_server), "mail": list(SUFFIXES),
+            "upload_max_mb": _EDGE_MAX_MB if on_server else None}
 
 
 @app.get("/commands")
@@ -1529,21 +1569,37 @@ async def _write_upload(f: UploadFile, dest: Path) -> None:
                         f"{dest.name} is over the {_UPLOAD_MAX_BYTES // (1024 * 1024)} MB upload limit")
 
 
+def _part_path(dest: Path) -> Path:
+    """`.<name>.part` beside `dest`, its name cut to the 255 bytes a file name
+    may have: a drop's name is the browser's, and only the import caps it."""
+    stem = dest.name
+    while len(f".{stem}.part".encode("utf-8")) > 255:
+        stem = stem[:-1]
+    return dest.with_name(f".{stem}.part")
+
+
 async def _write_stream(chunks, dest: Path, cap: int, too_big: str) -> None:
     """Write `chunks` to `dest`, refusing past `cap` bytes with `too_big`.
+
+    Written whole before `dest` exists (ADR-0099 point 3): into `.<name>.part`,
+    fsynced, then renamed. A file written in place was readable half-done by
+    anything listing the Inbox, and a kill mid-upload left that half where a
+    job record could name it.
 
     Opened without following a link: a symlink planted at Inbox/<name> made
     an upload overwrite the file it pointed to, outside the vault (found end
     to end 2026-10-12). O_NOFOLLOW makes the check and the open one step; the
-    is_symlink() check stands in where the platform has no O_NOFOLLOW."""
+    is_symlink() check stands in where the platform has no O_NOFOLLOW. The
+    rename replaces a link planted at `dest` after the check, never its target."""
     import errno
     import os
 
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     if dest.is_symlink():
         raise HTTPException(400, f"{dest.name} in the inbox is a link; not writing through it")
+    part = _part_path(dest)
     try:
-        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | nofollow, 0o666)
+        fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | nofollow, 0o666)
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             raise HTTPException(400, f"{dest.name} in the inbox is a link; not writing through it") from None
@@ -1556,32 +1612,37 @@ async def _write_stream(chunks, dest: Path, cap: int, too_big: str) -> None:
                 if written > cap:
                     raise HTTPException(413, too_big)
                 fh.write(chunk)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(part, dest)
     except BaseException:
         # No half file left in the vault, whatever stopped it: the cap, a full
         # disk, or a browser that stopped sending a multi-gigabyte export.
-        dest.unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
         raise
 
 
-async def _stage_uploads(
-        files: list[UploadFile]) -> tuple[list[str], list[str], list[tuple[str, str]]]:
+async def _stage_uploads(files: list[UploadFile], **job: Any
+                         ) -> tuple[list[str], list[str], list[tuple[str, str]], list[dict]]:
     """Write uploads to Inbox and mechanically stage them, mirroring the inline
-    half of `/nucleate` (silica/cli.py): PDFs convert to markdown, code/notebooks
-    become skeleton stubs, prose stays as-is. Returns (ready, stubs, skipped):
-    markdown notes ready for the injector/reading, code stub note paths already
-    written to the vault, and (file name, reason) for each file no lane took.
-    The semantic step (nucleate? summarize?) is the agent's, driven by the
-    user's message: see `_compose_nucleate_turn`.
+    half of `/nucleate` (silica/cli.py): code/notebooks become skeleton stubs,
+    prose stays as-is, and a file that needs convert() becomes a job.
+    Returns (ready, stubs, skipped, queued): markdown notes ready for the
+    injector/reading, code stub note paths already written to the vault,
+    (file name, reason) for each file no lane took, and the job records
+    (`job` carries the drop's text and session into each). The semantic step
+    (nucleate? summarize?) is the agent's, driven by the user's message: see
+    `_compose_nucleate_turn`.
 
-    convert() shells out to mineru (can be minutes on a book) and stage() reads
-    whole files, so both run in a worker thread: on the loop thread they blocked
-    /stop for the whole conversion, leaving a visible Stop button that could not
-    be served.
+    A conversion never runs here (ADR-0099 point 1): a lecture's transcription
+    outlasts the edge's 125 s, and a restart lost it without a trace. stage()
+    reads whole files, so it runs in a worker thread: on the loop thread it
+    blocked /stop, leaving a visible Stop button that could not be served.
     """
     from silica.kernel.vault_manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
     from silica.sources import pdf_extract
-    from silica.sources.convert import convert
     from silica.sources.registry import adapter_for, stage
+    from silica.ui.web import jobs
 
     if len(files) > _UPLOAD_MAX_FILES:
         raise HTTPException(413, f"at most {_UPLOAD_MAX_FILES} files per drop")
@@ -1597,6 +1658,7 @@ async def _stage_uploads(
     ready: list[str] = []
     stubs: list[str] = []
     skipped: list[tuple[str, str]] = []
+    queued: list[dict] = []
     for f in files:
         # `.name` is the containment: a client-chosen filename never contributes
         # a directory, and one that is nothing but directories ("..") gets the
@@ -1610,19 +1672,18 @@ async def _stage_uploads(
         # child; they stay null for anything that is not a PDF.
         ingest: dict[str, Any] = {"ext": _ingest_ext(dest.name), "bytes": None, "pages": None,
                   "pages_without_text": None, "pages_read": None, "outcome": "error"}
+        job_writes_it = False  # a converted file's line waits for its job's outcome
         try:
             await _write_upload(f, dest)
             ingest["bytes"] = dest.stat().st_size
             rel = f"{inbox_rel}/{dest.name}"
             adapter = adapter_for(rel, enabled=enabled)
-            if adapter is None:  # no source claims it → converter fallback (PDF today)
+            if adapter is None:  # no source claims it: convert() runs as a job (ADR-0099)
                 try:
-                    ready.extend(await asyncio.to_thread(convert, rel))
-                    pages, unread = pdf_extract.report(dest)
-                    ingest.update(pages, outcome="partial" if unread else "ok")
-                    if unread:  # ADR-0087 point 3: the reply names them, as the note does
-                        skipped.append((dest.name, f"staged, but {unread}"))
-                except ValueError as exc:
+                    queued.append(await asyncio.to_thread(
+                        jobs.record, rel, origin="drop", **job, on_end=partial(_ingest_ended, ingest)))
+                    job_writes_it = True
+                except ValueError as exc:  # admission refused it, before it was queued
                     logger.warning("nucleate: skipped %s: %s", dest.name, exc)
                     skipped.append((dest.name, _skip_reason(exc)))
                     ingest.update(pdf_extract.report(dest)[0], outcome=getattr(exc, "outcome", "error"))
@@ -1638,8 +1699,22 @@ async def _stage_uploads(
                 logger.warning("nucleate: %s: %s", dest.name, result.get("message", ""))
                 skipped.append((dest.name, _skip_reason(result.get("message") or "no lane could read it")))
         finally:
-            emit("ingest", **ingest)
-    return ready, stubs, skipped
+            if not job_writes_it:
+                emit("ingest", **ingest)
+    return ready, stubs, skipped, queued
+
+
+def _ingest_ended(ingest: dict, rec: dict) -> None:
+    """A converted drop's ingest line (ADR-0100 point 3), written when its job
+    ends. An interrupted job writes none: the line counts conversions that had
+    an outcome, and the retry that gives it one is a new run, not an upload.
+    The page counts and the outcome's word (partial, no_text, garbage) are the
+    job's, from the read its conversion did (ADR-0087)."""
+    if rec.get("state") == "done":
+        outcome = "partial" if rec.get("pages_not_read") else "ok"
+    else:
+        outcome = rec.get("outcome") or "error"
+    emit("ingest", **{**ingest, **(rec.get("pages") or {}), "outcome": outcome})
 
 
 def _skip_reason(exc: Exception | str) -> str:
@@ -1687,13 +1762,21 @@ def _is_mail(name: str) -> bool:
 
 def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
                            mail: Sequence[str] = (),
-                           skipped: Sequence[tuple[str, str]] = ()) -> str:
+                           skipped: Sequence[tuple[str, str]] = (),
+                           converting: Sequence[str] = ()) -> str:
     """The agent turn for a batch of attached files: the user's instruction plus
     a factual manifest of what got staged. Empty instruction defaults to nucleate."""
     lines: list[str] = []
     if ready:
         lines.append("Markdown staged in Inbox, ready to nucleate or read:")
         lines += [f"- {p}" for p in ready]
+    if converting:
+        # Named so the answer does not read as if the files were lost: they
+        # are converting after this turn, and the page offers each one when it
+        # is ready (ADR-0099 point 6). The agent cannot read them yet.
+        lines.append("Still converting, not readable in this turn. Tell the user each one is "
+                     "offered above the message box, with Nucleate it, once it is ready:")
+        lines += [f"- {n}" for n in converting]
     if stubs:
         lines.append("Code skeleton stubs already staged in the vault:")
         lines += [f"- {p}" for p in stubs]
@@ -1717,15 +1800,39 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
 
 @app.post("/nucleate", dependencies=_SAME_ORIGIN)
 async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
+    """A drop: the files into the Inbox, and the turn that acts on them.
+
+    A file that needs convert() is a job (ADR-0099), so the answer never waits
+    on a conversion: the turn, when the drop has one, starts with the files
+    that were ready and names the ones still converting (point 6); the job ids
+    ride the `X-Silica-Jobs` header. A drop of only such files and no words
+    has no turn yet, and answers 202 with the jobs: each finished one offers
+    the turn instead of starting it."""
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     try:
-        ready, stubs, skipped = await _stage_uploads(files)
+        ready, stubs, skipped, queued = await _stage_uploads(files, text=text, session=current_session_id)
     except Exception:
         _end_turn()  # release the slot the staging never got to use
         raise
     mail = [Path(f.filename or "").name for f in files if _is_mail(Path(f.filename or "").name)]
-    return _turn_response(_compose_nucleate_turn(text, ready, stubs, mail, skipped))
+    if queued and not (text.strip() or ready or stubs):
+        _end_turn()
+        return JSONResponse({"jobs": queued, "mail": mail,
+                             "skipped": [{"name": n, "reason": why} for n, why in skipped]},
+                            status_code=202)
+    ids = [j["id"] for j in queued]
+    if ids and current_session_id is None:
+        # The turn opens the chat's session, after the jobs were written:
+        # opened here first, so a job shows on the chat it was dropped into.
+        from silica.ui.web import jobs
+
+        jobs.annotate(ids, session=_open_session())
+    resp = _turn_response(_compose_nucleate_turn(
+        text, ready, stubs, mail, skipped, converting=[j["source"]["name"] for j in queued]))
+    if ids:
+        resp.headers["X-Silica-Jobs"] = ",".join(ids)
+    return resp
 
 
 @app.post("/vault/import", dependencies=_SAME_ORIGIN)
@@ -1765,8 +1872,9 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
     from silica.kernel.recall.paths import ignore_matcher
     from silica.kernel.vault_manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
     from silica.sources import pdf_extract
-    from silica.sources.convert import convert
+    from silica.sources.media_admission import MediaRefused
     from silica.sources.registry import adapter_for, stage
+    from silica.ui.web import jobs
     from silica.ui.web import vault_import as vi
 
     on_server = hosted()
@@ -1832,14 +1940,9 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
             top = rel.parts[0] if len(rel.parts) > 1 else ""
             folders.add(f"{inbox_rel}/{top}" if top else inbox_rel)
             adapter = adapter_for(dest_rel, enabled=enabled)
-            if adapter is None:  # no source claims it: the converter (PDF and documents)
-                row.update(status="note", notes=await asyncio.to_thread(convert, dest_rel))
-                seen = pdf_extract.cached(dest) if suffix == ".pdf" else None
-                if seen and seen.get("hidden"):
-                    row["hidden"] = [{"page": i + 1, "characters": n} for i, n in sorted(seen["hidden"].items())]
-                unread = pdf_extract.report(dest)[1] if suffix == ".pdf" else ""
-                if unread:  # ADR-0087 point 3: the row names them, as the note does
-                    row["pages_not_read"] = unread
+            if adapter is None:  # no source claims it: the converter, as a job (ADR-0099)
+                # Its notes, and the hidden text it left out, arrive on the job.
+                row.update(status="queued", job=(await asyncio.to_thread(jobs.record, dest_rel, origin="import"))["id"])
                 continue
             staged = await asyncio.to_thread(stage, adapter, dest_rel)
             if staged["status"] == "distill":  # prose: the file is the note
@@ -1850,9 +1953,9 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
                 raise vi.Refused(staged.get("message") or "no lane could read it")
         except HTTPException as exc:  # the size cap, or a link in the Inbox: authored above
             row.update(status="refused", reason=exc.detail)
-        except (vi.Refused, pdf_extract.PdfUnreadable) as exc:
-            # Sentences written for the student (vault_import, pdf_extract),
-            # so the text itself is the reason.
+        except (vi.Refused, pdf_extract.PdfUnreadable, MediaRefused) as exc:
+            # Sentences written for the student (vault_import, pdf_extract,
+            # media admission), so the text itself is the reason.
             row.update(status="refused", reason=exc.args[0])
         except ValueError as exc:
             # A converter's own reason can carry a path or a tool's output, so
@@ -1866,7 +1969,8 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
             row.update(status="refused", reason="it could not be read")
         finally:
             results.append(row)
-            if dest is not None and dest.is_file() and not dest.is_symlink():
+            # A queued file is its job's now, which settles it when it ends.
+            if dest is not None and dest.is_file() and not dest.is_symlink() and row.get("status") != "queued":
                 refused = row.get("status") == "refused"
                 # On the server a PDF goes once its note is written, or once it
                 # failed (point 7): the note is what the product reads, and a
@@ -1882,15 +1986,25 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
 _EMBED_LOCK = threading.Lock()
 
 
+# How long the embedding of an import waits for the conversion queue to
+# drain. It bounds a waiting thread, not the work: an import is up to 500
+# files (ADR-0098 H2) and the queue runs one at a time, so a large one can
+# outlast it, and the notes it has not reached wait for the next /embed.
+_EMBED_WAIT_S = 3 * 3600
+
+
 def _embed_imported(folders: set[str]) -> None:
     """Embed what an import wrote, so the dense leg finds it without a manual
     /embed (ADR-0098 point 6). In the background: on the pilot's CPU embedder
-    a folder can take minutes, and the import's answer should not wait.
+    a folder can take minutes, and the import's answer should not wait. After
+    the conversion queue drains (ADR-0099): a PDF's note exists only then.
     ponytail: an agent-run /embed during this thread writes the same store; a
     lock on the store itself is the upgrade, due when a run shows the race."""
     def run() -> None:
         from silica.tools import TOOLS
+        from silica.ui.web import jobs
 
+        jobs.drain(_EMBED_WAIT_S)
         with _EMBED_LOCK:
             for folder in sorted(folders):
                 try:
@@ -4101,6 +4215,18 @@ async def narration_sse(request: Request, from_seq: int = 0):
 
     BUS.subscribe(_narr.BEAT_TOPIC, on_beat)
 
+    # A job's transitions ride the same stream (ADR-0099 point 5), as their
+    # own event with no `id:`, so the browser's Last-Event-ID stays the beats'.
+    from silica.ui.web import jobs
+
+    def on_job(rec: dict) -> None:
+        try:
+            loop.call_soon_threadsafe(q.put_nowait, ("job", rec))
+        except RuntimeError:
+            pass   # loop closed: the client is gone, and GET /jobs answers its next page
+
+    BUS.subscribe(jobs.TOPIC, on_job)
+
     async def gen():
         try:
             sid = current_session_id
@@ -4123,10 +4249,14 @@ async def narration_sse(request: Request, from_seq: int = 0):
                     if _stopping():
                         return
                     continue
+                if isinstance(rec, tuple):
+                    yield f"event: job\ndata: {json.dumps(rec[1], default=str)}\n\n"
+                    continue
                 yield (f"event: beats\nid: {rec.get('seq')}\n"
                        f"data: {json.dumps({'sid': rec.get('sid'), 'beats': [rec]}, default=str)}\n\n")
         finally:
             BUS.unsubscribe(_narr.BEAT_TOPIC, on_beat)
+            BUS.unsubscribe(jobs.TOPIC, on_job)
 
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
@@ -4899,6 +5029,10 @@ app.include_router(_learn_router)
 from silica.ui.web.skills_routes import router as _skills_router  # noqa: E402
 
 app.include_router(_skills_router)
+
+from silica.ui.web.jobs import router as _jobs_router  # noqa: E402
+
+app.include_router(_jobs_router)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 

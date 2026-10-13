@@ -1,6 +1,6 @@
 """Admission for media before the shared transcriber: the length cap, the
-monthly minutes, one file at a time per hosted tenant, and the refusal reaching
-the turn a chat drop composes."""
+monthly minutes, and the refusal reaching the turn a chat drop composes. One
+file at a time is the job worker's now (ADR-0099), tested in test_jobs.py."""
 from __future__ import annotations
 
 import threading
@@ -119,31 +119,6 @@ def test_a_transcription_that_fails_is_not_counted(media, monkeypatch):
     assert adm.used_seconds() == 0.0
 
 
-def test_a_hosted_tenant_transcribes_one_file_at_a_time(media, monkeypatch):
-    """The turn gate is freed when a browser leaves mid-/convert while the
-    conversion thread runs on, so the gate alone let a second file in."""
-    add, _, _ = media
-    monkeypatch.setenv("SILICA_HOSTED", "1")
-    inside, release = threading.Event(), threading.Event()
-
-    def slow(wav):
-        inside.set()
-        release.wait(10)
-        return "Some words were spoken."
-
-    monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", slow)
-    first = threading.Thread(target=conv.convert, args=(add("first.mp3", 60),))
-    first.start()
-    try:
-        assert inside.wait(10)
-        with pytest.raises(adm.MediaRefused, match="Another file is still being transcribed"):
-            conv.convert(add("second.mp3", 60))
-    finally:
-        release.set()
-        first.join(10)
-    conv.convert("second.mp3")  # admitted once the first is done
-
-
 def test_a_laptop_is_not_held_to_one_file_at_a_time(media, monkeypatch):
     add, _, _ = media
     inside, release = threading.Event(), threading.Event()
@@ -221,7 +196,18 @@ def test_a_refused_file_is_named_in_the_turn_with_its_sentence(drop, monkeypatch
     assert "- lecture.mp3: lecture.mp3 is 180 minutes long, and files of up to 90 minutes" in text
 
 
-def test_hosted_a_converter_failure_reaches_the_turn_without_its_raw_text(drop, monkeypatch):
+def _failure(name: str) -> str:
+    """The sentence a failed conversion's job holds: the transcriber runs
+    after the turn now (ADR-0099), so its failure reaches the job, not the turn."""
+    from silica.ui.web import jobs
+
+    assert jobs.drain(20)
+    (rec,) = [r for r in jobs.listing() if r["source"]["name"] == name]
+    assert rec["state"] == "failed"
+    return rec["error"]
+
+
+def test_hosted_a_converter_failure_reaches_the_job_without_its_raw_text(drop, monkeypatch):
     monkeypatch.setenv("SILICA_HOSTED", "1")
 
     def down(wav):
@@ -229,16 +215,17 @@ def test_hosted_a_converter_failure_reaches_the_turn_without_its_raw_text(drop, 
 
     monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", down)
     text = drop("talk.mp3", 60)
-    assert "- talk.mp3: it could not be converted" in text
-    assert "127.0.0.1" not in text
+    assert "- talk.mp3" in text and "Still converting" in text
+    assert _failure("talk.mp3") == "it could not be converted"
 
 
-def test_on_a_laptop_the_turn_carries_the_converter_reason(drop, monkeypatch):
+def test_on_a_laptop_the_job_carries_the_converter_reason(drop, monkeypatch):
     def down(wav):
         raise ValueError("no transcription server at http://localhost:1236/v1")
 
     monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", down)
-    assert "- talk.mp3: no transcription server at http://localhost:1236/v1" in drop("talk.mp3", 60)
+    drop("talk.mp3", 60)
+    assert _failure("talk.mp3") == "no transcription server at http://localhost:1236/v1"
 
 
 def test_the_endpoint_lanes_mp3_is_measured_by_its_size(tmp_path, monkeypatch):

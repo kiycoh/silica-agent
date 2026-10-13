@@ -34,6 +34,19 @@ def _fresh_narrator(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture(autouse=True)
+def _jobs_end_with_their_test():
+    """The conversion worker is one thread per process (ADR-0099) and the
+    store it writes is per test: a job still running when its test ends would
+    write the next test's vault. Waits only where a test queued one."""
+    yield
+    import sys
+
+    jobs = sys.modules.get("silica.ui.web.jobs")
+    if jobs is not None:
+        assert jobs.drain(30), "a conversion job outlived its test"
+
+
+@pytest.fixture(autouse=True)
 def _gui_answers_testclient_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """TestClient sends Host: testserver, which the GUI's loopback-only Host
     check refuses (audit 2026-10-09, S3). Skipped where the [gui] extra is

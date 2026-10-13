@@ -2249,13 +2249,13 @@ def _via_asr(src: Path, workdir: Path) -> tuple[str, Path]:
     from silica.sources import media_admission as admission
 
     # Here and not at an entry point: the chat drop, /convert, the nucleate
-    # tool and the vault import all arrive at this one call.
-    with admission.one_at_a_time(src.name):
-        admission.admit(src)
-        audio = _media_to_audio(src, workdir, mp3=CONFIG.stt_provider == "endpoint")
-        seconds = admission.admit_audio(audio, src.name)
-        text = ASR_PROVIDERS[CONFIG.stt_provider](audio)
-        admission.charge(seconds)
+    # tool and the vault import all arrive at this one call. No lock around
+    # it: the web's job worker runs one conversion at a time (ADR-0099 point 2).
+    admission.admit(src)
+    audio = _media_to_audio(src, workdir, mp3=CONFIG.stt_provider == "endpoint")
+    seconds = admission.admit_audio(audio, src.name)
+    text = ASR_PROVIDERS[CONFIG.stt_provider](audio)
+    admission.charge(seconds)
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)  # none, but the tail expects a dir
     if not text.strip():

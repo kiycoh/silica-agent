@@ -157,6 +157,12 @@ def test_no_route_serialises_str_exc_into_a_user_facing_field():
     start = text.index("def _skip_reason(")
     text = text[:start] + text[text.index("\n\n\n", start):]
     assert "str(exc)" not in text, "a route hands the raw exception to the person again"
+    # A job's failure reaches the person too (ADR-0099), through `_sentence`,
+    # the same exemption for the same reason as `_skip_reason`.
+    jobs = (WEB.parent / "jobs.py").read_text(encoding="utf-8")
+    start = jobs.index("def _sentence(")
+    jobs = jobs[:start] + jobs[jobs.index("\n\n\n", start):]
+    assert "str(exc)" not in jobs, "a job hands the raw exception to the person"
     from silica.ui.web.failures import explain
     out = explain(RuntimeError("HTTPError 502 upstream (request id 4f2a)"))
     assert out["error"].startswith("The model endpoint didn't answer")

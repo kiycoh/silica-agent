@@ -7,14 +7,21 @@ On the hosted pilot every tenant transcribes on one shared whisper-server,
 which runs one request at a time, so a file is a claim on the whole host's
 transcription for as long as it runs. `_ASR_TIMEOUT_S` bounds a file only after
 it has held the cores for two hours; the checks here refuse it before it
-starts. Three of them, each off unless configured, so a laptop install keeps
+starts. Two of them, each off unless configured, so a laptop install keeps
 the behaviour it had before this module:
 
   * SILICA_MEDIA_MAX_MINUTES: the longest file accepted.
   * SILICA_MEDIA_MINUTES_MONTHLY: the minutes one account may transcribe in a
     calendar month, counted in the account's own ~/.silica.
-  * hosted (`silica.config.hosted()`): one file at a time per process, which on
-    the pilot is one tenant.
+
+One file at a time per tenant is no longer a lock here: the web's job worker
+runs conversions in order (ADR-0099 point 2), and `admit` runs when a job is
+recorded too, so a refused file never enters that queue.
+ponytail: the agent's nucleate tool still converts inside a turn, beside the
+worker, so two files can pass the monthly check against the same minutes
+left; the overshoot is one file, SILICA_MEDIA_MAX_MINUTES at most. Route the
+tool through the queue when a tenant's month closes over its budget in
+transcription-seconds.json.
 
 Every refusal is a `MediaRefused` whose text is the sentence the user reads.
 """
@@ -26,14 +33,9 @@ import math
 import os
 import shutil
 import subprocess
-import threading
 import time
 import wave
-from collections.abc import Iterator
-from contextlib import contextmanager
 from pathlib import Path
-
-from silica.config import hosted
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +44,6 @@ MONTHLY_MINUTES_ENV = "SILICA_MEDIA_MINUTES_MONTHLY"
 # ffprobe reads a container's header, not its samples: seconds on any file a
 # user can upload. The bound is for a file built to make it scan.
 _PROBE_TIMEOUT_S = 60
-
-_TRANSCRIBING = threading.Lock()
 
 
 class MediaRefused(ValueError):
@@ -211,26 +211,3 @@ def charge(seconds: float) -> None:
     ledger[month] = ledger.get(month, 0.0) + seconds
     atomic_write_bytes(_counter_path(), json.dumps(ledger, sort_keys=True).encode("utf-8"), mode=0o600)
 
-
-@contextmanager
-def one_at_a_time(name: str) -> Iterator[None]:
-    """One transcription per process when hosted, which is one per tenant.
-
-    Refused rather than waited on: a second file reaches here only past the
-    turn gate, from a turn whose browser left while its conversion ran on (the
-    gate is freed then and the worker thread is not), and a turn that waited
-    would show a spinner for as long as the first file takes, up to two hours.
-    Held around the budget check and the charge too, so two files cannot both
-    pass against the same minutes left."""
-    if not hosted():
-        yield
-        return
-    if not _TRANSCRIBING.acquire(blocking=False):
-        raise MediaRefused(
-            f"Another file is still being transcribed for this account. "
-            f"Add {name} again once it is done."
-        )
-    try:
-        yield
-    finally:
-        _TRANSCRIBING.release()

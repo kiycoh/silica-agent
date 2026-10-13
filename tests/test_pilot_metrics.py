@@ -213,46 +213,54 @@ def test_an_upload_writes_an_ingest_line_without_its_name(client, journal, monke
     assert lines[1]["ext"] == "other"
 
 
-def _drop_pdfs(tc, server, monkeypatch, pdfs: dict[str, bytes]) -> str:
-    """POST the PDFs to /nucleate; returns the turn's text, which carries the
-    manifest the agent repeats to the student."""
+def test_a_dropped_pdf_counts_its_pages_and_names_the_ones_not_read(client, journal, monkeypatch):
+    """ADR-0087 point 3 with ADR-0100's ingest line, through ADR-0099's jobs:
+    the counts come from the conversion's own read, the line waits for the
+    job, and the job names the page the note names."""
     from silica.config import CONFIG
     from silica.sources import pdf_extract
-
-    monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
-    pdf_extract._CACHE.clear()
-    seen: list[str] = []
-
-    def run_agent(messages, *a, **kw):
-        seen.extend(str(m.get("content") or "") for m in messages if m.get("role") == "user")
-        return "ok"
-
-    monkeypatch.setattr(server, "run_agent", run_agent)
-    resp = tc.post("/nucleate", files=[("files", (n, b, "application/pdf")) for n, b in pdfs.items()])
-    assert resp.status_code == 200
-    return "\n".join(seen)
-
-
-def test_a_dropped_pdf_counts_its_pages_and_names_the_ones_not_read(client, journal, monkeypatch):
-    """ADR-0087 point 3 with ADR-0100's ingest line: the counts come from the
-    conversion's own read, and the reply names the page the note names."""
+    from silica.sources.pdf_extract import NO_TEXT
+    from silica.ui.web import jobs
     from tests.doc_factory import gray_lines, pdf_bytes
 
     tc, server = client
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
+    pdf_extract._CACHE.clear()
     text = "A page of real lecture text about entropy and heat engines."
-    turn = _drop_pdfs(tc, server, monkeypatch, {
+    resp = tc.post("/nucleate", files=[("files", (n, b, "application/pdf")) for n, b in {
         "mixed.pdf": pdf_bytes([text, "", text], images={1: gray_lines()}),
         "scan.pdf": pdf_bytes(["", ""], images={0: gray_lines(), 1: gray_lines()}),
-    })
+    }.items()])
+    assert resp.status_code == 202
+    assert jobs.drain(20)
 
-    mixed, scan = journal.events("ingest")
-    assert {k: mixed[k] for k in ("pages", "pages_without_text", "pages_read", "outcome")} == {
-        "pages": 3, "pages_without_text": 1, "pages_read": 0, "outcome": "partial"}
-    assert {k: scan[k] for k in ("pages", "pages_without_text", "pages_read", "outcome")} == {
-        "pages": 2, "pages_without_text": 2, "pages_read": 0, "outcome": "no_text"}
-    assert "mixed.pdf: staged, but page 2 has no selectable text and was not read" in turn
+    by_ext = {line["outcome"]: line for line in journal.events("ingest")}
+    assert {k: by_ext["partial"][k] for k in ("pages", "pages_without_text", "pages_read")} == {
+        "pages": 3, "pages_without_text": 1, "pages_read": 0}
+    assert {k: by_ext["no_text"][k] for k in ("pages", "pages_without_text", "pages_read")} == {
+        "pages": 2, "pages_without_text": 2, "pages_read": 0}
+    recs = {r["source"]["name"]: r for r in jobs.listing()}
+    assert recs["mixed.pdf"]["pages_not_read"] == "page 2 has no selectable text and was not read"
     # Hosted, point 3's sentence goes whole, and names no tool the student cannot run.
-    from silica.sources.pdf_extract import NO_TEXT
+    assert recs["scan.pdf"]["error"] == NO_TEXT
+    assert "mineru" not in recs["scan.pdf"]["error"].lower()
 
-    assert f"scan.pdf: {NO_TEXT}" in turn
-    assert "mineru" not in turn.lower() and "could not be converted" not in turn
+
+def test_a_converted_upload_writes_its_ingest_line_when_its_job_ends(client, journal, monkeypatch):
+    """ADR-0099: the conversion runs after the answer, so the line that names
+    its outcome waits for the job, and a failure is counted as one."""
+    from silica.sources import convert as conv
+    from silica.ui.web import jobs
+
+    tc, server = client
+
+    def down(src, workdir, mp3=False):
+        raise ValueError(f"ffmpeg could not read {MARKER}")
+
+    monkeypatch.setattr(conv, "_media_to_audio", down)
+    resp = tc.post("/nucleate", files=[("files", (f"{MARKER}.mp3", b"\0" * 64, "audio/mpeg"))])
+    assert resp.status_code == 202
+    assert jobs.drain(20)
+    (line,) = journal.events("ingest")
+    assert MARKER not in json.dumps(journal.lines)
+    assert (line["ext"], line["bytes"], line["outcome"]) == (".mp3", 64, "error")

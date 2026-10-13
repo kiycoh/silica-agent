@@ -37,6 +37,23 @@ def _inbox() -> Path:
     return Path(CONFIG.vault_path) / "Inbox"
 
 
+def _settled(resp) -> dict[str, dict]:
+    """The rows by name once their conversions ended: a file that needs one
+    answers `queued` with its job (ADR-0099), whose record carries the notes
+    and the hidden text the row carried when the import converted inline."""
+    from silica.ui.web import jobs
+
+    assert jobs.drain(20)
+    rows = {}
+    for r in resp.json()["files"]:
+        if r.get("job"):
+            rec = jobs.read(r["job"])
+            r = {**r, "status": "note" if rec["state"] == "done" else rec["state"],
+                 "notes": rec["notes"], **({"hidden": rec["hidden"]} if rec["hidden"] else {})}
+        rows[r["name"]] = r
+    return rows
+
+
 # --- names and paths (H7) ----------------------------------------------------
 
 def test_a_relative_path_cannot_leave_the_folder_it_is_joined_to():
@@ -80,7 +97,8 @@ def test_a_folder_keeps_its_tree_and_only_what_silica_reads(client):
     ])
 
     assert resp.status_code == 200
-    rows = {r["name"]: r for r in resp.json()["files"]}
+    assert {r["name"]: r for r in resp.json()["files"]}["Corso/Settimana 1/Lezione 1.pdf"]["status"] == "queued"
+    rows = _settled(resp)
     assert rows["Corso/Settimana 1/Lezione 1.pdf"]["notes"] == ["Inbox/Corso/Settimana 1/Lezione 1.md"]
     assert (_inbox() / "Corso/Settimana 1/Lezione 1.pdf").exists()  # locally the PDF stays
     assert rows["Corso/appunti.md"]["status"] == "note"
@@ -100,7 +118,7 @@ def test_one_bad_file_never_stops_the_batch(client):
         ("", "binary.md", b"\x00\x01\x02"),
     ])
 
-    rows = {r["name"]: r for r in resp.json()["files"]}
+    rows = _settled(resp)
     assert rows["fake.pdf"]["status"] == "refused" and "not a PDF" in rows["fake.pdf"]["reason"]
     assert rows["good.pdf"]["status"] == "note"
     assert rows["binary.md"]["status"] == "refused" and "not text" in rows["binary.md"]["reason"]
@@ -139,7 +157,7 @@ def test_hidden_text_is_named_in_the_reply(client):
     from tests.test_pdf_hostile import _HOSTILE_PAGE, _pdf
 
     tc, _ = client
-    row = _post(tc, [("", "hostile.pdf", _pdf(_HOSTILE_PAGE))]).json()["files"][0]
+    row = _settled(_post(tc, [("", "hostile.pdf", _pdf(_HOSTILE_PAGE))]))["hostile.pdf"]
 
     assert row["status"] == "note"
     assert row["hidden"][0]["page"] == 1 and row["hidden"][0]["characters"] > 40
@@ -154,7 +172,7 @@ def test_on_the_server_the_pdf_goes_once_its_note_exists(client, monkeypatch):
     resp = _post(tc, [("", "paper.pdf", pdf_bytes(["Text of the paper, in full."])), ("", "doc.docx", b"PK")])
 
     assert types["import"] == [".md", ".pdf", ".txt"] and types["extensions"] == [".md", ".pdf", ".txt"]
-    rows = {r["name"]: r for r in resp.json()["files"]}
+    rows = _settled(resp)
     assert rows["paper.pdf"]["notes"] == ["Inbox/paper.md"]
     assert not (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
     assert rows["doc.docx"]["status"] == "skipped"
@@ -208,8 +226,15 @@ def test_a_page_without_text_is_named_in_its_row_and_a_scan_gets_the_sentence(cl
     resp = _post(tc, [("", "mixed.pdf", pdf_bytes([text, "", ""], images={1: gray_lines(), 2: gray_lines()})),
                       ("", "scan.pdf", pdf_bytes([""], images={0: gray_lines()}))])
 
+    from silica.ui.web import jobs
+
+    # Both convert as jobs (ADR-0099): the rows come back queued, and what the
+    # conversion found rides on each job, which the import box reads when it ends.
     mixed, scan = resp.json()["files"]
-    assert mixed["status"] == "note"
+    assert (mixed["status"], scan["status"]) == ("queued", "queued")
+    assert jobs.drain(20)
+    mixed, scan = jobs.read(mixed["job"]), jobs.read(scan["job"])
+    assert mixed["state"] == "done"
     assert mixed["pages_not_read"] == "pages 2 and 3 have no selectable text and were not read"
-    assert (scan["status"], scan["reason"]) == ("refused", NO_TEXT)
-    assert "mineru" not in resp.text.lower()
+    assert (scan["state"], scan["error"]) == ("failed", NO_TEXT)
+    assert "mineru" not in scan["error"].lower()

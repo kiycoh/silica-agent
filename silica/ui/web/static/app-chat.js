@@ -1324,7 +1324,26 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       } catch {
         // A proxy's HTML page carries no sentence; the status in the detail does.
       }
+      // A proxy's 413 carries no sentence: Caddy's own cap can sit under the
+      // edge's 100 MB the page checks before sending.
+      if (!said && resp.status === 413) said = "the file is larger than the server accepts";
       throw Object.assign(new Error(`HTTP ${resp.status}`), { said });
+    }
+    // A drop or a command that only queued conversions answers 202 with its
+    // jobs (ADR-0099), and anything else that is not an event stream used to
+    // yield no event and end without a word (point 5).
+    const type = resp.headers.get("content-type") || "";
+    if (!type.startsWith("text/event-stream")) {
+      const d = type.includes("json") ? await resp.json().catch(() => null) : null;
+      if (!d || !Array.isArray(d.jobs)) {
+        throw Object.assign(new Error(`HTTP ${resp.status} ${type || "without a type"}`),
+          { said: "the server's answer was not a reply. Try again." });
+      }
+      pending.remove();
+      drawJobAnswer(flow, d);
+      outcome = "success";
+      announce("files queued for conversion");
+      return;
     }
     const reader = resp.body.getReader();
     const dec = new TextDecoder();

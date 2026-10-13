@@ -35,6 +35,7 @@
   <link rel="stylesheet" href="/static/app-base.css" />
   <link rel="stylesheet" href="/static/app-shell.css" />
   <link rel="stylesheet" href="/static/app-chat.css" />
+  <link rel="stylesheet" href="/static/app-jobs.css" />
   <link rel="stylesheet" href="/static/app-panels.css" />
   <link rel="stylesheet" href="/static/app-chrome.css" />
   <link rel="stylesheet" href="/static/app-metrics.css" />
@@ -219,6 +220,9 @@
            is the one way back down that does not cost them their place. -->
       <div class="jump-lane"><button type="button" id="jump-latest" hidden>&#8595; new text below</button></div>
 
+      <!-- Conversions after the answer (ADR-0099): a drop's recording or PDF,
+           waiting, converting, ready with Nucleate it, or stopped with Retry. -->
+      <div id="jobs" hidden></div>
       <div id="attachments" hidden></div>
       <!-- The run line (audit P1): what the agent is doing NOW, how long it has
            been at it, where it is in the turn, and the control that stops it,
@@ -680,6 +684,7 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script src="/static/app-metrics.js"></script>
   <script src="/static/app-learn.js"></script>
   <script src="/static/app-notes.js"></script>
+  <script src="/static/app-jobs.js"></script>
   <script src="/static/app-boot.js"></script>
   <script src="/static/app-settings.js"></script>
   <script src="/static/app-connectors.js"></script>
