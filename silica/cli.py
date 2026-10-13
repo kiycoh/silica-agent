@@ -15,8 +15,10 @@ import logging
 import os
 import re
 import shlex
+import signal
 from pathlib import Path
 import sys
+import threading
 import uuid
 from collections.abc import Callable
 from contextlib import nullcontext, redirect_stdout
@@ -170,6 +172,45 @@ def _context_breakdown(messages: list[dict]) -> dict[str, int]:
     schemas = _chat_tool_schemas(messages)
     counts["tool_specs"] = _count_context_tokens([], schemas) if schemas else 0
     return counts
+
+
+class _TurnInterrupt:
+    """Ctrl+C during a TUI turn (ADR-0004), and the turn's cancel token.
+
+    During a tool the first press only sets the token: a recipe tool's worker
+    pools poll it between items and drain, where a KeyboardInterrupt lands in
+    the main thread mid-run and leaves those pools running. Anywhere else the
+    main thread is only waiting on the model's daemon thread, so raising there
+    stops at once, as it always did; the token is set first so nothing the turn
+    started keeps going. A second press raises even during a tool."""
+
+    def __init__(self, forward: Callable) -> None:
+        self.token = threading.Event()
+        self._forward = forward
+        # A counter and not a flag: a recipe tool runs a loop of its own, whose
+        # tool events reach this same callback inside the outer tool's, from its
+        # worker threads too, hence the lock.
+        self._tools = 0
+        self._lock = threading.Lock()
+
+    def __call__(self, event) -> None:
+        from silica.agent.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
+
+        if isinstance(event, ToolStartEvent):
+            with self._lock:
+                self._tools += 1
+        elif isinstance(event, (ToolCompleteEvent, ToolErrorEvent)):
+            with self._lock:
+                self._tools = max(self._tools - 1, 0)
+        self._forward(event)
+
+    def on_sigint(self, signum, frame) -> None:
+        first = not self.token.is_set()
+        self.token.set()
+        if first and self._tools:
+            CONSOLE.print("\n  [dim](stopping once the running step lets go; Ctrl+C again to force)[/]")
+            return
+        raise KeyboardInterrupt
 
 
 def _print_turn_notes(notes: list[dict]) -> None:
@@ -4772,14 +4813,18 @@ def main():
         # recall misses for the thin-coverage hint.
         # A /web turn is not checked for numbers, but its pages were read: the
         # RecallWatch under its WebTurn collects them for the session set.
-        read = RecallWatch(callback, surface="repl")
+        interrupt = _TurnInterrupt(callback)
+        read = RecallWatch(interrupt, surface="repl")
         watch = WebTurn(web[0], read) if web else read
 
+        # Only around the turn: at the prompt, prompt_toolkit owns Ctrl+C.
+        previous_sigint = signal.signal(signal.SIGINT, interrupt.on_sigint)
         try:
             answer = run_agent(
                 messages,
                 model=CONFIG.model,
                 tool_progress_callback=watch,
+                cancel_token=interrupt.token,
                 constraints=(
                     # interactive=True: the chat_tools cut must not also demote
                     # the REPL to a worker (no streaming, worker-slot capped) —
@@ -4790,6 +4835,10 @@ def main():
                                           deferred=chat_deferred(messages), interactive=True)
                 ),
             )
+            if interrupt.token.is_set():
+                # A drained tool hands back the loop's "(silica: cancelled)",
+                # which is no answer: the turn ends the way a raise ends it.
+                raise KeyboardInterrupt
             # ADR-0095: the answer as the model wrote it, before attribution adds
             # text it did not; not a /web turn's, whose answer is bound to banked
             # verbatim quotes.
@@ -4826,6 +4875,8 @@ def main():
             callback.close()
             logger.exception("Agent error")
             CONSOLE.print(f"\n  [bold red]Error:[/] {e}\n")
+        finally:
+            signal.signal(signal.SIGINT, previous_sigint)
         # After the except arms too: an interrupted or failed turn still read
         # what its results showed, and the narration /resume rebuilds from has them.
         seen_numbers |= read.numbers
