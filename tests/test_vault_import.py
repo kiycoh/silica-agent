@@ -37,6 +37,23 @@ def _inbox() -> Path:
     return Path(CONFIG.vault_path) / "Inbox"
 
 
+def _settled(resp) -> dict[str, dict]:
+    """The rows by name once their conversions ended: a file that needs one
+    answers `queued` with its job (ADR-0099), whose record carries the notes
+    and the hidden text the row carried when the import converted inline."""
+    from silica.ui.web import jobs
+
+    assert jobs.drain(20)
+    rows = {}
+    for r in resp.json()["files"]:
+        if r.get("job"):
+            rec = jobs.read(r["job"])
+            r = {**r, "status": "note" if rec["state"] == "done" else rec["state"],
+                 "notes": rec["notes"], **({"hidden": rec["hidden"]} if rec["hidden"] else {})}
+        rows[r["name"]] = r
+    return rows
+
+
 # --- names and paths (H7) ----------------------------------------------------
 
 def test_a_relative_path_cannot_leave_the_folder_it_is_joined_to():
@@ -80,7 +97,8 @@ def test_a_folder_keeps_its_tree_and_only_what_silica_reads(client):
     ])
 
     assert resp.status_code == 200
-    rows = {r["name"]: r for r in resp.json()["files"]}
+    assert {r["name"]: r for r in resp.json()["files"]}["Corso/Settimana 1/Lezione 1.pdf"]["status"] == "queued"
+    rows = _settled(resp)
     assert rows["Corso/Settimana 1/Lezione 1.pdf"]["notes"] == ["Inbox/Corso/Settimana 1/Lezione 1.md"]
     assert (_inbox() / "Corso/Settimana 1/Lezione 1.pdf").exists()  # locally the PDF stays
     assert rows["Corso/appunti.md"]["status"] == "note"
@@ -100,7 +118,7 @@ def test_one_bad_file_never_stops_the_batch(client):
         ("", "binary.md", b"\x00\x01\x02"),
     ])
 
-    rows = {r["name"]: r for r in resp.json()["files"]}
+    rows = _settled(resp)
     assert rows["fake.pdf"]["status"] == "refused" and "not a PDF" in rows["fake.pdf"]["reason"]
     assert rows["good.pdf"]["status"] == "note"
     assert rows["binary.md"]["status"] == "refused" and "not text" in rows["binary.md"]["reason"]
@@ -139,7 +157,7 @@ def test_hidden_text_is_named_in_the_reply(client):
     from tests.test_pdf_hostile import _HOSTILE_PAGE, _pdf
 
     tc, _ = client
-    row = _post(tc, [("", "hostile.pdf", _pdf(_HOSTILE_PAGE))]).json()["files"][0]
+    row = _settled(_post(tc, [("", "hostile.pdf", _pdf(_HOSTILE_PAGE))]))["hostile.pdf"]
 
     assert row["status"] == "note"
     assert row["hidden"][0]["page"] == 1 and row["hidden"][0]["characters"] > 40
@@ -154,7 +172,7 @@ def test_on_the_server_the_pdf_goes_once_its_note_exists(client, monkeypatch):
     resp = _post(tc, [("", "paper.pdf", pdf_bytes(["Text of the paper."])), ("", "doc.docx", b"PK")])
 
     assert types["import"] == [".md", ".pdf", ".txt"] and types["extensions"] == [".md", ".pdf", ".txt"]
-    rows = {r["name"]: r for r in resp.json()["files"]}
+    rows = _settled(resp)
     assert rows["paper.pdf"]["notes"] == ["Inbox/paper.md"]
     assert not (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
     assert rows["doc.docx"]["status"] == "skipped"

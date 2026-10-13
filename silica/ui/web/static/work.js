@@ -1680,6 +1680,12 @@ function neighbourRows(d) {
     es.addEventListener("beats", (e) => {
       try { ingest(JSON.parse(e.data)); } catch { /* one malformed frame is not the stream */ }
     });
+    // A conversion job's transitions ride this stream (ADR-0099 point 5), and
+    // each (re)connect is when app-jobs.js reads back what it may have missed.
+    es.addEventListener("job", (e) => {
+      try { document.dispatchEvent(new CustomEvent("silica:job", { detail: JSON.parse(e.data) })); } catch { /* one malformed frame is not the stream */ }
+    });
+    es.addEventListener("open", () => document.dispatchEvent(new CustomEvent("silica:stream-open")));
     es.onerror = () => { /* EventSource retries by itself; a closed panel is not an error to report */ };
   }
 

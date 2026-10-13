@@ -211,3 +211,23 @@ def test_an_upload_writes_an_ingest_line_without_its_name(client, journal, monke
     assert lines[0] == {"ts": lines[0]["ts"], "event": "ingest", "ext": ".md", "bytes": len(body),
                         "pages": None, "pages_without_text": None, "outcome": "ok"}
     assert lines[1]["ext"] == "other"
+
+
+def test_a_converted_upload_writes_its_ingest_line_when_its_job_ends(client, journal, monkeypatch):
+    """ADR-0099: the conversion runs after the answer, so the line that names
+    its outcome waits for the job, and a failure is counted as one."""
+    from silica.sources import convert as conv
+    from silica.ui.web import jobs
+
+    tc, server = client
+
+    def down(src, workdir, mp3=False):
+        raise ValueError(f"ffmpeg could not read {MARKER}")
+
+    monkeypatch.setattr(conv, "_media_to_audio", down)
+    resp = tc.post("/nucleate", files=[("files", (f"{MARKER}.mp3", b"\0" * 64, "audio/mpeg"))])
+    assert resp.status_code == 202
+    assert jobs.drain(20)
+    (line,) = journal.events("ingest")
+    assert MARKER not in json.dumps(journal.lines)
+    assert (line["ext"], line["bytes"], line["outcome"]) == (".mp3", 64, "error")

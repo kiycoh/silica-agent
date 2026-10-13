@@ -265,12 +265,28 @@ function addFiles(fileList) {
   // threads the user took part in (ADR-0090 point 5), and the composer has
   // neither. Dropped here it wrote a note /revert could not find (2026-10-12).
   const mail = [];
-  for (const f of fileList) (/\.(eml|mbox)$/i.test(f.name) ? mail : staged).push(f);
+  for (const f of withinUploadCap(fileList)) (/\.(eml|mbox)$/i.test(f.name) ? mail : staged).push(f);
   if (mail.length) {
     notify(`${mail.map((f) => f.name).join(", ")}: mail is imported in Settings › Connectors › Mail, `
       + "or with /mail import <file>, which show a dry run first", "warn");
   }
   renderAttachments();
+}
+
+// The edge's cap on one request, on the server only (/supported_types): a file
+// over it never reaches silica, and the edge answers with a page of its own
+// (ADR-0099 Consequences). Refused here, before a byte is sent, with the
+// reason; 0 is a laptop, where nothing stands in between.
+let uploadMaxMb = 0;
+function withinUploadCap(files) {
+  const list = [...files];
+  if (!uploadMaxMb) return list;
+  const big = list.filter((f) => f.size > uploadMaxMb * 1024 * 1024);
+  if (big.length) {
+    notify(`${big.map((f) => f.name).join(", ")}: over the ${uploadMaxMb} MB a file can be to reach the `
+      + "server. Split a long recording into parts, or export it at a lower bitrate.", "error");
+  }
+  return list.filter((f) => !big.includes(f));
 }
 
 // Upload every staged file + the typed text as one turn (server stages them —
@@ -284,7 +300,13 @@ function nucleateStaged(text) {
   fd.append("text", text);
   staged = [];
   renderAttachments();
-  runTurn(fetch("/nucleate", { method: "POST", body: fd }), "staging " + names.length + (names.length === 1 ? " file" : " files"));
+  // The turn names the files still converting; their rows come from the list,
+  // read now rather than waiting on the stream's first event (ADR-0099).
+  const sent = fetch("/nucleate", { method: "POST", body: fd }).then((r) => {
+    if (r.headers.get("X-Silica-Jobs")) jobsFetch();
+    return r;
+  });
+  runTurn(sent, "staging " + names.length + (names.length === 1 ? " file" : " files"));
 }
 
 // The formats the chat model's projector takes (image_readings._MIME).
@@ -332,7 +354,10 @@ const nucleateInput = $("#nucleate-file");
 fetch("/supported_types")
   .then((r) => r.json())
   // Images are offered even when no converter reads them: they go to the chat.
-  .then((d) => { nucleateInput.accept = [...new Set([...(d.extensions || []), ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"])].join(","); })
+  .then((d) => {
+    nucleateInput.accept = [...new Set([...(d.extensions || []), ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"])].join(",");
+    uploadMaxMb = d.upload_max_mb || 0;
+  })
   .catch(() => {}); // accept="" just means the picker shows all files
 const attachMenu = $("#attach-menu");
 const closeAttachMenu = menuButton(attachMenu, $("#attach"));
@@ -436,6 +461,9 @@ async function importToVault(files, fromFolder) {
     if (!ok) skipped.push(path);
     return ok;
   });
+  const fits = withinUploadCap(wanted);
+  const big = wanted.length - fits.length;
+  wanted.splice(0, wanted.length, ...fits);
   const folder = fromFolder && wanted[0] ? relOf(wanted[0]).split("/")[0] : "";
   $("#side-vault").open = true;
   if (wanted.length > VAULT_IMPORT_MAX) {
@@ -465,13 +493,30 @@ async function importToVault(files, fromFolder) {
     }
     rows.push(...(await r.json()).files);
   }
-  renderVaultImport({ rows, skipped, failed, folder });
+  vaultImportLast = { rows, skipped, failed, folder, big };
+  renderVaultImport(vaultImportLast);
+  // A PDF converts in milliseconds: its job's last event can arrive before this
+  // answer did, so each row takes the state the page already holds for it.
+  for (const r of rows) if (r.job && jobsById.has(r.job)) vaultImportJob(jobsById.get(r.job));
   if (rows.length) loadVaultInfo();
+}
+
+// A file that needs converting answers `queued` with its job (ADR-0099); its
+// row turns into a note, or a refusal, when the job ends. The last import's
+// box is the one kept up to date: an earlier one was dismissed or replaced.
+let vaultImportLast = null;
+function vaultImportJob(j) {
+  const row = vaultImportLast && vaultImportLast.rows.find((r) => r.job === j.id);
+  if (!row || (j.state !== "done" && j.state !== "failed" && j.state !== "interrupted")) return;
+  if (j.state === "done") Object.assign(row, { status: "note", notes: j.notes, hidden: j.hidden && j.hidden.length ? j.hidden : undefined });
+  else Object.assign(row, { status: "refused", reason: j.error });
+  if (!vaultImportBox.hidden) renderVaultImport(vaultImportLast);
+  loadVaultInfo();
 }
 
 // One line of counts with its two actions, then the files that need a word:
 // refused with their reason, and hidden text left out (ADR-0098 H6).
-function renderVaultImport({ progress = "", rows = [], skipped = [], failed = "", folder = "" }) {
+function renderVaultImport({ progress = "", rows = [], skipped = [], failed = "", folder = "", big = 0 }) {
   vaultImportBox.hidden = false;
   vaultImportBox.replaceChildren();
   const head = document.createElement("div");
@@ -483,15 +528,20 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
   }
   const done = rows.filter((r) => r.status === "note");
   const refused = rows.filter((r) => r.status === "refused");
+  const converting = rows.filter((r) => r.status === "queued");
   const notTaken = skipped.length + rows.filter((r) => r.status === "skipped").length;
-  const where = folder ? `${(done[0]?.path || "").split("/")[0] || "Inbox"}/${folder}` : "the Inbox";
-  const parts = [done.length ? `${done.length} imported into ${where}` : "nothing imported"];
+  const where = folder ? `${(done[0]?.path || converting[0]?.path || "").split("/")[0] || "Inbox"}/${folder}` : "the Inbox";
+  const parts = [done.length ? `${done.length} imported into ${where}` : converting.length ? `into ${where}` : "nothing imported"];
+  if (converting.length) parts.push(`${converting.length} converting`);
   if (notTaken) parts.push(`${notTaken} not a type Silica reads`);
+  if (big) parts.push(`${big} over ${uploadMaxMb} MB`);
   if (refused.length) parts.push(`${refused.length} refused`);
   const text = document.createElement("span");
   text.textContent = (failed ? `import stopped: ${failed}. ` : "") + parts.join(" · ");
   head.append(text);
-  if (done.length) {
+  // Offered once nothing converts: a /nucleate of a folder still converting
+  // would convert its files a second time, inside the turn.
+  if (done.length && !converting.length) {
     const go = document.createElement("button");
     go.type = "button";
     go.className = "linklike";
@@ -511,7 +561,7 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
   x.className = "vi-x";
   x.setAttribute("aria-label", "dismiss");
   x.textContent = "✕";
-  x.addEventListener("click", () => { vaultImportBox.hidden = true; });
+  x.addEventListener("click", () => { vaultImportBox.hidden = true; vaultImportLast = null; });
   head.append(x);
   const notes = [
     ...refused.map((r) => `${r.name}: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`),
