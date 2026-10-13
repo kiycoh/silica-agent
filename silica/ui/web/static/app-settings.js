@@ -13,8 +13,35 @@ const stSearch = $("#st-search");
 const settingsBtn = $("#settings-btn");
 // Zotero first: it is a source of the vault, the rest are about the machine.
 // Connectors right after it (ADR-0089 point 8): accounts beyond the vault.
-const ST_EXTRA = ["Zotero", "Connectors", "Endpoints", "Diagnostics", "About"];
+// Skills after Connectors (ADR-0097 point 4): the same shape, a list you add
+// to and remove from.
+const ST_EXTRA = ["Zotero", "Connectors", "Skills", "Endpoints", "Diagnostics", "About"];
 const stState = { data: null, section: "Session", controls: [], uid: 0 };
+
+// One glyph per section, drawn as the rail draws its own: a 24 grid, a 1.7
+// stroke in currentColor, so the active tab's accent reaches the icon too. A
+// section the server adds later gets an empty glyph, which keeps its name on
+// the same left edge as the others.
+const ST_ICONS = {
+  Session: '<path d="M20 15a2 2 0 0 1-2 2H8l-4 4V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/>',
+  Vault: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  Brains: '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+  Language: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18z"/>',
+  Display: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  Memory: '<path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  Zotero: '<path d="M4 4v16M8 8v12M12 6v14M16 6l4 14"/>',
+  Connectors: '<path d="M9 3v5M15 3v5M12 18v3"/><path d="M6 8h12v4a6 6 0 0 1-12 0z"/>',
+  Skills: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 8l-6 8"/>',
+  Endpoints: '<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/>',
+  Diagnostics: '<path d="M22 12h-4l-3 8L9 4l-3 8H2"/>',
+  About: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>',
+};
+
+function stTabIcon(name) {
+  return '<svg class="st-tab-icon" aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" '
+    + 'fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">'
+    + (ST_ICONS[name] || "") + "</svg>";
+}
 
 function stEl(tag, cls, text) {
   const el = document.createElement(tag);
@@ -531,7 +558,9 @@ function stRender(data) {
   for (const name of ST_EXTRA) stPanel.appendChild(stSectionEl(name));
   stPanel.appendChild(stEl("div", "st-empty"));
   for (const name of [...data.sections.map((s) => s.name), ...ST_EXTRA]) {
-    const b = stEl("button", "st-tab", name);
+    const b = stEl("button", "st-tab");
+    b.innerHTML = stTabIcon(name);
+    b.appendChild(stEl("span", "", name));
     b.type = "button";
     b.dataset.section = name;
     b.addEventListener("click", () => stShow(name));
@@ -541,6 +570,7 @@ function stRender(data) {
   renderEndpoints(stPanel.querySelector('[data-section="Endpoints"]'));
   renderZotero(stPanel.querySelector('[data-section="Zotero"]'));
   renderConnectors(stPanel.querySelector('[data-section="Connectors"]'));
+  renderSkills(stPanel.querySelector('[data-section="Skills"]'));
   const memory = stPanel.querySelector('[data-section="Memory"]');
   if (memory) renderMemory(memory);
   const diagnostics = stPanel.querySelector('[data-section="Diagnostics"]');

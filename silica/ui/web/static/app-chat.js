@@ -1668,10 +1668,83 @@ let allCommands = [];
 let filteredCommands = [];
 let cmdSelIdx = -1;
 
-fetch("/commands").then(r => r.json()).then(data => allCommands = data || []).catch(() => {});
+// Read again after Settings installs or removes a skill (ADR-0097), so the
+// picker changes without a reload.
+function loadCommands() {
+  return fetch("/commands").then(r => r.json()).then(data => allCommands = data || []).catch(() => {});
+}
+loadCommands();
+
+// --- @ names a note (ADR-0097 point 1) ----------------------------------------
+// The link the caret is writing: `@query` at the start of a word, or `[[query`
+// anywhere. `name@host` is not a trigger, so an address stays text, and a
+// query that opens with a space is not one either (`@ 3pm`). The pick is
+// written as a wikilink: an `@name` has no closing mark, so nothing could say
+// where a title with spaces ends, and the mirror already bands `[[...]]`.
+let mention = null;
+
+function mentionAtCaret() {
+  if (input.selectionStart !== input.selectionEnd) return null;
+  const upto = input.value.slice(0, input.selectionStart);
+  const m = /(?:^|[\s(\[])(@)([^@\[\]\n]{0,64})$/.exec(upto) || /(\[\[)([^\]\[\n|#]{0,64})$/.exec(upto);
+  if (!m || /^\s/.test(m[2])) return null;
+  return { start: upto.length - m[1].length - m[2].length, end: upto.length, query: m[2], brackets: m[1] === "[[" };
+}
+
+// The explore search's own index and ranking (app-notes.js), top 8. True when
+// the list is showing notes; false hands the box back to the command picker.
+function renderMentions() {
+  mention = mentionAtCaret();
+  if (!mention || typeof noteIdx === "undefined" || !noteIdx.length) return false;
+  const q = mention.query.trim().toLowerCase();
+  const hits = (q
+    ? noteIdx.map((n) => [scoreNote(n, q), n]).filter((p) => p[0] > 0)
+        .sort((a, b) => b[0] - a[0] || a[1].name.localeCompare(b[1].name)).map((p) => p[1])
+    : [...noteIdx].sort((a, b) => a.name.localeCompare(b.name))).slice(0, 8);
+  if (!hits.length) { mention = null; return false; }
+  const box = $("#commands");
+  filteredCommands = hits;
+  cmdSelIdx = 0;
+  box.innerHTML = "";
+  hits.forEach((n, i) => {
+    const el = document.createElement("button");
+    el.className = "cmd-item" + (i === cmdSelIdx ? " sel" : "");
+    el.type = "button";
+    const folder = n.path.includes("/") ? n.path.slice(0, n.path.lastIndexOf("/")) : "";
+    el.innerHTML = `<span class="cmd-note">${escapeHtml(n.name)}</span><span class="cmd-summary">${escapeHtml(folder)}</span>`;
+    el.title = n.path;
+    el.addEventListener("mousedown", (e) => e.preventDefault()); // the caret stays in the field
+    el.addEventListener("click", () => pickMention(n));
+    box.appendChild(el);
+  });
+  box.hidden = false;
+  return true;
+}
+
+// The basename when no other note has it, else the path: Obsidian's "shortest
+// path when possible", and what the server resolves the same way.
+function pickMention(n) {
+  const m = mention;
+  if (!m) return;
+  const stem = (p) => p.replace(/\.md$/i, "").split("/").pop().toLowerCase();
+  const unique = noteIdx.filter((o) => stem(o.path) === stem(n.path)).length === 1;
+  const link = unique ? n.path.replace(/\.md$/i, "").split("/").pop() : n.path.replace(/\.md$/i, "");
+  let after = input.value.slice(m.end);
+  if (m.brackets && after.startsWith("]]")) after = after.slice(2);
+  const ins = `[[${link}]] `;
+  input.value = input.value.slice(0, m.start) + ins + after.replace(/^ /, "");
+  const caret = m.start + ins.length;
+  input.setSelectionRange(caret, caret);
+  input.focus();
+  mention = null;
+  autoGrow(input);
+  renderCommands(input.value);
+  renderHighlight();
+}
 
 function renderCommands(q) {
   const box = $("#commands");
+  if (renderMentions()) return;
   if (!q.startsWith("/")) {
     box.hidden = true;
     return;
@@ -1725,6 +1798,7 @@ function updateCmdSel() {
 }
 
 function pickCommand(c) {
+  if (c.path !== undefined) return pickMention(c); // the list is holding notes
   input.value = c.name + (c.usage ? " " : "");
   input.focus();
   renderCommands(input.value);
@@ -1812,7 +1886,7 @@ input.addEventListener("keydown", (e) => {
       cmdSelIdx = (cmdSelIdx - 1 + filteredCommands.length) % filteredCommands.length;
       updateCmdSel();
       return;
-    } else if (e.key === "Enter" && !e.shiftKey) {
+    } else if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
       e.preventDefault();
       if (cmdSelIdx >= 0 && cmdSelIdx < filteredCommands.length) {
         pickCommand(filteredCommands[cmdSelIdx]);

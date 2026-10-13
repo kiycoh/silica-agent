@@ -988,6 +988,16 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
                 return
             agent_msg = expanded
 
+        # The notes the user named, as paths (ADR-0097 point 2). From `text`,
+        # so a skill's expansion keeps its links and the block adds their
+        # paths. Not on a /web turn: its tools cannot read a note. Off the
+        # loop, because it reads the driver's graph.
+        if web is None:
+            from silica.agent.mentions import named_notes
+
+            if block := await asyncio.to_thread(named_notes, text):
+                agent_msg += "\n\n" + block
+
         # An attached image rides this turn only (ADR-0077 point 3): the
         # transcript, the narration and every later turn carry its saved path,
         # which silica_look opens again, because the base64 would otherwise be
@@ -3579,6 +3589,10 @@ def get_messages():
         if not content and not tools and not thinking:
             continue
         images: list[dict] = []
+        if m["role"] == "user" and isinstance(content, str) and "<named-notes>" in content:
+            from silica.agent.mentions import strip
+
+            content = strip(content)
         if m["role"] == "user" and isinstance(content, str) and "[image attached: " in content:
             content, images = _attached_images(content)
         data.append({"role": m["role"], "content": content, "tools": tools,
@@ -4301,6 +4315,10 @@ def index():
 from silica.ui.web.learn_routes import router as _learn_router  # noqa: E402
 
 app.include_router(_learn_router)
+
+from silica.ui.web.skills_routes import router as _skills_router  # noqa: E402
+
+app.include_router(_skills_router)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
