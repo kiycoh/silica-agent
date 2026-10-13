@@ -1465,13 +1465,19 @@ async def chat(payload: dict):
 
 @app.get("/supported_types")
 def supported_types():
-    """Extensions the nucleate picker offers: they drive the `+` button's `accept`.
+    """Extensions the pickers offer: `extensions` drives the chat `+`'s
+    `accept`, `import` the vault `+`'s and its folder filter (ADR-0098 point 3).
     `mail` is the Mail row's picker, kept apart: the composer stages no mail
-    (`_is_mail`)."""
+    (`_is_mail`). On the server both lists are ADR-0087 point 5's: the host
+    has no mineru and no LibreOffice, and offered 60 extensions until then."""
+    from silica.config import hosted
     from silica.sources.mail import SUFFIXES
     from silica.sources.registry import supported_nucleate_extensions
+    from silica.ui.web.vault_import import HOSTED_EXTENSIONS, importable_extensions
 
-    return {"extensions": supported_nucleate_extensions(), "mail": list(SUFFIXES)}
+    on_server = hosted()
+    exts = list(HOSTED_EXTENSIONS) if on_server else supported_nucleate_extensions()
+    return {"extensions": exts, "import": importable_extensions(on_server), "mail": list(SUFFIXES)}
 
 
 @app.get("/commands")
@@ -1705,6 +1711,178 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
         raise
     mail = [Path(f.filename or "").name for f in files if _is_mail(Path(f.filename or "").name)]
     return _turn_response(_compose_nucleate_turn(text, ready, stubs, mail, skipped))
+
+
+@app.post("/vault/import", dependencies=_SAME_ORIGIN)
+async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = Form([]),
+                       last: str = Form("")):
+    """The vault's `+` (ADR-0098 point 5): files, or a folder's files with
+    their relative paths, into the Inbox, each through its lane, with no agent
+    turn. One result per file; one file's failure never stops the others (H4).
+
+    `paths[i]` is the folder-relative path of `files[i]` (`webkitRelativePath`),
+    "" for a file picked on its own. `last` marks the page's final batch, after
+    which the imported folders are embedded in the background.
+
+    The turn slot is held while the batch writes: `_begin_turn` is the one
+    serialisation of vault writes the server has, and an import racing a
+    turn's writes is a case nothing tests.
+    ponytail: one writer at a time, so an import waits for a turn; a lock per
+    Inbox path is the upgrade, due when students ask to import mid-turn.
+    """
+    if len(files) > _UPLOAD_MAX_FILES:
+        raise HTTPException(413, f"at most {_UPLOAD_MAX_FILES} files per request")
+    if paths and len(paths) != len(files):
+        raise HTTPException(400, "paths must name every file, in order")
+    if not _begin_turn():
+        raise HTTPException(409, "a turn is running: import when it ends")
+    try:
+        results, folders = await _import_files(files, paths or [""] * len(files))
+    finally:
+        _end_turn()
+    if last and folders:
+        _embed_imported(folders)
+    return {"files": results}
+
+
+async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list[dict], set[str]]:
+    from silica.config import hosted
+    from silica.kernel.recall.paths import ignore_matcher
+    from silica.kernel.vault_manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
+    from silica.sources import pdf_extract
+    from silica.sources.convert import convert
+    from silica.sources.registry import adapter_for, stage
+    from silica.ui.web import vault_import as vi
+
+    on_server = hosted()
+    vault = Path(CONFIG.vault_path or ".")
+    inbox_rel = resolve_inbox_dir(str(vault), active_write_dir(), CONFIG.inbox_dir or "Inbox")
+    inbox = vault / inbox_rel
+    inbox.mkdir(parents=True, exist_ok=True)
+    allowed = set(vi.importable_extensions(on_server))
+    ignore = ignore_matcher(vault)
+    enabled = get_active_manifest().sources
+    results: list[dict] = []
+    folders: set[str] = set()
+    for f, given in zip(files, paths):
+        row: dict = {"name": given or Path(f.filename or "").name}
+        dest: Path | None = None
+        checked = False  # written, and its bytes are what its extension says
+        try:
+            # A file picked on its own keeps its name only, as a drop does; a
+            # folder's file keeps the folder's tree under the Inbox (point 4).
+            rel = vi.clean_rel(given or Path(f.filename or "").name)
+            suffix = rel.suffix.lower()
+            if vi.skipped(rel, ignore):
+                row.update(status="skipped", reason="inside a hidden or ignored folder")
+                continue
+            if suffix not in allowed:
+                row.update(status="skipped", reason=f"{suffix or 'no extension'}: not a type Silica reads here")
+                continue
+            if suffix == ".txt":
+                # The index reads .md only: plain text comes in as the note it
+                # already is, not as a file no question can reach.
+                rel = rel.with_suffix(".md")
+            dest = vi.numbered(inbox / rel)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.parent.resolve().is_relative_to(inbox.resolve()):
+                raise vi.Refused("its folder leads outside the inbox")
+            dest_rel = dest.relative_to(vault).as_posix()
+            if suffix in (".md", ".txt"):
+                # A note goes in through the driver, so the index knows it at
+                # once: a raw write followed by the driver's next write in the
+                # same folder was absorbed by its directory stamps, and the
+                # tree showed 3 of 5 imported notes (seen 2026-10-13).
+                data = bytearray()
+                while chunk := await f.read(_UPLOAD_CHUNK):
+                    data.extend(chunk)
+                    if len(data) > vi.TEXT_MAX_BYTES:
+                        raise vi.Refused(f"it is over the {vi.TEXT_MAX_BYTES // (1024 * 1024)} MB limit for a note")
+                content = vi.check_text(bytes(data))
+                from silica.driver import DRIVER
+
+                await asyncio.to_thread(DRIVER.create, dest_rel, content)
+            else:
+                cap = pdf_extract.MAX_BYTES if on_server else _UPLOAD_MAX_BYTES
+
+                async def chunks(upload=f):
+                    while chunk := await upload.read(_UPLOAD_CHUNK):
+                        yield chunk
+
+                await _write_stream(chunks(), dest, cap, f"it is over the {cap // (1024 * 1024)} MB limit")
+                if suffix == ".pdf":
+                    pdf_extract.require_header(dest)
+            checked = True
+            row["path"] = dest_rel
+            top = rel.parts[0] if len(rel.parts) > 1 else ""
+            folders.add(f"{inbox_rel}/{top}" if top else inbox_rel)
+            adapter = adapter_for(dest_rel, enabled=enabled)
+            if adapter is None:  # no source claims it: the converter (PDF and documents)
+                row.update(status="note", notes=await asyncio.to_thread(convert, dest_rel))
+                seen = pdf_extract.cached(dest) if suffix == ".pdf" else None
+                if seen and seen.get("hidden"):
+                    row["hidden"] = [{"page": i + 1, "characters": n} for i, n in sorted(seen["hidden"].items())]
+                continue
+            staged = await asyncio.to_thread(stage, adapter, dest_rel)
+            if staged["status"] == "distill":  # prose: the file is the note
+                row.update(status="note", notes=[dest_rel])
+            elif staged["status"] == "ok":       # code or a notebook: a stub note
+                row.update(status="note", notes=[staged["note_path"]])
+            else:
+                raise vi.Refused(staged.get("message") or "no lane could read it")
+        except HTTPException as exc:  # the size cap, or a link in the Inbox: authored above
+            row.update(status="refused", reason=exc.detail)
+        except (vi.Refused, pdf_extract.PdfUnreadable) as exc:
+            # Sentences written for the student (vault_import, pdf_extract),
+            # so the text itself is the reason.
+            row.update(status="refused", reason=exc.args[0])
+        except ValueError as exc:
+            # A converter's own reason can carry a path or a tool's output, so
+            # it is detail, which explain() leaves empty on the server (ADR-0085).
+            row.update(status="refused", reason="it could not be converted", detail=_failure(exc)["detail"])
+        except Exception as exc:
+            # Tolerated, not swallowed: one file a lane chokes on must not cost
+            # the student the rest of the folder (H4), so it is named in its
+            # row and logged with its type; the batch goes on.
+            logger.warning("vault import: %s failed: %s", row["name"], type(exc).__name__)
+            row.update(status="refused", reason="it could not be read")
+        finally:
+            results.append(row)
+            if dest is not None and dest.is_file() and not dest.is_symlink():
+                refused = row.get("status") == "refused"
+                # On the server a PDF goes once its note is written, or once it
+                # failed (point 7): the note is what the product reads, and a
+                # copy of the student's file is what it should not hold; and
+                # nothing refused stays in a capped directory. Locally only a
+                # file that is not what its extension says goes: a real
+                # document a lane could not read stays for mineru and /report.
+                if (on_server and (refused or dest.suffix.lower() == ".pdf")) or (refused and not checked):
+                    dest.unlink()
+    return results, folders
+
+
+_EMBED_LOCK = threading.Lock()
+
+
+def _embed_imported(folders: set[str]) -> None:
+    """Embed what an import wrote, so the dense leg finds it without a manual
+    /embed (ADR-0098 point 6). In the background: on the pilot's CPU embedder
+    a folder can take minutes, and the import's answer should not wait.
+    ponytail: an agent-run /embed during this thread writes the same store; a
+    lock on the store itself is the upgrade, due when a run shows the race."""
+    def run() -> None:
+        from silica.tools import TOOLS
+
+        with _EMBED_LOCK:
+            for folder in sorted(folders):
+                try:
+                    TOOLS["silica_embed_refresh"].run(folder=folder)
+                except Exception as exc:
+                    # The import is done and the notes are searchable by words;
+                    # vectors arrive with the next /embed instead.
+                    logger.warning("vault import: embedding %s failed: %s", folder, type(exc).__name__)
+
+    threading.Thread(target=run, name="vault-import-embed", daemon=True).start()
 
 
 @app.post("/mail/upload", dependencies=_SAME_ORIGIN)
