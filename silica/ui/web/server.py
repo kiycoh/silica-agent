@@ -1571,6 +1571,7 @@ async def _stage_uploads(
     be served.
     """
     from silica.kernel.vault_manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
+    from silica.sources import pdf_extract
     from silica.sources.convert import convert
     from silica.sources.registry import adapter_for, stage
 
@@ -1595,13 +1596,12 @@ async def _stage_uploads(
         dest = inbox / (Path(f.filename or "").name or "dropped")
         if _is_mail(dest.name):
             continue  # never written: see _is_mail
-        # The file's ingest line (ADR-0100 point 3). pages and
-        # pages_without_text stay null: convert() keeps PDFium's pages to
-        # itself on main, and a second parse here would double the untrusted
-        # PDF work ADR-0087 wants in a child. ADR-0087 point 3's per-file
-        # outcome (branch adr/0098-vault-import) is where they get filled.
+        # The file's ingest line (ADR-0100 point 3). The page counts come from
+        # the conversion's own read (pdf_extract.report), never a second parse
+        # here, which would double the untrusted PDF work ADR-0087 keeps in a
+        # child; they stay null for anything that is not a PDF.
         ingest: dict[str, Any] = {"ext": _ingest_ext(dest.name), "bytes": None, "pages": None,
-                  "pages_without_text": None, "outcome": "error"}
+                  "pages_without_text": None, "pages_read": None, "outcome": "error"}
         try:
             await _write_upload(f, dest)
             ingest["bytes"] = dest.stat().st_size
@@ -1610,10 +1610,14 @@ async def _stage_uploads(
             if adapter is None:  # no source claims it → converter fallback (PDF today)
                 try:
                     ready.extend(await asyncio.to_thread(convert, rel))
-                    ingest["outcome"] = "ok"
+                    pages, unread = pdf_extract.report(dest)
+                    ingest.update(pages, outcome="partial" if unread else "ok")
+                    if unread:  # ADR-0087 point 3: the reply names them, as the note does
+                        skipped.append((dest.name, f"staged, but {unread}"))
                 except ValueError as exc:
                     logger.warning("nucleate: skipped %s: %s", dest.name, exc)
                     skipped.append((dest.name, _skip_reason(exc)))
+                    ingest.update(pdf_extract.report(dest)[0], outcome=getattr(exc, "outcome", "error"))
                 continue
             result = await asyncio.to_thread(stage, adapter, rel)
             if result["status"] == "distill":       # prose → injector re-reads it
@@ -1639,8 +1643,11 @@ def _skip_reason(exc: Exception | str) -> str:
     point 5), it becomes the vault import's sentence for the same case."""
     from silica.config import hosted
     from silica.sources.media_admission import MediaRefused
+    from silica.sources.pdf_extract import PdfUnreadable
 
-    if isinstance(exc, MediaRefused) or not hosted():
+    # PdfUnreadable is ADR-0087 point 3's sentence, written for the student
+    # and naming no tool or path, so it goes as it is on the server too.
+    if isinstance(exc, (MediaRefused, PdfUnreadable)) or not hosted():
         return str(exc)
     return "it could not be converted"
 
@@ -1690,7 +1697,7 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
     if skipped:
         # Named in the turn and not only in the log: a refused or failed file
         # otherwise vanished, and the user saw an answer about the others.
-        lines.append("Not staged, each with the reason. Tell the user which files and why:")
+        lines.append("Not staged, or staged in part, each with the reason. Tell the user which files and why:")
         lines += [f"- {n}: {why}" for n, why in skipped]
     manifest = "\n".join(lines) if lines else "(no files could be staged)"
     base = text.strip() or (
@@ -1822,6 +1829,9 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
                 seen = pdf_extract.cached(dest) if suffix == ".pdf" else None
                 if seen and seen.get("hidden"):
                     row["hidden"] = [{"page": i + 1, "characters": n} for i, n in sorted(seen["hidden"].items())]
+                unread = pdf_extract.report(dest)[1] if suffix == ".pdf" else ""
+                if unread:  # ADR-0087 point 3: the row names them, as the note does
+                    row["pages_not_read"] = unread
                 continue
             staged = await asyncio.to_thread(stage, adapter, dest_rel)
             if staged["status"] == "distill":  # prose: the file is the note

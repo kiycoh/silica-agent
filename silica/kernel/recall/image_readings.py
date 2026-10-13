@@ -48,6 +48,21 @@ _PROMPT = (
     "text: the words, labels and numbers written in it, verbatim, or an empty string."
 )
 
+# A whole page whose text layer is missing (ADR-0087 amendment), where
+# _PROMPT is a figure's: on two paper pages rendered as pictures it gave back
+# the figure or the table alone, 30 of 533 words and 20 of 504, and dropped the
+# prose; this one returned 654 of a page's 673 words (Qwen3.5-9B, 2026-10-13).
+PAGE_PROMPT = (
+    "This is one page of a document whose text layer is missing. Reply with JSON only: "
+    '{{"kind": "...", "description": "...", "text": "..."}}. '
+    "text: every word printed on the page, verbatim and in reading order, headings, paragraphs, "
+    "lists, table cells, captions and formulas included; keep paragraph breaks as blank lines; "
+    "do not summarise or skip anything. "
+    "kind: one or two words (slide, lecture notes, article page, table, handwriting). "
+    "description: one sentence in {language} on what the page is about; start with the content "
+    "itself, never with 'This page' or 'The image'."
+)
+
 _cache: dict[str, object] = {"key": None, "store": None}
 
 
@@ -153,19 +168,21 @@ def image_part(path: Path) -> dict:
     data = base64.b64encode(path.read_bytes()).decode()
     return {"type": "image_url", "image_url": {"url": f"data:{_MIME[path.suffix.lower()]};base64,{data}"}}
 
-def read_image(path: Path, language: str, *, ask: Callable[[list[dict]], str]) -> dict | None:
+def read_image(path: Path, language: str, *, ask: Callable[[list[dict]], str],
+               prompt: str = _PROMPT) -> dict | None:
     """One reading of the image at `path`, or None when the reply is not one.
 
     `ask` sends the messages to a vision model and returns its text
     (`ask_chat_model` in silica/agent/vision.py); it is passed in because the
     graph structure modules that reach this one never import the agent (P2/DKB).
     Raises whatever `ask` raises: the caller decides whether a refused call
-    means "no vision here" (stop) or "this image" (skip)."""
+    means "no vision here" (stop) or "this image" (skip). `prompt` is
+    `PAGE_PROMPT` for a whole page, the figure prompt otherwise."""
     from silica.kernel.text.sanitize import parse_json
     if path.suffix.lower() not in _MIME:
         return None
     reply = ask([{"role": "user", "content": [
-        image_part(path), {"type": "text", "text": _PROMPT.format(language=language)},
+        image_part(path), {"type": "text", "text": prompt.format(language=language)},
     ]}])
     try:
         parsed, _ = parse_json(reply, strict=False)

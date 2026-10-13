@@ -606,6 +606,13 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         read_from_image = not md_text.strip() and suffix in IMG_EXTS
         if read_from_image:
             md_text = _image_reading_md(src)
+        elif provider is _via_pdfium:
+            from silica.sources.pdf_extract import cached
+
+            # Every page a model's reading: the note is a picture's account, as
+            # an image's is above, and provenance says so the same way.
+            seen = cached(src)
+            read_from_image = bool(seen and seen.get("read") and len(seen["no_text"]) == seen["n_pages"])
         if not md_text.strip():
             # Silence here would write an empty inbox note and call it success.
             if suffix in MEDIA_EXTS:
@@ -629,12 +636,11 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
                     "content is entirely images (which this path does not read; "
                     "re-save it as PDF to run those through OCR)"
                 )
-            # The usual cause is a scan with no text layer, and the default
-            # provider reads text layers only, so name the provider that does.
-            raise ValueError(
-                f"no text extracted from {src.name} — a scanned document needs OCR: "
-                "`pip install 'mineru[pipeline]'` and set SILICA_PDF_PROVIDER=mineru"
-            )
+            # The usual cause is a scan with no text layer. pdfium refuses one
+            # itself (_via_pdfium); this is another provider coming back empty.
+            from silica.sources.pdf_extract import PdfUnreadable
+
+            raise PdfUnreadable(_no_text_sentence(provider is _pdf_via_mineru), "no_text")
         # Copy only images the markdown references: mineru dumps every crop it
         # detects (477 files for a 200-page book, 19 referenced) — the rest
         # would land in the vault as orphans.
@@ -720,9 +726,11 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     """Default provider — PDFium's text layer, headings from the outline or a
     line heuristic. No torch, no JVM, one ~3 MB wheel.
 
-    It has no OCR: a scan with no text layer yields nothing, which `_doc_to_md`'s
-    empty guard turns into an error naming mineru. Figures are not extracted
-    either (the images dir comes back empty): PDFium exposes image objects, but
+    It has no OCR. A page without a text layer is read by the chat model when
+    it takes images (ADR-0087 amendment, `_read_pages`), and named in the note
+    when it does not; a file none of whose pages has text or a reading is
+    refused with ADR-0087 point 3's sentence. Figures are not extracted
+    (the images dir comes back empty): PDFium exposes image objects, but
     turning them into files needs Pillow, which the base install does not carry;
     mineru (installed separately) is the path for a document whose figures are
     the point. The file itself is opened only in `pdf_extract`, in a child with
@@ -738,9 +746,133 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     from silica.sources import pdf_extract
 
     data = pdf_extract.read(src)
+    _read_pages(data, workdir)
+    if len(data["no_text"]) == data["n_pages"] and not data["read"]:
+        raise pdf_extract.PdfUnreadable(_no_text_sentence(), "no_text")
+    after = dict(data["readings"])
+    for i in data["unread"]:
+        after[i] = f"> [page {i + 1}: no selectable text, not read]"
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
-    return _pdf_markdown(data["pages"], data["toc"]), images
+    return _pdf_markdown(data["pages"], data["toc"], after), images
+
+
+def _no_text_sentence(ocr_provider: bool = False) -> str:
+    """ADR-0087 point 3's sentence for a PDF with no text. Hosted, nothing
+    after it: the student cannot install a tool on the server. Locally the
+    owner can, so the OCR provider is named, unless it is the one that ran."""
+    from silica.config import hosted
+    from silica.sources.pdf_extract import NO_TEXT
+
+    if hosted() or ocr_provider:
+        return NO_TEXT
+    return (f"{NO_TEXT} To read a scan on this machine, install mineru "
+            "(`pip install 'mineru[pipeline]'`) and set SILICA_PDF_PROVIDER=mineru.")
+
+
+# ADR-0087 amendment: pages of one file read at once.
+# ponytail: 4 calls in flight because 60 pages one at a time is 60 round trips
+# of a few seconds (ADR-0077 measured 2.2 s a figure on the local 9B), minutes
+# for a lecture deck, and 4 cut that to about a quarter; a local llama-server
+# with one slot queues them, which costs nothing. The ceiling is a provider's
+# rate limit: OpenRouter's free models allow 20 requests a minute per account
+# (ADR-0071), which 4 calls of 2 s pass at 120, and call_llm's 429 pacing
+# absorbs a burst until its retries run out and the page is named. The
+# pilot's glm-5.3-flash is not a free model. The upgrade is one limiter in
+# call_llm for every caller, due at the first "pdf page %d not read" line
+# whose exception type is a RateLimitError in a tenant's journal.
+_PAGE_READERS = 4
+
+
+def _read_pages(data: dict, workdir: Path) -> None:
+    """Send each rendered page without text to the chat model (ADR-0087
+    amendment), and keep what became of every page without text in `data`,
+    the cached read, so a second conversion of the same bytes pays nothing
+    and the upload's report (`pdf_extract.report`) can count them:
+
+    - `readings`, page index to the markdown that stands where the page was;
+    - `read`, the pages the model read; `unread`, the pages to name. A page
+      that rendered blank is in neither: there was nothing on it to read.
+
+    The images leave `data` here, read or not: up to 16 MiB of PNG a file has
+    no reason to stay in the cache once its readings exist.
+    """
+    if "readings" in data:
+        return
+    images = data.pop("images", None) or {}
+    pending = sorted(i for i, png in images.items() if png)
+    readings: dict[int, str] = {}
+    if pending:
+        from silica.agent.vision import ask_chat_model
+        from silica.kernel.recall import image_readings
+
+        sample = " ".join(t for page in data["pages"] for t, _ in page)[:4000]
+        language = image_readings._language(sample)
+
+        def one(i: int) -> dict | None:
+            png = workdir / f"page-{i + 1}.png"
+            png.write_bytes(images[i])
+            try:
+                return image_readings.read_image(
+                    png, language, prompt=image_readings.PAGE_PROMPT,
+                    ask=lambda messages: ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS))
+            finally:
+                png.unlink(missing_ok=True)
+
+        def guarded(i: int) -> dict | None:
+            try:
+                return one(i)
+            except Exception as exc:
+                # One page the model will not take (a content filter, a time
+                # out, the usage window closing mid-file) is that page named,
+                # not the file lost: the pages already read are paid for. The
+                # type goes with it, which the hosted journal keeps.
+                logger.warning("pdf page %d not read", i + 1, exc_info=exc)
+                return None
+
+        results: list[tuple[int, dict | None]] = []
+        try:
+            results.append((pending[0], one(pending[0])))
+        except Exception as exc:
+            # The first call alone decides whether the others go out: a model
+            # without image input, or no model at all, fails every page the
+            # same way, and 60 refusals would cost 60 round trips to learn it.
+            logger.info("pdf pages not read, the chat model refused the first: %s", type(exc).__name__)
+        else:
+            if len(pending) > 1:
+                from concurrent.futures import ThreadPoolExecutor
+
+                with ThreadPoolExecutor(max_workers=_PAGE_READERS, thread_name_prefix="pdf-page") as pool:
+                    results += zip(pending[1:], pool.map(guarded, pending[1:]))
+        for i, reading in results:
+            if reading:
+                readings[i] = _page_reading_md(i + 1, reading)
+    blank = {i for i, png in images.items() if png is None}
+    data["readings"] = readings
+    data["read"] = sorted(readings)
+    data["unread"] = [i for i in data["no_text"] if i not in readings and i not in blank]
+
+
+# A page reading's output budget. A dense paper page took 1,074 tokens as JSON
+# (673 words, Qwen3.5-9B, 2026-10-13), past the figure reading's 700; and
+# glm-5.3-flash refuses reasoning=False, so its thinking spends from the same
+# budget. At its $0.90 a million out, 2,500 caps a page at $0.00225.
+_PAGE_MAX_TOKENS = 2500
+
+
+def _page_reading_md(page: int, reading: dict) -> str:
+    """A page's reading as a quote under ADR-0077's label, so the reader and the
+    student tell a model's account from the document's own words, and the
+    model's text, quoted line by line, cannot open a heading of its own."""
+    kind = reading.get("kind") or "page"
+    description = reading.get("description") or ""
+    lines = [f"> [page {page}, read by {reading.get('model') or 'a model'}] "
+             + (f"{kind}: {description}" if description else kind)]
+    text = (reading.get("text") or "").strip()
+    if text:
+        lines.append(">")
+        lines += [f"> {line}".rstrip() for line in text.splitlines()]
+    return "\n".join(lines)
 
 
 # Section headings a paper carries whether or not it has an outline. The first
@@ -803,15 +935,18 @@ def _normalise_line(text: str) -> str:
     return re.sub(r"\W+", " ", text).strip().lower()
 
 
-def _pdf_markdown(pages: list[list[tuple[str, float]]], toc: list[tuple[int, str, int]]) -> str:
+def _pdf_markdown(pages: list[list[tuple[str, float]]], toc: list[tuple[int, str, int]],
+                  after: dict[int, str] | None = None) -> str:
     """Page lines → markdown with headings.
 
     The embedded outline beats any guessing wherever it exists (23 headings vs
     12 on a 19-entry probe paper in the pymupdf4llm era), so with an outline
     each entry marks the line carrying its title on its page, or opens the page
     when the title is not found there (a bookmark pointing mid-column). With no
-    outline, `_heading_level` decides per line.
+    outline, `_heading_level` decides per line. `after` holds what closes a
+    page by its index: a page without text, read or named (ADR-0087).
     """
+    after = after or {}
     by_page: dict[int, list[tuple[int, str]]] = {}
     for level, title, index in toc:
         by_page.setdefault(index, []).append((level, title))
@@ -843,6 +978,8 @@ def _pdf_markdown(pages: list[list[tuple[str, float]]], toc: list[tuple[int, str
         out: list[str] = list(lead)
         for j, t in enumerate(texts):
             out.append(f"\n{'#' * marks[j]} {t}\n" if j in marks else t)
+        if i in after:
+            out += ["", after[i]]
         blocks.append("\n".join(out))
     md = "\n\n".join(b for b in blocks if b.strip())
     return re.sub(r"\n{3,}", "\n\n", md).strip("\n") + ("\n" if md.strip() else "")

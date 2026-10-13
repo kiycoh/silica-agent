@@ -73,6 +73,21 @@ def _no_form_sniff_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(forms, "call_llm", _offline)
 
 
+@pytest.fixture(autouse=True)
+def _no_page_reading_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test sends a PDF page to the developer's chat model (ADR-0087
+    amendment): without this, a fixture page under 20 characters reached the
+    local Qwen on 2026-10-13. Raising is a model without image input, so the
+    pages are named, as on a laptop with no vision endpoint. Tests that want a
+    reading patch vision.ask_chat_model themselves, which overrides this."""
+    import silica.agent.vision as vision
+
+    def _offline(*a, **k):
+        raise RuntimeError("page reading disabled in tests")
+
+    monkeypatch.setattr(vision, "ask_chat_model", _offline)
+
+
 
 @pytest.fixture(autouse=True)
 def _restore_tools_registry() -> None:

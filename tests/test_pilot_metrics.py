@@ -209,5 +209,50 @@ def test_an_upload_writes_an_ingest_line_without_its_name(client, journal, monke
     lines = journal.events("ingest")
     assert MARKER not in json.dumps(lines)
     assert lines[0] == {"ts": lines[0]["ts"], "event": "ingest", "ext": ".md", "bytes": len(body),
-                        "pages": None, "pages_without_text": None, "outcome": "ok"}
+                        "pages": None, "pages_without_text": None, "pages_read": None, "outcome": "ok"}
     assert lines[1]["ext"] == "other"
+
+
+def _drop_pdfs(tc, server, monkeypatch, pdfs: dict[str, bytes]) -> str:
+    """POST the PDFs to /nucleate; returns the turn's text, which carries the
+    manifest the agent repeats to the student."""
+    from silica.config import CONFIG
+    from silica.sources import pdf_extract
+
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
+    pdf_extract._CACHE.clear()
+    seen: list[str] = []
+
+    def run_agent(messages, *a, **kw):
+        seen.extend(str(m.get("content") or "") for m in messages if m.get("role") == "user")
+        return "ok"
+
+    monkeypatch.setattr(server, "run_agent", run_agent)
+    resp = tc.post("/nucleate", files=[("files", (n, b, "application/pdf")) for n, b in pdfs.items()])
+    assert resp.status_code == 200
+    return "\n".join(seen)
+
+
+def test_a_dropped_pdf_counts_its_pages_and_names_the_ones_not_read(client, journal, monkeypatch):
+    """ADR-0087 point 3 with ADR-0100's ingest line: the counts come from the
+    conversion's own read, and the reply names the page the note names."""
+    from tests.doc_factory import gray_lines, pdf_bytes
+
+    tc, server = client
+    text = "A page of real lecture text about entropy and heat engines."
+    turn = _drop_pdfs(tc, server, monkeypatch, {
+        "mixed.pdf": pdf_bytes([text, "", text], images={1: gray_lines()}),
+        "scan.pdf": pdf_bytes(["", ""], images={0: gray_lines(), 1: gray_lines()}),
+    })
+
+    mixed, scan = journal.events("ingest")
+    assert {k: mixed[k] for k in ("pages", "pages_without_text", "pages_read", "outcome")} == {
+        "pages": 3, "pages_without_text": 1, "pages_read": 0, "outcome": "partial"}
+    assert {k: scan[k] for k in ("pages", "pages_without_text", "pages_read", "outcome")} == {
+        "pages": 2, "pages_without_text": 2, "pages_read": 0, "outcome": "no_text"}
+    assert "mixed.pdf: staged, but page 2 has no selectable text and was not read" in turn
+    # Hosted, point 3's sentence goes whole, and names no tool the student cannot run.
+    from silica.sources.pdf_extract import NO_TEXT
+
+    assert f"scan.pdf: {NO_TEXT}" in turn
+    assert "mineru" not in turn.lower() and "could not be converted" not in turn

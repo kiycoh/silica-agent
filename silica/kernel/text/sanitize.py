@@ -412,6 +412,19 @@ def parse_json(raw: str, strict: bool = False):
             parse_err = e
 
     if parsed is None:
+        # One whole value, then nothing but closers: a model that closed its
+        # object twice ('..."}\n}', Qwen3.5-9B on a page reading, 2026-10-13)
+        # wrote everything asked for, and "Extra data" dropped all of it. Only
+        # closers may follow: a second value after the first is still an error.
+        try:
+            value, end = json.JSONDecoder().raw_decode(processed)
+        except json.JSONDecodeError:
+            pass
+        else:
+            if not processed[end:].strip(" \t\r\n}]"):
+                parsed, parse_err, was_strict_clean = value, None, False
+
+    if parsed is None:
         salvage = _salvage_array(processed)
         if salvage is not None:
             ops, tail = salvage

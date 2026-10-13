@@ -577,3 +577,24 @@ def test_loose_marker_alone_never_activates_appendix_mode():
     json_text, bodies = extract_body_appendix(raw)
     assert bodies == {}
     assert json_text == raw
+
+
+def test_parse_json_takes_a_whole_object_followed_only_by_a_stray_closer():
+    # Qwen3.5-9B closed a page reading's object twice (2026-10-13), and the whole
+    # reading was dropped as "Extra data".
+    from silica.kernel.text.sanitize import parse_json
+
+    reply = '```json\n{\n  "kind": "page",\n  "text": "a b c"}\n}\n```'
+    parsed, clean = parse_json(reply, strict=False)
+    assert parsed == {"kind": "page", "text": "a b c"} and clean is False
+
+
+def test_parse_json_still_refuses_two_objects():
+    import json
+
+    import pytest
+
+    from silica.kernel.text.sanitize import parse_json
+
+    with pytest.raises((json.JSONDecodeError, ValueError)):
+        parse_json('{"a": 1} {"b": 2}', strict=False)

@@ -470,7 +470,8 @@ async function importToVault(files, fromFolder) {
 }
 
 // One line of counts with its two actions, then the files that need a word:
-// refused with their reason, and hidden text left out (ADR-0098 H6).
+// refused with their reason, hidden text left out (ADR-0098 H6), and pages
+// with no text that no model read (ADR-0087 point 3).
 function renderVaultImport({ progress = "", rows = [], skipped = [], failed = "", folder = "" }) {
   vaultImportBox.hidden = false;
   vaultImportBox.replaceChildren();
@@ -517,6 +518,7 @@ function renderVaultImport({ progress = "", rows = [], skipped = [], failed = ""
     ...refused.map((r) => `${r.name}: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`),
     ...rows.filter((r) => r.hidden).flatMap((r) => r.hidden.map((h) =>
       `${r.name}, page ${h.page}: ${h.characters} characters of hidden text left out`)),
+    ...rows.filter((r) => r.pages_not_read).map((r) => `${r.name}: ${r.pages_not_read}`),
   ];
   if (notes.length) {
     const list = document.createElement("ul");
