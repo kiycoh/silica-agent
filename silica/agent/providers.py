@@ -369,7 +369,7 @@ class OpenAIEmbedder:
 
     def __init__(self, base_url: str, api_key: str, model: str,
                  query_prefix: str = "", document_prefix: str = "",
-                 read_timeout: float = 60.0):
+                 read_timeout: float = 60.0, query_base_url: str = ""):
         # Mirror the LLM provider's hardening: a granular read-timeout turns a
         # frozen embedding server (e.g. a cold/contended local model) into a
         # fast failure instead of an indefinite hang, and max_retries=1 stops
@@ -383,6 +383,13 @@ class OpenAIEmbedder:
             base_url=base_url, api_key=api_key, timeout=_timeout, max_retries=1
         )
         self.base_url = base_url
+        # A query's own server, so it never queues behind an index batch
+        # (config.embedding_query_base_url). None, and not a second reference
+        # to `client`, keeps a test that swaps `client` covering queries too.
+        self.query_base_url = query_base_url if query_base_url not in ("", base_url) else ""
+        self.query_client = openai.OpenAI(
+            base_url=query_base_url, api_key=api_key, timeout=_timeout, max_retries=1
+        ) if self.query_base_url else None
         self.model = model
         self.query_prefix = query_prefix
         self.document_prefix = document_prefix
@@ -402,12 +409,21 @@ class OpenAIEmbedder:
         prefix = self.query_prefix if query else self.document_prefix
         if prefix:
             texts = [prefix + t for t in texts]
+        client = self.client
+        if query and self.query_client is not None:
+            client = self.query_client
+        own = client is not self.client
         try:
-            response = self.client.embeddings.create(model=self.model, input=texts)
+            response = client.embeddings.create(model=self.model, input=texts)
         except Exception as e:
             # Warn, then re-raise unchanged: the callers' fail-open guards stay
             # in charge of what to skip, this only makes the skip visible.
-            warn_down_once("embedder", self.base_url, e, self.model)
+            # Its own role, so a dead query server does not use up the one
+            # warning the index server's failure would get.
+            if own:
+                warn_down_once("query embedder", self.query_base_url, e, self.model)
+            else:
+                warn_down_once("embedder", self.base_url, e, self.model)
             raise
         # The API guarantees ordering matches the input list
         return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
@@ -422,6 +438,7 @@ def get_embedder(config: Any) -> OpenAIEmbedder:
         query_prefix=getattr(config, "embedding_query_prefix", ""),
         document_prefix=getattr(config, "embedding_document_prefix", ""),
         read_timeout=getattr(config, "embedding_timeout", 60.0),
+        query_base_url=getattr(config, "embedding_query_base_url", ""),
     )
 
 

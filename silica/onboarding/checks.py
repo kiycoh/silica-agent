@@ -760,12 +760,12 @@ def check_stt(config: SilicaConfig) -> CheckResult:
     from silica.agent import stt
     from silica.onboarding.serve import ready
 
-    url = config.stt_base_url
+    url, key = stt.dictation_endpoint(config)
     if url and ready(url):
         return CheckResult("dictation", "ok", f"endpoint {url}")
     if stt.has_local_stt():
         return CheckResult("dictation", "ok", f"in-process faster-whisper ({stt.local_stt_model(config)})")
-    down = f"nothing answering at {url}" if url else "no endpoint configured"
+    down = f"nothing answering at {url}" if url else f"no endpoint configured ({key} is empty)"
     return CheckResult(
         "dictation", "unknown", f"off: {down}, [stt] extra not installed",
         "optional: `pip install 'silica-agent[stt]'` transcribes in process "

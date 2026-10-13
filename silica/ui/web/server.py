@@ -3805,7 +3805,8 @@ def stt_status(warm: bool = True):
     """Whether dictation can work, and which lane will do it, asked before the
     browser requests the mic.
 
-    A probe, not a config flag: stt_base_url has a default, so "configured" and
+    A probe, not a config flag: the dictation endpoint falls back to
+    stt_base_url, which has a default, so "configured" and
     "listening" are different questions and only the second one is useful. Shares
     ensure_local_servers' readiness check, which knows that llama.cpp-family
     servers answer 503 while they load and that an open port therefore lies.
@@ -3815,10 +3816,12 @@ def stt_status(warm: bool = True):
     aloud, which asks with `warm=0` (ADR-0049).
     """
     from silica.agent import stt as local
+    from silica.config import hosted
     from silica.onboarding.serve import ready
 
-    url = CONFIG.stt_base_url
-    base = {"url": url, "browser": CONFIG.stt_browser, "lang": local.speech_lang(CONFIG)}
+    url, key = local.dictation_endpoint(CONFIG)
+    base = {"url": url, "browser": CONFIG.stt_browser, "lang": local.speech_lang(CONFIG),
+            "hosted": hosted()}
     if url and ready(url):
         return {**base, "ok": True, "via": "endpoint", "detail": ""}
     if local.has_local_stt():
@@ -3827,11 +3830,16 @@ def stt_status(warm: bool = True):
         if warm:
             local.warm(model)
         return {**base, "ok": True, "via": "local", "model": model, "cold": cold, "detail": ""}
-    why = f"nothing is answering at {url}" if url else "SILICA_STT_BASE_URL is empty"
+    if base["hosted"]:
+        # A tenant can set neither the key nor the extra, and a loopback URL
+        # names nothing it can reach, so the sentence names neither.
+        why = "the transcriber is not answering" if url else "this server does not transcribe dictation"
+        return {**base, "ok": False, "via": "", "detail": why}
+    why = f"nothing is answering at {url}" if url else f"{key} is empty"
     return {**base, "ok": False, "via": "", "detail": why + " and the [stt] extra is not installed"}
 
 
-async def _stt_via_endpoint(clip: bytes) -> tuple[str, str]:
+async def _stt_via_endpoint(url: str, clip: bytes) -> tuple[str, str]:
     """One clip through the configured /audio/transcriptions endpoint:
     `(text, "")`, or `("", the sentence the user reads)` so the route can try
     the in-process lane before it reports anything."""
@@ -3843,7 +3851,7 @@ async def _stt_via_endpoint(clip: bytes) -> tuple[str, str]:
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
-                f"{CONFIG.stt_base_url.rstrip('/')}/audio/transcriptions",
+                f"{url.rstrip('/')}/audio/transcriptions",
                 files={"file": ("clip.wav", clip, "audio/wav")},
                 data=form,
                 headers={"Authorization": f"Bearer {CONFIG.stt_api_key}"},
@@ -3881,8 +3889,9 @@ async def stt(audio: UploadFile = File(...)):
     if len(clip) > _STT_MAX_BYTES:
         raise HTTPException(413, f"recording over {_STT_MAX_BYTES // (1024 * 1024)} MB")
     failed = ""
-    if CONFIG.stt_base_url:
-        text, failed = await _stt_via_endpoint(clip)
+    url, _key = local.dictation_endpoint(CONFIG)
+    if url:
+        text, failed = await _stt_via_endpoint(url, clip)
         if not failed:
             return {"text": text, "via": "endpoint"}
     if not local.has_local_stt():

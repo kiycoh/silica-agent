@@ -580,12 +580,15 @@
   <div id="stt-panel" hidden role="dialog" aria-label="dictation is not available">
     <div class="sp-title">dictation is off</div>
     <p id="stt-why"></p>
+    <!-- Hidden on a hosted tenant, which can neither install nor start anything. -->
+    <div id="stt-install">
     <p>It needs a transcriber on this machine. The simplest runs inside silica, about 480 MB downloaded on first use:</p>
     <pre>pip install 'silica-agent[stt]'</pre>
     <p>Or any OpenAI-compatible endpoint; with the second line set, silica starts it on the next launch:</p>
     <pre>SILICA_STT_BASE_URL=http://localhost:1236/v1
 SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236"</pre>
-    <p>Or the browser's own recognizer: settings, Language, browser speech.</p>
+    </div>
+    <p>The browser's own recognizer also takes dictation: settings, Language, browser speech.</p>
     <button type="button" id="stt-close" class="ghost">close</button>
   </div>
 

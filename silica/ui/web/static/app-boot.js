@@ -245,8 +245,12 @@ const sttPanel = $("#stt-panel");
 // match, so the take ends itself.
 const MIC_MAX_MS = 60000;
 
+// Set by every probe: a hosted tenant cannot install or start a transcriber, so
+// the panel keeps only the lane it can still choose, the browser's.
+let sttHosted = false;
 function showSttPanel(why) {
   $("#stt-why").textContent = why;
+  $("#stt-install").hidden = sttHosted;
   sttPanel.hidden = false;
 }
 $("#stt-close").addEventListener("click", () => { sttPanel.hidden = true; });
@@ -260,6 +264,7 @@ async function sttAvailable() {
   const answer = await fetch("/stt")
     .then((r) => r.json())
     .catch(() => ({ ok: false, detail: "the silica server did not answer" }));
+  sttHosted = !!answer.hosted;
   if (answer.ok) sttProbe = answer;
   return answer;
 }

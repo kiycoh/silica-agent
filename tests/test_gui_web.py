@@ -1931,6 +1931,61 @@ def test_stt_without_any_transcriber_is_a_503_not_a_bad_microphone(client, monke
     assert resp.status_code == 503
 
 
+def test_dictation_goes_to_its_own_endpoint_not_the_convert_one(client, monkeypatch, no_local_stt):
+    """whisper-server transcribes one request at a time: a clip sent to the one
+    busy with a lecture for /convert waits for the whole lecture."""
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "http://localhost:8/v1", raising=False)
+    from silica.onboarding import serve
+
+    probed: list[str] = []
+    monkeypatch.setattr(serve, "ready", lambda url: probed.append(url) or True)
+    assert app.get("/stt").json()["via"] == "endpoint"
+    assert probed == ["http://localhost:8/v1"]
+
+    posted: list[str] = []
+
+    class _Client(_RefusingClient):
+        async def post(self, url, **kw):
+            posted.append(url)
+            return await super().post(url, **kw)
+
+    import httpx
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
+    assert posted == ["http://localhost:8/v1/audio/transcriptions"]
+
+
+def test_an_empty_dictation_endpoint_turns_off_only_dictation(client, monkeypatch, no_local_stt):
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_base_url", "http://localhost:9/v1", raising=False)
+    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "", raising=False)
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    from silica.onboarding import serve
+
+    monkeypatch.setattr(serve, "ready", lambda url: True)  # the /convert server answers
+    body = app.get("/stt").json()
+    assert body["ok"] is False and "SILICA_STT_DICTATION_BASE_URL is empty" in body["detail"]
+    import httpx
+
+    # reaching the /convert server would be a 502 from the refused connection
+    monkeypatch.setattr(httpx, "AsyncClient", _RefusingClient)
+    resp = app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")})
+    assert resp.status_code == 503
+
+
+def test_a_hosted_tenant_is_not_told_to_install_or_configure_anything(
+        client, monkeypatch, no_local_stt):
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "", raising=False)
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    body = app.get("/stt").json()
+    assert body["ok"] is False and body["hosted"] is True
+    assert "SILICA_" not in body["detail"] and "[stt]" not in body["detail"]
+
+
 # --- theme -------------------------------------------------------------------
 # The palette is CSS and needs no test. What does is the seam that decides WHICH
 # palette: a preference the server stamps, a resolution only the browser can do,

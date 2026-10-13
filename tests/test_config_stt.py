@@ -18,7 +18,7 @@ _KEYS = (
     "SILICA_STT_PROVIDER", "SILICA_ASR_PROVIDER",
     "SILICA_STT_WHISPERCPP_BIN", "SILICA_ASR_WHISPERCPP_BIN",
     "SILICA_STT_WHISPERCPP_MODEL", "SILICA_ASR_WHISPERCPP_MODEL",
-    "SILICA_STT_LOCAL_MODEL", "SILICA_STT_BROWSER",
+    "SILICA_STT_LOCAL_MODEL", "SILICA_STT_BROWSER", "SILICA_STT_DICTATION_BASE_URL",
 )
 
 
@@ -58,6 +58,28 @@ def test_defaults_when_nothing_is_set(clean_env):
     # the browser lane can send audio to the vendor, so it is never on unasked
     assert cfg.stt_browser == "off"
     assert cfg.stt_local_model == ""
+
+
+def test_dictation_shares_the_convert_endpoint_unless_given_its_own(clean_env, monkeypatch):
+    """whisper-server transcribes one request at a time, so a host that also
+    transcribes lectures gives dictation its own endpoint, or none."""
+    from silica.agent.stt import dictation_endpoint
+
+    cfg = SilicaConfig()
+    assert dictation_endpoint(cfg) == ("http://localhost:1236/v1", "SILICA_STT_BASE_URL")
+    # the fallback is read at call time, so it follows a later change
+    cfg.stt_base_url = "http://elsewhere:1236/v1"
+    assert dictation_endpoint(cfg)[0] == "http://elsewhere:1236/v1"
+
+    monkeypatch.setenv("SILICA_STT_DICTATION_BASE_URL", "http://127.0.0.1:1239/v1")
+    assert dictation_endpoint(SilicaConfig()) == (
+        "http://127.0.0.1:1239/v1", "SILICA_STT_DICTATION_BASE_URL")
+
+    # set and empty is not unset: dictation loses the endpoint, /convert keeps it
+    monkeypatch.setenv("SILICA_STT_DICTATION_BASE_URL", "")
+    cfg = SilicaConfig()
+    assert dictation_endpoint(cfg) == ("", "SILICA_STT_DICTATION_BASE_URL")
+    assert cfg.stt_base_url == "http://localhost:1236/v1"
 
 
 def test_auto_language_is_omitted_on_the_convert_lane(clean_env, monkeypatch, tmp_path):
