@@ -602,7 +602,11 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             # used to push the next link under whatever section came last.
             entry = f"{marker}: {link}" if add_def else ("" if linked else link)
             new = append_source(attributed, entry) if entry else attributed
-            orch.DRIVER.overwrite(note_path, new)
+            from silica.kernel.write.preserve import Loss
+
+            # CITE: verbatim lines gain their [^label] and the patch's own
+            # definition gives way to the one that links the leaf.
+            orch.DRIVER.overwrite(note_path, new, loss=Loss.CITE)
             fsm._run_inverses.append(
                 (note_path,
                  InverseOp(kind=InverseOpKind.restore_version, path=note_path,

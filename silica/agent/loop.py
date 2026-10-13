@@ -320,6 +320,13 @@ def run_agent(
         compact_by_relevance(messages, TOOLS)
     # What a tool may need to know about the turn it serves (read_scope.py).
     read_scope.set_requests(messages)
+    if constraints is None or constraints.interactive:
+        # A chat turn opens here: a create at a path the chat deleted since is
+        # judged against the deleted body (ADR-0093). A batch sub-loop opens
+        # none, so it cannot shrink the window of the chat turn it runs in.
+        from silica.kernel.write import preserve
+
+        preserve.begin_turn()
     # Not read_scope's REQUESTS for the user-memory gates (ADR-0076): those
     # strings drop `origin`, and a directive's own "Note that ..." would read
     # as the user asking to remember.
@@ -788,10 +795,12 @@ def run_agent(
         _emit(ThinkingEndEvent(iteration=iteration))
     _narr_mod.NARRATOR.thought_close(final.reasoning or "")
     text = (final.text or "").strip() or "(silica: maximum iterations reached)"
-    # The landing answer never reaches messages here (callers print it), so the
-    # narration records it explicitly or the transcript ends mid-question.
     text = _declare_links(text) if _interactive else text
-    _narr_mod.NARRATOR.turn({"role": "assistant", "content": text})
+    # Into the history and not narrated here, as the normal path does: the
+    # caller's final beat records it after attribution, figures and the turn
+    # notes (ADR-0094 point 8). Narrated here as a detached dict, it was missing
+    # from /messages and left the turn notes no message to ride on.
+    messages.append({"role": "assistant", "content": text})
     return text
 
 

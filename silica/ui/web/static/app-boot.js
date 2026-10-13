@@ -55,6 +55,8 @@ async function loadVault() {
         turn.body.appendChild(seg);
         turn.raw.push(m.content);
       }
+      const notes = turnNotes(m.notes);
+      if (notes) turn.body.appendChild(notes);
       if (m.tools && m.tools.length) {
         const g = document.createElement("div");
         g.className = "tools";

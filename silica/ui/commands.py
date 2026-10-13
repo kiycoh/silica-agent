@@ -228,6 +228,14 @@ COMMANDS: tuple[Command, ...] = (
         summary="undo the last patch on a note",
     ),
     Command(
+        name="/delete",
+        group="direct",
+        usage="<path>",
+        summary="delete a note, even one other notes link to; says which links it left "
+                "pointing nowhere, /undo brings it back",
+        examples=("/delete Corso/Autoencoders.md",),
+    ),
+    Command(
         name="/review",
         group="direct",
         usage="[--flush=HASH]",

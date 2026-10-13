@@ -571,13 +571,13 @@ def test_no_control_carries_information_only_in_a_title():
     # the drawer's pin is a glyph alone, so its state rides the tip
     pin = _fn(js, "function syncPinButton()")
     assert "btn.dataset.tip =" in pin and "btn.title" not in pin
-    card = _fn(js, "function writeCard(ref, effect, verb)")
+    card = _fn(js, "function writeCard(ref, effect, verb, refused)")
     assert "b.dataset.tip" in card and "b.title" not in card
 
 
 def test_no_write_card_removes_its_action_without_a_reason():
     js = app_js()
-    body = _fn(js, "function writeCard(ref, effect, verb)")
+    body = _fn(js, "function writeCard(ref, effect, verb, refused)")
     failed = body[body.index("if (!copy.act) {"):]
     failed = failed[:failed.index("return card;")]
     assert "b.disabled = true" in failed and "nothing landed, nothing to revert" in failed

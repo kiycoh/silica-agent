@@ -226,8 +226,12 @@ def silica_flag_note(name: Annotated[str, Field(description='Name or vault-relat
     if new_content == prior_content:
         return {"note": name, "path": path, "contested": still_contested, "changed": False}
 
+    from silica.kernel.write.preserve import Loss
+
     try:
-        DRIVER.overwrite(path, new_content)
+        # A clear files each resolved callout under ## Superseded and rewrites
+        # its tail (RESOLVE); setting a flag only adds, and is judged as such.
+        DRIVER.overwrite(path, new_content, loss=Loss.RESOLVE if clear else None)
     except Exception as e:
         return {"error": f"Failed to write '{name}': {e}"}
 
@@ -356,7 +360,7 @@ def silica_write_note(
         checkpoint_depth = None
         checkpoint_ok = False
         try:
-            checkpoint_depth = get_checkpoint_store().push(path, "", content)
+            checkpoint_depth = get_checkpoint_store().push(path, None, content)  # None: created, /undo removes it
             checkpoint_ok = True
         except Exception as e:
             logger.warning("checkpoint push failed for '%s': %s — /undo has no "

@@ -26,7 +26,13 @@ from silica.ui.style import FlatMarkdown
 
 from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
 from silica.agent.loop import run_agent
-from silica.agent.recall_watch import THIN_COVERAGE_HINT, RecallWatch
+from silica.agent import turn_notes
+from silica.agent.recall_watch import (
+    RecallWatch,
+    numbers_notes,
+    numbers_of_session,
+    unfounded_in_turn,
+)
 from silica.config import CONFIG
 from silica.onboarding.adopt import resolve_cwd_vault
 from silica.prompts import _lang_prefer, system_prompt
@@ -164,6 +170,18 @@ def _context_breakdown(messages: list[dict]) -> dict[str, int]:
     schemas = _chat_tool_schemas(messages)
     counts["tool_specs"] = _count_context_tokens([], schemas) if schemas else 0
     return counts
+
+
+def _print_turn_notes(notes: list[dict]) -> None:
+    """The lines under an answer, dim, in the channel's order (ADR-0094 point 8):
+    the same notes the GUI draws, which arrive already ordered by attach()."""
+    from rich.markup import escape
+
+    if not notes:
+        return
+    for note in notes:
+        CONSOLE.print(f"  [dim]{escape(note['text'])}[/]")
+    CONSOLE.print()
 
 
 def _compact_context(messages: list[dict], collapsed: set[int]) -> set[int]:
@@ -1003,7 +1021,9 @@ def _dc_verify(args: list[str], **_) -> bool:
     if new == prior:
         CONSOLE.print(f"  {path}: nothing to change.")
         return True
-    DRIVER.overwrite(path, new)
+    from silica.kernel.write.preserve import Loss
+
+    DRIVER.overwrite(path, new, loss=Loss.PERSON)  # the person's own attestation
     get_checkpoint_store().push(path, prior, new)  # /undo reaches it; the edited lane knows it
     if "--clear" in args:
         CONSOLE.print(f"  {path}: human attestations cleared.")
@@ -1417,11 +1437,11 @@ def _dc_changes(args: list[str], **_) -> bool:
 
 
 def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
-    """/undo [note-path] — revert the last write to one note, or bring back a
-    note the chat deleted."""
+    """/undo [note-path]: revert the last write to one note, bring back a
+    note the chat or /delete deleted, or move back a note the chat moved."""
     from silica.driver import DRIVER
     from silica.kernel.write.checkpoints import get_checkpoint_store
-    from silica.kernel.write.undo_journal import get_undo_journal, revert_run
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal, revert_run
 
     store = get_checkpoint_store()
     journal = get_undo_journal()
@@ -1435,26 +1455,48 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     # split, so `/undo silica/Verdetto reranker.md` used to look up
     # "silica/Verdetto" and report nothing to undo. Note names with spaces are
     # the common case in a vault, and the web GUI's per-note revert sends this.
+    def _written_since(p: str, t: float) -> bool:
+        return any((store.latest_at(q) or 0.0) > t for q in (p, f"{p}.md"))
+
     rest = raw_input.strip().split(maxsplit=1)
-    deleted = None
+    deleted = moved = None
     note_path: str | None
     if len(rest) > 1:
         note_path = rest[1].strip()
         if not _on_disk(note_path):
-            deleted = journal.last_chat_delete(vault, note_path)
+            deleted = journal.last_delete(vault, note_path)
+        # A patch the note took after it landed is undone before the move.
+        move = None if deleted else journal.last_chat_move(vault, note_path)
+        if move and not _written_since(move[2], move[3]):
+            moved = move
     else:
-        # The newest action wins, a write or a delete: a delete lives in the
-        # undo journal, not in the checkpoint store the writes use.
+        # The newest action wins, a write, a delete or a move: a delete and a
+        # move live in the undo journal, not in the checkpoint store.
         last_write = store.most_recent()
-        last_delete = journal.last_chat_delete(vault)
+        newest = last_write[1] if last_write else None
+        last_delete = journal.last_delete(vault)
         if last_delete and not _on_disk(last_delete[1]) and (
-                last_write is None or last_delete[2] >= last_write[1]):
-            deleted = last_delete
+                newest is None or last_delete[2] >= newest):
+            deleted, newest = last_delete, last_delete[2]
+        last_move = journal.last_chat_move(vault)
+        if last_move and (newest is None or last_move[3] >= newest):
+            deleted, moved = None, last_move
         note_path = deleted[1] if deleted else (last_write[0] if last_write else None)
+    if moved:
+        res = revert_run(moved[0])
+        if res["reverted"]:
+            CONSOLE.print(f"  Moved back: [bold]{moved[2]}[/] → {moved[1]}")
+        else:
+            why = (res["skipped"] or res["errors"] or [{"reason": "unknown"}])[0]
+            CONSOLE.print(f"  [yellow]Not moved back:[/] {moved[2]} "
+                          f"({why.get('reason') or why.get('error')})")
+        return True
     if deleted:
+        user_deleted = (journal.run_info(deleted[0]) or {}).get("source") == USER_DELETE_SOURCE
         res = revert_run(deleted[0])
         if res["reverted"]:
-            CONSOLE.print(f"  Restored: [bold]{deleted[1]}[/] (deleted from the chat)")
+            how = "deleted with /delete" if user_deleted else "deleted from the chat"
+            CONSOLE.print(f"  Restored: [bold]{deleted[1]}[/] ({how})")
         else:
             why = (res["skipped"] or res["errors"] or [{"reason": "unknown"}])[0]
             CONSOLE.print(f"  [yellow]Not restored:[/] {deleted[1]} "
@@ -1469,13 +1511,73 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         CONSOLE.print(f"  [yellow]Nothing to undo for[/] {note_path} (already at original).")
         return True
 
+    if store.absent_floor(note_path):
+        # The chat created this note: before it there was nothing, so undo
+        # removes it rather than leave a 0-byte note that keeps taking links.
+        try:
+            DRIVER.delete(note_path)
+            store.clear(note_path)
+            CONSOLE.print(f"  Undone: [bold]{note_path}[/] removed (the chat created it)")
+        except Exception as exc:
+            CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+        return True
+    from silica.kernel.write.preserve import Loss
+
     try:
-        DRIVER.overwrite(note_path, content)
+        DRIVER.overwrite(note_path, content, loss=Loss.RESTORE)
         depth = store.depth(note_path)
         remaining = max(0, depth - 1)
         CONSOLE.print(f"  Undone: [bold]{note_path}[/]  [dim]({remaining} undo step(s) remaining)[/]")
     except Exception as exc:
         CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+    return True
+
+
+def _dc_delete(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/delete <path>: delete a note as the user's own act (ADR-0092). The
+    model's silica_delete refuses a note other notes link to; this is where
+    the user deletes it, with no model in between, the way /remember writes
+    past the memory gate. Journaled under user:/delete, so /undo brings it
+    back; it prints each link the delete left pointing to no note and each
+    note it left with no incoming link."""
+    from rich.markup import escape
+
+    from silica.driver import DRIVER
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE
+    from silica.tools.wrapped import delete_with_restore_point
+
+    # Everything after the command is the path, as for /undo: note names
+    # with spaces are the common case.
+    rest = raw_input.strip().split(maxsplit=1)
+    ref = rest[1].strip() if len(rest) > 1 else ""
+    if not ref:
+        CONSOLE.print("  Usage: /delete <path>  [dim](the note to delete; /undo brings it back)[/]")
+        return True
+    try:
+        nc = DRIVER.read_note(ref)
+        path = nc.ref.path or ref
+        res = delete_with_restore_point(path, nc.content, USER_DELETE_SOURCE)
+    except Exception as exc:
+        res = {"error": str(exc)}
+    if "error" in res:
+        err = res["error"].removeprefix("not deleted: ")
+        CONSOLE.print(f"  [yellow]Not deleted:[/] {escape(ref)} ({escape(err)})", soft_wrap=True)
+        return True
+    # soft_wrap: a vault path is long, and a link cut across two lines in
+    # the GUI's code block reads as two entries.
+    CONSOLE.print(f"  Deleted: [bold]{escape(path)}[/]", soft_wrap=True)
+    if dangling := res["dangling"]:
+        CONSOLE.print(f"  {len(dangling)} link{'s' if len(dangling) != 1 else ''} now point"
+                      f"{'' if len(dangling) != 1 else 's'} to no note:")
+        for d in dangling:
+            CONSOLE.print(f"    {escape(d['note'])} → {escape('[[' + d['link'] + ']]')}",
+                          soft_wrap=True)
+    if orphaned := res["orphaned"]:
+        CONSOLE.print(f"  {len(orphaned)} note{'s' if len(orphaned) != 1 else ''} left with "
+                      "no incoming link:")
+        for o in orphaned:
+            CONSOLE.print(f"    {escape(o)}", soft_wrap=True)
+    CONSOLE.print(f"  [dim]/undo {escape(path)} brings it back.[/]", soft_wrap=True)
     return True
 
 
@@ -1894,6 +1996,7 @@ _DIRECT: dict[str, Callable[..., bool]] = {
     "/episodes": _dc_episodes,
     "/changes": _dc_changes,
     "/undo": _dc_undo,
+    "/delete": _dc_delete,
     "/revert": _dc_revert,
     "/zotero": lambda args, **kw: _dc_zotero(args, **kw),
     "/mail": _dc_mail,
@@ -1930,6 +2033,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         /verify <note> [--clear]
         /changes
         /undo [note-path]
+        /delete <path>
     """
 
     parts = raw_input.strip().split()
@@ -2373,8 +2477,10 @@ def _stage_envelope(body: str, stem: str, inbox: str) -> str:
     """
     from silica.driver import DRIVER
 
+    from silica.kernel.write.preserve import Loss
+
     rel = f"{inbox}/{stem}.md"
-    DRIVER.upsert(rel, body)
+    DRIVER.upsert(rel, body, loss=Loss.STAGED)
     return rel
 
 
@@ -2620,7 +2726,9 @@ def _promote(args: list[str]) -> str:
     # keep it to one path segment so no key can stage outside the inbox.
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", entity).strip(".-") or "episodic"
     rel = f"{inbox}/{stem}.md"
-    DRIVER.upsert(rel, promotion_stub(heads, store=store))
+    from silica.kernel.write.preserve import Loss
+
+    DRIVER.upsert(rel, promotion_stub(heads, store=store), loss=Loss.STAGED)
     try:
         target_dir = _pick_target_folder([rel])
     except Exception as exc:
@@ -4513,6 +4621,9 @@ def main():
     user_memory.set_incognito(False)
     messages = _fresh_messages()
     collapsed: set[int] = set()  # message indices already elided by compaction
+    # Number tokens of every result this session read, raw (ADR-0095): compaction
+    # and a relevance verdict stub the tool messages, and must not decide what grounds.
+    seen_numbers: set[str] = set()
     # This session's own identity, for the capture lane. Random, not a clock:
     # two silica processes started in the same second share the same vault WAL,
     # and a deterministic name would have one overwrite the other's envelope.
@@ -4598,12 +4709,20 @@ def main():
                 print_home()
                 messages[:] = _fresh_messages()
                 collapsed = set()  # indices reset with the history
+                seen_numbers = set()
                 from silica.agent import narration as _narr
                 _narr.NARRATOR.close()          # next user turn opens a fresh sid
                 session_id = uuid.uuid4().hex[:12]
                 continue
 
             result = _handle_slash_command(user_input, messages)
+            if cmd.startswith("/resume"):
+                # From the narration the history came back from. A /resume that
+                # failed left the narrator on this session, whose narration holds
+                # what the live set does.
+                from silica.agent import narration as _narr
+
+                seen_numbers = numbers_of_session(_narr.NARRATOR.sid)
             if result is False:
                 print("  (_  _)。˚")
                 break
@@ -4651,7 +4770,10 @@ def main():
         # Both wrappers forward every event to the renderer untouched: WebTurn
         # records the trace the citations are built from, RecallWatch counts
         # recall misses for the thin-coverage hint.
-        watch = WebTurn(web[0], callback) if web else RecallWatch(callback)
+        # A /web turn is not checked for numbers, but its pages were read: the
+        # RecallWatch under its WebTurn collects them for the session set.
+        read = RecallWatch(callback, surface="repl")
+        watch = WebTurn(web[0], read) if web else read
 
         try:
             answer = run_agent(
@@ -4668,12 +4790,19 @@ def main():
                                           deferred=chat_deferred(messages), interactive=True)
                 ),
             )
+            # ADR-0095: the answer as the model wrote it, before attribution adds
+            # text it did not; not a /web turn's, whose answer is bound to banked
+            # verbatim quotes.
+            unread = [] if web else unfounded_in_turn(answer, read.numbers, messages, seen_numbers)
             if web:
                 answer = watch.attribute(answer, messages)
             elif watch.web_answer:
                 from silica.sources.web_research import relay_sources
 
                 answer = relay_sources(answer, messages)
+            # The lines under the answer, stored on it before the beat below
+            # so the session keeps them (ADR-0094 point 8).
+            notes = turn_notes.attach(messages, ([] if web else watch.notes()) + numbers_notes(unread))
             # Final-assistant turn beat, post-attribution (see loop.py): the
             # replay must carry what the user actually read, sources included.
             if messages and messages[-1].get("role") == "assistant":
@@ -4683,8 +4812,7 @@ def main():
                 CONSOLE.print("[role.assistant]⏺ silica[/]")
                 CONSOLE.print(FlatMarkdown(answer))
                 CONSOLE.print()
-            if not web and watch.thin:
-                CONSOLE.print(f"  [dim]{THIN_COVERAGE_HINT}[/]\n")
+            _print_turn_notes(notes)
             # run_agent already appended the final assistant message to the
             # history — re-appending `answer` here would store it twice.
             _update_context_tokens(messages)
@@ -4698,6 +4826,9 @@ def main():
             callback.close()
             logger.exception("Agent error")
             CONSOLE.print(f"\n  [bold red]Error:[/] {e}\n")
+        # After the except arms too: an interrupted or failed turn still read
+        # what its results showed, and the narration /resume rebuilds from has them.
+        seen_numbers |= read.numbers
 
     # Every exit from the REPL passes here: /exit, Ctrl+D, Ctrl+C at the prompt.
     if not user_memory.incognito():

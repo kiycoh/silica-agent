@@ -681,10 +681,12 @@ def completion(plan: dict, entries: list[dict], passed: list[bool] | None = None
 
 # ---------------------------------------------------------------- the plan note, written
 
-def _journaled(path: str, mutate, source: str = "learn") -> str:
+def _journaled(path: str, mutate, source: str = "learn", *, loss=None, free=()) -> str:
     """One revertible overwrite of the plan note (ADR-0039's shape): the
     prior bytes go to the undo journal as a run, so /revert undoes exactly
-    this write. Returns the run id, "" when nothing changed."""
+    this write. Returns the run id, "" when nothing changed. `loss` and
+    `free` reach the overwrite: each caller names what its write may change
+    (ADR-0093)."""
     import hashlib
 
     from silica.driver import DRIVER
@@ -697,7 +699,7 @@ def _journaled(path: str, mutate, source: str = "learn") -> str:
         return ""
     journal = get_undo_journal()
     run_id = journal.start_run(source=source, vault=str(_vault()))
-    DRIVER.overwrite(path, after)
+    DRIVER.overwrite(path, after, loss=loss, free=free)
     post = DRIVER.read_note(path).content or ""
     journal.record(run_id, InverseOp(kind=InverseOpKind.restore_version, path=path, prior_content=before),
                    hashlib.sha256(post.encode("utf-8")).hexdigest())
@@ -751,13 +753,15 @@ def set_revisit(plan_path: str, paths: list[str]) -> str:
     session; the only way a calibration suggestion persists (D26)."""
     current = read_plan(plan_path)["revisit"]
     merged = list(dict.fromkeys(current + [p for p in paths if p]))
-    return _journaled(plan_path, lambda t: _set_keys(t, {"revisit": merged or None}))
+    return _journaled(plan_path, lambda t: _set_keys(t, {"revisit": merged or None}),
+                      free=("revisit",))
 
 
 def clear_revisit(plan_path: str, consumed: list[str]) -> str:
     current = read_plan(plan_path)["revisit"]
     left = [p for p in current if p not in set(consumed)]
-    return _journaled(plan_path, lambda t: _set_keys(t, {"revisit": left or None}))
+    return _journaled(plan_path, lambda t: _set_keys(t, {"revisit": left or None}),
+                      free=("revisit",))
 
 
 def close_plan(plan_path: str, reopen: bool = False) -> dict:
@@ -767,7 +771,8 @@ def close_plan(plan_path: str, reopen: bool = False) -> dict:
 
     plan = read_plan(plan_path)
     if reopen:
-        _journaled(plan_path, lambda t: _set_keys(t, {"status": None, "completed": None}))
+        _journaled(plan_path, lambda t: _set_keys(t, {"status": None, "completed": None}),
+                   free=("status", "completed"))
         return {"status": "active", "completed": None}
     from silica.kernel.report import quiz
 
@@ -776,7 +781,8 @@ def close_plan(plan_path: str, reopen: bool = False) -> dict:
         return {"status": plan["status"], "completed": plan.get("completed"),
                 "say": "Not every leaf has demonstrated the target yet; the plan stays open."}
     today = date.today().isoformat()
-    _journaled(plan_path, lambda t: _set_keys(t, {"status": "completed", "completed": today}))
+    _journaled(plan_path, lambda t: _set_keys(t, {"status": "completed", "completed": today}),
+               free=("status", "completed"))
     return {"status": "completed", "completed": today}
 
 
@@ -920,7 +926,11 @@ def edit_plan(plan_path: str, name: str, scope: str, target, by: str | None = No
                 keys.pop(k, None)
         return frontmatter.dump(keys, re.sub(r"\n{3,}", "\n\n", "\n".join(out)).rstrip("\n") + "\n")
 
-    run = _journaled(plan_path, mutate)
+    from silica.kernel.write.preserve import Loss
+
+    # PLAN relaxes the preamble, the generated sections and the plan keys;
+    # the reader's own sections must survive the re-scope.
+    run = _journaled(plan_path, mutate, loss=Loss.PLAN)
     return {"path": plan_path, "run": run, "gaps": resolved["gaps"], "tree": resolved["tree"],
             "paths": resolved["paths"], "cards": cards}
 

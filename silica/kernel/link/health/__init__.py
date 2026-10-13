@@ -33,6 +33,10 @@ exactly 1.0; a single introduced violation fails. Transforms under test:
   T3  fs backend write → read (the channel of the historical double-escaping
       LaTeX bug) — a scratch tempdir, never the real vault.
   T4  sanitize.normalize_ops (distiller post-processing).
+  T5  preservation (ADR-0093): the nineteen composers behind the driver's
+      writes, each under its declared Loss, must keep every line and value
+      the note had (`preserve.lost`). Not a lint diff: the composers passed
+      T1 to T4 while dropping a related: link or a line's indent.
 """
 from __future__ import annotations
 
@@ -209,12 +213,14 @@ def _t4_sanitize(body, stem) -> dict:
 
 def integrity_probe(vault: Path, *, verbose: bool = False) -> dict:
     from silica.driver.fs_backend import ObsidianFSBackend  # lazy: kernel stays driver-free at import
+    from silica.kernel.link.health.preservation import preservation
 
     all_md = iter_notes(vault)
     title_index = build_title_index([p.stem for p in all_md])
 
     notes = 0
     clean = 0
+    notes_losing = 0
     vault_structural = 0
     vault_style = 0
     notes_with_structural = 0
@@ -234,14 +240,18 @@ def integrity_probe(vault: Path, *, verbose: bool = False) -> dict:
             if structural:
                 notes_with_structural += 1
 
-            # differential across the 4 transforms
+            # differential across the 4 transforms, and what T5 lost
+            lost_by = preservation(rel, text, stem, title_index)
             introduced = {
                 "T1-frontmatter": _t1_frontmatter(text, data, body, stem),
                 "T2-autolink": _t2_autolink(body, title_index, stem),
                 "T3-fs-roundtrip": _t3_fs_roundtrip(backend, rel, text, stem),
                 "T4-sanitize": _t4_sanitize(body, stem),
+                "T5-preservation": {f"{name}: {why}": 1 for name, why in lost_by.items()},
             }
             notes += 1
+            if lost_by:
+                notes_losing += 1
             if any(introduced.values()):
                 if verbose:
                     for transform, viols in introduced.items():
@@ -266,4 +276,5 @@ def integrity_probe(vault: Path, *, verbose: bool = False) -> dict:
         "vault_structural_violations": vault_structural,
         "vault_style_flags": vault_style,
         "vault_notes_with_structural": notes_with_structural,
+        "preservation_notes_losing": notes_losing,
     }

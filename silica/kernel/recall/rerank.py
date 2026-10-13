@@ -259,7 +259,9 @@ def rerank_related(
     is noise — skip the call, keep first-stage order.
 
     `stats` is an optional out-dict: `rerank_related` sets `stats["reranked"]`
-    to whether the cross-encoder actually scored this pool. Callers that DISPLAY
+    to whether the cross-encoder actually scored this pool, and, when the
+    reranker was asked and abstained, `stats["degraded"]["rerank"]` to its cause
+    (ADR-0094; gate 2b never asks it, so it is never marked). Callers that DISPLAY
     the score need it — on abstention the surviving numbers are first-stage
     fusion cosines (~0.03), on a real rerank they are relevance probabilities
     (~0.99), and nothing in the list itself distinguishes the two scales.
@@ -310,6 +312,10 @@ def rerank_related(
     if scores is None or len(scores) != len(pool):
         if stats is not None:
             stats["reranked"] = False  # reranker down/short reply: cosines survive
+            # The served Reranker says why in `failure`; a stand-in that has no
+            # such attribute abstained for a reason nobody recorded.
+            cause = getattr(reranker, "failure", None) or "failed"
+            stats.setdefault("degraded", {}).setdefault("rerank", cause)
         return pool
     order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
     out = [pool[i] for i in order]

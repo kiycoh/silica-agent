@@ -34,7 +34,7 @@ def vault(tmp_path, monkeypatch):
 
 def _delete(ref):
     from silica.tools.wrapped import silica_delete
-    return silica_delete(ref, confirm=True)
+    return silica_delete(ref)  # nothing links it: the model's delete lands
 
 
 def test_undo_with_the_path_recreates_a_deleted_note(vault):

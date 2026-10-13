@@ -104,7 +104,7 @@ def silica_event_create(title: Annotated[str, Field(description='Event title')],
         checkpoint_depth = None
         checkpoint_ok = False
         try:
-            checkpoint_depth = get_checkpoint_store().push(path, "", content)
+            checkpoint_depth = get_checkpoint_store().push(path, None, content)  # None: created, /undo removes it
             checkpoint_ok = True
         except Exception as e:
             logger.warning("checkpoint push failed for '%s': %s — /undo has no "
@@ -155,7 +155,8 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
 
         new_content = upsert_props(prior, {_FIELD_TO_KEY[k]: v for k, v in changes.items()})
         try:
-            DRIVER.overwrite(target.path, new_content)
+            # The event keys are what an update is for (ADR-0093 `free`).
+            DRIVER.overwrite(target.path, new_content, free=tuple(_FIELD_TO_KEY.values()))
         except Exception as e:
             return {"error": f"Failed to update '{target.path}': {e}"}
 

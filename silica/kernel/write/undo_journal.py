@@ -24,6 +24,15 @@ _DEFAULT_JOURNAL_PATH = Path.home() / ".silica" / "undo_journal.db"
 # appeared at the path since, instead of overwriting it with the old body.
 CHAT_DELETE_SOURCE = "chat:silica_delete"
 ABSENT_HASH = "absent"
+# A move from the chat, the same way: one move_back inverse. Until 2026-10-11
+# a move recorded nothing, and the GUI's "move this note back" did nothing.
+CHAT_MOVE_SOURCE = "chat:silica_move"
+# A delete the user ran (/delete, or the card's "delete anyway"): a note other
+# notes link to is the user's to delete, not the model's (ADR-0092). Its own
+# source, so a check that judges the chat's deletes (ADR-0093's re-create)
+# can leave the user's out by name.
+USER_DELETE_SOURCE = "user:/delete"
+DELETE_SOURCES = (CHAT_DELETE_SOURCE, USER_DELETE_SOURCE)
 
 
 class UndoJournalStore:
@@ -179,12 +188,20 @@ class UndoJournalStore:
                          path: str | None = None) -> tuple[str, str, float] | None:
         """(run_id, path, started_at) of the newest un-reverted chat delete in
         `vault`, of `path` when given (any spelling, via provenance.note_key)."""
+        return self.last_delete(vault, path, sources=(CHAT_DELETE_SOURCE,))
+
+    def last_delete(self, vault: str | None, path: str | None = None,
+                    sources: tuple[str, ...] = DELETE_SOURCES
+                    ) -> tuple[str, str, float] | None:
+        """The same over every source in `sources`: by default a chat delete
+        or one the user ran with /delete, both of which /undo takes back."""
         from silica.kernel.write.provenance import note_key
 
+        marks = ",".join("?" * len(sources))
         query = ("SELECT r.run_id, i.path, r.started_at FROM runs r "
                  "JOIN inverses i ON i.run_id = r.run_id "
-                 "WHERE r.reverted_at IS NULL AND r.source = ? AND i.kind = ?")
-        params: list = [CHAT_DELETE_SOURCE, InverseOpKind.recreate_deleted.value]
+                 f"WHERE r.reverted_at IS NULL AND r.source IN ({marks}) AND i.kind = ?")
+        params: list = [*sources, InverseOpKind.recreate_deleted.value]
         if vault is not None:
             query += " AND r.vault = ?"
             params.append(vault)
@@ -193,6 +210,48 @@ class UndoJournalStore:
         for row in self._conn().execute(query, params):
             if want is None or note_key(row["path"]) == want:
                 return row["run_id"], row["path"], row["started_at"]
+        return None
+
+    def newest_post_hash(self, path: str, vault: str | None) -> str | None:
+        """The post-write hash of the newest un-reverted inverse for `path`
+        in `vault` (any spelling, via provenance.note_key): what the agent last
+        landed there. ADR-0093's draft pass compares it with the note now."""
+        from silica.kernel.write.provenance import note_key
+
+        query = ("SELECT i.path, i.post_hash FROM inverses i JOIN runs r ON r.run_id = i.run_id "
+                 "WHERE r.reverted_at IS NULL")
+        params: list = []
+        if vault is not None:
+            query += " AND r.vault = ?"
+            params.append(vault)
+        query += " ORDER BY i.id DESC"
+        want = note_key(path)
+        for row in self._conn().execute(query, params):
+            if note_key(row["path"]) == want:
+                return row["post_hash"]
+        return None
+
+    def last_chat_move(self, vault: str | None, ref: str | None = None
+                       ) -> tuple[str, str, str, float] | None:
+        """(run_id, from, to, started_at) of the newest un-reverted chat move in
+        `vault`. `ref` matches either end, or the folder the note landed in:
+        the GUI's moved card sends the call's raw `to`, which may be a folder."""
+        from silica.kernel.write.provenance import note_key
+
+        query = ("SELECT r.run_id, i.path, i.to_path, r.started_at FROM runs r "
+                 "JOIN inverses i ON i.run_id = r.run_id "
+                 "WHERE r.reverted_at IS NULL AND r.source = ? AND i.kind = ?")
+        params: list = [CHAT_MOVE_SOURCE, InverseOpKind.move_back.value]
+        if vault is not None:
+            query += " AND r.vault = ?"
+            params.append(vault)
+        query += " ORDER BY r.started_at DESC, r.rowid DESC"
+        want = note_key(ref) if ref else None
+        for row in self._conn().execute(query, params):
+            to = row["to_path"] or ""
+            if want is None or want in {note_key(row["path"]), note_key(to),
+                                        note_key(to.rsplit("/", 1)[0])}:
+                return row["run_id"], row["path"], to, row["started_at"]
         return None
 
     def inverses_for(self, run_id: str) -> list[tuple[InverseOp, str | None]]:

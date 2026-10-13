@@ -92,10 +92,18 @@ def test_mtime_is_the_date_of_last_resort(tmp_path):
     assert _by_note(dd.propose(vault, repo_root=tmp_path))["undated.md"].code_ref == ref_jan
 
 
-def test_apply_stamps_frontmatter_and_a_second_pass_proposes_nothing(tmp_path):
+def test_apply_stamps_frontmatter_and_a_second_pass_proposes_nothing(tmp_path, monkeypatch):
+    import silica.driver
+    from silica.config import CONFIG
+    from silica.kernel.write import session_changes
+
     vault, ref_jan, _ = _fixture(tmp_path)
+    monkeypatch.setattr(CONFIG, "vault_path", str(vault))
+    monkeypatch.setattr(silica.driver, "_driver", None)
     props = dd.propose(vault, repo_root=tmp_path)
     assert dd.apply(vault, props) == 1
+    # Through the driver (ADR-0093): the Changes list and the check see it.
+    assert "adr/0907-a-thing.md" in session_changes.snapshot()
     text = (vault / "adr" / "0907-a-thing.md").read_text(encoding="utf-8")
     assert text.startswith("---\n") and "\n# ADR-0907: a thing\n" in text
     bound = {n: d for n, d, _ in codedocs.iter_documenting_notes(vault)}
@@ -111,8 +119,11 @@ from silica.config import CONFIG
 
 
 def test_stale_stamp_lists_without_writing_and_writes_on_request(tmp_path, monkeypatch, capsys):
+    import silica.driver
+
     vault, ref_jan, _ = _fixture(tmp_path)
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
+    monkeypatch.setattr(silica.driver, "_driver", None)  # the stamp writes through it
     adr = vault / "adr" / "0907-a-thing.md"
     before = adr.read_text(encoding="utf-8")
 
@@ -134,7 +145,10 @@ def test_propose_scopes_to_a_folder(tmp_path):
 
 
 def test_stale_stamp_takes_a_folder(tmp_path, monkeypatch, capsys):
+    import silica.driver
+
     vault, _, _ = _fixture(tmp_path)
+    monkeypatch.setattr(silica.driver, "_driver", None)  # the stamp writes through it
     (vault / "spec.md").write_text("---\ncreated: 2026-02-05\n---\n\nsee src/b.py\n", encoding="utf-8")
     monkeypatch.setattr(CONFIG, "vault_path", str(vault))
     assert _handle_direct_shortcut("/stale --stamp adr --write", []) is True

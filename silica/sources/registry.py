@@ -192,7 +192,11 @@ def stage(
     # already computes real coverage, and codeast has NO guard for the
     # tree-sitter SIGSEGV of 2026-08-19 — its `except Exception` cannot catch a
     # native crash, and a batch over silica/ is what would trip it.
-    DRIVER.upsert(stub.note_path, stub.body)  # re-ingesting the same target refreshes the stub
+    from silica.kernel.write.preserve import Loss
+
+    # STAGED holds only under the inbox or sources/: a code note stage() writes
+    # elsewhere (sources/code.py), which the person may have refined, is judged.
+    DRIVER.upsert(stub.note_path, stub.body, loss=Loss.STAGED)  # re-ingesting refreshes the stub
     if run_id:
         _record_inverse(run_id, stub.note_path, prior)
     return {"status": "ok", "note_path": stub.note_path, "meta": dict(item.meta)}

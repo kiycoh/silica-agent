@@ -539,3 +539,14 @@ def _no_real_keyring():
     keyring.set_keyring(backend)
     yield backend
     keyring.set_keyring(previous)
+
+
+@pytest.fixture(autouse=True)
+def _close_the_preservation_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """run_agent opens ADR-0093's chat turn in the caller's context and
+    nothing closes it, so without a fresh one per test every later test's
+    create would read (and create) the undo journal inside its own tmp vault."""
+    from contextvars import ContextVar
+
+    from silica.kernel.write import preserve
+    monkeypatch.setattr(preserve, "_TURN_STARTED", ContextVar("preserve_turn_started", default=None))

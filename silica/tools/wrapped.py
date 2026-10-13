@@ -6,7 +6,8 @@
 From SILICA.md §4.4:
   Wrapped tools enforce invariants in the toolset, not in the system prompt.
   - silica_move always updates wikilinks (graph-safe).
-  - silica_delete refuses to delete if it loses density.
+  - silica_delete refuses a note other notes link to: that delete is the
+    user's, with /delete (ADR-0092).
 
 C3 rollback strategy (ADR-0009):
   - write ops   → InverseOp(delete_created, path)
@@ -52,21 +53,36 @@ def silica_move(ref: Annotated[str, Field(description='Name or path of the note 
     # literally the first made a file Obsidian does not list and the second
     # renamed the note to Archivio.md. What moves is a note, so the target is
     # one, and a last part that is not the note's name is where it goes.
+    from silica.config import CONFIG
+    from silica.kernel.write.undo_journal import CHAT_MOVE_SOURCE, get_undo_journal
+
+    try:
+        origin = DRIVER.read_note(ref).ref.path or str(ref)
+    except Exception as e:
+        return {"error": str(e)}  # the same refusal DRIVER.move would give
     target = to.strip()
     if not target.lower().endswith(".md"):
-        try:
-            name = Path(DRIVER.read_note(ref).ref.path or "").name
-        except Exception as e:
-            return {"error": str(e)}  # the same refusal DRIVER.move would give
+        name = Path(origin).name
         last = target.rstrip("/").rsplit("/", 1)[-1]
         if not target.endswith("/") and last.casefold() == Path(name).stem.casefold():
             target += ".md"
         else:
             target = f"{target.rstrip('/')}/{name}" if target.rstrip("/") else name
+    # The restore point first, as silica_delete does: /undo and the GUI's
+    # "move this note back" find the move here.
+    try:
+        journal = get_undo_journal()
+        run_id = journal.start_run(source=CHAT_MOVE_SOURCE,
+                                   vault=(CONFIG.vault_path or "").strip() or None)
+        journal.record(run_id, InverseOp(kind=InverseOpKind.move_back, path=origin,
+                                         to_path=target), post_hash=None)
+    except Exception as e:
+        return {"error": f"not moved: no restore point could be recorded ({e})"}
     try:
         DRIVER.move(ref, target)
         return {"success": True, "moved": ref, "to": target}
     except Exception as e:
+        journal.mark_reverted(run_id)  # nothing moved: nothing to move back
         return {"error": str(e)}
 
 
@@ -75,29 +91,74 @@ def silica_move(ref: Annotated[str, Field(description='Name or path of the note 
 # ---------------------------------------------------------------------------
 
 @tool(cls="wrapped", collapse="eager")
-def silica_delete(ref: Annotated[str, Field(description='Name or path of the note to delete')], confirm: Annotated[bool, Field(description='Explicit confirmation for density loss')] = False) -> dict[str, Any]:
-    """Delete a note. Requires confirmation if density is lost. Revertible:
-    /undo (or /revert) recreates it from the copy taken before the delete."""
-    if not confirm:
-        return {"error": "Anti-deletion policy: must pass confirm=True to acknowledge no density is lost."}
-
-    from silica.config import CONFIG
-    from silica.kernel.write.undo_journal import ABSENT_HASH, CHAT_DELETE_SOURCE, get_undo_journal
+def silica_delete(ref: Annotated[str, Field(description='Name or path of the note to delete')]) -> dict[str, Any]:
+    """Delete a note that no other note links to. Revertible: /undo (or
+    /revert) recreates it from the copy taken before the delete. A note other
+    notes link to is not deleted: the result names them, and the user deletes
+    it with /delete <path>."""
+    # `confirm` was removed 2026-10-11 (ADR-0092): both recorded chat deletes
+    # passed confirm=true on their first call, so it guarded nothing. A linked
+    # note is the user's to delete, and no argument, list or token completes
+    # that delete here, in this turn or a later one: a list the model copies
+    # back would be the same ritual with more characters.
+    from silica.kernel.write.undo_journal import CHAT_DELETE_SOURCE
 
     try:
         nc = DRIVER.read_note(ref)
     except Exception as e:
         return {"error": str(e)}  # the delete would refuse it the same way
     path = nc.ref.path or str(ref)
+    referrers = linked_from(path)
+    if referrers:
+        n = len(referrers)
+        return {
+            "error": f"not deleted: {n} {'note links' if n == 1 else 'notes link'} to {Path(path).stem}",
+            "linked_from": referrers,
+            # The note the refusal is about, resolved: the chat card's "delete
+            # anyway" sends /delete with it, where `ref` may be a bare name.
+            "path": path,
+            "next": ("Deleting a note other notes link to is the user's act. Tell the user "
+                     f"which notes link to it. They delete it with /delete {path}, and "
+                     "/undo brings it back."),
+        }
+    res = delete_with_restore_point(path, nc.content, CHAT_DELETE_SOURCE)
+    res.pop("dangling", None)  # nothing linked the note, so no link dangles
+    return res
+
+
+def linked_from(path: str) -> list[str]:
+    """The notes that link `path`, the note itself left out."""
+    return sorted({r.path for r in DRIVER.backlinks(path) if r.path} - {path})
+
+
+def delete_with_restore_point(path: str, content: str, source: str) -> dict[str, Any]:
+    """Record the restore point under `source`, delete `path`, and say what
+    the delete left: `dangling`, each link that now points to no note, and
+    `orphaned`, each note left with no incoming link. One helper for the
+    model's delete and the user's /delete, so both report the same way.
+
+    Both lists come from the driver's snapshots of the note's neighbourhood
+    before and after, which hold every note the delete can change: a link
+    the delete breaks has its source among the referrers, and a note it
+    orphans was linked by the deleted note, so is among its successors. They
+    equal rules 2 and 1 of the graph gate only because the driver's index
+    repairs itself on a delete (ADR-0092 point 1).
+    """
+    from silica.config import CONFIG
+    from silica.kernel.write.undo_journal import ABSENT_HASH, get_undo_journal
+
+    pre = DRIVER.graph_snapshot([NoteRef(name=Path(path).stem, path=path)])
+    own = path.removesuffix(".md")
+    around = [k for k in pre.link_counts if k != own]
     # The restore point first: a delete that cannot be taken back is the one
     # this tool no longer does (until 2026-09-28 it took none, and /undo could
     # not bring the note back).
     try:
         journal = get_undo_journal()
-        run_id = journal.start_run(source=CHAT_DELETE_SOURCE,
+        run_id = journal.start_run(source=source,
                                    vault=(CONFIG.vault_path or "").strip() or None)
         journal.record(run_id, InverseOp(kind=InverseOpKind.recreate_deleted, path=path,
-                                         prior_content=nc.content), post_hash=ABSENT_HASH)
+                                         prior_content=content), post_hash=ABSENT_HASH)
     except Exception as e:
         return {"error": f"not deleted: no restore point could be recorded ({e})"}
     try:
@@ -105,7 +166,17 @@ def silica_delete(ref: Annotated[str, Field(description='Name or path of the not
     except Exception as e:
         journal.mark_reverted(run_id)  # nothing was deleted: nothing to recreate later
         return {"error": str(e)}
-    return {"success": True, "deleted": path, "undo": f"/undo {path}"}
+    post = DRIVER.graph_snapshot([NoteRef(name=k.rsplit("/", 1)[-1], path=f"{k}.md")
+                                  for k in around])
+    keys = set(around)
+    before = {(lk.source.path, lk.target) for lk in pre.unresolved}
+    dangling = sorted({(lk.source.path, lk.target) for lk in post.unresolved
+                       if lk.source.path.removesuffix(".md") in keys} - before)
+    orphaned = sorted(f"{k}.md" for k in around
+                      if pre.backlink_counts.get(k, 0) > 0 and post.backlink_counts.get(k) == 0)
+    return {"success": True, "deleted": path, "undo": f"/undo {path}",
+            "orphaned": orphaned,
+            "dangling": [{"note": src, "link": tgt} for src, tgt in dangling]}
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +346,8 @@ def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to r
     Accepts the 'inverses' list produced by silica_snapshot — fully
     JSON-serialisable, no hidden Python objects.
     """
+    from silica.kernel.write.preserve import Loss
+
     errors: list[str] = []
     applied: list[str] = []
 
@@ -301,7 +374,7 @@ def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to r
             elif inv.kind == InverseOpKind.restore_version:
                 if inv.prior_content is not None:
                     # Overwrite with captured content (reliable across backends).
-                    DRIVER.overwrite(path, inv.prior_content)
+                    DRIVER.overwrite(path, inv.prior_content, loss=Loss.RESTORE)
                     applied.append(f"restored_content:{path}")
                 else:
                     logger.warning("restore_version: no prior_content for %s — skipped", path)
@@ -310,7 +383,7 @@ def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to r
                 if inv.prior_content is not None:
                     # upsert: a re-run restore (partial rollback retry) finds the
                     # note already recreated — restoring content is still correct.
-                    DRIVER.upsert(path, inv.prior_content)
+                    DRIVER.upsert(path, inv.prior_content, loss=Loss.RESTORE)
                     applied.append(f"recreated_deleted:{path}")
                 else:
                     errors.append(f"recreate_deleted missing prior_content for {path}")

@@ -19,6 +19,7 @@ import json
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import networkx as nx
@@ -37,7 +38,8 @@ from silica.driver.base import (
 from silica.kernel.link.ast import extract_links_typed
 from silica.kernel.recall.graph_export import is_vault_artifact
 from silica.kernel.recall.paths import is_source_leaf
-from silica.kernel.write import session_changes
+from silica.kernel.write import preserve, session_changes
+from silica.kernel.write import frontmatter as fm
 from silica.kernel.write.notetype import stamp_type
 from silica.kernel.write.ops import InverseOp, InverseOpKind
 
@@ -49,6 +51,28 @@ PROTOCOL_VERSION = 1
 # reply carrying a large note body. Mirrors ui/connect.py (driver must not
 # import from ui).
 MAX_FRAME = 2**25
+
+
+def _disk_prior(path: str) -> tuple[str | None, bool]:
+    """The note as it stands on disk, on LF, and whether its bytes were CRLF.
+
+    Read the way session_changes.touched_from_disk reads it: the plugin has
+    the same folder open that CONFIG points at, so the prior the check needs
+    is one open() away and costs no round trip. None when the file is not
+    there (the write is a create)."""
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    try:
+        raw = (Path(CONFIG.vault_path) / path).read_bytes()
+    except OSError:
+        return None, False
+    try:
+        return preserve.lf(raw.decode("utf-8")), preserve.crlf_dominant(raw)
+    except UnicodeDecodeError:
+        # Not text the composers could have read either: nothing to compare.
+        return None, False
 
 
 class ObsidianWSBackend(GraphIndexMixin):
@@ -224,9 +248,12 @@ class ObsidianWSBackend(GraphIndexMixin):
         path = self._path_arg(ref)
         data = self._rpc("read", path=path)
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
+        # Folded to LF here, as the fs backend's read does: every composer
+        # assumes `\n`, and the write puts the note's own terminator back
+        # (ADR-0093 decision 8). The plugin hands the bytes over as they are.
         return NoteContent(
             ref=NoteRef(name=name, path=data.get("path", path)),
-            content=data.get("content", ""),
+            content=preserve.lf(data.get("content", "")),
         )
 
     def list_files(self, folder: str = "") -> list[NoteRef]:
@@ -386,13 +413,17 @@ class ObsidianWSBackend(GraphIndexMixin):
                     neighborhood.update(self._graph.predecessors(r.path))
 
         paths = self._notes.keys() if neighborhood is None else neighborhood
+        # One pass, grouped by source, as in the fs backend (ADR-0092 point 4).
+        by_source: dict[str, list[str]] = {}
+        for s, t in self._unresolved_links:
+            by_source.setdefault(s, []).append(t)
         link_counts: dict[str, int] = {}
         backlink_counts: dict[str, int] = {}
         for path in paths:
             if path not in self._notes:
                 continue
             resolved = self._graph.out_degree(path) if path in self._graph else 0
-            unresolved = sum(1 for s, _t in self._unresolved_links if s == path)
+            unresolved = len(by_source.get(path, ()))
             key = path.removesuffix(".md")
             link_counts[key] = resolved + unresolved
             backlink_counts[key] = self._graph.in_degree(path) if path in self._graph else 0
@@ -400,7 +431,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         orphans = [self._notes[p] for p in paths
                    if p in self._notes and (p not in self._graph or self._graph.in_degree(p) == 0)]
         unresolved_links = [Link(source=self._node_ref(s), target=t.removesuffix(".md"))
-                            for s, t in self._unresolved_links
+                            for s, targets in by_source.items() for t in targets
                             if s in self._notes and (neighborhood is None or s in neighborhood)]
         return GraphSnapshot(
             orphans=orphans, unresolved=unresolved_links,
@@ -411,21 +442,29 @@ class ObsidianWSBackend(GraphIndexMixin):
     # Write (graph-safe) — one RPC each; the reply IS the settle (§2.4)
     # ------------------------------------------------------------------
 
-    def create(self, path: str, content: str) -> NoteRef:
+    def create(self, path: str, content: str, *, loss: preserve.Loss | None = None,
+               free=()) -> NoteRef:
         content = stamp_type(path, content)   # OKF §4.1 `type`, if absent
+        # ADR-0093: a path the chat deleted this turn is judged against the
+        # body the delete saved. If the plugin folds the path into a key
+        # note_key does not, the lookup misses and the create is unchecked.
+        preserve.check_recreate(path, content, loss=loss, free=free)
         data = self._rpc("create", path=path, content=content)
         ref = NoteRef(name=data["name"], path=data["path"])
         # The plugin's path is the authoritative one, and it is only known once
         # the reply is in — so this one records after the write, with no baseline
         # read: a create had nothing to be a baseline.
         session_changes.touched(ref.path, None)
-        self._patch_graph_add(ref.path, ref, content)
+        self._patch_create(ref.path, ref, content)
         return ref
 
-    def overwrite(self, path: str, content: str) -> NoteRef:
-        return self._overwrite_raw(path, stamp_type(path, content))  # OKF §4.1 `type`
+    def overwrite(self, path: str, content: str, *, loss: preserve.Loss | None = None,
+                  free=()) -> NoteRef:
+        return self._overwrite_raw(path, stamp_type(path, content),  # OKF §4.1 `type`
+                                   loss=loss, free=free)
 
-    def _overwrite_raw(self, path: str, content: str) -> NoteRef:
+    def _overwrite_raw(self, path: str, content: str, *, loss: preserve.Loss | None = None,
+                       free=()) -> NoteRef:
         """Write bytes as given. Rollback only: a restore is not an authored
         write, so it must not acquire the derived `type` stamp that overwrite()
         applies — undo has to return the prior bytes exactly.
@@ -434,8 +473,10 @@ class ObsidianWSBackend(GraphIndexMixin):
         still goes through the public seam and re-stamps a pre-backfill note.
         Promote to a Protocol verb only if that divergence ever bites.
         """
+        prior, crlf = _disk_prior(path)
+        preserve.check_write(path, prior, content, loss=loss, free=free)
         session_changes.touched_from_disk(path)
-        self._rpc("overwrite", path=path, content=content)
+        self._rpc("overwrite", path=path, content=preserve.encode(content, crlf))
         name = path.rsplit("/", 1)[-1].removesuffix(".md")
         ref = NoteRef(name=name, path=path)
         self._patch_graph_add(path, ref, content)
@@ -451,6 +492,14 @@ class ObsidianWSBackend(GraphIndexMixin):
 
     def set_prop(self, ref: NoteRef | str, name: str, value: Any, type_: str = "text") -> None:
         path = self._path_arg(ref)
+        prior, _crlf = _disk_prior(path)
+        if prior is not None:
+            # The plugin's own result is not visible before it writes, so the
+            # rule judges what the fs backend's set_prop would write. No
+            # caller today (2026-10-11); it stays checked for the first one.
+            data, _raw, body = fm.split(prior)
+            after = fm.dump({**(data or {}), name: value}, body)
+            preserve.check_write(path, prior, after, free=(name,))
         session_changes.touched_from_disk(path)
         self._rpc("set_prop", path=path, name=name, value=value, type=type_)
 
@@ -475,7 +524,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         path = self._path_arg(ref)
         session_changes.touched_from_disk(path)
         self._rpc("delete", path=path)
-        self._patch_graph_remove(path)
+        self._patch_delete(path)
 
     def autolink_note(
         self,
@@ -533,6 +582,61 @@ class ObsidianWSBackend(GraphIndexMixin):
             ]
         self._unresolved_links = {(s, t) for s, t in self._unresolved_links if s != path}
 
+    def _patch_delete(self, path: str) -> None:
+        """`_patch_graph_remove`, then every note that linked it.
+
+        The fs backend's repair (ADR-0092), with each referrer's body read
+        from disk: the plugin's delete replies as soon as `trashFile` returns,
+        before Obsidian's metadata cache settles, so asking it for links now
+        would answer with no settled timing. The referrers' bytes did not
+        change, and the plugin has the folder CONFIG points at open (the
+        assumption `session_changes.touched_from_disk` already makes).
+        """
+        if not self._is_graph_built:
+            return
+        referrers = ([p for p in self._graph.predecessors(path) if p != path]
+                     if path in self._graph else [])
+        self._patch_graph_remove(path)
+        self._repatch_from_disk(referrers)
+
+    def _patch_create(self, path: str, ref: NoteRef, content: str) -> None:
+        """`_patch_graph_add`, then the sources of unresolved pairs that now
+        resolve to the new note, filtered by name first. The fs backend also
+        re-patches the referrers of a namesake; this index resolves a bare
+        name to the first note of that name, so a new namesake takes no link
+        here until this resolver follows the fs one (ADR-0092 point 1)."""
+        self._patch_graph_add(path, ref, content)
+        if not self._is_graph_built:
+            return
+        name = ref.name.lower()
+        sources: set[str] = set()
+        for source, target in list(self._unresolved_links):
+            if target.rsplit("/", 1)[-1].removesuffix(".md").lower() != name:
+                continue
+            hit = self._resolve_link(target, source_path=source)
+            if hit is not None and hit.path == path:
+                sources.add(source)
+        sources.discard(path)
+        self._repatch_from_disk(sorted(sources))
+
+    def _repatch_from_disk(self, paths: list[str]) -> None:
+        from silica.config import CONFIG
+
+        root = (getattr(CONFIG, "vault_path", "") or "").strip()
+        for path in paths:
+            try:
+                if not root:
+                    raise OSError("no vault path configured")
+                content = (Path(root) / path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
+                # The disk does not hold what the plugin has open: drop the
+                # index and let the next read rebuild it from the plugin, the
+                # same fallback move() and autolink_note() take.
+                logger.debug("index repair: %s not re-read (%s); rebuilding", path, exc)
+                self._is_graph_built = False
+                return
+            self._patch_graph_add(path, self._node_ref(path), content)
+
     def _add_link_edges(self, path: str, content: str) -> None:
         for target, scaffold in extract_links_typed(content).items():
             resolved = self._resolve_link(target, source_path=path)
@@ -586,7 +690,7 @@ class ObsidianWSBackend(GraphIndexMixin):
             kind = getattr(inv, "kind", None)
             prior = getattr(inv, "prior_content", None)
             if kind == InverseOpKind.restore_version and prior is not None:
-                self._overwrite_raw(inv.path, prior)
+                self._overwrite_raw(inv.path, prior, loss=preserve.Loss.RESTORE)
         for path in txn.created_paths:
             try:
                 self.delete(path)
