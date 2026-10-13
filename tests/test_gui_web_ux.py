@@ -151,6 +151,11 @@ def test_a_stopped_turn_keeps_the_partial_answer_and_adds_an_outcome_row(client,
 
 def test_no_route_serialises_str_exc_into_a_user_facing_field():
     text = (WEB.parent / "server.py").read_text(encoding="utf-8")
+    # _skip_reason is the one exemption: it hands the converter's text to the
+    # agent turn on a laptop, where the paths in it are the owner's own, and on
+    # a hosted tenant it returns a fixed sentence instead (ADR-0085 point 5).
+    start = text.index("def _skip_reason(")
+    text = text[:start] + text[text.index("\n\n\n", start):]
     assert "str(exc)" not in text, "a route hands the raw exception to the person again"
     from silica.ui.web.failures import explain
     out = explain(RuntimeError("HTTPError 502 upstream (request id 4f2a)"))
