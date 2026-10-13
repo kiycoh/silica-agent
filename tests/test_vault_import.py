@@ -72,7 +72,7 @@ def test_a_name_already_there_gets_a_number(tmp_path):
 def test_a_folder_keeps_its_tree_and_only_what_silica_reads(client):
     tc, _ = client
     resp = _post(tc, [
-        ("Corso/Settimana 1/Lezione 1.pdf", "Lezione 1.pdf", pdf_bytes(["Entropy and heat."])),
+        ("Corso/Settimana 1/Lezione 1.pdf", "Lezione 1.pdf", pdf_bytes(["Entropy and heat, the first lecture."])),
         ("Corso/appunti.md", "appunti.md", b"# Appunti\n\nbody"),
         ("Corso/elenco.txt", "elenco.txt", b"plain text list"),
         ("Corso/foto.jpg", "foto.jpg", b"\xff\xd8\xff"),
@@ -96,7 +96,7 @@ def test_one_bad_file_never_stops_the_batch(client):
     tc, _ = client
     resp = _post(tc, [
         ("", "fake.pdf", b"<html><script>alert(1)</script></html>"),
-        ("", "good.pdf", pdf_bytes(["A real page."])),
+        ("", "good.pdf", pdf_bytes(["A real page of lecture notes."])),
         ("", "binary.md", b"\x00\x01\x02"),
     ])
 
@@ -151,7 +151,7 @@ def test_on_the_server_the_pdf_goes_once_its_note_exists(client, monkeypatch):
     tc, _ = client
 
     types = tc.get("/supported_types").json()
-    resp = _post(tc, [("", "paper.pdf", pdf_bytes(["Text of the paper."])), ("", "doc.docx", b"PK")])
+    resp = _post(tc, [("", "paper.pdf", pdf_bytes(["Text of the paper, in full."])), ("", "doc.docx", b"PK")])
 
     assert types["import"] == [".md", ".pdf", ".txt"] and types["extensions"] == [".md", ".pdf", ".txt"]
     rows = {r["name"]: r for r in resp.json()["files"]}

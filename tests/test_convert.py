@@ -69,7 +69,7 @@ def test_legacy_pymupdf_setting_still_selects_the_default(tmp_vault, monkeypatch
     assert conv.resolve_pdf_provider("pymupdf") == "pdfium"
     assert "pymupdf" not in conv.PDF_PROVIDERS  # the settings enum lists real names only
     monkeypatch.setattr(CONFIG, "pdf_provider", "pymupdf")
-    (Path(CONFIG.vault_path) / "old.pdf").write_bytes(_pdf_bytes(["Legacy pin body"]))
+    (Path(CONFIG.vault_path) / "old.pdf").write_bytes(_pdf_bytes(["Legacy pin body, one page of text."]))
 
     body = _inbox_note(conv.convert("old.pdf")[0]).read_text(encoding="utf-8")
     assert "Legacy pin body" in body
@@ -77,7 +77,7 @@ def test_legacy_pymupdf_setting_still_selects_the_default(tmp_vault, monkeypatch
 
 def test_pdfium_converts_a_real_pdf(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
-    (Path(CONFIG.vault_path) / "paper.pdf").write_bytes(_pdf_bytes(["Hello vault"]))
+    (Path(CONFIG.vault_path) / "paper.pdf").write_bytes(_pdf_bytes(["Hello vault, one page of text."]))
 
     body = _inbox_note(conv.convert("paper.pdf")[0]).read_text(encoding="utf-8")
     assert "Hello vault" in body
@@ -89,7 +89,7 @@ def test_pdfium_uses_the_embedded_outline_for_headings(tmp_vault, monkeypatch):
     on the line that carries its title."""
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
     pdf = _pdf_bytes(
-        ["Chapter One\nbody one", "Chapter Two\nbody two"],
+        ["Chapter One\nbody one of the first chapter", "Chapter Two\nbody two of the second chapter"],
         toc=[[1, "Chapter One", 1], [1, "Chapter Two", 2]],
     )
     (Path(CONFIG.vault_path) / "book.pdf").write_bytes(pdf)
@@ -101,7 +101,7 @@ def test_pdfium_uses_the_embedded_outline_for_headings(tmp_vault, monkeypatch):
 
 def test_pdfium_without_outline_still_produces_text(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
-    (Path(CONFIG.vault_path) / "plain.pdf").write_bytes(_pdf_bytes(["Body with no outline"]))
+    (Path(CONFIG.vault_path) / "plain.pdf").write_bytes(_pdf_bytes(["Body with no outline at all here"]))
 
     body = _inbox_note(conv.convert("plain.pdf")[0]).read_text(encoding="utf-8")
     assert "Body with no outline" in body
@@ -274,7 +274,7 @@ def test_pdf_creation_date_lands_in_frontmatter(tmp_vault, monkeypatch):
     not the run (`source_event_date` reads the converted note's `date:`)."""
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
     (Path(CONFIG.vault_path) / "dated.pdf").write_bytes(
-        _pdf_bytes(["Dated body"], creation_date="D:20240402093000+02'00'"))
+        _pdf_bytes(["Dated body of a short paper"], creation_date="D:20240402093000+02'00'"))
 
     note = _inbox_note(conv.convert("dated.pdf")[0]).read_text(encoding="utf-8")
     assert note.startswith("---\ndate: 2024-04-02\n")
@@ -284,7 +284,7 @@ def test_undated_pdf_gets_no_date_line(tmp_vault, monkeypatch):
     """No metadata → no `date:` — a missing event clock must stay missing (the
     FSM would stamp it on every claim as valid_from)."""
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
-    (Path(CONFIG.vault_path) / "plain.pdf").write_bytes(_pdf_bytes(["Undated body"]))
+    (Path(CONFIG.vault_path) / "plain.pdf").write_bytes(_pdf_bytes(["Undated body of a short paper"]))
 
     note = _inbox_note(conv.convert("plain.pdf")[0]).read_text(encoding="utf-8")
     assert note.startswith('---\nsource_file: "')
@@ -322,7 +322,7 @@ def test_empty_extraction_raises_pointing_at_ocr(tmp_vault, monkeypatch):
     monkeypatch.setitem(conv.PDF_PROVIDERS, "pdfium", lambda src, wd: ("   \n\n", wd))
     tmp_vault.note("scan.pdf", "x")
 
-    with pytest.raises(ValueError, match="no text extracted.*mineru"):
+    with pytest.raises(ValueError, match="no selectable text.*mineru"):
         conv.convert("scan.pdf")
     assert not (Path(CONFIG.vault_path) / CONFIG.inbox_dir / "scan.md").exists()
 
@@ -718,7 +718,7 @@ def _fake_soffice(monkeypatch, *, writes_pdf=True, returncode=0, stderr="", hang
         if writes_pdf:
             out = Path(cmd[cmd.index("-outdir") + 1])
             out.mkdir(parents=True, exist_ok=True)
-            (out / "deck.pdf").write_bytes(_pdf_bytes(["Slide text from a .ppt"]))
+            (out / "deck.pdf").write_bytes(_pdf_bytes(["Slide text from a .ppt deck"]))
 
         class R:
             pass

@@ -1,4 +1,5 @@
-"""Hand-written test documents: PDF (text pages, outline, metadata), DOCX, EPUB, FB2.
+"""Hand-written test documents: PDF (text pages, outline, metadata, image pages,
+unmapped fonts), DOCX, EPUB, FB2.
 
 The suite used to build its fixtures with pymupdf, which left an AGPL package in
 the dev environment after the runtime dropped it (2026-08-31). A text-only PDF
@@ -23,6 +24,8 @@ def pdf_bytes(
     title: str | None = None,
     author: str | None = None,
     font_sizes: list[list[float]] | None = None,
+    images: dict[int, tuple[int, int, bytes]] | None = None,
+    garbled: set[int] | None = None,
 ) -> bytes:
     """A real one-column PDF, one page per string, lines separated by "\\n".
 
@@ -31,7 +34,18 @@ def pdf_bytes(
     it, nesting is not built). `creation_date` is the PDF form, e.g.
     "D:20240402093000+02'00'". `font_sizes`, when given, holds one size per
     line of each page (default 11 pt), so a test can stage a heading heuristic.
+
+    `images` maps a 0-based page to (width, height, 8-bit gray pixels), drawn
+    468 pt wide at the top of that page as an image XObject: with "" as the
+    page's text, a page that is only a picture, as a scan is (ADR-0087).
+    Pixels shorter than width times height are taken as the stream already
+    Flate-compressed, which builds a 1 GiB picture in 1 MB.
+    `garbled` pages draw their text in a font whose ToUnicode map sends every
+    code into the private use area, which is what a subset font with no usable
+    map extracts as: the glyphs are on the page, the letters are not.
     """
+    import zlib
+
     objects: list[bytes] = []
 
     def add(body: bytes) -> int:
@@ -49,6 +63,13 @@ def pdf_bytes(
     if toc:
         next_id += 1 + len(toc)
     info_id = next_id if (creation_date or title or author) else None
+    if info_id:
+        next_id += 1
+    image_ids: dict[int, int] = {}
+    for i in sorted(images or {}):
+        image_ids[i] = next_id
+        next_id += 1
+    garbled_font_id = next_id if garbled else None
 
     add(b"<< /Type /Catalog /Pages 2 0 R"
         + (f" /Outlines {outlines_id} 0 R /PageMode /UseOutlines".encode() if toc else b"")
@@ -57,16 +78,24 @@ def pdf_bytes(
     add(f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>".encode())
     add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     for i in range(n_pages):
+        fonts = f"/F1 {font_id} 0 R" + (f" /F2 {garbled_font_id} 0 R" if garbled_font_id else "")
+        xobject = f" /XObject << /Im0 {image_ids[i]} 0 R >>" if i in image_ids else ""
         add(f"<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 612 792] "
-            f"/Resources << /Font << /F1 {font_id} 0 R >> >> "
+            f"/Resources << /Font << {fonts} >>{xobject} >> "
             f"/Contents {content_ids[i]} 0 R >>".encode())
     for i, text in enumerate(pages):
         lines = text.split("\n")
         sizes = (font_sizes[i] if font_sizes else None) or [11.0] * len(lines)
-        stream = b"BT\n"
+        font = "/F2" if garbled and i in garbled else "/F1"
+        stream = b""
+        if images and i in images:
+            w, h, _ = images[i]
+            drawn = 468 * h / w
+            stream += f"q 468 0 0 {drawn:g} 72 {720 - drawn:g} cm /Im0 Do Q\n".encode()
+        stream += b"BT\n"
         y = 720.0
         for line, size in zip(lines, sizes):
-            stream += f"/F1 {size:g} Tf 1 0 0 1 72 {y:g} Tm ".encode() + _pdf_string(line) + b" Tj\n"
+            stream += f"{font} {size:g} Tf 1 0 0 1 72 {y:g} Tm ".encode() + _pdf_string(line) + b" Tj\n"
             y -= size * 1.6
         stream += b"ET"
         add(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream")
@@ -95,6 +124,16 @@ def pdf_bytes(
         if creation_date:
             info += b" /CreationDate " + _pdf_string(creation_date)
         add(info + b" >>")
+    for i in sorted(images or {}):
+        w, h, pixels = images[i]
+        data = zlib.compress(pixels) if len(pixels) == w * h else pixels
+        add(f"<< /Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray "
+            f"/BitsPerComponent 8 /Filter /FlateDecode /Length {len(data)} >>\nstream\n".encode()
+            + data + b"\nendstream")
+    if garbled_font_id:
+        add(f"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding "
+            f"/ToUnicode {garbled_font_id + 1} 0 R >>".encode())
+        add(b"<< /Length " + str(len(_PUA_CMAP)).encode() + b" >>\nstream\n" + _PUA_CMAP + b"\nendstream")
 
     out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = []
@@ -110,6 +149,36 @@ def pdf_bytes(
         trailer += f" /Info {info_id} 0 R"
     out += (trailer + f" >>\nstartxref\n{xref}\n%%EOF\n").encode()
     return bytes(out)
+
+
+# Every printable ASCII code to U+E020..U+E07E: letters drawn, private-use
+# characters extracted.
+_PUA_CMAP = b"""/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<00> <FF>
+endcodespacerange
+1 beginbfrange
+<20> <7E> <E020>
+endbfrange
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end"""
+
+
+def gray_lines(width: int = 300, height: int = 200) -> tuple[int, int, bytes]:
+    """A white picture crossed by dark bars, as lines of type look from afar:
+    something on the page to render, and no text layer under it."""
+    rows = []
+    for y in range(height):
+        ink = (y // 6) % 3 == 0 and 10 < y < height - 10
+        rows.append(bytes([30 if ink and 20 < x < width - 20 else 255 for x in range(width)]))
+    return width, height, b"".join(rows)
 
 
 # --- DOCX ---------------------------------------------------------------------

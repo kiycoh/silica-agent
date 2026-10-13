@@ -14,11 +14,17 @@ The child half (`_child`, run as this file's `__main__`) imports pypdfium2 and
 the standard library and nothing from `silica`: it starts with `python -I -B`
 on this file's path, so neither the package nor the working directory is on
 its import path.
+
+A page without text (ADR-0087 point 3) is rendered here too, grayscale, and
+handed back as PNG for the parent to send to the chat model (the amendment of
+2026-10-13); the reading itself is the parent's (`convert._read_pages`),
+because the child has no network.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 
 # ADR-0087 point 2's table, measured there: the library's largest PDF is 20 MB
@@ -32,8 +38,54 @@ WALL_SECONDS = 120
 MAX_CHARS = 8_000_000
 # The JSON around 8 million characters: per-line arrays and font sizes, and
 # \uXXXX escapes for non-ASCII text, which can triple a line.
-_OUT_BYTES = 40 * 1024 * 1024
+_TEXT_OUT_BYTES = 40 * 1024 * 1024
 _ERR_BYTES = 64 * 1024
+
+# ADR-0087 point 3: a page under 20 non-space characters has no text layer.
+# Over the library's 5,915 pages, 3 sit under it (two figures, one blank) and
+# the next real page has 45.
+MIN_PAGE_CHARS = 20
+# Point 4, measured on 255 papers: the median page's share of bad characters
+# fired on the 2 true garbage documents, and the nearest clean one sat at
+# 0.083. The function-word share only warns until it is measured on 20 UNIPA
+# lecture PDFs, because terse Italian slides may sit near it.
+BAD_SHARE = 0.10
+FUNCTION_WORD_SHARE = 0.05
+# U+FFFD, C0 but newline and tab, C1, and the three private use areas: what
+# glyph codes with no Unicode map come out as. Never a letter a student wrote.
+_BAD_RE = re.compile("[\x00-\x08\x0b-\x1f\x80-\x9f\ufffd\ue000-\uf8ff"
+                     "\U000f0000-\U000ffffd\U00100000-\U0010fffd]")
+# English and Italian closed-class words: running prose of either language is
+# a quarter to a half of these, glyph-code garbage none.
+_FUNCTION_WORDS = frozenset("""
+    the of and to a in is that for it as with was on be by this are or at from an not which
+    but have has had were been their its they we our can these such than also into more
+    il lo la i gli le di da con su per tra fra e che non un una uno del della dei delle degli
+    al alla ai alle nel nella nei nelle sul sulla sono come anche si ma o ed se questo questa
+""".split())
+
+# The amendment's render: grayscale, long side at most 1600 px, about 1,500
+# image tokens a page in on glm-5.3-flash by its estimate. A page past
+# `vision_pages()` is named instead.
+VISION_PAGES = 60
+LONG_SIDE = 1600
+# The child has no network and RLIMIT_FSIZE 0, so pictures come back on stdout
+# and the stdout cap has to hold them. 16 MiB of PNG for one file: measured
+# 2026-10-13 at 16 gray levels, a born-digital page is 108 KiB median and 141
+# KiB at most (the first 3 pages of 12 papers) and one page with noise added
+# as a scanner's 152 to 187 KiB, so the default 60 pages need about 11 MiB and
+# fit with room. A page that would pass the budget is not sent, and it and the
+# rest are named.
+_IMAGE_BYTES = 16 * 1024 * 1024
+# The text, the pictures as base64 (4 bytes for every 3), and a line of JSON
+# framing per picture: 40 + 21.4 MiB, so the bound stays a number.
+_OUT_BYTES = _TEXT_OUT_BYTES + _IMAGE_BYTES * 4 // 3 + 1024 * 1024
+# 16 gray levels, not 256: a scan's grain is most of an 8-bit PNG (857 KiB to
+# 1.3 MiB for that noisy page, against 152 to 187 KiB quantised), and 16
+# levels keep every edge of a letter.
+_LEVELS = bytes((v >> 4) * 17 for v in range(256))
+# A rendered page with no pixel darker than 0xF0 draws nothing worth reading.
+_LIGHT = bytes(range(0xF0, 0x100))
 # A PDF reader accepts the header anywhere in the first 1,024 bytes (Acrobat's
 # tolerance, which files in the wild rely on), so the check looks that far.
 HEAD_BYTES = 1024
@@ -46,15 +98,34 @@ _INVISIBLE_MODES = (3, 7)
 TOO_LARGE = "This PDF is too large or malformed to read."
 PASSWORD = "This PDF is password-protected: remove the password and upload it again."
 NOT_PDF = "This file is not a PDF: it has no %PDF- header in its first 1,024 bytes."
-_MESSAGES = {"password": PASSWORD, "malformed": TOO_LARGE, "pages": TOO_LARGE, "output": TOO_LARGE}
+NO_TEXT = ("This PDF has no selectable text (a scan or images). "
+           "Silica reads text only: upload a PDF exported from the original file.")
+GARBAGE = ("This PDF's text cannot be read: its fonts do not map to letters. "
+           "Upload a PDF exported from the original file.")
+# Each refusal's sentence and its ADR-0100 `ingest` outcome. `garbage` is not
+# in ADR-0100's list; it is counted on its own because ADR-0087 reopens a
+# second reader when garbage refusals pass 2% of uploads.
+_REFUSALS = {"password": (PASSWORD, "password"), "malformed": (TOO_LARGE, "malformed"),
+             "pages": (TOO_LARGE, "too_large"), "output": (TOO_LARGE, "too_large"),
+             "garbage": (GARBAGE, "garbage")}
 
 
 class PdfUnreadable(ValueError):
-    """A PDF that cannot be read, with the sentence the student is shown.
+    """A PDF that cannot be read, with the sentence the student is shown and
+    the `ingest` outcome word ADR-0100 counts it under.
 
     A ValueError because every caller that stages files already catches one per
     file (`_stage_uploads`); `PdfiumError` is a RuntimeError, which ended a
-    whole drop with a 500 (ADR-0098 H4)."""
+    whole drop with a 500 (ADR-0098 H4). The outcome is an attribute and not a
+    second argument, so `args[0]` stays the sentence the routes show."""
+
+    def __init__(self, message: str, outcome: str = "malformed"):
+        super().__init__(message)
+        self.outcome = outcome
+
+
+def _refusal(reason: str) -> PdfUnreadable:
+    return PdfUnreadable(*_REFUSALS.get(reason, (TOO_LARGE, "too_large")))
 
 
 def require_header(path: str | os.PathLike) -> None:
@@ -63,55 +134,182 @@ def require_header(path: str | os.PathLike) -> None:
             raise PdfUnreadable(NOT_PDF)
 
 
+def vision_pages() -> int:
+    """How many pages without text one file may have read by the chat model:
+    `SILICA_PDF_VISION_PAGES`, set at deploy, 0 to turn the reading off.
+
+    Read per call, as `hosted()` reads its flag: the child gets an empty
+    environment, so the number goes to it as an argument, and a test or a
+    tenant's restart changes it without a reload."""
+    raw = os.environ.get("SILICA_PDF_VISION_PAGES", "").strip()
+    try:
+        return max(0, int(raw)) if raw else VISION_PAGES
+    except ValueError:
+        return VISION_PAGES
+
+
 # --- the read, on either side of the process boundary -------------------------
 
-def extract(source, max_pages: int | None = None, max_chars: int | None = None) -> dict:
+def extract(source, max_pages: int | None = None, max_chars: int | None = None,
+            vision_pages: int = 0, emit=None) -> dict:
     """Read `source` (a path or a binary file object) into plain data.
 
     Hidden text is left out of a page that also has visible text, and counted
     under `hidden` by page index (ADR-0098 H6). A page whose text is all
     hidden is an OCR layer, which Tesseract and ocrmypdf draw in render mode 3
     over the scan, and is kept whole.
+
+    Pages under `MIN_PAGE_CHARS` are listed in `no_text`, and the first
+    `vision_pages` of them are rendered (`render` lists which): `images` maps
+    each to its PNG, or to None when nothing is on it; a page missing from it
+    could not be drawn or would pass `_IMAGE_BYTES`. With `emit`, the text
+    goes to it the moment it is read and then each page as it is rendered,
+    instead of into `images`: the child writes each out as it comes, because a
+    render decodes a page's images, which reading text never did, and a bomb
+    there must cost the pages after it and not the text before.
     """
     import pypdfium2 as pdfium
-    import pypdfium2.raw as raw
 
     pdf = pdfium.PdfDocument(source)
     try:
-        n = len(pdf)
-        # len() reads the page count without parsing a page: 0.05 s on a
-        # 200,000-page tree (ADR-0087), so the cap costs nothing before the work.
-        if max_pages is not None and n > max_pages:
-            raise _Refused("pages")
-        meta = {key: " ".join((pdf.get_metadata_value(key) or "").split())
-                for key in ("Title", "Author", "CreationDate")}
-        toc: list[list] = []
-        for bookmark in pdf.get_toc():
-            title = " ".join((bookmark.get_title() or "").split())
-            dest = bookmark.get_dest()
-            index = dest.get_index() if dest is not None else None
-            if title and index is not None and index >= 0:
-                toc.append([bookmark.level, title, index])
-        pages: list[list] = []
-        hidden: dict[int, int] = {}
-        chars = 0
-        for i in range(n):
-            page = pdf[i]
-            textpage = page.get_textpage()
-            try:
-                lines, dropped = _page_lines(page, textpage, raw)
-            finally:
-                textpage.close()
-                page.close()
-            if dropped:
-                hidden[i] = dropped
-            chars += sum(len(t) for t, _ in lines)
-            if max_chars is not None and chars > max_chars:
-                raise _Refused("output")
-            pages.append(lines)
+        data = _text(pdf, max_pages, max_chars)
+        data["render"] = data["no_text"][:vision_pages]
+        if emit is None:
+            data["images"] = dict(_render(pdf, data["render"]))
+        else:
+            emit(data)
+            for item in _render(pdf, data["render"]):
+                emit(item)
     finally:
         pdf.close()
-    return {"pages": pages, "toc": toc, "meta": meta, "n_pages": n, "hidden": hidden}
+    return data
+
+
+def _text(pdf, max_pages: int | None, max_chars: int | None) -> dict:
+    import pypdfium2.raw as raw
+
+    n = len(pdf)
+    # len() reads the page count without parsing a page: 0.05 s on a
+    # 200,000-page tree (ADR-0087), so the cap costs nothing before the work.
+    if max_pages is not None and n > max_pages:
+        raise _Refused("pages")
+    meta = {key: _clean(" ".join((pdf.get_metadata_value(key) or "").split()))
+            for key in ("Title", "Author", "CreationDate")}
+    toc: list[list] = []
+    for bookmark in pdf.get_toc():
+        title = _clean(" ".join((bookmark.get_title() or "").split()))
+        dest = bookmark.get_dest()
+        index = dest.get_index() if dest is not None else None
+        if title and index is not None and index >= 0:
+            toc.append([bookmark.level, title, index])
+    pages: list[list] = []
+    hidden: dict[int, int] = {}
+    no_text: list[int] = []
+    bad_shares: list[float] = []
+    word_shares: list[float] = []
+    chars = 0
+    for i in range(n):
+        page = pdf[i]
+        textpage = page.get_textpage()
+        try:
+            lines, dropped, bad = _page_lines(page, textpage, raw)
+        finally:
+            textpage.close()
+            page.close()
+        if dropped:
+            hidden[i] = dropped
+        chars += sum(len(t) for t, _ in lines)
+        if max_chars is not None and chars > max_chars:
+            raise _Refused("output")
+        pages.append(lines)
+        good = sum(len("".join(t.split())) for t, _ in lines)
+        if good < MIN_PAGE_CHARS:
+            no_text.append(i)
+        if good + bad >= MIN_PAGE_CHARS:
+            bad_shares.append(bad / (good + bad))
+        if good >= MIN_PAGE_CHARS:
+            words = re.findall(r"[^\W\d_]+", " ".join(t for t, _ in lines).lower())
+            word_shares.append(sum(w in _FUNCTION_WORDS for w in words) / max(1, len(words)))
+    # Judged on the median page, never page by page: tables tripped a page
+    # rule on 79 pages of 18 clean documents (ADR-0087 Context).
+    bad_median = _median(bad_shares)
+    if bad_median > BAD_SHARE:
+        raise _Refused("garbage")
+    return {"pages": pages, "toc": toc, "meta": meta, "n_pages": n, "hidden": hidden,
+            "no_text": no_text, "function_words": _median(word_shares) if word_shares else None}
+
+
+def _median(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2
+
+
+def _clean(text: str) -> str:
+    return _BAD_RE.sub("", text)
+
+
+def _render(pdf, indices: list[int]):
+    """(index, PNG) for each page of `indices`, (index, None) for one with
+    nothing on it, until `_IMAGE_BYTES` would be passed. A page left out is
+    one the parent names."""
+    import pypdfium2.raw as raw
+
+    spent = 0
+    for i in indices:
+        page = pdf[i]
+        try:
+            width, height = page.get_size()
+            # render() rounds each side up, so a hair under keeps 1600 at most.
+            bitmap = page.render(scale=LONG_SIDE / max(width, height, 1.0) * (1 - 1e-9), grayscale=True)
+            try:
+                w, h, stride = bitmap.width, bitmap.height, bitmap.stride
+                gray = bytes(bitmap.buffer)
+            finally:
+                bitmap.close()
+            # Each row behind PNG's filter byte 0 (none): the per-byte filters
+            # compress better and cost a Python loop over 1.8 million pixels.
+            rows = b"".join(b"\x00" + gray[y * stride:y * stride + w] for y in range(h))
+            white = len(rows.translate(None, _LIGHT)) == h  # only the filter bytes are dark
+            # White with a picture on it is a picture PDFium would not draw: a
+            # 1 GiB image rendered as nothing in 0.1 s (2026-10-13). Not blank,
+            # so it is named rather than passed over in silence.
+            blank = white and not any(kind == raw.FPDF_PAGEOBJ_IMAGE for _, kind in _objects(page, raw))
+        except Exception:
+            # A page that raises while drawn (a MediaBox of zero size is a
+            # ValueError, and the bitmap is a ctypes buffer, so the address
+            # space limit surfaces as MemoryError): that page goes unsent and
+            # is named, and the text read before it stands.
+            continue
+        finally:
+            page.close()
+        if white:
+            if blank:
+                yield i, None
+            continue
+        png = png_gray(rows.translate(_LEVELS), w, h)
+        spent += len(png)
+        if spent > _IMAGE_BYTES:
+            return
+        yield i, png
+
+
+def png_gray(rows: bytes, width: int, height: int) -> bytes:
+    """An 8-bit grayscale PNG of `rows` (each a filter byte, then `width` pixels).
+
+    Over zlib and struct, because Pillow is not a dependency of the hosted
+    install and the child imports nothing else (ADR-0087 amendment point 1)."""
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, body: bytes) -> bytes:
+        return struct.pack(">I", len(body)) + tag + body + struct.pack(">I", zlib.crc32(tag + body))
+
+    return (b"\x89PNG\r\n\x1a\n"
+            + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(rows, 6)) + chunk(b"IEND", b""))
 
 
 class _Refused(Exception):
@@ -120,9 +318,10 @@ class _Refused(Exception):
         self.reason = reason
 
 
-def _page_lines(page, textpage, raw) -> tuple[list[list], int]:
-    """[text, font size] per non-blank line of a page, and how many hidden
-    characters were left out of it.
+def _page_lines(page, textpage, raw) -> tuple[list[list], int, int]:
+    """[text, font size] per non-blank line of a page, how many hidden
+    characters were left out of it, and how many bad ones (`_BAD_RE`) were
+    stripped, which ADR-0087 point 4 removes always and judges per document.
 
     One font-size call per line, at the line's first glyph: PDFium's text index
     is one unit per character, so the offset of a line in the page string IS
@@ -141,6 +340,7 @@ def _page_lines(page, textpage, raw) -> tuple[list[list], int]:
             hide = None  # all hidden: an OCR layer, kept whole
     lines: list[list] = []
     dropped = 0
+    bad = 0
     pos = 0
     for line_raw in text.split("\n"):
         line = line_raw.rstrip("\r")
@@ -154,6 +354,8 @@ def _page_lines(page, textpage, raw) -> tuple[list[list], int]:
             shown = "".join(kept)
         else:
             shown = line
+        shown, n_bad = _BAD_RE.subn("", shown)
+        bad += n_bad
         stripped = shown.strip()
         if stripped:
             lead = len(line) - len(line.lstrip())
@@ -164,7 +366,7 @@ def _page_lines(page, textpage, raw) -> tuple[list[list], int]:
             size = float(raw.FPDFText_GetFontSize(textpage, first)) if first < n else 0.0
             lines.append([stripped, size])
         pos += len(line_raw) + 1
-    return lines, dropped
+    return lines, dropped, bad
 
 
 def _object_hidden(obj, raw, size, matrix) -> bool:
@@ -190,18 +392,22 @@ def _page_has_hidden(page, raw) -> bool:
     import ctypes
 
     size, matrix = ctypes.c_float(), raw.FS_MATRIX()
+    return any(kind == raw.FPDF_PAGEOBJ_TEXT and _object_hidden(obj, raw, size, matrix)
+               for obj, kind in _objects(page, raw))
+
+
+def _objects(page, raw):
+    """(object, type) for everything a page draws, inside form XObjects too."""
     stack = [(raw.FPDFPage_CountObjects(page), lambda j, p=page: raw.FPDFPage_GetObject(p, j))]
     while stack:
         count, get = stack.pop()
         for j in range(count):
             obj = get(j)
             kind = raw.FPDFPageObj_GetType(obj)
-            if kind == raw.FPDF_PAGEOBJ_TEXT and _object_hidden(obj, raw, size, matrix):
-                return True
+            yield obj, kind
             if kind == raw.FPDF_PAGEOBJ_FORM:
                 stack.append((raw.FPDFFormObj_CountObjects(obj),
                               lambda j, f=obj: raw.FPDFFormObj_GetObject(f, j)))
-    return False
 
 
 def _hidden_chars(textpage, n: int, raw) -> list[bool]:
@@ -243,9 +449,11 @@ _NETWORK_NOTE_LOGGED = False
 def read(path: str | os.PathLike) -> dict:
     """`extract(path)`, in a limited child on the server and in-process locally.
 
-    Cached by path, size and mtime: one conversion asks for the text, the date
-    and the citation, and before this each of those opened the hostile file
-    again (ADR-0087 Context, three opens)."""
+    Cached by path, size, mtime and the vision cap: one conversion asks for the
+    text, the date and the citation, and before this each of those opened the
+    hostile file again (ADR-0087 Context, three opens)."""
+    import logging
+
     from silica.config import hosted
 
     key = _key(path)
@@ -255,18 +463,24 @@ def read(path: str | os.PathLike) -> dict:
     # which ended a whole drop with a 500 (ADR-0098 H4).
     require_header(path)
     if hosted():
-        data = _read_in_child(path)
+        data = _read_in_child(path, key[-1])
     else:
         try:
-            data = extract(os.fspath(path))
+            data = extract(os.fspath(path), vision_pages=key[-1])
         except _Refused as exc:
-            raise PdfUnreadable(_MESSAGES[exc.reason]) from None
+            raise _refusal(exc.reason) from None
         except Exception as exc:
             # pypdfium2 raises PdfiumError (a RuntimeError) for every load
             # failure, and names the password case only in its message.
             if type(exc).__name__ != "PdfiumError":
                 raise
-            raise PdfUnreadable(PASSWORD if "password" in str(exc).lower() else TOO_LARGE) from None
+            raise _refusal("password" if "password" in str(exc).lower() else "malformed") from None
+    words = data.get("function_words")
+    if words is not None and words < FUNCTION_WORD_SHARE:
+        # Point 4's second rule warns and keeps the text: terse Italian slides
+        # may sit near 0.05, and no lecture PDF has been measured yet.
+        logging.getLogger(__name__).warning(
+            "pdf: the median page is %.3f function words, under %.2f; kept", words, FUNCTION_WORD_SHARE)
     if len(_CACHE) >= 8:
         _CACHE.pop(next(iter(_CACHE)))
     _CACHE[key] = data
@@ -291,24 +505,66 @@ def metadata(path: str | os.PathLike) -> dict:
 
     pdf = pdfium.PdfDocument(os.fspath(path))
     try:
-        return {k: " ".join((pdf.get_metadata_value(k) or "").split())
+        return {k: _clean(" ".join((pdf.get_metadata_value(k) or "").split()))
                 for k in ("Title", "Author", "CreationDate")}
     finally:
         pdf.close()
 
 
 def cached(path: str | os.PathLike) -> dict | None:
-    """The last read of `path`, for a caller that reports on it after converting."""
+    """The last read of `path`, for a caller that reports on it after converting.
+
+    After a conversion it also holds what became of the pages without text
+    (`read` and `unread`, set by `convert._read_pages`)."""
     return _CACHE.get(_key(path))
+
+
+def report(path: str | os.PathLike) -> tuple[dict, str]:
+    """ADR-0100's page fields for the last conversion of `path`, and the
+    sentence that names its pages left unread ("" when none were).
+
+    Nulls for a file that was not read as a PDF here: counting it a second
+    time in the GUI process would double the untrusted work."""
+    try:
+        seen = cached(path)
+    except OSError:
+        # The file is gone (the server deletes a PDF once its note exists or
+        # it failed): there is nothing left to count, and nulls say so.
+        seen = None
+    if not seen:
+        return {"pages": None, "pages_without_text": None, "pages_read": None}, ""
+    return ({"pages": seen["n_pages"], "pages_without_text": len(seen["no_text"]),
+             "pages_read": len(seen.get("read", ()))},
+            unread_sentence([i + 1 for i in seen.get("unread", ())]))
+
+
+def unread_sentence(pages: list[int]) -> str:
+    """"pages 2, 4 and 7 to 9 have no selectable text and were not read", for
+    the reply and the import row; "" for none."""
+    if not pages:
+        return ""
+    runs: list[list[int]] = []
+    for n in sorted(pages):
+        if runs and n == runs[-1][1] + 1:
+            runs[-1][1] = n
+        else:
+            runs.append([n, n])
+    # A run of three or more is a range; two side by side read better as two.
+    named = [part for a, b in runs
+             for part in ([f"{a} to {b}"] if b - a >= 2 else [str(n) for n in range(a, b + 1)])]
+    listed = named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1]
+    if len(pages) == 1:
+        return f"page {listed} has no selectable text and was not read"
+    return f"pages {listed} have no selectable text and were not read"
 
 
 def _key(path: str | os.PathLike) -> tuple:
     st = os.stat(path)
-    return (os.path.realpath(path), st.st_size, st.st_mtime_ns)
+    return (os.path.realpath(path), st.st_size, st.st_mtime_ns, vision_pages())
 
 
-def _read_in_child(path: str | os.PathLike) -> dict:
-    """Run `_child` on an already-open descriptor of `path` and parse its JSON.
+def _read_in_child(path: str | os.PathLike, vision: int = 0) -> dict:
+    """Run `_child` on an already-open descriptor of `path` and parse what it writes.
 
     The descriptor, not the path: the child never resolves a name, so a link
     swapped in after this open cannot point it elsewhere (ADR-0098 H1)."""
@@ -322,10 +578,10 @@ def _read_in_child(path: str | os.PathLike) -> dict:
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
     try:
         if os.fstat(fd).st_size > MAX_BYTES:
-            raise PdfUnreadable(TOO_LARGE)
+            raise PdfUnreadable(TOO_LARGE, "too_large")
         with tempfile.TemporaryDirectory() as cwd:
             proc = subprocess.Popen(
-                [sys.executable, "-I", "-B", os.path.abspath(__file__), str(fd)],
+                [sys.executable, "-I", "-B", os.path.abspath(__file__), str(fd), str(vision)],
                 pass_fds=(fd,), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, env={}, cwd=cwd,
             )
@@ -354,9 +610,10 @@ def _read_in_child(path: str | os.PathLike) -> dict:
                             raise subprocess.TimeoutExpired(proc.args, WALL_SECONDS)
                 proc.wait(timeout=max(0.1, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
+                # Stopped, not refused yet: a child past a limit while it
+                # rendered has already written the text (`_parse_child`).
                 proc.kill()
                 proc.wait()
-                raise PdfUnreadable(TOO_LARGE) from None
             finally:
                 sel.close()
                 stdout.close()
@@ -367,17 +624,48 @@ def _read_in_child(path: str | os.PathLike) -> dict:
     if note and not _NETWORK_NOTE_LOGGED:
         _NETWORK_NOTE_LOGGED = True
         logging.getLogger(__name__).warning("pdf child: %s", note[:500])
-    # A signal is a limit that fired (SIGABRT under RLIMIT_AS, SIGXCPU under
-    # RLIMIT_CPU), or a crash in PDFium: the same sentence either way.
-    if proc.returncode != 0:
-        raise PdfUnreadable(TOO_LARGE)
+    return _parse_child(out)
+
+
+def _parse_child(out: bytearray) -> dict:
+    """The child's lines: the text first, then one `[index, base64 PNG or
+    null]` a rendered page.
+
+    The text counts only when its line is whole, and then whatever ended the
+    child: a signal or a limit while it rendered (a page's images are decoded
+    there, which text extraction never did) costs the pages not yet sent,
+    which the student sees named, and not the document. A child that ended
+    before its first line is a limit that fired (SIGABRT under RLIMIT_AS,
+    SIGXCPU under RLIMIT_CPU) or a crash in PDFium: the same sentence either way."""
+    import base64
+
+    end = out.find(b"\n")
+    # The text has its own share of the cap: past it the child is not the one
+    # this file wrote (MAX_CHARS stops an honest one well before).
+    if end < 0 or end > _TEXT_OUT_BYTES:
+        raise PdfUnreadable(TOO_LARGE, "too_large")
     try:
-        data = json.loads(out)
+        data = json.loads(out[:end])
     except ValueError:
-        raise PdfUnreadable(TOO_LARGE) from None
+        raise PdfUnreadable(TOO_LARGE, "too_large") from None
+    if not isinstance(data, dict):
+        raise PdfUnreadable(TOO_LARGE, "too_large")
     if "error" in data:
-        raise PdfUnreadable(_MESSAGES.get(data["error"], TOO_LARGE))
+        raise _refusal(str(data["error"]))
     data["hidden"] = {int(k): v for k, v in data.get("hidden", {}).items()}
+    planned = set(data.get("render", ()))
+    images: dict[int, bytes | None] = {}
+    start = end + 1
+    while (end := out.find(b"\n", start)) >= 0:
+        try:
+            item = json.loads(out[start:end])
+            if not isinstance(item, list) or len(item) != 2:
+                break  # the child's own error line after the text: no page follows it
+            images[int(item[0])] = base64.b64decode(item[1], validate=True) if item[1] is not None else None
+        except (ValueError, TypeError):
+            break  # a line a kill cut short, which is the last one anyway
+        start = end + 1
+    data["images"] = {i: png for i, png in images.items() if i in planned}
     return data
 
 
@@ -407,7 +695,7 @@ def _drop_network() -> str:
     return ""
 
 
-def _child(fd: int) -> int:
+def _child(fd: int, vision: int) -> int:
     import resource
 
     # Limits first, before pypdfium2 is even imported: set here and not through
@@ -421,16 +709,28 @@ def _child(fd: int) -> int:
     note = _drop_network()
     if note:
         sys.stderr.write(note + "\n")
+    out = sys.stdout.buffer
+
+    def emit(item) -> None:
+        import base64
+
+        if not isinstance(item, dict):
+            index, png = item
+            item = [index, base64.b64encode(png).decode("ascii") if png is not None else None]
+        out.write(json.dumps(item).encode("ascii") + b"\n")
+        # Flushed a line at a time: a SIGABRT in the next render loses
+        # Python's buffer, and the text must already be in the pipe.
+        out.flush()
+
     try:
         with os.fdopen(fd, "rb") as fh:
-            data = extract(fh, max_pages=MAX_PAGES, max_chars=MAX_CHARS)
+            extract(fh, max_pages=MAX_PAGES, max_chars=MAX_CHARS, vision_pages=vision, emit=emit)
     except _Refused as exc:
-        data = {"error": exc.reason}
+        emit({"error": exc.reason})
     except Exception as exc:
-        data = {"error": "password" if "password" in str(exc).lower() else "malformed"}
-    sys.stdout.write(json.dumps(data))
+        emit({"error": "password" if "password" in str(exc).lower() else "malformed"})
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(_child(int(sys.argv[1])))
+    sys.exit(_child(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 0))

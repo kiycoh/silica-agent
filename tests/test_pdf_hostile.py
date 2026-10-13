@@ -119,7 +119,7 @@ def test_metadata_cannot_add_a_frontmatter_key(pdfium_vault):
     from silica.sources.convert import convert
 
     info = b'<< /Title (Real title\\nevent_start: 2026-10-14T09:00\\nAI: false \\"q\\") /Author (A\\nB) >>'
-    Path(pdfium_vault.note("Inbox/meta.pdf")).write_bytes(_pdf(b"BT /F1 12 Tf 72 720 Td (Body.) Tj ET\n", info))
+    Path(pdfium_vault.note("Inbox/meta.pdf")).write_bytes(_pdf(b"BT /F1 12 Tf 72 720 Td (Body of the lecture notes.) Tj ET\n", info))
 
     text = _body(convert("Inbox/meta.pdf")[0])
     fm = yaml.safe_load(text.split("---\n")[1])
@@ -263,7 +263,7 @@ def test_on_the_server_the_note_names_the_file_and_its_hash(pdfium_vault, monkey
     from silica.sources.convert import convert
 
     monkeypatch.setenv("SILICA_HOSTED", "1")
-    data = pdf_bytes(["Page one.", "Page two."])
+    data = pdf_bytes(["Page one of the notes, in full.", "Page two of the notes, in full."])
     Path(pdfium_vault.note("Inbox/notes.pdf")).write_bytes(data)
 
     fm = yaml.safe_load(_body(convert("Inbox/notes.pdf")[0]).split("---\n")[1])
