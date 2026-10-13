@@ -1913,14 +1913,14 @@ function mcardRows(card) {
 }
 
 // --- the four readings (ADR-0072) -----------------------------------------------
-// Structure first, and the view's own address (#metrics): the owner's call,
+// Structure first, and the view's own address (#examine): the owner's call,
 // 2026-10-07, since the shape of the vault is what the view is opened for.
 const METRICS_TABS = ["structure", "attention", "trend", "activity"];
-// A pasted #metrics/<reading> is read before the first render, the way explore
+// A pasted #examine/<reading> is read before the first render, the way explore
 // reads its surface, so a reload lands on the reading it named.
 let metricsTab = (() => {
   const { slug, arg } = parseHash();
-  return slug === "metrics" && METRICS_TABS.includes(arg) ? arg : METRICS_TABS[0];
+  return viewOfSlug(slug) === "metrics" && METRICS_TABS.includes(arg) ? arg : METRICS_TABS[0];
 })();
 
 function setMetricsTab(t, push = true) {

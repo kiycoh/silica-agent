@@ -859,6 +859,13 @@ async function openSession(id, fromUrl = false) {
 // #chat/<session>, #explore/<mode>, #learn/… (learn owns its own), plus
 // ?note=<path> while the drawer is open. Rendered state writes the hash; the
 // hash, when it changes under us (Back, a paste, a new tab), drives the state.
+// A view's address is its label, not its id: the ids stayed when Graph became
+// Explore, Calendar Plan and Metrics Examine (2026-10-13), because renaming
+// them would touch every element and test that names the view. The id still
+// routes, so a bookmark made before a rename lands where it did.
+const VIEW_SLUG = { graph: "explore", calendar: "plan", metrics: "examine" };
+const viewOfSlug = (s) => Object.keys(VIEW_SLUG).find((v) => VIEW_SLUG[v] === s) || s;
+
 function parseHash() {
   const raw = (location.hash || "").replace(/^#/, "");
   const [path, query] = raw.split("?");
@@ -873,10 +880,10 @@ function parseHash() {
 
 function syncUrl(push) {
   if (activeTab === "learn" && location.hash.startsWith("#learn")) return; // learn's own sub-states
-  let h = "#" + (activeTab === "graph" ? "explore" : activeTab);
+  let h = "#" + (VIEW_SLUG[activeTab] || activeTab);
   if (activeTab === "chat" && currentSessionId) h += "/" + encodeURIComponent(currentSessionId);
   if (activeTab === "graph" && typeof graphMode === "string") h += "/" + graphMode;
-  // #metrics/<reading> (ADR-0072); Structure is the tab's own address.
+  // #examine/<reading> (ADR-0072); Structure is the tab's own address.
   if (activeTab === "metrics" && typeof metricsTab === "string" && metricsTab !== "structure") h += "/" + metricsTab;
   if (notePanel.classList.contains("open") && lastNotePath) h += "?note=" + encodeURIComponent(lastNotePath);
   if (location.hash === h) return;
@@ -992,7 +999,7 @@ $(".tabs").addEventListener("click", (e) => {
   const tab = e.target.dataset.tab;
   if (tab) showTab(tab);
 });
-// #explore / #metrics / #chat on the URL select the tab, at load and on manual
+// #explore / #examine / #chat on the URL select the tab, at load and on manual
 // hash edits alike. Unknown hashes are left alone (note anchors, etc.).
 // A surface that registers after load (Library exists only for a vault linked
 // to Zotero, ADR-0055) is not in LAYOUT_MODES when the route first runs, and the
@@ -1001,7 +1008,7 @@ let pendingGraphMode = "";
 
 function tabFromHash() {
   const { slug, arg, note } = parseHash();
-  const tab = slug === "explore" ? "graph" : slug;
+  const tab = viewOfSlug(slug);
   if (["chat", "graph", "learn", "calendar", "metrics"].includes(tab) && tab !== activeTab) showTab(tab);
   // Back and Forward walk the chats and the surfaces, not only the tabs.
   if (tab === "chat" && arg && arg !== currentSessionId && !streaming) openSession(arg, true);
