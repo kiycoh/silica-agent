@@ -4478,6 +4478,13 @@ async def stt(audio: UploadFile = File(...)):
             return {"text": text, "via": "endpoint"}
     if not local.has_local_stt():
         if failed:
+            from silica.config import hosted
+
+            if hosted():
+                # A spent allowance reaches dictation as OpenRouter's 403, whose
+                # body is no sentence for a student: explain() names the layer
+                # and its reset (ADR-0102 point 6). It reads the key, so off the loop.
+                failed = (await asyncio.to_thread(_failure, failed))["error"]
             raise HTTPException(502, failed)
         raise HTTPException(503, "no transcription endpoint configured and the [stt] extra is not installed")
     try:

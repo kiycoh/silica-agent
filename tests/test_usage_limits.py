@@ -424,3 +424,26 @@ def test_what_needs_no_model_stays_at_the_limit(fake, tmp_vault, monkeypatch):
 
     assert (Path(CONFIG.vault_path) / "Inbox" / "Lecture.md").exists()
     assert tc.get("/limits").status_code == 200
+
+
+def test_hosted_dictation_at_a_limit_says_which_and_when(fake, monkeypatch, tmp_vault):
+    """Dictation reaches OpenRouter outside call_llm: its 403 was shown as
+    "transcription failed (403): <OpenRouter's body>"."""
+    from fastapi.testclient import TestClient
+
+    from silica.agent import stt
+    from silica.ui.web import server
+
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    fake.body = key_record(month_spend=1.5)
+
+    async def endpoint(url, clip):
+        return "", 'transcription failed (403): {"error":{"message":"Key limit exceeded","code":403}}'
+
+    monkeypatch.setattr(server, "_stt_via_endpoint", endpoint)
+    monkeypatch.setattr(stt, "dictation_endpoint", lambda cfg: ("https://openrouter.ai/api/v1", "SILICA_STT_BASE_URL"))
+    monkeypatch.setattr(stt, "has_local_stt", lambda: False)
+    resp = TestClient(server.app).post("/stt", files={"audio": ("clip.wav", b"RIFFfake", "audio/wav")})
+    assert resp.status_code == 502
+    assert resp.json()["detail"].startswith("You have used this month's allowance.")
+    assert "Key limit" not in resp.text
