@@ -893,6 +893,14 @@ def call_llm(
     retries = 0
     chain = fallback_chain(model)
     used = chain[0]
+    if any(m.startswith("openrouter/") for m in chain):
+        # ADR-0102 point 5: here and not at the turn's start, so Learn's
+        # grading, the capability workers and every iteration of a turn pass
+        # the same check. Raises UsageLimited before any span opens: a call
+        # refused is a call never made, and the turn's error says so.
+        from silica.agent.usage_limits import check
+
+        check()
 
     def _on_retry(attempt: int, ceiling: int, delay: float, exc: Exception) -> None:
         # Same id, still running: both folds update the open span's summary in

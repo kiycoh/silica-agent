@@ -56,6 +56,16 @@ def _no_local_zotero(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _no_openrouter_key_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may read the developer's OpenRouter key record (ADR-0102): a
+    hosted test whose failure text holds a 403 would otherwise send the key in
+    ~/.silica/.env to openrouter.ai. Port 9 refuses at once, which every caller
+    takes as a failed read; tests/test_usage_limits.py serves a fake instead."""
+    import silica.agent.usage_limits as usage_limits
+    monkeypatch.setattr(usage_limits, "KEY_URL", "http://127.0.0.1:9/api/v1/key")
+
+
+@pytest.fixture(autouse=True)
 def _no_form_sniff_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """The form sniff must never reach a real endpoint from a test.
 

@@ -975,6 +975,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
     tools: dict[str, int] = {}
     tool_errors: dict[str, int] = {}
     outcome = "cancelled"
+    limit: str | None = None  # the layer a `limited` turn met (ADR-0102 point 10)
 
     def cb(ev):  # runs in the agent/LLM worker thread
         if isinstance(ev, ToolStartEvent):
@@ -1219,9 +1220,16 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         outcome = "cancelled" if stopped else "empty" if empty else "done"
         yield done
     except Exception as exc:  # never leave the UI stuck on the spinner
-        logger.exception("web turn failed")
-        outcome = "error"
-        yield {"type": "error", **_failure(exc)}
+        # Off the loop: hosted, a 403 reads the key to name the spent layer.
+        failure = await asyncio.to_thread(_failure, exc)
+        # A limit reached is the tenant's allowance at work, not a fault of
+        # the server: counted as `limited` (ADR-0102 point 10), and kept out
+        # of the error log the nightly rollup counts.
+        limit = failure.get("limit")
+        if limit is None:
+            logger.exception("web turn failed")
+        outcome = "limited" if limit else "error"
+        yield {"type": "error", **failure}
     finally:
         BUS.unsubscribe("work/phase", on_phase)
         # ponytail: the tokens are the difference of the process totals, so a
@@ -1236,7 +1244,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
              calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
              cached=tokens_after[3] - tokens_before[3],
              completion=tokens_after[2] - tokens_before[2],
-             tools=dict(tools), tool_errors=dict(tool_errors))
+             tools=dict(tools), tool_errors=dict(tool_errors), limit=limit)
         _prewarm_seed()  # the turn may have written notes — refresh the new-chat seed
         if task is not None and not task.done():
             current_cancel.set()  # abandonment: stop the zombie...
@@ -3880,6 +3888,18 @@ def _brief_path() -> Path:
     from silica.kernel.recall import paths
 
     return paths.index_dir() / "vault_brief.json"
+
+
+@app.get("/limits")
+def limits():
+    """How much of each usage limit is used and when it resets (ADR-0102
+    point 7): `{"limits": [{layer, used, resets_at}]}`, the window first, then
+    the week and the month, `used` a share from 0 to 1 and never a currency. An
+    empty list where the key has no limit or the model is not on OpenRouter.
+    Sync, so FastAPI runs the read of the key on its thread pool."""
+    from silica.agent.usage_limits import status
+
+    return {"limits": status(CONFIG.model or "")}
 
 
 @app.get("/vault_brief")

@@ -51,6 +51,16 @@ def decide(state: Any, questions: dict[str, dict], *,
         logger.debug("decision disabled (SILICA_DECISION_MODEL unset)")
         return None
     t0 = time.time()
+    from silica.agent.usage_limits import UsageLimited, check
+
+    try:
+        # The same key and the same limits as call_llm (ADR-0102 point 5).
+        # Refused, this is one more non-answer: the caller's fallback is
+        # call_llm, which refuses again with the sentence the student reads.
+        check()
+    except UsageLimited as e:
+        _log(model, "error", t0, f"refused: {e.layer} limit")
+        return None
     try:
         resp = httpx.post(
             DECISIONS_URL,

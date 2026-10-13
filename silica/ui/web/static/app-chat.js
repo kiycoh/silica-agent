@@ -1378,6 +1378,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     loadSessions(); // turn saved server-side — refresh titles/order
     loadVaultInfo(); // a turn may have written notes — refresh stats + tree
     loadChanges();   // …and the sidebar's record of what it changed
+    if (typeof loadLimits === "function") loadLimits(); // what the turn spent (ADR-0102)
     markVaultChanged(); // a turn may have written notes
   }
 
@@ -1547,14 +1548,17 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     } else if (ev.type === "error") {
       close("");
       outcome = "error";
-      peekError(ev.error);
+      // A usage limit's reset arrives in UTC; app-limits.js writes it in the
+      // reader's clock (ADR-0102 point 6).
+      const said = typeof limitSentence === "function" ? limitSentence(ev) : ev.error;
+      peekError(said);
       // The error belongs to the message that failed, not to a corner and not
       // to the agent: it used to render as a raw exception line attributed to
       // the agent as speech AND as a toast over the send button, and neither
       // offered a way to try again, so a failed turn ended the conversation
       // and took the typed question with it.
-      attachFailure(lastUserBody, ev.error, ev.detail || "", retry);
-      announce("the turn failed: " + ev.error);
+      attachFailure(lastUserBody, said, ev.detail || "", retry);
+      announce("the turn failed: " + said);
     }
     followBottom();
   }
