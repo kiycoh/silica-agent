@@ -367,6 +367,17 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("OPENROUTER_PROVIDER", "")
     )
 
+    # The same routing, per model: a JSON object from model id (with or without
+    # the openrouter/ prefix) to OpenRouter's `provider` object, sent as written,
+    # e.g. {"qwen/qwen3.7-flash-20260727": {"order": ["alibaba/us-east-1"],
+    # "allow_fallbacks": false}, "z-ai/glm-5.3-flash": {"zdr": true}}. A model
+    # it names ignores OPENROUTER_PROVIDER, which follows every model, fallbacks
+    # included: the pilot's Alibaba pin sent its GLM fallback to an endpoint GLM
+    # does not have (2026-10-13).
+    openrouter_provider_by_model: str = field(
+        default_factory=lambda: os.getenv("OPENROUTER_PROVIDER_BY_MODEL", "")
+    )
+
     # Models tried in order when a call's own model fails for a reason the
     # endpoint owns: down, overloaded, rate-limited past its retries, a key it
     # refuses, a model it does not have (agent/llm.py, ADR-0063).

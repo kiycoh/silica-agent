@@ -83,6 +83,44 @@ class TestAgentGuardsAndProvider(unittest.TestCase):
         self.assertNotIn("provider", mock_completion.call_args[1]["extra_body"])
 
     @patch("litellm.completion")
+    def test_a_pin_follows_its_own_model_and_not_the_fallback(self, mock_completion):
+        """The pilot pins Qwen to Alibaba's US endpoint and falls back to GLM.
+        A global pin sent GLM to Alibaba too, where it has no endpoint."""
+        import json
+
+        import litellm
+
+        from silica.config import CONFIG
+        mock_choice = MagicMock(finish_reason="stop")
+        mock_choice.message.content = "ok"
+        mock_choice.message.tool_calls = None
+        ok = MagicMock(choices=[mock_choice], usage={})
+        down = litellm.ServiceUnavailableError("down", llm_provider="openrouter", model="x")
+        # three attempts on Qwen (retry_transient), then GLM answers
+        mock_completion.side_effect = [down] * 3 + [ok]
+        table = json.dumps({
+            "qwen/qwen3.7-flash-20260727": {"order": ["alibaba/us-east-1"], "allow_fallbacks": False},
+            "openrouter/z-ai/glm-5.3-flash": {"zdr": True},
+        })
+        with patch.object(CONFIG, "openrouter_provider_by_model", table), \
+                patch.object(CONFIG, "openrouter_provider", ""), \
+                patch.object(CONFIG, "fallback_models", "openrouter/z-ai/glm-5.3-flash"), \
+                patch("silica.agent.llm.time.sleep"), \
+                patch.dict("silica.agent.llm._held", clear=True):
+            call_llm(model="openrouter/qwen/qwen3.7-flash-20260727", messages=[])
+        sent = {c[1]["model"]: c[1]["extra_body"].get("provider") for c in mock_completion.call_args_list}
+        self.assertEqual(sent["openrouter/qwen/qwen3.7-flash-20260727"],
+                         {"order": ["alibaba/us-east-1"], "allow_fallbacks": False})
+        self.assertEqual(sent["openrouter/z-ai/glm-5.3-flash"], {"zdr": True})
+
+    def test_a_broken_pin_table_fails_the_call_instead_of_unpinning(self):
+        from silica.agent.llm import openrouter_routing
+        from silica.config import CONFIG
+        with patch.object(CONFIG, "openrouter_provider_by_model", "{not json"):
+            with self.assertRaises(ValueError):
+                openrouter_routing(None, "openrouter/qwen/qwen3.7-flash-20260727")
+
+    @patch("litellm.completion")
     def test_max_tokens_and_finish_reason_in_provider(self, mock_completion):
         from tests.llm_mocks import litellm_mock_response
 

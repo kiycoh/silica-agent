@@ -453,9 +453,27 @@ def _openrouter_session_id() -> str:
     return NARRATOR.sid or _PROCESS_SESSION
 
 
-def openrouter_routing(provider_list: str | None = None) -> dict | None:
+@functools.lru_cache(maxsize=4)
+def _provider_table(raw: str) -> dict[str, dict]:
+    """OPENROUTER_PROVIDER_BY_MODEL parsed, keyed without the openrouter/
+    prefix. A table that does not parse raises rather than reading as empty:
+    the pin it carries can be where the data goes (the pilot's keeps Qwen off
+    Alibaba's Singapore/China endpoint), so a typo must stop the calls, not
+    quietly unpin them."""
+    try:
+        table = json.loads(raw)
+    except ValueError as e:
+        raise ValueError(f"OPENROUTER_PROVIDER_BY_MODEL is not JSON: {e}") from e
+    if not isinstance(table, dict) or not all(isinstance(v, dict) for v in table.values()):
+        raise ValueError("OPENROUTER_PROVIDER_BY_MODEL must map a model id to a provider object")
+    return {k.removeprefix("openrouter/"): v for k, v in table.items()}
+
+
+def openrouter_routing(provider_list: str | None = None, model: str = "") -> dict | None:
     """OpenRouter `extra_body` provider-routing block, or None.
 
+    A model named in OPENROUTER_PROVIDER_BY_MODEL gets its own `provider`
+    object and nothing else applies to it. Otherwise:
     `provider_list` is a comma-separated list of provider names pinned as the
     routing `order`; defaults to CONFIG.openrouter_provider. The distiller path
     passes CONFIG.openrouter_provider_distiller for its own pin. `allow_fallbacks`
@@ -464,6 +482,10 @@ def openrouter_routing(provider_list: str | None = None) -> dict | None:
     exists to prevent. Shared by both LLM paths — litellm (call_llm) and the
     openai SDK (agent/providers.py) — so the pin applies everywhere openrouter is used.
     """
+    if CONFIG.openrouter_provider_by_model.strip() and model:
+        own = _provider_table(CONFIG.openrouter_provider_by_model).get(model.removeprefix("openrouter/"))
+        if own is not None:
+            return {"provider": own}
     raw = CONFIG.openrouter_provider if provider_list is None else provider_list
     order = [p.strip() for p in raw.split(",") if p.strip()]
     return {"provider": {"order": order, "allow_fallbacks": False}} if order else None
@@ -1029,7 +1051,7 @@ def _call_llm(
                                        or _session_open()):
             kwargs["include_reasoning"] = True
         kwargs["extra_headers"] = _OPENROUTER_ATTRIBUTION
-        rt = openrouter_routing(openrouter_provider) or {}
+        rt = openrouter_routing(openrouter_provider, model) or {}
         rt["session_id"] = _openrouter_session_id()
         if reasoning is False:
             # `enabled: False` is the knob that lands; `max_tokens: 0` is
