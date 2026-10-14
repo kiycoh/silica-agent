@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -28,7 +28,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 
-from silica.agent.constraints import AgentConstraints, chat_deferred, chat_tools, web_turn_constraints
+from silica.agent.constraints import (
+    PHONE_TOOLS,
+    AgentConstraints,
+    chat_deferred,
+    chat_tools,
+    web_turn_constraints,
+)
 from silica.agent.events import LLMStreamEvent, ToolErrorEvent, ToolStartEvent
 from silica.agent.llm import meter_totals
 from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
@@ -123,16 +129,23 @@ def _reset_session() -> None:
     from silica.agent import narration as _narr
     from silica.kernel import user_memory
 
-    _narr.NARRATOR.close()   # release the flock; next turn opens a fresh sid
+    # A phone turn (ADR-0089 amendment) holds the gate and the narrator while
+    # the browser cannot see it, so its New chat must not free either: the
+    # browser's chat starts over here, and the phone turn hands the narrator
+    # to whatever chat is current when it ends (_narrating_phone).
+    phone = _phone_running
+    if not phone:
+        _narr.NARRATOR.close()   # release the flock; next turn opens a fresh sid
     # Incognito is per chat in the GUI (ADR-0076 §8): a new chat is back on
     # the record, so the seed below gets its memory message again.
     user_memory.set_incognito(False)
     messages[:], CONFIG.context_tokens = _seeded()
     _collapsed.clear()
     _seen_numbers.clear()
-    current_cancel = None
-    current_task = None
-    _busy = False
+    if not phone:
+        current_cancel = None
+        current_task = None
+        _busy = False
     current_session_id = None  # next turn opens a new file
 
 
@@ -1251,7 +1264,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         # worker spends past this line uncounted. A context variable per turn
         # is the upgrade, due when ADR-0099's jobs are built.
         tokens_after = meter_totals()
-        emit("turn", kind=_turn_kind(text), outcome=outcome,
+        emit("turn", kind=_turn_kind(text), channel="web", outcome=outcome,
              ms=round((time.monotonic() - started) * 1000),
              first_token_ms=round((first_token[0] - started) * 1000) if first_token else None,
              calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
@@ -1289,6 +1302,141 @@ def _turn_response(text: str, attachments: "Sequence[Path]" = ()) -> StreamingRe
     return StreamingResponse(
         gen(), media_type="text/event-stream", background=BackgroundTask(_sweep_if_orphaned)
     )
+
+
+# --- the phone's conversation (ADR-0089 point 5, amendment 2026-10-14) -------
+# Turns from the operator's Telegram bot (silica-hosted) run in a conversation
+# of their own: their own list, narration session and tool block, so a phone
+# turn never re-prefills the browser's chat with a different block. The gate
+# stays shared, one model and one turn at a time, which also makes the release
+# drain (GET /jobs/running) wait for a phone turn as for any other.
+_phone_messages: list[dict] = []
+_phone_collapsed: set[int] = set()
+_phone_sid: str | None = None
+_phone_running = False  # a phone turn holds the gate; read by _reset_session
+
+# The system prompt teaches the write workflows and a phone turn has none of
+# their tools, so without this line "save this" reads to the model as a request
+# it can meet. It goes before the seed's closing language line, which must stay
+# last (cli.seed_messages).
+_PHONE_LINE = (
+    "This conversation is on Telegram, where you can search and read the vault "
+    "but not change it: nothing is written, moved or remembered from here. If "
+    "asked to, say it has to be done in Silica itself. Telegram shows plain "
+    "text, so write without Markdown, tables or LaTeX."
+)
+
+
+def _reset_phone() -> None:
+    global _phone_sid
+    _phone_messages.clear()
+    _phone_collapsed.clear()
+    _phone_sid = None
+
+
+@contextmanager
+def _narrating_phone():
+    """Point the narrator at the phone's session for one turn, then at the
+    browser's chat as it stands when the turn ends: New chat may have replaced
+    it meanwhile (_reset_session), and reopening the one held at the start
+    would append the next chat's turns to the file the student left. No
+    browser turn narrates in between, because the gate is the phone's."""
+    global _phone_sid
+    from silica.agent import narration as _narr
+
+    _narr.NARRATOR.close()
+    try:
+        fresh = _phone_sid is None
+        # Named before the session beat is written, so narration_sse already
+        # knows the phone's beats by their sid and keeps them off the tab.
+        _phone_sid = _phone_sid or uuid.uuid4().hex[:12]
+        _narr.NARRATOR.ensure_session(driver="gui", sid=_phone_sid)
+        if fresh:
+            # A title beat before the first turn names the chat in the list,
+            # as a rename does (narration._narration_row).
+            _narr.NARRATOR.narrate("title", "done", "Telegram", {"title": "Telegram"}, parent=None)
+        yield
+    finally:
+        _narr.NARRATOR.close()
+        if current_session_id:
+            try:
+                _narr.NARRATOR.ensure_session(driver="gui", sid=current_session_id)
+            except _narr.SessionBusy:
+                # Another process took the browser's file while the phone held
+                # the narrator. Nothing is lost by going on: the browser's next
+                # turn meets the same SessionBusy in _narrate_user_turn, which
+                # is where it is reported.
+                logger.warning("narration not restored after a phone turn")
+
+
+def _phone_turn(text: str, cancel: threading.Event) -> dict:
+    """One phone turn, whole: `{"answer": ...}`, or `{"error": ...}` with the
+    sentence the browser would show, a usage limit's reset included."""
+    global _phone_collapsed
+    from silica.agent import narration as _narr
+    from silica.cli import _compact_context, _update_context_tokens, seed_messages
+
+    # The browser reopened the phone's session from the chat list and now
+    # writes it, so the phone goes on in a new one rather than beside it. A
+    # chat deleted from the list starts over too: its history must not reach
+    # the model again, nor its file come back without a title.
+    if _phone_sid is not None and (
+            _phone_sid == current_session_id
+            or not (_narr.narration_dir() / f"{_phone_sid}.jsonl").exists()):
+        _reset_phone()
+    started, tokens_before = time.monotonic(), meter_totals()
+    first_token: list[float] = []
+    tools: dict[str, int] = {}
+    tool_errors: dict[str, int] = {}
+    outcome, limit = "cancelled", None
+    # CONFIG.context_tokens is the browser's ring. The phone's compaction
+    # borrows the meter and hands it back as it found it.
+    browser_tokens = CONFIG.context_tokens
+
+    def cb(ev):  # the counts the turn line carries, as run_turn's cb keeps them
+        if isinstance(ev, ToolStartEvent):
+            tools[ev.name] = tools.get(ev.name, 0) + 1
+        elif isinstance(ev, ToolErrorEvent):
+            tool_errors[ev.name] = tool_errors.get(ev.name, 0) + 1
+        elif not first_token and isinstance(ev, LLMStreamEvent) and ev.chunk_type == "text" and ev.content:
+            first_token.append(time.monotonic())
+
+    try:
+        if not _phone_messages:
+            seed = seed_messages()
+            seed.insert(len(seed) - 1, {"role": "system", "content": _PHONE_LINE})
+            _phone_messages[:] = seed
+        with _narrating_phone():
+            msg = {"role": "user", "content": text, "origin": "telegram"}
+            _phone_messages.append(msg)
+            _narr.NARRATOR.turn(msg)
+            answer = run_agent(_phone_messages, CONFIG.model, cb, cancel_token=cancel,
+                               constraints=AgentConstraints(tools=PHONE_TOOLS, interactive=True))
+            if _phone_messages[-1].get("role") == "assistant":
+                _narr.NARRATOR.turn(_phone_messages[-1])
+            _update_context_tokens(_phone_messages)
+            _phone_collapsed = _compact_context(_phone_messages, _phone_collapsed)
+        if cancel.is_set():
+            return {"answer": "Stopped."}
+        outcome = "empty" if answer == _EMPTY_COMPLETION else "done"
+        return {"answer": answer}
+    except Exception as exc:
+        failure = _failure(exc)
+        limit = failure.get("limit")
+        if limit is None:
+            logger.exception("phone turn failed")
+        outcome = "limited" if limit else "error"
+        return {"error": failure["error"]}
+    finally:
+        CONFIG.context_tokens = browser_tokens
+        tokens_after = meter_totals()
+        emit("turn", kind="chat", channel="telegram", outcome=outcome,
+             ms=round((time.monotonic() - started) * 1000),
+             first_token_ms=round((first_token[0] - started) * 1000) if first_token else None,
+             calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
+             cached=tokens_after[3] - tokens_before[3],
+             completion=tokens_after[2] - tokens_before[2],
+             tools=dict(tools), tool_errors=dict(tool_errors), limit=limit)
 
 
 def _zotero_detect() -> None:
@@ -1501,6 +1649,39 @@ async def chat(payload: dict):
         _end_turn()
         return JSONResponse(queued, status_code=202)
     return _turn_response(text, attachments)
+
+
+@app.post("/phone/turn", dependencies=_SAME_ORIGIN)
+async def phone_turn(payload: dict):
+    """One turn from the phone, answered once and whole: a Telegram message is
+    sent complete, so the caller has no use for a stream (ADR-0089 amendment,
+    H5). 409 while any turn runs, the browser's included."""
+    global current_cancel, current_task, _phone_running
+    text = str(payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="text is empty")
+    if not _begin_turn():
+        raise HTTPException(status_code=409, detail="a turn is already in progress")
+    _phone_running = True
+    # The browser's Stop sets this token, so it ends a phone turn too.
+    current_cancel = cancel = threading.Event()
+    # Named as the gate's task, so a /chat stream closing in the same instant
+    # (_sweep_if_orphaned) does not take this turn for an orphan and free it.
+    current_task = task = asyncio.ensure_future(asyncio.to_thread(_phone_turn, text, cancel))
+    try:
+        return await task
+    finally:
+        _phone_running = False
+        _end_turn()
+
+
+@app.post("/phone/new", dependencies=_SAME_ORIGIN)
+async def phone_new():
+    """`/new` from the phone: its next turn opens a fresh conversation."""
+    if _busy:
+        raise HTTPException(status_code=409, detail="a turn is already in progress")
+    _reset_phone()
+    return {"ok": True}
 
 
 # The body a request may carry through Cloudflare on the Free and Pro plans
@@ -4195,6 +4376,14 @@ def _stopping() -> bool:
     return _SERVER is not None and bool(_SERVER.should_exit)
 
 
+def _beat_for_tab(rec: dict) -> bool:
+    """A phone turn's beats stay off the browser's live stream (ADR-0089
+    amendment): the work panel adopts any new sid and would drop the browser's
+    run, and their seqs would move its Last-Event-ID cursor. Unless the browser
+    itself has the phone's chat open."""
+    return not (_phone_sid and rec.get("sid") == _phone_sid and _phone_sid != current_session_id)
+
+
 @app.get("/narration/sse")
 async def narration_sse(request: Request, from_seq: int = 0):
     """Live beats. The SSE `id:` field is the seq, so the browser's own
@@ -4251,6 +4440,8 @@ async def narration_sse(request: Request, from_seq: int = 0):
                     continue
                 if isinstance(rec, tuple):
                     yield f"event: job\ndata: {json.dumps(rec[1], default=str)}\n\n"
+                    continue
+                if not _beat_for_tab(rec):
                     continue
                 yield (f"event: beats\nid: {rec.get('seq')}\n"
                        f"data: {json.dumps({'sid': rec.get('sid'), 'beats': [rec]}, default=str)}\n\n")
