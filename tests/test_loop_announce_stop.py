@@ -86,6 +86,21 @@ def test_answer_whose_reasoning_names_no_tool_is_final():
     assert len(seen) == 1
 
 
+def test_full_answer_whose_reasoning_plans_a_later_tool_is_final():
+    # Measured 2026-10-14 on qwen3.7-flash (hosted t01, /quiz): the prompt names
+    # silica_record_quiz for the turn AFTER the reader answers, the reasoning
+    # restated that plan, and the nudge retracted three finished questions.
+    quiz = _resp(
+        text="Ecco le tue 3 domande:\n\n1. Recall?\n2. Comprehension?\n3. Application?",
+        reasoning="When the reader replies, grade each answer, call silica_recall.",
+    )
+    fake, seen = _scripted(quiz, _resp(text="unused"))
+    with patch("silica.agent.loop.call_llm", fake):
+        out = run_agent([{"role": "user", "content": "quiz"}], "test", constraints=_TOOLS)
+    assert out.startswith("Ecco le tue 3 domande")
+    assert len(seen) == 1
+
+
 def test_no_nudge_once_a_tool_has_run():
     # After a tool result the model routinely names the tool it used while
     # answering; only the step before any tool can be an unkept announcement.
