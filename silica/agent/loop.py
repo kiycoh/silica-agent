@@ -138,6 +138,19 @@ _FINAL_TURN_INSTRUCTION = (
 )
 
 
+# A stop counts as an unkept announcement only when its text is a preamble. The
+# measured preamble was one line of 47 chars (2026-09-27, qwen3.5-9b); the
+# misfire it must not catch was 3 quiz questions over 7 lines, 719 chars
+# (2026-10-14, qwen3.7-flash on /quiz, whose prompt names silica_record_quiz
+# for the turn after the reader answers). 200 is 4x the preamble.
+_PREAMBLE_MAX_CHARS = 200
+
+
+def _is_preamble(text: str | None) -> bool:
+    body = (text or "").strip()
+    return len(body) <= _PREAMBLE_MAX_CHARS and "\n" not in body
+
+
 def _announced_tool(reasoning: str | None, offered) -> str | None:
     """The offered tool a step's reasoning names, longest first so
     `silica_read_note` is not reported as `silica_read`."""
@@ -516,9 +529,11 @@ def run_agent(
             # first step qualifies: after a tool result the model names the tool
             # it used while answering, and the first step only is also what
             # keeps it to one nudge per turn. Never when the cap is one step:
-            # the landing turn after it has no tools to call.
+            # the landing turn after it has no tools to call. Never on a full
+            # answer: reasoning that plans a tool for a later turn names it too.
             tool = (_announced_tool(resp.reasoning, allowed)
-                    if iteration == 1 and max_iterations > 1 else None)
+                    if iteration == 1 and max_iterations > 1
+                    and _is_preamble(resp.text) else None)
             if tool:
                 logger.info("announce-and-stop: %s named, no call; nudging", tool)
                 # The preamble is now an intermediate step: narrate it as one and
