@@ -176,7 +176,7 @@ def test_a_chat_turn_writes_one_turn_line(client, journal, monkeypatch):
     asyncio.run(collect())
     (turn,) = journal.events("turn")
     assert MARKER not in json.dumps(turn)
-    assert turn["kind"] == "chat" and turn["outcome"] == "done"
+    assert turn["kind"] == "chat" and turn["outcome"] == "done" and turn["channel"] == "web"
     assert turn["tools"] == {"search_context": 2} and turn["tool_errors"] == {"read_note": 1}
     assert (turn["calls"], turn["prompt"], turn["completion"], turn["cached"]) == (1, 30, 5, 0)
     assert isinstance(turn["ms"], int) and isinstance(turn["first_token_ms"], int)

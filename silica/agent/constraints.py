@@ -148,6 +148,25 @@ CHAT_CORE = (
 _REVIEW_APPLY = ("silica_ledger_next", "silica_ledger_update")
 
 
+# What a turn from Telegram is offered (ADR-0089 point 5): the core's reads, in
+# the core's order, and nothing deferred, so no loader either. A Telegram
+# account is a second door to the vault, held by whoever holds the phone, and
+# Silica has no approval step: with no write tool and no web here, no text a
+# phone turn reads can make it write a note, save a memory or fetch a URL.
+PHONE_TOOLS = (
+    "silica_recall",
+    "silica_search",
+    "silica_search_context",
+    "silica_read_note",
+    "silica_read",
+    "silica_outline",
+    "silica_files",
+    "silica_props",
+    "silica_links",
+    "silica_backlinks",
+)
+
+
 def _eligible() -> dict:
     from silica.tools import TOOLS
     import silica.tools.loader  # noqa: F401  the core names it; register before reading TOOLS
