@@ -1399,6 +1399,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     loadChanges();   // …and the sidebar's record of what it changed
     if (typeof loadLimits === "function") loadLimits(); // what the turn spent (ADR-0102)
     markVaultChanged(); // a turn may have written notes
+    document.dispatchEvent(new CustomEvent("silica:turn-end", { detail: { outcome } })); // ADR-0105
   }
 
   function handle(ev) {

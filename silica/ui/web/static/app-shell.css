@@ -714,6 +714,142 @@ details.side-section[open] {
   display: none;
 }
 
+/* --- the first-visit tour (ADR-0105) ----------------------------------------
+   The dim is the shadow of one box sized to the lit control, and it takes no
+   pointer events: the student clicks +, types and sends under it. 95 puts it
+   over the note drawer (50-52) and the narrow drawer (45) and under every menu
+   a step opens (the chat's commands and + at 100, the vault's + at 120), so a
+   menu the student opens is never dimmed. The bubble sits over those menus,
+   under the shared tooltip and the settings modal (200). */
+#tour-spot {
+  position: fixed;
+  z-index: 95;
+  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 0 100vmax color-mix(in srgb, var(--scrim) 75%, transparent);
+  pointer-events: none;
+  transition: left var(--dur) var(--ease), top var(--dur) var(--ease),
+              width var(--dur) var(--ease), height var(--dur) var(--ease);
+}
+
+#tour-spot.tour-all {
+  box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--scrim) 75%, transparent);
+}
+
+#tour-tip {
+  position: fixed;
+  z-index: 150;
+  width: min(320px, calc(100vw - 32px));
+  padding: 0.75rem 0.85rem 0.7rem;
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--lift), var(--glass-edge);
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  line-height: 1.5;
+}
+
+#tour-spot[hidden],
+#tour-tip[hidden],
+.tour-status[hidden] {
+  display: none;
+}
+
+.tour-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.tour-x {
+  border: 0;
+  background: none;
+  color: var(--ash-dim);
+  font-size: var(--fs-meta);
+  padding: 0.15rem 0.3rem;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+}
+
+.tour-x:hover {
+  color: var(--frost);
+}
+
+.tour-body {
+  margin: 0.45rem 0 0;
+  color: var(--frost);
+}
+
+.tour-status {
+  margin: 0.45rem 0 0;
+  color: var(--ash);
+  font-size: var(--fs-meta);
+}
+
+.tour-status.failed {
+  color: var(--warn);
+}
+
+.tour-acts {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+.tour-link {
+  margin-right: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--ash);
+  font: inherit;
+  font-size: var(--fs-meta);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tour-link:hover {
+  color: var(--accent);
+}
+
+.tour-btn {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.tour-btn:hover,
+.tour-btn.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tour-x:focus-visible,
+.tour-link:focus-visible,
+.tour-btn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #tour-spot {
+    transition: none;
+  }
+}
+
 /* Chrome wraps everything after <summary> in an anonymous ::details-content
    box, so THAT is the flex item of the compartment and .side-body is a child of
    it. Measured: a 316px compartment holding a 1637px body that painted straight

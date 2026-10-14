@@ -462,6 +462,7 @@
     <button type="button" id="help-btn" class="vp-item" aria-haspopup="dialog" aria-expanded="false"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M9.5 9.3a2.6 2.6 0 0 1 5 .9c0 1.8-2.5 2.3-2.5 3.8"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg><span>Shortcuts and help</span><kbd>?</kbd></button>
   </div>
   <div id="help-panel" hidden role="dialog" aria-label="help">
+      <button type="button" id="tour-start" class="vp-item"><span>Guided tour</span></button>
       <div class="sp-title">keyboard</div>
       <div class="hp-row"><kbd>&#8629;</kbd><span>send the message</span></div>
       <div class="hp-row"><kbd>&#8679; &#8629;</kbd><span>new line instead of sending</span></div>
@@ -686,6 +687,9 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script src="/static/app-notes.js"></script>
   <script src="/static/app-jobs.js"></script>
   <script src="/static/app-boot.js"></script>
+  <!-- Before app-settings.js, which starts the first /vault_info and /sessions:
+       the tour's listeners must exist before either answers (ADR-0105). -->
+  <script src="/static/app-tour.js"></script>
   <script src="/static/app-settings.js"></script>
   <script src="/static/app-connectors.js"></script>
   <script src="/static/app-limits.js"></script>
