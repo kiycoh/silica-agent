@@ -4741,9 +4741,12 @@ async def _stt_via_endpoint(url: str, clip: bytes) -> tuple[str, str]:
     the in-process lane before it reports anything."""
     import httpx
 
+    from silica.metrics import outcome_of, transcribed
+
     form = {"model": CONFIG.stt_model, "response_format": "json"}
     if CONFIG.stt_lang:
         form["language"] = CONFIG.stt_lang
+    started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             for _ in range(2):
@@ -4760,13 +4763,19 @@ async def _stt_via_endpoint(url: str, clip: bytes) -> tuple[str, str]:
                     break
                 del form["language"]
     except Exception as exc:
+        transcribed("dictation", started, outcome_of(exc))
         return "", f"transcription endpoint unreachable: {exc}"
     if resp.status_code != 200:
+        transcribed("dictation", started, str(resp.status_code))
         return "", f"transcription failed ({resp.status_code}): {resp.text[:200]}"
     try:
-        return (resp.json().get("text") or "").strip(), ""
+        payload = resp.json()
+        text = (payload.get("text") or "").strip()
     except Exception as exc:
+        transcribed("dictation", started, "malformed")
         return "", f"transcription endpoint returned no JSON: {exc}"
+    transcribed("dictation", started, "ok" if text else "empty", payload)
+    return text, ""
 
 
 @app.post("/stt", dependencies=_SAME_ORIGIN)

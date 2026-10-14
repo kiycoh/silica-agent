@@ -2126,8 +2126,11 @@ def _asr_via_endpoint(audio: Path) -> str:
     time every word in verbose_json, and those pauses are the paragraph breaks.
     A transcript with no paragraph break is one oversized inbox note.
     """
+    import time
+
     import httpx
 
+    from silica.metrics import outcome_of, transcribed
     from silica.sources.web_fetch import vtt_to_text
 
     url = f"{_asr_base(CONFIG.stt_base_url)}/audio/transcriptions"
@@ -2150,6 +2153,7 @@ def _asr_via_endpoint(audio: Path) -> str:
                 timeout=_ASR_TIMEOUT_S,
             )
 
+    started = time.monotonic()
     try:
         resp = post()
         # ...but a hosted API takes an ISO-639-1 code or nothing: OpenRouter
@@ -2161,6 +2165,7 @@ def _asr_via_endpoint(audio: Path) -> str:
             del data["language"]
             resp = post()
     except httpx.HTTPError as e:
+        transcribed("media", started, outcome_of(e))
         raise ValueError(
             # whisper-server serves /inference unless told otherwise, and
             # answers 404 on this path (measured 2026-10-13)
@@ -2170,6 +2175,7 @@ def _asr_via_endpoint(audio: Path) -> str:
             "set SILICA_STT_PROVIDER=whispercpp"
         ) from None
     if resp.status_code != 200:
+        transcribed("media", started, str(resp.status_code))
         raise ValueError(f"transcription server returned {resp.status_code}: {resp.text[:200]}")
     body = resp.text
     try:
@@ -2177,10 +2183,14 @@ def _asr_via_endpoint(audio: Path) -> str:
     except ValueError:
         # A server that ignored response_format and answered vtt still carries
         # its pauses in the cue timings.
-        return vtt_to_text(body, paragraph_gap_s=_ASR_PARAGRAPH_GAP_S)
-    if not isinstance(payload, dict):
-        return ""
-    return _paragraphs_at_pauses(payload, _ASR_PARAGRAPH_GAP_S)
+        payload, text = None, vtt_to_text(body, paragraph_gap_s=_ASR_PARAGRAPH_GAP_S)
+    else:
+        text = _paragraphs_at_pauses(payload, _ASR_PARAGRAPH_GAP_S) if isinstance(payload, dict) else ""
+    # "empty" apart from "ok": qwen3-asr on OpenRouter answered 3 of 11 long
+    # files with an empty 200 (2026-10-14), and only this line counts how
+    # often that keeps happening.
+    transcribed("media", started, "ok" if text.strip() else "empty", payload)
+    return text
 
 
 def _asr_via_whispercpp(wav: Path) -> str:

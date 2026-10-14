@@ -7,6 +7,7 @@ import importlib.util
 import logging
 import os
 import threading
+import time
 from functools import lru_cache
 from typing import Any
 from urllib.parse import urlsplit
@@ -17,6 +18,7 @@ from pydantic import BaseModel
 from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
 from silica.agent.llm import LLMResponse
 from silica.config import DEFAULT_EMBEDDING_MODEL, HOSTED_PROVIDERS, ensure_prefix
+from silica.metrics import emit, ms_since, number, outcome_of
 
 logger = logging.getLogger(__name__)
 
@@ -452,9 +454,12 @@ class OpenAIEmbedder:
         if query and self.query_client is not None:
             client = self.query_client
         own = client is not self.client
+        started, outcome, usage = time.monotonic(), "ok", None
         try:
             response = client.embeddings.create(model=self.model, input=texts)
+            usage = getattr(response, "usage", None)
         except Exception as e:
+            outcome = outcome_of(e)
             # Warn, then re-raise unchanged: the callers' fail-open guards stay
             # in charge of what to skip, this only makes the skip visible.
             # Its own role, so a dead query server does not use up the one
@@ -464,6 +469,12 @@ class OpenAIEmbedder:
             else:
                 warn_down_once("embedder", self.base_url, e, self.model)
             raise
+        finally:
+            # The hosted embedder is free and local, so its cost is the host's
+            # 2 cores: the tokens, and how long a query waits behind a batch.
+            emit("embed", lane="query" if query else "document", inputs=len(texts),
+                 tokens=number(getattr(usage, "prompt_tokens", None)),
+                 ms=ms_since(started), outcome=outcome)
         # The API guarantees ordering matches the input list
         return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
 
@@ -524,6 +535,8 @@ class Reranker:
         self.failure = None
         if not query or not documents:
             return None
+        started, outcome = time.monotonic(), "malformed"
+        usage: dict = {}
         try:
             resp = httpx.post(
                 self.url,
@@ -532,7 +545,11 @@ class Reranker:
                 timeout=self.timeout,
             )
             resp.raise_for_status()
-            results = resp.json().get("results")
+            body = resp.json()
+            # OpenRouter's /rerank usage (schema read 2026-10-15); a local
+            # llama.cpp or rerank_serve reply has none.
+            usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+            results = body.get("results")
             if not isinstance(results, list):
                 self.failure = "failed"
                 return None
@@ -547,11 +564,16 @@ class Reranker:
                 # (ADR-0094): abstain, so the fused order stands and is marked.
                 self.failure = "failed"
                 return None
+            outcome = "ok"
             return scored  # type: ignore[return-value]  # every slot was filled above
         except Exception as e:
+            outcome = outcome_of(e)
             warn_down_once("reranker", self.url, e, self.model)
             self.failure = why_of(e)
             return None
+        finally:
+            emit("rerank", documents=len(documents), tokens=number(usage.get("total_tokens")),
+                 usd=number(usage.get("cost")), ms=ms_since(started), outcome=outcome)
 
 
 @lru_cache(maxsize=1)

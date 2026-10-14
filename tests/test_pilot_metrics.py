@@ -264,3 +264,150 @@ def test_a_converted_upload_writes_its_ingest_line_when_its_job_ends(client, jou
     (line,) = journal.events("ingest")
     assert MARKER not in json.dumps(journal.lines)
     assert (line["ext"], line["bytes"], line["outcome"]) == (".mp3", 64, "error")
+
+
+# --- the services a turn or an upload pays for besides the model -----------
+# The host's embedder, the reranker and the transcriber bill outside call_llm,
+# so each writes its own line: one per request, with the provider's usage
+# coerced to numbers, because a reply is as untrusted as the student's text.
+
+class _Status(Exception):
+    status_code = 503
+
+
+def _embedder(reply):
+    from types import SimpleNamespace
+
+    from silica.agent.providers import OpenAIEmbedder
+
+    e = OpenAIEmbedder(base_url="http://x/v1", api_key="k", model="m")
+
+    def create(**kw):
+        if isinstance(reply, BaseException):
+            raise reply
+        return reply
+
+    e.client = SimpleNamespace(embeddings=SimpleNamespace(create=create))
+    return e
+
+
+def test_an_embed_call_writes_its_lane_inputs_and_tokens(journal):
+    from types import SimpleNamespace
+
+    reply = SimpleNamespace(data=[SimpleNamespace(index=1, embedding=[0.0]),
+                                  SimpleNamespace(index=0, embedding=[1.0])],
+                            usage=SimpleNamespace(prompt_tokens=12, total_tokens=12))
+    assert _embedder(reply).embed([MARKER, "b"]) == [[1.0], [0.0]]
+    with pytest.raises(_Status):
+        _embedder(_Status()).embed([MARKER], query=True)
+    with pytest.raises(ConnectionError):
+        _embedder(ConnectionError(MARKER)).embed([MARKER], query=True)
+
+    assert MARKER not in json.dumps(journal.lines)
+    ok, down, refused = journal.events("embed")
+    assert (ok["lane"], ok["inputs"], ok["tokens"], ok["outcome"]) == ("document", 2, 12, "ok")
+    assert isinstance(ok["ms"], int)
+    assert (down["lane"], down["tokens"], down["outcome"]) == ("query", None, "503")
+    assert refused["outcome"] == "ConnectionError"
+
+
+def test_a_rerank_call_writes_its_documents_and_the_providers_cost(journal, monkeypatch):
+    import httpx
+
+    from silica.agent import providers
+
+    replies = iter([
+        httpx.Response(200, json={"results": [{"index": 1, "relevance_score": 0.9},
+                                              {"index": 0, "relevance_score": 0.1}],
+                                  "usage": {"cost": 0.00012, "total_tokens": 340}}),
+        # a reply's usage is untrusted: text where a number belongs never lands
+        httpx.Response(200, json={"results": [{"index": 0, "relevance_score": 0.5}],
+                                  "usage": {"cost": MARKER, "total_tokens": True}}),
+        httpx.Response(403, json={"error": {"message": MARKER}}),
+    ])
+
+    def post(url, **kw):
+        resp = next(replies)
+        resp.request = httpx.Request("POST", url)
+        return resp
+
+    monkeypatch.setattr(providers.httpx, "post", post)
+    rr = providers.Reranker(base_url="http://x/v1", model="m")
+    assert rr.scores("q", [MARKER, "b"]) == [0.1, 0.9]
+    assert rr.scores("q", [MARKER, "b"]) is None  # one score for two documents
+    assert rr.scores("q", [MARKER]) is None
+    assert rr.scores("", [MARKER]) is None  # no request, so no line
+
+    assert MARKER not in json.dumps(journal.lines)
+    ok, short, limited = journal.events("rerank")
+    assert (ok["documents"], ok["tokens"], ok["usd"], ok["outcome"]) == (2, 340, 0.00012, "ok")
+    assert (short["usd"], short["tokens"], short["outcome"]) == (None, None, "malformed")
+    assert (limited["documents"], limited["usd"], limited["outcome"]) == (1, None, "403")
+
+
+def test_a_media_transcription_writes_its_seconds_and_cost_never_its_text(journal, monkeypatch, tmp_path):
+    import httpx
+
+    from silica.sources import convert
+
+    monkeypatch.setattr(convert.CONFIG, "stt_base_url", "http://x/v1", raising=False)
+    monkeypatch.setattr(convert.CONFIG, "stt_lang", "it", raising=False)
+    replies = iter([
+        httpx.Response(200, json={"text": MARKER, "duration": 61.5,
+                                  "usage": {"seconds": 61.5, "cost": 0.0021}}),
+        # qwen3-asr's empty 200 (convert._via_asr): no text and no usage
+        httpx.Response(200, json={"text": ""}),
+        # whisper-server's verbose_json has a duration and no usage
+        httpx.Response(200, json={"text": "a", "duration": 7.25}),
+        httpx.Response(403, text=MARKER),
+    ])
+    monkeypatch.setattr(httpx, "post", lambda url, **kw: next(replies))
+    audio = tmp_path / "talk.mp3"
+    audio.write_bytes(b"ID3")
+
+    assert convert._asr_via_endpoint(audio) == MARKER
+    assert convert._asr_via_endpoint(audio) == ""
+    assert convert._asr_via_endpoint(audio) == "a"
+    with pytest.raises(ValueError):
+        convert._asr_via_endpoint(audio)
+
+    assert MARKER not in json.dumps(journal.lines)
+    ok, empty, local, limited = journal.events("stt")
+    assert (ok["lane"], ok["seconds"], ok["usd"], ok["outcome"]) == ("media", 61.5, 0.0021, "ok")
+    assert (empty["seconds"], empty["usd"], empty["outcome"]) == (None, None, "empty")
+    assert (local["seconds"], local["usd"], local["outcome"]) == (7.25, None, "ok")
+    assert (limited["seconds"], limited["outcome"]) == (None, "403")
+
+
+def test_a_dictation_writes_an_stt_line_on_the_dictation_lane(client, journal, monkeypatch):
+    import httpx
+
+    app, server = client
+    monkeypatch.setattr(server.CONFIG, "stt_dictation_base_url", "http://x/v1", raising=False)
+    replies = iter([httpx.Response(200, json={"text": MARKER, "usage": {"seconds": 4.0, "cost": 0.00008}}),
+                    httpx.Response(502, text=MARKER)])
+
+    class _Client:
+        def __init__(self, **kw):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, **kw):
+            return next(replies)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _Client)
+    from silica.agent import stt as local
+
+    monkeypatch.setattr(local, "has_local_stt", lambda: False)
+    assert app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")}).json()["text"] == MARKER
+    assert app.post("/stt", files={"audio": ("clip.wav", b"RIFFclip", "audio/wav")}).status_code == 502
+
+    assert MARKER not in json.dumps(journal.lines)
+    ok, failed = journal.events("stt")
+    assert (ok["lane"], ok["seconds"], ok["usd"], ok["outcome"]) == ("dictation", 4.0, 0.00008, "ok")
+    assert (failed["lane"], failed["outcome"]) == ("dictation", "502")
