@@ -137,6 +137,7 @@ async function loadVaultInfo() {
     buildNoteIndex();                 // explore note search reads the fresh tree
     applySidebarFilter();
     applyHashNote();                  // a ?note= deep link can open now that the tree knows it
+    document.dispatchEvent(new CustomEvent("silica:vault-info")); // the tour reads the fresh tree (ADR-0105)
   } catch { notify("couldn't refresh vault stats"); }
 }
 
@@ -738,6 +739,7 @@ async function loadSessions() {
     // The boot wrote "#chat" before the id was known; stamp the id in place so
     // Back from the next chat has somewhere to return to.
     if (activeTab === "chat" && currentSessionId) syncUrl(false);
+    document.dispatchEvent(new CustomEvent("silica:sessions")); // the tour's "no chat yet" (ADR-0105)
   } catch { notify("couldn't load chat history"); }
 }
 
