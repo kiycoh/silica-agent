@@ -140,3 +140,28 @@ def test_the_internal_key_never_reaches_the_provider():
     from silica.agent.providers import INTERNAL_KEYS
 
     assert "silica_workspace" in INTERNAL_KEYS
+
+
+def test_the_joined_note_and_the_workspace_edit_are_among_this_chats_changes(client, monkeypatch):
+    """Point 4 as decided: a note the chat writes joins notes:, and that edit
+    shows among what this chat did to the vault (ADR-0072's list, /changes)."""
+    tc, server = client
+    from silica.driver import DRIVER
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        DRIVER.create("Notes/Methods.md", "# Methods\n\nFixed effects and IV.\n")
+        tool_progress_callback(ToolCompleteEvent("silica_write_note", {"path": "Notes/Methods.md"}, "c1",
+                                                 json.dumps({"op": "write", "success": True, "path": "Notes/Methods.md"}),
+                                                 0.0, 0))
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    tc.post("/chat", json={"text": "scrivi i metodi", "workspace": "Thesis"})
+    changed = {row["path"] for row in tc.get("/changes").json()}
+    assert {"Notes/Methods.md", "Workspaces/Thesis.md"} <= changed
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    assert "'[[Methods]]'" in (Path(CONFIG.vault_path) / "Workspaces/Thesis.md").read_text(encoding="utf-8")
