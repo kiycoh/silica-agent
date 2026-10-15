@@ -1725,6 +1725,14 @@ def attachment(name: str):
 
 @app.post("/chat", dependencies=_SAME_ORIGIN)
 async def chat(payload: dict):
+    workspace = str(payload.get("workspace") or "")
+    if workspace:
+        from silica.kernel.workspaces import find_workspace
+
+        # A chip naming a workspace renamed or deleted since must not run the
+        # turn on the whole vault under that chip.
+        if await asyncio.to_thread(find_workspace, workspace) is None:
+            raise HTTPException(status_code=404, detail="that workspace no longer exists")
     attachments = _save_attachments(payload.get("images") or [])
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
@@ -1741,7 +1749,7 @@ async def chat(payload: dict):
     if queued is not None:
         _end_turn()
         return JSONResponse(queued, status_code=202)
-    return _turn_response(text, attachments, str(payload.get("workspace") or ""))
+    return _turn_response(text, attachments, workspace)
 
 
 @app.post("/phone/turn", dependencies=_SAME_ORIGIN)
@@ -2181,13 +2189,18 @@ def workspaces_create(payload: dict):
     was opened on."""
     from silica.kernel import workspaces
 
+    notes, folders = payload.get("notes") or [], payload.get("folders") or []
+    if not all(isinstance(v, list) and all(isinstance(x, str) for x in v) for v in (notes, folders)):
+        raise HTTPException(status_code=400, detail="notes and folders must be lists of names")
     try:
-        path = workspaces.create_workspace(str(payload.get("name") or ""),
-                                           notes=[str(n) for n in payload.get("notes") or []],
-                                           folders=[str(f) for f in payload.get("folders") or []])
+        path = workspaces.create_workspace(str(payload.get("name") or ""), notes=notes, folders=folders)
     except ValueError as exc:
         # create_workspace's own sentences (name refused or taken), never a path
         raise HTTPException(status_code=400, detail=exc.args[0]) from None
+    except FileExistsError:
+        raise HTTPException(status_code=409, detail="a note with that name is already there") from None
+    except OSError:
+        raise HTTPException(status_code=400, detail="that name cannot be a file name here") from None
     return workspaces.summary(workspaces.read_workspace(path))
 
 
@@ -2201,15 +2214,17 @@ def workspaces_line(payload: dict):
     if ws is None:
         raise HTTPException(status_code=404, detail="no such workspace")
     key, value = str(payload.get("key") or ""), str(payload.get("value") or "")
-    if key not in workspaces.LINES or not value.strip():
+    on = payload.get("on", True)
+    if key not in workspaces.LINES or not value.strip() or not isinstance(on, bool):
         raise HTTPException(status_code=400, detail="key must be notes, folders or where, with a value")
     try:
-        if payload.get("on", True):
+        if on:
             workspaces.add_line(ws["path"], key, value)
         else:
             workspaces.remove_line(ws["path"], key, value)
     except (OSError, RuntimeError) as exc:
-        return _failure(exc)
+        # not 200: the menu checks r.ok and would show the line as saved
+        return JSONResponse(_failure(exc), status_code=500)
     return workspaces.summary(workspaces.read_workspace(ws["path"]))
 
 

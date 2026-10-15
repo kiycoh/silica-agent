@@ -606,8 +606,10 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
 }
 
 /* The tree row's pin, at the 24px target floor: lit while the note is in the
-   rail, which is what tells you the pin took. */
-#note-pin {
+   rail, which is what tells you the pin took. The workspaces ◇ beside it
+   (ADR-0112) wears the same button. */
+#note-pin,
+#note-ws {
   flex: none;
   display: grid;
   place-items: center;
@@ -622,7 +624,8 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
   transition: color var(--dur) var(--ease);
 }
 
-#note-pin:hover {
+#note-pin:hover,
+#note-ws:hover {
   color: var(--frost);
 }
 
@@ -677,6 +680,7 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
 #note-info:focus-visible,
 #note-read:focus-visible,
 #note-pin:focus-visible,
+#note-ws:focus-visible,
 #note-changes:focus-visible {
   outline: 1px solid var(--accent);
   outline-offset: 1px;

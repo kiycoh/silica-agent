@@ -6,6 +6,7 @@
 
 let workspaces = [];       // /workspaces rows: {path, name, count, members, dead, ...}
 let chatWorkspace = "";    // the workspace this chat is opened in; "" is the whole vault
+let wsBooted = false;      // the server's `current` is adopted once, then on a reopened chat
 const wsOpen = new Set();  // rows shown expanded, by path
 const WS_REASON = { listed: "listed", folder: "folder", where: "where", derived: "derived" };
 const WS_REASON_TIP = {
@@ -15,16 +16,31 @@ const WS_REASON_TIP = {
   derived: "nucleated from a member",
 };
 
-async function loadWorkspaces() {
+// `adopt` takes the server's scope for this chat. Only at boot and on a
+// reopened chat: the server learns a closed or opened chip at the next turn,
+// so adopting it on every refresh brought a closed chip back, or dropped an
+// open one, whenever a workspace was edited in between.
+async function loadWorkspaces({ adopt = false } = {}) {
   try {
     const d = await (await fetch("/workspaces")).json();
     if (d.error) return;
     workspaces = d.workspaces || [];
-    chatWorkspace = d.current || "";
+    if (adopt || !wsBooted) chatWorkspace = d.current || "";
+    wsBooted = true;
+    if (chatWorkspace && !workspaces.some((w) => w.path === chatWorkspace)) {
+      // Renamed or deleted since the chat was opened in it: said, not silent,
+      // and the server refuses a turn that still names it (404).
+      chatWorkspace = "";
+      notify("the workspace this chat was opened in is gone: the next message searches the whole vault");
+    }
   } catch { return; } // the group keeps what it drew; the next vault refresh retries
   renderWorkspaces();
   renderWsChip();
   syncNoteWs();
+  // A workspace note open in the reader was rewritten under it (a ◇ edit, a
+  // note the chat wrote): the field takes the new bytes unless it holds
+  // unsaved typing, and the next keystroke no longer meets a 409.
+  if (typeof refreshOpenNote === "function" && workspaces.some((w) => w.path === editPath)) refreshOpenNote();
 }
 
 const wsByPath = (p) => workspaces.find((w) => w.path === p);
@@ -85,6 +101,7 @@ function renderWorkspaces() {
   }
   syncTreeWs();
   applySidebarFilter();
+  placeWsMenu();
 }
 
 // The members under their own folder path, so a member reads as the same note
@@ -117,7 +134,7 @@ function renderWsMembers(w) {
   for (const f of w.dead.folders) list.appendChild(mkEl("div", "ws-dead", `folder not found: ${f}`));
   for (const n of w.dead.notes) list.appendChild(mkEl("div", "ws-dead", `no note named ${n}`));
   if (!w.members.length && !w.dead.folders.length && !w.dead.notes.length) {
-    list.appendChild(mkEl("div", "ws-folder", "empty: add notes or folders with ◇ in the tree"));
+    list.appendChild(mkEl("div", "ws-hint", "empty: add notes or folders with ◇ in the tree"));
   }
   if (w.has_instructions) {
     const p = mkEl("div", "ws-instr", "a chat here follows the note's own words");
@@ -155,8 +172,13 @@ $("#workspaces").addEventListener("click", (e) => {
   if (e.target.closest(".ws-toggle")) {
     if (wsOpen.has(w.path)) wsOpen.delete(w.path); else wsOpen.add(w.path);
     renderWorkspaces();
+    focusWsRow(w.path); // the re-render replaced the button that had focus
   }
 });
+
+function focusWsRow(path) {
+  $(`#workspaces .ws-row[data-path="${CSS.escape(path)}"] .ws-toggle`)?.focus();
+}
 
 // The + on the bucket: a workspace with nothing in it yet, named in place.
 $("#ws-new").addEventListener("click", () => {
@@ -168,13 +190,15 @@ $("#ws-new-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#ws-new-name").value.trim();
   if (!name) return;
-  if (await createWorkspace(name, [], [])) {
+  const made = await createWorkspace(name, [], []);
+  if (made) {
     $("#ws-new-name").value = "";
     $("#ws-new-form").hidden = true;
+    focusWsRow(made.path);
   }
 });
 $("#ws-new-name").addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { e.stopPropagation(); $("#ws-new-form").hidden = true; }
+  if (e.key === "Escape") { e.stopPropagation(); $("#ws-new-form").hidden = true; $("#ws-new").focus(); }
 });
 
 async function createWorkspace(name, notes, folders) {
@@ -218,6 +242,7 @@ function renderWsChip() {
     chatWorkspace = "";
     renderWsChip();
     renderWorkspaces();
+    input.focus(); // the chip that had focus is gone
     notify("the next message searches the whole vault");
   });
   chip.appendChild(x);
@@ -280,7 +305,9 @@ async function openWsMenu(button, path, folder) {
 }
 
 function placeWsMenu() {
-  if (!wsMenuFor) return;
+  if (!wsMenuFor || wsMenu.hidden) return;
+  // A tree refresh replaces the row the menu was opened on: nothing to follow.
+  if (!wsMenuFor.button.isConnected) { closeWsMenu(); return; }
   const r = wsMenuFor.button.getBoundingClientRect();
   const h = wsMenu.offsetHeight || 0;
   const below = r.bottom + 4 + h <= innerHeight - 8;
@@ -327,6 +354,9 @@ document.addEventListener("click", (e) => {
   if (!e.target.closest("#ws-menu, .tree-ws, #note-ws")) closeWsMenu();
 });
 addEventListener("resize", placeWsMenu);
+// The drawer scrolls, and the list grows when a workspace opens: the menu
+// follows its ◇ instead of staying where it was first drawn.
+addEventListener("scroll", placeWsMenu, true);
 $("#note-ws").addEventListener("click", () => openWsMenu($("#note-ws"), lastViewedPath, false));
 
 // The ◇ on a tree row and beside the reader's pin lights when the note or the

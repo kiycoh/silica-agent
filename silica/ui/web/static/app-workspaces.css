@@ -249,6 +249,13 @@
   background: color-mix(in srgb, var(--warn) 12%, transparent);
 }
 
+.ws-hint {
+  padding: 0.35rem 0.35rem 0.1rem;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ash-dim);
+}
+
 .ws-instr {
   padding: 0.3rem 0.35rem 0;
   font-size: 11px;
@@ -380,9 +387,17 @@
   border-top: 1px solid var(--line);
 }
 
+/* The jobs rows' frame (app-jobs.css): the composer's measure and inset, so
+   the chip lines up with the field, and above the composer's fade. */
 #ws-chip-row {
   display: flex;
-  padding: 0.5rem 1rem 0;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(var(--measure) + 4rem);
+  padding-inline: 2rem;
+  margin: 0.5rem auto 0;
+  position: relative;
+  z-index: 1;
 }
 
 #ws-chip-row[hidden] {

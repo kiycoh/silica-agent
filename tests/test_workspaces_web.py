@@ -165,3 +165,35 @@ def test_the_joined_note_and_the_workspace_edit_are_among_this_chats_changes(cli
     from silica.config import CONFIG
 
     assert "'[[Methods]]'" in (Path(CONFIG.vault_path) / "Workspaces/Thesis.md").read_text(encoding="utf-8")
+
+
+# --- the endpoints' answers (review of 2026-10-15) --------------------------------
+
+def test_a_turn_naming_a_workspace_that_is_gone_is_refused_not_run_unscoped(client, monkeypatch, tmp_vault):
+    tc, server = client
+    ran = []
+    monkeypatch.setattr(server, "run_agent", lambda *a, **k: ran.append(1) or "ok")
+    from silica.config import CONFIG
+    from pathlib import Path
+
+    root = Path(CONFIG.vault_path)
+    (root / "Workspaces/Thesis.md").rename(root / "Workspaces/Thesis 2026.md")
+    r = tc.post("/chat", json={"text": "two", "workspace": "Workspaces/Thesis.md"})
+    assert r.status_code == 404 and not ran
+
+
+def test_create_and_line_validate_their_input(client, tmp_vault):
+    tc, _ = client
+    assert tc.post("/workspaces", json={"name": "Num", "notes": 5}).status_code == 400
+    assert tc.post("/workspaces", json={"name": "Str", "notes": "abc"}).status_code == 400
+    for name in (".hidden", "..", "."):
+        assert tc.post("/workspaces", json={"name": name}).status_code == 400
+    tmp_vault.note("Workspaces/Plain.md", "# my own note\n\nprecious\n")
+    assert tc.post("/workspaces", json={"name": "Plain"}).status_code == 409
+    from silica.config import CONFIG
+    from pathlib import Path
+
+    assert "precious" in (Path(CONFIG.vault_path) / "Workspaces/Plain.md").read_text(encoding="utf-8")
+    assert tc.post("/workspaces", json={"name": "x" * 300}).status_code == 400
+    r = tc.post("/workspaces/line", json={"workspace": "Thesis", "key": "notes", "value": "Bayes", "on": "false"})
+    assert r.status_code == 400

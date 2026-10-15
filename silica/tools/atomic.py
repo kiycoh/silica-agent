@@ -710,8 +710,10 @@ def silica_orphans() -> dict:
     neglected vault is mostly orphans, so the count is the answer to "how many"
     and the sample is enough to start linking.
     """
+    from silica.kernel.workspaces import in_scope
+
     refs = DRIVER.orphans()
-    paths = [r.path for r in refs]
+    paths = [r.path for r in refs if in_scope(r.path)]
     out: dict = {"total": len(paths), "orphans": paths[:_FILES_CAP]}
     if len(paths) > _FILES_CAP:
         out["truncated"] = True
@@ -1454,6 +1456,10 @@ def silica_learn_items(n: Annotated[int, Field(description='Session size (defaul
             prefix = t.replace("\\", "/").casefold()
             notes = learner._notes_meta(Path(CONFIG.vault_path))
             scope = [p for p in notes if p.casefold().startswith(prefix)]
+    from silica.kernel.workspaces import active_scope
+
+    if (ws := active_scope()) is not None:  # a workspace's turn studies its members only
+        scope = [p for p in (scope if scope is not None else ws["paths"]) if p in ws["paths"]]
     picked = pick.session(n=max(1, n), scope=scope, frontier=frontier, revisit=revisit)
     if plan_path and plan is not None:  # plan_path is only set from a found plan
         plans.assign_objectives(plan, picked["items"])
@@ -1480,7 +1486,12 @@ def silica_review_queue(limit: Annotated[int, Field(description='How many notes 
     """
     from silica.kernel.report import learner
 
-    rows = learner.review_queue(limit=limit, target=target)
+    from silica.kernel.workspaces import active_scope, in_scope
+
+    scoped = active_scope() is not None  # a workspace's turn picks among its members only
+    rows = learner.review_queue(limit=10**6 if scoped else limit, target=target)
+    if scoped:
+        rows = [r for r in rows if in_scope(r["path"])][:limit]
     return [
         {
             "path": r["path"],

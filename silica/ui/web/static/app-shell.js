@@ -73,7 +73,9 @@ $("#railmini").addEventListener("click", (e) => {
 // a dismissal. The rail itself and the strip that summoned it are not.
 document.addEventListener("click", (e) => {
   if (!railSection) return;
-  if (e.target.closest("#sidebar, #railmini")) return;
+  // A target a click handler already re-rendered away (a workspace row that
+  // opened) is no longer inside anything; it was inside the rail.
+  if (!e.target.isConnected || e.target.closest("#sidebar, #railmini")) return;
   closeRail();
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRail(); });
@@ -871,7 +873,7 @@ async function openSession(id, fromUrl = false) {
     }
   } catch { notify("couldn't load that chat"); return; }
   currentSessionId = id;
-  loadWorkspaces(); // the scope its last turn ran in comes back with it (ADR-0112)
+  loadWorkspaces({ adopt: true }); // the scope its last turn ran in comes back with it (ADR-0112)
   // The push happens BEFORE showTab: showTab replaces the hash from rendered
   // state, and a push after it would find the hash already written and
   // push nothing, so Back would leave the app instead of the chat.
