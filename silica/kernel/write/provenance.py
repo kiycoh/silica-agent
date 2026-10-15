@@ -116,8 +116,14 @@ def read_records(
     source: str | None = None,
     *,
     vault_path: str | None = None,
+    by_name: bool = False,
 ) -> list[dict[str, Any]]:
-    """All provenance records, optionally filtered to one source basename.
+    """All provenance records, optionally filtered to one source.
+
+    `source` is a source key (`vault_manifest.source_key`): its path under the
+    inbox, the bare name for a source at the inbox root. `by_name=True` takes
+    every source of that bare name instead, for a caller that only holds an
+    op's `source_basename` and can live with namesakes counting as one.
 
     Missing store or unreadable file degrade to [] (additive: absence of
     the store must look like today's behaviour). Corrupt content is
@@ -159,8 +165,96 @@ def read_records(
             _records_memo = (key, records)
 
     if source is not None:
-        return [r for r in records if isinstance(r, dict) and r.get("source") == source]
+        keyof = _keyer(records, vault_path, key)
+        if by_name:
+            name = source.rsplit("/", 1)[-1]
+            return [r for r in records if isinstance(r, dict)
+                    and keyof(r).rsplit("/", 1)[-1] == name]
+        return [r for r in records if isinstance(r, dict) and keyof(r) == source]
     return list(records)
+
+
+# Census memo, keyed like _records_memo plus the vault: the walk is paid once
+# per ledger state, and only by a ledger that still holds bare-name records.
+_census_memo: tuple[tuple, dict[str, list[str]]] | None = None
+
+
+def _source_census(vault_path: str | None, memo_key: tuple | None) -> dict[str, list[str]]:
+    """`{basename: [source key, ...]}` for every file the inbox and the archive
+    hold, keyed the way `vault_manifest.source_key` keys them.
+
+    The archive is walked first and pruned out of the inbox walk, because an
+    old vault keeps it inside the inbox and its files would otherwise come
+    back as `done/<folder>/<name>`.
+    """
+    global _census_memo
+    import os
+
+    from silica.kernel.vault_manifest import active_done_dir, active_inbox_dir
+
+    root = resolve_vault_path(vault_path)
+    if not root:
+        return {}
+    full_key = (root, memo_key)
+    if memo_key is not None and _census_memo is not None and _census_memo[0] == full_key:
+        return _census_memo[1]
+    done, inbox = active_done_dir(), active_inbox_dir()
+    out: dict[str, set[str]] = {}
+    for base in dict.fromkeys(b for b in (done, inbox) if b):
+        top = Path(root) / base
+        skip = (Path(root) / done).resolve() if done and base != done else None
+        for dirpath, dirnames, filenames in os.walk(top):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")
+                           and (skip is None or (Path(dirpath) / d).resolve() != skip)]
+            for fn in filenames:
+                rel = (Path(dirpath) / fn).relative_to(top).as_posix()
+                out.setdefault(fn, set()).add(rel)
+    census = {k: sorted(v) for k, v in out.items()}
+    if memo_key is not None:
+        _census_memo = (full_key, census)
+    return census
+
+
+def _keyer(records: list[dict[str, Any]], vault_path: str | None,
+           memo_key: tuple | None) -> Callable[[dict], str]:
+    """The canonical source key of a record.
+
+    A record written before 2026-10-15 names its source by the bare name
+    (ADR-0114). It is read as the one inbox or archive file of that name; when
+    the vault holds several, or none, it keeps the bare name and so matches no
+    folder-qualified key: the ledger abstains rather than hand one lecture's
+    history to its namesake. A source at the inbox root was keyed by its bare
+    name before and after, and the census maps it to itself.
+    """
+    bare = any(isinstance(r, dict) and r.get("source") and "/" not in str(r["source"])
+               for r in records)
+    if not bare:
+        return lambda r: str(r.get("source") or "")
+    census = _source_census(vault_path, memo_key)
+
+    def keyof(r: dict) -> str:
+        src = str(r.get("source") or "")
+        if "/" in src:
+            return src
+        keys = census.get(src, [])
+        return keys[0] if len(keys) == 1 else src
+    return keyof
+
+
+def source_keys(*, vault_path: str | None = None) -> list[str]:
+    """Every canonical source key the ledger holds, in first-seen order."""
+    records = read_records(vault_path=vault_path)
+    keyof = _keyer(records, vault_path, _ledger_key(vault_path))
+    return list(dict.fromkeys(keyof(r) for r in records if isinstance(r, dict) and r.get("source")))
+
+
+def _ledger_key(vault_path: str | None) -> tuple | None:
+    path = _store_path(vault_path)
+    try:
+        st = path.stat() if path else None
+    except OSError:
+        return None
+    return (str(path), st.st_mtime_ns, st.st_size) if st else None
 
 
 # Op kinds that DERIVE a note from the source, i.e. what the ledger records.
@@ -321,20 +415,22 @@ def drifted_notes(
     *,
     vault_path: str | None = None,
 ) -> list[tuple[str, str]]:
-    """`[(note, source_basename), ...]` for notes derived from a superseded
+    """`[(note, source_key), ...]` for notes derived from a superseded
     source version.
 
     Rule (spec-hermes-coherence §3): for each source with >=2 records at
     different sha256 values, take the most recent record whose sha differs
     from the source's CURRENT (latest) sha — its notes that do NOT appear
-    in ANY record carrying the current sha are drifted.
+    in ANY record carrying the current sha are drifted. Sources are grouped by
+    canonical key, so a record from before ADR-0114 and its successor are one
+    history, and two namesakes are two.
     """
     records = read_records(vault_path=vault_path)
+    keyof = _keyer(records, vault_path, _ledger_key(vault_path))
     by_source: dict[str, list[dict]] = {}
     for r in records:
-        src = r.get("source")
-        if src:
-            by_source.setdefault(src, []).append(r)
+        if isinstance(r, dict) and r.get("source"):
+            by_source.setdefault(keyof(r), []).append(r)
 
     out: list[tuple[str, str]] = []
     for source, recs in by_source.items():
@@ -407,7 +503,9 @@ def note_authored_by(
     *,
     vault_path: str | None = None,
 ) -> bool:
-    """True when `source` (a source basename) already authored `note_path`.
+    """True when a source named `source` (an op's bare source_basename) already
+    authored `note_path`. Namesakes count as one here: the executor holds only
+    the bare name, and its skip also needs the snippet already in the note.
 
     Reads the provenance ledger: on any prior run, did this exact source file
     write or patch this note? The patch executor uses it to make a re-ingest
@@ -421,14 +519,14 @@ def note_authored_by(
     target = _norm_note_ref(note_path)
     if not target:
         return False
-    for r in read_records(source, vault_path=vault_path):
+    for r in read_records(source, vault_path=vault_path, by_name=True):
         if any(_norm_note_ref(n) == target for n in (r.get("notes") or [])):
             return True
     return False
 
 
 def sources_by_note(*, vault_path: str | None = None) -> dict[str, list[str]]:
-    """`{note_key: [source_basename, ...]}`, sources in first-seen ledger order.
+    """`{note_key: [source_key, ...]}`, sources in first-seen ledger order.
 
     The ledger is keyed by source; the graph payload and the dedup verdict ask
     the other way round, for every node at once. One inversion per call is
@@ -436,10 +534,12 @@ def sources_by_note(*, vault_path: str | None = None) -> dict[str, list[str]]:
     `sources_of` calls over the whole graph would be O(nodes * records).
     """
     out: dict[str, list[str]] = {}
-    for r in read_records(vault_path=vault_path):
-        src = r.get("source")
-        if not src:
+    records = read_records(vault_path=vault_path)
+    keyof = _keyer(records, vault_path, _ledger_key(vault_path))
+    for r in records:
+        if not isinstance(r, dict) or not r.get("source"):
             continue
+        src = keyof(r)
         for n in r.get("notes") or []:
             lst = out.setdefault(note_key(n), [])
             if src not in lst:
@@ -460,12 +560,12 @@ def grounding_by_note(*, vault_path: str | None = None) -> dict[str, dict]:
 
 
 def sources_of(note_path: str, *, vault_path: str | None = None) -> list[str]:
-    """Every source basename that ever authored `note_path`, or []."""
+    """Every source key that ever authored `note_path`, or []."""
     return list(sources_by_note(vault_path=vault_path).get(note_key(note_path), []))
 
 
 def drift_map(*, vault_path: str | None = None) -> dict[str, str]:
-    """`{note_path.md: source_basename}` for every drifted note.
+    """`{note_path.md: source_key}` for every drifted note.
 
     The read-time stale flag's shape: keys end in `.md` like codedocs.peek's,
     so `codedocs.peek_level` reads both maps with one lookup. The ledger
@@ -558,8 +658,8 @@ def check_renucleate(
 
     Used by /nucleate right before staging a file: warns when the inbox file
     about to be re-nucleated carries a different sha256 than the last known
-    record for that source basename. No prior record -> (False, 0) — a
-    first nucleate is not a re-nucleate.
+    record for that source key. No prior record -> (False, 0) — a first
+    nucleate is not a re-nucleate.
     """
     recs = read_records(source, vault_path=vault_path)
     if not recs:
@@ -1057,6 +1157,12 @@ def citation_of(source_basename: str, *, vault_path: str | None = None) -> dict[
         inbox = active_inbox_dir()
         if root and inbox:
             hits = sorted((Path(root) / inbox).rglob(source_basename))
+            # Two chunks of one name are two sources (CorsoA/, CorsoB/), and
+            # the op names only the bare name: no citation beats the other
+            # lecture's, memoized onto every note of this one (ADR-0114).
+            if len(hits) > 1:
+                logger.debug("citation_of(%s): %d namesakes, none cited", source_basename, len(hits))
+                hits = []
             if hits:
                 data, _, _ = frontmatter.split(hits[0].read_text(encoding="utf-8"))
                 if isinstance(data, dict):

@@ -222,10 +222,15 @@ def _incoming_side(ctx: dict, source_basename: str) -> tuple[int, str | None]:
     from silica.kernel.write.contested import TIER_DISTILLED, TIER_GROUNDED
     from silica.kernel.write.provenance import source_event_date
 
-    leaf, _err = read_or_skip(f"{in_write_dir(SOURCES_DIR)}/{source_basename}")
+    from silica.kernel.vault_manifest import source_key
+
+    inbox_file = ctx.get("inbox_file") or ""
+    # The leaf sits at the source's path under sources/ (ADR-0114); by the bare
+    # name alone a namesake's leaf would lend this claim its tier and date.
+    leaf, _err = read_or_skip(
+        f"{in_write_dir(SOURCES_DIR)}/{source_key(inbox_file) if inbox_file else source_basename}")
     if leaf:
         return TIER_GROUNDED, source_event_date(leaf)
-    inbox_file = ctx.get("inbox_file") or ""
     source_text = (read_or_skip(inbox_file)[0] or "") if inbox_file else ""
     return TIER_DISTILLED, source_event_date(source_text)
 
@@ -242,9 +247,16 @@ def _pair_provenance(candidate_path: str, source_basename: str) -> dict[str, Any
     from silica.kernel.write.provenance import sources_of
 
     candidate_sources = sources_of(candidate_path)
+    # The ledger keys sources by their path under the inbox (ADR-0114). A key
+    # in hand compares exactly; a bare name matches any source of that name,
+    # since two namesakes cannot be told apart by it.
+    if "/" in source_basename:
+        same = source_basename in candidate_sources
+    else:
+        same = any(k.rsplit("/", 1)[-1] == source_basename for k in candidate_sources)
     if not candidate_sources:
         relation = "unknown"
-    elif source_basename in candidate_sources:
+    elif same:
         relation = "same-source"
     else:
         relation = "cross-source"
@@ -461,7 +473,10 @@ def _route_verdict(
     )
     result.setdefault("rationale", decision.rationale)
     result.setdefault("verdict", decision.verdict)
-    result.setdefault("provenance", _pair_provenance(candidate_path, source_basename))
+    from silica.kernel.vault_manifest import source_key
+
+    incoming = source_key(ctx["inbox_file"]) if ctx.get("inbox_file") else source_basename
+    result.setdefault("provenance", _pair_provenance(candidate_path, incoming))
     if result.get("status") == "committed":
         _clean_twin_bundle(ctx)
         if decision.verdict == "duplicate":

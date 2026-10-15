@@ -289,6 +289,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
     try:
         from silica.kernel.progress import RunManifestEntry
         vault_ctx = fsm.context.get("vault_graph_ctx", {})
+        _chunk_source = getattr(fsm, "_current_source_file", "") or ""
         for op in ops:
             path = op.touched_ref()
             if op.op not in (OpType.write, OpType.patch) or not path:
@@ -305,6 +306,8 @@ def handle_write(fsm: "InjectorFSM") -> None:
                 cluster_id=cluster_id,
                 source_basename=op.source_basename or "",
                 op=op.op.value,
+                source_file=(_chunk_source if _chunk_source and op.source_basename
+                             == os.path.basename(_chunk_source) else ""),
             ))
         fsm.manifest.save()
 

@@ -26,6 +26,7 @@ import networkx as nx
 from websockets.asyncio.client import connect
 
 from silica.driver.base import (
+    namesake_order,
     GraphIndexMixin,
     GraphSnapshot,
     Heading,
@@ -242,7 +243,7 @@ class ObsidianWSBackend(GraphIndexMixin):
             return ref
         self._ensure_graph()
         matched = self._notes_by_name.get(ref.lower(), [])
-        return matched[0].path if matched else f"{ref}.md"
+        return min(matched, key=lambda r: namesake_order(r.path)).path if matched else f"{ref}.md"
 
     def read_note(self, ref: NoteRef | str) -> NoteContent:
         path = self._path_arg(ref)
@@ -279,6 +280,11 @@ class ObsidianWSBackend(GraphIndexMixin):
         # Older plugins ignore the flag and degrade to md-only.
         rows = self._rpc("list_files", folder=inbox, all=True)
         return [NoteRef(name=r["name"], path=r["path"]) for r in (rows or [])]
+
+    def notes_named(self, name: str) -> list[str]:
+        self._ensure_graph()
+        refs = self._notes_by_name.get((name or "").removesuffix(".md").lower(), [])
+        return sorted((r.path for r in refs), key=namesake_order)
 
     def search_names(self, query: str) -> list[NoteRef]:
         q = query.lower()
@@ -360,7 +366,7 @@ class ObsidianWSBackend(GraphIndexMixin):
         if ref.endswith(".md"):
             return ref
         matched = self._notes_by_name.get(ref.lower(), [])
-        return matched[0].path if matched else None
+        return min(matched, key=lambda r: namesake_order(r.path)).path if matched else None
 
     def links(self, ref: NoteRef | str) -> list[NoteRef]:
         self._ensure_graph()
@@ -601,10 +607,10 @@ class ObsidianWSBackend(GraphIndexMixin):
 
     def _patch_create(self, path: str, ref: NoteRef, content: str) -> None:
         """`_patch_graph_add`, then the sources of unresolved pairs that now
-        resolve to the new note, filtered by name first. The fs backend also
-        re-patches the referrers of a namesake; this index resolves a bare
-        name to the first note of that name, so a new namesake takes no link
-        here until this resolver follows the fs one (ADR-0092 point 1)."""
+        resolve to the new note, filtered by name first, and the referrers of
+        a namesake: a bare name ranks its notes by `namesake_order` (ADR-0114),
+        so a shallower new note can take a link that resolved elsewhere, as
+        in the fs backend (ADR-0092 point 1)."""
         self._patch_graph_add(path, ref, content)
         if not self._is_graph_built:
             return
@@ -616,6 +622,9 @@ class ObsidianWSBackend(GraphIndexMixin):
             hit = self._resolve_link(target, source_path=source)
             if hit is not None and hit.path == path:
                 sources.add(source)
+        for other in self._notes_by_name.get(name, ()):
+            if other.path != path and other.path in self._graph:
+                sources.update(self._graph.predecessors(other.path))
         sources.discard(path)
         self._repatch_from_disk(sorted(sources))
 
@@ -663,7 +672,7 @@ class ObsidianWSBackend(GraphIndexMixin):
             matches = [r for p, r in self._notes.items() if p.lower().endswith(suffix)]
             return min(matches, key=lambda r: (r.path.count("/"), r.path.lower())) if matches else None
         matched = self._notes_by_name.get(t.lower(), [])
-        return matched[0] if matched else None
+        return min(matched, key=lambda r: namesake_order(r.path)) if matched else None
 
     # ------------------------------------------------------------------
     # Transactionality — content snapshots (no history over the bridge)

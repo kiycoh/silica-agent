@@ -697,6 +697,49 @@ def _record_dangling_links(ops: list[Op], *, future_ref_whitelist: list[str] | N
                     })
 
 
+def _record_ambiguous_links(ops: list[Op], ambiguous_out: list | None) -> None:
+    """Name the wikilinks of the batch that a shared name sends to another folder.
+
+    A bare `[[Name]]` with several notes of that name and none beside the note
+    resolves to the shallowest of them. In the vaults Silica wrote, measured
+    2026-10-15, every such link checked was wrong or arbitrary: 7 of 7 Zocor
+    links opened another drug's section, 8 of 8 hub links a source leaf
+    instead of the lecture outline (ADR-0114). Which note the model meant is
+    not in the op, so the link is kept as written and only reported: a
+    rewrite would guess, and this exists to stop guessing.
+    """
+    if ambiguous_out is None:
+        return
+    from silica.driver.base import namesake_order
+
+    batch: dict[str, set[str]] = {}
+    for op in ops:
+        if op.op in (OpType.write, OpType.patch, OpType.overwrite) and op.path:
+            batch.setdefault(os.path.splitext(os.path.basename(op.path))[0].lower(), set()).add(
+                op.path if op.path.endswith(".md") else op.path + ".md")
+    seen: dict[str, list[str]] = {}
+    for op in ops:
+        if op.op not in (OpType.write, OpType.patch, OpType.overwrite) or not op.path:
+            continue
+        here = os.path.dirname(op.path.replace("\\", "/"))
+        for lnk in dict.fromkeys(extract_links(op.snippet or op.content or "")):
+            stem = lnk.split("|", 1)[0].split("#", 1)[0].strip().removesuffix(".md")
+            if not stem or "/" in stem:
+                continue
+            key = stem.lower()
+            if key not in seen:
+                try:
+                    named = set(DRIVER.notes_named(stem))
+                except Exception:
+                    named = set()  # a backend without the index: nothing to compare, nothing reported
+                seen[key] = sorted(named | batch.get(key, set()), key=namesake_order)
+            cands = seen[key]
+            if len(cands) < 2 or any(os.path.dirname(c) == here for c in cands):
+                continue
+            ambiguous_out.append({"link": stem, "note_path": op.path, "resolves_to": cands[0],
+                                  "candidates": cands})
+
+
 def _missing_hub_ops(ops: list[Op], *, target_dir: str, path_exists) -> list[Op]:
     """A write for every hub the batch names and the vault does not have.
 
@@ -1224,8 +1267,13 @@ def validate_operations(
     profile: str | None = None,
     normalized_out: dict | None = None,
     grounding_out: list | None = None,
+    ambiguous_links_out: list | None = None,
 ) -> tuple[list[Op], list[Rejection]]:
     """Validates operations against payloads and target_dir using DRIVER.
+
+    ambiguous_links_out (optional): one `{link, note_path, resolves_to,
+    candidates}` per bare wikilink that a name shared across folders sends
+    elsewhere (`_record_ambiguous_links`). Never causes a rejection.
 
     ungrounded_out (optional): collects warn-only span-grounding hits —
     write/patch ops whose math/code spans can't be located in their source
@@ -1363,6 +1411,7 @@ def validate_operations(
 
     _record_dangling_links(validated_ops, future_ref_whitelist=future_ref_whitelist,
                            path_exists=path_exists, cleared_links_out=cleared_links_out)
+    _record_ambiguous_links(validated_ops, ambiguous_links_out)
 
     if grounding_out is not None and rejected_ops:
         # Grounding.check runs before the extractive/shape rejections that

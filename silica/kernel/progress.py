@@ -138,6 +138,12 @@ class RunManifestEntry:
     cluster_id: int
     source_basename: str
     op: str                 # "write" | "patch"
+    # The inbox file of the chunk that wrote the note, when the op names that
+    # chunk's own file. A folder nucleated in one run can hold CorsoA/ and
+    # CorsoB/ "Lezione 1.md", and the bare name alone gave CLEANUP each file
+    # the other's notes (ADR-0114). "" in manifests written before it, and for
+    # an op that names another source: CLEANUP then falls back to the name.
+    source_file: str = ""
 
 
 @dataclass

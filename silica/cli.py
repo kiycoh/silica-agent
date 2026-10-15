@@ -1626,9 +1626,17 @@ def _revert_by_source(source: str, vault: str | None) -> bool:
     """Every journalled run the ledger attributes to `source`, newest first,
     scoped to that source's notes; what the journal does not hold is named,
     never guessed at (legacy runs predate the join and stay /revert <run-id>)."""
+    from rich.markup import escape
+
     from silica.kernel.write.undo_journal import revert_source
 
     res = revert_source(source, vault=vault)
+    if res.get("ambiguous"):
+        CONSOLE.print(f"  {len(res['ambiguous'])} sources are named {escape(source)}; "
+                      "nothing reverted. Name one:", soft_wrap=True)
+        for k in res["ambiguous"]:
+            CONSOLE.print(f"    /revert --source {escape(k)}", soft_wrap=True)
+        return True
     runs = res["runs"]
     reverted = sum(len(r["reverted"]) for r in runs)
     skipped = sum(len(r["skipped"]) for r in runs)
@@ -1661,9 +1669,14 @@ def _dc_revert(args: list[str], *, raw_input: str = "", **_) -> bool:
     from silica.kernel.write.undo_journal import get_undo_journal, revert_run
     vault = CONFIG.vault_path.strip() or None
     tokens = list(args) or raw_input.strip().split()[1:]
-    source = next((t.split("=", 1)[1] for t in tokens if t.startswith("--source=")), "")
-    if "--source" in tokens and tokens.index("--source") + 1 < len(tokens):
-        source = tokens[tokens.index("--source") + 1]
+    # The source is the rest of the line: lecture files carry spaces
+    # ("CorsoA/Lezione 1.md"), and one token cut every such name at its first.
+    source = ""
+    for i, t in enumerate(tokens):
+        if t == "--source" or t.startswith("--source="):
+            source = " ".join([t.split("=", 1)[1], *tokens[i + 1:]]) if "=" in t else " ".join(tokens[i + 1:])
+            break
+    source = source.strip().strip("\"'")
     if source:
         return _revert_by_source(source, vault)
     parts_split = raw_input.strip().split(maxsplit=1)
@@ -2804,7 +2817,9 @@ def _promote(args: list[str]) -> str:
 
     from silica.kernel.write.provenance import read_records
 
-    notes = list((read_records(Path(rel).name) or [{}])[-1].get("notes") or [])
+    from silica.kernel.vault_manifest import source_key
+
+    notes = list((read_records(source_key(rel)) or [{}])[-1].get("notes") or [])
     # CLEANUP's record lists the run's hub note first ("Life/Life"): the stamp
     # must name the note that holds the facts, not the folder's MOC.
 
@@ -3200,7 +3215,7 @@ def _nucleate_prepare(
         if not mfs:
             return []  # everything was filed; reported above
 
-    from pathlib import Path as _Path
+    from silica.kernel.vault_manifest import source_key
     from silica.kernel.write.provenance import (
         already_distilled, check_renucleate, content_sha256,
     )
@@ -3216,10 +3231,10 @@ def _nucleate_prepare(
             # Same sha as the last COMPLETE record with notes ⇒ this segment
             # is already in the vault; re-distilling it costs a full LLM
             # pass to write nothing (the failure cases are provenance's).
-            if already_distilled(_Path(mf).name, incoming_sha):
+            if already_distilled(source_key(mf), incoming_sha):
                 distilled_prior += 1
                 continue
-            modified, prior_notes = check_renucleate(_Path(mf).name, incoming_sha)
+            modified, prior_notes = check_renucleate(source_key(mf), incoming_sha)
             if modified:
                 CONSOLE.print(
                     f"  [yellow]re-nucleate of a modified source: {prior_notes} note(s) "

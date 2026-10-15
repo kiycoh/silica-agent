@@ -356,6 +356,7 @@ def silica_validate_ops(
 
     cleared_parents: list[dict] = []
     cleared_links: list[dict] = []
+    ambiguous_links: list[dict] = []
     ungrounded: list[dict] = []
     grounding: list[dict] = []
     normalized: dict[str, int] = {}
@@ -371,6 +372,7 @@ def silica_validate_ops(
         profile=profile,
         normalized_out=normalized,
         grounding_out=grounding,
+        ambiguous_links_out=ambiguous_links,
     )
 
     total = len(ops)
@@ -397,6 +399,7 @@ def silica_validate_ops(
         "rejected_ops": [r.model_dump() for r in rejected_ops],
         "cleared_parents": cleared_parents,
         "cleared_links": cleared_links,
+        "ambiguous_links": ambiguous_links,
         "ungrounded": ungrounded,
         "grounding": grounding,
         # Malformed-but-unambiguous ops repaired rather than rejected, per
@@ -577,11 +580,10 @@ def _record_recovered_writes(txn, validated, content_hash: str, bundle: dict) ->
         run_id = ""
 
     try:
-        import os as _os
-
+        from silica.kernel.vault_manifest import source_key
         from silica.kernel.write.provenance import append_record, is_deriving_op
 
-        source = _os.path.basename(bundle.get("source_path", "") or "")
+        source = source_key(bundle.get("source_path", "") or "")
         notes = sorted({
             (op.path or "").removesuffix(".md")
             for op in validated

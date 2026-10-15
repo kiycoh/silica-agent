@@ -10,7 +10,7 @@ From SILICA.md §4.2:
 """
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 import re
 import subprocess
@@ -530,10 +530,10 @@ def silica_read_note(
                                             "note (summaries, edits, checks that need all of it).")] = "",
     vault: Annotated[str, Field(description='Read from another Silica vault (the `vault` or `memory_vault` a recall reply named). Read-only.')] = "",
 ) -> str:
-    """Reads a note in the vault by name (wikilink-style resolution). DO NOT use
-    paths. `query` narrows a long note to the passages that answer it; empty
-    returns the complete content. `vault=<path>` reads from another vault,
-    read-only."""
+    """Reads a note in the vault by name (wikilink-style resolution), not
+    path; Folder/Name for a name notes share. `query` narrows a long note to
+    the passages that answer it; empty returns the complete content.
+    `vault=<path>` reads from another vault, read-only."""
     if vault.strip():
         from silica.config import CONFIG
         from silica.driver import reader_for
@@ -542,11 +542,16 @@ def silica_read_note(
         target = resolve_known(vault)  # ValueError names the rule and the fix
         active = (getattr(CONFIG, "vault_path", "") or "").strip()
         if not active or Path(active).resolve() != target:
-            nc = reader_for(str(target)).read_note(name)
+            reader = reader_for(str(target))
+            if shared := _shared_name(reader, name):
+                return shared
+            nc = reader.read_note(name)
             body = _with_stale_banner(nc.content, path=nc.ref.path or "", vault=str(target))
             return (f"> [read-only] {target}: this note belongs to another vault; "
                     "silica_write_note and silica_patch_note act on the active vault only\n\n"
                     + body)
+    if shared := _shared_name(DRIVER, name):
+        return shared
     nc = DRIVER.read_note(name)
     body, path = nc.content or "", nc.ref.path or ""
     from silica.tools.user_memory import returned_notes
@@ -569,6 +574,29 @@ def silica_read_note(
     if narrowed is None:
         return annotate(whole)
     return whole[:len(whole) - len(body)] + annotate(narrowed)  # the banner, then the passages
+
+
+def _shared_name(reader: Any, name: str) -> str:
+    """The reply for a bare name several notes share, "" for any other name.
+
+    Reading one of them meant reading whichever the index met first: on a
+    drug vault where 13 drugs each hold `Controindicazioni`, a question about
+    the Lanoxin got the Mepral's section in 4 of 16 live runs, and none once
+    the read named the candidates instead (A/B 2026-10-15, ADR-0114).
+    """
+    bare = (name or "").strip().replace("\\", "/")
+    if not bare or "/" in bare:
+        return ""
+    try:
+        paths = reader.notes_named(bare)
+    except Exception:
+        return ""  # a backend without the index reads as before: one note, its pick
+    if len(paths) < 2:
+        return ""
+    shown = [p.removesuffix(".md") for p in paths]
+    return (f"Nothing read: {len(shown)} notes are named {bare.removesuffix('.md')!r}: "
+            + "; ".join(shown)
+            + f'. Read the one you mean with its folder, e.g. name="{shown[0]}".')
 
 
 def _with_stale_banner(content: str, path: str = "", vault: str | None = None) -> str:

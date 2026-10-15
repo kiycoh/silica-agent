@@ -711,6 +711,21 @@ def handle_validate(fsm: "InjectorFSM") -> None:
                 "ungrounded_span",
                 f"{u.get('heading', '')}: " + " | ".join(s[:60] for s in u.get("spans", [])),
             )
+    # Bare links a name shared across folders sends elsewhere (ADR-0114):
+    # reported, never rewritten. The warning names every candidate; the count
+    # rides on the file's line in the run report (files_summary).
+    ambiguous = res.get("ambiguous_links") or []
+    if ambiguous:
+        src = os.path.basename(getattr(fsm, "_current_source_file", "") or "")
+        counts = fsm.context.setdefault("ambiguous_links", {})
+        counts[src] = counts.get(src, 0) + len(ambiguous)
+        if fsm.warning_ledger is not None:
+            by_note: dict[str, list[str]] = {}
+            for a in ambiguous:
+                by_note.setdefault(a["note_path"], []).append(
+                    f"[[{a['link']}]] -> {a['resolves_to']} (of {len(a['candidates'])})")
+            for note, lines in by_note.items():
+                fsm.warning_ledger.add(note, "ambiguous_link", "; ".join(lines))
     # The score behind the warning, kept until CLEANUP writes it to the
     # provenance record (finalize._record_provenance drains it per source).
     fsm.context.setdefault("grounding", []).extend(res.get("grounding", []))

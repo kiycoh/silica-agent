@@ -28,15 +28,15 @@ logger = logging.getLogger(__name__)
 
 
 def _item_provenance(item: Any) -> tuple[str, str, str] | None:
-    """(source basename, content sha, ledger run id) of the work item.
+    """(source key, content sha, ledger run id) of the work item.
 
-    dedup carries the inbox path, expand the op's source_basename. The run id
+    dedup carries the inbox path, so its key is the path under the inbox
+    (ADR-0114); expand carries only the op's source_basename, which the ledger
+    reads as that file when the vault holds one of the name. The run id
     is the FSM's own `progress.run_id` — the key CLEANUP stamps and the key the
     dangling-link sweep and check_renucleate read back. It is NOT the undo
     journal's run id, which is a separate uuid4 keyspace.
     """
-    import os
-
     ctx = getattr(item, "context", None) or {}
     sha = ctx.get("content_hash") or ""
     run_id = ctx.get("run_id") or ""
@@ -48,7 +48,9 @@ def _item_provenance(item: Any) -> tuple[str, str, str] | None:
         # carries is fsm._current_content_hash — so the first entry answers for all.
         src = next((c.get("inbox_file") for c in (ctx.get("concepts") or [])
                     if isinstance(c, dict) and c.get("inbox_file")), "")
-    return (os.path.basename(src), sha, run_id) if src and sha else None
+    from silica.kernel.vault_manifest import source_key
+
+    return (source_key(src), sha, run_id) if src and sha else None
 
 
 def consume(wq: Any, agent: "BoundedSubAgent", stop: Any = None,

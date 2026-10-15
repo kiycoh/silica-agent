@@ -658,11 +658,37 @@ def archive_path_for(inbox_file: str, done_dir: str = "") -> str:
     the vault under the archive.
     """
     root = in_write_dir(done_dir) if done_dir else active_done_dir()
-    rel = (inbox_file or "").replace("\\", "/").strip("/")
-    inbox = active_inbox_dir()
-    under = rel[len(inbox) + 1:] if inbox and within(rel, inbox) else ""
-    rel = under or rel.rsplit("/", 1)[-1]
+    rel = source_key(inbox_file)
     return f"{root}/{rel}" if root else rel
+
+
+def source_key(source_file: str) -> str:
+    """A source's identity: its path under the inbox, which the archive mirrors.
+
+    The provenance ledger and the source leaf are keyed by it. The bare name
+    was their key until 2026-10-15, and once convert kept `CorsoA/Lezione 1.md`
+    and `CorsoB/Lezione 1.md` apart (2026-10-13), two lectures shared one
+    history: `/revert --source` of one deleted the other's notes, and each
+    nucleate of one read as a new version of the other (ADR-0114). A source at
+    the inbox root keeps its bare name, so a flat inbox matches every record it
+    already has. A path already in the archive gives the key it had before the
+    move; the archive is tried first because an old vault keeps it inside the
+    inbox. An absolute path inside the vault is read as the vault path it
+    names; anything outside both roots keeps its bare name, as the archive
+    always did.
+    """
+    rel = (source_file or "").replace("\\", "/")
+    if os.path.isabs(rel):
+        from silica.config import CONFIG
+
+        vault = (getattr(CONFIG, "vault_path", "") or "").replace("\\", "/").rstrip("/")
+        if vault and rel.startswith(vault + "/"):
+            rel = rel[len(vault) + 1:]
+    rel = rel.strip("/")
+    for root in (active_done_dir(), active_inbox_dir()):
+        if root and rel.lower() != root.strip("/").lower() and within(rel, root):
+            return rel[len(root.strip("/")) + 1:]
+    return rel.rsplit("/", 1)[-1]
 
 
 def in_write_dir(rel_path: str) -> str:
