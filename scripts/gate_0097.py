@@ -99,8 +99,9 @@ def turns(path: Path):
         elif kind == "call" and cur["model"] is None and p.get("model"):
             cur["model"] = p["model"]
         elif isinstance(msg, dict) and msg.get("role") == "assistant" and not msg.get("tool_calls"):
-            # The last one wins: an announce-and-stop preamble is narrated the
-            # same way and is followed by the real answer (loop.py).
+            # The last one wins: narrations written before 2026-10-15 carry an
+            # announce-and-stop preamble narrated the same way and followed by
+            # the real answer (the nudge loop.py no longer has).
             cur["answer"] = b.get("seq")
         elif kind == "tool" and b.get("id"):
             c = cur["calls"].setdefault(b["id"], {"name": p.get("name"), "args": {}})
