@@ -486,6 +486,26 @@ def revert_run(run_id: str, *, store: UndoJournalStore | None = None,
             "stale": stale, "errors": errors}
 
 
+def resolve_source(source: str, *, vault: str | None) -> tuple[str, list[str]]:
+    """`(key, candidates)` for what the user typed after `--source`.
+
+    A ledger key as written wins, then the key the path names
+    (`Inbox/CorsoA/Lezione 1.md`), then a bare name, which resolves only when
+    one source carries it: `candidates` lists every key of that name, and more
+    than one means the caller must ask which.
+    """
+    from silica.kernel.vault_manifest import source_key
+    from silica.kernel.write.provenance import source_keys
+
+    keys = source_keys(vault_path=vault)
+    for k in (source, source_key(source)):
+        if k in keys:
+            return k, [k]
+    name = source.replace("\\", "/").rsplit("/", 1)[-1]
+    named = sorted(k for k in keys if k.rsplit("/", 1)[-1] == name)
+    return (named[0] if len(named) == 1 else source), named
+
+
 def revert_source(source: str, *, vault: str | None,
                   store: UndoJournalStore | None = None) -> dict:
     """Undo every journalled run that derived notes from `source` (ADR-0028).
@@ -503,9 +523,15 @@ def revert_source(source: str, *, vault: str | None,
     """
     from silica.kernel.write.provenance import read_records
 
+    key, candidates = resolve_source(source, vault=vault)
+    if len(candidates) > 1:
+        # Two sources share the name (CorsoA/, CorsoB/ "Lezione 1.md"): reverting
+        # both deleted notes the user never asked about (ADR-0114). The caller
+        # names one; nothing is touched until then.
+        return {"source": source, "runs": [], "unrevertable": [], "ambiguous": candidates}
     store = store or get_undo_journal()
     notes_by_ledger_run: dict[str, set[str]] = {}
-    for r in read_records(source, vault_path=vault):
+    for r in read_records(key, vault_path=vault):
         rid = r.get("run_id")
         if rid:
             notes_by_ledger_run.setdefault(rid, set()).update(r.get("notes") or [])

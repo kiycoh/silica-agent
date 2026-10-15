@@ -194,6 +194,20 @@ def handle_lint(fsm: "InjectorFSM") -> None:
     fsm._transition_success()
 
 
+def _entries_of(fsm: "InjectorFSM", source_file: str) -> list:
+    """The manifest entries this source file wrote.
+
+    By the entry's own `source_file` when it carries one, so two namesakes
+    nucleated in one run (CorsoA/, CorsoB/ "Lezione 1.md") do not share their
+    notes (ADR-0114); by the bare name for an entry written before that field,
+    or by an op that named another source.
+    """
+    basename = os.path.basename(source_file)
+    return [e for e in fsm.manifest.entries
+            if (e.source_file == source_file if getattr(e, "source_file", "")
+                else e.source_basename == basename)]
+
+
 def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
     """Append one line to the vault's human journal (log.md).
 
@@ -220,14 +234,9 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
         if fi in logged:
             return
         logged.add(fi)
-        new_count = sum(
-            1 for e in fsm.manifest.entries
-            if e.source_basename == basename and e.op == "write"
-        )
-        patch_count = sum(
-            1 for e in fsm.manifest.entries
-            if e.source_basename == basename and e.op == "patch"
-        )
+        mine = _entries_of(fsm, source_file)
+        new_count = sum(1 for e in mine if e.op == "write")
+        patch_count = sum(1 for e in mine if e.op == "patch")
 
         deferred_count = 0
         extractive_rejected = 0
@@ -258,6 +267,11 @@ def _log_nucleate_completion(fsm: "InjectorFSM", fi: int, source_file: str) -> N
                 # gate dropped is declared in the run report, never silently
                 # folded into the aggregate "deferred".
                 entry["extractive_rejected"] = extractive_rejected
+            ambiguous = (ctx.get("ambiguous_links") or {}).get(basename)
+            if ambiguous:
+                # Links this file's notes carry that a shared name sends to
+                # another folder (ADR-0114); warnings.json names them.
+                entry["ambiguous_links"] = ambiguous
             prior = (ctx.get("renucleated") or {}).get(basename)
             if prior:
                 # The source was nucleated before at another version: the
@@ -311,26 +325,30 @@ def _source_text_after_cleanup(source_file: str) -> str:
     return ""
 
 
-def _archived_source_text(basename: str) -> str:
-    """The archived text of a source the ledger knows only by basename: the
-    archive mirrors the inbox tree, so the file can sit anywhere under the
-    done root. First match wins; "" when none, and its spans then read as
-    lost, which is the pre-2026-09-04 behaviour for that one source."""
+def _archived_source_text(key: str) -> str:
+    """The archived text of the source the ledger keys `key`.
+
+    The archive mirrors the inbox tree, so a key is its path under the done
+    root. A bare name the vault holds once (a record from before ADR-0114) is
+    found anywhere under it; one it holds several times reads as "", and its
+    spans then read as lost, which keeps the note drifted rather than vouching
+    for it with the other lecture's text."""
     from silica.config import CONFIG
     from silica.kernel.vault_manifest import active_done_dir
 
     root = os.path.join(CONFIG.vault_path or "", active_done_dir())
-    for dirpath, _dirs, files in os.walk(root):
-        if basename in files:
-            try:
-                return open(os.path.join(dirpath, basename), encoding="utf-8",
-                            errors="replace").read()
-            except OSError:
-                return ""
-    return ""
+    found = [os.path.join(root, key)] if os.path.isfile(os.path.join(root, key)) else []
+    if not found and "/" not in key:
+        found = [os.path.join(d, key) for d, _dirs, files in os.walk(root) if key in files]
+    if len(found) != 1:
+        return ""
+    try:
+        return open(found[0], encoding="utf-8", errors="replace").read()
+    except OSError:
+        return ""
 
 
-def _reverify_prior(fsm, basename: str, source_file: str, sha256: str,
+def _reverify_prior(fsm, key: str, source_file: str, sha256: str,
                     notes: list[str]) -> tuple[dict[str, dict], list[str]]:
     """Re-check the previous version's notes against the new source text
     (spec M6): `({note: grounding}, reverified)`. A note whose checkable
@@ -348,7 +366,7 @@ def _reverify_prior(fsm, basename: str, source_file: str, sha256: str,
     from silica.kernel.write.provenance import (
         grounding_counts, read_records, sources_of, ungrounded_spans)
 
-    recs = read_records(basename)
+    recs = read_records(key)
     if not recs or recs[-1].get("sha256") == sha256:
         return {}, []
     prior = list(recs[-1].get("notes") or [])
@@ -373,7 +391,7 @@ def _reverify_prior(fsm, basename: str, source_file: str, sha256: str,
         # ledger names them, their archived text is the rest of the corpus.
         corpus = text
         for other in sources_of(note):
-            if other != basename:
+            if other != key:
                 if other not in other_texts:
                     other_texts[other] = _archived_source_text(other)
                 corpus += "\n" + other_texts[other]
@@ -403,18 +421,17 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
     effort and must never block CLEANUP.
     """
     try:
+        from silica.kernel.vault_manifest import source_key
         from silica.kernel.write.provenance import append_record, is_deriving_op
 
         basename = os.path.basename(source_file)
+        key = source_key(source_file)
         content_hashes = getattr(fsm, "_file_content_hashes", [])
         sha256 = content_hashes[fi] if fi < len(content_hashes) else ""
         if not sha256:
             return
 
-        notes = sorted({
-            e.path for e in fsm.manifest.entries
-            if e.source_basename == basename and is_deriving_op(e.op)
-        })
+        notes = sorted({e.path for e in _entries_of(fsm, source_file) if is_deriving_op(e.op)})
 
         # getattr: the record must land even from a caller without a context
         # (a bookkeeping key must never cost the record; the except below
@@ -422,9 +439,9 @@ def _record_provenance(fsm: "InjectorFSM", fi: int, source_file: str) -> None:
         ctx = getattr(fsm, "context", None) or {}
         partial = bool(ctx.get("has_partial_failure") or ctx.get("failed_chunks"))
         grounding = _drain_grounding(ctx, basename)
-        re_grounding, reverified = _reverify_prior(fsm, basename, source_file, sha256, notes)
+        re_grounding, reverified = _reverify_prior(fsm, key, source_file, sha256, notes)
         grounding.update(re_grounding)  # whole-body row wins over the op row
-        append_record(basename, sha256, fsm.progress.run_id, notes, partial=partial,
+        append_record(key, sha256, fsm.progress.run_id, notes, partial=partial,
                       grounding=grounding, reverified=reverified)
     except Exception as exc:
         logger.debug("CLEANUP: provenance append skipped (non-fatal): %s", exc)
@@ -462,6 +479,8 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             source_event_date,
         )
 
+        from silica.kernel.vault_manifest import source_key
+
         basename = os.path.basename(source_file)
         # A segment of a one-node source (a Zotero paper, ADR-0055) names the
         # leaf the converter already wrote whole: link there, write nothing.
@@ -471,16 +490,31 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
             src_data, _, _ = frontmatter.split(orch.DRIVER.read_note(source_file).content or "")
         except Exception:
             src_data = {}
-        owner = src_data.get("source_leaf") if isinstance(src_data, dict) else None
-        leaf_name = str(owner) if owner else basename
+        if not isinstance(src_data, dict):
+            src_data = {}
+        owner = src_data.get("source_leaf")
+        # The leaf sits at the source's own path under sources/ (ADR-0114): one
+        # flat folder gave CorsoB/Lezione 1 the leaf of CorsoA/Lezione 1, its
+        # text and its date, and linked every note of B to it.
+        leaf_name = str(owner) if owner else source_key(source_file)
         leaf_rel = f"{in_write_dir(SOURCES_DIR)}/{leaf_name}"
-        leaf_stem = leaf_name.removesuffix(".md")
-
         try:
             orch.DRIVER.read_note(leaf_rel)
             leaf_exists = True
         except Exception:
             leaf_exists = False
+        if not leaf_exists and not owner and "/" in leaf_name:
+            # A leaf written flat before ADR-0114 is reused only when it names
+            # the same original file, the one identity convert stamps on both.
+            flat = f"{in_write_dir(SOURCES_DIR)}/{basename}"
+            try:
+                old, _, _ = frontmatter.split(orch.DRIVER.read_note(flat).content or "")
+            except Exception:
+                old = None
+            if (isinstance(old, dict) and src_data.get("source_file")
+                    and old.get("source_file") == src_data.get("source_file")):
+                leaf_name, leaf_rel, leaf_exists = basename, flat, True
+        leaf_stem = leaf_name.removesuffix(".md")
 
         wants_leaf = getattr(fsm, "keep_sources", False) or bool(
             getattr(fsm, "seen_override", None)
@@ -508,17 +542,14 @@ def _write_source_leaf(fsm: "InjectorFSM", source_file: str) -> None:
                     quoted = str(val).replace("\\", "\\\\").replace('"', '\\"')
                     carry += f'{key}: "{quoted}"\n'
             date_line = f"date: {date}\n" if date else ""
-            leaf = f"---\n{date_line}source_id: {basename}\n{carry}---\n\n{body.lstrip()}"
+            leaf = f"---\n{date_line}source_id: {leaf_name}\n{carry}---\n\n{body.lstrip()}"
             orch.DRIVER.create(leaf_rel, leaf)
             fsm._run_inverses.append(
                 (leaf_rel, InverseOp(kind=InverseOpKind.delete_created, path=leaf_rel), None)
             )
             leaf_exists = True
 
-        notes = sorted({
-            e.path for e in fsm.manifest.entries
-            if e.source_basename == basename and is_deriving_op(e.op)
-        })
+        notes = sorted({e.path for e in _entries_of(fsm, source_file) if is_deriving_op(e.op)})
         label = footnote_label(basename)
         marker = f"[^{label}]"
 

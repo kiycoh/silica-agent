@@ -39,7 +39,7 @@ def _link_recovered_writes(
     """
     import os
     from silica.kernel.link.autolink import build_title_index
-    from silica.kernel.write.moc import hub_desc, merge_moc_section, moc_heading
+    from silica.kernel.write.moc import hub_desc, merge_moc_section, moc_heading, moc_line
 
     hub_name = (hub or "").strip("[]")
     hub_l = hub_name.lower()
@@ -80,15 +80,11 @@ def _link_recovered_writes(
         logger.warning("anneal: hub '%s' not readable, MOC membership skipped: %s", hub_path, e)
         return
     try:
-        entries = [
-            (os.path.splitext(os.path.basename(op.touched_ref()))[0],
-             hub_desc(op.snippet or op.content or ""))
-            for op in written
-        ]
+        entries = [(op.touched_ref(), hub_desc(op.snippet or op.content or "")) for op in written]
         source_name = os.path.splitext(os.path.basename(source_path))[0] or "deferred"
         sample = hub_note.content + " ".join(d for _, d in entries[:3])
         heading = moc_heading(source_name, sample)
-        note_lines = [f"- [[{n}]] — {d}" if d else f"- [[{n}]]" for n, d in entries]
+        note_lines = [moc_line(p, d) for p, d in entries]
         DRIVER.overwrite(hub_path, merge_moc_section(hub_note.content, heading, note_lines))
         logger.info(
             "anneal: %d recovered note(s) autolinked and added to hub '%s' MOC",
@@ -356,6 +352,7 @@ def silica_validate_ops(
 
     cleared_parents: list[dict] = []
     cleared_links: list[dict] = []
+    ambiguous_links: list[dict] = []
     ungrounded: list[dict] = []
     grounding: list[dict] = []
     normalized: dict[str, int] = {}
@@ -371,6 +368,7 @@ def silica_validate_ops(
         profile=profile,
         normalized_out=normalized,
         grounding_out=grounding,
+        ambiguous_links_out=ambiguous_links,
     )
 
     total = len(ops)
@@ -397,6 +395,7 @@ def silica_validate_ops(
         "rejected_ops": [r.model_dump() for r in rejected_ops],
         "cleared_parents": cleared_parents,
         "cleared_links": cleared_links,
+        "ambiguous_links": ambiguous_links,
         "ungrounded": ungrounded,
         "grounding": grounding,
         # Malformed-but-unambiguous ops repaired rather than rejected, per
@@ -577,11 +576,10 @@ def _record_recovered_writes(txn, validated, content_hash: str, bundle: dict) ->
         run_id = ""
 
     try:
-        import os as _os
-
+        from silica.kernel.vault_manifest import source_key
         from silica.kernel.write.provenance import append_record, is_deriving_op
 
-        source = _os.path.basename(bundle.get("source_path", "") or "")
+        source = source_key(bundle.get("source_path", "") or "")
         notes = sorted({
             (op.path or "").removesuffix(".md")
             for op in validated

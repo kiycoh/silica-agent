@@ -32,6 +32,7 @@ from silica.kernel.write.moc import (
     moc_target as _moc_target,
     merge_moc_section as _merge_moc_section,
     moc_heading as _moc_heading,
+    moc_line as _moc_line,
 )
 
 
@@ -289,6 +290,7 @@ def handle_write(fsm: "InjectorFSM") -> None:
     try:
         from silica.kernel.progress import RunManifestEntry
         vault_ctx = fsm.context.get("vault_graph_ctx", {})
+        _chunk_source = getattr(fsm, "_current_source_file", "") or ""
         for op in ops:
             path = op.touched_ref()
             if op.op not in (OpType.write, OpType.patch) or not path:
@@ -305,6 +307,8 @@ def handle_write(fsm: "InjectorFSM") -> None:
                 cluster_id=cluster_id,
                 source_basename=op.source_basename or "",
                 op=op.op.value,
+                source_file=(_chunk_source if _chunk_source and op.source_basename
+                             == os.path.basename(_chunk_source) else ""),
             ))
         fsm.manifest.save()
 
@@ -423,8 +427,8 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
 
     # Collect write ops grouped by effective parent:
     # notes with op.parent set go to that parent note; others fall back to hub.
-    hub_notes: list[tuple[str, str]] = []       # (note_name, desc)
-    parent_notes: dict[str, list[tuple[str, str]]] = {}  # parent_name → [(note_name, desc)]
+    hub_notes: list[tuple[str, str]] = []       # (note_path, desc)
+    parent_notes: dict[str, list[tuple[str, str]]] = {}  # parent_name → [(note_path, desc)]
     for op in ops:
         if op.op != OpType.write:
             continue
@@ -438,9 +442,9 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
         desc = _hub_desc(snippet)
         effective_parent = (op.parent.strip("[]") if op.parent else None) or hub_name
         if effective_parent.lower() == hub_name_lower:
-            hub_notes.append((note_name, desc))
+            hub_notes.append((path, desc))
         else:
-            parent_notes.setdefault(effective_parent, []).append((note_name, desc))
+            parent_notes.setdefault(effective_parent, []).append((path, desc))
 
     if not hub_notes and not parent_notes:
         logger.info("HUB_UPDATE: no new notes to link, skipping")
@@ -489,7 +493,8 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
     _hub_key = hub_path.removesuffix(".md")
     _hub_cluster = _gctx.get(_hub_key, {}).get("cluster_id", -1)
     if _gctx and _hub_cluster >= 0:
-        for note_name, _ in hub_notes:
+        for note_path, _ in hub_notes:
+            note_name = os.path.splitext(os.path.basename(note_path))[0]
             _note_key = f"{fsm.target_dir}/{note_name}".replace("//", "/")
             _note_cluster = _gctx.get(_note_key, {}).get("cluster_id", -1)
             if _note_cluster >= 0 and _note_cluster != _hub_cluster:
@@ -513,10 +518,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
     moc_heading = _moc_heading(source_name, _lang_sample)
 
     # Build note link lines.
-    note_lines = [
-        f"- [[{n}]] — {d}" if d else f"- [[{n}]]"
-        for n, d in hub_notes
-    ]
+    note_lines = [_moc_line(p, d) for p, d in hub_notes]
 
     # Merge: append to existing section if present (same file, multiple chunks),
     # otherwise create a new section.  Use overwrite to avoid the settle race.
@@ -572,10 +574,7 @@ def handle_hub_update(fsm: "InjectorFSM") -> None:
                 # Build and write parent MOC block (same language-aware heading,
                 # same deduplication logic as the hub section above).
                 p_heading = _moc_heading(source_name, p_note.content)
-                p_note_lines = [
-                    f"- [[{n}]] — {d}" if d else f"- [[{n}]]"
-                    for n, d in p_new_notes
-                ]
+                p_note_lines = [_moc_line(p, d) for p, d in p_new_notes]
                 new_p_content = _merge_moc_section(p_note.content, p_heading, p_note_lines)
                 orch.DRIVER.overwrite(parent_path, new_p_content)
                 existing_paths = {d["path"] for d in fsm._chunk_ctx.get("snapshot_domain", [])}

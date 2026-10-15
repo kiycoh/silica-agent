@@ -107,6 +107,18 @@ class Txn:
         return serialized
 
 
+def namesake_order(path: str) -> tuple[int, str]:
+    """Which of several notes sharing a name a bare name means: the shallowest
+    path, then alphabetical, the rank the fs link resolver always used.
+
+    Reads took the first note the index met instead, which is the filesystem's
+    directory order: copying one vault from ext4 to tmpfs changed the note read
+    for 30 of its 31 shared names, and on 29 of them the read disagreed with
+    the link (ADR-0114).
+    """
+    return (path.count("/"), path.lower())
+
+
 # ---------------------------------------------------------------------------
 # GraphIndexMixin — helpers shared verbatim by both backends
 # ---------------------------------------------------------------------------
@@ -207,6 +219,13 @@ class ObsidianDriver(Protocol):
 
     def search_names(self, query: str) -> list[NoteRef]:
         """Search vault note names matching query."""
+        ...
+
+    def notes_named(self, name: str) -> list[str]:
+        """Paths of every note named `name` (case-insensitive), in
+        `namesake_order`. More than one means the bare name does not say which
+        note it is; a caller that must not guess asks the user, or the model,
+        to name the folder (ADR-0114)."""
         ...
 
     def search_context(self, query: str) -> list[Hit]:

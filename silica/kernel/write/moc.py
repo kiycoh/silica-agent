@@ -65,6 +65,28 @@ def moc_target(name: str, target_dir: str) -> str:
     return landing
 
 
+def moc_line(path: str, desc: str = "") -> str:
+    """One MOC bullet for the note at `path`: `[[Name]]`, or `[[Folder/Name|Name]]`
+    when other notes share the name.
+
+    A bare name several notes share opens the shallowest of them from a hub in
+    another folder: 8 of 8 `## From:` lines in a hosted ML vault opened the
+    lecture's source leaf instead of its outline (ADR-0114). The writer knows
+    the path, so the link names it; a name one note carries stays bare, as
+    Obsidian itself writes it.
+    """
+    from silica.driver import DRIVER
+
+    stem = (path or "").replace("\\", "/").removesuffix(".md")
+    name = stem.rsplit("/", 1)[-1]
+    try:
+        shared = len(DRIVER.notes_named(name)) > 1
+    except Exception:
+        shared = False  # a backend without the name index: the bare link, as before
+    link = f"[[{stem}|{name}]]" if shared and "/" in stem else f"[[{name}]]"
+    return f"- {link} — {desc}" if desc else f"- {link}"
+
+
 # Emitted until 2026-09. Recognised forever by merge_moc_section: a hub that
 # already carries this spelling must keep merging into it, or every later chunk
 # of the same source opens a second section. Never emitted again.

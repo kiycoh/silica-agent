@@ -648,17 +648,21 @@ class InjectorFSM(BaseFSM[InjectorState]):
         """
         if not content_hash:
             return  # an unreadable file makes no claim about its history
+        from silica.kernel.vault_manifest import source_key
         from silica.kernel.write.provenance import check_renucleate
 
         basename = os.path.basename(inbox_file)
-        modified, prior = check_renucleate(basename, content_hash)
+        key = source_key(inbox_file)
+        modified, prior = check_renucleate(key, content_hash)
         if not modified:
             return
+        # Keyed by basename: _log_nucleate_completion and files_summary read it
+        # back by the file's name, the label they print.
         self.context.setdefault("renucleated", {})[basename] = prior
         logger.warning(
             "NUCLEATE: %s changed since its last nucleation; %d note(s) derive from "
             "the previous version and stay in place (/revert --source %s removes them)",
-            basename, prior, basename)
+            key, prior, key)
 
     def run(self) -> dict[str, Any]:
         """Execute the pipeline end-to-end (single or multi-file)."""

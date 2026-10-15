@@ -26,6 +26,7 @@ import networkx as nx
 from silica.kernel.link.ast import ADR_REF_RE, NON_MD_EXTENSIONS, extract_refs_typed, resolve_relative
 
 from silica.driver.base import (
+    namesake_order,
     GraphIndexMixin,
     GraphSnapshot,
     Heading,
@@ -717,10 +718,10 @@ class ObsidianFSBackend(GraphIndexMixin):
         if name.endswith(".md"):
             name = name[:-3]
         
-        # Look up in index
+        # Look up in index; several notes of one name rank as a link to it does
         matched = self._notes_by_name.get(name.lower(), [])
         if matched:
-            return self.vault_path / matched[0].path
+            return self.vault_path / min(matched, key=lambda r: namesake_order(r.path)).path
             
         # Check if the name/ref is actually a path pointing directly to an
         # existing FILE (CLI direct-path reads). is_file, never exists: a bare
@@ -778,6 +779,12 @@ class ObsidianFSBackend(GraphIndexMixin):
     # ------------------------------------------------------------------
     # Discovery / Read
     # ------------------------------------------------------------------
+
+    @_locked
+    def notes_named(self, name: str) -> list[str]:
+        self._ensure_index()
+        refs = self._notes_by_name.get((name or "").removesuffix(".md").lower(), [])
+        return sorted((r.path for r in refs), key=namesake_order)
 
     @_locked
     def search_names(self, query: str) -> list[NoteRef]:

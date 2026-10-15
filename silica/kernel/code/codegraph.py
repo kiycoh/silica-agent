@@ -13,10 +13,12 @@ Refresh happens only on invocation (no watchers, per charter).
 
 Import-scoped call edges (store v2) are recorded for the code-wiki digest:
 a call whose spelled name matches an imported first-party name is a
-near-certain usage edge, no scope resolution needed. They stay OUT of
-related_notes/RRF/autolink and every automatic decision (coverage ordering,
-/impact) — the wiki digest is their only consumer. Broader call resolution
-(scope-stack, receivers) remains a future seam.
+near-certain usage edge, no scope resolution needed. Java adds one more rule
+(store v5, ADR-0114): a call whose name has exactly one first-party
+definition links to it. They stay OUT of related_notes/RRF/autolink and every
+automatic decision (coverage ordering, /impact) — the wiki digest is their
+only consumer. Broader call resolution (scope-stack, receivers) remains a
+future seam.
 """
 from __future__ import annotations
 
@@ -152,7 +154,7 @@ def classify_import(
 # store — derived index at paths.index_dir()/codegraph.json
 # ---------------------------------------------------------------------------
 
-STORE_VERSION = 4   # v4: TS re-exports resolve; C/Java module_doc loses licence noise
+STORE_VERSION = 5   # v5: Java calls link on a unique first-party definition (ADR-0114)
 
 
 def store_path() -> Path:
@@ -396,7 +398,7 @@ def _file_entry(root: Path, rel: str, files: AbstractSet[str]) -> tuple[dict, li
         "parse_error": sk.parse_error,
     }
     raw_calls = ([(c.name, c.parent) for c in sk.calls]
-                 if language in ("c", "cpp") else [])
+                 if language in ("c", "cpp", "java") else [])
     return entry, raw_calls
 
 
@@ -437,9 +439,67 @@ def build_codegraph(root: Path) -> CodeGraph:
         entries[rel] = entry
         if raw_calls:
             c_raw[rel] = raw_calls
+    java_raw = {rel: raw for rel, raw in c_raw.items() if entries[rel].get("language") == "java"}
     for rel, raw in c_raw.items():
-        entries[rel]["calls"] = _join_c_calls(rel, raw, entries)
+        if rel not in java_raw:
+            entries[rel]["calls"] = _join_c_calls(rel, raw, entries)
+    _join_java_calls(java_raw, entries)
     return CodeGraph(head_ref=gitstate.head_ref(root) or "", files=entries)
+
+
+# Methods of java.lang.Object, the collection, map and string types, and the
+# AWT sizes, which every Java file calls. A project that defines one of them
+# once (an `isEmpty` on an inventory slot) would otherwise collect every
+# `list.isEmpty()` in the repo: 2 of the 4 wrong links in the first audited
+# sample were that, and `getWidth` 2 of the 3 in the second.
+_JDK_METHOD_NAMES = frozenset({
+    "equals", "hashCode", "toString", "getClass", "clone", "compareTo", "close",
+    "isEmpty", "size", "get", "set", "add", "addAll", "put", "putAll", "remove",
+    "contains", "containsKey", "clear", "iterator", "forEach", "stream", "of",
+    "valueOf", "length", "charAt", "substring", "startsWith", "endsWith", "format",
+    "next", "hasNext", "run", "apply", "accept", "test", "getOrDefault", "keySet",
+    "values", "entrySet", "toArray", "sort", "min", "max", "join", "split", "trim",
+    "getWidth", "getHeight",
+})
+
+
+def _join_java_calls(raw_by_file: dict[str, list[tuple[str, str]]], entries: dict[str, dict]) -> None:
+    """Java call edges beyond the import-scoped ones: a call whose name has
+    exactly one first-party definition links to it, and a name defined twice
+    or more links nowhere (ADR-0114).
+
+    Java calls are mostly `receiver.method()`, which the import matcher cannot
+    see: it gave 167 edges for 2,875 call sites on a 175-file game. Linking on
+    a unique definition added 712 at 36/40 correct in a hand audit, the
+    import-scoped edges' own level (151/163 verified). The uniqueness holds
+    because Java receivers are almost always project types; the same rule on
+    Python was 12/40 (`.search`, `.items` meet one first-party definition and
+    a whole standard library), so it stays Java-only.
+    """
+    defs: dict[str, set[tuple[str, str]]] = {}
+    for rel, entry in entries.items():
+        if entry.get("language") != "java":
+            continue
+        for s in entry.get("symbols", []):
+            if s.get("kind") in ("function", "class", "method"):
+                qual = f'{s["parent"]}.{s["name"]}' if s.get("parent") else s["name"]
+                defs.setdefault(s["name"], set()).add((rel, qual))
+    for rel, raw in raw_by_file.items():
+        calls = entries[rel].setdefault("calls", [])
+        have = {(c["callee"].rsplit(".", 1)[-1], c["caller"]) for c in calls}
+        seen = {(c["target"], c["callee"], c["caller"]) for c in calls}
+        for name, parent in raw:
+            last = name.rsplit(".", 1)[-1]
+            if (last, parent) in have or last in _JDK_METHOD_NAMES:
+                continue
+            found = defs.get(last, ())
+            if len(found) != 1:
+                continue
+            target, qual = next(iter(found))
+            if (target, qual, parent) not in seen:
+                seen.add((target, qual, parent))
+                calls.append({"target": target, "callee": qual, "caller": parent})
+        calls.sort(key=lambda c: (c["target"], c["callee"], c["caller"]))
 
 
 def _serialize(graph: CodeGraph) -> bytes:
