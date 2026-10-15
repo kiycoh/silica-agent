@@ -754,7 +754,14 @@ _NUMBER_RE = re.compile(r"(?<![0-9A-Za-z])-?\d+(?:[.,]\d+)*")
 _GROUPED_RE = re.compile(r"-?\d{1,3}(?:[.,]\d{3})+")
 _DECIMAL_COMMA_RE = re.compile(r"-?\d+,\d+")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
-_URL_RE = re.compile(r"https?://\S+")
+# Any scheme and any markdown link target, not http(s) alone: a local model
+# linked a note as `](file://C:/.../Ledbury%20Components%202025%20EWCA.md)`
+# and its `%20` escapes were flagged as the numbers 20, 202025 and 201109
+# (legal testbench probe, 2026-10-15). No `\b` before the scheme: a URL glued
+# to a CJK character or a digit (`参见https://...`) has no word boundary and
+# went unstripped; a match starting earlier only takes letters, which
+# _NUMBER_RE never reads. `<...>` is CommonMark's target for a path with spaces.
+_URL_RE = re.compile(r"[a-z][a-z0-9+.-]*://\S+|\]\((?:<[^>\n]*>|[^)\s]*)\)", re.I)
 
 
 def _number_spellings(tok: str) -> set[str]:
