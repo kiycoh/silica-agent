@@ -6,11 +6,20 @@ seams: parsing, coverage, op assembly, edge selection, and the call plan.
 """
 from __future__ import annotations
 
+import json
 import re
 
 import pytest
 
 from silica.kernel import outline as ol
+
+
+@pytest.fixture(autouse=True)
+def _llm_bodies(monkeypatch):
+    """Most tests here pin the bodies stage; looked-up bodies, the default
+    since 2026-10-15, set SILICA_OUTLINE_BODIES=verbatim themselves."""
+    monkeypatch.setenv("SILICA_OUTLINE_BODIES", "llm")
+    monkeypatch.delenv("SILICA_OUTLINE_CACHE", raising=False)
 
 
 _SRC = """## Machine Learning (9 CFU)
@@ -540,6 +549,102 @@ def test_run_outliner_retry_regenerates_only_the_named_bodies():
     assert calls == [ol.STAGE_BODIES_TAG]
     assert [o["heading"] for o in res["updates"]] == ["Margine geometrico"]
     assert "corpo nuovo" in res["updates"][0]["snippet"]
+
+
+def _stage_ask(calls: list, outline_json: dict):
+    def ask(system: str, user: str, *, max_tokens: int, **kw) -> dict:
+        calls.append((system.split("\n", 1)[0], user, kw.get("prefix")))
+        if system.startswith(ol.STAGE_A_TAG):
+            return outline_json
+        if system.startswith(ol.STAGE_GAP_TAG):
+            return {"ideas": [], "skips": []}
+        if system.startswith(ol.STAGE_BODIES_TAG):
+            titles = re.findall(r'^- "(.+?)" \(section: ', user.split("IDEAS:\n", 1)[1], re.M)
+            return {"bodies": {t: f"corpo di {t}" for t in titles}}
+        return {"edges": []}
+    return ask
+
+
+def test_verbatim_bodies_partition_the_source_with_no_bodies_or_gap_call(monkeypatch):
+    """SILICA_OUTLINE_BODIES=verbatim: stage A labels the cuts, the text is
+    looked up. Every block goes to one note, a heading no idea names to the
+    idea before it, and an idea naming a held section folds into its owner."""
+    monkeypatch.setenv("SILICA_OUTLINE_BODIES", "verbatim")
+    data = json.loads(json.dumps(_OUTLINE_JSON))
+    data["ideas"].append({"title": "Margine funzionale", "section": "Margine", "claim": "Variante non normalizzata.",
+                          "depends_on": [{"title": "Margine geometrico", "relation": "contrasts", "why": "w"}]})
+    data["ideas"][1]["depends_on"].append({"title": "Margine funzionale", "relation": "bounds", "why": "w"})
+    calls: list = []
+    res = ol.run_outliner(source_text=_SRC, source_basename="Lezione 11.md", target="ML", hub="H",
+                          language="Italian", vault_outline=[{"title": "X", "claim": "c", "lesson": "L", "path": "ML/X.md"}],
+                          ask=_stage_ask(calls, data))
+
+    assert [c[0] for c in calls] == [ol.STAGE_A_TAG, ol.STAGE_B_TAG]
+    body = {o["heading"]: o["snippet"] for o in res["updates"] if o["op"] == "write"}
+    assert set(body) == {"Margine geometrico", "Errore del percettrone online", "Lezione 11"}
+    margine = body["Margine geometrico"]
+    assert "$$\\gamma_r = \\min_{x_i \\in T} d_e(x_i, r)$$" in margine
+    assert "M = insieme dei punti misclassificati" in margine     # "dove:" is the formula's legend
+    assert "> Variante non normalizzata." in margine               # the folded idea's claim
+    errore = body["Errore del percettrone online"]
+    assert "Novikoff" in errore and "dimostrazione" in errore      # both repeats of the heading
+    assert "Si incorporano i vincoli" in errore                    # an unnamed heading goes to the idea before it
+    assert "\n# " not in errore and "## Errore del percettrone online" in errore
+    assert errore.count("[[Margine geometrico]]") == 1             # the folded target, retargeted and deduped
+    assert sum("(T. di Novikoff)" in b for b in body.values()) == 1  # nothing written twice
+    assert res["gaps"] == []                                       # a partition leaves no heading out
+    assert body["Lezione 11"].endswith("## Support vector machines\n")  # the lead lands in the spine
+    assert "9 CFU" not in body["Lezione 11"]                       # apparatus before the first idea does not
+    excerpt = {c["name"]: c["inbox_excerpt"] for c in res["concepts"]}
+    assert "Si incorporano i vincoli" in excerpt["Errore del percettrone online"]
+
+
+def test_heading_for_takes_a_paraphrase_but_not_a_generic_heading():
+    stems = {ol._sec_key(h): ol._stems(h) for h in ("Errore adattivo:", "Esempio:", "Learning rate adattivo")}
+    assert ol._heading_for("Funzione di errore adattiva", stems) == ol._sec_key("Errore adattivo:")
+    assert ol._heading_for("Esempio di regressione lineare", stems) == ""
+    assert ol._heading_for("Learning rate adattivo", stems) == ol._sec_key("Learning rate adattivo")
+
+
+def test_verbatim_stage_a_is_handed_the_headings_to_copy(monkeypatch):
+    monkeypatch.setenv("SILICA_OUTLINE_BODIES", "verbatim")
+    calls: list = []
+    ol.run_outliner(source_text=_SRC, source_basename="L.md", target="T", hub="H", language="Italian",
+                    vault_outline=[], ask=_stage_ask(calls, json.loads(json.dumps(_OUTLINE_JSON))))
+    user = calls[0][1]
+    heads = user.split("SOURCE HEADINGS", 1)[1]
+    assert "- Errore del percettrone online" in heads and "9 CFU" not in heads  # apparatus is never a section
+
+
+def test_cache_layout_sends_the_source_once_as_a_shared_prefix(monkeypatch):
+    monkeypatch.setenv("SILICA_OUTLINE_CACHE", "1")
+    calls: list = []
+    data = json.loads(json.dumps(_OUTLINE_JSON))
+    ol.run_outliner(source_text=_SRC, source_basename="Lezione 11.md", target="ML", hub="H",
+                    language="Italian", vault_outline=[{"title": "X", "claim": "c", "lesson": "L", "path": "ML/X.md"}],
+                    ask=_stage_ask(calls, data))
+    stages = [c[0] for c in calls]
+    assert stages[:2] == [ol.STAGE_A_TAG, ol.STAGE_GAP_TAG] and stages[-1] == ol.STAGE_B_TAG
+    for tag, user, prefix in calls:
+        if tag == ol.STAGE_B_TAG:
+            assert prefix is None
+        else:
+            assert prefix == _SRC and "SOURCE:" not in user and "Novikoff" not in user
+
+
+def test_default_ask_with_a_prefix_puts_the_source_in_the_system_message(monkeypatch):
+    from types import SimpleNamespace
+    sent: dict = {}
+
+    def call_llm(**k):
+        sent.update(k)
+        return SimpleNamespace(text='{"ideas": []}', finish_reason="stop")
+
+    monkeypatch.setattr("silica.kernel.prep_delegation._call_with_deadline", lambda fn, *a, **k: fn())
+    monkeypatch.setattr("silica.agent.providers.get_provider", lambda *a, **k: SimpleNamespace(call_llm=call_llm))
+    ol._default_ask(ol.STAGE_A_TAG + "\nrules", "", max_tokens=10, prefix="the source")
+    assert sent["messages"][0] == {"role": "system", "content": ol.SOURCE_HEAD + "the source"}
+    assert sent["messages"][1]["content"].startswith(ol.STAGE_A_TAG)
 
 
 def test_lane_for_routes_document_profiles_to_outline(monkeypatch):
@@ -1127,3 +1232,22 @@ def test_a_reply_the_server_cannot_parse_is_asked_once_more_off_temperature_zero
     with pytest.raises(litellm.InternalServerError):
         ol._default_ask(ol.STAGE_BODIES_TAG, "u", max_tokens=10, raw=True)
     assert seen == [0.0]
+
+
+def test_parse_outline_makes_titles_safe_file_names_everywhere_they_are_used():
+    """2026-10-15, Qwen3.5-9B: a "/" in an idea title became a subfolder and a
+    link that never resolved, and the graph gate rolled the lecture back."""
+    out = ol.parse_outline({"spine": ["Codifica/decodifica lossy", "Teorema #2"], "ideas": [
+        {"title": "Codifica/decodifica lossy", "section": "S", "claim": "c", "depends_on": []},
+        {"title": "Teorema #2", "section": "S", "claim": "c",
+         "depends_on": [{"title": "Codifica/decodifica lossy", "relation": "applies", "why": "w"}]}]})
+    assert out.titles() == ["Codifica-decodifica lossy", "Teorema 2"]
+    assert out.spine == out.titles()
+    assert out.ideas[1].depends_on[0]["title"] == "Codifica-decodifica lossy"
+
+
+def test_bodies_are_looked_up_by_default(monkeypatch):
+    monkeypatch.delenv("SILICA_OUTLINE_BODIES")
+    assert ol.verbatim_bodies()
+    monkeypatch.setenv("SILICA_OUTLINE_BODIES", "llm")
+    assert not ol.verbatim_bodies()
