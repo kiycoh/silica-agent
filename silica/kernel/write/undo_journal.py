@@ -502,7 +502,7 @@ def resolve_source(source: str, *, vault: str | None) -> tuple[str, list[str]]:
         if k in keys:
             return k, [k]
     name = source.replace("\\", "/").rsplit("/", 1)[-1]
-    named = [k for k in keys if k.rsplit("/", 1)[-1] == name]
+    named = sorted(k for k in keys if k.rsplit("/", 1)[-1] == name)
     return (named[0] if len(named) == 1 else source), named
 
 

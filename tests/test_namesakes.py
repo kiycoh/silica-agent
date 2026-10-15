@@ -113,3 +113,16 @@ def test_java_call_links_only_to_a_unique_first_party_definition(tmp_path):
     assert {"target": "src/Player.java", "callee": "Player.pickUpItem", "caller": "Game"} in calls
     assert not any(c["callee"].endswith("attack") for c in calls)    # two definitions: no link
     assert not any(c["callee"].endswith("isEmpty") for c in calls)   # a JDK name: no link
+
+
+# --------------------------------------------- lever 5: hub link target ---
+
+def test_a_hub_bullet_names_the_folder_only_when_the_name_is_shared(tmp_vault):
+    from silica.kernel.write.moc import moc_line
+
+    tmp_vault.note("Corsi/Machine Learning/Lezione 24.md", "outline")
+    tmp_vault.note("sources/Lezione 24.md", "leaf")
+    tmp_vault.note("Corsi/Machine Learning/Pooling.md", "p")
+    assert (moc_line("Corsi/Machine Learning/Lezione 24.md", "Reti convolutive")
+            == "- [[Corsi/Machine Learning/Lezione 24|Lezione 24]] — Reti convolutive")
+    assert moc_line("Corsi/Machine Learning/Pooling.md") == "- [[Pooling]]"
