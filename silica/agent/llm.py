@@ -49,6 +49,7 @@ def _litellm():
     drop_foreign_env()
     litellm.suppress_debug_info = True
     litellm.drop_params = True
+    _keep_openrouter_cache_markers(litellm)
     return litellm
 
 
@@ -540,6 +541,46 @@ def _meter_site() -> str:
 # Applies whether direct or proxied (openrouter/, bedrock/, vertex_ai/); the
 # native gemini/ route ignores the marker rather than rejecting it.
 _CACHEABLE_MODELS = ("anthropic", "claude", "gemini")
+# Qwen through OpenRouter caches implicitly only at fixed checkpoints (7936
+# tokens): a 5.7k-token source sent under two different stage prompts got no
+# hit, while an explicit breakpoint hit the whole prefix on every later call,
+# four in parallel too, at no write premium (alibaba/us-east-1, 2026-10-15).
+# Only on that route: a local Qwen behind `custom` has no billing to amortise.
+_OPENROUTER_CACHEABLE = ("qwen",)
+
+
+def _cacheable(model: str) -> bool:
+    m = model.lower()
+    if any(k in m for k in _CACHEABLE_MODELS):
+        return True
+    # ponytail: an env gate while the A/B runs (2026-10-15); drop it, and the
+    # check with it, once the arm is adopted or refuted.
+    return (os.getenv("SILICA_QWEN_CACHE", "").strip() == "1" and m.startswith("openrouter/")
+            and any(k in m for k in _OPENROUTER_CACHEABLE))
+
+
+def _keep_openrouter_cache_markers(litellm) -> None:
+    """litellm strips cache_control on OpenRouter for any model outside its own
+    list (claude, gemini, minimax, glm, z-ai in 1.86.0: llms/openrouter/chat/
+    transformation.py), so the breakpoint _with_prompt_cache puts on a Qwen
+    request never reached the provider. Widens that check to the models in
+    _OPENROUTER_CACHEABLE, once per process."""
+    try:
+        from litellm.llms.openrouter.chat.transformation import OpenrouterConfig
+        orig = OpenrouterConfig._supports_cache_control_in_content
+    except (ImportError, AttributeError):
+        # A litellm that moved or renamed the check: the request still goes
+        # out, without the breakpoint, i.e. billed as before this existed.
+        logger.debug("litellm: no OpenRouter cache_control check to widen")
+        return
+    if getattr(orig, "_silica", False):
+        return
+
+    def supports(self, model: str) -> bool:
+        return any(k in model.lower() for k in _OPENROUTER_CACHEABLE) or orig(self, model)
+
+    supports._silica = True
+    OpenrouterConfig._supports_cache_control_in_content = supports
 
 
 # Routes whose server renders the conversation with the model's own Jinja chat
@@ -612,7 +653,7 @@ def _with_prompt_cache(model: str, messages: list[dict]) -> list[dict]:
     appending to it, so a marker persisted there would end up in the stored
     conversation and in every later turn.
     """
-    if not any(k in model.lower() for k in _CACHEABLE_MODELS):
+    if not _cacheable(model):
         return messages
     out = list(messages)
     head = 0

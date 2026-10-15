@@ -2047,16 +2047,56 @@ def _is_mail(name: str) -> bool:
     return Path(name).suffix.lower() in SUFFIXES
 
 
+NUCLEATE_ASK = ("Nucleate the attached file(s) into an appropriate folder; "
+                "ask me if the target is unclear.")
+
+# A drop with no words used to default to NUCLEATE_ASK. On t03 (2026-10-14) a
+# dropped 317-page PDF started a 22-file run nobody asked for, the most
+# expensive thing the agent can do. Without a request the turn now describes
+# what came in and asks; "Nucleate it" on a finished job still says
+# NUCLEATE_ASK, because there the student chose it.
+DROP_ASK = ("I attached the file(s) below without saying what I want. Do not nucleate, convert, "
+            "move or write anything yet. Say in one or two sentences what each file is, from its "
+            "outline below; read the file only when the outline is not enough. Then ask what I "
+            "want to do with it, offering three or four concrete options that fit this material "
+            "(for example: nucleate it into notes under a folder you name, summarize it, quiz me "
+            "on it, a guided /learn path).")
+_DROP_OUTLINE_HEADINGS = 8
+
+
+def _drop_outline(rel: str) -> str:
+    """"~N words; sections: a; b; ..." for a staged note, so DROP_ASK is
+    answered from the manifest and not by reading a whole textbook into the
+    context (the t03 PDF was 317 pages)."""
+    from silica.config import CONFIG
+    from silica.kernel.outline import source_headings
+
+    try:
+        md = (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        # The manifest still names the file; without its outline the model
+        # reads it, which is the cost this saves and not a wrong answer.
+        return ""
+    heads = source_headings(md)
+    more = f" (+{len(heads) - _DROP_OUTLINE_HEADINGS} more)" if len(heads) > _DROP_OUTLINE_HEADINGS else ""
+    shown = "; ".join(heads[:_DROP_OUTLINE_HEADINGS])
+    return f"~{len(md.split())} words" + (f"; sections: {shown}{more}" if shown else "")
+
+
 def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
                            mail: Sequence[str] = (),
                            skipped: Sequence[tuple[str, str]] = (),
                            converting: Sequence[str] = ()) -> str:
     """The agent turn for a batch of attached files: the user's instruction plus
-    a factual manifest of what got staged. Empty instruction defaults to nucleate."""
+    a factual manifest of what got staged. Empty instruction: DROP_ASK, with
+    each ready file's outline so the description needs no read."""
+    asked = text.strip()
     lines: list[str] = []
     if ready:
         lines.append("Markdown staged in Inbox, ready to nucleate or read:")
-        lines += [f"- {p}" for p in ready]
+        for p in ready:
+            outline = "" if asked else _drop_outline(p)
+            lines.append(f"- {p}" + (f" ({outline})" if outline else ""))
     if converting:
         # Named so the answer does not read as if the files were lost: they
         # are converting after this turn, and the page offers each one when it
@@ -2078,11 +2118,7 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
         lines.append("Not staged, or staged in part, each with the reason. Tell the user which files and why:")
         lines += [f"- {n}: {why}" for n, why in skipped]
     manifest = "\n".join(lines) if lines else "(no files could be staged)"
-    base = text.strip() or (
-        "Nucleate the attached file(s) into an appropriate folder; "
-        "ask me if the target is unclear."
-    )
-    return f"{base}\n\n---\nAttached files:\n{manifest}"
+    return f"{asked or DROP_ASK}\n\n---\nAttached files:\n{manifest}"
 
 
 @app.post("/nucleate", dependencies=_SAME_ORIGIN)
@@ -2115,8 +2151,11 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
         from silica.ui.web import jobs
 
         jobs.annotate(ids, session=_open_session())
-    resp = _turn_response(_compose_nucleate_turn(
-        text, ready, stubs, mail, skipped, converting=[j["source"]["name"] for j in queued]))
+    # A thread: with no words the manifest reads each staged note for its
+    # outline, and a textbook read on the loop thread blocks /stop.
+    resp = _turn_response(await asyncio.to_thread(
+        _compose_nucleate_turn, text, ready, stubs, mail, skipped,
+        converting=[j["source"]["name"] for j in queued]))
     if ids:
         resp.headers["X-Silica-Jobs"] = ",".join(ids)
     return resp

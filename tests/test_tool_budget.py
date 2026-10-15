@@ -233,6 +233,31 @@ def test_cache_breakpoint_applies_to_gemini():
     assert out[0]["content"] == _marked("you are silica")
 
 
+def test_cache_breakpoint_applies_to_qwen_on_openrouter_only_behind_the_gate(monkeypatch):
+    """Qwen through OpenRouter reuses a shared prefix only at fixed 7936-token
+    checkpoints unless the request marks it (2026-10-15); a local Qwen has no
+    billing to amortise and its server sees plain strings."""
+    monkeypatch.delenv("SILICA_QWEN_CACHE", raising=False)
+    assert _with_prompt_cache("openrouter/qwen/qwen3.7-flash-20260727", _MSGS) is _MSGS
+    monkeypatch.setenv("SILICA_QWEN_CACHE", "1")
+    out = _with_prompt_cache("openrouter/qwen/qwen3.7-flash-20260727", _MSGS)
+    assert out[0]["content"] == _marked("you are silica")
+    assert _with_prompt_cache("custom/qwen3.5-9b", _MSGS) is _MSGS
+
+
+def test_litellm_keeps_the_breakpoint_on_a_qwen_openrouter_request():
+    from litellm.llms.openrouter.chat.transformation import OpenrouterConfig
+
+    from silica.agent.llm import _litellm
+
+    _litellm()
+    cfg = OpenrouterConfig()
+    msgs = _with_prompt_cache("anthropic/claude", _MSGS)  # any marked pair
+    kept, _ = cfg.remove_cache_control_flag_from_messages_and_tools("qwen/qwen3.7-flash-20260727", msgs)
+    assert kept[0]["content"][0].get("cache_control") == {"type": "ephemeral"}
+    assert cfg._supports_cache_control_in_content("anthropic/claude-sonnet-4")
+
+
 def test_cache_breakpoint_never_mutates_caller_history():
     # run_agent keeps appending to this exact list; a marker written in place
     # would leak into the stored conversation and every later turn.

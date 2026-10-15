@@ -389,7 +389,8 @@ def test_a_finished_job_offers_the_turn_and_never_starts_one(client):
     assert "text" not in ran  # done, and still no turn of its own
     r = tc.post(f"/jobs/{job['id']}/turn", json={})
     assert r.status_code == 200
-    assert "Nucleate the attached file(s)" in ran["text"] and "Inbox/talk.md" in ran["text"]
+    # The button is the student's choice, so it nucleates; a wordless drop no longer does.
+    assert ran["text"].startswith(server.NUCLEATE_ASK) and "Inbox/talk.md" in ran["text"]
     assert _record(job["id"])["dismissed"] is True
     assert tc.post(f"/jobs/{job['id']}/turn", json={}).status_code == 200  # still a note to offer
 

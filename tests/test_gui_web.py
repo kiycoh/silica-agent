@@ -695,6 +695,28 @@ def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatc
     user = next(m for m in ran["msgs"] if m["role"] == "user")
     assert "file these under Concepts/AI" in user["content"]
     assert "Inbox/note.md" in user["content"]
+    assert "sections:" not in user["content"]  # a request reads what it needs
+
+
+def test_a_wordless_drop_asks_from_the_outline_and_does_not_nucleate(client, monkeypatch):
+    """No words with the drop: the turn describes and asks (t03 2026-10-14 ran
+    a 22-file nucleate off a bare drop), from an outline the manifest carries."""
+    tc, server = client
+    ran: dict = {}
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        ran["msgs"] = list(messages)
+        messages.append({"role": "assistant", "content": "ok"})
+        return "ok"
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    body = b"# Enzimi\n\nuno due tre\n\n## Cinetica\n\nquattro\n\n## Inibizione\n\ncinque\n"
+    resp = tc.post("/nucleate", files=[("files", ("bio.md", body, "text/markdown"))])
+
+    assert resp.status_code == 200
+    user = next(m for m in ran["msgs"] if m["role"] == "user")["content"]
+    assert user.startswith(server.DROP_ASK)
+    assert "Inbox/bio.md (~" in user and "sections: Enzimi; Cinetica; Inibizione" in user
 
 
 def test_a_dropped_file_lands_in_the_inbox_inside_the_write_boundary(client, monkeypatch):
@@ -717,11 +739,11 @@ def test_a_dropped_file_lands_in_the_inbox_inside_the_write_boundary(client, mon
 
 
 def test_compose_nucleate_turn_defaults_empty_text_and_lists_files():
-    from silica.ui.web.server import _compose_nucleate_turn
+    from silica.ui.web.server import DROP_ASK, _compose_nucleate_turn
 
-    # empty instruction → default nucleate ask; markdown vs code stubs both listed
+    # empty instruction → describe and ask, never nucleate; markdown vs code stubs both listed
     msg = _compose_nucleate_turn("", ["Inbox/a.md"], ["Code/b.md"])
-    assert "Nucleate the attached file(s)" in msg
+    assert msg.startswith(DROP_ASK) and "Do not nucleate" in msg
     assert "Inbox/a.md" in msg and "Code/b.md" in msg
 
     # a real instruction is kept verbatim as the turn's lead

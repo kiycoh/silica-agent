@@ -270,6 +270,22 @@ def _clean_title(s: object) -> str:
     return re.sub(r"\s+", " ", str(s or "")).strip().strip("*").strip().rstrip(".").strip()
 
 
+_PATH_SEP_RE = re.compile(r"\s*[/\\]\s*")
+# What breaks a wikilink to the note: alias, heading and block-ref syntax.
+_LINK_UNSAFE_RE = re.compile(r"[|#^\[\]]")
+
+
+def _note_name(s: object) -> str:
+    """A title that is also a safe file name and wikilink target. The note's
+    path, heading and every [[link]] to it are built from this one string, so
+    it is cleaned here and not later: SANITIZE stripped the title alone, and a
+    9B's "Compressione lossy tramite codifica/decodifica" became a subfolder
+    whose link never resolved, so the graph gate rolled Lezione 13 back
+    (2026-10-15)."""
+    t = _PATH_SEP_RE.sub("-", _clean_title(s))
+    return re.sub(r"\s+", " ", _LINK_UNSAFE_RE.sub(" ", t)).strip()
+
+
 # Course apparatus the model turns into ideas when a lecture opens with it
 # ("Libri di testo" became a note, 2026-09-05). Closed, bilingual, exact.
 _APPARATUS_TITLES = frozenset({
@@ -317,6 +333,9 @@ def parse_outline(obj: dict) -> Outline:
         if not _title_ok(title):
             logger.info("outline: idea title rejected as a slide line: %r", title)
             continue
+        title = _note_name(title)
+        if title.casefold() in seen:
+            continue
         section = _clean_title(raw.get("section"))
         # An idea born in an apparatus section is apparatus: the lecturer's
         # name under "Machine Learning (9 CFU)" became a note the bodies
@@ -335,14 +354,14 @@ def parse_outline(obj: dict) -> Outline:
         for d in idea.depends_on:
             if not isinstance(d, dict):
                 continue
-            target = by_key.get(_clean_title(d.get("title")).casefold())
+            target = by_key.get(_note_name(d.get("title")).casefold())
             rel = str(d.get("relation") or "").strip()
             if not target or target == idea.title or rel not in RELATIONS:
                 continue
             kept.append({"title": target, "relation": rel, "why": str(d.get("why") or "").strip()})
         idea.depends_on = kept
-    spine = [by_key[_clean_title(t).casefold()] for t in (obj.get("spine") or [])
-             if _clean_title(t).casefold() in by_key]
+    spine = [by_key[_note_name(t).casefold()] for t in (obj.get("spine") or [])
+             if _note_name(t).casefold() in by_key]
     spine += [i.title for i in ideas if i.title not in spine]
     return Outline(lesson_title=str(obj.get("lesson_title") or "").strip(), spine=spine, ideas=ideas)
 
@@ -400,7 +419,7 @@ def select_edges(raw: list, *, ideas: set[str], existing: dict[str, str],
         # geometrico") instead of the title alone: measured 2026-09-02, all 22
         # proposed edges of one run died on exact matching. Take the last
         # pipe-separated field, which is the title in every row shape we emit.
-        return _clean_title(str(raw or "").split("|")[-1]).casefold()
+        return _note_name(str(raw or "").split("|")[-1]).casefold()
 
     idea_by_key = {t.casefold(): t for t in ideas}
     existing_by_key = {t.casefold(): t for t in existing}
@@ -441,7 +460,7 @@ def _stem(basename: str) -> str:
 
 def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basename: str,
                 edges: list[dict], existing: dict[str, str],
-                only_titles: set[str] | None = None) -> list[dict]:
+                only_titles: set[str] | None = None, lead: str = "") -> list[dict]:
     """Outline + edges -> raw ops in the distiller's own shape.
 
     One write per idea (section, parent = the spine note, typed relations in
@@ -501,9 +520,10 @@ def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basena
         rows = [f"{n}. {t if t in bodiless else f'[[{t}]]'}: {next(i.claim for i in outline.ideas if i.title == t)}"
                 for n, t in enumerate(outline.spine, 1)]
         head = f"> {outline.lesson_title}\n\n" if outline.lesson_title else ""
+        tail = f"\n{lead.strip()}\n" if lead.strip() else ""
         ops.append({
             "op": "write", "path": f"{tgt}/{spine_title}.md", "heading": spine_title, "title": spine_title,
-            "snippet": head + "\n".join(rows) + "\n", "source_basename": source_basename, "hub": hub,
+            "snippet": head + "\n".join(rows) + "\n" + tail, "source_basename": source_basename, "hub": hub,
             "section": SPINE_SECTION,
         })
         for e in edges:
@@ -612,7 +632,7 @@ def section_text(source: str, heading: str) -> str:
     return "\n\n".join(parts)
 
 
-def concept_entries(ops: list[dict], source: str = "") -> list[dict]:
+def concept_entries(ops: list[dict], source: str = "", excerpts: dict[str, str] | None = None) -> list[dict]:
     """Payload concept rows that make VALIDATE hold for these ops, in the shape
     `payload.build_concept_entry` emits (name, excerpt, hint, collision).
 
@@ -620,7 +640,9 @@ def concept_entries(ops: list[dict], source: str = "") -> list[dict]:
     gate and the extractive floor compare bodies against it, and the
     keyphrase pipeline's 450-char windows are what flagged verbatim formulas
     as "not grounded" (7 of 24 notes on the 2026-09-02 before arm). A section
-    the source does not have falls back to the whole document."""
+    the source does not have falls back to the whole document. `excerpts`
+    (title -> text) wins over both: a partition body spans every heading it
+    took in, more than its named section."""
     entries: list[dict] = []
     seen: set[str] = set()
     for op in ops:
@@ -630,7 +652,7 @@ def concept_entries(ops: list[dict], source: str = "") -> list[dict]:
         seen.add(name)
         collision = {"path": op["path"], "match_type": "title", "total_hits": 1, "excerpt": ""} \
             if op.get("op") == "patch" else None
-        excerpt = section_text(source, op.get("section") or "") or source
+        excerpt = (excerpts or {}).get(name) or section_text(source, op.get("section") or "") or source
         entries.append({"name": name, "action_hint": "enrich" if collision else "create",
                         "inbox_excerpt": excerpt[:MAX_SECTION_EXCERPT], "vault_collision": collision})
     return entries
@@ -794,14 +816,34 @@ def bodies_workers_for(source_text: str) -> int:
     return max(1, min(BODIES_WORKERS, window // per_call))
 
 
-def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False) -> dict:
+SOURCE_HEAD = "SOURCE DOCUMENT (every request about it carries the same text):\n\n"
+
+
+def _cache_layout() -> bool:
+    """SILICA_OUTLINE_CACHE=1: the source rides first, in the system message,
+    and the stage's instructions follow it in the user message, so every call
+    on one file shares the source as a token prefix the provider can cache.
+    The default layout puts each stage's own prompt first, and the t03 run
+    (2026-10-14) resent the same 10.5k-token source six times, cached only
+    when a retry repeated a call whole."""
+    return os.getenv("SILICA_OUTLINE_CACHE", "").strip() == "1"
+
+
+def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False,
+                 prefix: str | None = None) -> dict:
     """One JSON reply from the worker model, no tools, no thinking; `raw`
     returns {"text": reply} for the marker-delimited bodies stage (one retry
-    on an empty reply or one without a marker).
+    on an empty reply or one without a marker). `prefix` is the source in the
+    cache layout (_cache_layout).
 
     reasoning=False: measured 2026-09-02 on deepseek-v4-flash, the thinking
     trace ate the whole completion budget and the reply carried no JSON.
     """
+    if prefix is not None:
+        messages = [{"role": "system", "content": SOURCE_HEAD + prefix},
+                    {"role": "user", "content": system.strip() + "\n\n" + user}]
+    else:
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     import threading
     from silica.agent.providers import get_provider
     from silica.config import CONFIG
@@ -823,7 +865,7 @@ def _default_ask(system: str, user: str, *, max_tokens: int, raw: bool = False) 
         def _once(temperature: float, schema=schema):
             abandoned = threading.Event()
             return _call_with_deadline(lambda: provider.call_llm(
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                messages=messages,
                 tools=None, response_schema=schema, max_tokens=max_tokens, temperature=temperature,
                 reasoning=False, openrouter_provider=CONFIG.openrouter_provider_distiller, cancel=abandoned,
                 # Temperature 0: a 500 the client retried came back as the same
@@ -912,19 +954,31 @@ def _match_bodies(reply: dict, titles: list[str],
     return got
 
 
-def skeleton(src: str, *, language: str, ask: Callable[..., dict]) -> Outline:
+def skeleton(src: str, *, language: str, ask: Callable[..., dict], cover: bool = True) -> Outline:
     """Stage A, then the coverage pass when a heading has no idea: the ideas
     and their typed edges, every source heading claimed or skipped. Shared
     with the study-mode inventory (docs/specs/study-mode.md D31), whose key
-    is this same reconstruction of the argument."""
+    is this same reconstruction of the argument. `cover=False` skips the
+    pass: verbatim bodies (partition_bodies) hand an unnamed heading's text
+    to the idea before it, so the pass would pay a whole-source call to name
+    text that already lands."""
     rels = ", ".join(RELATIONS)
-    outline = parse_outline(ask(STAGE_A.format(lang=language, rels=rels), src, max_tokens=8000))
-    gaps = coverage_gaps(outline, source_headings(src))
+    cached = _cache_layout()
+    user = "" if cached else src
+    if not cover and (heads := source_headings(src)):
+        # Verbatim bodies look each idea's text up by this name: a 9B wrote
+        # its own section names for 15 ideas of 15 on Lezione 18 (2026-10-15).
+        user += ("\n\nSOURCE HEADINGS (copy each idea's \"section\" from this list, exactly):\n"
+                 + "\n".join(f"- {h}" for h in heads))
+    outline = parse_outline(ask(STAGE_A.format(lang=language, rels=rels), user,
+                                max_tokens=8000, **({"prefix": src} if cached else {})))
+    gaps = coverage_gaps(outline, source_headings(src)) if cover else []
     if not gaps:
         return _unshout(outline, src)
+    ideas_so_far = "IDEAS SO FAR:\n" + "\n".join(f"{i.title} | {i.section}" for i in outline.ideas)
     extra = ask(STAGE_GAP.format(gaps="\n".join(f"- {g}" for g in gaps), lang=language, rels=rels),
-                "IDEAS SO FAR:\n" + "\n".join(f"{i.title} | {i.section}" for i in outline.ideas)
-                + "\n\nSOURCE:\n" + src, max_tokens=4000)
+                ideas_so_far if cached else ideas_so_far + "\n\nSOURCE:\n" + src, max_tokens=4000,
+                **({"prefix": src} if cached else {}))
     # A coverage idea exists to close a named section; one without a
     # section closes nothing and reaches the bodies stage as
     # "(section: )", which is how the claim-only notes were born.
@@ -1000,22 +1054,33 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     # Sized only for the real worker: an injected `ask` is a test or a probe.
     workers = BODIES_WORKERS if ask else bodies_workers_for(src)
     ask = ask or _default_ask
+    verbatim = verbatim_bodies()
     if outline is None:
-        outline = skeleton(src, language=language, ask=ask)
-    titles = [i.title for i in outline.ideas if only_titles is None or i.title in only_titles]
+        outline = skeleton(src, language=language, ask=ask, cover=not verbatim)
+    lead = ""
+    looked_up: dict[str, str] = {}
+    if verbatim and only_titles is None:
+        # The steer retry (only_titles) still asks the model: VALIDATE turned
+        # a looked-up body down, and the lookup would return the same text.
+        lead, looked_up = partition_bodies(outline, src)
+        titles: list[str] = []
+    else:
+        titles = [i.title for i in outline.ideas if only_titles is None or i.title in only_titles]
+    cached = _cache_layout()
 
     def _bodies(batch: list[str]) -> dict[str, str]:
         section_of = {t: next(i.section for i in outline.ideas if i.title == t) for t in batch}
         # Quoted titles with the section set apart: shown as "title | section"
         # rows, the model keyed a whole lecture's bodies by the section (three
         # batches of Lezione 1, 2026-09-05) or echoed the row as the key.
-        user = "SOURCE:\n" + src + "\n\nIDEAS:\n" + "\n".join(
+        user = ("" if cached else "SOURCE:\n" + src + "\n\n") + "IDEAS:\n" + "\n".join(
             f'- "{t}" (section: {section_of[t]})' for t in batch)
         if steer_context:
             user += "\n\nPREVIOUS ATTEMPT WAS REJECTED:\n" + steer_context
         from litellm import InternalServerError
         try:
-            reply = ask(STAGE_BODIES.format(lang=language), user, max_tokens=12000, raw=True)
+            reply = ask(STAGE_BODIES.format(lang=language), user, max_tokens=12000, raw=True,
+                        **({"prefix": src} if cached else {}))
         except (ValueError, TimeoutError, InternalServerError) as exc:
             # One batch must not take the lecture down: Lezione 8 landed 0
             # notes when a batch failed twice (2026-09-05). Its titles go to
@@ -1037,9 +1102,10 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     from concurrent.futures import ThreadPoolExecutor
     batches = [titles[k:k + BODIES_BATCH] for k in range(0, len(titles), BODIES_BATCH)]
     got: dict[str, str] = {}
-    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(batches)))) as pool:
-        for part in pool.map(_bodies, batches):
-            got.update(part)
+    if batches:
+        with ThreadPoolExecutor(max_workers=max(1, min(workers, len(batches)))) as pool:
+            for part in pool.map(_bodies, batches):
+                got.update(part)
     missing = [t for t in titles if t not in got]
     if missing:
         # One more ask, only for what came back empty: cheaper than landing a
@@ -1051,6 +1117,8 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
         if idea.title in got:
             idea.body = got[idea.title]
     edges: list[dict] = []
+    # A partition leaves no heading's text out, so there is no gap to name.
+    gaps = [] if verbatim and only_titles is None else coverage_gaps(outline, source_headings(src))
     existing = {r["title"]: r["path"] for r in vault_outline}
     if vault_outline and only_titles is None:
         from litellm import InternalServerError
@@ -1070,10 +1138,141 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
         edges = select_edges(reply.get("edges") or [], ideas=set(outline.titles()), existing=existing,
                              spine_titles={r["title"] for r in vault_outline if r.get("spine")})
     ops = outline_ops(outline, target=target, hub=hub, source_basename=source_basename,
-                      edges=edges, existing=existing, only_titles=only_titles)
+                      edges=edges, existing=existing, only_titles=only_titles, lead=lead)
     return {
-        "updates": ops, "ephemerals": [], "concepts": concept_entries(ops, src), "missing_bodies": missing,
+        "updates": ops, "ephemerals": [], "concepts": concept_entries(ops, src, looked_up),
+        "missing_bodies": missing,
         "outline": {"lesson_title": outline.lesson_title, "spine": outline.spine,
                     "ideas": [i.__dict__ for i in outline.ideas], "skips": outline.skips},
-        "gaps": coverage_gaps(outline, source_headings(src)),
+        "gaps": gaps,
     }
+
+
+# ---------------------------------------------------------- verbatim bodies --
+def verbatim_bodies() -> bool:
+    """An idea's body is looked up in the source (partition_bodies), not
+    written by the bodies stage; SILICA_OUTLINE_BODIES=llm brings that stage
+    back. It was the lane's bulk: measured 2026-10-15 on Qwen 3.7 Flash over
+    8 lectures, the lookup cut a nucleate from 103 calls and $0.0336 to 34
+    and $0.0077, and from 1206 s to 644 s, while the chat on the vault scored
+    0.88 against 0.87 (95% CI of the difference -0.08..+0.08, 70 turns each);
+    on a 541-page book, $0.1198 to $0.0303. The model-written bodies also
+    left 15% of the lectures' prose out of the notes, the lookup 3%."""
+    return os.getenv("SILICA_OUTLINE_BODIES", "").strip().lower() != "llm"
+
+
+# Stage A names a section that spans two headings as "A / B" or "A; B"
+# (11 of 137 ideas on the 2026-10-14 A/B lectures).
+_SECTION_PARTS = re.compile(r"\s*[/;]\s*")
+_BODY_HEADING = re.compile(r"^(#{1,6})(?=\s)", re.M)
+
+
+def partition_bodies(outline: Outline, src: str) -> tuple[str, dict[str, str]]:
+    """Give each idea the source text under its section, so that the notes
+    partition the source: every heading block goes to exactly one note.
+
+    A block whose heading no idea names goes to the idea that owns the block
+    before it, so nothing between two named headings is lost. What precedes
+    the first named heading is the lead and goes to the spine note: stage A
+    left 44 lines of Lezione 18 ("Altre funzioni d'errore") unnamed there
+    (2026-10-15), and dropping them lost a tenth of the lecture. Apparatus
+    headings before the first idea and the sections stage A skipped are left
+    out. An idea naming a section another idea already owns is folded into
+    that idea (its claim appended, every edge retargeted), so no text is
+    written twice. An idea whose section is not a heading of the source keeps
+    no body, and outline_ops then leaves it in the spine only.
+
+    Returns the lead and each idea's text as the source has it, VALIDATE's
+    excerpt for the note.
+    """
+    marks = list(_HEADING_RE.finditer(src))
+    stems = {_sec_key(m.group(1)): _stems(m.group(1)) for m in marks}
+    owner_of: dict[str, Idea] = {}
+    for idea in outline.ideas:
+        for part in _SECTION_PARTS.split(idea.section or ""):
+            k = _heading_for(part, stems)
+            if k and k not in owner_of:
+                owner_of[k] = idea
+    skipped = {_sec_key(s.get("section", "")) for s in outline.skips}
+    texts: dict[str, list[str]] = {}
+    first = marks[0].start() if marks else len(src)
+    lead: list[str] = [src[:first].strip()] if src[:first].strip() else []
+    owner: Idea | None = None
+    for m, nxt in zip(marks, marks[1:] + [None]):
+        k = _sec_key(m.group(1))
+        if k in owner_of:
+            owner = owner_of[k]
+        elif k in skipped:
+            continue
+        end = nxt.start() if nxt else len(src)
+        block = src[m.start():end].strip()
+        if owner is None:
+            # An apparatus heading keeps its text, not its own line: Lezione
+            # 18's first 20 lines of content sat under the course banner
+            # "Machine Learning (9 CFU)" (2026-10-15).
+            if _NOISE_HEADING_RE.search(m.group(1)):
+                block = src[m.end():end].strip()
+            if block:
+                lead.append(block)
+            continue
+        texts.setdefault(owner.title, []).append(block)
+
+    holders = {i.title for i in owner_of.values()}
+    fold: dict[str, str] = {}
+    for idea in outline.ideas:
+        if idea.title in holders:
+            continue
+        keys = [k for p in _SECTION_PARTS.split(idea.section or "") if (k := _sec_key(p)) in owner_of]
+        if keys:
+            fold[idea.title] = owner_of[keys[0]].title
+    by_title = {i.title: i for i in outline.ideas}
+    for gone, into in fold.items():
+        target, idea = by_title[into], by_title[gone]
+        if idea.claim:
+            target.claim = f"{target.claim}\n> {idea.claim}" if target.claim else idea.claim
+        target.depends_on += idea.depends_on
+    outline.ideas = [i for i in outline.ideas if i.title not in fold]
+    for idea in outline.ideas:
+        seen: set[str] = set()
+        kept = []
+        for d in idea.depends_on:
+            t = fold.get(d["title"], d["title"])
+            if t != idea.title and t not in seen:
+                seen.add(t)
+                kept.append({**d, "title": t})
+        idea.depends_on = kept
+        idea.body = _demote_headings("\n\n".join(texts.get(idea.title, [])))
+    outline.spine = list(dict.fromkeys(fold.get(t, t) for t in outline.spine))
+    return _demote_headings("\n\n".join(lead)), {t: "\n\n".join(parts) for t, parts in texts.items()}
+
+
+def _stems(s: str) -> set[str]:
+    return {w[:5] for w in _WORD_RE.findall(s.casefold()) if len(w) >= 3}
+
+
+def _heading_for(section: str, stems: dict[str, set[str]]) -> str:
+    """The key of the source heading a stage-A section names: the exact one,
+    else the single best by Dice overlap of 5-letter word stems, at 0.6 or
+    more. A 9B paraphrases ("Funzione di errore adattiva" for "Errore
+    adattivo:", Lezione 18, 2026-10-15); "Esempio di regressione" against
+    "Esempio:" scores 0.5 and stays unmatched, which costs that idea its body
+    and never gives it a generic heading's text."""
+    k = _sec_key(section)
+    if not k or k in stems:
+        return k
+    s = _stems(section)
+    scored = sorted(((2 * len(s & h) / (len(s) + len(h)), key) for key, h in stems.items() if h and s),
+                    reverse=True)
+    if scored and scored[0][0] >= 0.6 and (len(scored) == 1 or scored[1][0] < scored[0][0]):
+        return scored[0][1]
+    return ""
+
+
+def _demote_headings(md: str) -> str:
+    """Source headings inside a note body, shifted so the highest is `##`:
+    the note's own title is its only `#`."""
+    levels = [len(m.group(1)) for m in _BODY_HEADING.finditer(md)]
+    shift = 2 - min(levels) if levels and min(levels) < 2 else 0
+    if not shift:
+        return md
+    return _BODY_HEADING.sub(lambda m: "#" * min(6, len(m.group(1)) + shift), md)

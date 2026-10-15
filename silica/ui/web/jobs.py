@@ -598,8 +598,8 @@ def dismiss_job(job_id: str):
 @router.post("/{job_id}/turn", dependencies=_SAME_ORIGIN)
 def offered_turn(job_id: str, payload: dict | None = None):
     """The turn a finished job offers (point 6, Open 1): the student starts
-    it, the job never does. "Nucleate it" composes the drop's default
-    instruction over the job's notes; `ask` reruns the words the student typed
+    it, the job never does. "Nucleate it" composes NUCLEATE_ASK over the
+    job's notes; `ask` reruns the words the student typed
     with the drop, which reached the turn before the file was ready."""
     from silica.ui.web import server
 
@@ -610,5 +610,7 @@ def offered_turn(job_id: str, payload: dict | None = None):
     if not server._begin_turn():
         raise HTTPException(409, "a turn is already in progress")
     _update(job_id, dismissed=True)
-    words = rec["text"] if ask else ""
+    # "Nucleate it" is the student's choice, so it says so: the empty words
+    # of a drop now mean describe-and-ask (server.DROP_ASK).
+    words = rec["text"] if ask else server.NUCLEATE_ASK
     return server._turn_response(server._compose_nucleate_turn(words, rec["notes"], []))

@@ -130,7 +130,7 @@ def handle_lint(fsm: "InjectorFSM") -> None:
 
             success, errors = check_graph_regression(
                 fsm._pre_graph, post_graph, created_paths, frozenset(deferred_stems),
-                patched_paths,
+                patched_paths, removed_paths=frozenset(txn_removed_paths(fsm._txn)),
             )
 
             if orch.CONFIG.verbose:
@@ -629,6 +629,19 @@ def txn_touched_paths(txn) -> set[str]:
             val = inv.get(key) if isinstance(inv, dict) else getattr(inv, key, None)
             if val:
                 out.add(val)
+    return out
+
+
+def txn_removed_paths(txn) -> set[str]:
+    """The paths the chunk's transaction deleted or moved away: the only notes
+    whose absence the chunk can be blamed for (check_graph_regression rule 2).
+    A delete's inverse recreates `path`; a move's moves `to_path` back to it."""
+    out: set[str] = set()
+    for inv in getattr(txn, "inverses", None) or []:
+        kind = inv.get("kind") if isinstance(inv, dict) else getattr(inv, "kind", None)
+        path = inv.get("path") if isinstance(inv, dict) else getattr(inv, "path", None)
+        if path and str(getattr(kind, "value", kind)) in ("recreate_deleted", "move_back"):
+            out.add(path)
     return out
 
 

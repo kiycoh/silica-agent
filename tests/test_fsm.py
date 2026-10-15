@@ -417,7 +417,8 @@ def test_fsm_graph_regression_orphan_is_warning(mock_open, mock_restore, mock_dr
     orphan_error = "Unplanned orphans introduced: done/lezione_1.md"
     with patch("silica.kernel.graph_diff.check_graph_regression", return_value=(False, [orphan_error])) as mock_check:
         fsm.step()
-        mock_check.assert_called_once_with(pre_graph, post_graph, ["notes/NoteA.md"], frozenset(), frozenset())
+        mock_check.assert_called_once_with(pre_graph, post_graph, ["notes/NoteA.md"], frozenset(), frozenset(),
+                                           removed_paths=frozenset())
         # Orphan-only: pipeline must NOT roll back
         assert fsm.state != InjectorState.ROLLBACK, "Orphan-only errors must not trigger ROLLBACK"
 
@@ -457,7 +458,8 @@ def test_fsm_graph_regression_gate_rollback(mock_open, mock_restore, mock_driver
         # patched_paths carries every txn-touched path (post-WRITE phases
         # included), not only op-level patches — see txn_touched_paths.
         mock_check.assert_called_once_with(pre_graph, post_graph, ["notes/NoteA.md"],
-                                           frozenset(), frozenset({"notes/NoteA.md"}))
+                                           frozenset(), frozenset({"notes/NoteA.md"}),
+                                           removed_paths=frozenset())
         assert fsm.state == InjectorState.ROLLBACK
         assert "Graph regression gate failed: Broken backlinks" in fsm.context["chunk"]["abort_reason"]
 
@@ -1490,3 +1492,20 @@ def test_collision_routes_on_the_cosine_best_note_not_the_fused_winner():
     assert len(items) == 1, "the cosine-best note at 0.80 is in the band and must reach the judge"
     assert items[0].target_path == "Stats/Stimatore di massima verosimiglianza.md"
     assert items[0].context["score"] == 0.80
+
+
+def test_txn_removed_paths_names_only_deleted_and_moved_notes():
+    from types import SimpleNamespace
+
+    from silica.kernel.write.ops import InverseOp, InverseOpKind
+    from silica.router.states.finalize import txn_removed_paths
+
+    txn = SimpleNamespace(inverses=[
+        InverseOp(kind=InverseOpKind.delete_created, path="T/New.md"),
+        InverseOp(kind=InverseOpKind.restore_version, path="T/Patched.md", version=3),
+        InverseOp(kind=InverseOpKind.recreate_deleted, path="T/Gone.md", prior_content="x"),
+        InverseOp(kind=InverseOpKind.move_back, path="T/Old.md", to_path="U/Old.md"),
+        {"kind": "recreate_deleted", "path": "T/GoneToo.md"},   # the persisted dict form
+    ])
+    assert txn_removed_paths(txn) == {"T/Gone.md", "T/Old.md", "T/GoneToo.md"}
+    assert txn_removed_paths(None) == set()
