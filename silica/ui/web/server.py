@@ -5196,7 +5196,7 @@ def index():
     # The big vendored bundles keep their long-lived cache — only these churn.
     import hashlib
 
-    from silica.config import CONFIG
+    from silica.config import CONFIG, hosted
 
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     # work.js belongs here as much as the others: it owns the whole node
@@ -5217,6 +5217,10 @@ def index():
     # Stamping it server-side is what keeps a light session from flashing dark.
     pref = CONFIG.theme if CONFIG.theme in ("auto", "dark", "light") else "auto"
     html = html.replace('data-theme-pref="auto"', f'data-theme-pref="{pref}"')
+    # Stamped, not probed, for the same reason: the views a hosted account
+    # does not get (ADR-0111 point 3) must be gone before the first paint.
+    if hosted():
+        html = html.replace('<html lang="en"', '<html lang="en" data-hosted', 1)
     return HTMLResponse(html)
 
 

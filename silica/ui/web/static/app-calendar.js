@@ -574,7 +574,7 @@ document.addEventListener("visibilitychange", () => {
 buildSurfaceTabs();
 
 // Land on chat — it's the primary surface — unless the URL names another view
-// (#explore, #plan, #examine): a pasted deep link must win over the default.
+// (#explore, #calendar, #examine): a pasted deep link must win over the default.
 // Read the hash BEFORE the default click: showTab rewrites it via replaceState.
 const bootSlug = (location.hash || "").replace(/^#/, "").split("/")[0];
 const bootTab = viewOfSlug(bootSlug);

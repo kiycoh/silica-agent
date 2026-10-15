@@ -1420,9 +1420,10 @@ def silica_review_queue(limit: Annotated[int, Field(description='How many notes 
     `AI: true` authorship and the graded-quiz ledger — writing counts as
     learning once; quizzes are the only proof since.
     """
+    from silica.kernel.learn.plans import planned_paths
     from silica.kernel.report import learner
 
-    rows = learner.review_queue(limit=limit, target=target)
+    rows = learner.review_queue(limit=limit, target=target, planned=None if target else planned_paths())
     return [
         {
             "path": r["path"],

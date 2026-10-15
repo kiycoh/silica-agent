@@ -362,3 +362,15 @@ def test_a_path_outside_the_vault_reads_as_no_note(vault, tmp_path):
     secret.write_text("# secret\n", encoding="utf-8")
     assert items.read_note(str(secret)) == "" and items.read_note("../outside.md") == ""
     assert items.read_note("ML/Softmax.md").startswith("---")
+
+
+def test_planned_paths_is_what_the_active_plans_cover(vault):
+    """The line Learn's Next draws once a plan exists (ADR-0111 point 4)."""
+    assert plans.planned_paths() is None   # no plan: no line
+    vault.note("Bio/cell.md", "# Cell\n\nThe membrane is a lipid bilayer.\n")
+    vault.note("Bio/Lab.md", "---\nevent_start: 2026-10-20T10:00\n---\n\n# Lab\n")
+    vault.note("Ref/memo.md", "# Memo\n\nKept for reference.\n")
+    vault.note("Plans/Exam.md", "---\ntype: plan\nscope: folder\ntarget: Bio/\n---\n\n# Exam\n")
+    assert plans.planned_paths() == {"Bio/cell.md"}
+    vault.note("Plans/Exam.md", "---\ntype: plan\nscope: folder\ntarget: Bio/\nstatus: completed\n---\n\n# Exam\n")
+    assert plans.planned_paths() is None   # a completed plan draws no line

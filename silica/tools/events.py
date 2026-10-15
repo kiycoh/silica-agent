@@ -226,7 +226,8 @@ def silica_agenda(start: Annotated[str, Field(description="Window start: 'today'
         # Event notes are schedule, not study material: on a fresh vault the
         # picker marks every note unexplored and today's row would flood with
         # the calendar itself. Same exclusion the dated-notes axis has.
-        review_rows = [r for r in learner.review_queue(limit=10)
+        from silica.kernel.learn.plans import planned_paths
+        review_rows = [r for r in learner.review_queue(limit=10, planned=planned_paths())
                        if r.get("path") not in event_paths]
     except Exception as e:
         logger.debug("agenda: review axis unavailable (%s)", e)

@@ -64,10 +64,15 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str]:
             ).timestamp()
         except ValueError:
             pass  # unparseable statement: keep the mtime proxy
-    return ts, bool((data or {}).get("AI")), str((data or {}).get("type") or "").strip().lower()
+    # An event note states no `type`; its `event_start` is what makes it one
+    # (calendar/model.py), so that key names its kind here.
+    kind = "event" if (data or {}).get("event_start") is not None else (data or {}).get("type")
+    return ts, bool((data or {}).get("AI")), str(kind or "").strip().lower()
 
 
-NOT_MATERIAL = ("plan", "syllabus")   # notes about learning, never asked about
+# Notes about learning, never asked about; and the calendar's own notes, which
+# Learn's "never practised" listed as study material until 2026-10-15.
+NOT_MATERIAL = ("plan", "syllabus", "event")
 
 
 def is_material(meta: dict) -> bool:
@@ -249,6 +254,23 @@ def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> 
     return out
 
 
+def off_plan_dropped(rows: dict[str, dict], planned: set[str] | None) -> dict[str, dict]:
+    """The rows a picker with no scope may offer (ADR-0111 point 4).
+
+    Once a plan is active, a note never practised is study material only if
+    a plan covers it: a note added to be summarised or kept for reference
+    does not become a goal by being in the vault. A note already practised
+    stays, because practising it was the reader's choice. `planned` is
+    `plans.planned_paths()`, None when no plan is active, and then every note
+    is material, as before. The caller reads it: this module is under the
+    graph contract (pyproject, "graph data never reaches silica.agent"), and
+    plans reaches the agent through learn.items.
+    """
+    if planned is None:
+        return rows
+    return {k: r for k, r in rows.items() if r["attempts"] or r["path"] in planned}
+
+
 def review_queue(
     limit: int = 10,
     target: str = "",
@@ -257,6 +279,7 @@ def review_queue(
     _entries_override: list | None = None,
     _store=None,
     _prereqs_override: dict[str, list[str]] | None = None,
+    planned: set[str] | None = None,
 ) -> list[dict]:
     """The picker: what to quiz next, or (with target=) an area's full state.
 
@@ -264,7 +287,8 @@ def review_queue(
     half from **unexplored** (zero evidence, AI-unknown first, then notes whose
     concepts no question ever measured, central first). Target mode returns
     every note under the path prefix with its R and pool, unknown first — the
-    calibration read /learn builds a syllabus from.
+    calibration read /learn builds a syllabus from. `planned` narrows global
+    mode as off_plan_dropped says: pass `plans.planned_paths()`.
     """
     from silica.kernel.report import quiz
 
@@ -284,6 +308,8 @@ def review_queue(
         return "known"
 
     rows = {k: r for k, r in rows.items() if is_material(notes_meta.get(r["path"], {}))}
+    if not target:
+        rows = off_plan_dropped(rows, planned)
     for r in rows.values():
         r["why"] = why(r)
 

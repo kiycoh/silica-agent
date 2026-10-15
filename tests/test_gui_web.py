@@ -2657,3 +2657,28 @@ def test_a_chat_turn_is_offered_the_core_and_can_load_the_rest(client, monkeypat
     c = seen["c"]
     assert c.interactive and set(c.tools) <= set(CHAT_CORE)
     assert "silica_orphans" in c.deferred and set(c.deferred) <= set(loadable())
+
+
+def test_index_stamps_hosted_so_examine_is_gone_before_first_paint(client, monkeypatch):
+    """ADR-0111 point 3: a hosted account gets no Examine row, and the page
+    knows it from the document, not from a probe that answers after paint."""
+    app, _server = client
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    assert "data-hosted" not in app.get("/").text.split(">", 2)[1]
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    assert '<html lang="en" data-hosted' in app.get("/").text
+    css = (STATIC_SRC / "app-shell.css").read_text(encoding="utf-8")
+    assert 'html[data-hosted] #views .tab[data-tab="metrics"]' in css
+    assert 'html[data-hosted] #railmini .tab[data-tab="metrics"]' in css
+
+
+def test_every_view_row_says_what_the_view_is_for():
+    """ADR-0111 point 1: the rail's icons had a name and no purpose, and a
+    pilot user asked for the terms before the functions (2026-10-15)."""
+    import re
+
+    html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
+    rows = re.findall(r'<button type="button" class="(?:rm )?tab" data-tab="(\w+)"[^>]*?(?: data-tip="([^"]*)")?>', html)
+    assert len(rows) == 8 and all(tip for _tab, tip in rows), rows
+    assert "<span>Calendar</span>" in html and "<span>Plan</span>" not in html
+    assert "nucleate it into Inbox" not in html   # a drop converts; nucleate is offered after

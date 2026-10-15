@@ -183,7 +183,10 @@ function showTip(el) {
   const r = el.getBoundingClientRect();
   const w = tip.offsetWidth, h = tip.offsetHeight;
   let x = r.left + r.width / 2 - w / 2, y = r.top - h - 6;
-  if (y < 4) y = r.bottom + 6;
+  // On the rail the icons stand in a column 34px apart, so a tip above one
+  // covers the next: beside it, as the tour's bubble sits (ADR-0105 point 4).
+  if (el.closest("#railmini")) { x = r.right + 8; y = r.top + r.height / 2 - h / 2; }
+  else if (y < 4) y = r.bottom + 6;
   x = Math.max(4, Math.min(x, window.innerWidth - w - 4));
   tip.style.left = x + "px";
   tip.style.top = y + "px";

@@ -353,6 +353,16 @@
   margin: 0;
 }
 
+/* Examine is off the hosted surface (ADR-0111 point 3): it reads the vault's
+   upkeep, which a pilot user asked about and could not place. The server
+   stamps data-hosted on <html>; the ids are here because #views .tab sets
+   display with an id's weight. */
+html[data-hosted] #views .tab[data-tab="metrics"],
+html[data-hosted] #railmini .tab[data-tab="metrics"],
+html[data-hosted] #help-panel .hp-examine {
+  display: none;
+}
+
 .side-new:hover,
 #views .tab:hover {
   background: var(--sel-hover);
