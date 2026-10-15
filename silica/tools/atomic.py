@@ -448,8 +448,9 @@ READ_QUERY_WINDOWS, READ_QUERY_WIDTH = 3, 2000
 # 3996 and `v <- alpha v - eta g` starts at 4011, so the model wrote a rule the
 # note does not hold (ctx:32000:jev, 2026-10-15). Offline over the context-cap
 # probe's 12 note turns: fact recall 0.78 -> 0.89 at +1.5k chars, where wider
-# plain windows at the same chars reach 0.85. 0 = off, the probe's switch.
-READ_QUERY_RUN_ON = 0
+# plain windows at the same chars reach 0.85; live, no miss traced to it
+# (ADR-0113). 0 turns it off.
+READ_QUERY_RUN_ON = 800
 _HEADING = re.compile(r"^#{1,6} ", re.M)
 
 

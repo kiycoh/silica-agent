@@ -109,7 +109,8 @@ def test_a_window_holding_a_heading_runs_on_to_the_formula_under_it(monkeypatch)
     body = "x" * 50 + "\n## Momentum\n" + "y" * 40 + "\n$$ v = a v - e g $$\n" + "z" * 400 + "\n## Next\n"
     head = body.index("## Momentum")
     cut = [(0, body[:head + 30])]
-    assert atomic._run_on(body, cut) == cut  # off by default
+    monkeypatch.setattr(atomic, "READ_QUERY_RUN_ON", 0)
+    assert atomic._run_on(body, cut) == cut
     monkeypatch.setattr(atomic, "READ_QUERY_RUN_ON", 100)
     (off, text), = atomic._run_on(body, cut)
     assert off == 0 and "v = a v - e g" in text and "## Next" not in text

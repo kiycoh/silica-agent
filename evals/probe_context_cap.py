@@ -30,8 +30,10 @@ Jev's spend is not metered here (decide() is not call_llm): read it as the
 key's usage delta over a run of that arm alone. `:fitnarrow` turns on
 loop.FIT_NARROWS: a note read this turn that will not fit is served as its
 passages densest in the query's (or the request's) words instead of a stub.
-`:runon` sets atomic.READ_QUERY_RUN_ON to 800: a narrowed window that holds
-a heading runs on toward the next one. Flags combine in any order:
+`:runon` set atomic.READ_QUERY_RUN_ON to 800 (a narrowed window that holds a
+heading runs on toward the next one) when it was off; on by default since
+ADR-0113, the flag now changes nothing and stays so the 2026-10-15 arm names
+still parse. Flags combine in any order:
 `ctx:32000:jev:fitnarrow:runon`.
 
 `<arm>@<model>` runs that arm on another chat model (litellm id, e.g.
