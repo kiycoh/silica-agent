@@ -729,8 +729,10 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
     It has no OCR. A page without a text layer is read by the chat model when
     it takes images (ADR-0087 amendment, `_read_pages`), and named in the note
     when it does not; a file none of whose pages has text or a reading is
-    refused with ADR-0087 point 3's sentence. Figures are not extracted
-    (the images dir comes back empty): PDFium exposes image objects, but
+    refused with ADR-0087 point 3's sentence. A page drawing a math font is
+    read the same way, and its reading stands in for its text below the
+    headings (the amendment of 2026-10-14); unread, it keeps its text.
+    Figures are not extracted (the images dir comes back empty): PDFium exposes image objects, but
     turning them into files needs Pillow, which the base install does not carry;
     mineru (installed separately) is the path for a document whose figures are
     the point. The file itself is opened only in `pdf_extract`, in a child with
@@ -754,7 +756,7 @@ def _via_pdfium(src: Path, workdir: Path) -> tuple[str, Path]:
         after[i] = f"> [page {i + 1}: no selectable text, not read]"
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
-    return _pdf_markdown(data["pages"], data["toc"], after), images
+    return _pdf_markdown(data["pages"], data["toc"], after, set(data["math_read"])), images
 
 
 def _no_text_sentence(ocr_provider: bool = False) -> str:
@@ -785,14 +787,18 @@ _PAGE_READERS = 4
 
 
 def _read_pages(data: dict, workdir: Path) -> None:
-    """Send each rendered page without text to the chat model (ADR-0087
-    amendment), and keep what became of every page without text in `data`,
-    the cached read, so a second conversion of the same bytes pays nothing
-    and the upload's report (`pdf_extract.report`) can count them:
+    """Send each rendered page to the chat model, a page without text
+    (ADR-0087 amendment) for its words and a formula page (the amendment of
+    2026-10-14) for a transcription with its formulas in LaTeX, and keep what
+    became of each in `data`, the cached read, so a second conversion of the
+    same bytes pays nothing and the upload's report (`pdf_extract.report`)
+    can count them:
 
     - `readings`, page index to the markdown that stands where the page was;
-    - `read`, the pages the model read; `unread`, the pages to name. A page
-      that rendered blank is in neither: there was nothing on it to read.
+    - `read`, the pages without text the model read; `unread`, the ones to
+      name. A page that rendered blank is in neither: there was nothing on it
+      to read. `math_read`, the formula pages read: one left unread keeps
+      PDFium's text and is not named, since its words are there.
 
     The images leave `data` here, read or not: up to 16 MiB of PNG a file has
     no reason to stay in the cache once its readings exist.
@@ -801,6 +807,7 @@ def _read_pages(data: dict, workdir: Path) -> None:
         return
     images = data.pop("images", None) or {}
     pending = sorted(i for i, png in images.items() if png)
+    math = set(data.get("math", ()))
     readings: dict[int, str] = {}
     if pending:
         from silica.agent.vision import ask_chat_model
@@ -809,13 +816,16 @@ def _read_pages(data: dict, workdir: Path) -> None:
         sample = " ".join(t for page in data["pages"] for t, _ in page)[:4000]
         language = image_readings._language(sample)
 
+        def ask(messages: list[dict]) -> str:
+            return ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS)
+
         def one(i: int) -> dict | None:
             png = workdir / f"page-{i + 1}.png"
             png.write_bytes(images[i])
             try:
-                return image_readings.read_image(
-                    png, language, prompt=image_readings.PAGE_PROMPT,
-                    ask=lambda messages: ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS))
+                if i in math:
+                    return _read_formula_page(png, ask)
+                return image_readings.read_image(png, language, prompt=image_readings.PAGE_PROMPT, ask=ask)
             finally:
                 png.unlink(missing_ok=True)
 
@@ -849,8 +859,26 @@ def _read_pages(data: dict, workdir: Path) -> None:
                 readings[i] = _page_reading_md(i + 1, reading)
     blank = {i for i, png in images.items() if png is None}
     data["readings"] = readings
-    data["read"] = sorted(readings)
+    data["read"] = sorted(i for i in readings if i not in math)
+    data["math_read"] = sorted(i for i in readings if i in math)
     data["unread"] = [i for i in data["no_text"] if i not in readings and i not in blank]
+
+
+_FENCE_RE = re.compile(r"^```[\w-]*\n|\n?```$")
+
+
+def _read_formula_page(png: Path, ask) -> dict | None:
+    """A formula page's transcription, in the shape `_page_reading_md` takes;
+    None for an empty reply, which leaves the page its PDFium text. Markdown
+    and not `read_image`'s JSON: see `FORMULA_PAGE_PROMPT`."""
+    from silica.kernel.recall import image_readings
+
+    reply = ask([{"role": "user", "content": [
+        image_readings.image_part(png), {"type": "text", "text": image_readings.FORMULA_PAGE_PROMPT}]}])
+    text = _FENCE_RE.sub("", (reply or "").strip()).strip()
+    if not text:
+        return None
+    return {"kind": "transcription", "text": text, "model": image_readings._model_name()}
 
 
 # A page reading's output budget. A dense paper page took 1,074 tokens as JSON
@@ -935,8 +963,20 @@ def _normalise_line(text: str) -> str:
     return re.sub(r"\W+", " ", text).strip().lower()
 
 
+def _carries_title(line: str, title: str) -> bool:
+    """A normalised line carries an outline title: it starts with it, or it is
+    the title's first line, wrapped, and then at least half of it. Any prefix
+    used to count: "( ) ( )" normalises to "", which prefixes every title, and
+    "d" prefixed every "Diapositiva N: ..." of a PowerPoint export, so lecture
+    12 came out with "# ( )", "# :" and "# d" for its slide titles
+    (2026-10-14). A title no line carries opens its page instead."""
+    if not line or not title:
+        return False
+    return line.startswith(title) or (title.startswith(line) and 2 * len(line) >= len(title))
+
+
 def _pdf_markdown(pages: list[list[tuple[str, float]]], toc: list[tuple[int, str, int]],
-                  after: dict[int, str] | None = None) -> str:
+                  after: dict[int, str] | None = None, replace: set[int] | None = None) -> str:
     """Page lines → markdown with headings.
 
     The embedded outline beats any guessing wherever it exists (23 headings vs
@@ -944,9 +984,15 @@ def _pdf_markdown(pages: list[list[tuple[str, float]]], toc: list[tuple[int, str
     each entry marks the line carrying its title on its page, or opens the page
     when the title is not found there (a bookmark pointing mid-column). With no
     outline, `_heading_level` decides per line. `after` holds what closes a
-    page by its index: a page without text, read or named (ADR-0087).
+    page by its index: a page without text, read or named (ADR-0087). On a
+    page in `replace` it stands for the page's text, of which only the
+    headings stay: a formula page's transcription (the amendment of
+    2026-10-14), beside which PDFium's debris would be read twice by every
+    retrieval and cost the chat its tokens. The headings stay because the
+    note is cut into sections at them.
     """
     after = after or {}
+    replace = replace or set()
     by_page: dict[int, list[tuple[int, str]]] = {}
     for level, title, index in toc:
         by_page.setdefault(index, []).append((level, title))
@@ -959,9 +1005,7 @@ def _pdf_markdown(pages: list[list[tuple[str, float]]], toc: list[tuple[int, str
             norm = [_normalise_line(t) for t in texts]
             for level, title in by_page.get(i, []):
                 want = _normalise_line(title)
-                hit = next((j for j, n in enumerate(norm)
-                            if n == want or (want and (n.startswith(want) or want.startswith(n)))
-                            and j not in marks), None)
+                hit = next((j for j, n in enumerate(norm) if j not in marks and _carries_title(n, want)), None)
                 depth = min(level + 1, 6)
                 if hit is None:
                     lead.append(f"{'#' * depth} {title}")
@@ -977,7 +1021,10 @@ def _pdf_markdown(pages: list[list[tuple[str, float]]], toc: list[tuple[int, str
                     marks[j] = depth
         out: list[str] = list(lead)
         for j, t in enumerate(texts):
-            out.append(f"\n{'#' * marks[j]} {t}\n" if j in marks else t)
+            if j in marks:
+                out.append(f"\n{'#' * marks[j]} {t}\n")
+            elif i not in replace:
+                out.append(t)
         if i in after:
             out += ["", after[i]]
         blocks.append("\n".join(out))

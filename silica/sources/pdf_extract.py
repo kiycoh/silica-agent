@@ -17,8 +17,9 @@ its import path.
 
 A page without text (ADR-0087 point 3) is rendered here too, grayscale, and
 handed back as PNG for the parent to send to the chat model (the amendment of
-2026-10-13); the reading itself is the parent's (`convert._read_pages`),
-because the child has no network.
+2026-10-13), and so is a page drawing a math font, whose formulas the text
+layer loses (the amendment of 2026-10-14); the reading itself is the
+parent's (`convert._read_pages`), because the child has no network.
 """
 from __future__ import annotations
 
@@ -65,10 +66,23 @@ _FUNCTION_WORDS = frozenset("""
 """.split())
 
 # The amendment's render: grayscale, long side at most 1600 px, about 1,500
-# image tokens a page in on glm-5.3-flash by its estimate. A page past
-# `vision_pages()` is named instead.
+# image tokens a page in on glm-5.3-flash by its estimate. A page without text
+# past `vision_pages()` is named instead; a formula page past it keeps PDFium's
+# text.
 VISION_PAGES = 60
 LONG_SIDE = 1600
+# A page drawing a glyph in one of these fonts has formulas PDFium's text layer
+# loses (ADR-0087 amendment of 2026-10-14): Cambria Math is PowerPoint's
+# equation editor, Symbol the old one's Greek and operators (it extracts as
+# private-use characters, or as ASCII with the layout gone: "( ) ( ) | =+ |
+# h W x b"), CMMI to MSAM LaTeX's math fonts. Over the 706 pages of 32 lecture
+# decks it fired on 440, and none of the 358 fired by Symbol alone drew only
+# bullets. A name may carry a subset prefix ("BCDNEE+CambriaMath").
+# ponytail: a deck whose bullets are set in Symbol has every bulleted page
+# read, which costs a reading and loses nothing; refine to the glyphs drawn
+# (FPDFText_GetFontInfo per character) when a tenant's journal shows a deck
+# with more than 80% of its pages read and no formula in the readings.
+_MATH_FONT = re.compile(r"Math|Symbol|(?:^|\+)(?:CMMI|CMSY|CMEX|MSBM|MSAM)")
 # The child has no network and RLIMIT_FSIZE 0, so pictures come back on stdout
 # and the stdout cap has to hold them. 16 MiB of PNG for one file: measured
 # 2026-10-13 at 16 gray levels, a born-digital page is 108 KiB median and 141
@@ -135,8 +149,9 @@ def require_header(path: str | os.PathLike) -> None:
 
 
 def vision_pages() -> int:
-    """How many pages without text one file may have read by the chat model:
-    `SILICA_PDF_VISION_PAGES`, set at deploy, 0 to turn the reading off.
+    """How many pages, without text first and then with formulas, one file may
+    have read by the chat model: `SILICA_PDF_VISION_PAGES`, set at deploy, 0
+    to turn the reading off.
 
     Read per call, as `hosted()` reads its flag: the child gets an empty
     environment, so the number goes to it as an argument, and a test or a
@@ -159,8 +174,9 @@ def extract(source, max_pages: int | None = None, max_chars: int | None = None,
     hidden is an OCR layer, which Tesseract and ocrmypdf draw in render mode 3
     over the scan, and is kept whole.
 
-    Pages under `MIN_PAGE_CHARS` are listed in `no_text`, and the first
-    `vision_pages` of them are rendered (`render` lists which): `images` maps
+    Pages under `MIN_PAGE_CHARS` are listed in `no_text`, pages with text and
+    a `_MATH_FONT` glyph in `math`, and the first `vision_pages` of the two,
+    in that order, are rendered (`render` lists which): `images` maps
     each to its PNG, or to None when nothing is on it; a page missing from it
     could not be drawn or would pass `_IMAGE_BYTES`. With `emit`, the text
     goes to it the moment it is read and then each page as it is rendered,
@@ -173,7 +189,9 @@ def extract(source, max_pages: int | None = None, max_chars: int | None = None,
     pdf = pdfium.PdfDocument(source)
     try:
         data = _text(pdf, max_pages, max_chars)
-        data["render"] = data["no_text"][:vision_pages]
+        # A page without text has nothing else to stand for it; a formula page
+        # left out keeps PDFium's text, so it goes after them under the cap.
+        data["render"] = (data["no_text"] + data["math"])[:vision_pages]
         if emit is None:
             data["images"] = dict(_render(pdf, data["render"]))
         else:
@@ -205,6 +223,7 @@ def _text(pdf, max_pages: int | None, max_chars: int | None) -> dict:
     pages: list[list] = []
     hidden: dict[int, int] = {}
     no_text: list[int] = []
+    math: list[int] = []
     bad_shares: list[float] = []
     word_shares: list[float] = []
     chars = 0
@@ -213,6 +232,7 @@ def _text(pdf, max_pages: int | None, max_chars: int | None) -> dict:
         textpage = page.get_textpage()
         try:
             lines, dropped, bad = _page_lines(page, textpage, raw)
+            has_math = _page_has_math(page, raw)
         finally:
             textpage.close()
             page.close()
@@ -225,6 +245,8 @@ def _text(pdf, max_pages: int | None, max_chars: int | None) -> dict:
         good = sum(len("".join(t.split())) for t, _ in lines)
         if good < MIN_PAGE_CHARS:
             no_text.append(i)
+        elif has_math:
+            math.append(i)
         if good + bad >= MIN_PAGE_CHARS:
             bad_shares.append(bad / (good + bad))
         if good >= MIN_PAGE_CHARS:
@@ -236,7 +258,8 @@ def _text(pdf, max_pages: int | None, max_chars: int | None) -> dict:
     if bad_median > BAD_SHARE:
         raise _Refused("garbage")
     return {"pages": pages, "toc": toc, "meta": meta, "n_pages": n, "hidden": hidden,
-            "no_text": no_text, "function_words": _median(word_shares) if word_shares else None}
+            "no_text": no_text, "math": math,
+            "function_words": _median(word_shares) if word_shares else None}
 
 
 def _median(values: list[float]) -> float:
@@ -396,6 +419,23 @@ def _page_has_hidden(page, raw) -> bool:
                for obj, kind in _objects(page, raw))
 
 
+def _page_has_math(page, raw) -> bool:
+    """A text object on the page draws in a `_MATH_FONT`. Per object and not
+    per character: 1.5 ms a page over 706 lecture pages."""
+    import ctypes
+
+    name = ctypes.create_string_buffer(128)
+    for obj, kind in _objects(page, raw):
+        if kind != raw.FPDF_PAGEOBJ_TEXT:
+            continue
+        font = raw.FPDFTextObj_GetFont(obj)
+        size = raw.FPDFFont_GetBaseFontName(font, name, len(name)) if font else 0
+        # Past the buffer PDFium leaves it as it was, the previous object's name.
+        if 0 < size <= len(name) and _MATH_FONT.search(name.value.decode("latin-1")):
+            return True
+    return False
+
+
 def _objects(page, raw):
     """(object, type) for everything a page draws, inside form XObjects too."""
     stack = [(raw.FPDFPage_CountObjects(page), lambda j, p=page: raw.FPDFPage_GetObject(p, j))]
@@ -515,7 +555,8 @@ def cached(path: str | os.PathLike) -> dict | None:
     """The last read of `path`, for a caller that reports on it after converting.
 
     After a conversion it also holds what became of the pages without text
-    (`read` and `unread`, set by `convert._read_pages`)."""
+    (`read` and `unread`) and of the formula pages (`math_read`), set by
+    `convert._read_pages`."""
     return _CACHE.get(_key(path))
 
 

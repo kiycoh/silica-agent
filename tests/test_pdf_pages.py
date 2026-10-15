@@ -393,3 +393,80 @@ def test_a_page_is_asked_for_all_its_words_with_room_to_answer(pdfium_vault, mon
     conv.convert("Inbox/mixed.pdf")
     assert seen[0] == conv._PAGE_MAX_TOKENS > 700
     assert "every word" in seen[1] and seen[1] != image_readings._PROMPT.format(language="English")
+
+
+# --- a page in a math font (amendment of 2026-10-14) --------------------------
+# PDFium keeps a formula slide's words and loses its formulas: Greek letters and
+# operators come out as private-use characters, or as ASCII with the layout gone.
+
+FORMULA = "alpha = (K + lambda I)^-1 y, what the text layer kept of it"
+
+
+def _deck() -> bytes:
+    return pdf_bytes([TEXT, "Kernel ridge\n" + FORMULA], toc=[(1, "Kernel ridge", 2)], math={1})
+
+
+def test_a_math_font_page_is_transcribed_in_place_of_its_text(pdfium_vault, monkeypatch):
+    from silica.agent import vision
+    from silica.kernel.recall import image_readings
+    from silica.sources import pdf_extract
+    from silica.sources.convert import convert
+
+    prompts: list = []
+
+    def ask(messages, max_tokens=700):
+        prompts.extend(p["text"] for p in messages[0]["content"] if p["type"] == "text")
+        return "```markdown\nKernel ridge\n\n$$\\hat\\alpha = (K + \\lambda I)^{-1} y$$\n```"
+
+    monkeypatch.setattr(vision, "ask_chat_model", ask)
+    src = _write(pdfium_vault, "deck.pdf", _deck())
+
+    body = _note(convert("Inbox/deck.pdf")[0])
+
+    assert prompts == [image_readings.FORMULA_PAGE_PROMPT]  # page 1 has no math font: not sent
+    assert "about entropy" in body
+    # The heading stays, since the note is cut at headings; the rest is the transcription.
+    assert body.index("\n# Kernel ridge\n") < body.index("> [page 2, read by glm-5.3-flash] transcription")
+    assert "> $$\\hat\\alpha = (K + \\lambda I)^{-1} y$$" in body and "```" not in body
+    assert FORMULA not in body
+    # ADR-0100's pages_read counts pages without text; a formula page is not one.
+    assert pdf_extract.report(src) == ({"pages": 2, "pages_without_text": 0, "pages_read": 0}, "")
+
+
+def test_a_math_font_page_the_model_does_not_read_keeps_its_text(pdfium_vault, monkeypatch):
+    from silica.sources.convert import convert
+
+    _reader(monkeypatch, fail=True)
+    _write(pdfium_vault, "deck.pdf", _deck())
+
+    body = _note(convert("Inbox/deck.pdf")[0])
+
+    assert FORMULA in body and "not read" not in body and "read by" not in body
+
+
+def test_pages_without_text_are_rendered_before_formula_pages(pdfium_vault, monkeypatch):
+    """Under the cap a page without text goes first: it has nothing else to
+    stand for it, and a formula page left out keeps its text."""
+    from silica.sources import pdf_extract
+    from silica.sources.convert import convert
+
+    monkeypatch.setenv("SILICA_PDF_VISION_PAGES", "1")
+    _reader(monkeypatch)
+    src = _write(pdfium_vault, "deck.pdf", pdf_bytes(["Kernel ridge\n" + FORMULA, ""], math={0},
+                                                     images={1: gray_lines()}))
+
+    body = _note(convert("Inbox/deck.pdf")[0])
+
+    assert pdf_extract.cached(src)["render"] == [1]
+    assert FORMULA in body and "[page 2, read by" in body
+
+
+def test_the_server_child_finds_the_math_font_page(tmp_path):
+    from silica.sources import pdf_extract
+
+    f = tmp_path / "deck.pdf"
+    f.write_bytes(_deck())
+
+    data = pdf_extract._read_in_child(f, 60)
+
+    assert data["math"] == [1] and data["render"] == [1] and data["images"][1][:4] == b"\x89PNG"

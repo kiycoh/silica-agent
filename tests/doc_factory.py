@@ -26,6 +26,7 @@ def pdf_bytes(
     font_sizes: list[list[float]] | None = None,
     images: dict[int, tuple[int, int, bytes]] | None = None,
     garbled: set[int] | None = None,
+    math: set[int] | None = None,
 ) -> bytes:
     """A real one-column PDF, one page per string, lines separated by "\\n".
 
@@ -43,6 +44,9 @@ def pdf_bytes(
     `garbled` pages draw their text in a font whose ToUnicode map sends every
     code into the private use area, which is what a subset font with no usable
     map extracts as: the glyphs are on the page, the letters are not.
+    `math` pages draw every line after the first in a font named CambriaMath,
+    as PowerPoint's equation editor draws a formula under a slide's title; its
+    WinAnsi encoding still maps, so the text extracts.
     """
     import zlib
 
@@ -70,6 +74,9 @@ def pdf_bytes(
         image_ids[i] = next_id
         next_id += 1
     garbled_font_id = next_id if garbled else None
+    if garbled:
+        next_id += 2  # the font and its ToUnicode stream
+    math_font_id = next_id if math else None
 
     add(b"<< /Type /Catalog /Pages 2 0 R"
         + (f" /Outlines {outlines_id} 0 R /PageMode /UseOutlines".encode() if toc else b"")
@@ -78,7 +85,8 @@ def pdf_bytes(
     add(f"<< /Type /Pages /Kids [{kids}] /Count {n_pages} >>".encode())
     add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
     for i in range(n_pages):
-        fonts = f"/F1 {font_id} 0 R" + (f" /F2 {garbled_font_id} 0 R" if garbled_font_id else "")
+        fonts = (f"/F1 {font_id} 0 R" + (f" /F2 {garbled_font_id} 0 R" if garbled_font_id else "")
+                 + (f" /F3 {math_font_id} 0 R" if math_font_id else ""))
         xobject = f" /XObject << /Im0 {image_ids[i]} 0 R >>" if i in image_ids else ""
         add(f"<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 612 792] "
             f"/Resources << /Font << {fonts} >>{xobject} >> "
@@ -94,7 +102,9 @@ def pdf_bytes(
             stream += f"q 468 0 0 {drawn:g} 72 {720 - drawn:g} cm /Im0 Do Q\n".encode()
         stream += b"BT\n"
         y = 720.0
-        for line, size in zip(lines, sizes):
+        for k, (line, size) in enumerate(zip(lines, sizes)):
+            if math and i in math and k:
+                font = "/F3"
             stream += f"{font} {size:g} Tf 1 0 0 1 72 {y:g} Tm ".encode() + _pdf_string(line) + b" Tj\n"
             y -= size * 1.6
         stream += b"ET"
@@ -134,6 +144,8 @@ def pdf_bytes(
         add(f"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding "
             f"/ToUnicode {garbled_font_id + 1} 0 R >>".encode())
         add(b"<< /Length " + str(len(_PUA_CMAP)).encode() + b" >>\nstream\n" + _PUA_CMAP + b"\nendstream")
+    if math_font_id:
+        add(b"<< /Type /Font /Subtype /TrueType /BaseFont /CambriaMath /Encoding /WinAnsiEncoding >>")
 
     out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = []
