@@ -2162,6 +2162,22 @@ def test_calendar_endpoint_serves_the_agenda_days(client, tmp_vault):
     assert [e["title"] for e in day["events"]] == ["Dentist"]
 
 
+def test_calendar_shows_a_plan_on_its_by_day(client, tmp_vault):
+    # A pilot student set `by` on a plan and found the calendar empty
+    # (2026-10-15): the plan lands on its deadline, and only there.
+    tc, _server = client
+    tmp_vault.note("Plans/Exam.md", "---\ntype: plan\nscope: folder\ntarget: Bio/\n"
+                   "by: '2026-08-20'\n---\n\n# Molecular biology exam\n")
+    tmp_vault.note("Plans/Open.md", "---\ntype: plan\nscope: folder\ntarget: Bio/\n---\n\n# No deadline\n")
+
+    d = tc.get("/calendar", params={"start": "2026-08-17", "days": 7}).json()
+    days = {r["date"]: r for r in d["days"]}
+    assert days["2026-08-20"]["plans"] == [{"name": "Molecular biology exam", "path": "Plans/Exam.md",
+                                            "status": "active"}]
+    assert all(not r["plans"] for k, r in days.items() if k != "2026-08-20")
+    assert "plan due: Molecular biology exam" in d["text"]
+
+
 def test_calendar_endpoint_rejects_a_bad_start(client):
     tc, _server = client
     assert "error" in tc.get("/calendar", params={"start": "not-a-date"}).json()

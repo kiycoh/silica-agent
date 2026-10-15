@@ -138,6 +138,23 @@ function calEventEl(e, cls, withTime) {
   return el;
 }
 
+// A study plan stands on its deadline (`by`), and it opens in Learn rather
+// than in the note drawer: the note is where the plan is kept, Learn is where
+// it is read and practised. Through the hash and not showTab + lrGo: showTab
+// replaces the history entry, so Back from the plan landed on Learn's home
+// instead of on the month it was clicked from.
+function calOpenPlan(path) {
+  location.hash = lrHash({ view: "plan", plan: path });
+}
+function calPlanEl(p) {
+  const done = p.status === "completed";
+  // the diamond, or the check once completed, is the chip's ::before
+  const el = mkEl("div", "cal-chip plan" + (done ? " done" : ""), p.name);
+  el.title = "study plan due: " + p.name;
+  el.addEventListener("click", (ev) => { ev.stopPropagation(); calOpenPlan(p.path); });
+  return el;
+}
+
 function calBuildWeek(dates, tall) {
   const week = document.createElement("div");
   week.className = "cal-week" + (tall ? " wk" : "");
@@ -205,9 +222,13 @@ function calBuildWeek(dates, tall) {
     }
     const chips = document.createElement("div");
     chips.className = "cal-chips";
-    const timed = ((calDays[date] || {}).events || []).filter((e) => !calIsBar(e));
+    // A deadline leads the day's chips: it is the one an exam week is read for.
+    const timed = [
+      ...((calDays[date] || {}).plans || []).map(calPlanEl),
+      ...((calDays[date] || {}).events || []).filter((e) => !calIsBar(e)).map((e) => calEventEl(e, "cal-chip", true)),
+    ];
     const cap = tall ? timed.length : CAL_CHIP_CAP;
-    timed.slice(0, cap).forEach((e) => chips.appendChild(calEventEl(e, "cal-chip", true)));
+    timed.slice(0, cap).forEach((el) => chips.appendChild(el));
     overflow[i] += Math.max(0, timed.length - cap);
     // The three derived axes, under whatever appointments the day holds. They
     // are counts of what is already true, so they never take the space an
@@ -345,6 +366,14 @@ function calAgendaDay(row) {
     it.addEventListener("click", () => openNote(e.path));
     sec.appendChild(it);
   }
+
+  axis("plan", row.plans, (it, p) => {
+    it.appendChild(mkEl("span", "cal-ag-txt", (p.status === "completed" ? "\u2713 " : "") + p.name));
+    it.title = "study plan due · " + p.path;
+    it.classList.add("clickable");
+    if (p.status === "completed") it.classList.add("done");
+    it.addEventListener("click", () => calOpenPlan(p.path));
+  });
 
   // A task opens its note at its line. The box is read-only by decision
   // (ADR-0062 Decision 4): ticking one is the Tasks plugin's job, since done

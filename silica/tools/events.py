@@ -182,8 +182,8 @@ def silica_event_update(note: Annotated[str, Field(description='Event note stem 
 @tool(cls="composed")
 def silica_agenda(start: Annotated[str, Field(description="Window start: 'today' or 'YYYY-MM-DD'")] = "today", days: Annotated[int, Field(ge=1, le=90, description='Window length in days')] = 7) -> dict[str, Any]:
     """Per-day agenda: the day's daily note, event occurrences, dated notes,
-    tasks (read as the Tasks plugin reads them), agent activity, and review-due
-    (today only)."""
+    tasks (read as the Tasks plugin reads them), study plans on their `by` day,
+    agent activity, and review-due (today only)."""
     from silica.kernel.calendar.agenda import agenda
     from silica.kernel.calendar.daily import daily_notes
     from silica.kernel.calendar.tasks import scan_tasks
@@ -231,10 +231,19 @@ def silica_agenda(start: Annotated[str, Field(description="Window start: 'today'
     except Exception as e:
         logger.debug("agenda: review axis unavailable (%s)", e)
 
+    plans: list[dict] = []
+    try:
+        from silica.kernel.learn.plans import list_plans
+        plans = list_plans()
+    except Exception as e:
+        # A reading, like the review axis: a plan note that will not parse
+        # costs its deadline marker and leaves every other axis in place.
+        logger.debug("agenda: plans unavailable (%s)", e)
+
     rows = agenda(start_date, end_date, occurrences=occurrences,
                   timeline_rows=tl, log_lines=log_lines, review_rows=review_rows,
                   event_stems={ev.stem for ev in events}, today=today,
-                  tasks=scan_tasks(vault), dailies=daily_notes(vault))
+                  tasks=scan_tasks(vault), dailies=daily_notes(vault), plans=plans)
 
     lines: list[str] = [f"Agenda {start_date.isoformat()} +{days}d"]
     for r in rows:
@@ -247,6 +256,8 @@ def silica_agenda(start: Annotated[str, Field(description="Window start: 'today'
             content.append(f"  {when}  {evt['title']}{mark}")
         if r["notes"]:
             content.append("  notes: " + ", ".join(n["label"] for n in r["notes"]))
+        for p in r["plans"]:
+            content.append(f"  plan due: {p['name']}" + (" (completed)" if p["status"] == "completed" else ""))
         for t in r["tasks"]:
             mark = "[x]" if t["status"] == "done" else "[ ]"
             late = f" (due {t['due']})" if t["overdue"] else ""
