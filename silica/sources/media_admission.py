@@ -122,9 +122,11 @@ def probe_seconds(src: Path) -> float | None:
     exe = shutil.which("ffprobe")
     if not exe:
         return None
+    from silica.sources.convert import _FFMPEG_FORMATS
+
     try:
         proc = subprocess.run(
-            [exe, "-v", "error", "-show_entries", "format=duration",
+            [exe, "-v", "error", *_FFMPEG_FORMATS, "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", str(src)],
             capture_output=True, text=True, timeout=_PROBE_TIMEOUT_S, stdin=subprocess.DEVNULL,
         )
@@ -199,9 +201,10 @@ def admit_audio(audio: Path, name: str) -> float:
 def charge(seconds: float) -> None:
     """Add a transcription that ran to this month's count.
 
-    Called once the transcriber has answered, whatever it heard: an hour of
-    silence held the shared server for as long as an hour of speech. A refused
-    file, or one the transcriber failed on, is never counted."""
+    Called once the transcriber has answered with words. A refused file, one
+    the transcriber failed on, and one it answered empty are never counted:
+    an empty answer may be the provider's failure (convert._via_asr), and the
+    dollars of a silent file are capped by the key's own month anyway."""
     if not seconds or not _minutes(MONTHLY_MINUTES_ENV):
         return
     from silica.kernel.recall.paths import atomic_write_bytes

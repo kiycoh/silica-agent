@@ -164,14 +164,16 @@ def test_hidden_text_is_named_in_the_reply(client):
 
 
 def test_on_the_server_the_pdf_goes_once_its_note_exists(client, monkeypatch):
-    """Point 7, and ADR-0087 point 5's list: a .docx is not offered or taken."""
+    """Point 7, and ADR-0087 point 5's list with its audio (amendment of
+    2026-10-14): a .docx is not offered or taken."""
     monkeypatch.setenv("SILICA_HOSTED", "1")
     tc, _ = client
 
     types = tc.get("/supported_types").json()
     resp = _post(tc, [("", "paper.pdf", pdf_bytes(["Text of the paper, in full."])), ("", "doc.docx", b"PK")])
 
-    assert types["import"] == [".md", ".pdf", ".txt"] and types["extensions"] == [".md", ".pdf", ".txt"]
+    offered = [".md", ".pdf", ".txt", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"]
+    assert types["import"] == offered and types["extensions"] == offered
     rows = _settled(resp)
     assert rows["paper.pdf"]["notes"] == ["Inbox/paper.md"]
     assert not (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()

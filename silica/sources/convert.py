@@ -274,10 +274,21 @@ CONVERTIBLE_DOC_EXTS = (
 # ffmpeg knobs. `-nostdin` is not cosmetic: ffmpeg reads stdin by default and
 # would swallow the TUI's keystrokes (or block) when run under a prompt.
 _FFMPEG_ARGS = ("-nostdin", "-loglevel", "error", "-y")
+# The demuxers a media upload may open, before `-i` and in ffprobe. ffmpeg picks
+# a demuxer from the bytes, not the name, and an upload's bytes are the
+# uploader's: ffmpeg 8.0.1 read "x.mp3" holding `ffconcat version 1.0` as a
+# concat list of another file beside it (2026-10-14), and the host's 5.1.9
+# predates the 2024 check that keeps an HLS playlist out the same way. Every
+# AUDIO_EXTS and VIDEO_EXTS file opens with one of these; no playlist does.
+_FFMPEG_FORMATS = ("-format_whitelist", "mp3,wav,mov,aac,flac,ogg,asf,matroska,avi,mpeg,mpegts")
 _ASR_SAMPLE_RATE = "16000"
 # 24 kbps: against 32 kbps on 17 min of FLEURS Italian it moved WER by at most
 # 0.2 points on MAI-Transcribe-2, Scribe v2 and Qwen3-ASR-1.7B (2026-10-13), and
 # a two-hour lecture stays at 21.6 MB, under OpenRouter's 25 MB upload cap.
+# Not FLAC, though the models read 16 kHz and it is lossless: on the same clips
+# Qwen3-ASR-1.7B scored 1.76-1.82% on FLAC and 1.88-2.00% on this mp3, numbers
+# spelled, a gap inside two runs of one file (2026-10-14). FLAC is 51.6 MB an
+# hour, so past 29 minutes it is over that cap.
 _ASR_MP3_BITRATE = "24k"
 # Generous: transcribing is minutes of audio, not one page. omniparse's
 # equivalent subprocess call has no timeout at all, so a stuck decoder there
@@ -2100,7 +2111,7 @@ def _media_to_audio(src: Path, workdir: Path, mp3: bool = False) -> Path:
               "-id3v2_version", "0", "-f", "mp3"] if mp3 else ["-f", "wav"])
     try:
         proc = subprocess.run(
-            [exe, *_FFMPEG_ARGS, "-i", str(src), "-vn",
+            [exe, *_FFMPEG_ARGS, *_FFMPEG_FORMATS, "-i", str(src), "-vn",
              "-ac", "1", "-ar", _ASR_SAMPLE_RATE, *codec, str(out)],
             capture_output=True, text=True, timeout=_FFMPEG_TIMEOUT_S,
             preexec_fn=_REAP_WITH_PARENT,
@@ -2312,13 +2323,21 @@ def _via_asr(src: Path, workdir: Path) -> tuple[str, Path]:
     audio = _media_to_audio(src, workdir, mp3=CONFIG.stt_provider == "endpoint")
     seconds = admission.admit_audio(audio, src.name)
     text = ASR_PROVIDERS[CONFIG.stt_provider](audio)
-    admission.charge(seconds)
+    if not text.strip() and CONFIG.stt_provider == "endpoint":
+        # qwen3-asr-1.7b on OpenRouter answered 200 with no text and no usage
+        # to 3 of 11 calls on 45-60 min files (2026-10-14), after 59-130 s, and
+        # the same file came back whole on the next call. One retry: a file
+        # that really is silence pays one more upload.
+        text = ASR_PROVIDERS["endpoint"](audio)
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)  # none, but the tail expects a dir
     if not text.strip():
         # Empty, NOT a bare heading: the shared empty guard is what turns this
         # into an error, and a heading would make silence look like success.
+        # Not charged: after the retry it is as likely a provider that failed
+        # twice as a file with no speech, and the minutes are the student's.
         return "", images
+    admission.charge(seconds)
     # A heading gives the segmenter a cut point and the note a title line; the
     # stem is all the metadata a bare media file carries.
     return f"# {src.stem}\n\n{text}\n", images

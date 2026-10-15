@@ -119,6 +119,21 @@ def test_a_transcription_that_fails_is_not_counted(media, monkeypatch):
     assert adm.used_seconds() == 0.0
 
 
+def test_an_empty_answer_is_retried_once_and_never_counted(media, monkeypatch):
+    add, _, _ = media
+    monkeypatch.setenv(adm.MONTHLY_MINUTES_ENV, "60")
+    answers = ["", "Words on the second call."]
+    monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", lambda wav: answers.pop(0))
+    conv.convert(add("flaky.mp3", 600))
+    assert answers == [] and adm.used_seconds() == pytest.approx(600)
+
+    calls = []
+    monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", lambda wav: calls.append(wav) or "")
+    with pytest.raises(ValueError, match="no speech transcribed"):
+        conv.convert(add("silence.mp3", 600))
+    assert len(calls) == 2 and adm.used_seconds() == pytest.approx(600)
+
+
 def test_a_laptop_is_not_held_to_one_file_at_a_time(media, monkeypatch):
     add, _, _ = media
     inside, release = threading.Event(), threading.Event()
@@ -152,6 +167,17 @@ def test_ffprobe_reads_a_real_length(tmp_path):
     assert adm.probe_seconds(_write_wav(tmp_path / "a.wav", 3.0)) == pytest.approx(3.0, abs=0.05)
     (tmp_path / "junk.mp3").write_bytes(b"not audio")
     assert adm.probe_seconds(tmp_path / "junk.mp3") is None
+
+
+def test_a_concat_list_named_mp3_reads_nothing_beside_it(tmp_path):
+    """ffmpeg picks a demuxer from the bytes: without convert._FFMPEG_FORMATS
+    this upload was read as a list naming another file, and transcribed it."""
+    if not conv.shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg not installed")
+    _write_wav(tmp_path / "other.wav", 2.0)
+    (tmp_path / "evil.mp3").write_text("ffconcat version 1.0\nfile 'other.wav'\n")
+    with pytest.raises(ValueError, match="ffmpeg could not read evil.mp3"):
+        conv._media_to_audio(tmp_path / "evil.mp3", tmp_path, mp3=True)
 
 
 # --- the refusal reaches the user ----------------------------------------------------------
@@ -194,6 +220,18 @@ def test_a_refused_file_is_named_in_the_turn_with_its_sentence(drop, monkeypatch
     assert "Inbox/note.md" in text  # the other file still went through
     assert "Not staged" in text
     assert "- lecture.mp3: lecture.mp3 is 180 minutes long, and files of up to 90 minutes" in text
+
+
+def test_hosted_a_drop_takes_audio(drop, monkeypatch):
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    assert "Still converting" in drop("talk.m4a", 60)
+
+
+def test_hosted_a_drop_names_what_the_picker_does_not_offer(drop, monkeypatch):
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    text = drop("clip.mp4", 60)
+    assert "Inbox/note.md" in text
+    assert "- clip.mp4: .mp4: not a type Silica reads here" in text
 
 
 def _failure(name: str) -> str:
