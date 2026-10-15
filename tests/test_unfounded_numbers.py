@@ -72,6 +72,8 @@ def test_code_links_and_urls_are_not_checked():
         "[the paper](https://example.org/v/77)\n"
         "([EWCA](file://C:/vault/Caselaw/Ledbury%20Components%202025%20EWCA%20Civ%201109.md))\n"
         "[ruling](Caselaw/Brindle%202025.md)\n"
+        "[ruling](<Caselaw/Brindle 2025.md>)\n"
+        "参见https://example.org/paper/2401.12345\n"
     )
     assert flag(answer, "") == []
 
