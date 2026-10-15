@@ -1,6 +1,11 @@
 /* --- chat log: dense terminal transcript, not floating bubbles -------------- */
 #log {
   flex: 1;
+  /* The containing block of every `.msg .role`, which is absolute (visually
+     hidden). Without it they resolved against the viewport, escaped this clip,
+     and a section landing below the fold scrolled the page for a frame: the
+     window's scrollbar blinked through every long chat (t06, 2026-10-15). */
+  position: relative;
   overflow-y: auto;
   padding: 0;
   display: flex;

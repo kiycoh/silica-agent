@@ -2465,6 +2465,22 @@ def test_every_frame_loading_overlay_has_a_positioned_containing_block():
             f"#{view} hosts a .frame-loading overlay but is not a containing block"
 
 
+def test_the_transcript_is_the_containing_block_of_its_hidden_bylines():
+    """`.msg .role` is visually hidden with `position:absolute`, and nothing
+    between it and <body> was positioned, so every byline resolved against the
+    viewport and escaped #log's clip. A message appended below the fold put its
+    byline under the window for the frame before the follow scroll, and the
+    document's own scrollbar blinked once per section of every streamed answer
+    in a chat taller than the window (t06, 2026-10-15; 324 of 393 frames over
+    12 turns at 1280x720)."""
+    import re
+
+    css = app_css()
+    rules = re.findall(r"#log\s*\{([^}]*)\}", css)
+    assert any(re.search(r"position:\s*relative", r) for r in rules), \
+        "#log is not a containing block: the hidden bylines scroll the page"
+
+
 def test_a_write_card_meets_the_changes_payload_on_the_resolved_path():
     """The card is stamped with the tool's own argument ("Photosynthesis"),
     /changes reports the path the tool resolved ("Biology/Photosynthesis.md").
