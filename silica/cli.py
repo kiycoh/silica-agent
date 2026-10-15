@@ -4320,10 +4320,18 @@ def _resolve_context_budget() -> None:
     (OpenRouter) report their own context_length, so the pin is ignored there
     and the provider's value always wins. Falls back to the static default when
     the provider is unreachable.
+
+    Hosted, the pin wins on OpenRouter too: there it is the operator's price
+    decision, set in host.env, not a guess at the window. The pilot's endpoint
+    bills a call of 32k prompt tokens or more at 3.3x, and a 32k cap cost 62%
+    less a chat than the 1M window at equal answers
+    (docs/evaluation/context-cap-2026-10-13.md). hosted() is the unit's
+    variable, so a laptop's .env cannot shrink an OpenRouter model's window.
     """
     if not _model_configured():
         return
-    if os.getenv("SILICA_MAX_CONTEXT") and CONFIG.provider != "openrouter":
+    from silica.config import hosted
+    if os.getenv("SILICA_MAX_CONTEXT") and (CONFIG.provider != "openrouter" or hosted()):
         return
     from silica.agent.providers import model_limits
     window, _ = model_limits(CONFIG.provider, CONFIG.model)
