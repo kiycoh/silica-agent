@@ -14,9 +14,15 @@ import re
 import unicodedata
 from pathlib import Path, PurePosixPath
 
+from silica.sources.convert import AUDIO_EXTS
+
 # ADR-0087 point 5, the owner's answer of 2026-10-12: the hosted pilot reads
 # PDF, markdown and plain text, and nothing else is installed to read more.
-HOSTED_EXTENSIONS = (".md", ".pdf", ".txt")
+# Audio since the amendment of 2026-10-14: ffmpeg is on the host for the
+# transcriber, and its demuxers are held to convert._FFMPEG_FORMATS. Not
+# video, which the notice does not name and which is mostly bytes the
+# transcriber never hears under the edge's 100 MB.
+HOSTED_EXTENSIONS = (".md", ".pdf", ".txt", *AUDIO_EXTS)
 # 255 bytes is the name limit on ext4 and XFS; 200 leaves room for " (99)".
 MAX_NAME_BYTES = 200
 MAX_DEPTH = 16

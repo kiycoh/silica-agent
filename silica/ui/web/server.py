@@ -1913,13 +1913,21 @@ async def _stage_uploads(files: list[UploadFile], **job: Any
     reads whole files, so it runs in a worker thread: on the loop thread it
     blocked /stop, leaving a visible Stop button that could not be served.
     """
+    from silica.config import hosted
     from silica.kernel.vault_manifest import active_write_dir, get_active_manifest, resolve_inbox_dir
     from silica.sources import pdf_extract
+    from silica.sources.convert import IMG_EXTS
     from silica.sources.registry import adapter_for, stage
     from silica.ui.web import jobs
+    from silica.ui.web.vault_import import HOSTED_EXTENSIONS
 
     if len(files) > _UPLOAD_MAX_FILES:
         raise HTTPException(413, f"at most {_UPLOAD_MAX_FILES} files per drop")
+    # ADR-0087 point 5 on the server: a drop takes what the chat's + offers, the
+    # hosted list and the images that ride with it, because a dragged file
+    # never meets the picker's `accept`. Until 2026-10-14 a dragged video or
+    # .docx reached the converter here.
+    taken = (*HOSTED_EXTENSIONS, *IMG_EXTS) if hosted() else None
     # The inbox inside the write boundary, as active_inbox_dir() composes it; a
     # literal root Inbox/ staged drops outside a vault that writes only under
     # docs/silica. "Inbox" stands in when SILICA_INBOX_DIR switches the inbox
@@ -1948,6 +1956,11 @@ async def _stage_uploads(files: list[UploadFile], **job: Any
                   "pages_without_text": None, "pages_read": None, "outcome": "error"}
         job_writes_it = False  # a converted file's line waits for its job's outcome
         try:
+            if taken is not None and dest.suffix.lower() not in taken:
+                # Never written, but counted: the line is the attempt's, by type.
+                ingest["bytes"] = f.size
+                skipped.append((dest.name, f"{dest.suffix.lower() or 'no extension'}: not a type Silica reads here"))
+                continue
             await _write_upload(f, dest)
             ingest["bytes"] = dest.stat().st_size
             rel = f"{inbox_rel}/{dest.name}"

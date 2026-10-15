@@ -99,6 +99,21 @@ def test_pdfium_uses_the_embedded_outline_for_headings(tmp_vault, monkeypatch):
     assert "body one" in body and "body two" in body
 
 
+def test_pdfium_outline_title_is_not_pinned_on_formula_debris(tmp_vault, monkeypatch):
+    """PowerPoint's outline names a slide "Diapositiva 9: Kernel Ridge
+    regression", and PDFium's text of its formulas leaves lines like "( ) ( )"
+    and "d": an empty line prefixed every title and "d" every "Diapositiva",
+    so the slide's heading was "# ( )" (lecture 12, 2026-10-14)."""
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
+    pdf = _pdf_bytes(["( ) ( )\nd\nKernel Ridge regression\nthe body of the slide, at length"],
+                     toc=[[1, "Diapositiva 9: Kernel Ridge regression", 1]])
+    (Path(CONFIG.vault_path) / "deck.pdf").write_bytes(pdf)
+
+    body = _inbox_note(conv.convert("deck.pdf")[0]).read_text(encoding="utf-8")
+    assert "# Diapositiva 9: Kernel Ridge regression\n" in body
+    assert "# ( )" not in body and "# d\n" not in body and "\nd\n" in body
+
+
 def test_pdfium_without_outline_still_produces_text(tmp_vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
     (Path(CONFIG.vault_path) / "plain.pdf").write_bytes(_pdf_bytes(["Body with no outline at all here"]))

@@ -211,6 +211,22 @@ class TestCliContextBudget:
         _resolve_context_budget()
         assert CONFIG.max_context_tokens == 1048576
 
+    @patch("silica.agent.providers.model_limits", return_value=(1000000, 0))
+    def test_env_pin_wins_on_openrouter_when_hosted(self, _limits, monkeypatch):
+        # The host's cap is a price decision, not a guess at the window: past
+        # 32k prompt tokens the pilot's endpoint bills 3.3x
+        # (docs/evaluation/context-cap-2026-10-13.md).
+        from silica.cli import _resolve_context_budget
+        from silica.config import CONFIG
+
+        monkeypatch.setenv("SILICA_HOSTED", "1")
+        monkeypatch.setenv("SILICA_MAX_CONTEXT", "32000")
+        monkeypatch.setattr(CONFIG, "model", "openrouter/qwen/qwen3.7-flash-20260727")
+        monkeypatch.setattr(CONFIG, "_provider", "openrouter")
+        monkeypatch.setattr(CONFIG, "max_context_tokens", 32000)
+        _resolve_context_budget()
+        assert CONFIG.max_context_tokens == 32000
+
     @patch("silica.agent.providers.model_limits", return_value=(0, 0))
     def test_unknown_window_keeps_default(self, _limits, monkeypatch):
         from silica.cli import _resolve_context_budget
