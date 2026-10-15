@@ -27,7 +27,12 @@ default typesafe/jev-1.13), which the host leaves unset: without it
 silica_read_note serves every note whole whatever its `query`
 (agent/read_scope.py) and relevance compaction is off (ADR-0052, ADR-0053).
 Jev's spend is not metered here (decide() is not call_llm): read it as the
-key's usage delta over a run of that arm alone.
+key's usage delta over a run of that arm alone. `:fitnarrow` turns on
+loop.FIT_NARROWS: a note read this turn that will not fit is served as its
+passages densest in the query's (or the request's) words instead of a stub.
+`:runon` sets atomic.READ_QUERY_RUN_ON to 800: a narrowed window that holds
+a heading runs on toward the next one. Flags combine in any order:
+`ctx:32000:jev:fitnarrow:runon`.
 
 `<arm>@<model>` runs that arm on another chat model (litellm id, e.g.
 `ctx:32000@openrouter/mistralai/mistral-nemo`) with SILICA_FALLBACK_MODELS
@@ -207,7 +212,14 @@ def run_one(arm: str, case: str, model: str, max_usd: float, out_json: Path) -> 
     cap = int(base.split(":")[1])
     temp = next((float(p[1:]) for p in base.split(":")[2:] if p.startswith("t")), None)
     CONFIG.max_context_tokens = cap
-    if base.endswith(":narrow"):
+    flags = set(base.split(":")[2:])
+    if "runon" in flags:
+        from silica.tools import atomic
+        atomic.READ_QUERY_RUN_ON = 800
+    if "fitnarrow" in flags:
+        from silica.agent import loop
+        loop.FIT_NARROWS = True
+    if "narrow" in flags:
         # A note over NARROW_SHARE of the window, read with a `query`, is served
         # as its query windows: whole, the pre-call fit would stub it before
         # the model saw it, and the model reads it again (seen at ctx:32000 on
@@ -343,7 +355,7 @@ def table(out_dir: Path) -> str:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--arm", action="append", help="ctx:<N>[:narrow|:jev][@<model>]")
+    ap.add_argument("--arm", action="append", help="ctx:<N>[:narrow|:jev|:fitnarrow|:runon...][@<model>]")
     ap.add_argument("--case", action="append", choices=list(CASES))
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--max-usd", type=float, default=0.5, help="per conversation; cancels past it")
@@ -378,7 +390,7 @@ def main(argv=None) -> int:
                 base, _, model = arm.partition("@")
                 if model:
                     env.update(SILICA_MODEL=model, SILICA_FALLBACK_MODELS="")
-                if base.endswith(":jev"):
+                if "jev" in base.split(":")[2:]:
                     env["SILICA_DECISION_MODEL"] = os.environ.get("JEV_MODEL", "typesafe/jev-1.13")
                 # `.` too: with_suffix would read "qwen3.7-flash-…-r1" as an extension and
                 # write every run of that arm to one file.

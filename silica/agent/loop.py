@@ -123,6 +123,35 @@ WINDOW_FILL = 0.9
 _LLAMA_OVERFLOW = re.compile(
     r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)"
 )
+# A note read this turn that will not fit is served as its passages densest in
+# the words of the read's query, or of the request when it gave none, instead
+# of a stub naming a re-read that cannot fit either (compaction.fit_window).
+# The probe's `fitnarrow` arm; off until it is measured against the stub.
+FIT_NARROWS = False
+
+
+def _fit_shrink(name: str, arguments: str, body: str) -> str | None:
+    if not FIT_NARROWS or name != "silica_read_note":
+        return None
+    try:
+        args = json.loads(arguments or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(args, dict) or args.get("vault") or not args.get("name"):
+        return None
+    requests = read_scope.REQUESTS.get()
+    query = str(args.get("query") or "").strip() or (requests[-1] if requests else "")
+    if not query:
+        return None
+    from silica.tools.atomic import narrowed_read
+
+    try:
+        return narrowed_read(str(args["name"]), query)
+    except Exception as exc:
+        # The note moved or the driver failed between the read and this fit:
+        # the stub the caller falls back to is what the fit wrote before.
+        logger.warning("fit narrowing failed for %s (%s): stubbed", args["name"], exc)
+        return None
 
 # What a turn that produced neither text nor a tool call returns. A sentinel and
 # not "": every caller gates its output on the returned string being truthy, so
@@ -425,7 +454,7 @@ def run_agent(
                 messages, collapsed,
                 estimate=sent_tokens + grown // TEXT_CHARS_PER_TOKEN,
                 limit=int(WINDOW_FILL * CONFIG.max_context_tokens),
-                tools=TOOLS,
+                tools=TOOLS, shrink=_fit_shrink,
             )
             _newly = sorted(set(collapsed) - _pre_collapsed)
             if _newly:
@@ -464,6 +493,7 @@ def run_agent(
                     collapsed, _ = fit_window(
                         messages, collapsed, estimate=int(over[1]),
                         limit=int(WINDOW_FILL * int(over[2])), tools=TOOLS,
+                        shrink=_fit_shrink,
                     )
                     if collapsed == _pre_collapsed:
                         raise

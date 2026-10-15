@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 
 MIN_COLLAPSE_CHARS = 200  # don't collapse a body smaller than its own stub
 
@@ -362,6 +362,7 @@ def fit_window(
     estimate: int,
     limit: int,
     tools: dict,
+    shrink: Callable[[str, str, str], str | None] | None = None,
 ) -> tuple[set[int], int]:
     """Collapse lazy read results, oldest first and floor included, until the
     request about to be sent is estimated under `limit` tokens.
@@ -372,12 +373,22 @@ def fit_window(
     request is rejected (llama.cpp: 400 exceed_context_size_error) and the turn
     dies; a stub the model can re-issue keeps it alive. Returns the collapsed
     set and the estimate left after the collapses.
+
+    `shrink(tool, arguments, body)` may offer a smaller body for a result of
+    the running turn, tried before its stub. A stub of a read that cannot fit
+    whole names a re-call that cannot fit either: at a 32k cap Lezione 18 was
+    read ten times in one turn and never seen (docs/evaluation/
+    context-cap-2026-10-13.md, finding 4). Earlier turns' results are stubbed
+    as before: they were read for another request, so the passages a shrink
+    would pick by this one's words are not what they were read for. A shrunk
+    body stays out of `collapsed`, so a later sweep can still stub it.
     """
     id_to_name: dict[str, tuple[str, str]] = {}
     for m in messages:
         for tc in m.get("tool_calls") or []:
             fn = tc.get("function", {})
             id_to_name[tc.get("id", "")] = (fn.get("name", ""), fn.get("arguments", "{}"))
+    turn_start = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
     updated = set(collapsed)
     for i, m in enumerate(messages):
         if estimate <= limit:
@@ -390,9 +401,15 @@ def fit_window(
         tool = tools.get(name) if name else None
         if tool is None or getattr(tool, "collapse", "lazy") != "lazy":
             continue
-        m["content"] = read_stub(name, arguments, body, "to fit the context window")
+        smaller = shrink(name, arguments, body) if shrink and i > turn_start else None
+        # Half the body at most, or the next iteration shrinks it again to the
+        # same passages and the request never comes under the limit.
+        if smaller and len(smaller) <= len(body) // 2:
+            m["content"] = smaller
+        else:
+            m["content"] = read_stub(name, arguments, body, "to fit the context window")
+            updated.add(i)
         estimate -= (len(body) - len(m["content"])) // _CHARS_PER_TOKEN
-        updated.add(i)
     return updated, estimate
 
 
