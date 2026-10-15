@@ -337,15 +337,21 @@ input.addEventListener("paste", (e) => {
   if (files.length) { e.preventDefault(); addFiles(files); }
 });
 
+// Counted for files only: a tree row dragged onto a workspace carries none,
+// and the "nucleate into Inbox/" hint would promise what that drop never does.
 let dragDepth = 0;
-window.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
+const draggingFiles = (e) => e.dataTransfer.types.includes("Files");
+window.addEventListener("dragenter", (e) => { e.preventDefault(); if (draggingFiles(e)) { dragDepth++; document.body.classList.add("dragging"); } });
 window.addEventListener("dragover", (e) => e.preventDefault());
-window.addEventListener("dragleave", (e) => { e.preventDefault(); if (--dragDepth <= 0) document.body.classList.remove("dragging"); });
+window.addEventListener("dragleave", (e) => { e.preventDefault(); if (draggingFiles(e) && --dragDepth <= 0) document.body.classList.remove("dragging"); });
 window.addEventListener("drop", (e) => {
+  // A target that took the files (a workspace row, a skill row) prevented the
+  // default first: staging them for the chat too would import them twice.
+  const taken = e.defaultPrevented;
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove("dragging");
-  if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  if (!taken && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
 });
 
 // "+" opens what the next message can do (ADR-0083). Its first entry is the

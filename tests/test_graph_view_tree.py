@@ -83,3 +83,11 @@ def test_the_rail_offers_plan_this_folder_and_the_frame_does_not():
     html = render_tree([_node("a/b/c.md")], actions=True)
     assert 'class="tree-plan" data-folder="a/"' in html and 'data-folder="a/b/"' in html
     assert "tree-plan" not in render_tree([_node("a/b/c.md")])
+
+
+def test_a_rail_folder_drags_onto_a_workspace_and_the_frames_does_not():
+    """ADR-0112: a folder row of the rail is draggable onto a workspace row; a
+    summary is not by default, and the frame has no workspaces to drop on."""
+    html = render_tree([_node("a/b/c.md")], actions=True)
+    assert html.count('<summary draggable="true">') == 2
+    assert "draggable" not in render_tree([_node("a/b/c.md")])

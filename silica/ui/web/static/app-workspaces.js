@@ -61,7 +61,7 @@ function renderWorkspaces() {
   if (!workspaces.length) {
     // The one line that says what the group is for (Open 1): a workspace is not
     // a pane layout, as the same word means in Obsidian.
-    box.appendChild(mkEl("p", "ws-empty", "Groups notes from any folder without moving them. Start one with + or with ◇ on a note."));
+    box.appendChild(mkEl("p", "ws-empty", "Groups notes from any folder without moving them. Start one with +, with ◇ on a note, or by dragging a note here."));
   }
   for (const w of workspaces) {
     const open = wsOpen.has(w.path);
@@ -134,7 +134,7 @@ function renderWsMembers(w) {
   for (const f of w.dead.folders) list.appendChild(mkEl("div", "ws-dead", `folder not found: ${f}`));
   for (const n of w.dead.notes) list.appendChild(mkEl("div", "ws-dead", `no note named ${n}`));
   if (!w.members.length && !w.dead.folders.length && !w.dead.notes.length) {
-    list.appendChild(mkEl("div", "ws-hint", "empty: add notes or folders with ◇ in the tree"));
+    list.appendChild(mkEl("div", "ws-hint", "empty: drag notes or folders here, or use ◇ in the tree"));
   }
   if (w.has_instructions) {
     const p = mkEl("div", "ws-instr", "a chat here follows the note's own words");
@@ -180,25 +180,101 @@ function focusWsRow(path) {
   $(`#workspaces .ws-row[data-path="${CSS.escape(path)}"] .ws-toggle`)?.focus();
 }
 
-// The + on the bucket: a workspace with nothing in it yet, named in place.
+// The + on the bucket: a workspace with nothing in it yet, named in place. A
+// row dropped on the group but on no workspace opens it too, holding that row.
+let wsNewWith = null; // {key, value} of the dropped row, or null
+function wsNewReset() {
+  wsNewWith = null;
+  $("#ws-new-name").placeholder = "Name the workspace";
+}
 $("#ws-new").addEventListener("click", () => {
   const f = $("#ws-new-form");
   f.hidden = !f.hidden;
+  wsNewReset();
   if (!f.hidden) $("#ws-new-name").focus();
 });
 $("#ws-new-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const name = $("#ws-new-name").value.trim();
   if (!name) return;
-  const made = await createWorkspace(name, [], []);
+  const w = wsNewWith;
+  const made = await createWorkspace(name, w?.key === "notes" ? [w.value] : [], w?.key === "folders" ? [w.value] : []);
   if (made) {
     $("#ws-new-name").value = "";
     $("#ws-new-form").hidden = true;
+    wsNewReset();
     focusWsRow(made.path);
   }
 });
 $("#ws-new-name").addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { e.stopPropagation(); $("#ws-new-form").hidden = true; $("#ws-new").focus(); }
+  if (e.key === "Escape") { e.stopPropagation(); $("#ws-new-form").hidden = true; wsNewReset(); $("#ws-new").focus(); }
+});
+
+// --- drag a tree row onto a workspace -------------------------------------------
+// The same line the ◇ menu writes, for the student who reaches for the mouse.
+// Its own type, not text/plain: the window's handler stages dropped Files for
+// the chat, and a dragged link carries none. Files from the desktop dropped on
+// a row import into that workspace, as its + does.
+const WS_DRAG = "application/x-silica-ws";
+const wsGroup = $("#ws-group");
+const wsShown = (it) => it.value.split("/").pop().replace(/\.md$/, "") + (it.key === "folders" ? "/" : "");
+
+document.addEventListener("dragstart", (e) => {
+  const note = e.target.closest?.("#tree .tree-note, #workspaces .ws-note");
+  const folder = !note && e.target.closest?.("#tree summary")?.querySelector(".tree-ws")?.dataset.wsFolder;
+  if (!note && !folder) return;
+  e.dataTransfer.setData(WS_DRAG, JSON.stringify(note ? { key: "notes", value: note.dataset.id } : { key: "folders", value: folder }));
+  e.dataTransfer.effectAllowed = "copy";
+});
+
+let wsOver = null;
+function wsDropMark(el) {
+  if (wsOver === el) return;
+  wsOver?.classList.remove("ws-over");
+  wsOver = el;
+  el?.classList.add("ws-over");
+  // the window's "nucleate into Inbox/" hint is not what a row does with files
+  document.body.classList.toggle("ws-drop", !!el);
+}
+wsGroup.addEventListener("dragover", (e) => {
+  const row = e.target.closest(".ws-row");
+  const t = e.dataTransfer.types;
+  if (!t.includes(WS_DRAG) && !(row && t.includes("Files"))) { wsDropMark(null); return; }
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "copy";
+  wsDropMark(row || wsGroup);
+});
+// relatedTarget is null where a browser does not report it: the mark goes, and
+// the next dragover over the group draws it again.
+wsGroup.addEventListener("dragleave", (e) => { if (!wsGroup.contains(e.relatedTarget)) wsDropMark(null); });
+document.addEventListener("dragend", () => wsDropMark(null));
+
+wsGroup.addEventListener("drop", async (e) => {
+  wsDropMark(null);
+  const row = e.target.closest(".ws-row");
+  const w = row && wsByPath(row.dataset.path);
+  let it = null;
+  try { it = JSON.parse(e.dataTransfer.getData(WS_DRAG) || "null"); } catch { /* not ours: the window's handler decides */ }
+  if (!it && w && e.dataTransfer.files.length) {
+    e.preventDefault(); // the window's handler sees it taken and stages nothing
+    vaultImportWorkspace = w.path;
+    importToVault([...e.dataTransfer.files], false);
+    return;
+  }
+  if (!it || !["notes", "folders"].includes(it.key) || typeof it.value !== "string") return;
+  e.preventDefault();
+  if (!w) {
+    $("#ws-new-form").hidden = false;
+    wsNewWith = it;
+    $("#ws-new-name").placeholder = `New workspace with ${wsShown(it)}`;
+    $("#ws-new-name").focus();
+    return;
+  }
+  const already = it.key === "folders" ? w.folders.includes(it.value) : w.members.some((m) => m.path === it.value);
+  if (already) { notify(`${wsShown(it)} is already in ${w.name}`, "info"); return; }
+  if (!(await wsSetLine(w.path, it.key, it.value, true))) return;
+  notify(`${wsShown(it)} added to ${w.name}`, "info");
+  await loadWorkspaces();
 });
 
 async function createWorkspace(name, notes, folders) {
@@ -243,7 +319,7 @@ function renderWsChip() {
     renderWsChip();
     renderWorkspaces();
     input.focus(); // the chip that had focus is gone
-    notify("the next message searches the whole vault");
+    notify("the next message searches the whole vault", "info");
   });
   chip.appendChild(x);
   row.appendChild(chip);
@@ -324,18 +400,24 @@ function closeWsMenu(refocus = false) {
   if (refocus) b?.focus();
 }
 
+// The ◇ menu's toggle and a drop on a row: one line added or removed.
+async function wsSetLine(workspace, key, value, on) {
+  try {
+    const r = await fetch("/workspaces/line", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ workspace, key, value, on }),
+    });
+    if (!r.ok) throw new Error();
+    return true;
+  } catch { notify("couldn't change that workspace"); return false; }
+}
+
 wsMenu.addEventListener("click", async (e) => {
   const item = e.target.closest(".ws-item");
   if (!item || item.disabled || !wsMenuFor) return;
   const on = item.getAttribute("aria-checked") !== "true";
   const { path, folder } = wsMenuFor;
-  try {
-    const r = await fetch("/workspaces/line", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspace: item.dataset.ws, key: folder ? "folders" : "notes", value: path, on }),
-    });
-    if (!r.ok) throw new Error();
-  } catch { notify("couldn't change that workspace"); return; }
+  if (!(await wsSetLine(item.dataset.ws, folder ? "folders" : "notes", path, on))) return;
   item.setAttribute("aria-checked", String(on));
   item.querySelector("svg").innerHTML = on ? '<polyline points="5 12 10 17 19 7"></polyline>' : "";
   await loadWorkspaces();

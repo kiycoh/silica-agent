@@ -163,7 +163,10 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
                     f'title="plan this folder in Learn" aria-label="plan the folder {html.escape(name, quote=True)}">'
                     f"plan</button>") if actions else ""
             ws = _ws_button(folder.rstrip("/"), name, folder=True) if actions else ""
-            out.append(f"<details{attr}><summary>{html.escape(name)}"
+            # a note's <a> drags by itself; a summary only when told, and the
+            # rail drops a folder on a workspace row as its ◇ menu adds one
+            drag = ' draggable="true"' if actions else ""
+            out.append(f"<details{attr}><summary{drag}>{html.escape(name)}"
                        f'<span class="tree-n">{count(tree[name])}</span>{ws}{plan}</summary>')
             out.append(emit(tree[name], depth + 1, folder))
             out.append("</details>")

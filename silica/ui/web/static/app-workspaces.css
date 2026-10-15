@@ -438,3 +438,16 @@
 .ws-chip .chip-name {
   color: var(--frost);
 }
+
+/* a drop target while a tree row or a file is dragged over it: a row adds it,
+   the group anywhere else opens the new-workspace form holding it */
+.ws-row.ws-over,
+#ws-group.ws-over > .ws-bucket {
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+  background: var(--sel);
+}
+
+body.ws-drop #drop-hint {
+  display: none;
+}
