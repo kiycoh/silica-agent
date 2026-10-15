@@ -116,15 +116,18 @@ def session(
     _entries_override: list | None = None,
     _pairs_override: list[tuple[str, str]] | None = None,
     _conflicts_override: list[str] | None = None,
+    _planned_override: set[str] | None = None,
     _store=None,
 ) -> dict:
     """Pick the rows of one session. Returns {items, due, unexplored,
     amnesty, short}; each item carries path, title-less row fields, pool,
     kind, level, stale, and `pair` for a contrast item.
 
-    `scope` restricts every pool to those paths (a plan's, D24); `frontier`
-    names the paths that come first inside it; `revisit` is the reader's own
-    queue (D26) and precedes everything.
+    `scope` restricts every pool to those paths (a plan's, D24); without one,
+    a never-practised note outside every active plan is left out
+    (learner.off_plan_dropped). `frontier` names the paths that come first
+    inside it; `revisit` is the reader's own queue (D26) and precedes
+    everything.
     """
     from datetime import datetime, timezone
 
@@ -151,6 +154,11 @@ def session(
     if scope is not None:
         allowed = {p for p in scope}
         rows = {k: r for k, r in rows.items() if r["path"] in allowed}
+    else:
+        from silica.kernel.learn.plans import planned_paths
+
+        planned = _planned_override if _planned_override is not None else planned_paths()
+        rows = learner.off_plan_dropped(rows, planned)
 
     def why(r: dict) -> str:
         if r["stale"]:

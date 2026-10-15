@@ -223,13 +223,14 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=()) -> dict:
     context; a step that names a concept with no note of its own is a gap
     until new-material targets (extension 1) exist.
     """
-    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.report.learner import _notes_meta, is_material
 
     notes = _notes_meta(_vault())
     # A plan is the card, never the material: the topic "memoria" listed
     # Plans/Prova Learn.md among its notes (2026-10-08) because the plan names
-    # the topic. The walk already records `type` for exactly this.
-    allowed = {p for p, m in notes.items() if m.get("kind") not in ("plan", "syllabus")
+    # the topic. The walk already records `type` for exactly this, and an
+    # event note's kind with it.
+    allowed = {p for p, m in notes.items() if is_material(m)
                and (not restrict or p.casefold().startswith(restrict.casefold()))}
     if kind == "notes":
         names = notes_of(target)
@@ -447,6 +448,24 @@ def scope_of(plan: dict) -> dict:
     frontier = frontier_of(plan, paths)
     revisit = [p for p in (resolve_title(n) for n in plan["revisit"]) if p]
     return {"paths": paths, "frontier": frontier, "revisit": revisit}
+
+
+def planned_paths() -> set[str] | None:
+    """Every note an active plan covers, or None when no plan is active: the
+    line between study material and the rest of the vault (ADR-0111 point 4)."""
+    active = [p for p in list_plans() if p["status"] != "completed"]
+    if not active:
+        return None
+    out: set[str] = set()
+    for p in active:
+        try:
+            out.update(scope_of(p)["paths"])
+        except Exception as exc:
+            # A plan whose scope will not resolve covers nothing here, as it
+            # covers nothing in Learn's rows (learn_routes._plan_scopes): its
+            # never-practised notes wait out of Next until the plan reads.
+            logger.debug("planned_paths: scope of %s not resolved (%s)", p["path"], exc)
+    return out
 
 
 def frontier_of(plan: dict, paths: list[str], entries: list[dict] | None = None) -> list[str]:

@@ -219,3 +219,33 @@ def test_view_reads_frontmatter_from_the_vault(tmp_vault, monkeypatch):
     assert learner.WEAK_R < user["R"] < learner.DUE_R          # months old: in the pool, not the digest
     assert v[learner.key_of("Robot.md")]["R"] is None        # AI: true, never quizzed
     assert v[learner.key_of("Undated.md")]["R"] > 0.9        # mtime fallback: just written
+
+
+def test_review_queue_leaves_a_never_practised_note_outside_every_plan_out():
+    """The agent's picker draws the same line as Learn's (ADR-0111 point 4);
+    target mode, the calibration read a plan is built from, does not."""
+    now = time.time()
+    notes = {
+        "Bio/cell.md": {"created": now - DAY, "ai": True},
+        "Ref/memo.md": {"created": now - DAY, "ai": True},
+        "Cal/2026-10-20 Lab.md": {"created": now - DAY, "ai": False, "kind": "event"},
+    }
+    rows = learner.review_queue(limit=4, _notes_override=notes, _entries_override=[], now_ts=now,
+                                planned={"Bio/cell.md"})
+    assert {r["path"] for r in rows} == {"Bio/cell.md"}
+    rows = learner.review_queue(target="Ref/", _notes_override=notes, _entries_override=[], now_ts=now,
+                                planned={"Bio/cell.md"})
+    assert {r["path"] for r in rows} == {"Ref/memo.md"}
+
+
+def test_an_event_note_is_not_study_material(tmp_vault):
+    """Learn listed the calendar's own notes as never practised (seen 2026-10-15)."""
+    tmp_vault.note("Cal/Lab session.md", "---\nevent_start: 2026-10-20T10:00\n---\n\n# Lab session\n")
+    tmp_vault.note("Bio/cell.md", "# Cell\n\nThe membrane is a lipid bilayer.\n")
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    meta = learner._notes_meta(Path(CONFIG.vault_path))
+    assert not learner.is_material(meta["Cal/Lab session.md"])
+    assert learner.is_material(meta["Bio/cell.md"])

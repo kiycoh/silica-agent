@@ -155,8 +155,8 @@ def test_agenda_review_axis_excludes_event_notes(vault, monkeypatch):
                                       encoding="utf-8")
     monkeypatch.setattr(
         "silica.kernel.report.learner.review_queue",
-        lambda limit=10: [{"path": "calendar/2026-08-20 Dentist.md", "why": "unexplored"},
-                          {"path": "lecture.md", "why": "unexplored"}])
+        lambda limit=10, **_: [{"path": "calendar/2026-08-20 Dentist.md", "why": "unexplored"},
+                               {"path": "lecture.md", "why": "unexplored"}])
     res = silica_agenda()  # review lands on today's row
     today = res["days"][0]
     assert [r["path"] for r in today["review"]] == ["lecture.md"]

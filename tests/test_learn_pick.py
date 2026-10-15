@@ -96,3 +96,23 @@ def test_revisit_queue_enters_next_session_with_priority():
     notes = _notes(now, {"A/x.md": (400, False), "A/y.md": (400, False), "A/fresh.md": (1, False)})
     s = pick.session(n=3, now_ts=now, _notes_override=notes, _entries_override=[], revisit=["A/fresh.md"])
     assert s["items"][0]["path"] == "A/fresh.md" and s["items"][0]["pool"] == "revisit"
+
+
+def test_once_a_plan_is_active_a_never_practised_note_outside_it_is_not_offered():
+    """t4, 2026-10-15: a note added to be summarised must not become a study
+    goal by being in the vault (ADR-0111 point 4)."""
+    now = time.time()
+    notes = _notes(now, {"Bio/cell.md": (5, False), "Ref/memo.md": (5, False), "Old/done.md": (400, False)})
+    entries = [{"ts": _iso(now - 390 * DAY), "path": "Old/done.md", "correct": True, "rating": 3}]  # due again
+    s = pick.session(n=8, now_ts=now, _notes_override=notes, _entries_override=entries,
+                     _planned_override={"Bio/cell.md"})
+    paths = {it["path"] for it in s["items"]}
+    assert "Ref/memo.md" not in paths
+    assert {"Bio/cell.md", "Old/done.md"} <= paths   # planned, and practised once: both stay
+    # no plan in the (empty) test vault: the whole vault is material, as before
+    free = pick.session(n=8, now_ts=now, _notes_override=notes, _entries_override=entries)
+    assert "Ref/memo.md" in {it["path"] for it in free["items"]}
+    # a scope the reader picked wins over the plans
+    picked = pick.session(n=8, now_ts=now, _notes_override=notes, _entries_override=entries,
+                          scope=["Ref/memo.md"], _planned_override={"Bio/cell.md"})
+    assert [it["path"] for it in picked["items"]] == ["Ref/memo.md"]

@@ -32,6 +32,10 @@ function isNarrow() {
 
 let railSection = null; // which compartment the summoned rail is showing
 
+// Stamped on <html> by the server (index()), so the views a hosted account
+// does not get are gone before the first paint rather than after a probe.
+const HOSTED = document.documentElement.hasAttribute("data-hosted");
+
 function toggleRail(sec) {
   const open = railSection !== sec;
   railSection = open ? sec : null;
@@ -176,11 +180,13 @@ function areaCount(data) {
 
 let vaultBroken = 0;
 function renderVaultHealth(data) {
-  vaultBroken = data.unresolved || 0;
+  // The count's one action is Examine, which a hosted account does not have
+  // (ADR-0111 point 3): there it would be an amber dot nobody can answer.
+  vaultBroken = HOSTED ? 0 : data.unresolved || 0;
   const broken = $("#top-broken");
   broken.hidden = !vaultBroken;
   broken.textContent = nfmt(vaultBroken) + " unresolved wikilink" + (vaultBroken === 1 ? "" : "s")
-    + " · targets that do not exist yet · open metrics";
+    + " · targets that do not exist yet · open Examine";
   $("#vault-links").hidden = !vaultBroken;
   // the compartment's own count, which is the rail's reading of the size;
   // the folder count rides the hover, the summary row is 264px wide
@@ -873,11 +879,19 @@ async function openSession(id, fromUrl = false) {
 // ?note=<path> while the drawer is open. Rendered state writes the hash; the
 // hash, when it changes under us (Back, a paste, a new tab), drives the state.
 // A view's address is its label, not its id: the ids stayed when Graph became
-// Explore, Calendar Plan and Metrics Examine (2026-10-13), because renaming
-// them would touch every element and test that names the view. The id still
-// routes, so a bookmark made before a rename lands where it did.
-const VIEW_SLUG = { graph: "explore", calendar: "plan", metrics: "examine" };
-const viewOfSlug = (s) => Object.keys(VIEW_SLUG).find((v) => VIEW_SLUG[v] === s) || s;
+// Explore and Metrics Examine (2026-10-13), because renaming them would touch
+// every element and test that names the view. The id still routes, so a
+// bookmark made before a rename lands where it did. Calendar was Plan from
+// 2026-10-13 to 2026-10-15 and is Calendar again (ADR-0111 point 2): plans are
+// made in Learn, and two pilot users looked for them under Plan the same day.
+const VIEW_SLUG = { graph: "explore", metrics: "examine" };
+const OLD_SLUG = { plan: "calendar" };
+// Examine is off the hosted surface (ADR-0111 point 3): the address no longer
+// opens it there, so a bookmark lands on the chat like any unknown one.
+const viewOfSlug = (s) => {
+  const v = Object.keys(VIEW_SLUG).find((k) => VIEW_SLUG[k] === s) || OLD_SLUG[s] || s;
+  return v === "metrics" && HOSTED ? "" : v;
+};
 
 function parseHash() {
   const raw = (location.hash || "").replace(/^#/, "");

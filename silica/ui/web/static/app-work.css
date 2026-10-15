@@ -48,6 +48,12 @@
 .cal-chip { font-size: 11px; color: var(--text); background: var(--slate-2); border-radius: var(--r-xs); padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .cal-chip:hover { background: var(--line); color: var(--frost); }
 .cal-chip .t { color: var(--ash); margin-right: 4px; font-variant-numeric: tabular-nums; }
+/* A plan's deadline: the chip of an event led by a milestone diamond, so it
+   reads as a date in the plan's life and not as one more appointment, without
+   a second hue in the grid. Not an inset accent edge: that is the selection
+   bar this app retired (test_selected_is_a_frosted_box_and_never_a_bar). */
+.cal-chip.plan::before { content: "\25C6"; color: var(--accent); margin-right: 4px; font-size: 9px; vertical-align: 0.1em; }
+.cal-chip.plan.done::before { content: "\2713"; }
 .cal-bar { z-index: 1; margin: 1px 3px; border-radius: var(--r-xs); background: var(--accent); color: var(--void); font-size: 11px; line-height: 18px; font-weight: 600; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; }
 /* The three derived axes: what already happened here, or is waiting. Not
    chips — a filled chip is an appointment, and printing sixty agent writes in
