@@ -35,7 +35,7 @@ from silica.agent.constraints import (
     chat_tools,
     web_turn_constraints,
 )
-from silica.agent.events import LLMStreamEvent, ToolErrorEvent, ToolStartEvent
+from silica.agent.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
 from silica.agent.llm import meter_totals
 from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
 from silica.agent import turn_notes
@@ -67,6 +67,7 @@ _collapsed: set[int] = set()  # message indices elided by compaction, across tur
 _seen_numbers: set[str] = set()
 _busy = False  # one turn at a time; a second /chat is refused with 409
 current_session_id: str | None = None  # narration sid of the live conversation
+current_workspace: str | None = None  # vault path of the workspace this chat is opened in (ADR-0112)
 # The store moved to ~/.silica/narration (docs/specs/narration/spec.md §5);
 # legacy web_sessions/*.json are read forever through silica.agent.narration.
 
@@ -125,7 +126,7 @@ def _seeded() -> tuple[list[dict], int]:
 
 
 def _reset_session() -> None:
-    global current_cancel, current_task, _busy, current_session_id
+    global current_cancel, current_task, _busy, current_session_id, current_workspace
     from silica.agent import narration as _narr
     from silica.kernel import user_memory
 
@@ -147,6 +148,90 @@ def _reset_session() -> None:
         current_task = None
         _busy = False
     current_session_id = None  # next turn opens a new file
+    current_workspace = None   # a new chat is the whole vault until a turn names one
+
+
+WS_ORIGIN = "workspace"
+
+
+def _apply_workspace(ws: dict | None) -> None:
+    """The system line of a chat opened in a workspace (ADR-0112 point 4,
+    Open 3): what the scope does, then the workspace note's body as the
+    user's standing instructions. Written once and edited in place, never
+    removed: compaction counts messages by index (`_collapsed`), so a removal
+    or a late insert would shift every one it recorded."""
+    from silica.kernel import workspaces
+
+    i = next((n for n, m in enumerate(messages) if m.get("origin") == WS_ORIGIN), None)
+    if ws is None:
+        if i is not None:
+            messages[i]["content"] = ("This conversation is no longer limited to a workspace: searches "
+                                      "cover the whole vault and no workspace instructions apply.")
+        return
+    text = workspaces.instructions_message(ws, len(workspaces.members(ws)))
+    if i is not None:
+        messages[i]["content"] = text
+        return
+    if _collapsed:
+        # ponytail: a chat compacted before it was first opened in a workspace
+        # gets the scope without the line; the UI opens a workspace chat only
+        # as a new chat, so this needs an API caller. Rebase `_collapsed` if
+        # that ever shows up in the pilot's logs.
+        logger.info("workspace line skipped: the chat is already compacted")
+        return
+    # Before the seed's last system message, which must stay last (_lang_prefer).
+    head = next((n for n, m in enumerate(messages) if m.get("role") != "system"), len(messages))
+    messages.insert(max(head - 1, 0), {"role": "system", "content": text, "origin": WS_ORIGIN})
+
+
+def _resolve_workspace(ref: str) -> dict | None:
+    """The workspace a turn names, or None; sets this chat's current one."""
+    global current_workspace
+    from silica.kernel import workspaces
+
+    ws = workspaces.find_workspace(ref) if ref else None
+    current_workspace = ws["path"] if ws else None
+    return ws
+
+
+def _scoped_run(ws: dict | None, fn, *args, **kwargs):
+    """Run the agent with retrieval narrowed to `ws` (ADR-0112 point 4). Set
+    and reset on the worker thread itself: `to_thread` copies the context, and
+    a token must be reset in the context that set it."""
+    from silica.kernel import workspaces
+
+    token = workspaces.open_scope(ws) if ws else None
+    try:
+        return fn(*args, **kwargs)
+    finally:
+        if token is not None:
+            workspaces.close_scope(token)
+
+
+def _join_workspace(ws_path: str, ev) -> None:
+    """A note this chat wrote joins its workspace's `notes:` (ADR-0112 point
+    4); the write to the workspace note lands among the chat's changes."""
+    from silica.kernel import workspaces
+
+    if _is_tool_failure(ev.result):
+        return
+    path = ""
+    try:
+        out = json.loads(ev.result)
+        path = str(out.get("path") or "") if isinstance(out, dict) else ""
+    except (TypeError, ValueError):
+        pass  # a non-JSON result names no path; the call's own argument does
+    path = path or str((ev.args or {}).get("path") or "")
+    if not path:
+        return
+    try:
+        ws = workspaces.read_workspace(ws_path)
+        if path.removesuffix(".md") not in {k.removesuffix(".md") for k in workspaces.members(ws)}:
+            workspaces.add_line(ws_path, "notes", path)
+    except Exception:
+        # The note is written either way; a workspace note deleted or broken
+        # mid-turn only loses the listing, which the drawer then shows absent.
+        logger.warning("could not add %s to the workspace %s", path, ws_path, exc_info=True)
 
 
 def _ctx_meter() -> dict:
@@ -970,7 +1055,7 @@ def _turn_kind(text: str) -> str:
     return word[1:] if any(c.name == word for c in COMMANDS) else "slash"
 
 
-async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterator[dict]:
+async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str = "") -> AsyncIterator[dict]:
     """One agent turn as a stream of transport-neutral wire dicts.
 
     Yields `event_to_json(...)` dicts as the agent streams, then exactly one
@@ -1002,8 +1087,11 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
     tool_errors: dict[str, int] = {}
     outcome = "cancelled"
     limit: str | None = None  # the layer a `limited` turn met (ADR-0102 point 10)
+    ws: dict | None = None    # the workspace this turn runs in (ADR-0112 point 4)
 
     def cb(ev):  # runs in the agent/LLM worker thread
+        if isinstance(ev, ToolCompleteEvent) and ws is not None and ev.name == "silica_write_note":
+            _join_workspace(ws["path"], ev)
         if isinstance(ev, ToolStartEvent):
             tools[ev.name] = tools.get(ev.name, 0) + 1
         elif isinstance(ev, ToolErrorEvent):
@@ -1135,6 +1223,10 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         msg: dict[str, Any] = {"role": "user", "content": agent_msg}
         if text.startswith("/"):
             msg["origin"] = "cli"
+        ws = await asyncio.to_thread(_resolve_workspace, workspace)
+        await asyncio.to_thread(_apply_workspace, ws)
+        if ws is not None:
+            msg["silica_workspace"] = ws["path"]   # the scope this turn ran in
         messages.append(msg)
         _narrate_user_turn(msg)
         if images:
@@ -1152,7 +1244,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
         sentinel = object()
         task = asyncio.create_task(
             asyncio.to_thread(
-                run_agent, messages, CONFIG.model, watch,
+                _scoped_run, ws, run_agent, messages, CONFIG.model, watch,
                 cancel_token=current_cancel,
                 # Same chat_tools cut as the CLI REPL (the tool block is the
                 # biggest per-iteration cost); interactive keeps the GUI's live
@@ -1270,7 +1362,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
              calls=tokens_after[0] - tokens_before[0], prompt=tokens_after[1] - tokens_before[1],
              cached=tokens_after[3] - tokens_before[3],
              completion=tokens_after[2] - tokens_before[2],
-             tools=dict(tools), tool_errors=dict(tool_errors), limit=limit)
+             tools=dict(tools), tool_errors=dict(tool_errors), limit=limit,
+             scope="workspace" if ws is not None else "vault")
         _prewarm_seed()  # the turn may have written notes — refresh the new-chat seed
         if task is not None and not task.done():
             current_cancel.set()  # abandonment: stop the zombie...
@@ -1279,7 +1372,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = ()) -> AsyncIterat
             _end_turn()  # normal / error / early-return: free now
 
 
-def _turn_response(text: str, attachments: "Sequence[Path]" = ()) -> StreamingResponse:
+def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str = "") -> StreamingResponse:
     """One agent turn as an SSE stream. Caller must claim the slot via
     `_begin_turn()` first; `_sweep_if_orphaned` frees it if the body never runs."""
 
@@ -1292,7 +1385,7 @@ def _turn_response(text: str, attachments: "Sequence[Path]" = ()) -> StreamingRe
         flaggable = hosted()
         sid0 = current_session_id
         seq0 = await asyncio.to_thread(_session_head, sid0) if flaggable else 0
-        async for item in run_turn(text, attachments):
+        async for item in run_turn(text, attachments, workspace):
             if flaggable and item.get("type") == "done":
                 turn = await asyncio.to_thread(_turn_since, sid0, seq0)
                 if turn:
@@ -1648,7 +1741,7 @@ async def chat(payload: dict):
     if queued is not None:
         _end_turn()
         return JSONResponse(queued, status_code=202)
-    return _turn_response(text, attachments)
+    return _turn_response(text, attachments, str(payload.get("workspace") or ""))
 
 
 @app.post("/phone/turn", dependencies=_SAME_ORIGIN)
@@ -2018,14 +2111,17 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
 
 @app.post("/vault/import", dependencies=_SAME_ORIGIN)
 async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = Form([]),
-                       last: str = Form("")):
+                       last: str = Form(""), workspace: str = Form("")):
     """The vault's `+` (ADR-0098 point 5): files, or a folder's files with
     their relative paths, into the Inbox, each through its lane, with no agent
     turn. One result per file; one file's failure never stops the others (H4).
 
     `paths[i]` is the folder-relative path of `files[i]` (`webkitRelativePath`),
     "" for a file picked on its own. `last` marks the page's final batch, after
-    which the imported folders are embedded in the background.
+    which the imported folders are embedded in the background. `workspace`
+    (ADR-0112 point 6) is the workspace whose `+` was used: each imported
+    note joins its `notes:`, a file still converting by its name, which
+    resolves when the job writes the note.
 
     The turn slot is held while the batch writes: `_begin_turn` is the one
     serialisation of vault writes the server has, and an import racing a
@@ -2045,7 +2141,85 @@ async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = F
         _end_turn()
     if last and folders:
         _embed_imported(folders)
+    if workspace:
+        await asyncio.to_thread(_list_imports_in, workspace, results)
     return {"files": results}
+
+
+def _list_imports_in(ref: str, results: list[dict]) -> None:
+    from silica.kernel import workspaces
+
+    ws = workspaces.find_workspace(ref)
+    if ws is None:
+        return
+    for row in results:
+        # a file still converting is listed by the note it will become
+        names = row.get("notes") or ([str(Path(row["path"]).with_suffix(""))]
+                                     if row.get("status") == "queued" and row.get("path") else [])
+        for n in names:
+            workspaces.add_line(ws["path"], "notes", n)
+
+
+# --- workspaces (ADR-0112) --------------------------------------------------------
+
+@app.get("/workspaces")
+def workspaces_list():
+    """Every workspace as the drawer shows it, and the one this chat is
+    opened in."""
+    from silica.kernel import workspaces
+
+    try:
+        rows = [workspaces.summary(w) for w in workspaces.list_workspaces()]
+    except Exception as exc:
+        return _failure(exc)
+    return {"workspaces": rows, "current": current_workspace}
+
+
+@app.post("/workspaces", dependencies=_SAME_ORIGIN)
+def workspaces_create(payload: dict):
+    """A new workspace note, optionally holding the note or folder its menu
+    was opened on."""
+    from silica.kernel import workspaces
+
+    try:
+        path = workspaces.create_workspace(str(payload.get("name") or ""),
+                                           notes=[str(n) for n in payload.get("notes") or []],
+                                           folders=[str(f) for f in payload.get("folders") or []])
+    except ValueError as exc:
+        # create_workspace's own sentences (name refused or taken), never a path
+        raise HTTPException(status_code=400, detail=exc.args[0]) from None
+    return workspaces.summary(workspaces.read_workspace(path))
+
+
+@app.post("/workspaces/line", dependencies=_SAME_ORIGIN)
+def workspaces_line(payload: dict):
+    """Add or remove one line of a workspace: the user's act from the
+    drawer's menu. Removing a line never touches the note or folder it names."""
+    from silica.kernel import workspaces
+
+    ws = workspaces.find_workspace(str(payload.get("workspace") or ""))
+    if ws is None:
+        raise HTTPException(status_code=404, detail="no such workspace")
+    key, value = str(payload.get("key") or ""), str(payload.get("value") or "")
+    if key not in workspaces.LINES or not value.strip():
+        raise HTTPException(status_code=400, detail="key must be notes, folders or where, with a value")
+    try:
+        if payload.get("on", True):
+            workspaces.add_line(ws["path"], key, value)
+        else:
+            workspaces.remove_line(ws["path"], key, value)
+    except (OSError, RuntimeError) as exc:
+        return _failure(exc)
+    return workspaces.summary(workspaces.read_workspace(ws["path"]))
+
+
+@app.get("/workspaces/membership")
+def workspaces_membership(path: str, folder: bool = False):
+    """For the drawer's menu on one note or folder: every workspace, whether
+    the row is a listed line of it, and any other reason it is a member."""
+    from silica.kernel import workspaces
+
+    return {"path": path, "folder": folder, "workspaces": workspaces.membership_of(path, is_folder=folder)}
 
 
 async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list[dict], set[str]]:
@@ -4465,7 +4639,7 @@ def list_sessions():
 
 @app.post("/session/load", dependencies=_SAME_ORIGIN)
 def load_session(payload: dict):
-    global current_session_id, _collapsed
+    global current_session_id, _collapsed, current_workspace
     if _busy:
         raise HTTPException(status_code=409, detail="a turn is already in progress")
     from silica.cli import _update_context_tokens
@@ -4495,6 +4669,12 @@ def load_session(payload: dict):
     # /resume already put a fresh seed in front; this is the same.
     messages[:] = _seeded()[0] + replayed
     _collapsed = set()
+    # The scope its last turn ran in (ADR-0112 point 4): the seed holds no
+    # workspace line, so it is written again here, as the seed is.
+    last = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
+    ws = _resolve_workspace(str(last.get("silica_workspace") or ""))
+    if ws is not None:
+        _apply_workspace(ws)
     _seen_numbers.clear()
     _seen_numbers.update(numbers_of_session(current_session_id))
     _update_context_tokens(messages)

@@ -232,7 +232,9 @@ def clamp_max_tokens(provider: str, model: str, requested: int | None, input_cha
 # (user_memory.TAINT_KEY, ADR-0090 point 8). `silica_turn_notes` is what the
 # chat drew under an answer (ADR-0094, agent/turn_notes.py): the reader's
 # line, never the model's.
-INTERNAL_KEYS = ("origin", "silica_reasoning", "silica_taint", "silica_turn_notes")
+# `silica_workspace` is the workspace a user turn ran in (ADR-0112 point 4),
+# kept on the turn so a reopened chat knows its scope.
+INTERNAL_KEYS = ("origin", "silica_reasoning", "silica_taint", "silica_turn_notes", "silica_workspace")
 
 
 def _to_wire(msg: dict) -> dict:

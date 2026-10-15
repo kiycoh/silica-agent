@@ -130,6 +130,7 @@ async function loadVaultInfo() {
       p.querySelector("button").addEventListener("click", (e) => { e.stopPropagation(); $("#vault-add").click(); });
       $("#tree").append(p);
     }
+    loadWorkspaces();                 // the members follow the files (ADR-0112)
     renderVaultHealth(data);          // the chip's dot, the panel's link count, the compartment's size
     syncTreePins();          // a fresh tree knows nothing about the pins yet
     markOpenNote();          // …nor about the note the drawer is on
@@ -313,6 +314,7 @@ function syncPinButton() {
   // A glyph alone, so the tip carries the state; the accessible name stays
   // put, since aria-pressed already says whether it is on.
   btn.dataset.tip = on ? "pinned: unpin this note" : "keep this note in the rail";
+  if (typeof syncNoteWs === "function") syncNoteWs(); // its neighbour states the same note
 }
 
 // The same pin, stated on the row it came from. Pinned is a state of the NOTE,
@@ -422,6 +424,13 @@ $("#tree").addEventListener("click", (e) => {
   // what a pin is for (naming it without going there).
   const pin = e.target.closest(".tree-pin");
   if (pin) { togglePin(pin.dataset.pin); return; }
+  // the row's workspaces (ADR-0112), also inside a folder's summary
+  const ws = e.target.closest(".tree-ws");
+  if (ws) {
+    e.preventDefault();
+    openWsMenu(ws, ws.dataset.wsNote || ws.dataset.wsFolder, !ws.dataset.wsNote);
+    return;
+  }
   // inside the folder's summary: the details must not toggle under it
   const plan = e.target.closest(".tree-plan");
   if (plan) { e.preventDefault(); learnPlanFolder(plan.dataset.folder); return; }
@@ -592,6 +601,12 @@ function applySidebarFilter() {
   $("#pinned").querySelectorAll(".pin-row").forEach((el) => {
     el.hidden = !!q && !el.textContent.toLowerCase().includes(q) &&
                 !(el.dataset.path || "").toLowerCase().includes(q);
+  });
+  // workspaces: on the name, or on any member's name or path
+  $("#workspaces").querySelectorAll(".ws-row").forEach((el) => {
+    const w = workspaces.find((x) => x.path === el.dataset.path);
+    el.hidden = !!q && !el.dataset.name.toLowerCase().includes(q) &&
+                !(w && w.members.some((m) => m.path.toLowerCase().includes(q)));
   });
   // changed notes: same substring rule as the tree, on the same names
   $("#changes").querySelectorAll(".chg-row").forEach((el) => {
@@ -856,6 +871,7 @@ async function openSession(id, fromUrl = false) {
     }
   } catch { notify("couldn't load that chat"); return; }
   currentSessionId = id;
+  loadWorkspaces(); // the scope its last turn ran in comes back with it (ADR-0112)
   // The push happens BEFORE showTab: showTab replaces the hash from rendered
   // state, and a push after it would find the hash already written and
   // push nothing, so Back would leave the app instead of the chat.

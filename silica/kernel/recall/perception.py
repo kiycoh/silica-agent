@@ -206,7 +206,8 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
                     use_rerank: bool = True, leg_stats: dict | None = None,
                     use_memory: bool = True, vault: str | None = None,
                     recall_rank: list[tuple[str, float]] | None = None,
-                    lexical_rank: list[tuple[str, float]] | None = None):
+                    lexical_rank: list[tuple[str, float]] | None = None,
+                    allow: frozenset[str] | None = None):
     """Fused first-stage retrieval + cross-encoder rerank for a fresh text query.
 
     The single retrieval path shared by the chat tools
@@ -304,6 +305,7 @@ def facade_retrieve(query: str, *, k: int, use_embedder: bool = True,
         k=k,
         recall_rank=recall_rank,
         lexical_rank=lexical_rank,
+        allow=allow if peek is None else None,
     ) or []
     if peek is not None:
         # Fusion marks the primary legs "vault", which every body reader takes
@@ -544,7 +546,8 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
              folder: str | None = None,
              min_trust: str | None = None,
              lifecycle: str | None = None,
-             mark_used: bool = False) -> Perception:
+             mark_used: bool = False,
+             allow: frozenset[str] | None = None) -> Perception:
     """Retrieve + assemble the answer-time context for `query`.
 
     ``mark_used`` is for the answer path only (silica_recall): the episodic
@@ -574,6 +577,10 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
     ``recall_rank``/``lexical_rank`` are forwarded to `facade_retrieve`
     untouched: extra ranked legs the caller computed, never built here.
 
+    ``allow`` is a workspace's member keys (ADR-0112 point 4), forwarded to
+    `facade_retrieve`, which applies it inside each leg; unlike ``folder`` it
+    needs no over-fetch.
+
     ``paths`` skips retrieval and assembles the given notes in order (the eval
     adapter's --stuff arm, or a caller that already holds a shortlist);
     unreadable paths are skipped and ranks stay dense. ``episodic_ttl_days``:
@@ -592,7 +599,7 @@ def perceive(query: str, *, now: str, k: int = DEFAULT_K,
             query, k=k * 3 if folder else k, use_embedder=use_embedder,
             use_rerank=use_rerank, use_memory=use_memory, vault=vault,
             leg_stats=leg_stats, recall_rank=recall_rank,
-            lexical_rank=lexical_rank)
+            lexical_rank=lexical_rank, allow=allow)
         if folder:
             from silica.kernel.recall.paths import in_folder
 

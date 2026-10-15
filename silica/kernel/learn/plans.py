@@ -22,7 +22,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ("notes", "folder", "topic", "steps")
+SCOPES = ("notes", "folder", "topic", "steps", "workspace")
 REACH = {"unistructural": 1, "multistructural": 2, "relational": 3, "extended": 4}
 REACH_LABEL = {1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts"}
 _STEP_RE = re.compile(r"^- \[( |x|X)\]\s*(.*)$")
@@ -209,6 +209,14 @@ def target_text(scope: str, target) -> str:
     inside a title survives the round trip."""
     if scope == "notes":
         return ", ".join(f"[[{n}]]" for n in notes_of(target))
+    if scope == "workspace":
+        # A wikilink, so renaming the workspace note rewrites the plan too, and
+        # by path: a plan named after its workspace shares its name, and
+        # [[Statistics exam]] would then name the plan itself.
+        from silica.kernel.workspaces import find_workspace, title_of
+
+        ws = find_workspace(str(target))
+        return f"[[{ws['path'].removesuffix('.md') if ws else title_of(str(target))}]]"
     return target if isinstance(target, str) else ", ".join(target)
 
 
@@ -243,7 +251,26 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=()) -> dict:
         return _topic_scope(str(target), allowed)
     if kind == "steps":
         return _steps_scope(str(target), notes, allowed, set(refused or ()))
+    if kind == "workspace":
+        return _workspace_scope(str(target), allowed)
     raise ValueError(f"unknown scope kind {kind!r}")
+
+
+def _workspace_scope(target: str, allowed: set[str]) -> dict:
+    """A workspace's members (ADR-0112 point 5), resolved live each read, so
+    a note added to the workspace joins the plan's frontier without an edit.
+    One tree node per folder the members sit in."""
+    from silica.kernel import workspaces
+
+    ws = workspaces.find_workspace(target)
+    if ws is None:
+        return {"paths": [], "tree": [], "gaps": [f"no workspace named {target}"]}
+    paths = sorted(p for p in workspaces.members(ws) if p in allowed)
+    groups: dict[str, list[str]] = {}
+    for p in paths:
+        groups.setdefault(p.rsplit("/", 1)[0] if "/" in p else "/", []).append(p)
+    return {"paths": paths, "tree": [{"node": f, "children": [], "leaves": ls} for f, ls in sorted(groups.items())],
+            "gaps": []}
 
 
 def _folder_tree(prefix: str, paths: list[str]) -> list[dict]:
@@ -975,6 +1002,7 @@ def _goal_sentence(scope: str, target, objectives: list[str]) -> str:
     from silica.kernel.learn import objectives as obj
 
     what = {"notes": "these notes", "folder": f"everything under {target}", "topic": f"the notes on {target}",
+            "workspace": f"the notes of the workspace {target}",
             "steps": f"the steps of {target if isinstance(target, str) and len(target) < 60 and chr(10) not in target else 'the program'}"}[scope]
     names = [obj.LABEL[o].lower() for o in obj.normalize(objectives)] or ["objectives to define"]
     return f"Learn {what}: " + (", ".join(names[:-1]) + (", and " if len(names) > 1 else "") + names[-1]) + "."

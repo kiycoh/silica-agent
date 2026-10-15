@@ -145,6 +145,7 @@ def _rank_embeddings_from_vec(
     *,
     k: int,
     exclude: set[str],
+    allow: frozenset[str] | None = None,
 ) -> list[tuple[str, str, float]] | None:
     """Note ranking from a query vector, or None if the embed leg abstains.
 
@@ -155,7 +156,8 @@ def _rank_embeddings_from_vec(
     if embed_store is None or vec is None:
         return None
     try:
-        cands = embed_store.cosine_top_k(vec, k=k, exclude=exclude)
+        cands = (embed_store.cosine_top_k(vec, k=k, exclude=exclude, allow=allow) if allow is not None
+                 else embed_store.cosine_top_k(vec, k=k, exclude=exclude))
     except Exception:
         return None
     if not cands:
@@ -274,6 +276,7 @@ def _rank_cooccur_from_profile(
     k: int,
     blocked: set[str],
     scope: str | None,
+    allow: frozenset[str] | None = None,
 ) -> list[tuple[str, float]] | None:
     """Rank in-scope notes by IDF-weighted concept overlap with `profile`
     (implicit concept->notes inverted index). Returns None when nothing overlaps.
@@ -320,7 +323,7 @@ def _rank_cooccur_from_profile(
         for path, tf in plist.items():
             ok = allowed.get(path)
             if ok is None:
-                ok = path not in blocked and in_folder(path, scope)
+                ok = path not in blocked and in_folder(path, scope) and (allow is None or path in allow)
                 allowed[path] = ok
             if not ok:
                 continue
@@ -723,6 +726,7 @@ def related_notes_for_query(
     exclude: set[str] | None = None,
     recall_rank: list[tuple[str, float]] | None = None,
     lexical_rank: list[tuple[str, float]] | None = None,
+    allow: frozenset[str] | None = None,
 ) -> list[RelatedNote]:
     """Return the top-k notes related to a FRESH query (not an indexed note).
 
@@ -746,11 +750,14 @@ def related_notes_for_query(
     `lexical_rank`: the hand-written BM25/fuzzy leg (opt-in via `use_lexical`
     on `facade_retrieve`), folded into fusion as an extra abstaining leg. None
     (the default) leaves every caller but that opt-in path unaffected.
+
+    `allow`: the store keys a workspace's turn may return (ADR-0112 point 4),
+    applied inside both vault legs before their cut; None is every note.
     """
     blocked = set(exclude or ())
     pool = max(k * 3, _POOL_MIN)
 
-    embed_rank = _rank_embeddings_from_vec(embed_store, query_vec, k=pool, exclude=blocked)
+    embed_rank = _rank_embeddings_from_vec(embed_store, query_vec, k=pool, exclude=blocked, allow=allow)
 
     cooc_rank = None
     if cooccur_store is not None and query_text:
@@ -760,7 +767,7 @@ def related_notes_for_query(
             scope=scope,
         )
         cooc_rank = _rank_cooccur_from_profile(
-            cooccur_store, profile, k=pool, blocked=blocked, scope=scope
+            cooccur_store, profile, k=pool, blocked=blocked, scope=scope, allow=allow
         )
 
     mem_embed_rank = _rank_embeddings_from_vec(
