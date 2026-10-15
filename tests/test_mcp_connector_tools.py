@@ -371,8 +371,12 @@ def test_a_session_start_opens_the_servers_in_the_background():
     mcp_tools.unregister()  # registered from this file, not from an earlier test's
     mcp_tools.start()
     assert not mcp_client.CLIENTS.connected("mail"), "startup does not wait on a server"
+    # The session is alive before its tool listing is cached (_list writes the
+    # cache after ready): the release job of v0.15.0 read the cache in that gap
+    # and failed, so the wait covers both.
     deadline = time.monotonic() + 30
-    while not mcp_client.CLIENTS.connected("mail") and time.monotonic() < deadline:
+    while not (mcp_client.CLIENTS.connected("mail") and mcp_client.cached_tools("mail")) \
+            and time.monotonic() < deadline:
         time.sleep(0.1)
     assert mcp_client.CLIENTS.connected("mail")
     assert mcp_client.cached_tools("mail")
