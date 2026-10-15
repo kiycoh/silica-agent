@@ -261,6 +261,11 @@ def apply_arm(arm: str) -> None:
             prompts._MATH_GUI = ""
         else:
             prompts._BASE = ablate(prompts._BASE, rule)
+    elif arm == "no_app":
+        # The seed before ADR-0115. An empty message is dropped by run_one; the
+        # arm the ADR was gated on (2026-10-16) added what this removes.
+        import silica.ui.web.app_help as app_help
+        app_help.app_message = lambda: ""
     elif arm == "no_relevance":
         import silica.agent.relevance as relevance
         relevance.ENABLED = False
@@ -818,7 +823,7 @@ def run_one(arm: str, case: str, model: str, max_prompt_tokens: int, out_json: P
     vault = Path(os.environ["SILICA_VAULT"])
     # An ablated suffix leaves an empty system message; a Jinja route folds it
     # into the head harmlessly, a hosted one may 400 on empty content.
-    messages = [m for m in seed_messages(math=True) if m.get("content")]
+    messages = [m for m in seed_messages(math=True, app=True) if m.get("content")]
     sid = _narr.NARRATOR.ensure_session(driver="probe", seed={"arm": arm, "case": case})
     cancel = threading.Event()
     spent = {"prompt": 0, "completion": 0, "calls": 0}

@@ -359,7 +359,7 @@
    display with an id's weight. */
 html[data-hosted] #views .tab[data-tab="metrics"],
 html[data-hosted] #railmini .tab[data-tab="metrics"],
-html[data-hosted] #help-panel .hp-examine {
+html[data-hosted] #help-panel [data-surface="local"] {
   display: none;
 }
 

@@ -86,8 +86,9 @@ def _build_seed() -> tuple[list[dict], int]:
     global _seed
     from silica.cli import _chat_tool_schemas, _count_context_tokens, seed_messages
 
-    # The same builder the TUI seeds from, math=True for the MathML renderer.
-    msgs = seed_messages(math=True)
+    # The same builder the TUI seeds from, math=True for the MathML renderer,
+    # app=True for the help panel the chat answers from (ADR-0115).
+    msgs = seed_messages(math=True, app=True)
     # Tools included for the same reason `_update_context_tokens` includes them:
     # counted without the block, a fresh window read 2.1k and jumped to 9.3k on
     # the first turn, so the meter's opening number disagreed with its next one.

@@ -327,12 +327,13 @@ def _vault_scope() -> str:
     )
 
 
-def seed_messages(math: bool = False) -> list[dict]:
+def seed_messages(math: bool = False, app: bool = False) -> list[dict]:
     """The system context a fresh conversation starts from: prompt, date, vault
     scope, vault map, and the restated language rule.
 
     Shared by the TUI and the GUI (`ui/web/server._build_seed`, which passes
-    math=True for the MathML renderer). It used to be TUI-only, and the GUI's
+    math=True for the MathML renderer and app=True for the help panel the chat
+    answers from, ADR-0115). It used to be TUI-only, and the GUI's
     own seed had drifted to prompt + map: no `_vault_scope`, so the model was
     blind to `write_dir`, and no closing language line, which is the fix commit
     93b6d2d shipped here and never carried across. One builder, no drift.
@@ -347,6 +348,12 @@ def seed_messages(math: bool = False) -> list[dict]:
     messages: list[dict] = [{"role": "system", "content": system_prompt(reply, math=math)}]
     messages.append({"role": "system", "content": _today_line()})
     messages.append({"role": "system", "content": _vault_scope()})
+    if app:
+        # Before the map, which is the seed's bulk. On 2026-10-16 the seed with
+        # it answered 13 to 15 of 14 to 15 how-to questions a run, against 4 to 5
+        # without (docs evaluation/app-knowledge-2026-10-16).
+        from silica.ui.web.app_help import app_message
+        messages.append({"role": "system", "content": app_message()})
     _inject_vault_map(messages)
     # User memory (ADR-0076), frozen for the session: a save lands on disk and
     # in its tool result and shows here from the next session, so the model's
