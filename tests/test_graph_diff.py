@@ -325,3 +325,38 @@ def test_graph_diff_real_loss_still_caught_across_twins():
     assert not success
     assert "Broken backlinks detected" not in errors[0]  # 2 of 15 is drift, not vandalism
     assert "decreased from 15 to 13" in errors[0]
+
+
+def _foreign_link_snapshots():
+    """A note this payload never touched gains a link to a note that never
+    existed: a sub-agent's merge wrote it (book run 2026-10-15)."""
+    pre = GraphSnapshot(orphans=[], unresolved=[], link_counts={"notes/Intrattabilita": 2})
+    post = GraphSnapshot(
+        orphans=[],
+        unresolved=[Link(source=NoteRef(name="Intrattabilita", path="notes/Intrattabilita.md"),
+                         target="Posteriore Variazionale")],
+        link_counts={"notes/Intrattabilita": 3},
+    )
+    return pre, post
+
+
+def test_a_link_another_writer_put_in_an_untouched_note_is_not_this_payloads_regression():
+    pre, post = _foreign_link_snapshots()
+    success, errors = check_graph_regression(pre, post, created_paths=[], removed_paths=frozenset())
+    assert success and not errors
+
+
+def test_a_link_left_dangling_by_a_note_this_payload_removed_still_blocks():
+    pre, post = _foreign_link_snapshots()
+    for removed in ({"notes/Posteriore Variazionale.md"}, {"Posteriore Variazionale.md"}):
+        success, errors = check_graph_regression(pre, post, created_paths=[],
+                                                 removed_paths=frozenset(removed))
+        assert not success
+        assert "[[Intrattabilita]] -> [[Posteriore Variazionale]]" in errors[0]
+
+
+def test_without_removed_paths_every_new_unresolved_link_still_blocks():
+    """organize's gate passes none: its moves are its whole job."""
+    pre, post = _foreign_link_snapshots()
+    success, _ = check_graph_regression(pre, post, created_paths=[])
+    assert not success

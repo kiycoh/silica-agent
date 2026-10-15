@@ -39,6 +39,7 @@ def check_graph_regression(
     created_paths: list[str],
     deferred_stems: frozenset[str] = frozenset(),
     patched_paths: frozenset[str] = frozenset(),
+    removed_paths: frozenset[str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Verify that the changes do not introduce structural regressions.
 
@@ -60,11 +61,22 @@ def check_graph_regression(
          and calling one intentional and the other vandalism only depended on
          whether the concept already had a file. What is left for the rule is
          its real job — collateral damage to notes nobody in this chunk touched.
+         With `removed_paths` given, that damage has one cause it can have:
+         the payload deleted or moved the note the link points at. It cannot
+         write in a note it did not touch, so a link that is new there was
+         written by someone else, a sub-agent's merge or the user, and rolling
+         the payload back neither caused it nor removes it. A 2026-10-15 book
+         run rolled back 30 committed notes over a dedup merge's
+         [[Posteriore Variazionale]] in a note of an earlier file, which the
+         rollback could not even reach.
 
     Args:
       deferred_stems: lowercase basenames (no extension) of notes that were
         planned in this chunk but failed to settle and were deferred for retry.
       patched_paths: vault-relative paths this payload patched or overwrote.
+      removed_paths: vault-relative paths this payload deleted or moved away;
+        None keeps rule 2 on every new unresolved link (organize's gate, whose
+        moves are its whole job, passes none).
 
     Returns:
       (success, list_of_errors)
@@ -113,12 +125,16 @@ def check_graph_regression(
     # a false positive that mirrors the Rule 1 domain-expansion problem already
     # guarded by norm_pre_observed.
     norm_patched = {normalize_path(p) for p in patched_paths}
+    # A link names a note by path or by basename; a removed note answers to both.
+    removed = None if removed_paths is None else {
+        k for p in removed_paths for k in (normalize_path(p), normalize_path(p).rsplit("/", 1)[-1])}
     new_unres_blocking = {
         (src, tgt) for src, tgt in new_unres
         if src not in norm_created
         and src not in norm_patched   # exempt notes this chunk deliberately edited
         and src in norm_pre_observed   # must have a concrete pre-write baseline
         and tgt not in deferred_stems  # exempt planned-but-deferred targets
+        and (removed is None or tgt in removed or tgt.rsplit("/", 1)[-1] in removed)
     }
     if new_unres_blocking:
         detail_links = []
