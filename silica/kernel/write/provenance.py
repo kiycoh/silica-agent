@@ -754,7 +754,11 @@ _NUMBER_RE = re.compile(r"(?<![0-9A-Za-z])-?\d+(?:[.,]\d+)*")
 _GROUPED_RE = re.compile(r"-?\d{1,3}(?:[.,]\d{3})+")
 _DECIMAL_COMMA_RE = re.compile(r"-?\d+,\d+")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
-_URL_RE = re.compile(r"https?://\S+")
+# Any scheme and any markdown link target, not http(s) alone: a local model
+# linked a note as `](file://C:/.../Ledbury%20Components%202025%20EWCA.md)`
+# and its `%20` escapes were flagged as the numbers 20, 202025 and 201109
+# (legal testbench probe, 2026-10-15).
+_URL_RE = re.compile(r"\b[a-z][a-z0-9+.-]*://\S+|\]\([^)\s]*\)", re.I)
 
 
 def _number_spellings(tok: str) -> set[str]:
