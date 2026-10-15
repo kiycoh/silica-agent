@@ -5118,17 +5118,23 @@ def get_settings():
     locked, and its suggestions. Plus what About needs, so opening the panel is
     one round trip."""
     from silica import __version__
+    from silica.config import hosted
     from silica.onboarding.wizard import resolve_env_path
     from silica.ui.web import settings as st
     from silica.update import behind_count
 
+    on_server = hosted()
     return {
         "env_path": st.short_path(resolve_env_path()),
         "busy": _busy,
-        "sections": st.read_sections(),
+        # No hosted row has a pick-list fed by /models (ADR-0104 point 3), so
+        # the four probes would run on every opening of the panel for nothing.
+        "sections": st.read_sections(probe=not on_server),
         "version": __version__,
-        "behind": behind_count(),
+        # A tenant cannot update itself; the page drops the line by `hosted`.
+        "behind": 0 if on_server else behind_count(),
         "issues_url": "https://github.com/kiycoh/silica-agent/issues",
+        "hosted": on_server,
     }
 
 
@@ -5172,10 +5178,16 @@ async def confirm_setting(payload: dict):
     which a model change never touches, so stale vectors would be compared in an
     incompatible space in silence until something forces a full re-index.
     """
+    from silica.config import hosted
     from silica.ui.web import settings as st
 
     key = str(payload.get("key", ""))
     value = str(payload.get("value", ""))
+    if hosted():
+        # Neither row is a hosted row (ADR-0104 point 1). Caddy refuses this
+        # path too, but a vault switch skips apply's allow-list, so the refusal
+        # must not rest on the front door alone.
+        raise HTTPException(status_code=404, detail="not on this server")
     _reject_if_busy_or_locked(key)
     if key == st.VAULT_KEY:
         return await asyncio.to_thread(_apply_vault_switch, value)

@@ -16,6 +16,9 @@ const settingsBtn = $("#settings-btn");
 // Skills after Connectors (ADR-0097 point 4): the same shape, a list you add
 // to and remove from.
 const ST_EXTRA = ["Zotero", "Connectors", "Skills", "Endpoints", "Diagnostics", "About"];
+// A hosted account gets only these two (ADR-0104 point 1): the others are about
+// a machine the operator runs, and their routes are refused at the front door.
+const ST_EXTRA_HOSTED = ["Skills", "About"];
 const stState = { data: null, section: "Session", controls: [], uid: 0 };
 
 // One glyph per section, drawn as the rail draws its own: a 24 grid, a 1.7
@@ -496,6 +499,9 @@ async function renderDiagnostics(host) {
 function renderAbout(host, data) {
   host.querySelectorAll(".st-row, .st-note-line").forEach((e) => e.remove());
   stInfoRow(host, "version", `silica ${data.version}`);
+  // No "updates": a tenant cannot update itself. No "report a bug": it opens
+  // a public GitHub issue, and /bug_report is refused on hosted.
+  if (data.hosted) return;
   stInfoRow(host, "updates", data.behind
     ? `${data.behind} commit${data.behind === 1 ? "" : "s"} behind · update with \`silica update\``
     : "up to date");
@@ -555,9 +561,10 @@ function stRender(data) {
     for (const row of section.rows) el.appendChild(stRowEl(row));
     stPanel.appendChild(el);
   }
-  for (const name of ST_EXTRA) stPanel.appendChild(stSectionEl(name));
+  const extra = data.hosted ? ST_EXTRA_HOSTED : ST_EXTRA;
+  for (const name of extra) stPanel.appendChild(stSectionEl(name));
   stPanel.appendChild(stEl("div", "st-empty"));
-  for (const name of [...data.sections.map((s) => s.name), ...ST_EXTRA]) {
+  for (const name of [...data.sections.map((s) => s.name), ...extra]) {
     const b = stEl("button", "st-tab");
     b.innerHTML = stTabIcon(name);
     b.appendChild(stEl("span", "", name));
@@ -567,12 +574,18 @@ function stRender(data) {
     stTabs.appendChild(b);
   }
   renderAbout(stPanel.querySelector('[data-section="About"]'), data);
-  renderEndpoints(stPanel.querySelector('[data-section="Endpoints"]'));
-  renderZotero(stPanel.querySelector('[data-section="Zotero"]'));
-  renderConnectors(stPanel.querySelector('[data-section="Connectors"]'));
   renderSkills(stPanel.querySelector('[data-section="Skills"]'));
   const memory = stPanel.querySelector('[data-section="Memory"]');
   if (memory) renderMemory(memory);
+  if (!data.hosted) stRenderMachine();
+  stShow(stState.section);
+  stSetBusy(data.busy || streaming);
+}
+
+function stRenderMachine() {
+  renderEndpoints(stPanel.querySelector('[data-section="Endpoints"]'));
+  renderZotero(stPanel.querySelector('[data-section="Zotero"]'));
+  renderConnectors(stPanel.querySelector('[data-section="Connectors"]'));
   const diagnostics = stPanel.querySelector('[data-section="Diagnostics"]');
   // The checks are a snapshot of a machine that keeps changing — starting the
   // server this panel just told you was down is the whole point.
@@ -581,8 +594,6 @@ function stRender(data) {
   recheck.addEventListener("click", () => renderDiagnostics(diagnostics));
   diagnostics.querySelector(".st-section-title").appendChild(recheck);
   renderDiagnostics(diagnostics);
-  stShow(stState.section);
-  stSetBusy(data.busy || streaming);
 }
 
 function stShow(name) {

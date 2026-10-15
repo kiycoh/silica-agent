@@ -239,3 +239,56 @@ def test_vault_switch_is_live_only_and_never_persists(client, env_file, tmp_path
 
 def test_vault_origin_is_never_the_file():
     assert st._origin(st.VAULT_KEY, {st.VAULT_KEY}) == "derived"
+
+
+# --- hosted (ADR-0104) ---------------------------------------------------------
+# Spelled out here rather than read off HOSTED_ROWS, so a key added to the
+# tuple by accident fails a test instead of reaching every tenant.
+_HOSTED_TABLE = {
+    "Session": ["SILICA_MODEL", "context", "SILICA_SHOW_THINKING"],
+    "Language": ["SILICA_STT_LANG", "SILICA_STT_BROWSER"],
+    "Display": ["SILICA_THEME", "SILICA_SHOW_THINKING",
+                "SILICA_GRAPH_PARTICLES", "SILICA_GRAPH_SHADING"],
+    "Memory": ["SILICA_MEMORY"],
+}
+
+
+@pytest.fixture
+def hosted_client(client, monkeypatch):
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    # Nothing exported: the refusals below must come from the table, not from
+    # a lock that a host.env missing the line would not give.
+    monkeypatch.setattr(st, "SHELL_ENV", frozenset())
+    return client
+
+
+def test_hosted_get_lists_exactly_the_table(hosted_client, env_file):
+    c, _server = hosted_client
+    body = c.get("/settings").json()
+    assert body["hosted"] is True and body["behind"] == 0
+    assert {s["name"]: [r["key"] for r in s["rows"]] for s in body["sections"]} == _HOSTED_TABLE
+    rows = {r["key"]: r for s in body["sections"] for r in s["rows"]}
+    assert rows["SILICA_MODEL"]["kind"] == "readonly"
+    assert rows["SILICA_STT_BROWSER"]["options"] == ["off", "on-device"]
+    assert rows["context"]["value"] == f"{CONFIG.max_context_tokens:,} tokens"
+
+
+def test_hosted_refuses_every_write_outside_the_table(hosted_client, env_file):
+    c, _server = hosted_client
+    for key, value in (("SILICA_PROVIDER_API_KEY", "sk-x"),
+                       ("SILICA_STT_BROWSER", "cloud"),
+                       ("SILICA_MODEL", "openai/gpt-5"),
+                       ("SILICA_INBOX_DIR", "elsewhere")):
+        assert c.post("/settings", json={"key": key, "value": value}).status_code == 400, key
+    confirm = c.post("/settings/confirm", json={"key": "SILICA_VAULT", "value": "/"})
+    assert confirm.status_code == 404
+    assert not env_file.exists()
+
+
+def test_hosted_writes_a_table_row_to_the_tenant_env(hosted_client, env_file, monkeypatch):
+    c, _server = hosted_client
+    # The write is live too: both are put back after the test.
+    monkeypatch.setenv("SILICA_STT_LANG", "auto")
+    monkeypatch.setattr(CONFIG, "stt_lang", CONFIG.stt_lang)
+    assert c.post("/settings", json={"key": "SILICA_STT_LANG", "value": "it"}).status_code == 200
+    assert "SILICA_STT_LANG=it" in env_file.read_text()

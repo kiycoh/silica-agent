@@ -25,7 +25,7 @@ than accepting an edit we know evaporates.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from silica import SHELL_ENV
@@ -35,6 +35,7 @@ from silica.config import (
     PROVIDER_PREFIXES,
     USER_ENV,
     claim_env,
+    hosted,
 )
 
 
@@ -77,6 +78,19 @@ SAFE_MODE_KEY = "safe_mode"
 
 _EMBED_WARN = "changing this invalidates every stored vector"
 
+# The rows a hosted account sees and may write (ADR-0104 point 1). sections()
+# filters by it, so the panel and apply's allow-list shrink together: hiding
+# rows in the page alone would leave every key the host does not set writable
+# by a bare POST. By section, not one flat tuple of keys, because the model is
+# also a Brains row and Brains is hidden.
+HOSTED_ROWS: dict[str, tuple[str, ...]] = {
+    "Session": ("SILICA_MODEL", "context", "SILICA_SHOW_THINKING"),
+    "Language": ("SILICA_STT_LANG", "SILICA_STT_BROWSER"),
+    "Display": ("SILICA_THEME", "SILICA_SHOW_THINKING",
+                "SILICA_GRAPH_PARTICLES", "SILICA_GRAPH_SHADING"),
+    "Memory": ("SILICA_MEMORY",),
+}
+
 # The four endpoints serve.py knows how to start, and the env key that names the
 # command for each. One table for the model pick-lists and the Endpoints section.
 ENDPOINTS: tuple[tuple[str, str], ...] = (
@@ -115,7 +129,7 @@ def sections() -> dict[str, tuple[Row, ...]]:
     from silica.onboarding.wizard import EMBED_MODELS, RERANK_MODELS
 
     providers = tuple(sorted(PROVIDER_PREFIXES))
-    return {
+    table = {
         "Session": (
             Row("SILICA_MODEL", "model", "model", "text", "what answers you",
                 models_of="chat"),
@@ -216,6 +230,29 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 "and keeps the files"),
         ),
     }
+    if not hosted():
+        return table
+    return {
+        name: tuple(_hosted_row(r) for r in table[name] if r.key in keys)
+        for name, keys in HOSTED_ROWS.items()
+    }
+
+
+def _hosted_row(row: Row) -> Row:
+    """A row as a hosted account gets it (ADR-0104 point 1)."""
+    if row.key == "SILICA_MODEL":
+        # Read-only by kind, not only by host.env's lock: a host.env that lost
+        # the line would otherwise let a POST pick any model on the tenant's key.
+        return replace(row, kind="readonly", models_of="")
+    if row.key == "context":
+        return replace(row, help="tokens a turn is cut to")
+    if row.key == "SILICA_STT_BROWSER":
+        # "cloud" sends the audio to the browser's vendor, a recipient the
+        # privacy notice does not name.
+        return replace(row, options=("off", "on-device"), help=(
+            "the browser's own recognizer, when no transcriber answers, and its "
+            "voices for reading Learn aloud · on-device keeps audio on this device"))
+    return row
 
 
 def _applicable() -> dict[str, Row]:
@@ -289,6 +326,13 @@ def _shown(row: Row) -> str:
 
 
 def _readonly_value(key: str) -> str:
+    if key == "SILICA_MODEL":
+        return CONFIG.model or ""
+    if key == "context" and hosted():
+        # model_limits misses the dated id the host pins ((0, 0) for
+        # qwen3.7-flash-20260727, measured 2026-10-14), and the window a turn
+        # is actually cut to is this one.
+        return f"{CONFIG.max_context_tokens:,} tokens"
     if key == "context":
         from silica.agent.providers import model_limits
 
@@ -481,6 +525,10 @@ def apply(key: str, value) -> dict:
         # Not an env var: the manifest is the store, so none of the .env
         # machinery below applies to this row.
         return apply_safe_mode(_truthy(value))
+    if row.kind == "enum" and str(value) not in _enum_options(row):
+        # The <select> is closed but a POST does not come from it, and on hosted
+        # the narrowed set is the boundary (browser speech without "cloud").
+        return {"ok": False, "error": f"{row.label}: one of {', '.join(_enum_options(row))}"}
 
     updates = provider_group(str(value)) if key == "SILICA_PROVIDER" else {}
     if not updates:
