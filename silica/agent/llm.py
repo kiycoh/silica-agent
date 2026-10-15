@@ -579,8 +579,8 @@ def _keep_openrouter_cache_markers(litellm) -> None:
     def supports(self, model: str) -> bool:
         return any(k in model.lower() for k in _OPENROUTER_CACHEABLE) or orig(self, model)
 
-    supports._silica = True
-    OpenrouterConfig._supports_cache_control_in_content = supports
+    supports._silica = True  # type: ignore[attr-defined]
+    OpenrouterConfig._supports_cache_control_in_content = supports  # type: ignore[method-assign]
 
 
 # Routes whose server renders the conversation with the model's own Jinja chat
