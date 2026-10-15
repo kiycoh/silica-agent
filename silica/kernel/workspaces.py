@@ -12,6 +12,7 @@ user's own words, read as standing instructions by a chat opened in it.
 from __future__ import annotations
 
 import re
+import threading
 from contextvars import ContextVar
 from pathlib import Path
 
@@ -34,14 +35,19 @@ def _vault() -> Path:
 
 
 def is_workspace(data: dict | None) -> bool:
-    return bool(data) and str(data.get("type") or "").strip().lower() == KIND
+    return isinstance(data, dict) and str(data.get("type") or "").strip().lower() == KIND
 
 
 def _as_list(value) -> list[str]:
     if value is None:
         return []
+    # Hand-written YAML: `- [[Note]]` unquoted is a nested list and
+    # `- course: stats` unquoted a mapping; str() of either matched nothing and
+    # the next edit wrote it back as `[['Note']]`.
+    if isinstance(value, dict):
+        return [f"{k}: {v}" for k, v in value.items()]
     if isinstance(value, (list, tuple)):
-        return [str(v).strip() for v in value if str(v).strip()]
+        return [s for v in value for s in _as_list(v)]
     text = str(value).strip()
     return [text] if text else []
 
@@ -110,7 +116,8 @@ def read_workspace(path: str, text: str | None = None) -> dict:
     return {
         "path": path,
         "name": name,
-        "notes": [title_of(x) for x in _as_list(data.get("notes"))],
+        # every link of a line: a text property `"[[A]], [[B]]"` lost B on the next edit
+        "notes": [t.strip() for x in _as_list(data.get("notes")) for t in (_WIKILINK_RE.findall(x) or [x])],
         "folders": [f.replace("\\", "/").strip("/") for f in _as_list(data.get("folders"))],
         "where": _as_list(data.get("where")),
         "instructions": "\n".join(lines).strip(),
@@ -206,7 +213,11 @@ def dead_lines(ws: dict) -> dict[str, list[str]]:
     stems = {Path(p).stem.casefold() for p in fms}
     notes = [t for t in ws.get("notes", [])
              if (t if t.endswith(".md") else t + ".md") not in fms and Path(t).stem.casefold() not in stems]
-    folders = [f for f in ws.get("folders", []) if not (vault / f).is_dir()]
+    # A line that leaves the vault is dead whatever is there: is_dir() on it
+    # would tell a hosted tenant which directories the server has.
+    root = vault.resolve()
+    folders = [f for f in ws.get("folders", [])
+               if not (vault / f).resolve().is_relative_to(root) or not (vault / f).is_dir()]
     return {"notes": notes, "folders": folders}
 
 
@@ -236,7 +247,11 @@ def membership_of(path: str, is_folder: bool = False) -> list[dict]:
         else:
             m = members(w)
             reasons = [r for r in m.get(path, []) if r["kind"] != "listed"]
-            listed = any(r["kind"] == "listed" for r in m.get(path, []))
+            # Against the lines, not the members: a plan or a workspace note
+            # listed by hand is never a member, and its line must still show
+            # checked so it can be taken out again.
+            keys = {_note_key(t) for t in w["notes"]}
+            listed = _note_key(path) in keys or _note_key(Path(path).stem) in keys
         out.append({"path": w["path"], "name": w["name"], "listed": listed, "reasons": reasons})
     return out
 
@@ -258,6 +273,12 @@ def _link_name(value: str) -> str:
     clash = sum(1 for p in _frontmatters(_vault()) if Path(p).stem.casefold() == stem.casefold())
     return stem if clash <= 1 else target
 
+# One writer at a time: add_line/remove_line read the note and write the
+# whole line back, so two edits at once (the drawer, a turn's write, an
+# import) kept only the last: 24 concurrent adds kept 1 (measured 2026-10-15).
+_EDIT_LOCK = threading.Lock()
+
+
 def _set_line(ws_path: str, key: str, values: list[str]) -> None:
     from silica.driver import DRIVER
 
@@ -270,6 +291,11 @@ def add_line(ws_path: str, key: str, value: str) -> bool:
     line was already there."""
     if key not in LINES:
         raise ValueError(f"unknown workspace line {key!r}")
+    with _EDIT_LOCK:
+        return _add_line(ws_path, key, value)
+
+
+def _add_line(ws_path: str, key: str, value: str) -> bool:
     ws = read_workspace(ws_path)
     value = value.strip()
     if key == "notes":
@@ -291,6 +317,11 @@ def remove_line(ws_path: str, key: str, value: str) -> bool:
     """Remove one line; never the file it names (leaving deletes nothing)."""
     if key not in LINES:
         raise ValueError(f"unknown workspace line {key!r}")
+    with _EDIT_LOCK:
+        return _remove_line(ws_path, key, value)
+
+
+def _remove_line(ws_path: str, key: str, value: str) -> bool:
     ws = read_workspace(ws_path)
     if key == "notes":
         want = {_note_key(title_of(value)), _note_key(_link_name(value))}
@@ -318,8 +349,9 @@ def create_workspace(name: str, notes=(), folders=()) -> str:
     from silica.kernel.write import frontmatter
 
     name = " ".join(str(name).split())
-    if not name or _BAD_NAME.search(name):
-        raise ValueError("a workspace name cannot be empty or hold / \\ : * ? \" < > | # ^ [ ]")
+    # a leading dot is a hidden file the walk never lists: a workspace no one sees
+    if not name or _BAD_NAME.search(name) or name.startswith("."):
+        raise ValueError("a workspace name cannot be empty, start with a dot or hold / \\ : * ? \" < > | # ^ [ ]")
     if find_workspace(name):
         raise ValueError(f"a workspace named {name!r} already exists")
     path = f"{in_write_dir(DEFAULT_FOLDER)}/{name}.md"
@@ -380,7 +412,9 @@ def instructions_message(ws: dict, count: int) -> str:
     the scope does, then the body of the workspace note as the user wrote it."""
     head = (f'This conversation is opened in the workspace "{ws["name"]}" ({count} notes). '
             "Searches return only its notes; a note the user names with @ or by path is read "
-            "wherever it is. A note you write here joins the workspace.")
+            "wherever it is. A note you write here joins the workspace. The vault map above "
+            "describes the whole vault: do not open a note it names outside this workspace "
+            "unless the user asks for it.")
     body = (ws.get("instructions") or "").strip()
     if not body:
         return head

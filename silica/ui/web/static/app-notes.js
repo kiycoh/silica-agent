@@ -1619,6 +1619,8 @@ async function saveEdit() {
       editClean = data.text;
       if (data.broken) editor.setMissing(data.broken);
       loadChanges(); // the Work compartment and the menu's diff see the edit
+      // a workspace note's row reads its name, lines and instructions (ADR-0112)
+      if (typeof workspaces !== "undefined" && workspaces.some((w) => w.path === path)) loadWorkspaces();
     } catch {
       notify("couldn't save the note");
     } finally {

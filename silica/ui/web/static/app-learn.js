@@ -1421,6 +1421,8 @@ function lrDefaultName() {
   if (f.nameTouched || !f.scope) return;
   if (f.scope === "folder") f.name = f.target.replace(/\/$/, "").split("/").pop();
   else if (f.scope === "steps") f.name = f.label && !f.target.includes("\n") ? f.label : `Syllabus, ${lrDate(new Date().toISOString())}`;
+  // "plan", so the plan note does not take its workspace's name (ADR-0112)
+  else if (f.scope === "workspace") f.name = `${f.label} plan`;
   else f.name = f.label || f.target;
 }
 

@@ -199,3 +199,69 @@ def test_the_file_listing_is_the_members_inside_a_scope(vault):
     assert "Courses/Econometrics/Panel data.md" not in out["files"]
     assert "Concepts/Residuals.md" in out["files"] and out["total"] == 5
     assert "Courses/Econometrics/Panel data.md" in silica_files("")["files"]
+
+
+def test_a_listed_card_reads_as_listed_so_it_can_be_taken_out(vault):
+    # a plan or a workspace note is never a member, but a line naming one
+    # must still show checked in the ◇ menu, or it could never be removed
+    path = "Workspaces/Statistics exam.md"
+    wsk.add_line(path, "notes", "Plans/Exam plan.md")
+    rows = {r["name"]: r for r in wsk.membership_of("Plans/Exam plan.md")}
+    assert rows["Statistics exam"]["listed"] is True
+    assert "Plans/Exam plan.md" not in wsk.members(wsk.find_workspace(path))
+    assert wsk.remove_line(path, "notes", "Plans/Exam plan.md") is True
+    rows = {r["name"]: r for r in wsk.membership_of("Plans/Exam plan.md")}
+    assert rows["Statistics exam"]["listed"] is False
+
+
+# --- hand-written lines and concurrent edits (review of 2026-10-15) --------------
+
+def _write(rel: str, text: str) -> None:
+    from silica.config import CONFIG
+
+    (Path(CONFIG.vault_path) / rel).write_text(text, encoding="utf-8")
+
+
+def test_concurrent_adds_keep_every_line(vault):
+    import threading
+
+    path = "Workspaces/Statistics exam.md"
+    for i in range(12):
+        vault.note(f"Pool/N{i:02d}.md", f"# N{i}\n")
+    barrier = threading.Barrier(12)
+
+    def go(i):
+        barrier.wait()
+        wsk.add_line(path, "notes", f"Pool/N{i:02d}.md")
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(12)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    notes = wsk.read_workspace(path)["notes"]
+    assert all(f"N{i:02d}" in notes for i in range(12))
+
+
+def test_hand_written_yaml_keeps_its_lines_through_an_edit(vault):
+    path = "Workspaces/Hand.md"
+    vault.note("Pool/A.md", "# A\n")
+    vault.note("Pool/B.md", "# B\n")
+    vault.note("Pool/Tagged.md", "---\ncourse: stats\n---\n# T\n")
+    # unquoted wikilinks are nested lists in YAML, an unquoted `k: v` a mapping,
+    # and a text property can carry several links
+    _write(path, "---\ntype: workspace\nnotes:\n- [[A]]\n- '[[B]], [[Bayes theorem]]'\nwhere:\n- course: stats\n---\n# Hand\n")
+    ws = wsk.read_workspace(path)
+    assert ws["notes"] == ["A", "B", "Bayes theorem"] and ws["where"] == ["course: stats"]
+    m = wsk.members(ws)
+    assert {"Pool/A.md", "Pool/B.md", "Pool/Tagged.md"} <= set(m)
+    wsk.add_line(path, "notes", "Inbox/Lecture 05 regression.md")
+    assert wsk.read_workspace(path)["notes"] == ["A", "B", "Bayes theorem", "Lecture 05 regression"]
+
+
+def test_a_folder_line_outside_the_vault_is_dead_whatever_is_there(vault):
+    path = "Workspaces/Statistics exam.md"
+    up = "../" * 12
+    wsk.add_line(path, "folders", up + "etc")
+    wsk.add_line(path, "folders", up + "no_such_dir_q")
+    dead = wsk.dead_lines(wsk.find_workspace(path))["folders"]
+    # both dead: telling them apart would say which host directories exist
+    assert sorted(dead) == sorted([(up + "etc").strip("/"), (up + "no_such_dir_q").strip("/")])

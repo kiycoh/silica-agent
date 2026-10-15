@@ -627,6 +627,11 @@ def silica_timeline(start: Annotated[str, Field(description='Inclusive ISO start
     if not vault.is_dir():
         return {"error": "No vault configured."}
     t = timeline(vault, start=start, end=end, limit=limit)
+    from silica.kernel.workspaces import active_scope
+
+    if (ws := active_scope()) is not None:  # a workspace's turn lists its members only (ADR-0112 point 4)
+        stems = {Path(p).stem for p in ws["paths"]}
+        t["rows"] = [r for r in t["rows"] if r[2] in stems]
     lines = [f"{date}  -> {label} ({stem}.md)" for date, label, stem in t["rows"]]
     if t["dropped"]:
         lines.append(f"...and {t['dropped']} more dated notes before this range")
@@ -686,8 +691,11 @@ def silica_related(note: Annotated[str, Field(description='Note name (wikilink-s
     if len(embed_store) == 0 and cooccur_store is None:
         return {"note": note, "error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
 
+    from silica.kernel.workspaces import allow_keys
+
+    allow = allow_keys()  # a workspace's turn ranks its members only (ADR-0112 point 4)
     mem_embed = mem_cooccur = None
-    if memory:
+    if memory and allow is None:
         from silica.kernel.recall.memory_lane import memory_stores
 
         mem_embed, mem_cooccur = memory_stores()  # ADR-0019 second recall lane
@@ -697,8 +705,10 @@ def silica_related(note: Annotated[str, Field(description='Note name (wikilink-s
         cooccur_store=cooccur_store,
         memory_embed_store=mem_embed,
         memory_cooccur_store=mem_cooccur,
-        k=k,
+        k=k if allow is None else max(k, len(allow)),
     )
+    if allow is not None:
+        results = [r for r in results if r.path in allow][:k]
     # Same score contract as silica_semantic_search (ADR-0032): reorder-only
     # within the fused top-k (membership stays first-stage, retrieval-gates 2a),
     # query = the seed's bare title — the one measured rerank query shape. The
@@ -836,7 +846,9 @@ def silica_concepts(term: Annotated[str, Field(description="A single word/concep
 
     # Concept -> notes inverted lookup, ranked by contribution count. Read the
     # cached stem postings directly (O(df log df)) instead of an O(N) vault scan.
-    posting = store.stem_postings().get(stem, {})
+    from silica.kernel.workspaces import in_scope
+
+    posting = {p: c for p, c in store.stem_postings().get(stem, {}).items() if in_scope(p)}
     notes = sorted(posting.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
 
     out = {
