@@ -357,3 +357,61 @@ def test_fit_window_skips_non_lazy_tools():
     collapsed, est = fit_window(m, set(), estimate=10**6, limit=1000,
                                 tools={"silica_read_note": NS(collapse="eager")})
     assert collapsed == set() and est == 10**6
+
+
+def _two_turns():
+    """A read answered last turn (2), a new request (4), a read this turn (6)."""
+    m = _msgs()[:3]
+    m += [{"role": "assistant", "content": "done"},                                     # 3
+          {"role": "user", "content": "now the other note"},                            # 4
+          {"role": "assistant", "content": "", "tool_calls": [
+              {"id": "d", "type": "function",
+               "function": {"name": "silica_read_note", "arguments": '{"name": "Qux"}'}}]},  # 5
+          {"role": "tool", "tool_call_id": "d", "content": "y" * 3000}]                # 6
+    return m
+
+
+def test_fit_window_shrinks_only_this_turns_read_and_leaves_it_sweepable():
+    """Context cap 2026-10-13, finding 4: a fresh read stubbed for not fitting
+    names a re-read that cannot fit either, and the model re-read Lezione 18
+    ten times in one turn. The earlier turn's read is stubbed as before."""
+    m = _two_turns()
+    asked = []
+
+    def shrink(name, arguments, body):
+        asked.append(arguments)
+        return "passages"
+
+    collapsed, est = fit_window(m, set(), estimate=10**6, limit=1000, tools=_TOOLS, shrink=shrink)
+    assert asked == ['{"name": "Qux"}']
+    assert m[2]["content"].startswith("⟪silica: result elided")
+    assert m[6]["content"] == "passages"
+    assert collapsed == {2}
+
+
+def test_fit_window_stubs_a_shrink_that_saves_less_than_half():
+    """Otherwise the next iteration shrinks the shrunk body to the same
+    passages and the request never comes under the limit."""
+    m = _two_turns()
+    collapsed, _ = fit_window(m, set(), estimate=10**6, limit=1000, tools=_TOOLS,
+                              shrink=lambda *a: "y" * 1600)
+    assert "context window" in m[6]["content"] and 6 in collapsed
+
+
+def test_fit_shrink_is_off_by_default_and_reads_the_request_when_no_query(monkeypatch):
+    from silica.agent import loop, read_scope
+    from silica.tools import atomic
+
+    seen = []
+    monkeypatch.setattr(atomic, "narrowed_read", lambda name, q: seen.append((name, q)) or "p")
+    token = read_scope.REQUESTS.set(("first", "the momentum rule please"))
+    try:
+        assert loop._fit_shrink("silica_read_note", '{"name": "L18"}', "x") is None
+        monkeypatch.setattr(loop, "FIT_NARROWS", True)
+        assert loop._fit_shrink("silica_read_note", '{"name": "L18"}', "x") == "p"
+        assert loop._fit_shrink("silica_read_note", '{"name": "L18", "query": "momentum"}', "x") == "p"
+        assert loop._fit_shrink("silica_read", '{"path": "L18.md"}', "x") is None
+        assert loop._fit_shrink("silica_read_note", '{"name": "L18", "vault": "/o"}', "x") is None
+    finally:
+        read_scope.REQUESTS.reset(token)
+    assert seen == [("L18", "the momentum rule please"), ("L18", "momentum")]

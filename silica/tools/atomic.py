@@ -442,6 +442,30 @@ READ_QUERY_WHOLE_UNDER = 8000
 # 3 x 2000 = 6000 chars, the budget of the head cap refuted the same day: what
 # was measured is which chars are served, not how many.
 READ_QUERY_WINDOWS, READ_QUERY_WIDTH = 3, 2000
+# A window that holds a heading runs on toward the next heading, at most this
+# many chars more: density lands on a slide's title and prose, and the formula
+# under them falls past the cut. Lezione 18's momentum window ended at char
+# 3996 and `v <- alpha v - eta g` starts at 4011, so the model wrote a rule the
+# note does not hold (ctx:32000:jev, 2026-10-15). Offline over the context-cap
+# probe's 12 note turns: fact recall 0.78 -> 0.89 at +1.5k chars, where wider
+# plain windows at the same chars reach 0.85; live, no miss traced to it
+# (ADR-0113). 0 turns it off.
+READ_QUERY_RUN_ON = 800
+_HEADING = re.compile(r"^#{1,6} ", re.M)
+
+
+def _run_on(body: str, spans: list[tuple[int, str]]) -> list[tuple[int, str]]:
+    out = []
+    for k, (off, text) in enumerate(spans):
+        end = off + len(text)
+        heads = [m.start() for m in _HEADING.finditer(body, off, end)]
+        if READ_QUERY_RUN_ON and heads:
+            nxt = _HEADING.search(body, heads[-1] + 1)
+            stop = min(nxt.start() if nxt else len(body), end + READ_QUERY_RUN_ON,
+                       spans[k + 1][0] if k + 1 < len(spans) else len(body))
+            end = max(end, stop)
+        out.append((off, body[off:end]))
+    return out
 
 
 def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
@@ -460,8 +484,8 @@ def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
     query = " ".join(w for w in re.findall(r"\w+", query) if w.lower() not in named)
     if not query or len(body) <= READ_QUERY_WHOLE_UNDER:
         return None
-    spans = rerank.best_window_spans(body, query, READ_QUERY_WIDTH, READ_QUERY_WINDOWS,
-                                     rerank.window_weights(query), snap=True)
+    spans = _run_on(body, rerank.best_window_spans(body, query, READ_QUERY_WIDTH, READ_QUERY_WINDOWS,
+                                                   rerank.window_weights(query), snap=True))
     total = body.count("\n") + 1
     parts, gaps, nxt = [], [], 1
     for off, text in spans:
@@ -479,6 +503,21 @@ def _narrow_to_query(name: str, body: str, path: str, query: str) -> str | None:
             f"silica_read(path=\"{path}\", start=, end=), or call this tool with an empty query "
             "for the whole note.]")
     return head + "\n\n" + "\n\n".join(parts)
+
+
+def narrowed_read(name: str, query: str) -> str | None:
+    """What `silica_read_note(name, query)` serves when it narrows, without the
+    whole-or-part decision: the loop asks for it when the whole note will not
+    fit the window (compaction.fit_window). None = nothing to narrow."""
+    nc = DRIVER.read_note(name)
+    body, path = nc.content or "", nc.ref.path or ""
+    narrowed = _narrow_to_query(name, body, path, query)
+    if narrowed is None:
+        return None
+    from silica.kernel.recall.image_readings import annotate
+
+    whole = _with_stale_banner(body, path=path)
+    return whole[:len(whole) - len(body)] + annotate(narrowed)
 
 
 @tool(cls="atomic")

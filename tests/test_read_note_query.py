@@ -100,3 +100,23 @@ def test_the_model_sees_no_scope_to_choose():
 
     params = TOOLS["silica_read_note"].json_schema()["function"]["parameters"]["properties"]
     assert list(params) == ["name", "query", "vault"]
+
+
+def test_a_window_holding_a_heading_runs_on_to_the_formula_under_it(monkeypatch):
+    """ctx:32000:jev 2026-10-15: Lezione 18's momentum window ended 15 chars
+    before `v <- alpha v - eta g`, and the model wrote a rule the note does not
+    hold. Capped by the next heading, by the run-on, and by the next window."""
+    body = "x" * 50 + "\n## Momentum\n" + "y" * 40 + "\n$$ v = a v - e g $$\n" + "z" * 400 + "\n## Next\n"
+    head = body.index("## Momentum")
+    cut = [(0, body[:head + 30])]
+    monkeypatch.setattr(atomic, "READ_QUERY_RUN_ON", 0)
+    assert atomic._run_on(body, cut) == cut
+    monkeypatch.setattr(atomic, "READ_QUERY_RUN_ON", 100)
+    (off, text), = atomic._run_on(body, cut)
+    assert off == 0 and "v = a v - e g" in text and "## Next" not in text
+    assert len(text) == head + 30 + 100
+    monkeypatch.setattr(atomic, "READ_QUERY_RUN_ON", 10_000)
+    assert atomic._run_on(body, cut)[0][1] == body[:body.index("## Next")]
+    two = atomic._run_on(body, [(0, body[:head + 30]), (head + 60, body[head + 60:head + 70])])
+    assert two[0][1] == body[:head + 60]
+    assert atomic._run_on(body, [(0, "x" * 20)]) == [(0, "x" * 20)]  # no heading, no run-on
