@@ -626,12 +626,11 @@ def silica_timeline(start: Annotated[str, Field(description='Inclusive ISO start
     vault = Path(getattr(CONFIG, "vault_path", "") or "").expanduser()
     if not vault.is_dir():
         return {"error": "No vault configured."}
-    t = timeline(vault, start=start, end=end, limit=limit)
-    from silica.kernel.workspaces import active_scope
+    from silica.kernel.workspaces import active_scope, in_scope
 
-    if (ws := active_scope()) is not None:  # a workspace's turn lists its members only (ADR-0112 point 4)
-        stems = {Path(p).stem for p in ws["paths"]}
-        t["rows"] = [r for r in t["rows"] if r[2] in stems]
+    # A workspace's turn lists and counts its members only (ADR-0112 point 4).
+    scoped = active_scope() is not None
+    t = timeline(vault, start=start, end=end, limit=limit, keep=in_scope if scoped else None)
     lines = [f"{date}  -> {label} ({stem}.md)" for date, label, stem in t["rows"]]
     if t["dropped"]:
         lines.append(f"...and {t['dropped']} more dated notes before this range")

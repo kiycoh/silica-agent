@@ -197,3 +197,20 @@ def test_create_and_line_validate_their_input(client, tmp_vault):
     assert tc.post("/workspaces", json={"name": "x" * 300}).status_code == 400
     r = tc.post("/workspaces/line", json={"workspace": "Thesis", "key": "notes", "value": "Bayes", "on": "false"})
     assert r.status_code == 400
+
+
+def test_a_reader_save_holds_the_line_edit_lock(client, monkeypatch, tmp_vault):
+    # A save that passed its etag check and then wrote erased a line a turn
+    # had added in between (review of dbbcfa0, 2026-10-15).
+    from silica.driver import get_driver
+    from silica.kernel import workspaces as wsk
+
+    tc, server = client
+    tmp_vault.note("Workspaces/Thesis.md", "---\ntype: workspace\nnotes: []\n---\n# Thesis\n")
+    held = []
+    driver = get_driver()  # the instance, never the DRIVER proxy: its teardown would pin a dead vault
+    real = driver.overwrite
+    monkeypatch.setattr(driver, "overwrite", lambda *a, **kw: (held.append(wsk._EDIT_LOCK.locked()), real(*a, **kw))[1])
+    r = tc.post("/note/save", json={"path": "Workspaces/Thesis.md",
+                                    "text": "---\ntype: workspace\nnotes: []\n---\n# Thesis\n\nmore\n"})
+    assert r.status_code == 200 and held == [True]

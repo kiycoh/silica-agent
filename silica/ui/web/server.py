@@ -3476,17 +3476,24 @@ def note_save(payload: dict):
     canon = note_resolver()(str(payload.get("path", "")))
     if not canon:
         raise HTTPException(404, "note not found in vault")
-    current = session_changes.current_text(canon)
-    if current is None:
-        raise HTTPException(404, "note unreadable")
-    if payload.get("etag") and payload["etag"] != _etag(current):
-        return JSONResponse({"detail": "note changed on disk", "text": current,
-                             "etag": _etag(current)}, status_code=409)
-    text = str(payload.get("text", ""))
-    if text != current:
-        from silica.kernel.write.preserve import Loss
+    from silica.kernel.workspaces import _EDIT_LOCK
 
-        DRIVER.overwrite(canon, text, loss=Loss.PERSON)  # the person typed it
+    # The workspace line edits' lock, from the etag check to the write: a turn
+    # adding a note it wrote to the workspace between the two was erased by
+    # this save, or put back a line the person had just removed (review of
+    # dbbcfa0, 2026-10-15). One process-wide lock: saves are milliseconds.
+    with _EDIT_LOCK:
+        current = session_changes.current_text(canon)
+        if current is None:
+            raise HTTPException(404, "note unreadable")
+        if payload.get("etag") and payload["etag"] != _etag(current):
+            return JSONResponse({"detail": "note changed on disk", "text": current,
+                                 "etag": _etag(current)}, status_code=409)
+        text = str(payload.get("text", ""))
+        if text != current:
+            from silica.kernel.write.preserve import Loss
+
+            DRIVER.overwrite(canon, text, loss=Loss.PERSON)  # the person typed it
     # overwrite() may stamp a derived `type:` into the frontmatter, so what
     # landed is read back rather than assumed: the editor's next etag has to be
     # the disk's, or its next save refuses itself.

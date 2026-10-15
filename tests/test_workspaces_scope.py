@@ -50,6 +50,21 @@ def test_timeline(vault):
     assert "Secret" not in out["timeline"] and "Member" in out["timeline"]
 
 
+def test_timeline_scopes_by_path_and_counts_members_only(vault):
+    # Two folders' README.md share a stem: a filter on stems let the outside
+    # one through and the counts kept the whole vault (review of dbbcfa0).
+    from silica.tools.graph import silica_timeline
+
+    vault.note("Inside/README.md", "---\ndate: 2026-01-04\n---\n# In\n")
+    vault.note("Outside/README.md", "---\ndate: 2026-01-05\nsession_id: Payroll call\n---\n# Out\n")
+    tok = wsk.open_scope(wsk.find_workspace("Focus"))
+    try:
+        out = silica_timeline()
+    finally:
+        wsk.close_scope(tok)
+    assert "Payroll call" not in out["timeline"] and out["total_dated"] == 2
+
+
 def test_orphans(vault):
     from silica.tools.atomic import silica_orphans
 

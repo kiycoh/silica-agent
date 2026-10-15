@@ -25,6 +25,7 @@ queries between vault changes cost one stat walk, not a re-parse.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from silica.kernel.write import frontmatter
@@ -32,11 +33,12 @@ from silica.kernel.write.contested import note_clock
 from silica.kernel.recall.paths import SOURCES_DIR
 
 
-_rows_memo: dict[str, tuple[str, list[tuple[str, str, str]]]] = {}  # vault -> (epoch, rows)
+_rows_memo: dict[str, tuple[str, list[tuple[str, str, str, str]]]] = {}  # vault -> (epoch, rows)
 
 
-def _all_rows(vault: Path) -> list[tuple[str, str, str]]:
-    """Every dated (date, label, stem) row of `vault`, unfiltered.
+def _all_rows(vault: Path) -> list[tuple[str, str, str, str]]:
+    """Every dated (date, label, stem, vault-relative path) row of `vault`,
+    unfiltered.
 
     Memoized on the vault's file-state epoch: the walk YAML-parses every
     note, and the MCP tool re-runs it per query.
@@ -53,7 +55,7 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str]]:
 
     ignored = ignore_matcher(vault)
     days = daily_rule(vault)
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str]] = []
     for f in sorted(vault.rglob("*.md")):
         parts = f.relative_to(vault).parts
         if any(p.startswith(".") for p in parts):
@@ -78,7 +80,7 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str]]:
         if not date:
             continue
         label = str((data or {}).get("session_id") or f.stem)
-        rows.append((str(date)[:10], label, f.stem))
+        rows.append((str(date)[:10], label, f.stem, "/".join(parts)))
 
     if epoch:
         _rows_memo.clear()
@@ -86,18 +88,23 @@ def _all_rows(vault: Path) -> list[tuple[str, str, str]]:
     return rows
 
 
-def timeline(vault: Path, start: str = "", end: str = "", limit: int = 50) -> dict:
+def timeline(vault: Path, start: str = "", end: str = "", limit: int = 50,
+             keep: Callable[[str], bool] | None = None) -> dict:
     """Dated notes of `vault`, chronological. Rows are (date, label, stem).
 
     `start`/`end` are inclusive ISO-date bounds; empty means unbounded. On
     overflow the most recent `limit` rows are kept (recency is the useful
     default) and `dropped` reports how many older rows were cut.
-    `total_dated` counts the in-range dated notes before the cut.
+    `total_dated` counts the in-range dated notes before the cut. `keep`
+    takes a vault-relative path and drops a note before anything is counted:
+    a workspace's scope (ADR-0112), which a stem alone cannot apply, since two
+    folders' README.md share one.
     """
     rows = [
-        r for r in _all_rows(vault)
+        r[:3] for r in _all_rows(vault)
         # day precision: keeps datetime values inside inclusive bounds
         if not (start and r[0] < start) and not (end and r[0] > end)
+        and (keep is None or keep(r[3]))
     ]
     rows.sort(key=lambda r: (r[0], r[2]))  # date asc; stem tie-break for determinism
     total = len(rows)
