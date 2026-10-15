@@ -46,6 +46,7 @@
   <link rel="stylesheet" href="/static/app-zotero.css" />
   <link rel="stylesheet" href="/static/app-connectors.css" />
   <link rel="stylesheet" href="/static/app-limits.css" />
+  <link rel="stylesheet" href="/static/app-workspaces.css" />
   <link rel="stylesheet" href="/static/app-motion.css" />
 </head>
 <body>
@@ -143,12 +144,24 @@
             <div class="side-bucket">pinned</div>
             <div id="pinned"></div>
           </div>
+          <!-- Workspaces (ADR-0112 point 6): a group of THIS list, as pinned is.
+               Each gathers notes from any folder without moving them; a chat or
+               a plan opened in one reads only what it gathers. -->
+          <div id="ws-group">
+            <div class="side-bucket ws-bucket"><span>workspaces</span><button type="button" id="ws-new" class="ws-new" title="new workspace" aria-label="new workspace"><svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button></div>
+            <form id="ws-new-form" hidden><input id="ws-new-name" type="text" placeholder="Name the workspace" aria-label="name of the new workspace" autocomplete="off" /></form>
+            <div id="workspaces"></div>
+          </div>
           <div id="tree"></div>
         </div>
       </details>
       <!-- The vault's + (ADR-0098): two entries, because one browser picker takes
            files or a folder and never both. Outside the <details> so a shut
            Vault still opens it, and fixed under the + when it opens. -->
+      <!-- The workspaces of one note or folder, opened from its ◇ in the tree
+           or beside the reader's pin; fixed, as the + menu is, because the
+           drawer scrolls and clips. -->
+      <div id="ws-menu" role="menu" aria-label="workspaces" hidden></div>
       <div id="vault-add-menu" role="menu" aria-label="add to the vault" hidden>
         <button type="button" role="menuitem" id="vam-files" title="pick files; each becomes a note in the Inbox">files…</button>
         <button type="button" role="menuitem" id="vam-folder" title="pick a folder; the files Silica reads keep its tree in the Inbox">a folder…</button>
@@ -224,6 +237,9 @@
            waiting, converting, ready with Nucleate it, or stopped with Retry. -->
       <div id="jobs" hidden></div>
       <div id="attachments" hidden></div>
+      <!-- The workspace this chat is opened in (ADR-0112 point 4); closing it
+           widens the next turns to the whole vault. -->
+      <div id="ws-chip-row" hidden></div>
       <!-- The run line (audit P1): what the agent is doing NOW, how long it has
            been at it, where it is in the turn, and the control that stops it,
            all on one row next to the field. Present only while a turn runs.
@@ -526,6 +542,7 @@
       <!-- Pinned is a state, and a state has to show at rest, so the pin is the
            one control left outside the menu: the tree row's glyph, lit when on. -->
       <button type="button" id="note-pin" aria-pressed="false" aria-label="keep this note in the rail" data-tip="keep this note in the rail"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="17" x2="12" y2="22"></line><path d="M5 17h14l-2-4V4H7v9z"></path></svg></button>
+      <button type="button" id="note-ws" aria-haspopup="menu" aria-expanded="false" aria-label="workspaces of this note" data-tip="workspaces of this note"><svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l9 9-9 9-9-9z"></path></svg></button>
       <!-- While the diff shows: what it is, and the way back to the text. -->
       <button type="button" id="note-changes" class="wk-scope" hidden aria-label="changes this session; back to the text">changes <span aria-hidden="true">&#215;</span></button>
       <!-- The node pane's own two marks. The scope chip says `report` on the
@@ -697,6 +714,7 @@ SILICA_STT_SERVE_CMD="whisper-server -m ggml-small.bin --port 1236 --inference-p
   <script src="/static/app-metrics.js"></script>
   <script src="/static/app-learn.js"></script>
   <script src="/static/app-notes.js"></script>
+  <script src="/static/app-workspaces.js"></script>
   <script src="/static/app-jobs.js"></script>
   <script src="/static/app-boot.js"></script>
   <!-- Before app-settings.js, which starts the first /vault_info and /sessions:

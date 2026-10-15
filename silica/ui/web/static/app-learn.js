@@ -52,7 +52,7 @@ const LR_OBJ_DESC = {
   compare: "Find similarities, differences and the conditions that make them matter.",
   evaluate: "Support a choice or a judgement with criteria and evidence.",
 };
-const LR_SCOPE = { notes: "some notes", folder: "a folder", topic: "a topic", steps: "a syllabus" };
+const LR_SCOPE = { notes: "some notes", folder: "a folder", topic: "a topic", steps: "a syllabus", workspace: "a workspace" };
 const LR_GRADE_WAIT_MS = 20000;   // §5.1: after 20 s without a verdict, self-grade with the evidence
 // An explanation said aloud runs longer than a chat message (ADR-0049); the
 // server's upload cap (_STT_MAX_BYTES) is sized for this ceiling.
@@ -686,7 +686,7 @@ function lrRenderPlanDetail(right, p) {
     live ? "a new session waits for this one to end" : !closed ? `${lrPlural(n, "question")} · about ${Math.max(1, Math.round(n * 1.3))} min` : "",
     [open, edit, reopen, go, done]);
   const goal = lrEl("p", "goal");
-  goal.append(`Across ${p.target}, ${lrPlural(r.coverage[1], "note")}: `);
+  goal.append(`Across ${p.scope === "workspace" ? "the workspace " : ""}${lrTargetShown(p)}, ${lrPlural(r.coverage[1], "note")}: `);
   p.objectives.forEach((o, i) => { goal.appendChild(lrEl("b", null, LR_OBJ[o]?.toLowerCase() || o)); goal.append(i < p.objectives.length - 2 ? ", " : i === p.objectives.length - 2 ? ", and " : "."); });
   head.appendChild(goal);
   const next = lrEl("p", "next");
@@ -802,7 +802,7 @@ function lrRenderPlanDetail(right, p) {
   lrDisc(discs, "About this plan", "", (box) => {
     const dl = lrEl("dl", "lr-kv");
     const kv = (k, v) => { if (v) dl.append(lrEl("dt", null, k), lrEl("dd", null, v)); };
-    kv("studies", `${LR_SCOPE[p.scope] || p.scope}, ${p.target}, ${lrPlural(r.coverage[1], "note")}`);
+    kv("studies", `${LR_SCOPE[p.scope] || p.scope}, ${lrTargetShown(p)}, ${lrPlural(r.coverage[1], "note")}`);
     kv(p.objectives.length > 1 ? "objectives" : "objective", `${lrObjList(p.objectives)}, ${p.objectives_chosen ? "chosen by you" : "proposed by Silica"}`);
     kv("created", lrDate(p.created));
     kv("target date", p.by ? lrDate(p.by) : "");
@@ -1157,7 +1157,7 @@ function lrFormReset(extra = {}) {
   }, extra);
 }
 lrFormReset();
-const LR_KIND_WORD = { folder: "folder", notes: "notes", topic: "topic", steps: "syllabus" };
+const LR_KIND_WORD = { folder: "folder", notes: "notes", topic: "topic", steps: "syllabus", workspace: "workspace" };
 const LR_SESSION_Q = 8;
 
 // Plan this folder (ADR-0081 §17): from a Map row or the sidebar tree, the
@@ -1171,12 +1171,27 @@ function lrPlanFolder(folder) {
 }
 window.learnPlanFolder = lrPlanFolder;
 
+// A workspace plan keeps its target as a wikilink by path (plans.target_text);
+// the reader is shown the workspace's name.
+const lrTargetShown = (p) => p.scope === "workspace"
+  ? String(p.target || "").replace(/^\[\[|\]\]$/g, "").split("/").pop() : p.target;
+
+// Plan from a workspace (ADR-0112 point 5): the same fields, scoped to its
+// members, which the server resolves again at every read.
+function learnPlanWorkspace(name) {
+  // "plan", so the plan note does not take its workspace's name
+  lrFormReset({ step: "fields", scope: "workspace", target: name, label: name, name: `${name} plan` });
+  if (activeTab !== "learn") showTab("learn");
+  lrGo({ view: "new" });
+  lrPreviewScope();
+}
+
 // Edit plan opens the fields filled, without the sentence (§17).
 function lrFormFromPlan(p) {
   lrFormReset({
     step: "fields", editPath: p.path, name: p.name, nameTouched: true, scope: p.scope,
     target: p.scope === "notes" ? [...(p.notes || [])] : p.target,
-    label: p.scope === "notes" ? (p.notes || []).join(", ") : p.target, restrict: p.restrict || "", by: p.by || "",
+    label: p.scope === "notes" ? (p.notes || []).join(", ") : lrTargetShown(p), restrict: p.restrict || "", by: p.by || "",
     objectives: p.objectives_chosen ? [...p.objectives] : [], refused: [...(p.refused || [])],
     // a plan from before the cards (or with none) gets them written now
     cards: p.cards?.length ? p.cards.map((c) => ({ ...c })) : null, cardsSaved: !!p.cards?.length,

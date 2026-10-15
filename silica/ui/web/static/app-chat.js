@@ -1669,7 +1669,8 @@ function send(text, replay = false, images = []) {
   runTurn(fetch("/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(images.length ? { text, images } : { text }),
+    body: JSON.stringify({ text, ...(images.length ? { images } : {}),
+                           ...(chatWorkspace ? { workspace: chatWorkspace } : {}) }),
   }), "working", () => send(text, true, images));
 }
 
@@ -2110,6 +2111,8 @@ async function newChat() {
   log.innerHTML = "";
   await fetch("/reset", { method: "POST" });
   currentSessionId = "";
+  chatWorkspace = "";       // a new chat is the whole vault until a workspace opens it
+  renderWsChip();
   activeTab = "chat";
   syncUrl(true);   // a new chat is a place Back can return from (P7)
   showTab("chat"); // surface the fresh chat

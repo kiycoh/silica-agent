@@ -102,8 +102,12 @@ def silica_search(query: Annotated[str, Field(description='Text to search for in
     # One enumeration, scored in place. The phrase and the words are not two
     # passes: a second lookup is a second round-trip on the ws backend (one
     # `list_files` per token) and it can only re-find what this scan already saw.
+    from silica.kernel.workspaces import in_scope
+
     scored: list[tuple] = []
     for ref in DRIVER.search_names(""):
+        if not in_scope(ref.path):
+            continue  # a workspace's turn finds only its members (ADR-0112 point 4)
         name = _fold(ref.name)
         carried = sum(t in name for t in tokens)
         if not carried:
@@ -272,6 +276,49 @@ def _engine():
     return core
 
 
+def _scoped_search(engine, query: str, k: int, folder: str) -> dict:
+    """`engine.search`, kept inside a workspace's members when the turn is
+    opened in one (ADR-0112 point 4).
+
+    silica-core takes one folder prefix and no list of paths, and it is a
+    pinned dependency (ADR-0043), so the cut cannot happen inside its BM25.
+    Its scores use the whole store's idf, so the same query asked once per
+    folder the members sit in ranks on one scale: those calls are merged and
+    cut to the members.
+
+    ponytail: one call per folder, at most 8; past that, or with a member at
+    the vault's root, one wide call (k x 10, at most 300) filtered after. Ask
+    silica-core for an allow-list if a scoped turn on a pilot vault is seen
+    returning fewer than k passages that a wide search finds.
+    """
+    from silica.kernel.workspaces import active_scope, in_scope
+
+    scope = active_scope()
+    if scope is None:
+        return engine.search(query, folder=folder, k=k)
+    parents = {p.rsplit("/", 1)[0] if "/" in p else "" for p in scope["paths"]}
+    roots = sorted(f for f in parents if not any(g != f and f.startswith(g + "/") for g in parents))
+    if folder.strip() or not roots or "" in roots or len(roots) > 8:
+        calls, fetch = [folder], min(max(k * 10, 100), 300)
+    else:
+        calls, fetch = roots, max(k * 3, 12)
+    first: dict | None = None
+    hits: list[dict] = []
+    seen: set[tuple] = set()
+    for f in calls:
+        r = engine.search(query, folder=f, k=fetch)
+        if "error" in r:
+            return r
+        first = first or r
+        for h in r["hits"]:
+            if (h["path"], h["line"]) in seen or not in_scope(h["path"]):
+                continue
+            seen.add((h["path"], h["line"]))
+            hits.append(h)
+    hits.sort(key=lambda h: -float(h.get("score") or 0.0))
+    return {**(first or {}), "hits": hits[:k], "candidates": len({h["path"] for h in hits})}
+
+
 @tool(cls="atomic")
 def silica_search_context(
     query: Annotated[str, Field(description='Words to look for inside note bodies; the vault vocabulary, not a question')],
@@ -294,7 +341,7 @@ def silica_search_context(
     Returns {hits, notes_matched, terms_absent, index}; `scanned` says which
     corpora answered.
     """
-    r = _engine().search(query, folder=folder, k=k)
+    r = _scoped_search(_engine(), query, k, folder)
     if "error" in r:
         return r
 
@@ -820,6 +867,17 @@ def silica_files(folder: Annotated[str, Field(description='Optional folder path 
     # filename without its extension, so the dict shipped every note's name
     # twice (48% of this payload, ~2.5k tokens at the 200-entry cap).
     files = notes_under(folder)
+    from silica.kernel.workspaces import active_scope, in_scope
+
+    scope = active_scope()
+    if scope is not None:
+        # A workspace's turn lists its members only (ADR-0112 point 4): a live
+        # chat listed the whole vault after every search had answered from the
+        # members, then read the outside note the listing showed it.
+        files = [f for f in files if in_scope(f)]
+        return {"total": len(files), "files": files[:_FILES_CAP], "workspace": scope["name"],
+                "hint": f"Listing limited to the workspace {scope['name']}; a note outside it is "
+                        "read only when the user names it."}
     result: dict = {"total": len(files), "files": files[:_FILES_CAP]}
     if len(files) > _FILES_CAP:
         result["truncated"] = True

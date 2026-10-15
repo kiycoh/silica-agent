@@ -396,6 +396,11 @@ const vaultImportBox = $("#vault-import");
 // The server's cap per request (_UPLOAD_MAX_FILES), and ADR-0098 H2's cap per
 // import, the free tier's note count: past it a folder is a job, not a pick.
 const VAULT_IMPORT_BATCH = 32;
+// The workspace whose + opened the picker (ADR-0112 point 6): each imported
+// note joins it. Cleared by the import that uses it and by a click on the
+// vault's own +, which imports into no workspace.
+let vaultImportWorkspace = "";
+$("#vault-add").addEventListener("click", (e) => { if (e.isTrusted) vaultImportWorkspace = ""; }, true);
 const VAULT_IMPORT_MAX = 500;
 // From /supported_types. A folder picker ignores `accept`, so the same list
 // filters what a folder hands over before anything is sent; while it is empty
@@ -452,6 +457,8 @@ async function importToVault(files, fromFolder) {
   // hand over single files in folder mode, and those go in as files.
   const relOf = (f) => (fromFolder && f.webkitRelativePath) || "";
   const extOf = (name) => (name.match(/\.[^./]+$/) || [""])[0].toLowerCase();
+  const intoWorkspace = vaultImportWorkspace;
+  vaultImportWorkspace = "";
   const skipped = [];
   const wanted = files.filter((f) => {
     const path = relOf(f) || f.name;
@@ -480,6 +487,7 @@ async function importToVault(files, fromFolder) {
       if (fromFolder) fd.append("paths", relOf(f));
     }
     if (i + VAULT_IMPORT_BATCH >= wanted.length) fd.append("last", "1");
+    if (intoWorkspace) fd.append("workspace", intoWorkspace);
     let r;
     try {
       r = await fetch("/vault/import", { method: "POST", body: fd });
@@ -495,6 +503,7 @@ async function importToVault(files, fromFolder) {
   }
   vaultImportLast = { rows, skipped, failed, folder, big };
   renderVaultImport(vaultImportLast);
+  if (intoWorkspace) loadWorkspaces();
   // A PDF converts in milliseconds: its job's last event can arrive before this
   // answer did, so each row takes the state the page already holds for it.
   for (const r of rows) if (r.job && jobsById.has(r.job)) vaultImportJob(jobsById.get(r.job));

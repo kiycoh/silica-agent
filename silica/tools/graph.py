@@ -346,9 +346,15 @@ def _facade_search(text: str, k: int, memory: bool = True, folder: str = "") -> 
     # One record for both calls (ADR-0094): the query embed marks `embed` in
     # facade_retrieve, the cross-encoder marks `rerank` below. Kept apart, a
     # search that lost its embedder read `reranked: true` and looked healthy.
+    from silica.kernel.workspaces import allow_keys
+
     rr: dict = {"reranked": False}
+    # A chat opened in a workspace searches only its members (ADR-0112 point
+    # 4), and the personal-memory lane is another vault, so it sits out.
+    allow = allow_keys()
     results, _query_vec = facade_retrieve(text, k=max(k, _NOTE_POOL), use_rerank=False,
-                                          use_memory=memory, leg_stats=rr)
+                                          use_memory=memory and allow is None, leg_stats=rr,
+                                          allow=allow)
     if results is None:
         return {**degraded_fields(rr),
                 "error": "No index available. Run silica_embed_refresh or silica_cooccurrence_refresh first."}
@@ -455,6 +461,13 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
                 "vault's note use silica_read_note(name, vault=...)",
                 "context": "", "notes": [], "partial": [], "facts": 0}
     named, missing = _resolve_named(notes) if notes else (None, [])
+    from silica.kernel.workspaces import allow_keys
+
+    # A workspace's turn searches its members only (ADR-0112 point 4); named
+    # notes are the user's act and a peek is another vault, so neither is cut.
+    allow = allow_keys() if named is None and not peek else None
+    if allow is not None:
+        memory = False
     rr: dict[str, Any] = {"reranked": False}
     # Named notes are the whole context: the memory lane's facts would lead it
     # with material the question did not ask about.
@@ -463,7 +476,7 @@ def silica_recall(query: Annotated[str, Field(description='The question or topic
                  use_memory=memory and named is None, vault=peek, leg_stats=rr,
                  folder=folder.strip() or None,
                  min_trust=min_trust or None, lifecycle=lifecycle or None,
-                 mark_used=True)
+                 mark_used=True, allow=allow)
     # Staleness is the ACTIVE vault's code lane; a peeked vault's paths would
     # only ever match it by coincidence.
     stale_map = {} if peek else _peek_stale()

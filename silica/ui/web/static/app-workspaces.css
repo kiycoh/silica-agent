@@ -1,0 +1,425 @@
+/* Workspaces (ADR-0112): a group of the Vault list below pinned, the ◇ menu
+   of a tree row, and the chip of a chat opened in one. The rows borrow the
+   tree's metrics (26px, 12px text, the count's own class) so a member reads as
+   the same note the tree below shows. */
+
+.ws-bucket {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ws-new {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+
+.ws-new:hover,
+.ws-new:focus-visible {
+  color: var(--accent);
+}
+
+#ws-new-form {
+  padding: 0 0.35rem 0.3rem;
+}
+
+#ws-new-name,
+.ws-menu-new input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 12px;
+  padding: 0.3rem 0.5rem;
+  color: var(--frost);
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
+.ws-empty {
+  margin: 0;
+  padding: 0.1rem 0.55rem 0.4rem;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ash-dim);
+}
+
+.ws-row {
+  border-radius: var(--r-xs);
+}
+
+.ws-row.current {
+  background: var(--sel);
+}
+
+.ws-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 26px;
+}
+
+.ws-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 26px;
+  padding: 0 0.35rem;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+
+.ws-toggle:hover {
+  background: var(--slate-2);
+}
+
+.ws-toggle .tree-n {
+  float: none;
+  margin-left: auto;
+}
+
+.ws-toggle .t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-chev {
+  flex: none;
+  color: var(--ash-dim);
+  transition: transform var(--dur) var(--ease);
+}
+
+.ws-toggle[aria-expanded="true"] .ws-chev {
+  transform: rotate(90deg);
+}
+
+.ws-glyph {
+  flex: none;
+  color: var(--accent);
+}
+
+.ws-warn {
+  flex: none;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--warn);
+}
+
+/* The row's actions show on hover and keyboard focus, as the tree's pin does:
+   the row's main act is opening it. Laid over the row's end, so at rest the
+   count sits where the tree's counts sit. */
+.ws-acts {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  display: flex;
+  gap: 1px;
+  background: var(--slate-2);
+  border-radius: var(--r-xs);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur) var(--ease);
+}
+
+.ws-head:hover .ws-acts,
+.ws-head:focus-within .ws-acts {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ws-act {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+}
+
+.ws-act:hover,
+.ws-act:focus-visible {
+  color: var(--accent);
+}
+
+.ws-members {
+  display: grid;
+  padding: 0 0 0.35rem 1.35rem;
+}
+
+.ws-folder {
+  padding: 0.35rem 0.35rem 0.05rem;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ash-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-note {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  height: 24px;
+  padding: 0 0.35rem;
+  border-radius: var(--r-xs);
+  font-size: 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.ws-note:hover {
+  background: var(--slate-2);
+  color: var(--frost);
+}
+
+.ws-note .t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-badges {
+  display: flex;
+  gap: 3px;
+  flex: none;
+}
+
+/* Why a note is in: one hue at four weights, never four colours (the app has
+   one vivid). Filled is the user's own pick; the rules are outlines. */
+.ws-b {
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--accent);
+}
+
+.ws-b.listed {
+  background: var(--accent);
+  color: var(--on-vivid);
+}
+
+.ws-b.where {
+  border-style: dashed;
+}
+
+.ws-b.derived {
+  border-style: dotted;
+  border-color: var(--ash-dim);
+  color: var(--ash-dim);
+}
+
+.ws-dead {
+  margin: 0.2rem 0.35rem 0;
+  padding: 0.2rem 0.4rem;
+  border-radius: var(--r-xs);
+  font-size: 11px;
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+.ws-instr {
+  padding: 0.3rem 0.35rem 0;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--ash-dim);
+}
+
+/* The tree's ◇, beside the pin: hidden at rest unless the row is in a
+   workspace, so the tree stays a list of names. */
+.tree-ws {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+#tree summary .tree-ws {
+  float: right;
+  display: inline-grid;
+  height: 18px;
+}
+
+.tree-row:hover .tree-ws,
+#tree summary:hover .tree-ws,
+.tree-ws:focus-visible,
+.tree-ws[aria-expanded="true"],
+.tree-ws.on {
+  opacity: 1;
+}
+
+.tree-ws.on,
+#note-ws.on {
+  color: var(--accent);
+}
+
+.tree-ws:hover {
+  color: var(--frost);
+}
+
+.tree-ws.on svg path,
+#note-ws.on svg path {
+  fill: currentColor;
+}
+
+#ws-menu {
+  position: fixed;
+  z-index: 120;
+  width: 14rem;
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+  padding: 6px;
+  background: var(--bubble);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+}
+
+#ws-menu[hidden] {
+  display: none;
+}
+
+.ws-mh {
+  padding: 0.3rem 0.6rem 0.35rem;
+  font-size: 11px;
+  color: var(--ash-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 28px;
+  padding: 0.3rem 0.6rem;
+  font-family: var(--sans);
+  font-size: var(--fs-ctl);
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.ws-item svg {
+  flex: none;
+  color: var(--accent);
+}
+
+.ws-item .t {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-item .why {
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.ws-item:not([disabled]):is(:hover, :focus-visible) {
+  color: var(--frost);
+  background: var(--sel-hover);
+  outline: none;
+}
+
+.ws-item[disabled] {
+  cursor: default;
+  color: var(--ash-dim);
+}
+
+.ws-menu-new {
+  margin-top: 4px;
+  padding: 4px 0.2rem 0;
+  border-top: 1px solid var(--line);
+}
+
+#ws-chip-row {
+  display: flex;
+  padding: 0.5rem 1rem 0;
+}
+
+#ws-chip-row[hidden] {
+  display: none;
+}
+
+/* #ws-chip-row scopes it: app-metrics.css styles another `.chip` later in the
+   cascade, which took the gap away from the glyph. */
+#ws-chip-row .ws-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0;
+  padding: 0.25rem 0.35rem 0.25rem 0.65rem;
+  border-radius: 999px;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+#ws-chip-row .chip-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--ash-dim);
+  cursor: pointer;
+}
+
+#ws-chip-row .chip-x:hover {
+  color: var(--frost);
+  background: var(--sel-hover);
+}
+
+.ws-chip .chip-name {
+  color: var(--frost);
+}

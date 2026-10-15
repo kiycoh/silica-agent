@@ -506,8 +506,13 @@ class EmbedStore(DiskSynced):
         query_vec: list[float],
         k: int,
         exclude: set[str] | None,
+        allow: frozenset[str] | set[str] | None = None,
     ) -> list[dict[str, Any]]:
         exclude = exclude or set()
+        # `allow` keeps a workspace's turn inside its members (ADR-0112 point
+        # 4) BEFORE the top-k cut, so k fills from members; None is every note.
+        if allow is not None:
+            exclude = exclude | {p for p in self._notes if p not in allow}
         q = np.asarray(query_vec, dtype=np.float32)
         q_norm = float(np.linalg.norm(q))
         matrix: list[tuple[float, str]] = []
@@ -537,6 +542,7 @@ class EmbedStore(DiskSynced):
         query_vec: list[float],
         k: int = 5,
         exclude: set[str] | None = None,
+        allow: frozenset[str] | set[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Return the top-k most similar notes as dicts with keys:
             path, name, score
@@ -551,7 +557,7 @@ class EmbedStore(DiskSynced):
         # the caller got arbitrary notes back with nothing logged.
         with self._lock:
             self._ensure_matrix()
-            return self._search(self._mat, self._mat_paths, self._mat_dim, query_vec, k, exclude)
+            return self._search(self._mat, self._mat_paths, self._mat_dim, query_vec, k, exclude, allow)
 
     def title_cosine_top_k(
         self,
