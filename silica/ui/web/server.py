@@ -2887,6 +2887,39 @@ def calendar(start: str = "", days: int = 7):
     return out
 
 
+@app.get("/calendar/event/path")
+def calendar_event_path(title: str = "", start: str = "", rrule: str = ""):
+    """The note the quick card would write, named before it is saved."""
+    from silica.tools.events import event_note_path
+
+    return event_note_path(title, start, rrule)
+
+
+@app.post("/calendar/event", dependencies=_SAME_ORIGIN)
+def calendar_event_create(payload: dict):
+    """The quick card's Save (ADR-0118 point 1): the same writer as the chat's
+    `silica_event_create`, so the calendar is a second door and not a second
+    implementation of the event note."""
+    from silica.tools.events import create_event
+
+    f = {k: str(payload.get(k) or "") for k in
+         ("title", "start", "end", "rrule", "reminder", "body", "plan")}
+    return create_event(f.pop("title"), f.pop("start"), **f, person=True)
+
+
+@app.post("/calendar/event/status", dependencies=_SAME_ORIGIN)
+def calendar_event_status(payload: dict):
+    """The event card's Done and Cancel (ADR-0118 point 6). Open is not a
+    status a card can set: `silica_event_update` keeps a field it is passed
+    empty, so a closed series is reopened in its note."""
+    from silica.tools.events import silica_event_update
+
+    status = str(payload.get("status") or "")
+    if status not in ("done", "cancelled"):
+        return {"error": "status must be done or cancelled"}
+    return silica_event_update(note=str(payload.get("path") or ""), status=status)
+
+
 @app.post("/reminders", dependencies=_SAME_ORIGIN)
 def reminders_poll():
     """The front-end poll IS the reminder tick: compute due, advance the

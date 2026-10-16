@@ -34,6 +34,10 @@ class Occurrence:
     end: dt.datetime | None  # exclusive bound; None = instant
     all_day: bool
     status: str
+    # carried for the calendar's event card and the session diamond (ADR-0118)
+    rrule: str = ""
+    reminder: str = ""
+    plan: str = ""
 
 
 def _duration(event: Event) -> dt.timedelta:
@@ -70,7 +74,8 @@ def expand(event: Event, win_start: dt.datetime, win_end: dt.datetime,
             continue
         out.append(Occurrence(stem=event.stem, title=event.title, path=event.path,
                               start=s, end=end, all_day=event.all_day,
-                              status=event.status))
+                              status=event.status, rrule=event.rrule or "",
+                              reminder=event.reminder_raw, plan=event.plan))
     return out
 
 

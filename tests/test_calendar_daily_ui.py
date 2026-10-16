@@ -21,9 +21,12 @@ def _fn(src: str, name: str) -> str:
 
 
 def test_the_grid_cell_opens_its_daily_note_as_a_triangle():
-    week = _fn(_src("app-calendar.js"), "calBuildWeek")
-    assert ".daily" in week and '"cal-daily"' in week
-    assert "openNote(daily.path)" in week and "stopPropagation" in week
+    cal = _src("app-calendar.js")
+    tri = _fn(cal, "calDailyBtn")
+    assert '"cal-daily"' in tri and "openNote(daily.path)" in tri and "stopPropagation" in tri
+    # the month cell and the week's day head both carry it (ADR-0118)
+    assert "calDailyBtn(daily)" in _fn(cal, "calBuildWeek")
+    assert "calDailyBtn(row.daily)" in _fn(cal, "calDayHead")
     assert ".cal-daily" in _src("app-work.css")
 
 

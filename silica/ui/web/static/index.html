@@ -406,17 +406,22 @@
     </section>
     <section id="view-calendar" class="view">
       <div id="cal-head">
+        <button type="button" id="cal-today" class="ghost" title="jump to today (T)">Today</button>
         <div id="cal-nav" role="group" aria-label="calendar navigation">
-          <button type="button" id="cal-prev" class="ghost" title="previous" aria-label="previous">&#8249;</button>
-          <button type="button" id="cal-today" class="ghost" title="jump to today">today</button>
-          <button type="button" id="cal-next" class="ghost" title="next" aria-label="next">&#8250;</button>
+          <button type="button" id="cal-prev" class="ghost" title="previous (K)" aria-label="previous">&#8249;</button>
+          <button type="button" id="cal-next" class="ghost" title="next (J)" aria-label="next">&#8250;</button>
         </div>
         <div id="cal-title" aria-live="polite"></div>
+        <div id="cal-sub"></div>
         <div class="spacer"></div>
-        <div id="cal-mode" role="group" aria-label="calendar mode">
-          <button type="button" data-calmode="month" class="active" aria-pressed="true">month</button>
-          <button type="button" data-calmode="week" aria-pressed="false">week</button>
+        <div id="cal-mode" role="group" aria-label="calendar view">
+          <button type="button" data-calmode="day" aria-pressed="false" title="day (D)">Day</button>
+          <button type="button" data-calmode="week" class="active" aria-pressed="true" title="week (W)">Week</button>
+          <button type="button" data-calmode="month" aria-pressed="false" title="month (M)">Month</button>
+          <button type="button" data-calmode="agenda" aria-pressed="false" title="agenda (A)">Agenda</button>
         </div>
+        <!-- the side column's New event, for when the view is too narrow to hold it -->
+        <button type="button" id="cal-new-bar" class="cal-new sm" title="new event (C)">New event</button>
       </div>
       <!-- the other four views all name what they are doing while they do it;
            this one used to open on an empty grid and fill in silently -->
@@ -425,8 +430,18 @@
         <div>Reading the vault's dates.</div>
       </div>
       <div id="cal-main">
-        <div id="cal-grid" aria-label="calendar grid"></div>
-        <aside id="cal-agenda" aria-label="agenda"></aside>
+        <!-- ADR-0118: Google Calendar's frame, New event, a month to jump with
+             and the layers beside the view -->
+        <aside id="cal-side" aria-label="calendar tools">
+          <button type="button" id="cal-new" class="cal-new" title="new event (C)">New event</button>
+          <div id="cal-mini" aria-label="jump to a day"></div>
+          <div>
+            <div class="cal-side-h">Show</div>
+            <div id="cal-layers" role="group" aria-label="layers"></div>
+          </div>
+          <div class="cal-keys"><div><kbd>C</kbd> new event <kbd>T</kbd> today</div><div><kbd>D</kbd><kbd>W</kbd><kbd>M</kbd><kbd>A</kbd> views</div></div>
+        </aside>
+        <div id="cal-grid" aria-label="calendar"></div>
       </div>
     </section>
     <section id="view-metrics" class="view">
@@ -488,7 +503,7 @@
       <div class="hp-row"><span class="hp-what">a chat</span><span>asks your notes; under each answer, the notes it read</span></div>
       <div class="hp-row"><span class="hp-what">Explore</span><span>a map of your notes: similar notes sit close, links draw lines</span></div>
       <div class="hp-row"><span class="hp-what">Learn</span><span>questions on your notes; what you miss comes back. Study plans are made and kept here</span></div>
-      <div class="hp-row"><span class="hp-what">Calendar</span><span>events, deadlines, and the day each study plan is due</span></div>
+      <div class="hp-row"><span class="hp-what">Calendar</span><span>events, deadlines, and the day each study plan is due; click or drag an empty time to add an event</span></div>
       <div class="hp-row hp-examine"><span class="hp-what">Examine</span><span>the vault's health: its shape, what to fix, what changed</span></div>
       <div class="hp-row"><span class="hp-what">a new note</span><span>the chat reads it and Explore draws it at once. It never changes a plan, and Learn suggests it only when a plan covers it, or when you have no plan yet</span></div>
       <div class="sp-title">keyboard</div>

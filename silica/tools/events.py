@@ -45,6 +45,60 @@ def silica_event_create(title: Annotated[str, Field(description='Event title')],
                         reminder: Annotated[str, Field(description='Lead before each occurrence: <N>m|h|d')] = "", body: Annotated[str, Field(description='Optional markdown body')] = "") -> dict[str, Any]:
     """Create a user event (appointment, deadline) as a calendar note.
     Revertible with /undo."""
+    return create_event(title, start, end=end, rrule=rrule, reminder=reminder, body=body)
+
+
+def _event_stem(title: str, start: str, rrule: str) -> tuple[str, str]:
+    """(stem, "") or ("", error) for the note an event is written to."""
+    from silica.kernel.write import templates as tpl
+
+    # Recurring events keep a date-free stem: the series has no single day.
+    # slugify strips every path separator, so the stem cannot steer the write out
+    # of the calendar folder — but a recurring title leads the stem, and every
+    # reader of the calendar (scan_events, the timeline walk, ignore_matcher)
+    # skips a path part starting with "." as vault plumbing. A leading dot would
+    # therefore write the note, report success, and leave an event no agenda,
+    # update or reminder can ever see again. A title of nothing but dots and
+    # stripped characters has no filename left at all.
+    safe_title = tpl.slugify(title).lstrip(".")
+    if not safe_title:
+        return "", f"title {title!r} has no usable characters for a filename"
+    return (safe_title if rrule else f"{start.strip()[:10]} {safe_title}"), ""
+
+
+def _free_path(folder: str, stem: str) -> str:
+    path = f"{folder}/{stem}.md"
+    n = 2
+    while True:
+        try:
+            DRIVER.read_note(path)
+        except Exception:
+            return path  # free slot — the happy path
+        path = f"{folder}/{stem} {n}.md"
+        n += 1
+
+
+def event_note_path(title: str, start: str, rrule: str = "") -> dict[str, Any]:
+    """The path `create_event` would write right now, for the calendar's quick
+    card to name before it saves (ADR-0118 point 1): the note is the event."""
+    from silica.kernel.vault_manifest import in_write_dir
+
+    stem, err = _event_stem(title.strip(), start, rrule)
+    if err:
+        return {"error": err}
+    return {"path": _free_path(in_write_dir("calendar"), stem)}
+
+
+def create_event(title: str, start: str, *, end: str = "", rrule: str = "",
+                 reminder: str = "", body: str = "", plan: str = "",
+                 person: bool = False) -> dict[str, Any]:
+    """The one writer of an event note: the chat's tool and the calendar's
+    quick card (`POST /calendar/event`) both land here, so the slug rule, the
+    free-name loop and the restore point exist once. `plan` is a plan note's
+    vault path and makes the event a study session (ADR-0118 point 2).
+    `person` is the quick card: the person typed the event, so it does not
+    take the `AI: true` floor every model write gets, which Learn reads as
+    "written by the AI"."""
     from silica.kernel.calendar.model import validate_event
     from silica.kernel.vault_manifest import in_write_dir
     from silica.kernel.workqueue import path_lease
@@ -64,38 +118,24 @@ def silica_event_create(title: Annotated[str, Field(description='Event title')],
     errors = validate_event(fm)
     if errors:
         return {"error": "; ".join(errors)}
+    if plan.strip():
+        fm["event_plan"] = f"[[{plan.strip().removesuffix('.md')}]]"
 
-    # Recurring events keep a date-free stem: the series has no single day.
-    # slugify strips every path separator, so the stem cannot steer the write out
-    # of the calendar folder — but a recurring title leads the stem, and every
-    # reader of the calendar (scan_events, the timeline walk, ignore_matcher)
-    # skips a path part starting with "." as vault plumbing. A leading dot would
-    # therefore write the note, report success, and leave an event no agenda,
-    # update or reminder can ever see again. A title of nothing but dots and
-    # stripped characters has no filename left at all.
-    safe_title = tpl.slugify(title).lstrip(".")
-    if not safe_title:
-        return {"error": f"title {title!r} has no usable characters for a filename"}
-    stem = safe_title if rrule else f"{start.strip()[:10]} {safe_title}"
+    stem, err = _event_stem(title, start, rrule)
+    if err:
+        return {"error": err}
     folder = in_write_dir("calendar")
 
     ordered: dict[str, Any] = {"title": title, **fm}
     ordered["last modified"] = dt.date.today().isoformat()
     block = yaml.safe_dump(ordered, allow_unicode=True, sort_keys=False).strip()
-    content = tpl.ensure_system_floor(
-        f"---\n{block}\n---\n\n{body.strip()}\n" if body.strip()
-        else f"---\n{block}\n---\n")
+    content = (f"---\n{block}\n---\n\n{body.strip()}\n" if body.strip()
+               else f"---\n{block}\n---\n")
+    if not person:
+        content = tpl.ensure_system_floor(content)
 
     with path_lease(f"{folder}/{stem}.md"):
-        path = f"{folder}/{stem}.md"
-        n = 2
-        while True:
-            try:
-                DRIVER.read_note(path)
-            except Exception:
-                break  # free slot — the happy path
-            path = f"{folder}/{stem} {n}.md"
-            n += 1
+        path = _free_path(folder, stem)
         try:
             ref = DRIVER.create(path, content)
         except Exception as e:
@@ -274,4 +314,16 @@ def silica_agenda(start: Annotated[str, Field(description="Window start: 'today'
     if len(lines) == 1:
         lines.append("(empty window)")
 
-    return {"start": start_date.isoformat(), "days": rows, "text": "\n".join(lines)}
+    # The plans still ahead of the window's first day, for the countdown bars
+    # the week draws from today to each `by` (ADR-0118 point 3). A day row
+    # carries a plan only on its `by`, which leaves a week before it empty.
+    ahead = []
+    for p in plans:
+        try:
+            by = dt.date.fromisoformat(str(p.get("by") or "")[:10])
+        except ValueError:
+            continue  # no date, or one written as words: no bar to draw toward
+        if p.get("status") == "active" and by >= start_date:
+            ahead.append({"name": p["name"], "path": p["path"], "by": by.isoformat()})
+    return {"start": start_date.isoformat(), "days": rows, "plans": ahead,
+            "text": "\n".join(lines)}
