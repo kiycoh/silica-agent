@@ -106,3 +106,10 @@ def test_a_ledger_task_loads_the_tool_it_names(monkeypatch):
     with patch("silica.agent.loop.call_llm", fake):
         run_agent([{"role": "user", "content": "yes"}], "test", constraints=c)
     assert "silica_orphans" not in offered[0] and offered[1][-1] == "silica_orphans"
+
+
+def test_loading_a_core_tool_says_it_is_already_offered():
+    from silica.tools.loader import silica_load_tools
+    out = silica_load_tools(["silica_rework", "silica_no_such_tool"])
+    assert out["already_offered"] == ["silica_rework"]
+    assert out["unknown"] == ["silica_no_such_tool"]

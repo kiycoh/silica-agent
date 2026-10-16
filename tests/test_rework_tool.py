@@ -75,8 +75,10 @@ def test_under_the_floor_it_sends_the_text_back_without_a_call(tmp_vault, llm):
     assert out["ok"] is False and "rewrite it in your reply" in out["error"] and not llm
 
 
-def test_a_note_is_reworked_block_by_block_into_a_note_beside_it(tmp_vault, llm):
+def test_a_note_is_reworked_block_by_block_into_a_note_beside_it(tmp_vault, llm, monkeypatch):
+    from silica.agent import read_scope
     from silica.kernel.write import frontmatter
+    monkeypatch.setattr(read_scope, "REQUESTS", read_scope.ContextVar("t", default=()))
     body = "\n\n".join(_para(400) for _ in range(6))
     tmp_vault.note("Lit/Chapter.md", "---\ntags: [x]\n---\n" + body)
     out = rework.silica_rework(note="Chapter", instruction="modernise it")  # no message: MCP
