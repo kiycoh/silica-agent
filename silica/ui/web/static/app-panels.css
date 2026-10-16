@@ -300,8 +300,15 @@
   text-overflow: ellipsis;
 }
 
+/* The hint covers the chat view only, the one surface whose drop stages files:
+   a full-window scrim also covered the rail, whose rows are drop targets of
+   their own. */
+#view-chat {
+  position: relative;
+}
+
 #drop-hint {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 100;
   display: none;
@@ -310,6 +317,8 @@
   background: var(--drop-scrim);
   color: var(--accent);
   border: 2px dashed var(--accent);
+  /* the view clips to its rounded corners, which cut a square dash off there */
+  border-radius: inherit;
   /* the headline step, stated in px like every other step: 1.2rem resolves to
      the same 18px at the 15px root and reads as a sixteenth step to anything
      that checks the ramp */

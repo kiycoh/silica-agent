@@ -337,15 +337,26 @@ input.addEventListener("paste", (e) => {
   if (files.length) { e.preventDefault(); addFiles(files); }
 });
 
+// Only files over the chat view are staged: the rail and the skill rows take
+// drops of their own, and a tree row dragged anywhere carries no files, so the
+// hint would promise a nucleate that drop never does. dragover decides the hint
+// because it names the element under the cursor; the depth count only notices
+// the drag leaving the window, where dragover stops firing.
+const chatView = $("#view-chat");
+const filesOverChat = (e) => e.dataTransfer.types.includes("Files") && chatView.contains(e.target);
 let dragDepth = 0;
-window.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
-window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; });
+window.addEventListener("dragover", (e) => {
+  // Cancelled everywhere, or a file let go off the chat opens in the tab.
+  e.preventDefault();
+  document.body.classList.toggle("dragging", filesOverChat(e));
+});
 window.addEventListener("dragleave", (e) => { e.preventDefault(); if (--dragDepth <= 0) document.body.classList.remove("dragging"); });
 window.addEventListener("drop", (e) => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove("dragging");
-  if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  if (filesOverChat(e) && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
 });
 
 // "+" opens what the next message can do (ADR-0083). Its first entry is the

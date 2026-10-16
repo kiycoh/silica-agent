@@ -50,7 +50,6 @@
   <link rel="stylesheet" href="/static/app-motion.css" />
 </head>
 <body>
-  <div id="drop-hint">Drop to nucleate into Inbox/</div>
 
 
   <main>
@@ -211,6 +210,9 @@
     </aside>
 
     <section id="view-chat" class="view active">
+      <!-- Inside the chat view, not over the page: the drop lands in this
+           composer, so the rail and its workspaces stay uncovered. -->
+      <div id="drop-hint">Drop to nucleate into Inbox/</div>
       <!-- The landing, shown only while the transcript is empty. Above the
            wordmark, the presence (app-presence.js, ADR-0048): the assistant as
            a quartz point in glass, seeded by the vault's path, thinking while
