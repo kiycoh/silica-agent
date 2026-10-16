@@ -1298,6 +1298,12 @@ def write_plan(payload: dict):
     # a refused line by its index (this form) or its text (the plan note's `refused:`)
     refused = [int(i) if str(i).lstrip("-").isdigit() else str(i) for i in (payload.get("refused") or []) if str(i).strip()]
     chosen = obj.normalize(payload.get("objectives"))
+    reference = payload.get("reference")
+    if isinstance(reference, str) and reference.strip():
+        try:
+            scope, target, restrict = _with_reference(scope, target, restrict, reference)
+        except Exception as exc:
+            raise HTTPException(400, str(exc))
     if scope not in plans.SCOPES:
         raise HTTPException(400, f"scope must be one of {plans.SCOPES}")
     if payload.get("preview") or payload.get("cards_only"):
@@ -1339,6 +1345,24 @@ def write_plan(payload: dict):
     except Exception as exc:
         raise HTTPException(400, str(exc))
     return out
+
+
+def _with_reference(scope: str, target, restrict: str, reference: str) -> tuple[str, Any, str]:
+    """Study and a Reference as today's syllabus scope (ADR-0119): the
+    reference's lines are the steps, and what is studied bounds where they
+    are looked for. A folder stays a prefix, so a note added to it later is
+    found; notes, a topic or a workspace are bounded by the notes they
+    resolve to now. No Study: the whole vault, as a syllabus plan always was."""
+    from silica.kernel.learn import plans
+
+    if not scope:
+        return "steps", reference, ""
+    if scope == "folder":
+        return "steps", reference, str(target).strip()
+    paths = plans.resolve_scope(scope, target, restrict=restrict)["paths"]
+    if not paths:
+        raise ValueError("nothing to study resolves, so the reference has nowhere to be looked for")
+    return "steps", reference, plans.RESTRICT_SEP.join(paths)
 
 
 def _preview(res: dict, chosen: list[str]) -> dict:

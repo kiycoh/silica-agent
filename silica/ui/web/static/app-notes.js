@@ -1422,6 +1422,10 @@ $("#note-chat").addEventListener("click", () => {
   const title = $("#note-title-text").textContent.trim() || lastNotePath.split("/").pop().replace(/\.md$/, "");
   draftInComposer('Tell me about "' + title + '", grounded in what the vault already says. ');
 });
+// Test me and Explain it (ADR-0119): Learn's home no longer lists every
+// note, so a test on this one starts here. Learn's own functions run them.
+$("#note-test").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath && typeof learnTestNote === "function") learnTestNote(lastNotePath); });
+$("#note-teach").addEventListener("click", () => { closeNoteMenu(); if (lastNotePath && typeof learnExplain === "function") learnExplain(lastNotePath); });
 $("#note-diff-open").addEventListener("click", () => openDiff(lastNotePath));
 $("#note-changes").addEventListener("click", () => openNote(lastNotePath));
 

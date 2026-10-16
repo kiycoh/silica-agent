@@ -94,7 +94,7 @@ def test_the_home_is_one_column_that_asks_what_you_would_like_to_learn():
     # the segments of ADR-0081 are gone from the bar
     assert '["next", "Next", { view: "home" }]' not in js
     # the session is its list, and Drop edits it (ADR-0119 Gate)
-    assert "session_rows" in js and 'lrGateCount("edited")' in js
+    assert "session_rows" in js and 'from: "edited"' in js
     for word in ('"Fading"', '"Not tested yet"', '"Missed"', '"What you know"', '"Changed this week"'):
         assert word in js, word
 
@@ -103,7 +103,7 @@ def test_a_test_is_written_as_a_plan_only_when_it_holds_something_to_keep():
     js = app_js()
     keep = js[js.index("function lrKeeps("):]
     keep = keep[:keep.index("\n}\n")]
-    for field in ("reference", "by", "objectives"):
+    for field in ("f.ref", "f.by", "f.objectives"):
         assert field in keep, field
     assert '"Save only"' in js and "Kept as a plan" in js
     # the dialog sits over the home; Reference is a field of its own
@@ -113,14 +113,32 @@ def test_a_test_is_written_as_a_plan_only_when_it_holds_something_to_keep():
 def test_explain_it_and_test_me_open_from_the_note_menu():
     # ADR-0119 reopens the note menu to practice (ADR-0075 had moved it to
     # Learn's rows, which no longer list every note)
-    assert 'id="note-test"' in INDEX and 'id="note-explain"' in INDEX
+    assert 'id="note-test"' in INDEX and 'id="note-teach"' in INDEX
     js = app_js()
-    assert '$("#note-test")' in js and '$("#note-explain")' in js
+    assert '$("#note-test")' in js and '$("#note-teach")' in js
     assert 'teach: true' in js and "/learn/teach" in js
 
 
 def test_the_receipt_opens_on_what_was_missed():
     js = app_js()
+    row = js[js.index("function lrMissedRow("):]
+    row = row[:row.index("\n}\n")]
+    assert "Read it in the note" in row and "openNote(file, span?.line)" in row
     rc = js[js.index("function lrRenderReceipt("):]
-    assert "Read it in the note" in rc and "openNote(" in rc
     assert rc.index("lrMissedList(") < rc.index('"The figures"')
+
+
+def test_a_reference_is_a_syllabus_bounded_by_what_is_studied(client):
+    c, _ = client
+    body = {"scope": "folder", "target": "ML/", "reference": "Iperpiano\nTeoria della mente"}
+    pv = c.post("/learn/plan", json={**body, "preview": True}).json()
+    assert [n["node"] for n in pv["tree"]] == ["Iperpiano", "Teoria della mente"]
+    assert pv["paths"] == ["ML/Iperpiano.md"] and pv["gaps"] == ["Teoria della mente"]
+    w = c.post("/learn/plan", json={**body, "name": "Esame ML", "templates": True}).json()
+    rep = c.get("/learn/plan", params={"path": w["path"]}).json()
+    assert rep["scope"] == "steps" and rep["restrict"] == "ML/"
+    # a note studied bounds it by its path; no Study, the whole vault
+    # pasted text ends in a line break, or one line equal to a title would be read as that note
+    one = c.post("/learn/plan", json={"scope": "notes", "target": ["Iperpiano"], "reference": "Iperpiano\n", "preview": True}).json()
+    assert one["paths"] == ["ML/Iperpiano.md"]
+    assert c.post("/learn/plan", json={"scope": "", "reference": "Iperpiano\n", "preview": True}).json()["paths"] == ["ML/Iperpiano.md"]

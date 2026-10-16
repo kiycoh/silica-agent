@@ -368,7 +368,9 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     (ADR-0081, Create plan fault 4); a refused line is a gap by the reader."""
     from silica.kernel.write import frontmatter
 
-    path = resolve_title(target, notes)
+    # a line break says pasted text: "Iperpiano" alone names the note to read
+    # the syllabus from, "Iperpiano\n" is one line to match (ADR-0119)
+    path = None if "\n" in target else resolve_title(target, notes)
     if path:
         _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
         lines = [s["text"] for s in parse_steps(body)] or [

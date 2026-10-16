@@ -555,11 +555,16 @@
            since ADR-0075 that is two things: a question about it in the
            composer that is showing, and the graph arranged on it (ADR-0088). The four asks
            that stood here are still typed commands (/summarize, /explain,
-           /quiz, /relate), and practice starts from Learn's own rows. The
+           /quiz, /relate). Practice is back since ADR-0119: Learn's home no
+           longer lists every note, so the note is where a test on it starts
+           (test me on this…, the dialog; explain it in my words, the
+           teach-back, not the old "explain" ask, which was Silica's). The
            diff is listed only when this session changed the note: with a
            write card, it is the one way to it. -->
       <div id="note-menu" role="menu" aria-label="this note" hidden>
         <button type="button" role="menuitem" id="note-chat">chat</button>
+        <button type="button" role="menuitem" id="note-test">test me on this…</button>
+        <button type="button" role="menuitem" id="note-teach">explain it in my words</button>
         <button type="button" role="menuitem" id="note-map">the map<span class="arw" aria-hidden="true">&#8594;</span></button>
         <div id="nm-read" hidden>
           <div role="separator"></div>

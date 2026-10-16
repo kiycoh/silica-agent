@@ -188,7 +188,8 @@ def test_index_carries_the_learn_view_after_explore_and_the_section():
     assert re.findall(r'data-tab="(\w+)"', rail) == ["graph", "learn", "calendar", "metrics"]
     assert 'id="view-learn"' in INDEX and 'id="learn-bar"' in INDEX
     assert 'id="learn-crumb"' in INDEX and 'id="learn-back"' in INDEX and 'id="learn-end"' in INDEX
-    # practice left the note's menu (ADR-0075): it starts from Learn's own rows
+    # practice left the note's menu (ADR-0075) and came back as two items,
+    # test me on this… and explain it (ADR-0119, tests/test_learn_simpler.py)
     assert 'id="note-learn"' not in INDEX
     scripts = re.findall(r'<script src="/static/(app-[\w-]+\.js)">', INDEX)
     assert scripts.index("app-learn.js") == scripts.index("app-metrics.js") + 1
@@ -351,8 +352,10 @@ def test_learn_is_on_the_shell_scale_and_states_are_marks():
     assert 'setAttribute("aria-pressed"' in goals and '"role", "checkbox"' not in learn
     # one fact once: no tooltip glossary, no explanations in the flow
     assert "mcard-sub" not in learn and '"mnote"' not in learn
+    # ↑ ↓ walk the rows by focus; the home has no detail pane to navigate
+    # (ADR-0119), and Escape closes the dialog
     keys = learn[learn.index("function learnKeys"):]
-    assert '"ArrowDown"' in keys and '"ArrowUp"' in keys and "replace: true" in keys
+    assert '"ArrowDown"' in keys and '"ArrowUp"' in keys and ".focus()" in keys and "lrCloseDialog()" in keys
 
 
 
