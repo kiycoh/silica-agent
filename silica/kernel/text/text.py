@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import threading
+from types import SimpleNamespace
 from typing import Any
 
 from silica.kernel.write import frontmatter
@@ -80,6 +81,7 @@ _TOKEN_RE = re.compile(r"[a-zA-ZÀ-ÿ]+")
 # threading.local rather than a lock: construction is ~0.5 µs (the tables are
 # class-level), so a copy per thread costs nothing and keeps stemming parallel.
 _STEMMERS = threading.local()
+_SURFACE = SimpleNamespace(stemWord=lambda word: word)
 
 
 def _get_stemmer(lang: str) -> Any:
@@ -93,7 +95,11 @@ def _get_stemmer(lang: str) -> Any:
     stemmer = by_lang.get(lang)
     if stemmer is None:
         import snowballstemmer
-        stemmer = by_lang[lang] = snowballstemmer.stemmer(lang)
+        # Snowball has no chinese, which language.detect names: surface forms,
+        # as candidates._stemmer_for keeps them. Any other unknown name still
+        # raises, since a misspelt cooccurrence_lang should not index unstemmed.
+        stemmer = by_lang[lang] = (_SURFACE if lang == language.CHINESE
+                                   else snowballstemmer.stemmer(lang))
     return stemmer
 
 

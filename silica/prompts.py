@@ -68,14 +68,22 @@ A review reports first and changes nothing until the user clearly says yes. Star
 
 
 # The language section is appended last (recency): the model weights end-of-prompt
-# instructions heavily. On button/slash-command turns the user's message carries no
-# natural language, so without a declared default it would fall through to English.
+# instructions heavily. A vault that declares no chat language gets this rule,
+# not "Reply in <its detected language> by default": on an undeclared Italian
+# vault that one answered 2 of 12 Chinese questions in Chinese, this one 9
+# (2026-10-16, docs evaluation/reply-language-2026-10-16). It is no longer than
+# the rule it replaced because the prefix sits at ADR-0091's ceiling; a wording
+# 70 tokens longer was not told apart from it (20 of 28 cases against 17, n=4).
+# ponytail: a question about a long Italian lecture is still answered in Italian
+# once the lecture is read (2 of 12, Chinese and English). Reopen at the first
+# pilot report of it, or on 2027-01-15: a per-call line naming the message's
+# language, after the tool results.
 _LANG_FOLLOW = """\
 ## What language to reply in
-ALWAYS reply in the language of the user's most recent message — even when the notes,
-the vault map, and the rest of this conversation are in a different language. An English
-question gets an English answer, an Italian question an Italian answer, whatever language
-the vault happens to be in."""
+ALWAYS reply in the language of the person's latest message, even when the notes and
+tool results are in another: a Chinese question on an Italian note gets a Chinese answer,
+quotes left as written. A slash command or button press takes their earlier messages'
+language, else its notes'."""
 
 
 # Only appended in the GUI, which renders dollar-math as MathML (server.py).
@@ -97,13 +105,16 @@ def _lang_prefer(language: str) -> str:
     )
 
 
+def _lang_rule(reply_language: str | None) -> str:
+    return _lang_prefer(reply_language) if reply_language else _LANG_FOLLOW
+
+
 def system_prompt(reply_language: str | None = None, math: bool = False) -> str:
-    """Full system prompt. `reply_language` (resolved by the caller as
-    `conventions.reply_language or conventions.language`) sets the default chat
-    language, so button/slash-command turns don't default to English. None keeps
-    the follow-the-user rule verbatim. `math=True` (GUI only) tells the model to
+    """Full system prompt. `reply_language` (what the vault declares,
+    `conventions.reply_language or conventions.language`) sets the chat
+    language; None follows the person's own. `math=True` (GUI only) tells the model to
     emit dollar-math, which the web interface renders as MathML."""
-    lang = _lang_prefer(reply_language) if reply_language else _LANG_FOLLOW
+    lang = _lang_rule(reply_language)
     parts = [_BASE, _MATH_GUI, lang] if math else [_BASE, lang]
     return "\n\n".join(parts)
 

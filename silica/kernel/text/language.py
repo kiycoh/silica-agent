@@ -31,11 +31,20 @@ SNOWBALL_TO_ISO: dict[str, str] = {
     "russian": "ru", "spanish": "es", "swedish": "sv",
 }
 
+# detect() also names chinese, which has neither a Snowball stemmer nor
+# function words its argmax could count. It stays out of SNOWBALL_TO_ISO, whose
+# keys settings.py offers as a co-occurrence stemmer, and has its code here.
+CHINESE = "chinese"
+ISO: dict[str, str] = {**SNOWBALL_TO_ISO, CHINESE: "zh"}
+
 # Letters of any script — [a-zA-ZÀ-ÿ] silently blinded detect() to cyrillic
 # and arabic (russian/arabic in SNOWBALL_TO_ISO were unreachable: zero tokens
 # -> zero stopword hits -> english), and split romanian ș/ț and hungarian ő/ű
 # words, which sit outside Latin-1.
 _TOKEN_RE = re.compile(r"[^\W\d_]+")
+# Han characters (unified ideographs, extension A, compatibility) and kana.
+_HAN_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_KANA_RE = re.compile(r"[\u3040-\u30ff]")
 # Markup votes for no language. The stop_words English list has 1,333
 # entries, among them single letters, "text", "begin", "right", "td" and "tr",
 # so math symbols, LaTeX commands outside math delimiters, MinerU's HTML
@@ -121,6 +130,8 @@ def detect(text: str) -> str:
     stopwords_for() set (every SNOWBALL_TO_ISO key when the stop_words
     package works; degrades to en/it when it is broken — today's
     behavior). Empty text or no hits -> "english", deterministically.
+    Text written mostly in Han characters is "chinese", decided on script
+    before any word is counted.
     Candidate order is english-first, then SNOWBALL_TO_ISO insertion order,
     so max() (which keeps the first max on a tie) resolves any tie
     involving english to english, and other ties by that fixed order.
@@ -128,9 +139,17 @@ def detect(text: str) -> str:
     ponytail: stopword-ratio classifier; swap to langdetect confined here
     if confusables (es/pt/fr/it) misfire on real prose.
     """
-    words = [w.lower() for w in _TOKEN_RE.findall(_MARKUP_RE.sub(" ", text))]
+    plain = _MARKUP_RE.sub(" ", text)
+    words = [w.lower() for w in _TOKEN_RE.findall(plain)]
     if not words:
         return "english"
+    # Chinese writes no spaces, so to _TOKEN_RE a clause is one word that no
+    # stoplist holds, and a Chinese note read "english" (2026-10-16). A Chinese
+    # word is about two characters: more of them than Latin-script words is
+    # Chinese, unless more kana than Han run between them, which is Japanese.
+    han = len(_HAN_RE.findall(plain))
+    if han > len(_KANA_RE.findall(plain)) and han / 2 > sum(1 for w in words if not _HAN_RE.search(w)):
+        return CHINESE
 
     ordered = ["english"] + [name for name in SNOWBALL_TO_ISO if name != "english"]
     candidates = [name for name in ordered if stopwords_for(name)]

@@ -146,10 +146,10 @@ def speech_lang(config: Any) -> str:
     fixed = (getattr(config, "stt_lang", "") or "").strip()
     if fixed and fixed != "auto":
         return fixed
-    from silica.kernel.text.language import SNOWBALL_TO_ISO
+    from silica.kernel.text.language import ISO
     from silica.onboarding.checks import reply_language_for
 
     name = (reply_language_for((getattr(config, "vault_path", "") or "").strip()) or "").strip().lower()
-    if name in SNOWBALL_TO_ISO:
-        return SNOWBALL_TO_ISO[name]
+    if name in ISO:
+        return ISO[name]
     return name if len(name) == 2 and name.isalpha() else ""

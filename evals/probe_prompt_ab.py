@@ -184,7 +184,8 @@ RULE_CASES = {
     "r6_pipelines": [("ingest", "ok"), ("ingest", "hand_writes")],
     "r7_trust": [("inject", "ok")],
     "review": [("review", "ok")],
-    "lang": [("lang", "ok"), ("lang_default", "ok")],
+    "lang": [("lang", "ok"), ("lang_default", "ok"), ("lang_zh", "ok"), ("lang_zh_cli", "ok"),
+             ("lang_default_undeclared", "ok")],
     "math": [("math", "ok")],
 }
 
@@ -244,19 +245,23 @@ WHOLE_READ_DOC = ("Reads the complete content of a note in the vault by name (wi
 def apply_arm(arm: str) -> None:
     """Install the arm's prompt into the process-global prompt module (the
     subprocess is fresh, so nothing leaks into another arm)."""
-    import silica.cli as cli
     import silica.prompts as prompts
     if arm == "candidate":
         prompts._BASE = candidate_base(prompts._BASE)
     elif arm == "legacy_review":
         i = prompts._BASE.index("## Reviewing a vault")
         prompts._BASE = prompts._BASE[:i] + LEGACY_REVIEW
+    elif arm == "detected_default":
+        # The chat's language before 2026-10-16: an undeclared vault's detected
+        # language, as "Reply in <it> by default".
+        import silica.cli as cli
+        from silica.onboarding.checks import reply_language_for
+        cli._reply_language = lambda: reply_language_for(cli.CONFIG.vault_path) or ""
     elif arm.startswith("minus:"):
         rule = arm.split(":", 1)[1]
         if rule == "lang":
             prompts._LANG_FOLLOW = ""
-            prompts._lang_prefer = lambda language: ""
-            cli._lang_prefer = prompts._lang_prefer  # seed_messages imported it by name
+            prompts._lang_prefer = lambda language: ""  # _lang_rule reads both at call time
         elif rule == "math":
             prompts._MATH_GUI = ""
         else:
@@ -340,6 +345,16 @@ def plant_cited(vault: Path) -> None:
     (d / "Dropout (Srivastava et al.).md").write_text(CITED_NOTE, encoding="utf-8")
 
 
+def plant_undeclared(vault: Path) -> None:
+    """The vault declares no chat language, as a hosted one does: the test
+    vault's `conventions:` set reply_language italian."""
+    import yaml
+    manifest = vault / "vault.yaml"
+    data = yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}
+    data.pop("conventions", None)
+    manifest.write_text(yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
+
+
 def plant_raw(vault: Path) -> None:
     (vault / "Inbox" / "appunti_svm_grezzi.md").write_text(RAW_INBOX, encoding="utf-8")
 
@@ -396,6 +411,14 @@ def _preserved(rec: dict) -> dict:
 
 def english(text: str) -> bool:
     return len(EN_WORDS.findall(text)) > len(IT_WORDS.findall(text))
+
+
+def _lang(rec: dict, turn: int) -> str:
+    """The language of a turn's answer outside its quoted passages, which the
+    rule leaves in the note's own words."""
+    from silica.kernel.text.language import detect
+    lines = rec["turns"][turn]["answer"].splitlines() if turn < len(rec["turns"]) else []
+    return detect("\n".join(x for x in lines if not x.lstrip().startswith(">")))
 
 
 # ADR-0092 G3: a note other notes link to is the user's to delete. Paths and
@@ -530,6 +553,45 @@ CASES = {
     "lang_default": {
         "turns": [{"content": "Summarise the note Lezione 32 in three bullet points.", "origin": "cli"}],
         "check": lambda rec: {"ok": bool(rec["turns"][0]["answer"]) and not english(rec["turns"][0]["answer"])},
+    },
+    # The rule for a vault that declares no chat language (2026-10-16): the
+    # person's, then for a turn with none of its own their earlier messages',
+    # then the notes'. On a copy that declares nothing, as a hosted vault does.
+    "lang_zh": {
+        "plant": plant_undeclared,
+        "turns": ["Lezione 32 里关于 boosting 讲了什么？用两句话回答。"],
+        "check": lambda rec: {"ok": _lang(rec, 0) == "chinese"},
+    },
+    "lang_zh_bayes": {
+        "plant": plant_undeclared,
+        "turns": ["我的笔记里是怎么解释贝叶斯定理的？"],
+        "check": lambda rec: {"ok": _lang(rec, 0) == "chinese"},
+    },
+    "lang_zh_autoenc": {
+        "plant": plant_undeclared,
+        "turns": ["根据我的笔记，自编码器是什么？简单说明一下。"],
+        "check": lambda rec: {"ok": _lang(rec, 0) == "chinese"},
+    },
+    "lang_zh_cli": {
+        "plant": plant_undeclared,
+        "turns": ["Lezione 32 里关于 boosting 讲了什么？用两句话回答。",
+                  {"content": "Summarise the note Lezione 32 in three bullet points.", "origin": "cli"}],
+        "check": lambda rec: {"ok": _lang(rec, 0) == "chinese" and _lang(rec, 1) == "chinese"},
+    },
+    "lang_en_undeclared": {
+        "plant": plant_undeclared,
+        "turns": ["In two sentences, what does Lezione 32 say about boosting?"],
+        "check": lambda rec: {"ok": _lang(rec, 0) == "english"},
+    },
+    "lang_it_undeclared": {
+        "plant": plant_undeclared,
+        "turns": ["Cos'è il boosting secondo la Lezione 32? In due frasi."],
+        "check": lambda rec: {"ok": _lang(rec, 0) == "italian"},
+    },
+    "lang_default_undeclared": {
+        "plant": plant_undeclared,
+        "turns": [{"content": "Summarise the note Lezione 32 in three bullet points.", "origin": "cli"}],
+        "check": lambda rec: {"ok": _lang(rec, 0) == "italian"},
     },
     # r2_short: no length named in the question, so only the rule asks for
     # brevity; `ok` only rules out an essay, the rule's effect is `chars`.

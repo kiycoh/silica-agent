@@ -549,13 +549,13 @@ def language_status(vault: str) -> tuple[str | None, str | None, bool]:
 
 
 def reply_language_for(vault: str) -> str | None:
-    """The language chat should default to for `vault`.
+    """The language a surface with no message of the person's to follow
+    speaks for `vault`: the speech APIs (agent/stt.speech_lang).
 
     Explicit conventions win (`reply_language`, else `language`); the fallback
     is the vault's own authority (declared `cooccurrence_lang`, else detected
-    from the human notes). Without the fallback a /quiz on an Italian vault
-    came back in English: slash-command turns carry no language of their own,
-    and only the explicit conventions ever reached the prompt.
+    from the human notes). The chat used it too until 2026-10-16 and now reads
+    the conventions alone (cli._reply_language): it has the person's messages.
     """
     if not vault:
         return None

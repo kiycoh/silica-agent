@@ -37,6 +37,38 @@ def test_detect_spanish():
     assert language.detect(ES) == "spanish"
 
 
+ZH = "机器学习是人工智能的一个分支，它让计算机从数据中学习规律，而不是依靠明确编写的规则。"
+
+
+def test_detect_chinese():
+    assert language.detect(ZH) == "chinese"
+
+
+def test_detect_chinese_under_frontmatter_and_english_terms():
+    """Before 2026-10-16 a Chinese note read "english" on its frontmatter: a
+    Han clause is one token to the word count, in no stoplist."""
+    note = ("---\ntags: [ml, svm]\nrelated: null\n---\n# 支持向量机 (SVM)\n"
+            "支持向量机是一种监督学习算法。kernel trick 把数据映射到高维空间，使线性不可分的数据变得可分。")
+    assert language.detect(note) == "chinese"
+
+
+def test_a_chinese_word_in_italian_prose_stays_italian():
+    assert language.detect(IT + " Il carattere 学习 vuol dire studiare.") == "italian"
+
+
+def test_japanese_is_not_chinese():
+    assert language.detect("機械学習は人工知能の一分野であり、データから規則を学ぶことを目的としている。") != "chinese"
+
+
+def test_chinese_keeps_its_surface_forms_and_a_misspelt_language_still_raises():
+    import pytest
+    from silica.kernel.text.text import stem_word
+
+    assert stem_word("学习", lang="chinese") == "学习"
+    with pytest.raises(KeyError):
+        stem_word("gatti", lang="italain")
+
+
 def test_detect_russian():
     # Cyrillic: zero tokens under a latin-only token regex, so russian could
     # never win detection and a russian store silently froze as english.

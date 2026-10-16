@@ -37,7 +37,7 @@ from silica.agent.recall_watch import (
 )
 from silica.config import CONFIG
 from silica.onboarding.adopt import resolve_cwd_vault
-from silica.prompts import _lang_prefer, system_prompt
+from silica.prompts import _lang_rule, system_prompt
 from silica.ui.console import CONSOLE
 from silica.ui.home import print_home
 from silica.ui.prompt import build_session, bottom_toolbar, prompt_text
@@ -329,7 +329,7 @@ def _vault_scope() -> str:
 
 def seed_messages(math: bool = False) -> list[dict]:
     """The system context a fresh conversation starts from: prompt, date, vault
-    scope, vault map, and the restated language rule.
+    scope, vault map, and the restated language rule (`_reply_language`).
 
     Shared by the TUI and the GUI (`ui/web/server._build_seed`, which passes
     math=True for the MathML renderer). It used to be TUI-only, and the GUI's
@@ -337,13 +337,7 @@ def seed_messages(math: bool = False) -> list[dict]:
     blind to `write_dir`, and no closing language line, which is the fix commit
     93b6d2d shipped here and never carried across. One builder, no drift.
     """
-    from silica.onboarding.checks import reply_language_for
-
-    # Explicit conventions, else the vault's own language (declared, else
-    # detected from the human notes): a slash-command turn carries no language
-    # of its own, and defaulting to English on an Italian vault answered /quiz
-    # in the wrong language.
-    reply = reply_language_for(CONFIG.vault_path) or ""
+    reply = _reply_language()
     messages: list[dict] = [{"role": "system", "content": system_prompt(reply, math=math)}]
     messages.append({"role": "system", "content": _today_line()})
     messages.append({"role": "system", "content": _vault_scope()})
@@ -360,8 +354,24 @@ def seed_messages(math: bool = False) -> list[dict]:
     # in `reply`, that bulk drowns the language rule sitting in message 0, and
     # the model answers in the notes' language. Restate it last, closest to the
     # user turn.
-    messages.append({"role": "system", "content": _lang_prefer(reply)})
+    messages.append({"role": "system", "content": _lang_rule(reply)})
     return messages
+
+
+def _reply_language() -> str:
+    """The chat language the vault declares, "" when it declares none.
+
+    Not the language its notes are detected in, which this also returned until
+    2026-10-16: that set "Reply in italian by default" on every undeclared
+    Italian vault, and 10 of 12 Chinese questions got an Italian answer. A slash
+    command, which has no language of its own, is the follow rule's to place.
+    """
+    if not CONFIG.vault_path:
+        return ""
+    from silica.kernel.vault_manifest import load_manifest
+
+    conv = load_manifest(CONFIG.vault_path).conventions
+    return conv.reply_language or conv.language or ""
 
 
 def _fresh_messages() -> list[dict]:
