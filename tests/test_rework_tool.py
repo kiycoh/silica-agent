@@ -64,6 +64,10 @@ def llm(monkeypatch):
     return calls
 
 
+def _block_calls(calls):
+    return [c for c in calls if "rewrite one block" in c["messages"][0]["content"]]
+
+
 def _requests(monkeypatch, message: str):
     from silica.agent import read_scope
     monkeypatch.setattr(read_scope, "REQUESTS", read_scope.ContextVar("t", default=(message,)))
@@ -83,9 +87,10 @@ def test_a_note_is_reworked_block_by_block_into_a_note_beside_it(tmp_vault, llm,
     tmp_vault.note("Lit/Chapter.md", "---\ntags: [x]\n---\n" + body)
     out = rework.silica_rework(note="Chapter", instruction="modernise it")  # no message: MCP
     assert out["ok"] and out["link"] == "[[Chapter (reworked)]]" and out["blocks"] == 2
-    assert all(c["reasoning"] is False for c in llm)
-    assert "The user's request: modernise it" in llm[0]["messages"][0]["content"]
-    assert "tags" not in llm[0]["messages"][1]["content"]
+    work = _block_calls(llm)
+    assert len(work) == 2 and all(c["reasoning"] is False for c in work)
+    assert "The user's request: modernise it" in work[0]["messages"][0]["content"]
+    assert "tags" not in work[0]["messages"][1]["content"]
     data, _, written = frontmatter.split((Path(tmp_vault.note("Lit/x.md")).parent / "Chapter (reworked).md").read_text())
     assert data["source"] == "[[Chapter]]"
     assert written.count("RW ") == 2 and _norm(written.replace("RW ", "")) == _norm(body)
@@ -102,7 +107,7 @@ def test_a_pasted_text_comes_from_the_message_without_what_the_server_appends(tm
     assert list(Path(tmp_vault.note("Inbox/z.md")).parent.glob("testo0*(reworked).md"))
     sent = " ".join(c["messages"][1]["content"] for c in llm)
     assert "named-notes" not in sent and "image attached" not in sent
-    assert llm[0]["messages"][0]["content"].endswith("Rielabora questo testo:")
+    assert _block_calls(llm)[0]["messages"][0]["content"].endswith("Rielabora questo testo:")
 
 
 def test_one_failed_block_writes_nothing(tmp_vault, monkeypatch):
@@ -158,7 +163,8 @@ def test_the_blocks_get_the_persons_words_not_the_chats_paraphrase(tmp_vault, ll
     _requests(monkeypatch, "Riscrivi [[Chapter]] in italiano moderno")
     tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
     rework.silica_rework(note="Chapter", instruction="usa paragrafi tematici e tabelle")
-    assert llm[0]["messages"][0]["content"].endswith("The user's request: Riscrivi [[Chapter]] in italiano moderno")
+    assert _block_calls(llm)[0]["messages"][0]["content"].endswith(
+        "The user's request: Riscrivi [[Chapter]] in italiano moderno")
 
 
 def test_every_result_string_survives_the_eager_projection(tmp_vault, llm, monkeypatch):
@@ -168,3 +174,67 @@ def test_every_result_string_survives_the_eager_projection(tmp_vault, llm, monke
     for out in (rework.silica_rework(note="Short"),
                 rework.silica_rework(note="A long chapter title of several words")):
         assert "re-call to expand" not in generic_projection(out), out
+
+
+# --- the readable variant: outline headings, block heads, language -----------
+
+def _outline_llm(monkeypatch, reply):
+    calls = []
+
+    def fake(model, messages, **kw):
+        calls.append({"messages": messages, **kw})
+        if "rewrite one block" in messages[0]["content"]:
+            return SimpleNamespace(text="RW " + messages[-1]["content"])
+        if isinstance(reply, Exception):
+            raise reply
+        return SimpleNamespace(text=reply)
+
+    monkeypatch.setattr("silica.agent.llm.call_llm", fake)
+    monkeypatch.setattr("silica.config.CONFIG.decision_model", "")
+    return calls
+
+
+def test_the_outline_puts_its_headings_where_it_names_and_no_closer_than_the_gap(monkeypatch):
+    paras = [_para(200) for _ in range(8)]
+    _outline_llm(monkeypatch, "1 | The start\n2 | Too close\n3 | The middle\n99 | Out of range\nnoise")
+    out = rework.outline("\n\n".join(paras), "Italian")
+    assert [ln for ln in out.split("\n\n") if ln.startswith("## ")] == ["## The start", "## The middle"]
+    assert out.split("\n\n")[0] == "## The start" and out.split("\n\n")[3] == "## The middle"
+
+
+def test_a_text_without_headings_gets_the_outline_and_its_blocks_keep_them(tmp_vault, monkeypatch):
+    calls = _outline_llm(monkeypatch, "1 | Il lago\n4 | La minaccia")
+    tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(6)))
+    assert rework.silica_rework(note="Chapter")["ok"]
+    outline_call = [c for c in calls if "numbered [1]" in c["messages"][0]["content"]]
+    assert len(outline_call) == 1 and outline_call[0].get("reasoning") is None
+    written = (Path(tmp_vault.note("Lit/x.md")).parent / "Chapter (reworked).md").read_text()
+    assert written.index("## Il lago") < written.index("## La minaccia")
+
+
+def test_a_headed_text_gets_no_outline(tmp_vault, monkeypatch):
+    calls = _outline_llm(monkeypatch, "1 | Never asked")
+    body = "\n\n".join(f"## Part {i}\n\n" + _para(400) for i in range(4))
+    tmp_vault.note("Lit/Headed.md", body)
+    assert rework.silica_rework(note="Headed")["ok"]
+    assert not [c for c in calls if "numbered [1]" in c["messages"][0]["content"]]
+
+
+def test_a_failed_outline_still_writes_the_rework(tmp_vault, monkeypatch):
+    _outline_llm(monkeypatch, RuntimeError("provider down"))
+    tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
+    assert rework.silica_rework(note="Chapter")["ok"]
+
+
+def test_a_heading_opening_a_mid_text_block_is_dropped_unless_the_source_opens_with_one(monkeypatch):
+    monkeypatch.setattr("silica.agent.llm.call_llm",
+                        lambda model, messages, **kw: SimpleNamespace(text="## Invented\n\nBody."))
+    assert rework._rework("words mid-section", "x", "Italian", None) == "Body."
+    assert rework._rework("## Real\n\nwords", "x", "Italian", None).startswith("## Invented")
+
+
+def test_the_blocks_are_told_the_texts_language_by_name(tmp_vault, llm):
+    italian = " ".join(["Il curato tornava a casa e la sera era tranquilla, ma non sapeva che cosa"] * 100)
+    tmp_vault.note("Lit/Capitolo.md", "\n\n".join([italian] * 4))
+    rework.silica_rework(note="Capitolo")
+    assert "Write in Italian." in _block_calls(llm)[0]["messages"][0]["content"]

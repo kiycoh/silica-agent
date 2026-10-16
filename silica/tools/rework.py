@@ -53,13 +53,43 @@ WORKERS = 8
 # read_scope.PART_ACCEPT use. Reopen with 100 labelled requests.
 SHORTER_ACCEPT = 0.6
 
+# The readable variant (docs/evaluation/rework-quality-2026-10-16.md): the light
+# paraphrase it replaces kept 0.99 of the facts at Gulpease 43 and no headings;
+# these rules keep 0.97 at Gulpease 66, with the text's headings and the outline's.
+# "Old documents become present-day language": told to keep quotations exact, the
+# blocks copied Manzoni's decrees verbatim and the judge marked the rework down for
+# it. The language is named, not "the language of the text": under English
+# instructions Qwen wrote 17 of 65 paragraphs of one Italian rework in English.
 _WORKER_PROMPT = (
-    "You rewrite one block of a longer text that the user asked to have reworked. "
-    "Rewrite this block only: keep every passage, in order, at roughly its original "
-    "length; change the wording, not the content. Do not add facts, comments or "
-    "explanations that are not in the text. Reply with the rewritten text only: no "
-    "preamble, no heading, no closing remark, no offer of other versions. Write in "
-    "the language of the text.\n\nThe user's request: {instruction}")
+    "You rewrite one block of a longer text that the user asked to have reworked. Rewrite the "
+    "whole block, in order: every event, fact, name, number and date stays; the wording changes. "
+    "Do not add facts, comments or explanations that are not in the text.\n\n"
+    "How to write it:\n"
+    "- Clear present-day prose, as a good textbook writes it: most sentences between 12 and 25 "
+    "words. Split a long sentence in two or three; never write a string of very short sentences.\n"
+    "- Old or literary language becomes present-day language, quoted old documents included; "
+    "keep in quotation marks only a phrase the text is famous for. Keep dialogue as dialogue, "
+    "and keep who says each line.\n"
+    "- Short paragraphs, one idea each.\n"
+    "- Keep the text's headings at their level. Inside a section, where the subject changes, add "
+    "a ### sub-heading of two to five plain words; in a story a whole scene is one subject, so "
+    "never put a heading inside a dialogue.\n"
+    "- Where the text lists three or more parallel things, make a bulleted list. Where it treats "
+    "several kinds or parts one after another, open each with a bold label, like \"**Mechanical "
+    "barriers.**\". Everything else stays prose.\n"
+    "- Keep formulas, tables and links exact. Add no formula, table or diagram unless the user's "
+    "request asks for one.\n\n"
+    "Reply with the rewritten text only: no preamble, no title, no closing remark, no offer of "
+    "other versions. Write in {language}.\n\n"
+    "The user's request: {instruction}")
+
+_OUTLINE_PROMPT = (
+    "The user gives you a text whose paragraphs are numbered [1], [2], ... Split it into its main "
+    "sections, as a textbook would: between {low} and {high} sections, each starting where the "
+    "subject changes. For each section write one line: the number of the paragraph it starts "
+    "at, then \" | \", then a heading of two to five plain words in {language} naming what the "
+    "section is about, as a textbook would title it (\"The landscape\", \"The threat\"). The "
+    "first section starts at [1]. Nothing else.")
 
 _QUESTION = {"kind": {
     "type": "choice",
@@ -80,6 +110,19 @@ _QUESTION = {"kind": {
 _IMAGE_RE = re.compile(r"\n*\[image attached: [^\]\n]+\]")
 _SENTENCE_RE = re.compile(r"(?<=[.!?…])\s+")
 _UNSAFE_NAME = re.compile(r'[\\/:*?"<>|#^\[\]]+')
+_HEADING_RE = re.compile(r"^\s*#{1,6} ")
+_LEAD_HEADING_RE = re.compile(r"^\s*#{1,6} [^\n]*\n+")
+_OUTLINE_LINE_RE = re.compile(r"\s*\[?(\d+)\]?\s*\|\s*(.+)")
+# A text with fewer headings than one in this many words gets the outline's. The
+# 6.1k-word chapter and article measured had none, the headed article one in 250.
+OUTLINE_WORDS = 800
+# An outline heading this close to the one before is dropped: without it, thinking
+# off put a heading on every line of Manzoni's dialogue (65 in one chapter).
+OUTLINE_GAP = 250
+# The outline reads the whole text in one call, so past this it would cross the
+# endpoint's 32k-token tier, billed at 3.3x (about 18k words of Italian). Only
+# 6.1k-word texts were measured; a longer one is reworked without headings added.
+OUTLINE_MAX_WORDS = 12_000
 
 
 def _words(text: str) -> int:
@@ -125,6 +168,47 @@ def blocks(text: str) -> list[str]:
     return [g[0][1] + "".join(sep + piece for sep, piece in g[1:]) for g in groups]
 
 
+def _language(text: str) -> str:
+    from silica.kernel.text import language
+
+    return language.display_name(language.detect(text[:4000]))
+
+
+def outline(text: str, language: str, cancel_token: Any = None) -> str:
+    """The text with a heading at each of its main sections, from one reading of
+    the whole of it: a block sees a thousand words and cannot tell where a
+    chapter's parts begin. Paragraph numbers and not quoted first words, because
+    asked to quote eight words Qwen copied whole paragraphs (2026-10-16)."""
+    from silica.agent.llm import call_llm
+    from silica.config import CONFIG
+
+    paras = re.split(r"\n\s*\n", text.strip())
+    n = _words(text)
+    prompt = _OUTLINE_PROMPT.format(low=max(2, n // 900), high=max(3, n // 350), language=language)
+    numbered = "\n\n".join(f"[{i + 1}] {p}" for i, p in enumerate(paras))
+    # Thinking on, unlike the blocks: with it off the reply numbered the sections
+    # 1 to 10 instead of naming paragraphs, so every heading landed in the first
+    # 700 words of a 6k-word article. On it costs about 0.001 USD and 40 to 60 s
+    # on a 6k-word text (2026-10-16). Reopen with a 1024-token reasoning budget
+    # if a rework of 6k words passes 120 s.
+    reply = call_llm(CONFIG.model, [{"role": "system", "content": prompt},
+                                    {"role": "user", "content": numbered}], cancel=cancel_token).text or ""
+    named: dict[int, str] = {}
+    for line in reply.splitlines():
+        m = _OUTLINE_LINE_RE.match(line)
+        if m and 0 < int(m.group(1)) <= len(paras):
+            named.setdefault(int(m.group(1)) - 1, m.group(2).strip(" *#"))
+    out: list[str] = []
+    words, last = 0, -OUTLINE_GAP
+    for i, para in enumerate(paras):
+        if named.get(i) and words - last >= OUTLINE_GAP and not _HEADING_RE.match(para):
+            out.append("## " + named[i])
+            last = words
+        out.append(para)
+        words += _words(para)
+    return "\n\n".join(out)
+
+
 def _request() -> str:
     """The user's current message as they wrote it: without the named-notes
     block and the image markers the server appends to it."""
@@ -148,11 +232,11 @@ def _wants_shorter(request: str) -> bool:
     return verdict["choice"] == "shorter" and verdict["probabilities"].get("shorter", 0.0) > SHORTER_ACCEPT
 
 
-def _rework(block: str, instruction: str, cancel_token: Any) -> str:
+def _rework(block: str, instruction: str, language: str, cancel_token: Any) -> str:
     from silica.agent.llm import call_llm
     from silica.config import CONFIG
 
-    messages = [{"role": "system", "content": _WORKER_PROMPT.format(instruction=instruction)},
+    messages = [{"role": "system", "content": _WORKER_PROMPT.format(instruction=instruction, language=language)},
                 {"role": "user", "content": block}]
     # Thinking off: on two texts it was the most faithful arm (FActScore 0.966
     # and 0.996, against 0.879 and 0.965 with thinking on), with the fewest
@@ -160,7 +244,10 @@ def _rework(block: str, instruction: str, cancel_token: Any) -> str:
     out = (call_llm(CONFIG.model, messages, reasoning=False, cancel=cancel_token).text or "").strip()
     if not out:
         raise RuntimeError("the model returned no text")
-    return out
+    # A block starts wherever a thousand words ran out, mostly mid-section, so a
+    # heading the worker opens it with would split a section in two; one the
+    # source block opens with is the text's own (or the outline's) and stays.
+    return out if _HEADING_RE.match(block) else _LEAD_HEADING_RE.sub("", out, count=1)
 
 
 def _target(folder: str, stem: str) -> str:
@@ -214,6 +301,14 @@ def silica_rework(
     if len(parts) > MAX_BLOCKS:
         return {"ok": False, "blocks": len(parts),
                 "error": f"Over {MAX_BLOCKS} blocks: ask the person for one part at a time."}
+    language = _language(text)
+    if len(re.findall(r"^#{1,6} ", text, re.M)) * OUTLINE_WORDS < words <= OUTLINE_MAX_WORDS:
+        try:
+            parts = blocks(outline(text, language, cancel_token))
+        except Exception as e:
+            # Headings are for reading, the rework is the content: a text that
+            # comes back complete without them is still what was asked for.
+            logger.warning("rework outline failed, no headings added: %s", e)
 
     # The person's own words, not the chat's `instruction`: the chat paraphrases
     # and adds what nobody asked for ("paragrafi tematici e tabelle quando
@@ -222,7 +317,7 @@ def silica_rework(
     # message behind it (MCP).
     ask = re.split(r"\n\s*\n", request, maxsplit=1)[0][:300] if request else (instruction or "Rework this text")
     with ThreadPoolExecutor(min(WORKERS, len(parts))) as pool:
-        futures = [pool.submit(_rework, p, ask, cancel_token) for p in parts]
+        futures = [pool.submit(_rework, p, ask, language, cancel_token) for p in parts]
         outs: list[str] = []
         for k, fut in enumerate(futures):
             try:
