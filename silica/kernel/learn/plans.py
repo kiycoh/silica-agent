@@ -23,6 +23,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 SCOPES = ("notes", "folder", "topic", "steps", "workspace")
+# Several bounds in one `restrict:` line, the separator `refused:` already uses
+RESTRICT_SEP = " | "
 REACH = {"unistructural": 1, "multistructural": 2, "relational": 3, "extended": 4}
 REACH_LABEL = {1: "Facts", 2: "Parts", 3: "Mechanisms", 4: "New contexts"}
 _STEP_RE = re.compile(r"^- \[( |x|X)\]\s*(.*)$")
@@ -223,7 +225,9 @@ def target_text(scope: str, target) -> str:
 def resolve_scope(kind: str, target, restrict: str = "", refused=()) -> dict:
     """{paths, tree, gaps} for a scope (D23). `target` is the scope's argument:
     paths for notes, a prefix for folder, a term for topic, a note or a
-    directive for steps. `restrict` is a folder prefix for "X relative to Y";
+    directive for steps. `restrict` bounds the material: a folder prefix for
+    "X relative to Y", or several prefixes joined by " | " when a reference
+    is bounded by the notes studied rather than one folder (ADR-0119);
     `refused` the indexes of syllabus lines the reader marked "not this",
     kept as gaps (ADR-0081 §13).
 
@@ -234,12 +238,15 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=()) -> dict:
     from silica.kernel.report.learner import _notes_meta, is_material
 
     notes = _notes_meta(_vault())
+    # A note's path is a prefix of itself only, so a list of notes and a
+    # folder bound a reference by the same test
+    bounds = tuple(b.strip().casefold() for b in str(restrict or "").split(RESTRICT_SEP) if b.strip())
     # A plan is the card, never the material: the topic "memoria" listed
     # Plans/Prova Learn.md among its notes (2026-10-08) because the plan names
     # the topic. The walk already records `type` for exactly this, and an
     # event note's kind with it.
     allowed = {p for p, m in notes.items() if is_material(m)
-               and (not restrict or p.casefold().startswith(restrict.casefold()))}
+               and (not bounds or p.casefold().startswith(bounds))}
     if kind == "notes":
         names = notes_of(target)
         paths = [p for p in (resolve_title(n, notes) for n in names) if p and p in allowed]
@@ -466,7 +473,7 @@ def scope_of(plan: dict) -> dict:
             if p and p not in paths:
                 paths.append(p)
         if not paths and plan["target"]:
-            paths = resolve_scope("steps", plan["target"])["paths"]
+            paths = resolve_scope("steps", plan["target"], restrict=plan.get("restrict", ""))["paths"]
     else:
         target = plan["target"]
         if plan["scope"] == "notes":

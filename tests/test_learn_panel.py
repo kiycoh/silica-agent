@@ -374,8 +374,8 @@ def test_next_groups_say_why_from_the_ledger_and_the_note_carries_its_history(cl
              "session": "s1", "rating": 1, "conf": 90, "hints": 0, "told": False})
     d = c.get("/learn").json()
     n = d["next"]
-    # the plan resumes on Iperpiano (first in its order, never practised)
-    assert n["plans"][0]["name"] == "ML plan" and n["plans"][0]["why"] == "Iperpiano · first in order, never practised"
+    # the plan resumes on Iperpiano (first in its order, not tested yet)
+    assert n["plans"][0]["name"] == "ML plan" and n["plans"][0]["why"] == "Iperpiano · first in order, not tested yet"
     missed = n["missed"][0]
     assert missed["path"] == m and missed["title"] == "Margine geometrico" and missed["why"].startswith("sure, but wrong")
     assert "in ML plan" in missed["why"] and missed["questions"] == 2
