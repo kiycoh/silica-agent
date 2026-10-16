@@ -2640,6 +2640,11 @@ button.lr-cell:focus-visible {
   color: var(--frost);
 }
 
+.lr-nhead b .cnt {
+  font-weight: 400;
+  color: var(--ash-dim);
+}
+
 /* a row of the list: the mark, the title and the reason on one line */
 .lr-srow {
   margin: 0;

@@ -428,7 +428,7 @@ function lrAskBox() {
   const wrap = lrEl("div", "lr-ta lr-askin");
   if (lrAsk.pick) {
     const tok = lrEl("span", "lr-tok");
-    tok.append(lrEl("i", null, LR_KIND_WORD[lrAsk.pick.kind] || lrAsk.pick.kind), lrAsk.pick.label);
+    tok.append(lrEl("i", null, lrKindWord(lrAsk.pick)), lrAsk.pick.label);
     const x = lrBtn("lr-x", "×", () => { lrAsk.pick = null; lrRender(); setTimeout(() => $("#lr-ask")?.focus(), 0); });
     x.setAttribute("aria-label", "clear what to learn");
     tok.appendChild(x);
@@ -495,7 +495,7 @@ function lrAskPaint(inp, list) {
     li.id = "lr-ask-opt-" + i;
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", i === lrAsk.idx ? "true" : "false");
-    li.append(lrEl("i", null, LR_KIND_WORD[o.kind] || o.kind), lrEl("span", "l", o.label), lrEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
+    li.append(lrEl("i", null, lrKindWord(o)), lrEl("span", "l", o.label), lrEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
     li.addEventListener("mousedown", (e) => { e.preventDefault(); lrAskPick(o); });
     list.appendChild(li);
   });
@@ -510,6 +510,8 @@ function lrAskPick(o) {
   lrRender();
   setTimeout(() => $("#lr-ask-go")?.focus(), 0);
 }
+// one note picked reads "note"; the plan form's "notes" names a scope of several
+const lrKindWord = (o) => (o.kind === "notes" && (o.count || 1) === 1 ? "note" : LR_KIND_WORD[o.kind] || o.kind);
 const lrAskClear = () => Object.assign(lrAsk, { q: "", opts: [], idx: -1, pick: null });
 
 async function lrAskGo() {
@@ -578,7 +580,7 @@ function lrStartList(rows) {
   learnStartSession({ scope: paths, n: rows.length, from: "edited" });
 }
 
-function lrSessionRow(r) {
+function lrSessionRow(r, { drop = true } = {}) {
   const row = lrEl("div", "lr-sg lr-srow");
   const pick = lrBtn("pick", undefined, () => lrGo({ view: "note", path: r.path }));
   pick.dataset.lrRow = pick.dataset.lrKey = "note:" + r.path;
@@ -590,32 +592,31 @@ function lrSessionRow(r) {
   const ex = lrBtn("lr-link", "Explain it", () => learnExplain(r.path));
   ex.setAttribute("aria-label", `Explain ${r.title} in your own words`);
   ex.disabled = !!lrSession || !!r.pair;
-  const drop = lrBtn("lr-link", "Drop", () => { lrDropped.add(r.path); lrRender(); });
-  drop.setAttribute("aria-label", `Drop ${r.title} from the next session`);
-  act.append(ex, drop);
+  const dropB = lrBtn("lr-link", "Drop", () => { lrDropped.add(r.path); lrRender(); });
+  dropB.setAttribute("aria-label", `Drop ${r.title} from the next session`);
+  act.appendChild(ex);
+  if (drop) act.appendChild(dropB);
   row.append(pick, act);
   return row;
 }
 
+// Missed: a row per note with its reason, as the session's list, and one
+// action for all of them in the head (three reasons on one line did not read)
 function lrMissedHome(missed) {
   const sec = lrEl("section", "lr-hsec");
-  const h = lrEl("h3", "lr-hh", "Missed");
-  h.appendChild(lrEl("span", "cnt num", String(missed.length)));
-  sec.appendChild(h);
-  const row = lrEl("div", "lr-hline");
-  const tx = lrEl("div", "tx");
-  const names = lrEl("div", "t");
-  missed.slice(0, 3).forEach((m, i) => {
-    if (i) names.append(", ");
-    names.appendChild(lrBtn("lr-link", m.title, () => lrGo({ view: "note", path: m.path })));
-  });
-  if (missed.length > 3) names.append(` and ${missed.length - 3} more`);
-  tx.append(names, lrEl("span", "lr-help", missed.slice(0, 3).map((m) => m.why).join(" · ")));
+  const head = lrEl("div", "lr-nhead");
+  const t = lrEl("div", "t");
+  const h = lrEl("b", null, "Missed");
+  h.appendChild(lrEl("span", "cnt num", ` ${missed.length}`));
+  t.append(h, lrEl("span", "lr-help", "lately, and not met since"));
   const q = missed.reduce((a, m) => a + (m.questions || 1), 0);
   const go = lrBtn("ghost box", "Ask these again", () => learnStartSession({ scope: missed.map((m) => m.path), n: Math.min(24, q), from: "missed" }));
   go.disabled = !!lrSession;
-  row.append(tx, go);
-  sec.appendChild(row);
+  head.append(t, go);
+  sec.appendChild(head);
+  const open = lrMore.has("missed");
+  for (const m of open ? missed : missed.slice(0, 3)) sec.appendChild(lrSessionRow({ path: m.path, title: m.title, why: m.why, mark: "open" }, { drop: false }));
+  if (missed.length > 3) sec.appendChild(lrBtn("lr-more", open ? "Show fewer" : `${missed.length - 3} more`, () => { open ? lrMore.delete("missed") : lrMore.add("missed"); lrRender(); }));
   return sec;
 }
 
@@ -1592,7 +1593,8 @@ function lrStudySection() {
   const row = lrEl("div", "lr-studyrow");
   if (f.scope && f.target) {
     const tok = lrEl("span", "lr-tok");
-    const n = f.preview?.paths?.length;
+    // with a Reference the preview counts its matches, not the Study's notes
+    const n = f.ref ? null : f.preview?.paths?.length;
     tok.append(lrEl("i", null, LR_KIND_WORD[f.scope]), `${f.label || f.target}` + (n != null ? ` · ${lrPlural(n, "note")}` : ""));
     const x = lrBtn("lr-x", "×", () => { Object.assign(f, { scope: "", target: "", label: "", restrict: "", preview: null, cards: null, refused: [] }); lrRender(); setTimeout(() => $("#lr-study")?.focus(), 0); });
     x.setAttribute("aria-label", "clear what to study");
@@ -1812,7 +1814,8 @@ async function lrPreviewScope({ keepCards = false } = {}) {
   lrDefaultName();
   const seq = ++f.seq;
   f.previewBusy = true;
-  if (!keepCards) f.cards = null;
+  // a cards call still running was written for the material before this change
+  if (!keepCards) { f.cards = null; f.cardSeq++; f.cardsBusy = false; }
   lrRender();
   let out;
   try {
@@ -1887,7 +1890,7 @@ function lrShowPreview(sec, p) {
     line.append(` · ${covered.length - doubt} matched` + (doubt ? ` · ${doubt} to check` : "") + (p.gaps.length ? ` · ${lrPlural(p.gaps.length, "gap")}` : ""));
   } else {
     line.appendChild(lrEl("b", null, `${lrPlural(p.paths.length, "note")}` + (p.parts > 1 ? ` in ${p.parts} parts` : "")));
-    line.append(` · ${p.measured} practised · ${p.never} never asked` + (p.due ? ` · ${p.due} to review` : ""));
+    line.append(` · ${p.measured} practised · ${p.never} not tested yet` + (p.due ? ` · ${p.due} to review` : ""));
   }
   sec.appendChild(line);
   if (steps) {
@@ -2048,7 +2051,7 @@ function lrObjectivesSection() {
   sum.append(lrEl("span", "chev"), st);
   const check = (f.cards || []).filter((c) => c.reads_as).length;
   if (check) { const m = lrEl("span", "m"); m.append(lrMark("warn", ""), `${check} to check`); sum.appendChild(m); }
-  else sum.appendChild(lrEl("span", "m mute", `${f.editPath ? "Save" : "Create"} writes what is shown`));
+  else sum.appendChild(lrEl("span", "m mute", "Saving writes what is shown"));
   det.appendChild(sum);
   const inner = lrEl("div", "in");
   if (!f.cards) inner.appendChild(lrEl("p", "lr-help", f.cardsBusy ? "The cards show here once written; Create meanwhile writes them in template wording." : "Written once the material is chosen."));
@@ -2217,7 +2220,8 @@ function lrRenderSession(body) {
     return;
   }
   const eb = lrEl("div", "lr-eyebrow");
-  eb.appendChild(lrEl("span", "eyebrow", lrEyebrow(it)));
+  // a teach-back's item keeps the kind it was built with; the eyebrow says what was asked
+  eb.appendChild(lrEl("span", "eyebrow", s.mode === "teach" ? `Explain it · ${lrStem(it.path)}` : lrEyebrow(it)));
   if (window.speechSynthesis) eb.appendChild(lrReadToggle());
   sheet.appendChild(eb);
   // the question keeps its size after the answer (ADR-0061 §18)
@@ -2310,7 +2314,9 @@ function lrInputParts(sheet, s, it) {
 // words against the note, and the reveal and its rating follow as for any
 // question. Answering by voice is the session's own mic.
 const LR_TEACH_TURNS = 4;
-const lrTeachAsk = (it) => `Explain ${it.title || lrStem(it.path)} in your own words.`;
+// the note's name, not items.title_of: that reads the first heading, which in
+// this vault is often a section ("Modellamento cognitivo" for L'apprendimento)
+const lrTeachAsk = (it) => `Explain ${lrStem(it.path)} in your own words.`;
 function lrTeachParts(sheet, s, it) {
   const T = s.teachT[it.i] || (s.teachT[it.i] = { turn: 0, transcript: [] });
   const eb = lrEl("div", "lr-eyebrow");
@@ -2698,17 +2704,22 @@ function lrChoose(n) {
 async function lrConfirm() {
   const s = lrSession, it = lrItem();
   if (s.results[it.i]) return lrNext();
+  // Enter again while the rating is in flight would post it twice (the server
+  // holds a lock for that too, learn_routes._RATE_LOCK)
+  if (s.confirming) return;
   const v = s.verdicts[it.i];
   const self = !!v.needs_self_grade || v.grader === "self";
   const rating = s.chosen?.[it.i] ?? (self ? null : v.rating);
   if (!rating) { notify("pick a rating", "warn"); return; }
   const btn = $("#lr-confirm");
   if (btn) btn.disabled = true;
+  s.confirming = true;
   try {
     const r = await lrPost("/learn/rate", { id: s.id, i: it.i, rating });
     s.results[it.i] = r;
     if (v.needs_self_grade) v.selfRated = true;
   } catch (e) { if (lrGone(e)) return; notify("not recorded: " + e.message); if (btn) btn.disabled = false; return; }
+  finally { s.confirming = false; }
   if (s.results[it.i].momentum) { lrRender(); return; }   // a milestone line reads before moving on
   lrNext();
 }
@@ -2789,15 +2800,21 @@ function lrMissedList(wrap, r) {
   const pts = byPoint ? r.points.filter((p) => p.status !== "met") : [];
   const items = byPoint ? [] : r.items.filter((x) => ["missed", "assisted", "skipped"].includes(x.status));
   const n = pts.length + items.length;
+  // a skip is not a miss (ADR-0061): it is listed, and the head does not count it
+  const missedN = [...pts, ...items].filter((x) => x.status !== "skipped").length;
+  const skippedN = n - missedN;
   const sec = lrEl("section", "lr-missed");
-  sec.appendChild(lrEl("h2", null, n ? `You missed ${lrPlural(n, byPoint ? "point" : "question")}` : "Nothing missed"));
+  sec.appendChild(lrEl("h2", null, missedN ? `You missed ${lrPlural(missedN, byPoint ? "point" : "question")}` : "Nothing missed"));
   const t3 = r.tally3;
-  if (t3) sec.appendChild(lrEl("p", "lr-help", `${t3.met} of ${t3.points} met without help` + (t3.assisted ? ` · ${t3.assisted} more with help, not counted` : "")));
+  const sub = [t3 ? `${t3.met} of ${t3.points} met without help` : "", t3?.assisted ? `${t3.assisted} more with help, not counted` : "",
+    skippedN ? `${skippedN} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
+  if (sub) sec.appendChild(lrEl("p", "lr-help", sub));
   for (const p of pts) {
     const it = r.items.find((x) => x.point?.i === p.i && x.span?.line) || r.items.find((x) => x.point?.i === p.i);
-    sec.appendChild(lrMissedRow(p.status, p.heading ? `${p.kind}, under ${p.heading}` : p.kind, r.note, it?.span, it?.title || lrStem(r.note)));
+    sec.appendChild(lrMissedRow(p.status, p.heading ? `${p.kind}, under ${p.heading}` : p.kind, r.note, it?.span, lrStem(r.note)));
   }
-  for (const x of items) sec.appendChild(lrMissedRow(x.status, x.q ? lrPlain(x.q) : x.title || lrStem(x.path), x.path, x.span, x.title || lrStem(x.path)));
+  // the note's name, not items.title_of's first heading (a section in this vault)
+  for (const x of items) sec.appendChild(lrMissedRow(x.status, x.q ? lrPlain(x.q) : lrStem(x.path), x.path, x.span, lrStem(x.path)));
   wrap.appendChild(sec);
   const paths = [...new Set(items.filter((x) => x.status !== "skipped").map((x) => x.path))];
   return { n, paths };

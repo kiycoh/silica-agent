@@ -142,3 +142,51 @@ def test_a_reference_is_a_syllabus_bounded_by_what_is_studied(client):
     one = c.post("/learn/plan", json={"scope": "notes", "target": ["Iperpiano"], "reference": "Iperpiano\n", "preview": True}).json()
     assert one["paths"] == ["ML/Iperpiano.md"]
     assert c.post("/learn/plan", json={"scope": "", "reference": "Iperpiano\n", "preview": True}).json()["paths"] == ["ML/Iperpiano.md"]
+
+
+def test_the_teach_summary_speaks_the_explanations_language(monkeypatch):
+    from silica.kernel.learn import grade
+
+    seen = []
+    monkeypatch.setattr(grade, "_llm", lambda prompt, *a, **k: (seen.append(prompt), ("GRADE: partial\nPRECISE: no\nRUBRIC: manca\nFEEDBACK: Hai detto.\nMISCONCEPTION: none\n", "stop"))[1])
+    said = [{"role": "reader", "text": "L'apprendimento è un cambiamento stabile del comportamento dovuto all'esperienza e alle sue conseguenze."},
+            {"role": "student", "text": "E il condizionamento classico?"}]
+    v = grade.teach_summary({"title": "L'apprendimento", "span": "", "path": "P/L'apprendimento.md", "kind": "explain", "level": 3}, said, ["Una claim."])
+    assert "LANGUAGE: Italian" in seen[0] and 'as "you"' in seen[0]
+    assert v["summary"] == "manca"
+
+
+def test_two_ratings_at_once_write_one_ledger_line(client, tmp_path, monkeypatch):
+    """Enter pressed while the first rating was in flight wrote two lines
+    (2026-10-16): the route is sync, so the two posts ran on two threads."""
+    import json
+    import threading
+
+    from silica.kernel.report import learner
+
+    c, _ = client
+    s = c.post("/learn/session", json={"note": "ML/Margine geometrico.md"}).json()
+    it = s["items"][0]
+    c.post("/learn/answer", json={"id": s["id"], "i": it["i"], "production": "il margine", "conf": 70, "hints": 0, "told": False})
+    real = learner.view
+    monkeypatch.setattr(learner, "view", lambda *a, **k: (time.sleep(0.3), real(*a, **k))[1])
+    codes = []
+    ts = [threading.Thread(target=lambda: codes.append(c.post("/learn/rate", json={"id": s["id"], "i": it["i"], "rating": 3}).status_code)) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert codes == [200, 200]
+    lines = [json.loads(x) for x in (tmp_path / "quiz.jsonl").read_text().splitlines()]
+    assert len([x for x in lines if x.get("session") == s["id"]]) == 1
+
+
+def test_a_one_line_pasted_reference_reads_back_as_text(vault):
+    out = plans.write_plan("One line", "steps", "Softmax\n", restrict="ML/")
+    p = plans.read_plan(out["path"])
+    assert p["target"] == "Softmax\n"                      # still text: Edit plan offers it as pasted
+    assert plans.scope_of(p)["paths"] == ["ML/Softmax.md"]
+    # a note's name stays a name
+    vault.note("ML/Programma.md", "# Programma\n\n- Softmax\n- Chain rule\n")
+    q = plans.read_plan(plans.write_plan("By note", "steps", "Programma", restrict="ML/")["path"])
+    assert q["target"] == "Programma" and plans.scope_of(q)["paths"] == ["ML/Softmax.md", "ML/Chain rule.md"]

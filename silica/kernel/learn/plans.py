@@ -88,7 +88,11 @@ def read_plan(path: str, text: str | None = None) -> dict:
     scope = str(data.get("scope") or ("steps" if legacy else "folder")).strip().lower()
     if scope not in SCOPES:
         scope = "notes"
-    target = str(data.get("target") or "").strip()
+    target = str(data.get("target") or "")
+    # a syllabus pasted as text keeps its line break, which is what tells it
+    # from a note's name: one line equal to a title was re-read as that note
+    # on Edit plan (ADR-0119, found 2026-10-16); every other target is a name
+    target = target.strip(" \t") if scope == "steps" and "\n" in target.strip(" \t") else target.strip()
     reach = str(data.get("reach") or "relational").strip().lower()
     from silica.kernel.learn import objectives as obj
 

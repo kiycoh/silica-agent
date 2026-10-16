@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -787,8 +788,21 @@ def _momentum(before: dict | None, after: dict | None, first_success: bool) -> s
     return None
 
 
+# One rating at a time: the route is sync, so FastAPI runs two posts on two
+# threads, and both passed the `recorded` check before either wrote (two
+# ledger lines for one answer, 2026-10-16, Enter pressed while the first post
+# took 1.5 s to read the view twice). Ratings are one per answer: a lock costs
+# nothing here.
+_RATE_LOCK = threading.Lock()
+
+
 @router.post("/rate", dependencies=_SAME_ORIGIN)
 def rate(payload: dict):
+    with _RATE_LOCK:
+        return _rate(payload)
+
+
+def _rate(payload: dict):
     from silica.kernel.learn import objectives as obj
     from silica.kernel.learn.items import AXIS
     from silica.kernel.report import learner, quiz
