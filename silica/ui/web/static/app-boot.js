@@ -7,6 +7,7 @@ async function loadVault() {
                  jsonHeader(r, "X-Silica-Context-Parts"), r.headers.get("X-Silica-Compact-At"));
     const msgs = await r.json();
     log.innerHTML = "";
+    resetCites();
     // One reply is ONE bubble. The model's text arrives split around its own
     // tool calls, so the history holds several assistant messages per turn —
     // rendering each as its own bubble made a single answer read as three
@@ -22,6 +23,8 @@ async function loadVault() {
       if (!turn) return;
       const f = turnFooter(turn.touched, turn.failed);
       if (f) turn.body.appendChild(f);
+      // A stored turn keeps no duration, so its line counts and never times.
+      finishTurn(turn.body, turn.ledger, turn.touched, { steps: turn.steps, secs: 0 });
       if (turn.flag && turn.raw.length) turn.body.appendChild(turn.flag.flagged ? mkFlagDone() : flagControl(turn.flag));
       turn = null;
     };
@@ -35,7 +38,9 @@ async function loadVault() {
         continue;
       }
       if (!turn) {
-        turn = { body: bubble("silica"), raw: [], touched: new Map(), failed: new Map(), flag: flagTurn };
+        turn = { body: bubble("silica"), raw: [], touched: new Map(), failed: new Map(), flag: flagTurn, steps: 0 };
+        turn.ledger = makeLedger(turn.body.closest(".msg"), false);
+        turn.body.appendChild(turn.ledger);
         const t = turn;
         addCopyBtn(t.body, () => t.raw.join("\n\n"));
       }
@@ -56,8 +61,9 @@ async function loadVault() {
         turn.raw.push(m.content);
       }
       const notes = turnNotes(m.notes);
-      if (notes) turn.body.appendChild(notes);
+      if (notes) turn.ledger.appendChild(notes);
       if (m.tools && m.tools.length) {
+        turn.steps += m.tools.length;
         const g = document.createElement("div");
         g.className = "tools";
         for (const t of m.tools) {
@@ -139,22 +145,18 @@ for (const el of [$("#input"), $("#dock-input")]) {
 //
 // The worker half only appears when there IS a second model: it defaults to
 // empty and every call site falls back to the chat model, so printing the same
-// name twice would claim two models where one is configured.
+// name twice would claim two models where one is configured. Read by the
+// context ring's panel (app-chat.js), which is about this session's model and
+// its window, since nothing about the session sits under the box (ADR-0117).
 async function loadConfig() {
   try {
     const c = await (await fetch("/config")).json();
     const short = (m) => (m || "").split("/").pop();
-    const box = $("#chat-models");
-    box.textContent = "";
-    const pair = (lbl, val) => {
-      box.appendChild(mkEl("span", "cm-lbl", lbl));
-      box.appendChild(mkEl("span", "cm-val", val));
-    };
-    pair("model", c.model ? short(c.model) : "no model");
-    if (c.worker_model && c.worker_model !== c.model) pair("worker", short(c.worker_model));
+    chatModels = { model: c.model ? short(c.model) : "no model",
+                   worker: c.worker_model && c.worker_model !== c.model ? short(c.worker_model) : "" };
+    if (!$("#ctx-panel").hidden) renderCtxPanel();
   } catch { notify("couldn't load session config"); }
 }
-$("#chat-models").addEventListener("click", () => openSettings());
 $("#metrics-cancel").addEventListener("click", () => {
   if (metricsAbort) metricsAbort.abort();
 });

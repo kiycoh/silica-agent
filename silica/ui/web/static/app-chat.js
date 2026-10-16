@@ -3,8 +3,9 @@
 const $ = (s) => document.querySelector(s);
 const log = $("#log");
 const input = $("#input");
-// The run line (P1) exists twice, at the chat composer and at the dock, and
-// Stop rides in it: one turn, two places it can be watched and stopped from.
+// The run line (P1): the dock's strip, and in the chat the live ledger line at
+// the head of the running turn (ADR-0117 point 4). Stop rides in the dock's
+// strip; in the chat it is the send button for the length of the turn.
 const runLines = () => document.querySelectorAll(".run-line");
 const stopBtns = () => document.querySelectorAll(".rl-stop");
 function setRunVisible(v) {
@@ -385,9 +386,10 @@ function claimRefs(t, touched, failed) {
 }
 
 // The footer of a turn: a card per mutation, a disabled-with-reason card per
-// failed write, the bulk revert when there is more than one, and the read
-// chips. One builder for the live turn and the replayed one, so a reopened
-// chat shows the same writes and reads the live one showed (audit P4).
+// failed write, and the bulk revert when there is more than one. The reads it
+// used to end on are the source cards and the ledger line now (ADR-0117 point
+// 2). One builder for the live turn and the replayed one, so a reopened chat
+// shows the same writes the live one showed (audit P4).
 function turnFooter(touched, failed) {
   const frag = document.createDocumentFragment();
   const mutations = [...touched].filter(([, e]) => e !== "read");
@@ -410,9 +412,6 @@ function turnFooter(touched, failed) {
     }
     frag.appendChild(w);
   }
-  const reads = [...touched].filter(([, e]) => e === "read").map(([r]) => r);
-  const chips = readChips(reads);
-  if (chips) frag.appendChild(chips);
   return frag.childElementCount ? frag : null;
 }
 
@@ -663,7 +662,10 @@ function addCopyBtn(bodyEl, getText) {
     catch { b.textContent = "failed"; }
     setTimeout(() => (b.textContent = "copy"), 1200);
   });
-  bodyEl.appendChild(b);
+  // At the end of the ledger line when the turn has one (ADR-0117): the line
+  // is the answer's first row, so the button needs no lane of its own above it.
+  const led = bodyEl.querySelector(":scope > .ledger");
+  (led || bodyEl).appendChild(b);
 }
 
 // --- flagging an answer (ADR-0100 point 6) -----------------------------------
@@ -1019,6 +1021,8 @@ function setCtxTokens(used, max, parts, compactAt) {
   if (!$("#ctx-panel").hidden) renderCtxPanel();
 }
 
+// Who answers in this session, filled by loadConfig (app-boot.js).
+let chatModels = null;
 function renderCtxPanel() {
   const panel = $("#ctx-panel");
   const { used, max, parts, compactAt } = ctxMeter;
@@ -1054,7 +1058,13 @@ function renderCtxPanel() {
     + `<span class="ctxp-fig">${fmtTokens(used)} / ${fmtTokens(max)}</span>`
     + `<span class="ctxp-pct">${pct}%</span></div>`
     + `<div class="stack">${segs.join("")}</div>`
-    + rows.join("") + note;
+    + rows.join("") + note
+    + (chatModels
+      ? `<div class="ctxp-models"><span class="cm-lbl">model</span><span class="cm-val">${escapeHtml(chatModels.model)}</span>`
+        + (chatModels.worker ? `<span class="cm-lbl">worker</span><span class="cm-val">${escapeHtml(chatModels.worker)}</span>` : "")
+        + `<button type="button" class="linklike" id="ctxp-settings">settings</button></div>`
+      : "");
+  $("#ctxp-settings")?.addEventListener("click", () => { closeCtxPanel(); openSettings(); });
 }
 
 function closeCtxPanel(refocus = false) {
@@ -1069,11 +1079,32 @@ function closeCtxPanel(refocus = false) {
 // answers one at a time (409 otherwise), so a second message cannot be SENT,
 // but it can be queued (P2), and a button that says so is better than a dead
 // one. The placeholder says the same thing where the eye already is.
-const PH_IDLE = "message silica…  (⏎ send, ⇧⏎ newline)";
+// The idle placeholder names what the field is for and stops teaching keys
+// (ADR-0117 point 5); the busy one keeps its clause, because a queue is not
+// something anyone guesses an Enter does.
+const PH_IDLE = "Ask about your notes";
 // The parenthetical is the clause the fitter drops when the field is narrow.
 const PH_BUSY = "type the next message  (⏎ queues it for after this turn)";
+// The chat's send button has three acts and shows one (ADR-0117 point 4): send,
+// or for the length of a turn stop, and queue while the field holds text, so
+// a message typed mid-turn is never one click away from interrupting it. Enter
+// only ever sends or queues; stopping is this button and the dock's strip.
+const SEND_ACT = {
+  send: "send",
+  queue: "queue this message for after the current turn",
+  stop: "stop the current response",
+};
+function syncSend() {
+  const b = $("#send");
+  const mode = !streaming ? "send" : (input.value.trim() ? "queue" : "stop");
+  b.dataset.mode = mode;
+  b.setAttribute("aria-label", SEND_ACT[mode]);
+  b.title = SEND_ACT[mode];
+  if (mode !== "stop") b.disabled = false; // a stop that landed re-arms here
+}
+input.addEventListener("input", () => { if (streaming) syncSend(); });
 function setSendDisabled(v) {
-  $("#send").textContent = v ? "queue" : "send";
+  syncSend();
   $("#dock-send").textContent = v ? "queue" : "send";
   // Through the fitter (app-boot.js), not the attribute: it re-fits the FULL
   // string on every resize, so a placeholder written here alone lasted until
@@ -1173,6 +1204,11 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   setSendDisabled(true);
   announce("silica is responding");
   const body = bubble("silica");
+  // The ledger line heads the turn (ADR-0117 point 3): live while it runs, the
+  // counts once it ends, and the one way to open the rows the flow keeps.
+  const ledger = makeLedger(body.closest(".msg"), true);
+  body.appendChild(ledger);
+  let steps = 0;
   // flow = thinking blocks, tool groups and text segments interleaved in arrival
   // order, so the transcript reads chronologically: think, tools, think, tools,
   // text… (Claude-style). In this agent the connective tissue between tool calls
@@ -1385,6 +1421,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     // own revert, so you undo the write you are looking at rather than the turn.
     const footer = turnFooter(touched, failed);
     if (footer) flow.appendChild(footer);
+    finishTurn(body, ledger, touched, { steps, secs: (performance.now() - turnT0) / 1000 });
     const answer = texts.map((t) => t.raw).join("\n\n").trim();
     if (answer) addCopyBtn(body, () => answer);
     if (answer && flagTurn) flow.appendChild(flagControl(flagTurn));
@@ -1426,6 +1463,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       peekDelta(ev.text);
       composerPresence?.spoke(); // the stone in the composer lights while text lands
     } else if (ev.type === "tool_start") {
+      steps++;
       if (ev.pipeline) {
         // A nucleate run gets the block instead of a line; tool calls are
         // dispatched one at a time (agent/loop.py), so the phase events that
@@ -1493,6 +1531,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       if (f) claimRefs({ notes: f.refs, effect: f.effect, error: true, name: f.verb }, touched, failed);
       delete claimed[ev.id]; // it failed: do not claim its notes
     } else if (ev.type === "batch") {
+      steps++;
       toolsGroup().appendChild(makeToolRow(ev.kind + " · " + ev.label).el);
       curTools.appendChild(caret);
     } else if (ev.type === "approval") {
@@ -1511,7 +1550,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         close("");
         // Drawn here only: a stopped turn has no answer to store them on.
         const notes = turnNotes(ev.notes);
-        if (notes) flow.appendChild(notes);
+        if (notes) ledger.appendChild(notes);
         const o = document.createElement("div");
         o.className = "turn-outcome";
         const secs = (performance.now() - turnT0) / 1000;
@@ -1561,7 +1600,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       close(""); // collapse any open thinking, end all segments
       drawDiagrams(body);
       const notes = turnNotes(ev.notes);
-      if (notes) flow.appendChild(notes);
+      if (notes) ledger.appendChild(notes);
       setCtxTokens(ev.context_tokens, ev.max_context_tokens, ev.context_parts, ev.compact_at);
       peekDone(ev); // card gets the canonical OFM render
       announce("response ready");
@@ -1620,28 +1659,328 @@ function resolveRef(ref) {
   return same.length === 1 ? same[0].path : r; // ambiguous: keep the argument as written
 }
 
-function readChips(refs) {
-  const byPath = new Map();
+// The notes a turn read, unique by resolved path (see resolveRef above).
+function uniqueReads(refs) {
+  const byPath = new Set();
   for (const ref of refs) {
     const p = resolveRef(ref);
-    if (!byPath.has(p)) byPath.set(p, ref);
+    if (p) byPath.add(p);
   }
-  if (!byPath.size) return null;
-  const s = document.createElement("div");
-  s.className = "sources";
-  const g = document.createElement("div");
-  g.className = "sgroup read";
-  g.innerHTML = '<span class="sources-label">read</span>';
-  for (const [path] of byPath) {
-    const c = document.createElement("span");
-    c.className = "note-link";
-    c.dataset.path = path; // delegated click → note drawer
-    c.textContent = window.chipLabel ? window.chipLabel(path) : path.split("/").pop().replace(/\.md$/, "");
-    g.appendChild(c);
-  }
-  s.appendChild(g);
-  return s;
+  return [...byPath];
 }
+
+const noteLabel = (path) =>
+  window.chipLabel ? window.chipLabel(path) : path.split("/").pop().replace(/\.md$/, "");
+
+// --- the ledger line (ADR-0117 point 3) --------------------------------------
+// Everything that describes how a turn ran, folded into one line at its head.
+// The thinking and tool rows stay in the flow in arrival order, hidden by CSS
+// until the line opens them in place, so the live stream and the replay keep
+// building exactly what they built before. While the turn runs the line holds
+// the run line's spans, which work.js fills from the narration beats.
+function makeLedger(msg, live) {
+  const led = document.createElement("div");
+  led.className = "ledger";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "ledger-toggle";
+  btn.setAttribute("aria-expanded", "false");
+  btn.innerHTML = '<span class="lg-caret" aria-hidden="true">▸</span><span class="lg-sum"></span>';
+  if (live) {
+    btn.querySelector(".lg-sum").innerHTML = '<span class="run-line" data-state="live">'
+      + '<span class="rl-dot" aria-hidden="true"></span><span class="rl-verb">working</span>'
+      + '<span class="rl-target"></span><span class="rl-elapsed"></span>'
+      + '<span class="rl-pos"></span><span class="rl-stall"></span></span>';
+  }
+  btn.addEventListener("click", () => {
+    const open = msg.classList.toggle("show-work");
+    btn.setAttribute("aria-expanded", String(open));
+  });
+  led.appendChild(btn);
+  return led;
+}
+
+// The line once the turn is over: what it read, how many steps, how long, and
+// by name the notes it read without citing them, which are still where the
+// answer may have come from. A turn with nothing folded and nothing to say
+// loses the line.
+function finishLedger(msg, led, { steps, secs, reads, cited }) {
+  const hasWork = !!msg.querySelector(".body .thinking, .body .tools");
+  const uncited = reads.filter((p) => !cited.has(p));
+  const notes = led.querySelector(".turn-notes");
+  const parts = [];
+  if (reads.length) parts.push(`read ${reads.length} note${reads.length === 1 ? "" : "s"}`);
+  if (steps) parts.push(`${steps} step${steps === 1 ? "" : "s"}`);
+  if (!parts.length && msg.querySelector(".body .thinking")) parts.push("thought");
+  if (parts.length && secs >= 0.05) parts.push(fmtDur(secs));
+  if (!parts.length && !uncited.length && !notes) {
+    const copy = led.querySelector(".copy-btn"); // a replayed turn put it here first
+    if (copy) led.parentElement.appendChild(copy);
+    led.remove();
+    return;
+  }
+  const toggle = led.querySelector(".ledger-toggle");
+  toggle.querySelector(".lg-sum").textContent = parts.join(" · ");
+  toggle.hidden = !parts.length;
+  // Nothing folded, nothing to open: the line stays a statement.
+  toggle.disabled = !hasWork;
+  if (!uncited.length) return;
+  const r = document.createElement("span");
+  r.className = "lg-reads";
+  // Beside cards, a name here needs saying why it is not one of them.
+  if (cited.size) r.appendChild(mkEl("span", "lg-label", "not cited"));
+  for (const p of uncited) {
+    const c = document.createElement("button");
+    c.type = "button";
+    c.className = "note-link";
+    c.dataset.path = p; // delegated click (app-notes.js) opens the drawer
+    c.textContent = noteLabel(p);
+    r.appendChild(c);
+  }
+  toggle.after(r);
+}
+
+// One end for the live turn and the replayed one: number the citations, draw
+// their cards, then state the line with the reads the cards did not take.
+function finishTurn(body, ledger, touched, meta) {
+  const cited = citeTurn(body);
+  const reads = uniqueReads([...touched].filter(([, e]) => e === "read").map(([r]) => r));
+  finishLedger(body.closest(".msg"), ledger, { ...meta, reads, cited });
+}
+
+// --- source cards (ADR-0117 point 2, skeleton A: the margin) -----------------
+// Each note the answer links gets a number after the link, in order of first
+// use, and one card in the margin lane level with the line that first cites
+// it: title, folder, and the note's line closest to the citing paragraph.
+function citeTurn(body) {
+  const order = [];
+  if (body.querySelector(".cites")) return new Set(order); // already numbered
+  for (const a of body.querySelectorAll(".stream-text .note-link[data-path]")) {
+    const p = resolveRef(a.dataset.path);
+    let n = order.indexOf(p) + 1;
+    if (!n) { order.push(p); n = order.length; }
+    a.dataset.cite = n;
+    const m = document.createElement("sup");
+    m.className = "cite-mark";
+    m.dataset.cite = n;
+    m.textContent = n;
+    a.after(m);
+  }
+  if (!order.length) return new Set(order);
+  const lane = document.createElement("div");
+  lane.className = "cites";
+  order.forEach((p, i) => lane.appendChild(citeCard(body, p, i + 1)));
+  body.appendChild(lane);
+  citeRO.observe(body);
+  queueCiteLayout();
+  return new Set(order);
+}
+
+function citeCard(body, path, n) {
+  const card = document.createElement("button");
+  card.type = "button";
+  card.className = "cite-card";
+  card.dataset.cite = n;
+  card.dataset.path = path;
+  card.title = "open " + noteLabel(path);
+  const t = document.createElement("span");
+  t.className = "cite-title";
+  t.appendChild(mkEl("span", "cite-n", String(n)));
+  t.appendChild(mkEl("span", "cite-name", noteLabel(path)));
+  card.appendChild(t);
+  // The folder the note sits in, trimmed from the left: in a 16rem lane a
+  // whole path wraps mid-name, and the nearest folder is the one that tells.
+  const cut = path.lastIndexOf("/");
+  if (cut > 0) {
+    const dir = path.slice(0, cut);
+    const d = mkEl("span", "cite-dir", (dir.includes("/") ? "…/" : "") + dir.split("/").pop());
+    d.title = dir;
+    card.appendChild(d);
+  }
+  // The words of every paragraph that cites this note, minus the link's own.
+  const words = new Set();
+  for (const a of body.querySelectorAll(`.stream-text .note-link[data-cite="${n}"]`)) {
+    const block = a.closest("li, td, th, .stream-text > *");
+    let text = block ? block.textContent : "";
+    // "Label (Note):" heads the list that holds what it says about the note
+    if (/:\s*$/.test(text) && block.nextElementSibling) text += " " + block.nextElementSibling.textContent;
+    const own = citeWords(a.textContent);
+    for (const w of citeWords(text)) if (!own.has(w)) words.add(w);
+  }
+  noteLines(path).then((lines) => {
+    const line = bestLine(lines, words);
+    if (!line) return; // no line shares enough with the answer: none is made up
+    card.appendChild(mkEl("span", "cite-line", `“${line}”`));
+    queueCiteLayout();
+  });
+  return card;
+}
+
+// cite-pure:start (run under node by tests/test_cite_cards.py)
+// ponytail: words of four letters or more, minus the commonest English and
+// Italian ones, and a line needs two in common with the citing paragraph. An
+// answer in one language over notes in another shares mostly names, symbols
+// and numbers, so most of those cards show no line. The upgrade is the passage
+// the turn's own read returned, once a stored turn keeps its tool results
+// (app-boot.js: a replayed call "opens onto nothing"); review at the pilot
+// report on 2027-03-01.
+const CITE_STOP = new Set(("that this with from have your what when which their there these those they them then than "
+  + "also into only some more most such each been were will would could should about between because "
+  + "della delle dello degli nella nelle sono come anche questo questa quella quello perché dove quando "
+  + "essere viene molto tutti tutte ogni loro").split(" "));
+function citeWords(text) {
+  const out = new Set();
+  for (const w of (text || "").toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || []) if (!CITE_STOP.has(w)) out.add(w);
+  return out;
+}
+function bestLine(lines, words) {
+  let best = "", top = 1;
+  for (const line of lines) {
+    let k = 0;
+    for (const w of citeWords(line)) if (words.has(w)) k++;
+    if (k > top) { top = k; best = line; }
+  }
+  return best;
+}
+// A note's prose as sentences: no frontmatter, fences, headings, tables or
+// comments, and the link and emphasis markup read as the words it shows.
+function proseLines(md) {
+  const text = md.replace(/^---\n[\s\S]*?\n---\n/, "").replace(/```[\s\S]*?```/g, "").replace(/<!--[\s\S]*?-->/g, "");
+  const out = [];
+  for (const raw of text.split("\n")) {
+    const l = raw.trim();
+    if (!l || /^(#|\||>|!\[|\$\$)/.test(l)) continue;
+    const plain = l.replace(/^([-*+]|\d+\.)\s+/, "")
+      .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*_`=]+/g, "");
+    for (const sent of plain.split(/(?<=[.!?;])\s+/)) {
+      if (sent.length >= 40 && sent.length <= 240) out.push(sent);
+    }
+  }
+  return out;
+}
+// cite-pure:end
+
+// ponytail: one fetch per note for the page's life, so a note edited while the
+// chat is open keeps the line it had until a reload; key it on the note's etag
+// if a stale line is ever reported.
+const noteLineCache = new Map();
+function noteLines(path) {
+  if (!noteLineCache.has(path)) {
+    noteLineCache.set(path, fetch("/note/raw?path=" + encodeURIComponent(path))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => proseLines((d && d.text) || ""))
+      .catch(() => [])); // an unreadable note is a card without a line, as an unmatched one is
+  }
+  return noteLineCache.get(path);
+}
+
+// Placing the cards. One pass over every lane in the transcript, in order, so a
+// card taller than its line hangs past the next question rather than under a
+// card of the next turn. A block that crosses into the lane (a wide table, a
+// code fence, a diagram) moves down by what the card beside it needs, so the
+// card stays level with its line; a card cited from inside such a block goes
+// below it. Too narrow for the lane, each card folds under the block that
+// first cites it.
+let citeRaf = 0;
+const citeRO = new ResizeObserver(() => queueCiteLayout());
+citeRO.observe(log);
+function queueCiteLayout() {
+  if (!citeRaf) citeRaf = requestAnimationFrame(layoutCites);
+}
+function layoutCites() {
+  citeRaf = 0;
+  // Each pass starts from the answer as rendered: last pass's pushes come off
+  // first, and the size it ends on is the one it started from, so the
+  // ResizeObserver sees no change and does not call it again.
+  for (const el of log.querySelectorAll("[data-cite-push]")) {
+    el.style.marginTop = "";
+    delete el.dataset.citePush;
+  }
+  const base = log.getBoundingClientRect().top - log.scrollTop; // log content coordinates
+  let prev = -Infinity;
+  for (const lane of log.querySelectorAll(".msg.silica .cites")) {
+    const body = lane.parentElement;
+    if (lane.offsetLeft + lane.offsetWidth > body.clientWidth + 1) { foldCites(body, lane); continue; }
+    unfoldCites(body, lane);
+    const laneBox = lane.getBoundingClientRect();
+    const laneTop = laneBox.top - base;
+    const blocks = [...body.querySelectorAll(".stream-text > *")];
+    for (const card of lane.children) {
+      const link = body.querySelector(`.stream-text .note-link[data-cite="${card.dataset.cite}"]`);
+      const box = link && link.getClientRects()[0];
+      if (!box) continue; // inside a folded row: nowhere on screen to stand level with
+      const h = card.offsetHeight;
+      const line = box.top - base - 4;
+      let top = Math.max(line, prev + 10);
+      // Measured inside the loop: a push moves every block under it.
+      for (const el of blocks) {
+        const r = el.getBoundingClientRect();
+        if (!r.height || r.right <= laneBox.left + 1) continue; // stays in the text column
+        const a = r.top - base, b = r.bottom - base;
+        if (top + h + 8 <= a || top >= b + 8) continue;
+        if (line < a) {
+          el.style.marginTop = (parseFloat(getComputedStyle(el).marginTop) + top + h + 8 - a) + "px";
+          el.dataset.citePush = "1";
+        } else {
+          top = b + 8;
+        }
+      }
+      card.style.top = (top - laneTop) + "px";
+      prev = top + h;
+    }
+  }
+}
+function foldCites(body, lane) {
+  for (const card of [...lane.children]) {
+    const link = body.querySelector(`.stream-text .note-link[data-cite="${card.dataset.cite}"]`);
+    const block = link && link.closest(".stream-text > *");
+    if (!block) continue;
+    let tray = block.nextElementSibling;
+    if (!tray || !tray.classList.contains("cite-tray")) {
+      tray = mkEl("div", "cite-tray");
+      block.after(tray);
+    }
+    card.style.top = "";
+    tray.appendChild(card);
+  }
+}
+function unfoldCites(body, lane) {
+  const cards = [...body.querySelectorAll(".cite-tray > .cite-card")];
+  if (!cards.length) return;
+  cards.sort((a, b) => a.dataset.cite - b.dataset.cite).forEach((c) => lane.appendChild(c));
+  for (const t of body.querySelectorAll(".cite-tray")) t.remove();
+}
+// A cleared transcript takes its observed bodies with it.
+function resetCites() {
+  citeRO.disconnect();
+  citeRO.observe(log);
+}
+
+// Pointing at a card tints the paragraphs that cite it, and pointing at a
+// citation lights its card; focus does the same for the keyboard.
+let citeHotKey = "";
+function setCiteHot(target) {
+  const hit = target && target.closest && target.closest(".cite-card, .cite-mark, .stream-text .note-link[data-cite]");
+  const msg = hit && hit.closest(".msg");
+  const key = msg ? `${[...log.children].indexOf(msg)}:${hit.dataset.cite}` : "";
+  if (key === citeHotKey) return;
+  citeHotKey = key;
+  for (const el of log.querySelectorAll(".cite-hot")) el.classList.remove("cite-hot");
+  if (!msg) return;
+  const n = hit.dataset.cite;
+  for (const c of msg.querySelectorAll(`.cite-card[data-cite="${n}"]`)) c.classList.add("cite-hot");
+  for (const a of msg.querySelectorAll(`.stream-text .note-link[data-cite="${n}"]`)) {
+    a.closest("li, td, th, .stream-text > *")?.classList.add("cite-hot");
+  }
+}
+log.addEventListener("pointerover", (e) => setCiteHot(e.target));
+log.addEventListener("pointerleave", () => setCiteHot(null));
+log.addEventListener("focusin", (e) => setCiteHot(e.target));
+log.addEventListener("click", (e) => {
+  const card = e.target.closest(".cite-card");
+  if (card) openNote(card.dataset.path);
+});
 
 // The images a user turn carried, under its words: live from the data URLs the
 // composer read, on reload from /attachment (ADR-0077).
@@ -1804,7 +2143,7 @@ $("#composer").addEventListener("submit", (e) => {
   renderCommands(input.value); // clearing by hand fires no `input` event — dismiss the picker
   renderHighlight();           // …and clear the bands with it
   clearDraft();                // sent or queued, it is no longer a draft
-  if (streaming) { queueMessage(t); return; }
+  if (streaming) { queueMessage(t); syncSend(); return; } // the field is empty again: the button is stop
   // Images alone ride the turn as pixels the model sees (ADR-0077); anything
   // else, or an explicit /nucleate, is uploaded and staged into the vault.
   if (staged.length && stagedAreImages() && !t.trim().startsWith("/")) lookStaged(t);
@@ -2087,14 +2426,28 @@ dockInput.addEventListener("keydown", (e) => {
 // invites a second click that cannot do more than the first, and one that
 // stays dead through a slow cancel reads as a control that did nothing.
 const STOP_GRACE_MS = 2000;
-document.addEventListener("click", (e) => {
-  if (!e.target.closest(".rl-stop")) return;
+function requestStop() {
+  const send = $("#send");
   for (const b of stopBtns()) { b.disabled = true; b.textContent = "stopping…"; }
+  send.disabled = true;
+  send.title = "stopping…";
   fetch("/stop", { method: "POST" }).catch(() => { /* the finally below re-arms */ });
   setTimeout(() => {
     if (!streaming) return;
     for (const b of stopBtns()) { b.disabled = false; b.textContent = "still stopping"; }
+    send.disabled = false;
+    send.title = "still stopping";
   }, STOP_GRACE_MS);
+}
+document.addEventListener("click", (e) => {
+  if (e.target.closest(".rl-stop")) requestStop();
+});
+// A click, not the form's submit: Enter on an empty field mid-turn submits too,
+// and must queue nothing rather than stop the turn.
+$("#send").addEventListener("click", (e) => {
+  if ($("#send").dataset.mode !== "stop") return;
+  e.preventDefault();
+  requestStop();
 });
 
 // The wordmark goes home (the chat view); "+ new" in the Chats compartment
@@ -2109,6 +2462,7 @@ async function newChat() {
   autoGrow(input);
   renderHighlight();
   log.innerHTML = "";
+  resetCites();
   await fetch("/reset", { method: "POST" });
   currentSessionId = "";
   chatWorkspace = "";       // a new chat is the whole vault until a workspace opens it

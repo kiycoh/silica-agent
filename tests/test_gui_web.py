@@ -2336,10 +2336,15 @@ def test_the_composer_carries_the_presence_at_the_head_of_its_row():
         shell = INDEX_HTML[at:INDEX_HTML.index("</form>", at)]
         assert 'class="cp-presence"' in shell, form_id
         assert shell.index("cp-presence") < shell.index("<textarea") < shell.index('class="mic"'), form_id
-    for line_id in ("run-line", "dock-run-line"):
-        at = INDEX_HTML.index(f'id="{line_id}"')
-        line = INDEX_HTML[at:INDEX_HTML.index("rl-stop", at)]
-        assert 'class="rl-dot"' in line and "<canvas" not in line, line_id
+    # the dock's run line, and the chat's, which is the running turn's ledger
+    # since ADR-0117: a dot, never a canvas
+    at = INDEX_HTML.index('id="dock-run-line"')
+    line = INDEX_HTML[at:INDEX_HTML.index("rl-stop", at)]
+    assert 'class="rl-dot"' in line and "<canvas" not in line
+    js = app_js()
+    led = js[js.index("function makeLedger(msg, live)"):]
+    led = led[:led.index("\n}\n")]
+    assert 'class="rl-dot"' in led and "<canvas" not in led
     assert "#view-chat:has(#log:empty) .cp-presence" in app_css()
     at = INDEX_HTML.index('src="/static/app-presence.js"')
     assert at < INDEX_HTML.index('src="/static/app-chat.js"')

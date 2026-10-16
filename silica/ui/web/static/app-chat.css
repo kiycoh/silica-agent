@@ -28,29 +28,31 @@
   padding-bottom: 1.4rem;
 }
 
-/* Sided transcript: one shared measure, inside which your turn is a bubble
-   hugging its own text against the right edge while the answer runs the full
-   width as a sheet. The padding here IS the measure, so the bubble can align to
-   the column edge and not to the pane edge — and it is THE SAME measure the
-   answer uses, or the two right edges disagree by 12rem and the bubble reads as
-   centred (i.e. as neither side of the conversation). */
+/* Your turn is the heading of the exchange (ADR-0117, skeleton A): a rule
+   over the text column and the question under it, no bubble. The answer's
+   left edge is where it starts, so question and answer read as one column and
+   the margin to their right holds nothing but the answer's sources. The
+   padding here IS the measure, the same one .msg > .body takes, so the left
+   edges agree at every width. */
 .msg.user {
   padding-inline: max(2rem, calc(50% - var(--measure) / 2));
 }
 
-/* Capped below the measure on purpose: a long question that filled the column
-   edge to edge became a box the exact size of the answer's sheet, and "who is
-   talking" went back to being a colour difference. The gutter it leaves on the
-   left is the signal. */
+/* The question outranks every heading inside an answer (#log .msg.silica h1
+   below), so a long chat still reads as questions with answers under them.
+   ponytail: a pasted page is a heading too; clamp it with a "show all" at the
+   first pilot report of a note pasted into the chat. */
 .msg.user>.body {
-  background: var(--bubble);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
-  padding: 0.7rem 1rem;
-  width: fit-content;
-  max-width: min(100%, 42rem);
-  margin-inline: auto 0;
+  max-width: var(--text-w, 43rem);
+  margin-inline: 0;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
   color: var(--frost);
+  font-size: 19px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  text-wrap: pretty;
 }
 
 /* The answer flows on the view's surface with no card of its own: the view IS
@@ -1326,38 +1328,6 @@
   box-shadow: var(--lift);
 }
 
-/* Who answers you, under the box you write in. The line takes the bottom
-   breathing room the composer used to hold alone, so the pane keeps its height.
-   The box mirrors #composer (measure + its 2rem gutters, border-box) so the
-   right edge lands on the send button's, at every width. */
-#view-chat #composer {
-  padding-bottom: 0.45rem;
-}
-
-#chat-models {
-  display: flex;
-  justify-content: flex-end;
-  align-items: baseline;
-  gap: 0.35rem;
-  width: 100%;
-  max-width: calc(var(--measure) + 4rem);
-  margin-inline: auto;
-  padding: 0 2.3rem 0.9rem;
-  background: none;
-  border: 0;
-  font-family: var(--sans);
-  font-size: 11px;
-  line-height: 1;
-  color: var(--ash-dim);
-  cursor: pointer;
-  transition: color var(--dur) var(--ease);
-}
-
-#chat-models:hover,
-#chat-models:focus-visible {
-  color: var(--text);
-}
-
 .cm-lbl {
   font-size: var(--fs-meta);
 }
@@ -2011,6 +1981,19 @@
   padding-top: 1.4rem;
 }
 
+/* With a ledger line the copy control sits at its end (addCopyBtn), so the
+   lane closes to a breath under the question (ADR-0117). */
+.msg.silica>.body:has(> .ledger) {
+  padding-top: 0.45rem;
+}
+
+#log .ledger .copy-btn {
+  position: static;
+  margin-left: auto;
+  padding: 0.05rem 0.5rem;
+  font-size: 11px;
+}
+
 .msg:focus-within .copy-btn,
 .copy-btn:focus-visible {
   opacity: 1;
@@ -2081,11 +2064,6 @@
   padding: 0.25rem 0.45rem;
   min-height: 24px;
   font-size: 11px;
-}
-
-/* the composer keeps its gap to the chip and to the run line above it */
-#view-chat #queue {
-  margin-top: 0.35rem;
 }
 
 /* --- a failure on the message that failed (P3) ----------------------------- */
@@ -2362,4 +2340,380 @@
 .memory-line .to-continue:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+
+/* --- ADR-0117: the answer shows what it stands on (skeleton A, the margin) ---
+   The chat's measure is the text column, a gap and the margin lane. Prose and
+   everything that describes the turn keep the text column (43rem, the prose
+   measure argued above); a table, a code fence or a diagram takes the whole
+   measure, and the cards beside it step below it (layoutCites). */
+#view-chat {
+  --text-w: 43rem;
+  --cite-gap: 2.5rem;
+  --cite-w: 16rem;
+  --measure: calc(var(--text-w) + var(--cite-gap) + var(--cite-w));
+}
+
+#view-chat .msg.silica :is(.ledger, .thinking, .tools, .writes, .turn-outcome, .approval, .cite-tray) {
+  max-width: var(--text-w);
+}
+
+/* The ledger line (point 3): one mono line between the question and the
+   answer. The rows it counts stay in the flow and show only when it opens. */
+.ledger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.2rem 0.9rem;
+  margin: 0 0 0.75rem;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ash);
+}
+
+.ledger-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+}
+
+.ledger-toggle:hover:not(:disabled),
+.ledger-toggle:focus-visible {
+  color: var(--frost);
+}
+
+.ledger-toggle:disabled {
+  cursor: default;
+}
+
+.ledger-toggle:disabled .lg-caret {
+  visibility: hidden;
+}
+
+.lg-caret {
+  display: inline-block;
+  color: var(--ash-dim);
+  transition: transform var(--dur) var(--ease);
+}
+
+.msg.show-work .lg-caret {
+  transform: rotate(90deg);
+}
+
+.lg-reads {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.75rem;
+}
+
+#log .ledger .lg-reads .note-link {
+  padding: 0;
+  background: none;
+  border: 0;
+  font: inherit;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+/* The question and its answer are one exchange: the space between them is
+   the ledger line's, not two turns' paddings stacked. */
+.msg.user:has(+ .msg.silica) {
+  padding-bottom: 0.2rem;
+}
+
+.msg.user + .msg.silica {
+  padding-top: 0.2rem;
+}
+
+.lg-label {
+  color: var(--ash-dim);
+}
+
+/* Inside a chat answer the headings sit under the question's 19px; in a note
+   (#peek-body, #note-edit) they keep the scale above. */
+#log .msg.silica h1 {
+  font-size: 1.15em;
+}
+
+#log .msg.silica h2 {
+  font-size: 1.1em;
+}
+
+#log .msg.silica h3 {
+  font-size: 1em;
+}
+
+/* Display math centres on the text it belongs to, not on text and margin. */
+#view-chat .msg.silica .stream-text>.math {
+  max-width: var(--text-w);
+}
+
+/* Opened, the rows end a breath above the answer instead of running into it. */
+.msg.silica.show-work .tools,
+.msg.silica.show-work .thinking {
+  margin-bottom: 0.9rem;
+}
+
+.ledger .turn-notes {
+  flex-basis: 100%;
+  margin: 0;
+  font-family: var(--sans);
+}
+
+/* While the turn runs the line is the run line, inline and unboxed. */
+.ledger .run-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  width: auto;
+  max-width: none;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+}
+
+.ledger .rl-dot {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+}
+
+.ledger .rl-verb {
+  color: var(--accent);
+}
+
+.ledger .rl-target {
+  padding: 0;
+  background: none;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  max-width: 22rem;
+}
+
+.msg.silica:not(.show-work) .thinking,
+.msg.silica:not(.show-work) .tools:not(:has(.tool-pipeline, .approval, .memory-line)) {
+  display: none;
+}
+
+/* The source cards (point 2): a number after each citing link, a card in the
+   lane level with it. The lane takes no room; the cards are placed by script. */
+#log .cite-mark {
+  margin-left: 0.15em;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 0;
+  vertical-align: super;
+  color: var(--accent);
+}
+
+.cites {
+  position: absolute;
+  top: 0;
+  left: calc(var(--text-w) + var(--cite-gap));
+  width: var(--cite-w);
+  height: 0;
+}
+
+.cite-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.5rem 0.65rem 0.55rem;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  font: inherit;
+  text-align: left;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.cite-card:hover,
+.cite-card:focus-visible,
+.cite-card.cite-hot {
+  border-color: var(--accent);
+  background: var(--sel-hover);
+}
+
+.cite-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--frost);
+}
+
+.cite-n {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--accent);
+}
+
+.cite-dir,
+.cite-line {
+  padding-left: 1.05rem;
+}
+
+.cite-dir {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ash);
+  overflow-wrap: anywhere;
+}
+
+.cite-line {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ash-dim);
+}
+
+/* Too narrow for the lane: under the block that first cites them. */
+.cite-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0.9rem;
+}
+
+.cite-tray .cite-card {
+  position: static;
+  flex: 1 1 13rem;
+  border-color: var(--line);
+}
+
+#log .stream-text .cite-hot:not(.cite-card) {
+  background: var(--sel);
+  box-shadow: 0 0 0 4px var(--sel);
+  border-radius: 3px;
+}
+
+/* The composer (point 5): the field, then the toolbar. Along its top edge,
+   anything waiting on the next message. */
+#composer .composer-shell {
+  flex-wrap: wrap;
+  row-gap: 0.1rem;
+  padding: 0.35rem 0.4rem 0.4rem;
+}
+
+#composer .grow {
+  order: -1;
+  flex: 1 0 100%;
+}
+
+#composer :is(#jobs, #attachments, #queue) {
+  order: -2;
+  flex: 1 0 100%;
+}
+
+#composer #jobs {
+  max-width: none;
+  padding: 0.2rem 0.2rem 0;
+  margin: 0;
+}
+
+#composer #attachments {
+  padding: 0.2rem 0.2rem 0;
+}
+
+#composer #queue {
+  max-width: none;
+  margin: 0.1rem 0 0.2rem;
+}
+
+#composer #ws-chip-row {
+  width: auto;
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  align-self: center;
+}
+
+#composer .mic {
+  margin-left: auto;
+}
+
+#send {
+  display: grid;
+  place-items: center;
+  width: var(--field-row);
+  padding: 0;
+}
+
+#send svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+#send .send-stop,
+#send[data-mode="stop"] .send-go {
+  display: none;
+}
+
+#send[data-mode="stop"] .send-stop {
+  display: block;
+  fill: currentColor;
+}
+
+/* Stop is not the vivid act: it recedes to the control colour, like send did
+   for the length of a turn before ADR-0117. */
+#send[data-mode="stop"] {
+  background: var(--slate-2);
+  border-color: var(--line-2);
+  color: var(--frost);
+}
+
+.ctxp-models {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0.25rem 0.6rem;
+  margin-top: 0.6rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.ctxp-models .cm-val {
+  overflow-wrap: anywhere;
+}
+
+.ctxp-models .linklike {
+  grid-column: 3;
+  grid-row: 1;
 }

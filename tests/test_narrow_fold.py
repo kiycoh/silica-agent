@@ -67,12 +67,18 @@ def test_the_composer_hint_is_a_clause_the_fitter_can_drop():
     field hard-cuts mid-word and fitPlaceholder() shortens the string instead.
     It shortens by stripping the trailing parenthetical, which silently does
     nothing the day someone rewrites the hint without one -- and the failure is
-    the old clip, which looks like a rendering artefact rather than a rewrite."""
+    the old clip, which looks like a rendering artefact rather than a rewrite.
+    A hint short enough for the narrowest field needs no clause: the chat's idle
+    hint stopped teaching keys (ADR-0117 point 5) and is 20 characters, about
+    150px against the 223px the field keeps at the 900px floor."""
     html, app = INDEX.read_text(), app_js()
     assert "function fitPlaceholder(" in app
     hints = re.findall(r'<textarea[^>]*placeholder="([^"]*)"', html)
+    hints += re.findall(r'const PH_(?:IDLE|BUSY) = "([^"]*)"', app)
     assert hints, "no composer placeholder in index.html"
     for hint in hints:
+        if len(hint) <= 24:
+            continue
         stem = re.sub(r"\s*\([^()]*\)\s*$", "", hint)
         assert stem and stem != hint, f"{hint!r} has no clause for the fitter to drop"
 
