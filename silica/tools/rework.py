@@ -190,8 +190,11 @@ def silica_rework(
     if note:
         try:
             src = DRIVER.read_note(note)
-        except Exception as e:
-            return {"error": f"Note '{note}' not found ({e})."}
+        except Exception:
+            # The driver raises on a missing note; the model needs the name back,
+            # and the backend's message (a vault path) would push it past the
+            # projection's 80 chars.
+            return {"ok": False, "error": f"No note named '{note}'."}
         text = frontmatter.split(src.content)[2]
         title = PurePosixPath(src.ref.path or note).stem
         folder = str(PurePosixPath(src.ref.path or note).parent)
@@ -204,15 +207,13 @@ def silica_rework(
         return {"error": "No note was named and the message holds no text to rework."}
     if words < FLOOR_WORDS:
         return {"ok": False, "words": words,
-                "error": (f"The text is {words} words, under the tool's floor of {FLOOR_WORDS}: "
-                          "rewrite it yourself in your reply, every passage in order, at about its length.")}
+                "error": f"Under {FLOOR_WORDS} words: rewrite it in your reply, all of it, same length."}
     if _wants_shorter(request):
-        return {"ok": False, "error": ("The request asks for something shorter than the text: this tool "
-                                       "keeps all of it. Write the summary or the shorter version yourself.")}
+        return {"ok": False, "error": "A shorter version was asked for: write it yourself."}
     parts = blocks(text)
     if len(parts) > MAX_BLOCKS:
-        return {"ok": False, "error": (f"The text is {words} words ({len(parts)} blocks), over the tool's "
-                                       f"limit of {MAX_BLOCKS} blocks. Ask for one part of it at a time.")}
+        return {"ok": False, "blocks": len(parts),
+                "error": f"Over {MAX_BLOCKS} blocks: ask the person for one part at a time."}
 
     # The person's own words, not the chat's `instruction`: the chat paraphrases
     # and adds what nobody asked for ("paragrafi tematici e tabelle quando
@@ -229,7 +230,8 @@ def silica_rework(
             except Exception as e:
                 # All or nothing: a note missing one block would read as a
                 # complete rework with a passage gone, the failure this exists for.
-                return {"ok": False, "error": f"Block {k + 1} of {len(parts)} failed ({e}); nothing was written."}
+                logger.warning("rework block %d of %d failed: %s", k + 1, len(parts), e)
+                return {"ok": False, "error": f"Block {k + 1} of {len(parts)} failed; nothing was written."}
 
     body = "\n\n".join(outs)
     # A pasted text's name comes from its own first words, not from the request
@@ -242,9 +244,12 @@ def silica_rework(
                                 props={"source": f"[[{title}]]"} if title else None)
     if written.get("error"):
         return {"ok": False, "error": written["error"]}
-    return {"ok": True, "path": written.get("path", path), "words_in": words,
-            "words_out": _words(body), "blocks": len(parts),
-            # "Link the new note" read as "link it from the source": one run patched
-            # the person's note with a pointer to the rework (2026-10-16).
-            "reply": ("Answer in one line that gives the person a [[wikilink]] to the new note. "
-                      "Do not paste its text, and do not edit the source note.")}
+    # Every string here stays under the 80 chars the loop's eager projection
+    # keeps (compaction.generic_projection): a longer `reply` reached the chat as
+    # "reply=<128 chars> ⟨↻ re-call to expand⟩", and the chat read the new note
+    # whole and then misspelled its link (2026-10-16). `link` is there to be
+    # copied. "Link the new note" once read as "link it from the source": a run
+    # patched the person's note with a pointer to the rework.
+    return {"ok": True, "link": f"[[{PurePosixPath(written.get('path', path)).stem}]]",
+            "words_in": words, "words_out": _words(body), "blocks": len(parts),
+            "reply": "Give the person `link` in one line. Do not edit the source note."}

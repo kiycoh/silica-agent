@@ -72,7 +72,7 @@ def _requests(monkeypatch, message: str):
 def test_under_the_floor_it_sends_the_text_back_without_a_call(tmp_vault, llm):
     tmp_vault.note("Lit/Short.md", _para(300))
     out = rework.silica_rework(note="Short")
-    assert out["ok"] is False and "rewrite it yourself" in out["error"] and not llm
+    assert out["ok"] is False and "rewrite it in your reply" in out["error"] and not llm
 
 
 def test_a_note_is_reworked_block_by_block_into_a_note_beside_it(tmp_vault, llm):
@@ -80,7 +80,7 @@ def test_a_note_is_reworked_block_by_block_into_a_note_beside_it(tmp_vault, llm)
     body = "\n\n".join(_para(400) for _ in range(6))
     tmp_vault.note("Lit/Chapter.md", "---\ntags: [x]\n---\n" + body)
     out = rework.silica_rework(note="Chapter", instruction="modernise it")  # no message: MCP
-    assert out["ok"] and out["path"] == "Lit/Chapter (reworked).md" and out["blocks"] == 2
+    assert out["ok"] and out["link"] == "[[Chapter (reworked)]]" and out["blocks"] == 2
     assert all(c["reasoning"] is False for c in llm)
     assert "The user's request: modernise it" in llm[0]["messages"][0]["content"]
     assert "tags" not in llm[0]["messages"][1]["content"]
@@ -96,7 +96,8 @@ def test_a_pasted_text_comes_from_the_message_without_what_the_server_appends(tm
                "</named-notes>\n\n[image attached: /tmp/x.png]")
     _requests(monkeypatch, message)
     out = rework.silica_rework()
-    assert out["ok"] and out["path"].startswith("Inbox/testo0 testo1")
+    assert out["ok"] and out["link"].startswith("[[testo0 testo1")
+    assert list(Path(tmp_vault.note("Inbox/z.md")).parent.glob("testo0*(reworked).md"))
     sent = " ".join(c["messages"][1]["content"] for c in llm)
     assert "named-notes" not in sent and "image attached" not in sent
     assert llm[0]["messages"][0]["content"].endswith("Rielabora questo testo:")
@@ -132,14 +133,14 @@ def test_jev_saying_shorter_sends_the_request_back(tmp_vault, llm, monkeypatch):
 def test_an_existing_rework_is_not_overwritten(tmp_vault, llm):
     tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
     tmp_vault.note("Lit/Chapter (reworked).md", "earlier")
-    assert rework.silica_rework(note="Chapter")["path"] == "Lit/Chapter (reworked) 2.md"
+    assert rework.silica_rework(note="Chapter")["link"] == "[[Chapter (reworked) 2]]"
 
 
 def test_too_many_blocks_is_refused(tmp_vault, llm, monkeypatch):
     monkeypatch.setattr(rework, "MAX_BLOCKS", 2)
     tmp_vault.note("Lit/Long.md", "\n\n".join(_para(400) for _ in range(9)))
     out = rework.silica_rework(note="Long")
-    assert out["ok"] is False and "limit of 2 blocks" in out["error"] and not llm
+    assert out["ok"] is False and "Over 2 blocks" in out["error"] and not llm
 
 
 def test_the_tool_sits_in_the_chat_core_before_the_loader():
@@ -156,3 +157,12 @@ def test_the_blocks_get_the_persons_words_not_the_chats_paraphrase(tmp_vault, ll
     tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
     rework.silica_rework(note="Chapter", instruction="usa paragrafi tematici e tabelle")
     assert llm[0]["messages"][0]["content"].endswith("The user's request: Riscrivi [[Chapter]] in italiano moderno")
+
+
+def test_every_result_string_survives_the_eager_projection(tmp_vault, llm, monkeypatch):
+    from silica.agent.compaction import generic_projection
+    tmp_vault.note("Lit/Short.md", _para(300))
+    tmp_vault.note("Lit/A long chapter title of several words.md", "\n\n".join(_para(400) for _ in range(3)))
+    for out in (rework.silica_rework(note="Short"),
+                rework.silica_rework(note="A long chapter title of several words")):
+        assert "re-call to expand" not in generic_projection(out), out
