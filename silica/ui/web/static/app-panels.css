@@ -871,6 +871,16 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
   background: var(--sel);
 }
 
+/* The line a chat citation opened the note at (openCite), or the rendered
+   block that holds it, in the one grammar for "this one" (2026-09-22): the
+   --sel fill, never an accent bar. Laid over the element's own ground rather
+   than in place of it, since a callout and a code line paint theirs; on the
+   block it goes on what is drawn, not on the wrapper around its corners. */
+#note-edit .cm-line.cm-cite-line,
+#note-edit .cm-rendered-block.cm-cite-line>* {
+  background-image: linear-gradient(var(--sel), var(--sel));
+}
+
 /* Headings keep their size with the caret on them, as Obsidian's do: only the
    `#` comes and goes, so the line does not jump when you step onto it. */
 #note-edit .cm-line.cm-h {

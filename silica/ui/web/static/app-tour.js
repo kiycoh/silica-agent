@@ -38,12 +38,12 @@ const TOUR_STEPS = {
   cite: {
     // Where the answer says what it stands on (ADR-0117), not the answer: a
     // long one is taller than the window and lights nothing. A cited note is a
-    // card beside its line; a note read and not cited is named on the line
-    // above the answer.
+    // numbered link in the text; a note read and not cited is named on the
+    // line above the answer.
     n: 2, target: () => tourSource() || tourLastAnswer(),
     body: () => {
       const s = tourSource();
-      if (s?.classList.contains("cite-card")) return "The answer comes from your notes: each one it cites stands beside the line that uses it. Click one to open it.";
+      if (s?.dataset.cite) return "The answer comes from your notes: each numbered link is one of them. Click it to open the note.";
       if (s) return "The answer comes from your notes: the ones it read are named above it. Click one to open it.";
       return "The answer comes from the notes in your vault.";
     },
@@ -73,7 +73,7 @@ const TOUR_STEPS = {
 // the answer a `cite` pointed at and the frame a `map` sat on are gone.
 function tourSource() {
   const a = tourLastAnswer();
-  return a?.querySelector(".cite-card") || a?.querySelector(".lg-reads") || null;
+  return a?.querySelector(".stream-text .note-link[data-cite]") || a?.querySelector(".lg-reads") || null;
 }
 const TOUR_RESUME = { fetch: "file", cite: "explore", map: "quiz" };
 

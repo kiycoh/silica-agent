@@ -1727,7 +1727,7 @@ function finishLedger(msg, led, { steps, secs, reads, cited }) {
   if (!uncited.length) return;
   const r = document.createElement("span");
   r.className = "lg-reads";
-  // Beside cards, a name here needs saying why it is not one of them.
+  // Beside numbered citations, a name here needs saying why it is not one.
   if (cited.size) r.appendChild(mkEl("span", "lg-label", "not cited"));
   for (const p of uncited) {
     const c = document.createElement("button");
@@ -1740,21 +1740,23 @@ function finishLedger(msg, led, { steps, secs, reads, cited }) {
   toggle.after(r);
 }
 
-// One end for the live turn and the replayed one: number the citations, draw
-// their cards, then state the line with the reads the cards did not take.
+// One end for the live turn and the replayed one: number the citations, then
+// state the line with the reads the answer did not cite.
 function finishTurn(body, ledger, touched, meta) {
   const cited = citeTurn(body);
   const reads = uniqueReads([...touched].filter(([, e]) => e === "read").map(([r]) => r));
   finishLedger(body.closest(".msg"), ledger, { ...meta, reads, cited });
 }
 
-// --- source cards (ADR-0117 point 2, skeleton A: the margin) -----------------
+// --- citations (ADR-0117 point 2, amended 2026-10-16) -------------------------
 // Each note the answer links gets a number after the link, in order of first
-// use, and one card in the margin lane level with the line that first cites
-// it: title, folder, and the note's line closest to the citing paragraph.
+// use. The margin of cards beside them is gone at the owner's call: a card per
+// linked note repeated the link it stood next to. A citation opens its note in
+// the drawer at the line that says what the answer took from it (openCite).
 function citeTurn(body) {
+  const marks = body.querySelectorAll(".cite-mark");
+  if (marks.length) return new Set([...marks].map((m) => m.dataset.path)); // already numbered
   const order = [];
-  if (body.querySelector(".cites")) return new Set(order); // already numbered
   for (const a of body.querySelectorAll(".stream-text .note-link[data-path]")) {
     const p = resolveRef(a.dataset.path);
     let n = order.indexOf(p) + 1;
@@ -1763,43 +1765,18 @@ function citeTurn(body) {
     const m = document.createElement("sup");
     m.className = "cite-mark";
     m.dataset.cite = n;
+    m.dataset.path = p; // the delegated click (app-notes.js) hands it to openCite
+    m.title = "open " + noteLabel(p);
     m.textContent = n;
     a.after(m);
   }
-  if (!order.length) return new Set(order);
-  const lane = document.createElement("div");
-  lane.className = "cites";
-  order.forEach((p, i) => lane.appendChild(citeCard(body, p, i + 1)));
-  body.appendChild(lane);
-  citeRO.observe(body);
-  queueCiteLayout();
   return new Set(order);
 }
 
-function citeCard(body, path, n) {
-  const card = document.createElement("button");
-  card.type = "button";
-  card.className = "cite-card";
-  card.dataset.cite = n;
-  card.dataset.path = path;
-  card.title = "open " + noteLabel(path);
-  const t = document.createElement("span");
-  t.className = "cite-title";
-  t.appendChild(mkEl("span", "cite-n", String(n)));
-  t.appendChild(mkEl("span", "cite-name", noteLabel(path)));
-  card.appendChild(t);
-  // The folder the note sits in, trimmed from the left: in a 16rem lane a
-  // whole path wraps mid-name, and the nearest folder is the one that tells.
-  const cut = path.lastIndexOf("/");
-  if (cut > 0) {
-    const dir = path.slice(0, cut);
-    const d = mkEl("span", "cite-dir", (dir.includes("/") ? "…/" : "") + dir.split("/").pop());
-    d.title = dir;
-    card.appendChild(d);
-  }
-  // The words of every paragraph that cites this note, minus the link's own.
+// The words of every paragraph that cites note n, minus the link's own.
+function citeWordsFor(msg, n) {
   const words = new Set();
-  for (const a of body.querySelectorAll(`.stream-text .note-link[data-cite="${n}"]`)) {
+  for (const a of msg.querySelectorAll(`.stream-text .note-link[data-cite="${n}"]`)) {
     const block = a.closest("li, td, th, .stream-text > *");
     let text = block ? block.textContent : "";
     // "Label (Note):" heads the list that holds what it says about the note
@@ -1807,23 +1784,30 @@ function citeCard(body, path, n) {
     const own = citeWords(a.textContent);
     for (const w of citeWords(text)) if (!own.has(w)) words.add(w);
   }
-  noteLines(path).then((lines) => {
-    const line = bestLine(lines, words);
-    if (!line) return; // no line shares enough with the answer: none is made up
-    card.appendChild(mkEl("span", "cite-line", `“${line}”`));
-    queueCiteLayout();
-  });
-  return card;
+  return words;
+}
+
+// Opens the cited note and marks its line closest to the citing paragraphs.
+// Read off the editor once the note has loaded, not off a fetch of our own,
+// so the line number is one of the document on screen. No line shares enough
+// with the answer: the note opens at its top and nothing is marked.
+async function openCite(el) {
+  const msg = el.closest(".msg");
+  const words = msg ? citeWordsFor(msg, el.dataset.cite) : new Set();
+  if (!(await openNote(el.dataset.path)) || !editor) return;
+  const hit = bestLine(proseLines(editor.getText()), words);
+  if (hit) editor.markLine(hit.line);
 }
 
 // cite-pure:start (run under node by tests/test_cite_cards.py)
 // ponytail: words of four letters or more, minus the commonest English and
 // Italian ones, and a line needs two in common with the citing paragraph. An
 // answer in one language over notes in another shares mostly names, symbols
-// and numbers, so most of those cards show no line. The upgrade is the passage
-// the turn's own read returned, once a stored turn keeps its tool results
-// (app-boot.js: a replayed call "opens onto nothing"); review at the pilot
-// report on 2027-03-01.
+// and numbers, so most of those citations open the note with no line marked.
+// The upgrade is the passage the turn's own read returned: the server keeps
+// every tool result with the session (server.py, the replay's `results`), but
+// the page gets 1200 characters of a live one and nothing of a stored one, so
+// the join belongs on the server. Review at the pilot report on 2027-03-01.
 const CITE_STOP = new Set(("that this with from have your what when which their there these those they them then than "
   + "also into only some more most such each been were will would could should about between because "
   + "della delle dello degli nella nelle sono come anche questo questa quella quello perché dove quando "
@@ -1834,153 +1818,66 @@ function citeWords(text) {
   return out;
 }
 function bestLine(lines, words) {
-  let best = "", top = 1;
-  for (const line of lines) {
+  let best = null, top = 1;
+  for (const l of lines) {
     let k = 0;
-    for (const w of citeWords(line)) if (words.has(w)) k++;
-    if (k > top) { top = k; best = line; }
+    for (const w of citeWords(l.text)) if (words.has(w)) k++;
+    if (k > top) { top = k; best = l; }
   }
   return best;
 }
-// A note's prose as sentences: no frontmatter, fences, headings, tables or
+// A note's prose as sentences, each with the 1-based line of the raw file it
+// sits on (the editor's document): no frontmatter, fences, headings, tables or
 // comments, and the link and emphasis markup read as the words it shows.
 function proseLines(md) {
-  const text = md.replace(/^---\n[\s\S]*?\n---\n/, "").replace(/```[\s\S]*?```/g, "").replace(/<!--[\s\S]*?-->/g, "");
+  const rows = md.split("\n");
   const out = [];
-  for (const raw of text.split("\n")) {
-    const l = raw.trim();
-    if (!l || /^(#|\||>|!\[|\$\$)/.test(l)) continue;
+  let i = 0;
+  if (rows[0].trimEnd() === "---") {
+    const end = rows.findIndex((r, k) => k > 0 && r.trimEnd() === "---");
+    if (end > 0) i = end + 1;
+  }
+  let fence = false, comment = false;
+  for (; i < rows.length; i++) {
+    let l = rows[i].trim();
+    if (l.startsWith("```")) { fence = !fence; continue; }
+    if (fence) continue;
+    if (comment) { comment = !l.includes("-->"); continue; }
+    l = l.replace(/<!--.*?-->/g, "");
+    if (l.includes("<!--")) { comment = true; continue; }
+    // A quote's or a callout's body is the note's own prose; a callout's head
+    // is only its type.
+    l = l.replace(/^(>\s*)+/, "");
+    if (!l || /^(#|\||!\[|\$\$|\[!)/.test(l)) continue;
     const plain = l.replace(/^([-*+]|\d+\.)\s+/, "")
       .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1")
       .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/[*_`=]+/g, "");
     for (const sent of plain.split(/(?<=[.!?;])\s+/)) {
-      if (sent.length >= 40 && sent.length <= 240) out.push(sent);
+      if (sent.length >= 40 && sent.length <= 240) out.push({ text: sent, line: i + 1 });
     }
   }
   return out;
 }
 // cite-pure:end
 
-// ponytail: one fetch per note for the page's life, so a note edited while the
-// chat is open keeps the line it had until a reload; key it on the note's etag
-// if a stale line is ever reported.
-const noteLineCache = new Map();
-function noteLines(path) {
-  if (!noteLineCache.has(path)) {
-    noteLineCache.set(path, fetch("/note/raw?path=" + encodeURIComponent(path))
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => proseLines((d && d.text) || ""))
-      .catch(() => [])); // an unreadable note is a card without a line, as an unmatched one is
-  }
-  return noteLineCache.get(path);
-}
-
-// Placing the cards. One pass over every lane in the transcript, in order, so a
-// card taller than its line hangs past the next question rather than under a
-// card of the next turn. A block that crosses into the lane (a wide table, a
-// code fence, a diagram) moves down by what the card beside it needs, so the
-// card stays level with its line; a card cited from inside such a block goes
-// below it. Too narrow for the lane, each card folds under the block that
-// first cites it.
-let citeRaf = 0;
-const citeRO = new ResizeObserver(() => queueCiteLayout());
-citeRO.observe(log);
-function queueCiteLayout() {
-  if (!citeRaf) citeRaf = requestAnimationFrame(layoutCites);
-}
-function layoutCites() {
-  citeRaf = 0;
-  // Each pass starts from the answer as rendered: last pass's pushes come off
-  // first, and the size it ends on is the one it started from, so the
-  // ResizeObserver sees no change and does not call it again.
-  for (const el of log.querySelectorAll("[data-cite-push]")) {
-    el.style.marginTop = "";
-    delete el.dataset.citePush;
-  }
-  const base = log.getBoundingClientRect().top - log.scrollTop; // log content coordinates
-  let prev = -Infinity;
-  for (const lane of log.querySelectorAll(".msg.silica .cites")) {
-    const body = lane.parentElement;
-    if (lane.offsetLeft + lane.offsetWidth > body.clientWidth + 1) { foldCites(body, lane); continue; }
-    unfoldCites(body, lane);
-    const laneBox = lane.getBoundingClientRect();
-    const laneTop = laneBox.top - base;
-    const blocks = [...body.querySelectorAll(".stream-text > *")];
-    for (const card of lane.children) {
-      const link = body.querySelector(`.stream-text .note-link[data-cite="${card.dataset.cite}"]`);
-      const box = link && link.getClientRects()[0];
-      if (!box) continue; // inside a folded row: nowhere on screen to stand level with
-      const h = card.offsetHeight;
-      const line = box.top - base - 4;
-      let top = Math.max(line, prev + 10);
-      // Measured inside the loop: a push moves every block under it.
-      for (const el of blocks) {
-        const r = el.getBoundingClientRect();
-        if (!r.height || r.right <= laneBox.left + 1) continue; // stays in the text column
-        const a = r.top - base, b = r.bottom - base;
-        if (top + h + 8 <= a || top >= b + 8) continue;
-        if (line < a) {
-          el.style.marginTop = (parseFloat(getComputedStyle(el).marginTop) + top + h + 8 - a) + "px";
-          el.dataset.citePush = "1";
-        } else {
-          top = b + 8;
-        }
-      }
-      card.style.top = (top - laneTop) + "px";
-      prev = top + h;
-    }
-  }
-}
-function foldCites(body, lane) {
-  for (const card of [...lane.children]) {
-    const link = body.querySelector(`.stream-text .note-link[data-cite="${card.dataset.cite}"]`);
-    const block = link && link.closest(".stream-text > *");
-    if (!block) continue;
-    let tray = block.nextElementSibling;
-    if (!tray || !tray.classList.contains("cite-tray")) {
-      tray = mkEl("div", "cite-tray");
-      block.after(tray);
-    }
-    card.style.top = "";
-    tray.appendChild(card);
-  }
-}
-function unfoldCites(body, lane) {
-  const cards = [...body.querySelectorAll(".cite-tray > .cite-card")];
-  if (!cards.length) return;
-  cards.sort((a, b) => a.dataset.cite - b.dataset.cite).forEach((c) => lane.appendChild(c));
-  for (const t of body.querySelectorAll(".cite-tray")) t.remove();
-}
-// A cleared transcript takes its observed bodies with it.
-function resetCites() {
-  citeRO.disconnect();
-  citeRO.observe(log);
-}
-
-// Pointing at a card tints the paragraphs that cite it, and pointing at a
-// citation lights its card; focus does the same for the keyboard.
+// Pointing at a citation tints every paragraph of the answer that cites the
+// same note; focus does the same for the keyboard.
 let citeHotKey = "";
 function setCiteHot(target) {
-  const hit = target && target.closest && target.closest(".cite-card, .cite-mark, .stream-text .note-link[data-cite]");
+  const hit = target && target.closest && target.closest(".cite-mark, .stream-text .note-link[data-cite]");
   const msg = hit && hit.closest(".msg");
   const key = msg ? `${[...log.children].indexOf(msg)}:${hit.dataset.cite}` : "";
   if (key === citeHotKey) return;
   citeHotKey = key;
   for (const el of log.querySelectorAll(".cite-hot")) el.classList.remove("cite-hot");
   if (!msg) return;
-  const n = hit.dataset.cite;
-  for (const c of msg.querySelectorAll(`.cite-card[data-cite="${n}"]`)) c.classList.add("cite-hot");
-  for (const a of msg.querySelectorAll(`.stream-text .note-link[data-cite="${n}"]`)) {
+  for (const a of msg.querySelectorAll(`.stream-text .note-link[data-cite="${hit.dataset.cite}"]`)) {
     a.closest("li, td, th, .stream-text > *")?.classList.add("cite-hot");
   }
 }
 log.addEventListener("pointerover", (e) => setCiteHot(e.target));
 log.addEventListener("pointerleave", () => setCiteHot(null));
 log.addEventListener("focusin", (e) => setCiteHot(e.target));
-log.addEventListener("click", (e) => {
-  const card = e.target.closest(".cite-card");
-  if (card) openNote(card.dataset.path);
-});
 
 // The images a user turn carried, under its words: live from the data URLs the
 // composer read, on reload from /attachment (ADR-0077).
@@ -2462,7 +2359,6 @@ async function newChat() {
   autoGrow(input);
   renderHighlight();
   log.innerHTML = "";
-  resetCites();
   await fetch("/reset", { method: "POST" });
   currentSessionId = "";
   chatWorkspace = "";       // a new chat is the whole vault until a workspace opens it

@@ -90,6 +90,15 @@ def test_the_copy_button_is_visible_when_focused_by_keyboard():
     assert re.search(r"\.msg:focus-within \.copy-btn,\s*\.copy-btn:focus-visible \{[^}]*opacity: 1", css)
 
 
+def test_every_copy_button_anchors_its_own_hit_area():
+    """The hit-area ::after is 100% of its containing block (app-work.css): a
+    copy button left static on the ledger handed it the whole answer, and any
+    click on the text copied the turn (2026-10-16)."""
+    css = app_css()
+    for rule in re.findall(r"[^{}]*\.copy-btn\s*\{[^}]*\}", css):
+        assert "position: static" not in rule, rule.strip()
+
+
 # --- P2. Enter during a turn queues; the draft persists -----------------------
 
 def test_enter_while_streaming_queues_instead_of_dropping():

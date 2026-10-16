@@ -7,7 +7,6 @@ async function loadVault() {
                  jsonHeader(r, "X-Silica-Context-Parts"), r.headers.get("X-Silica-Compact-At"));
     const msgs = await r.json();
     log.innerHTML = "";
-    resetCites();
     // One reply is ONE bubble. The model's text arrives split around its own
     // tool calls, so the history holds several assistant messages per turn —
     // rendering each as its own bubble made a single answer read as three

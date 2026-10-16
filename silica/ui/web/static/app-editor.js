@@ -318,6 +318,15 @@
     create: () => new Set(),
     update: (v, tr) => tr.effects.reduce((a, e) => (e.is(brokenEffect) ? new Set(e.value) : a), v),
   });
+  // The line a chat citation opened the note at (ADR-0117). It lives in the
+  // note's state, so the next load() drops it, and edits carry it along.
+  const markEffect = StateEffect.define();
+  const CITE_LINE = Decoration.line({ class: "cm-cite-line" });
+  const marked = StateField.define({
+    create: () => Decoration.none,
+    update: (v, tr) => tr.effects.reduce((a, e) => (e.is(markEffect) ? e.value : a), v.map(tr.changes)),
+    provide: (f) => EditorView.decorations.from(f),
+  });
   let TOP = null; // the element heading the note, set per load()
   const linkKey = (target) => target.split("#")[0].trim();
 
@@ -589,6 +598,7 @@
       new LanguageSupport(language),
       focused,
       broken,
+      marked,
       EditorView.focusChangeEffect.of((_s, on) => focusEffect.of(on)),
       livePreview,
       linkPress,
@@ -649,6 +659,27 @@
         if (!(n >= 1 && n <= doc.lines)) return;
         const pos = doc.line(n).from;
         view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      },
+      // revealLine, with the line marked as the one a citation stands on.
+      markLine(n) {
+        const doc = view.state.doc;
+        if (!(n >= 1 && n <= doc.lines)) return;
+        const pos = doc.line(n).from;
+        view.dispatch({
+          selection: { anchor: pos },
+          effects: [markEffect.of(Decoration.set([CITE_LINE.range(pos)])), EditorView.scrollIntoView(pos, { y: "center" })],
+        });
+        // A line inside a rendered block (a callout, a table) has no row of its
+        // own on screen, and the field takes no focus to unfold it (ADR-0059),
+        // so the block wears the mark until it is drawn again.
+        view.requestMeasure({
+          read: () => [...view.contentDOM.querySelectorAll(".cm-rendered-block")]
+            .filter((el) => { const b = view.lineBlockAt(view.posAtDOM(el)); return b.from <= pos && pos <= b.to; }),
+          write: (hit) => {
+            for (const el of view.contentDOM.querySelectorAll(".cm-rendered-block.cm-cite-line")) el.classList.remove("cm-cite-line");
+            for (const el of hit) el.classList.add("cm-cite-line");
+          },
+        });
       },
     };
   }

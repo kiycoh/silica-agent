@@ -30,10 +30,9 @@
 
 /* Your turn is the heading of the exchange (ADR-0117, skeleton A): a rule
    over the text column and the question under it, no bubble. The answer's
-   left edge is where it starts, so question and answer read as one column and
-   the margin to their right holds nothing but the answer's sources. The
-   padding here IS the measure, the same one .msg > .body takes, so the left
-   edges agree at every width. */
+   left edge is where it starts, so question and answer read as one column.
+   The padding here IS the measure, the same one .msg > .body takes, so the
+   left edges agree at every width. */
 .msg.user {
   padding-inline: max(2rem, calc(50% - var(--measure) / 2));
 }
@@ -1987,8 +1986,11 @@
   padding-top: 0.45rem;
 }
 
+/* Relative, never static: the hit-area ::after (app-work.css) is sized at 100%
+   of its containing block, so a static button handed it the whole answer and
+   every click on the text copied the turn. */
 #log .ledger .copy-btn {
-  position: static;
+  position: relative;
   margin-left: auto;
   padding: 0.05rem 0.5rem;
   font-size: 11px;
@@ -2343,20 +2345,30 @@
 }
 
 
-/* --- ADR-0117: the answer shows what it stands on (skeleton A, the margin) ---
-   The chat's measure is the text column, a gap and the margin lane. Prose and
-   everything that describes the turn keep the text column (43rem, the prose
-   measure argued above); a table, a code fence or a diagram takes the whole
-   measure, and the cards beside it step below it (layoutCites). */
+/* --- ADR-0117: the answer shows what it stands on ---------------------------
+   The chat's measure is the text column (43rem, the prose measure argued
+   above), centred: question, ledger, answer and composer share one axis. A
+   table or a code fence keeps the wide sheet it always had, out from both
+   sides of the column, so the page keeps one centre. Until 2026-10-16 a lane
+   of source cards stood right of the column and the text sat left of centre
+   to make room for it; the owner removed the cards (point 2, amended). */
 #view-chat {
   --text-w: 43rem;
-  --cite-gap: 2.5rem;
-  --cite-w: 16rem;
-  --measure: calc(var(--text-w) + var(--cite-gap) + var(--cite-w));
+  --wide-w: 58rem;
+  --measure: var(--text-w);
 }
 
-#view-chat .msg.silica :is(.ledger, .thinking, .tools, .writes, .turn-outcome, .approval, .cite-tray) {
-  max-width: var(--text-w);
+#view-chat .msg.silica {
+  container-type: inline-size;
+}
+
+/* 100cqi is the turn's own width inside its gutters, so on a narrow log the
+   wide sheet is the column and the margins come to nothing. */
+#view-chat .msg.silica .stream-text> :is(table, pre) {
+  --wide: min(var(--wide-w), 100cqi);
+  width: var(--wide);
+  max-width: none;
+  margin-inline: calc((100% - var(--wide)) / 2);
 }
 
 /* The ledger line (point 3): one mono line between the question and the
@@ -2458,11 +2470,6 @@
   font-size: 1em;
 }
 
-/* Display math centres on the text it belongs to, not on text and margin. */
-#view-chat .msg.silica .stream-text>.math {
-  max-width: var(--text-w);
-}
-
 /* Opened, the rows end a breath above the answer instead of running into it. */
 .msg.silica.show-work .tools,
 .msg.silica.show-work .thinking {
@@ -2511,8 +2518,8 @@
   display: none;
 }
 
-/* The source cards (point 2): a number after each citing link, a card in the
-   lane level with it. The lane takes no room; the cards are placed by script. */
+/* The citation (point 2): a number after each citing link. It opens the note
+   at the line it stands on, as the link does (openCite). */
 #log .cite-mark {
   margin-left: 0.15em;
   font-family: var(--mono);
@@ -2521,97 +2528,10 @@
   line-height: 0;
   vertical-align: super;
   color: var(--accent);
-}
-
-.cites {
-  position: absolute;
-  top: 0;
-  left: calc(var(--text-w) + var(--cite-gap));
-  width: var(--cite-w);
-  height: 0;
-}
-
-.cite-card {
-  position: absolute;
-  left: 0;
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.5rem 0.65rem 0.55rem;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--r-sm);
-  font: inherit;
-  text-align: left;
-  text-transform: none;
-  letter-spacing: 0;
-  color: var(--text);
   cursor: pointer;
-  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
 }
 
-.cite-card:hover,
-.cite-card:focus-visible,
-.cite-card.cite-hot {
-  border-color: var(--accent);
-  background: var(--sel-hover);
-}
-
-.cite-title {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-size: 13.5px;
-  font-weight: 600;
-  line-height: 1.3;
-  color: var(--frost);
-}
-
-.cite-n {
-  flex-shrink: 0;
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--accent);
-}
-
-.cite-dir,
-.cite-line {
-  padding-left: 1.05rem;
-}
-
-.cite-dir {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--ash);
-  overflow-wrap: anywhere;
-}
-
-.cite-line {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
-  font-size: 12.5px;
-  line-height: 1.45;
-  color: var(--ash-dim);
-}
-
-/* Too narrow for the lane: under the block that first cites them. */
-.cite-tray {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin: 0.35rem 0 0.9rem;
-}
-
-.cite-tray .cite-card {
-  position: static;
-  flex: 1 1 13rem;
-  border-color: var(--line);
-}
-
-#log .stream-text .cite-hot:not(.cite-card) {
+#log .stream-text .cite-hot {
   background: var(--sel);
   box-shadow: 0 0 0 4px var(--sel);
   border-radius: 3px;
