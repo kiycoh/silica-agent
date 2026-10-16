@@ -78,7 +78,11 @@ def test_meter_off_is_noop(monkeypatch):
 # the silica_load_tools catalog (~1k tok) and the ledger pair included; the
 # review protocol left BASE for the tool results (-400 tok) and five rules with
 # no measured effect were deleted (-450 tok, prompts.py).
-CHAT_PREFIX_TOKENS = 6_180
+# Re-measured 2026-10-16 at 6_947: main stood at 6_691 (inside the old
+# tolerance), and +256 is silica_rework joining the core (ADR-0116). Its
+# description was not trimmed: it is the text the routing probe measured
+# (docs/evaluation/rework-chunked-2026-10-16.md), and a trim reruns that probe.
+CHAT_PREFIX_TOKENS = 6_947
 CHAT_PREFIX_TOLERANCE = 0.10
 
 

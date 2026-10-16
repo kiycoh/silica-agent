@@ -58,6 +58,9 @@ from silica.tools.curate import (  # noqa: F401
 from silica.tools.sessions import (  # noqa: F401
     silica_session_search,
 )
+from silica.tools.rework import (  # noqa: F401
+    silica_rework,
+)
 from silica.tools.user_memory import (  # noqa: F401
     silica_remember,
 )
