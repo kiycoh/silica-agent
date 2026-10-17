@@ -353,10 +353,13 @@ window.addEventListener("dragover", (e) => {
 });
 window.addEventListener("dragleave", (e) => { e.preventDefault(); if (--dragDepth <= 0) document.body.classList.remove("dragging"); });
 window.addEventListener("drop", (e) => {
+  // A target that took the files (a workspace row, a skill row) prevented the
+  // default first: staging them for the chat too would import them twice.
+  const taken = e.defaultPrevented;
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove("dragging");
-  if (filesOverChat(e) && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  if (!taken && filesOverChat(e) && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
 });
 
 // "+" opens what the next message can do (ADR-0083). Its first entry is the
