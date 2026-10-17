@@ -2212,7 +2212,9 @@ async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = F
 
 # Measured from the pilot host 2026-10-17: yt-dlp gets "Sign in to confirm
 # you're not a bot" for a public video, as YouTube answers datacenter
-# addresses. Refused before a request goes out, with the way that works there.
+# addresses. With no account cookies on the server it is refused before a
+# request goes out; with them, it is this same sentence when YouTube asks
+# again (the account gone, the cookies expired), with the way that works.
 YOUTUBE_ON_SERVER = ("YouTube does not let the server read videos (it asks it to sign in): "
                      "download the video's audio and add that file, and it is transcribed")
 
@@ -2229,7 +2231,7 @@ async def vault_fetch(payload: dict):
     server the unit's IPAddressDeny holds the private ranges and link-local
     under it."""
     from silica.config import hosted
-    from silica.sources.web_fetch import _YT_DOMAINS, host_matches
+    from silica.sources.web_fetch import _YT_DOMAINS, YoutubeBlocked, host_matches, youtube_cookies
     from silica.sources.web_research import fetch_to_inbox
 
     url = str(payload.get("url") or "").strip()
@@ -2237,13 +2239,19 @@ async def vault_fetch(payload: dict):
     if not url or len(url) > 2048 or any(c.isspace() for c in url):
         raise HTTPException(400, "a link is one web address, at most 2,048 characters")
     row: dict = {"name": url}
-    if hosted() and host_matches(url if "://" in url else f"https://{url}", *_YT_DOMAINS):
+    if (hosted() and youtube_cookies() is None
+            and host_matches(url if "://" in url else f"https://{url}", *_YT_DOMAINS)):
         return {"files": [{**row, "status": "refused", "reason": YOUTUBE_ON_SERVER}]}
     if not _begin_turn():
         raise HTTPException(409, "a turn is running: add the link when it ends")
     try:
         note = await asyncio.to_thread(fetch_to_inbox, url)
         row.update(status="note", notes=[note], path=note)
+    except YoutubeBlocked:
+        # web_fetch logged the renewal line; the student gets the way around it.
+        row.update(status="refused", reason=YOUTUBE_ON_SERVER if hosted() else
+                   "YouTube asked to sign in: set SILICA_YOUTUBE_COOKIES to an account's cookies "
+                   "file, or download the audio and add that")
     except Exception as exc:
         # Not only ValueError: httpx raises its own on a refused connection or
         # a timeout, and either is this link refused, not a 500. The reason

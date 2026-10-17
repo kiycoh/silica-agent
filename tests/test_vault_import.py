@@ -274,6 +274,35 @@ def test_on_the_server_a_youtube_link_is_refused_before_any_request(client, monk
         assert row == {"name": url, "status": "refused", "reason": YOUTUBE_ON_SERVER}
 
 
+def test_on_the_server_with_cookies_a_youtube_link_is_fetched_and_a_wall_is_named(client, monkeypatch, tmp_path):
+    """With the operator's account cookies the server tries; when YouTube
+    asks again (the account gone), the student gets the audio's way round."""
+    from silica.sources import web_fetch
+    from silica.ui.web.server import YOUTUBE_ON_SERVER
+
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setenv(web_fetch.YOUTUBE_COOKIES_ENV, str(jar))
+    pages = iter([web_fetch.Page("Source: https://youtu.be/abc\n\nhello from the video", "A talk"),
+                  web_fetch.YoutubeBlocked("asked to sign in")])
+
+    def page(url):
+        out = next(pages)
+        if isinstance(out, Exception):
+            raise out
+        return out
+
+    monkeypatch.setattr(web_fetch, "fetch_page", page)
+    tc, _ = client
+
+    first, = tc.post("/vault/fetch", json={"url": "https://youtu.be/abc"}).json()["files"]
+    second, = tc.post("/vault/fetch", json={"url": "https://youtu.be/abc"}).json()["files"]
+
+    assert first["status"] == "note"
+    assert second == {"name": "https://youtu.be/abc", "status": "refused", "reason": YOUTUBE_ON_SERVER}
+
+
 def test_a_link_that_cannot_be_read_is_a_refused_row_not_an_error(client, monkeypatch):
     import httpx
 
