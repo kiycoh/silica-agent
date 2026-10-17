@@ -1372,7 +1372,7 @@ def _with_reference(scope: str, target, restrict: str, reference: str) -> tuple[
     if not scope:
         return "steps", reference, ""
     if scope == "folder":
-        return "steps", reference, str(target).strip()
+        return "steps", reference, plans.RESTRICT_SEP.join(plans.folder_parts(target))
     paths = plans.resolve_scope(scope, target, restrict=restrict)["paths"]
     if not paths:
         raise ValueError("nothing to study resolves, so the reference has nowhere to be looked for")
