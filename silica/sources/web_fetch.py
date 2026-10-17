@@ -57,11 +57,17 @@ _BODY_DEADLINE = 120
 _YT_DOMAINS: tuple[str, ...] = ("youtube.com", "youtu.be")
 # Languages only: `--sub-lang` does not choose between auto-generated and
 # uploaded subs (that is `--write-auto-sub` / `--write-sub`, and we ask for
-# both). `en.*` already matches bare `en`, so no separate entry is needed.
+# both). Not `en.*`, which it was until 2026-10-17: YouTube names its machine
+# translations `<to>-<from>` in lowercase (`en-de` is English from German),
+# so `en.*` asked for every one of them, the 2nd came back HTTP 429, and the
+# error ended yt-dlp before it wrote the info file, the note's title (measured
+# on jNQXAC9IVRw). yt-dlp matches without case, so a region cannot be told
+# from a source language by pattern (`en-[A-Z]+` took `en-de` too): the
+# regions are named, `-orig` being the auto-captions' own language.
 # Which of the downloaded files wins is alphabetical, not preferential:
 # `sorted(glob("*.vtt"))[0]`, where `sub.en-GB.vtt` beats `sub.en.vtt` because
 # `-` (0x2D) sorts before `.` (0x2E).
-_YT_SUB_LANGS = "en.*,it.*"
+_YT_SUB_LANGS = "en,en-orig,en-US,en-GB,en-CA,en-AU,en-IE,en-IN,it,it-orig,it-IT,it-CH"
 _YT_TIMEOUT = 120
 # What YouTube answers a datacenter address with no signed-in session (the
 # pilot host, 2026-10-17), and a session whose account is gone or whose
@@ -757,9 +763,13 @@ def _youtube_transcript(url: str) -> Page:
         files = sorted(Path(tmp).glob("*.vtt"))
         if not files and _YT_SIGN_IN in (proc.stderr or ""):
             # The line the operator greps for; the probe pages on the same.
-            logger.warning(
-                "youtube: sign-in wall (%s): the cookies need renewing, silica-hosted bin/youtube-cookies",
-                "cookies set" if signed_in else "no cookies")
+            # Two literals and no argument: the server's log keeps a silica
+            # record's template only (silica/ui/logging.py), never its args.
+            if signed_in:
+                logger.warning("youtube: sign-in wall with the cookies set: renew them, "
+                               "silica-hosted bin/youtube-cookies")
+            else:
+                logger.warning("youtube: sign-in wall with no cookies: set SILICA_YOUTUBE_COOKIES")
             raise YoutubeBlocked(f"YouTube asked to sign in before it would show {url}")
         if not files:
             tail = (proc.stderr or proc.stdout or "").strip()[-300:]

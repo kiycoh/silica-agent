@@ -39,6 +39,28 @@ def test_a_plan_written_with_a_reference_keeps_both_prefixes(vault):
     assert plans.scope_of(p)["paths"] == ["ML/Chain rule.md", "ML/Softmax.md"]
 
 
+def test_a_study_of_several_folders_and_notes_resolves_their_union(vault):
+    res = plans.resolve_scope("folder", "ML/Deep/ | Other/Note.md | Softmax.md")
+    # a note by its path or by its name, each a part of its own after the folder's
+    assert res["paths"] == ["ML/Deep/ResNet.md", "Other/Note.md", "ML/Softmax.md"]
+    assert [n["node"] for n in res["tree"]] == ["ML/Deep", "Note", "Softmax"]
+    # a note under a folder already chosen is counted once
+    assert plans.resolve_scope("folder", "ML/ | ML/Softmax.md")["paths"].count("ML/Softmax.md") == 1
+    out = plans.write_plan("Mixed", "folder", "ML/Deep/ | Softmax.md")
+    assert plans.scope_of(plans.read_plan(out["path"]))["paths"] == ["ML/Deep/ResNet.md", "ML/Softmax.md"]
+
+
+def test_the_ask_box_and_the_study_gather_notes_and_folders():
+    """A note or a folder joins the ones already chosen, in the home's box and
+    in the dialog's Study, and the field stays open for the next (2026-10-17)."""
+    js = app_js()
+    for fn in ("function lrAskPick(", "function lrPickScope("):
+        body = js[js.index(fn):]
+        body = body[:body.index("\n}\n")]
+        assert "lrJoins(o) &&" in body and "every(lrJoins)" in body
+    assert "if (lrAsk.picks.every(lrJoins))" in js and "if (items.every(lrJoins)) row.appendChild(lrStudyInput(" in js
+
+
 def test_learn_lists_the_next_session_with_a_reason_per_note(client):
     c, _ = client
     d = c.get("/learn").json()
@@ -143,6 +165,9 @@ def test_a_reference_is_a_syllabus_bounded_by_what_is_studied(client):
     one = c.post("/learn/plan", json={"scope": "notes", "target": ["Iperpiano"], "reference": "Iperpiano\n", "preview": True}).json()
     assert one["paths"] == ["ML/Iperpiano.md"]
     assert c.post("/learn/plan", json={"scope": "", "reference": "Iperpiano\n", "preview": True}).json()["paths"] == ["ML/Iperpiano.md"]
+    # a folder and a note named by its title: the bound is the note's path
+    mixed = c.post("/learn/plan", json={"scope": "folder", "target": "sources/ | Iperpiano.md", "reference": "Iperpiano\n", "preview": True}).json()
+    assert mixed["paths"] == ["ML/Iperpiano.md"]
 
 
 def test_the_teach_summary_speaks_the_explanations_language(monkeypatch):

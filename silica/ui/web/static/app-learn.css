@@ -2564,7 +2564,8 @@ button.lr-cell:focus-visible {
 
 .lr-ask {
   display: flex;
-  align-items: center;
+  /* the buttons sit on the field's line, the last one once picks wrap above it */
+  align-items: flex-end;
   gap: 0.5rem;
   margin-top: -0.6rem;
 }
@@ -2572,6 +2573,17 @@ button.lr-cell:focus-visible {
 .lr-ask .lr-askin {
   flex: 1 1 auto;
   max-width: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* the picked notes and folders sit before the field, which keeps the rest of the line */
+.lr-ask .lr-askin .lr-field {
+  flex: 1 1 12rem;
+  width: auto;
+  min-width: 0;
 }
 
 .lr-ask .lr-field {

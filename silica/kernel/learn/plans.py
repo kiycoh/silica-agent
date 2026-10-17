@@ -256,9 +256,16 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=()) -> dict:
         paths = [p for p in (resolve_title(n, notes) for n in names) if p and p in allowed]
         return {"paths": paths, "tree": [{"node": Path(p).stem, "children": [], "leaves": [p]} for p in paths], "gaps": []}
     if kind == "folder":
-        prefix = str(target).replace("\\", "/").strip()
-        paths = sorted(p for p in allowed if p.casefold().startswith(prefix.casefold()))
-        return {"paths": paths, "tree": _folder_tree(prefix, paths), "gaps": []}
+        paths, seen, tree = [], set(), []
+        for prefix in folder_parts(target, notes):
+            got = sorted(p for p in allowed if p.casefold().startswith(prefix.casefold()) and p not in seen)
+            seen.update(got)
+            paths += got
+            if prefix.casefold().endswith(".md"):
+                tree += [{"node": Path(prefix).stem, "children": [], "leaves": got}] if got else []
+            else:
+                tree += _folder_tree(prefix, got)
+        return {"paths": paths, "tree": tree, "gaps": []}
     if kind == "topic":
         return _topic_scope(str(target), allowed)
     if kind == "steps":
@@ -266,6 +273,16 @@ def resolve_scope(kind: str, target, restrict: str = "", refused=()) -> dict:
     if kind == "workspace":
         return _workspace_scope(str(target), allowed)
     raise ValueError(f"unknown scope kind {kind!r}")
+
+
+def folder_parts(target, notes: dict | None = None) -> list[str]:
+    """A folder scope's prefixes: one folder, or folders and notes studied
+    together, joined by " | " as `restrict` joins its bounds. A note part is
+    turned into its path, a prefix of itself only, so it may be named by its
+    title: a notes scope keeps titles, and adding a folder to one keeps them."""
+    parts = [b.strip() for b in str(target or "").replace("\\", "/").split(RESTRICT_SEP) if b.strip()]
+    # an empty target was every note, which a legacy plan without one relied on
+    return [(resolve_title(b, notes) or b) if b.casefold().endswith(".md") else b for b in parts] or [""]
 
 
 def _workspace_scope(target: str, allowed: set[str]) -> dict:
@@ -1033,7 +1050,7 @@ def _trim(lines: list[str]) -> list[str]:
 def _goal_sentence(scope: str, target, objectives: list[str]) -> str:
     from silica.kernel.learn import objectives as obj
 
-    what = {"notes": "these notes", "folder": f"everything under {target}", "topic": f"the notes on {target}",
+    what = {"notes": "these notes", "folder": f"everything under {', '.join(str(target).split(RESTRICT_SEP))}", "topic": f"the notes on {target}",
             "workspace": f"the notes of the workspace {target}",
             "steps": f"the steps of {target if isinstance(target, str) and len(target) < 60 and chr(10) not in target else 'the program'}"}[scope]
     names = [obj.LABEL[o].lower() for o in obj.normalize(objectives)] or ["objectives to define"]
