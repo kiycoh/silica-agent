@@ -1038,7 +1038,8 @@ class TestConvertersReportsMineru:
         monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
         row = check_converters(CONFIG)
         assert "mineru" in row.detail
-        assert ".pptx" in row.detail
+        # a deck is read from its own XML since ADR-0120; a workbook still needs mineru
+        assert ".xlsx" in row.detail
 
     def test_absent_mineru_is_optional_with_an_install_hint(self, monkeypatch):
         from silica.config import CONFIG

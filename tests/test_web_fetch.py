@@ -488,6 +488,58 @@ def test_youtube_without_subtitles_reports_the_stderr_tail(monkeypatch):
         wf.web_fetch("https://youtu.be/abc")
 
 
+def test_youtube_signs_in_with_a_copy_of_the_operators_cookies(monkeypatch, tmp_path):
+    """ADR-0120 amendment: yt-dlp writes its jar back to the path it is
+    given, so it gets a copy and the operator's file is never touched."""
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    monkeypatch.setenv(wf.YOUTUBE_COOKIES_ENV, str(jar))
+    monkeypatch.setattr(wf.shutil, "which", lambda name: "/usr/bin/yt-dlp")
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["cookies"] = Path(argv[argv.index("--cookies") + 1])
+        seen["copied"] = seen["cookies"].read_text(encoding="utf-8")
+        seen["cookies"].write_text("rotated", encoding="utf-8")
+        Path(argv[argv.index("-o") + 1]).with_suffix(".en.vtt").write_text(_VTT, encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(wf.subprocess, "run", fake_run)
+    wf.web_fetch("https://www.youtube.com/watch?v=abc")
+
+    assert seen["cookies"] != jar and seen["copied"].startswith("# Netscape")
+    assert jar.read_text(encoding="utf-8") == "# Netscape HTTP Cookie File\n"
+
+
+def test_youtube_without_readable_cookies_runs_signed_out(monkeypatch, tmp_path):
+    monkeypatch.setenv(wf.YOUTUBE_COOKIES_ENV, str(tmp_path / "gone.txt"))
+    assert wf.youtube_cookies() is None
+
+
+def test_the_sign_in_wall_is_its_own_error_and_logs_the_renewal(monkeypatch, caplog, tmp_path):
+    """The renewal line is a literal: the server's log keeps a template, not
+    its arguments (silica/ui/logging.py)."""
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    monkeypatch.setenv(wf.YOUTUBE_COOKIES_ENV, str(jar))
+    _fake_ytdlp(monkeypatch, writes=False,
+                stderr="ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies")
+    with caplog.at_level("WARNING"), pytest.raises(wf.YoutubeBlocked):
+        wf.web_fetch("https://youtu.be/abc")
+    record, = [r for r in caplog.records if r.name == wf.__name__]
+    assert not record.args and "sign-in wall" in record.msg and "bin/youtube-cookies" in record.msg
+
+
+def test_youtube_asks_for_named_tracks_and_not_every_machine_translation():
+    """`en.*` matched YouTube's `<to>-<from>` translations (`en-de`), one
+    request each: the second came back HTTP 429 and ended yt-dlp before the
+    info file, the note's title (2026-10-17). yt-dlp matches without case, so
+    no pattern can keep a region and drop a source language."""
+    langs = wf._YT_SUB_LANGS.split(",")
+    assert not any(ch in wf._YT_SUB_LANGS for ch in "*+[")
+    assert {"en", "it", "en-orig", "it-orig"} <= set(langs) and "en-de" not in langs
+
+
 def test_youtube_lookalike_domain_takes_the_http_path(monkeypatch):
     _serve(monkeypatch, _Resp(text="<p>not youtube</p>"))
     out = wf.web_fetch("https://youtube.com.evil.test/watch?v=abc")

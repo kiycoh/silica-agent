@@ -22,7 +22,31 @@ from silica.sources.convert import AUDIO_EXTS
 # transcriber, and its demuxers are held to convert._FFMPEG_FORMATS. Not
 # video, which the notice does not name and which is mostly bytes the
 # transcriber never hears under the edge's 100 MB.
-HOSTED_EXTENSIONS = (".md", ".pdf", ".txt", *AUDIO_EXTS)
+# ADR-0120 (2026-10-17) adds what NotebookLM takes and the base install
+# reads with nothing installed on the host: documents read in process under
+# the 16 MB part ceiling (DOCX in pdf_extract's child), images read by the
+# chat model, and a CSV's profile.
+DOCUMENT_EXTENSIONS = (".docx", ".pptx", ".epub", ".fb2", ".odt", ".odp", ".ods", ".rtf")
+# The formats the chat model is sent (image_readings._MIME without .bmp,
+# which no OpenRouter provider lists).
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+HOSTED_EXTENSIONS = (".md", ".pdf", ".txt", *DOCUMENT_EXTENSIONS, *IMAGE_EXTENSIONS, ".csv",
+                     *AUDIO_EXTS)
+# On the server a file goes once its note is written (ADR-0098 point 7): the
+# note is what the product reads. Not an image, which the note embeds, nor a
+# CSV, whose rows stay for silica_query_table, nor audio, as before.
+READ_THEN_REMOVED = (".pdf", *DOCUMENT_EXTENSIONS)
+# What the first bytes of an upload must be for its extension: a renamed
+# file reached a reader as whatever it really was (ADR-0098 H4).
+_SIGNATURES = {
+    **dict.fromkeys((".docx", ".pptx", ".epub", ".odt", ".odp", ".ods"), (b"PK\x03\x04",)),
+    ".rtf": (b"{\\rtf",),
+    ".fb2": (b"<?xml", b"\xef\xbb\xbf<?xml", b"<FictionBook"),
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",),
+    ".gif": (b"GIF87a", b"GIF89a"),
+    ".webp": (b"RIFF",),
+}
 # 255 bytes is the name limit on ext4 and XFS; 200 leaves room for " (99)".
 MAX_NAME_BYTES = 200
 MAX_DEPTH = 16
@@ -46,15 +70,27 @@ class Refused(ValueError):
 
 
 def importable_extensions(hosted: bool) -> list[str]:
-    """What the vault's + accepts: the hosted list, or every nucleate lane
-    minus images, which go with a chat message and are not filed (ADR-0077
-    point 3)."""
+    """What the vault's + accepts: the hosted list, or every nucleate lane.
+    Images too since ADR-0120: picked in the vault's + they are a source the
+    student files, read into a note; dropped in the chat they still go with
+    the message and are not filed (ADR-0077 point 3)."""
     if hosted:
         return list(HOSTED_EXTENSIONS)
-    from silica.sources.convert import IMG_EXTS
     from silica.sources.registry import supported_nucleate_extensions
 
-    return [e for e in supported_nucleate_extensions() if e not in IMG_EXTS]
+    return supported_nucleate_extensions()
+
+
+def check_signature(path: Path, suffix: str) -> None:
+    """Refused when `path`'s first bytes are not what `suffix` says; a format
+    with no fixed opening (markdown, CSV, audio, which admission probes) passes."""
+    want = _SIGNATURES.get(suffix)
+    if not want:
+        return
+    with open(path, "rb") as fh:
+        head = fh.read(16)
+    if not head.startswith(want) or (suffix == ".webp" and head[8:12] != b"WEBP"):
+        raise Refused(f"it is not a {suffix[1:].upper()} file (its first bytes are something else)")
 
 
 def clean_rel(raw: str) -> PurePosixPath:

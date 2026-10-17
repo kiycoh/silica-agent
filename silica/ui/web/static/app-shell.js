@@ -132,7 +132,7 @@ async function loadVaultInfo() {
       // which is also why `#tree:empty` never matched.
       const p = document.createElement("p");
       p.className = "vault-empty";
-      p.innerHTML = 'Nothing here yet: <button type="button" class="linklike">add files or a folder</button>, or drop them anywhere.';
+      p.innerHTML = 'Nothing here yet: <button type="button" class="linklike">add files, a folder or a link</button>, or drop them anywhere.';
       p.querySelector("button").addEventListener("click", (e) => { e.stopPropagation(); $("#vault-add").click(); });
       $("#tree").append(p);
     }

@@ -2037,6 +2037,9 @@ _INGEST_EXTS = frozenset({
     ".pdf", ".md", ".markdown", ".txt", ".docx", ".pptx", ".xlsx", ".odt", ".ods",
     ".epub", ".rtf", ".html", ".htm", ".csv", ".json", ".ipynb", ".py",
     ".png", ".jpg", ".jpeg", ".mp3", ".m4a", ".wav",
+    # ADR-0120's additions to the hosted list, so its uploads count by type
+    ".fb2", ".odp", ".webp", ".gif", ".aac", ".flac", ".ogg", ".opus", ".wma",
+    ".3gp", ".3g2", ".aiff", ".aif", ".aifc", ".amr", ".au", ".snd",
 })
 
 
@@ -2207,6 +2210,66 @@ async def vault_import(files: list[UploadFile] = File(...), paths: list[str] = F
     return {"files": results}
 
 
+# Measured from the pilot host 2026-10-17: yt-dlp gets "Sign in to confirm
+# you're not a bot" for a public video, as YouTube answers datacenter
+# addresses. With no account cookies on the server it is refused before a
+# request goes out; with them, it is this same sentence when YouTube asks
+# again (the account gone, the cookies expired), with the way that works.
+YOUTUBE_ON_SERVER = ("YouTube does not let the server read videos (it asks it to sign in): "
+                     "download the video's audio and add that file, and it is transcribed")
+
+
+@app.post("/vault/fetch", dependencies=_SAME_ORIGIN)
+async def vault_fetch(payload: dict):
+    """The vault's + "a link…" (ADR-0120): one web page, or locally a
+    YouTube video's captions, into the Inbox as a note, with no agent turn:
+    `/fetch` from the GUI. One row in `/vault/import`'s shape, so the page
+    shows it as it shows a file.
+
+    The address is the signed-in student's own, typed here, which is the case
+    `web_fetch._validated`'s ponytail leaves open on DNS rebinding; on the
+    server the unit's IPAddressDeny holds the private ranges and link-local
+    under it."""
+    from silica.config import hosted
+    from silica.sources.web_fetch import _YT_DOMAINS, YoutubeBlocked, host_matches, youtube_cookies
+    from silica.sources.web_research import fetch_to_inbox
+
+    url = str(payload.get("url") or "").strip()
+    workspace = str(payload.get("workspace") or "")
+    if not url or len(url) > 2048 or any(c.isspace() for c in url):
+        raise HTTPException(400, "a link is one web address, at most 2,048 characters")
+    row: dict = {"name": url}
+    if (hosted() and youtube_cookies() is None
+            and host_matches(url if "://" in url else f"https://{url}", *_YT_DOMAINS)):
+        return {"files": [{**row, "status": "refused", "reason": YOUTUBE_ON_SERVER}]}
+    if not _begin_turn():
+        raise HTTPException(409, "a turn is running: add the link when it ends")
+    try:
+        note = await asyncio.to_thread(fetch_to_inbox, url)
+        row.update(status="note", notes=[note], path=note)
+    except YoutubeBlocked:
+        # web_fetch logged the renewal line; the student gets the way around it.
+        row.update(status="refused", reason=YOUTUBE_ON_SERVER if hosted() else
+                   "YouTube asked to sign in: set SILICA_YOUTUBE_COOKIES to an account's cookies "
+                   "file, or download the audio and add that")
+    except Exception as exc:
+        # Not only ValueError: httpx raises its own on a refused connection or
+        # a timeout, and either is this link refused, not a 500. The reason
+        # is detail, as an import's converter text is, which explain() leaves
+        # empty on the server (ADR-0085 point 5); the log keeps it there.
+        logger.warning("vault fetch failed: %s: %s", type(exc).__name__, exc)
+        row.update(status="refused", detail=_failure(exc)["detail"],
+                   reason="that page could not be read: it may need a login, refuse automated "
+                          "readers, or not be a web page")
+    finally:
+        _end_turn()
+    if row["status"] == "note":
+        _embed_imported({str(Path(row["path"]).parent)})
+        if workspace:
+            await asyncio.to_thread(_list_imports_in, workspace, [row])
+    return {"files": [row]}
+
+
 def _list_imports_in(ref: str, results: list[dict]) -> None:
     from silica.kernel import workspaces
 
@@ -2358,6 +2421,7 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
                 await _write_stream(chunks(), dest, cap, f"it is over the {cap // (1024 * 1024)} MB limit")
                 if suffix == ".pdf":
                     pdf_extract.require_header(dest)
+                vi.check_signature(dest, suffix)
             checked = True
             row["path"] = dest_rel
             top = rel.parts[0] if len(rel.parts) > 1 else ""
@@ -2401,7 +2465,7 @@ async def _import_files(files: list[UploadFile], paths: list[str]) -> tuple[list
                 # nothing refused stays in a capped directory. Locally only a
                 # file that is not what its extension says goes: a real
                 # document a lane could not read stays for mineru and /report.
-                if (on_server and (refused or dest.suffix.lower() == ".pdf")) or (refused and not checked):
+                if (on_server and (refused or dest.suffix.lower() in vi.READ_THEN_REMOVED)) or (refused and not checked):
                     dest.unlink()
     return results, folders
 
