@@ -1,5 +1,5 @@
 """Hand-written test documents: PDF (text pages, outline, metadata, image pages,
-unmapped fonts), DOCX, EPUB, FB2.
+unmapped fonts), DOCX, EPUB, FB2, PPTX.
 
 The suite used to build its fixtures with pymupdf, which left an AGPL package in
 the dev environment after the runtime dropped it (2026-08-31). A text-only PDF
@@ -338,3 +338,104 @@ def fb2_bytes(sections: list[tuple[str, list[str]]], title: str | None = None) -
     return ('<?xml version="1.0" encoding="UTF-8"?>'
             '<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">'
             f"<description>{ti}</description><body>{body}</body></FictionBook>").encode("utf-8")
+
+
+# --- PPTX ---------------------------------------------------------------------
+
+_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
+_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_PKG = "http://schemas.openxmlformats.org/package/2006/relationships"
+# 1x1 PNG, a valid file for a reader that sniffs it
+PNG_1X1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000001000000010806000000"
+    "1f15c4890000000d49444154789c63000100000500010d0a2db40000000049454e44ae426082")
+
+
+def pptx_bytes(slides: list[dict], swap_order: bool = False) -> bytes:
+    """A minimal PresentationML package, slide size 10 x 7.5 in (EMU).
+
+    Each slide dict may carry `title`, `bullets` (list of (level, text)),
+    `text` (a free text box's paragraphs), `table` (rows of cells), `notes`,
+    `picture` (fraction of the slide's area, 0..1), `logo` (a picture whose
+    media file every slide with the key shares), `big` (a one-line text box at
+    36 pt, the other text boxes then at 18) and `footer` (a sldNum
+    placeholder's text, which the reader drops). `swap_order` lists the slides
+    in presentation.xml in reverse, to pin that order comes from there.
+    """
+    import io
+    import zipfile
+    from xml.sax.saxutils import escape
+
+    cx, cy = 9144000, 6858000
+
+    def para(text: str, lvl: int = 0, sz: int = 0) -> str:
+        ppr = f'<a:pPr lvl="{lvl}"/>' if lvl else ""
+        rpr = f'<a:rPr sz="{sz}"/>' if sz else ""
+        return f"<a:p>{ppr}<a:r>{rpr}<a:t>{escape(text)}</a:t></a:r></a:p>"
+
+    def sp(ph: str | None, paras: str, idx: int = 1) -> str:
+        nvpr = (f'<p:nvPr><p:ph type="{ph}"/></p:nvPr>' if ph not in (None, "")
+                else '<p:nvPr><p:ph idx="1"/></p:nvPr>' if ph == "" else "<p:nvPr/>")
+        return (f'<p:sp><p:nvSpPr><p:cNvPr id="{idx}" name="s"/><p:cNvSpPr/>{nvpr}</p:nvSpPr>'
+                f"<p:spPr/><p:txBody><a:bodyPr/>{paras}</p:txBody></p:sp>")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        ids = []
+        for n, s in enumerate(slides, 1):
+            shapes, rels = [], []
+            if "title" in s:
+                shapes.append(sp("title", para(s["title"]), 2))
+            if "bullets" in s:
+                shapes.append(sp("", "".join(para(t, lvl) for lvl, t in s["bullets"]), 3))
+            if "big" in s:  # a title drawn as a free text box, set larger than the rest
+                shapes.append(sp(None, para(s["big"], sz=3600), 8))
+            if "text" in s:
+                shapes.append(sp(None, "".join(para(t, sz=1800 if "big" in s else 0) for t in s["text"]), 4))
+            if "footer" in s:
+                shapes.append(sp("sldNum", para(s["footer"]), 5))
+            if "table" in s:
+                rows = "".join("<a:tr>" + "".join(f"<a:tc><a:txBody>{para(c)}</a:txBody></a:tc>" for c in row)
+                               + "</a:tr>" for row in s["table"])
+                shapes.append('<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="6" name="t"/></p:nvGraphicFramePr>'
+                              f"<a:graphic><a:graphicData><a:tbl>{rows}</a:tbl></a:graphicData></a:graphic>"
+                              "</p:graphicFrame>")
+            if "logo" in s:  # one media file every such slide points at
+                shapes.append('<p:pic><p:nvPicPr><p:cNvPr id="9" name="l"/></p:nvPicPr>'
+                              '<p:blipFill><a:blip r:embed="rIdLogo"/></p:blipFill><p:spPr><a:xfrm>'
+                              f'<a:off x="0" y="0"/><a:ext cx="{cx // 2}" cy="{cy // 2}"/></a:xfrm></p:spPr></p:pic>')
+                rels.append(f'<Relationship Id="rIdLogo" Type="{_R}/image" Target="../media/logo.png"/>')
+                if "ppt/media/logo.png" not in z.namelist():
+                    z.writestr("ppt/media/logo.png", PNG_1X1)
+            if "picture" in s:
+                side = s["picture"] ** 0.5
+                shapes.append('<p:pic><p:nvPicPr><p:cNvPr id="7" name="p"/></p:nvPicPr>'
+                              f'<p:blipFill><a:blip r:embed="rIdImg"/></p:blipFill><p:spPr><a:xfrm>'
+                              f'<a:off x="0" y="0"/><a:ext cx="{int(cx * side)}" cy="{int(cy * side)}"/>'
+                              "</a:xfrm></p:spPr></p:pic>")
+                rels.append(f'<Relationship Id="rIdImg" Type="{_R}/image" Target="../media/image{n}.png"/>')
+                z.writestr(f"ppt/media/image{n}.png", PNG_1X1)
+            if "notes" in s:
+                rels.append(f'<Relationship Id="rIdN" Type="{_R}/notesSlide" '
+                            f'Target="../notesSlides/notesSlide{n}.xml"/>')
+                z.writestr(f"ppt/notesSlides/notesSlide{n}.xml",
+                           f'<p:notes xmlns:p="{_P}" xmlns:a="{_A}"><p:cSld><p:spTree>'
+                           + sp("sldImg", "", 2) + sp("body", para(s["notes"]), 3)
+                           + "</p:spTree></p:cSld></p:notes>")
+            z.writestr(f"ppt/slides/slide{n}.xml",
+                       f'<p:sld xmlns:p="{_P}" xmlns:a="{_A}" xmlns:r="{_R}"><p:cSld><p:spTree>'
+                       + "".join(shapes) + "</p:spTree></p:cSld></p:sld>")
+            z.writestr(f"ppt/slides/_rels/slide{n}.xml.rels",
+                       f'<Relationships xmlns="{_PKG}">' + "".join(rels) + "</Relationships>")
+            ids.append(n)
+        order = list(reversed(ids)) if swap_order else ids
+        z.writestr("ppt/presentation.xml",
+                   f'<p:presentation xmlns:p="{_P}" xmlns:r="{_R}"><p:sldIdLst>'
+                   + "".join(f'<p:sldId id="{255 + n}" r:id="rId{n}"/>' for n in order)
+                   + f'</p:sldIdLst><p:sldSz cx="{cx}" cy="{cy}"/></p:presentation>')
+        z.writestr("ppt/_rels/presentation.xml.rels",
+                   f'<Relationships xmlns="{_PKG}">'
+                   + "".join(f'<Relationship Id="rId{n}" Type="{_R}/slide" Target="slides/slide{n}.xml"/>'
+                             for n in ids) + "</Relationships>")
+    return buf.getvalue()

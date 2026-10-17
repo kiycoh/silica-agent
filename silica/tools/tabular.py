@@ -61,7 +61,17 @@ def _connect(data_dir: Path):
     """
     import duckdb
 
+    from silica.config import hosted
+
     con = duckdb.connect()
+    if hosted():
+        # The tenant's cgroup is 1 GB (silica@.service MemoryMax=1G) and
+        # DuckDB's default is 80% of the machine's memory. A 100 MB CSV's
+        # profile peaked at 283 MB for the whole process (2026-10-17), so
+        # 256 MB for DuckDB's own buffers is past it, and a spill or an
+        # out-of-memory error is the query's, not the tenant's (ADR-0120).
+        con.execute("SET memory_limit='256MB'")
+        con.execute("SET threads=2")
     con.execute("SET allowed_directories=[?]", [str(data_dir)])
     con.execute("SET enable_external_access=false")
     con.execute("SET lock_configuration=true")

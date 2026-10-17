@@ -476,7 +476,9 @@ Extras install alone or combined, for example `"silica-agent[gui,mcp]"`:
 
 PDF, DOCX, EPUB and the legacy office formats need no extra: the base install converts them. The tabular lane (`silica_tables`, `silica_query_table`, and the /convert profile) needs no extra either: DuckDB is a base dependency, one 20 MB wheel.
 
-Scanned documents need OCR, and no extra provides it. The default PDF reader takes the text layer only, so a scan yields nothing. OCR, figure extraction and the `.pptx`/`.xlsx`/image lanes all run through MinerU, which you install yourself and Silica calls as a command, the same way it calls ffmpeg and LibreOffice:
+PowerPoint decks need nothing either: Silica reads a `.pptx` from its own XML, slide titles as headings, bullets, tables, speaker notes and pictures, and a slide that is only a picture is read by the chat model. Without OCR installed an image is read the same way, by the chat model, when that model takes images.
+
+Scanned documents need OCR, and no extra provides it. The default PDF reader takes the text layer only, so a scan yields nothing. OCR, figure extraction and the `.xlsx` lane run through MinerU, which you install yourself and Silica calls as a command, the same way it calls ffmpeg and LibreOffice:
 
 ```bash
 pip install 'mineru[pipeline]'    # then set SILICA_PDF_PROVIDER=mineru
