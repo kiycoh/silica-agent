@@ -1,9 +1,10 @@
 // --- learn tab ---------------------------------------------------------------
 // The Learn tab (learn-suite §5, refined 2026-09-07 per docs/design/learn/
-// ui-ux-refinement.md, rethought by ADR-0081): it opens on Next, one queue in
-// four groups where every row says why it is up; Plans holds the list and the
-// composer; Map is what you know, a mark per note. A stable list on the left
-// and one detail on the right; one session, its receipt. Everything on screen
+// ui-ux-refinement.md, rethought by ADR-0081, then by ADR-0119): it opens on
+// one column, "What would you like to learn?", the next session as the list
+// of notes it will ask with a reason each, what you missed and your plans. A
+// test or a plan is made in one dialog over that column; a plan, a note and
+// the map ("What you know") are views of their own; one session, its receipt. Everything on screen
 // is a reading of the ledger through /learn; the answer key never reaches
 // this file before the reader has answered (G5), and a ledger line is
 // written only on `rate`.
@@ -23,7 +24,7 @@ let lrData = null;            // the /learn payload
 let lrRoute = { view: "home", plan: "", path: "", id: "" };
 let lrPlan = null;            // the selected plan's /learn/plan report
 let lrNote = null;            // the selected note's /learn/note detail (a row of Next, a cell of the Map)
-let lrSeg = "next";           // next | plans | map: the left pane (ADR-0081)
+let lrSeg = "next";           // "map" while the map shows: the gate counts its openings once
 let lrMap = null;             // the /learn/map payload
 let lrMapLoading = false;
 let lrMapPlan = "";           // the plan filtering the map, "" for every folder
@@ -79,7 +80,9 @@ const lrCap = (s) => String(s || "").charAt(0).toUpperCase() + String(s || "").s
 const lrA = (w) => `${/^[aeiou]/i.test(w || "") ? "an" : "a"} ${w}`;
 const lrAnd = (l) => (l.length > 1 ? l.slice(0, -1).join(", ") + " and " + l[l.length - 1] : l[0] || "");
 const lrObjList = (objs) => { const l = (objs || []).map((o) => LR_OBJ[o] ? LR_OBJ[o].toLowerCase() : o); return l.length > 1 ? l.slice(0, -1).join(", ") + ", and " + l[l.length - 1] : l[0] || ""; };
-const lrOriginRoute = (o) => (o?.kind === "plan" ? { view: "plan", plan: o.path } : o?.kind === "note" ? { view: "note", path: o.path } : { view: "home" });
+// a session returns to its plan, else to the home column, where a note is a
+// row of the list (ADR-0119); before, a note's session returned to its pane
+const lrOriginRoute = (o) => (o?.kind === "plan" ? { view: "plan", plan: o.path } : { view: "home" });
 
 async function lrPost(url, body) {
   const r = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
@@ -104,7 +107,7 @@ function lrGone(e) {
 // with help, not counted), full (met without help); warn is the one amber
 // mark, for caution. `say` labels it for a screen reader; "" when the words
 // beside it already say it.
-const LR_MARK_SAY = { open: "still to verify", half: "met with help, not counted", full: "met without help", warn: "caution" };
+const LR_MARK_SAY = { open: "still to verify", half: "met with help, not counted", full: "met without help", warn: "caution", never: "not tested yet" };
 function lrMark(kind, say) {
   const m = lrEl("span", "lr-mk " + kind);
   const label = say === undefined ? LR_MARK_SAY[kind] : say;
@@ -256,19 +259,8 @@ async function loadLearn(force = false) {
   // none on the server (it restarted): a session kept in this page offered
   // Resume and then failed every answer with "no live session" (2026-10-06)
   else if (!lrPlansError && !lrData.live && lrSession) lrSession = null;
-  if (lrRoute.view === "home" && !lrPlansError) {
-    // entering: the last selected plan, else the only plan, else the most
-    // recently used one, else the first row of Next; never a session
-    // started for you (refinement §4)
-    const active = (lrData.plans || []).filter((p) => p.status !== "completed");
-    let last = null;
-    try { last = localStorage.getItem(LR_LAST_PLAN); } catch { /* private window */ }
-    const pick = active.find((p) => p.path === last) || (active.length === 1 ? active[0] : [...active].sort((a, b) => String(b.last || "").localeCompare(String(a.last || "")))[0]);
-    const n = lrData.next || {};
-    const first = (n.missed || [])[0] || (n.due || [])[0] || (n.never || [])[0];
-    if (pick) { lrRoute = { view: "plan", plan: pick.path, path: "", id: "" }; lrSeg = "next"; }
-    else if (first) lrRoute = { view: "note", plan: "", path: first.path, id: "" };
-  }
+  // entering stays on the home: before ADR-0119 it jumped to the last plan
+  // or the first row, because the home was a list waiting for a selection
   lrRender();
 }
 
@@ -284,30 +276,22 @@ async function lrAttach(id) {
     for (const [i, r] of Object.entries(s.results || {})) results[Number(i)] = r;
     const skipped = {};
     for (const i of s.skipped || []) skipped[i] = true;
-    lrSession = { ...s, cur: cur < 0 ? s.items.length - 1 : cur, answers: {}, verdicts, results, skipped, hintsUsed: {}, shown: {}, conf: null, told: false, state: "input" };
+    const teachT = {};
+    for (const [i, t] of Object.entries(s.teach || {})) teachT[Number(i)] = { turn: t.turn, transcript: t.transcript || [] };
+    lrSession = { ...s, cur: cur < 0 ? s.items.length - 1 : cur, answers: {}, verdicts, results, skipped, hintsUsed: {}, shown: {}, conf: null, told: false, state: "input", teachT };
     const it = lrSession.items[lrSession.cur];
     if (it && verdicts[it.i]) { lrSession.state = "reveal"; lrSession.conf = verdicts[it.i].conf ?? null; lrSession.told = !!verdicts[it.i].told; }
   } catch { /* the session is gone: the home view reads as usual */ }
 }
 
 // --- the bar -----------------------------------------------------------------
-// The bar carries the place: on the home views the three segments and the
-// stamp of the segment's base, on a session or a receipt the crumb; a
-// return, End session.
-function lrBar({ crumb = [], stamp = "", stampTitle = "", back = null, end = false, segs = false } = {}) {
+// The bar carries the place: on the home the view's purpose, said where a
+// first look lands (t4, messages 4 and 6; ADR-0119); elsewhere the crumb, a
+// return, End session. ADR-0081's three segments are gone with its panes.
+function lrBar({ crumb = [], stamp = "", stampTitle = "", back = null, end = false, say = "" } = {}) {
   const c = $("#learn-crumb");
   c.innerHTML = "";
-  if (segs) {
-    const nav = lrEl("nav", "lr-seg lr-segs");
-    nav.setAttribute("aria-label", "Learn");
-    for (const [k, label, to] of [["next", "Next", { view: "home" }], ["plans", "Plans", { view: "plans" }], ["map", "Map", { view: "map" }]]) {
-      // a selected plan stays selected between Next and Plans: both list it
-      const b = lrBtn(lrSeg === k ? "on" : null, label, () => (lrRoute.view === "plan" && k !== "map" ? (lrSeg = k, lrRender()) : lrGo(to)));
-      if (lrSeg === k) b.setAttribute("aria-current", "page");
-      nav.appendChild(b);
-    }
-    c.appendChild(nav);
-  }
+  if (say) c.appendChild(lrEl("span", "lr-purpose", say));
   crumb.forEach((part, i) => { if (i) c.appendChild(lrEl("span", "sep", "›")); c.appendChild(lrEl("b", null, part)); });
   if (stamp) { const s = lrEl("span", "vault num", stamp); if (stampTitle) s.title = stampTitle; c.appendChild(s); }
   const b = $("#learn-back");
@@ -320,16 +304,11 @@ function lrBar({ crumb = [], stamp = "", stampTitle = "", back = null, end = fal
 }
 $("#learn-end").addEventListener("click", () => lrEndAsk ? (lrEndAsk = false, lrRender()) : lrEnd());
 
-// Each segment's stamp names its own base (ADR-0081 §4): Next is the vault's,
-// with the amnesty sentence as its title; Plans counts plans; Map counts notes.
-function lrVaultStamp() {
+// The map's stamp names its base (ADR-0081 §4): notes practised of the vault.
+function lrMapStamp() {
   const d = lrData || {};
-  if (!d.total) return ["", ""];
-  if (lrSeg === "plans") { const n = (d.plans || []).filter((p) => p.status !== "completed").length; return [n ? lrPlural(n, "plan") : "", ""]; }
-  if (lrSeg === "map") return [d.measured ? `${nfmt(d.measured)} of ${nfmt(d.total)} notes practised` : `${nfmt(d.total)} notes, none practised yet`, ""];
-  const st = d.stamp;
-  if (!st || !st.waiting) return [d.measured ? `${nfmt(d.measured)} of ${nfmt(d.total)} notes practised` : "", ""];
-  return [`${nfmt(st.waiting)} waiting` + (st.more ? ` · ${st.more} more by ${lrDate(st.by)}` : ""), st.title || ""];
+  if (!d.total) return "";
+  return d.measured ? `${nfmt(d.measured)} of ${nfmt(d.total)} notes practised` : `${nfmt(d.total)} notes, none practised yet`;
 }
 
 function lrRender() {
@@ -349,138 +328,331 @@ function lrRender() {
   if (keep) body.querySelector(`[data-lr-key="${CSS.escape(keep)}"]`)?.focus({ preventScroll: true });
 }
 
-// --- home: a list (or the map), then one detail -----------------------------------
+// --- home: one column (ADR-0119) ----------------------------------------------
+// What would you like to learn, then the next session as its list, what you
+// missed, your plans. A plan, a note and the map are views of their own, one
+// pane each with Learn as their way back; the dialog sits over the column.
+const LR_PURPOSE = "Test yourself on your notes, then see what you missed.";
+const LR_LIST_SHOWN = 5;
+const lrAsk = { q: "", opts: [], idx: -1, pick: null };
+// notes taken out of the next session before Start (ADR-0119, Gate)
+const lrDropped = new Set();
+
 function lrRenderHome(body) {
   const d = lrData;
   if (!d) return;
-  const plans = d.plans || [];
-  const active = plans.filter((p) => p.status !== "completed");
-  const sel = lrRoute.view === "plan" || lrRoute.view === "edit" ? plans.find((p) => p.path === lrRoute.plan) : null;
-  let back = null;
-  if (lrRoute.view === "new" || lrRoute.view === "edit") {
-    let last = null;
-    try { last = localStorage.getItem(LR_LAST_PLAN); } catch { /* private window */ }
-    const prev = lrRoute.view === "edit" ? sel : active.find((p) => p.path === last);
-    back = { label: prev ? `Back to ${prev.name}` : "Back to your plans", run: () => lrGo(prev ? { view: "plan", plan: prev.path } : { view: "plans" }) };
-  }
-  const [stamp, stampTitle] = lrVaultStamp();
-  lrBar({ stamp, stampTitle, back, segs: true });
-  const mv = lrEl("section", "mv lr-mv" + (lrSeg === "map" ? " lr-mapv" : ""));
-  const left = lrEl("div", "mv-l");
-  const right = lrEl("div", "mv-r");
-  if (lrSeg === "map") lrRenderMapLeft(left);
-  else if (lrSeg === "plans") lrRenderPlansLeft(left, sel);
-  else lrRenderNextLeft(left);
-  mv.append(left, right);
-  body.appendChild(mv);
-  // -- the detail
-  if (lrRoute.view === "new" || lrRoute.view === "edit") return lrRenderComposer(right);
-  if (lrRoute.view === "plan") {
-    if (!sel) { right.appendChild(lrEl("p", "lr-help", "That plan is not in the vault any more.")); return; }
-    if (lrPlan && lrPlan.path === sel.path) lrRenderPlanDetail(right, lrPlan);
-    else { right.appendChild(lrEl("p", "lr-help", "Reading the plan.")); lrFetchPlan(sel.path); }
+  const v = lrRoute.view;
+  if (["home", "new", "edit"].includes(v)) {
+    lrBar({ say: LR_PURPOSE });
+    const col = lrHomeColumn(d);
+    body.appendChild(col);
+    if (v === "new" || v === "edit") { col.inert = true; body.appendChild(lrDialog()); }
     return;
   }
-  const notePath = lrRoute.view === "note" ? lrRoute.path : lrRoute.view === "map" ? lrRoute.path : "";
-  if (notePath) {
-    if (lrNote && lrNote.path === notePath && lrNote.gone) right.appendChild(lrEl("p", "lr-help", "That note is not in the vault any more."));
-    else if (lrNote && lrNote.path === notePath) lrRenderNoteDetail(right, lrNote);
-    else { right.appendChild(lrEl("p", "lr-help", "Reading the note.")); lrFetchNote(notePath); }
+  const back = { label: "Learn", run: () => lrGo({ view: "home" }) };
+  if (v === "map") {
+    lrBar({ crumb: ["What you know"], stamp: lrMapStamp(), back });
+    const mv = lrEl("section", "mv lr-mv lr-mapv");
+    const left = lrEl("div", "mv-l");
+    const right = lrEl("div", "mv-r");
+    lrRenderMapLeft(left);
+    mv.append(left, right);
+    body.appendChild(mv);
+    if (lrRoute.path) { lrNoteInto(right, lrRoute.path); return; }
+    const inv = lrEl("div", "lr-invite");
+    inv.append(lrEl("h2", null, "Pick a note to see its history"), lrEl("p", null, "Each mark is a note: dashed not tested yet, open still to verify, half met with help, full met without help."));
+    right.appendChild(inv);
+    const discs = lrEl("div", "lr-discs end");
+    lrReadings(discs, d);
+    right.appendChild(discs);
     return;
   }
-  if (lrSession) right.appendChild(lrResumeBox());
-  const inv = lrEl("div", "lr-invite");
-  if (lrSeg === "map") {
-    inv.append(lrEl("h2", null, "Pick a note to see its history"), lrEl("p", null, "Each mark is a note: dashed never asked, open still to verify, half met with help, full met without help."));
-  } else if (lrPlansError) {
-    inv.append(lrEl("h2", null, "Pick a row to see why it is up"), lrEl("p", null, "Your plans come back here once Retry reads them."));
-  } else if (!plans.length) {
-    // the first run (ADR-0061 §10): two sentences and one primary
-    inv.append(lrEl("h2", null, "Start with a plan, or with one note"),
-      lrEl("p", null, "A plan says what you want to study and what you want to be able to do. It lands as a note in the vault, with one line per session and never a score."));
-    const row = lrEl("div", "row");
-    row.append(lrBtn(lrSession ? "ghost box" : "lr-send", "Create plan", () => lrGo({ view: "new" })), lrEl("span", "lr-help", "or practise a row on the left"));
-    inv.appendChild(row);
+  const one = lrEl("section", "lr-one");
+  body.appendChild(one);
+  if (v === "plans") {
+    lrBar({ crumb: ["All plans"], back });
+    lrRenderPlansLeft(one, null);
+    return;
+  }
+  if (v === "plan") {
+    const sel = (d.plans || []).find((p) => p.path === lrRoute.plan);
+    lrBar({ crumb: [sel ? sel.name : "Plan"], back });
+    if (!sel) { one.appendChild(lrEl("p", "lr-help", "That plan is not in the vault any more.")); return; }
+    if (lrPlan && lrPlan.path === sel.path) lrRenderPlanDetail(one, lrPlan);
+    else { one.appendChild(lrEl("p", "lr-help", "Reading the plan.")); lrFetchPlan(sel.path); }
+    return;
+  }
+  lrBar({ crumb: [lrStem(lrRoute.path)], back });
+  lrNoteInto(one, lrRoute.path);
+}
+
+function lrNoteInto(box, path) {
+  if (lrNote && lrNote.path === path && lrNote.gone) box.appendChild(lrEl("p", "lr-help", "That note is not in the vault any more."));
+  else if (lrNote && lrNote.path === path) lrRenderNoteDetail(box, lrNote);
+  else { box.appendChild(lrEl("p", "lr-help", "Reading the note.")); lrFetchNote(path); }
+}
+
+function lrHomeColumn(d) {
+  const col = lrEl("div", "lr-home");
+  if (lrSession) col.appendChild(lrResumeBox());
+  col.appendChild(lrEl("h2", "lr-ask-h", "What would you like to learn?"));
+  col.appendChild(lrAskBox());
+  if (d.recent?.length) {
+    // what a student who studies to their own plan wants tested (t4, messages 3, 7)
+    const row = lrEl("div", "lr-recent");
+    row.appendChild(lrEl("span", "lr-help", "Changed this week"));
+    for (const r of d.recent) {
+      const c = lrBtn("lr-chip", r.title, () => learnStartSession({ note: r.path, from: "recent" }));
+      c.title = `Test me on ${r.title}`;
+      c.disabled = !!lrSession;
+      row.appendChild(c);
+    }
+    col.appendChild(row);
+  }
+  col.appendChild(lrSessionList(d));
+  const n = d.next || {};
+  if (n.missed?.length) col.appendChild(lrMissedHome(n.missed));
+  if (lrPlansError) col.appendChild(lrPlansErrorBox());
+  else if (n.plans?.length) col.appendChild(lrPlansHome(n.plans));
+  const links = lrEl("div", "lr-links");
+  links.append(lrBtn("lr-link", "What you know", () => lrGo({ view: "map" })), lrBtn("lr-link", "All plans", () => lrGo({ view: "plans" })));
+  col.appendChild(links);
+  return col;
+}
+
+// "What would you like to learn?": a note, a folder or a topic from the
+// typeahead starts a test at once and writes nothing; a syllabus note opens
+// the dialog with it as the Reference; a sentence is read into the dialog.
+function lrAskBox() {
+  const row = lrEl("div", "lr-ask");
+  const wrap = lrEl("div", "lr-ta lr-askin");
+  if (lrAsk.pick) {
+    const tok = lrEl("span", "lr-tok");
+    tok.append(lrEl("i", null, lrKindWord(lrAsk.pick)), lrAsk.pick.label);
+    const x = lrBtn("lr-x", "×", () => { lrAsk.pick = null; lrRender(); setTimeout(() => $("#lr-ask")?.focus(), 0); });
+    x.setAttribute("aria-label", "clear what to learn");
+    tok.appendChild(x);
+    wrap.appendChild(tok);
   } else {
-    inv.append(lrEl("h2", null, lrSeg === "plans" ? "Pick a plan to continue it" : "Pick a row to see why it is up"),
-      lrEl("p", null, lrSeg === "plans" ? "Or create one: one sentence is enough to start." : "Every row says why; the right pane shows what you already answered on it."));
+    const inp = lrEl("input", "lr-field");
+    inp.type = "text"; inp.id = "lr-ask"; inp.value = lrAsk.q; inp.autocomplete = "off";
+    inp.placeholder = "A note, a folder, a topic, or what you are preparing for";
+    inp.setAttribute("aria-label", "What would you like to learn?");
+    inp.setAttribute("role", "combobox"); inp.setAttribute("aria-autocomplete", "list");
+    inp.setAttribute("aria-controls", "lr-ask-opts"); inp.setAttribute("aria-expanded", "false");
+    inp.dataset.lrKey = "ask";
+    const list = lrEl("ul", "lr-opts");
+    list.id = "lr-ask-opts"; list.setAttribute("role", "listbox"); list.hidden = true;
+    let t = null;
+    inp.addEventListener("input", () => { lrAsk.q = inp.value; lrAskBtn(); clearTimeout(t); t = setTimeout(() => lrAskSearch(inp, list), 120); });
+    inp.addEventListener("blur", () => setTimeout(() => { list.hidden = true; inp.setAttribute("aria-expanded", "false"); }, 150));
+    inp.addEventListener("keydown", (e) => {
+      const n = lrAsk.opts.length;
+      if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n && !list.hidden) {
+        e.preventDefault();
+        lrAsk.idx = (lrAsk.idx + (e.key === "ArrowDown" ? 1 : n + (lrAsk.idx < 0 ? 0 : -1))) % n;
+        lrAskPaint(inp, list);
+      } else if (e.key === "Enter") {
+        // a highlighted option is picked; otherwise the words are read as a
+        // sentence, so a long request is never hijacked by a near title
+        e.preventDefault();
+        const o = !list.hidden && lrAsk.idx >= 0 ? lrAsk.opts[lrAsk.idx] : null;
+        if (o) lrAskPick(o); else lrAskGo();
+      } else if (e.key === "Escape" && !list.hidden) { e.stopPropagation(); list.hidden = true; inp.setAttribute("aria-expanded", "false"); }
+    });
+    wrap.append(inp, list);
   }
-  right.appendChild(inv);
-  const discs = lrEl("div", "lr-discs end");
-  lrReadings(discs, d);
-  right.appendChild(discs);
+  const form = lrBtn("ghost box", "Form", () => { lrFormReset({ step: "fields" }); lrGo({ view: "new" }); });
+  form.title = "set a test or a plan up field by field";
+  const go = lrBtn("lr-send", "Test me", lrAskGo);
+  go.id = "lr-ask-go";
+  row.append(wrap, form, go);
+  lrAskBtn(go);
+  return row;
 }
 
-// Next (ADR-0081 §1, §2): the picker's session as the one primary, its mix
-// named; then four groups in a fixed order, every row with its reason.
-const LR_GROUPS = [["missed", "Missed lately", 4], ["due", "Falling due", 3], ["never", "Never practised", 2]];
-function lrRenderNextLeft(left) {
-  const d = lrData;
-  const n = d.next || { plans: [], missed: [], due: [], never: [] };
-  if (d.session) {
-    const box = lrEl("div", "lr-primary");
-    // one primary per view (ADR-0061): the picker's session until a row is
-    // selected, then the selected row's action in the detail is the primary
-    const quiet = lrSession || ["plan", "note"].includes(lrRoute.view);
-    const go = lrBtn(quiet ? "ghost box" : "lr-send", lrSession ? "A session is open" : `Practise · ${lrPlural(d.session.questions, "question")} · ~${d.session.minutes} min`,
-      () => (lrSession ? lrGo({ view: "session", id: lrSession.id }) : learnStartSession({ from: "primary" })));
-    box.appendChild(go);
-    if (d.mix) box.appendChild(lrEl("div", "lr-lh-sub", d.mix));
-    left.appendChild(box);
-  }
-  const lh = lrEl("div", "lr-lh", "Your plans");
-  lh.appendChild(lrEl("span", "cnt num", lrPlansError ? "–" : n.plans.length ? String(n.plans.length) : ""));
-  left.appendChild(lh);
-  if (lrPlansError) {
-    // an error is not an empty vault (refinement §4): where the plans would be
-    const eb = lrEl("div", "lr-errbox");
-    eb.setAttribute("role", "alert");
-    const t = lrEl("b");
-    t.append(lrMark("warn", ""), "Couldn't read your plans");
-    eb.append(t, lrEl("span", null, "The vault answered with an error. Your plans are untouched, and the rows below still work."),
-      lrBtn("ghost box", "Retry", () => loadLearn(true)));
-    left.appendChild(eb);
-  } else if (!n.plans.length) {
-    left.appendChild(lrBtn("lr-create", "+ Create plan", () => lrGo({ view: "new" })));
-  }
-  for (const p of n.plans) left.appendChild(lrNextRow({ ...p, title: p.name }, "plan"));
-  for (const [g, title, shownN] of LR_GROUPS) {
-    const rows = n[g] || [];
-    if (!rows.length) continue;
-    const h = lrEl("div", "lr-lh lr-lh2", title);
-    h.appendChild(lrEl("span", "cnt num", String(rows.length)));
-    left.appendChild(h);
-    const open = lrMore.has(g) || rows.some((r, i) => i >= shownN && lrRoute.view === "note" && lrRoute.path === r.path);
-    for (const r of open ? rows : rows.slice(0, shownN)) left.appendChild(lrNextRow(r, g));
-    if (rows.length > shownN) left.appendChild(lrBtn("lr-more", open ? "Show fewer" : `Show ${rows.length - shownN} more`, () => { lrMore.has(g) ? lrMore.delete(g) : lrMore.add(g); lrRender(); }));
-  }
-  if (!n.plans.length && !LR_GROUPS.some(([g]) => (n[g] || []).length)) {
-    left.appendChild(lrEl("p", "lr-lh-sub", d.measured || d.total
-      ? "Nothing to suggest: notes need a footnoted claim or a Relations bullet to be asked about."
-      : "Nothing measured yet. Pick a note in the vault and practise it; the list grows from there."));
-  }
+function lrAskBtn(btn = $("#lr-ask-go")) {
+  if (btn) btn.disabled = !!lrSession || !(lrAsk.pick || lrAsk.q.trim());
 }
 
-// A row of Next is a title and its reason (ADR-0081 §1); the action shows on
-// hover, on focus and on the selected row. A plan row starts the plan.
-const LR_ACT = { plan: "Continue", missed: "Ask again", due: "Practice", never: "Practice" };
-function lrNextRow(r, g) {
-  const isPlan = g === "plan";
-  const on = isPlan ? (lrRoute.view === "plan" && lrRoute.plan === r.path) : (lrRoute.view === "note" && lrRoute.path === r.path);
-  const row = lrEl("div", "lr-sg" + (on ? " on" : ""));
-  const key = (isPlan ? "plan:" : "note:") + r.path;
-  const pick = lrBtn("pick", undefined, () => lrGo(isPlan ? { view: "plan", plan: r.path } : { view: "note", path: r.path }));
-  pick.dataset.lrRow = pick.dataset.lrKey = key;
-  pick.setAttribute("aria-pressed", on ? "true" : "false");
-  const inLive = lrSession && (isPlan ? lrSession.plan === r.path : lrSession.note === r.path);
-  pick.append(lrEl("span", "t", r.title), lrEl("span", "r", inLive ? "in the open session" : r.why));
-  const verb = inLive ? "Resume" : LR_ACT[g];
-  const act = lrBtn("act", verb, () => inLive ? lrGo({ view: "session", id: lrSession.id })
-    : isPlan ? learnStartSession({ plan: r.path, from: "row" }) : learnStartSession(r.pair ? { scope: r.pair, n: 1, from: "row" } : { note: r.path, from: "row" }));
-  act.setAttribute("aria-label", `${verb} ${r.title}`);
-  act.dataset.lrKey = "act:" + key;
+async function lrAskSearch(inp, list) {
+  const q = inp.value.trim();
+  let opts = [];
+  // past a title's length the words are a sentence, read on Enter
+  if (q && q.length <= 60) {
+    try { opts = await (await fetch("/learn/scopes?q=" + encodeURIComponent(q))).json(); } catch { opts = []; }
+  }
+  if (inp.value.trim() !== q) return;    // a later keystroke owns the list
+  lrAsk.opts = Array.isArray(opts) ? opts.slice(0, 8) : [];
+  lrAsk.idx = -1;
+  lrAskPaint(inp, list);
+}
+
+function lrAskPaint(inp, list) {
+  list.innerHTML = "";
+  lrAsk.opts.forEach((o, i) => {
+    const li = lrEl("li", i === lrAsk.idx ? "on" : null);
+    li.id = "lr-ask-opt-" + i;
+    li.setAttribute("role", "option");
+    li.setAttribute("aria-selected", i === lrAsk.idx ? "true" : "false");
+    li.append(lrEl("i", null, lrKindWord(o)), lrEl("span", "l", o.label), lrEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
+    li.addEventListener("mousedown", (e) => { e.preventDefault(); lrAskPick(o); });
+    list.appendChild(li);
+  });
+  list.hidden = !lrAsk.opts.length;
+  inp.setAttribute("aria-expanded", list.hidden ? "false" : "true");
+  if (lrAsk.idx >= 0) inp.setAttribute("aria-activedescendant", "lr-ask-opt-" + lrAsk.idx);
+  else inp.removeAttribute("aria-activedescendant");
+}
+
+function lrAskPick(o) {
+  Object.assign(lrAsk, { pick: o, q: "", opts: [], idx: -1 });
+  lrRender();
+  setTimeout(() => $("#lr-ask-go")?.focus(), 0);
+}
+// one note picked reads "note"; the plan form's "notes" names a scope of several
+const lrKindWord = (o) => (o.kind === "notes" && (o.count || 1) === 1 ? "note" : LR_KIND_WORD[o.kind] || o.kind);
+const lrAskClear = () => Object.assign(lrAsk, { q: "", opts: [], idx: -1, pick: null });
+
+async function lrAskGo() {
+  const o = lrAsk.pick;
+  const text = lrAsk.q.trim();
+  if (!o && !text) { $("#lr-ask")?.focus(); return; }
+  if (lrSession) { notify("a session is open; end it or resume it first", "warn"); return; }
+  if (o?.kind === "steps") {
+    lrAskClear();
+    lrFormReset({ step: "fields", ref: { kind: "note", target: o.target, label: o.label } });
+    lrGo({ view: "new" });
+    lrPreviewScope();
+    return;
+  }
+  if (o?.kind === "notes") { lrAskClear(); learnStartSession({ note: o.path, from: "ask" }); return; }
+  if (o?.kind === "folder") { lrAskClear(); learnStartSession({ scope: o.target, from: "ask" }); return; }
+  if (o) {
+    // a topic or a workspace: the notes it resolves to, as a plan's preview reads them
+    let paths = [];
+    try { paths = (await lrPost("/learn/plan", { scope: o.kind, target: o.target, preview: true })).paths || []; } catch (e) { notify("couldn't read that: " + e.message); return; }
+    if (!paths.length) { notify(`no notes to test on ${o.label}`, "warn"); return; }
+    lrAskClear();
+    learnStartSession({ scope: paths, from: "ask" });
+    return;
+  }
+  // a sentence opens the dialog, filled by the reading (ADR-0081 §10)
+  lrAskClear();
+  lrFormReset({ step: "fields", sentence: text });
+  lrGo({ view: "new" });
+  lrReadSentence();
+}
+
+// The next session as its list (ADR-0119, D): the notes it will ask, each
+// with its reason. Drop takes one out; Start then sends the rows left as the
+// session's scope, and untouched it is the picker's own session.
+function lrSessionList(d) {
+  const sec = lrEl("section", "lr-hsec lr-next");
+  const all = d.session_rows || [];
+  if (!all.length) {
+    sec.appendChild(lrEl("p", "lr-help", d.total ? "Nothing waiting from earlier sessions: a note needs a footnoted claim or a Relations bullet to be asked about."
+      : "Nothing tested yet. Name a note above and test yourself on it; this list grows from there."));
+    return sec;
+  }
+  const rows = all.filter((r) => !lrDropped.has(r.path));
+  const head = lrEl("div", "lr-nhead");
+  const t = lrEl("div", "t");
+  t.appendChild(lrEl("b", null, `${lrPlural(rows.length, "question")} waiting from earlier sessions`));
+  t.appendChild(lrEl("span", "lr-help", lrDropped.size ? `about ${_lrMinutes(rows.length)} min · ${lrPlural(lrDropped.size, "note")} dropped`
+    : [d.session ? `about ${d.session.minutes} min` : "", d.mix || ""].filter(Boolean).join(" · ")));
+  head.appendChild(t);
+  if (lrDropped.size) head.appendChild(lrBtn("lr-link", "Put them back", () => { lrDropped.clear(); lrRender(); }));
+  const start = lrBtn("ghost box", "Start these", () => lrStartList(rows));
+  start.disabled = !rows.length || !!lrSession;
+  head.appendChild(start);
+  sec.appendChild(head);
+  const open = lrMore.has("list");
+  for (const r of open ? rows : rows.slice(0, LR_LIST_SHOWN)) sec.appendChild(lrSessionRow(r));
+  if (rows.length > LR_LIST_SHOWN) sec.appendChild(lrBtn("lr-more", open ? "Show fewer" : `${rows.length - LR_LIST_SHOWN} more`, () => { open ? lrMore.delete("list") : lrMore.add("list"); lrRender(); }));
+  return sec;
+}
+
+function lrStartList(rows) {
+  if (!lrDropped.size) { learnStartSession({ from: "primary" }); return; }
+  const paths = [...new Set(rows.flatMap((r) => r.pair || [r.path]))];
+  lrDropped.clear();
+  learnStartSession({ scope: paths, n: rows.length, from: "edited" });
+}
+
+function lrSessionRow(r, { drop = true } = {}) {
+  const row = lrEl("div", "lr-sg lr-srow");
+  const pick = lrBtn("pick", undefined, () => lrGo({ view: "note", path: r.path }));
+  pick.dataset.lrRow = pick.dataset.lrKey = "note:" + r.path;
+  pick.setAttribute("aria-pressed", "false");
+  const t = lrEl("span", "t");
+  t.append(lrMark(r.mark || "open", ""), r.title);
+  pick.append(t, lrEl("span", "r", r.why));
+  const act = lrEl("span", "act");
+  const ex = lrBtn("lr-link", "Explain it", () => learnExplain(r.path));
+  ex.setAttribute("aria-label", `Explain ${r.title} in your own words`);
+  ex.disabled = !!lrSession || !!r.pair;
+  const dropB = lrBtn("lr-link", "Drop", () => { lrDropped.add(r.path); lrRender(); });
+  dropB.setAttribute("aria-label", `Drop ${r.title} from the next session`);
+  act.appendChild(ex);
+  if (drop) act.appendChild(dropB);
   row.append(pick, act);
   return row;
+}
+
+// Missed: a row per note with its reason, as the session's list, and one
+// action for all of them in the head (three reasons on one line did not read)
+function lrMissedHome(missed) {
+  const sec = lrEl("section", "lr-hsec");
+  const head = lrEl("div", "lr-nhead");
+  const t = lrEl("div", "t");
+  const h = lrEl("b", null, "Missed");
+  h.appendChild(lrEl("span", "cnt num", ` ${missed.length}`));
+  t.append(h, lrEl("span", "lr-help", "lately, and not met since"));
+  const q = missed.reduce((a, m) => a + (m.questions || 1), 0);
+  const go = lrBtn("ghost box", "Ask these again", () => learnStartSession({ scope: missed.map((m) => m.path), n: Math.min(24, q), from: "missed" }));
+  go.disabled = !!lrSession;
+  head.append(t, go);
+  sec.appendChild(head);
+  const open = lrMore.has("missed");
+  for (const m of open ? missed : missed.slice(0, 3)) sec.appendChild(lrSessionRow({ path: m.path, title: m.title, why: m.why, mark: "open" }, { drop: false }));
+  if (missed.length > 3) sec.appendChild(lrBtn("lr-more", open ? "Show fewer" : `${missed.length - 3} more`, () => { open ? lrMore.delete("missed") : lrMore.add("missed"); lrRender(); }));
+  return sec;
+}
+
+function lrPlansHome(plans) {
+  const sec = lrEl("section", "lr-hsec");
+  const h = lrEl("h3", "lr-hh", "Your plans");
+  h.appendChild(lrEl("span", "cnt num", String(plans.length)));
+  sec.appendChild(h);
+  for (const p of plans) {
+    const row = lrEl("div", "lr-hline");
+    const tx = lrEl("div", "tx");
+    const name = lrEl("div", "t");
+    const open = lrBtn("lr-link", p.name, () => lrGo({ view: "plan", plan: p.path }));
+    open.dataset.lrRow = open.dataset.lrKey = "plan:" + p.path;
+    name.appendChild(open);
+    if (p.by) name.appendChild(lrEl("span", "lr-help", ` · by ${lrDate(p.by)}`));
+    const live = lrSession && lrSession.plan === p.path;
+    tx.append(name, lrEl("span", "lr-help", live ? "in the open session" : p.why));
+    const go = live ? lrBtn("ghost box", "Resume", () => lrGo({ view: "session", id: lrSession.id }))
+      : lrBtn("ghost box", "Continue", () => learnStartSession({ plan: p.path, from: "plan" }));
+    if (!live) go.disabled = !!lrSession;
+    go.setAttribute("aria-label", `${live ? "Resume" : "Continue"} ${p.name}`);
+    row.append(tx, go);
+    sec.appendChild(row);
+  }
+  return sec;
+}
+
+function lrPlansErrorBox() {
+  // an error is not an empty vault (refinement §4): where the plans would be
+  const eb = lrEl("div", "lr-errbox");
+  eb.setAttribute("role", "alert");
+  const t = lrEl("b");
+  t.append(lrMark("warn", ""), "Couldn't read your plans");
+  eb.append(t, lrEl("span", null, "The vault answered with an error. Your plans are untouched."), lrBtn("ghost box", "Retry", () => loadLearn(true)));
+  return eb;
 }
 
 // Plans: today's list and the composer (ADR-0081 §5).
@@ -501,7 +673,7 @@ function lrRenderPlansLeft(left, sel) {
     return;
   }
   const isNew = lrRoute.view === "new";
-  const create = lrBtn("lr-create" + (isNew ? " on" : ""), "+ Create plan", () => { lrFormReset(); lrGo({ view: "new" }); });
+  const create = lrBtn("lr-create" + (isNew ? " on" : ""), "+ New plan", () => { lrFormReset({ step: "fields" }); lrGo({ view: "new" }); });
   create.setAttribute("aria-pressed", isNew ? "true" : "false");
   left.appendChild(create);
   for (const p of active) left.appendChild(lrPlanRow(p, sel && sel.path === p.path));
@@ -545,7 +717,7 @@ function lrPlanRow(p, on, completed = false) {
 // reason on hover and selects the note on click: one note, two steps from
 // anywhere. No colour carries a state (ADR-0061).
 const LR_MAP_SHOWN = 12;
-const LR_CELL_SAY = { never: "never asked", open: "asked, still open", half: "met with help", full: "met without help" };
+const LR_CELL_SAY = { never: "not tested yet", open: "asked, still open", half: "met with help", full: "met without help" };
 function lrRenderMapLeft(left) {
   if (!lrMapCounted) { lrMapCounted = true; lrGateCount("map"); }
   if (!lrMap) { left.appendChild(lrEl("p", "lr-lh-sub", "Reading the map.")); lrFetchMap(); return; }
@@ -973,18 +1145,20 @@ function lrObjRow(c, { edit = null, remove = null } = {}) {
 // One grammar for every row of Next and every cell of the Map: the head with
 // Open note and the action, the reason as a sentence, History, what a session
 // covers, how this is measured. It retires the suggestion detail (§6).
-const LR_GROUP_EYEBROW = { missed: "Missed lately", due: "Falling due", never: "Never practised" };
+const LR_GROUP_EYEBROW = { missed: "Missed", due: "Fading", never: "Not tested yet" };
 const LR_HIST_MARK = { met: "full", assisted: "half", missed: "open" };
 function lrRenderNoteDetail(right, n) {
   const inLive = lrSession && lrSession.note === n.path;
   if (inLive) right.appendChild(lrResumeBox());
-  const verb = n.group === "missed" ? "Ask again" : "Practice";
+  const verb = n.group === "missed" ? "Ask again" : "Test me";
   const go = inLive ? null : lrBtn("lr-send", verb, () => learnStartSession({ note: n.path }));
   if (go) go.disabled = !n.grounded || !!lrSession;
+  const explain = inLive ? null : lrBtn("ghost box", "Explain it", () => learnExplain(n.path));
+  if (explain) { explain.disabled = !n.grounded || !!lrSession; explain.title = "explain it in your own words; a student who has not read it asks four questions"; }
   const eyebrow = lrRoute.view === "map" ? n.path : LR_GROUP_EYEBROW[n.group] || "Note";
   const head = lrHead(eyebrow + (n.also_in?.length ? ` · in ${n.also_in.map((p) => p.name).join(", ")}` : ""), n.title,
     inLive ? "" : n.questions ? `${lrPlural(n.questions, "question")} · about ${n.minutes} min` : "no grounded line to ask about",
-    [lrBtn("ghost box", "Open note", () => openNote(n.path)), go]);
+    [lrBtn("ghost box", "Open note", () => openNote(n.path)), explain, go]);
   // why it is up, in words: the ledger's own fields, never a model's (ADR-0081 §3)
   if (n.sentence) head.appendChild(lrEl("p", "lr-reason", n.sentence));
   if (lrSession && !inLive) head.appendChild(lrEl("p", "lr-help", "A session is open; end it or resume it before starting this one."));
@@ -1151,7 +1325,7 @@ const lrForm = {};
 function lrFormReset(extra = {}) {
   Object.assign(lrForm, {
     step: "sentence", sentence: "", read: "", reading: false, said: [], took: null, model: false,
-    name: "", nameTouched: false, scope: "", target: "", label: "", count: null, restrict: "", by: "",
+    name: "", nameTouched: false, scope: "", target: "", label: "", count: null, restrict: "", by: "", ref: null, refMode: "note", refQ: "", refOpts: [], refIdx: -1,
     objectives: [], refused: [], preview: null, previewBusy: false, cards: null, cardsBusy: false, cardsAt: 0,
     cardsModel: false, cardsSaved: false, cardsFailed: false, editing: null, editPath: "", q: "", opts: [], optIdx: -1, seq: 0, cardSeq: 0,
   }, extra);
@@ -1171,6 +1345,25 @@ function lrPlanFolder(folder) {
 }
 window.learnPlanFolder = lrPlanFolder;
 
+// Test me on this… from the note menu (ADR-0119): the dialog with the note
+// as its Study; Start tests it at once, unless a date or a reference makes
+// it a plan.
+function learnTestNote(path) {
+  const stem = lrStem(path);
+  lrFormReset({ step: "fields", scope: "notes", target: [stem], label: stem });
+  if (activeTab !== "learn") showTab("learn");
+  lrGo({ view: "new" });
+  lrPreviewScope();
+}
+window.learnTestNote = learnTestNote;
+
+// Explain it (ADR-0119, suggestion 2): a teach-back on one note. The server
+// has run it since 0.7.0 (POST /learn/teach); the view never called it.
+function learnExplain(path) {
+  learnStartSession({ note: path, teach: true, from: "explain" });
+}
+window.learnExplain = learnExplain;
+
 // A workspace plan keeps its target as a wikilink by path (plans.target_text);
 // the reader is shown the workspace's name.
 const lrTargetShown = (p) => p.scope === "workspace"
@@ -1186,8 +1379,29 @@ function learnPlanWorkspace(name) {
   lrPreviewScope();
 }
 
-// Edit plan opens the fields filled, without the sentence (§17).
+// Edit plan opens the fields filled, without the sentence (§17). A syllabus
+// plan reads as a Reference and its `restrict` bounds as the Study (ADR-0119).
+function lrStudyFromBounds(restrict) {
+  const bounds = String(restrict || "").split(" | ").map((b) => b.trim()).filter(Boolean);
+  if (bounds.length === 1 && !/\.md$/i.test(bounds[0])) return { scope: "folder", target: bounds[0], label: bounds[0] };
+  if (bounds.length && bounds.every((b) => /\.md$/i.test(b))) { const stems = bounds.map(lrStem); return { scope: "notes", target: stems, label: stems.join(", ") }; }
+  return { scope: "", target: "", label: "" };
+}
+function lrRefOf(target) {
+  const t = String(target || "");
+  return t.includes("\n") ? { kind: "text", target: t, label: "" } : { kind: "note", target: t, label: lrStem(t) };
+}
 function lrFormFromPlan(p) {
+  if (p.scope === "steps") {
+    lrFormReset({
+      step: "fields", editPath: p.path, name: p.name, nameTouched: true, ...lrStudyFromBounds(p.restrict), restrict: "",
+      ref: lrRefOf(p.target), refMode: String(p.target || "").includes("\n") ? "text" : "note", by: p.by || "",
+      objectives: p.objectives_chosen ? [...p.objectives] : [], refused: [...(p.refused || [])],
+      cards: p.cards?.length ? p.cards.map((c) => ({ ...c })) : null, cardsSaved: !!p.cards?.length,
+    });
+    lrPreviewScope({ keepCards: !!p.cards?.length });
+    return;
+  }
   lrFormReset({
     step: "fields", editPath: p.path, name: p.name, nameTouched: true, scope: p.scope,
     target: p.scope === "notes" ? [...(p.notes || [])] : p.target,
@@ -1199,6 +1413,30 @@ function lrFormFromPlan(p) {
   lrPreviewScope({ keepCards: !!p.cards?.length });
 }
 
+// The dialog (ADR-0119, suggestion 5): one form for a test or a plan, over
+// the home column, opened by Form, by a sentence, by the note menu and by
+// the chat's + menu. Escape, × and a click outside close it.
+function lrDialog() {
+  const scrim = lrEl("div", "lr-scrim");
+  scrim.addEventListener("mousedown", (e) => { if (e.target === scrim) lrCloseDialog(); });
+  const dlg = lrEl("div", "lr-dialog");
+  dlg.setAttribute("role", "dialog");
+  dlg.setAttribute("aria-modal", "true");
+  dlg.setAttribute("aria-label", lrRoute.view === "edit" ? "Edit plan" : "New test or plan");
+  const x = lrBtn("lr-x lr-dlg-x", "×", lrCloseDialog);
+  x.setAttribute("aria-label", "close");
+  dlg.appendChild(x);
+  lrRenderComposer(dlg);
+  scrim.appendChild(dlg);
+  if (!dlg.contains(document.activeElement)) setTimeout(() => { if (!dlg.contains(document.activeElement)) dlg.querySelector("input, textarea")?.focus({ preventScroll: true }); }, 0);
+  return scrim;
+}
+
+function lrCloseDialog() {
+  lrForm.editing = null;
+  lrGo(lrRoute.view === "edit" ? { view: "plan", plan: lrRoute.plan } : { view: "home" }, { replace: true });
+}
+
 function lrRenderComposer(right) {
   if (lrRoute.view === "edit" && lrForm.editPath !== lrRoute.plan) {
     if (lrPlan && lrPlan.path === lrRoute.plan) lrFormFromPlan(lrPlan);
@@ -1206,20 +1444,22 @@ function lrRenderComposer(right) {
   }
   if (lrRoute.view === "new" && lrForm.editPath) lrFormReset();
   const box = lrEl("div", "lr-composer");
-  if (lrForm.step === "sentence") lrSentenceStep(box);
+  if (lrForm.reading) {
+    box.append(lrEl("span", "eyebrow", "New test"), lrEl("p", "lr-readback s", `“${lrForm.sentence}”`), lrEl("p", "lr-help", "Reading your sentence…"));
+  } else if (lrForm.step === "sentence") lrSentenceStep(box);
   else lrFieldsStep(box);
   right.appendChild(box);
 }
 
 function lrSentenceStep(box) {
   const head = lrEl("div", "lr-phead");
-  head.append(lrEl("span", "eyebrow", "New plan · nothing is written until you create it"), lrEl("h2", null, "What are you preparing for?"));
+  head.append(lrEl("span", "eyebrow", "New test · nothing is written until you keep it"), lrEl("h2", null, "What would you like to learn?"));
   box.appendChild(head);
   const ta = lrEl("textarea", "lr-field textarea lr-sentence");
   ta.rows = 3;
   ta.value = lrForm.sentence;
   ta.placeholder = "Psychology exam on November 30: perception, short-term memory, reinforcement learning, theory of mind. I need to explain and apply them.";
-  ta.setAttribute("aria-label", "What are you preparing for?");
+  ta.setAttribute("aria-label", "What would you like to learn?");
   ta.disabled = lrForm.reading;
   ta.addEventListener("input", () => (lrForm.sentence = ta.value));
   // Enter, or leaving the field, reads it (§10); Shift+Enter is a new line
@@ -1248,19 +1488,24 @@ async function lrReadSentence() {
     scope: r.scope || "", target: r.target || "", label: Array.isArray(r.target) ? r.target.join(", ") : r.target || "", restrict: r.restrict || "",
     objectives: r.objectives || [], by: r.by || "", name: r.name || "", nameTouched: !!r.name, refused: [], preview: null, cards: null,
   });
+  // a syllabus read from the sentence is the Reference, its folder the Study (ADR-0119)
+  if (lrForm.scope === "steps") {
+    Object.assign(lrForm, { ref: lrRefOf(lrForm.target), refMode: String(lrForm.target).includes("\n") ? "text" : "note",
+      ...(lrForm.restrict ? { scope: "folder", target: lrForm.restrict, label: lrForm.restrict } : { scope: "", target: "", label: "" }), restrict: "" });
+  }
   if (lrRoute.view === "new") lrRender();
-  if (lrForm.scope) lrPreviewScope();
+  if (lrForm.scope || lrForm.ref) lrPreviewScope();
 }
 
 function lrFieldsStep(box) {
   const edit = !!lrForm.editPath;
   const head = lrEl("div", "lr-phead");
-  head.appendChild(lrEl("span", "eyebrow", edit ? "Edit plan · one revertible write, sessions untouched" : "New plan · nothing is written until you create it"));
+  head.appendChild(lrEl("span", "eyebrow", edit ? "Edit plan · one revertible write, sessions untouched" : lrForm.read ? "Filled from your sentence. Change anything." : "New test"));
   const name = lrEl("input", "lr-title");
-  name.type = "text"; name.value = lrForm.name; name.placeholder = "Name the plan";
+  name.type = "text"; name.value = lrForm.name; name.placeholder = edit ? "Name the plan" : "Name it, to keep it as a plan";
   name.setAttribute("aria-label", "Plan name");
   name.dataset.lrKey = "form:name";
-  name.addEventListener("input", () => { lrForm.name = name.value; lrForm.nameTouched = true; const at = $("#lr-lands"); if (at) at.textContent = lrLands(); lrCtaState(); });
+  name.addEventListener("input", () => { lrForm.name = name.value; lrForm.nameTouched = true; lrCtaState(); });
   head.appendChild(name);
   box.appendChild(head);
   // the sentence, kept above the fields, and what the reading did with it
@@ -1275,26 +1520,69 @@ function lrFieldsStep(box) {
     box.appendChild(said);
   }
   box.appendChild(lrStudySection());
+  box.appendChild(lrReferenceSection());
   box.appendChild(lrGoalsSection());
   box.appendChild(lrBySection());
   box.appendChild(lrObjectivesSection());
   const cta = lrEl("div", "lr-cta");
   const lands = lrEl("span", "lr-help");
-  lands.append(edit ? "Saves " : "Lands as ", Object.assign(lrEl("span", "path", lrLands()), { id: "lr-lands" }), " · revertible");
-  const create = lrBtn("lr-send", edit ? "Save plan" : "Create plan", lrWritePlan);
-  create.id = "lr-create-btn";
-  cta.append(lands, lrBtn("ghost box", "Cancel", () => { lrForm.editing = null; history.length > 1 && ["new", "edit"].includes(lrParse(location.hash)?.view) ? history.back() : lrGo({ view: "plans" }); }), create);
+  lands.id = "lr-lands";
+  if (edit) {
+    lands.append("Saves ", lrEl("span", "path", lrLands()), " · revertible");
+    const save = lrBtn("lr-send", "Save plan", () => lrWritePlan());
+    save.id = "lr-create-btn";
+    cta.append(lands, lrBtn("ghost box", "Cancel", lrCloseDialog), save);
+  } else {
+    lands.textContent = lrKeptLine();
+    const keep = lrBtn("ghost box", "Save only", () => lrWritePlan());
+    keep.id = "lr-create-btn";
+    keep.title = "keep it as a plan without starting";
+    const start = lrBtn("lr-send", "Start", lrStartTest);
+    start.id = "lr-start-btn";
+    cta.append(lands, lrBtn("ghost box", "Cancel", lrCloseDialog), keep, start);
+  }
   box.appendChild(cta);
-  lrCtaState(create);
+  // the box is not in the page yet: its buttons are found inside it
+  lrCtaState(box);
 }
 
 const lrLands = () => lrForm.editPath || `Plans/${lrForm.name.trim() || "<name>"}.md`;
-// Create is the one primary, enabled once Study holds a checked value (§12)
-function lrCtaState(btn = $("#lr-create-btn")) {
-  if (!btn) return;
-  const ok = !!(lrForm.preview && lrForm.preview.paths?.length && lrForm.name.trim());
-  btn.disabled = !ok;
-  btn.title = ok ? "" : !lrForm.name.trim() ? "name the plan first" : "choose what to study first";
+
+// A test is written as a plan only when it holds something to keep: a
+// reference, a date or goals chosen (ADR-0119). Otherwise each quick test
+// would add a note to Plans/ and, once active, narrow what Learn offers
+// next to its notes (ADR-0111 point 4).
+function lrKeeps(f = lrForm) {
+  return !!(f.ref?.target?.trim?.() || f.by || f.objectives.length);
+}
+function lrKeptLine() {
+  const f = lrForm;
+  const why = [f.ref?.target?.trim?.() ? "a reference" : "", f.by ? "a date" : "", f.objectives.length ? "goals" : ""].filter(Boolean);
+  return why.length ? `Kept as a plan in ${lrLands()}: it has ${lrAnd(why)}.` : "A one-off test: nothing is written but the answers. Save only keeps it as a plan.";
+}
+
+// Start and Save only need material; Save only, and Start when it keeps, a name
+function lrCtaState(root = document) {
+  const ok = !!lrForm.preview?.paths?.length;
+  const named = !!lrForm.name.trim();
+  const save = root.querySelector("#lr-create-btn");
+  if (save) { save.disabled = !(ok && named); save.title = !ok ? "choose what to study first" : !named ? "name it first" : save.title; }
+  const start = root.querySelector("#lr-start-btn");
+  if (start) {
+    start.disabled = !ok || (lrKeeps() && !named) || !!lrSession;
+    start.title = !ok ? "choose what to study first" : lrKeeps() && !named ? "name it first: it is kept as a plan" : lrSession ? "a session is open" : "";
+  }
+  const lands = root.querySelector("#lr-lands");
+  if (lands && !lrForm.editPath) lands.textContent = lrKeptLine();
+}
+
+async function lrStartTest() {
+  const f = lrForm;
+  if (lrKeeps(f)) { await lrWritePlan({ start: true }); return; }
+  const paths = f.preview?.paths || [];
+  if (!paths.length) { notify("choose what to study first", "warn"); return; }
+  lrFormReset();
+  learnStartSession({ scope: paths, from: "dialog" });
 }
 
 // -- Study: a token, or a typeahead over folders, notes, topics and syllabus notes
@@ -1303,32 +1591,18 @@ function lrStudySection() {
   sec.appendChild(lrEl("h3", null, "Study"));
   const f = lrForm;
   const row = lrEl("div", "lr-studyrow");
-  if (f.scope === "steps" && f.target.includes("\n") || f.scope === "steps" && !f.label) {
-    const ta = lrEl("textarea", "lr-field textarea");
-    ta.rows = Math.min(8, Math.max(3, f.target.split("\n").length));
-    ta.value = f.target;
-    ta.placeholder = "One subject per line, in the order you will study them";
-    ta.setAttribute("aria-label", "the syllabus, one subject per line");
-    ta.addEventListener("input", () => (f.target = ta.value));
-    ta.addEventListener("change", () => { f.refused = []; lrPreviewScope(); });
-    row.appendChild(ta);
-    sec.appendChild(row);
-    const aside = lrEl("div", "lr-asides");
-    aside.appendChild(lrBtn("lr-link", "pick a folder, a note or a topic instead", () => { Object.assign(f, { scope: "", target: "", label: "", preview: null, cards: null }); lrRender(); }));
-    sec.appendChild(aside);
-  } else if (f.scope && f.target) {
+  if (f.scope && f.target) {
     const tok = lrEl("span", "lr-tok");
-    const n = f.preview?.paths?.length;
+    // with a Reference the preview counts its matches, not the Study's notes
+    const n = f.ref ? null : f.preview?.paths?.length;
     tok.append(lrEl("i", null, LR_KIND_WORD[f.scope]), `${f.label || f.target}` + (n != null ? ` · ${lrPlural(n, "note")}` : ""));
     const x = lrBtn("lr-x", "×", () => { Object.assign(f, { scope: "", target: "", label: "", restrict: "", preview: null, cards: null, refused: [] }); lrRender(); setTimeout(() => $("#lr-study")?.focus(), 0); });
     x.setAttribute("aria-label", "clear what to study");
     tok.appendChild(x);
     row.appendChild(tok);
-    row.appendChild(lrBtn("lr-link", "Paste a syllabus", () => { Object.assign(f, { scope: "steps", target: "", label: "", preview: null, cards: null, refused: [] }); lrRender(); }));
     sec.appendChild(row);
   } else {
     row.appendChild(lrStudyInput());
-    row.appendChild(lrBtn("lr-link", "Paste a syllabus", () => { Object.assign(f, { scope: "steps", target: "", label: "", preview: null, cards: null, refused: [] }); lrRender(); }));
     sec.appendChild(row);
   }
   // a restriction read from the sentence is shown on the field and can be cleared (§13)
@@ -1342,10 +1616,114 @@ function lrStudySection() {
     r.appendChild(tok);
     sec.appendChild(r);
   }
-  if (f.previewBusy && !f.preview) sec.appendChild(lrEl("p", "lr-help", "Resolving the material…"));
+  // with a Reference the preview is its lines, shown under it; here, what bounds them
+  if (f.ref) sec.appendChild(lrEl("p", "lr-help", f.scope ? "The reference's lines are looked for here." : "Empty: the reference's lines are looked for in the whole vault."));
+  else if (f.previewBusy && !f.preview) sec.appendChild(lrEl("p", "lr-help", "Resolving the material…"));
   else if (f.preview?.error) { const e = lrEl("p", "lr-help warn"); e.append(lrMark("warn", ""), "Could not resolve: " + f.preview.error); sec.appendChild(e); }
   else if (f.preview) lrShowPreview(sec, f.preview);
   return sec;
+}
+
+// -- Reference: what must be studied, a syllabus note or pasted text (ADR-0119).
+// Stored as today's syllabus scope, bounded by the Study; optional.
+function lrReferenceSection() {
+  const f = lrForm;
+  const sec = lrEl("section", "lr-fs");
+  const h = lrEl("h3", null, "Reference");
+  h.appendChild(lrEl("span", "lr-help", " optional"));
+  sec.appendChild(h);
+  const seg = lrEl("div", "lr-seg lr-refseg");
+  seg.setAttribute("role", "radiogroup"); seg.setAttribute("aria-label", "the reference is");
+  for (const [k, label] of [["note", "A note"], ["text", "Paste text"]]) {
+    const on = f.refMode === k;
+    const b = lrBtn(on ? "on" : null, label, () => {
+      if (f.refMode === k) return;
+      Object.assign(f, { refMode: k, ref: null, refused: [], preview: null, cards: null });
+      lrRender();
+      lrPreviewScope();
+    });
+    b.setAttribute("role", "radio"); b.setAttribute("aria-checked", on ? "true" : "false");
+    seg.appendChild(b);
+  }
+  sec.appendChild(seg);
+  if (f.refMode === "text") {
+    const ta = lrEl("textarea", "lr-field textarea");
+    const text = f.ref?.kind === "text" ? f.ref.target : "";
+    ta.rows = Math.min(8, Math.max(3, text.split("\n").length));
+    ta.value = text;
+    ta.placeholder = "The concepts or the files to study, one per line";
+    ta.setAttribute("aria-label", "the reference, one line per concept or file");
+    ta.dataset.lrKey = "form:ref";
+    ta.addEventListener("input", () => { f.ref = ta.value.trim() ? { kind: "text", target: ta.value, label: "" } : null; lrCtaState(); });
+    ta.addEventListener("change", () => { f.refused = []; lrPreviewScope(); });
+    sec.appendChild(ta);
+  } else if (f.ref?.kind === "note") {
+    const tok = lrEl("span", "lr-tok");
+    tok.append(lrEl("i", null, "note"), f.ref.label || lrStem(f.ref.target));
+    const x = lrBtn("lr-x", "×", () => { Object.assign(f, { ref: null, refused: [], preview: null, cards: null }); lrRender(); lrPreviewScope(); });
+    x.setAttribute("aria-label", "clear the reference");
+    tok.appendChild(x);
+    sec.appendChild(tok);
+  } else sec.appendChild(lrRefInput());
+  if (f.ref) {
+    if (f.previewBusy && !f.preview) sec.appendChild(lrEl("p", "lr-help", "Matching the lines against your notes…"));
+    else if (f.preview?.error) { const e = lrEl("p", "lr-help warn"); e.append(lrMark("warn", ""), "Could not resolve: " + f.preview.error); sec.appendChild(e); }
+    else if (f.preview) lrShowPreview(sec, f.preview);
+  } else sec.appendChild(lrEl("p", "lr-help", "A syllabus or a list of what the exam covers: each line is matched to your notes, and a line with no note is shown."));
+  return sec;
+}
+
+function lrRefInput() {
+  const f = lrForm;
+  const wrap = lrEl("div", "lr-ta");
+  const inp = lrEl("input", "lr-field");
+  inp.type = "text"; inp.id = "lr-ref"; inp.placeholder = "A note that lists what to study"; inp.value = f.refQ; inp.autocomplete = "off";
+  inp.setAttribute("role", "combobox"); inp.setAttribute("aria-autocomplete", "list");
+  inp.setAttribute("aria-controls", "lr-ref-opts"); inp.setAttribute("aria-expanded", "false");
+  inp.setAttribute("aria-label", "the reference note");
+  inp.dataset.lrKey = "form:refnote";
+  const list = lrEl("ul", "lr-opts");
+  list.id = "lr-ref-opts"; list.setAttribute("role", "listbox"); list.hidden = true;
+  const paint = () => {
+    list.innerHTML = "";
+    f.refOpts.forEach((o, i) => {
+      const li = lrEl("li", i === f.refIdx ? "on" : null);
+      li.setAttribute("role", "option"); li.setAttribute("aria-selected", i === f.refIdx ? "true" : "false");
+      li.append(lrEl("i", null, o.kind === "steps" ? "syllabus" : "note"), lrEl("span", "l", o.label));
+      li.addEventListener("mousedown", (e) => { e.preventDefault(); pick(o); });
+      list.appendChild(li);
+    });
+    list.hidden = !f.refOpts.length;
+    inp.setAttribute("aria-expanded", list.hidden ? "false" : "true");
+  };
+  const pick = (o) => { Object.assign(f, { ref: { kind: "note", target: o.target, label: o.label }, refQ: "", refOpts: [], refIdx: -1, refused: [], preview: null, cards: null }); lrRender(); lrPreviewScope(); };
+  let t = null;
+  inp.addEventListener("input", () => {
+    f.refQ = inp.value;
+    clearTimeout(t);
+    t = setTimeout(async () => {
+      const q = inp.value.trim();
+      let opts = [];
+      if (q) { try { opts = await (await fetch("/learn/scopes?q=" + encodeURIComponent(q))).json(); } catch { opts = []; } }
+      if (inp.value.trim() !== q) return;
+      // a syllabus note first, then any note: a note's lines are what is read
+      const seen = new Set();
+      f.refOpts = (Array.isArray(opts) ? opts : []).filter((o) => ["steps", "notes"].includes(o.kind))
+        .sort((a, b) => (a.kind === "steps" ? 0 : 1) - (b.kind === "steps" ? 0 : 1))
+        .filter((o) => !seen.has(o.target) && seen.add(o.target)).slice(0, 6);
+      f.refIdx = f.refOpts.length ? 0 : -1;
+      paint();
+    }, 120);
+  });
+  inp.addEventListener("blur", () => setTimeout(() => { list.hidden = true; inp.setAttribute("aria-expanded", "false"); }, 150));
+  inp.addEventListener("keydown", (e) => {
+    const n = f.refOpts.length;
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && n) { e.preventDefault(); f.refIdx = (f.refIdx + (e.key === "ArrowDown" ? 1 : n - 1)) % n; paint(); }
+    else if (e.key === "Enter") { e.preventDefault(); const o = f.refOpts[Math.max(0, f.refIdx)]; if (o) pick(o); }
+    else if (e.key === "Escape" && !list.hidden) { e.stopPropagation(); list.hidden = true; inp.setAttribute("aria-expanded", "false"); }
+  });
+  wrap.append(inp, list);
+  return wrap;
 }
 
 function lrStudyInput() {
@@ -1374,7 +1752,7 @@ function lrStudyInput() {
       e.preventDefault();
       const o = lrForm.opts[Math.max(0, lrForm.optIdx)];
       if (o) lrPickScope(o);
-    } else if (e.key === "Escape") { list.hidden = true; inp.setAttribute("aria-expanded", "false"); }
+    } else if (e.key === "Escape" && !list.hidden) { e.stopPropagation(); list.hidden = true; inp.setAttribute("aria-expanded", "false"); }
   });
   wrap.append(inp, list);
   return wrap;
@@ -1386,7 +1764,7 @@ async function lrScopeSearch(inp, list) {
   // a failed lookup is an empty list: the reader can still paste a syllabus
   try { opts = await (await fetch("/learn/scopes?q=" + encodeURIComponent(q))).json(); } catch { opts = []; }
   if (inp.value !== q) return;      // a later keystroke owns the list
-  lrForm.opts = Array.isArray(opts) ? opts : [];
+  lrForm.opts = (Array.isArray(opts) ? opts : []).filter((o) => o.kind !== "steps");
   lrForm.optIdx = lrForm.opts.length ? 0 : -1;
   lrPaintOpts(inp, list);
 }
@@ -1418,7 +1796,10 @@ function lrPickScope(o) {
 // pattern; the old form asked for it last, empty, with a fixed placeholder)
 function lrDefaultName() {
   const f = lrForm;
-  if (f.nameTouched || !f.scope) return;
+  if (f.nameTouched) return;
+  if (f.ref?.kind === "note") { f.name = f.ref.label || lrStem(f.ref.target); return; }
+  if (f.ref && !f.scope) { f.name = `Syllabus, ${lrDate(new Date().toISOString())}`; return; }
+  if (!f.scope) return;
   if (f.scope === "folder") f.name = f.target.replace(/\/$/, "").split("/").pop();
   else if (f.scope === "steps") f.name = f.label && !f.target.includes("\n") ? f.label : `Syllabus, ${lrDate(new Date().toISOString())}`;
   // "plan", so the plan note does not take its workspace's name (ADR-0112)
@@ -1428,12 +1809,13 @@ function lrDefaultName() {
 
 async function lrPreviewScope({ keepCards = false } = {}) {
   const f = lrForm;
-  if (!f.scope || !String(f.target).trim()) return;
+  if (!f.ref?.target?.trim?.() && !(f.scope && String(f.target).trim())) { f.preview = null; lrCtaState(); return; }
   if (!keepCards) f.cardsSaved = false;
   lrDefaultName();
   const seq = ++f.seq;
   f.previewBusy = true;
-  if (!keepCards) f.cards = null;
+  // a cards call still running was written for the material before this change
+  if (!keepCards) { f.cards = null; f.cardSeq++; f.cardsBusy = false; }
   lrRender();
   let out;
   try {
@@ -1451,7 +1833,12 @@ function lrStudyBody() {
   const f = lrForm;
   // notes travel as a list: "Sensazione, percezione, psicofisica" is one title
   const target = f.scope === "notes" ? (Array.isArray(f.target) ? f.target : [f.target]) : f.target;
-  return { scope: f.scope, target, restrict: f.restrict, refused: f.refused, objectives: f.objectives };
+  const body = { scope: f.scope, target, restrict: f.restrict, refused: f.refused, objectives: f.objectives };
+  // the server turns Study and Reference into a syllabus bounded by the Study (ADR-0119)
+  // pasted text always carries a line break: one line equal to a title would
+  // otherwise be read as that note (plans._steps_scope)
+  if (f.ref?.target?.trim?.()) body.reference = f.ref.kind === "text" && !f.ref.target.includes("\n") ? f.ref.target + "\n" : f.ref.target;
+  return body;
 }
 
 // The cards, in the background (§16): one model call, never the gate
@@ -1494,7 +1881,7 @@ function lrCardsLine() {
 // bases (§12): what you already know shows while you choose.
 function lrShowPreview(sec, p) {
   const f = lrForm;
-  const steps = f.scope === "steps";
+  const steps = !!f.ref || f.scope === "steps";
   const line = lrEl("p", "lr-pline");
   if (steps) {
     const covered = p.tree.filter((n) => !n.gap);
@@ -1503,7 +1890,7 @@ function lrShowPreview(sec, p) {
     line.append(` · ${covered.length - doubt} matched` + (doubt ? ` · ${doubt} to check` : "") + (p.gaps.length ? ` · ${lrPlural(p.gaps.length, "gap")}` : ""));
   } else {
     line.appendChild(lrEl("b", null, `${lrPlural(p.paths.length, "note")}` + (p.parts > 1 ? ` in ${p.parts} parts` : "")));
-    line.append(` · ${p.measured} practised · ${p.never} never asked` + (p.due ? ` · ${p.due} to review` : ""));
+    line.append(` · ${p.measured} practised · ${p.never} not tested yet` + (p.due ? ` · ${p.due} to review` : ""));
   }
   sec.appendChild(line);
   if (steps) {
@@ -1664,7 +2051,7 @@ function lrObjectivesSection() {
   sum.append(lrEl("span", "chev"), st);
   const check = (f.cards || []).filter((c) => c.reads_as).length;
   if (check) { const m = lrEl("span", "m"); m.append(lrMark("warn", ""), `${check} to check`); sum.appendChild(m); }
-  else sum.appendChild(lrEl("span", "m mute", `${f.editPath ? "Save" : "Create"} writes what is shown`));
+  else sum.appendChild(lrEl("span", "m mute", "Saving writes what is shown"));
   det.appendChild(sum);
   const inner = lrEl("div", "in");
   if (!f.cards) inner.appendChild(lrEl("p", "lr-help", f.cardsBusy ? "The cards show here once written; Create meanwhile writes them in template wording." : "Written once the material is chosen."));
@@ -1690,7 +2077,7 @@ function lrObjEditor(c, i) {
   return box;
 }
 
-async function lrWritePlan() {
+async function lrWritePlan({ start = false } = {}) {
   const f = lrForm;
   if (!f.name.trim()) { notify("a plan needs a name", "warn"); return; }
   if (!f.preview?.paths?.length) { notify("choose what to study first", "warn"); return; }
@@ -1708,8 +2095,7 @@ async function lrWritePlan() {
     lrData = null; lrPlan = null; lrMap = null;
     await loadLearn(true);
     lrGo({ view: "plan", plan: out.path }, { replace: true });
-    lrSeg = "plans";
-    lrRender();
+    if (start) learnStartSession({ plan: out.path, from: "dialog" });
   } catch (e) { notify(`plan not ${f.editPath ? "saved" : "created"}: ` + e.message); if (btn) btn.disabled = false; }
 }
 
@@ -1736,6 +2122,7 @@ async function learnStartSession(opts = {}) {
   if (opts.note) body.note = opts.note;
   if (opts.points) body.points = opts.points;
   if (opts.scope) body.scope = opts.scope;
+  if (opts.teach) body.teach = true;
   lrStarting = true;
   $("#learn-loading").hidden = false;
   $("#learn-loading").querySelector(".fl-msg").textContent = "Picking and writing the questions.";
@@ -1755,7 +2142,7 @@ async function learnStartSession(opts = {}) {
     return;
   }
   lrGateCount(opts.from || "other");
-  lrSession = { ...s, cur: 0, state: "input", answers: {}, verdicts: {}, results: {}, skipped: {}, hintsUsed: {}, shown: {}, conf: null, told: false };
+  lrSession = { ...s, cur: 0, state: "input", answers: {}, verdicts: {}, results: {}, skipped: {}, hintsUsed: {}, shown: {}, conf: null, told: false, teachT: {} };
   if (activeTab !== "learn") showTab("learn");
   lrGo({ view: "session", id: s.id });
 }
@@ -1825,12 +2212,20 @@ function lrRenderSession(body) {
   const prev = s.cur > 0 ? s.items[s.cur - 1] : null;
   if (prev) wrap.appendChild(lrPrevRow(s, prev, s.cur));
   const sheet = lrEl("div", "lr-sheet");
+  if (s.mode === "teach" && s.state !== "reveal") {
+    lrTeachParts(sheet, s, it);
+    wrap.appendChild(sheet);
+    body.appendChild(wrap);
+    setTimeout(() => $("#lr-answer")?.focus(), 0);
+    return;
+  }
   const eb = lrEl("div", "lr-eyebrow");
-  eb.appendChild(lrEl("span", "eyebrow", lrEyebrow(it)));
+  // a teach-back's item keeps the kind it was built with; the eyebrow says what was asked
+  eb.appendChild(lrEl("span", "eyebrow", s.mode === "teach" ? `Explain it · ${lrStem(it.path)}` : lrEyebrow(it)));
   if (window.speechSynthesis) eb.appendChild(lrReadToggle());
   sheet.appendChild(eb);
   // the question keeps its size after the answer (ADR-0061 §18)
-  sheet.appendChild(lrMd(lrEl("p", "q"), it.q));
+  sheet.appendChild(lrMd(lrEl("p", "q"), s.mode === "teach" ? lrTeachAsk(it) : it.q));
   if (s.state === "input") lrInputParts(sheet, s, it);
   else if (s.state === "grading") lrGradingParts(sheet, s, it);
   else if (s.state === "reveal") lrReveal(sheet, it, s.verdicts[it.i]);
@@ -1911,6 +2306,79 @@ function lrInputParts(sheet, s, it) {
   submit.setAttribute("aria-disabled", ready ? "false" : "true");
   actions.appendChild(submit);
   sheet.appendChild(actions);
+}
+
+// --- Explain it: the teach-back (ADR-0119, suggestion 2) ------------------------
+// You explain the note with the book closed; a student who sees only its
+// title asks four times (grade.TEACH_TURNS); the summary then reads your
+// words against the note, and the reveal and its rating follow as for any
+// question. Answering by voice is the session's own mic.
+const LR_TEACH_TURNS = 4;
+// the note's name, not items.title_of: that reads the first heading, which in
+// this vault is often a section ("Modellamento cognitivo" for L'apprendimento)
+const lrTeachAsk = (it) => `Explain ${lrStem(it.path)} in your own words.`;
+function lrTeachParts(sheet, s, it) {
+  const T = s.teachT[it.i] || (s.teachT[it.i] = { turn: 0, transcript: [] });
+  const eb = lrEl("div", "lr-eyebrow");
+  eb.appendChild(lrEl("span", "eyebrow", T.turn ? `A student who has not read your note asks · ${T.turn} of ${LR_TEACH_TURNS}` : "Explain it · with the book closed"));
+  sheet.appendChild(eb);
+  sheet.appendChild(lrEl("p", "q", lrTeachAsk(it)));
+  if (T.transcript.length) {
+    const log = lrEl("div", "lr-teachlog");
+    for (const x of T.transcript) log.appendChild(lrEl("p", x.role === "reader" ? "you" : "ask", x.text));
+    sheet.appendChild(log);
+  }
+  const lab = lrEl("label", "lr-answer");
+  lab.appendChild(lrEl("span", "lr-help", T.turn ? "Your answer to the student" : "What it is, how it works, why it matters"));
+  const ta = lrEl("textarea", "lr-input");
+  ta.id = "lr-answer";
+  ta.rows = T.turn ? 3 : 6;
+  ta.placeholder = T.turn ? "answer in your own words" : "your explanation, as you would give it to someone who has not read the note";
+  ta.value = s.answers[it.i] || "";
+  ta.disabled = !!s.teachBusy;
+  ta.addEventListener("input", () => (s.answers[it.i] = ta.value));
+  const inwrap = lrEl("div", "lr-inwrap");
+  inwrap.appendChild(ta);
+  if (typeof attachMic === "function") inwrap.appendChild(lrMic(s, it, ta));
+  lab.appendChild(inwrap);
+  sheet.appendChild(lab);
+  const actions = lrEl("div", "lr-actions");
+  actions.appendChild(lrEl("span", "sp"));
+  if (s.teachBusy) actions.appendChild(lrEl("span", "lr-help", T.turn >= LR_TEACH_TURNS ? "Checking your explanation against the note…" : "The student is reading what you said…"));
+  const send = lrKey(lrBtn("lr-send" + (s.teachBusy ? " off" : ""), T.turn >= LR_TEACH_TURNS ? "Finish" : "Send", lrTeachSend), "⏎", "Enter");
+  send.id = "lr-submit";
+  actions.appendChild(send);
+  sheet.appendChild(actions);
+}
+
+async function lrTeachSend() {
+  const s = lrSession, it = lrItem();
+  if (!s || s.mode !== "teach" || s.teachBusy || s.state !== "input") return;
+  if (typeof micBusy === "function" && micBusy("lr-answer")) { notify("the dictation is still running; stop it, then send", "warn"); return; }
+  const reply = (s.answers[it.i] || "").trim();
+  if (!reply) { notify("say it in a sentence or two first", "warn"); return; }
+  const T = s.teachT[it.i] || (s.teachT[it.i] = { turn: 0, transcript: [] });
+  s.teachBusy = true;
+  lrRender();
+  let r;
+  try { r = await lrPost("/learn/teach", { id: s.id, i: it.i, reply }); } catch (e) {
+    s.teachBusy = false;
+    if (!lrGone(e)) { notify("couldn't send: " + e.message); lrRender(); }
+    return;
+  }
+  s.teachBusy = false;
+  T.transcript.push({ role: "reader", text: reply });
+  s.answers[it.i] = "";
+  if (r.done) {
+    // the reveal compares all you said, not the last answer
+    s.answers[it.i] = T.transcript.filter((x) => x.role === "reader").map((x) => x.text).join("\n");
+    s.verdicts[it.i] = r;
+    s.state = "reveal";
+  } else {
+    T.transcript.push({ role: "student", text: r.question });
+    T.turn = r.turn;
+  }
+  lrRender();
 }
 
 // What the answer was given with, said once on the line that shows it.
@@ -2138,6 +2606,7 @@ function lrReveal(sheet, it, v) {
   const fb = mismatch ? `The note's claim is not supported by the line it cites, so this answer is not scored.${v.note_defect ? " " + v.note_defect : ""}`
     : v.feedback_line || (self ? "No model verdict. Compare your answer with the claim and the source, then rate it." : "");
   if (fb) vd.appendChild(lrEl("p", "fb", fb));
+  if (s.mode === "teach" && v.summary && v.summary !== fb) vd.appendChild(lrEl("p", "fb", v.summary));
   sheet.appendChild(vd);
   if (mismatch) {
     // the one amber verdict: the note's claim beside the source's line (ADR-0061 §23)
@@ -2235,17 +2704,22 @@ function lrChoose(n) {
 async function lrConfirm() {
   const s = lrSession, it = lrItem();
   if (s.results[it.i]) return lrNext();
+  // Enter again while the rating is in flight would post it twice (the server
+  // holds a lock for that too, learn_routes._RATE_LOCK)
+  if (s.confirming) return;
   const v = s.verdicts[it.i];
   const self = !!v.needs_self_grade || v.grader === "self";
   const rating = s.chosen?.[it.i] ?? (self ? null : v.rating);
   if (!rating) { notify("pick a rating", "warn"); return; }
   const btn = $("#lr-confirm");
   if (btn) btn.disabled = true;
+  s.confirming = true;
   try {
     const r = await lrPost("/learn/rate", { id: s.id, i: it.i, rating });
     s.results[it.i] = r;
     if (v.needs_self_grade) v.selfRated = true;
   } catch (e) { if (lrGone(e)) return; notify("not recorded: " + e.message); if (btn) btn.disabled = false; return; }
+  finally { s.confirming = false; }
   if (s.results[it.i].momentum) { lrRender(); return; }   // a milestone line reads before moving on
   lrNext();
 }
@@ -2315,8 +2789,54 @@ async function lrOpenReceipt(id, { replace = false } = {}) {
 
 // --- receipt -----------------------------------------------------------------
 const LR_STATUS_WORD = { assisted: "met with help, not counted", missed: "missed", skipped: "skipped", open: "not answered", not_scored: "not scored" };
-const LR_COMES_BACK = { missed: "in Missed lately", assisted: "back when it falls due", skipped: "nothing recorded" };
+const LR_COMES_BACK = { missed: "back in Missed", assisted: "back when it fades", skipped: "nothing recorded" };
 const lrStatusMark = (st) => (st === "met" ? "full" : st === "assisted" ? "half" : st === "not_scored" ? "warn" : "open");
+
+// The receipt opens on what was missed (ADR-0119, suggestion 3): each open
+// point or question with the line it rests on, a way to read it there, and
+// how it comes back. Returns the notes to ask again.
+function lrMissedList(wrap, r) {
+  const byPoint = !!r.points?.length;
+  const pts = byPoint ? r.points.filter((p) => p.status !== "met") : [];
+  const items = byPoint ? [] : r.items.filter((x) => ["missed", "assisted", "skipped"].includes(x.status));
+  const n = pts.length + items.length;
+  // a skip is not a miss (ADR-0061): it is listed, and the head does not count it
+  const missedN = [...pts, ...items].filter((x) => x.status !== "skipped").length;
+  const skippedN = n - missedN;
+  const sec = lrEl("section", "lr-missed");
+  sec.appendChild(lrEl("h2", null, missedN ? `You missed ${lrPlural(missedN, byPoint ? "point" : "question")}` : "Nothing missed"));
+  const t3 = r.tally3;
+  const sub = [t3 ? `${t3.met} of ${t3.points} met without help` : "", t3?.assisted ? `${t3.assisted} more with help, not counted` : "",
+    skippedN ? `${skippedN} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
+  if (sub) sec.appendChild(lrEl("p", "lr-help", sub));
+  for (const p of pts) {
+    const it = r.items.find((x) => x.point?.i === p.i && x.span?.line) || r.items.find((x) => x.point?.i === p.i);
+    sec.appendChild(lrMissedRow(p.status, p.heading ? `${p.kind}, under ${p.heading}` : p.kind, r.note, it?.span, lrStem(r.note)));
+  }
+  // the note's name, not items.title_of's first heading (a section in this vault)
+  for (const x of items) sec.appendChild(lrMissedRow(x.status, x.q ? lrPlain(x.q) : lrStem(x.path), x.path, x.span, lrStem(x.path)));
+  wrap.appendChild(sec);
+  const paths = [...new Set(items.filter((x) => x.status !== "skipped").map((x) => x.path))];
+  return { n, paths };
+}
+
+function lrMissedRow(status, what, path, span, title) {
+  const row = lrEl("div", "lr-mrow");
+  const t = lrEl("div", "t");
+  t.append(lrMark(lrStatusMark(status), ""), lrEl("span", null, what));
+  row.appendChild(t);
+  // a claim's line is in its source when the note cites one (item.source.leaf)
+  const inSource = !!(span?.leaf && span.leaf !== path);
+  const file = inSource ? span.leaf : path;
+  const where = [inSource ? lrStem(file) : title, span?.line ? `line ${span.line}` : ""].filter(Boolean).join(", ");
+  row.appendChild(lrEl("p", "src", span?.text ? `${where}: «${span.text}»` : where));
+  const acts = lrEl("div", "acts");
+  const read = lrBtn("lr-link", inSource ? "Read it in the source" : "Read it in the note", () => openNote(file, span?.line));
+  read.setAttribute("aria-label", `Read ${inSource ? lrStem(file) : title}${span?.line ? ` at line ${span.line}` : ""}`);
+  acts.append(read, lrEl("span", "lr-help", [LR_STATUS_WORD[status], LR_COMES_BACK[status]].filter(Boolean).join(" · ")));
+  row.appendChild(acts);
+  return row;
+}
 
 // The open points named by heading: "limit and step under Tipi di agente".
 function lrNamePoints(points) {
@@ -2342,11 +2862,10 @@ function lrRenderReceipt(body) {
   const r = lrReceipt;
   if (!r || r.id !== lrRoute.id) { lrOpenReceipt(lrRoute.id, { replace: true }); return; }
   const o = r.origin || {};
-  // Back lands on Next with the first missed note selected, so what the
-  // receipt established is the next thing read (ADR-0081 §9)
-  const firstMiss = r.items.find((x) => x.status === "missed");
-  const backLabel = firstMiss ? "Back to Next" : `Back to ${o.kind === "vault" ? "Next" : o.label}`;
-  const goBack = async () => { lrReceipt = null; if (!lrData) await loadLearn(true); lrGo(firstMiss ? { view: "note", path: firstMiss.path } : lrOriginRoute(o)); };
+  // Back lands on the plan it came from, else on Learn, whose Missed row now
+  // carries what this receipt established (ADR-0119)
+  const backLabel = o.kind === "plan" ? `Back to ${o.label}` : "Back to Learn";
+  const goBack = async () => { lrReceipt = null; if (!lrData) await loadLearn(true); lrGo(o.kind === "plan" ? lrOriginRoute(o) : { view: "home" }); };
   const when = r.ts ? lrDate(r.ts) : r.started ? `${lrDate(r.started)}, ${lrTime(r.started)}` : "";
   const dur = r.duration ? ` · ${Math.floor(r.duration / 60)} min ${Math.round(r.duration % 60)} s` : "";
   const crumb = [];
@@ -2362,19 +2881,8 @@ function lrRenderReceipt(body) {
   const again = r.from_ledger ? null : lrBtn("ghost box", `Another session on ${o.kind === "vault" ? "the vault" : o.kind === "note" ? "this note" : o.label}`,
     () => learnStartSession(o.kind === "plan" ? { plan: o.path } : o.kind === "note" ? { note: o.path } : {}));
   wrap.appendChild(lrHead(eyebrow.join(" · "), r.note ? r.items[0]?.title || lrStem(r.note) : o.kind === "plan" ? o.label : "Suggested practice", "", [again]));
-  // three figures (ADR-0061 §25); the summary sentence is what is read aloud
-  if (t3) {
-    const unit = r.points?.length ? "points" : "questions";
-    const figs = lrEl("div", "lr-figs");
-    const left = Math.max(0, t3.points - t3.met);
-    const sub2 = [t3.missed ? `${t3.missed} missed` : "", t3.skipped ? `${t3.skipped} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
-    figs.append(lrFig(`${t3.met} of ${t3.points}`, `${unit} met without help`, t3.assisted ? `${t3.assisted} more with help, not counted` : ""),
-      lrFig(left, `${unit} still open`, sub2));
-    const hold = r.note ? lrNetMoves(r.moved, true).find((x) => x.what === "hold") : null;
-    if (hold) figs.appendChild(lrFig(hold.to, "hold, estimated", hold.from !== hold.to ? `was ${hold.from}` : ""));
-    else figs.appendChild(lrFig(`${t3.with_evidence} of ${t3.objectives}`, "objectives with new evidence"));
-    wrap.appendChild(figs);
-  }
+  // what was missed first (ADR-0119, suggestion 3), then the way to ask it again
+  const missed = lrMissedList(wrap, r);
   if (lrReadAloud && r.established && typeof speak === "function" && !lrSpoken.has(`rc:${r.id}`)) { lrSpoken.add(`rc:${r.id}`); speak(r.established); }
   if (r.next && !r.note) wrap.appendChild(lrEl("p", "lr-help", `${r.next} ${typeof r.due_left === "number" ? r.due_left + " notes stay due; they can wait." : ""}`));
   // the next step is the primary: the targeted questions, naming them (ADR-0061 §26)
@@ -2387,51 +2895,48 @@ function lrRenderReceipt(body) {
     fu.append(t, lrBtn("lr-q", "Not now", () => fu.remove()),
       lrBtn("lr-send", `Ask them now · about ${r.followup.minutes} min`, () => learnStartSession({ note: r.note, points: r.followup.points, plan: r.plan || undefined })));
     wrap.appendChild(fu);
+  } else if (missed.paths.length && !r.from_ledger) {
+    // a session over several notes: the notes missed, asked again now; a
+    // miss schedules nothing by itself (_reason_sentence), so "tomorrow" as
+    // drawn would have been a promise the schedule does not keep
+    const fu = lrEl("div", "lr-followup");
+    const t = lrEl("div", "t");
+    t.appendChild(lrEl("b", null, `${lrPlural(missed.paths.length, "note")} to ask again`));
+    t.appendChild(lrEl("span", "lr-help", "or they come back in Missed"));
+    fu.append(t, lrBtn("lr-send", "Ask these again", () => learnStartSession({ scope: missed.paths, n: Math.min(24, missed.n), from: "missed" })));
+    wrap.appendChild(fu);
   }
-  if (r.points?.length) {
-    // points are marks grouped by heading (ADR-0061 §27)
-    const sec = lrEl("section", "lr-sec");
-    sec.appendChild(lrEl("h3", null, "Points"));
-    let heading = null;
-    let grid = null;
-    for (const p of r.points) {
-      if (p.heading !== heading || !grid) {
-        heading = p.heading;
-        if (heading) sec.appendChild(lrEl("span", "lr-grp", heading));
-        grid = lrEl("div", "lr-pts");
-        sec.appendChild(grid);
-      }
-      const name = lrEl("span", "p");
-      name.append(lrMark(lrStatusMark(p.status), p.status === "met" ? "met without help" : ""), p.kind);
-      if (p.status !== "met") {
-        // where it rests and how it comes back (ADR-0081 §9)
-        const line = r.items.find((x) => x.point?.i === p.i && x.span?.line)?.span?.line;
-        name.appendChild(lrEl("span", "m", [LR_STATUS_WORD[p.status] || p.status, line ? `line ${line}` : "", LR_COMES_BACK[p.status]].filter(Boolean).join(" · ")));
-      }
-      grid.append(name, lrEl("span", "k", LR_OBJ_SHORT[p.objective] || p.objective));
+  // the figures and the points' marks, on request (ADR-0061 §25, §27)
+  if (t3 || r.points?.length) lrDisc(wrap, "The figures", "", (box) => {
+    if (t3) {
+      const unit = r.points?.length ? "points" : "questions";
+      const figs = lrEl("div", "lr-figs");
+      const left = Math.max(0, t3.points - t3.met);
+      const sub2 = [t3.missed ? `${t3.missed} missed` : "", t3.skipped ? `${t3.skipped} skipped, not counted as wrong` : ""].filter(Boolean).join(" · ");
+      figs.append(lrFig(`${t3.met} of ${t3.points}`, `${unit} met without help`, t3.assisted ? `${t3.assisted} more with help, not counted` : ""),
+        lrFig(left, `${unit} still open`, sub2));
+      const hold = r.note ? lrNetMoves(r.moved, true).find((x) => x.what === "hold") : null;
+      if (hold) figs.appendChild(lrFig(hold.to, "hold, estimated", hold.from !== hold.to ? `was ${hold.from}` : ""));
+      else figs.appendChild(lrFig(`${t3.with_evidence} of ${t3.objectives}`, "objectives with new evidence"));
+      box.appendChild(figs);
     }
-    wrap.appendChild(sec);
-  }
-  // a session over several notes: its open questions as rows, each with
-  // where it rests and how it comes back (ADR-0081 §9)
-  const open = r.points?.length ? [] : r.items.filter((x) => ["missed", "assisted", "skipped"].includes(x.status));
-  if (open.length) {
-    const sec = lrEl("section", "lr-sec");
-    const h = lrEl("h3", null, "Still open");
-    h.appendChild(lrEl("span", "num", String(open.length)));
-    sec.appendChild(h);
-    // one note asked several times names its questions, not the title thrice
-    const oneNote = new Set(open.map((x) => x.path)).size === 1;
-    for (const x of open) {
-      const row = lrEl("div", "lr-openrow");
-      const t = lrEl("span", "t");
-      t.append(lrMark(lrStatusMark(x.status), ""), oneNote && x.q ? lrEl("span", "q", lrPlain(x.q))
-        : lrBtn("lr-link", x.title || lrStem(x.path), () => lrGo({ view: "note", path: x.path })));
-      row.append(t, lrEl("span", "m", [LR_STATUS_WORD[x.status], x.span?.line ? `line ${x.span.line}` : "", LR_COMES_BACK[x.status]].filter(Boolean).join(" · ")));
-      sec.appendChild(row);
+    if (r.points?.length) {
+      // points are marks grouped by heading (ADR-0061 §27)
+      let heading = null;
+      let grid = null;
+      for (const p of r.points) {
+        if (p.heading !== heading || !grid) {
+          heading = p.heading;
+          if (heading) box.appendChild(lrEl("span", "lr-grp", heading));
+          grid = lrEl("div", "lr-pts");
+          box.appendChild(grid);
+        }
+        const name = lrEl("span", "p");
+        name.append(lrMark(lrStatusMark(p.status), p.status === "met" ? "met without help" : ""), p.kind);
+        grid.append(name, lrEl("span", "k", LR_OBJ_SHORT[p.objective] || p.objective));
+      }
     }
-    wrap.appendChild(sec);
-  }
+  });
   if (r.revisit?.length) {
     const sec = lrEl("section", "lr-sec");
     sec.appendChild(lrEl("h3", null, "What to revisit"));
@@ -2540,19 +3045,21 @@ function learnKeys(e) {
   if (activeTab !== "learn") return;
   const tgt = e.target;
   const typing = tgt && (tgt.tagName === "TEXTAREA" || tgt.tagName === "INPUT" || tgt.tagName === "SELECT" || tgt.isContentEditable);
-  if (["home", "plan", "note", "plans"].includes(lrRoute.view)) {
+  if (["new", "edit"].includes(lrRoute.view)) {
+    // a typeahead's Escape closes its list and stops there (lrAskBox, lrRefInput)
+    if (e.key === "Escape") { e.preventDefault(); lrCloseDialog(); }
+    return;
+  }
+  if (["home", "plans"].includes(lrRoute.view)) {
+    // ↑ ↓ walk the rows; Enter opens the focused one (ADR-0119: the home has
+    // no detail pane, so an arrow no longer navigates)
     if (typing || e.altKey || e.ctrlKey || e.metaKey || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
     if (tgt?.closest && tgt !== document.body && !tgt.closest("#view-learn")) return;
     const rows = [...document.querySelectorAll("#learn-body [data-lr-row]")].filter((x) => x.offsetParent !== null);
     if (!rows.length) return;
     e.preventDefault();
-    const cur = rows.findIndex((x) => x.getAttribute("aria-pressed") === "true");
-    const next = rows[cur < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, cur + (e.key === "ArrowDown" ? 1 : -1)))];
-    const key = next.dataset.lrRow;
-    next.focus();
-    const seg = lrSeg;
-    lrGo(key.startsWith("plan:") ? { view: "plan", plan: key.slice(5) } : { view: "note", path: key.slice(5) }, { replace: true });
-    if (key.startsWith("plan:") && seg !== lrSeg) { lrSeg = seg; lrRender(); }
+    const cur = rows.indexOf(document.activeElement);
+    rows[cur < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, cur + (e.key === "ArrowDown" ? 1 : -1)))].focus();
     return;
   }
   if (!lrSession || lrRoute.view !== "session") return;
@@ -2560,8 +3067,8 @@ function learnKeys(e) {
   if (e.key === "Escape") { e.preventDefault(); if (lrEndAsk) { lrEndAsk = false; lrRender(); } else lrLeave(); return; }
   if (lrEndAsk) return;
   if (s.state === "input") {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); lrSubmit(false); return; }
-    if (e.key === "h" && !typing) { e.preventDefault(); lrHint(); }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); s.mode === "teach" ? lrTeachSend() : lrSubmit(false); return; }
+    if (e.key === "h" && !typing && s.mode !== "teach") { e.preventDefault(); lrHint(); }
     return;
   }
   if (s.state === "reveal") {

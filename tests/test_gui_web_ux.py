@@ -564,12 +564,14 @@ def test_the_drawers_verbs_live_behind_the_title():
     verbs are the title's menu; the pin stays out of it, since pinned is a
     state and a state has to show at rest. ADR-0075 cut the menu to chat and
     the map (the diff when there is one) and put the two views' glyphs beside
-    the title, outside the menu for the pin's reason: the dot is a state."""
+    the title, outside the menu for the pin's reason: the dot is a state.
+    ADR-0119 adds two items, a test on the note and its teach-back, because
+    Learn's home no longer lists every note; the old /explain ask stays out."""
     head = _block(INDEX, '<aside id="note-panel"', '<div id="note-diff"')
     assert ('<button type="button" id="note-title" aria-haspopup="menu" aria-expanded="false" '
             'aria-controls="note-menu">') in head
     menu = _block(head, '<div id="note-menu" role="menu"', "</header>")
-    assert re.findall(r'role="menuitem" id="([\w-]+)"', menu) == ["note-chat", "note-map", "note-diff-open"]
+    assert re.findall(r'role="menuitem" id="([\w-]+)"', menu) == ["note-chat", "note-test", "note-teach", "note-map", "note-diff-open"]
     for gone in ("note-summarize", "note-explain", "note-quiz", "note-relate", "note-learn"):
         assert gone not in INDEX, gone
     for glyph in ("note-pin", "note-info", "note-read"):

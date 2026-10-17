@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -149,6 +150,7 @@ def learn_home():
     plan_rows = [_plan_row(p, rows, entries) for p in plan_list]
     groups = _next_groups(entries, rows, preview, plan_rows, scopes, now)
     session_q = len(preview["items"])
+    evs_by = _events_of(entries)
     return {
         "next": groups, "mix": _mix(preview["items"], groups),
         "session": {"questions": session_q, "minutes": _minutes(session_q)} if session_q else None,
@@ -167,7 +169,42 @@ def learn_home():
                                 f"The list shows {SUGGESTIONS_N}; the rest waits.") if preview["amnesty"] else None,
                     "counts": counts, "first_four_minutes": _minutes(sum(s["questions"] for s in sug[:4]))},
         "live": _LIVE["id"] if _LIVE else None, "live_info": _live_info(),
+        "session_rows": [_session_row(it, evs_by, now) for it in preview["items"]],
+        "recent": _recent(rows, now),
     }
+
+
+def _session_row(it: dict, evs_by: dict[str, list[dict]], now: float) -> dict:
+    """A note of the next session as the home lists it (ADR-0119, D): its
+    reason in ADR-0081's words and the mark of its last answer."""
+    from silica.kernel.report import learner
+
+    evs = evs_by.get(learner.key_of(it["path"]), [])
+    title = " · ".join(_stem(x) for x in it["pair"]) if it.get("pair") else _stem(it["path"])
+    mark = "never" if not evs else {"met": "full", "assisted": "half", "missed": "open"}[_outcome(evs[-1])]
+    return {"path": it["path"], "title": title, "why": _reason(it, evs, now, pool=it["pool"]), "mark": mark,
+            "pair": it.get("pair")}
+
+
+RECENT_DAYS = 7
+RECENT_N = 4
+
+
+def _recent(rows: dict, now: float) -> list[dict]:
+    """The notes changed this week, newest first: what a student who studies
+    to their own plan most likely wants to be tested on (t4, messages 3, 7)."""
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.kernel.report import learner
+
+    # the view's rows carry no mtime; the note walk does, and says what is material
+    meta = learner._notes_meta(Path(CONFIG.vault_path))
+    fresh = [(m["mtime"], p) for p, m in meta.items()
+             if learner.is_material(m) and (m.get("mtime") or 0) >= now - RECENT_DAYS * 86400
+             and learner.key_of(p) in rows]
+    fresh.sort(reverse=True)
+    return [{"path": p, "title": _stem(p)} for _t, p in fresh[:RECENT_N]]
 
 
 def _preview_row(it: dict, scopes: dict[str, dict]) -> dict:
@@ -300,7 +337,7 @@ def _reason(row: dict, evs: list[dict], now: float, pool: str = "", misses: list
     # a note the reader wrote holds a card from its writing (D10), so the
     # picker can hold it due before any answer: the due date is its reason
     if row.get("attempts", 0) == 0 and not evs and not (pool == "due" and due):
-        return "never practised · " + ("AI-written, a prediction first" if row.get("ai") else "written by you")
+        return "not tested yet · " + ("AI-written, a prediction first" if row.get("ai") else "written by you")
     if due:
         return f"waiting since {_day(due)}" if due <= now else f"falls due {_day(due)}"
     return "practise this note"
@@ -314,7 +351,7 @@ def _stem(path: str) -> str:
 
 
 def _next_row(path: str, title: str, reason: str, group: str, scopes: dict, **extra) -> dict:
-    why = reason.removeprefix("never practised · ") if group == "never" else reason
+    why = reason.removeprefix("not tested yet · ") if group == "never" else reason
     also = _also_in(path, scopes)
     if also and group != "plans":
         why += f" · in {also[0]['name']}"
@@ -332,7 +369,7 @@ def _plan_next_why(p: dict, row: dict | None, evs: list[dict], now: float, misse
     if missed:
         return f"{p['next']['title']} · {_miss_clause(missed['misses'], evs[-1])}"
     if not evs:
-        return f"{p['next']['title']} · first in order, never practised"
+        return f"{p['next']['title']} · first in order, not tested yet"
     return f"{p['next']['title']} · first in the plan's order"
 
 
@@ -387,7 +424,7 @@ def _mix(preview_items: list[dict], groups: dict) -> str:
     for it in preview_items:
         g = where.get(it["path"]) or ("never" if it["pool"] == "unexplored" and not it.get("attempts") else "due")
         n[g] += 1
-    words = {"due": "falling due", "missed": "missed lately", "never": "never practised"}
+    words = {"due": "fading", "missed": "missed", "never": "not tested yet"}
     return ", ".join(f"{v} {words[k]}" for k, v in n.items() if v)
 
 
@@ -430,8 +467,8 @@ def _reason_sentence(reason: str, history: list[dict], in_plan: str) -> str:
         parts.append(f"It {reason}; practising it early costs nothing.")
     elif reason.startswith("edited"):
         parts.append(f"It was {reason.split(',')[0]}, after the last answer: the questions are on the new text.")
-    elif reason.startswith("never practised"):
-        parts.append("Never practised. " + ("Written by the AI, so you predict first, then read." if "AI" in reason
+    elif reason.startswith("not tested yet"):
+        parts.append("Not tested yet. " + ("Written by the AI, so you predict first, then read." if "AI" in reason
                                             else "Written by you, so a first question checks what writing it left."))
     elif reason.startswith("met with a hint"):
         parts.append("The hint meant it was not counted: one unaided answer settles it.")
@@ -582,12 +619,14 @@ def start_session(payload: dict):
         scope, frontier, revisit = scoped["paths"], scoped["frontier"], scoped["revisit"]
         objectives = plan["objectives"]
         origin = {"kind": "plan", "path": plan["path"], "label": plan["name"]}
+    teach = bool(payload.get("teach")) and bool(note)
     if note:
         picked = _note_rows(note, payload.get("points"), objectives if plan else None)
         objectives = picked["objectives"]
         if plan is None:
             origin = {"kind": "note", "path": note, "label": items.title_of(note)}
-        n = max(1, sum(len(r.get("asks") or []) or 1 for r in picked["items"]))
+        # one explanation covers the note, so a teach-back is one item
+        n = 1 if teach else max(1, sum(len(r.get("asks") or []) or 1 for r in picked["items"]))
     else:
         if isinstance(scope, str) and scope:
             from pathlib import Path
@@ -601,10 +640,14 @@ def start_session(payload: dict):
         if plan is not None:
             plans.assign_objectives(plan, picked["items"])
     built = items.build_session(picked["items"], picked["backfill"], n=n)
+    if teach:
+        # build_session sizes a note's items on its asks, not on n
+        built = built[:1]
     sid = uuid.uuid4().hex
     _LIVE = {"id": sid, "plan": plan["path"] if plan else "", "note": note, "origin": origin, "objectives": objectives,
              "reach": plan["reach_level"] if plan else 4, "n": n, "items": built, "verdicts": {}, "recorded": {},
-             "skipped": set(), "teach": {}, "started": _now(), "before": {}, "revisit": revisit or []}
+             "skipped": set(), "teach": {}, "started": _now(), "before": {}, "revisit": revisit or [],
+             "mode": "teach" if teach else "questions"}
     short = None
     if len(built) < n:
         short = picked["short"] or (f"{len(built)} of {n}: the other picked notes carry no line to ask about "
@@ -643,7 +686,7 @@ def _session_payload(s: dict, amnesty=None, short=None) -> dict:
             "objectives": s["objectives"], "objective_labels": [obj.LABEL[o] for o in s["objectives"]],
             "items": items.cue_payload(s["items"]), "amnesty": amnesty, "short": short, "started": s["started"],
             "reasons": [REASON.get("stale" if it.get("stale") else it["pool"], it["pool"]) for it in s["items"]],
-            "minutes": _minutes(len(s["items"]))}
+            "minutes": _minutes(len(s["items"])), "mode": s.get("mode", "questions")}
 
 
 @router.get("/session")
@@ -657,6 +700,8 @@ def live_session(id: str):
     out["skipped"] = sorted(s["skipped"])
     out["verdicts"] = {str(i): _verdict_payload(v, s["items"][i - 1]) for i, v in s["verdicts"].items() if i not in s["recorded"]}
     out["results"] = {str(i): r["result"] for i, r in s["recorded"].items()}
+    # a teach-back in progress: the reader's words and the student's questions
+    out["teach"] = {str(i): {"turn": t["turn"], "transcript": t["transcript"]} for i, t in s["teach"].items()}
     return out
 
 
@@ -743,8 +788,21 @@ def _momentum(before: dict | None, after: dict | None, first_success: bool) -> s
     return None
 
 
+# One rating at a time: the route is sync, so FastAPI runs two posts on two
+# threads, and both passed the `recorded` check before either wrote (two
+# ledger lines for one answer, 2026-10-16, Enter pressed while the first post
+# took 1.5 s to read the view twice). Ratings are one per answer: a lock costs
+# nothing here.
+_RATE_LOCK = threading.Lock()
+
+
 @router.post("/rate", dependencies=_SAME_ORIGIN)
 def rate(payload: dict):
+    with _RATE_LOCK:
+        return _rate(payload)
+
+
+def _rate(payload: dict):
     from silica.kernel.learn import objectives as obj
     from silica.kernel.learn.items import AXIS
     from silica.kernel.report import learner, quiz
@@ -1254,6 +1312,12 @@ def write_plan(payload: dict):
     # a refused line by its index (this form) or its text (the plan note's `refused:`)
     refused = [int(i) if str(i).lstrip("-").isdigit() else str(i) for i in (payload.get("refused") or []) if str(i).strip()]
     chosen = obj.normalize(payload.get("objectives"))
+    reference = payload.get("reference")
+    if isinstance(reference, str) and reference.strip():
+        try:
+            scope, target, restrict = _with_reference(scope, target, restrict, reference)
+        except Exception as exc:
+            raise HTTPException(400, str(exc))
     if scope not in plans.SCOPES:
         raise HTTPException(400, f"scope must be one of {plans.SCOPES}")
     if payload.get("preview") or payload.get("cards_only"):
@@ -1295,6 +1359,24 @@ def write_plan(payload: dict):
     except Exception as exc:
         raise HTTPException(400, str(exc))
     return out
+
+
+def _with_reference(scope: str, target, restrict: str, reference: str) -> tuple[str, Any, str]:
+    """Study and a Reference as today's syllabus scope (ADR-0119): the
+    reference's lines are the steps, and what is studied bounds where they
+    are looked for. A folder stays a prefix, so a note added to it later is
+    found; notes, a topic or a workspace are bounded by the notes they
+    resolve to now. No Study: the whole vault, as a syllabus plan always was."""
+    from silica.kernel.learn import plans
+
+    if not scope:
+        return "steps", reference, ""
+    if scope == "folder":
+        return "steps", reference, str(target).strip()
+    paths = plans.resolve_scope(scope, target, restrict=restrict)["paths"]
+    if not paths:
+        raise ValueError("nothing to study resolves, so the reference has nowhere to be looked for")
+    return "steps", reference, plans.RESTRICT_SEP.join(paths)
 
 
 def _preview(res: dict, chosen: list[str]) -> dict:
