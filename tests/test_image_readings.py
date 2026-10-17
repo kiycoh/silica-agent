@@ -2,6 +2,7 @@
 for the image wherever text is indexed or shown to the agent."""
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -122,6 +123,11 @@ def test_bulk_embed_reads_images_first_and_embeds_raw_bodies(monkeypatch):
 def test_an_image_with_no_text_becomes_its_reading(vault, monkeypatch):
     from silica.sources import convert
     img = _image(vault, "Inbox/lavagna.png")
+    # The mineru branch (ADR-0077). Without mineru on PATH an image is the chat
+    # model's reading from the start (ADR-0120 point 3, test_source_parity), so
+    # this passed only where mineru was installed and failed v0.17.0's release.
+    real = shutil.which
+    monkeypatch.setattr(convert.shutil, "which", lambda name: "/usr/bin/mineru" if name == "mineru" else real(name))
 
     def mineru(src, workdir):
         (workdir / "images").mkdir()
