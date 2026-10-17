@@ -2637,3 +2637,73 @@
   grid-column: 3;
   grid-row: 1;
 }
+
+/* --- the files a question carried (ADR-0121 point 4) ----------------------- */
+/* Under the words, on the question's own measure: a chip per file, its name
+   opening the note, and "add to vault" until the Inbox has it (point 5). */
+.msg.user>.msg-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  max-width: var(--text-w, 43rem);
+  margin-top: 0.5rem;
+}
+
+.mf {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  font-family: var(--sans);
+  font-size: 12px;
+}
+
+.mf-name {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--frost);
+  font: inherit;
+  cursor: pointer;
+}
+
+.mf-name:disabled {
+  cursor: default;
+  color: var(--ash);
+}
+
+.mf-name:not(:disabled):hover {
+  color: var(--accent);
+}
+
+.mf-in {
+  color: var(--ash-dim);
+}
+
+/* "again" sits beside copy at the end of the ledger line; without a line, both
+   are corner controls, so it stands left of copy instead of on top of it. */
+.msg .redo-btn {
+  right: 3.6rem;
+}
+
+#log .ledger .redo-btn {
+  right: auto;
+  margin-left: 0.3rem;
+}
+
+/* "edit" under the last question, revealed like copy on hover or focus. */
+.msg.user>.edit-btn {
+  position: relative;
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 11px;
+  padding: 0.05rem 0.5rem;
+}
+
+.msg.user.editing>.body {
+  color: var(--ash);
+  border-top-color: var(--accent);
+}

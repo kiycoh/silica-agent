@@ -94,10 +94,19 @@ def _inbox() -> Path:
     return Path(CONFIG.vault_path) / "Inbox"
 
 
+def _chat(server) -> str:
+    """The open chat's folder of attached files, vault-relative (ADR-0121 point 5)."""
+    from silica.kernel.recall.paths import chat_folder
+
+    return chat_folder(server.current_session_id)
+
+
 # --- point 1 and 3: the drop answers at once, behind a record ---------------------------
 
 def test_a_dropped_recording_answers_at_once_with_a_queued_job(client, lane):
-    tc, _, ran = client
+    from silica.config import CONFIG
+
+    tc, server, ran = client
     gate, _, _ = lane
     gate.clear()
     try:
@@ -107,16 +116,18 @@ def test_a_dropped_recording_answers_at_once_with_a_queued_job(client, lane):
         # Read before the transcriber is let go: the record is on disk first.
         rec = _record(job["id"])
         assert rec["state"] in ("queued", "running")
-        assert rec["source"]["path"] == "Inbox/lecture.mp3" and rec["source"]["size"] == 64
+        # The chat's file, not the vault's (ADR-0121 point 5).
+        assert rec["source"]["path"] == f"{_chat(server)}/lecture.mp3" and rec["source"]["size"] == 64
         assert len(rec["source"]["sha256"]) == 64 and rec["media"] is True
         assert "text" not in ran  # no words and nothing ready: no turn
     finally:
         gate.set()
     _drain()
     rec = _record(job["id"])
-    assert rec["state"] == "done" and rec["notes"] == ["Inbox/lecture.md"]
+    assert rec["state"] == "done" and rec["notes"] == [f"{_chat(server)}/lecture.md"]
     assert rec["attempts"] == 1 and rec["finished"] >= rec["started"] >= rec["created"]
-    assert (_inbox() / "lecture.md").exists()
+    assert (Path(CONFIG.vault_path) / _chat(server) / "lecture.md").exists()
+    assert not (_inbox() / "lecture.md").exists() and not (_inbox() / "lecture.mp3").exists()
 
 
 def test_the_upload_is_whole_before_it_has_its_name(client, monkeypatch):
@@ -136,13 +147,16 @@ def test_the_upload_is_whole_before_it_has_its_name(client, monkeypatch):
     body = b"# Hi\n\n" + b"x" * 3000
     tc.post("/nucleate", files=[("files", ("note.md", body, "text/markdown"))])
     assert (".note.md.part", len(body)) in seen
-    assert (_inbox() / "note.md").read_bytes() == body
-    assert not (_inbox() / ".note.md.part").exists()
+    folder = _inbox().parent / _chat(server)
+    assert (folder / "note.md").read_bytes() == body
+    assert not (folder / ".note.md.part").exists()
 
 
-def test_a_drop_with_words_starts_its_turn_with_what_was_ready(client, lane):
-    """Point 6: the turn starts at once with the ready files and names the
-    ones still converting; the job ids ride the header."""
+def test_a_drop_with_words_waits_for_its_files_then_asks_once(client, lane):
+    """ADR-0121 point 1: a question never runs before its file can be read.
+    The drop answers 202 and starts no turn; the record keeps the words, the
+    chat and the files that were ready; the page asks once the drop is read,
+    and a second ask (another tab) is refused."""
     tc, server, ran = client
     gate, _, _ = lane
     gate.clear()
@@ -150,18 +164,22 @@ def test_a_drop_with_words_starts_its_turn_with_what_was_ready(client, lane):
         r = tc.post("/nucleate", data={"text": "what is this lecture about?"},
                     files=[("files", ("lecture.mp3", b"\0" * 64, "audio/mpeg")),
                            ("files", ("note.md", b"# Hi\n\nbody", "text/markdown"))])
-        assert r.status_code == 200 and r.headers["content-type"].startswith("text/event-stream")
-        ids = r.headers["X-Silica-Jobs"].split(",")
+        assert r.status_code == 202 and r.json()["waits"] is True
+        (job,) = r.json()["jobs"]
+        assert "text" not in ran
     finally:
         gate.set()
-    assert "what is this lecture about?" in ran["text"]
-    assert "Inbox/note.md" in ran["text"]
-    assert "Still converting" in ran["text"] and "- lecture.mp3" in ran["text"]
     _drain()
-    rec = _record(ids[0])
-    # The record keeps the words and the chat the turn opened (point 3).
+    rec = _record(job["id"])
     assert rec["text"] == "what is this lecture about?"
-    assert rec["session"] and rec["session"] == server.current_session_id
+    assert rec["session"] and rec["session"] == server.current_session_id == r.json()["session"]
+    assert rec["beside"] == [f"{_chat(server)}/note.md"]
+    assert tc.post(f"/jobs/{job['id']}/turn", json={"as": "ask"}).status_code == 200
+    assert ran["text"].startswith("what is this lecture about?")
+    # Both files ride the question, each whole while it fits (point 2).
+    assert f'<file path="{_chat(server)}/lecture.md">' in ran["text"]
+    assert f'<file path="{_chat(server)}/note.md">' in ran["text"]
+    assert tc.post(f"/jobs/{job['id']}/turn", json={"as": "ask"}).status_code == 409
 
 
 def test_an_over_long_recording_never_enters_the_queue(client, monkeypatch):
@@ -178,10 +196,10 @@ def test_an_over_long_recording_never_enters_the_queue(client, monkeypatch):
 
 
 def test_a_drop_of_markdown_alone_records_no_job(client):
-    tc, _, ran = client
+    tc, server, ran = client
     r = tc.post("/nucleate", files=[("files", ("note.md", b"# Hi\n\nbody", "text/markdown"))])
     assert r.status_code == 200 and "X-Silica-Jobs" not in r.headers
-    assert "Inbox/note.md" in ran["text"]
+    assert f"{_chat(server)}/note.md" in ran["text"]
 
 
 # --- point 2: one worker, in order -----------------------------------------------------------
@@ -389,20 +407,23 @@ def test_a_finished_job_offers_the_turn_and_never_starts_one(client):
     assert "text" not in ran  # done, and still no turn of its own
     r = tc.post(f"/jobs/{job['id']}/turn", json={})
     assert r.status_code == 200
-    # The button is the student's choice, so it nucleates; a wordless drop no longer does.
+    # The button is the student's choice, so it nucleates; a wordless drop no
+    # longer does. Nucleating adds the file to the vault first (ADR-0121 point 5).
     assert ran["text"].startswith(server.NUCLEATE_ASK) and "Inbox/talk.md" in ran["text"]
+    assert (_inbox() / "talk.md").exists() and (_inbox() / "talk.mp3").exists()
     assert _record(job["id"])["dismissed"] is True
-    assert tc.post(f"/jobs/{job['id']}/turn", json={}).status_code == 200  # still a note to offer
+    # A drop's turn is asked once (ADR-0121 point 1): two tabs, one answer.
+    assert tc.post(f"/jobs/{job['id']}/turn", json={}).status_code == 409
 
 
 def test_ask_again_reruns_the_words_typed_with_the_drop(client):
     tc, server, ran = client
     r = tc.post("/nucleate", data={"text": "summarize it"},
                 files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
-    job_id = r.headers["X-Silica-Jobs"]
+    job_id = r.json()["jobs"][0]["id"]
     _drain()
-    tc.post(f"/jobs/{job_id}/turn", json={"ask": True})
-    assert ran["text"].startswith("summarize it") and "Inbox/talk.md" in ran["text"]
+    tc.post(f"/jobs/{job_id}/turn", json={"ask": True})   # the older spelling of "as": "ask"
+    assert ran["text"].startswith("summarize it") and f"{_chat(server)}/talk.md" in ran["text"]
 
 
 # --- the vault import (ADR-0098) and commands typed in the chat ------------------------------

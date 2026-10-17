@@ -327,10 +327,12 @@ def begin_turn() -> None:
 
 
 def _staged_path(path: str) -> bool:
-    from silica.kernel.recall.paths import is_inbox_path, is_source_leaf
+    from silica.kernel.recall.paths import is_chat_path, is_inbox_path, is_source_leaf
 
     try:
-        return bool(is_inbox_path(path) or is_source_leaf(path))
+        # A chat's attached file converts in its chat's folder (ADR-0121
+        # point 5), rebuilt from its source exactly as an inbox note is.
+        return bool(is_inbox_path(path) or is_source_leaf(path) or is_chat_path(path))
     except Exception as exc:
         # An unreadable manifest must not make a staging write judged as a
         # declared one: off the path test, STAGED is judged like no reason.

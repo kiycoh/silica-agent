@@ -430,12 +430,26 @@ def _session_owner(path: Path) -> dict:
     return {}
 
 
+# A question asked again (ADR-0121 point 7): the last user message and all
+# that follows it left the conversation. One more beat rather than an edit,
+# since the file is append-only; replay folds it exactly as the live list did.
+REWIND = "chat/rewind"
+
+
 def messages_from_beats(beats: list[dict]) -> list[dict]:
-    """The conversation as the narration recorded it: `turn` beats in order.
+    """The conversation as the narration recorded it: `turn` beats in order,
+    with each REWIND taking back the last user message and what followed it.
     This is what resume/load rebuild `messages` from (spec §5)."""
-    return [b["payload"]["message"] for b in beats
-            if b.get("kind") == "turn" and isinstance(b.get("payload"), dict)
-            and isinstance(b["payload"].get("message"), dict)]
+    out: list[dict] = []
+    for b in beats:
+        if b.get("kind") == REWIND:
+            at = max((i for i, m in enumerate(out) if m.get("role") == "user"), default=-1)
+            if at >= 0:
+                del out[at:]
+        elif (b.get("kind") == "turn" and isinstance(b.get("payload"), dict)
+              and isinstance(b["payload"].get("message"), dict)):
+            out.append(b["payload"]["message"])
+    return out
 
 
 # --- session list (merged with legacy web_sessions, spec §5) ----------------
