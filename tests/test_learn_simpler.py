@@ -4,6 +4,7 @@
 """ADR-0119: Learn opens on the next session as its list, a test is a plan
 only when it holds something to keep, a reference bounds a syllabus by the
 notes studied, and Explain it runs the teach-back the server already had."""
+# ruff: noqa: F811  the client and vault fixtures are imported, so every test that takes them reads as a redefinition
 from __future__ import annotations
 
 import os
