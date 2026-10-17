@@ -2319,9 +2319,10 @@ def test_gui_seed_is_the_tui_seed(tmp_vault, monkeypatch):
     gui = [m["content"] for m in server._seed[0]]
     tui = [m["content"] for m in seed_messages()]
 
-    assert len(gui) == len(tui)
-    # Same messages, one difference: the GUI prompt carries the math block.
-    assert gui[1:] == tui[1:]
+    # Same messages, two differences: the GUI prompt carries the math block, and
+    # the GUI alone has an app around it to answer about (ADR-0115).
+    assert gui[3].startswith("## The app you are in")
+    assert gui[1:3] + gui[4:] == tui[1:]
     assert "$$" in gui[0] and "$$" not in tui[0]
     # And the two things the GUI was missing, by content rather than by parity:
     # what day it is (nothing else in the seed carries a date) and the read/write
