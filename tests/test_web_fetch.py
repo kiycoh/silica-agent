@@ -516,12 +516,28 @@ def test_youtube_without_readable_cookies_runs_signed_out(monkeypatch, tmp_path)
     assert wf.youtube_cookies() is None
 
 
-def test_the_sign_in_wall_is_its_own_error_and_logs_the_renewal(monkeypatch, caplog):
+def test_the_sign_in_wall_is_its_own_error_and_logs_the_renewal(monkeypatch, caplog, tmp_path):
+    """The renewal line is a literal: the server's log keeps a template, not
+    its arguments (silica/ui/logging.py)."""
+    jar = tmp_path / "cookies.txt"
+    jar.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+    monkeypatch.setenv(wf.YOUTUBE_COOKIES_ENV, str(jar))
     _fake_ytdlp(monkeypatch, writes=False,
                 stderr="ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies")
     with caplog.at_level("WARNING"), pytest.raises(wf.YoutubeBlocked):
         wf.web_fetch("https://youtu.be/abc")
-    assert "youtube: sign-in wall" in caplog.text and "bin/youtube-cookies" in caplog.text
+    record, = [r for r in caplog.records if r.name == wf.__name__]
+    assert not record.args and "sign-in wall" in record.msg and "bin/youtube-cookies" in record.msg
+
+
+def test_youtube_asks_for_named_tracks_and_not_every_machine_translation():
+    """`en.*` matched YouTube's `<to>-<from>` translations (`en-de`), one
+    request each: the second came back HTTP 429 and ended yt-dlp before the
+    info file, the note's title (2026-10-17). yt-dlp matches without case, so
+    no pattern can keep a region and drop a source language."""
+    langs = wf._YT_SUB_LANGS.split(",")
+    assert not any(ch in wf._YT_SUB_LANGS for ch in "*+[")
+    assert {"en", "it", "en-orig", "it-orig"} <= set(langs) and "en-de" not in langs
 
 
 def test_youtube_lookalike_domain_takes_the_http_path(monkeypatch):
