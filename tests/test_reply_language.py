@@ -1,6 +1,7 @@
-"""`conventions.reply_language` — chat language, distinct from note-content
-`language`. Root cause it fixes: button/slash-command turns carry no natural
-language, so the follow-the-user rule fell through to English."""
+"""`conventions.reply_language`: chat language, distinct from note-content
+`language`. Declared, it is the chat's default; undeclared, the chat follows the
+person, and a button or slash-command turn takes their earlier messages' language
+or the notes'."""
 from __future__ import annotations
 
 from silica.kernel.vault_manifest import load_manifest
@@ -54,9 +55,30 @@ def test_prompt_with_preferred_language_names_it_and_covers_buttons():
     assert "button" in p and "slash-command" in p  # the turn that had no signal
 
 
-def test_prompt_without_preference_is_backcompat():
+def test_prompt_without_preference_follows_the_person():
+    """No "by default" for an undeclared vault: "Reply in italian by default"
+    answered 2 of 12 Chinese questions in Chinese, this rule 9 (2026-10-16). The
+    turn with no language of its own is the follow rule's to place."""
     assert system_prompt(None) == SYSTEM_PROMPT
-    assert "language of the user's most recent message" in SYSTEM_PROMPT
+    assert "ALWAYS reply in the language of the person's latest message" in SYSTEM_PROMPT
+    assert "by default" not in SYSTEM_PROMPT
+    assert "slash command" in SYSTEM_PROMPT and "else its notes'" in SYSTEM_PROMPT
+
+
+def test_the_seed_of_an_undeclared_vault_follows_the_person(tmp_vault):
+    """Italian notes, nothing declared: the language they are detected in no
+    longer sets the chat's, at the head of the seed or in its last line."""
+    from silica.cli import seed_messages
+    from silica.prompts import _LANG_FOLLOW
+
+    it = "Il gatto è sul tavolo e la casa è bella, ma non è facile trovare la strada giusta."
+    for i in range(3):
+        tmp_vault.note(f"nota{i}.md", it)
+    seed = seed_messages()
+    assert seed[-1]["content"] == _LANG_FOLLOW
+    assert seed[0]["content"].endswith(_LANG_FOLLOW)
+    tmp_vault.note("vault.yaml", "conventions:\n  reply_language: italian\n")
+    assert "Reply in italian by default" in seed_messages()[-1]["content"]
 
 
 def test_math_instruction_is_gui_only():

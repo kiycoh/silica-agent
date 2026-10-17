@@ -179,7 +179,7 @@ def _apply_workspace(ws: dict | None) -> None:
         # that ever shows up in the pilot's logs.
         logger.info("workspace line skipped: the chat is already compacted")
         return
-    # Before the seed's last system message, which must stay last (_lang_prefer).
+    # Before the seed's last system message, the language rule, which must stay last.
     head = next((n for n, m in enumerate(messages) if m.get("role") != "system"), len(messages))
     messages.insert(max(head - 1, 0), {"role": "system", "content": text, "origin": WS_ORIGIN})
 
