@@ -41,12 +41,18 @@ def _gist(description: str) -> str:
 def silica_load_tools(
     names: Annotated[list[str], Field(description="Exact tool names from the list above")],
 ) -> dict[str, Any]:
-    from silica.agent.constraints import loadable
+    from silica.agent.constraints import CHAT_CORE, loadable
 
     pool = set(loadable())
     loaded = [n for n in names if n in pool]
     out: dict[str, Any] = {"loaded": loaded}
-    unknown = [n for n in names if n not in pool]
+    # A core tool named here is already offered. Reported as "unknown", it told
+    # the chat the tool did not exist, and the chat condensed a chapter itself
+    # instead of calling silica_rework (1 of 12 runs, 2026-10-16).
+    offered = [n for n in names if n in CHAT_CORE]
+    if offered:
+        out["already_offered"] = offered
+    unknown = [n for n in names if n not in pool and n not in CHAT_CORE]
     if unknown:
         out["unknown"] = unknown
     return out

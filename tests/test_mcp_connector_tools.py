@@ -444,7 +444,10 @@ def _prefix_tokens() -> int:
 # tokens measured (12 cached tools, cut at 90 characters), so four fit and a
 # fifth does not (6,810). Kill adding servers above the ceiling unless the
 # token meter is re-pinned with its reason.
-GATE2_CEILING = 6_798
+# Re-pinned 2026-10-16 with the token meter (6,947 + 10%), which ADR-0116's
+# silica_rework moved by +256; four servers measured 7,054 then, so the
+# ceiling now leaves room for about 20 more catalog lines, not one.
+GATE2_CEILING = 7_641
 
 
 def test_gate2_four_configured_servers_keep_the_chat_prefix_under_the_ceiling():

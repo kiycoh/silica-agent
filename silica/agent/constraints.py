@@ -116,6 +116,10 @@ def web_turn_constraints() -> AgentConstraints:
 # more chance for a 9B model to answer "noted" and save nothing. It sits just
 # before the loader, so the head every earlier session cached is unchanged up
 # to it.
+# silica_rework joined 2026-10-16 without use data either (ADR-0116), for the
+# same reason: asked to rework a long text, the chat model answers it itself
+# and condenses it, and a load step is one more chance to do that. Also just
+# before the loader.
 CHAT_CORE = (
     "silica_recall",
     "silica_search",
@@ -137,6 +141,7 @@ CHAT_CORE = (
     "silica_web_answer",
     "silica_run_injector",
     "silica_remember",
+    "silica_rework",
     "silica_load_tools",
 )
 
