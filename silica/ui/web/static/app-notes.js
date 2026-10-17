@@ -399,9 +399,10 @@ nucleateInput.addEventListener("change", () => {
 });
 
 // --- the vault's + (ADR-0098) ---------------------------------------------------
-// Files or a folder into the Inbox, each through its lane, and no agent turn:
-// a folder the student only wants searchable should not spend a turn. Two
-// entries because one browser picker takes files or a folder, never both.
+// Files, a folder or a link into the Inbox, each through its lane, and no
+// agent turn: a folder the student only wants searchable should not spend a
+// turn. Two picker entries because one browser picker takes files or a folder,
+// never both; the link is typed (ADR-0120).
 const vaultAddBtn = $("#vault-add");
 const vaultAddMenu = $("#vault-add-menu");
 const vaultFilesInput = $("#vault-files");
@@ -432,19 +433,71 @@ function placeVaultAddMenu() {
   vaultAddMenu.style.top = `${Math.round(r.bottom + 4)}px`;
   vaultAddMenu.style.right = `${Math.max(8, Math.round(innerWidth - r.right))}px`;
 }
-let closeVaultAddMenu = () => false;
-if ("webkitdirectory" in HTMLInputElement.prototype) {
-  closeVaultAddMenu = menuButton(vaultAddMenu, vaultAddBtn, placeVaultAddMenu);
-} else {
-  // No folder picker in this browser: a menu of one entry is a detour.
-  vaultAddBtn.removeAttribute("aria-haspopup");
-  vaultAddBtn.addEventListener("click", () => vaultFilesInput.click());
-}
+const closeVaultAddMenu = menuButton(vaultAddMenu, vaultAddBtn, placeVaultAddMenu);
+// No folder picker in this browser: the entry would open a file picker.
+if (!("webkitdirectory" in HTMLInputElement.prototype)) $("#vam-folder").hidden = true;
 vaultAddMenu.addEventListener("click", (e) => {
   const item = e.target.closest('[role="menuitem"]');
   if (item?.id === "vam-files") vaultFilesInput.click();
   if (item?.id === "vam-folder") vaultFolderInput.click();
+  if (item?.id === "vam-link") askVaultLink();
 });
+
+// A web page into the Inbox, as /fetch does (ADR-0120). The address is typed
+// in the import's own box, which then shows the outcome as it shows a file's.
+// Text, not type=url: `en.wikipedia.org/wiki/X` is how people type an
+// address, and the server adds the https.
+function askVaultLink() {
+  const intoWorkspace = vaultImportWorkspace;
+  vaultImportWorkspace = "";
+  closeVaultAddMenu(true);
+  $("#side-vault").open = true;
+  vaultImportBox.hidden = false;
+  vaultImportBox.replaceChildren();
+  const form = document.createElement("form");
+  form.className = "vi-link";
+  const field = document.createElement("input");
+  Object.assign(field, { type: "text", inputMode: "url", autocomplete: "off", placeholder: "https://…" });
+  field.setAttribute("aria-label", "web address of the page to add");
+  const go = document.createElement("button");
+  Object.assign(go, { type: "submit", className: "linklike", textContent: "add" });
+  const x = document.createElement("button");
+  Object.assign(x, { type: "button", className: "vi-x", textContent: "✕" });
+  x.setAttribute("aria-label", "dismiss");
+  x.addEventListener("click", () => { vaultImportBox.hidden = true; });
+  field.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    e.stopPropagation(); // the app's Escape would go on to close the drawer
+    vaultImportBox.hidden = true;
+  });
+  form.append(field, go, x);
+  vaultImportBox.append(form);
+  field.focus();
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const url = field.value.trim();
+    if (!url) return;
+    renderVaultImport({ progress: "reading the page…" });
+    let rows = [];
+    let failed = "";
+    try {
+      const r = await fetch("/vault/fetch", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, workspace: intoWorkspace }),
+      });
+      if (r.ok) rows = (await r.json()).files;
+      else failed = (await r.json().catch(() => ({}))).detail || `the server answered ${r.status}`;
+    } catch {
+      failed = "the server could not be reached";
+    }
+    vaultImportLast = { rows, skipped: [], failed, folder: "", big: 0 };
+    renderVaultImport(vaultImportLast);
+    if (rows.some((r) => r.status === "note")) {
+      loadVaultInfo();
+      if (intoWorkspace) loadWorkspaces();
+    }
+  });
+}
 // Its own Escape: the app's one list (app-settings.js) would go on to close
 // the drawer, and the student only meant the menu.
 vaultAddMenu.addEventListener("keydown", (e) => {

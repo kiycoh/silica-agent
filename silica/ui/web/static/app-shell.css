@@ -1303,6 +1303,25 @@ details.side-section>summary.side-title:focus-visible {
   color: var(--frost);
 }
 
+/* "a link…" (ADR-0120): the address field in the box its outcome replaces. */
+#vault-import .vi-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#vault-import .vi-link input {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  color: var(--frost);
+  background: var(--slate-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+}
+
 #vault-import ul {
   margin: 0.35rem 0 0;
   padding-left: 1rem;

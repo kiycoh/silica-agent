@@ -8,14 +8,16 @@ calls it as the fallback when no source adapter claims a file. Dispatch is by
 extension over `DOC_EXTS`, three families with three different backends:
 
   * PDF — the selectable provider seam below.
-  * DOCX (mammoth → HTML), EPUB (a ZIP of XHTML) and FB2 (XML)
-    (`_BASE_TEXT_EXTS`) — read in process through one HTML/XML-to-markdown
-    pass, no office suite and no torch. XPS and MOBI, which only MuPDF opened,
-    are no longer accepted: declared unsupported rather than half-read.
-  * Images (`IMG_EXTS`) and OOXML decks/sheets (`OFFICE_EXTS`) — mineru, always,
-    because it is the only backend that opens them at all. Images take mineru's
-    OCR pipeline (it wraps them into a one-page PDF); pptx/xlsx take its native
-    python-pptx/openpyxl reader, no LibreOffice involved.
+  * DOCX (mammoth → HTML), EPUB (a ZIP of XHTML), FB2 (XML) and PPTX (a ZIP
+    of slide XML) (`_BASE_TEXT_EXTS`) — read in process through one
+    HTML/XML-to-markdown pass, no office suite and no torch; on the server
+    mammoth runs in `pdf_extract`'s limited child (ADR-0120). XPS and MOBI,
+    which only MuPDF opened, are no longer accepted: declared unsupported
+    rather than half-read.
+  * Images (`IMG_EXTS`) — mineru's OCR pipeline when it is installed (it wraps
+    them into a one-page PDF), and the chat model's reading when it is not, as
+    on the server (ADR-0120). OOXML sheets (`OFFICE_EXTS`) — mineru, always,
+    because it is the only backend that opens them at all.
   * ODF, RTF and legacy `.xls` (`_PURE_PY_OFFICE_EXTS`) — read in process, with
     no office suite anywhere: an ODF file is a ZIP the standard library opens,
     and striprtf + xlrd together weigh ~200 KB.
@@ -163,28 +165,33 @@ _MINERU_SIX_RE = re.compile(r"No module named ['\"]six['\"]")
 
 
 # Text documents read in process with no PDF renderer in the path: DOCX through
-# mammoth, EPUB (a ZIP of XHTML) and FB2 (XML) through the standard library.
-# `.txt`/`.md` are absent on purpose: ProseAdapter already claims them.
-_BASE_TEXT_EXTS = (".docx", ".epub", ".fb2")
+# mammoth, EPUB (a ZIP of XHTML), FB2 (XML) and PPTX (a ZIP of slide XML)
+# through the standard library. `.txt`/`.md` are absent on purpose:
+# ProseAdapter already claims them.
+_BASE_TEXT_EXTS = (".docx", ".epub", ".fb2", ".pptx")
 
 # Image formats mineru opens (its own `image_suffixes`). It wraps the image into
 # a one-page PDF internally, so a screenshot or a scan takes the same OCR
 # pipeline a scanned PDF takes. Both `.tif` and `.tiff` land because mineru
 # sniffs content rather than trusting the extension (measured: `.tif` -> "tiff",
 # `.jpg` -> "jpeg"). `.heic` is absent: mineru does not list it, and reading it
-# at all needs pillow-heif.
+# at all needs pillow-heif. Without mineru only `image_readings._MIME`'s
+# formats are read, by the chat model (`_via_image_model`).
 IMG_EXTS = (".png", ".jpg", ".jpeg", ".jp2", ".webp", ".gif", ".bmp", ".tif", ".tiff")
 
-# OOXML mineru parses NATIVELY, via python-pptx / openpyxl, with no LibreOffice
-# anywhere in the path. Output lands in `<stem>/office/<stem>.md` instead of
-# `auto/`, which the provider's recursive glob already finds; slide titles come
-# out as `##` headings, which is what `_split_on_headings` wants.
+# OOXML mineru parses NATIVELY, via openpyxl, with no LibreOffice anywhere in
+# the path. Output lands in `<stem>/office/<stem>.md` instead of `auto/`,
+# which the provider's recursive glob already finds.
 #
 # `.docx` is deliberately NOT here: mammoth reads it in the base install, so
 # routing it through mineru would demand an OCR install for a format that
-# already works. The pre-2007 binaries are not here either -- neither mineru nor
-# MuPDF opens them (see `_PURE_PY_OFFICE_EXTS` and `LEGACY_OFFICE_EXTS`).
-OFFICE_EXTS = (".pptx", ".xlsx")
+# already works. Nor is `.pptx` since 2026-10-17 (ADR-0120): mineru 3.2.1's
+# pptx path is python-pptx with no OCR at all (`grep -i ocr` on its
+# model/pptx/ and backend/office/ is empty), so it read nothing the deck's own
+# XML does not, and `_via_pptx` reads that XML with no install. The pre-2007
+# binaries are not here either -- neither mineru nor MuPDF opens them (see
+# `_PURE_PY_OFFICE_EXTS` and `LEGACY_OFFICE_EXTS`).
+OFFICE_EXTS = (".xlsx",)
 
 # Inputs no provider but mineru opens, so the provider seam does not apply.
 _MINERU_ONLY_EXTS = (*IMG_EXTS, *OFFICE_EXTS)
@@ -243,8 +250,14 @@ _SOFFICE_NOISE = ("javaldx",)
 # Media: transcribed, not parsed. Both families take the same path (ffmpeg
 # demuxes any container to 16 kHz mono wav, which is the one input every ASR
 # accepts), so video costs nothing beyond `-vn`. The list is what ffmpeg reads
-# in a default build, not everything it can be built for.
-AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma")
+# in a default build, not everything it can be built for. The second row is
+# ADR-0120's, what a phone or a Mac recorder writes: 3GP/3G2 (old Android
+# recorders, the `mov` demuxer), AIFF (macOS), AMR (voice memos) and Sun AU.
+# `.3gp` can hold video, whose audio is the part transcribed, as for `.mp4`.
+# Not NotebookLM's `.ram` (a playlist, the class `_FFMPEG_FORMATS` keeps out),
+# `.cda` (a 44-byte CD track stub with no audio in it) or `.mid` (MIDI, no speech).
+AUDIO_EXTS = (".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma",
+              ".3gp", ".3g2", ".aiff", ".aif", ".aifc", ".amr", ".au", ".snd")
 VIDEO_EXTS = (".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".mpg", ".mpeg")
 MEDIA_EXTS = (*AUDIO_EXTS, *VIDEO_EXTS)
 
@@ -280,7 +293,8 @@ _FFMPEG_ARGS = ("-nostdin", "-loglevel", "error", "-y")
 # concat list of another file beside it (2026-10-14), and the host's 5.1.9
 # predates the 2024 check that keeps an HLS playlist out the same way. Every
 # AUDIO_EXTS and VIDEO_EXTS file opens with one of these; no playlist does.
-_FFMPEG_FORMATS = ("-format_whitelist", "mp3,wav,mov,aac,flac,ogg,asf,matroska,avi,mpeg,mpegts")
+_FFMPEG_FORMATS = ("-format_whitelist",
+                   "mp3,wav,mov,aac,flac,ogg,asf,matroska,avi,mpeg,mpegts,aiff,amr,au")
 _ASR_SAMPLE_RATE = "16000"
 # 24 kbps: against 32 kbps on 17 min of FLEURS Italian it moved WER by at most
 # 0.2 points on MAI-Transcribe-2, Scribe v2 and Qwen3-ASR-1.7B (2026-10-13), and
@@ -584,7 +598,9 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
     # neither docling nor opendataloader is a path verified here for either family.
     if suffix in TABULAR_EXTS:
         return _convert_tabular(src)
-    if suffix in _MINERU_ONLY_EXTS:
+    if suffix in IMG_EXTS and shutil.which("mineru") is None:
+        provider = _via_image_model
+    elif suffix in _MINERU_ONLY_EXTS:
         provider = _pdf_via_mineru
     elif suffix in MEDIA_EXTS:
         provider = _via_asr
@@ -604,6 +620,8 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
         provider = _via_epub
     elif suffix == ".fb2":
         provider = _via_fb2
+    elif suffix == ".pptx":
+        provider = _via_pptx
     else:
         name = resolve_pdf_provider(CONFIG.pdf_provider)
         if name not in PDF_PROVIDERS:
@@ -632,6 +650,12 @@ def _doc_to_md(target: str, dest_dir: str, leaf: tuple[str, dict] | None = None)
                     "carries no recognisable speech (music, silence, or a "
                     "language the model was not given)"
                 )
+            if provider is _via_image_model:
+                # No OCR ran, so pointing at one would be advice the server
+                # cannot take; the sentence is the student's (ADR-0120).
+                from silica.sources.pdf_extract import PdfUnreadable
+
+                raise PdfUnreadable(IMAGE_UNREAD, "no_text")
             if suffix in _MINERU_ONLY_EXTS:
                 # mineru already ran (it is the only backend for these), so
                 # pointing at OCR would be advice the user has already taken.
@@ -831,7 +855,10 @@ def _read_pages(data: dict, workdir: Path) -> None:
             return ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS)
 
         def one(i: int) -> dict | None:
-            png = workdir / f"page-{i + 1}.png"
+            # A slide's picture keeps its own suffix: `image_part` names the
+            # MIME type after it, and a JPEG sent as image/png is the provider's
+            # to refuse (`_via_pptx`).
+            png = workdir / f"page-{i + 1}{data.get('suffixes', {}).get(i, '.png')}"
             png.write_bytes(images[i])
             try:
                 if i in math:
@@ -867,7 +894,7 @@ def _read_pages(data: dict, workdir: Path) -> None:
                     results += zip(pending[1:], pool.map(guarded, pending[1:]))
         for i, reading in results:
             if reading:
-                readings[i] = _page_reading_md(i + 1, reading)
+                readings[i] = _page_reading_md(i + 1, reading, data.get("unit", "page"))
     blank = {i for i, png in images.items() if png is None}
     data["readings"] = readings
     data["read"] = sorted(i for i in readings if i not in math)
@@ -899,13 +926,14 @@ def _read_formula_page(png: Path, ask) -> dict | None:
 _PAGE_MAX_TOKENS = 2500
 
 
-def _page_reading_md(page: int, reading: dict) -> str:
+def _page_reading_md(page: int, reading: dict, unit: str = "page") -> str:
     """A page's reading as a quote under ADR-0077's label, so the reader and the
     student tell a model's account from the document's own words, and the
-    model's text, quoted line by line, cannot open a heading of its own."""
-    kind = reading.get("kind") or "page"
+    model's text, quoted line by line, cannot open a heading of its own.
+    `unit` is "slide" for a deck's picture-only slide (ADR-0120)."""
+    kind = reading.get("kind") or unit
     description = reading.get("description") or ""
-    lines = [f"> [page {page}, read by {reading.get('model') or 'a model'}] "
+    lines = [f"> [{unit} {page}, read by {reading.get('model') or 'a model'}] "
              + (f"{kind}: {description}" if description else kind)]
     text = (reading.get("text") or "").strip()
     if text:
@@ -1050,16 +1078,33 @@ def _via_docx(src: Path, workdir: Path) -> tuple[str, Path]:
     every period and bracket in prose (`Body text\\.`), and a note is quoted
     later by people. Its HTML inlines images as data URIs, which the shared
     pass writes out as files so the figures reach the vault like a PDF's do.
+
+    mammoth reads a member whole, with no cap (`mammoth/zips.py`), so every
+    declared size is held to `_zip_member`'s ceiling before it opens the
+    archive: zipfile stops a read at the declared size (`ZipExtFile._left`),
+    so a member that lies inflates no further. On the server it runs in
+    `pdf_extract`'s limited child (ADR-0087 point 5's plan, built by
+    ADR-0120): an 8 MB document.xml took mammoth 7.6 s of CPU and 211 MB
+    (2026-10-17, 2 MB took 1.8 s and 71 MB), so the server's 16 MB ceiling
+    is near its 60 s and 1 GiB only when several parts are that large, and
+    the child is what stops those before the tenant's 1 GB cgroup does.
     """
     try:
-        import mammoth
+        import mammoth  # noqa: F401  the child imports it again, by itself
     except ImportError:
         raise ValueError("mammoth not installed — `pip install 'mammoth>=1.9'`") from None
+    from silica.config import hosted
+    from silica.sources import pdf_extract
 
+    try:
+        with zipfile.ZipFile(src) as z:
+            for info in z.infolist():
+                _check_member_size(info)
+    except zipfile.BadZipFile:
+        raise ValueError(f"{src.name} is not a readable DOCX file — re-save it, or export it as PDF") from None
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
-    with open(src, "rb") as fh:
-        html = mammoth.convert_to_html(fh).value
+    html = pdf_extract.docx_html(src) if hosted() else pdf_extract.docx_html_here(src)
     return _html_to_md(html, images=images, prefix=src.stem), images
 
 
@@ -1136,6 +1181,7 @@ def _via_fb2(src: Path, workdir: Path) -> tuple[str, Path]:
     """FictionBook 2: `<section>` titles become headings at their nesting depth,
     `<p>` become paragraphs. The standard library reads it; nothing else is
     involved."""
+    _whole_file_cap(src)
     root = _parse_office_xml(src.read_bytes())
     blocks: list[str] = []
 
@@ -1164,6 +1210,297 @@ def _via_fb2(src: Path, workdir: Path) -> tuple[str, Path]:
     images = workdir / "images"
     images.mkdir(parents=True, exist_ok=True)
     return "\n\n".join(blocks), images
+
+
+# --- PPTX: the deck's own XML (ADR-0120) ------------------------------------
+
+# Placeholders a layout repeats on every slide: the date, the footer, the
+# slide number, and on a notes page the thumbnail of the slide itself.
+_PPTX_SKIP = frozenset({"dt", "ftr", "sldNum", "hdr", "sldImg"})
+_PPTX_TITLE = frozenset({"title", "ctrTitle"})
+# A content placeholder's paragraphs are the slide's bullets; "" is one with
+# no type, which is how a layout's content box is written.
+_PPTX_BULLETS = frozenset({"", "body", "obj"})
+# mineru's rule for a picture too small to be content (MIN_PICTURE_AREA_RATIO
+# in its pptx_converter, 3.2.1): a logo or an icon under 1% of the slide.
+_PPTX_MIN_PICTURE = 0.01
+# What the vault shows and `_rewrite_image_links` embeds. EMF and WMF, which
+# decks carry for vector art, nothing here renders.
+_PPTX_MEDIA = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+# A PDF's page cap (pdf_extract.MAX_PAGES), for the same reason.
+_PPTX_MAX_SLIDES = 1000
+
+
+def _ooxml_attr(el: ET.Element | None, name: str) -> str:
+    """A relationship attribute by local name: `r:id` and `r:embed` sit in a
+    namespace that Strict OOXML spells differently from Transitional. Only a
+    namespaced key: a `p:sldId` also carries a plain `id`, its number."""
+    if el is None:
+        return ""
+    return next((v for k, v in el.attrib.items() if k.startswith("{") and _local_name(k) == name), "")
+
+
+def _ooxml_rels(z: zipfile.ZipFile, part: str) -> dict[str, str]:
+    """`part`'s relationships: id to the member each points at."""
+    import posixpath
+
+    folder, base = posixpath.split(part)
+    name = posixpath.join(folder, "_rels", f"{base}.rels")
+    if name not in z.NameToInfo:
+        return {}
+    out: dict[str, str] = {}
+    for rel in _parse_office_xml(_zip_member(z, name)):
+        target = rel.get("Target") or ""
+        if rel.get("TargetMode") == "External" or not target:
+            continue
+        out[rel.get("Id") or ""] = (target.lstrip("/") if target.startswith("/")
+                                    else posixpath.normpath(posixpath.join(folder, target)))
+    return out
+
+
+def _first_child(el: ET.Element, name: str) -> ET.Element | None:
+    return next((c for c in el if _local_name(c.tag) == name), None)
+
+
+def _pptx_line(p: ET.Element) -> str:
+    """One paragraph's text; a line break inside it is a space."""
+    parts = [(d.text or "") if _local_name(d.tag) == "t" else " "
+             for d in p.iter() if _local_name(d.tag) in ("t", "br")]
+    return " ".join("".join(parts).split())
+
+
+def _pptx_lines(body: ET.Element, bullets: bool) -> list[str]:
+    """A text body as markdown blocks: bullets where the placeholder or the
+    paragraph says so, indented by level, a run of them one block, since a
+    blank line between items is a list broken in two; plain text otherwise."""
+    out: list[str] = []
+    in_list = False
+    for p in body:
+        if _local_name(p.tag) != "p" or not (text := _pptx_line(p)):
+            continue
+        ppr = _first_child(p, "pPr")
+        marks = {_local_name(c.tag) for c in ppr} if ppr is not None else set()
+        if (bullets and "buNone" not in marks) or marks & {"buChar", "buAutoNum"}:
+            lvl = ppr.get("lvl", "0") if ppr is not None else "0"
+            item = f"{'  ' * min(int(lvl) if lvl.isdigit() else 0, 8)}- {text}"
+            if in_list:
+                out[-1] += "\n" + item
+            else:
+                out.append(item)
+            in_list = True
+        else:
+            out.append(text)
+            in_list = False
+    return out
+
+
+def _pptx_shapes(tree: ET.Element):
+    """The shapes under `tree` in document order, groups opened. An
+    AlternateContent block gives its Fallback, the form every reader takes."""
+    for el in tree:
+        name = _local_name(el.tag)
+        if name == "grpSp":
+            yield from _pptx_shapes(el)
+        elif name == "AlternateContent" and (fallback := _first_child(el, "Fallback")) is not None:
+            yield from _pptx_shapes(fallback)
+        elif name in ("sp", "pic", "graphicFrame"):
+            yield name, el
+
+
+def _pptx_placeholder(sp: ET.Element) -> str | None:
+    """The placeholder's type, "" for one with none, None for a free shape."""
+    nv = _first_child(sp, "nvSpPr")
+    ph = next((d for d in nv.iter() if _local_name(d.tag) == "ph"), None) if nv is not None else None
+    return None if ph is None else ph.get("type", "")
+
+
+def _pptx_area(el: ET.Element) -> int:
+    """cx times cy in EMU, of a shape's `a:ext` or of the deck's `p:sldSz`."""
+    ext = next((d for d in el.iter() if _local_name(d.tag) in ("ext", "sldSz") and d.get("cx")), None)
+    try:
+        return int(ext.get("cx") or 0) * int(ext.get("cy") or 0) if ext is not None else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _pptx_table(frame: ET.Element) -> str:
+    """A slide table as a markdown table, merged cells left empty. Not
+    `_md_table`: its 80-character cell cap is a profile's, and a slide's
+    cell is the slide's text."""
+    rows = [[" ".join(_pptx_line(p) for p in tc.iter() if _local_name(p.tag) == "p").strip()
+             for tc in tr if _local_name(tc.tag) == "tc"]
+            for tr in frame.iter() if _local_name(tr.tag) == "tr"]
+    rows = [r for r in rows if any(r)]
+    if not rows:
+        return ""
+    width = max(len(r) for r in rows)
+    lines = ["| " + " | ".join(c.replace("|", "\\|") for c in r + [""] * (width - len(r))) + " |"
+             for r in rows]
+    return "\n".join([lines[0], "|" + "---|" * width, *lines[1:]])
+
+
+def _via_pptx(src: Path, workdir: Path) -> tuple[str, Path]:
+    """PPTX → markdown from the deck's XML, standard library only (ADR-0120).
+
+    Slides in the presentation's order, each a `##` heading (its title, or
+    "Slide N"), so the segmenter cuts and packs a deck as it does a book's
+    chapters; then its bullets, its text boxes, its tables and its pictures,
+    and the speaker's notes, which a lecturer often writes the lecture in. A
+    slide with no text of its own is read from its largest picture by the
+    chat model, as a PDF page without text is (ADR-0087 amendment), up to
+    `pdf_extract.vision_pages()` of them; the rest are named.
+
+    ponytail: shapes in document order, which is the order they were drawn,
+    not always the order they are read; mineru sorts by position (xycut).
+    Sort by `a:off` when a deck reads out of order in a real note.
+    """
+    import posixpath
+    from collections import Counter
+
+    images = workdir / "images"
+    images.mkdir(parents=True, exist_ok=True)
+    try:
+        with zipfile.ZipFile(src) as z:
+            pres = _parse_office_xml(_zip_member(z, "ppt/presentation.xml"))
+            rels = _ooxml_rels(z, "ppt/presentation.xml")
+            order = [rels.get(_ooxml_attr(el, "id"), "") for el in pres.iter() if _local_name(el.tag) == "sldId"]
+            size = pres.find(".//{*}sldSz")  # `is None`, not `or`: a childless Element is falsy
+            slide_area = _pptx_area(size) if size is not None else 0
+            slides = [_pptx_slide(z, part, slide_area)
+                      for part in [p for p in order if p in z.NameToInfo][:_PPTX_MAX_SLIDES]]
+            # A picture on two slides or more is the template's (a logo, a
+            # background): on a 26-slide student deck one image stood on every
+            # slide, and embedding it 26 times is noise the note carries.
+            uses = Counter(m for *_, pictures in slides for m in {m for _, m in pictures})
+            written: dict[str, str] = {}  # media member -> its file in `images`
+            for *_, pictures in slides:
+                pictures[:] = [(a, m) for a, m in pictures if uses[m] == 1]
+                for _, media in pictures:
+                    try:
+                        data = _zip_member(z, media)
+                    except ValueError:
+                        continue  # a picture past the ceiling is that picture lost
+                    written[media] = posixpath.basename(media)
+                    (images / written[media]).write_bytes(data)
+    except (zipfile.BadZipFile, KeyError, ET.ParseError) as e:
+        raise ValueError(
+            f"{src.name} is not a readable PPTX file ({type(e).__name__}) — "
+            "re-save it, or export it as PDF"
+        ) from None
+    parts: dict[int, list[str]] = {}
+    texty: set[int] = set()  # slides with words of their own, title or notes included
+    bare: dict[int, str] = {}  # slide index -> its largest picture, for slides with no text
+    for n, (title, lines, notes, pictures) in enumerate(slides):
+        pictures = [(a, m) for a, m in pictures if m in written]
+        if not (title or lines or notes or pictures):
+            continue  # a blank slide: a heading over nothing is noise in the note
+        out = [f"## {title or f'Slide {n + 1}'}"]
+        out += [f"![]({images / written[m]})" for _, m in pictures]
+        out += lines
+        if notes:
+            out += ["Speaker notes:", *notes]
+        if title or lines or notes:
+            texty.add(n)
+        else:
+            bare[n] = max(pictures)[1]
+        parts[n] = out
+    readings = _read_slides(bare, written, images, parts, workdir)
+    for n in bare:
+        parts[n].insert(1, readings.get(n) or f"> [slide {n + 1}: no text, not read]")
+    if not texty and not readings:
+        return "", images  # pictures no model read: `_doc_to_md` names the empty file
+    return "\n\n".join("\n\n".join(out) for out in parts.values()) + "\n", images
+
+
+def _pptx_size(el: ET.Element) -> int:
+    """The largest font size a shape's text states, in hundredths of a point;
+    0 when it states none and inherits from the layout."""
+    sizes = [int(sz) for d in el.iter()
+             if _local_name(d.tag) in ("rPr", "defRPr", "endParaRPr") and (sz := d.get("sz") or "").isdigit()]
+    return max(sizes, default=0)
+
+
+def _pptx_slide(z: zipfile.ZipFile, part: str, slide_area: int
+                ) -> tuple[str, list[str], list[str], list[tuple[int, str]]]:
+    """One slide: its title, its text and tables as markdown blocks in document
+    order, its speaker notes, and its pictures as (area, media member).
+
+    A slide without a title placeholder takes as title the one short line set
+    larger than everything else on it: Google Slides and Canva draw the title
+    as a free text box, and on a 26-slide deck it came out as the last line
+    of every slide."""
+    root = _parse_office_xml(_zip_member(z, part))
+    srels = _ooxml_rels(z, part)
+    title = ""
+    items: list[tuple[list[str], int, str]] = []  # (blocks, font size, the line if a free one-liner)
+    pictures: list[tuple[int, str]] = []
+    tree = next((el for el in root.iter() if _local_name(el.tag) == "spTree"), None)
+    for kind, el in _pptx_shapes(tree) if tree is not None else ():
+        if kind == "graphicFrame":
+            if table := _pptx_table(el):
+                items.append(([table], 0, ""))
+            continue
+        if kind == "pic":
+            blip = next((d for d in el.iter() if _local_name(d.tag) == "blip"), None)
+            media = srels.get(_ooxml_attr(blip, "embed"), "")
+            area = _pptx_area(el)
+            if (media.lower().endswith(_PPTX_MEDIA) and media in z.NameToInfo
+                    and not (slide_area and area < _PPTX_MIN_PICTURE * slide_area)):
+                pictures.append((area, media))
+            continue
+        ph = _pptx_placeholder(el)
+        body = _first_child(el, "txBody")
+        if ph in _PPTX_SKIP or body is None:
+            continue
+        paras = [t for p in body if _local_name(p.tag) == "p" and (t := _pptx_line(p))]
+        if ph in _PPTX_TITLE and not title:
+            title = " ".join(paras)
+            continue
+        if blocks := _pptx_lines(body, bullets=ph in _PPTX_BULLETS):
+            # A line with no letter in it ("7,9%") is a slide's callout, not its name.
+            one = (paras[0] if ph is None and len(paras) == 1 and len(paras[0].split()) <= _HEADING_MAX_WORDS
+                   and any(ch.isalpha() for ch in paras[0]) else "")
+            items.append((blocks, _pptx_size(el), one))
+    if not title and items:
+        top = max(range(len(items)), key=lambda i: items[i][1])
+        if items[top][2] and all(it[1] < items[top][1] for i, it in enumerate(items) if i != top):
+            title = items.pop(top)[2]
+    notes_part = next((t for t in srels.values() if "/notesSlides/" in f"/{t}"), "")
+    notes: list[str] = []
+    if notes_part in z.NameToInfo:
+        notes_tree = _parse_office_xml(_zip_member(z, notes_part))
+        spt = next((e for e in notes_tree.iter() if _local_name(e.tag) == "spTree"), None)
+        for kind, el in _pptx_shapes(spt) if spt is not None else ():
+            body = _first_child(el, "txBody")
+            if kind == "sp" and _pptx_placeholder(el) == "body" and body is not None:
+                notes += _pptx_lines(body, bullets=False)
+    return title, [b for blocks, _, _ in items for b in blocks], notes, pictures
+
+
+def _read_slides(bare: dict[int, str], written: dict[str, str], images: Path,
+                 parts: dict[int, list[str]], workdir: Path) -> dict[int, str]:
+    """The chat model's reading of each slide with no text of its own, from its
+    largest picture, through `_read_pages` like a PDF page without text: the
+    same cap (`vision_pages`), the same 16 MiB of pictures a file, and the
+    first refusal deciding for the rest."""
+    from silica.sources import pdf_extract
+
+    sent: dict[int, bytes] = {}
+    suffixes: dict[int, str] = {}
+    budget = pdf_extract._IMAGE_BYTES
+    for n in sorted(bare)[:pdf_extract.vision_pages()]:
+        picture = (images / written[bare[n]]).read_bytes()
+        if len(picture) > budget:
+            break
+        budget -= len(picture)
+        sent[n], suffixes[n] = picture, Path(bare[n]).suffix.lower()
+    if not sent:
+        return {}
+    sample = " ".join(line for out in parts.values() for line in out[1:] if not line.startswith("!["))[:4000]
+    data: dict = {"images": sent, "suffixes": suffixes, "unit": "slide",
+                  "pages": [[(sample, 0.0)]], "no_text": sorted(sent)}
+    _read_pages(data, workdir)
+    return data["readings"]
 
 
 # --- HTML → markdown, shared by DOCX and EPUB --------------------------------
@@ -1365,6 +1702,37 @@ def _pdf_via_opendataloader(src: Path, workdir: Path) -> tuple[str, Path]:
 # inflates to gigabytes. 64 MB is far past any real content.xml (a 500-page .odt
 # with tables lands around 3 MB) and far short of a bomb.
 _MAX_ZIP_MEMBER = 64 * 1024 * 1024
+# On the server these readers run in the tenant's own process, under its 1 GB
+# cgroup (silica-hosted deploy/silica@.service MemoryMax=1G), and ElementTree
+# took 69 MB to hold an 8 MB part and 29 MB for 2 MB (2026-10-17): 64 MB would
+# be ~450 MB for one part. 16 MB is ~110 MB and still 5x the 500-page .odt.
+_HOSTED_ZIP_MEMBER = 16 * 1024 * 1024
+
+
+def _member_cap() -> int:
+    from silica.config import hosted
+
+    return _HOSTED_ZIP_MEMBER if hosted() else _MAX_ZIP_MEMBER
+
+
+def _check_member_size(info: zipfile.ZipInfo) -> None:
+    cap = _member_cap()
+    if info.file_size > cap:
+        raise ValueError(
+            f"{info.filename} declares more than {cap // (1024 * 1024)} MB "
+            "uncompressed — refusing to read it (decompression bomb)"
+        )
+
+
+def _whole_file_cap(src: Path) -> None:
+    """A format read whole (FB2, RTF) held to the member ceiling: on the server
+    the file is the part, and the upload's own cap is 100 MB."""
+    cap = _member_cap()
+    if src.stat().st_size > cap:
+        raise ValueError(
+            f"{src.name} is over the {cap // (1024 * 1024)} MB this reader takes "
+            "— export it as PDF"
+        )
 
 
 def _zip_member(z: zipfile.ZipFile, name: str) -> bytes:
@@ -1374,16 +1742,13 @@ def _zip_member(z: zipfile.ZipFile, name: str) -> bytes:
     read is capped anyway because the local header is written by whoever built
     the archive and may simply lie about it.
     """
-    if z.getinfo(name).file_size > _MAX_ZIP_MEMBER:
-        raise ValueError(
-            f"{name} declares more than {_MAX_ZIP_MEMBER // (1024 * 1024)} MB "
-            "uncompressed — refusing to read it (decompression bomb)"
-        )
+    _check_member_size(z.getinfo(name))
+    cap = _member_cap()
     with z.open(name) as f:
-        data = f.read(_MAX_ZIP_MEMBER + 1)
-    if len(data) > _MAX_ZIP_MEMBER:
+        data = f.read(cap + 1)
+    if len(data) > cap:
         raise ValueError(
-            f"{name} inflates past {_MAX_ZIP_MEMBER // (1024 * 1024)} MB — "
+            f"{name} inflates past {cap // (1024 * 1024)} MB — "
             "refusing to read it (decompression bomb)"
         )
     return data
@@ -1501,6 +1866,8 @@ def _via_rtf(src: Path, workdir: Path) -> tuple[str, Path]:
             "striprtf not installed — `pip install striprtf`, "
             "or re-save the file as PDF"
         ) from None
+    # striprtf took 6.0 s of CPU on 16 MB (2026-10-17), in the tenant's process.
+    _whole_file_cap(src)
     # RTF is 7-bit ASCII by spec with non-ASCII escaped, so a stray raw byte is
     # a malformed file rather than a different encoding: replace and move on.
     return rtf_to_text(
@@ -2380,6 +2747,27 @@ def _mineru_error(stderr: str) -> str:
     return (hits[-1] if hits else lines[-1])[:300]
 
 
+IMAGE_UNREAD = ("This image could not be read: the model that reads images gave no "
+                "reading of it. Try again later, or ask about it in the chat.")
+
+
+def _via_image_model(src: Path, workdir: Path) -> tuple[str, Path]:
+    """An image where no OCR is installed, as on the server: no text of its own,
+    so `_doc_to_md`'s image branch has the chat model read it (ADR-0120).
+    Refused up front in a format the model is never sent (`_MIME`): a `.tif`
+    or `.jp2` needs mineru, or a re-save."""
+    from silica.kernel.recall.image_readings import _MIME
+
+    if src.suffix.lower() not in _MIME:
+        raise ValueError(
+            f"{src.suffix} images are read by mineru, which is not installed here: "
+            "re-save it as PNG or JPEG"
+        )
+    images = workdir / "images"
+    images.mkdir(parents=True, exist_ok=True)
+    return "", images
+
+
 def _image_reading_md(src: Path) -> str:
     """An image the OCR pass found no text in, as the chat model's reading of it
     (ADR-0077): a diagram or a whiteboard photo was refused before. Empty when
@@ -2388,7 +2776,13 @@ def _image_reading_md(src: Path) -> str:
 
     try:
         from silica.agent.vision import ask_chat_model
-        reading = image_readings.read_image(src, image_readings._language(""), ask=ask_chat_model)
+
+        # A page's budget, not a figure's 700: a photo of a page of notes is
+        # a page's words, and a reply cut short is JSON that does not parse.
+        def ask(messages: list[dict]) -> str:
+            return ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS)
+
+        reading = image_readings.read_image(src, image_readings._language(""), ask=ask)
     except Exception as e:
         # No vision endpoint, or none at all: the caller raises the OCR error,
         # which is still the truth about this file.
@@ -2475,7 +2869,7 @@ def _source_date(src: Path) -> str | None:
     import datetime
     try:
         suffix = src.suffix.lower()
-        if suffix in (*OFFICE_EXTS, ".docx"):
+        if suffix in (*OFFICE_EXTS, ".docx", ".pptx"):
             # OOXML core properties: <dcterms:created>2024-04-02T09:00:00Z</…>
             with zipfile.ZipFile(src) as z:
                 xml = _zip_member(z, "docProps/core.xml").decode("utf-8", "replace")
@@ -2519,7 +2913,7 @@ def _doc_citation(src: Path, md_text: str) -> dict[str, str]:
 
             meta = metadata(src)
             title, authors = meta.get("Title", ""), meta.get("Author", "")
-        elif suffix == ".docx":
+        elif suffix in (".docx", ".pptx"):
             # OOXML core properties: <dc:title>, <dc:creator>
             import html as _html
 

@@ -765,15 +765,16 @@ def _pdf_lane(config: SilicaConfig) -> str:
 def _mineru_lane() -> str:
     """Whether the mineru CLI is reachable, and what cannot convert without it.
 
-    Its own row and not a footnote to the PDF one: images and .pptx/.xlsx reach
-    mineru whatever SILICA_PDF_PROVIDER says, because no other backend opens
-    them at all (`_MINERU_ONLY_EXTS` in sources/convert.py). So a vault of
-    screenshots is unconvertible under the default provider too, and the pdf
-    row — which only ever reports the PDF lane — never said so.
+    Its own row and not a footnote to the PDF one: .xlsx reaches mineru
+    whatever SILICA_PDF_PROVIDER says, because no other backend opens it at all
+    (`_MINERU_ONLY_EXTS` in sources/convert.py), and the pdf row — which only
+    ever reports the PDF lane — never said so. Since ADR-0120 an image without
+    mineru is read by the chat model and a .pptx from its own XML, so the
+    missing line names what that leaves: no OCR, and no .xlsx.
     """
     if shutil.which("mineru"):
-        return "ok (OCR, figures, images/.pptx/.xlsx)"
-    return "missing (no OCR; images/.pptx/.xlsx cannot convert)"
+        return "ok (OCR, figures, images, .xlsx)"
+    return "missing (no OCR: images go to the chat model; .xlsx cannot convert)"
 
 
 def check_stt(config: SilicaConfig) -> CheckResult:
@@ -832,7 +833,7 @@ def check_converters(config: SilicaConfig) -> CheckResult:
     # instruction for a tool the user already has reads as a fault report.
     absent = []
     if not shutil.which("mineru"):
-        absent.append("mineru for OCR and images/.pptx/.xlsx (`pip install 'mineru[pipeline]'`)")
+        absent.append("mineru for OCR and .xlsx (`pip install 'mineru[pipeline]'`)")
     if not ffmpeg:
         absent.append("ffmpeg for audio/video")
     if status == "missing":

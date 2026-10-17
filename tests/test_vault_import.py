@@ -103,7 +103,7 @@ def test_a_folder_keeps_its_tree_and_only_what_silica_reads(client):
     assert (_inbox() / "Corso/Settimana 1/Lezione 1.pdf").exists()  # locally the PDF stays
     assert rows["Corso/appunti.md"]["status"] == "note"
     assert rows["Corso/elenco.txt"]["path"] == "Inbox/Corso/elenco.md"  # text comes in as a note
-    assert rows["Corso/foto.jpg"]["status"] == "skipped"
+    assert rows["Corso/foto.jpg"]["status"] != "skipped"  # a source since ADR-0120
     assert rows["Corso/.obsidian/workspace.md"]["status"] == "skipped"
     assert not (_inbox() / "Corso/.obsidian").exists()
 
@@ -165,27 +165,135 @@ def test_hidden_text_is_named_in_the_reply(client):
 
 def test_on_the_server_the_pdf_goes_once_its_note_exists(client, monkeypatch):
     """Point 7, and ADR-0087 point 5's list with its audio (amendment of
-    2026-10-14): a .docx is not offered or taken."""
+    2026-10-14) and ADR-0120's documents, images and CSV: a video is not
+    offered or taken, and a .docx that is not one is refused by its bytes."""
+    from silica.ui.web.vault_import import HOSTED_EXTENSIONS
+
     monkeypatch.setenv("SILICA_HOSTED", "1")
     tc, _ = client
 
     types = tc.get("/supported_types").json()
-    resp = _post(tc, [("", "paper.pdf", pdf_bytes(["Text of the paper, in full."])), ("", "doc.docx", b"PK")])
+    resp = _post(tc, [("", "paper.pdf", pdf_bytes(["Text of the paper, in full."])),
+                      ("", "doc.docx", b"PK"), ("", "talk.mp4", b"\x00\x00\x00\x18ftypmp42")])
 
-    offered = [".md", ".pdf", ".txt", ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"]
-    assert types["import"] == offered and types["extensions"] == offered
+    assert types["import"] == types["extensions"] == list(HOSTED_EXTENSIONS)
+    assert {".docx", ".pptx", ".epub", ".png", ".csv", ".3gp"} <= set(HOSTED_EXTENSIONS)
     rows = _settled(resp)
     assert rows["paper.pdf"]["notes"] == ["Inbox/paper.md"]
     assert not (_inbox() / "paper.pdf").exists() and (_inbox() / "paper.md").exists()
-    assert rows["doc.docx"]["status"] == "skipped"
+    assert rows["doc.docx"]["status"] == "refused" and "not a DOCX file" in rows["doc.docx"]["reason"]
+    assert not (_inbox() / "doc.docx").exists()
+    assert rows["talk.mp4"]["status"] == "skipped"
 
 
-def test_locally_the_vault_plus_offers_no_images():
+def test_locally_the_vault_plus_offers_images():
+    """ADR-0120: picked in the vault's + an image is a source; the chat's
+    attach keeps it with the message (ADR-0077 point 3)."""
     from silica.ui.web.vault_import import importable_extensions
 
     exts = importable_extensions(hosted=False)
     assert ".pdf" in exts and ".md" in exts and ".py" in exts
-    assert ".png" not in exts and ".jpg" not in exts
+    assert ".png" in exts and ".jpg" in exts
+
+
+def test_on_the_server_a_document_a_deck_an_image_and_a_table_become_notes(client, monkeypatch):
+    """ADR-0120 end to end, hosted: the documents go once read, as a PDF does
+    (point 7); the image stays, since its note embeds it; the CSV stays, since
+    its rows are queried where they lie."""
+    import json
+    import shutil
+
+    from silica.agent import vision
+    from silica.sources import convert
+    from tests.doc_factory import PNG_1X1, docx_bytes, pptx_bytes
+
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    real = shutil.which
+    monkeypatch.setattr(convert.shutil, "which", lambda n: None if n == "mineru" else real(n))
+    monkeypatch.setattr(vision, "ask_chat_model", lambda m, max_tokens=700: json.dumps(
+        {"kind": "handwriting", "description": "notes", "text": "Carnot cycle"}))
+    tc, _ = client
+
+    rows = _settled(_post(tc, [
+        ("", "essay.docx", docx_bytes([("p", "Heat flows from hot to cold.")])),
+        ("", "deck.pptx", pptx_bytes([{"title": "Entropy", "bullets": [(0, "never decreases")]}])),
+        ("", "board.png", PNG_1X1),
+        ("", "marks.csv", b"student,mark\nanna,28\nbruno,30\n"),
+    ]))
+
+    assert {n: r["status"] for n, r in rows.items()} == dict.fromkeys(rows, "note")
+    vault = _inbox().parent
+    assert "Heat flows" in (vault / rows["essay.docx"]["notes"][0]).read_text(encoding="utf-8")
+    assert "## Entropy" in (vault / rows["deck.pptx"]["notes"][0]).read_text(encoding="utf-8")
+    assert "Carnot cycle" in (vault / rows["board.png"]["notes"][0]).read_text(encoding="utf-8")
+    assert "student" in (vault / rows["marks.csv"]["notes"][0]).read_text(encoding="utf-8")
+    assert not (_inbox() / "essay.docx").exists() and not (_inbox() / "deck.pptx").exists()
+    assert (_inbox() / "board.png").exists() and (_inbox() / "marks.csv").exists()
+
+
+def test_an_image_whose_bytes_are_not_one_is_refused(client):
+    tc, _ = client
+
+    row = _settled(_post(tc, [("", "photo.png", b"<html>not a picture</html>")]))["photo.png"]
+
+    assert row["status"] == "refused" and "not a PNG file" in row["reason"]
+    assert not (_inbox() / "photo.png").exists()
+
+
+# --- a link (ADR-0120) ----------------------------------------------------------
+
+def test_a_link_becomes_a_note_in_the_inbox(client, monkeypatch):
+    from silica.sources import web_fetch
+
+    seen = []
+
+    def page(url):
+        seen.append(url)
+        return web_fetch.Page("Source: https://x.test/post\n\nThe second law, stated plainly.", "Second law")
+
+    monkeypatch.setattr(web_fetch, "fetch_page", page)
+    tc, _ = client
+
+    row, = tc.post("/vault/fetch", json={"url": "x.test/post"}).json()["files"]
+
+    assert seen == ["https://x.test/post"]
+    assert row["status"] == "note"
+    assert "The second law, stated plainly." in (_inbox().parent / row["notes"][0]).read_text(encoding="utf-8")
+
+
+def test_on_the_server_a_youtube_link_is_refused_before_any_request(client, monkeypatch):
+    from silica.sources import web_fetch
+    from silica.ui.web.server import YOUTUBE_ON_SERVER
+
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setattr(web_fetch, "fetch_page", lambda url: pytest.fail("a request went out"))
+    tc, _ = client
+
+    for url in ("https://www.youtube.com/watch?v=abc", "youtu.be/abc"):
+        row, = tc.post("/vault/fetch", json={"url": url}).json()["files"]
+        assert row == {"name": url, "status": "refused", "reason": YOUTUBE_ON_SERVER}
+
+
+def test_a_link_that_cannot_be_read_is_a_refused_row_not_an_error(client, monkeypatch):
+    import httpx
+
+    from silica.sources import web_fetch
+
+    def down(url):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(web_fetch, "fetch_page", down)
+    tc, _ = client
+
+    resp = tc.post("/vault/fetch", json={"url": "https://down.test/"})
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    hosted = tc.post("/vault/fetch", json={"url": "https://down.test/"})
+
+    assert resp.status_code == 200 and resp.json()["files"][0]["status"] == "refused"
+    assert "connection refused" in resp.json()["files"][0]["detail"]
+    assert "connection refused" not in str(hosted.json()["files"][0])  # the log keeps it there
+    assert tc.post("/vault/fetch", json={"url": "two words"}).status_code == 400
+    assert tc.post("/vault/fetch", json={"url": ""}).status_code == 400
 
 
 # --- H6: the remote-image channel ---------------------------------------------

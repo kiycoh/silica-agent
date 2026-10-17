@@ -588,9 +588,11 @@ def test_image_and_office_route_to_mineru_whatever_the_provider_says(
     on pymupdf: a 1653x2339 render of a text page yields ''), and none opens
     pptx/xlsx at all. So unlike DOCX these must NOT fall back to the default PDF
     provider when the provider is unset or set to something else -- they must
-    reach mineru or fail loudly."""
+    reach mineru or fail loudly. With mineru on PATH: without it an image is the
+    chat model's (ADR-0120, tests/test_source_parity.py)."""
     monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
     monkeypatch.setattr(conv, "_via_pdfium", _never_called_default)
+    monkeypatch.setattr(conv.shutil, "which", lambda name: f"/usr/bin/{name}")
     seen: list[str] = []
 
     def run(cmd, **kw):
@@ -610,10 +612,11 @@ def _never_called_default(*a, **k):
 
 
 def test_office_output_lands_under_its_own_parse_dir(tmp_vault, monkeypatch):
-    """Measured on mineru 3.4.4: a pptx parses into `<stem>/office/<stem>.md`,
+    """Measured on mineru 3.4.4: an OOXML file parses into `<stem>/office/<stem>.md`,
     not the `auto/` a pdf gets. The provider's glob is recursive so both work --
-    pinned here because a non-recursive "fix" would silently break only OOXML."""
-    tmp_vault.note("deck.pptx", "x")
+    pinned here because a non-recursive "fix" would silently break only OOXML.
+    A sheet since ADR-0120: a deck no longer goes to mineru."""
+    tmp_vault.note("deck.xlsx", "x")
 
     def run(cmd, **kw):
         out = Path(cmd[cmd.index("-o") + 1])
@@ -628,7 +631,7 @@ def test_office_output_lands_under_its_own_parse_dir(tmp_vault, monkeypatch):
 
     monkeypatch.setattr(conv.subprocess, "run", run)
 
-    body = _inbox_note(conv.convert("deck.pptx")[0]).read_text(encoding="utf-8")
+    body = _inbox_note(conv.convert("deck.xlsx")[0]).read_text(encoding="utf-8")
     assert "## Slide One" in body
     assert "- bullet" in body
 
@@ -636,6 +639,7 @@ def test_office_output_lands_under_its_own_parse_dir(tmp_vault, monkeypatch):
 def test_unreadable_image_error_does_not_advise_installing_ocr(tmp_vault, monkeypatch):
     """mineru IS the backend here, so the PDF branch's "install mineru and set
     SILICA_PDF_PROVIDER=mineru" would be advice the user has already taken."""
+    monkeypatch.setattr(conv.shutil, "which", lambda name: f"/usr/bin/{name}")
     monkeypatch.setattr(conv, "_pdf_via_mineru", lambda src, wd: ("  \n\n", wd))
     tmp_vault.note("cat.png", "x")
 
@@ -671,32 +675,6 @@ def test_real_mineru_ocrs_an_image_with_no_text_layer(tmp_vault):
     body = _inbox_note(conv.convert(str(png))[0]).read_text(encoding="utf-8")
     assert "Silica ingestion probe" in body
     assert "Second line of scanned text." in body
-
-
-@_REAL_MINERU
-def test_real_mineru_reads_a_pptx_without_libreoffice(tmp_vault, monkeypatch):
-    """mineru parses OOXML natively (python-pptx), so no `soffice` is spawned --
-    which matters because a present-but-hung LibreOffice is a real machine
-    state. Slide titles must arrive as headings, since that is what the
-    segmenter splits on."""
-    pptx_mod = pytest.importorskip("pptx")
-    deck = pptx_mod.Presentation()
-    slide = deck.slides.add_slide(deck.slide_layouts[1])
-    slide.shapes.title.text = "Ingestion Roadmap"
-    slide.placeholders[1].text = "Images via mineru\nOffice native"
-    path = Path(CONFIG.vault_path) / "deck.pptx"
-    deck.save(path)
-
-    def no_soffice(cmd, **kw):
-        assert "soffice" not in str(cmd) and "libreoffice" not in str(cmd)
-        return _real_run(cmd, **kw)
-
-    _real_run = conv.subprocess.run
-    monkeypatch.setattr(conv.subprocess, "run", no_soffice)
-
-    body = _inbox_note(conv.convert(str(path))[0]).read_text(encoding="utf-8")
-    assert "## Ingestion Roadmap" in body
-    assert "Images via mineru" in body
 
 
 def test_gui_picker_accepts_the_new_families(tmp_vault):

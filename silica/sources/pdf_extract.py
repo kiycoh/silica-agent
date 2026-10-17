@@ -15,6 +15,10 @@ the standard library and nothing from `silica`: it starts with `python -I -B`
 on this file's path, so neither the package nor the working directory is on
 its import path.
 
+A DOCX on the server goes through the same child with the same limits
+(`docx_html`, ADR-0087 point 5's plan, built by ADR-0120): mammoth reads a
+member whole with no cap of its own, and its memory grows 25 MB a MB of XML.
+
 A page without text (ADR-0087 point 3) is rendered here too, grayscale, and
 handed back as PNG for the parent to send to the chat model (the amendment of
 2026-10-13), and so is a page drawing a math font, whose formulas the text
@@ -110,6 +114,7 @@ TINY_POINTS = 1.0
 _INVISIBLE_MODES = (3, 7)
 
 TOO_LARGE = "This PDF is too large or malformed to read."
+DOC_TOO_LARGE = "This document is too large or malformed to read: export it as PDF and add that."
 PASSWORD = "This PDF is password-protected: remove the password and upload it again."
 NOT_PDF = "This file is not a PDF: it has no %PDF- header in its first 1,024 bytes."
 NO_TEXT = ("This PDF has no selectable text (a scan or images). "
@@ -604,8 +609,39 @@ def _key(path: str | os.PathLike) -> tuple:
     return (os.path.realpath(path), st.st_size, st.st_mtime_ns, vision_pages())
 
 
+def docx_html_here(path: str | os.PathLike) -> str:
+    """mammoth's HTML of a DOCX, in this process: the laptop's path."""
+    import mammoth
+
+    with open(path, "rb") as fh:
+        return mammoth.convert_to_html(fh).value
+
+
+def docx_html(path: str | os.PathLike) -> str:
+    """mammoth's HTML of a DOCX, read in the limited child (the server's path).
+
+    ponytail: figures stay behind in the child, which writes the HTML on one
+    line under the text's share of the pipe; a PDF on the server carries no
+    figures either. Send them as later lines, as rendered pages are, when a
+    student's DOCX figure is what the note is missing."""
+    out = _run_child(path, ["docx"], DOC_TOO_LARGE)
+    end = out.find(b"\n")
+    try:
+        data = json.loads(out[:end]) if 0 <= end <= _TEXT_OUT_BYTES else None
+    except ValueError:
+        data = None
+    if not isinstance(data, dict) or not isinstance(data.get("html"), str):
+        raise PdfUnreadable(DOC_TOO_LARGE, "too_large")
+    return data["html"]
+
+
 def _read_in_child(path: str | os.PathLike, vision: int = 0) -> dict:
-    """Run `_child` on an already-open descriptor of `path` and parse what it writes.
+    """Run `_child` on `path` and parse what it writes."""
+    return _parse_child(_run_child(path, [str(vision)], TOO_LARGE))
+
+
+def _run_child(path: str | os.PathLike, args: list[str], too_large: str) -> bytearray:
+    """Run `_child` on an already-open descriptor of `path`; its stdout, capped.
 
     The descriptor, not the path: the child never resolves a name, so a link
     swapped in after this open cannot point it elsewhere (ADR-0098 H1)."""
@@ -619,10 +655,10 @@ def _read_in_child(path: str | os.PathLike, vision: int = 0) -> dict:
     fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0))
     try:
         if os.fstat(fd).st_size > MAX_BYTES:
-            raise PdfUnreadable(TOO_LARGE, "too_large")
+            raise PdfUnreadable(too_large, "too_large")
         with tempfile.TemporaryDirectory() as cwd:
             proc = subprocess.Popen(
-                [sys.executable, "-I", "-B", os.path.abspath(__file__), str(fd), str(vision)],
+                [sys.executable, "-I", "-B", os.path.abspath(__file__), str(fd), *args],
                 pass_fds=(fd,), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, env={}, cwd=cwd,
             )
@@ -665,7 +701,7 @@ def _read_in_child(path: str | os.PathLike, vision: int = 0) -> dict:
     if note and not _NETWORK_NOTE_LOGGED:
         _NETWORK_NOTE_LOGGED = True
         logging.getLogger(__name__).warning("pdf child: %s", note[:500])
-    return _parse_child(out)
+    return out
 
 
 def _parse_child(out: bytearray) -> dict:
@@ -736,7 +772,7 @@ def _drop_network() -> str:
     return ""
 
 
-def _child(fd: int, vision: int) -> int:
+def _child(fd: int, vision: int, kind: str = "pdf") -> int:
     import resource
 
     # Limits first, before pypdfium2 is even imported: set here and not through
@@ -763,6 +799,27 @@ def _child(fd: int, vision: int) -> int:
         # Python's buffer, and the text must already be in the pipe.
         out.flush()
 
+    if kind == "docx":
+        try:
+            import io
+
+            import mammoth
+
+            # Copied, not handed over: mammoth takes `fileobj.name` for the
+            # folder of a linked image, and an fdopen'd file's name is an int.
+            # The parent already held the file to MAX_BYTES.
+            with os.fdopen(fd, "rb") as fh:
+                docx = io.BytesIO(fh.read())
+            # An <img> with no src: `_html_to_md` keeps its alt text and
+            # writes no file, which the child could not write anyway.
+            html = mammoth.convert_to_html(
+                docx, convert_image=mammoth.images.img_element(lambda image: {})).value
+            emit({"html": html[:MAX_CHARS]})
+        except Exception:
+            # Any failure in here is the file's: the parent names it with
+            # DOC_TOO_LARGE, and the traceback stays in the child.
+            emit({"error": "malformed"})
+        return 0
     try:
         with os.fdopen(fd, "rb") as fh:
             extract(fh, max_pages=MAX_PAGES, max_chars=MAX_CHARS, vision_pages=vision, emit=emit)
@@ -774,4 +831,6 @@ def _child(fd: int, vision: int) -> int:
 
 
 if __name__ == "__main__":
+    if sys.argv[2:3] == ["docx"]:
+        sys.exit(_child(int(sys.argv[1]), 0, "docx"))
     sys.exit(_child(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 0))

@@ -133,7 +133,7 @@
            tree. Pinned is a group of THIS list and not a compartment of its
            own: it is the notes you named, and they are notes. -->
       <details class="side-section" id="side-vault" open>
-        <summary class="side-title"><svg class="si" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Vault<span id="vault-count"></span><button type="button" id="tree-collapse" title="collapse all folders" aria-label="collapse all folders">collapse</button><button type="button" id="vault-add" aria-label="add to the vault" aria-haspopup="menu" aria-expanded="false" aria-controls="vault-add-menu" title="add files or a folder"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button></summary>
+        <summary class="side-title"><svg class="si" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>Vault<span id="vault-count"></span><button type="button" id="tree-collapse" title="collapse all folders" aria-label="collapse all folders">collapse</button><button type="button" id="vault-add" aria-label="add to the vault" aria-haspopup="menu" aria-expanded="false" aria-controls="vault-add-menu" title="add files, a folder or a link"><svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button></summary>
         <div class="side-body">
           <!-- What the last import did (ADR-0098 point 5): in the compartment it
                was started from, not in a toast that leaves before the student
@@ -164,6 +164,7 @@
       <div id="vault-add-menu" role="menu" aria-label="add to the vault" hidden>
         <button type="button" role="menuitem" id="vam-files" title="pick files; each becomes a note in the Inbox">files…</button>
         <button type="button" role="menuitem" id="vam-folder" title="pick a folder; the files Silica reads keep its tree in the Inbox">a folder…</button>
+        <button type="button" role="menuitem" id="vam-link" title="type a web address; the page's text becomes a note in the Inbox">a link…</button>
       </div>
       <input id="vault-files" type="file" multiple hidden />
       <input id="vault-folder" type="file" webkitdirectory multiple hidden />
@@ -496,7 +497,7 @@
       <div class="hp-row"><kbd>ctrl ,</kbd><span>settings</span></div>
       <div class="hp-row"><kbd>?</kbd><span>this panel, from anywhere you are not typing</span></div>
       <div class="sp-title">the vault</div>
-      <div class="hp-row"><span class="hp-what">drop a file</span><span>anywhere on the window: it becomes a note in Inbox/, and the vault's + takes a folder too</span></div>
+      <div class="hp-row"><span class="hp-what">drop a file</span><span>anywhere on the window: it becomes a note in Inbox/, and the vault's + takes a folder, or a link to a web page, too</span></div>
       <div class="hp-row"><span class="hp-what">New chat</span><span>at the top of the sidebar starts one; the old one stays in Chats</span></div>
       <div class="hp-row"><span class="hp-what">every write</span><span>gets a card in the transcript with its own revert</span></div>
       <div class="hp-row"><span class="hp-what">This chat</span><span>lists every note this chat touched; click one to read its diff</span></div>

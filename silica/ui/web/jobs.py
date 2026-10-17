@@ -348,13 +348,17 @@ def _hidden(src: Path) -> list[dict]:
 
 
 def _settle_source(rec: dict) -> None:
-    """ADR-0098 point 7 on the server: an imported PDF goes once its note is
-    written, and an imported file that failed goes too, since nothing refused
+    """ADR-0098 point 7 on the server: an imported PDF, or since ADR-0120 a
+    document (`READ_THEN_REMOVED`), goes once its note is written, and an
+    imported file that failed goes too, since nothing refused
     stays in a capped directory. A drop keeps its file in the Inbox, as it
     always has, and so does a laptop."""
     if not hosted() or rec.get("origin") != "import":
         return
-    if rec["state"] == "failed" or (rec["state"] == "done" and rec["source"]["name"].lower().endswith(".pdf")):
+    from silica.ui.web.vault_import import READ_THEN_REMOVED
+
+    if rec["state"] == "failed" or (rec["state"] == "done"
+                                    and rec["source"]["name"].lower().endswith(READ_THEN_REMOVED)):
         _remove_source(rec)
 
 
