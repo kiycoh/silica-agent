@@ -334,7 +334,7 @@ function lrRender() {
 // pane each with Learn as their way back; the dialog sits over the column.
 const LR_PURPOSE = "Test yourself on your notes, then see what you missed.";
 const LR_LIST_SHOWN = 5;
-const lrAsk = { q: "", opts: [], idx: -1, pick: null };
+const lrAsk = { q: "", opts: [], idx: -1, picks: [] };
 // notes taken out of the next session before Start (ADR-0119, Gate)
 const lrDropped = new Set();
 
@@ -421,22 +421,24 @@ function lrHomeColumn(d) {
 }
 
 // "What would you like to learn?": a note, a folder or a topic from the
-// typeahead starts a test at once and writes nothing; a syllabus note opens
-// the dialog with it as the Reference; a sentence is read into the dialog.
+// typeahead starts a test at once and writes nothing; notes and folders
+// gather, one after another, into one test; a syllabus note opens the dialog
+// with it as the Reference; a sentence is read into the dialog.
 function lrAskBox() {
   const row = lrEl("div", "lr-ask");
   const wrap = lrEl("div", "lr-ta lr-askin");
-  if (lrAsk.pick) {
+  lrAsk.picks.forEach((o, i) => {
     const tok = lrEl("span", "lr-tok");
-    tok.append(lrEl("i", null, lrKindWord(lrAsk.pick)), lrAsk.pick.label);
-    const x = lrBtn("lr-x", "×", () => { lrAsk.pick = null; lrRender(); setTimeout(() => $("#lr-ask")?.focus(), 0); });
-    x.setAttribute("aria-label", "clear what to learn");
+    tok.append(lrEl("i", null, lrKindWord(o)), o.label);
+    const x = lrBtn("lr-x", "×", () => { lrAsk.picks.splice(i, 1); lrRender(); setTimeout(() => $("#lr-ask")?.focus(), 0); });
+    x.setAttribute("aria-label", lrAsk.picks.length > 1 ? `remove ${o.label}` : "clear what to learn");
     tok.appendChild(x);
     wrap.appendChild(tok);
-  } else {
+  });
+  if (lrAsk.picks.every(lrJoins)) {
     const inp = lrEl("input", "lr-field");
     inp.type = "text"; inp.id = "lr-ask"; inp.value = lrAsk.q; inp.autocomplete = "off";
-    inp.placeholder = "A note, a folder, a topic, or what you are preparing for";
+    inp.placeholder = lrAsk.picks.length ? "Add a note or a folder" : "A note, a folder, a topic, or what you are preparing for";
     inp.setAttribute("aria-label", "What would you like to learn?");
     inp.setAttribute("role", "combobox"); inp.setAttribute("aria-autocomplete", "list");
     inp.setAttribute("aria-controls", "lr-ask-opts"); inp.setAttribute("aria-expanded", "false");
@@ -472,7 +474,7 @@ function lrAskBox() {
 }
 
 function lrAskBtn(btn = $("#lr-ask-go")) {
-  if (btn) btn.disabled = !!lrSession || !(lrAsk.pick || lrAsk.q.trim());
+  if (btn) btn.disabled = !!lrSession || !(lrAsk.picks.length || lrAsk.q.trim());
 }
 
 async function lrAskSearch(inp, list) {
@@ -483,7 +485,9 @@ async function lrAskSearch(inp, list) {
     try { opts = await (await fetch("/learn/scopes?q=" + encodeURIComponent(q))).json(); } catch { opts = []; }
   }
   if (inp.value.trim() !== q) return;    // a later keystroke owns the list
-  lrAsk.opts = Array.isArray(opts) ? opts.slice(0, 8) : [];
+  // past the first pick, only a note or a folder not picked yet can join it
+  const taken = new Set(lrAsk.picks.map((o) => o.kind + ":" + o.target));
+  lrAsk.opts = (Array.isArray(opts) ? opts : []).filter((o) => !lrAsk.picks.length || (lrJoins(o) && !taken.has(o.kind + ":" + o.target))).slice(0, 8);
   lrAsk.idx = -1;
   lrAskPaint(inp, list);
 }
@@ -506,18 +510,21 @@ function lrAskPaint(inp, list) {
 }
 
 function lrAskPick(o) {
-  Object.assign(lrAsk, { pick: o, q: "", opts: [], idx: -1 });
+  lrAsk.picks = lrJoins(o) && lrAsk.picks.every(lrJoins) ? [...lrAsk.picks, o] : [o];
+  Object.assign(lrAsk, { q: "", opts: [], idx: -1 });
   lrRender();
-  setTimeout(() => $("#lr-ask-go")?.focus(), 0);
+  // the field stays open for the next note or folder; Enter on it empty starts
+  setTimeout(() => $(lrJoins(o) ? "#lr-ask" : "#lr-ask-go")?.focus(), 0);
 }
 // one note picked reads "note"; the plan form's "notes" names a scope of several
 const lrKindWord = (o) => (o.kind === "notes" && (o.count || 1) === 1 ? "note" : LR_KIND_WORD[o.kind] || o.kind);
-const lrAskClear = () => Object.assign(lrAsk, { q: "", opts: [], idx: -1, pick: null });
+const lrAskClear = () => Object.assign(lrAsk, { q: "", opts: [], idx: -1, picks: [] });
 
 async function lrAskGo() {
-  const o = lrAsk.pick;
+  const picks = lrAsk.picks;
+  const o = picks.length === 1 ? picks[0] : null;
   const text = lrAsk.q.trim();
-  if (!o && !text) { $("#lr-ask")?.focus(); return; }
+  if (!picks.length && !text) { $("#lr-ask")?.focus(); return; }
   if (lrSession) { notify("a session is open; end it or resume it first", "warn"); return; }
   if (o?.kind === "steps") {
     lrAskClear();
@@ -528,11 +535,13 @@ async function lrAskGo() {
   }
   if (o?.kind === "notes") { lrAskClear(); learnStartSession({ note: o.path, from: "ask" }); return; }
   if (o?.kind === "folder") { lrAskClear(); learnStartSession({ scope: o.target, from: "ask" }); return; }
-  if (o) {
-    // a topic or a workspace: the notes it resolves to, as a plan's preview reads them
+  if (picks.length) {
+    // a topic, a workspace, or several notes and folders: the notes they
+    // resolve to, as a plan's preview reads them
+    const s = lrStudyOf(picks);
     let paths = [];
-    try { paths = (await lrPost("/learn/plan", { scope: o.kind, target: o.target, preview: true })).paths || []; } catch (e) { notify("couldn't read that: " + e.message); return; }
-    if (!paths.length) { notify(`no notes to test on ${o.label}`, "warn"); return; }
+    try { paths = (await lrPost("/learn/plan", { scope: s.scope, target: s.target, preview: true })).paths || []; } catch (e) { notify("couldn't read that: " + e.message); return; }
+    if (!paths.length) { notify(`no notes to test on ${s.label}`, "warn"); return; }
     lrAskClear();
     learnStartSession({ scope: paths, from: "ask" });
     return;
@@ -1334,6 +1343,30 @@ lrFormReset();
 const LR_KIND_WORD = { folder: "folder", notes: "notes", topic: "topic", steps: "syllabus", workspace: "workspace" };
 const LR_SESSION_Q = 8;
 
+// The Study as the items it holds (ADR-0119, amendment 2026-10-17): notes and folders gather, a
+// topic, a workspace or a syllabus stands alone. Notes alone stay a notes
+// scope, by title; any folder among them makes one folder scope whose parts
+// are joined by " | ", as `restrict` joins its bounds (plans.folder_parts).
+const LR_SEP = " | ";
+const lrJoins = (o) => o.kind === "folder" || o.kind === "notes";
+function lrStudyItems(f) {
+  if (!f.scope || !String(f.target).trim()) return [];
+  if (f.scope === "notes") return (Array.isArray(f.target) ? f.target : [f.target]).map((t) => ({ kind: "notes", target: t, label: t }));
+  if (f.scope === "folder") {
+    return String(f.target).split(LR_SEP).map((b) => b.trim()).filter(Boolean)
+      .map((b) => (/\.md$/i.test(b) ? { kind: "notes", target: lrStem(b), label: lrStem(b), path: b } : { kind: "folder", target: b, label: b }));
+  }
+  return [{ kind: f.scope, target: f.target, label: f.label || f.target }];
+}
+function lrStudyOf(items) {
+  if (!items.length) return { scope: "", target: "", label: "" };
+  const label = items.map((i) => i.label).join(", ");
+  if (items.every((i) => i.kind === "notes")) return { scope: "notes", target: items.map((i) => i.target), label };
+  if (items.length === 1) return { scope: items[0].kind, target: items[0].target, label: items[0].label };
+  // a note by its path when the typeahead gave one, else by its title: the server resolves either
+  return { scope: "folder", target: items.map((i) => (i.kind === "folder" ? i.target : i.path || i.target + ".md")).join(LR_SEP), label };
+}
+
 // Plan this folder (ADR-0081 §17): from a Map row or the sidebar tree, the
 // fields filled with the folder and the sentence skipped.
 function lrPlanFolder(folder) {
@@ -1367,7 +1400,8 @@ window.learnExplain = learnExplain;
 // A workspace plan keeps its target as a wikilink by path (plans.target_text);
 // the reader is shown the workspace's name.
 const lrTargetShown = (p) => p.scope === "workspace"
-  ? String(p.target || "").replace(/^\[\[|\]\]$/g, "").split("/").pop() : p.target;
+  ? String(p.target || "").replace(/^\[\[|\]\]$/g, "").split("/").pop()
+  : p.scope === "folder" ? lrStudyItems(p).map((i) => i.label).join(", ") || p.target : p.target;
 
 // Plan from a workspace (ADR-0112 point 5): the same fields, scoped to its
 // members, which the server resolves again at every read.
@@ -1382,10 +1416,7 @@ function learnPlanWorkspace(name) {
 // Edit plan opens the fields filled, without the sentence (§17). A syllabus
 // plan reads as a Reference and its `restrict` bounds as the Study (ADR-0119).
 function lrStudyFromBounds(restrict) {
-  const bounds = String(restrict || "").split(" | ").map((b) => b.trim()).filter(Boolean);
-  if (bounds.length === 1 && !/\.md$/i.test(bounds[0])) return { scope: "folder", target: bounds[0], label: bounds[0] };
-  if (bounds.length && bounds.every((b) => /\.md$/i.test(b))) { const stems = bounds.map(lrStem); return { scope: "notes", target: stems, label: stems.join(", ") }; }
-  return { scope: "", target: "", label: "" };
+  return lrStudyOf(lrStudyItems({ scope: "folder", target: String(restrict || "") }));
 }
 function lrRefOf(target) {
   const t = String(target || "");
@@ -1591,20 +1622,20 @@ function lrStudySection() {
   sec.appendChild(lrEl("h3", null, "Study"));
   const f = lrForm;
   const row = lrEl("div", "lr-studyrow");
-  if (f.scope && f.target) {
+  const items = lrStudyItems(f);
+  // with a Reference the preview counts its matches, not the Study's notes;
+  // with several items the preview's line counts them all
+  const n = f.ref || items.length !== 1 ? null : f.preview?.paths?.length;
+  items.forEach((it, i) => {
     const tok = lrEl("span", "lr-tok");
-    // with a Reference the preview counts its matches, not the Study's notes
-    const n = f.ref ? null : f.preview?.paths?.length;
-    tok.append(lrEl("i", null, LR_KIND_WORD[f.scope]), `${f.label || f.target}` + (n != null ? ` · ${lrPlural(n, "note")}` : ""));
-    const x = lrBtn("lr-x", "×", () => { Object.assign(f, { scope: "", target: "", label: "", restrict: "", preview: null, cards: null, refused: [] }); lrRender(); setTimeout(() => $("#lr-study")?.focus(), 0); });
-    x.setAttribute("aria-label", "clear what to study");
+    tok.append(lrEl("i", null, lrKindWord(it)), it.label + (n != null ? ` · ${lrPlural(n, "note")}` : ""));
+    const x = lrBtn("lr-x", "×", () => lrDropStudy(i));
+    x.setAttribute("aria-label", items.length > 1 ? `remove ${it.label}` : "clear what to study");
     tok.appendChild(x);
     row.appendChild(tok);
-    sec.appendChild(row);
-  } else {
-    row.appendChild(lrStudyInput());
-    sec.appendChild(row);
-  }
+  });
+  if (items.every(lrJoins)) row.appendChild(lrStudyInput(items.length));
+  sec.appendChild(row);
   // a restriction read from the sentence is shown on the field and can be cleared (§13)
   if (f.restrict && ["steps", "topic"].includes(f.scope)) {
     const r = lrEl("div", "lr-asides");
@@ -1726,10 +1757,20 @@ function lrRefInput() {
   return wrap;
 }
 
-function lrStudyInput() {
+function lrDropStudy(i) {
+  const items = lrStudyItems(lrForm);
+  items.splice(i, 1);
+  Object.assign(lrForm, lrStudyOf(items), { preview: null, cards: null, refused: [] });
+  if (!items.length) lrForm.restrict = "";
+  lrRender();
+  lrPreviewScope();
+  setTimeout(() => $("#lr-study")?.focus(), 0);
+}
+
+function lrStudyInput(chosen = 0) {
   const wrap = lrEl("div", "lr-ta");
   const inp = lrEl("input", "lr-field");
-  inp.type = "text"; inp.id = "lr-study"; inp.placeholder = "A folder, a note or a topic";
+  inp.type = "text"; inp.id = "lr-study"; inp.placeholder = chosen ? "Add a folder or a note" : "A folder, a note or a topic";
   inp.value = lrForm.q;
   inp.setAttribute("role", "combobox"); inp.setAttribute("aria-autocomplete", "list");
   inp.setAttribute("aria-controls", "lr-opts"); inp.setAttribute("aria-expanded", "false");
@@ -1739,7 +1780,9 @@ function lrStudyInput() {
   list.id = "lr-opts"; list.setAttribute("role", "listbox"); list.hidden = true;
   let t = null;
   inp.addEventListener("input", () => { lrForm.q = inp.value; clearTimeout(t); t = setTimeout(() => lrScopeSearch(inp, list), 120); });
-  inp.addEventListener("focus", () => lrScopeSearch(inp, list));
+  // empty, focus offers the folders; once one is chosen the focus a re-render
+  // hands back would reopen the list over the preview at every pick
+  inp.addEventListener("focus", () => { if (!chosen || inp.value) lrScopeSearch(inp, list); });
   inp.addEventListener("blur", () => setTimeout(() => { list.hidden = true; inp.setAttribute("aria-expanded", "false"); }, 150));
   inp.addEventListener("keydown", (e) => {
     const n = lrForm.opts.length;
@@ -1764,7 +1807,10 @@ async function lrScopeSearch(inp, list) {
   // a failed lookup is an empty list: the reader can still paste a syllabus
   try { opts = await (await fetch("/learn/scopes?q=" + encodeURIComponent(q))).json(); } catch { opts = []; }
   if (inp.value !== q) return;      // a later keystroke owns the list
-  lrForm.opts = (Array.isArray(opts) ? opts : []).filter((o) => o.kind !== "steps");
+  const items = lrStudyItems(lrForm);
+  const taken = new Set(items.map((i) => i.kind + ":" + i.target));
+  lrForm.opts = (Array.isArray(opts) ? opts : []).filter((o) => o.kind !== "steps"
+    && (!items.length || (lrJoins(o) && !taken.has(o.kind + ":" + o.target))));
   lrForm.optIdx = lrForm.opts.length ? 0 : -1;
   lrPaintOpts(inp, list);
 }
@@ -1776,7 +1822,7 @@ function lrPaintOpts(inp, list) {
     li.id = "lr-opt-" + i;
     li.setAttribute("role", "option");
     li.setAttribute("aria-selected", i === lrForm.optIdx ? "true" : "false");
-    li.append(lrEl("i", null, LR_KIND_WORD[o.kind] || o.kind), lrEl("span", "l", o.label), lrEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
+    li.append(lrEl("i", null, lrKindWord(o)), lrEl("span", "l", o.label), lrEl("span", "c num", o.kind === "steps" ? `${o.count} lines` : lrPlural(o.count, "note")));
     li.addEventListener("mousedown", (e) => { e.preventDefault(); lrPickScope(o); });
     list.appendChild(li);
   });
@@ -1786,8 +1832,10 @@ function lrPaintOpts(inp, list) {
 }
 
 function lrPickScope(o) {
-  Object.assign(lrForm, { scope: o.kind, target: o.kind === "notes" ? [o.target] : o.target, label: o.label, q: "", opts: [], refused: [], preview: null, cards: null });
-  if (o.kind === "folder" || o.kind === "notes") lrForm.restrict = "";
+  const had = lrStudyItems(lrForm);
+  const items = lrJoins(o) && had.every(lrJoins) ? [...had, o] : [o];
+  Object.assign(lrForm, lrStudyOf(items), { q: "", opts: [], refused: [], preview: null, cards: null });
+  if (lrJoins(o)) lrForm.restrict = "";
   lrRender();
   lrPreviewScope();
 }
@@ -1800,7 +1848,7 @@ function lrDefaultName() {
   if (f.ref?.kind === "note") { f.name = f.ref.label || lrStem(f.ref.target); return; }
   if (f.ref && !f.scope) { f.name = `Syllabus, ${lrDate(new Date().toISOString())}`; return; }
   if (!f.scope) return;
-  if (f.scope === "folder") f.name = f.target.replace(/\/$/, "").split("/").pop();
+  if (f.scope === "folder") f.name = lrStudyItems(f).map((i) => (i.kind === "folder" ? i.target.replace(/\/$/, "").split("/").pop() : i.label)).join(", ");
   else if (f.scope === "steps") f.name = f.label && !f.target.includes("\n") ? f.label : `Syllabus, ${lrDate(new Date().toISOString())}`;
   // "plan", so the plan note does not take its workspace's name (ADR-0112)
   else if (f.scope === "workspace") f.name = `${f.label} plan`;
