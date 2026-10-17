@@ -2205,6 +2205,92 @@ def test_calendar_endpoint_rejects_a_bad_start(client):
     assert "error" in tc.get("/calendar", params={"start": "not-a-date"}).json()
 
 
+# ADR-0118: the calendar writes the event note the chat's tool writes.
+
+def _in_vault(rel: str) -> Path:
+    from silica.config import CONFIG
+    return Path(CONFIG.vault_path) / rel
+
+
+def test_the_quick_card_writes_the_event_note_and_the_week_reads_it_back(client, tmp_vault):
+    tc, _server = client
+    r = tc.post("/calendar/event", json={"title": "Laboratorio di Chimica",
+                                          "start": "2026-08-20 14:00", "end": "2026-08-20 17:00",
+                                          "rrule": "FREQ=WEEKLY;BYDAY=TH", "reminder": "10m"}).json()
+    assert r["success"] and r["path"] == "calendar/Laboratorio di Chimica.md", r
+
+    d = tc.get("/calendar", params={"start": "2026-08-17", "days": 14}).json()
+    days = {row["date"]: row for row in d["days"]}
+    for day in ("2026-08-20", "2026-08-27"):
+        [e] = days[day]["events"]
+        assert (e["start"][11:], e["end"][11:], e["reminder"], e["plan"]) == ("14:00", "17:00", "10m", "")
+        assert e["rrule"] == "FREQ=WEEKLY;BYDAY=TH"
+
+
+def test_a_study_session_names_its_plan_and_the_payload_carries_the_plans_ahead(client, tmp_vault):
+    tc, _server = client
+    tmp_vault.note("Plans/Exam.md", "---\ntype: plan\nscope: folder\ntarget: Bio/\n"
+                   "by: '2026-09-10'\n---\n\n# Molecular biology exam\n")
+    tmp_vault.note("Plans/Past.md", "---\ntype: plan\nscope: folder\ntarget: Bio/\n"
+                   "by: '2026-08-01'\n---\n\n# Already sat\n")
+    r = tc.post("/calendar/event", json={"title": "Replicazione del DNA", "start": "2026-08-21 11:00",
+                                          "end": "2026-08-21 12:00", "plan": "Plans/Exam.md"}).json()
+    assert r["success"], r
+    text = _in_vault(r["path"]).read_text(encoding="utf-8")
+    assert "event_plan: '[[Plans/Exam]]'" in text
+    assert "AI: true" not in text  # the person typed it
+
+    d = tc.get("/calendar", params={"start": "2026-08-17", "days": 7}).json()
+    [e] = {row["date"]: row for row in d["days"]}["2026-08-21"]["events"]
+    assert e["plan"] == "Plans/Exam"
+    assert d["plans"] == [{"name": "Molecular biology exam", "path": "Plans/Exam.md", "by": "2026-09-10"}]
+
+
+def test_a_plan_whose_by_is_not_a_date_draws_no_bar(client, tmp_vault):
+    tc, _server = client
+    tmp_vault.note("Plans/Words.md", "---\ntype: plan\nscope: folder\ntarget: Bio/\n"
+                   "by: Nov 15\n---\n\n# Written as words\n")
+    assert tc.get("/calendar", params={"start": "2026-08-17", "days": 7}).json()["plans"] == []
+
+
+def test_an_unquoted_plan_link_is_still_read_as_the_plan(client, tmp_vault):
+    # YAML reads a bare [[Plans/Exam]] as a list holding a list
+    tc, _server = client
+    tmp_vault.note("calendar/2026-08-21 Ripasso.md",
+                   "---\nevent_start: 2026-08-21 11:00\nevent_plan: [[Plans/Exam]]\n---\n")
+    d = tc.get("/calendar", params={"start": "2026-08-17", "days": 7}).json()
+    [e] = {row["date"]: row for row in d["days"]}["2026-08-21"]["events"]
+    assert e["plan"] == "Plans/Exam"
+
+
+def test_the_card_names_the_note_before_it_is_saved_and_after_a_clash(client, tmp_vault):
+    tc, _server = client
+    q = {"title": "Dentist", "start": "2026-08-20 15:00"}
+    assert tc.get("/calendar/event/path", params=q).json() == {"path": "calendar/2026-08-20 Dentist.md"}
+    assert tc.post("/calendar/event", json=q).json()["path"] == "calendar/2026-08-20 Dentist.md"
+    assert tc.get("/calendar/event/path", params=q).json() == {"path": "calendar/2026-08-20 Dentist 2.md"}
+    assert "error" in tc.get("/calendar/event/path", params={"title": "..", "start": "2026-08-20"}).json()
+
+
+def test_a_bad_time_writes_nothing(client, tmp_vault):
+    tc, _server = client
+    r = tc.post("/calendar/event", json={"title": "Dentist", "start": "2026-08-20 25:00"}).json()
+    assert "error" in r
+    assert not _in_vault("calendar").exists()
+
+
+def test_the_event_card_closes_an_event_and_cannot_reopen_it(client, tmp_vault):
+    tc, _server = client
+    tmp_vault.note("calendar/2026-08-20 Dentist.md", EVENT_NOTE_FM)
+    assert tc.post("/calendar/event/status",
+                   json={"path": "calendar/2026-08-20 Dentist.md", "status": "done"}).json()["success"]
+    d = tc.get("/calendar", params={"start": "2026-08-17", "days": 7}).json()
+    [e] = {row["date"]: row for row in d["days"]}["2026-08-20"]["events"]
+    assert e["status"] == "done"
+    assert "error" in tc.post("/calendar/event/status",
+                              json={"path": "calendar/2026-08-20 Dentist.md", "status": ""}).json()
+
+
 def test_reminders_poll_is_post_and_delivers_at_most_once(client, tmp_vault):
     # One-shot in the past with an at-start reminder: exactly one late notice
     # on the first poll, none on the second (the mark advanced), and GET is

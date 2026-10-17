@@ -40,7 +40,8 @@ def _event_dict(o: Occurrence) -> dict:
         start = o.start.strftime("%Y-%m-%d %H:%M")
         end = o.end.strftime("%Y-%m-%d %H:%M") if o.end else ""
     return {"stem": o.stem, "title": o.title, "path": o.path, "start": start,
-            "end": end, "all_day": o.all_day, "status": o.status}
+            "end": end, "all_day": o.all_day, "status": o.status,
+            "rrule": o.rrule, "reminder": o.reminder, "plan": o.plan}
 
 
 def _task_day(t: Task, today: dt.date) -> dt.date | None:

@@ -51,6 +51,9 @@ class Event:
     reminder: dt.timedelta | None   # lead time before each occurrence
     reminder_raw: str               # canonical lead string ("30m"), "" if none
     status: str                     # "" (open) | "done" | "cancelled"
+    # A study session names its plan (ADR-0118 point 2): the target of the
+    # `event_plan` wikilink, brackets and alias stripped; "" for a plain event.
+    plan: str = ""
 
 
 def _parse_when(value) -> tuple[dt.datetime, bool] | None:
@@ -148,9 +151,16 @@ def parse_event(data: dict, *, stem: str, path: str) -> Event | None:
         logger.warning("calendar: %s event_status unknown, reading as open: %r", path, raw_status)
 
     title = str(data.get("title") or "").strip() or stem
+    # Unquoted, `[[Plans/Exam]]` is YAML for a list holding a list; a property
+    # panel can also write a list. The first scalar is the link either way.
+    raw_plan = data.get("event_plan") or ""
+    while isinstance(raw_plan, list):
+        raw_plan = raw_plan[0] if raw_plan else ""
+    plan = str(raw_plan).strip().removeprefix("[[").removesuffix("]]")
     return Event(stem=stem, path=path, title=title, start=start, end=end,
                  all_day=all_day, rrule=rrule, reminder=reminder,
-                 reminder_raw=reminder_raw, status=status)
+                 reminder_raw=reminder_raw, status=status,
+                 plan=plan.split("|")[0].strip())
 
 
 def validate_event(data: dict) -> list[str]:

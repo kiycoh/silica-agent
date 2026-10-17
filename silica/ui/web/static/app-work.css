@@ -1,29 +1,203 @@
 /* --- calendar ---------------------------------------------------------------
-   Two reading surfaces (grid + agenda panel) carry the 14px radius; chips and
-   bars are aim targets and stay tight. Every color is a theme token, so light
-   mode needs no extra rules. */
+   ADR-0118: Google Calendar's frame in one hue. Every surface is a theme
+   token, so paper needs no rules of its own. A kind is a shape (block,
+   diamond, triangle, checkbox, ring), never a colour: the accent marks today,
+   now, the selection and the one primary action; amber marks overdue. */
 /* position: the #cal-loading overlay is .frame-loading (inset:0), so without
    a positioned ancestor it resolves against the viewport and blanks header and
    sidebar for the whole first /calendar fetch. #view-graph and #view-metrics
-   already carry this for the same reason. */
-#view-calendar { position: relative; padding: 12px 16px; gap: 10px; overflow-y: auto; }
-#cal-head { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+   already carry this for the same reason. The container is what folds the
+   side column at a narrow view, whatever the drawer and the note took. */
+#view-calendar { position: relative; padding: 12px 16px; gap: 12px; overflow: hidden; container-type: inline-size; }
+#cal-head { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; min-height: 36px; }
+#cal-today { height: 32px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: var(--r-sm); font-size: var(--fs-ctl); color: var(--frost); }
 #cal-nav { display: flex; gap: 2px; }
-#cal-title { font-size: 15px; font-weight: 600; color: var(--frost); }
+#cal-nav button { width: 30px; height: 30px; padding: 0; border-radius: var(--r-sm); font-size: 18px; color: var(--ash); }
+#cal-title { font-size: 20px; font-weight: 600; color: var(--frost); margin-left: 4px; white-space: nowrap; }
+#cal-sub { font-size: var(--fs-meta); color: var(--ash-dim); padding-top: 4px; white-space: nowrap; }
 #cal-mode { display: flex; gap: 2px; background: var(--slate-2); border-radius: var(--r-sm); padding: 2px; }
-#cal-mode button { border: 0; background: transparent; color: var(--ash); padding: 3px 10px; border-radius: var(--r-xs); cursor: pointer; font: inherit; font-size: 12px; }
+#cal-mode button { border: 0; background: transparent; color: var(--ash); padding: 4px 12px; border-radius: var(--r-xs); cursor: pointer; font: inherit; font-size: var(--fs-ctl); }
 #cal-mode button.active { background: var(--sel); color: var(--frost); font-weight: 500; }
-#cal-main { display: flex; gap: 12px; flex: 1; min-height: 0; align-items: stretch; }
-#cal-grid { flex: 2 1 480px; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--page); }
+#cal-main { display: flex; gap: 16px; flex: 1; min-height: 0; }
+#cal-grid { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+/* the side column */
+#cal-side { flex: 0 0 216px; display: flex; flex-direction: column; gap: 18px; min-height: 0; overflow-x: hidden; overflow-y: auto; }
+.cal-new { display: inline-flex; align-items: center; gap: 10px; align-self: flex-start; height: 44px; padding: 0 18px 0 14px; border: 0; border-radius: var(--r); background: var(--accent); color: var(--void); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.cal-new::before { content: "+"; font-size: 22px; font-weight: 400; line-height: 1; }
+.cal-new.sm { height: 32px; padding: 0 12px 0 10px; border-radius: var(--r-sm); font-size: var(--fs-ctl); margin-left: 6px; }
+.cal-new.sm::before { font-size: 18px; }
+#cal-new-bar { display: none; }
+@container (max-width: 860px) {
+  #cal-side { display: none; }
+  #cal-new-bar { display: inline-flex; }
+}
+.cal-mini-h { display: flex; align-items: center; justify-content: space-between; font-size: var(--fs-ctl); font-weight: 600; color: var(--frost); padding: 0 0 4px 6px; }
+.cal-mini-h button { width: 26px; height: 26px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ash); font-size: 16px; cursor: pointer; }
+.cal-mini-h button:hover { background: var(--sel-hover); color: var(--frost); }
+.cal-mini-g { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); row-gap: 2px; text-align: center; }
+.cal-mini-g .dw { font-size: 11px; color: var(--ash-dim); line-height: 22px; }
+.cal-mini-g button { position: relative; height: 28px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-meta); color: var(--text); cursor: pointer; font-variant-numeric: tabular-nums; }
+.cal-mini-g button span { display: inline-block; width: 26px; height: 26px; line-height: 26px; border-radius: 999px; }
+.cal-mini-g button:hover span { background: var(--sel-hover); }
+/* --ash-dim and not opacity, for the month cell's reason below */
+.cal-mini-g .o { color: var(--ash-dim); }
+.cal-mini-g .wk { background: var(--sel); }
+.cal-mini-g .wk.l { border-radius: var(--r-sm) 0 0 var(--r-sm); }
+.cal-mini-g .wk.r { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.cal-mini-g .on span { background: var(--sel); color: var(--frost); font-weight: 600; }
+.cal-mini-g .td span { background: var(--accent); color: var(--void); font-weight: 700; }
+.cal-mini-g .pd::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 5px; height: 5px; margin-left: -2.5px; background: var(--accent); transform: rotate(45deg); }
+.cal-side-h { font-size: var(--fs-meta); color: var(--ash-dim); margin: 0 0 4px 6px; }
+.cal-layer { display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 6px; border: 0; border-radius: var(--r-sm); background: none; font: inherit; font-size: var(--fs-ctl); color: var(--ash-dim); text-align: left; cursor: pointer; }
+.cal-layer:hover { background: var(--sel-hover); }
+.cal-layer.on { color: var(--text); }
+.cal-layer .cb { width: 14px; height: 14px; box-sizing: border-box; border: 1.5px solid var(--line-2); border-radius: var(--r-xs); display: grid; place-items: center; flex: 0 0 auto; }
+.cal-layer.on .cb { background: var(--accent); border-color: var(--accent); }
+.cal-layer.on .cb::after { content: ""; width: 7px; height: 4px; border-left: 2px solid var(--void); border-bottom: 2px solid var(--void); transform: translateY(-1px) rotate(-45deg); }
+.cal-layer .n { margin-left: auto; font-size: var(--fs-meta); color: var(--ash-dim); font-variant-numeric: tabular-nums; }
+.cal-keys { margin-top: auto; padding-left: 6px; font-size: var(--fs-meta); line-height: 2; color: var(--ash-dim); }
+.cal-keys div { white-space: nowrap; }
+.cal-keys kbd { font: inherit; color: var(--ash); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 0 4px; margin: 0 2px 0 4px; }
+.cal-keys kbd + kbd { margin-left: 0; }
+
+/* The shapes, one per kind, shared by the layers and the rows that list them. */
+.cal-g { width: 14px; height: 14px; display: inline-grid; place-items: center; flex: 0 0 auto; }
+.cal-g::before { content: ""; display: block; }
+.cal-g-events::before { width: 12px; height: 9px; border-radius: 2px; background: var(--ash-dim); }
+.cal-g-plans::before { width: 7px; height: 7px; background: var(--accent); transform: rotate(45deg); }
+.cal-g-tasks::before { width: 10px; height: 10px; box-sizing: border-box; border: 1.5px solid var(--ash); border-radius: 2px; }
+.cal-g-review::before { width: 10px; height: 10px; box-sizing: border-box; border: 1.5px solid var(--ash); border-radius: 50%; }
+.cal-g-daily::before { width: 10px; height: 9px; background: var(--ash); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.cal-g-runs::before { width: 10px; height: 10px; background: var(--ash); clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
+.cal-g-notes::before { width: 10px; height: 2px; background: var(--ash); }
+.cal-dia { display: inline-block; width: 7px; height: 7px; background: var(--accent); transform: rotate(45deg); flex: 0 0 auto; }
+
+/* --- week and day: the hours ------------------------------------------------- */
+.ct { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r); background: var(--page); overflow: hidden; }
+.ct-head, .ct-band, .ct-body { display: grid; grid-template-columns: 56px repeat(var(--n), minmax(0, 1fr)); }
+.ct-head { flex: 0 0 auto; border-bottom: 1px solid var(--line); }
+.ct-dh { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 8px 8px 10px; border-left: 1px solid var(--line); }
+.ct-dh .dn { font-size: var(--fs-meta); color: var(--ash-dim); }
+.ct-dh.today .dn { color: var(--accent); font-weight: 600; }
+.ct-dh .nr { display: flex; align-items: center; gap: 4px; }
+.ct-dh .num { min-width: 30px; height: 30px; padding: 0 2px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: 20px; font-weight: 500; color: var(--text); text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
+.ct-dh .num:hover { color: var(--frost); background: var(--sel-hover); }
+.ct-dh.past .num { color: var(--ash); }
+.ct-dh.today .num { width: 30px; text-align: center; background: var(--accent); color: var(--void); font-size: 16px; font-weight: 700; }
+.ct-ct { min-height: 16px; font-size: var(--fs-meta); line-height: 16px; color: var(--ash-dim); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ct-ct .due { color: var(--warn); }
+.ct-band { flex: 0 0 auto; row-gap: 3px; padding: 6px 0; max-height: 120px; overflow-y: auto; border-bottom: 1px solid var(--line); }
+.ct-band > .ct-gut { grid-column: 1; grid-row: 1 / -1; padding: 5px 8px 0 0; font-size: 11px; color: var(--ash-dim); text-align: right; }
+.ct-bar, .ct-plan, .ct-band .cal-chip { display: flex; align-items: center; gap: 8px; min-width: 0; height: 24px; margin: 0 3px; padding: 0 8px; border-radius: var(--r-xs); font: inherit; font-size: var(--fs-meta); text-align: left; white-space: nowrap; overflow: hidden; cursor: pointer; }
+.ct-bar { border: 0; background: var(--slate-2); color: var(--frost); font-weight: 500; }
+.ct-bar:hover { background: var(--line); }
+.ct-bar .et { overflow: hidden; text-overflow: ellipsis; }
+/* A plan is outlined and an event filled: a fill is an appointment. Open on the
+   right when its exam lies past the last day drawn, the way Google cuts a bar
+   that runs on into next week. */
+.ct-plan { border: 1px solid var(--line-2); background: transparent; color: var(--frost); }
+.ct-plan:hover { background: var(--sel-hover); }
+.ct-plan.open { margin-right: 0; border-right: 0; border-radius: var(--r-xs) 0 0 var(--r-xs); }
+.ct-plan b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+.ct-plan .left { color: var(--ash); flex: 0 0 auto; }
+.ct-plan .to { margin-left: auto; color: var(--ash-dim); flex: 0 0 auto; }
+.ct-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.ct-body { position: relative; height: calc(24 * 48px); background-image: linear-gradient(color-mix(in srgb, var(--line) 65%, transparent) 1px, transparent 1px); background-size: 100% 48px; }
+.ct-body > .ct-gut { position: relative; background: var(--page); }
+.ct-hl { position: absolute; right: 8px; font-size: 11px; color: var(--ash-dim); font-variant-numeric: tabular-nums; transform: translateY(-7px); }
+.ct-col { position: relative; border-left: 1px solid var(--line); touch-action: pan-y; cursor: cell; }
+.ct-ev { position: absolute; display: flex; flex-direction: column; gap: 1px; box-sizing: border-box; padding: 4px 7px; border: 0; border-radius: var(--r-xs); background: var(--slate-2); color: var(--frost); font: inherit; text-align: left; overflow: hidden; cursor: pointer; z-index: 1; }
+.ct-ev:hover { background: var(--line); }
+.ct-ev .et { font-size: var(--fs-meta); font-weight: 600; line-height: 15px; overflow: hidden; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ct-ev .et .cal-dia { margin: 0 6px 1px 1px; vertical-align: middle; }
+.ct-ev .tm { font-size: 11px; color: var(--ash); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ct-ev.short { flex-direction: row; align-items: center; gap: 6px; padding: 0 7px; }
+.ct-ev.short .et, .ct-ev.s1 .et { -webkit-line-clamp: 1; }
+.ct-ev.short .et { flex: 0 1 auto; }
+/* Past and done recede by token, not opacity: opacity took the time line to
+   2.7:1 in the mock-ups (ADR-0118), and the month cell measured the same. */
+/* Halfway to the page and not --slate: --slate is darker than an event on
+   graphite but a stronger beige than one on paper, so it receded on one theme
+   and came forward on the other. */
+.ct-ev.past, .ct-ev.done { background: color-mix(in srgb, var(--slate-2) 50%, var(--page)); }
+.ct-ev.past .et, .ct-ev.done .et { color: var(--ash); font-weight: 500; }
+.ct-ev.past .tm, .ct-ev.done .tm { color: var(--ash-dim); }
+.ct-ev.cancelled .et { text-decoration: line-through; }
+.ct-ev.sess { background: var(--page); box-shadow: inset 0 0 0 1px var(--line-2); }
+.ct-ev.sess:hover { background: var(--sel-hover); }
+.ct-now { position: absolute; left: -1px; right: 0; height: 2px; background: var(--accent); z-index: 3; pointer-events: none; }
+.ct-now::before { content: ""; position: absolute; left: -6px; top: -5px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); }
+.ct-ghost { position: absolute; left: 2px; right: 4px; box-sizing: border-box; padding: 3px 7px; border-radius: var(--r-xs); background: var(--sel); box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--frost); font-size: 11px; font-variant-numeric: tabular-nums; z-index: 2; pointer-events: none; }
+.ct.one .ct-ev { padding: 7px 12px; }
+.ct.one .ct-ev .et { font-size: 14px; line-height: 18px; }
+.ct.one .ct-ev .tm { font-size: var(--fs-meta); }
+.ct.one .ct-ev.short { padding: 0 12px; gap: 12px; }
+
+/* --- day: the week's strip, the hours, what the day asks -------------------- */
+.cd { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.cd-strip { flex: 0 0 auto; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)) minmax(0, 3fr); gap: 8px; }
+.cd-tile { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 9px 11px; border: 0; border-radius: var(--r); background: var(--page); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.cd-tile:hover { background: var(--slate-2); }
+.cd-tile.on { background: var(--sel); }
+.cd-tile .th { display: flex; align-items: center; gap: 6px; }
+.cd-tile .dn { font-size: var(--fs-meta); color: var(--ash-dim); }
+.cd-tile.today .dn { color: var(--accent); font-weight: 600; }
+/* on the --sel box the accent label measures 4.41:1; the disc beside it already says today */
+.cd-tile.today.on .dn { color: var(--frost); }
+.cd-tile .n { font-size: 16px; font-weight: 600; color: var(--frost); font-variant-numeric: tabular-nums; }
+.cd-tile.past .n { color: var(--ash); }
+.cd-tile.today .n { min-width: 24px; height: 24px; line-height: 24px; border-radius: 999px; background: var(--accent); color: var(--void); font-size: var(--fs-ctl); text-align: center; }
+.cd-tile .tri { margin-left: auto; width: 9px; height: 8px; background: var(--ash-dim); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.cd-tile .mb { position: relative; height: 6px; border-radius: 3px; background: var(--slate-2); }
+.cd-tile .mb i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: var(--ash-dim); }
+.cd-tile .mb i.s { background: var(--accent); }
+.cd-tile .cd-ct { min-height: 16px; font-size: var(--fs-meta); color: var(--ash-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-tile .cd-ct.due { color: var(--warn); }
+.cd-plans { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; padding: 8px 12px; border-radius: var(--r); background: var(--page); }
+.cd-plan { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 0; border: 0; background: none; font: inherit; font-size: var(--fs-ctl); color: var(--frost); text-align: left; cursor: pointer; }
+.cd-plan .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-plan:hover .nm { text-decoration: underline; }
+.cd-plan b { margin-left: auto; flex: 0 0 auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cd-plan i { flex: 0 0 auto; font-style: normal; font-size: var(--fs-meta); color: var(--ash-dim); }
+.cd-plans .none { font-size: var(--fs-meta); color: var(--ash-dim); }
+.cd-new { align-self: flex-start; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-ctl); font-weight: 600; color: var(--accent); cursor: pointer; }
+.cd-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, 1fr); gap: 12px; }
+.cd-stack { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.cd-pnl { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r); background: var(--page); }
+.cd-pnl .ph { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.cd-pnl .ph b { font-size: 15px; font-weight: 600; color: var(--frost); }
+.cd-pnl .ph span { font-size: var(--fs-meta); color: var(--ash-dim); }
+.cd-pnl .ph .open { margin-left: auto; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-ctl); font-weight: 600; color: var(--accent); cursor: pointer; }
+.cd-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 28px; margin: 0 -6px; padding: 0 6px; border: 0; border-radius: var(--r-xs); background: none; font: inherit; font-size: var(--fs-ctl); color: var(--frost); text-align: left; cursor: pointer; }
+.cd-row:hover { background: var(--sel-hover); }
+.cd-row.log { cursor: default; }
+.cd-row.log:hover { background: none; }
+.cd-row .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cd-row i { font-style: normal; font-size: var(--fs-meta); color: var(--ash-dim); white-space: nowrap; }
+.cd-row em { font-style: normal; font-size: var(--fs-meta); color: var(--warn); white-space: nowrap; }
+.cd-row.done .t { color: var(--ash-dim); text-decoration: line-through; }
+.cd-row.done .cal-g-tasks::before { background: var(--ash-dim); border-color: var(--ash-dim); }
+.cd-pnl .pf { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: var(--fs-meta); color: var(--ash-dim); }
+/* Outlined: New event is the view's one filled control. */
+.cd-pnl .go { margin-left: auto; height: 32px; padding: 0 14px; border: 1px solid var(--accent); border-radius: var(--r-sm); background: none; font: inherit; font-size: var(--fs-ctl); font-weight: 600; color: var(--accent); cursor: pointer; }
+.cd-pnl .go:hover { background: var(--sel); }
+.cd-pnl .ex { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text); }
+.cd-empty { padding: 6px 2px; font-size: var(--fs-ctl); color: var(--ash-dim); }
+@container (max-width: 1000px) {
+  .cd-strip { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .cd-plans { grid-column: 1 / -1; }
+}
+
+/* --- month ----------------------------------------------------------------- */
+.cm { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--page); }
 .cal-dow { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .cal-dow div { padding: 5px 8px; font-size: 10px; color: var(--ash-dim); text-transform: uppercase; letter-spacing: 0.07em; text-align: right; }
 .cal-week { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--line); flex: 1; min-height: 0; }
 .cal-week:last-child { border-bottom: 0; }
-.cal-day { grid-row: 1 / -1; display: flex; flex-direction: column; border-right: 1px solid var(--line); padding: 0 3px 3px; min-height: 84px; min-width: 0; cursor: pointer; overflow: hidden; }
-.cal-week.wk .cal-day { min-height: 340px; }
+.cal-day { grid-row: 1 / -1; display: flex; flex-direction: column; border-right: 1px solid var(--line); padding: 0 3px 3px; min-height: 84px; min-width: 0; cursor: cell; overflow: hidden; }
 .cal-day.c7 { border-right: 0; }
-.cal-day:hover { background: var(--slate-2); }
-.cal-day.selected { box-shadow: inset 0 0 0 1px var(--accent); }
+.cal-day:hover { background: var(--sel-hover); }
 /* Adjacent-month days recede by taking the dimmer token, not by going
    translucent. opacity 0.35 composited --ash down to 1.85:1 dark and 1.74:1
    light, so the day numbers either side of a month boundary were the least
@@ -31,13 +205,14 @@
    still only 3.64:1. --ash-dim at full strength measures 5.19:1 dark and 6.63:1
    light against the cell, and still reads as a step down from the --ash the
    current month's numbers carry (6.01:1 / 7.26:1). */
-.cal-day.other .cal-num { color: var(--ash-dim); }
-.cal-num { height: 20px; display: flex; align-items: center; justify-content: flex-end; font-size: 11px; color: var(--ash); flex: 0 0 auto; }
+.cal-day.other .cal-n { color: var(--ash-dim); }
+.cal-num { height: 22px; display: flex; align-items: center; justify-content: flex-end; flex: 0 0 auto; }
 /* A pill, and 9px was aiming at one and missing: the badge is 20px tall, so
    any radius under half its height leaves four flat spots on what reads as a
    round day marker. 999px states the intent instead of approximating it. */
-.cal-num span { padding: 0 5px; border-radius: 999px; }
-.cal-day.today .cal-num span { background: var(--accent); color: var(--void); font-weight: 700; }
+.cal-n { min-width: 20px; height: 20px; padding: 0 5px; border: 0; border-radius: 999px; background: none; font: inherit; font-size: 11px; color: var(--ash); cursor: pointer; font-variant-numeric: tabular-nums; }
+.cal-n:hover { background: var(--sel); color: var(--frost); }
+.cal-day.today .cal-n { background: var(--accent); color: var(--void); font-weight: 700; }
 /* The day's daily note (ADR-0062): the graph's triangle, apex up, in the
    neutral fill the graph gives a lone day. A button, so it carries the focus
    ring and the keyboard; 16px of hit area around a 9px mark. */
@@ -45,20 +220,26 @@
 .cal-daily::before { content: ""; width: 9px; height: 8px; background: var(--ash); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .cal-daily:hover::before { background: var(--frost); }
 .cal-chips { display: flex; flex-direction: column; gap: 2px; min-height: 0; overflow: hidden; }
-.cal-chip { font-size: 11px; color: var(--text); background: var(--slate-2); border-radius: var(--r-xs); padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.cal-chip { display: block; width: 100%; border: 0; font: inherit; text-align: left; font-size: 11px; color: var(--text); background: var(--slate-2); border-radius: var(--r-xs); padding: 1px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .cal-chip:hover { background: var(--line); color: var(--frost); }
+.cal-chip .et { overflow: hidden; text-overflow: ellipsis; }
 .cal-chip .t { color: var(--ash); margin-right: 4px; font-variant-numeric: tabular-nums; }
+.cal-chip.sess { background: transparent; box-shadow: inset 0 0 0 1px var(--line-2); }
+.cal-chip .cal-dia { width: 6px; height: 6px; margin: 0 5px 1px 1px; vertical-align: middle; }
 /* A plan's deadline: the chip of an event led by a milestone diamond, so it
    reads as a date in the plan's life and not as one more appointment, without
    a second hue in the grid. Not an inset accent edge: that is the selection
    bar this app retired (test_selected_is_a_frosted_box_and_never_a_bar). */
 .cal-chip.plan::before { content: "\25C6"; color: var(--accent); margin-right: 4px; font-size: 9px; vertical-align: 0.1em; }
 .cal-chip.plan.done::before { content: "\2713"; }
-.cal-bar { z-index: 1; margin: 1px 3px; border-radius: var(--r-xs); background: var(--accent); color: var(--void); font-size: 11px; line-height: 18px; font-weight: 600; padding: 0 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; }
-/* The three derived axes: what already happened here, or is waiting. Not
-   chips — a filled chip is an appointment, and printing sixty agent writes in
-   the same shape as a meeting would make the month unreadable in the other
-   direction. A dot and a count, on no surface at all. */
+/* An all-day event is a filled neutral bar like any other event: the accent
+   fill it wore made the calendar's loudest object a dentist's appointment. */
+.cal-bar { z-index: 1; display: block; margin: 1px 3px; border: 0; border-radius: var(--r-xs); background: var(--slate-2); color: var(--frost); font: inherit; font-size: 11px; line-height: 18px; font-weight: 600; padding: 0 6px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; }
+.cal-bar:hover { background: var(--line); }
+/* The derived axes: what already happened here, or is waiting. Not chips — a
+   filled chip is an appointment, and printing sixty agent writes in the same
+   shape as a meeting would make the month unreadable in the other direction.
+   A dot and a count, on no surface at all. */
 /* A block, not a flex row: a bare text node inside a flex container is an
    anonymous item that no rule can reach, so text-overflow did nothing and a
    narrow cell cut "nucleate ×50" to "nucleat" with no mark that it had. */
@@ -92,37 +273,31 @@
 .cal-sig.due { color: var(--warn); }
 .cal-day:hover .cal-sig { color: var(--ash); }
 .cal-day:hover .cal-sig.due { color: var(--warn); }
+.cal-chip.done, .cal-bar.done { background: color-mix(in srgb, var(--slate-2) 50%, var(--page)); color: var(--ash); }
+.cal-chip.cancelled, .cal-bar.cancelled { background: color-mix(in srgb, var(--slate-2) 50%, var(--page)); color: var(--ash); text-decoration: line-through; }
+.cal-more { align-self: flex-start; margin-top: auto; padding: 1px 0 0; border: 0; background: none; font: inherit; font-size: 10px; color: var(--ash-dim); cursor: pointer; }
+button.cal-more:hover { color: var(--frost); text-decoration: underline; }
 
-.cal-chip.done, .cal-bar.done { opacity: 0.55; }
-.cal-chip.cancelled, .cal-bar.cancelled { opacity: 0.55; text-decoration: line-through; }
-.cal-more { font-size: 10px; color: var(--ash-dim); margin-top: auto; padding-top: 1px; }
-/* 400, not 330: every row here is a note name with a folder or a set of counts
-   after it, and at 330 the ellipsis landed before the name did. The grid loses
-   70px it was spending on empty cells. */
-#cal-agenda { flex: 1 1 340px; min-width: 260px; max-width: 400px; border: 1px solid var(--line); border-radius: var(--r); background: var(--page); padding: 10px 12px; overflow-y: auto; }
+/* --- agenda ------------------------------------------------------------------- */
+.cal-ag { flex: 1; min-height: 0; max-width: 46rem; overflow-y: auto; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r); background: var(--page); }
 .cal-ag-head { font-size: 10px; color: var(--ash-dim); text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
 .cal-ag-day { margin-bottom: 12px; }
 .cal-ag-date { font-size: 12px; font-weight: 600; color: var(--frost); margin-bottom: 3px; }
 .cal-ag-date .wd { color: var(--ash-dim); font-weight: 400; margin-left: 6px; }
 .cal-ag-item { display: flex; gap: 8px; font-size: 12px; color: var(--text); padding: 2px 0; min-width: 0; }
+.cal-ag-item .cal-dia { width: 6px; height: 6px; margin: 0 6px 1px 0; vertical-align: middle; }
 /* :not(.cal-ag-txt), because the note name is the one field that must survive a
-   narrow rail. The rail is `flex: 1 1 340px` between the grid and the window,
-   so at a 1000px viewport it lands around 188px while a row like
-   "nucleate 09-the-second-book-of-the-pistis-sophia.md" wants 476px: with
-   nowrap every row in the rail ellipsised away most of its own subject. The
-   comment below already said only the note wraps; this is the rule that was
-   stopping it. */
+   narrow column: with nowrap every row ellipsised away most of its own
+   subject. Only the note wraps. */
 .cal-ag-item > span:last-child:not(.cal-ag-txt) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-ag-item.ev { cursor: pointer; }
 .cal-ag-item.ev:hover > span:last-child { color: var(--frost); text-decoration: underline; }
-.cal-ag-item.cancelled > span:last-child { text-decoration: line-through; opacity: 0.6; }
+.cal-ag-item.cancelled > span:last-child { text-decoration: line-through; color: var(--ash-dim); }
 .cal-ag-item .when { flex: 0 0 52px; color: var(--ash); font-variant-numeric: tabular-nums; font-size: 11px; padding-top: 1px; }
 .cal-ag-kind { text-transform: uppercase; letter-spacing: 0.05em; font-size: 9px !important; color: var(--ash-dim) !important; padding-top: 3px !important; }
 .cal-ag-empty { color: var(--ash-dim); font-size: 11px; }
 /* An agenda row is three fields, not one sentence: the verb leads, the note is
-   the part you scan for, and the counts trail. Only the note wraps — the other
-   two are short by construction, and letting them wrap would break the column
-   the `when` gutter establishes. */
+   the part you scan for, and the counts trail. */
 .cal-ag-txt { min-width: 0; overflow-wrap: anywhere; }
 .cal-ag-txt b { font-weight: 500; color: var(--ash); }
 .cal-ag-txt i { font-style: normal; color: var(--ash-dim); }
@@ -142,12 +317,39 @@
   cursor: pointer;
 }
 .cal-ag-more:hover { text-decoration: underline; }
-@media (max-width: 860px) {
-  #cal-main { flex-direction: column; overflow-y: auto; }
-  #cal-grid { flex: 0 0 auto; }
-  .cal-day { min-height: 64px; }
-  #cal-agenda { max-width: none; flex: 0 0 auto; }
-}
+
+/* --- the cards: quick (new event) and event --------------------------------- */
+.cal-card { position: absolute; z-index: 30; width: 344px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--sheet); box-shadow: 0 18px 48px rgb(var(--shadow-rgb) / 0.45); font-size: var(--fs-ctl); color: var(--text); }
+.cal-card .x { position: absolute; top: 8px; right: 8px; width: 28px; height: 28px; border: 0; border-radius: var(--r-sm); background: none; color: var(--ash); font-size: 18px; cursor: pointer; }
+.cal-card .x:hover { background: var(--sel-hover); color: var(--frost); }
+.cq-title { margin-right: 32px; padding: 2px 0 6px; border: 0; border-bottom: 2px solid var(--line-2); background: transparent; font: inherit; font-size: 17px; color: var(--frost); outline: 0; }
+.cq-title:focus { border-bottom-color: var(--accent); }
+.cq-kind { display: flex; gap: 2px; align-self: flex-start; padding: 2px; border-radius: var(--r-sm); background: var(--page); }
+.cq-kind button { display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 12px; border: 0; border-radius: var(--r-xs); background: transparent; font: inherit; font-size: var(--fs-ctl); color: var(--ash); cursor: pointer; }
+.cq-kind button.active { background: var(--sel); color: var(--frost); font-weight: 500; }
+.cq-kind .cal-dia { width: 6px; height: 6px; }
+.cq-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cq-row .k { font-size: var(--fs-meta); color: var(--ash-dim); }
+.cq-times { display: inline-flex; align-items: center; gap: 6px; }
+.cq-times[hidden] { display: none; }
+.cq-ad { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-meta); color: var(--ash); cursor: pointer; }
+.cq-ad input { accent-color: var(--accent); }
+.cal-card input[type="date"], .cal-card input[type="time"], .cal-card select { height: 30px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--page); font: inherit; font-size: var(--fs-ctl); color: var(--frost); color-scheme: inherit; }
+.cq-plan select { flex: 1; min-width: 0; }
+.cq-path { padding: 6px 8px; border-radius: var(--r-xs); background: var(--page); font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--ash); overflow-wrap: anywhere; }
+.cq-err { font-size: var(--fs-meta); color: var(--del); }
+.cq-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 2px; }
+.cq-more { margin: 0 auto 0 -6px; padding: 4px 6px; border: 0; border-radius: var(--r-xs); background: none; font: inherit; font-size: var(--fs-ctl); color: var(--ash); cursor: pointer; }
+.cq-more:hover { color: var(--frost); }
+.cq-save { height: 32px; padding: 0 18px; border: 0; border-radius: var(--r-sm); background: var(--accent); color: var(--void); font: inherit; font-size: var(--fs-ctl); font-weight: 600; cursor: pointer; }
+.cq-save:disabled, .cq-more:disabled { opacity: 0.6; cursor: progress; }
+.ce-title { display: flex; align-items: center; gap: 8px; margin-right: 32px; font-size: 17px; font-weight: 600; color: var(--frost); }
+.ce-row { color: var(--text); }
+.ce-st { color: var(--ash-dim); }
+.ce-link { align-self: flex-start; padding: 0; border: 0; background: none; font: inherit; font-size: var(--fs-ctl); color: var(--accent); cursor: pointer; }
+.ce-link:hover { text-decoration: underline; }
+.ce-cancel { height: 32px; padding: 0 12px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: none; font: inherit; font-size: var(--fs-ctl); color: var(--text); cursor: pointer; }
+.ce-cancel:hover { background: var(--sel-hover); }
 
 /* --- reduced motion, the backstop -------------------------------------------
    Three curated blocks above name the handful of moving parts that need a

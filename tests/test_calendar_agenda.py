@@ -89,7 +89,7 @@ def test_event_dicts_are_json_ready():
     [e] = rows["2026-08-18"]["events"]
     assert e == {"stem": "meet", "title": "meet", "path": "e.md",
                  "start": "2026-08-18 09:00", "end": "2026-08-18 10:00",
-                 "all_day": False, "status": ""}
+                 "all_day": False, "status": "", "rrule": "", "reminder": "", "plan": ""}
 
 
 # --- ADR-0062: the day's daily note, and the tasks axis ---------------------
