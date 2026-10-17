@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import logging
 import re
 import shutil
 import socket
@@ -35,6 +36,8 @@ from urllib.parse import unquote, urlencode, urlsplit
 import httpx
 
 from silica.tools import tool
+
+logger = logging.getLogger(__name__)
 
 # ~7.5k tokens of a 60k default context budget. A LinkedIn guest page is 374 KB
 # raw; without this ceiling one fetch eats the window.
@@ -60,6 +63,26 @@ _YT_DOMAINS: tuple[str, ...] = ("youtube.com", "youtu.be")
 # `-` (0x2D) sorts before `.` (0x2E).
 _YT_SUB_LANGS = "en.*,it.*"
 _YT_TIMEOUT = 120
+# What YouTube answers a datacenter address with no signed-in session (the
+# pilot host, 2026-10-17), and a session whose account is gone or whose
+# cookies expired. The renewal is the operator's (silica-hosted
+# bin/youtube-cookies), so it is named in the log and not to the student.
+_YT_SIGN_IN = "Sign in to confirm"
+YOUTUBE_COOKIES_ENV = "SILICA_YOUTUBE_COOKIES"
+
+
+class YoutubeBlocked(ValueError):
+    """YouTube asked for a sign-in this session does not have."""
+
+
+def youtube_cookies() -> Path | None:
+    """The account cookies yt-dlp signs in with (ADR-0120 amendment), when the
+    operator set SILICA_YOUTUBE_COOKIES to a readable file; None otherwise."""
+    import os
+
+    raw = os.environ.get(YOUTUBE_COOKIES_ENV, "").strip()
+    path = Path(raw) if raw else None
+    return path if path is not None and os.access(path, os.R_OK) else None
 _WP_DOMAINS: tuple[str, ...] = ("wikipedia.org",)
 _WP_PREFIX = "/wiki/"
 _WP_API_PATH = "/w/api.php"
@@ -713,10 +736,17 @@ def _youtube_transcript(url: str) -> Page:
         )
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "sub"
+        signed_in: list[str] = []
+        if cookies := youtube_cookies():
+            # A copy, not the file: yt-dlp writes its cookie jar back to the
+            # path it was given, and every tenant reads the one file at once.
+            jar = Path(tmp) / "cookies.txt"
+            shutil.copyfile(cookies, jar)
+            signed_in = ["--cookies", str(jar)]
         proc = subprocess.run(
             [
                 exe, "--skip-download", "--write-auto-sub", "--write-sub",
-                "--write-info-json",
+                "--write-info-json", *signed_in,
                 "--sub-lang", _YT_SUB_LANGS, "--sub-format", "vtt",
                 "--no-playlist", "--playlist-items", "1", "-o", str(out), "--", url,
             ],
@@ -725,6 +755,12 @@ def _youtube_transcript(url: str) -> Page:
             timeout=_YT_TIMEOUT,
         )
         files = sorted(Path(tmp).glob("*.vtt"))
+        if not files and _YT_SIGN_IN in (proc.stderr or ""):
+            # The line the operator greps for; the probe pages on the same.
+            logger.warning(
+                "youtube: sign-in wall (%s): the cookies need renewing, silica-hosted bin/youtube-cookies",
+                "cookies set" if signed_in else "no cookies")
+            raise YoutubeBlocked(f"YouTube asked to sign in before it would show {url}")
         if not files:
             tail = (proc.stderr or proc.stdout or "").strip()[-300:]
             raise ValueError(
