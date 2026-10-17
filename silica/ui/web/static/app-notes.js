@@ -337,15 +337,26 @@ input.addEventListener("paste", (e) => {
   if (files.length) { e.preventDefault(); addFiles(files); }
 });
 
+// Only files over the chat view are staged: the rail and the skill rows take
+// drops of their own, and a tree row dragged anywhere carries no files, so the
+// hint would promise a nucleate that drop never does. dragover decides the hint
+// because it names the element under the cursor; the depth count only notices
+// the drag leaving the window, where dragover stops firing.
+const chatView = $("#view-chat");
+const filesOverChat = (e) => e.dataTransfer.types.includes("Files") && chatView.contains(e.target);
 let dragDepth = 0;
-window.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; document.body.classList.add("dragging"); });
-window.addEventListener("dragover", (e) => e.preventDefault());
+window.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; });
+window.addEventListener("dragover", (e) => {
+  // Cancelled everywhere, or a file let go off the chat opens in the tab.
+  e.preventDefault();
+  document.body.classList.toggle("dragging", filesOverChat(e));
+});
 window.addEventListener("dragleave", (e) => { e.preventDefault(); if (--dragDepth <= 0) document.body.classList.remove("dragging"); });
 window.addEventListener("drop", (e) => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove("dragging");
-  if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  if (filesOverChat(e) && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
 });
 
 // "+" opens what the next message can do (ADR-0083). Its first entry is the
@@ -1025,6 +1036,7 @@ let openSeq = 0; // two fast opens: only the last one may land
 
 // `facts` are what the graph frame knew about the node it was clicked as
 // (degree, state, area): handed on to the pane rather than asked for again.
+// True once the note is the one on screen, so a caller can act on its text.
 async function openNote(path, line, facts) {
   if (!path) return;
   const seq = ++openSeq;
@@ -1034,7 +1046,7 @@ async function openNote(path, line, facts) {
   if (path === editPath && drawerMode === "note" && notePanel.classList.contains("open")) {
     if (line && editor) editor.revealLine(line);
     if (ctxPath !== path) loadContext(path, facts);
-    return;
+    return true;
   }
   closeNoteMenu();
   await releaseNote(); // what was typed into the last note reaches the disk first
@@ -1064,6 +1076,7 @@ async function openNote(path, line, facts) {
   // button away wherever the note was opened, and the info button's dot needs
   // to know about a warning before anyone asks.
   loadContext(data.path, facts);
+  return true;
 }
 
 // Whose context the pane holds, so turning details on never shows another's.
@@ -1902,8 +1915,10 @@ document.addEventListener("click", (e) => {
   // diff, which falls back to the note when the session holds no baseline.
   const changed = e.target.closest(".wc-open");
   if (changed) { e.preventDefault(); openDiff(changed.dataset.path); return; }
-  const link = e.target.closest(".note-link");
-  if (link) { e.preventDefault(); openNote(link.dataset.path); return; }
+  // A numbered citation in an answer opens at the line it stands on (openCite,
+  // app-chat.js); every other link opens the note at its top.
+  const link = e.target.closest(".note-link, .cite-mark");
+  if (link) { e.preventDefault(); link.dataset.cite ? openCite(link) : openNote(link.dataset.path); return; }
   // An external link opens in its own tab. The app has no internal <a href> of
   // its own — every in-app move is JS — so any href in the flow came out of a
   // rendered answer or note, and following it in place tore down the SPA: the

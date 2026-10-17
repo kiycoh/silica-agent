@@ -75,16 +75,28 @@ def test_the_last_transcript_row_is_fully_visible_at_scroll_end():
         "the last row ends under the composer's scrim"
 
 
-def test_read_chips_are_unique_by_resolved_path():
+def test_read_notes_are_unique_by_resolved_path():
+    """The ledger names a note read and not cited once, however the tool's
+    argument spelled it (ADR-0117 point 2 took the reads out of the footer)."""
     js = app_js()
-    body = _fn(js, "function readChips(refs)")
-    assert "resolveRef(ref)" in body and "byPath.has(p)" in body
+    body = _fn(js, "function uniqueReads(refs)")
+    assert "resolveRef(ref)" in body and "new Set()" in body
     assert "function resolveRef(ref)" in js
+    assert "function readChips(" not in js, "the read row is back in the footer"
 
 
 def test_the_copy_button_is_visible_when_focused_by_keyboard():
     css = app_css()
     assert re.search(r"\.msg:focus-within \.copy-btn,\s*\.copy-btn:focus-visible \{[^}]*opacity: 1", css)
+
+
+def test_every_copy_button_anchors_its_own_hit_area():
+    """The hit-area ::after is 100% of its containing block (app-work.css): a
+    copy button left static on the ledger handed it the whole answer, and any
+    click on the text copied the turn (2026-10-16)."""
+    css = app_css()
+    for rule in re.findall(r"[^{}]*\.copy-btn\s*\{[^}]*\}", css):
+        assert "position: static" not in rule, rule.strip()
 
 
 # --- P2. Enter during a turn queues; the draft persists -----------------------
@@ -93,7 +105,7 @@ def test_enter_while_streaming_queues_instead_of_dropping():
     js = app_js()
     body = js[js.index('$("#composer").addEventListener("submit"'):]
     body = body[:body.index("\n});\n")]
-    assert "if (streaming) { queueMessage(t); return; }" in body
+    assert "if (streaming) { queueMessage(t); syncSend(); return; }" in body
     assert "if (streaming) return;" not in body, "Enter is swallowed again"
     assert 'id="queue"' in INDEX and "sends when this turn ends" in INDEX
 
@@ -188,10 +200,12 @@ def test_a_transport_failure_never_draws_an_assistant_row():
 
 def test_stop_is_disabled_until_the_cancel_is_acknowledged():
     js = app_js()
-    body = js[js.index('if (!e.target.closest(".rl-stop")) return;'):]
-    body = body[:body.index("\n});\n")]
-    assert "b.disabled = true" in body and "STOP_GRACE_MS" in body
-    assert "still stopping" in body
+    body = _fn(js, "function requestStop()")
+    assert "b.disabled = true" in body and "send.disabled = true" in body
+    assert "STOP_GRACE_MS" in body and "still stopping" in body
+    # one routine for the dock's strip and the chat's send button
+    assert 'if (e.target.closest(".rl-stop")) requestStop();' in js
+    assert 'if ($("#send").dataset.mode !== "stop") return;' in js
 
 
 # --- P1. Run line at the composer ---------------------------------------------
@@ -200,7 +214,10 @@ def test_the_run_line_shows_the_running_tool_verb_and_target():
     body = _fn(WORK, "function paintRunLine(run)", "  ")
     assert "find((r) => r.running)" in body
     assert 'set(".rl-verb", verb)' in body and 'set(".rl-target", target)' in body
-    assert 'id="run-line"' in INDEX
+    # the chat's run line is the running turn's ledger (ADR-0117 point 4), built
+    # after load, so work.js finds it at paint time
+    assert '<span class="run-line" data-state="live">' in _fn(app_js(), "function makeLedger(msg, live)")
+    assert "const runLines = runLinesNow();" in body
 
 
 def test_no_elapsed_ticks_anywhere_after_done():
@@ -211,11 +228,14 @@ def test_no_elapsed_ticks_anywhere_after_done():
 
 
 def test_stop_sits_within_the_composer_column():
-    # Stop is a child of the run line, which shares the composer's measure.
+    # In the chat, Stop is the send button for the length of a turn (ADR-0117
+    # point 4); the dock keeps it in its run line, on the composer's measure.
     css = app_css()
     line = re.search(r"\.run-line \{([^}]*)\}", css).group(1)
     assert "max-width: var(--measure)" in line
-    assert re.search(r'<div class="run-line" id="run-line"[^>]*>(?:(?!</div>).)*class="rl-stop"', INDEX, re.S)
+    assert re.search(r'<div class="run-line" id="dock-run-line"[^>]*>(?:(?!</div>).)*class="rl-stop"', INDEX, re.S)
+    assert 'id="run-line"' not in INDEX, "the chat grew its strip back"
+    assert re.search(r'<button type="submit" id="send"[^>]*>.*?class="send-stop"', INDEX, re.S)
     assert 'id="stop"' not in INDEX, "a Stop still lives outside the run line"
 
 
@@ -655,14 +675,19 @@ def test_the_three_panes_are_surfaces_on_a_gutter_canvas():
     assert "right: calc(var(--note-w, 630px) + 2 * var(--gutter));" in css
 
 
-def test_the_answer_flows_on_the_surface_and_only_the_user_keeps_a_bubble():
+def test_the_answer_flows_on_the_surface_and_the_question_heads_it():
+    """No card on either side since ADR-0117: the answer flows on the surface
+    and the question is a heading over a rule on the text column, starting
+    where the answer's text starts."""
     css = app_css()
     answer = css[css.index(".msg.silica>.body {"):]
     answer = answer[:answer.index("}")]
     assert "background:" not in answer, "the answer grew a card inside the sheet again"
     user = css[css.index(".msg.user>.body {"):]
     user = user[:user.index("}")]
-    assert "background: var(--bubble);" in user
+    assert "background:" not in user, "the question grew its bubble back"
+    assert "border-top: 1px solid var(--line);" in user
+    assert "max-width: var(--text-w, 43rem);" in user and "margin-inline: 0;" in user
 
 
 def test_the_view_showing_is_marked_as_the_current_place():

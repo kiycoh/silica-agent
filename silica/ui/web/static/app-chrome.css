@@ -180,7 +180,7 @@ body.note-open #toasts {
 /* align-items:center above makes every child shrink to its own content, which
    collapsed the composer to the width of its placeholder. The shell already
    carries the measure, so the row just has to span the pane and let it centre. */
-#view-chat:has(#log:empty) :is(#composer, #chat-models) {
+#view-chat:has(#log:empty) #composer {
   align-self: stretch;
 }
 

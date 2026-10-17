@@ -300,8 +300,15 @@
   text-overflow: ellipsis;
 }
 
+/* The hint covers the chat view only, the one surface whose drop stages files:
+   a full-window scrim also covered the rail, whose rows are drop targets of
+   their own. */
+#view-chat {
+  position: relative;
+}
+
 #drop-hint {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 100;
   display: none;
@@ -310,6 +317,8 @@
   background: var(--drop-scrim);
   color: var(--accent);
   border: 2px dashed var(--accent);
+  /* the view clips to its rounded corners, which cut a square dash off there */
+  border-radius: inherit;
   /* the headline step, stated in px like every other step: 1.2rem resolves to
      the same 18px at the 15px root and reads as a sixteenth step to anything
      that checks the ramp */
@@ -860,6 +869,16 @@ body.drawer-recall :is(#metrics-bar, #cal-head, #learn-bar) {
 #note-edit .cm-selectionBackground,
 #note-edit .cm-focused .cm-selectionBackground {
   background: var(--sel);
+}
+
+/* The line a chat citation opened the note at (openCite), or the rendered
+   block that holds it, in the one grammar for "this one" (2026-09-22): the
+   --sel fill, never an accent bar. Laid over the element's own ground rather
+   than in place of it, since a callout and a code line paint theirs; on the
+   block it goes on what is drawn, not on the wrapper around its corners. */
+#note-edit .cm-line.cm-cite-line,
+#note-edit .cm-rendered-block.cm-cite-line>* {
+  background-image: linear-gradient(var(--sel), var(--sel));
 }
 
 /* Headings keep their size with the caret on them, as Obsidian's do: only the

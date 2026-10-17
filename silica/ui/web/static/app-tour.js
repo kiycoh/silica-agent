@@ -36,12 +36,17 @@ const TOUR_STEPS = {
     body: "Ask about it. The question is written for you: send it, or write your own.",
   },
   cite: {
-    // The row of notes the answer read (readChips in app-chat.js), not the
-    // answer: a long one is taller than the window and lights nothing.
-    n: 2, target: () => tourLastAnswer()?.querySelector(".sources") || tourLastAnswer(),
-    body: () => tourLastAnswer()?.querySelector(".sources")
-      ? "The answer comes from your notes: the ones it read are listed under it. Click one to open it."
-      : "The answer comes from the notes in your vault.",
+    // Where the answer says what it stands on (ADR-0117), not the answer: a
+    // long one is taller than the window and lights nothing. A cited note is a
+    // numbered link in the text; a note read and not cited is named on the
+    // line above the answer.
+    n: 2, target: () => tourSource() || tourLastAnswer(),
+    body: () => {
+      const s = tourSource();
+      if (s?.dataset.cite) return "The answer comes from your notes: each numbered link is one of them. Click it to open the note.";
+      if (s) return "The answer comes from your notes: the ones it read are named above it. Click one to open it.";
+      return "The answer comes from the notes in your vault.";
+    },
     primary: ["Next", () => tourGo("explore")],
   },
   explore: {
@@ -66,6 +71,10 @@ const TOUR_STEPS = {
 };
 // A reload lands on the half of a step that can be drawn again from nothing:
 // the answer a `cite` pointed at and the frame a `map` sat on are gone.
+function tourSource() {
+  const a = tourLastAnswer();
+  return a?.querySelector(".stream-text .note-link[data-cite]") || a?.querySelector(".lg-reads") || null;
+}
 const TOUR_RESUME = { fetch: "file", cite: "explore", map: "quiz" };
 
 // {step, note} while it runs. `note` is what the steps name: the note, or for a

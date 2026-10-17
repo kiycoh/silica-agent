@@ -50,7 +50,6 @@
   <link rel="stylesheet" href="/static/app-motion.css" />
 </head>
 <body>
-  <div id="drop-hint">Drop to nucleate into Inbox/</div>
 
 
   <main>
@@ -211,6 +210,9 @@
     </aside>
 
     <section id="view-chat" class="view active">
+      <!-- Inside the chat view, not over the page: the drop lands in this
+           composer, so the rail and its workspaces stay uncovered. -->
+      <div id="drop-hint">Drop to nucleate into Inbox/</div>
       <!-- The landing, shown only while the transcript is empty. Above the
            wordmark, the presence (app-presence.js, ADR-0048): the assistant as
            a quartz point in glass, seeded by the vault's path, thinking while
@@ -233,31 +235,22 @@
            is the one way back down that does not cost them their place. -->
       <div class="jump-lane"><button type="button" id="jump-latest" hidden>&#8595; new text below</button></div>
 
-      <!-- Conversions after the answer (ADR-0099): a drop's recording or PDF,
-           waiting, converting, ready with Nucleate it, or stopped with Retry. -->
-      <div id="jobs" hidden></div>
-      <div id="attachments" hidden></div>
-      <!-- The workspace this chat is opened in (ADR-0112 point 4); closing it
-           widens the next turns to the whole vault. -->
-      <div id="ws-chip-row" hidden></div>
-      <!-- The run line (audit P1): what the agent is doing NOW, how long it has
-           been at it, where it is in the turn, and the control that stops it,
-           all on one row next to the field. Present only while a turn runs.
-           Content is a second projection of the narration beats work.js already
-           reads for the rail; app-chat.js owns only whether it shows. -->
-      <div class="run-line" id="run-line" hidden data-state="live">
-        <span class="rl-dot" aria-hidden="true"></span>
-        <span class="rl-verb">working</span>
-        <span class="rl-target"></span>
-        <span class="rl-elapsed"></span>
-        <span class="rl-pos"></span>
-        <span class="rl-stall"></span>
-        <button type="button" class="rl-stop" aria-label="stop the current response">&#9632; stop</button>
-      </div>
       <form id="composer">
         <div class="composer-shell">
           <div class="commands" id="commands" hidden></div>
           <input id="nucleate-file" type="file" multiple hidden />
+          <!-- Along the top edge, everything waiting on the next message
+               (ADR-0117 point 5): conversions after an answer (ADR-0099), the
+               files staged for it, and a message typed during a turn (P2), which
+               interrupting sends now and nothing else does. -->
+          <div id="jobs" hidden></div>
+          <div id="attachments" hidden></div>
+          <div id="queue" hidden>
+            <span class="q-text"></span>
+            <span class="q-note">sends when this turn ends</span>
+            <button type="button" id="q-now">send now &middot; interrupts</button>
+            <button type="button" id="q-drop" class="ghost" aria-label="remove the queued message">&#10005;</button>
+          </div>
           <!-- The stone from the landing at 36px (ADR-0048, second site), at the
                head of the row you write to, where Murmur keeps it: the one place
                in a chat that is always in view and where the eye waits for the
@@ -287,13 +280,17 @@
             <button type="button" role="menuitem" data-action="/report" title="structural audit of the vault">report</button>
             <button type="button" role="menuitem" data-action="/organize" title="classify and reorganize notes by a taxonomy you describe">organize</button>
           </div>
+          <!-- The workspace this chat is opened in (ADR-0112 point 4), in the
+               toolbar since ADR-0117; closing it widens the next turns to the
+               whole vault. -->
+          <div id="ws-chip-row" hidden></div>
           <!-- The field and a layer exactly its size behind it. The mirror draws
                background bands and the ghost completion; the textarea keeps its
                own opaque glyphs, caret and selection on top, so nothing here can
                ever ghost or lag a character behind what you typed. -->
           <div class="grow">
             <div class="hl" id="input-hl" aria-hidden="true"></div>
-            <textarea id="input" rows="1" aria-label="message silica" placeholder="message silica…  (⏎ send, ⇧⏎ newline)"></textarea>
+            <textarea id="input" rows="1" aria-label="message silica" placeholder="Ask about your notes"></textarea>
           </div>
           <!-- After the field, not before: with the stone in first place three
                glyphs stood left of the caret and none right of it. -->
@@ -310,24 +307,9 @@
             </svg>
           </button>
           <div id="ctx-panel" hidden role="dialog" aria-label="context window"></div>
-          <button type="submit" id="send">send</button>
+          <button type="submit" id="send" data-mode="send" aria-label="send" title="send"><svg class="send-go" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 19V5M6 11l6-6 6 6"></path></svg><svg class="send-stop" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="7" width="10" height="10" rx="1.5"></rect></svg></button>
         </div>
       </form>
-      <!-- Enter during a turn queues instead of being swallowed (P2). One chip,
-           one message: the low-regret act is the default, and interrupting is
-           the explicit button on a visible object, never the Enter key. -->
-      <div id="queue" hidden>
-        <span class="q-text"></span>
-        <span class="q-note">sends when this turn ends</span>
-        <button type="button" id="q-now">send now &middot; interrupts</button>
-        <button type="button" id="q-drop" class="ghost" aria-label="remove the queued message">&#10005;</button>
-      </div>
-      <!-- who answers you, under the thing you are writing to. A session fact,
-
-           not a per-message one: the worker model runs distilling and prep, so
-           stamping it on a turn would say something false. Click → settings,
-           which is where the old header chip used to lead. -->
-      <button type="button" id="chat-models" title="which models this session uses · click to open settings"></button>
     </section>
 
     <section id="view-graph" class="view">

@@ -544,10 +544,13 @@ function neighbourRows(d) {
   // speed bench; experiment E4 (the gap distribution between beats on real
   // turns) sets the real number. Reopen when E4 lands.
   const STALL_S = 90;
-  const runLines = document.querySelectorAll(".run-line");
+  // Queried at each paint, not once at load: the chat's run line is the ledger
+  // of the running turn (ADR-0117 point 4), built when the turn starts.
+  const runLinesNow = () => document.querySelectorAll(".run-line");
   const nth = (n) => n + (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
 
   function paintRunLine(run) {
+    const runLines = runLinesNow();
     if (!runLines.length) return;
     const live = run.running;
     const now = Date.now() / 1000;
