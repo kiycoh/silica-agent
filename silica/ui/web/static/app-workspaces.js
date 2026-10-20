@@ -58,11 +58,10 @@ const WS_ICON = {
 function renderWorkspaces() {
   const box = $("#workspaces");
   box.innerHTML = "";
-  if (!workspaces.length) {
-    // The one line that says what the group is for (Open 1): a workspace is not
-    // a pane layout, as the same word means in Obsidian.
-    box.appendChild(mkEl("p", "ws-empty", "Groups notes from any folder without moving them. Start one with +, with ◇ on a note, or by dragging a note here."));
-  }
+  // What the group is for (Open 1: a workspace is not a pane layout, as the
+  // same word means in Obsidian) is the tooltip of its + since ADR-0122 point
+  // 8: as three lines under the label it was the longest text in the drawer,
+  // read once and then stepped over on every visit.
   for (const w of workspaces) {
     const open = wsOpen.has(w.path);
     const row = mkEl("div", "ws-row" + (w.path === chatWorkspace ? " current" : ""));

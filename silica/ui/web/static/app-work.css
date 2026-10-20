@@ -414,22 +414,12 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   transform: translate(-50%, -50%);
 }
 
-/* --- work mode: the run, in the right sidebar ------------------------------
-   What the agent is doing has never had a surface in this app. The account
-   exists — silica/agent/narration.py writes it and /narration/sse serves it
-   live — and the transcript could only ever show its shadow: a tool line while
-   a call is in flight, nothing at all while the model is thinking, and no way
-   to see the token a turn actually cost. This renders the stream itself.
-
-   It was a column of its own (#work, --work-w: 372px) against the right edge,
-   which is the edge the note drawer already owned: `body.note-open #work` set
-   it to display:none, so the one surface that says what the agent is doing was
-   the surface any opened note switched off. It is a pane of that drawer now,
-   with the drawer's own width and its own segment in #note-mode, and it keeps
-   its geometry from #work-body alone — the header, the name, the close button
-   and the 1195px fold all belonged to being a second panel and are gone with
-   it. Still read WHILE the turn runs, still never over the answer: the drawer
-   insets the transcript rather than covering it. */
+/* --- the narration's panes ----------------------------------------------------
+   What the agent is doing has a surface since work.js projected the stream
+   silica/agent/narration.py writes. The run's steps are the transcript's ledger
+   line (ADR-0117 point 3) and its marks are on the left drawer's Chats segment
+   (ADR-0122); the run's own pane, "This chat", left with ADR-0122. What stays
+   here is the right drawer's node pane and its chip. */
 
 /* What the run is currently about (report, node), as a chip beside the sidebar
    mode rather than replacing it. Boxed, because unboxed it reads as a second
@@ -448,49 +438,6 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   display: none;
 }
 
-.wk-state {
-  font-size: var(--fs-meta);
-  font-variant-numeric: tabular-nums;
-  color: var(--ash-dim);
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.wk-state::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--ash-dim);
-}
-
-.wk-state.live {
-  color: var(--frost);
-}
-
-/* The chip is inline, so [hidden] carries itself; this one declares display and
-   would keep it. */
-.wk-state[hidden] {
-  display: none;
-}
-
-/* In the rail it is the compartment's own reading, so it sits at the far end of
-   the title row: folded shut, the dot is the whole answer to "is anything
-   happening". Lowercase against the title's caps for the same reason the counts
-   beside Pinned and This session are. */
-#side-chat>.side-title>.wk-state {
-  margin-left: auto;
-  /* the 0.55rem every other right-hand figure in the rail ends on */
-  margin-right: 0.55rem;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.wk-state.live::before {
-  background: var(--accent);
-}
-
 /* The pane itself, on the same footing as #note-edit and #note-diff: one of the
    drawer's three children, shown for the mode it draws. No display of its own,
    so the [hidden] JS sets is the whole switch. */
@@ -499,38 +446,6 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   min-height: 0;
   overflow-y: auto;
   --sb: var(--line);
-}
-
-/* The run's pane is a rail compartment, not a drawer child: .side-body above
-   already owns its height and its scroll, so all this carries is the rule
-   colour the beat spine reads. */
-#work-body {
-  --sb: var(--line);
-}
-
-/* the receipt line and the two folds of "this chat" (audit P17) */
-.wk-receipt {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.7rem;
-  padding: 0.15rem 0.55rem 0.4rem;
-}
-
-.wk-fold {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.1rem 0.2rem 0.1rem 0.55rem;
-  font-size: 12px;
-  color: var(--ash);
-}
-
-.wk-fold .linklike {
-  padding: 0.25rem 0.35rem;
-  color: var(--accent);
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 11px;
 }
 
 .wk-empty {
@@ -575,179 +490,6 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   color: var(--ash-dim);
 }
 
-/* The spine. One 1px rule down the beat stream, and while the run is live its
-   top two thirds are accent: the run's own progress bar, at the cost of a
-   border rather than a widget. */
-.wk-tl {
-  position: relative;
-  padding: 0.45rem 0.85rem 0.65rem;
-}
-
-.wk-tl::before {
-  content: "";
-  position: absolute;
-  left: 1.2rem;
-  top: 0.8rem;
-  bottom: 0.9rem;
-  width: 1px;
-  background: var(--line);
-}
-
-/* --spine is set by work.js from the RUNNING beat's measured centre; the 62%
-   fallback is the fraction the deck drew and is what shows for the one frame
-   before the measurement lands. */
-.wk-tl.live::before {
-  background: linear-gradient(var(--accent) 0 var(--spine, 62%),
-                              var(--line) var(--spine, 62%) 100%);
-}
-
-.wk-beat {
-  position: relative;
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) max-content;
-  gap: 0.6rem;
-  align-items: start;
-  padding: 0.3rem 0;
-  overflow: hidden;
-}
-
-/* The mark sits ON the spine and has to occlude it, so it carries the pane's
-   own background rather than a transparent one. */
-.wk-mark {
-  width: 16px;
-  height: 16px;
-  display: grid;
-  place-items: center;
-  margin-top: 1px;
-  position: relative;
-  z-index: 1;
-  background: var(--slate);
-}
-
-.wk-mark::before {
-  content: "";
-  display: block;
-}
-
-.wk-think::before {
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  border: 1px solid var(--ash-dim);
-}
-
-.wk-tool::before {
-  width: 6px;
-  height: 6px;
-  background: var(--accent);
-}
-
-.wk-call::before {
-  width: 0;
-  height: 0;
-  /* impeccable-disable-next-line side-tab -- a zero-box border triangle, not an accent rail: this IS the marker, see .wk-think and .wk-phase beside it */
-  border-left: 5px solid var(--accent);
-  border-top: 3.5px solid transparent;
-  border-bottom: 3.5px solid transparent;
-}
-
-.wk-phase::before {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  border: 1px solid var(--accent);
-}
-
-.wk-beat.failed .wk-tool::before {
-  background: var(--warn);
-}
-
-.wk-v {
-  display: flex;
-  align-items: baseline;
-  gap: 0.45rem;
-  min-width: 0;
-}
-
-.wk-verb {
-  font-size: 11.5px;
-  color: var(--text);
-  flex: 0 0 auto;
-}
-
-.wk-target {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--frost);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* A thought is prose the model wrote, so it clamps rather than ellipsising on
-   one line: two lines is enough to recognise a plan, and the transcript holds
-   the whole of it. */
-.wk-thought {
-  font-size: 11.5px;
-  line-height: 1.5;
-  color: var(--ash);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.wk-sub {
-  font-family: var(--mono);
-  font-size: 9.5px;
-  font-variant-numeric: tabular-nums;
-  color: var(--ash-dim);
-  margin-top: 1px;
-}
-
-.wk-dur {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  color: var(--ash-dim);
-  white-space: nowrap;
-  margin-top: 1px;
-}
-
-.wk-beat.running .wk-verb,
-.wk-beat.running .wk-thought {
-  color: var(--frost);
-}
-
-.wk-beat.running .wk-dur {
-  color: var(--accent);
-}
-
-/* Running is a band crossing the row, never a pulse of the whole line: a pulse
-   animates the text you are reading, which is the argument the pipeline block
-   one file over already made for itself. */
-.wk-beat.running::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(100deg,
-      transparent 20%,
-      color-mix(in srgb, var(--accent) 11%, transparent) 50%,
-      transparent 80%);
-  background-size: 220% 100%;
-  animation: wk-glare 1.6s linear infinite;
-}
-
-@keyframes wk-glare {
-  from { background-position: 120% 0; }
-  to { background-position: -120% 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .wk-beat.running::after { animation: none; }
-}
-
 .wk-sec {
   display: flex;
   align-items: center;
@@ -770,51 +512,6 @@ button.cal-more:hover { color: var(--frost); text-decoration: underline; }
   font-size: 9.5px;
   font-variant-numeric: tabular-nums;
   color: var(--ash-dim);
-}
-
-/* A write is an object here for the same reason it is one in the transcript:
-   the vault changed, and a chip cannot carry a revert. */
-.wk-write {
-  margin: 0.5rem 0.85rem 0.6rem;
-  padding: 0.55rem 0.65rem;
-  background: var(--sheet);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-}
-
-.wk-write.failed {
-  border-style: dashed;
-  border-color: var(--warn);
-}
-
-.wk-write-h {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.35rem;
-}
-
-.wk-op {
-  font-size: var(--fs-meta);
-  font-weight: 600;
-  color: var(--warn);
-}
-
-.wk-note {
-  margin-left: auto;
-  font-family: var(--mono);
-  font-size: 9.5px;
-  color: var(--ash-dim);
-}
-
-.wk-path {
-  font-family: var(--mono);
-  font-size: 10.5px;
-  color: var(--frost);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 0.45rem;
 }
 
 .wk-acts {

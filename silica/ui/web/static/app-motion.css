@@ -50,7 +50,8 @@
 
 #surface-tabs.glide>.stab.active,
 #metrics-tabs.glide>.stab.active,
-#cal-mode.glide>button.active {
+#cal-mode.glide>button.active,
+#side-tabs.glide>button.active {
   background: transparent;
 }
 

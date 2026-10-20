@@ -7,7 +7,7 @@ if (localStorage.getItem("sidebar-collapsed") === "1")
 function toggleSidebar() {
   // Below the floor the rail is already a strip of icons and there is nothing
   // left to collapse; the same button summons it over the transcript instead.
-  if (isNarrow()) { toggleRail(railSection || "side-vault"); return; }
+  if (isNarrow()) { toggleRail(railSection || sidePane); return; }
   const collapsed = document.body.classList.toggle("sidebar-collapsed");
   localStorage.setItem("sidebar-collapsed", collapsed ? "1" : "0");
   sidebarYielded = false; // an explicit choice outranks the drawer's auto-yield
@@ -30,7 +30,7 @@ function isNarrow() {
   return getComputedStyle(document.body).getPropertyValue("--narrow").trim() === "1";
 }
 
-let railSection = null; // which compartment the summoned rail is showing
+let railSection = null; // which list the summoned rail is showing
 
 // Stamped on <html> by the server (index()), so the views a hosted account
 // does not get are gone before the first paint rather than after a probe.
@@ -43,11 +43,10 @@ function toggleRail(sec) {
   for (const b of document.querySelectorAll("#railmini .rm"))
     b.classList.toggle("on", open && b.dataset.sec === sec);
   if (!open) return;
-  // The compartment you asked for is the one that opens; the others keep the
-  // state you left them in, so summoning Files twice does not re-collapse the
-  // tree you just expanded.
-  const el = document.getElementById(sec);
-  if (el) { el.open = true; el.scrollIntoView({ block: "nearest" }); }
+  // The list you asked for is the one shown (ADR-0122); the tree keeps the
+  // folders you left open, so summoning the notes twice does not re-collapse
+  // what you just expanded.
+  showSidePane(sec);
 }
 
 function closeRail() {
@@ -62,13 +61,12 @@ $("#railmini").addEventListener("click", (e) => {
   if (!b) return;
   if (b.dataset.tab) { closeRail(); showTab(b.dataset.tab); return; } // a place picked, the summoned drawer goes
   if (!b.dataset.sec) return; // the toggle, New chat and the vault have their own handlers
-  // Above the floor the rail is the drawer collapsed by choice: a compartment
-  // asked for from it opens the drawer on that compartment, where below the
-  // floor it is summoned over the transcript.
+  // Above the floor the rail is the drawer collapsed by choice: a list asked
+  // for from it opens the drawer on that list, where below the floor it is
+  // summoned over the transcript.
   if (!isNarrow()) {
     toggleSidebar();
-    const el = document.getElementById(b.dataset.sec);
-    if (el) el.open = true;
+    showSidePane(b.dataset.sec);
     return;
   }
   toggleRail(b.dataset.sec);
@@ -84,22 +82,13 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRail(); });
 
-// No compartment hides any more (audit P17: each has a resting state), so this
-// only keeps an icon honest about a section that is missing altogether.
-function syncRailIcons() {
-  for (const b of document.querySelectorAll("#railmini .rm[data-sec]")) {
-    const sec = document.getElementById(b.dataset.sec);
-    b.hidden = !sec || sec.hidden;
-  }
-}
-new MutationObserver(syncRailIcons).observe($("#sidebar"),
-  { attributes: true, attributeFilter: ["hidden"], subtree: true });
-
+// No rail icon hides with its list (ADR-0122): the list not in view is hidden
+// by design, and its icon is the way back to it. syncRailIcons, which hid the
+// icon of a hidden compartment, went with the compartments.
 function syncNarrow() {
   const narrow = isNarrow();
   $("#railmini").hidden = !narrow && !document.body.classList.contains("sidebar-collapsed");
   if (!narrow) closeRail();
-  syncRailIcons();
 }
 syncNarrow();
 
@@ -137,7 +126,7 @@ async function loadVaultInfo() {
       $("#tree").append(p);
     }
     loadWorkspaces();                 // the members follow the files (ADR-0112)
-    renderVaultHealth(data);          // the chip's dot, the panel's link count, the compartment's size
+    renderVaultHealth(data);          // the chip's dot, the panel's link count
     syncTreePins();          // a fresh tree knows nothing about the pins yet
     markOpenNote();          // …nor about the note the drawer is on
     renderVaultFacts(data);           // the chat landing's counted line
@@ -156,7 +145,7 @@ async function loadVaultInfo() {
 // notices and the broken-link count with its way to metrics. The size lives
 // on the landing and in metrics, which is where a size is read.
 
-// The folder's NAME in the drawer's foot, its path on hover and in full at the
+// The folder's NAME in the drawer's head, its path on hover and in full at the
 // head of the vault's panel, which is where "which of my two vaults is this
 // window" is answered while reading something else.
 function setVaultPath(path) {
@@ -191,12 +180,8 @@ function renderVaultHealth(data) {
   broken.textContent = nfmt(vaultBroken) + " unresolved wikilink" + (vaultBroken === 1 ? "" : "s")
     + " · targets that do not exist yet · open Examine";
   $("#vault-links").hidden = !vaultBroken;
-  // the compartment's own count, which is the rail's reading of the size;
-  // the folder count rides the hover, the summary row is 264px wide
-  const folders = $("#tree").querySelectorAll("details").length;
-  const count = $("#vault-count");
-  count.textContent = data.notes ? nfmt(data.notes) + (data.notes === 1 ? " note" : " notes") : "";
-  count.dataset.tip = folders ? `${nfmt(data.notes || 0)} notes in ${nfmt(folders)} folder${folders === 1 ? "" : "s"}` : "";
+  // No size beside the list's name since ADR-0122, which has no title row to
+  // carry one: the size is read on the landing and in Examine (P16).
   syncVaultDot();
 }
 
@@ -205,7 +190,7 @@ function renderVaultHealth(data) {
 function syncVaultDot() {
   const warn = vaultBroken > 0 || noticeCount > 0;
   const label = "vault " + ($("#top-vname").textContent || "") + (warn ? ", needs attention" : ", healthy");
-  // The drawer's foot and the rail's foot are one vault said twice, and the
+  // The drawer's head and the rail's dot are one vault said twice, and the
   // panel colours its count by the same state.
   for (const el of [$("#vault-chip"), $("#rail-vault"), $("#vault-panel")]) el.dataset.health = warn ? "warn" : "ok";
   $("#vault-chip").setAttribute("aria-label", label);
@@ -470,10 +455,10 @@ function markOpenNote() {
 // --- changes (what this session did to the vault) ----------------------------
 // The list is the server's, not the transcript's: it survives a reload, folds
 // five writes to one note into one row, and empties a row when /undo puts the
-// bytes back. A row opens the drawer on the diff, which is the only place in the
-// app where you can read what actually changed rather than what was claimed.
+// bytes back. It was drawn as rows of "This chat" until ADR-0122; it still
+// feeds the write cards' tallies and review borders, the drawer's diff mode,
+// and the review mark on the chat it belongs to.
 const changedPaths = new Set();
-const KIND_MARK = { created: "+", deleted: "−", moved: "→", modified: "±" };
 
 // A turn-end refresh is enough for a one-note write, and wrong for a run: an
 // injector writes for minutes before its tool returns, so the notes were on disk
@@ -505,41 +490,14 @@ async function loadChanges() {
   changeRows = rows;
   changedPaths.clear();
   reviewOf.clear();
-  const box = $("#changes");
-  box.innerHTML = "";
   for (const r of rows) {
     changedPaths.add(r.path);
     if (r.review) reviewOf.set(r.path, r.review);
-    const row = mkEl("div", "chg-row " + r.kind + (r.review ? " review" : ""));
-    row.dataset.path = r.path;
-    row.title = r.from ? `${r.from} → ${r.path}` : r.path;
-    row.appendChild(mkEl("span", "chg-mark", KIND_MARK[r.kind] || "±"));
-    row.appendChild(mkEl("span", "chg-name", r.name));
-    const tally = mkEl("span", "chg-tally");
-    if (r.review) tally.appendChild(mkEl("span", "chg-review", "to review"));
-    if (r.added) tally.appendChild(mkEl("span", "chg-add", "+" + r.added));
-    if (r.removed) tally.appendChild(mkEl("span", "chg-del", "−" + r.removed));
-    if (!r.added && !r.removed && !r.review) tally.appendChild(mkEl("span", "chg-quiet", r.kind));
-    row.appendChild(tally);
-    box.appendChild(row);
   }
-  // The compartment's resting state says what to expect, and its filled state
-  // counts what needs an eye: "2 changed · 1 to review" is the sentence the
-  // reader opens this compartment for.
-  const toReview = rows.filter((r) => r.review).length;
-  const head = $("#chat-head");
-  head.textContent = rows.length
-    ? `${rows.length} changed` + (toReview ? ` · ${toReview} to review` : "")
-    : "nothing changed yet";
-  head.classList.toggle("review", toReview > 0);
-  // The folded rail's one state: an amber bar on the first icon while a write
-  // waits for a verdict, and a label that says so rather than a title.
-  const rm = document.querySelector('#railmini .rm[data-sec="side-chat"]');
-  rm.classList.toggle("review", toReview > 0);
-  rm.setAttribute("aria-label", toReview ? `this chat · ${toReview} to review` : "this chat");
+  chatsReview = rows.filter((r) => r.review).length;
+  syncChatsMark();
   stampWriteTallies(rows);
   stampReviewCards();
-  applySidebarFilter();
   syncDrawerMode(); // the menu's diff may have just become available for the open note
   refreshOpenNote(); // a turn or an undo may have rewritten the note in the drawer
 }
@@ -576,15 +534,10 @@ function stampWriteTallies(rows) {
   }
 }
 
-$("#changes").addEventListener("click", (e) => {
-  const row = e.target.closest(".chg-row");
-  if (row) openDiff(row.dataset.path);
-});
-
-// One box, no scope: the rail's three compartments ARE the scope, so one
-// typed string narrows every list at once and the status line counts per kind.
-// Two chips (notes, chats) used to pick one list; a note and a chat sharing a
-// substring both show, each under its own title, which is the disambiguation.
+// One box for both lists: a note and a chat sharing a substring both match,
+// each in its own list, and the status line counts per kind. Two chips (notes,
+// chats) used to pick what it read; the segment above it picks what is SHOWN
+// (ADR-0122), which is a different question.
 function applySidebarFilter() {
   const q = $("#side-search").value.trim().toLowerCase();
   // notes: substring on name or full path
@@ -616,11 +569,6 @@ function applySidebarFilter() {
     el.hidden = !!q && !el.dataset.name.toLowerCase().includes(q) &&
                 !(w && w.members.some((m) => m.path.toLowerCase().includes(q)));
   });
-  // changed notes: same substring rule as the tree, on the same names
-  $("#changes").querySelectorAll(".chg-row").forEach((el) => {
-    el.hidden = !!q && !el.textContent.toLowerCase().includes(q) &&
-                !(el.dataset.path || "").toLowerCase().includes(q);
-  });
   // sessions: substring on the TITLE span, not the row: the row also carries
   // "2h ago" and the "…" menu, so "ago" would light every chat. While
   // searching, the expand cap is lifted.
@@ -650,12 +598,21 @@ function applySidebarFilter() {
   const notes = $("#tree").querySelectorAll(".tree-note:not([hidden])").length;
   const chats = $("#sessions").querySelectorAll(".session:not([hidden])").length;
   const n = (k, w) => `${k} ${w}${k === 1 ? "" : "s"}`;
-  const parts = [];
-  if (notes) parts.push(n(notes, "note"));
-  if (chats) parts.push(n(chats, "chat"));
-  box.appendChild(document.createTextNode(
-    parts.length ? `${parts.join(" · ")} match · ` : `nothing is named "${typed}" · `));
-  box.classList.toggle("empty", !parts.length);
+  // The list not in view says its matches as the way to it (ADR-0122 point
+  // 4): a chat named like the typed word is otherwise a match nobody sees.
+  const kinds = [[notes, "note", "side-vault"], [chats, "chat", "side-chats"]].filter(([k]) => k);
+  kinds.forEach(([k, w, pane], i) => {
+    if (i) box.appendChild(document.createTextNode(" · "));
+    if (pane === sidePane) { box.appendChild(document.createTextNode(n(k, w))); return; }
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "linklike sf-other";
+    go.textContent = n(k, w);
+    go.addEventListener("click", () => showSidePane(pane));
+    box.appendChild(go);
+  });
+  box.appendChild(document.createTextNode(kinds.length ? " match · " : `nothing is named "${typed}" · `));
+  box.classList.toggle("empty", !kinds.length);
   const ask = document.createElement("button");
   ask.type = "button";
   ask.className = "linklike";
@@ -668,14 +625,6 @@ function applySidebarFilter() {
   box.appendChild(ask);
 }
 $("#side-search").addEventListener("input", applySidebarFilter);
-
-// A button inside a <summary> (collapse, + new) would also toggle the whole
-// compartment. Cancelling on the summary itself is what reliably suppresses
-// that: preventDefault from the button's own listener is order-dependent and
-// stopPropagation does not consistently reach summary's activation behaviour.
-for (const s of document.querySelectorAll("#sidebar details.side-section > summary")) {
-  s.addEventListener("click", (e) => { if (e.target.closest("button")) e.preventDefault(); });
-}
 
 $("#tree-collapse").addEventListener("click", () => {
   for (const d of $("#tree").querySelectorAll("details[open]")) d.open = false;
@@ -730,7 +679,6 @@ async function loadSessions() {
     currentSessionId = current;
     currentTitle = "";
     restoreDraft(current); // the composer's draft is per chat
-    $("#sessions-count").textContent = sessionCount || "";
     let bucket = "";
     sessions.forEach((s, i) => {
       const b = dayBucket(s.updated || 0);
@@ -756,6 +704,7 @@ async function loadSessions() {
       box.appendChild(el);
     });
     setDocumentTitle();
+    syncChatsMark(); // the review mark rides the current chat's row, rebuilt just now
     $("#sessions-more").textContent = "show all " + sessionCount;
     applySidebarFilter();
     applyHashSession(); // a #chat/<id> deep link names a chat that may not be the current one
@@ -849,6 +798,58 @@ function renameSessionInline(row) {
   });
   field.addEventListener("blur", () => finish(true));
 }
+
+// --- the two lists (ADR-0122) -------------------------------------------------
+// One shown at a time under the segment, the other one click away: the tree and
+// the chats used to split the column 3:2 and neither had room. Remembered per
+// browser; a first visit shows the notes, the list every view reads (ADR-0072).
+let sidePane = localStorage.getItem("side-pane") === "side-chats" ? "side-chats" : "side-vault";
+
+function showSidePane(id) {
+  if (id !== "side-vault" && id !== "side-chats") return;
+  sidePane = id;
+  for (const p of document.querySelectorAll("#sidebar .side-pane")) p.hidden = p.id !== id;
+  for (const b of document.querySelectorAll("#side-tabs button")) setActive(b, b.dataset.pane === id);
+  $("#sidebar").dataset.pane = id; // the notes' tools leave with the notes (app-shell.css)
+  localStorage.setItem("side-pane", id);
+  syncChatsMark();
+  if ($("#side-search").value.trim()) applySidebarFilter(); // the link in the status line swaps lists
+}
+$("#side-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-pane]");
+  if (b) showSidePane(b.dataset.pane);
+});
+
+// The states "This chat" carried while it was shut (audit P17), on the list
+// that holds the chat now: amber while a write of the current chat waits for a
+// verdict, the accent dot while a turn runs. The segment shows the dot only
+// while the chats are out of view, where the running row's own dot is not; the
+// rail's icon shows it always, since folded nothing else does.
+let chatsReview = 0; // writes of the current chat under review, from /changes
+let runLive = false; // set by work.js from the narration, the one reader of it
+
+function markRun(live) {
+  if (live === runLive) return;
+  runLive = live;
+  syncChatsMark();
+}
+
+function syncChatsMark() {
+  const mark = (live) => (chatsReview ? "review" : live ? "live" : "");
+  const seg = $('#side-tabs [data-pane="side-chats"]');
+  const rm = $('#railmini [data-sec="side-chats"]');
+  seg.dataset.mark = mark(runLive && sidePane !== "side-chats");
+  rm.dataset.mark = mark(runLive);
+  const said = chatsReview ? ` · ${chatsReview} to review` : runLive ? " · a turn running" : "";
+  seg.setAttribute("aria-label", "chats" + said);
+  rm.setAttribute("aria-label", "chats" + said);
+  const row = $("#sessions .session.active");
+  if (row) {
+    row.classList.toggle("review", chatsReview > 0);
+    row.title = chatsReview ? `${chatsReview} write${chatsReview === 1 ? "" : "s"} to review` : "";
+  }
+}
+showSidePane(sidePane);
 
 // The work panel projects whichever narration session is current, and the two
 // places that switch it are the only ones that know. A load replays no beats
@@ -997,7 +998,7 @@ function glide(seg) {
     .observe(seg, { subtree: true, attributeFilter: ["class"] });
   new ResizeObserver(place).observe(seg);
 }
-for (const id of ["#surface-tabs", "#cal-mode", "#metrics-tabs"]) glide($(id));
+for (const id of ["#surface-tabs", "#cal-mode", "#metrics-tabs", "#side-tabs"]) glide($(id));
 
 // Switching tabs is a function, not only a click: a synthetic .click() bubbles
 // to the document's outside-click handler, which closes the note drawer. Every

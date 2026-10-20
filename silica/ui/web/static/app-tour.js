@@ -110,6 +110,7 @@ const tourFirstNote = () => document.querySelector("#tree .tree-note")?.dataset.
 function tourOpenDrawer() {
   if (isNarrow()) { if (railSection !== "side-vault") toggleRail("side-vault"); }
   else if (document.body.classList.contains("sidebar-collapsed")) toggleSidebar();
+  showSidePane("side-vault"); // the + leaves with the notes when Chats is the list in view (ADR-0122)
 }
 
 // The control a step lights is the first match that has a box: the views are

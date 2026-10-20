@@ -1,13 +1,17 @@
-/* --- usage at the drawer's foot (ADR-0102 point 7) ---------------------------
-   One bar per limit, above the vault: the name and the share on one line, the
-   bar, and when it resets. The signal hue while there is room, amber from 80%,
-   the same threshold that raises the line above the composer. Drawn by
-   app-limits.js only where the key has a limit. */
-#usage {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.45rem 0.55rem 0.65rem;
+/* --- usage in Settings (ADR-0102 point 7, moved there by ADR-0122 point 6) ---
+   One row per limit: the name and the share on one line, the bar, and when it
+   resets. The signal hue while there is room, amber from 80%, the same
+   threshold that raises the line above the composer. Each is a settings row,
+   for its rule and its search, laid out as a block and not as the
+   label/control grid. Drawn by app-limits.js only where the key has a limit. */
+.st-row.us-row {
+  display: block;
+  /* a label 640px from its share is read as two facts; 30rem keeps them one */
+  max-width: 30rem;
+}
+
+.st-row.us-row[hidden] {
+  display: none;
 }
 
 .us-head {
@@ -15,12 +19,12 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 0.5rem;
-  font-size: var(--fs-meta);
+  font-size: var(--fs-ctl);
   line-height: 1.3;
 }
 
 .us-name {
-  color: var(--text);
+  color: var(--frost);
 }
 
 .us-pct {
@@ -29,11 +33,12 @@
 }
 
 /* --line and not --slate-2 for the track: the empty part of the bar has to
-   read on the drawer's --slate, where --slate-2 sits 1.14:1 off it on paper and
-   --line 1.35:1 (1.22 and 1.46 on graphite). Computed 2026-10-13. */
+   read on the panel behind it, and on the drawer's --slate, where it stood
+   until ADR-0122, --slate-2 sat 1.14:1 off it on paper and --line 1.35:1
+   (1.22 and 1.46 on graphite). Computed 2026-10-13. */
 .us-bar {
-  height: 4px;
-  margin-top: 0.3rem;
+  height: 6px;
+  margin-top: 0.45rem;
   background: var(--line);
   border-radius: 999px;
   overflow: hidden;
@@ -93,6 +98,20 @@
   height: 8px;
   border-radius: 999px;
   background: var(--warn);
+}
+
+/* the way to the bars in Settings (ADR-0122 point 6): the app's one
+   interactive colour, at the sentence's size, with no padding of its own */
+#limit-line .linklike {
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  font-size: inherit;
+  color: var(--accent);
+}
+
+#limit-line .linklike:hover {
+  color: var(--frost);
 }
 
 #limit-line[data-level="full"] {

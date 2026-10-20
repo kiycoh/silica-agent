@@ -2347,11 +2347,10 @@ $("#send").addEventListener("click", (e) => {
   requestStop();
 });
 
-// The wordmark goes home (the chat view); "+ new" in the Chats compartment
-// starts a chat (audit P16). Optimistic: clear the transcript at once (the
-// reset itself is a cached-seed copy server-side, but never make the click
-// wait on the network).
-$("#brand-logo").addEventListener("click", () => showTab("chat"));
+// New chat starts a chat (audit P16); the open one is a row of Chats, since
+// the wordmark that went home left the drawer (ADR-0122). Optimistic: clear the
+// transcript at once (the reset itself is a cached-seed copy server-side, but
+// never make the click wait on the network).
 async function newChat() {
   if (streaming) return;
   saveDraft();

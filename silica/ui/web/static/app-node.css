@@ -249,6 +249,12 @@
     display: flex;
   }
 
+  /* Summoned, the drawer stands beside the rail, whose own toggle is a
+     glyph away: two toggles 60px apart read as two different controls. */
+  #sidebar-toggle {
+    display: none;
+  }
+
   /* The view starts after #railmini (52px) here, and the dock with it. It
      kept the open rail's left edge and sat 212px right of the view's centre
      at 1000px, measured 2026-10-07 (ADR-0072). */
@@ -285,9 +291,10 @@
   background: var(--line);
 }
 
-/* The vault sits at the rail's foot as it sits at the drawer's: its dot. */
+/* The vault sits under the rail's toggle as it sits in the drawer's head
+   (ADR-0122): its dot, a little apart from the places that follow. */
 #rail-vault {
-  margin-top: auto;
+  margin-bottom: 0.3rem;
 }
 
 .rm.tab.active {
@@ -323,17 +330,25 @@
   background: var(--slate-2);
 }
 
-/* The folded rail's one state (audit P17): an amber bar on the first icon
-   while this chat has a write waiting for a verdict. A bar and not a dot, so
-   it reads as "something to look at" at 34px; the label says how many. */
-.rm.review::after {
+/* The folded rail's states (audit P17), on the Chats icon since ADR-0122: an
+   amber dot while the current chat has a write waiting for a verdict, an
+   accent one while a turn runs; the label says how many. A dot at the corner
+   and not the bar at the left edge it was: beside the --sel box of the icon
+   in view, a bar read as "this one is selected" (2026-10-21 review), and the
+   segment and the chat row wear a dot. */
+.rm[data-mark="review"]::after,
+.rm[data-mark="live"]::after {
   content: "";
   position: absolute;
   top: 6px;
-  bottom: 6px;
-  left: 0;
-  width: 2px;
+  right: 6px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
+  background: var(--accent);
+}
+
+.rm[data-mark="review"]::after {
   background: var(--warn);
 }
 

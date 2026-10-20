@@ -1,9 +1,9 @@
-// Work: the left rail's last compartment, and the only surface in this app that
-// reads the narration. It fills TWO panes now, at opposite edges, and the split
-// is the point: the run goes left (#work-body, always there, readable while a
-// note is open), what you POINTED at goes right (#node-pane, the drawer mode
-// named after it). One name used to cover both, and it drew the run on chat and
-// the node on explore - so the segment labelled `work` was wrong half the time.
+// Work: the only surface in this app that reads the narration. The run it
+// projects fills the run lines (the chat's ledger line and the dock's) and the
+// Chats mark of the left drawer; what you POINTED at fills #node-pane, the
+// right drawer's mode named after it. The run had a pane of its own at the left,
+// "This chat", until ADR-0122: the transcript's ledger line (ADR-0117 point 3)
+// says the same steps and reads where the answer is.
 //
 // `silica/agent/narration.py` has written an append-only account of every run
 // since it shipped, and `/narration/sse` has served it live for just as long.
@@ -447,11 +447,6 @@ function neighbourRows(d) {
   // The scope chip. Empty on a node: the segment beside it is already named
   // after that.
   const scope = document.getElementById("node-scope");
-  // The run, in the left rail. Its own head is the live dot in the summary, so
-  // the compartment says whether anything is happening while it is folded shut.
-  const runBody = document.getElementById("work-body");
-  const runState = document.getElementById("work-state");
-
   let beats = [], sid = null, curSid = null, run = null, tick = null;
   // Which tab is up: it decides what the NODE pane draws (the node on either
   // view that can select one). The rail's Work compartment
@@ -481,61 +476,7 @@ function neighbourRows(d) {
     return h;
   }
 
-  function beatRow(r) {
-    const row = el("div", "wk-beat" + (r.running ? " running" : "") + (r.failed ? " failed" : ""));
-    row.appendChild(el("span", "wk-mark wk-" + r.kind));
-    const lab = el("div", "wk-lab");
-    if (r.kind === "think") {
-      lab.appendChild(el("div", "wk-thought", r.text || "thinking"));
-    } else {
-      const v = el("div", "wk-v");
-      v.appendChild(el("span", "wk-verb", r.verb));
-      if (r.target) v.appendChild(el("span", "wk-target", r.target));
-      lab.appendChild(v);
-    }
-    if (r.sub) lab.appendChild(el("div", "wk-sub", r.sub));
-    row.appendChild(lab);
-    row.appendChild(el("div", "wk-dur", r.dur));
-    return row;
-  }
-
-  function writeCardEl(w) {
-    const card = el("div", "wk-write" + (w.failed ? " failed" : ""));
-    const h = el("div", "wk-write-h");
-    h.appendChild(el("span", "wk-op", w.failed ? "rolled back" : w.op));
-    if (w.failed) h.appendChild(el("span", "wk-note", "vault unchanged"));
-    card.appendChild(h);
-    card.appendChild(el("div", "wk-path", w.target));
-    if (!w.failed && w.target) {
-      const acts = el("div", "wk-acts");
-      const read = el("button", "wk-mini go", "read");
-      read.type = "button";
-      read.addEventListener("click", () => { if (window.openNote) window.openNote(w.target); });
-      const undo = el("button", "wk-mini", "revert");
-      undo.type = "button";
-      // `/undo <path>` is the same command the transcript's write card sends,
-      // and it takes the rest of the line, so a note name with spaces survives.
-      undo.addEventListener("click", () => { if (window.send) window.send("/undo " + w.target); });
-      acts.appendChild(read); acts.appendChild(undo);
-      card.appendChild(acts);
-    }
-    return card;
-  }
-
-  function sourceRow(s) {
-    const row = el("button", "wk-src");
-    row.type = "button";
-    row.appendChild(el("span", "wk-src-sw"));
-    const t = el("div", "wk-src-t");
-    t.appendChild(el("div", "wk-src-n", s.name));
-    t.appendChild(el("div", "wk-src-v", s.verb));
-    row.appendChild(t);
-    row.addEventListener("click", () => { if (window.openNote) window.openNote(s.name); });
-    return row;
-  }
-
-  // The run line above the composer (audit P1) is a second projection of the
-  // same beats the rail reads: verb and target of the running step, a clock
+  // The run line above the composer (audit P1) is a projection of the beats: verb and target of the running step, a clock
   // that ticks between beats, the position in the turn, and a stall sentence
   // once nothing has arrived for STALL_S. app-chat.js owns whether the line
   // shows (it knows when THIS tab's turn starts and ends); this only fills it.
@@ -587,29 +528,6 @@ function neighbourRows(d) {
     // is false for a few milliseconds, and a stone sent to idle there and back
     // restarted its crossfade on every beat and never arrived anywhere.
     if (live) composerPresence?.state(stalled ? "stalled" : verb === "thinking" ? "thinking" : "acting");
-  }
-
-  // The spine is the run's own progress bar, so it has to end at the beat that
-  // is RUNNING rather than at the fraction the mock happened to draw. Measured
-  // and not counted: a thought row is two lines and a tool row is one, so "the
-  // fourth of six beats" is nowhere near two thirds of the way down the column.
-  // The insets come from the rule's own computed style because the gradient is
-  // laid out in the pseudo-element's box, not the list's — reading them keeps
-  // the cyan on the beat when those paddings change in CSS alone.
-  function paintSpine(tl) {
-    const live = tl.querySelectorAll(".wk-beat.running");
-    const last = live[live.length - 1];
-    if (!last) { tl.style.removeProperty("--spine"); return; }
-    const box = tl.getBoundingClientRect();
-    const cs = getComputedStyle(tl, "::before");
-    const top = box.top + (parseFloat(cs.top) || 0);
-    const span = box.height - (parseFloat(cs.top) || 0) - (parseFloat(cs.bottom) || 0);
-    // A hidden panel measures zero, and a percentage of zero is NaN in a
-    // gradient, which paints the whole rule accent.
-    if (!(span > 0)) { tl.style.removeProperty("--spine"); return; }
-    const b = last.getBoundingClientRect();
-    const pct = ((b.top + b.height / 2 - top) / span) * 100;
-    tl.style.setProperty("--spine", Math.max(0, Math.min(100, pct)).toFixed(1) + "%");
   }
 
   // --- the Node panel --------------------------------------------------------
@@ -1384,60 +1302,6 @@ function neighbourRows(d) {
     ladderSection(d, into);
   }
 
-  // The run, in the rail. No view gate and no competition: this compartment has
-  // one subject and it is the same on all four views.
-  // The "this chat" compartment (audit P17): the run's outcome and receipt,
-  // the writes that did NOT land (the ones that did are the ledger rows above
-  // this, painted by app-shell.js from /changes), the reads behind "show",
-  // and the run's own steps behind "steps". The live step list is not drawn
-  // while the transcript is on screen: the run line at the composer names the
-  // current step, and the transcript already carries every row.
-  let stepsOpen = false, readsOpen = false; // survive the 500ms re-render
-
-  function renderRun(state) {
-    runState.textContent = state;
-    runState.className = "wk-state" + (run.running ? " live" : "");
-    runBody.textContent = "";
-    if (!run.rows.length) return; // the head line above says "nothing changed yet"
-
-    // The outcome, then the receipt: elapsed freezes here at done (audit P1).
-    const rh = el("div", "wk-receipt");
-    rh.appendChild(el("span", "wk-num", (run.running ? "running" : "done") + (run.elapsed ? " · " + run.elapsed : "")));
-    if (run.shape) rh.appendChild(el("span", "wk-num", run.shape));
-    if (run.model) rh.appendChild(el("span", "wk-num", run.model.split("/").pop()));
-    runBody.appendChild(rh);
-
-    for (const w of run.writes.filter((x) => x.failed)) runBody.appendChild(writeCardEl(w));
-
-    if (run.sources.length) {
-      const n = run.sources.length;
-      const row = el("div", "wk-fold");
-      const btn = el("button", "linklike", (readsOpen ? "hide" : "show"));
-      btn.type = "button";
-      btn.setAttribute("aria-expanded", String(readsOpen));
-      row.appendChild(el("span", "wk-fold-t", `${n} note${n === 1 ? "" : "s"} read`));
-      row.appendChild(btn);
-      btn.addEventListener("click", () => { readsOpen = !readsOpen; render(); });
-      runBody.appendChild(row);
-      if (readsOpen) for (const s of run.sources) runBody.appendChild(sourceRow(s));
-    }
-
-    const row = el("div", "wk-fold");
-    const btn = el("button", "linklike", stepsOpen ? "hide steps" : "steps");
-    btn.type = "button";
-    btn.setAttribute("aria-expanded", String(stepsOpen));
-    row.appendChild(el("span", "wk-fold-t", `${run.rows.length} step${run.rows.length === 1 ? "" : "s"}`));
-    row.appendChild(btn);
-    btn.addEventListener("click", () => { stepsOpen = !stepsOpen; render(); });
-    runBody.appendChild(row);
-    if (stepsOpen) {
-      const tl = el("div", "wk-tl" + (run.running ? " live" : ""));
-      for (const r of run.rows) tl.appendChild(beatRow(r));
-      runBody.appendChild(tl);
-      paintSpine(tl);
-    }
-  }
-
   // The drawer's details, and node mode. A note is drawn on every view now
   // (ADR-0075): it is the note open in the drawer, read from Chat as much as
   // from Explore, and its details are one button away wherever it was opened.
@@ -1601,9 +1465,8 @@ function neighbourRows(d) {
   // focus off a details tab twice a second while a turn was running.
   function renderRunSide() {
     run = projectRun(beats);
-    const state = run.running ? "live" : (run.rows.length ? "done" : "idle");
     paintRunLine(run);
-    renderRun(state);
+    markRun(run.running); // the Chats mark of the left drawer (ADR-0122 point 5)
   }
 
   function render() {

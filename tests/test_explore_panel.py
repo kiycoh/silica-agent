@@ -473,7 +473,7 @@ def test_auto_layout_finishes_the_descent_a_reheat_only_starts():
 # --- 5. the rail's floor -----------------------------------------------------
 
 def test_the_full_path_is_readable_without_hovering_it():
-    """The foot names the vault by its last segment, which is what identifies
+    """The head names the vault by its last segment, which is what identifies
     it at a glance. The full path was a tooltip, and a path you can only get by
     hovering is a path you cannot read while comparing two windows. It stood at
     the rail's floor until ADR-0084 folded that line into the vault's panel,
@@ -484,10 +484,11 @@ def test_the_full_path_is_readable_without_hovering_it():
     assert 'id="railfoot"' not in html
     setter = _block(app, "function setVaultPath(", "\n}")
     assert '$("#vp-path")' in setter and '$("#vault-chip").hidden = !path;' in setter
-    # last, and last is enough: the rail itself no longer scrolls, so the floor
-    # cannot be scrolled off it. Its compartments do, inside themselves.
-    foot = _block(css, "#side-foot {", "}")
-    assert "margin-top: auto" in foot
+    # first since ADR-0122, which moved the vault from the foot to the head:
+    # the drawer itself does not scroll, so the head cannot be scrolled off it.
+    # The list in view does, inside itself.
+    assert 'id="vault-chip"' in _block(html, '<div id="side-head">', "</div>")
+    assert 'id="side-foot"' not in html
     rail_css = _block(css, "#sidebar {", "\n}")
     assert "overflow: hidden" in rail_css, "the rail scrolls again"
     assert "overflow-y: auto" in _block(css, ".side-body {", "\n}")
