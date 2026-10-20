@@ -491,17 +491,19 @@ _CACHE: dict[tuple, dict] = {}
 _NETWORK_NOTE_LOGGED = False
 
 
-def read(path: str | os.PathLike) -> dict:
+def read(path: str | os.PathLike, vision: int | None = None) -> dict:
     """`extract(path)`, in a limited child on the server and in-process locally.
 
     Cached by path, size, mtime and the vision cap: one conversion asks for the
     text, the date and the citation, and before this each of those opened the
-    hostile file again (ADR-0087 Context, three opens)."""
+    hostile file again (ADR-0087 Context, three opens). `vision` overrides
+    `vision_pages()`; 0 is the text alone, for silica-core's index, which
+    would otherwise render up to 60 pages of every PDF it walks."""
     import logging
 
     from silica.config import hosted
 
-    key = _key(path)
+    key = _key(path, vision)
     if key in _CACHE:
         return _CACHE[key]
     # Before PDFium sees it: a renamed HTML file reached it as a PdfiumError,
@@ -604,9 +606,10 @@ def unread_sentence(pages: list[int]) -> str:
     return f"pages {listed} have no selectable text and were not read"
 
 
-def _key(path: str | os.PathLike) -> tuple:
+def _key(path: str | os.PathLike, vision: int | None = None) -> tuple:
     st = os.stat(path)
-    return (os.path.realpath(path), st.st_size, st.st_mtime_ns, vision_pages())
+    return (os.path.realpath(path), st.st_size, st.st_mtime_ns,
+            vision_pages() if vision is None else vision)
 
 
 def docx_html_here(path: str | os.PathLike) -> str:
