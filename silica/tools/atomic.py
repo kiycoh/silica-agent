@@ -274,8 +274,10 @@ def _engine():
     core.INDEX = "retrieval"
     core_config.CONFIG.vault_path = CONFIG.vault_path
     # A silica-core that renamed either name would go back to opening PDFs in
-    # this process without a word, so the engine refuses to run instead; the
-    # pin (ADR-0043) means only a deliberate bump can get here.
+    # this process without a word, so the engine refuses to run instead. The
+    # server installs the lock (0.10.1), but a wheel install resolves
+    # `silica-core>=0.10.1` to the newest release, untested here; 0.11.0 keeps
+    # both names (checked 2026-10-20).
     if not (callable(getattr(core, "_pdf_text", None)) and callable(getattr(core, "_extract_cache", None))):
         raise RuntimeError("silica-core no longer reads PDFs through _pdf_text: see silica/tools/atomic.py")
     core._pdf_text = _pdf_text
