@@ -2110,17 +2110,20 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
     asked = text.strip()
     lines: list[str] = []
     if ready:
-        lines.append("Markdown staged in Inbox, ready to nucleate or read:")
+        # Not "ready to nucleate": with those words a 9B nucleated a file it
+        # was asked a question about (ADR-0121 Context). The words above say
+        # what to do; NUCLEATE_ASK says nucleate when that is the request.
+        lines.append("Staged in the Inbox as Markdown, readable now:")
         for p in ready:
             outline = "" if asked else _drop_outline(p)
             lines.append(f"- {p}" + (f" ({outline})" if outline else ""))
     if converting:
         # Named so the answer does not read as if the files were lost: they
-        # are converting after this turn, and the page offers each one when it
-        # is ready (ADR-0099 point 6). The agent cannot read them yet.
-        lines.append("Still converting, not readable in this turn. Tell the user each one is "
-                     "offered above the message box, with Nucleate it, once it is ready:")
-        lines += [f"- {n}" for n in converting]
+        # are converting after this turn, and the page shows each one when it
+        # is ready (ADR-0099 point 6). The button is not named: told "offered
+        # with Nucleate it", the model told the student that button converts.
+        lines.append("Still converting into notes, each shown above the message box once it is ready:")
+        lines += [_converting_line(p) for p in converting]
     if stubs:
         lines.append("Code skeleton stubs already staged in the vault:")
         lines += [f"- {p}" for p in stubs]
@@ -2136,6 +2139,49 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
         lines += [f"- {n}: {why}" for n, why in skipped]
     manifest = "\n".join(lines) if lines else "(no files could be staged)"
     return f"{asked or DROP_ASK}\n\n---\nAttached files:\n{manifest}"
+
+
+def _converting_line(rel: str) -> str:
+    """One file of a drop still converting, by its vault path, which a read
+    can take; the name alone left the model nothing to open.
+
+    A PDF's text layer is readable now (ADR-0099 amendment 2026-10-20):
+    silica_read opens it through pdf_extract, in the limited child on the
+    server and without its hidden text (ADR-0098 amendment 2026-10-20), in
+    0.24-0.42 s for 36 pages, while the conversion waits on the chat model
+    reading page images (ADR-0087: 23.6 s for one scanned page). "Not
+    readable in this turn" was true of the note and false of the file.
+
+    This read is the one silica_read makes (`vision=0`, one cache key), so it
+    moves that cost before the turn rather than adding one; it names the
+    pages the layer lacks, so an answer that needs them says so."""
+    from silica.config import CONFIG
+    from silica.sources import pdf_extract
+
+    later = f"- {rel}: not readable until it is converted; tell the user so"
+    if not rel.lower().endswith(".pdf"):
+        return later
+    try:
+        data = pdf_extract.read(Path(CONFIG.vault_path or ".") / rel, vision=0)
+    except Exception:
+        # Tolerated: a PDF the reader refuses (a password, a malformed file, a
+        # child that died) is the conversion's to report, and how it ended
+        # reaches the next turn (jobs.settled). Until then it is a file still
+        # converting, which is all this line said before.
+        logger.warning("drop: the text layer of %s was not read", rel, exc_info=True)
+        return later
+    n, no_text, math = data["n_pages"], data["no_text"], data["math"]
+    if len(no_text) == n:
+        return later + " (it has no selectable text)"
+    # No `section="p. N"` here: once the note exists the engine serves it for
+    # this path, and a page section is then not_found; the path alone reads
+    # the layer now and the note later.
+    line = f'- {rel} ({n} pages): its text layer is readable now, in this message: silica_read(path="{rel}")'
+    gaps = ([f"may garble the formulas on {pdf_extract.named_pages([i + 1 for i in math])}"] if math else []) \
+        + ([f"has nothing on {pdf_extract.named_pages([i + 1 for i in no_text])}"] if no_text else [])
+    if gaps:
+        line += f". That layer {' and '.join(gaps)}: say so when the answer depends on those pages"
+    return line
 
 
 @app.post("/nucleate", dependencies=_SAME_ORIGIN)
@@ -2172,7 +2218,7 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     # outline, and a textbook read on the loop thread blocks /stop.
     resp = _turn_response(await asyncio.to_thread(
         _compose_nucleate_turn, text, ready, stubs, mail, skipped,
-        converting=[j["source"]["name"] for j in queued]))
+        converting=[j["source"]["path"] for j in queued]))
     if ids:
         resp.headers["X-Silica-Jobs"] = ",".join(ids)
     return resp

@@ -344,3 +344,28 @@ def test_a_pdf_the_child_refuses_is_unconverted_not_a_crash(pdfium_vault):
 
     assert silica_search_context("html")["hits"] == []
     assert silica_read("Inbox/fake.pdf")["error"]["code"] == "unconverted"
+
+
+def test_in_this_process_pdfium_is_entered_by_one_thread_at_a_time(pdfium_vault, monkeypatch):
+    """Two threads in PDFium end the interpreter, the laptop's whole server: a
+    drop's turn reads the text layer while the jobs worker converts the same
+    file. Unlocked, eight threads reading PDFs died with SIGSEGV in 3 of 3 runs
+    (2026-10-20); pinned here by the lock, since a crash would end the suite."""
+    import pypdfium2 as pdfium
+
+    from silica.sources import pdf_extract
+
+    opened = pdfium.PdfDocument
+
+    def only_under_the_lock(*a, **k):
+        assert pdf_extract._PDFIUM.locked(), "PDFium entered without pdf_extract._PDFIUM"
+        return opened(*a, **k)
+
+    monkeypatch.setattr(pdfium, "PdfDocument", only_under_the_lock)
+    path = Path(pdfium_vault.note("Inbox/a.pdf"))
+    path.write_bytes(pdf_bytes(["A page with enough text to count as one."]))
+
+    assert pdf_extract.read(path, vision=0)["n_pages"] == 1
+    pdf_extract._CACHE.clear()
+    pdf_extract.metadata(path)
+    assert not pdf_extract._PDFIUM.locked()

@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+import threading
 
 # ADR-0087 point 2's table, measured there: the library's largest PDF is 20 MB
 # and its longest paper 135 pages; the 803-page book takes 3.8 s, 364 MB and
@@ -489,6 +490,12 @@ def _hidden_chars(textpage, n: int, raw) -> list[bool]:
 
 _CACHE: dict[tuple, dict] = {}
 _NETWORK_NOTE_LOGGED = False
+# PDFium keeps one library state per process and two threads inside it abort
+# the interpreter, on a laptop the whole server: a drop's turn reads the text
+# layer while the jobs worker converts the same file, and an engine search
+# reads PDFs on the agent's thread (found 2026-10-20, "Fatal Python error:
+# Aborted" in two `_text` frames). The child is a process of its own.
+_PDFIUM = threading.Lock()
 
 
 def read(path: str | os.PathLike, vision: int | None = None) -> dict:
@@ -513,7 +520,8 @@ def read(path: str | os.PathLike, vision: int | None = None) -> dict:
         data = _read_in_child(path, key[-1])
     else:
         try:
-            data = extract(os.fspath(path), vision_pages=key[-1])
+            with _PDFIUM:
+                data = extract(os.fspath(path), vision_pages=key[-1])
         except _Refused as exc:
             raise _refusal(exc.reason) from None
         except Exception as exc:
@@ -550,12 +558,13 @@ def metadata(path: str | os.PathLike) -> dict:
         return read(path)["meta"]
     import pypdfium2 as pdfium
 
-    pdf = pdfium.PdfDocument(os.fspath(path))
-    try:
-        return {k: _clean(" ".join((pdf.get_metadata_value(k) or "").split()))
-                for k in ("Title", "Author", "CreationDate")}
-    finally:
-        pdf.close()
+    with _PDFIUM:
+        pdf = pdfium.PdfDocument(os.fspath(path))
+        try:
+            return {k: _clean(" ".join((pdf.get_metadata_value(k) or "").split()))
+                    for k in ("Title", "Author", "CreationDate")}
+        finally:
+            pdf.close()
 
 
 def cached(path: str | os.PathLike) -> dict | None:
@@ -591,6 +600,13 @@ def unread_sentence(pages: list[int]) -> str:
     the reply and the import row; "" for none."""
     if not pages:
         return ""
+    if len(pages) == 1:
+        return f"{named_pages(pages)} has no selectable text and was not read"
+    return f"{named_pages(pages)} have no selectable text and were not read"
+
+
+def named_pages(pages: list[int]) -> str:
+    """"page 4", or "pages 2, 4 and 7 to 9", for 1-based page numbers."""
     runs: list[list[int]] = []
     for n in sorted(pages):
         if runs and n == runs[-1][1] + 1:
@@ -601,9 +617,7 @@ def unread_sentence(pages: list[int]) -> str:
     named = [part for a, b in runs
              for part in ([f"{a} to {b}"] if b - a >= 2 else [str(n) for n in range(a, b + 1)])]
     listed = named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1]
-    if len(pages) == 1:
-        return f"page {listed} has no selectable text and was not read"
-    return f"pages {listed} have no selectable text and were not read"
+    return f"page {listed}" if len(pages) == 1 else f"pages {listed}"
 
 
 def _key(path: str | os.PathLike, vision: int | None = None) -> tuple:
