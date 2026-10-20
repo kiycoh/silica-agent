@@ -298,15 +298,16 @@ class Narrator:
         self._thought_t0 = time.time()
         self.narrate("thought", "running", "thinking", id=self._thought)
 
-    def thought_close(self, text: str) -> None:
+    def thought_close(self, text: str, status: str = "done") -> None:
         """Close the open thought with the full reasoning text (durable per
         ticket 01 Q5). No open thought → no-op, not an error: worker turns
-        never opened one."""
+        never opened one. `failed` when the call under it raised."""
         if self._sid is None or self._thought is None:
             return
         tid, self._thought = self._thought, None
         dur = time.time() - self._thought_t0
-        self.narrate("thought", "done", _title_from(text) if text else "thought (empty)",
+        summary = _title_from(text) if text else ("thought (call failed)" if status == "failed" else "thought (empty)")
+        self.narrate("thought", status, summary,
                      {"text": text, "duration_s": round(dur, 3)}, id=tid)
 
     def cancel(self, *, driver: str, target: str | None, scope: str) -> None:

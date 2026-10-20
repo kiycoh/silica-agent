@@ -413,3 +413,23 @@ def test_dedup_parse_failure_is_a_failed_judge_beat(narrator, monkeypatch):
     j = [b for b in _beats(narrator) if b["kind"] == "dedup/judge"][-1]
     assert j["status"] == "failed" and j["payload"]["judged"] is False
     assert j["payload"]["raw"] == "not json at all"
+
+
+def test_a_turn_whose_call_raises_leaves_no_thought_running(narrator):
+    """The loop closed its thought only once a response existed, so a refused
+    endpoint left the thought `running` until the next turn opened one, and
+    every projection of the narration read a run still going: the drawer's
+    Chats mark stayed live after the turn had failed (ADR-0122, 2026-10-21)."""
+    from unittest.mock import patch
+
+    from silica.agent.constraints import AgentConstraints
+    from silica.agent.loop import run_agent
+
+    def boom(*a, **k):
+        raise RuntimeError("Connection error.")
+
+    with patch("silica.agent.loop.call_llm", boom), pytest.raises(RuntimeError):
+        run_agent(messages=[{"role": "user", "content": "hi"}], model="router",
+                  constraints=AgentConstraints(tools=(), model="worker", max_iterations=2))
+    thought = [b for b in _beats(narrator) if b["kind"] == "thought"]
+    assert [b["status"] for b in thought] == ["running", "failed"]
