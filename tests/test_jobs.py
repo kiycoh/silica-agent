@@ -405,6 +405,55 @@ def test_ask_again_reruns_the_words_typed_with_the_drop(client):
     assert ran["text"].startswith("summarize it") and "Inbox/talk.md" in ran["text"]
 
 
+# --- a typed turn hears how its chat's conversions ended (2026-10-20) ---------------------
+
+def test_a_turn_typed_after_the_conversion_names_its_note_once(client, lane):
+    """The drop's turn said "still converting" and stays so in the history: a
+    question typed once the note exists was answered from the whole vault."""
+    tc, server, ran = client
+    gate, _, _ = lane
+    gate.clear()
+    try:
+        tc.post("/nucleate", data={"text": "riassumi"},
+                files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
+    finally:
+        gate.set()
+    assert "Still converting" in ran["text"] and "<converted-files>" not in ran["text"]
+    _drain()
+    tc.post("/chat", json={"text": "Ora puoi farmi il riassunto?"})
+    assert ran["text"].startswith("Ora puoi farmi il riassunto?\n\n<converted-files>")
+    assert "- talk.mp3: converted, read it at Inbox/talk.md" in ran["text"]
+    tc.post("/chat", json={"text": "e ancora?"})
+    assert "<converted-files>" not in ran["text"]  # told once
+    shown = [m["content"] for m in tc.get("/messages").json() if m["role"] == "user"]
+    assert shown[1] == "Ora puoi farmi il riassunto?"  # the block is the model's, not the student's
+
+
+def test_a_failed_conversion_reaches_the_next_turn_with_its_reason(client):
+    tc, server, ran = client
+    tc.post("/chat", json={"text": "hi"})
+    _write(_rec("bbbbbbbbbbbb", "failed", session=server.current_session_id,
+                error="this recording could not be read"))
+    _write(_rec("cccccccccccc", "done", session="another-chat", notes=["Inbox/b.md"]))
+    tc.post("/chat", json={"text": "is it ready?"})
+    assert "- a.mp3: not converted, this recording could not be read" in ran["text"]
+    assert "Inbox/b.md" not in ran["text"]  # another chat's file
+    assert _record("bbbbbbbbbbbb")["told"] is True
+
+
+def test_the_offered_turn_tells_the_agent_so_the_next_one_does_not_repeat_it(client):
+    tc, server, ran = client
+    tc.post("/chat", json={"text": "hi"})  # the chat exists, so the drop's job is its
+    r = tc.post("/nucleate", files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
+    job = r.json()["jobs"][0]
+    _drain()
+    assert _record(job["id"])["session"] == server.current_session_id
+    tc.post(f"/jobs/{job['id']}/turn", json={})
+    assert "Inbox/talk.md" in ran["text"] and "<converted-files>" not in ran["text"]
+    tc.post("/chat", json={"text": "done?"})
+    assert "<converted-files>" not in ran["text"]
+
+
 # --- the vault import (ADR-0098) and commands typed in the chat ------------------------------
 
 def test_an_imported_pdf_converts_as_a_job_and_the_server_drops_it_after(client, monkeypatch):

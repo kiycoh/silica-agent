@@ -1210,8 +1210,13 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # loop, because it reads the driver's graph.
         if web is None:
             from silica.agent.mentions import named_notes
+            from silica.ui.web import jobs
 
             if block := await asyncio.to_thread(named_notes, text):
+                agent_msg += "\n\n" + block
+            # This chat's conversions that ended since the agent last heard of
+            # them: the history still says "still converting" (jobs.settled).
+            if block := await asyncio.to_thread(jobs.settled, current_session_id):
                 agent_msg += "\n\n" + block
 
         # An attached image rides this turn only (ADR-0077 point 3): the
@@ -4672,7 +4677,8 @@ def get_messages():
         if not content and not tools and not thinking:
             continue
         images: list[dict] = []
-        if m["role"] == "user" and isinstance(content, str) and "<named-notes>" in content:
+        if m["role"] == "user" and isinstance(content, str) and (
+                "<named-notes>" in content or "<converted-files>" in content):
             from silica.agent.mentions import strip
 
             content = strip(content)
