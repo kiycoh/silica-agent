@@ -72,6 +72,26 @@ _MISS = {
 }
 
 
+def found_nothing(name: str | None, result: object) -> bool:
+    """A vault search that matched nothing: the only call a `final` web answer
+    may stand beside and still end the turn (loop.py).
+
+    Kept beside _MISS because _MISS is the one list of what an empty retrieval
+    looks like. `silica_search` counts here though not there: too weak a signal
+    to send the user to the web on, but a title search that matched nothing put
+    nothing in front of the chat model that the web answer would leave out. An
+    error is not nothing: the chat model may owe the user a word about it.
+    """
+    predicate = (lambda d: not d.get("paths")) if name == "silica_search" else _MISS.get(name or "")
+    if predicate is None:
+        return False
+    try:
+        data = json.loads(result)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return False
+    return isinstance(data, dict) and "error" not in data and bool(predicate(data))
+
+
 class RecallWatch:
     """Wraps a turn's tool_progress_callback; `.thin` is the verdict afterwards.
 
@@ -143,7 +163,9 @@ class RecallWatch:
         """This turn's `retrieval` notes for the end-of-turn channel (turn_notes):
         the degraded legs first, the cause before the miss it may explain."""
         lines = degraded_lines(self.degraded, self.surface)
-        if self.thin:
+        # Not after the turn already went to the web: "/web to search the web"
+        # under a web answer sends the user where they just were.
+        if self.thin and not self.web_answer:
             lines.append(THIN_COVERAGE_HINT)
         return [{"kind": "retrieval", "text": line} for line in lines]
 

@@ -365,11 +365,12 @@ def test_the_chat_toolset_carries_the_door_not_the_tools_behind_it():
 
 
 def test_web_answer_runs_the_consented_sub_loop_and_cites_its_trace(monkeypatch):
-    """One question in, cited prose out — and the sub-loop it spends is the
-    same constrained turn `/web` spends, not the caller's toolset."""
-    from silica.agent.constraints import web_turn_constraints
+    """One question in, cited prose out — and the sub-loop it spends is the web
+    lane's own constrained turn, not the caller's toolset."""
+    from silica.agent.constraints import web_answer_constraints
 
     monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)
+    monkeypatch.setattr(wr, "_seed", lambda question, watch: [])  # offline
     seen = {}
 
     def fake_run_agent(messages, model=None, tool_progress_callback=None,
@@ -387,7 +388,7 @@ def test_web_answer_runs_the_consented_sub_loop_and_cites_its_trace(monkeypatch)
 
     out = wr.silica_web_answer("what is rewiring")
 
-    assert seen["tools"] == web_turn_constraints().tools
+    assert seen["tools"] == web_answer_constraints().tools
     assert "what is rewiring" in seen["question"]
     assert "1. Rewiring — https://a.test/rw" in out
     # and the answer is keepable, exactly like a /web turn's
@@ -411,6 +412,7 @@ def test_the_sub_loops_searches_reach_the_outer_ui(monkeypatch):
     from silica.tools import TOOLS
 
     monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)
+    monkeypatch.setattr(wr, "_seed", lambda question, watch: [])  # offline
 
     def fake_run_agent(messages, model=None, tool_progress_callback=None,
                        constraints=None, cancel_token=None):

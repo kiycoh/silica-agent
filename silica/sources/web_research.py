@@ -44,14 +44,16 @@ import datetime
 import json
 import logging
 import re
+import time
 from dataclasses import replace
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import NamedTuple
+from typing import Annotated, NamedTuple
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 import httpx
+from pydantic import Field
 
 from silica.agent.constraints import AgentConstraints
 from silica.agent.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
@@ -831,11 +833,10 @@ class WebTurn:
 
 
 def web_turn_instruction(question: str) -> str:
-    """The consented web turn's user-side instruction, shared by both doors.
+    """The `/web` turn's user-side instruction (silica/cli.py expands to it).
 
-    `/web` expands to it in the chat's own history (silica/cli.py), and
-    `silica_web_answer` sends it into a sub-loop of its own. One text, so the two
-    doors cannot drift into answering the same question two different ways.
+    The chat's own door, `silica_web_answer`, shared this text until 2026-10-21
+    and now has web_answer_instruction below: see there for what it drops.
     """
     return (
         f"Answer this from the web, not from the vault: {question}\n"
@@ -848,6 +849,129 @@ def web_turn_instruction(question: str) -> str:
         "appended mechanically from the pages you actually opened. "
         "Reply in the language the question is written in."
     )
+
+
+def web_answer_instruction(question: str, asked: str = "") -> str:
+    """The chat door's instruction: `/web`'s, minus two round trips (ADR-0124).
+
+    Every model call of the door is a turn the user waits through: 6 sequential
+    calls, ~10 s each, for "chi è deborah ann woll" on hosted t06 (2026-10-21).
+    The search and the pages it opens are already in the history (_seed), so a
+    question the top pages answer needs one call. `remember` is not offered: it
+    cost a call of its own to bank quotes whose [Qn] markers the chat's relay
+    then dropped, and the pages the answer stands on are still listed under it.
+    `/web`, which answers the user directly, keeps both.
+
+    150 words, because the answer is the call the user waits on longest, its
+    time grows with its length, and "a short paragraph or two" was read as 186
+    to 514 words on the bench of 2026-10-22.
+
+    `asked` is the user's own request. The chat model rewrites the question,
+    into English in both bench turns of 2026-10-21 for an Italian request
+    (t06's own turn kept Italian), and a `final` answer reaches the user as
+    written, so the lane is told what language they used.
+    """
+    said = (f"The user's own words were: «{asked}». Reply in the language they "
+            "wrote in.\n" if asked else "Reply in the language the question is written in.\n")
+    return (
+        f"Answer this from the web, not from the vault: {question}\n"
+        f"{said}"
+        "A first search for it has already run and its top pages are open below. "
+        "If they answer it, answer now. If they do not, use `web_search` to find "
+        "other pages, `web_fetch` to read the ones that look like they answer it "
+        "(a search snippet is not the article) and `find_in_page` to look through "
+        "a page already open. Answer in prose, in at most 150 words unless the "
+        "question asks for detail: a who-is or what-is question gets what or who "
+        "it is and why it matters, not a full profile, and the user can ask for "
+        "more. Say plainly that the answer comes from the web rather than from "
+        "the user's own notes. Do not write a Sources section: the pages you "
+        "opened are listed under the answer mechanically."
+    )
+
+
+# How many of the first search's results the door opens before the model's first
+# call. Two, because the t06 turn opened exactly the top two itself, one call
+# after it had searched; a third page is ~2k more tokens on every later call
+# for a question the first two did not settle. Measure before raising it.
+_SEED_PAGES = 2
+
+
+def _seed(question: str, watch) -> list[dict]:
+    """Run the door's first search and open its top pages before the model's
+    first call, as history the model reads as its own calls.
+
+    What the model did with its first two calls on t06 anyway: search for the
+    question as asked, then open the top two hits. Done here, they cost ~1 s of
+    HTTP instead of two model round trips. The calls go through `watch`, so the
+    trace that builds the Sources block, the page cache `find_in_page` reads and
+    the live rows in the chat see them exactly as they see the model's.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from silica.agent.llm import build_assistant_message
+    from silica.agent.narration import NARRATOR
+
+    def emit(event) -> None:
+        watch(event)
+        try:
+            NARRATOR.on_render_event(event)
+        except Exception:
+            # The loop's own rule (loop._emit): a narration failure costs the
+            # replay a row, never the answer.
+            logger.debug("narration of a seeded call failed", exc_info=True)
+
+    def timed(fn, args: dict) -> tuple[str | None, str, float]:
+        t0 = time.perf_counter()
+        try:
+            return fn(**args), "", time.perf_counter() - t0
+        except Exception as e:
+            # Every lane down, or a page that will not open: the model sees no
+            # seed for it and searches or fetches itself, which is the door's
+            # behaviour before seeding. Its own call will meet the same error
+            # and can say so.
+            return None, str(e), time.perf_counter() - t0
+
+    def done(call_id: str, name: str, args: dict, outcome) -> str | None:
+        result, error, seconds = outcome
+        emit(ToolErrorEvent(name=name, call_id=call_id, error=error, iteration=0) if result is None
+             else ToolCompleteEvent(name=name, args=args, call_id=call_id, result=result,
+                                    duration_s=seconds, iteration=0))
+        return result
+
+    calls: list[tuple[str, str, dict, str]] = []
+    query = {"query": question}
+    emit(ToolStartEvent(name="web_search", args=query, call_id="seed-search", iteration=0))
+    hits = done("seed-search", "web_search", query, timed(web_search, query))
+    if hits is None:
+        return []
+    calls.append(("seed-search", "web_search", query, hits))
+    urls = [h["url"] for h in json.loads(hits) if isinstance(h, dict) and h.get("url")]
+    picked = [(f"seed-fetch-{i}", {"url": u}) for i, u in enumerate(urls[:_SEED_PAGES])]
+    # Only the HTTP runs on the pool: every event goes out from this thread, the
+    # one the trace, the narration and the chat's callback expect them on, and
+    # each start right before its own end, since the narration nests a start
+    # under any call still open (both starts first drew page 2 inside page 1).
+    with ThreadPoolExecutor(max_workers=max(len(picked), 1)) as pool:
+        outcomes = list(pool.map(lambda p: timed(_web_fetch.web_fetch, p[1]), picked))
+    for (cid, args), outcome in zip(picked, outcomes):
+        emit(ToolStartEvent(name="web_fetch", args=args, call_id=cid, iteration=0))
+        page = done(cid, "web_fetch", args, outcome)
+        if page is not None:
+            calls.append((cid, "web_fetch", args, page))
+
+    assistant, _ = build_assistant_message(
+        None, [(cid, name, json.dumps(args)) for cid, name, args, _ in calls])
+    out = [assistant] + [{"role": "tool", "tool_call_id": cid, "content": result}
+                         for cid, _, _, result in calls]
+    for msg in out:
+        NARRATOR.turn(msg)
+    return out
+
+
+# Longer than this, the user's request goes to the lane as the chat model's
+# question alone: a request that long is pasted text or an attachment's repr,
+# and the language hint is not worth its tokens on every lane call.
+_ASKED_CHARS = 600
 
 
 # The sub-loop has no vault and no chat history, so it gets a lane prompt of its
@@ -893,17 +1017,28 @@ def _live_progress(progress):
 
 
 @tool(cls="composed")
-def silica_web_answer(question: str, cancel_token=None, progress=None) -> str:
+def silica_web_answer(
+    question: Annotated[str, Field(description="The question, in the language the user wrote in")],
+    final: Annotated[bool, Field(description=(
+        "true when the web answer is all the user asked for: it reaches them "
+        "as written and the turn ends"))] = False,
+    cancel_token=None, progress=None,
+) -> str:
     """Answer a question from the live web, with citations.
 
     Call this whenever the user asks you to search the web, or asks for something
     the vault cannot hold — today's news, a library's current API, anything dated
     after their notes. Do NOT call it to answer from the user's own notes; the
-    vault tools do that. Returns prose plus a Sources block built from the pages
-    actually opened: pass that block through as it comes, never rewrite it and
-    never name a source it does not list. `/keep` saves the answer as an Inbox note.
+    vault tools do that. When you cannot tell whether the notes hold it, call a
+    vault search and this in the same block. Set `final` when the web answer is
+    all the user asked for: it then reaches them as written and the turn ends,
+    unless a vault search of this turn found something to add. Leave it unset
+    when you still have work to do with it (combine it with notes, save it,
+    compare). Returns prose plus a Sources block built from the pages actually
+    opened: pass that block through as it comes, never rewrite it and never name
+    a source it does not list. `/keep` saves the answer as an Inbox note.
     """
-    from silica.agent.constraints import web_turn_constraints
+    from silica.agent.constraints import web_answer_constraints
 
     # A sub-loop, not the four web tools handed to the chat: a fetched page is
     # attacker-controlled text, and in here the only tools it can reach are the
@@ -914,16 +1049,27 @@ def silica_web_answer(question: str, cancel_token=None, progress=None) -> str:
     # Only searches and fetches cross back out (_live_progress): the boundary
     # that keeps the raw page away from the chat loop is unchanged, what leaves
     # is a tool name and its arguments.
+    #
+    # `final` is read by the loop that called this (loop.py), not here: ending
+    # the turn is the caller's business, and the answer is the same either way.
+    from silica.agent import read_scope
+
+    # The turn's latest request, as run_agent recorded it for the tools. A
+    # request with an image attached is a parts list, whose repr carries the
+    # base64: no language hint is worth that, so it is left out.
+    asked = (read_scope.REQUESTS.get() or ("",))[-1]
+    asked = asked if len(asked) <= _ASKED_CHARS else ""
     messages = [
         {"role": "system", "content": _ANSWER_SYSTEM_PROMPT},
-        {"role": "user", "content": web_turn_instruction(question)},
+        {"role": "user", "content": web_answer_instruction(question, asked)},
     ]
     watch = WebTurn(question, _live_progress(progress))
+    messages += _seed(question, watch)
     answer = run_agent(
         messages,
         model=CONFIG.model,
         tool_progress_callback=watch,
-        constraints=web_turn_constraints(),
+        constraints=web_answer_constraints(),
         cancel_token=cancel_token,
     )
     return watch.attribute(answer, messages)
@@ -1204,8 +1350,16 @@ def _bind_citations(
 
 def _collect_sources(results: list[str]) -> list[tuple[str, str]]:
     """Pull (url, title) pairs from the tool-result trace, deduped, first-seen
-    order. These back the ADR-0015 Sources guarantee."""
-    seen: dict[str, str] = {}
+    order. These back the ADR-0015 Sources guarantee.
+
+    The pages opened, when any were: a search hit nobody read is not a source.
+    Until 2026-10-21 every hit was listed, and t06's answer about one actress
+    named nine sources under two Wikipedia pages actually read. A turn that
+    opened nothing still lists its hits, the only text its answer can stand on.
+    Titles come from the hits, since a fetched page's head names its URL only.
+    """
+    hits: dict[str, str] = {}
+    pages: list[str] = []
     for content in results:
         if not content:
             continue
@@ -1216,15 +1370,16 @@ def _collect_sources(results: list[str]) -> list[tuple[str, str]]:
             # URL after redirects, which is what a citation should point at.
             head = content.split("\n", 1)[0]
             if head.startswith("Source: ") and head[8:].strip():
-                url = head[8:].strip()
-                seen.setdefault(url, url)
+                pages.append(head[8:].strip())
             continue
         if not isinstance(items, list):
             continue
         for it in items:
             if isinstance(it, dict) and it.get("url"):
-                seen.setdefault(it["url"], it.get("title") or it["url"])
-    return list(seen.items())
+                hits.setdefault(it["url"], it.get("title") or it["url"])
+    if not pages:
+        return list(hits.items())
+    return list({url: hits.get(url, url) for url in pages}.items())
 
 
 def _build_note(

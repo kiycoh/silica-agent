@@ -101,6 +101,31 @@ def web_turn_constraints() -> AgentConstraints:
     )
 
 
+def web_answer_constraints() -> AgentConstraints:
+    """`silica_web_answer` — the chat's own door to the web, which the user
+    waits through mid-turn.
+
+    No `remember`: see web_answer_instruction in silica/sources/web_research.py.
+
+    8 and not /web's 48: the chat door is where /web's ceiling was spent for
+    no reason. A live V4 Flash smoke test on 2026-10-21 ran one question to 132
+    calls and 12 minutes with no answer, the chat calling this door four times.
+    On the latency bench of 2026-10-22 the lane answered four questions of five
+    in 1 to 3 calls; the fifth spent all 12 of a first cap on ten searches
+    against challenged lanes, and the steps past the eighth bought nothing. A
+    question that needs more is research, and /web-search writes it up as a note.
+
+    Thinking stays on. Off (OpenRouter `reasoning: {enabled: false}`) V4 Flash
+    0731 on DeepInfra wrote its draft into the answer, an English "Let me
+    answer." and the answer again, in 3 of 10 bench answers against 0 of 10 with
+    it on (2026-10-22).
+    """
+    return AgentConstraints(
+        tools=("web_search", "web_fetch", "find_in_page"),
+        max_iterations=8,
+    )
+
+
 # The chat core (ADR-0050): the tools a chat turn is offered before it asks for
 # any, in this order. Chosen from use, not taste: GUI and TUI sessions through
 # 2026-09-28 made 445 calls over 22 distinct tools. The core keeps the ones

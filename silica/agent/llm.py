@@ -65,7 +65,19 @@ _COOLDOWN_CAP = 20.0   # ceiling on the floor delay
 _RATE_LIMIT_ATTEMPTS = 6  # 429s get more tries than other transients (backoff to ~1min)
 
 
-def retry_transient(fn, exceptions: tuple, attempts: int = 3, base_delay: float = 1.0, jitter: float = 0.0, cancel: threading.Event | None = None, on_retry=None):
+def _shared_pool(exc: BaseException) -> bool:
+    """A 429 the provider's shared capacity raised, not our key's own limit.
+
+    OpenRouter names the source (`limit_source`) in the error body. The floor
+    above paces our requests against a limit they count towards; a shared
+    pool's is every other customer's traffic, so pacing ourselves frees nothing
+    and only makes the user wait. On hosted t06 2026-10-21 the floor a failed
+    turn left behind accounts for 32 of the next turn's 96 s (ADR-0124).
+    """
+    return "upstream_provider_shared_pool" in str(exc)
+
+
+def retry_transient(fn, exceptions: tuple, attempts: int = 3, base_delay: float = 1.0, jitter: float = 0.0, cancel: threading.Event | None = None, on_retry=None, pool_attempts: int | None = None):
     """Call fn(), retrying on transient exceptions with exponential backoff.
 
     Sleeps base_delay * 2**attempt (+ uniform jitter) between attempts and
@@ -86,6 +98,10 @@ def retry_transient(fn, exceptions: tuple, attempts: int = 3, base_delay: float 
     never on the exhausting failure or on abandonment. A plain callback and
     not a narration call: this helper is generic, and the one caller that
     narrates (call_llm) is the only one that knows the span it belongs to.
+
+    `pool_attempts` caps the tries on a shared-pool 429 (_shared_pool) for a
+    caller that has somewhere else to go: call_llm passes it while a fallback
+    model is left in the chain, which answers sooner than the pool clears.
     """
     global _run_cooldown
     ceiling = attempts
@@ -99,8 +115,11 @@ def retry_transient(fn, exceptions: tuple, attempts: int = 3, base_delay: float 
             return result
         except exceptions as e:
             if getattr(e, "status_code", None) == 429:
-                _run_cooldown = min(_run_cooldown + _COOLDOWN_STEP, _COOLDOWN_CAP)
-                ceiling = _RATE_LIMIT_ATTEMPTS
+                if _shared_pool(e):
+                    ceiling = pool_attempts or _RATE_LIMIT_ATTEMPTS
+                else:
+                    _run_cooldown = min(_run_cooldown + _COOLDOWN_STEP, _COOLDOWN_CAP)
+                    ceiling = _RATE_LIMIT_ATTEMPTS
             if cancel is not None and cancel.is_set():
                 logger.info("Call abandoned; dropping retries: %s", e)
                 raise
@@ -143,6 +162,15 @@ _benched: dict[str, float] = {}   # key -> monotonic time it may serve again
 # retry budget again (three attempts, up to 130 s each on a hung socket)
 # before reaching the model that answered the iteration before.
 _FALLBACK_HOLD_S = 300.0
+# A shared pool's 429 is not a dead endpoint: on hosted t06 2026-10-21 the pool
+# refused for 40 s at most and then served on the next try. Held for the full
+# 5 minutes, the chat would run on the last-resort model long after the one the
+# notice names is answering again.
+_POOL_HOLD_S = 60.0
+# Tries before a shared-pool 429 hands over to the next model of the chain, about
+# 8 s in. Of the two refused t06 calls that evening, the one that recovered did on
+# its third try, 6 s in; the other was still refused on its fifth, 40 s in.
+_POOL_ATTEMPTS = 3
 _held: dict[str, float] = {}   # model -> monotonic time it leads its chain again
 
 
@@ -965,13 +993,15 @@ def call_llm(
                 resp = _call_llm(used, messages, tools, max_tokens, response_format,
                                  temperature, on_delta, openrouter_provider, cancel,
                                  api_key if used == model else None, reasoning,
-                                 on_retry=_on_retry, sdk_retries=sdk_retries)
+                                 on_retry=_on_retry, sdk_retries=sdk_retries,
+                                 pool_attempts=_POOL_ATTEMPTS if n + 1 < len(chain) else None)
                 break
             except Exception as e:
                 if (n + 1 == len(chain) or not _falls_back(e)
                         or (cancel is not None and cancel.is_set())):
                     raise
-                _held[used] = time.monotonic() + _FALLBACK_HOLD_S
+                _held[used] = time.monotonic() + (
+                    _POOL_HOLD_S if _shared_pool(e) else _FALLBACK_HOLD_S)
                 logger.warning("llm %s failed (%s); trying %s", used, str(e)[:120], chain[n + 1])
                 NARRATOR.narrate(
                     "call", "running", f"llm {used} failed, trying {chain[n + 1]}: {str(e)[:80]}",
@@ -1040,6 +1070,7 @@ def _call_llm(
     reasoning: bool | None = None,
     on_retry=None,
     sdk_retries: int | None = None,
+    pool_attempts: int | None = None,
 ) -> LLMResponse:
     """Call the LLM with function-calling support.
 
@@ -1226,7 +1257,7 @@ def _call_llm(
             lambda: retry_transient(
                 lambda: _with_keys(keys, kwargs, lambda: _bounded(
                     lambda: lm.completion(**kwargs), _LOCAL_LLM_TIMEOUT, model)),
-                _TRANSIENT, cancel=cancel, on_retry=on_retry))
+                _TRANSIENT, cancel=cancel, on_retry=on_retry, pool_attempts=pool_attempts))
     else:
         def _stream_once():
             on_delta("reset", "")
@@ -1268,7 +1299,7 @@ def _call_llm(
         response = _without_refused_reasoning(
             model, kwargs, lambda: retry_transient(
                 lambda: _with_keys(keys, kwargs, _stream_once),
-                _TRANSIENT, cancel=cancel, on_retry=on_retry))
+                _TRANSIENT, cancel=cancel, on_retry=on_retry, pool_attempts=pool_attempts))
         if response is None:
             raise RuntimeError(f"LLM stream from {model} produced no chunks")
 
