@@ -103,17 +103,29 @@ function rollUpToasts() {
   more.textContent = `+${overflow} more`;
 }
 
-function notify(msg, level = "error") {
+// `action` ({label, run}) puts one button on the toast, the way back from what
+// it reports (a tree delete's undo, ADR-0123). Such a toast is never deduped,
+// since its button belongs to one event, and it stays longer: the reader has
+// to find the button, not only read the line.
+function notify(msg, level = "error", action = null) {
   announce(msg);
-  if ([...toasts.querySelectorAll(".toast")].some((t) => t.textContent === msg)) return; // dedupe visible
+  if (!action && [...toasts.querySelectorAll(".toast")].some((t) => t.textContent === msg)) return; // dedupe visible
   const t = document.createElement("div");
   t.className = "toast " + level;
   t.textContent = msg;
   t.title = msg; // CSS clamps the box to 3 lines; the full text stays reachable
   const kill = () => { t.remove(); rollUpToasts(); };
+  if (action) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "toast-act";
+    b.textContent = action.label;
+    b.addEventListener("click", (e) => { e.stopPropagation(); kill(); action.run(); });
+    t.appendChild(b);
+  }
   t.addEventListener("click", kill);
   toasts.appendChild(t);
-  setTimeout(kill, level === "error" ? 6000 : 3000);
+  setTimeout(kill, action ? 10000 : level === "error" ? 6000 : 3000);
   rollUpToasts();
 }
 

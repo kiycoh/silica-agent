@@ -151,7 +151,7 @@ def test_undo_brings_back_a_slash_delete_with_its_edges(vault, out):
 
     assert _handle_direct_shortcut("/undo Corso/Autoencoders.md", []) is True
     assert (vault / "Corso" / "Autoencoders.md").read_text(encoding="utf-8") == before
-    assert "deleted with /delete" in out()
+    assert "you deleted it" in out()
     live, rebuilt = _index_state()
     assert live == rebuilt
     assert ("Corso/Linker.md", "Corso/Autoencoders.md") in live[0]

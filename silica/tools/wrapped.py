@@ -144,12 +144,35 @@ def delete_with_restore_point(path: str, content: str, source: str) -> dict[str,
     equal rules 2 and 1 of the graph gate only because the driver's index
     repairs itself on a delete (ADR-0092 point 1).
     """
+    res = delete_notes_with_restore_point([(path, content)], source)
+    if "error" in res:
+        return {"error": res["error"]}
+    return {"success": True, "deleted": path, "undo": f"/undo {path}",
+            "orphaned": res["orphaned"], "dangling": res["dangling"]}
+
+
+def delete_notes_with_restore_point(notes: list[tuple[str, str]], source: str) -> dict[str, Any]:
+    """`delete_with_restore_point` over several (path, content) pairs as ONE
+    journal run, so a single /undo or revert_run brings the whole set back:
+    the rail's folder delete (ADR-0123). The one-note helper is this with one
+    pair, so the two cannot drift in what they report.
+
+    `dangling` and `orphaned` are over the set: a link from one deleted note
+    to another leaves nothing anyone keeps pointing nowhere, so neither list
+    names a note of the set.
+
+    Stops at the first note the driver refuses. The notes before it stay
+    deleted and stay in the run (`deleted` names them), because they are
+    undoable as they are; the refused note's inverse leaves the run (see
+    UndoJournalStore.drop_inverse for why it is not inert).
+    """
     from silica.config import CONFIG
     from silica.kernel.write.undo_journal import ABSENT_HASH, get_undo_journal
 
-    pre = DRIVER.graph_snapshot([NoteRef(name=Path(path).stem, path=path)])
-    own = path.removesuffix(".md")
-    around = [k for k in pre.link_counts if k != own]
+    paths = [p for p, _ in notes]
+    pre = DRIVER.graph_snapshot([NoteRef(name=Path(p).stem, path=p) for p in paths])
+    own = {p.removesuffix(".md") for p in paths}
+    around = [k for k in pre.link_counts if k not in own]
     # The restore point first: a delete that cannot be taken back is the one
     # this tool no longer does (until 2026-09-28 it took none, and /undo could
     # not bring the note back).
@@ -157,15 +180,34 @@ def delete_with_restore_point(path: str, content: str, source: str) -> dict[str,
         journal = get_undo_journal()
         run_id = journal.start_run(source=source,
                                    vault=(CONFIG.vault_path or "").strip() or None)
-        journal.record(run_id, InverseOp(kind=InverseOpKind.recreate_deleted, path=path,
-                                         prior_content=content), post_hash=ABSENT_HASH)
     except Exception as e:
-        return {"error": f"not deleted: no restore point could be recorded ({e})"}
-    try:
-        DRIVER.delete(path)
-    except Exception as e:
+        return {"error": f"not deleted: no restore point could be recorded ({e})", "deleted": []}
+    deleted: list[str] = []
+    for path, content in notes:
+        try:
+            journal.record(run_id, InverseOp(kind=InverseOpKind.recreate_deleted, path=path,
+                                             prior_content=content), post_hash=ABSENT_HASH)
+        except Exception as e:
+            error = f"not deleted: no restore point could be recorded ({e})"
+            break
+        try:
+            DRIVER.delete(path)
+        except Exception as e:
+            error = str(e)
+            try:
+                journal.drop_inverse(run_id, path)
+            except Exception as drop_error:
+                # Tolerated: the notes already deleted must still be reported
+                # with their run, or the person cannot undo them. What stays
+                # is a recreate revert_run skips, since the note is there.
+                logger.warning("delete: could not drop the inverse of %s: %s", path, drop_error)
+            break
+        deleted.append(path)
+    else:
+        error = None
+    if not deleted:
         journal.mark_reverted(run_id)  # nothing was deleted: nothing to recreate later
-        return {"error": str(e)}
+        return {"error": error, "deleted": []}
     post = DRIVER.graph_snapshot([NoteRef(name=k.rsplit("/", 1)[-1], path=f"{k}.md")
                                   for k in around])
     keys = set(around)
@@ -174,9 +216,12 @@ def delete_with_restore_point(path: str, content: str, source: str) -> dict[str,
                        if lk.source.path.removesuffix(".md") in keys} - before)
     orphaned = sorted(f"{k}.md" for k in around
                       if pre.backlink_counts.get(k, 0) > 0 and post.backlink_counts.get(k) == 0)
-    return {"success": True, "deleted": path, "undo": f"/undo {path}",
-            "orphaned": orphaned,
-            "dangling": [{"note": src, "link": tgt} for src, tgt in dangling]}
+    out = {"success": error is None, "deleted": deleted, "run": run_id,
+           "orphaned": orphaned,
+           "dangling": [{"note": src, "link": tgt} for src, tgt in dangling]}
+    if error is not None:
+        out["error"] = error
+    return out
 
 
 # ---------------------------------------------------------------------------

@@ -1553,7 +1553,9 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
         user_deleted = (journal.run_info(deleted[0]) or {}).get("source") == USER_DELETE_SOURCE
         res = revert_run(deleted[0])
         if res["reverted"]:
-            how = "deleted with /delete" if user_deleted else "deleted from the chat"
+            # user:/delete is /delete and the tree's row menu alike (ADR-0123):
+            # naming the command misnamed a delete the person made with a click
+            how = "you deleted it" if user_deleted else "deleted from the chat"
             CONSOLE.print(f"  Restored: [bold]{deleted[1]}[/] ({how})")
         else:
             why = (res["skipped"] or res["errors"] or [{"reason": "unknown"}])[0]

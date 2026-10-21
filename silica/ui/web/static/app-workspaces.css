@@ -255,48 +255,12 @@
   color: var(--ash-dim);
 }
 
-/* The tree's ◇, beside the pin: hidden at rest unless the row is in a
-   workspace, so the tree stays a list of names. */
-.tree-ws {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--r-xs);
-  background: none;
-  color: var(--ash-dim);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-
-#tree summary .tree-ws {
-  float: right;
-  display: inline-grid;
-  height: 18px;
-}
-
-.tree-row:hover .tree-ws,
-#tree summary:hover .tree-ws,
-.tree-ws:focus-visible,
-.tree-ws[aria-expanded="true"],
-.tree-ws.on {
-  opacity: 1;
-}
-
-.tree-ws.on,
+/* The reader's ◇ lights when the note is in a workspace. The tree's rows
+   reach their workspaces through the row menu instead (ADR-0123). */
 #note-ws.on {
   color: var(--accent);
 }
 
-.tree-ws:hover {
-  color: var(--frost);
-}
-
-.tree-ws.on svg path,
 #note-ws.on svg path {
   fill: currentColor;
 }

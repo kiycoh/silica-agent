@@ -156,7 +156,7 @@
                Each gathers notes from any folder without moving them; a chat or
                a plan opened in one reads only what it gathers. -->
           <div id="ws-group">
-            <div class="side-bucket ws-bucket"><span>workspaces</span><button type="button" id="ws-new" class="ws-new" aria-label="new workspace" data-tip="New workspace: it groups notes from any folder without moving them. A note joins one from its ◇, or by being dragged here"><svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button></div>
+            <div class="side-bucket ws-bucket"><span>workspaces</span><button type="button" id="ws-new" class="ws-new" aria-label="new workspace" data-tip="New workspace: it groups notes from any folder without moving them. A note joins one from its … in the tree, the ◇ beside its pin, or by being dragged here"><svg aria-hidden="true" focusable="false" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button></div>
             <form id="ws-new-form" hidden><input id="ws-new-name" type="text" placeholder="Name the workspace" aria-label="name of the new workspace" autocomplete="off" /></form>
             <div id="workspaces"></div>
           </div>
@@ -166,9 +166,9 @@
       <!-- The vault's + (ADR-0098): two entries, because one browser picker takes
            files or a folder and never both. Outside the pane and fixed under
            the + when it opens, because the pane scrolls and clips. -->
-      <!-- The workspaces of one note or folder, opened from its ◇ in the tree
-           or beside the reader's pin; fixed, as the + menu is, because the
-           drawer scrolls and clips. -->
+      <!-- The workspaces of one note or folder, opened from its row's … menu
+           in the tree (ADR-0123) or the ◇ beside the reader's pin; fixed, as
+           the + menu is, because the drawer scrolls and clips. -->
       <div id="ws-menu" role="menu" aria-label="workspaces" hidden></div>
       <div id="vault-add-menu" role="menu" aria-label="add to the vault" hidden>
         <button type="button" role="menuitem" id="vam-files" title="pick files; each becomes a note in the Inbox">files…</button>

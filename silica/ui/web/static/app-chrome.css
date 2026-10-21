@@ -70,6 +70,25 @@ body.note-open #toasts {
   border-left-color: var(--warn);
 }
 
+/* notify()'s one action: inline after the sentence, so a short toast stays
+   one line, in the accent because it is the toast's only clickable part */
+.toast-act {
+  margin-left: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.toast-act:hover,
+.toast-act:focus-visible {
+  text-decoration: underline;
+  outline: none;
+}
+
 @keyframes toast-in {
   from {
     transform: translateX(8px);

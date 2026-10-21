@@ -416,13 +416,10 @@ $("#tree").addEventListener("click", (e) => {
   // what a pin is for (naming it without going there).
   const pin = e.target.closest(".tree-pin");
   if (pin) { togglePin(pin.dataset.pin); return; }
-  // the row's workspaces (ADR-0112), also inside a folder's summary
-  const ws = e.target.closest(".tree-ws");
-  if (ws) {
-    e.preventDefault();
-    openWsMenu(ws, ws.dataset.wsNote || ws.dataset.wsFolder, !ws.dataset.wsNote);
-    return;
-  }
+  // the row's menu (ADR-0123), also inside a folder's summary, where the
+  // details must not toggle under it
+  const more = e.target.closest(".tree-more");
+  if (more) { e.preventDefault(); openTreeMenu(more); return; }
   // inside the folder's summary: the details must not toggle under it
   const plan = e.target.closest(".tree-plan");
   if (plan) { e.preventDefault(); learnPlanFolder(plan.dataset.folder); return; }
@@ -436,6 +433,138 @@ $("#tree").addEventListener("click", (e) => {
   const path = leaf.dataset.id;
   openNote(path);
 });
+
+// --- a tree row's menu (ADR-0123) --------------------------------------------
+// The chat row's "…" menu, on a note or a folder: its workspaces, and its
+// delete, armed as a chat's is. One menu for the whole tree, fixed to the
+// viewport: a summary clips what it holds and toggles its <details> on any
+// click inside, so the menu cannot live in the row as a chat's does.
+let treeMenu = null;
+let treeMenuFor = null;
+
+function closeTreeMenu(refocus = false) {
+  if (!treeMenu) return;
+  treeMenu.remove();
+  treeMenu = null;
+  treeMenuFor?.setAttribute("aria-expanded", "false");
+  if (refocus && treeMenuFor?.isConnected) treeMenuFor.focus();
+  treeMenuFor = null;
+}
+
+function placeTreeMenu(x, y) {
+  if (!treeMenu) return;
+  if (!treeMenuFor.isConnected) { closeTreeMenu(); return; } // a tree refresh took its row
+  if (x === undefined) {
+    const r = treeMenuFor.getBoundingClientRect();
+    x = r.right; y = r.bottom + 4;
+  }
+  const w = treeMenu.offsetWidth, h = treeMenu.offsetHeight;
+  treeMenu.style.left = `${Math.round(Math.min(Math.max(8, x - w), innerWidth - w - 8))}px`;
+  treeMenu.style.top = `${Math.round(y + h <= innerHeight - 8 ? y : Math.max(8, y - h - 8))}px`;
+}
+
+function openTreeMenu(btn, x, y) {
+  const again = treeMenuFor === btn;
+  closeTreeMenu();
+  if (again) { btn.focus(); return; }
+  const note = btn.dataset.note, folder = btn.dataset.folder;
+  // the count the summary shows is the count the server deletes: both come
+  // from the notes the tree is drawn with (tree_delete)
+  const n = note ? 1 : Number(btn.closest("summary")?.querySelector(".tree-n")?.textContent || 0);
+  const notes = `${n} ${n === 1 ? "note" : "notes"}`;
+  // Not class s-menu: closeSessionMenus removes every .s-menu on any click
+  // outside a chat row, this one included. The id takes its look (app-shell.css).
+  treeMenu = mkEl("div");
+  treeMenu.id = "tree-menu";
+  treeMenu.setAttribute("role", "menu");
+  treeMenu.setAttribute("aria-label", note ? "this note" : `the folder ${folder}`);
+  const item = (label, fn, cls) => {
+    const b = mkEl("button", "s-item" + (cls ? " " + cls : ""), label);
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); fn(b); });
+    treeMenu.appendChild(b);
+    return b;
+  };
+  item("workspaces…", () => { closeTreeMenu(); openWsMenu(btn, note || folder, !note); });
+  // A folder's delete names how many notes go, because that number is the
+  // consequence: the files that are not notes, and the folder, stay.
+  const label = note ? "delete" : `delete ${notes}`;
+  const del = item(label, () => {}, "danger");
+  armThenRun(del, label, note ? "click again to delete" : `click again · ${notes} go`,
+             () => deleteFromTree(note, folder));
+  treeMenuFor = btn;
+  btn.setAttribute("aria-expanded", "true");
+  document.body.appendChild(treeMenu);
+  placeTreeMenu(x, y);
+  treeMenu.querySelector("button").focus();
+}
+
+$("#tree").addEventListener("contextmenu", (e) => {
+  const more = e.target.closest(".tree-row, #tree summary")?.querySelector(".tree-more");
+  if (!more) return;
+  e.preventDefault();
+  openTreeMenu(more, e.clientX, e.clientY);
+});
+document.addEventListener("click", (e) => { if (!e.target.closest("#tree-menu, .tree-more")) closeTreeMenu(); });
+document.addEventListener("keydown", (e) => {
+  if (!treeMenu || !treeMenu.contains(document.activeElement)) return;
+  if (e.key === "Escape") { e.preventDefault(); closeTreeMenu(true); return; }
+  const items = [...treeMenu.querySelectorAll("button:not([disabled])")];
+  const go = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+  if (go) {
+    e.preventDefault();
+    items[(items.indexOf(document.activeElement) + go + items.length) % items.length]?.focus();
+  }
+});
+addEventListener("resize", () => placeTreeMenu());
+// the rail scrolls under a menu opened on one of its rows: it follows the row
+addEventListener("scroll", () => placeTreeMenu(), true);
+
+async function deleteFromTree(note, folder) {
+  closeTreeMenu();
+  let r = null, data = null;
+  try {
+    r = await fetch("/tree/delete", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(note ? { path: note } : { folder }),
+    });
+    data = await r.json();
+  } catch { /* reported below */ }
+  if (!r || !r.ok) { notify((data && data.detail) || "couldn't delete that"); return; }
+  const gone = new Set(data.deleted);
+  // A pin on a deleted note opens nothing; the undo puts it back with the note.
+  const unpinned = pinnedPaths.filter((p) => gone.has(p));
+  if (unpinned.length) { pinnedPaths = pinnedPaths.filter((p) => !gone.has(p)); savePins(); }
+  if (lastNotePath && gone.has(lastNotePath)) closeNote();
+  if (lastViewedPath && gone.has(lastViewedPath)) lastViewedPath = null; // the corner toggle would reopen it
+  loadVaultInfo();
+  const what = note ? note.replace(/\.md$/, "").split("/").pop()
+    : `${gone.size} ${gone.size === 1 ? "note" : "notes"} in ${folder.split("/").pop()}`;
+  const d = data.dangling.length;
+  const msg = `Deleted ${what}.`
+    + (d ? ` ${d} ${d === 1 ? "link now points" : "links now point"} to no note.` : "")
+    + (data.error ? ` ${data.error}.` : "");
+  notify(msg, data.error ? "error" : "info", { label: "undo", run: () => undoTreeDelete(data.run, unpinned) });
+}
+
+async function undoTreeDelete(run, unpinned) {
+  let r = null, data = null;
+  try {
+    r = await fetch("/tree/undo-delete", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run }),
+    });
+    data = await r.json();
+  } catch { /* reported below */ }
+  if (!r || !r.ok) { notify((data && data.detail) || "couldn't undo that delete"); return; }
+  const back = new Set(data.restored);
+  const repin = unpinned.filter((p) => back.has(p) && !pinnedPaths.includes(p));
+  if (repin.length) { pinnedPaths.unshift(...repin); savePins(); }
+  loadVaultInfo();
+  const n = data.restored.length, s = data.skipped.length;
+  notify(`Restored ${n} ${n === 1 ? "note" : "notes"}.`
+    + (s ? ` ${s} not restored: changed since the delete.` : ""), s ? "error" : "info");
+}
 
 // A left click with no modifier is the app's to handle; anything else is the
 // browser's (new tab, new window, save link).

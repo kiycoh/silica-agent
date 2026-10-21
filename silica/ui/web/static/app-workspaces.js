@@ -98,7 +98,7 @@ function renderWorkspaces() {
     if (open) row.appendChild(renderWsMembers(w));
     box.appendChild(row);
   }
-  syncTreeWs();
+  syncNoteWs();
   applySidebarFilter();
   placeWsMenu();
 }
@@ -220,7 +220,7 @@ const wsShown = (it) => it.value.split("/").pop().replace(/\.md$/, "") + (it.key
 
 document.addEventListener("dragstart", (e) => {
   const note = e.target.closest?.("#tree .tree-note, #workspaces .ws-note");
-  const folder = !note && e.target.closest?.("#tree summary")?.querySelector(".tree-ws")?.dataset.wsFolder;
+  const folder = !note && e.target.closest?.("#tree summary")?.querySelector(".tree-more")?.dataset.folder;
   if (!note && !folder) return;
   e.dataTransfer.setData(WS_DRAG, JSON.stringify(note ? { key: "notes", value: note.dataset.id } : { key: "folders", value: folder }));
   e.dataTransfer.effectAllowed = "copy";
@@ -432,7 +432,7 @@ wsMenu.addEventListener("keydown", (e) => {
   }
 });
 document.addEventListener("click", (e) => {
-  if (!e.target.closest("#ws-menu, .tree-ws, #note-ws")) closeWsMenu();
+  if (!e.target.closest("#ws-menu, #note-ws")) closeWsMenu();
 });
 addEventListener("resize", placeWsMenu);
 // The drawer scrolls, and the list grows when a workspace opens: the menu
@@ -440,21 +440,9 @@ addEventListener("resize", placeWsMenu);
 addEventListener("scroll", placeWsMenu, true);
 $("#note-ws").addEventListener("click", () => openWsMenu($("#note-ws"), lastViewedPath, false));
 
-// The ◇ on a tree row and beside the reader's pin lights when the note or the
-// folder is in a workspace, as the pin lights when it is pinned.
-function syncTreeWs() {
-  const notes = new Set(), folders = new Set();
-  for (const w of workspaces) {
-    for (const m of w.members) notes.add(m.path);
-    for (const f of w.folders) folders.add(f);
-  }
-  for (const b of $("#tree").querySelectorAll(".tree-ws")) {
-    const on = b.dataset.wsNote ? notes.has(b.dataset.wsNote) : folders.has(b.dataset.wsFolder);
-    b.classList.toggle("on", on);
-  }
-  syncNoteWs();
-}
-
+// The ◇ beside the reader's pin lights when the note is in a workspace, as the
+// pin lights when it is pinned. The tree's rows lost theirs to the row menu
+// (ADR-0123): a workspace's members are listed under it in the drawer.
 function syncNoteWs() {
   const b = $("#note-ws");
   const n = lastViewedPath ? workspaces.filter((w) => w.members.some((m) => m.path === lastViewedPath)).length : 0;
