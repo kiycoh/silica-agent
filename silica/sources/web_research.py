@@ -56,7 +56,7 @@ import httpx
 from pydantic import Field
 
 from silica.agent.constraints import AgentConstraints
-from silica.agent.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
+from silica.agent.events import LLMStreamEvent, ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
 from silica.agent.llm import call_llm
 from silica.agent.loop import run_agent
 from silica.config import CONFIG
@@ -995,8 +995,13 @@ def _live_progress(progress):
 
     Without this the chat shows one spinning `web answer` row for the whole lane
     and never says which sites the answer is being read from. Only the two tools
-    above pass: the sub-loop's own stream deltas would otherwise render into the
-    chat bubble as if the chat model had written them.
+    above pass.
+
+    The sub-loop's text deltas pass too, with the resets that retract them: a
+    `final` answer paints into the reply while it is written (ADR-0124
+    amendment), and the calling loop drops them when this answer will not be the
+    reply (loop.py). Its reasoning stays in here: the chat's thinking block
+    would show it as the chat model's own.
 
     The ids are namespaced because they are NOT unique across loops — the
     provider mints them per request, and `recover_leaked_tool_calls` restarts at
@@ -1012,6 +1017,8 @@ def _live_progress(progress):
             and event.name in _LIVE_TOOLS
         ):
             progress(replace(event, call_id=f"web:{event.call_id}"))
+        elif isinstance(event, LLMStreamEvent) and event.chunk_type in ("text", "reset"):
+            progress(event)
 
     return _forward
 
@@ -1075,6 +1082,9 @@ def silica_web_answer(
     return watch.attribute(answer, messages)
 
 
+_URL_RE = re.compile(r"https?://[^\s<>()\[\]]+")
+
+
 def relay_sources(answer: str, messages: list[dict]) -> str:
     """Put the door's citation block back on a chat answer that dropped it.
 
@@ -1085,7 +1095,11 @@ def relay_sources(answer: str, messages: list[dict]) -> str:
     That is the one thing the web path exists to make impossible, so the block is
     reapplied here — same guarantee, whichever door the answer came through.
 
-    Idempotent: an answer that relayed the block faithfully gets nothing.
+    Idempotent: an answer that relayed the block faithfully gets nothing, and
+    so does one whose URLs are exactly the pages opened under a heading of its
+    own: a GUI turn of 2026-10-22 relayed them under "Sources:" and listed both
+    pages twice once the block went back on. The guarantee is about which pages,
+    not the heading.
 
     ponytail: the last door of the turn wins. Two `silica_web_answer` calls in
     one turn cite the second; split the stash into a per-turn list the day a
@@ -1094,6 +1108,9 @@ def relay_sources(answer: str, messages: list[dict]) -> str:
     if not answer or _LAST_WEB_TURN is None or _SOURCES_HEAD in answer:
         return answer
     _, _, sources, _, lanes, _ = _LAST_WEB_TURN
+    cited = {u.rstrip(".,;:") for u in _URL_RE.findall(answer)}
+    if sources and cited == {url for url, _ in sources}:
+        return answer
     out = f"{answer.rstrip()}\n\n{_sources_block(sources, lanes)}"
     if messages and messages[-1].get("role") == "assistant":
         messages[-1]["content"] = out

@@ -18,7 +18,7 @@ import pytest
 
 import silica.cli  # noqa: F401  registers every chat tool, silica_web_answer included
 from silica.agent.constraints import AgentConstraints, web_answer_constraints
-from silica.agent.events import ToolCompleteEvent
+from silica.agent.events import LLMStreamEvent, ToolCompleteEvent
 from silica.agent.loop import run_agent
 from silica.agent.recall_watch import found_nothing
 from silica.sources import web_research as wr
@@ -203,3 +203,63 @@ def test_the_lane_is_told_the_users_own_words(monkeypatch, lanes):
         read_scope.REQUESTS.reset(token)
     assert "«chi è deborah ann woll»" in seen[0] and "prima domanda" not in seen[0]
     assert "«" not in seen[1]
+
+
+# --- the reply streams: a `final` answer paints while it is written ---------------
+
+def _streamed(monkeypatch, *, final=True, titles=(), door_first=False):
+    """One chat turn whose web door writes "Dal web" through its progress
+    callback, as its lane would. Returns the text deltas the frontend got."""
+    monkeypatch.setattr(TOOLS["silica_search"], "fn", lambda query: {
+        "paths": list(titles), "matched": len(titles)})
+
+    def door(question, final=False, progress=None):
+        progress(LLMStreamEvent(chunk_type="reasoning", content="hmm", iteration=1))
+        progress(LLMStreamEvent(chunk_type="text", content="Dal web", iteration=1))
+        return "Dal web.\n\n## Sources (web)\n1. x"
+
+    monkeypatch.setattr(TOOLS["silica_web_answer"], "fn", door)
+    block = [("c1", "silica_search", {"query": "woll"}),
+             ("c2", "silica_web_answer", {"question": "chi è Woll", "final": final})]
+    replies = iter([_resp(block[::-1] if door_first else block), _resp(text="Riscritta.")])
+    seen: list = []
+    messages = [{"role": "user", "content": "chi è deborah ann woll"}]
+    with patch("silica.agent.loop.call_llm", lambda model, messages, **kw: next(replies)):
+        run_agent(messages, model="test", tool_progress_callback=seen.append,
+                  constraints=AgentConstraints(
+                      tools=("silica_search", "silica_web_answer"), interactive=True))
+    return [e.content for e in seen if isinstance(e, LLMStreamEvent) and e.chunk_type == "text"]
+
+
+def test_a_final_answer_that_will_be_the_reply_streams_into_it(monkeypatch):
+    assert _streamed(monkeypatch) == ["Dal web"]
+
+
+@pytest.mark.parametrize("why", [
+    {"final": False},              # the chat model writes the reply
+    {"titles": ["Woll.md"]},       # a note for the chat model to add
+    {"door_first": True},          # the search after it could still find one
+])
+def test_a_web_answer_that_will_not_be_the_reply_paints_nothing(monkeypatch, why):
+    assert _streamed(monkeypatch, **why) == []
+
+
+def test_the_door_forwards_its_text_and_resets_but_keeps_its_reasoning():
+    seen: list = []
+    forward = wr._live_progress(seen.append)
+    for kind in ("reasoning", "text", "reset"):
+        forward(LLMStreamEvent(chunk_type=kind, content="x", iteration=1))
+    assert [e.chunk_type for e in seen] == ["text", "reset"]
+
+
+def test_the_lane_streams_without_being_a_chat_turn():
+    seen = {}
+
+    def fake_call_llm(model, messages, **kw):
+        seen.update(kw)
+        return _resp(text="ok")
+
+    with patch("silica.agent.loop.call_llm", fake_call_llm):
+        run_agent([{"role": "user", "content": "q"}], model="test",
+                  tool_progress_callback=lambda e: None, constraints=web_answer_constraints())
+    assert seen.get("on_delta") is not None

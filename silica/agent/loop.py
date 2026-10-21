@@ -410,10 +410,11 @@ def run_agent(
             return  # interrupted/abandoned — stop feeding the renderer
         _emit(LLMStreamEvent(chunk_type=chunk_type, content=content, iteration=iteration))
 
-    # Streaming is a TUI ergonomic: only interactive turns get it — worker and
-    # batch runs stay on the plain non-streaming call. A constrained toolset no
-    # longer implies "worker": an interactive caller that wants the chat_tools
-    # cut says so with constraints.interactive.
+    # Streaming is a TUI ergonomic: only interactive turns get it, and a sub-loop
+    # whose text can become the reply (constraints.stream, the web door's lane);
+    # worker and batch runs stay on the plain non-streaming call. A constrained
+    # toolset no longer implies "worker": an interactive caller that wants the
+    # chat_tools cut says so with constraints.interactive.
     # The kwarg is only passed when active, so call_llm test doubles only need
     # the bare signature plus cancel=None.
     _interactive = constraints is None or constraints.interactive
@@ -422,7 +423,8 @@ def run_agent(
         # None keeps the provider default (product behavior). Eval agent arms
         # pin 0.0 so a single-run A/B measures the lever, not sampling noise.
         _llm_kwargs["temperature"] = temperature
-    if tool_progress_callback is not None and _interactive:
+    if tool_progress_callback is not None and (
+            _interactive or (constraints is not None and constraints.stream)):
         _llm_kwargs["on_delta"] = _stream_delta
 
     def _interruptible_llm(kwargs: dict):
@@ -664,6 +666,19 @@ def run_agent(
                     )
                 )
                 start_time = time.perf_counter()
+                progress_cb = tool_progress_callback
+                # A web answer streams into the reply only when it will be the
+                # reply (ADR-0124 amendment): `final`, the last call of its
+                # block, and nothing found so far for the chat model to add.
+                # A call after it could still find something, and its row,
+                # drawn under the streamed text, would put that text beyond a
+                # reset. If the turn goes on anyway (the door failed, a
+                # convergence landing), the next model call opens with a reset
+                # that takes the text back (llm.py).
+                if progress_cb is not None and tc.name == "silica_web_answer" and not (
+                        _interactive and (tc.args or {}).get("final")
+                        and tc is resp.tool_calls[-1] and _stands_alone(messages, None)):
+                    progress_cb = _without_stream(progress_cb)
                 try:
                     # The frontend callback, deliberately not `_emit`: `_emit`
                     # also publishes on the bus, and a tool that runs a loop of
@@ -672,7 +687,7 @@ def run_agent(
                     # `agent/tool_*` twice.
                     result = allowed[tc.name].run(
                         _cancel_token=cancel_token,
-                        _progress=tool_progress_callback,
+                        _progress=progress_cb,
                         **tc.args,
                     )
                     duration = time.perf_counter() - start_time
@@ -860,7 +875,16 @@ def run_agent(
     return text
 
 
-def _stands_alone(messages: list[dict], answer_msg: dict) -> bool:
+def _without_stream(progress):
+    """*progress* minus stream deltas: a web answer that will not be the reply
+    keeps its rows and paints no text where the reply goes."""
+    def forward(event) -> None:
+        if not isinstance(event, LLMStreamEvent):
+            progress(event)
+    return forward
+
+
+def _stands_alone(messages: list[dict], answer_msg: dict | None) -> bool:
     """Every other call of this turn was a vault search that found nothing.
 
     Then a `final` web answer leaves the chat model nothing to combine: a note it

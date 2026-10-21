@@ -26,6 +26,11 @@ class AgentConstraints:
     # and staying off the worker-pool cap. This flag says which of the two a
     # constrained caller is; batch/worker callers leave it False.
     interactive: bool = False
+    # Streams its text to the progress callback without being a chat turn: the
+    # web door's lane, whose answer can be the reply (ADR-0124 amendment).
+    # `interactive` would also run the chat turn's relevance sweep, open a
+    # preserve window and declare links, none of which a sub-loop may do.
+    stream: bool = False
     # Permitted but not offered: the loop adds one to the offered set when
     # silica_load_tools names it, or when the model calls it directly (a hosted
     # route lets a model call a tool it read about; refusing that call would
@@ -119,10 +124,14 @@ def web_answer_constraints() -> AgentConstraints:
     0731 on DeepInfra wrote its draft into the answer, an English "Let me
     answer." and the answer again, in 3 of 10 bench answers against 0 of 10 with
     it on (2026-10-22).
+
+    Streams, so a `final` answer can paint into the reply while it is written;
+    whether it does is the calling loop's decision (loop.py).
     """
     return AgentConstraints(
         tools=("web_search", "web_fetch", "find_in_page"),
         max_iterations=8,
+        stream=True,
     )
 
 
