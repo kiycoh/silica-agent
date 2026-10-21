@@ -505,6 +505,13 @@ def run_agent(
                         {"indices": sorted(collapsed - _pre_collapsed)}, parent=None)
                     _abandon.clear()
                     resp = _interruptible_llm(_llm_kwargs)
+        except BaseException:
+            # A call that raises never reaches thought_close below, and a thought
+            # left open reads as a run still going to every projection of the
+            # narration until the next turn opens one: the drawer's Chats mark
+            # stayed live after a refused endpoint (2026-10-21, ADR-0122).
+            _narr_mod.NARRATOR.thought_close("", status="failed")
+            raise
         finally:
             _emit(ThinkingEndEvent(iteration=iteration))
         # Closed here and not in the adapter: the reasoning text only exists
@@ -795,6 +802,7 @@ def run_agent(
     except Exception as e:
         from silica.agent.usage_limits import UsageLimited
 
+        _narr_mod.NARRATOR.thought_close("", status="failed")  # as above: no open thought outlives its call
         if isinstance(e, UsageLimited):
             raise  # the student is owed the reset time, not "maximum iterations" (ADR-0102)
         logger.warning("Forced final turn failed (%s)", e)

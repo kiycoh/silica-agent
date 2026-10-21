@@ -98,42 +98,28 @@ def test_every_view_ends_a_gutter_before_the_note():
     assert "padding-right: var(--note-w" not in css and "padding-right: calc(var(--note-w" not in css
 
 
-def test_every_rail_icon_stands_for_a_compartment_that_exists():
-    """data-sec is the id of the <details> the icon opens. A renamed section
-    leaves a button that opens nothing, and nothing about that is an error --
-    the click just does not land."""
+def test_every_rail_icon_stands_for_a_list_that_exists():
+    """data-sec is the id of the pane the icon opens. A renamed pane leaves a
+    button that opens nothing, and nothing about that is an error -- the click
+    just does not land."""
     html = INDEX.read_text()
     rail = html[html.index('<aside id="railmini"'):html.index('<aside id="sidebar">')]
     secs = re.findall(r'data-sec="([^"]+)"', rail)
     assert secs, "the mini rail has no icons"
     for sec in secs:
         assert f'id="{sec}"' in html, f"#railmini points at {sec}, which is not in the rail"
-    # every compartment of the full rail is reachable from the folded one
+    # every list of the full drawer is reachable from the folded one
     sidebar = html[html.index('<aside id="sidebar">'):html.index("</aside>", html.index('<aside id="sidebar">'))]
-    for det in re.findall(r'<details class="side-section" id="([^"]+)"', sidebar):
-        assert det in secs, f"{det} has no icon and is unreachable when folded"
+    panes = re.findall(r'<section class="side-pane" id="([^"]+)"', sidebar)
+    assert panes
+    for pane in panes:
+        assert pane in secs, f"{pane} has no icon and is unreachable when folded"
 
 
-def test_an_icon_for_a_hidden_compartment_hides_itself():
-    """Pinned before the first pin and This session before the first write hide
-    themselves; an icon standing for one of them is a button that opens an
-    empty drawer. The sections are unhidden from several places, so this watches
-    the result rather than adding a call site to each."""
+def test_a_list_icon_stays_while_its_list_is_out_of_view():
+    """syncRailIcons hid the icon of a hidden compartment. Since ADR-0122 the
+    list not in view is hidden by design, so the same rule would take away the
+    one way back to it: the icons are never hidden with their list."""
     app = app_js()
-    assert "function syncRailIcons(" in app
-    assert 'attributeFilter: ["hidden"]' in app
-
-
-def test_the_spine_ends_at_the_running_beat():
-    """The deck drew 62% and the port shipped that literal, so the rule painted
-    the same two thirds whatever the run was doing. It is the run's own progress
-    bar; measured, not counted, because a thought row is two lines and a tool
-    row is one."""
-    css, work = app_css(), WORK_JS.read_text()
-    assert "var(--spine, 62%)" in css
-    assert re.search(r"linear-gradient\(var\(--accent\) 0 62%", css) is None
-    spine = work[work.index("function paintSpine("):work.index("// --- the Node panel")]
-    assert ".wk-beat.running" in spine
-    assert 'setProperty("--spine"' in spine
-    # and it is cleared, not left pointing at a beat that finished
-    assert 'removeProperty("--spine")' in spine
+    assert "function syncRailIcons(" not in app
+    assert 'attributeFilter: ["hidden"]' not in app[app.index("function syncNarrow("):]

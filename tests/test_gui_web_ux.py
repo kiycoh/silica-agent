@@ -360,22 +360,26 @@ def test_a_stale_session_id_is_a_notice_over_a_working_page(client):
     assert "log.innerHTML" not in body.split("That chat wasn't found")[0]
 
 
-# --- P16, after ADR-0084: identity and health at the drawer's foot ----------
+# --- P16, after ADR-0122: identity and health at the drawer's head ----------
 
-def _foot() -> str:
-    return _block(INDEX, '<div id="side-foot">', "</div>")
+def _head() -> str:
+    return _block(INDEX, '<div id="side-head">', "</div>")
 
 
 def test_top_elapsed_is_gone_from_the_chrome():
     assert "top-elapsed" not in INDEX and "top-run" not in INDEX
 
 
-def test_the_foot_holds_no_number_that_cannot_change_during_a_session():
-    foot = re.sub(r"<!--.*?-->", "", _foot(), flags=re.S)
+def test_the_head_holds_no_number_that_cannot_change_during_a_session():
+    head = re.sub(r"<!--.*?-->", "", _head(), flags=re.S)
+    assert 'id="vault-chip"' in head
     for dead in ("top-counts", "top-elapsed", "vh-facts"):
-        assert dead not in foot, f"{dead} is back in the chrome"
+        assert dead not in head, f"{dead} is back in the chrome"
     # the broken-link count lives in the panel behind the vault, not at rest
-    assert "top-broken" not in foot and "notices" not in foot.replace("top-notices", "")
+    assert "top-broken" not in head and "notices" not in head.replace("top-notices", "")
+    # and nothing stands under the list: the foot left with the vault's move
+    # up (ADR-0122), and the usage bars with it, to Settings
+    assert 'id="side-foot"' not in INDEX
 
 
 def test_new_chat_is_a_labelled_row_heading_the_views():
@@ -383,15 +387,14 @@ def test_new_chat_is_a_labelled_row_heading_the_views():
     # row, as "New" heads Claude's, and the rail carries it folded.
     sidebar = _block(INDEX, '<aside id="sidebar">', "</aside>")
     assert re.search(r'<button[^>]*id="new-chat"[^>]*>.*?<span>New chat</span></button>', sidebar)
-    assert 'id="new-chat"' not in _block(INDEX, 'id="side-chats"', "</details>")
+    assert 'id="new-chat"' not in _block(INDEX, 'id="side-chats"', "</section>")
     assert sidebar.index('id="new-chat"') < sidebar.index('<nav id="views"')
     js = app_js()
     assert '$("#new-chat").addEventListener("click", newChat)' in js
     assert '$("#rail-new").addEventListener("click", newChat)' in js
-    # the wordmark goes home; it no longer clears the transcript
-    brand = js[js.index('$("#brand-logo").addEventListener'):]
-    brand = brand[:brand.index("\n")]
-    assert 'showTab("chat")' in brand and "reset" not in brand
+    # the wordmark left the drawer with ADR-0122; the landing keeps it
+    assert 'id="brand-logo"' not in INDEX and "#brand-logo" not in js
+    assert '<div class="vh-mark">SILICA</div>' in INDEX
 
 
 def test_the_vault_chip_opens_notices_and_broken_links_in_one_panel():
@@ -416,35 +419,57 @@ def test_settings_and_help_keep_a_gesture_each():
     assert 'e.target.closest("input, textarea, select, [contenteditable], .cm-editor")' in js
 
 
-# --- P17 + P18 + P19. The rail by scope -------------------------------------
+# --- P17 + P18 + P19, after ADR-0122. One list at a time ---------------------
 
-def test_the_rail_orders_compartments_vault_chats_this_chat():
-    # Widest scope first (ADR-0072): the vault is what every view reads, and it
-    # sat last under the chats.
+def test_the_drawer_shows_one_of_two_lists_and_the_notes_first():
+    """The tree and the chats split the column 3:2 under a third compartment,
+    and neither had room (ADR-0122). A segment picks the list; the one shown
+    takes the height left. A first visit shows the notes, the list every view
+    reads (ADR-0072), and the choice is remembered."""
     rail = _block(INDEX, '<aside id="sidebar">', "</aside>")
-    secs = re.findall(r'<details class="side-section" id="(side-\w+)"', rail)
-    assert secs == ["side-vault", "side-chats", "side-chat"], secs
-
-
-def test_this_chat_has_a_resting_state_and_is_never_hidden():
-    rail = _block(INDEX, '<aside id="sidebar">', "</aside>")
-    tag = re.search(r'<details class="side-section" id="side-chat"[^>]*>', rail).group(0)
-    assert "hidden" not in tag
-    assert 'id="chat-head">nothing changed yet<' in rail
+    panes = re.findall(r'<section class="side-pane" id="(side-\w+)"', rail)
+    assert panes == ["side-vault", "side-chats"], panes
+    seg = _block(rail, '<div id="side-tabs"', "</div>")
+    assert re.findall(r'data-pane="(side-\w+)"', seg) == panes
+    assert re.search(r'<section class="side-pane" id="side-chats"[^>]*\bhidden\b', rail)
+    assert "<details" not in rail, "a compartment is back"
     js = app_js()
-    assert '$("#side-changes").hidden' not in js and '$("#side-pinned").hidden' not in js
+    assert 'let sidePane = localStorage.getItem("side-pane") === "side-chats" ? "side-chats" : "side-vault";' in js
+    body = _fn(js, "function showSidePane(id)")
+    assert 'localStorage.setItem("side-pane", id);' in body and "setActive(b, b.dataset.pane === id)" in body
+    assert '"#side-tabs"]) glide($(id));' in js
 
 
-def test_railmini_icons_match_the_compartments_one_to_one():
+def test_this_chat_left_and_its_marks_ride_the_chats():
+    """"This chat" repeated the transcript: the write cards, the ledger line's
+    steps and reads (ADR-0117). What it carried that nothing else did was two
+    states readable while shut (audit P17): a write waiting for review and a
+    turn running. They ride the Chats segment, the rail's Chats icon and, for
+    the review, the current chat's row (ADR-0122 point 5)."""
+    assert 'id="side-chat"' not in INDEX and 'id="chat-head"' not in INDEX
+    assert 'id="work-body"' not in INDEX and 'id="changes"' not in INDEX
+    js = app_js()
+    changes = _fn(js, "async function loadChanges()")
+    assert "chatsReview = rows.filter((r) => r.review).length;" in changes
+    assert "syncChatsMark();" in changes and "#changes" not in changes
+    mark = _fn(js, "function syncChatsMark()")
+    assert 'row.classList.toggle("review", chatsReview > 0);' in mark
+    assert 'seg.dataset.mark = mark(runLive && sidePane !== "side-chats");' in mark
+    assert "rm.dataset.mark = mark(runLive);" in mark
+    assert "markRun(run.running);" in WORK
+
+
+def test_railmini_icons_match_the_lists_one_to_one():
     rail = _block(INDEX, '<aside id="railmini"', "</aside>")
     icons = re.findall(r'data-sec="(side-\w+)"', rail)
     sidebar = _block(INDEX, '<aside id="sidebar">', "</aside>")
-    secs = re.findall(r'<details class="side-section" id="(side-\w+)"', sidebar)
-    assert icons == secs
-    # the one state the folded rail shows: something to review, as a labelled bar
+    panes = re.findall(r'<section class="side-pane" id="(side-\w+)"', sidebar)
+    assert icons == panes
+    # the folded rail's states, said by the Chats icon's label and drawn as a bar
     js = app_js()
-    assert re.search(r'rm\.setAttribute\("aria-label", toReview \? `this chat .{1,6} \$\{toReview\} to review` : "this chat"\)', js)
-    assert ".rm.review::after" in app_css()
+    assert 'rm.setAttribute("aria-label", "chats" + said);' in js
+    assert re.search(r'const said = chatsReview \? ` .{1,6} \$\{chatsReview\} to review` : runLive \? " .{1,6} a turn running" : "";', js)
+    assert '.rm[data-mark="review"]::after' in app_css()
 
 
 def test_the_current_chat_is_marked_in_the_rail_and_in_the_document_title():
@@ -515,19 +540,22 @@ def test_the_open_note_is_marked_in_the_tree():
     assert "markOpenNote();" in _fn(js, "function closeNote()")
 
 
-def test_one_filter_heads_the_rail_and_narrows_every_compartment():
+def test_one_filter_heads_the_list_and_reads_both_lists():
     """The filter used to sit inside Vault with two scope chips (notes, chats)
-    and reach UP into Chats: a box in one compartment acting on another, with
-    the chips there to excuse it. It is the rail's filter, so it sits above the
-    first compartment and narrows all three; the compartments are the scope."""
+    and reach UP into Chats. Since ADR-0122 the segment above it picks the
+    list SHOWN, and the filter still narrows both: the matches of the list not
+    in view are a button to it in the status line, or a chat named like the
+    typed word would be a match nobody sees."""
     rail = _block(INDEX, '<aside id="sidebar">', "</aside>")
     assert 'id="side-scope"' not in rail and "data-scope" not in rail
-    assert rail.index('id="side-search"') < rail.index('<details class="side-section" id="side-chat"')
+    assert rail.index('id="side-tabs"') < rail.index('id="side-search"') < rail.index('id="side-vault"')
     js = app_js()
     assert "sideScope" not in js
     body = _fn(js, "function applySidebarFilter()")
     assert "search inside the notes" in body and "match" in body
-    # one string narrows notes, pinned, changes AND chats: no branch zeroes it
+    assert 'go.addEventListener("click", () => showSidePane(pane));' in body
+    assert "if (pane === sidePane)" in body
+    # one string narrows notes, pinned AND chats: no branch zeroes it
     assert 'sideScope === "notes" ? raw : ""' not in body
     assert 'querySelectorAll(".session")' in body and 'querySelectorAll(".tree-note")' in body
 
@@ -695,20 +723,21 @@ def test_the_answer_flows_on_the_surface_and_the_question_heads_it():
 def test_the_view_showing_is_marked_as_the_current_place():
     """Since ADR-0084 the views are rows of the drawer, and the one showing
     wears the --sel box the open note and the current chat wear, with its glyph
-    in the accent. The segments inside a view keep the gliding pill, which is
-    why the views are out of the glide list."""
+    in the accent. The segments keep the gliding pill, inside a view and, since
+    ADR-0122, the drawer's Notes and Chats, which is why the views are out of
+    the glide list and the lists are in it."""
     css = app_css()
     p = css[css.index("#views .tab.active {"):]
     p = p[:p.index("}")]
     assert "background: var(--sel);" in p
     assert "text-shadow" not in p
-    assert 'for (const id of ["#surface-tabs", "#cal-mode", "#metrics-tabs"]) glide($(id));' in app_js()
+    assert 'for (const id of ["#surface-tabs", "#cal-mode", "#metrics-tabs", "#side-tabs"]) glide($(id));' in app_js()
 
 
 def test_the_chrome_reads_in_sentence_case_on_the_type_floor():
     css = app_css()
     assert "--fs-meta: 12px;" in css and "--fs-ctl: 13px;" in css
-    for sel in (".side-title {", ".side-bucket {", ':is(#note-menu, #attach-menu, #vault-add-menu) [role="menuitem"] {', ".sources-label {",
+    for sel in ("#side-tabs button {", ".side-bucket {", ':is(#note-menu, #attach-menu, #vault-add-menu) [role="menuitem"] {', ".sources-label {",
                 ".thinking summary {", "details.fm summary {", ".sp-title {"):
         # a selector may be ruled more than once across the cut sheets; none of
         # its blocks may set caps, and the one that sizes it sizes it on the scale

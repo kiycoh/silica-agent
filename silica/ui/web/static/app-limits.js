@@ -1,6 +1,7 @@
 // --- usage limits (ADR-0102 points 6 and 7) ------------------------------------
 // How much of each limit is used and when it resets, from GET /limits: a bar
-// per layer at the drawer's foot, and from 80% of any of them a line above the
+// per layer in Settings, Usage (ADR-0122 point 6; it was the drawer's foot and
+// the loudest thing in it), and from 80% of any of them a line above the
 // composer. A share and never a currency: the bar moves with what the student
 // did, where a price would move with the model. The server sends instants in
 // UTC and this file writes them in the reader's own clock, including in the
@@ -14,6 +15,9 @@ const LIM_WARN = 0.8;
 // be 31 days out: the refresh waits for the soonest reset, never past 6 hours.
 const LIM_REFRESH_CAP_MS = 6 * 3600 * 1000;
 let limTimer = 0;
+// The last /limits read, which Settings asks before drawing its Usage tab: no
+// entries, no tab, so a local key without limits never shows one.
+let limitsNow = [];
 
 // The reset in words, in the reader's zone: "at 14:20" for the window, which
 // is never more than 5 hours away, "on Monday at 02:00" for the week, "on 1
@@ -39,17 +43,11 @@ function limitSentence(ev) {
   return local ? ev.error.replace(ev.when, local) : ev.error;
 }
 
-function limBox() {
-  let box = document.getElementById("usage");
-  if (box) return box;
-  const foot = document.getElementById("side-foot");
-  if (!foot) return null;
-  box = document.createElement("section");
-  box.id = "usage";
-  box.setAttribute("aria-label", "usage");
-  box.hidden = true;
-  foot.prepend(box);
-  return box;
+// The Usage section of Settings, drawn from the last read: one row per layer,
+// each a settings row so the panel's search finds it by "usage" or its name.
+function renderUsage(host) {
+  host.querySelectorAll(".us-row").forEach((e) => e.remove());
+  for (const l of limitsNow) host.appendChild(limRow(l));
 }
 
 function limLine() {
@@ -72,7 +70,8 @@ function limLevel(used) {
 function limRow(l) {
   const pct = Math.round(Math.min(1, Math.max(0, l.used)) * 100);
   const row = document.createElement("div");
-  row.className = "us-row";
+  row.className = "st-row us-row";
+  row.dataset.search = `usage limit ${(LIM_NAMES[l.layer] || l.layer).toLowerCase()}`;
   row.dataset.layer = l.layer;
   row.dataset.level = limLevel(l.used);
   const head = document.createElement("div");
@@ -118,7 +117,14 @@ function limNotice(limits) {
   }
   const what = LIM_PHRASE[pick.layer] || pick.layer;
   const used = pick.used >= 1 ? what : `${Math.round(pick.used * 100)}% of ${what}`;
-  line.textContent = `You have used ${used}. It resets ${limWhen(pick.layer, pick.resets_at)}.`;
+  line.textContent = `You have used ${used}. It resets ${limWhen(pick.layer, pick.resets_at)}. `;
+  // The one usage mark outside Settings since ADR-0122 leads to the rest of it.
+  const more = document.createElement("button");
+  more.type = "button";
+  more.className = "linklike";
+  more.textContent = "See usage";
+  more.addEventListener("click", () => { stState.section = "Usage"; openSettings(); });
+  line.appendChild(more);
   line.dataset.level = limLevel(pick.used);
   line.hidden = false;
 }
@@ -132,11 +138,9 @@ async function loadLimits() {
     // own check before each call still holds the limits (ADR-0102 point 5).
     limits = [];
   }
-  const box = limBox();
-  if (box) {
-    box.replaceChildren(...limits.map(limRow));
-    box.hidden = !limits.length;
-  }
+  limitsNow = limits;
+  const host = document.querySelector('#st-panel [data-section="Usage"]');
+  if (host) renderUsage(host); // a refresh while Settings is open redraws its bars
   limNotice(limits);
   clearTimeout(limTimer);
   const now = Date.now();

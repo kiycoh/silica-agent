@@ -19,6 +19,9 @@ const ST_EXTRA = ["Zotero", "Connectors", "Skills", "Endpoints", "Diagnostics", 
 // A hosted account gets only these two (ADR-0104 point 1): the others are about
 // a machine the operator runs, and their routes are refused at the front door.
 const ST_EXTRA_HOSTED = ["Skills", "About"];
+// Usage heads the extras wherever /limits has entries (ADR-0122 point 6), as
+// Claude's settings keep theirs: a hosted key always has a month, a local key
+// usually has nothing, and then there is no tab rather than an empty one.
 const stState = { data: null, section: "Session", controls: [], uid: 0 };
 
 // One glyph per section, drawn as the rail draws its own: a 24 grid, a 1.7
@@ -38,6 +41,7 @@ const ST_ICONS = {
   Endpoints: '<rect x="3" y="3" width="18" height="7" rx="1.5"/><rect x="3" y="14" width="18" height="7" rx="1.5"/><path d="M7 6.5h.01M7 17.5h.01"/>',
   Diagnostics: '<path d="M22 12h-4l-3 8L9 4l-3 8H2"/>',
   About: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-5M12 8h.01"/>',
+  Usage: '<path d="M4 18a8 8 0 1 1 16 0"/><path d="M12 18l4-5"/>',
 };
 
 function stTabIcon(name) {
@@ -561,7 +565,7 @@ function stRender(data) {
     for (const row of section.rows) el.appendChild(stRowEl(row));
     stPanel.appendChild(el);
   }
-  const extra = data.hosted ? ST_EXTRA_HOSTED : ST_EXTRA;
+  const extra = [...(limitsNow.length ? ["Usage"] : []), ...(data.hosted ? ST_EXTRA_HOSTED : ST_EXTRA)];
   for (const name of extra) stPanel.appendChild(stSectionEl(name));
   stPanel.appendChild(stEl("div", "st-empty"));
   for (const name of [...data.sections.map((s) => s.name), ...extra]) {
@@ -574,6 +578,8 @@ function stRender(data) {
     stTabs.appendChild(b);
   }
   renderAbout(stPanel.querySelector('[data-section="About"]'), data);
+  const usage = stPanel.querySelector('[data-section="Usage"]');
+  if (usage) renderUsage(usage);
   renderSkills(stPanel.querySelector('[data-section="Skills"]'));
   const memory = stPanel.querySelector('[data-section="Memory"]');
   if (memory) renderMemory(memory);
@@ -736,14 +742,14 @@ document.addEventListener("keydown", (e) => {
 // vault's panel now (audit P16), the one place that answers "what is wrong
 // with this setup", beside the broken-link count; the toast strip goes back to
 // meaning "something just happened". Since ADR-0084 that panel opens from the
-// vault at the drawer's foot, or its dot at the rail's foot, and also holds
+// vault in the drawer (its head since ADR-0122), or its dot on the rail, and also holds
 // the path, switching, settings and help: everything the top strip's right
 // end held except the note drawer's toggle.
 const vaultChip = $("#vault-chip");
 const vaultPanel = $("#vault-panel");
 let noticeCount = 0;
 
-// Whichever of the vault's two marks is on screen: the drawer's foot, or the
+// Whichever of the vault's two marks is on screen: the drawer's head, or the
 // rail's while the drawer is folded. Read off the layout's own state and not
 // off the chip's box: a collapsed drawer is zero wide but still laid out, so
 // the chip keeps a box where nobody can see it.
@@ -753,16 +759,16 @@ function vaultOpener() {
   return folded ? $("#rail-vault") : vaultChip;
 }
 
-// From the drawer's foot it opens upward over the drawer, starting at the
-// foot's left: the foot is at the window's bottom, so down is the one way with
-// no room. From the rail it opens beside the rail, level with the dot, and
-// leaves the rail's icons in sight.
+// From the drawer's head it opens downward over the drawer, from the head's
+// left: the vault moved from the foot to the head with ADR-0122, so down is
+// where the room is. From the rail it opens beside the rail, level with the
+// dot, and leaves the rail's icons in sight.
 function placeOverVault(panel) {
   const from = vaultOpener();
   const r = from.getBoundingClientRect();
   const beside = from.id === "rail-vault";
   panel.style.left = Math.round(beside ? r.right + 10 : Math.max(8, r.left)) + "px";
-  panel.style.bottom = Math.round(window.innerHeight - (beside ? r.bottom : r.top - 6)) + "px";
+  panel.style.top = Math.round(beside ? r.top : r.bottom + 6) + "px";
 }
 
 function closeVaultPanel(refocus = true) {

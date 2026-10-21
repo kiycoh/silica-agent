@@ -451,7 +451,7 @@ function askVaultLink() {
   const intoWorkspace = vaultImportWorkspace;
   vaultImportWorkspace = "";
   closeVaultAddMenu(true);
-  $("#side-vault").open = true;
+  showSidePane("side-vault"); // the import reports in the notes
   vaultImportBox.hidden = false;
   vaultImportBox.replaceChildren();
   const form = document.createElement("form");
@@ -539,7 +539,7 @@ async function importToVault(files, fromFolder) {
   const big = wanted.length - fits.length;
   wanted.splice(0, wanted.length, ...fits);
   const folder = fromFolder && wanted[0] ? relOf(wanted[0]).split("/")[0] : "";
-  $("#side-vault").open = true;
+  showSidePane("side-vault"); // the import reports in the notes
   if (wanted.length > VAULT_IMPORT_MAX) {
     renderVaultImport({ failed: `${wanted.length} files Silica reads are in it, and one import takes at most ${VAULT_IMPORT_MAX}: pick a smaller folder` });
     return;
@@ -986,8 +986,9 @@ function restoreYieldedSidebar() {
 // That third mode was called `work` and drew two unrelated things behind one
 // name: the run on chat, the node on explore. A mode cannot be named after
 // one of its two subjects. The run moved to the left rail's Work compartment,
-// where nothing competes with it and it stays readable WHILE a note is open;
-// this mode kept the node, and now carries the name of what it draws.
+// where nothing competes with it and it stays readable WHILE a note is open
+// (and from there to the transcript's ledger line with ADR-0122); this mode
+// kept the node, and now carries the name of what it draws.
 //
 // (It also once carried a `context` mode, which drew the /context payload the
 // work panel's node scope also drew: two panels at the same edge, the same
@@ -1691,7 +1692,7 @@ async function saveEdit() {
       if (data.text !== text && editor.getText() === text) editor.adopt(data.text);
       editClean = data.text;
       if (data.broken) editor.setMissing(data.broken);
-      loadChanges(); // the Work compartment and the menu's diff see the edit
+      loadChanges(); // the menu's diff and the write cards see the edit
       // a workspace note's row reads its name, lines and instructions (ADR-0112)
       if (typeof workspaces !== "undefined" && workspaces.some((w) => w.path === path)) loadWorkspaces();
     } catch {
@@ -2007,10 +2008,10 @@ document.addEventListener("click", (e) => {
   if (drawerBefore && drawerBefore === drawerNow() && openBefore === openSeq &&  // untouched by this click
       e.target.isConnected &&
       !e.target.closest("#note-panel") &&
-      // A view row and the wordmark moved into the sidebar with ADR-0084, and a
-      // view switch still puts the note away as the strip's tabs did: the
-      // corner toggle brings it back on the new view.
-      (!e.target.closest("#sidebar") || e.target.closest("#views .tab, .brand")) &&
+      // A view row moved into the sidebar with ADR-0084, and a view switch
+      // still puts the note away as the strip's tabs did: the corner toggle
+      // brings it back on the new view.
+      (!e.target.closest("#sidebar") || e.target.closest("#views .tab")) &&
       !e.target.closest("#dock")) closeNote();
 });
 $("#note-close").addEventListener("click", closeNote);

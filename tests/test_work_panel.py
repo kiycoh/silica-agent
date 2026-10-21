@@ -166,7 +166,7 @@ def test_the_panel_is_wired_into_the_page():
     """The pane is part of the shell, not a widget bolted onto chat: the markup,
     the stylesheet and the script all have to be there."""
     html = INDEX.read_text()
-    assert 'id="work-body"' in html
+    assert 'id="node-pane"' in html
     assert '/static/work.js' in html
     # loaded after every cut of app.js: it calls openNote() (app-notes.js) and
     # send() (app-chat.js), and the last cut is the one that has to precede it.
@@ -181,8 +181,9 @@ def test_the_panel_is_wired_into_the_page():
 def test_the_run_and_the_node_are_two_panes_at_two_edges():
     """One name used to cover both. The `work` segment drew the RUN on chat and
     the NODE on explore, so the label was wrong half the time and the run was
-    unreadable whenever you were reading a note. The run is a rail compartment
-    now (left, always there); the drawer kept the node and took its name.
+    unreadable whenever you were reading a note. The run became a rail
+    compartment (left, always there) and left the rail with ADR-0122, for the
+    transcript's ledger line; the drawer kept the node and took its name.
 
     The rules that once kept a second right-edge aside out of the drawer's way
     have to stay gone, not merely unused."""
@@ -194,13 +195,12 @@ def test_the_run_and_the_node_are_two_panes_at_two_edges():
     # no segment names the modes since ADR-0059: each is entered the way its
     # subject is reached, and the `changes` chip leads back from the diff
     assert "data-mode=" not in drawer[:drawer.index("</aside>")]
-    # the run's pane is a compartment of the rail, the last one since ADR-0072
-    # (widest scope first): "this chat" is where the reader decides whether to
-    # trust the agent (audit P17), and it is never hidden
+    # the run's pane was a compartment of the left drawer, "This chat", until
+    # ADR-0122: the transcript's ledger line says its steps and reads where the
+    # answer is (ADR-0117 point 3), and its state is the Chats mark
     rail = html[html.index('<aside id="sidebar">'):html.index('<section id="view-chat"')]
-    secs = re.findall(r'<details class="side-section" id="(side-\w+)"', rail)
-    assert secs[-1] == "side-chat", secs
-    assert 'id="work-body"' in rail
+    assert 'id="work-body"' not in rail and 'id="side-chat"' not in rail
+    assert "markRun(run.running);" in js
     # one surface at this edge, so nothing hides one half of it from the other
     assert '<aside id="work"' not in html
     # comments stripped: the rules are named in the prose that explains why they
@@ -219,10 +219,8 @@ def test_the_scope_chip_rides_the_shared_header_and_nothing_renames_it():
     html, js = INDEX.read_text(), WORK_JS.read_text()
     head = html[html.index('<aside id="note-panel"'):html.index('id="note-diff"')]
     assert 'id="node-scope"' in head and 'id="node-state"' in head
-    # the run's own dot rides the compartment that holds the run, so it says
-    # whether anything is happening while that compartment is folded shut
-    rail = html[html.index('<aside id="sidebar">'):html.index('<section id="view-chat"')]
-    assert 'id="work-state"' in rail[rail.index('id="side-chat"'):]
+    # the run's own dot rode "This chat"; it is the Chats mark since ADR-0122
+    assert 'id="work-state"' not in html
     # nothing writes over the segment's name: the two readings set the chip
     assert "work-title" not in js and "wk-title" not in html
     # "node" is not among them: the pane's own head names what was pointed at,
@@ -308,36 +306,32 @@ def test_a_click_that_moves_the_sidebar_never_also_closes_it():
 def test_the_run_needs_no_boot_preference_to_survive_a_reload():
     """There was a `work-open` key and an ordering puzzle around it: the pane had
     to be reopened AFTER the boot tab (which closed the drawer) and the key read
-    BEFORE the first sync (which overwrote it). Both are gone with the move. The
-    run is a rail compartment, and <details open> in the markup is the whole
-    restore -- no key, no ordering, nothing to get wrong."""
+    BEFORE the first sync (which overwrote it). Both went when the run became a
+    rail compartment, and the compartment went with ADR-0122: nothing about the
+    run is restored at boot, because the transcript replays it."""
     app = app_js()
     html = INDEX.read_text()
     assert "bootWantsWork" not in app and "work-open" not in app
-    rail = html[html.index('<aside id="sidebar">'):html.index('<section id="view-chat"')]
-    assert '<details class="side-section" id="side-chat" open>' in rail
-    # nothing in JS decides whether the compartment is out: the <details> is.
-    # (the one reference left names the folded rail's icon for its review bar)
-    assert "side-chat" not in app.replace('data-sec="side-chat"', "")
+    assert 'id="side-chat"' not in html and '"side-chat"' not in app
 
 
-def test_every_rail_compartment_wears_its_own_icon():
-    """Below the 1120 floor the compartments ARE their icons (#railmini), so a
-    glyph that means "areas" collapsed and nothing open is a glyph you have to
-    learn twice. Same mark in both, one per section."""
+def test_every_list_has_a_rail_icon_and_a_segment():
+    """Below the 1195 floor the lists ARE their icons (#railmini), so each pane
+    has one, named by its label and its tooltip, and one button of the
+    segment that shows it (ADR-0122). A pane with neither is a list nobody can
+    reach once the other one is in view."""
     html = INDEX.read_text()
     rail = html[html.index('<aside id="railmini"'):html.index('<aside id="sidebar">')]
-    sections = re.findall(r'<details class="side-section" id="(side-\w+)"[^>]*>\s*'
-                          r'<summary class="side-title">(.*?)</summary>', html, re.S)
-    assert len(sections) == 3, [s[0] for s in sections]  # this chat, chats, vault
-    for sec, summary in sections:
-        assert 'class="si"' in summary, f"{sec} has no icon in its header"
-        # the shape itself, not just any icon: the first path/polygon/circle of
-        # the railmini button for this section has to appear in the summary too
-        btn = re.search(rf'data-sec="{sec}".*?</button>', rail, re.S)
-        assert btn, f"{sec} has no button in the folded rail"
-        shape = re.search(r'<(?:path|polygon|circle) [^>]*>', btn.group(0))
-        assert shape and shape.group(0) in summary, f"{sec}: rail and header disagree"
+    sidebar = html[html.index('<aside id="sidebar">'):html.index('<section id="view-chat"')]
+    panes = re.findall(r'<section class="side-pane" id="(side-\w+)"', sidebar)
+    assert len(panes) == 2, panes  # the notes, the chats
+    seg = sidebar[sidebar.index('<div id="side-tabs"'):]
+    seg = seg[:seg.index("</div>")]
+    for pane in panes:
+        btn = re.search(rf'<button[^>]*data-sec="{pane}"[^>]*>', rail)
+        assert btn, f"{pane} has no button in the folded rail"
+        assert "aria-label=" in btn.group(0) and "data-tip=" in btn.group(0)
+        assert f'data-pane="{pane}"' in seg, f"{pane} has no segment button"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node to run work.js")

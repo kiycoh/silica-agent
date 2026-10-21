@@ -163,6 +163,13 @@ body.note-open #toasts {
   color: var(--frost);
 }
 
+/* the other list's count (ADR-0122 point 4) is a word of the sentence, not a
+   line of its own like the offer to search inside the notes */
+#side-search-status .linklike.sf-other {
+  display: inline;
+  padding: 0;
+}
+
 
 /* idle: an empty transcript centers the landing and floats the composer right
    under it as a CONTAINED command island — not a full-width footer dragged up

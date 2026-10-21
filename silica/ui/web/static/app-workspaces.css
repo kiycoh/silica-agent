@@ -45,14 +45,6 @@
   border-radius: var(--r-sm);
 }
 
-.ws-empty {
-  margin: 0;
-  padding: 0.1rem 0.55rem 0.4rem;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--ash-dim);
-}
-
 .ws-row {
   border-radius: var(--r-xs);
 }

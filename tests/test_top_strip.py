@@ -27,19 +27,20 @@ def _block(html: str, open_tag: str, close_tag: str) -> str:
     return html[start:html.index(close_tag, start)]
 
 
-def _foot(html: str) -> str:
-    return _block(html, '<div id="side-foot">', "</div>")
+def _head(html: str) -> str:
+    return _block(html, '<div id="side-head">', "</div>")
 
 
 def test_the_vault_states_its_size_on_the_landing_and_not_in_the_chrome():
     """The strip carried the counts until the audit (P16): three numbers that
     cannot change during a session, beside every conversation. The landing
     and the metrics view keep them; the chrome keeps identity and health, in
-    the drawer's foot since the strip went (ADR-0084)."""
+    the drawer's foot since the strip went (ADR-0084) and its head since
+    ADR-0122."""
     html = INDEX.read_text()
     rail = _block(html, '<aside id="sidebar">', "</aside>")
 
-    assert 'id="vault-chip"' in _foot(html) and 'id="top-vname"' in _foot(html)
+    assert 'id="vault-chip"' in _head(html) and 'id="top-vname"' in _head(html)
     assert 'id="top-counts"' not in html, "the counts are back in the chrome"
     # the rail's old board, by every name it had
     for dead in ("stat-grid", "stat-notes", "stat-links", "stat-clusters",
@@ -63,7 +64,7 @@ def test_the_area_count_has_one_rule():
 def test_the_notices_are_behind_the_chip_not_camped_in_the_rail():
     html = INDEX.read_text()
     rail = _block(html, '<aside id="sidebar">', "</aside>")
-    assert 'id="vault-chip"' in _foot(html)
+    assert 'id="vault-chip"' in _head(html)
     assert 'id="boot-notices"' not in rail
     panel = _block(html, 'id="vault-panel"', 'id="settings-btn"')
     assert 'id="boot-notices"' in panel
@@ -75,21 +76,21 @@ def test_the_notices_are_behind_the_chip_not_camped_in_the_rail():
 
 
 def test_the_rail_holds_what_only_the_rail_can():
-    """Pinned, this session's writes, the files, the chats, the run: compartments
-    none of them stated anywhere else in the app. Layout and Areas stood here too
-    and no longer do -- both are readings of ONE view, and a control for the
-    picture belongs against the picture (#legend, inside #view-graph)."""
+    """Pinned, the files, the chats: lists none of them stated anywhere else in
+    the app. Layout and Areas stood here too and no longer do -- both are
+    readings of ONE view, and a control for the picture belongs against the
+    picture (#legend, inside #view-graph). "This chat" stood here until
+    ADR-0122: it repeated the transcript."""
     rail = _block(INDEX.read_text(), '<aside id="sidebar">', "</aside>")
-    # Three compartments by scope, never hidden (audit P17), widest first since
-    # ADR-0072: the vault, the chats, this chat. The filter heads the rail,
-    # above all three, because it narrows all three; pinned is a group of the
-    # vault list rather than a compartment of its own.
-    secs = re.findall(r'<details class="side-section" id="(side-\w+)"', rail)
-    assert secs == ["side-vault", "side-chats", "side-chat"], secs
+    # Two lists, one shown (ADR-0122), the notes first as the list every view
+    # reads (ADR-0072). The filter heads the list in view and reads both;
+    # pinned is a group of the notes rather than a list of its own.
+    panes = re.findall(r'<section class="side-pane" id="(side-\w+)"', rail)
+    assert panes == ["side-vault", "side-chats"], panes
     assert rail.index('id="side-search"') < rail.index('id="side-vault"')
     vault = rail[rail.index('id="side-vault"'):rail.index('id="side-chats"')]
     assert 'id="pinned"' in vault and 'id="side-search"' not in vault
-    assert "hidden" not in re.search(r'<details class="side-section" id="side-chat"[^>]*>', rail).group(0)
+    assert 'id="side-chat"' not in rail
     # ...and the two that left are readings of the explore view: the surfaces
     # are its tabs, and the areas are the Graph panel's one list (ADR-0058)
     view = _block(INDEX.read_text(), '<section id="view-graph"', "</section>")
@@ -106,8 +107,8 @@ def test_the_strip_is_gone_and_the_views_are_rows_of_the_drawer():
     rail = _block(html, '<aside id="sidebar">', "</aside>")
     views = _block(rail, '<nav id="views"', "</nav>")
     assert re.findall(r'data-tab="(\w+)"', views) == ["graph", "learn", "calendar", "metrics"]
-    assert rail.index('id="side-search"') < rail.index('id="new-chat"') < rail.index('<nav id="views"') \
-        < rail.index('id="side-vault"')
+    assert rail.index('id="vault-chip"') < rail.index('id="new-chat"') < rail.index('<nav id="views"') \
+        < rail.index('id="side-tabs"') < rail.index('id="side-search"') < rail.index('id="side-vault"')
     assert 'data-tab="chat"' not in html
     css = app_css()
     active = css[css.index("#views .tab.active {"):]
@@ -125,12 +126,15 @@ def test_a_pin_is_scoped_to_the_vault_it_was_made_in():
 
 
 def test_the_strip_and_the_panel_say_the_same_word():
-    """Both are painted from one projectRun() call and one computed word. Two
-    derivations would let the strip read idle while the panel beside it fills."""
+    """Both are painted from one projectRun() call: the run line and, since
+    ADR-0122 took the run's own pane, the drawer's Chats mark. Two derivations
+    would let the line read idle while the mark says a turn is running."""
     src = WORK_JS.read_text()
-    assert src.count('run.running ? "live"') == 1
-    assert "runState.textContent = state;" in src
-    assert "paintRunLine(run);" in src  # the run line at the composer (P1)
+    side = src[src.index("function renderRunSide() {"):]
+    side = side[:side.index("\n  }")]
+    assert src.count("run = projectRun(beats);") == 1
+    assert "paintRunLine(run);" in side  # the run line at the composer (P1)
+    assert "markRun(run.running);" in side  # the Chats mark (ADR-0122)
 
 
 def test_no_two_functions_in_app_js_share_a_name():
