@@ -38,7 +38,27 @@ _WIKILINK_RE = re.compile(r"(!?)\[\[([^\]|#\n]+)(#[^\]|\n]*)?(?:\|([^\]\n]*))?\]
 
 # A quoted wikilink entry in a `related:` YAML list — either quote style and
 # either indentation (`  - "[[X]]"` and column-0 `- '[[X]]'` both occur).
-_RELATED_ENTRY_RE = re.compile(r"^[ \t]*-[ \t]+[\"']?\[\[([^\]|#\n]+)[^\]\n]*\]\][\"']?[ \t]*$")
+_RELATED_ENTRY_RE = re.compile(r"^[ \t]*-[ \t]+([\"']?)\[\[([^\]|#\n]+)[^\]\n]*\]\][\"']?[ \t]*$")
+
+
+def _unquote(name: str, quote: str) -> str:
+    """The name a quoted entry holds. PyYAML writes `Bessel's` as `'Bessel''s'`,
+    and the fold reads `Bessel''s` as the same name, so the escaped form was
+    resolved and written back raw: `'Bessel's'`, a frontmatter that no longer
+    parses (a statistics lecture, 2026-10-21)."""
+    if quote == "'":
+        return name.replace("''", "'")
+    if quote == '"':
+        return re.sub(r'\\(["\\])', r"\1", name)
+    return name
+
+
+def _quote(name: str, quote: str) -> str:
+    if quote == "'":
+        return name.replace("'", "''")
+    if quote == '"':
+        return name.replace("\\", "\\\\").replace('"', '\\"')
+    return name
 
 
 def _fold(name: str) -> str:
@@ -152,12 +172,13 @@ def _prune_related(fm_text: str, resolves) -> tuple[str, list[str]]:
         if in_related:
             m = _RELATED_ENTRY_RE.match(line)
             if m:
-                entry = m.group(1).strip()
+                quote, raw = m.group(1), m.group(2)
+                entry = _unquote(raw.strip(), quote)
                 hit = resolves(entry)
                 if hit == entry:
                     out.append(line)
                 elif hit:
-                    out.append(line.replace(m.group(1), hit, 1))
+                    out.append(line.replace(raw, _quote(hit, quote), 1))
                 else:
                     dropped.append(entry)
                 continue
