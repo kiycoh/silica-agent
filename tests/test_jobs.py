@@ -480,20 +480,23 @@ def test_a_dropped_pdf_is_readable_in_the_drop_s_own_turn(client, pdfs):
     assert ('- Inbox/paper.pdf (3 pages): its text layer is readable now, in this message: '
             'silica_read(path="Inbox/paper.pdf")') in ran["text"]
     assert "may garble the formulas on page 2 and has nothing on page 3" in ran["text"]
+    assert ('look at it, silica_look(image="Inbox/paper.pdf", question=...), which finds the pages '
+            'by its words, or with page=N') in ran["text"]
     assert "not readable until" not in ran["text"]
     # The layer now, or the note once the job wrote it: the same call either way.
     assert "EmbedRank" in silica_read("Inbox/paper.pdf")["text"]
     _drain()
 
 
-def test_a_scan_still_waits_for_its_conversion(client, pdfs):
+def test_a_scan_is_looked_at_a_page_at_a_time_while_it_converts(client, pdfs):
     from tests.doc_factory import pdf_bytes
 
     tc, server, ran = client
     tc.post("/nucleate", data={"text": "riassumi"},
             files=[("files", ("scan.pdf", pdf_bytes(["", ""]), "application/pdf"))])
-    assert "- Inbox/scan.pdf: not readable until it is converted; tell the user so " \
-           "(it has no selectable text)" in ran["text"]
+    assert ("- Inbox/scan.pdf (2 pages): it has no selectable text, so it is not readable as text "
+            "until it is converted; an answer from one page can look at it, "
+            'silica_look(image="Inbox/scan.pdf", question=...)') in ran["text"]
     _drain()
 
 

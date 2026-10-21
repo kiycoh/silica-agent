@@ -2171,8 +2171,10 @@ def _converting_line(rel: str) -> str:
         logger.warning("drop: the text layer of %s was not read", rel, exc_info=True)
         return later
     n, no_text, math = data["n_pages"], data["no_text"], data["math"]
+    look = f'silica_look(image="{rel}", question=...), which finds the pages by its words, or with page=N'
     if len(no_text) == n:
-        return later + " (it has no selectable text)"
+        return (f"- {rel} ({n} pages): it has no selectable text, so it is not readable as text "
+                f"until it is converted; an answer from one page can look at it, {look}")
     # No `section="p. N"` here: once the note exists the engine serves it for
     # this path, and a page section is then not_found; the path alone reads
     # the layer now and the note later.
@@ -2180,7 +2182,10 @@ def _converting_line(rel: str) -> str:
     gaps = ([f"may garble the formulas on {pdf_extract.named_pages([i + 1 for i in math])}"] if math else []) \
         + ([f"has nothing on {pdf_extract.named_pages([i + 1 for i in no_text])}"] if no_text else [])
     if gaps:
-        line += f". That layer {' and '.join(gaps)}: say so when the answer depends on those pages"
+        # The page and not "say so" (ADR-0099 amendment 2026-10-21): on 40
+        # questions about the owner's lectures the text layer answered 0.56
+        # and the layer with the formula pages seen 0.91 to 0.93.
+        line += f". That layer {' and '.join(gaps)}: when the answer depends on one of them, look at it, {look}"
     return line
 
 
