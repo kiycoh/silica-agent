@@ -71,10 +71,11 @@ PAGE_PROMPT = (
 )
 
 # A page whose text layer lost its formulas (ADR-0087 amendment of 2026-10-14).
-# Markdown, not PAGE_PROMPT's JSON: in JSON a lone \Sigma beside escaped ones
-# failed the parse and lost 3 of 93 slide pages, and an unescaped \frac or
-# \beta would parse as a form feed or a backspace. The dollar signs are asked
-# for because 18 of the 93 came back as bare LaTeX, which Obsidian shows raw.
+# Markdown, not JSON (PAGE_PROMPT's shape until 2026-10-21): in JSON a lone
+# \Sigma beside escaped ones failed the parse and lost 3 of 93 slide pages,
+# and an unescaped \frac or \beta would parse as a form feed or a backspace.
+# The dollar signs are asked for because 18 of the 93 came back as bare
+# LaTeX, which Obsidian shows raw.
 # Not formatted: it names no language, and "in its own language" keeps a
 # slide Italian (scaledown/summarize answered 65 of the 93 in English).
 FORMULA_PAGE_PROMPT = (

@@ -2345,7 +2345,8 @@ async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
     # with a text layer, which this turn reads while it converts (ADR-0099
     # amendment 2026-10-20). A drop waits whole when one file must: its
     # question is asked once, with all of them (the amendment's recommendation).
-    now = [j for j in queued if text.strip() and await asyncio.to_thread(_readable_now, j["source"]["path"])]
+    now = ([j for j in queued if await asyncio.to_thread(_readable_now, j["source"]["path"])]
+           if text.strip() else [])
     waits = bool(text.strip()) and len(now) < len(queued)
     if queued and (waits or not (ready or stubs or now)):
         # The ready files of the same drop ride its question when it is asked.
@@ -2498,7 +2499,7 @@ def _files_shown(files: Any) -> list[dict]:
     in from its job when the message went out before they were written."""
     from silica.ui.web import jobs
 
-    out = []
+    out: list[dict] = []
     if not isinstance(files, list):
         return out
     vault = Path(CONFIG.vault_path or ".")
@@ -2557,7 +2558,7 @@ async def redo_turn(payload: dict | None = None):
         if at < 0:
             raise HTTPException(409, "there is no question to ask again")
         msg = dict(messages[at])
-        content = msg.get("content")
+        content: Any = msg.get("content")
         if isinstance(content, list):   # an image turn cut short: its text part
             content = next((p.get("text") for p in content if p.get("type") == "text"), "")
         if not isinstance(content, str) or content.startswith("/"):
