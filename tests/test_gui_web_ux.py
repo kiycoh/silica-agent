@@ -394,7 +394,7 @@ def test_new_chat_is_a_labelled_row_heading_the_views():
     assert '$("#rail-new").addEventListener("click", newChat)' in js
     # the wordmark left the drawer with ADR-0122; the landing keeps it
     assert 'id="brand-logo"' not in INDEX and "#brand-logo" not in js
-    assert '<div class="vh-mark">SILICA</div>' in INDEX
+    assert '<svg class="vh-mark"' in INDEX
 
 
 def test_the_vault_chip_opens_notices_and_broken_links_in_one_panel():
