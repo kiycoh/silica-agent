@@ -18,8 +18,7 @@ import pytest
 from tests.doc_factory import gray_lines, pdf_bytes
 
 TEXT = "A page of real lecture text about entropy and heat engines."
-READING = {"kind": "slide", "description": "A Carnot cycle drawn as a loop.",
-           "text": "Carnot cycle\nQ1 - Q2 = W"}
+READING = "Carnot cycle\n\n$Q_1 - Q_2 = W$\n\n[Figure: A Carnot cycle drawn as a loop.]"
 
 
 @pytest.fixture
@@ -41,11 +40,11 @@ def _reader(monkeypatch, reply: str | None = None, fail: bool = False) -> list:
 
     calls: list = []
 
-    def ask(messages, max_tokens=700):
+    def ask(messages, max_tokens=700, **_):
         calls.append(messages)
         if fail:
             raise RuntimeError("404 No endpoints found that support image input")
-        return reply if reply is not None else json.dumps(READING)
+        return reply if reply is not None else READING
 
     monkeypatch.setattr(vision, "ask_chat_model", ask)
     return calls
@@ -162,9 +161,9 @@ def test_a_reading_lands_at_its_page_under_the_models_label(pdfium_vault, monkey
 
     body = _note(convert("Inbox/mixed.pdf")[0])
 
-    label = "> [page 2, read by glm-5.3-flash] slide: A Carnot cycle drawn as a loop."
+    label = "> [page 2, read by glm-5.3-flash] transcription"
     assert body.index("about entropy") < body.index(label) < body.index("about work")
-    assert "> Carnot cycle\n> Q1 - Q2 = W" in body
+    assert "> Carnot cycle\n>\n> $Q_1 - Q_2 = W$\n>\n> [Figure: A Carnot cycle drawn as a loop.]" in body
     assert "source: image-reading" not in body  # the rest is the document's own text
     (part,) = [p for p in calls[0][0]["content"] if p["type"] == "image_url"]
     assert part["image_url"]["url"].startswith("data:image/png;base64,iVBOR")
@@ -183,10 +182,10 @@ def test_a_pdf_read_wholly_by_the_model_says_so_in_its_provenance(pdfium_vault, 
     assert "[page 1, read by" in body and "[page 2, read by" in body
 
 
-def test_a_reply_that_is_not_a_reading_leaves_the_page_named(pdfium_vault, monkeypatch):
+def test_an_empty_reply_leaves_the_page_named(pdfium_vault, monkeypatch):
     from silica.sources.convert import convert
 
-    _reader(monkeypatch, reply="I cannot see any image here.")
+    _reader(monkeypatch, reply="")
     _write(pdfium_vault, "mixed.pdf", pdf_bytes([TEXT, ""], images={1: gray_lines()}))
 
     assert "> [page 2: no selectable text, not read]" in _note(convert("Inbox/mixed.pdf")[0])
@@ -382,17 +381,48 @@ def test_a_page_is_asked_for_all_its_words_with_room_to_answer(pdfium_vault, mon
 
     seen: list = []
 
-    def ask(messages, max_tokens=700):
+    def ask(messages, max_tokens=700, **_):
         seen.append(max_tokens)
         (text,) = [p["text"] for p in messages[0]["content"] if p["type"] == "text"]
         seen.append(text)
-        return json.dumps(READING)
+        return READING
 
     monkeypatch.setattr(vision, "ask_chat_model", ask)
     _write(pdfium_vault, "mixed.pdf", pdf_bytes([TEXT, ""], images={1: gray_lines()}))
     conv.convert("Inbox/mixed.pdf")
     assert seen[0] == conv._PAGE_MAX_TOKENS > 700
     assert "every word" in seen[1] and seen[1] != image_readings._PROMPT.format(language="English")
+    # 26 of 30 scanned math pages came back as bare LaTeX before the dollars were asked for.
+    assert "$...$" in seen[1] and "{language}" not in seen[1]
+
+
+def test_a_reply_cut_at_the_budget_says_so(monkeypatch):
+    import importlib
+    from types import SimpleNamespace
+
+    from silica.agent import providers, vision
+
+    vision = importlib.reload(vision)  # the real ask, under conftest's offline one
+    finish = []
+    monkeypatch.setattr(providers, "get_provider", lambda *a, **k: SimpleNamespace(
+        call_llm=lambda **k: SimpleNamespace(text="Carnot cyc", finish_reason=finish[-1])))
+    finish.append("length")
+    assert vision.ask_chat_model([], cut=" [cut]") == "Carnot cyc [cut]"
+    finish.append("stop")
+    assert vision.ask_chat_model([], cut=" [cut]") == "Carnot cyc"
+
+
+def test_a_page_cut_short_keeps_what_was_read(pdfium_vault, monkeypatch):
+    """A dense page past _PAGE_MAX_TOKENS: as JSON the cut reply did not parse
+    and the one-page file was refused (2026-10-21, 8 of 210 olmOCR pages)."""
+    from silica.sources.convert import convert
+
+    _reader(monkeypatch, reply="Carnot cycle\n\nThe engine takes heat $Q_1$ from the hot sour")
+    _write(pdfium_vault, "scan.pdf", pdf_bytes([""], images={0: gray_lines()}))
+
+    body = _note(convert("Inbox/scan.pdf")[0])
+
+    assert "> The engine takes heat $Q_1$ from the hot sour" in body
 
 
 # --- a page in a math font (amendment of 2026-10-14) --------------------------
@@ -414,7 +444,7 @@ def test_a_math_font_page_is_transcribed_in_place_of_its_text(pdfium_vault, monk
 
     prompts: list = []
 
-    def ask(messages, max_tokens=700):
+    def ask(messages, max_tokens=700, **_):
         prompts.extend(p["text"] for p in messages[0]["content"] if p["type"] == "text")
         return "```markdown\nKernel ridge\n\n$$\\hat\\alpha = (K + \\lambda I)^{-1} y$$\n```"
 

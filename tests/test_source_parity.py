@@ -24,7 +24,7 @@ def model(monkeypatch):
 
     sent: list[tuple[list[dict], int]] = []
 
-    def ask(messages, max_tokens=700):
+    def ask(messages, max_tokens=700, **_):
         sent.append((messages, max_tokens))
         return json.dumps({"kind": "photo", "description": "a whiteboard", "text": "dS >= 0"})
 
@@ -50,7 +50,7 @@ def _body(notes: list[str]) -> str:
 def _refuse_model(monkeypatch):
     from silica.agent import vision
 
-    def ask(messages, max_tokens=700):
+    def ask(messages, max_tokens=700, **_):
         raise RuntimeError("this model takes no images")
 
     monkeypatch.setattr(vision, "ask_chat_model", ask)

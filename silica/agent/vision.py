@@ -7,8 +7,10 @@ vision, so an image goes to the same endpoint the chat uses, as an OpenAI
 from __future__ import annotations
 
 
-def ask_chat_model(messages: list[dict], max_tokens: int = 700) -> str:
-    """The chat model's text answer to `messages`, which may carry image parts."""
+def ask_chat_model(messages: list[dict], max_tokens: int = 700, cut: str = "") -> str:
+    """The chat model's text answer to `messages`, which may carry image parts;
+    `cut` is appended when the answer stopped at `max_tokens`, so a page read
+    in part does not pass for the whole of it."""
     from silica.agent.providers import get_provider
     from silica.config import CONFIG
     # temperature 0 skips ADR-0080's card sampling: the same bytes should give
@@ -17,4 +19,5 @@ def ask_chat_model(messages: list[dict], max_tokens: int = 700) -> str:
     # smaller ask).
     resp = get_provider(CONFIG, role="router").call_llm(
         messages=messages, max_tokens=max_tokens, temperature=0.0, reasoning=False)
-    return resp.text or ""
+    text = resp.text or ""
+    return text + cut if text and resp.finish_reason == "length" else text
