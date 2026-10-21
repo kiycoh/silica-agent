@@ -392,18 +392,19 @@ body.dragging #drop-hint {
   pointer-events: none;
 }
 
-/* The mark, at the scale's one display step. Nothing to opt out of any more:
-   the header logotype's animated sweep is deleted along with the mark's
-   gradient, so this is simply the mark at rest like everywhere else. */
+/* The lockup, generated into index.html by assets/build_banners.py and inked
+   here, because the theme is the app's setting and an SVG loaded as an image
+   would only see the OS's. 64px tall puts the mark's 16-unit grid on whole pixels (a unit is 4px),
+   and its 1u padding is the margin above the brief. */
 .vh-mark {
-  font-size: 52px;
-  font-weight: 200;
-  line-height: 1;
-  letter-spacing: 0.34em;
-  /* letterspacing pads the right of the last glyph; half of it back centres
-     the word against the sentence under it */
-  text-indent: 0.34em;
-  color: var(--frost);
+  display: block;
+  height: 64px;
+  width: auto;
+  fill: var(--frost);
+}
+
+.vh-mark .seed {
+  fill: var(--accent);
 }
 
 .vh-brief {

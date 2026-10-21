@@ -43,9 +43,17 @@
   transition: color var(--dur) var(--ease);
 }
 
-/* Was a three-stop gradient animated across the letters, and its own comment
-   admitted it was the loudest AI tell on the page. The logotype hovers to
-   --accent like every other control. */
+/* The mark at 16px (assets/build_banners.py): the seed carries the accent and
+   the shells the ink, and the whole mark hovers to --accent like every other
+   control, which is the identity's one-colour version. */
+.brand .brand-mark {
+  display: block;
+}
+
+.brand .seed {
+  fill: var(--accent);
+}
+
 .brand:hover {
   color: var(--accent);
 }

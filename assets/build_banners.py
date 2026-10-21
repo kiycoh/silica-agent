@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
-"""Emit the two README banners, the favicon both front ends use, and the web
-GUI's one remaining raster.
+"""Emit the mark, the two README banners, the favicon both front ends use, the
+two inline copies of the mark (the GUI's chat landing and the site's nav), and
+the web GUI's one remaining raster.
 
     python3 assets/build_banners.py
+
+The mark is the seed, approved 2026-10-21: one square in the corner and three
+shells grown from it, the way a vault grows one verified write on top of the
+last. It is computed here from a handful of numbers rather than drawn in a
+file, so the master, the banners and the inline copies cannot drift apart.
 
 An SVG loaded as an image (which is what the README does, through GitHub's camo
 proxy) runs in secure static mode and cannot fetch external resources, so
 <image href="silica-mark.svg"/> would render nothing. The mark has to live
 inside each banner as a copy, which is why the banners are generated and not
-hand-edited: keeping two copies of it in sync by hand is how they drift apart.
+hand-edited.
 
-The banner is the lockup and nothing else: no plate, no ground, no strapline.
-It is the small-size cut of the mark set beside the wordmark at the same
-height, on transparent, so it sits on whatever page embeds it instead of
-carrying its own rectangle everywhere it travels.
+The banner is the lockup and nothing else: no plate, no ground, no strapline,
+on transparent, so it sits on whatever page embeds it instead of carrying its
+own rectangle everywhere it travels.
 
-The favicon is one file copied to the two places that serve one, rather than
-three hand-kept copies of the same drawing. It is the mark's small-size cut,
-not the mark: the full one carries enough nested rings to turn to mush at 16px.
+The favicon is the mark itself, one file copied to the places that serve it.
+The old mark needed a small-size cut because its nested rings turned to mush at
+16px; this one is drawn on a 16-unit grid, so every edge already lands on a
+whole pixel at 16, 32, 48 and 64.
 
 The chat empty state still comes from the mascot PNG, because Sili survives
 there and not as the hero. That needs Pillow, which is not a silica dependency,
@@ -31,141 +37,141 @@ HERE = Path(__file__).parent
 MARK = "silica-mark.svg"
 MASCOT_PNG = "sili_mascot.png"
 STATIC = HERE.parent / "silica" / "ui" / "web" / "static"
+WEB = HERE.parent / "web"
 # (file, width) - the chat empty state, and nothing else now
 RASTERS = (("sili.webp", 360),)
-# one drawing per destination that needs it, copied rather than kept by hand:
-# the small cut for both tabs, the full mark for the site's social card
-FAVICON = "silica-mark-favicon.svg"
-WEB = HERE.parent / "web"
-ART_COPIES = ((FAVICON, STATIC / "favicon.svg"), (FAVICON, WEB / "favicon.svg"),
-              (MARK, WEB / "silica-mark.svg"))
+# the two tabs and the site's social card, all served the one master
+ART_COPIES = (STATIC / "favicon.svg", WEB / "favicon.svg", WEB / "silica-mark.svg")
 
-# The lockup, measured rather than eyeballed. The mark's hexagon fills 78.5% of
-# its own 512 box, so a 96 box draws it 75 tall against a 63 cap height: the
-# logo reads level with the wordmark instead of towering over it.
-MARK_SIZE = 96
-GAP = 26
-PAD_X, PAD_Y = 28, 26
+# The identity's two inks and its one hue at two stops: no single chromatic
+# value clears AA on both a near-white and a near-black ground. The seed carries
+# the signal, the shells and the words carry the ink. See
+# docs/specs/visual-identity.md.
+PAPER = dict(ink="#1A1815", sig="#0A6070")
+GRAPHITE = dict(ink="#F4F5F7", sig="#22B4CC")
 
-# Lato Light at 100 units, so the wordmark is 71.5 tall from baseline to cap and
-# its ink runs x 4.5 to 368.1 (measured off the path below, not off a font).
-WORD_SCALE = 0.88
-WORD_X0, WORD_X1, WORD_CAP = 4.5, 368.1, 71.5
+# One unit, 16 in the 256 box: seed 5u, gap 1u, shell 2u, three shells and 1u
+# of padding, so the mark is 14u square and each edge is a whole pixel at 16px.
+U = 16
+SEED, GAP, SHELL, SHELLS = 5 * U, U, 2 * U, 3
+PAD = U
+GROUND = PAD + SEED + SHELLS * (GAP + SHELL)  # the line the seed, shells and words stand on
+# Light on dark spreads, and the 1u gaps close first, so the graphite banner is
+# eroded by one unit of the 256 box on every edge. The files that serve both
+# grounds (the favicon and the two inline copies) keep one geometry: at 64px and
+# under the correction is a quarter of a pixel or less.
+THIN = 1
 
-# "Agent" is set in the wordmark's own face one register down, behind a hairline
-# rule, the lockup silica-core uses for "Core": the two repos are one product
-# family, and a reader who lands on either should see the same name with a
-# different qualifier, not two drawings. The rule keeps the label a qualifier
-# instead of the second half of the name, which is what lets the caps stay at
-# two fifths of the wordmark's: GitHub serves this banner at 240px on a phone,
-# where anything smaller arrives as a smudge.
-#
-# Tracked 0.20em against the wordmark's 0.16. Tracking is optical and does not
-# scale: a short line of small caps set at the big line's value reads tight.
-AGENT_SCALE = 0.364         # cap 26 against the wordmark's 63
-AGENT_GAP = 24              # ink to rule, then rule to ink: the same gap twice
-AGENT_X0, AGENT_X1, AGENT_CAP = 1.3, 409.0, 71.5
+# Archivo, the identity's one family (SIL OFL 1.1), outlined at 100 units with
+# fontTools so the word never falls back on someone else's machine: "silica" at
+# weight 560 and "agent" at 340, both tracked -0.01em, pen at 0 on the baseline.
+# Ink right edges, the l's ascender and the 560 cut's space measured off the font.
+WORD = "M26.6 1.2Q21 1.2 16.8 -0Q12.5 -1.2 9.6 -3.4Q6.8 -5.6 5.3 -8.5Q3.9 -11.5 3.9 -15Q3.9 -15.5 3.9 -15.9Q4 -16.3 4 -16.6H15.3Q15.3 -16.3 15.3 -16.1Q15.3 -15.9 15.3 -15.7Q15.4 -12.8 17 -11.1Q18.6 -9.3 21.3 -8.6Q24 -7.9 27.1 -7.9Q29.9 -7.9 32.3 -8.5Q34.8 -9.1 36.4 -10.5Q37.9 -11.8 37.9 -14Q37.9 -16.7 35.9 -18.2Q33.9 -19.7 30.6 -20.6Q27.3 -21.5 23.5 -22.5Q20.2 -23.4 17 -24.5Q13.7 -25.6 11.1 -27.3Q8.4 -29 6.8 -31.7Q5.2 -34.3 5.2 -38.3Q5.2 -42.1 6.8 -45Q8.5 -47.8 11.4 -49.8Q14.3 -51.7 18.4 -52.7Q22.4 -53.7 27.2 -53.7Q32 -53.7 35.8 -52.7Q39.6 -51.7 42.4 -49.8Q45.2 -47.9 46.7 -45.3Q48.1 -42.6 48.1 -39.5Q48.1 -38.8 48.1 -38.2Q48.1 -37.5 48 -37.3H36.8V-38.1Q36.8 -40.1 35.7 -41.5Q34.6 -43 32.4 -43.8Q30.1 -44.7 26.6 -44.7Q24.1 -44.7 22.3 -44.3Q20.4 -43.9 19.2 -43.1Q18 -42.4 17.4 -41.4Q16.8 -40.4 16.8 -39.2Q16.8 -37.2 18.3 -36Q19.8 -34.8 22.5 -34Q25.1 -33.2 28.1 -32.3Q31.7 -31.3 35.5 -30.2Q39.2 -29.2 42.5 -27.6Q45.7 -26 47.6 -23.1Q49.6 -20.2 49.6 -15.5Q49.6 -11 47.9 -7.8Q46.2 -4.5 43.1 -2.6Q40 -0.6 35.8 0.3Q31.6 1.2 26.6 1.2ZM59 -61.1V-72.3H70.5V-61.1ZM59 0V-52.6H70.5V0ZM82.6 0V-72.3H94.1V0ZM106.2 -61.1V-72.3H117.7V-61.1ZM106.2 0V-52.6H117.7V0ZM151.3 1.2Q143.2 1.2 137.8 -1.8Q132.4 -4.7 129.7 -10.8Q127.1 -16.9 127.1 -26.3Q127.1 -35.8 129.8 -41.8Q132.5 -47.9 137.9 -50.8Q143.3 -53.8 151.3 -53.8Q156.7 -53.8 160.7 -52.5Q164.8 -51.2 167.7 -48.5Q170.6 -45.8 172 -42Q173.4 -38.1 173.4 -32.9H161.8Q161.8 -36.8 160.7 -39.4Q159.5 -41.9 157.2 -43.2Q154.8 -44.4 151.1 -44.4Q147 -44.4 144.3 -42.5Q141.5 -40.6 140.2 -36.8Q138.8 -32.9 138.8 -27V-25.5Q138.8 -19.7 140.2 -15.8Q141.5 -11.9 144.3 -10Q147.1 -8.2 151.6 -8.2Q155.2 -8.2 157.6 -9.5Q159.9 -10.8 161.1 -13.4Q162.3 -16 162.3 -19.7H173.4Q173.4 -14.9 172 -11Q170.6 -7.1 167.7 -4.4Q164.9 -1.7 160.8 -0.2Q156.6 1.2 151.3 1.2ZM196.3 1.2Q194 1.2 191.1 0.6Q188.2 0 185.6 -1.5Q183 -3 181.4 -5.9Q179.7 -8.9 179.7 -13.6Q179.7 -19 182.1 -22.5Q184.6 -26 189 -28.1Q193.4 -30.1 199.5 -30.9Q205.7 -31.8 212.9 -31.8V-36.4Q212.9 -38.8 212.2 -40.7Q211.4 -42.6 209.4 -43.6Q207.4 -44.7 203.5 -44.7Q199.6 -44.7 197.4 -43.8Q195.2 -42.8 194.3 -41.4Q193.5 -40 193.5 -38.4V-37H182.4Q182.3 -37.5 182.3 -38Q182.3 -38.5 182.3 -39.2Q182.3 -43.8 185 -47.1Q187.7 -50.3 192.5 -52.1Q197.3 -53.8 203.5 -53.8Q210.6 -53.8 215.2 -51.8Q219.8 -49.8 222.1 -46.2Q224.4 -42.5 224.4 -37.3V-11.7Q224.4 -9.8 225.5 -9Q226.5 -8.2 227.8 -8.2H231.2V-0.4Q230.1 0 228.2 0.6Q226.4 1.1 223.7 1.1Q221.1 1.1 219.1 0.2Q217.1 -0.7 215.9 -2.3Q214.6 -4 214 -6.2H213.4Q211.7 -4 209.2 -2.3Q206.8 -0.6 203.6 0.3Q200.4 1.2 196.3 1.2ZM199.7 -8.2Q202.7 -8.2 205.2 -9.2Q207.7 -10.1 209.3 -11.7Q211 -13.4 212 -15.8Q212.9 -18.1 212.9 -20.9V-23.7Q206.9 -23.7 202 -23Q197.1 -22.2 194.3 -20.3Q191.5 -18.3 191.5 -14.6Q191.5 -12.6 192.4 -11.2Q193.4 -9.8 195.2 -9Q197 -8.2 199.7 -8.2Z"
+AGENT = "M20.1 1.2Q17.1 1.2 14.1 0.5Q11.2 -0.3 8.7 -1.9Q6.3 -3.5 4.9 -6.4Q3.5 -9.2 3.5 -13.3Q3.5 -18.8 6.1 -22.2Q8.7 -25.7 13.5 -27.6Q18.2 -29.6 24.7 -30.3Q31.2 -31 38.8 -31V-37.4Q38.8 -40.5 37.7 -42.7Q36.6 -44.9 33.9 -46.1Q31.2 -47.3 26.2 -47.3Q21.3 -47.3 18.6 -46.1Q15.8 -44.9 14.7 -42.9Q13.5 -40.9 13.5 -38.6V-37H6Q5.9 -37.5 5.9 -38Q5.9 -38.5 5.9 -39.2Q5.9 -44.1 8.5 -47.4Q11.2 -50.6 15.9 -52.2Q20.7 -53.8 26.9 -53.8Q33.4 -53.8 37.7 -51.9Q42.1 -50.1 44.4 -46.7Q46.6 -43.2 46.6 -38.3V-8.8Q46.6 -6.9 47.4 -6.2Q48.2 -5.4 49.5 -5.4H53.6V-0.3Q52.2 0.3 50.5 0.7Q48.8 1.1 46.9 1.1Q44.3 1.1 42.7 0Q41.1 -1.1 40.3 -3Q39.5 -4.9 39.3 -7.3H38.6Q36.7 -4.7 33.9 -2.8Q31 -0.8 27.6 0.2Q24.1 1.2 20.1 1.2ZM21.9 -5.4Q25.1 -5.4 28.1 -6.5Q31.2 -7.5 33.5 -9.4Q35.9 -11.3 37.4 -14Q38.8 -16.7 38.8 -19.9V-24.9Q30 -24.9 24 -23.9Q17.9 -23 14.8 -20.6Q11.7 -18.1 11.7 -13.7Q11.7 -10.9 13 -9Q14.3 -7.2 16.6 -6.3Q18.9 -5.4 21.9 -5.4ZM69 18.2Q65.2 18.2 62 16.6Q58.8 15 56.9 12Q55 9.1 55 5.2Q55 0.8 57.4 -2.2Q59.7 -5.2 63.3 -6.7Q60.7 -7.9 59.3 -10Q57.9 -12.2 57.9 -14.8Q57.9 -18.3 60.4 -20.7Q62.9 -23.1 66.6 -23.9Q63.2 -26.1 61.3 -29.5Q59.3 -32.9 59.3 -37Q59.3 -41.9 61.7 -45.7Q64 -49.5 68.7 -51.6Q73.4 -53.8 80.5 -53.8Q83.7 -53.8 86.5 -53.3Q89.3 -52.8 91.6 -51.8Q95.1 -53.2 97 -55.7Q98.8 -58.2 99.3 -61.1H107.2Q107 -58.2 105.8 -55.5Q104.5 -52.9 102.2 -51.2Q99.8 -49.4 96.6 -48.8Q99.1 -46.4 100.4 -43.4Q101.6 -40.4 101.6 -37Q101.6 -32.1 99.3 -28.4Q97 -24.6 92.4 -22.4Q87.8 -20.2 80.7 -20.2H72.4Q69.6 -20.2 67.7 -19.1Q65.9 -17.9 65.9 -15.4Q65.9 -13.2 67.8 -12Q69.6 -10.7 72.6 -10.7H93.5Q99.3 -10.7 102.9 -6.8Q106.6 -2.9 106.6 3Q106.6 7.3 104.5 10.7Q102.4 14.2 98.6 16.2Q94.9 18.2 89.9 18.2ZM71 12.1H89.8Q92.3 12.1 94.3 11Q96.3 10 97.5 8.2Q98.7 6.3 98.7 4.2Q98.7 0.5 96.5 -1.6Q94.4 -3.8 91.3 -3.8H71Q67.6 -3.8 65.3 -1.5Q62.9 0.8 62.9 4.2Q62.9 7.8 65.3 10Q67.6 12.1 71 12.1ZM80.5 -26.2Q87.2 -26.2 90.5 -29.1Q93.7 -32 93.7 -37Q93.7 -42 90.5 -44.9Q87.2 -47.7 80.5 -47.7Q73.8 -47.7 70.5 -44.9Q67.2 -42 67.2 -37Q67.2 -33.9 68.7 -31.4Q70.1 -29 73.1 -27.6Q76.1 -26.2 80.5 -26.2ZM134.3 1.2Q126.6 1.2 121.4 -1.8Q116.1 -4.7 113.4 -10.8Q110.7 -16.9 110.7 -26.3Q110.7 -35.8 113.4 -41.9Q116.1 -47.9 121.4 -50.9Q126.8 -53.8 134.7 -53.8Q142.1 -53.8 147.1 -50.9Q152.1 -48 154.6 -42.5Q157.1 -36.9 157.1 -28.7V-24.3H118.8Q118.9 -17.6 120.7 -13.3Q122.5 -9.1 125.9 -7.2Q129.4 -5.3 134.5 -5.3Q138.1 -5.3 140.8 -6.2Q143.6 -7.2 145.4 -8.9Q147.2 -10.6 148.2 -12.9Q149.1 -15.2 149.2 -17.8H156.8Q156.8 -13.8 155.3 -10.3Q153.9 -6.8 151 -4.2Q148.2 -1.7 144 -0.2Q139.8 1.2 134.3 1.2ZM118.9 -30.4H149Q149 -35.1 147.9 -38.3Q146.8 -41.5 144.9 -43.5Q142.9 -45.5 140.3 -46.4Q137.7 -47.3 134.4 -47.3Q129.6 -47.3 126.2 -45.5Q122.9 -43.7 121.1 -39.9Q119.3 -36.2 118.9 -30.4ZM167.1 0V-52.6H173.3L174.1 -44.5H174.8Q176.9 -47.9 179.7 -49.9Q182.4 -52 185.7 -52.9Q188.9 -53.8 192.6 -53.8Q197.6 -53.8 201.4 -52.1Q205.1 -50.5 207.2 -46.7Q209.3 -43 209.3 -36.6V0H201.5V-35.7Q201.5 -39 200.6 -41.2Q199.7 -43.4 198.2 -44.6Q196.7 -45.9 194.5 -46.4Q192.4 -46.9 189.9 -46.9Q186 -46.9 182.6 -45Q179.1 -43.1 177 -39.5Q174.9 -36 174.9 -31V0ZM233.7 1.1Q229.8 1.1 227.6 -0.2Q225.4 -1.6 224.5 -4Q223.6 -6.4 223.6 -9.3V-46H216.6V-52.6H223.7L225.2 -67.2H231.4V-52.6H241.5V-46H231.4V-10.6Q231.4 -8 232.3 -6.7Q233.1 -5.4 235.6 -5.4H241.5V-0.3Q240.5 0.1 239.1 0.4Q237.7 0.8 236.3 0.9Q234.9 1.1 233.7 1.1Z"
+WORD_X1, AGENT_X1, ASCENDER, SPACE = 231.16, 241.46, 72.3, 20.2
 
-# The rule carries the mark's own outline weight rather than one picked for it,
-# and is inked back so it separates without competing: at full ink a bar that
-# wide is the heaviest thing in a lockup drawn entirely in hairlines.
-RULE_W = 11 * MARK_SIZE / 512
-RULE_INK = 0.38
-
-W = round(PAD_X * 2 + MARK_SIZE + GAP + (WORD_X1 - WORD_X0) * WORD_SCALE
-          + AGENT_GAP * 2 + RULE_W + (AGENT_X1 - AGENT_X0) * AGENT_SCALE)
-H = MARK_SIZE + PAD_Y * 2
-# mark, wordmark, rule and label share one centre line, so nothing sits high.
-# The label is centred on its cap band and not on the wordmark's baseline: two
-# sizes of caps sharing a baseline read as one line where the small half slipped.
-MARK_X = PAD_X
-TEXT_X = PAD_X + MARK_SIZE + GAP - WORD_X0 * WORD_SCALE
-TEXT_Y = H / 2 + WORD_CAP * WORD_SCALE / 2
-RULE_X = TEXT_X + WORD_X1 * WORD_SCALE + AGENT_GAP
-RULE_Y, RULE_H = TEXT_Y - WORD_CAP * WORD_SCALE, WORD_CAP * WORD_SCALE
-AGENT_X = RULE_X + RULE_W + AGENT_GAP - AGENT_X0 * AGENT_SCALE
-AGENT_Y = H / 2 + AGENT_CAP * AGENT_SCALE / 2
-
-# Lato Light @ 100px, tracking 0.16em, extracted with fontTools SVGPathPen so it
-# never falls back to Arial on someone else's machine. Light and not Black: the
-# mark is hairline art, and a heavy wordmark reads as a different brand sharing
-# the canvas.
-WORDMARK = "M44.8 -62.2Q44.4 -61.3 43.5 -61.3Q42.9 -61.3 41.8 -62.2Q40.8 -63.2 39.1 -64.3Q37.3 -65.4 34.7 -66.3Q32.1 -67.3 28.2 -67.3Q24.4 -67.3 21.4 -66.2Q18.5 -65.1 16.5 -63.2Q14.6 -61.3 13.5 -58.8Q12.5 -56.3 12.5 -53.6Q12.5 -50 14 -47.6Q15.6 -45.2 18.1 -43.6Q20.6 -42 23.7 -40.8Q26.9 -39.7 30.2 -38.6Q33.6 -37.5 36.8 -36.2Q40 -34.9 42.5 -32.9Q45 -30.9 46.5 -27.9Q48 -25 48 -20.7Q48 -16.2 46.5 -12.3Q45 -8.3 42.1 -5.5Q39.2 -2.6 35 -0.9Q30.8 0.8 25.4 0.8Q18.4 0.8 13.3 -1.7Q8.2 -4.2 4.5 -8.5L5.9 -10.7Q6.5 -11.4 7.2 -11.4Q7.7 -11.4 8.4 -10.8Q9.1 -10.2 10.1 -9.3Q11.1 -8.5 12.5 -7.4Q13.9 -6.4 15.8 -5.5Q17.6 -4.7 20 -4.1Q22.4 -3.5 25.5 -3.5Q29.7 -3.5 33 -4.7Q36.2 -6 38.5 -8.2Q40.8 -10.4 42 -13.4Q43.2 -16.4 43.2 -19.9Q43.2 -23.7 41.7 -26.1Q40.2 -28.5 37.7 -30.1Q35.1 -31.8 32 -32.9Q28.8 -34 25.5 -35Q22.1 -36.1 18.9 -37.4Q15.8 -38.7 13.2 -40.7Q10.8 -42.7 9.2 -45.7Q7.7 -48.8 7.7 -53.3Q7.7 -56.9 9.1 -60.2Q10.4 -63.5 13 -66Q15.6 -68.5 19.4 -70Q23.2 -71.5 28.2 -71.5Q33.6 -71.5 38 -69.8Q42.4 -68 46 -64.5Z M85.1 0H80V-70.8H85.1Z M160.7 -4.4V0H122V-70.8H127.2V-4.4Z M193.7 0H188.6V-70.8H193.7Z M281.7 -11.9Q282.2 -11.9 282.6 -11.6L284.6 -9.4Q282.4 -7.1 279.8 -5.2Q277.2 -3.3 274.1 -2Q271.1 -0.7 267.4 0.1Q263.7 0.8 259.3 0.8Q251.9 0.8 245.8 -1.8Q239.7 -4.4 235.3 -9.1Q230.9 -13.8 228.5 -20.5Q226 -27.2 226 -35.4Q226 -43.5 228.5 -50.1Q231 -56.8 235.5 -61.5Q240 -66.3 246.3 -68.9Q252.6 -71.5 260.2 -71.5Q267.5 -71.5 273.1 -69.3Q278.7 -67 283.3 -63L281.8 -60.7Q281.4 -60.1 280.5 -60.1Q279.9 -60.1 278.5 -61.2Q277.2 -62.3 274.8 -63.6Q272.4 -65 268.8 -66.1Q265.2 -67.2 260.2 -67.2Q253.8 -67.2 248.5 -65Q243.2 -62.8 239.4 -58.7Q235.5 -54.6 233.4 -48.7Q231.2 -42.8 231.2 -35.4Q231.2 -27.9 233.4 -22Q235.6 -16.1 239.4 -12Q243.2 -8 248.4 -5.8Q253.5 -3.6 259.6 -3.6Q263.4 -3.6 266.3 -4.1Q269.3 -4.6 271.8 -5.6Q274.3 -6.6 276.5 -8.1Q278.6 -9.5 280.7 -11.5Q280.9 -11.7 281.2 -11.8Q281.4 -11.9 281.7 -11.9Z M352.4 -25.7 338 -61.5Q337.2 -63.2 336.6 -65.7Q336.2 -64.5 335.9 -63.4Q335.6 -62.3 335.2 -61.4L320.8 -25.7ZM368.1 0H364.1Q363.4 0 363 -0.4Q362.5 -0.8 362.2 -1.4L354 -21.9H319.2L310.9 -1.4Q310.7 -0.8 310.2 -0.4Q309.7 0 309 0H305.1L334.1 -70.8H339.1Z"
-
-# The same face at the same weight, extracted the same way (the method
-# reproduces silica-core's CORE path byte for byte). Cap 71.5, ink x 1.3 to 409.0.
-AGENT = "M48.6 -25.7 34.2 -61.5Q33.5 -63.2 32.8 -65.7Q32.5 -64.5 32.1 -63.4Q31.8 -62.3 31.4 -61.4L16.9 -25.7ZM64.2 0H60.3Q59.6 0 59.2 -0.4Q58.7 -0.8 58.5 -1.4L50.2 -21.9H15.4L7.1 -1.4Q6.9 -0.8 6.4 -0.4Q5.9 0 5.2 0H1.3L30.2 -70.8H35.3Z M152.5 -32.1V-7Q147.2 -3.2 141.2 -1.2Q135.2 0.8 127.7 0.8Q119.3 0.8 112.6 -1.8Q105.9 -4.4 101.2 -9.1Q96.5 -13.8 93.9 -20.5Q91.4 -27.2 91.4 -35.4Q91.4 -43.6 93.9 -50.3Q96.3 -57 101 -61.7Q105.6 -66.4 112.1 -69Q118.7 -71.5 126.9 -71.5Q130.9 -71.5 134.4 -71Q137.8 -70.5 140.8 -69.4Q143.7 -68.3 146.2 -66.7Q148.8 -65.2 151.2 -63.1L149.8 -60.9Q149.1 -59.7 147.7 -60.4Q146.9 -60.7 145.5 -61.8Q144.1 -62.9 141.6 -64Q139.2 -65.2 135.6 -66.2Q131.9 -67.2 126.8 -67.2Q119.8 -67.2 114.3 -65Q108.7 -62.8 104.8 -58.7Q100.8 -54.6 98.7 -48.7Q96.6 -42.8 96.6 -35.4Q96.6 -28 98.7 -22Q100.8 -16.1 104.9 -11.9Q108.9 -7.8 114.7 -5.5Q120.4 -3.4 127.6 -3.4Q130.8 -3.4 133.4 -3.8Q136.1 -4.2 138.5 -4.9Q140.9 -5.6 143.2 -6.7Q145.5 -7.8 147.8 -9.1V-28.2H134.3Q133.8 -28.2 133.4 -28.5Q133 -28.9 133 -29.3V-32.1Z M232 -4.2 231.9 0H189.5V-70.8H231.9V-66.5H194.7V-37.9H225.7V-33.8H194.7V-4.2Z M322.1 -70.8V0H319.7Q319.1 0 318.6 -0.2Q318.2 -0.5 317.8 -1L271.9 -62.4Q272 -60.9 272 -59.6V0H267.5V-70.8H270.1Q270.8 -70.8 271.1 -70.6Q271.5 -70.4 271.9 -69.8L317.8 -8.6Q317.7 -10.1 317.7 -11.4V-70.8Z M409 -66.4H384.2V0H379V-66.4H354V-70.8H409Z"
-
-# The banner is embedded as an <img>, so currentColor has nothing to inherit and
-# each theme states its own ink. `sig` is the centre crystal, the one emissive
-# point: one hue at two stops, because no single chromatic value clears AA on
-# both a near-white and a near-black ground. See docs/specs/visual-identity.md.
-# The six child nodes are the graph's own community palette, not a set invented
-# for the logo: the 212-306deg arc from `graph_export._community_color` at the
-# same 0.66 saturation. Two things change, both because the count here is six
-# and known rather than unbounded. The walk is even instead of golden-ratio,
-# which is what the golden walk approximates when it cannot see the count. And
-# there is one lightness band per ground, not two: the alternation exists to
-# separate communities the arc has run out of room for, and six evenly spaced
-# hues do not need it. It was also what broke the floor - at 0.54 the two
-# violets measured 2.34:1 and 2.65:1 against the raised plane, under the 3:1
-# WCAG 1.4.11 asks of a graphical object. One band at 0.66 dark / 0.56 paper
-# puts the worst of the twelve at 3.66:1 and 3.51:1.
-#
-# The arc stops short of cyan on purpose, which is what leaves the centre
-# crystal at 189deg as the only emissive point in the drawing.
-NODES_DARK = ("#6FA4E2", "#6F87E2", "#756FE2", "#936FE2", "#B16FE2", "#CF6FE2")
-NODES_LIGHT = ("#458AD9", "#4563D9", "#4D45D9", "#7445D9", "#9A45D9", "#C145D9")
-
-DARK = dict(name="banner.svg", wordmark="#F4F5F7", ink="#F4F5F7", sig="#22B4CC",
-            nodes=NODES_DARK)
-LIGHT = dict(name="banner-light.svg", wordmark="#1A1815", ink="#1A1815", sig="#0A6070",
-             nodes=NODES_LIGHT)
+# The word stands on the mark's ground line and its ascender meets the top of
+# the first shell, so the type and the mark share two edges instead of floating
+# at an eyeballed centre; it starts one shell and its gap (3u) after the mark.
+WORD_K = (SEED + GAP + SHELL) / ASCENDER
+WORD_X = GROUND + 3 * U
+AGENT_X = WORD_X + (WORD_X1 + SPACE) * WORD_K
 
 
-def mark_block(t: dict) -> str:
-    """The mark, inlined. Its ids are prefixed: they land in the banner's
-    document, where a bare id="c" would collide with the next thing named c.
-
-    The source file's <style> goes: it carries a prefers-color-scheme rule for
-    the standalone case, and inside a banner that would override the explicit
-    ink the <picture> element already picked. Which is why every colour the mark
-    states as a literal - the crystal and the six nodes - is swapped here for
-    the twin this theme measured against its own ground."""
-    src = (HERE / FAVICON).read_text()
-    body = src.split(">", 1)[1].rsplit("</svg>", 1)[0].strip()
-    body = re.sub(r"<style>.*?</style>", "", body, flags=re.S)
-    body = body.replace(DARK["sig"], t["sig"])
-    for dark, themed in zip(NODES_DARK, t["nodes"]):
-        body = body.replace(dark, themed)
-    for i in re.findall(r'id="([^"]+)"', body):
-        body = body.replace(f'id="{i}"', f'id="mark-{i}"')
-        body = body.replace(f"url(#{i})", f"url(#mark-{i})")
-    return body
+def poly(points) -> str:
+    return "M" + " L".join(f"{x:g} {y:g}" for x, y in points) + " Z"
 
 
-def banner(t: dict) -> str:
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {W} {H}" width="{W}" height="{H}" role="img" aria-label="Silica Agent">
-  <title>Silica Agent</title>
+def mark_paths(thin: float = 0) -> tuple[str, str]:
+    """(shells, seed) as path data. Each shell is an L standing on the ground
+    line and the left edge; eroding moves every edge in by `thin`, ends too."""
+    x, y, t = PAD, GROUND, thin
+    seed = poly([(x + t, y - SEED + t), (x + SEED - t, y - SEED + t), (x + SEED - t, y - t), (x + t, y - t)])
+    shells, edge = [], SEED
+    for _ in range(SHELLS):
+        a, b = edge + GAP, edge + GAP + SHELL  # the shell's inner and outer reach
+        shells.append(poly([(x + t, y - b + t), (x + b - t, y - b + t), (x + b - t, y - t),
+                            (x + a + t, y - t), (x + a + t, y - a - t), (x + t, y - a - t)]))
+        edge = b
+    return " ".join(shells), seed
 
-  <!-- the mark, inlined from {FAVICON} by build_banners.py.
-       Edit that file, not this block. -->
-  <svg x="{MARK_X}" y="{PAD_Y}" width="{MARK_SIZE}" height="{MARK_SIZE}" viewBox="0 0 512 512" color="{t['ink']}">
-    {mark_block(t)}
-  </svg>
 
-  <g transform="translate({TEXT_X:.1f} {TEXT_Y:.1f}) scale({WORD_SCALE})" fill="{t['wordmark']}">
-    <path d="{WORDMARK}"/>
-  </g>
+def words(agent: bool) -> tuple[float, str]:
+    """(lockup width, the words as paths) for the horizontal lockup, 256 tall."""
+    scale = f"scale({WORD_K:.4f})"
+    out = f'<path transform="translate({WORD_X} {GROUND}) {scale}" d="{WORD}"/>'
+    right = WORD_X + WORD_X1 * WORD_K
+    if agent:
+        out += f'<path transform="translate({AGENT_X:.2f} {GROUND}) {scale}" d="{AGENT}"/>'
+        right = AGENT_X + AGENT_X1 * WORD_K
+    return round(right + PAD, 2), out
 
-  <!-- the rule: the mark's outline weight, the wordmark's cap band -->
-  <rect x="{RULE_X:.1f}" y="{RULE_Y:.1f}" width="{RULE_W:.2f}" height="{RULE_H:.1f}" fill="{t['ink']}" opacity="{RULE_INK}"/>
 
-  <g transform="translate({AGENT_X:.1f} {AGENT_Y:.1f}) scale({AGENT_SCALE})" fill="{t['wordmark']}">
-    <path d="{AGENT}"/>
-  </g>
-</svg>
-"""
+def svg(w: float, body: str, label: str = "Silica") -> str:
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w:g} 256" width="{w:g}" height="256" '
+            f'role="img" aria-label="{label}"><title>{label}</title>{body}</svg>\n')
+
+
+def symbol() -> str:
+    """The master: it follows prefers-color-scheme, as a tab icon has to."""
+    shells, seed = mark_paths()
+    style = (f"<style>.i{{fill:{PAPER['ink']}}}.s{{fill:{PAPER['sig']}}}@media(prefers-color-scheme:dark)"
+             f"{{.i{{fill:{GRAPHITE['ink']}}}.s{{fill:{GRAPHITE['sig']}}}}}</style>")
+    return svg(256, f'{style}<path class="i" d="{shells}"/><path class="s" d="{seed}"/>')
+
+
+def banner(t: dict, thin: float) -> str:
+    """The banner is embedded as an <img>, so currentColor has nothing to
+    inherit and each theme states its own ink."""
+    shells, seed = mark_paths(thin)
+    w, ws = words(agent=True)
+    return svg(w, f'<path fill="{t["ink"]}" d="{shells}"/><path fill="{t["sig"]}" d="{seed}"/>'
+                  f'<g fill="{t["ink"]}">{ws}</g>', "Silica Agent")
+
+
+def landing_lockup() -> str:
+    """The GUI's chat landing: the page inks it (fill on .vh-mark, the seed by
+    its class), because the theme is the app's setting and not only the OS's."""
+    shells, seed = mark_paths()
+    w, ws = words(agent=False)
+    return ('        <!-- the lockup, generated by assets/build_banners.py -->\n'
+            f'        <svg class="vh-mark" viewBox="0 0 {w:g} 256" role="img" aria-label="Silica">'
+            f'<path d="{shells}"/><path class="seed" d="{seed}"/>{ws}</svg>')
+
+
+def small_mark(indent: str) -> str:
+    """The mark at 16px, for the site's nav and the GUI's drawer head: 16 puts
+    a unit on one pixel, where the old mark's 20 would put it on a pixel and a
+    quarter and blur every edge. Inked by the page, so the seed takes the accent
+    only where the page's CSS gives .seed one, and is ink otherwise."""
+    shells, seed = mark_paths()
+    return (f'{indent}<!-- the mark, generated by assets/build_banners.py -->\n'
+            f'{indent}<svg class="brand-mark" viewBox="0 0 256 256" width="16" height="16" aria-hidden="true"'
+            f' focusable="false"><path fill="currentColor" d="{shells}"/>'
+            f'<path class="seed" fill="currentColor" d="{seed}"/></svg>')
+
+
+def check() -> None:
+    """The failure that renders anyway: an edge off the 16-unit grid still
+    draws, just blurred at 16px, which is the size the mark exists for."""
+    shells, seed = mark_paths()
+    assert all(float(v) % U == 0 for v in re.findall(r"[\d.]+", shells + seed)), "an edge left the grid"
+
+
+def emit(path: Path, text: str) -> None:
+    before = path.read_text() if path.exists() else ""
+    path.write_text(text)
+    print(f"{path.relative_to(HERE.parent)}: {'unchanged' if text == before else 'updated'} ({len(text) // 1024} KB)")
+
+
+def patch(page: Path, opening: str, block: str) -> None:
+    """Swap the generated block for a new one. The page is hand-written around
+    it, so the block is found by its opening comment and nothing else moves."""
+    before = page.read_text()
+    after, n = re.subn(re.escape(opening) + r".*?</svg>", lambda _: block, before, count=1, flags=re.S)
+    if n != 1:
+        raise SystemExit(f"{page.relative_to(HERE.parent)}: generated block not found")
+    emit(page, after)
 
 
 def build_rasters() -> None:
@@ -180,95 +186,17 @@ def build_rasters() -> None:
         print(f"{name}: {width}x{height} ({out.stat().st_size // 1024} KB)")
 
 
-def check() -> None:
-    """The silent failure is a reference that outlives its def: the mark's ids
-    are prefixed on the way in, and a miss there still renders, just blank or
-    black. The other is a wordmark that has drifted off the mark's centre line,
-    which reads as a typo nobody can name."""
-    for theme in (DARK, LIGHT):
-        svg = banner(theme)
-        ids = set(re.findall(r'id="([^"]+)"', svg))
-        dangling = set(re.findall(r"url\(#([^)]+)\)", svg)) - ids
-        assert not dangling, f"{theme['name']}: dangling reference {dangling}"
-        assert "mark-h" in ids, "the mark's ids stopped being prefixed"
-
-    top = TEXT_Y - WORD_CAP * WORD_SCALE
-    assert abs((top + TEXT_Y) / 2 - H / 2) < 0.5, "wordmark off the centre line"
-    assert AGENT_X + AGENT_X1 * AGENT_SCALE <= W - PAD_X + 0.5, "the lockup overruns"
-    left = RULE_X - (TEXT_X + WORD_X1 * WORD_SCALE)
-    right = AGENT_X + AGENT_X0 * AGENT_SCALE - (RULE_X + RULE_W)
-    assert abs(left - AGENT_GAP) < 0.5 and abs(right - AGENT_GAP) < 0.5, \
-        f"the rule sits off centre in its gap ({left:.1f} / {right:.1f})"
-    assert abs(AGENT_Y - AGENT_CAP * AGENT_SCALE / 2 - H / 2) < 0.5, \
-        "Agent has drifted off the centre line"
-
-
-def header_mark() -> str:
-    """The favicon cut down again, for the site's nav at 20px.
-
-    One thing goes, mechanically: the masked ring moire, because at 20px it
-    renders as a halo around the nodes instead of as rings. The gradient it used
-    to strip as well is gone from the source now. What is left inherits
-    currentColor, including the crystal and the six child nodes, because at 20px
-    a separate emissive point is one pixel. Derived, not redrawn, so it cannot
-    drift."""
-    src = (HERE / FAVICON).read_text()
-    body = src.split(">", 1)[1].rsplit("</svg>", 1)[0]
-    body = re.sub(r'<g mask="url\(#h\)".*?</g>', "", body, flags=re.S)
-    body = re.sub(r"<style>.*?</style>", "", body, flags=re.S)  # inlined, so the page inks it
-    body = re.sub(r"<defs>.*?</defs>", "", body, flags=re.S)     # the mask, now unused
-    body = body.replace(DARK["sig"], "currentColor").replace('class="sig" ', "")
-    # the six community hues collapse for the same reason the crystal does: at
-    # 20px a node is three pixels, so the hue is a tint on a dot rather than an
-    # identity, and keeping it would pin six dark-ground literals into a page
-    # that inks its own header.
-    body = re.sub(r' class="n\d" (?:fill|stroke)="#[0-9A-F]{6}"', "", body)
-    if "url(#" in body:
-        raise SystemExit(f"{FAVICON}: a reference outlived its def")
-    # and it is inked heavier: at 20px the favicon's weights read lighter than
-    # the 600-weight wordmark beside it, which makes the pair look unfinished
-    body = re.sub(r'stroke-width="([\d.]+)"',
-                  lambda m: f'stroke-width="{float(m.group(1)) * 1.6:.0f}"', body)
-    body = re.sub(r'r="([\d.]+)"',
-                  lambda m: f'r="{float(m.group(1)) * 1.25:.0f}"', body)
-    return ('        <!-- the mark, monochrome, generated from '
-            f'assets/{FAVICON} by assets/build_banners.py -->\n'
-            '        <svg class="brand-mark" viewBox="0 0 512 512" width="20" height="20"'
-            ' aria-hidden="true" focusable="false">'
-            + body + "</svg>")
-
-
-def patch_site_mark() -> None:
-    page = HERE.parent / "web" / "index.html"
-    before = page.read_text()
-    after, n = re.subn(r"        <!-- the mark, monochrome.*?</svg>",
-                       lambda _: header_mark(), before, count=1, flags=re.S)
-    if n != 1:
-        raise SystemExit("web/index.html: brand mark block not found")
-    page.write_text(after)
-    print(f"web/index.html: {'unchanged' if after == before else 'updated'} (brand mark)")
-
-
-def copy_art() -> None:
-    for name, out in ART_COPIES:
-        art = (HERE / name).read_bytes()
-        verb = "unchanged" if out.exists() and out.read_bytes() == art else "updated"
-        out.write_bytes(art)
-        print(f"{out.relative_to(HERE.parent)}: {verb} ({len(art) // 1024} KB)")
-
-
 def main() -> None:
     check()
-    copy_art()
-    patch_site_mark()
+    emit(HERE / MARK, symbol())
+    for out in ART_COPIES:
+        emit(out, symbol())
+    patch(WEB / "index.html", "        <!-- the mark, generated", small_mark(" " * 8))
+    patch(STATIC / "index.html", "          <!-- the mark, generated", small_mark(" " * 10))
+    patch(STATIC / "index.html", "        <!-- the lockup, generated", landing_lockup())
     build_rasters()
-    for theme in (DARK, LIGHT):
-        path = HERE / theme["name"]
-        before = path.read_text() if path.exists() else ""
-        after = banner(theme)
-        path.write_text(after)
-        verb = "unchanged" if after == before else "updated"
-        print(f"{theme['name']}: {verb} ({len(after) // 1024} KB)")
+    emit(HERE / "banner.svg", banner(GRAPHITE, THIN))
+    emit(HERE / "banner-light.svg", banner(PAPER, 0))
 
 
 if __name__ == "__main__":
