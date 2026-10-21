@@ -725,7 +725,7 @@ def silica_look(
 ) -> str:
     """Looks at an image and answers a question about what it shows. Use it when
     the reading under an embed in silica_read_note does not answer, or for an
-    image attached earlier in the chat. One call to the chat model with the
+    image attached earlier in the chat. One call to the vision model with the
     pixels; nothing is stored."""
     from silica.agent import vision
     from silica.kernel.recall.image_readings import _MIME, image_part

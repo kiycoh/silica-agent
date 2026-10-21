@@ -1231,8 +1231,15 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         messages.append(msg)
         _narrate_user_turn(msg)
         if images:
-            from silica.kernel.recall.image_readings import image_part
-            msg["content"] = [{"type": "text", "text": agent_msg}, *map(image_part, images)]
+            from silica.agent import vision
+            if vision.separate():
+                # A chat model that takes text only gets the pixels as words
+                # (ADR-0077 amendment 2026-10-21). They ride this turn only, as
+                # the pixels did: the done-callback below restores agent_msg.
+                msg["content"] = agent_msg + await asyncio.to_thread(vision.read_attached, images, text)
+            else:
+                from silica.kernel.recall.image_readings import image_part
+                msg["content"] = [{"type": "text", "text": agent_msg}, *map(image_part, images)]
 
         # Both wrappers forward every event to `cb` untouched: WebTurn records the
         # trace the citations are built from, RecallWatch counts recall misses for

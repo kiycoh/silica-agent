@@ -175,7 +175,7 @@ def annotate(body: str) -> str:
 
 def _model_name() -> str:
     from silica.config import CONFIG
-    return (getattr(CONFIG, "model", "") or "").rsplit("/", 1)[-1]
+    return (getattr(CONFIG, "vision_model", "") or getattr(CONFIG, "model", "") or "").rsplit("/", 1)[-1]
 
 
 def image_part(path: Path) -> dict:
