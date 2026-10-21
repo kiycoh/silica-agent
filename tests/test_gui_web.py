@@ -2454,23 +2454,33 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
 
 def test_the_landing_presence_is_parsed_before_the_scripts_that_report_to_it():
     """app-settings.js asks for the vault sentence at load and app-shell.js hands
-    the answer and the vault path to `landingPresence`. The browser may run a
-    fetch callback between two scripts, so a presence loaded after them is an
-    undeclared name at that moment and the landing throws (ADR-0048)."""
+    the answer to `landingPresence`. The browser may run a fetch callback between
+    two scripts, so a presence loaded after them is an undeclared name at that
+    moment and the landing throws (ADR-0048)."""
     at = INDEX_HTML.index('src="/static/app-presence.js"')
     assert at < INDEX_HTML.index('src="/static/app-shell.js"')
     assert at < INDEX_HTML.index('src="/static/app-settings.js"')
-    hero = INDEX_HTML[INDEX_HTML.index('<div id="vault-hero">'):INDEX_HTML.index('class="vh-mark"')]
-    assert 'class="vh-presence"' in hero, "the presence sits above the wordmark"
+
+
+def test_the_landing_presence_lies_on_the_lockups_mark_and_never_replaces_it():
+    """ADR-0048, amendment 2026-10-21: the lockup's own mark is the presence. The
+    canvas sits in the lockup's box ahead of the generated SVG, and the page
+    hides the static mark only while a canvas is there, so without WebGL2 (the
+    canvas removes itself) or after a lost context (it hides itself) the lockup
+    is still whole."""
+    lockup = INDEX_HTML[INDEX_HTML.index('<div class="vh-lockup">'):INDEX_HTML.index('class="vh-brief"')]
+    assert lockup.index('class="vh-presence"') < lockup.index('<svg class="vh-mark"')
+    assert '<path class="shells"' in lockup and '<path class="seed"' in lockup
+    assert ".vh-lockup:has(> .vh-presence:not([hidden])) .vh-mark :is(.shells, .seed)" in app_css()
 
 
 def test_the_composer_carries_the_presence_at_the_head_of_its_row():
     """ADR-0048, second site: both composers (chat and dock) open their row with
-    the stone and put the mic after the field, so a row never has three glyphs
+    the mark and put the mic after the field, so a row never has three glyphs
     left of the caret; the run lines keep their dot and no canvas, since the
-    stone tried that row first and lost there. The landing hides the composer's
-    copy so one stone is on the screen at a time. Both scripts that report a turn
-    to it are parsed after app-presence.js."""
+    presence tried that row first and lost there. The landing hides the
+    composer's copy so one mark is on the screen at a time. Both scripts that
+    report a turn to it are parsed after app-presence.js."""
     for form_id in ("composer", "dock-composer"):
         at = INDEX_HTML.index(f'id="{form_id}"')
         shell = INDEX_HTML[at:INDEX_HTML.index("</form>", at)]

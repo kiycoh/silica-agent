@@ -1202,7 +1202,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   streaming = true;
   const turnT0 = performance.now();
   let toolsDone = 0; // for the stopped row: how much of the turn had landed
-  // What the stone in the composer shows when the turn ends (ADR-0048): a
+  // What the mark in the composer shows when the turn ends (ADR-0048): a
   // stopped turn is neither an arrival nor a failure, so it goes back to idle.
   let outcome = "idle";
   setRunVisible(true);
@@ -1477,7 +1477,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       textSeg().raw += ev.text;
       paintSoon();
       peekDelta(ev.text);
-      composerPresence?.spoke(); // the stone in the composer lights while text lands
+      composerPresence?.spoke(); // the mark in the composer lights while text lands
     } else if (ev.type === "tool_start") {
       steps++;
       if (ev.pipeline) {
@@ -2415,9 +2415,9 @@ $("#dock-composer").addEventListener("submit", (e) => {
 });
 
 dockInput.addEventListener("input", () => autoGrow(dockInput));
-// At rest the dock is the composer folded into its stone (app-panels.css). A tap
+// At rest the dock is the composer folded into its mark (app-panels.css). A tap
 // where there is no hover to unfold it lands on the glass, not the field, so the
-// glass hands the focus on and :focus-within opens it; the stone itself takes
+// glass hands the focus on and :focus-within opens it; the mark itself takes
 // no pointer events, so its clicks land here too.
 $("#dock-composer .composer-shell").addEventListener("click", (e) => {
   if (e.target === e.currentTarget) dockInput.focus();

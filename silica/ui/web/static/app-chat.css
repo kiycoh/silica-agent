@@ -1651,13 +1651,13 @@
   color: var(--accent);
 }
 
-/* The presence's second site (ADR-0048), at the head of the row: the crystal
-   alone since 2026-10-06, framed by its own length at about two thirds of its
-   box, so 36px of box is a crystal about 24px tall. The block margins make it
-   the height of every control beside it, so it centres at one row and stays on
-   the bottom edge once the field grows, the same rule they follow; the canvas
-   itself stays square because the shader draws a square. The dock's copy keeps
-   a 42px box and is scaled to this (app-panels.css). */
+/* The presence's second site (ADR-0048), at the head of the row: the mark,
+   fitted to 7/8 of its box like the landing's, so 36px of box is a mark about
+   31px tall (amendment 2026-10-21). The block margins make it the height of
+   every control beside it, so it centres at one row and stays on the bottom
+   edge once the field grows, the same rule they follow; the canvas itself stays
+   square because the shader draws a square. The dock's copy keeps a 42px box
+   and is scaled to this (app-panels.css). */
 .cp-presence {
   flex-shrink: 0;
   width: 36px;
@@ -1667,9 +1667,9 @@
   pointer-events: none;
 }
 
-/* One stone on the screen: while the landing shows its 150-220px one, the 36px
-   copy under it would be the same crystal twice. display:none also stops its
-   frames, which the intersection observer in app-presence.js reports. */
+/* One mark on the screen: while the landing shows its lockup, the 36px copy
+   under it would be the same mark twice. display:none also stops its frames,
+   which the intersection observer in app-presence.js reports. */
 #view-chat:has(#log:empty) .cp-presence {
   display: none;
 }

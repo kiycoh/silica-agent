@@ -233,7 +233,7 @@ body.host-drawer-open #hud{display:none}
    Folded and open the dock is the same height, so a hover never moves them.
    72px is the dock with one row, for the moment before the first message. */
 /* ADR-0072 anchors both groups to the frame's own bottom edge, on the
-   baseline of the dock's resting stone. They used to park 84px up, above
+   baseline of the dock's resting mark. They used to park 84px up, above
    the dock's full height, so that the composer unfolding to its 58rem
    measure could not cover them; at rest the dock is a 54px disc in the
    middle, so for all the time nobody typed they floated over the graph for a
@@ -243,7 +243,7 @@ body.host-drawer-open #hud{display:none}
    (silica-host-dock `lift`) and the old rule comes back: the corners park
    above the dock. */
 /* 16px, not the 12px inset: embedded, the open composer's foot and the resting
-   stone's sit 16-19px off this edge, and the groups end on that line. */
+   mark's sit 16-19px off this edge, and the groups end on that line. */
 body{--foot:12px}
 body.embedded{--foot:16px}
 body.embedded.foot-lift{--foot:calc(var(--dock-h,72px) + 12px)}
