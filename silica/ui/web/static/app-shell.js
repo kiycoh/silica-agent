@@ -159,7 +159,6 @@ function setVaultPath(path) {
   full.title = path || "";
   $("#vault-chip").hidden = !path;
   if (path && path !== was) loadPins(); // pins are per vault, and this is the switch
-  if (path && path !== was) { landingPresence?.seed(path); composerPresence?.seed(path); } // and so is the crystal, at both its sites
 }
 
 // A cluster count made entirely of singletons names nothing, so it is stated

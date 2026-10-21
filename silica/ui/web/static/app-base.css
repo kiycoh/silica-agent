@@ -84,6 +84,12 @@
      reaches for: far enough toward teal to read as an instrument colour rather
      than a glow, far enough from green not to collide with --add. The only
      vivid colour that is ever interactive. */
+  --mark-lit: #22B4CC;
+  --mark-hot: #A6EAF4;
+  /* the presence's light (ADR-0048, amendment 2026-10-21), the signal's hue
+     taken brighter: --mark-lit is a shell while the wave crosses it, --mark-hot
+     the seed and the wave's crest. Light on the mark and never text, so the AA
+     rule above does not bind them. */
   --warn: #E0A93B;
   /* amber, caution only */
   --add: #4FD08A;
@@ -276,6 +282,10 @@
   /* the same 189deg hue as graphite, at the stop that survives paper: 5.03:1 on
      the brightest plane it touches. Keeps the hue and gives up the glow, which
      is the honest trade and not a compromise worth hiding. */
+  --mark-lit: #1597AE;
+  --mark-hot: #1A9AB0;
+  /* paper's shells are black, so the light that crosses them is a teal brighter
+     than the accent rather than the accent itself */
   --warn: #7A4F03;
   /* the diff poles walked into paper's contrast range: the dark set's mint and
      rose are both under 2:1 on a white sheet */

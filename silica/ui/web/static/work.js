@@ -521,11 +521,11 @@ function neighbourRows(d) {
         : "");
       line.dataset.state = stalled ? "stalled" : "live";
     }
-    // The stone in the composer reads the same beats: a model call in flight is
+    // The mark in the composer reads the same beats: a model call in flight is
     // thinking, a running tool is acting, a silence past STALL_S is drained.
     // Text arriving is app-chat.js's to report, since only it sees the deltas,
     // and so is the outcome: between a tool's done beat and the next call `live`
-    // is false for a few milliseconds, and a stone sent to idle there and back
+    // is false for a few milliseconds, and a mark sent to idle there and back
     // restarted its crossfade on every beat and never arrived anywhere.
     if (live) composerPresence?.state(stalled ? "stalled" : verb === "thinking" ? "thinking" : "acting");
   }

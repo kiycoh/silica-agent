@@ -1,6 +1,7 @@
-// PROTOTYPE, kept in main as the record of ADR-0048's choice and not maintained
-// with the shader that ships (app-presence.js). A won, with C's thinking; B and C
-// and the responding and error states live only here.
+// PROTOTYPE, kept in main as the record of ADR-0048's choice and not maintained.
+// A won, with C's thinking, and shipped as the orb until 2026-10-21, when the
+// lockup's own mark took its place (app-presence.js); B and C and the
+// responding and error states live only here.
 //
 // Question: does a Murmur-style glass presence with a crystalline interior make
 // the empty chat recognisably Silica? Three interiors on the real landing,
@@ -15,8 +16,31 @@
 // The glass body, palette, surface and the slab-method solid are ported from
 // krispuckett/murmur (MIT), Sources/Murmur/Shaders/MurmurGlass.metal: the kit,
 // mh_body, mh_surface, mh_present and mh_geode. The state seeds, entries and the
-// activity envelope are MurmurState.swift and MurmurSignals.swift. Murmur's MIT
-// notice is in the header of app-presence.js.
+// activity envelope are MurmurState.swift and MurmurSignals.swift.
+//
+// Murmur is under this licence:
+//
+//   MIT License
+//
+//   Copyright (c) 2026 Kris Puckett
+//
+//   Permission is hereby granted, free of charge, to any person obtaining a copy
+//   of this software and associated documentation files (the "Software"), to deal
+//   in the Software without restriction, including without limitation the rights
+//   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//   copies of the Software, and to permit persons to whom the Software is
+//   furnished to do so, subject to the following conditions:
+//
+//   The above copyright notice and this permission notice shall be included in
+//   all copies or substantial portions of the Software.
+//
+//   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+//   SOFTWARE.
 (function () {
   const want = new URLSearchParams(location.search).get("presence");
   if (!want) return;

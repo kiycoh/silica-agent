@@ -379,17 +379,27 @@ body.dragging #drop-hint {
   display: flex;
 }
 
-/* The presence (ADR-0048). The glass is 60% of its canvas and the rest is the
-   contact glow and the containment falloff, so the negative margins pull the
-   wordmark up under the body rather than under the canvas. It shrinks on short
-   windows before the landing starts to scroll. */
+.vh-lockup {
+  position: relative;
+}
+
+/* The presence (ADR-0048, amendment 2026-10-21) lies on the lockup's mark: the
+   canvas is the mark's 256-unit square at the lockup's 64 px, and the shader
+   fits the drawn mark to the same 14 units, so it takes the static mark's
+   pixels and the word keeps its baseline on the mark's foot. The static mark is
+   hidden only while a canvas is there to replace it: without WebGL2 the canvas
+   removes itself, a lost context hides it, and the lockup is whole again. */
 .vh-presence {
-  --vh-p: clamp(150px, 24vh, 220px);
-  display: block;
-  width: var(--vh-p);
-  height: var(--vh-p);
-  margin: calc(var(--vh-p) * -0.14) auto calc(var(--vh-p) * -0.08);
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 64px;
+  height: 64px;
   pointer-events: none;
+}
+
+.vh-lockup:has(> .vh-presence:not([hidden])) .vh-mark :is(.shells, .seed) {
+  visibility: hidden;
 }
 
 /* The lockup, generated into index.html by assets/build_banners.py and inked
@@ -1255,17 +1265,17 @@ body.note-open #dock {
   right: calc(var(--note-w, 630px) + 2 * var(--gutter));
 }
 
-/* --- the dock at rest: the composer folded into its stone ----------------------
+/* --- the dock at rest: the composer folded into its mark ----------------------
    Off the chat a 58rem bar nobody is typing in crossed the graph. Now the
-   composer rests as its own stone in a round glass disc at the foot of the view,
+   composer rests as its own mark in a round glass disc at the foot of the view,
    where the field will open, and unfolds around it on hover, focus or a tap,
-   the stone travelling to its seat at the head of the row. It stays open while
+   the mark travelling to its seat at the head of the row. It stays open while
    anything is in it: a draft, a turn's run line, the answer card. Disc over the
-   bare crystal, and the numbers (a 42 px stone at rest, 36 px in the row,
+   bare crystal, and the numbers (a 42 px mark at rest, 36 px in the row,
    1050 ms) are the user's, set on the prototype (ADR-0048, amendment
    2026-10-06).
 
-   One registered number drives the morph. Width, corners, the stone's travel
+   One registered number drives the morph. Width, corners, the mark's travel
    and scale and the controls' fade are each a calc() of --unfold, and only
    --unfold transitions, so no two of them can drift out of step. The rest's
    float and halo are scaled by (1 - --unfold) instead of switched off, so their
@@ -1283,11 +1293,11 @@ body.note-open #dock {
 }
 
 #dock {
-  /* unitless, because the stone's scale is their ratio; --open is the row's
-     own stone, .cp-presence in app-chat.css */
+  /* unitless, because the mark's scale is their ratio; --open is the row's
+     own mark, .cp-presence in app-chat.css */
   --rest: 42;
   --open: 36;
-  /* the disc at rest: the stone's box plus the shell's padding and border */
+  /* the disc at rest: the mark's box plus the shell's padding and border */
   --pod: calc(var(--rest) * 1px + 0.6rem + 2px);
 }
 
@@ -1299,7 +1309,7 @@ body.note-open #dock {
   min-height: calc(var(--pod) + 1.6rem);
   align-items: flex-end;
   --unfold: 1;
-  /* 80 ms of hover intent: a pointer crossing the stone on its way across the
+  /* 80 ms of hover intent: a pointer crossing the mark on its way across the
      graph leaves before the transition starts, so it never twitches open */
   transition: --unfold 1050ms var(--ease) 80ms;
   animation: dock-bob 3.2s ease-in-out infinite alternate;
@@ -1314,7 +1324,7 @@ body.note-open #dock {
 /* Exits are instant everywhere else (app-motion.css). The fold waits 300 ms
    because it is the same object changing shape under a pointer that may have
    slipped off by a few px, not a panel the reader closed. It rests only where
-   there is a stone to rest as: without WebGL2 the canvas removes itself, a lost
+   there is a mark to rest as: without WebGL2 the canvas removes itself, a lost
    context hides it (app-presence.js), and an empty disc would be a control with
    no face, so the composer stays the composer. */
 #dock:not(:has(#peek:not([hidden]), #dock-run-line:not([hidden])))
@@ -1324,7 +1334,7 @@ body.note-open #dock {
 }
 
 /* The unfolded width (ADR-0072). Over the Graph and the Map the frame's two
-   foot groups sit at the bottom corners, on the stone's own baseline, so the
+   foot groups sit at the bottom corners, on the mark's own baseline, so the
    composer opens only to the width between them and they never have to move:
    248px a side from the dock's edge (the 12px inset, a group of at most 220px,
    a 16px gap), 218px of it inside the composer's own 30px padding. A container query,
@@ -1348,7 +1358,7 @@ body.note-open #dock {
   border-radius: calc(var(--r) + (var(--pod) / 2 - var(--r)) * (1 - var(--unfold)));
   overflow: clip;
   translate: 0 calc(-2.5px * var(--bob) * (1 - var(--unfold)));
-  /* --art-glow is the stone's halo already: emission on graphite, a contact
+  /* --art-glow is the mark's halo already: emission on graphite, a contact
      shadow on paper. Its own alpha is the landing's; the disc breathes from 1.1x
      to 2.2x of it. */
   box-shadow: var(--lift),
@@ -1359,11 +1369,11 @@ body.note-open #dock {
   transition: border-color var(--dur) var(--ease);
 }
 
-/* The stone keeps its 42 px box in both shapes and is SCALED to 36 px when the
+/* The mark keeps its 42 px box in both shapes and is SCALED to 36 px when the
    composer opens, not resized: a resize reallocates the WebGL backing store,
-   which clears it, after that frame was drawn, so the stone would blank on every
+   which clears it, after that frame was drawn, so the mark would blank on every
    frame of the morph. The margins seat the scaled box on the row's 2 px inset.
-   At rest the stone IS the row, so the disc is round; open, its box overhangs
+   At rest the mark IS the row, so the disc is round; open, its box overhangs
    the field's row equally above and below, so the shell is back at the
    composer's own height. */
 #dock .cp-presence {
