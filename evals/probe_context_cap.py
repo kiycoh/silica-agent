@@ -79,7 +79,14 @@ HOSTED_ENV = {
         "mistralai/mistral-nemo": {"order": ["io-net/fp16", "deepinfra/fp8"], "allow_fallbacks": False},
         # The cheapest endpoint ($0.0093/M in, $0.60 out, read 2026-10-14).
         # First-party deepseek is refused by the account's no-training guardrail.
-        "deepseek/deepseek-v4.1-flash": {"order": ["relace"], "allow_fallbacks": False}}),
+        "deepseek/deepseek-v4.1-flash": {"order": ["relace"], "allow_fallbacks": False},
+        # Read 2026-10-21, both answered a tools call under the account's
+        # no-training rule. near-ai is the cheapest gpt-oss endpoint with tools,
+        # and fp4 is the weights' own MXFP4, not a requantization. For 0731,
+        # deepinfra/fp8 over relace/fp4: cheaper per chat once cache reads are
+        # priced ($0.015/M against $0.0275/M), and not fp4.
+        "openai/gpt-oss-120b": {"order": ["near-ai/fp4"], "allow_fallbacks": False},
+        "deepseek/deepseek-v4-flash-0731": {"order": ["deepinfra/fp8"], "allow_fallbacks": False}}),
     "SILICA_RERANK_BASE_URL": "",
     "SILICA_RERANK_MODEL": "",
     "SILICA_DECISION_MODEL": "",
@@ -246,8 +253,13 @@ def run_one(arm: str, case: str, model: str, max_usd: float, out_json: Path) -> 
         cached = _cached_tokens(u)
         billed = u.get("cost")
         usd = float(billed) if billed is not None else tier_usd(prompt, cached, completion)
+        # Kept apart from the answer's tokens: a reasoning model's verbosity is
+        # mostly here, billed as output and never shown to the student.
+        ctd = u.get("completion_tokens_details")
+        reasoning = (ctd.get("reasoning_tokens") if isinstance(ctd, dict)
+                     else getattr(ctd, "reasoning_tokens", None)) or 0
         calls.append({"turn": turn_no[0], "model": resp.request.get("model"), "prompt": prompt,
-                      "cached": cached, "completion": completion, "usd": usd,
+                      "cached": cached, "completion": completion, "reasoning": reasoning, "usd": usd,
                       "billed": billed is not None})
         spent[0] += usd
         if spent[0] > max_usd:
@@ -285,6 +297,8 @@ def run_one(arm: str, case: str, model: str, max_usd: float, out_json: Path) -> 
         tcalls = tool_turns[i] if i < len(tool_turns) else []
         reads = [_note_key(c["args"]) for c in tcalls if c["name"] in READ_TOOLS]
         rec["tool_plan"] = [c["name"] for c in tcalls]
+        # What a claim check judges the answer against: the notes it read.
+        rec["read_args"] = [c["args"] for c in tcalls if c["name"] in READ_TOOLS]
         rec["rereads"] = sum(1 for k in reads if k and k in seen)
         seen.update(k for k in reads if k)
         rec["collapsed"] = compactions[i] if i < len(compactions) else 0
