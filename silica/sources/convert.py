@@ -852,7 +852,7 @@ def _read_pages(data: dict, workdir: Path) -> None:
         language = image_readings._language(sample)
 
         def ask(messages: list[dict]) -> str:
-            return ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS)
+            return ask_chat_model(messages, max_tokens=_PAGE_MAX_TOKENS, cut=_PAGE_CUT)
 
         def one(i: int) -> dict | None:
             # A slide's picture keeps its own suffix: `image_part` names the
@@ -861,9 +861,8 @@ def _read_pages(data: dict, workdir: Path) -> None:
             png = workdir / f"page-{i + 1}{data.get('suffixes', {}).get(i, '.png')}"
             png.write_bytes(images[i])
             try:
-                if i in math:
-                    return _read_formula_page(png, ask)
-                return image_readings.read_image(png, language, prompt=image_readings.PAGE_PROMPT, ask=ask)
+                return _transcribe_page(png, ask, image_readings.FORMULA_PAGE_PROMPT if i in math
+                                        else image_readings.PAGE_PROMPT.format(language=language))
             finally:
                 png.unlink(missing_ok=True)
 
@@ -905,14 +904,15 @@ def _read_pages(data: dict, workdir: Path) -> None:
 _FENCE_RE = re.compile(r"^```[\w-]*\n|\n?```$")
 
 
-def _read_formula_page(png: Path, ask) -> dict | None:
-    """A formula page's transcription, in the shape `_page_reading_md` takes;
-    None for an empty reply, which leaves the page its PDFium text. Markdown
-    and not `read_image`'s JSON: see `FORMULA_PAGE_PROMPT`."""
+def _transcribe_page(png: Path, ask, prompt: str) -> dict | None:
+    """A page's transcription, in the shape `_page_reading_md` takes; None for
+    an empty reply, which leaves a formula page its PDFium text and names a
+    page without text. Markdown and not `read_image`'s JSON: see
+    `FORMULA_PAGE_PROMPT` and `PAGE_PROMPT`."""
     from silica.kernel.recall import image_readings
 
     reply = ask([{"role": "user", "content": [
-        image_readings.image_part(png), {"type": "text", "text": image_readings.FORMULA_PAGE_PROMPT}]}])
+        image_readings.image_part(png), {"type": "text", "text": prompt}]}])
     text = _FENCE_RE.sub("", (reply or "").strip()).strip()
     if not text:
         return None
@@ -924,6 +924,11 @@ def _read_formula_page(png: Path, ask) -> dict | None:
 # glm-5.3-flash refuses reasoning=False, so its thinking spends from the same
 # budget. At its $0.90 a million out, 2,500 caps a page at $0.00225.
 _PAGE_MAX_TOKENS = 2500
+# ponytail: a page past the budget is read in part and says so, rather than
+# the budget growing: 5 of 7 dictionary and encyclopedia pages in olmOCR's
+# long_tiny_text stopped at 2,500 (2026-10-21), and none of the 17 scanned
+# pages read beside them did. Raise it when a student's own page is cut.
+_PAGE_CUT = "\n\n[The reading stops here: the page holds more than one reply can carry.]"
 
 
 def _page_reading_md(page: int, reading: dict, unit: str = "page") -> str:

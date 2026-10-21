@@ -10,9 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def ask_chat_model(messages: list[dict], max_tokens: int = 700) -> str:
+def ask_chat_model(messages: list[dict], max_tokens: int = 700, cut: str = "") -> str:
     """The vision model's text answer to `messages`, which may carry image parts.
-    The name predates the vision role: unset, it is still the chat model."""
+    The name predates the vision role: unset, it is still the chat model.
+    `cut` is appended when the answer stopped at `max_tokens`, so a page read
+    in part does not pass for the whole of it."""
     from silica.agent.providers import get_provider
     from silica.config import CONFIG
     # temperature 0 skips ADR-0080's card sampling: the same bytes should give
@@ -21,7 +23,8 @@ def ask_chat_model(messages: list[dict], max_tokens: int = 700) -> str:
     # smaller ask).
     resp = get_provider(CONFIG, role="vision").call_llm(
         messages=messages, max_tokens=max_tokens, temperature=0.0, reasoning=False)
-    return resp.text or ""
+    text = resp.text or ""
+    return text + cut if text and resp.finish_reason == "length" else text
 
 
 def separate() -> bool:

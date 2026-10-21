@@ -52,15 +52,22 @@ _PROMPT = (
 # _PROMPT is a figure's: on two paper pages rendered as pictures it gave back
 # the figure or the table alone, 30 of 533 words and 20 of 504, and dropped the
 # prose; this one returned 654 of a page's 673 words (Qwen3.5-9B, 2026-10-13).
+# Markdown since the ADR-0087 amendment of 2026-10-21, as FORMULA_PAGE_PROMPT:
+# a dense page went past _PAGE_MAX_TOKENS, the JSON came back cut and did not
+# parse, and the page was lost (8 of 210 olmOCR-Bench pages, a one-page file
+# refused with it); a cut transcription keeps what was read. The dollar signs
+# for the same reason as there: 26 of 30 scanned math pages came back as bare
+# LaTeX. The figure line stands for the JSON's description: a slide that is
+# only a picture has no words to transcribe.
 PAGE_PROMPT = (
-    "This is one page of a document whose text layer is missing. Reply with JSON only: "
-    '{{"kind": "...", "description": "...", "text": "..."}}. '
-    "text: every word printed on the page, verbatim and in reading order, headings, paragraphs, "
-    "lists, table cells, captions and formulas included; keep paragraph breaks as blank lines; "
-    "do not summarise or skip anything. "
-    "kind: one or two words (slide, lecture notes, article page, table, handwriting). "
-    "description: one sentence in {language} on what the page is about; start with the content "
-    "itself, never with 'This page' or 'The image'."
+    "This is one page of a document, a scan, a slide or a page of notes, whose text layer is "
+    "missing. Transcribe it: every word printed on the page, verbatim, in reading order and in "
+    "its own language, headings, lists, table cells and captions included; every formula in "
+    "LaTeX, inline as $...$ and on a line of its own as $$...$$, never without the dollar signs. "
+    "Keep paragraph breaks as blank lines. Where the page shows a picture, a chart or a diagram, "
+    "write in its place one line [Figure: ...] saying in one to three sentences in {language} "
+    "what it shows. Do not summarise, translate or skip anything else. Reply with the "
+    "transcription alone: no preamble, no code fence."
 )
 
 # A page whose text layer lost its formulas (ADR-0087 amendment of 2026-10-14).
@@ -192,8 +199,8 @@ def read_image(path: Path, language: str, *, ask: Callable[[list[dict]], str],
     (`ask_chat_model` in silica/agent/vision.py); it is passed in because the
     graph structure modules that reach this one never import the agent (P2/DKB).
     Raises whatever `ask` raises: the caller decides whether a refused call
-    means "no vision here" (stop) or "this image" (skip). `prompt` is
-    `PAGE_PROMPT` for a whole page, the figure prompt otherwise."""
+    means "no vision here" (stop) or "this image" (skip). A PDF's page is
+    not read here: convert.py transcribes it as markdown (`PAGE_PROMPT`)."""
     from silica.kernel.text.sanitize import parse_json
     if path.suffix.lower() not in _MIME:
         return None
