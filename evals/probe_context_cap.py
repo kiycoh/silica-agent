@@ -403,6 +403,12 @@ def main(argv=None) -> int:
                 reset_vault(scratch, None, home)
                 env = {**os.environ, **HOSTED_ENV, "SILICA_VAULT": str(scratch), "HOME": str(home),
                        "HF_HOME": str(Path.home() / ".cache" / "huggingface")}
+                # PROBE_PIN overrides HOSTED_ENV's pins model by model: two endpoints
+                # of one model in the same hour (V4 0731 fp4 against fp8, 2026-10-21)
+                # are two processes, and the arm only names the model.
+                if os.environ.get("PROBE_PIN"):
+                    env["OPENROUTER_PROVIDER_BY_MODEL"] = json.dumps(
+                        {**json.loads(HOSTED_ENV["OPENROUTER_PROVIDER_BY_MODEL"]), **json.loads(os.environ["PROBE_PIN"])})
                 base, _, model = arm.partition("@")
                 if model:
                     env.update(SILICA_MODEL=model, SILICA_FALLBACK_MODELS="")
