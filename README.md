@@ -505,6 +505,7 @@ It is not a dependency because nothing in Silica imports it, and owning it would
 | `SILICA_GIT_COMMIT` | Git safety net for writes (`off`, `auto`) |
 | `SILICA_TAVILY_API_KEY` | Optional: a backstop for `/web-search`, used only when DuckDuckGo rate-limits us. Search scrapes DuckDuckGo first either way, no key needed |
 | `SILICA_WORKER_MODEL` | Sub-agent worker model, used for dedup and refinement |
+| `SILICA_VISION_MODEL` | Optional: the model that reads images (attached, uploaded or embedded in notes, picture-only slides, PDF pages with formulas), for a chat model that takes text only. Unset, the chat model reads them. Rides `SILICA_PROVIDER` unless `SILICA_VISION_PROVIDER` is set |
 | `SILICA_FALLBACK_MODELS` | Optional: comma-separated models tried in order when a call's own model fails at its endpoint (down, overloaded, rate-limited past its retries, a refused key, a model it does not have). Never on a 400, which would fail anywhere. A model that failed waits behind the others for five minutes |
 | `OPENROUTER_API_KEY_2`, `_3`, ... | Optional: more keys for one provider, as numbered siblings of its key variable (any hosted provider's, and `SILICA_PROVIDER_API_KEY`). A key the endpoint rate-limits sits out a minute, one it refuses or bills out an hour, and the next key serves meanwhile |
 | `SILICA_DECISION_MODEL` | Optional typed-decision model (TypeSafe Jev via OpenRouter) in front of the source-form sniff. Off when unset; a confident verdict replaces the sniff's LLM call, anything else falls through to it |

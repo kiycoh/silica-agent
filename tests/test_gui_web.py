@@ -572,6 +572,34 @@ def test_a_chat_image_rides_its_turn_and_history_keeps_only_its_path(client, mon
     assert saved.read_bytes() == b"\x89PNG fake" and text["text"] == user["content"]
 
 
+def test_a_text_only_chat_model_gets_the_attached_image_as_words(client, monkeypatch):
+    """ADR-0077 amendment 2026-10-21: with a vision model of its own, the chat
+    model never receives pixels; the reading rides the turn, the path stays."""
+    import base64
+    from silica import config as cfg_mod
+    from silica.agent import vision
+    tc, server = client
+    seen = {}
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        seen["content"] = messages[-1]["content"]
+        messages.append({"role": "assistant", "content": "Una lavagna."})
+        return "Una lavagna."
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(cfg_mod.CONFIG, "vision_model", "openrouter/qwen/qwen3.7-flash-20260727")
+    monkeypatch.setattr(vision, "ask_chat_model", lambda messages, max_tokens=700:
+                        '{"kind": "photo", "description": "Una lavagna con due formule.", "text": ""}')
+    png = "data:image/png;base64," + base64.b64encode(b"\x89PNG fake").decode()
+    events = _read_sse(tc.post("/chat", json={"text": "Cosa mostra?",
+                                               "images": [{"name": "lavagna.png", "data": png}]}))
+    assert events[-1]["type"] == "done"
+    assert isinstance(seen["content"], str) and "base64" not in seen["content"]
+    assert "Una lavagna con due formule." in seen["content"]
+    user = next(m for m in server.messages if m["role"] == "user" and "Cosa mostra?" in str(m["content"]))
+    assert "[image attached: " in user["content"] and "Una lavagna con due formule." not in user["content"]
+
+
 
 def test_a_reloaded_chat_shows_the_image_again_and_not_its_path(client, monkeypatch):
     import base64

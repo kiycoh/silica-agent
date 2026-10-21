@@ -624,6 +624,8 @@ def get_provider(config: Any, role: str = "router") -> Provider:
                                leashed sub-agents can run on a separate small model.
     role="escalation"        → uses config.distill_escalation_provider / _model for escalated steer retries.
     role="judge"             → uses config.judge_provider / config.judge_model (spec M7); router when unset.
+    role="vision"            → uses config.vision_model, on config.vision_provider or the router's
+                               provider (ADR-0077 amendment 2026-10-21); router when unset.
 
     When the worker role specifies an explicit worker_api_key it wins over the
     preset; the endpoint always comes from the worker_provider preset.
@@ -643,6 +645,16 @@ def get_provider(config: Any, role: str = "router") -> Provider:
         provider_name = getattr(config, "judge_provider", "") or ""
         model_name = getattr(config, "judge_model", "") or ""
         if not provider_name or not model_name:
+            provider_name = getattr(config, "provider", "lmstudio") or ""
+            model_name = getattr(config, "model", "") or ""
+            role = "router"
+    elif role == "vision":
+        # Unlike the judge, the model alone is enough: falling back to the
+        # router because the provider was left unset would send the pixels to
+        # a chat model that may take text only, the one case this role exists for.
+        model_name = getattr(config, "vision_model", "") or ""
+        provider_name = getattr(config, "vision_provider", "") or getattr(config, "provider", "lmstudio") or ""
+        if not model_name:
             provider_name = getattr(config, "provider", "lmstudio") or ""
             model_name = getattr(config, "model", "") or ""
             role = "router"

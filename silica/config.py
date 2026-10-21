@@ -471,6 +471,18 @@ class SilicaConfig:
         default_factory=lambda: os.getenv("SILICA_JUDGE_PROVIDER", None)
     )
 
+    # --- Vision model (ADR-0077 amendment 2026-10-21) ---
+    # Where images go when the chat model cannot see: DeepSeek V4 Flash 0731
+    # won the hosted chat A/B of 2026-10-21 and takes text only. Unset, images
+    # go to the chat model as ADR-0077 decided. The provider defaults to the
+    # chat's (see get_provider), so the hosted case is one variable.
+    vision_model: str | None = field(
+        default_factory=lambda: os.getenv("SILICA_VISION_MODEL", None)
+    )
+    vision_provider: str | None = field(
+        default_factory=lambda: os.getenv("SILICA_VISION_PROVIDER", None)
+    )
+
     # --- Distiller escalation model (Tier 2 cascade) ---
     # A VALIDATE rejection escalates the steer retry to this model instead of
     # re-steering the worker (UCCI-style cascade). Unset: escalation falls back
@@ -972,6 +984,7 @@ class SilicaConfig:
         self.model = ensure_prefix(self.model, self._provider)
         self.worker_model = ensure_prefix(self.worker_model, self.worker_provider)
         self.judge_model = ensure_prefix(self.judge_model, self.judge_provider)
+        self.vision_model = ensure_prefix(self.vision_model, self.vision_provider or self.provider)
         self.distill_escalation_model = ensure_prefix(
             self.distill_escalation_model, self._distill_escalation_provider)
 
