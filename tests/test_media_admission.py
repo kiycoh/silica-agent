@@ -253,7 +253,7 @@ def test_hosted_a_converter_failure_reaches_the_job_without_its_raw_text(drop, m
 
     monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", down)
     text = drop("talk.mp3", 60)
-    assert "- talk.mp3" in text and "Still converting" in text
+    assert "- Inbox/talk.mp3: not readable until it is converted" in text and "Still converting" in text
     assert _failure("talk.mp3") == "it could not be converted"
 
 

@@ -49,6 +49,81 @@ def test_look_never_opens_a_file_outside_the_vault_or_the_attachments(vault, ask
     assert "not found" in out and not asked
 
 
+# --- a page of a PDF (ADR-0099 amendment 2026-10-21) ---------------------------
+
+@pytest.fixture
+def lecture(vault, monkeypatch):
+    from silica.sources import pdf_extract
+    from silica.tools import atomic
+    from tests.doc_factory import gray_lines, pdf_bytes
+
+    pdf_extract._CACHE.clear()
+    monkeypatch.setattr(atomic, "_pdf_looks", {})  # each test's turn starts uncounted
+    (vault / "Inbox").mkdir(exist_ok=True)
+    (vault / "Inbox" / "lecture.pdf").write_bytes(
+        pdf_bytes(["Kernel ridge\nalpha = (K + lambda I)^-1 y", ""], images={1: gray_lines()}))
+    return "Inbox/lecture.pdf"
+
+
+def test_look_sends_the_page_of_a_pdf_it_is_asked_about(lecture, asked):
+    from silica.tools.atomic import silica_look
+
+    assert silica_look(lecture, "che formula c'è?", page=2) == "La curva arriva a 3.2."
+    (parts,) = [m["content"] for m in asked[0]]
+    assert parts[0] == {"type": "text", "text": "Page 2:"}
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,iVBOR")
+    assert parts[2] == {"type": "text", "text": "che formula c'è?"}
+
+
+def test_without_a_page_the_question_s_words_find_it(lecture, asked):
+    """A turn named the right page 13 times in 23 (2026-10-21)."""
+    from silica.tools.atomic import silica_look
+
+    silica_look(lecture, "quale formula dà alpha nella kernel ridge?")
+
+    (parts,) = [m["content"] for m in asked[0]]
+    assert [p["text"] for p in parts if p["type"] == "text"] == [
+        "Page 1:", "quale formula dà alpha nella kernel ridge?\n\nSay which page the answer is on."]
+
+
+def test_look_asks_for_the_page_and_sends_nothing_past_the_last(lecture, asked):
+    from silica.tools.atomic import silica_look
+
+    assert "shares the question's words" in silica_look(lecture, "cosa mostra?")
+    assert "past its last page" in silica_look(lecture, "cosa mostra?", page=3)
+    assert not asked
+
+
+def test_a_turn_looks_at_six_pdf_pages_at_most(lecture, asked):
+    """26 pages looked at one after the other for a figure, 266k tokens (2026-10-21)."""
+    from silica.agent import read_scope
+    from silica.tools.atomic import silica_look
+
+    token = read_scope.REQUESTS.set(("dov'è la figura?",))
+    try:
+        for _ in range(6):
+            silica_look(lecture, "c'è la figura?", page=1)
+        assert "looks at PDF pages already" in silica_look(lecture, "c'è la figura?", page=2)
+        assert len(asked) == 6
+        read_scope.REQUESTS.set(("dov'è la figura?", "e la formula?"))
+        assert silica_look(lecture, "c'è la formula?", page=1) == "La curva arriva a 3.2."
+    finally:
+        read_scope.REQUESTS.reset(token)
+
+
+def test_on_the_server_the_page_is_drawn_in_the_limited_child(lecture, asked, monkeypatch):
+    from silica.sources import pdf_extract
+    from silica.tools.atomic import silica_look
+
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    monkeypatch.setattr(pdf_extract, "extract", lambda *a, **k: pytest.fail("drawn in the tenant's process"))
+
+    silica_look(lecture, "kernel ridge?")
+
+    (parts,) = [m["content"] for m in asked[0]]
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,iVBOR")
+
+
 def test_look_is_loaded_on_demand_not_offered_every_turn():
     from silica.agent.constraints import CHAT_CORE, loadable
     assert "silica_look" in loadable() and "silica_look" not in CHAT_CORE

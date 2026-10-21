@@ -284,7 +284,12 @@ def parse_headings(body: str) -> list[dict]:
     """Parse headings from the body using AST, ignoring code blocks."""
     body = textwrap.dedent(body)
 
-    tokens = _MD.parse(body)
+    # YAML frontmatter is no heading, but its closing `---` is a setext
+    # underline to CommonMark: every note with properties opened its outline
+    # with them as an H2 (silica_outline, found 2026-10-20). Blanked, not cut,
+    # so every `pos` below stays an offset into `body`.
+    m = _FRONTMATTER_BLOCK_RE.match(body)
+    tokens = _MD.parse(re.sub(r"[^\r\n]", " ", m.group(0)) + body[m.end():] if m else body)
 
     lines = body.splitlines(keepends=True)
     line_offsets = []

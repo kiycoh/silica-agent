@@ -423,8 +423,9 @@ def retry(job_id: str) -> dict:
         cur = read(job_id)
         if cur is None or cur.get("state") not in ("failed", "interrupted"):
             raise Refused(f"{name} is not stopped, so there is nothing to retry")
+        # `told` too: the agent heard of the failure, and the rerun's end is news.
         cur.update(state="queued", error="", notes=[], hidden=[], finished=None,
-                   dismissed=False, updated=time.time())
+                   dismissed=False, told=False, updated=time.time())
         _write(cur)
         _enqueue(job_id)
     return public(cur)
@@ -454,6 +455,43 @@ def listing() -> list[dict]:
     """The jobs the student has not dismissed, in this vault, oldest first."""
     vault = CONFIG.vault_path or ""
     return [public(rec) for rec in _all() if not rec.get("dismissed") and rec.get("vault") == vault]
+
+
+def settled(session: str | None) -> str:
+    """The block for the next turn of `session` naming its conversions that
+    ended since the agent last heard of them, each once; "" when none did.
+
+    The drop's turn said the file was still converting, and that line stays in
+    the history as written; the end of a job reached the agent only through
+    the row's own buttons. A question typed instead was answered as if the
+    file were still unreadable: on 2026-10-20 "Ora puoi farmi il riassunto?"
+    after a PDF's drop got a summary of the whole vault. Tagged so a reopened
+    chat shows the student's words without it (`mentions.STRIP`)."""
+    if not session:
+        return ""
+    vault = CONFIG.vault_path or ""
+    lines: list[str] = []
+    with _LOCK:
+        for rec in _all():
+            if (rec.get("session") != session or rec.get("told") or rec.get("vault") != vault
+                    or rec.get("state") not in ("done", "failed", "interrupted")):
+                continue
+            name, notes = rec["source"]["name"], rec.get("notes") or []
+            if rec["state"] != "done":
+                lines.append(f"- {name}: not converted, {rec.get('error') or INTERRUPTED}")
+            elif notes:
+                unread = f" ({rec['pages_not_read']})" if rec.get("pages_not_read") else ""
+                lines.append(f"- {name}: converted, read it at {', '.join(notes)}{unread}")
+            else:
+                lines.append(f"- {name}: converted, but no note came of it")
+            rec.update(told=True, updated=time.time())
+            _write(rec)
+    if not lines:
+        return ""
+    return "\n".join(["<converted-files>",
+                      "Files of this chat whose conversion ended since the last message. Where an "
+                      "earlier message says one is still converting or not readable, this is its "
+                      "state now:", *lines, "</converted-files>"])
 
 
 # --- commands typed in the chat ------------------------------------------------------
@@ -613,7 +651,8 @@ def offered_turn(job_id: str, payload: dict | None = None):
     ask = bool((payload or {}).get("ask")) and bool((rec.get("text") or "").strip())
     if not server._begin_turn():
         raise HTTPException(409, "a turn is already in progress")
-    _update(job_id, dismissed=True)
+    # Told: this turn's manifest names the notes, so `settled` would repeat it.
+    _update(job_id, dismissed=True, told=True)
     # "Nucleate it" is the student's choice, so it says so: the empty words
     # of a drop now mean describe-and-ask (server.DROP_ASK).
     words = rec["text"] if ask else server.NUCLEATE_ASK

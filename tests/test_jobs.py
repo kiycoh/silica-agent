@@ -156,7 +156,7 @@ def test_a_drop_with_words_starts_its_turn_with_what_was_ready(client, lane):
         gate.set()
     assert "what is this lecture about?" in ran["text"]
     assert "Inbox/note.md" in ran["text"]
-    assert "Still converting" in ran["text"] and "- lecture.mp3" in ran["text"]
+    assert "Still converting" in ran["text"] and "- Inbox/lecture.mp3: not readable until" in ran["text"]
     _drain()
     rec = _record(ids[0])
     # The record keeps the words and the chat the turn opened (point 3).
@@ -403,6 +403,101 @@ def test_ask_again_reruns_the_words_typed_with_the_drop(client):
     _drain()
     tc.post(f"/jobs/{job_id}/turn", json={"ask": True})
     assert ran["text"].startswith("summarize it") and "Inbox/talk.md" in ran["text"]
+
+
+# --- a typed turn hears how its chat's conversions ended (2026-10-20) ---------------------
+
+def test_a_turn_typed_after_the_conversion_names_its_note_once(client, lane):
+    """The drop's turn said "still converting" and stays so in the history: a
+    question typed once the note exists was answered from the whole vault."""
+    tc, server, ran = client
+    gate, _, _ = lane
+    gate.clear()
+    try:
+        tc.post("/nucleate", data={"text": "riassumi"},
+                files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
+    finally:
+        gate.set()
+    assert "Still converting" in ran["text"] and "<converted-files>" not in ran["text"]
+    _drain()
+    tc.post("/chat", json={"text": "Ora puoi farmi il riassunto?"})
+    assert ran["text"].startswith("Ora puoi farmi il riassunto?\n\n<converted-files>")
+    assert "- talk.mp3: converted, read it at Inbox/talk.md" in ran["text"]
+    tc.post("/chat", json={"text": "e ancora?"})
+    assert "<converted-files>" not in ran["text"]  # told once
+    shown = [m["content"] for m in tc.get("/messages").json() if m["role"] == "user"]
+    assert shown[1] == "Ora puoi farmi il riassunto?"  # the block is the model's, not the student's
+
+
+def test_a_failed_conversion_reaches_the_next_turn_with_its_reason(client):
+    tc, server, ran = client
+    tc.post("/chat", json={"text": "hi"})
+    _write(_rec("bbbbbbbbbbbb", "failed", session=server.current_session_id,
+                error="this recording could not be read"))
+    _write(_rec("cccccccccccc", "done", session="another-chat", notes=["Inbox/b.md"]))
+    tc.post("/chat", json={"text": "is it ready?"})
+    assert "- a.mp3: not converted, this recording could not be read" in ran["text"]
+    assert "Inbox/b.md" not in ran["text"]  # another chat's file
+    assert _record("bbbbbbbbbbbb")["told"] is True
+
+
+def test_the_offered_turn_tells_the_agent_so_the_next_one_does_not_repeat_it(client):
+    tc, server, ran = client
+    tc.post("/chat", json={"text": "hi"})  # the chat exists, so the drop's job is its
+    r = tc.post("/nucleate", files=[("files", ("talk.mp3", b"\0" * 64, "audio/mpeg"))])
+    job = r.json()["jobs"][0]
+    _drain()
+    assert _record(job["id"])["session"] == server.current_session_id
+    tc.post(f"/jobs/{job['id']}/turn", json={})
+    assert "Inbox/talk.md" in ran["text"] and "<converted-files>" not in ran["text"]
+    tc.post("/chat", json={"text": "done?"})
+    assert "<converted-files>" not in ran["text"]
+
+
+# --- a dropped PDF is read from its text layer while it converts (2026-10-20) ---------------
+
+@pytest.fixture
+def pdfs(monkeypatch):
+    from silica.config import CONFIG
+    from silica.sources import pdf_extract
+
+    monkeypatch.setattr(CONFIG, "pdf_provider", "pdfium")
+    monkeypatch.setenv("SILICA_PDF_VISION_PAGES", "0")  # no chat model reads a page here
+    pdf_extract._CACHE.clear()
+
+
+def test_a_dropped_pdf_is_readable_in_the_drop_s_own_turn(client, pdfs):
+    """The turn said "not readable in this turn" of a PDF whose text layer
+    silica_read serves at once: "riassumi" waited on the whole conversion."""
+    from silica.tools.atomic import silica_read
+    from tests.doc_factory import pdf_bytes
+
+    tc, server, ran = client
+    pages = ["EmbedRank extracts keyphrases with sentence embeddings.",
+             "Energy and mass\nE equals m times c squared, as derived", ""]
+    tc.post("/nucleate", data={"text": "riassumi"},
+            files=[("files", ("paper.pdf", pdf_bytes(pages, math={1}), "application/pdf"))])
+    assert ('- Inbox/paper.pdf (3 pages): its text layer is readable now, in this message: '
+            'silica_read(path="Inbox/paper.pdf")') in ran["text"]
+    assert "may garble the formulas on page 2 and has nothing on page 3" in ran["text"]
+    assert ('look at it, silica_look(image="Inbox/paper.pdf", question=...), which finds the pages '
+            'by its words, or with page=N') in ran["text"]
+    assert "not readable until" not in ran["text"]
+    # The layer now, or the note once the job wrote it: the same call either way.
+    assert "EmbedRank" in silica_read("Inbox/paper.pdf")["text"]
+    _drain()
+
+
+def test_a_scan_is_looked_at_a_page_at_a_time_while_it_converts(client, pdfs):
+    from tests.doc_factory import pdf_bytes
+
+    tc, server, ran = client
+    tc.post("/nucleate", data={"text": "riassumi"},
+            files=[("files", ("scan.pdf", pdf_bytes(["", ""]), "application/pdf"))])
+    assert ("- Inbox/scan.pdf (2 pages): it has no selectable text, so it is not readable as text "
+            "until it is converted; an answer from one page can look at it, "
+            'silica_look(image="Inbox/scan.pdf", question=...)') in ran["text"]
+    _drain()
 
 
 # --- the vault import (ADR-0098) and commands typed in the chat ------------------------------

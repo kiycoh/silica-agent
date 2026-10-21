@@ -31,6 +31,7 @@ import json
 import os
 import re
 import sys
+import threading
 
 # ADR-0087 point 2's table, measured there: the library's largest PDF is 20 MB
 # and its longest paper 135 pages; the 803-page book takes 3.8 s, 364 MB and
@@ -171,7 +172,7 @@ def vision_pages() -> int:
 # --- the read, on either side of the process boundary -------------------------
 
 def extract(source, max_pages: int | None = None, max_chars: int | None = None,
-            vision_pages: int = 0, emit=None) -> dict:
+            vision_pages: int = 0, emit=None, pages: list[int] | None = None) -> dict:
     """Read `source` (a path or a binary file object) into plain data.
 
     Hidden text is left out of a page that also has visible text, and counted
@@ -187,7 +188,8 @@ def extract(source, max_pages: int | None = None, max_chars: int | None = None,
     goes to it the moment it is read and then each page as it is rendered,
     instead of into `images`: the child writes each out as it comes, because a
     render decodes a page's images, which reading text never did, and a bomb
-    there must cost the pages after it and not the text before.
+    there must cost the pages after it and not the text before. `pages`, page
+    indices, are rendered in their place: the one a look asks for (`page_png`).
     """
     import pypdfium2 as pdfium
 
@@ -196,7 +198,8 @@ def extract(source, max_pages: int | None = None, max_chars: int | None = None,
         data = _text(pdf, max_pages, max_chars)
         # A page without text has nothing else to stand for it; a formula page
         # left out keeps PDFium's text, so it goes after them under the cap.
-        data["render"] = (data["no_text"] + data["math"])[:vision_pages]
+        data["render"] = ((data["no_text"] + data["math"])[:vision_pages] if pages is None
+                          else [i for i in pages if 0 <= i < data["n_pages"]])
         if emit is None:
             data["images"] = dict(_render(pdf, data["render"]))
         else:
@@ -489,19 +492,27 @@ def _hidden_chars(textpage, n: int, raw) -> list[bool]:
 
 _CACHE: dict[tuple, dict] = {}
 _NETWORK_NOTE_LOGGED = False
+# PDFium keeps one library state per process and two threads inside it abort
+# the interpreter, on a laptop the whole server: a drop's turn reads the text
+# layer while the jobs worker converts the same file, and an engine search
+# reads PDFs on the agent's thread (found 2026-10-20, "Fatal Python error:
+# Aborted" in two `_text` frames). The child is a process of its own.
+_PDFIUM = threading.Lock()
 
 
-def read(path: str | os.PathLike) -> dict:
+def read(path: str | os.PathLike, vision: int | None = None) -> dict:
     """`extract(path)`, in a limited child on the server and in-process locally.
 
     Cached by path, size, mtime and the vision cap: one conversion asks for the
     text, the date and the citation, and before this each of those opened the
-    hostile file again (ADR-0087 Context, three opens)."""
+    hostile file again (ADR-0087 Context, three opens). `vision` overrides
+    `vision_pages()`; 0 is the text alone, for silica-core's index, which
+    would otherwise render up to 60 pages of every PDF it walks."""
     import logging
 
     from silica.config import hosted
 
-    key = _key(path)
+    key = _key(path, vision)
     if key in _CACHE:
         return _CACHE[key]
     # Before PDFium sees it: a renamed HTML file reached it as a PdfiumError,
@@ -511,7 +522,8 @@ def read(path: str | os.PathLike) -> dict:
         data = _read_in_child(path, key[-1])
     else:
         try:
-            data = extract(os.fspath(path), vision_pages=key[-1])
+            with _PDFIUM:
+                data = extract(os.fspath(path), vision_pages=key[-1])
         except _Refused as exc:
             raise _refusal(exc.reason) from None
         except Exception as exc:
@@ -532,6 +544,32 @@ def read(path: str | os.PathLike) -> dict:
     return data
 
 
+def page_pngs(path: str | os.PathLike, indices: list[int]) -> dict[int, bytes]:
+    """Pages `indices` drawn as a page read at conversion is (`_render`), for
+    silica_look; a page past the last, one with nothing on it, or one that
+    could not be drawn is left out. Not cached: the cached read's images leave
+    it once the conversion has read them (`convert._read_pages`), and a look
+    is a few pages, drawn again in about the time the text takes (0.24-0.42 s
+    for 36 pages, 2026-10-20) plus the pages."""
+    from silica.config import hosted
+
+    require_header(path)
+    if hosted():
+        data = _parse_child(_run_child(path, ["0", ",".join(map(str, indices))], TOO_LARGE))
+    else:
+        try:
+            with _PDFIUM:
+                data = extract(os.fspath(path), pages=list(indices))
+        except _Refused as exc:
+            raise _refusal(exc.reason) from None
+        except Exception as exc:
+            # As in read(): PdfiumError names the password case only in its message.
+            if type(exc).__name__ != "PdfiumError":
+                raise
+            raise _refusal("password" if "password" in str(exc).lower() else "malformed") from None
+    return {i: png for i, png in data["images"].items() if png}
+
+
 def metadata(path: str | os.PathLike) -> dict:
     """Title, Author and CreationDate, without a full read where one is cheap.
 
@@ -548,12 +586,13 @@ def metadata(path: str | os.PathLike) -> dict:
         return read(path)["meta"]
     import pypdfium2 as pdfium
 
-    pdf = pdfium.PdfDocument(os.fspath(path))
-    try:
-        return {k: _clean(" ".join((pdf.get_metadata_value(k) or "").split()))
-                for k in ("Title", "Author", "CreationDate")}
-    finally:
-        pdf.close()
+    with _PDFIUM:
+        pdf = pdfium.PdfDocument(os.fspath(path))
+        try:
+            return {k: _clean(" ".join((pdf.get_metadata_value(k) or "").split()))
+                    for k in ("Title", "Author", "CreationDate")}
+        finally:
+            pdf.close()
 
 
 def cached(path: str | os.PathLike) -> dict | None:
@@ -589,6 +628,13 @@ def unread_sentence(pages: list[int]) -> str:
     the reply and the import row; "" for none."""
     if not pages:
         return ""
+    if len(pages) == 1:
+        return f"{named_pages(pages)} has no selectable text and was not read"
+    return f"{named_pages(pages)} have no selectable text and were not read"
+
+
+def named_pages(pages: list[int]) -> str:
+    """"page 4", or "pages 2, 4 and 7 to 9", for 1-based page numbers."""
     runs: list[list[int]] = []
     for n in sorted(pages):
         if runs and n == runs[-1][1] + 1:
@@ -599,14 +645,13 @@ def unread_sentence(pages: list[int]) -> str:
     named = [part for a, b in runs
              for part in ([f"{a} to {b}"] if b - a >= 2 else [str(n) for n in range(a, b + 1)])]
     listed = named[0] if len(named) == 1 else ", ".join(named[:-1]) + " and " + named[-1]
-    if len(pages) == 1:
-        return f"page {listed} has no selectable text and was not read"
-    return f"pages {listed} have no selectable text and were not read"
+    return f"page {listed}" if len(pages) == 1 else f"pages {listed}"
 
 
-def _key(path: str | os.PathLike) -> tuple:
+def _key(path: str | os.PathLike, vision: int | None = None) -> tuple:
     st = os.stat(path)
-    return (os.path.realpath(path), st.st_size, st.st_mtime_ns, vision_pages())
+    return (os.path.realpath(path), st.st_size, st.st_mtime_ns,
+            vision_pages() if vision is None else vision)
 
 
 def docx_html_here(path: str | os.PathLike) -> str:
@@ -772,7 +817,7 @@ def _drop_network() -> str:
     return ""
 
 
-def _child(fd: int, vision: int, kind: str = "pdf") -> int:
+def _child(fd: int, vision: int, kind: str = "pdf", pages: list[int] | None = None) -> int:
     import resource
 
     # Limits first, before pypdfium2 is even imported: set here and not through
@@ -822,7 +867,8 @@ def _child(fd: int, vision: int, kind: str = "pdf") -> int:
         return 0
     try:
         with os.fdopen(fd, "rb") as fh:
-            extract(fh, max_pages=MAX_PAGES, max_chars=MAX_CHARS, vision_pages=vision, emit=emit)
+            extract(fh, max_pages=MAX_PAGES, max_chars=MAX_CHARS, vision_pages=vision, emit=emit,
+                    pages=pages)
     except _Refused as exc:
         emit({"error": exc.reason})
     except Exception as exc:
@@ -833,4 +879,5 @@ def _child(fd: int, vision: int, kind: str = "pdf") -> int:
 if __name__ == "__main__":
     if sys.argv[2:3] == ["docx"]:
         sys.exit(_child(int(sys.argv[1]), 0, "docx"))
-    sys.exit(_child(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 0))
+    sys.exit(_child(int(sys.argv[1]), int(sys.argv[2]) if len(sys.argv) > 2 else 0,
+                    pages=[int(i) for i in sys.argv[3].split(",")] if len(sys.argv) > 3 else None))

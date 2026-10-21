@@ -35,7 +35,9 @@ _AMBIGUOUS_SHOWN = 5
 OPEN, CLOSE = "<named-notes>", "</named-notes>"
 # The block is the model's, not the user's words: a reopened chat shows the
 # turn without it, as it shows a turn without its `[image attached: …]` lines.
-STRIP = re.compile(r"\n*<named-notes>.*?</named-notes>", re.S)
+# jobs.settled's `converted-files` block is the same kind and goes with it, so
+# every reader of the user's words (the replay, rework's request) drops both.
+STRIP = re.compile(r"\n*<(named-notes|converted-files)>.*?</\1>", re.S)
 
 
 def refs(text: str) -> list[str]:

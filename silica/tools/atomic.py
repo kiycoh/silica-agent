@@ -273,7 +273,79 @@ def _engine():
 
     core.INDEX = "retrieval"
     core_config.CONFIG.vault_path = CONFIG.vault_path
+    # A silica-core that renamed either name would go back to opening PDFs in
+    # this process without a word, so the engine refuses to run instead. The
+    # server installs the lock (0.10.1), but a wheel install resolves
+    # `silica-core>=0.10.1` to the newest release, untested here; 0.11.0 keeps
+    # both names (checked 2026-10-20).
+    if not (callable(getattr(core, "_pdf_text", None)) and callable(getattr(core, "_extract_cache", None))):
+        raise RuntimeError("silica-core no longer reads PDFs through _pdf_text: see silica/tools/atomic.py")
+    core._pdf_text = _pdf_text
     return core
+
+
+# The tag on the page map this tree writes beside the engine's extraction:
+# silica-core's own map is a bare list, and its text kept the hidden lines.
+_PDF_READER = "pdf_extract/1"
+
+
+def _pdf_text(rel: str, full: Path) -> tuple[str, list[dict], str]:
+    """silica-core's `_pdf_text`, through which its index, its search windows
+    and `silica_read` open every PDF, read by `pdf_extract` instead: in the
+    limited child on the server (ADR-0098 H1) and without the text a student
+    never sees (H6). The engine opened each PDF it walked with PDFium in this
+    process and kept those lines, so a dropped PDF, which stays in the Inbox
+    while it converts, reached the server's own process at the next search
+    and its white text reached the turn (found 2026-10-20).
+
+    Same return and the same cache file, whose path `silica_read` hands out as
+    `extract_path`. The map beside it carries `_PDF_READER`, so a fresh
+    extraction the engine wrote before this is read again, never served.
+    The pages are the text alone (`vision=0`): the renders are the
+    conversion's, and up to 60 a file would be paid on every PDF the index
+    walks."""
+    import orjson
+
+    from silica.kernel.recall.paths import atomic_write_bytes
+    from silica.sources import pdf_extract
+    from silica_core import core
+
+    cache = core._extract_cache(rel)
+    pages_file = cache.with_suffix(".json")
+    try:
+        if cache.stat().st_mtime >= full.stat().st_mtime:
+            saved = orjson.loads(pages_file.read_bytes())
+            if isinstance(saved, dict) and saved.get("reader") == _PDF_READER:
+                text = cache.read_text(encoding="utf-8", errors="replace")
+                return text, saved["pages"], "" if text else "no text layer"
+    except (OSError, ValueError):
+        pass  # no extraction yet, or a torn one: the read below writes it again
+    try:
+        data = pdf_extract.read(full, vision=0)
+    except Exception as exc:
+        # One file the reader refuses (encrypted, a bomb the child died of, not
+        # a PDF) is that file listed `unconverted` with its reason, as the
+        # engine's own reader did: the index build has no guard of its own and
+        # would stop for every other file. Only ADR-0087's sentences, written
+        # for the student, go out as they are; anything else can carry a path.
+        why = str(exc) if isinstance(exc, pdf_extract.PdfUnreadable) else type(exc).__name__
+        return "", [], f"unreadable: {why}"
+    bodies = ["\n".join(line for line, _size in page).strip() for page in data["pages"]]
+    parts: list[str] = []
+    pages: list[dict] = []
+    line, offset = 1, 0
+    for n, body in enumerate(bodies, 1):
+        chunk = body + "\n\n"
+        pages.append({"page": n, "line": line, "offset": offset})
+        parts.append(chunk)
+        line += chunk.count("\n")
+        offset += len(chunk)
+    text = "".join(parts) if any(bodies) else ""
+    pages = pages if text else []
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_bytes(cache, text.encode("utf-8"))
+    atomic_write_bytes(pages_file, orjson.dumps({"reader": _PDF_READER, "pages": pages}))
+    return text, pages, "" if text else "no text layer"
 
 
 def _scoped_search(engine, query: str, k: int, folder: str) -> dict:
@@ -715,27 +787,102 @@ def _image_file(image: str) -> Path | None:
     return None
 
 
+# PDF looks one turn may make (ADR-0099 amendment 2026-10-21): asked about a
+# figure, a turn looked at 26 pages one after the other, 15 model calls and
+# 266k tokens in 574 s, where 16 of the 17 turns that looked stayed within 6.
+# Looks and not pages: counted in pages, two looks by the question's words
+# (3 pages each) spent the turn and 3 of 23 answers gave up.
+# ponytail: keyed by the turn's requests (read_scope), so a turn repeating the
+# last four messages word for word shares its predecessor's count; a turn id
+# in the loop is the upgrade if a student ever meets the cap that way.
+_PDF_LOOKS_A_TURN = 6
+_pdf_looks: dict[tuple, int] = {}
+
+
+def _question_pages(path: Path, question: str, n: int) -> list[int]:
+    """The `n` pages of a PDF whose text layer shares the question's rarest
+    words, by idf over the file's own pages; none when no page shares one.
+    A garbled formula page keeps its slide's words, which is what this
+    matches. Asked to name the page, a turn guessed right 13 times in 23
+    (2026-10-21); on the 40 lecture questions this ranks the page first 26
+    times and among the first three 34 times."""
+    import math
+    import re
+    from collections import Counter
+
+    from silica.sources import pdf_extract
+
+    def words(text: str) -> set[str]:
+        return set(re.findall(r"[^\W\d_]{4,}", text.casefold()))
+
+    pages = [words(" ".join(t for t, _ in lines)) for lines in pdf_extract.read(path, vision=0)["pages"]]
+    df = Counter(w for page in pages for w in page)
+    want = words(question)
+    score = [sum(math.log(len(pages) / df[w]) for w in want & page) for page in pages]
+    return [i for i in sorted(range(len(pages)), key=lambda i: -score[i])[:n] if score[i] > 0]
+
+
 @tool(cls="atomic")
 def silica_look(
     image: Annotated[str, Field(description="The image: its file name as a note embeds it "
                                             "(e.g. 'Pasted image 20250716182448.png'), a vault-relative "
-                                            "path, or the path an image attached to the chat was saved at")],
+                                            "path, the path an image attached to the chat was saved at, "
+                                            "or a PDF's vault-relative path")],
     question: Annotated[str, Field(description="What to find out from the pixels, in the user's words "
                                                "(e.g. 'what value does the curve reach at x=3?')")],
+    page: Annotated[int, Field(description="For a PDF: the page to look at, from 1. Left out, the "
+                                           "pages are found by the question's words")] = 0,
 ) -> str:
-    """Looks at an image and answers a question about what it shows. Use it when
-    the reading under an embed in silica_read_note does not answer, or for an
-    image attached earlier in the chat. One call to the vision model with the
-    pixels; nothing is stored."""
+    """Looks at an image, or at pages of a PDF, and answers a question about
+    what it shows. Use it when the reading under an embed in silica_read_note
+    does not answer, for an image attached earlier in the chat, or for a PDF
+    page whose formulas or figure its text layer lost. One call to the vision
+    model with the pixels; nothing is stored."""
+    import base64
+
     from silica.agent import vision
     from silica.kernel.recall.image_readings import _MIME, image_part
 
     path = _image_file(image)
-    if path is None or path.suffix.lower() not in _MIME:
+    if path is None or path.suffix.lower() not in (*_MIME, ".pdf"):
         return f"image not found: {image} (a vault image, by name or path, or an attached image's saved path)"
-    return vision.ask_chat_model(
-        [{"role": "user", "content": [image_part(path), {"type": "text", "text": question}]}],
-        max_tokens=1200)
+    if path.suffix.lower() != ".pdf":
+        return vision.ask_chat_model(
+            [{"role": "user", "content": [image_part(path), {"type": "text", "text": question}]}],
+            max_tokens=1200)
+    # Pages and not the file (ADR-0099 amendment 2026-10-21): a turn answering
+    # while the PDF converts sees only what it asks about, so a lecture's 30
+    # formula pages never fill the 32k window, where sending them all at
+    # 1024 px passed it on 10 of 40 questions.
+    from silica.agent.read_scope import REQUESTS
+    from silica.sources import pdf_extract
+
+    turn = REQUESTS.get()
+    if _pdf_looks.get(turn, 0) >= _PDF_LOOKS_A_TURN:
+        return (f"{_PDF_LOOKS_A_TURN} looks at PDF pages already in this turn: answer from what "
+                "they showed, or ask the student which page holds it")
+    try:
+        wanted = [page - 1] if page >= 1 else _question_pages(path, question, 3)
+        if not wanted:
+            return f"no page of {image} shares the question's words: name the page, page=N"
+        pngs = pdf_extract.page_pngs(path, wanted)
+    except pdf_extract.PdfUnreadable as exc:
+        return f"{image}: {exc}"
+    if len(_pdf_looks) > 64:
+        _pdf_looks.clear()
+    _pdf_looks[turn] = _pdf_looks.get(turn, 0) + 1
+    if not pngs:
+        return f"page {page} of {image} is past its last page, blank, or could not be drawn"
+    content: list[dict] = []
+    for i in wanted:
+        if i in pngs:
+            content += [{"type": "text", "text": f"Page {i + 1}:"},
+                        {"type": "image_url",
+                         "image_url": {"url": "data:image/png;base64," + base64.b64encode(pngs[i]).decode()}}]
+    asked = question if page >= 1 else f"{question}\n\nSay which page the answer is on."
+    return vision.ask_chat_model([{"role": "user", "content": [*content, {"type": "text", "text": asked}]}],
+                                 max_tokens=1200)
+
 
 @tool(cls="atomic")
 def silica_file_links(target: Annotated[str, Field(description='A note (name or path), OR a file path/basename (e.g. foto.jpg, analysis.ipynb, src/mod.py)')]) -> dict:
