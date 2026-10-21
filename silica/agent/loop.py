@@ -264,6 +264,11 @@ def _content_chars(content) -> int:
                    for p in content if isinstance(p, dict))
     return len(str(content or ""))
 
+
+class _Stopped(Exception):
+    """The turn's cancel token was set while the model was still writing."""
+
+
 def run_agent(
     messages: list[dict],
     model: str,
@@ -435,7 +440,16 @@ def run_agent(
 
         threading.Thread(target=_llm_worker, daemon=True, name="llm-call").start()
         try:
-            return _future.result()
+            # In slices, so a Stop is seen within 0.2 s and not when the model
+            # finishes: measured 12 s from the click to the stopped row while
+            # this waited on the whole generation (ADR-0121 point 7). Leaving
+            # sets `_abandon`, which ends the stream at its next chunk.
+            while True:
+                try:
+                    return _future.result(timeout=0.2)
+                except _cf.TimeoutError:
+                    if cancel_token is not None and cancel_token.is_set():
+                        raise _Stopped from None
         finally:
             _abandon.set()
 
@@ -505,6 +519,10 @@ def run_agent(
                         {"indices": sorted(collapsed - _pre_collapsed)}, parent=None)
                     _abandon.clear()
                     resp = _interruptible_llm(_llm_kwargs)
+        except _Stopped:
+            logger.info("Agent loop stopped during the model call at iteration %d", iteration)
+            _narr_mod.NARRATOR.thought_close("")   # the thought this call opened ends here
+            return "(silica: cancelled)"
         except BaseException:
             # A call that raises never reaches thought_close below, and a thought
             # left open reads as a run still going to every projection of the
@@ -601,6 +619,11 @@ def run_agent(
         # Dispatch each tool call
         pending_notices: list[dict] = []  # A34: convergence warnings, flushed AFTER
         for tc in resp.tool_calls:        # the tool block, never between sibling results
+            if cancel_token is not None and cancel_token.is_set():
+                # No further tool of the batch once Stop is pressed (ADR-0121
+                # point 7); the ids left unanswered are healed on the next
+                # entry (repair_tool_call_history), and the loop's top returns.
+                break
             logger.info("Tool call: %s(%s)", tc.name, tc.args)
 
             # Key representing the specific tool call + args

@@ -13,7 +13,8 @@ last state it reached: `running` is written before the conversion starts,
 Nothing resumes by itself. At startup a job still `queued` or `running`
 belonged to a process that is gone, and becomes `interrupted` (point 4): under
 `Restart=on-failure`, a file that kills the tenant would otherwise crash-loop
-it. Retry is the student's, and reruns from the Inbox copy.
+it. Retry is the student's, and reruns from the copy that was converted: in
+the Inbox for an import, in the chat's own folder for a drop (ADR-0121).
 """
 from __future__ import annotations
 
@@ -168,7 +169,7 @@ def _is_media(name: str) -> bool:
 # --- recording a job -------------------------------------------------------------------
 
 def record(path: str, *, origin: str, text: str = "", session: str | None = None,
-           dest_dir: str = "", on_end: Callable[[dict], None] | None = None) -> dict:
+           dest_dir: str = "", drop: str = "", on_end: Callable[[dict], None] | None = None) -> dict:
     """Record one conversion of `path` and queue it; return its record.
 
     `path` is what convert() takes: vault-relative, or absolute for a file a
@@ -177,6 +178,9 @@ def record(path: str, *, origin: str, text: str = "", session: str | None = None
     over the length cap or this month's minutes never enters the queue; the
     decoded length and the charge stay in `_via_asr`, where the audio is.
     Raises the admission's MediaRefused, whose text is the student's sentence.
+
+    `drop` groups the jobs of one chat drop: its question is asked once, when
+    the last of them is done (ADR-0121 point 1).
     """
     vault = CONFIG.vault_path or ""
     p = Path(path)
@@ -209,6 +213,7 @@ def record(path: str, *, origin: str, text: str = "", session: str | None = None
             "media": media, "seconds": seconds,
             "state": "queued", "created": now, "updated": now, "started": None, "finished": None,
             "attempts": 0, "notes": [], "hidden": [], "error": "", "dismissed": False,
+            "drop": drop, "beside": [], "answered": False, "progress": None,
         }
         _write(rec)
         if on_end is not None:
@@ -288,8 +293,6 @@ def _sentence(exc: Exception) -> str:
 
 
 def _run(job_id: str) -> None:
-    from silica.sources.convert import convert
-
     rec = read(job_id)
     if rec is None or rec.get("state") != "queued":
         # Dismissed, or marked interrupted by another process's startup that
@@ -304,7 +307,7 @@ def _run(job_id: str) -> None:
     try:
         if rec.get("vault") != (CONFIG.vault_path or ""):
             raise Refused("the vault changed since this file was added: add it again in this one")
-        notes = convert(str(src), dest_dir=rec.get("dest_dir") or "")
+        notes = _converted(job_id, src, rec.get("dest_dir") or "")
         hidden = _hidden(src)
         pages, unread = _pages(src)
     except Exception as exc:
@@ -320,6 +323,23 @@ def _run(job_id: str) -> None:
     hook = _ON_END.pop(job_id, None)
     if hook is not None:
         hook(rec)
+
+
+def _converted(job_id: str, src: Path, dest_dir: str) -> list[str]:
+    """convert(), with how many of a PDF's pages the chat model has read kept
+    on the record as `progress` (ADR-0121 point 1): the slow part of a PDF,
+    105 s for a 13-page paper with formulas, which the row could only count in
+    minutes. One write a page; a page takes about 2 s."""
+    from silica.sources.convert import PAGE_PROGRESS, convert
+
+    def report(done: int, total: int) -> None:
+        _update(job_id, expect=("running",), progress={"done": done, "total": total})
+
+    token = PAGE_PROGRESS.set(report)
+    try:
+        return convert(str(src), dest_dir=dest_dir)
+    finally:
+        PAGE_PROGRESS.reset(token)
 
 
 def _pages(src: Path) -> tuple[dict, str]:
@@ -425,7 +445,7 @@ def retry(job_id: str) -> dict:
             raise Refused(f"{name} is not stopped, so there is nothing to retry")
         # `told` too: the agent heard of the failure, and the rerun's end is news.
         cur.update(state="queued", error="", notes=[], hidden=[], finished=None,
-                   dismissed=False, told=False, updated=time.time())
+                   dismissed=False, told=False, progress=None, updated=time.time())
         _write(cur)
         _enqueue(job_id)
     return public(cur)
@@ -449,6 +469,53 @@ def dismiss(job_id: str) -> None:
         _publish(rec)  # the record is gone; every other open tab drops its row too
     if hosted() and rec.get("origin") == "import" and rec.get("vault") == (CONFIG.vault_path or ""):
         _remove_source(rec)  # point 7: an interrupted import's file goes with it
+
+
+def _drop_of(rec: dict) -> list[dict]:
+    """The jobs dropped together with `rec`, itself included, oldest first."""
+    if not rec.get("drop"):
+        return [rec]
+    return [r for r in _all() if r.get("drop") == rec["drop"] and r.get("vault") == rec.get("vault")]
+
+
+def _answer(recs: list[dict]) -> tuple[list[str], list[dict], str]:
+    """Mark a drop's jobs answered and dismissed, and return what the turn
+    carries: the notes the model reads (the converted ones, then the drop's
+    files that were ready at once), one `silica_files` entry per file, and
+    the words typed with the drop."""
+    from silica.ui.web.server import _file_entry
+
+    notes: list[str] = []
+    files: list[dict] = []
+    for r in recs:
+        # Told: the turn carries the notes, so `settled` would repeat them.
+        _update(r["id"], answered=True, dismissed=True, told=True)
+        notes += r.get("notes") or []
+        files.append(_file_entry(r["source"]["path"], r.get("notes") or []))
+    beside = list(dict.fromkeys(p for r in recs for p in r.get("beside") or []))
+    files += [_file_entry(p) for p in beside]
+    return notes + beside, files, (recs[0].get("text") or "") if recs else ""
+
+
+def join_next(session: str) -> tuple[list[str], list[dict], str] | None:
+    """The files of `session` read after their drop got no turn, for the next
+    message typed in that chat (ADR-0121 point 4), now marked answered; None
+    when there are none. A drop whose other files are still being read waits
+    for them, as its question does."""
+    with _LOCK:
+        vault = CONFIG.vault_path or ""
+        mine = [r for r in _all() if r.get("session") == session and r.get("vault") == vault
+                and r.get("origin") == "drop" and not r.get("answered") and not r.get("dismissed")]
+    ready = []
+    for r in mine:
+        group = [g for g in mine if (g.get("drop") or g["id"]) == (r.get("drop") or r["id"])]
+        if all(g.get("state") == "done" for g in group) and r.get("state") == "done":
+            ready.append(r)
+    if not ready:
+        return None
+    notes, files, _ = _answer(ready)
+    earlier = "; ".join(dict.fromkeys(r.get("text", "").strip() for r in ready if (r.get("text") or "").strip()))
+    return notes, files, earlier
 
 
 def listing() -> list[dict]:
@@ -639,21 +706,54 @@ def dismiss_job(job_id: str):
 
 @router.post("/{job_id}/turn", dependencies=_SAME_ORIGIN)
 def offered_turn(job_id: str, payload: dict | None = None):
-    """The turn a finished job offers (point 6, Open 1): the student starts
-    it, the job never does. "Nucleate it" composes NUCLEATE_ASK over the
-    job's notes; `ask` reruns the words the student typed
-    with the drop, which reached the turn before the file was ready."""
+    """The turn a read file offers (ADR-0121 points 1 and 6). The job never
+    starts it: the page that holds the chat asks, for the drop's question as
+    soon as its last file is done, or on a click.
+
+    `as` is what the turn does: "ask" reruns the words typed with the drop,
+    "summarize" and "quiz" compose their request, "nucleate" copies the files
+    into the Inbox and nucleates the copies. `{"ask": true}` is the older
+    spelling of "ask". A drop is answered once: a second ask, from another tab,
+    is refused, which is what keeps two tabs from answering it twice."""
     from silica.ui.web import server
 
-    rec = read(job_id) if _ID.fullmatch(job_id or "") else None
-    if rec is None or rec.get("state") != "done" or not rec.get("notes"):
-        raise HTTPException(409, "this conversion has no note to offer")
-    ask = bool((payload or {}).get("ask")) and bool((rec.get("text") or "").strip())
+    body = payload or {}
+    kind = str(body.get("as") or ("ask" if body.get("ask") else "nucleate"))
+    if kind not in ("ask", "summarize", "quiz", "nucleate"):
+        raise HTTPException(400, "a read file offers ask, summarize, quiz or nucleate")
+    # The slot first, then the record: a typed message that took this file in
+    # (join_next) holds the slot while it marks the file answered.
     if not server._begin_turn():
         raise HTTPException(409, "a turn is already in progress")
-    # Told: this turn's manifest names the notes, so `settled` would repeat it.
-    _update(job_id, dismissed=True, told=True)
-    # "Nucleate it" is the student's choice, so it says so: the empty words
-    # of a drop now mean describe-and-ask (server.DROP_ASK).
-    words = rec["text"] if ask else server.NUCLEATE_ASK
-    return server._turn_response(server._compose_nucleate_turn(words, rec["notes"], []))
+    try:
+        rec = read(job_id) if _ID.fullmatch(job_id or "") else None
+        if rec is None or rec.get("state") != "done" or not rec.get("notes"):
+            raise HTTPException(409, "this conversion has no note to offer")
+        # A drop read from its PDF's text layer in its own turn is answered and
+        # still offers the rest (ADR-0099 amendment 2026-10-20); one asked from
+        # its row is dismissed too, which ends its row in every tab.
+        if rec.get("dismissed") or (kind == "ask" and rec.get("answered")):
+            raise HTTPException(409, "this file's turn was already asked")
+        group = _drop_of(rec)
+        if any(g.get("state") != "done" for g in group):
+            raise HTTPException(409, "the other files dropped with it are still being read")
+        if kind == "ask" and not (rec.get("text") or "").strip():
+            kind = "summarize"
+        notes, files, words = _answer(group)
+        names = ", ".join(f["name"] for f in files)
+        if kind == "nucleate":
+            # Copied into the Inbox first (ADR-0121 point 5): the injector reads
+            # inbox files, and nucleating is the student adding them to the vault.
+            # The one composed turn still offered the injector.
+            inbox = server._add_to_vault(notes, [f["source"] for f in files])
+            return server._turn_response(
+                server._compose_nucleate_turn(server.NUCLEATE_ASK, inbox, [], inline=False),
+                files=files, said=f"Nucleate {names}")
+        words, said = {"ask": (words, words.strip()),
+                       "summarize": (server.SUMMARIZE_ASK, f"Summarize {names}"),
+                       "quiz": (server.QUIZ_ASK, f"Quiz me on {names}")}[kind]
+        return server._turn_response(server._compose_nucleate_turn(words, notes, []),
+                                     withhold=server.WITHHELD_WITH_FILES, files=files, said=said)
+    except BaseException:
+        server._end_turn()
+        raise

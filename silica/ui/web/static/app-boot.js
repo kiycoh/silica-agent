@@ -18,12 +18,15 @@ async function loadVault() {
     // The turn the next answer belongs to, for the flag (ADR-0100 point 6):
     // the server names it on the user row, hosted only.
     let flagTurn = null;
+    // The notes a question carried: the answer's sources, as the live turn
+    // counts them from its `files` event (ADR-0121 point 4).
+    let attached = [];
     const closeTurn = () => {
       if (!turn) return;
       const f = turnFooter(turn.touched, turn.failed);
       if (f) turn.body.appendChild(f);
       // A stored turn keeps no duration, so its line counts and never times.
-      finishTurn(turn.body, turn.ledger, turn.touched, { steps: turn.steps, secs: 0 });
+      finishTurn(turn.body, turn.ledger, turn.touched, { steps: turn.steps, secs: 0, found: turn.found });
       if (turn.flag && turn.raw.length) turn.body.appendChild(turn.flag.flagged ? mkFlagDone() : flagControl(turn.flag));
       turn = null;
     };
@@ -32,14 +35,19 @@ async function loadVault() {
         closeTurn();
         const body = bubble("user");
         body.textContent = m.content;
+        body.dataset.words = m.content;
         addTurnImages(body, m.images || []);
+        userFiles(body, m.files || []);
+        attached = (m.files || []).flatMap((f) => f.notes || []);
         flagTurn = m.turn || null;
         continue;
       }
       if (!turn) {
-        turn = { body: bubble("silica"), raw: [], touched: new Map(), failed: new Map(), flag: flagTurn, steps: 0 };
+        turn = { body: bubble("silica"), raw: [], touched: new Map(), failed: new Map(), flag: flagTurn, steps: 0, found: [] };
         turn.ledger = makeLedger(turn.body.closest(".msg"), false);
         turn.body.appendChild(turn.ledger);
+        claimRefs({ notes: attached, effect: "read" }, turn.touched, turn.failed);
+        attached = [];
         const t = turn;
         addCopyBtn(t.body, () => t.raw.join("\n\n"));
       }
@@ -66,6 +74,7 @@ async function loadVault() {
         const g = document.createElement("div");
         g.className = "tools";
         for (const t of m.tools) {
+          if (t.found) turn.found.push(...t.found);
           if (!t.summary) {
             // Same row object as a live turn, so a reloaded chat keeps the shape
             // it had while streaming. It opens onto nothing: a stored assistant
@@ -99,6 +108,7 @@ async function loadVault() {
       }
     }
     closeTurn();
+    markLastTurn();
     // /changes may have landed first: the cards drawn just now take their
     // tally, their resolved path and their review state from that payload.
     stampWriteTallies(changeRows);

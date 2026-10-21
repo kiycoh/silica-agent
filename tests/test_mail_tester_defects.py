@@ -150,7 +150,7 @@ def test_a_mail_file_dropped_into_the_chat_writes_nothing_and_the_turn_says_wher
     assert len(_notes(tmp_path)) == 1                     # the drop wrote no mail note
     assert not (inbox / "drop.eml").exists()               # nor the file itself
     assert "Settings › Connectors › Mail" in ran["text"] and "/mail import" in ran["text"]
-    assert "drop.eml" in ran["text"] and "Inbox/note.md" in ran["text"]
+    assert "drop.eml" in ran["text"] and "/note.md (~" in ran["text"]   # in its chat's folder (ADR-0121)
     assert "Code skeleton stubs" not in ran["text"]
     _handle_direct_shortcut("/revert", [])
     assert _notes(tmp_path) == []                          # /revert took back the import, all of it
@@ -181,7 +181,12 @@ def test_an_upload_never_writes_through_a_planted_symlink(web, tmp_path, monkeyp
     victim.write_text("ORIGINAL", encoding="utf-8")
     inbox = _inbox(tmp_path)
     (inbox / "victim.eml").symlink_to(victim)
-    (inbox / "victim.md").symlink_to(victim)
+    # A drop writes to its chat's folder (ADR-0121 point 5): the link planted there.
+    from silica.kernel.recall.paths import chat_folder
+
+    folder = tmp_path / "vault" / chat_folder(server._open_session())
+    folder.mkdir(parents=True)
+    (folder / "victim.md").symlink_to(victim)
 
     r = tc.post("/mail/upload", params={"name": "victim.eml"}, content=b"From: a@x.example\n\nbody\n")
     assert r.status_code == 400 and "link" in r.json()["detail"]

@@ -550,7 +550,11 @@ class ObsidianFSBackend(GraphIndexMixin):
         # the next rebuild drops. The inbox is indexed like any other folder:
         # staging notes are source material, and the ops that must not target
         # them are gated by `is_inbox_path`, not by their absence from the index.
-        if content is not None and is_vault_artifact(rel_path):
+        # A hidden folder likewise: the walk prunes it (`_rebuild_index`), and a
+        # chat's attached files are converted into one (ADR-0121 point 5), which
+        # must not list them in the tree until the next rebuild drops them.
+        if content is not None and (is_vault_artifact(rel_path)
+                                    or any(p.startswith(".") for p in Path(rel_path).parts[:-1])):
             content = None
 
         # Every caller has already written or unlinked the file, so the folder

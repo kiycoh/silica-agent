@@ -31,6 +31,7 @@ LOSS_PINS = {
     ("silica/tools/codedocs_tool.py", "silica_document", "Loss.STAGED"): 1,
     ("silica/cli.py", "_stage_envelope", "Loss.STAGED"): 1,
     ("silica/cli.py", "_promote", "Loss.STAGED"): 1,
+    ("silica/ui/web/server.py", "_add_to_vault", "Loss.STAGED"): 1,   # ADR-0121 point 5
     ("silica/agent/commit.py", "commit_derived", "Loss.DERIVED"): 1,
     ("silica/kernel/write/migrate.py", "apply", "Loss.MIGRATE"): 1,
     ("silica/kernel/learn/plans.py", "edit_plan", "Loss.PLAN"): 1,
@@ -94,10 +95,10 @@ def test_every_free_key_set_is_pinned():
 def test_the_counts_the_record_states():
     from silica.kernel.write.preserve import _RELAX_ALL, Loss
 
-    assert sum(LOSS_PINS.values()) == 22
+    assert sum(LOSS_PINS.values()) == 23
     off = sum(n for (_f, _fn, v), n in LOSS_PINS.items()
               if Loss[v.rsplit(".", 1)[-1].split()[0]] in _RELAX_ALL)
-    assert off == 17
+    assert off == 18
     assert sum(FREE_PINS.values()) == 7
 
 

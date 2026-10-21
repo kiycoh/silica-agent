@@ -217,20 +217,20 @@ def test_a_refused_file_is_named_in_the_turn_with_its_sentence(drop, monkeypatch
     monkeypatch.setenv(adm.MAX_MINUTES_ENV, "90")
 
     text = drop("lecture.mp3", 3 * 3600)
-    assert "Inbox/note.md" in text  # the other file still went through
+    assert "/note.md (~" in text  # the other file still went through, into the chat's folder
     assert "Not staged" in text
     assert "- lecture.mp3: lecture.mp3 is 180 minutes long, and files of up to 90 minutes" in text
 
 
 def test_hosted_a_drop_takes_audio(drop, monkeypatch):
     monkeypatch.setenv("SILICA_HOSTED", "1")
-    assert "Still converting" in drop("talk.m4a", 60)
+    assert "Still being read" in drop("talk.m4a", 60)
 
 
 def test_hosted_a_drop_names_what_the_picker_does_not_offer(drop, monkeypatch):
     monkeypatch.setenv("SILICA_HOSTED", "1")
     text = drop("clip.mp4", 60)
-    assert "Inbox/note.md" in text
+    assert "/note.md (~" in text
     assert "- clip.mp4: .mp4: not a type Silica reads here" in text
 
 
@@ -253,7 +253,7 @@ def test_hosted_a_converter_failure_reaches_the_job_without_its_raw_text(drop, m
 
     monkeypatch.setitem(conv.ASR_PROVIDERS, "endpoint", down)
     text = drop("talk.mp3", 60)
-    assert "- Inbox/talk.mp3: not readable until it is converted" in text and "Still converting" in text
+    assert "/talk.mp3: not readable until it is converted" in text and "Still being read" in text
     assert _failure("talk.mp3") == "it could not be converted"
 
 

@@ -50,6 +50,29 @@ _TOOL_EFFECT: dict[str, str] = {
 # it never reports a wrong note.
 _NOTE_KEYS = ("name", "path", "note", "note_path", "ref")
 
+# The search tools whose results name notes (ADR-0121 point 7): an answer that
+# stood on search snippets and read no note showed nothing to click. The first
+# three of each call, which the chat shows only when no note was read.
+_SEARCHES = ("silica_search", "silica_search_context", "silica_recall")
+_FOUND_PER_CALL = 3
+
+
+def _found(name: str, result: Any) -> list[str]:
+    """The notes a search call returned, best first, as vault paths: titles
+    (`paths`), body hits (`hits`), recall's delivered `notes` (no suffix)."""
+    if name not in _SEARCHES or not isinstance(result, str):
+        return []
+    try:
+        data = json.loads(result)
+    except ValueError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    paths = [p for p in data.get("paths") or [] if isinstance(p, str)]
+    paths += [h["path"] for h in data.get("hits") or [] if isinstance(h, dict) and isinstance(h.get("path"), str)]
+    paths += [n if n.endswith(".md") else n + ".md" for n in data.get("notes") or [] if isinstance(n, str)]
+    return list(dict.fromkeys(paths))[:_FOUND_PER_CALL]
+
 
 # What the expandable tool card carries. A read of a long note returns the whole
 # note, and the transcript would grow a second copy of the vault; the drawer is
@@ -200,6 +223,8 @@ def event_to_json(ev) -> dict | None:
             out["output"] = card
         if ev.name == "silica_run_injector":
             out["summary"] = _injector_summary(ev.result)
+        if (found := _found(ev.name, ev.result)):
+            out["found"] = found
         # A tool that returns {"error": ...} still completes, and the chat
         # claimed its notes as landed while a reloaded chat, which reads the
         # stored result, drew the same call as failed.
@@ -284,5 +309,7 @@ def tool_calls_to_json(
                 line["refused"] = refused
         if name == "silica_run_injector" and results:
             line["summary"] = _injector_summary(results.get(tc.get("id", "")))
+        if results and (found := _found(name, results.get(tc.get("id", "")))):
+            line["found"] = found
         out.append(line)
     return out

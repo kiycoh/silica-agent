@@ -289,12 +289,16 @@ function withinUploadCap(files) {
   return list.filter((f) => !big.includes(f));
 }
 
-// Upload every staged file + the typed text as one turn (server stages them —
-// converts PDFs, stubs code — then the agent works on them per `text`).
+// Upload every staged file + the typed text as one turn (server stages them in
+// the chat's own folder, ADR-0121; a file to convert becomes a job, and the
+// question waits for it when there is one).
 function nucleateStaged(text) {
   if (streaming || !staged.length) return;
   const names = staged.map((f) => f.name);
-  bubble("user").textContent = (text.trim() ? text.trim() + "\n" : "") + "⇪ " + names.join(", ");
+  const body = bubble("user");
+  body.textContent = text.trim();
+  body.dataset.words = text.trim();
+  userFiles(body, names.map((name) => ({ name })));
   const fd = new FormData();
   for (const f of staged) fd.append("files", f);
   fd.append("text", text);
@@ -307,6 +311,58 @@ function nucleateStaged(text) {
     return r;
   });
   runTurn(sent, "staging " + names.length + (names.length === 1 ? " file" : " files"));
+}
+
+// --- the files a message carried (ADR-0121 point 4) --------------------------
+// A chip per file under the words, live and replayed: the name opens the file's
+// note, and "add to vault" copies it into the Inbox (point 5). Until the turn's
+// `files` event names the file's place in the chat, a live chip is a name only.
+function userFiles(body, files) {
+  if (!body || !files || !files.length) return;
+  const msg = body.closest(".msg");
+  msg.querySelector(":scope > .msg-files")?.remove();
+  const row = document.createElement("div");
+  row.className = "msg-files";
+  for (const f of files) {
+    const chip = document.createElement("span");
+    chip.className = "mf";
+    const name = document.createElement("button");
+    name.type = "button";
+    name.className = "mf-name";
+    name.textContent = f.name;
+    const notes = f.notes || [];
+    name.disabled = !notes.length;
+    name.title = notes.length ? "open " + f.name : f.name;
+    name.addEventListener("click", () => notes.length && openNote(notes[0]));
+    chip.appendChild(name);
+    if (f.in_vault) chip.appendChild(mkEl("span", "mf-in", "in the vault"));
+    else if (f.source && notes.length) chip.appendChild(addToVaultButton(f.source, chip));
+    row.appendChild(chip);
+  }
+  body.after(row);
+}
+
+function addToVaultButton(source, chip) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "mf-add linklike";
+  b.textContent = "add to vault";
+  b.title = "copy this file and its notes into the Inbox; the chat keeps its own";
+  b.addEventListener("click", async () => {
+    b.disabled = true;
+    try {
+      const r = await fetch("/chat/files/add", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ source }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { notify(typeof d.detail === "string" ? d.detail : `the server answered ${r.status}`); b.disabled = false; return; }
+      b.replaceWith(mkEl("span", "mf-in", "in the vault"));
+      announce(`${source.split("/").pop()} added to the Inbox`);
+      loadVaultInfo();
+      markVaultChanged();
+    } catch { notify("the server could not be reached"); b.disabled = false; }
+  });
+  return b;
 }
 
 // The formats the chat model's projector takes (image_readings._MIME).

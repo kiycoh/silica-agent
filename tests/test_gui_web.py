@@ -716,19 +716,24 @@ def test_nucleate_stages_uploads_and_hands_files_to_the_agent(client, monkeypatc
     assert resp.status_code == 200
 
     from silica.config import CONFIG
+    from silica.kernel.recall.paths import chat_folder
 
-    saved = Path(CONFIG.vault_path) / "Inbox" / "note.md"
-    assert saved.exists()  # upload landed in the inbox (not nucleated yet)
-    # the agent turn carries the user's instruction *and* the staged file path
+    folder = chat_folder(server.current_session_id)
+    saved = Path(CONFIG.vault_path) / folder / "note.md"
+    assert saved.exists()  # landed in the chat's own folder (ADR-0121 point 5)
+    assert not (Path(CONFIG.vault_path) / "Inbox" / "note.md").exists()
+    # the agent turn carries the user's instruction *and* the file, whole
     user = next(m for m in ran["msgs"] if m["role"] == "user")
     assert "file these under Concepts/AI" in user["content"]
-    assert "Inbox/note.md" in user["content"]
-    assert "sections:" not in user["content"]  # a request reads what it needs
+    assert f'<file path="{folder}/note.md">' in user["content"] and "some body text" in user["content"]
+    assert user["silica_said"] == "file these under Concepts/AI"
+    assert user["silica_files"] == [{"name": "note.md", "source": f"{folder}/note.md", "notes": [f"{folder}/note.md"]}]
 
 
-def test_a_wordless_drop_asks_from_the_outline_and_does_not_nucleate(client, monkeypatch):
+def test_a_wordless_drop_asks_from_the_file_and_does_not_nucleate(client, monkeypatch):
     """No words with the drop: the turn describes and asks (t03 2026-10-14 ran
-    a 22-file nucleate off a bare drop), from an outline the manifest carries."""
+    a 22-file nucleate off a bare drop), from the file's text when it fits
+    (ADR-0121 point 2) and from an outline when it does not."""
     tc, server = client
     ran: dict = {}
 
@@ -743,13 +748,18 @@ def test_a_wordless_drop_asks_from_the_outline_and_does_not_nucleate(client, mon
 
     assert resp.status_code == 200
     user = next(m for m in ran["msgs"] if m["role"] == "user")["content"]
+    from silica.kernel.recall.paths import chat_folder
+
     assert user.startswith(server.DROP_ASK)
-    assert "Inbox/bio.md (~" in user and "sections: Enzimi; Cinetica; Inibizione" in user
+    assert f'<file path="{chat_folder(server.current_session_id)}/bio.md">' in user and "## Inibizione" in user
+    monkeypatch.setattr(server, "_INLINE_CHARS", 10)
+    assert "sections: Enzimi; Cinetica; Inibizione" in server._compose_nucleate_turn(
+        "", [f"{chat_folder(server.current_session_id)}/bio.md"], [])
 
 
-def test_a_dropped_file_lands_in_the_inbox_inside_the_write_boundary(client, monkeypatch):
-    """A vault that writes only under docs/silica stages a drop there, not in a
-    root Inbox/ outside the one folder writes are supposed to land in."""
+def test_a_dropped_file_lands_in_its_chat_inside_the_write_boundary(client, monkeypatch):
+    """A vault that writes only under docs/silica keeps a chat's files there,
+    not in a folder at the root of what may be a repository (ADR-0121 point 5)."""
     from silica.config import CONFIG
     from silica.kernel.vault_manifest import reset_manifest_cache
 
@@ -762,8 +772,8 @@ def test_a_dropped_file_lands_in_the_inbox_inside_the_write_boundary(client, mon
     resp = tc.post("/nucleate", files=[("files", ("note.md", b"# Hi\n\nbody", "text/markdown"))])
 
     assert resp.status_code == 200
-    assert (root / "docs/silica/Inbox/note.md").exists()
-    assert not (root / "Inbox/note.md").exists()
+    assert (root / f"docs/silica/.silica-chat/{server.current_session_id}/note.md").exists()
+    assert not (root / "Inbox/note.md").exists() and not (root / ".silica-chat").exists()
 
 
 def test_compose_nucleate_turn_defaults_empty_text_and_lists_files():

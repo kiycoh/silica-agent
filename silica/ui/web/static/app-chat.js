@@ -1152,6 +1152,11 @@ $("#q-now").addEventListener("click", () => {
   fetch("/stop", { method: "POST" });
 });
 function sendQueued() {
+  // A drop's question whose file was read during this turn goes first: it was
+  // asked before anything queued (ADR-0121 point 1). The queued text stays
+  // queued, and the end of that turn sends it.
+  const drop = typeof takeDropTurn === "function" ? takeDropTurn() : null;
+  if (drop) { setTimeout(() => jobOffer(drop, "ask"), 0); return; }
   const t = takeQueued();
   if (t) setTimeout(() => send(t), 0); // after the finally that called this returns
 }
@@ -1235,6 +1240,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   // change" is a result the user needs stated, not inferred from an absence.
   const failed = new Map();
   const claimed = {};  // call id → { refs, effect, verb }, held until tool_done
+  const found = [];    // notes the searches returned, shown when none was read (ADR-0121)
   const pipes = {};    // call id → injector pipeline block, held until tool_done
   let curPipe = null;  // the block phase events currently belong to
   let curText = null;   // open markdown segment { el, raw }
@@ -1421,7 +1427,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     // own revert, so you undo the write you are looking at rather than the turn.
     const footer = turnFooter(touched, failed);
     if (footer) flow.appendChild(footer);
-    finishTurn(body, ledger, touched, { steps, secs: (performance.now() - turnT0) / 1000 });
+    finishTurn(body, ledger, touched, { steps, secs: (performance.now() - turnT0) / 1000, found });
     const answer = texts.map((t) => t.raw).join("\n\n").trim();
     if (answer) addCopyBtn(body, () => answer);
     if (answer && flagTurn) flow.appendChild(flagControl(flagTurn));
@@ -1429,6 +1435,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
     // attributed to the agent; the failure that emptied it already sits on the
     // person's message.
     if (!flow.childElementCount) body.closest(".msg").remove();
+    markLastTurn();
     syncJump();
     sendQueued(); // what was held during this turn goes next, in order
     loadSessions(); // turn saved server-side — refresh titles/order
@@ -1440,6 +1447,15 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   }
 
   function handle(ev) {
+    // The files the question carried, named by the server (ADR-0121 point 4):
+    // they belong to the bubble above, and the answer has not begun.
+    // They are what the answer stands on, so they count as read, ahead of
+    // anything a search returns.
+    if (ev.type === "files") {
+      userFiles(lastUserBody, ev.files);
+      for (const f of ev.files) claimRefs({ notes: f.notes || [], effect: "read" }, touched, failed);
+      return;
+    }
     pending.remove(); // something arrived — the placeholder has done its job
     if (ev.type === "delta" && ev.kind === "reset") {
       // The server retracts what it just streamed: a transient retry replays the
@@ -1500,6 +1516,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         if (t) t.el.after(line); else toolsGroup().appendChild(line);
       }
       toolsDone++;
+      if (ev.found) found.push(...ev.found);
       const c = claimed[ev.id];
       if (c) {
         // A result that is an error landed nothing, as the replay of the same
@@ -1554,7 +1571,10 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
         const o = document.createElement("div");
         o.className = "turn-outcome";
         const secs = (performance.now() - turnT0) / 1000;
-        o.textContent = `stopped by you after ${fmtDur(secs)} · ${toolsDone} tool call${toolsDone === 1 ? "" : "s"} finished, the text above is what had arrived`;
+        // Not "the text above" over nothing: a preamble the stop cut short is
+        // retracted, so often no word of this turn is left (ADR-0121 point 7).
+        const arrived = texts.some((t) => t.raw.trim()) ? "the text above is what had arrived" : "nothing had been written yet";
+        o.textContent = `stopped by you after ${fmtDur(secs)} · ${toolsDone} tool call${toolsDone === 1 ? "" : "s"} finished, ${arrived}`;
         if (retry) {
           const c = document.createElement("button");
           c.type = "button";
@@ -1704,9 +1724,12 @@ function makeLedger(msg, live) {
 // by name the notes it read without citing them, which are still where the
 // answer may have come from. A turn with nothing folded and nothing to say
 // loses the line.
-function finishLedger(msg, led, { steps, secs, reads, cited }) {
+function finishLedger(msg, led, { steps, secs, reads, cited, found = [] }) {
   const hasWork = !!msg.querySelector(".body .thinking, .body .tools");
-  const uncited = reads.filter((p) => !cited.has(p));
+  // An answer that read no note still stood on what its searches returned
+  // (ADR-0121 point 7): those notes, at most six, are its sources then.
+  const fromSearch = reads.length ? [] : [...new Set(found)].filter((p) => !cited.has(p)).slice(0, 6);
+  const uncited = fromSearch.length ? fromSearch : reads.filter((p) => !cited.has(p));
   const notes = led.querySelector(".turn-notes");
   const parts = [];
   if (reads.length) parts.push(`read ${reads.length} note${reads.length === 1 ? "" : "s"}`);
@@ -1728,7 +1751,8 @@ function finishLedger(msg, led, { steps, secs, reads, cited }) {
   const r = document.createElement("span");
   r.className = "lg-reads";
   // Beside numbered citations, a name here needs saying why it is not one.
-  if (cited.size) r.appendChild(mkEl("span", "lg-label", "not cited"));
+  if (fromSearch.length) r.appendChild(mkEl("span", "lg-label", "found by search"));
+  else if (cited.size) r.appendChild(mkEl("span", "lg-label", "not cited"));
   for (const p of uncited) {
     const c = document.createElement("button");
     c.type = "button";
@@ -1898,6 +1922,7 @@ function send(text, replay = false, images = []) {
   if (!replay) {
     const body = bubble("user");
     body.textContent = text;
+    body.dataset.words = text;
     addTurnImages(body, images.map((im) => ({ src: im.data, name: im.name })));
   }
   const find = text.trim().match(/^\/find\s*(.*)$/);
@@ -1908,6 +1933,84 @@ function send(text, replay = false, images = []) {
     body: JSON.stringify({ text, ...(images.length ? { images } : {}),
                            ...(chatWorkspace ? { workspace: chatWorkspace } : {}) }),
   }), "working", () => send(text, true, images));
+}
+
+// --- the last turn asked again (ADR-0121 point 7) -----------------------------
+// "again" on the last answer, "edit" on the last question: both send the
+// question back through POST /turn/redo, which takes the old exchange out of
+// the conversation first. The last turn only, so only it carries the buttons.
+let editing = false;
+
+function markLastTurn() {
+  for (const b of log.querySelectorAll(".redo-btn, .edit-btn")) b.remove();
+  const users = log.querySelectorAll(".msg.user");
+  const user = users[users.length - 1];
+  const words = user?.querySelector(".body")?.dataset.words ?? "";
+  // A direct command is answered without the model, /find never reaches the
+  // server's history, and a drop still being read has no turn there yet.
+  if (!user || words.trim().startsWith("/") || user.querySelector(".body[data-drop]")) return;
+  const answer = user.nextElementSibling;
+  if (answer?.classList.contains("silica")) {
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "copy-btn redo-btn";
+    again.textContent = "again";
+    again.title = "ask the same question again; this answer leaves the conversation";
+    again.addEventListener("click", () => redoLast(null));
+    const body = answer.querySelector(".body");
+    (body.querySelector(":scope > .ledger") || body).appendChild(again);
+  }
+  if (words.trim()) {
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "copy-btn edit-btn";
+    edit.textContent = "edit";
+    edit.title = "change this question; sending it replaces the question and its answer";
+    edit.addEventListener("click", () => {
+      if (streaming) return;
+      editing = true;
+      input.value = words;
+      autoGrow(input);
+      input.focus();
+      input.setSelectionRange(words.length, words.length);
+      user.classList.add("editing");
+      notify("editing your last question: send replaces it, Esc keeps it", "info");
+    });
+    user.querySelector(".body").after(edit);
+  }
+}
+
+function endEditing() {
+  editing = false;
+  for (const el of log.querySelectorAll(".msg.user.editing")) el.classList.remove("editing");
+}
+
+function redoLast(words) {
+  if (streaming) return;
+  const users = log.querySelectorAll(".msg.user");
+  const user = users[users.length - 1];
+  if (!user) return;
+  endEditing();
+  // The old answer leaves the page as it leaves the conversation; an edited
+  // question gets a new bubble, the files it carried going with it.
+  while (user.nextElementSibling) user.nextElementSibling.remove();
+  let body = user.querySelector(".body");
+  if (words !== null) {
+    const files = user.querySelector(":scope > .msg-files");
+    user.remove();
+    body = bubble("user");
+    body.textContent = words;
+    body.dataset.words = words;
+    if (files) body.after(files);
+  } else {
+    lastUserBody = body;
+  }
+  const go = () => runTurn(fetch("/turn/redo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(words === null ? {} : { text: words }),
+  }), "working", go);
+  go();
 }
 
 // /find bypasses the agent entirely — same "direct tool, no LLM" pattern as
@@ -2041,6 +2144,8 @@ $("#composer").addEventListener("submit", (e) => {
   renderHighlight();           // …and clear the bands with it
   clearDraft();                // sent or queued, it is no longer a draft
   if (streaming) { queueMessage(t); syncSend(); return; } // the field is empty again: the button is stop
+  if (editing && !staged.length && t.trim() && !t.trim().startsWith("/")) { redoLast(t.trim()); return; }
+  endEditing();
   // Images alone ride the turn as pixels the model sees (ADR-0077); anything
   // else, or an explicit /nucleate, is uploaded and staged into the vault.
   if (staged.length && stagedAreImages() && !t.trim().startsWith("/")) lookStaged(t);
@@ -2286,6 +2391,11 @@ input.addEventListener("keydown", (e) => {
     e.preventDefault();
     $("#composer").requestSubmit();
     box.hidden = true;
+  } else if (e.key === "Escape" && editing) {
+    e.preventDefault();
+    input.value = "";
+    autoGrow(input);
+    endEditing();
   }
 });
 

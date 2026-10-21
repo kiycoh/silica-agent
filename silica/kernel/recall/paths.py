@@ -825,6 +825,26 @@ def to_vault_relative(path: str, *, ensure_md: bool = True) -> str:
     return rel
 
 
+# Where a chat keeps the files attached to it (ADR-0121 point 5): hidden, so no
+# walk lists it, and inside the vault, so the read tools reach it. Not
+# `.silica/chat`: with the vault at $HOME that is the config dir those tools refuse.
+CHAT_DIR = ".silica-chat"
+
+
+def chat_folder(session: str) -> str:
+    """A chat's folder, vault-relative, inside the write boundary: a vault that
+    writes only under docs/silica (a repository) gets no folder at its root."""
+    from silica.kernel.vault_manifest import active_write_dir
+
+    base = active_write_dir().strip("/")
+    return f"{base}/{CHAT_DIR}/{session}" if base else f"{CHAT_DIR}/{session}"
+
+
+def is_chat_path(path: str) -> bool:
+    """True for a vault-relative path inside a chat's folder of attached files."""
+    return CHAT_DIR in Path(path).parts[:-1]
+
+
 def is_inbox_path(path: str) -> bool:
     """True when a vault-relative path sits anywhere under an inbox root
     (case-insensitive). The inbox is staging, never a write or merge target —

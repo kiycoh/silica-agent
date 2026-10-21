@@ -1056,7 +1056,9 @@ def _turn_kind(text: str) -> str:
     return word[1:] if any(c.name == word for c in COMMANDS) else "slash"
 
 
-async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str = "") -> AsyncIterator[dict]:
+async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
+                   withhold: "Sequence[str]" = (), files: "Sequence[dict]" = (), said: str = "",
+                   prebuilt: dict | None = None) -> AsyncIterator[dict]:
     """One agent turn as a stream of transport-neutral wire dicts.
 
     Yields `event_to_json(...)` dicts as the agent streams, then exactly one
@@ -1069,6 +1071,11 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
     (the consumer stops iterating — a dropped SSE/WS client) the worker keeps
     running, so we signal cancel and defer the release to the worker's exit, so
     no second turn overlaps a zombie still mutating `messages`.
+
+    ADR-0121: `withhold` names tools this turn is not offered (a turn that
+    brings attached files in is not offered the injector, point 3); `files` and
+    `said` ride the user message for the bubble a reload draws (point 4);
+    `prebuilt` is a stored user message asked again as it was (POST /turn/redo).
     """
     from silica.cli import _compact_context, _expand_web_turn, _update_context_tokens
 
@@ -1229,12 +1236,22 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         msg: dict[str, Any] = {"role": "user", "content": agent_msg}
         if text.startswith("/"):
             msg["origin"] = "cli"
+        if files:
+            msg["silica_files"] = list(files)
+        if said:
+            msg["silica_said"] = said
+        if prebuilt is not None:
+            msg = prebuilt
         ws = await asyncio.to_thread(_resolve_workspace, workspace)
         await asyncio.to_thread(_apply_workspace, ws)
         if ws is not None:
             msg["silica_workspace"] = ws["path"]   # the scope this turn ran in
         messages.append(msg)
         _narrate_user_turn(msg)
+        if msg.get("silica_files"):
+            # The bubble's file chips, with what "add to vault" needs (ADR-0121
+            # point 4): the page only knew the names it uploaded.
+            yield {"type": "files", "files": await asyncio.to_thread(_files_shown, msg["silica_files"])}
         if images:
             from silica.agent import vision
             if vision.separate():
@@ -1266,7 +1283,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                 # names are summoned back exactly as in the terminal.
                 constraints=(
                     web_turn_constraints() if web
-                    else AgentConstraints(tools=chat_tools(messages),
+                    else AgentConstraints(tools=tuple(n for n in chat_tools(messages) if n not in withhold),
                                           deferred=chat_deferred(messages), interactive=True)
                 ),
             )
@@ -1385,7 +1402,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             _end_turn()  # normal / error / early-return: free now
 
 
-def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str = "") -> StreamingResponse:
+def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str = "",
+                   **extra: Any) -> StreamingResponse:
     """One agent turn as an SSE stream. Caller must claim the slot via
     `_begin_turn()` first; `_sweep_if_orphaned` frees it if the body never runs."""
 
@@ -1398,7 +1416,7 @@ def _turn_response(text: str, attachments: "Sequence[Path]" = (), workspace: str
         flaggable = hosted()
         sid0 = current_session_id
         seq0 = await asyncio.to_thread(_session_head, sid0) if flaggable else 0
-        async for item in run_turn(text, attachments, workspace):
+        async for item in run_turn(text, attachments, workspace, **extra):
             if flaggable and item.get("type") == "done":
                 turn = await asyncio.to_thread(_turn_since, sid0, seq0)
                 if turn:
@@ -1762,6 +1780,15 @@ async def chat(payload: dict):
     if queued is not None:
         _end_turn()
         return JSONResponse(queued, status_code=202)
+    if current_session_id and text.strip() and not text.startswith("/"):
+        # A file read after its drop got no turn joins this message (ADR-0121
+        # point 4): otherwise "this paper" names nothing the chat was given.
+        joined = await asyncio.to_thread(jobs.join_next, current_session_id)
+        if joined:
+            notes, files, earlier = joined
+            composed = await asyncio.to_thread(_compose_nucleate_turn, text, notes, [], earlier=earlier)
+            return _turn_response(composed, attachments, workspace,
+                                  withhold=WITHHELD_WITH_FILES, files=files, said=text)
     return _turn_response(text, attachments, workspace)
 
 
@@ -1917,7 +1944,7 @@ async def _write_stream(chunks, dest: Path, cap: int, too_big: str) -> None:
         raise
 
 
-async def _stage_uploads(files: list[UploadFile], **job: Any
+async def _stage_uploads(files: list[UploadFile], folder: str | None = None, **job: Any
                          ) -> tuple[list[str], list[str], list[tuple[str, str]], list[dict]]:
     """Write uploads to Inbox and mechanically stage them, mirroring the inline
     half of `/nucleate` (silica/cli.py): code/notebooks become skeleton stubs,
@@ -1928,6 +1955,9 @@ async def _stage_uploads(files: list[UploadFile], **job: Any
     (`job` carries the drop's text and session into each). The semantic step
     (nucleate? summarize?) is the agent's, driven by the user's message: see
     `_compose_nucleate_turn`.
+
+    `folder`, vault-relative, takes the place of the inbox: a chat's drop is
+    written to the chat's own folder (ADR-0121 point 5).
 
     A conversion never runs here (ADR-0099 point 1): a lecture's transcription
     outlasts the edge's 125 s, and a restart lost it without a trace. stage()
@@ -1954,7 +1984,7 @@ async def _stage_uploads(files: list[UploadFile], **job: Any
     # docs/silica. "Inbox" stands in when SILICA_INBOX_DIR switches the inbox
     # off, because a drop still needs a folder and that one is composed too.
     vault = CONFIG.vault_path or "."
-    inbox_rel = resolve_inbox_dir(vault, active_write_dir(), CONFIG.inbox_dir or "Inbox")
+    inbox_rel = folder or resolve_inbox_dir(vault, active_write_dir(), CONFIG.inbox_dir or "Inbox")
     inbox = Path(vault) / inbox_rel
     inbox.mkdir(parents=True, exist_ok=True)
     enabled = get_active_manifest().sources
@@ -2087,19 +2117,47 @@ DROP_ASK = ("I attached the file(s) below without saying what I want. Do not nuc
             "on it, a guided /learn path).")
 _DROP_OUTLINE_HEADINGS = 8
 
+# The two turns a read file offers besides its question (ADR-0121 point 6),
+# composed like "Nucleate it" and drawn as the label the bubble shows.
+SUMMARIZE_ASK = ("Summarize the attached file(s): the main points and findings, "
+                 "in a few short sections, from the file's own text.")
+QUIZ_ASK = ("Quiz me on the attached file(s): one question at a time, wait for my answer, "
+            "then say whether it is right and why, from the file's text.")
 
-def _drop_outline(rel: str) -> str:
+# A turn that brings attached files in is not offered the injector (ADR-0121
+# point 3): the 9B called it for a question about an 80-word file, against the
+# DROP_ASK sentence a drop with no words already carries. "Nucleate it" keeps it.
+WITHHELD_WITH_FILES = ("silica_run_injector",)
+
+# How much of the attached files' text rides the turn (ADR-0121 point 2):
+# about 6,000 tokens, a fifth of the hosted 32k window, which a verbale or a
+# short paper fits and a 317-page textbook (t03) does not.
+_INLINE_CHARS = 24_000
+
+# Where the words the student typed end in a composed turn: what follows is
+# the manifest the model reads and the bubble never shows (ADR-0121 point 4).
+MANIFEST_MARK = "\n\n---\nAttached files"
+
+
+def _attached_text(rel: str) -> str | None:
+    from silica.config import CONFIG
+
+    try:
+        return (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        # The manifest still names the file; without its text or outline the
+        # model reads it, which is the cost this saves and not a wrong answer.
+        return None
+
+
+def _drop_outline(rel: str, md: str | None = None) -> str:
     """"~N words; sections: a; b; ..." for a staged note, so DROP_ASK is
     answered from the manifest and not by reading a whole textbook into the
     context (the t03 PDF was 317 pages)."""
-    from silica.config import CONFIG
     from silica.kernel.outline import source_headings
 
-    try:
-        md = (Path(CONFIG.vault_path) / rel).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        # The manifest still names the file; without its outline the model
-        # reads it, which is the cost this saves and not a wrong answer.
+    md = _attached_text(rel) if md is None else md
+    if md is None:
         return ""
     heads = source_headings(md)
     more = f" (+{len(heads) - _DROP_OUTLINE_HEADINGS} more)" if len(heads) > _DROP_OUTLINE_HEADINGS else ""
@@ -2110,27 +2168,61 @@ def _drop_outline(rel: str) -> str:
 def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
                            mail: Sequence[str] = (),
                            skipped: Sequence[tuple[str, str]] = (),
-                           converting: Sequence[str] = ()) -> str:
+                           converting: Sequence[str] = (),
+                           earlier: str = "", inline: bool = True) -> str:
     """The agent turn for a batch of attached files: the user's instruction plus
-    a factual manifest of what got staged. Empty instruction: DROP_ASK, with
-    each ready file's outline so the description needs no read."""
+    a factual manifest of what got staged. Empty instruction: DROP_ASK.
+
+    Each ready file's text goes in whole while the total fits _INLINE_CHARS
+    (ADR-0121 point 2), so a question about a short file needs no tool call;
+    one that does not fit is named with its outline and read first. `earlier`
+    is the question a drop asked when its file joins a later message (point
+    4); `inline` is off for "Nucleate it", whose injector reads the files."""
     asked = text.strip()
     lines: list[str] = []
+    if asked and asked not in (NUCLEATE_ASK, SUMMARIZE_ASK, QUIZ_ASK):
+        # The prompt's rule is the language of the person's latest message,
+        # and this message is mostly attached text: an Italian question on an
+        # English paper was answered in English (ADR-0121, the app run).
+        lines.append("Everything below this line is attached material, not the user's words: "
+                     "reply in the language of their words above it, whatever the files' language.")
+    if earlier.strip():
+        lines.append(f'With these files the user asked earlier: "{earlier.strip()}"')
     if ready:
         # Not "ready to nucleate": with those words a 9B nucleated a file it
-        # was asked a question about (ADR-0121 Context). The words above say
-        # what to do; NUCLEATE_ASK says nucleate when that is the request.
-        lines.append("Staged in the Inbox as Markdown, readable now:")
+        # was asked a question about (ADR-0121 Context).
+        lines.append("Attached to this message by the user. The message is about these files: answer "
+                     "from them, and search the rest of the vault only when the message asks for that:"
+                     if inline else "Copied into the Inbox, to nucleate:")
+        budget = _INLINE_CHARS if inline else 0
         for p in ready:
-            outline = "" if asked else _drop_outline(p)
-            lines.append(f"- {p}" + (f" ({outline})" if outline else ""))
+            md = _attached_text(p)
+            if md is not None and len(md) <= budget:
+                budget -= len(md)
+                lines.append(f"- {p} (~{len(md.split())} words), its text:\n<file path=\"{p}\">\n"
+                             f"{md.strip()}\n</file>")
+                continue
+            outline = _drop_outline(p, md) if md is not None else ""
+            # The whole path in the call: a chat's file is in no index, so a
+            # read by its name alone finds nothing (the app run, ADR-0121).
+            lines.append(f"- {p}" + (f" ({outline})" if outline else "")
+                         + (f': too long to include here, read it with silica_read(path="{p}") before answering'
+                            if inline else ""))
     if converting:
-        # Named so the answer does not read as if the files were lost: they
-        # are converting after this turn, and the page shows each one when it
-        # is ready (ADR-0099 point 6). The button is not named: told "offered
-        # with Nucleate it", the model told the student that button converts.
-        lines.append("Still converting into notes, each shown above the message box once it is ready:")
+        # Named so the answer does not read as if the files were lost: each is
+        # still being read and joins the conversation when it is ready
+        # (ADR-0121 points 1 and 4). Each by its path, with what can be read of
+        # it now (ADR-0099 amendment 2026-10-20). The button is not named: told
+        # "offered with Nucleate it", the model told the student that button converts.
+        lines.append("Still being read. Tell the user each one joins this chat once it is ready, "
+                     "and can then be summarized or asked about:")
         lines += [_converting_line(p) for p in converting]
+    if ready and inline:
+        # Said again last, where a small model weighs it: with the sentence
+        # only at the head, the 9B still ran ten vault searches for a question
+        # its attached text answered (ADR-0121, the app run).
+        lines.append("Answer from the attached text above. Do not search the vault unless the "
+                     "user's words ask about their own notes.")
     if stubs:
         lines.append("Code skeleton stubs already staged in the vault:")
         lines += [f"- {p}" for p in stubs]
@@ -2145,7 +2237,7 @@ def _compose_nucleate_turn(text: str, ready: list[str], stubs: list[str],
         lines.append("Not staged, or staged in part, each with the reason. Tell the user which files and why:")
         lines += [f"- {n}: {why}" for n, why in skipped]
     manifest = "\n".join(lines) if lines else "(no files could be staged)"
-    return f"{asked or DROP_ASK}\n\n---\nAttached files:\n{manifest}"
+    return f"{asked or DROP_ASK}{MANIFEST_MARK}:\n{manifest}"
 
 
 def _converting_line(rel: str) -> str:
@@ -2162,20 +2254,11 @@ def _converting_line(rel: str) -> str:
     This read is the one silica_read makes (`vision=0`, one cache key), so it
     moves that cost before the turn rather than adding one; it names the
     pages the layer lacks, so an answer that needs them says so."""
-    from silica.config import CONFIG
     from silica.sources import pdf_extract
 
     later = f"- {rel}: not readable until it is converted; tell the user so"
-    if not rel.lower().endswith(".pdf"):
-        return later
-    try:
-        data = pdf_extract.read(Path(CONFIG.vault_path or ".") / rel, vision=0)
-    except Exception:
-        # Tolerated: a PDF the reader refuses (a password, a malformed file, a
-        # child that died) is the conversion's to report, and how it ended
-        # reaches the next turn (jobs.settled). Until then it is a file still
-        # converting, which is all this line said before.
-        logger.warning("drop: the text layer of %s was not read", rel, exc_info=True)
+    data = _text_layer(rel)
+    if data is None:
         return later
     n, no_text, math = data["n_pages"], data["no_text"], data["math"]
     look = f'silica_look(image="{rel}", question=...), which finds the pages by its words, or with page=N'
@@ -2196,44 +2279,306 @@ def _converting_line(rel: str) -> str:
     return line
 
 
+def _text_layer(rel: str) -> dict | None:
+    """A dropped PDF's text layer, read as silica_read reads it; None for any
+    other file and for a PDF the reader refuses."""
+    from silica.config import CONFIG
+    from silica.sources import pdf_extract
+
+    if not rel.lower().endswith(".pdf"):
+        return None
+    try:
+        return pdf_extract.read(Path(CONFIG.vault_path or ".") / rel, vision=0)
+    except Exception:
+        # Tolerated: a PDF the reader refuses (a password, a malformed file, a
+        # child that died) is the conversion's to report, and how it ended
+        # reaches the next turn (jobs.settled). Until then it is a file still
+        # converting, which is all the drop's line said before.
+        logger.warning("drop: the text layer of %s was not read", rel, exc_info=True)
+        return None
+
+
+def _readable_now(rel: str) -> bool:
+    """A PDF with text on some page: its question need not wait for it."""
+    data = _text_layer(rel)
+    return data is not None and len(data["no_text"]) < data["n_pages"]
+
+
 @app.post("/nucleate", dependencies=_SAME_ORIGIN)
 async def nucleate(files: list[UploadFile] = File(...), text: str = Form("")):
-    """A drop: the files into the Inbox, and the turn that acts on them.
+    """A drop: the files into the chat's own folder, and the turn that acts on them.
 
-    A file that needs convert() is a job (ADR-0099), so the answer never waits
-    on a conversion: the turn, when the drop has one, starts with the files
-    that were ready and names the ones still converting (point 6); the job ids
-    ride the `X-Silica-Jobs` header. A drop of only such files and no words
-    has no turn yet, and answers 202 with the jobs: each finished one offers
-    the turn instead of starting it."""
+    The files are the chat's, not the vault's (ADR-0121 point 5): written to
+    `.silica-chat/<session>/`, which no walk lists, and copied into the Inbox
+    only when the student asks. So the session opens first, and a fresh one is
+    named now, after the words or the files: the chat then lists at once, and
+    each job shows in that chat only.
+
+    A file that needs convert() is a job (ADR-0099), so nothing here waits on
+    a conversion. A drop with words and a file still to convert starts no turn
+    (ADR-0121 point 1): it answers 202 with the jobs, and the page that holds
+    this chat asks the question once the drop's last job is done. A drop of
+    only such files and no words answers 202 too; each one, read, offers its
+    turns. Otherwise the turn starts with the files that were ready."""
     if not _begin_turn():
         raise HTTPException(status_code=409, detail="a turn is already in progress")
+    from silica.kernel.recall.paths import chat_folder
+    from silica.ui.web import jobs
+
     try:
-        ready, stubs, skipped, queued = await _stage_uploads(files, text=text, session=current_session_id)
+        fresh = not any(m.get("role") == "user" for m in messages)
+        sid = await asyncio.to_thread(_open_session) or uuid.uuid4().hex[:12]
+        names = [Path(f.filename or "").name for f in files]
+        if fresh:
+            title = (text.strip().splitlines() or [", ".join(names)])[0]
+            await asyncio.to_thread(_name_session, sid, title)
+        # dest_dir too: a converted PDF's pictures go to `<dest_dir>/Images`,
+        # which would otherwise be the vault's Inbox.
+        folder = chat_folder(sid)
+        ready, stubs, skipped, queued = await _stage_uploads(
+            files, folder=folder, text=text, session=sid, drop=uuid.uuid4().hex[:12], dest_dir=folder)
     except Exception:
         _end_turn()  # release the slot the staging never got to use
         raise
-    mail = [Path(f.filename or "").name for f in files if _is_mail(Path(f.filename or "").name)]
-    if queued and not (text.strip() or ready or stubs):
+    mail = [n for n in names if _is_mail(n)]
+    # The question waits for its files (ADR-0121 point 1) but not for a PDF
+    # with a text layer, which this turn reads while it converts (ADR-0099
+    # amendment 2026-10-20). A drop waits whole when one file must: its
+    # question is asked once, with all of them (the amendment's recommendation).
+    now = [j for j in queued if text.strip() and await asyncio.to_thread(_readable_now, j["source"]["path"])]
+    waits = bool(text.strip()) and len(now) < len(queued)
+    if queued and (waits or not (ready or stubs or now)):
+        # The ready files of the same drop ride its question when it is asked.
+        await asyncio.to_thread(jobs.annotate, [j["id"] for j in queued], beside=ready)
         _end_turn()
-        return JSONResponse({"jobs": queued, "mail": mail,
+        return JSONResponse({"jobs": queued, "waits": waits, "mail": mail, "session": sid,
                              "skipped": [{"name": n, "reason": why} for n, why in skipped]},
                             status_code=202)
-    ids = [j["id"] for j in queued]
-    if ids and current_session_id is None:
-        # The turn opens the chat's session, after the jobs were written:
-        # opened here first, so a job shows on the chat it was dropped into.
-        from silica.ui.web import jobs
-
-        jobs.annotate(ids, session=_open_session())
-    # A thread: with no words the manifest reads each staged note for its
-    # outline, and a textbook read on the loop thread blocks /stop.
+    if now:
+        # Before the turn: a short PDF can be converted before it ends.
+        # Answered: the page would ask the drop's question again once the note
+        # is written. Not told: the next turn hears of the note (jobs.settled).
+        await asyncio.to_thread(jobs.annotate, [j["id"] for j in now], answered=True)
+    files_said = [_file_entry(p) for p in ready] + [_file_entry(j["source"]["path"], job=j["id"]) for j in queued]
+    # A thread: the manifest reads each staged note, and a textbook read on
+    # the loop thread blocks /stop.
     resp = _turn_response(await asyncio.to_thread(
         _compose_nucleate_turn, text, ready, stubs, mail, skipped,
-        converting=[j["source"]["path"] for j in queued]))
-    if ids:
-        resp.headers["X-Silica-Jobs"] = ",".join(ids)
+        converting=[j["source"]["path"] for j in queued]),
+        withhold=WITHHELD_WITH_FILES, files=files_said, said=text.strip())
+    if queued:
+        resp.headers["X-Silica-Jobs"] = ",".join(j["id"] for j in queued)
     return resp
+
+
+def _name_session(sid: str, title: str) -> None:
+    """A chat named by its drop (ADR-0121 point 1): a session with no turn yet
+    is unlisted, and a deferred question has none until its file is read."""
+    from silica.agent import narration as _narr
+
+    title = title.strip()
+    _narr.rename_session(sid, title[:57] + "…" if len(title) > 58 else title, CONFIG.vault_path or "")
+
+
+def _file_entry(source: str, notes: Sequence[str] | None = None, job: str = "") -> dict:
+    """One file as a user message carries it (`silica_files`, ADR-0121 point
+    4): its name, the file the student gave, the notes the model reads, and
+    the job converting it when the notes are not written yet."""
+    out: dict[str, Any] = {"name": Path(source).name, "source": source,
+                           "notes": list(notes) if notes is not None else ([] if job else [source])}
+    if job:
+        out["job"] = job
+    return out
+
+
+_EMBED_RE = re.compile(r"!\[\[([^\]|#]+)|!\[[^\]]*\]\(([^)\s]+)\)")
+
+
+def _chat_rel(rel: str, sid: str | None = None) -> tuple[str, str]:
+    """(the chat folder, the rest of the path) for a file of a chat's folder;
+    with `sid`, only of that chat. Anything else is refused: these routes copy
+    what the browser names, and it names only its own chat's files."""
+    from silica.kernel.recall.paths import CHAT_DIR
+
+    parts = Path(rel).parts
+    at = parts.index(CHAT_DIR) if CHAT_DIR in parts else -1
+    if (at < 0 or len(parts) < at + 3 or ".." in parts or Path(rel).is_absolute()
+            or (sid is not None and parts[at + 1] != sid)):
+        raise HTTPException(400, "that is not a file of this chat")
+    return "/".join(parts[:at + 2]), "/".join(parts[at + 2:])
+
+
+def _inbox_rel() -> str:
+    from silica.kernel.vault_manifest import active_write_dir, resolve_inbox_dir
+
+    return resolve_inbox_dir(CONFIG.vault_path or ".", active_write_dir(), CONFIG.inbox_dir or "Inbox")
+
+
+def _add_to_vault(notes: Sequence[str], sources: Sequence[str] = ()) -> list[str]:
+    """Copy a chat's files into the Inbox (ADR-0121 point 5), where they are
+    what a drop wrote before files belonged to their chat: the file at
+    `<inbox>/<name>`, its notes beside it, the pictures they embed under
+    `<inbox>/Images`. Returns the notes' Inbox paths, in order.
+
+    A copy, not a move: the chat's history names the chat's paths, and a turn
+    asked again reads them there. A file the Inbox already has with other
+    bytes is refused rather than overwritten, since it may be another file
+    of the same name the student put there."""
+    import filecmp
+    import shutil
+
+    from silica.driver import DRIVER
+    from silica.kernel.write.preserve import Loss
+
+    vault = Path(CONFIG.vault_path or ".")
+    inbox = _inbox_rel()
+    moved: dict[str, str] = {}
+    for rel in dict.fromkeys(sources):
+        if rel in notes:
+            continue
+        _, rest = _chat_rel(rel)
+        src, dst = vault / rel, vault / inbox / rest
+        if dst.exists() and not filecmp.cmp(src, dst, shallow=False):
+            raise HTTPException(409, f"the Inbox already has a different file named {dst.name}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if not dst.exists():
+            shutil.copy2(src, dst)
+        moved[str(src)] = str(dst)
+    out: list[str] = []
+    for rel in notes:
+        chat, rest = _chat_rel(rel)
+        dst_rel = f"{inbox}/{rest}"
+        if not rel.endswith(".md"):
+            (vault / dst_rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(vault / rel, vault / dst_rel)
+            out.append(dst_rel)
+            continue
+        text = (vault / rel).read_text(encoding="utf-8", errors="replace")
+        for old, new in moved.items():   # source_file names the file it came from
+            text = text.replace(old, new)
+        DRIVER.upsert(dst_rel, text, loss=Loss.STAGED)
+        out.append(dst_rel)
+        for m in _EMBED_RE.finditer(text):
+            pic = vault / chat / "Images" / Path(m[1] or m[2]).name
+            if pic.is_file():
+                (vault / inbox / "Images").mkdir(parents=True, exist_ok=True)
+                shutil.copy2(pic, vault / inbox / "Images" / pic.name)
+    return out
+
+
+@app.post("/chat/files/add", dependencies=_SAME_ORIGIN)
+async def chat_file_add(payload: dict):
+    """"add to vault" on a file of the open chat (ADR-0121 point 5): the file
+    and its notes copied into the Inbox, with no agent turn. The notes are
+    the job's when the file was converted, else the file itself."""
+    from silica.ui.web import jobs
+
+    source = str(payload.get("source") or "")
+    _chat_rel(source, current_session_id or "")
+    notes = [source]
+    vault = CONFIG.vault_path or ""
+    done = [r for r in jobs._all() if r.get("vault") == vault and r["source"].get("path") == source
+            and r.get("state") == "done" and r.get("notes")]
+    if done:
+        notes = done[-1]["notes"]
+    elif not source.endswith((".md", ".txt", ".markdown")):
+        raise HTTPException(409, "that file is still being read")
+    if not _begin_turn():   # the one serialisation of vault writes (see /vault/import)
+        raise HTTPException(409, "a turn is running: add it when it ends")
+    try:
+        added = await asyncio.to_thread(_add_to_vault, notes, [source])
+    finally:
+        _end_turn()
+    return {"notes": added}
+
+
+def _files_shown(files: Any) -> list[dict]:
+    """A user message's files as the bubble draws them (ADR-0121 point 4):
+    each with whether the Inbox has it, and a converted file's notes filled
+    in from its job when the message went out before they were written."""
+    from silica.ui.web import jobs
+
+    out = []
+    if not isinstance(files, list):
+        return out
+    vault = Path(CONFIG.vault_path or ".")
+    inbox = _inbox_rel()
+    for f in files:
+        if not isinstance(f, dict) or not f.get("source"):
+            continue
+        f = dict(f)
+        if not f.get("notes") and f.get("job"):
+            rec = jobs.read(f["job"]) if jobs._ID.fullmatch(str(f["job"])) else None
+            f["notes"] = (rec or {}).get("notes") or []
+        try:
+            _, rest = _chat_rel(f["source"])
+            # By size too: another file of the same name in the Inbox is not
+            # this one, and "add to vault" refuses to overwrite it.
+            mine, there = vault / f["source"], vault / inbox / rest
+            f["in_vault"] = there.is_file() and mine.is_file() and there.stat().st_size == mine.stat().st_size
+        except (HTTPException, OSError):
+            f["in_vault"] = False
+        out.append(f)
+    return out
+
+
+def _edited(content: str, words: str) -> str:
+    """A stored user message with its typed words replaced (POST /turn/redo):
+    the manifest and the images stay, the named notes follow the new words."""
+    from silica.agent.mentions import named_notes, strip
+
+    base = strip(content)
+    cuts = [i for i in (base.find(MANIFEST_MARK), base.find("\n\n[image attached: ")) if i >= 0]
+    rest = base[min(cuts):] if cuts else ""
+    block = named_notes(words)
+    if block:
+        at = rest.find("\n\n[image attached: ")
+        rest = rest + "\n\n" + block if at < 0 else rest[:at] + "\n\n" + block + rest[at:]
+    return words + rest
+
+
+@app.post("/turn/redo", dependencies=_SAME_ORIGIN)
+async def redo_turn(payload: dict | None = None):
+    """Ask the last question again (ADR-0121 point 7): regenerate, or with
+    `text`, edit it. The last user message and everything after it leave the
+    conversation, here and in the narration (a `chat/rewind` beat that replay
+    folds the same way), and the message runs again as it was stored, with its
+    files and its scope.
+    ponytail: the last turn only; an earlier question is a rewind by ordinal,
+    due when a student asks to edit one."""
+    global _collapsed
+    from silica.agent import narration as _narr
+
+    words = (payload or {}).get("text")
+    if not _begin_turn():
+        raise HTTPException(status_code=409, detail="a turn is already in progress")
+    try:
+        at = max((k for k, m in enumerate(messages) if m.get("role") == "user"), default=-1)
+        if at < 0:
+            raise HTTPException(409, "there is no question to ask again")
+        msg = dict(messages[at])
+        content = msg.get("content")
+        if isinstance(content, list):   # an image turn cut short: its text part
+            content = next((p.get("text") for p in content if p.get("type") == "text"), "")
+        if not isinstance(content, str) or content.startswith("/"):
+            # A direct command answered without the model has nothing to redo.
+            raise HTTPException(409, "a command runs again by typing it")
+        if words is not None:
+            words = str(words).strip()
+            if not words:
+                raise HTTPException(400, "an edited question needs words")
+            content = await asyncio.to_thread(_edited, content, words)
+            if "silica_said" in msg or msg.get("silica_files"):
+                msg["silica_said"] = words
+        msg["content"] = content
+        del messages[at:]
+        _collapsed = {c for c in _collapsed if c < at}
+        _narr.NARRATOR.narrate(_narr.REWIND, "done", "asked again", {}, parent=None)
+    except BaseException:
+        _end_turn()
+        raise
+    withhold = WITHHELD_WITH_FILES if msg.get("silica_files") and not content.startswith(NUCLEATE_ASK) else ()
+    return _turn_response(content, workspace=msg.get("silica_workspace") or "", withhold=withhold, prebuilt=msg)
 
 
 @app.post("/vault/import", dependencies=_SAME_ORIGIN)
@@ -4742,7 +5087,17 @@ def get_messages():
             content = strip(content)
         if m["role"] == "user" and isinstance(content, str) and "[image attached: " in content:
             content, images = _attached_images(content)
-        data.append({"role": m["role"], "content": content, "tools": tools,
+        files: list[dict] = []
+        if m["role"] == "user":
+            # The words the student typed, never the manifest the model reads
+            # (ADR-0121 point 4); a chat saved before that cuts at the same mark.
+            if isinstance(m.get("silica_said"), str):
+                content = m["silica_said"]
+            elif isinstance(content, str) and MANIFEST_MARK in content:
+                content = content.split(MANIFEST_MARK, 1)[0]
+                content = "" if content == DROP_ASK else content
+            files = _files_shown(m.get("silica_files"))
+        data.append({"role": m["role"], "content": content, "tools": tools, "files": files,
                      "thinking": thinking, "images": images,
                      "notes": turn_notes.of(m) if m["role"] == "assistant" else [],
                      "html": _linkify(content, resolve, remote_images=False) if content else ""})
@@ -4954,6 +5309,16 @@ def delete_session(payload: dict):
         raise HTTPException(status_code=409, detail=str(e)) from None
     if not ok:
         raise HTTPException(status_code=404, detail="no such session")
+    # The chat's attached files go with it (ADR-0121 point 5); a copy the
+    # student added to the vault stays, being the vault's now.
+    import shutil
+
+    from silica.kernel.recall.paths import chat_folder
+
+    # Tolerated: a chat that never had a file has no folder, and a file the
+    # system will not remove stays behind a deletion that already happened
+    # (the narration is gone); it is hidden, and no walk lists it.
+    shutil.rmtree(Path(CONFIG.vault_path or ".") / chat_folder(sid), ignore_errors=True)
     return {"ok": True}
 
 
@@ -4978,12 +5343,16 @@ def _session_beats(sid: str) -> list[dict]:
 
 def _user_turn_seqs(beats: list[dict]) -> list[int]:
     """The seqs of the user `turn` beats, in file order."""
+    from silica.agent.narration import REWIND
+
     out = []
     for b in beats:
         p = b.get("payload")
         m = p.get("message") if isinstance(p, dict) else None
         if b.get("kind") == "turn" and isinstance(m, dict) and m.get("role") == "user" and b.get("seq"):
             out.append(b["seq"])
+        elif b.get("kind") == REWIND and out:
+            out.pop()   # the question asked again left the conversation (ADR-0121 point 7)
     return out
 
 

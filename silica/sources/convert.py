@@ -69,7 +69,8 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextvars import ContextVar
 from glob import escape as glob_escape, glob
 from html.parser import HTMLParser
 from pathlib import Path
@@ -339,6 +340,12 @@ def convert(target: str, dest_dir: str = "", leaf: tuple[str, dict] | None = Non
     return _doc_to_md(target, dest_dir, leaf)
 
 
+# Set by the job worker around one convert() (ADR-0121 point 1): called with
+# (pages read, pages to read) while the chat model reads a PDF's pages, the one
+# slow part of a conversion that knows how far it is.
+PAGE_PROGRESS: ContextVar[Callable[[int, int], None] | None] = ContextVar("page_progress", default=None)
+
+
 def _note_dir(src: Path, inbox: str) -> str:
     """The folder a converted note goes to: the source's own folder when the
     source sits under the inbox, else the inbox itself.
@@ -352,8 +359,19 @@ def _note_dir(src: Path, inbox: str) -> str:
     collide; the upgrade is the same rule against the vault root, due when a
     /convert of a library reports it.
     """
+    vault = Path(CONFIG.vault_path or ".").resolve()
     try:
-        root = (Path(CONFIG.vault_path or ".") / inbox).resolve()
+        # A file attached to a chat (ADR-0121 point 5) converts beside itself,
+        # inside its chat's folder, never into the inbox it was kept out of.
+        from silica.kernel.recall.paths import is_chat_path
+
+        rel = src.resolve().relative_to(vault)
+        if is_chat_path(rel.as_posix()):
+            return rel.parent.as_posix()
+    except (ValueError, OSError):
+        pass
+    try:
+        root = (vault / inbox).resolve()
         rel = src.resolve().parent.relative_to(root)
     except (ValueError, OSError):
         return inbox
@@ -878,8 +896,11 @@ def _read_pages(data: dict, workdir: Path) -> None:
                 return None
 
         results: list[tuple[int, dict | None]] = []
+        report = PAGE_PROGRESS.get() or (lambda done, total: None)
+        report(0, len(pending))
         try:
             results.append((pending[0], one(pending[0])))
+            report(1, len(pending))
         except Exception as exc:
             # The first call alone decides whether the others go out: a model
             # without image input, or no model at all, fails every page the
@@ -890,7 +911,11 @@ def _read_pages(data: dict, workdir: Path) -> None:
                 from concurrent.futures import ThreadPoolExecutor
 
                 with ThreadPoolExecutor(max_workers=_PAGE_READERS, thread_name_prefix="pdf-page") as pool:
-                    results += zip(pending[1:], pool.map(guarded, pending[1:]))
+                    # In order, so a slow page holds the count back a little;
+                    # the calling thread is the one the job's PAGE_PROGRESS is set in.
+                    for i, reading in zip(pending[1:], pool.map(guarded, pending[1:])):
+                        results.append((i, reading))
+                        report(len(results), len(pending))
         for i, reading in results:
             if reading:
                 readings[i] = _page_reading_md(i + 1, reading, data.get("unit", "page"))

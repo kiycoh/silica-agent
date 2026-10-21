@@ -1242,6 +1242,11 @@ def _call_llm(
                     **kwargs, stream=True, stream_options={"include_usage": True}),
                 _LOCAL_LLM_TIMEOUT, model)
             for chunk in _stream:
+                if cancel is not None and cancel.is_set():
+                    # Nobody waits for this answer (the loop left on Stop):
+                    # leaving closes the stream, so the provider stops writing
+                    # it instead of finishing a reply no one reads (ADR-0121).
+                    return None
                 chunks.append(chunk)
                 try:
                     delta = chunk.choices[0].delta
