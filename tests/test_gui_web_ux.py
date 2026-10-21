@@ -392,8 +392,10 @@ def test_new_chat_is_a_labelled_row_heading_the_views():
     js = app_js()
     assert '$("#new-chat").addEventListener("click", newChat)' in js
     assert '$("#rail-new").addEventListener("click", newChat)' in js
-    # the wordmark left the drawer with ADR-0122; the landing keeps it
+    # the mark left the drawer with ADR-0122 and SILICA, the word alone, came
+    # back as its head (amendment 2026-10-22); the landing keeps the lockup
     assert 'id="brand-logo"' not in INDEX and "#brand-logo" not in js
+    assert '<span class="brand-word">SILICA' in _head()
     assert '<svg class="vh-mark"' in INDEX
 
 

@@ -40,7 +40,9 @@ def test_the_vault_states_its_size_on_the_landing_and_not_in_the_chrome():
     html = INDEX.read_text()
     rail = _block(html, '<aside id="sidebar">', "</aside>")
 
-    assert 'id="vault-chip"' in _head(html) and 'id="top-vname"' in _head(html)
+    assert 'id="vault-chip"' in _head(html) and "SILICA" in _head(html)
+    # the vault's name heads its menu since ADR-0122's amendment of 2026-10-22
+    assert 'id="vp-name"' in _block(html, '<div id="vp-head">', "</div>")
     assert 'id="top-counts"' not in html, "the counts are back in the chrome"
     # the rail's old board, by every name it had
     for dead in ("stat-grid", "stat-notes", "stat-links", "stat-clusters",
@@ -71,8 +73,9 @@ def test_the_notices_are_behind_the_chip_not_camped_in_the_rail():
     # ...and the broken-link count is in the same panel: one place for what
     # needs answering (audit P16)
     assert 'id="top-broken"' in panel
-    # the chip carries the count as words and goes quiet at zero
-    assert '$("#top-notices").textContent = n ?' in app_js()
+    # the count is the panel's; the head carries only the badge, and no words
+    assert 'id="vp-count"' in panel and "top-notices" not in html + app_js()
+    assert '#vault-chip:not([data-health="warn"]) .vdot' in app_css()
 
 
 def test_the_rail_holds_what_only_the_rail_can():
@@ -121,7 +124,7 @@ def test_a_pin_is_scoped_to_the_vault_it_was_made_in():
     """Switching vaults must not carry one vault's pins into another, so the
     storage key carries the path and a /vault switch re-reads it."""
     src = app_js()
-    assert 'return "pinned:" + ($("#top-vname").title || "");' in src
+    assert 'return "pinned:" + ($("#vp-name").title || "");' in src
     assert "if (path && path !== was) loadPins();" in src
 
 

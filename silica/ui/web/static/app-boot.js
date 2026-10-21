@@ -225,8 +225,8 @@ function closeHelpPanel(refocus = true) {
 function toggleHelpPanel() {
   if (!helpPanel.hidden) { closeHelpPanel(); return; }
   closeVaultPanel(false);
-  placeOverVault(helpPanel);
   helpPanel.hidden = false;
+  placeOverVault(helpPanel);
   helpBtn.setAttribute("aria-expanded", "true");
 }
 helpBtn.addEventListener("click", (e) => {

@@ -1293,8 +1293,8 @@ body.note-open #dock {
 }
 
 #dock {
-  /* unitless, because the mark's scale is their ratio; --open is the row's
-     own mark, .cp-presence in app-chat.css */
+  /* unitless, because the mark's scale is their ratio; --open is its size at
+     the head of the open row */
   --rest: 42;
   --open: 36;
   /* the disc at rest: the mark's box plus the shell's padding and border */
@@ -1377,6 +1377,8 @@ body.note-open #dock {
    the field's row equally above and below, so the shell is back at the
    composer's own height. */
 #dock .cp-presence {
+  flex-shrink: 0;
+  pointer-events: none;
   width: calc(var(--rest) * 1px);
   height: calc(var(--rest) * 1px);
   margin-block: calc((var(--field-row) - var(--rest) * 1px) / 2 * var(--unfold));

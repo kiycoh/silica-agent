@@ -1698,6 +1698,11 @@ const noteLabel = (path) =>
 // until the line opens them in place, so the live stream and the replay keep
 // building exactly what they built before. While the turn runs the line holds
 // the run line's spans, which work.js fills from the narration beats.
+// The mark in 2D where the run line's dot was (ADR-0048, amendment 2026-10-22),
+// its four pieces apart so each lights on its own (app-chat.css .rl-mark).
+// index.html's dock run line carries the same markup.
+const RUN_MARK = '<svg class="rl-mark" viewBox="0 0 256 256" aria-hidden="true" focusable="false"><path class="s0" d="M16 160 L96 160 L96 240 L16 240 Z"/><path class="s1" d="M16 112 L144 112 L144 240 L112 240 L112 144 L16 144 Z"/><path class="s2" d="M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z"/><path class="s3" d="M16 16 L240 16 L240 240 L208 240 L208 48 L16 48 Z"/></svg>';
+
 function makeLedger(msg, live) {
   const led = document.createElement("div");
   led.className = "ledger";
@@ -1708,7 +1713,7 @@ function makeLedger(msg, live) {
   btn.innerHTML = '<span class="lg-caret" aria-hidden="true">▸</span><span class="lg-sum"></span>';
   if (live) {
     btn.querySelector(".lg-sum").innerHTML = '<span class="run-line" data-state="live">'
-      + '<span class="rl-dot" aria-hidden="true"></span><span class="rl-verb">working</span>'
+      + RUN_MARK + '<span class="rl-verb">working</span>'
       + '<span class="rl-target"></span><span class="rl-elapsed"></span>'
       + '<span class="rl-pos"></span><span class="rl-stall"></span></span>';
   }

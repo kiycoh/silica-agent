@@ -762,12 +762,15 @@ function vaultOpener() {
 // From the drawer's head it opens downward over the drawer, from the head's
 // left: the vault moved from the foot to the head with ADR-0122, so down is
 // where the room is. From the rail it opens beside the rail, level with the
-// dot, and leaves the rail's icons in sight.
+// dot, and leaves the rail's icons in sight. Called once the panel is shown, in
+// the same task, so its width is measured before anything paints: on a 390 px
+// phone the rail's panel opened 10 px past the rail and ran off the right edge.
 function placeOverVault(panel) {
   const from = vaultOpener();
   const r = from.getBoundingClientRect();
   const beside = from.id === "rail-vault";
-  panel.style.left = Math.round(beside ? r.right + 10 : Math.max(8, r.left)) + "px";
+  const left = beside ? r.right + 10 : Math.max(8, r.left);
+  panel.style.left = Math.round(Math.max(8, Math.min(left, innerWidth - panel.offsetWidth - 8))) + "px";
   panel.style.top = Math.round(beside ? r.top : r.bottom + 6) + "px";
 }
 
@@ -778,22 +781,28 @@ function closeVaultPanel(refocus = true) {
   if (refocus) vaultOpener().focus(); // back to the opener: one focus contract for every panel (P9)
 }
 
-// The count rides the foot as words; with nothing to report the foot says only
-// the vault's name and the dot goes quiet.
+// The count is the panel's, beside "notices"; the drawer's head carries only
+// the badge on SILICA, and with nothing to report the badge goes.
 function setNoticeCount(n) {
   noticeCount = n;
-  $("#top-notices").textContent = n ? n + (n === 1 ? " notice" : " notices") : "";
   // "none" over listed information rows would contradict the rows below it.
   $("#vp-count").textContent = n ? String(n) : $("#boot-notices").childElementCount ? "" : "none";
   syncVaultDot();
+}
+
+// The account, stamped on a hosted tenant's page by the server (index()); a
+// local window has none and the row stays hidden.
+if (document.documentElement.dataset.user) {
+  $("#vp-email").textContent = document.documentElement.dataset.user;
+  $("#vp-user").hidden = false;
 }
 
 function toggleVaultPanel(e) {
   e.stopPropagation();
   if (!vaultPanel.hidden) { closeVaultPanel(); return; }
   closeHelpPanel(false);
-  placeOverVault(vaultPanel);
   vaultPanel.hidden = false;
+  placeOverVault(vaultPanel);
   vaultOpener().setAttribute("aria-expanded", "true");
   const first = vaultPanel.querySelector("button, summary, [href]");
   if (first) first.focus();

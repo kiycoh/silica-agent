@@ -1651,29 +1651,6 @@
   color: var(--accent);
 }
 
-/* The presence's second site (ADR-0048), at the head of the row: the mark,
-   fitted to 7/8 of its box like the landing's, so 36px of box is a mark about
-   31px tall (amendment 2026-10-21). The block margins make it the height of
-   every control beside it, so it centres at one row and stays on the bottom
-   edge once the field grows, the same rule they follow; the canvas itself stays
-   square because the shader draws a square. The dock's copy keeps a 42px box
-   and is scaled to this (app-panels.css). */
-.cp-presence {
-  flex-shrink: 0;
-  width: 36px;
-  height: 36px;
-  margin-block: calc((var(--field-row) - 36px) / 2);
-  margin-left: 2px;
-  pointer-events: none;
-}
-
-/* One mark on the screen: while the landing shows its lockup, the 36px copy
-   under it would be the same mark twice. display:none also stops its frames,
-   which the intersection observer in app-presence.js reports. */
-#view-chat:has(#log:empty) .cp-presence {
-  display: none;
-}
-
 :is(#attach, .mic) {
   background: transparent;
   color: var(--ash-dim);
@@ -2132,17 +2109,79 @@
   display: none;
 }
 
-.rl-dot {
+/* The run line's mark (ADR-0048, amendment 2026-10-22): the mark in 2D where
+   the dot was, at 16 px, the one size where every edge of its 16-unit grid
+   lands on a whole pixel. Each piece runs the same keyframes a little after the
+   one inside it, so a light leaves the seed and crosses the shells; --T is the
+   beat, quicker for a model call than for a tool, slow and amber once nothing
+   has arrived for STALL_S. CSS alone, no canvas and no frame loop: two of these
+   can be on screen for a whole turn, the ledger's and the dock's line. */
+.rl-mark {
+  --T: 1.05s;
+  --rl-seed: var(--accent);
+  --rl-lit: var(--mark-hot);
   flex-shrink: 0;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--accent);
+  width: 16px;
+  height: 16px;
+  shape-rendering: crispEdges;
 }
 
-.run-line[data-state="stalled"] .rl-dot {
-  background: var(--warn);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 14%, transparent);
+.rl-mark path {
+  fill: var(--frost);
+  opacity: 0.32;
+  animation: rl-shell var(--T) linear infinite;
+}
+
+.rl-mark .s0 {
+  fill: var(--rl-seed);
+  opacity: 1;
+  animation-name: rl-seed;
+}
+
+.rl-mark .s1 {
+  animation-delay: calc(var(--T) * 0.12);
+}
+
+.rl-mark .s2 {
+  animation-delay: calc(var(--T) * 0.24);
+}
+
+.rl-mark .s3 {
+  animation-delay: calc(var(--T) * 0.36);
+}
+
+.run-line[data-phase="acting"] .rl-mark {
+  --T: 1.7s;
+}
+
+.run-line[data-state="stalled"] .rl-mark {
+  --T: 4.5s;
+  --rl-seed: var(--warn);
+  --rl-lit: var(--warn);
+}
+
+@keyframes rl-seed {
+  0% { fill: var(--rl-seed); }
+  8% { fill: var(--rl-lit); }
+  30%, 100% { fill: var(--rl-seed); }
+}
+
+@keyframes rl-shell {
+  0% { fill: var(--frost); opacity: 0.32; }
+  10% { fill: var(--rl-lit); opacity: 1; }
+  38%, 100% { fill: var(--frost); opacity: 0.32; }
+}
+
+/* still, with the middle shell lit: the frame that says "working" without moving */
+@media (prefers-reduced-motion: reduce) {
+  .rl-mark path {
+    animation: none;
+  }
+
+  .rl-mark .s2 {
+    fill: var(--rl-lit);
+    opacity: 1;
+  }
 }
 
 .rl-verb {
@@ -2495,10 +2534,8 @@
   font-size: 11px;
 }
 
-.ledger .rl-dot {
+.ledger .rl-mark {
   align-self: center;
-  width: 6px;
-  height: 6px;
 }
 
 .ledger .rl-verb {
