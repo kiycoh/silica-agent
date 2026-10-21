@@ -783,7 +783,8 @@ function closeVaultPanel(refocus = true) {
 function setNoticeCount(n) {
   noticeCount = n;
   $("#top-notices").textContent = n ? n + (n === 1 ? " notice" : " notices") : "";
-  $("#vp-count").textContent = n ? String(n) : "none";
+  // "none" over listed information rows would contradict the rows below it.
+  $("#vp-count").textContent = n ? String(n) : $("#boot-notices").childElementCount ? "" : "none";
   syncVaultDot();
 }
 
@@ -821,9 +822,14 @@ async function loadHealth() {
   try {
     const rows = await (await fetch("/health")).json();
     box.innerHTML = "";
+    // `unknown` is the doctor's "could not tell", never "broken" (checks.py):
+    // listed as information, it neither counts nor turns the dot amber.
+    // Counted, a hosted provider nobody probes asked for attention on every load.
+    const warnings = () => box.querySelectorAll(".notice:not(.info)").length;
     for (const r of rows) {
+      const info = r.status === "unknown";
       const n = document.createElement("div");
-      n.className = "notice";
+      n.className = info ? "notice info" : "notice";
       const t = document.createElement("div");
       t.className = "notice-text";
       t.textContent = r.name + ": " + r.detail;
@@ -847,12 +853,12 @@ async function loadHealth() {
       x.className = "notice-x";
       x.setAttribute("aria-label", "dismiss this notice");
       x.textContent = "✕";
-      x.addEventListener("click", () => { n.remove(); setNoticeCount(box.childElementCount); });
+      x.addEventListener("click", () => { n.remove(); setNoticeCount(warnings()); });
       n.appendChild(x);
       box.appendChild(n);
-      announce(r.name + ": " + r.detail);
+      if (!info) announce(r.name + ": " + r.detail);
     }
-    setNoticeCount(rows.length);
+    setNoticeCount(warnings());
   } catch { /* the page works without the report; don't toast about the toast */ }
 }
 

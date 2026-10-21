@@ -496,7 +496,26 @@ class TestCheckLanguage:
         assert r.status == "ok"
         assert "language=italian" in r.detail
 
-    def test_mismatched_store_warns_and_suggests_cooccur(self, tmp_path, monkeypatch):
+    def test_a_store_against_a_declared_language_warns_and_suggests_cooccur(
+            self, tmp_path, monkeypatch):
+        import silica.kernel.recall.cooccurrence as cooc_mod
+        from silica.onboarding.checks import check_language
+
+        self._seed_italian_notes(tmp_path)
+        (tmp_path / "vault.yaml").write_text("cooccurrence_lang: italian\n", encoding="utf-8")
+        index_path = tmp_path / "cooc.json"
+        monkeypatch.setattr(cooc_mod, "_index_path_for", lambda vault: index_path)
+        self._store_with_lang(index_path, "english")
+
+        r = check_language(_cfg(vault_path=str(tmp_path)))
+        assert r.status == "warn"
+        assert "italian" in r.detail and "english" in r.detail
+        assert "/cooccur" in r.hint
+
+    def test_a_store_against_a_detected_language_is_unknown(self, tmp_path, monkeypatch):
+        """Two guesses disagreeing is not a fault found: the GUI lists an
+        unknown row as information, and hosted tenants read the warning on
+        every load with nothing to act on (2026-10-21)."""
         import silica.kernel.recall.cooccurrence as cooc_mod
         from silica.onboarding.checks import check_language
 
@@ -506,9 +525,9 @@ class TestCheckLanguage:
         self._store_with_lang(index_path, "english")
 
         r = check_language(_cfg(vault_path=str(tmp_path)))
-        assert r.status == "warn"
-        assert "italian" in r.detail and "english" in r.detail
-        assert "/cooccur" in r.hint
+        assert r.status == "unknown"
+        assert "italian (detected)" in r.detail and "english" in r.detail
+        assert "cooccurrence_lang: english" in r.hint and "/cooccur" in r.hint
 
     def test_corrupt_store_degrades_to_ok_no_traceback(self, tmp_path, monkeypatch):
         import silica.kernel.recall.cooccurrence as cooc_mod

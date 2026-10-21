@@ -2206,6 +2206,21 @@ def test_health_hides_the_cli_hook_check_from_the_sidebar(client, monkeypatch):
     ]
 
 
+def test_health_hides_the_hosts_converters_from_a_tenant(client, monkeypatch):
+    """Hosted, the converters row reports binaries host.env chose and a tenant
+    cannot install; locally the owner can, so it stays."""
+    tc, _ = client
+    import silica.onboarding.checks as checks
+
+    monkeypatch.setattr(checks, "run_checks", lambda cfg: [
+        checks.CheckResult("converters", "unknown", "mineru missing", "install mineru"),
+    ])
+    assert [r["name"] for r in tc.get("/health").json()] == ["converters"]
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    assert tc.get("/health").json() == []
+    assert [r["name"] for r in tc.get("/health?all=1").json()] == ["converters"]
+
+
 # --- calendar ----------------------------------------------------------------
 
 EVENT_NOTE_FM = "---\ntitle: Dentist\nevent_start: 2026-08-20 15:00\n---\n"

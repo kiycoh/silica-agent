@@ -124,6 +124,32 @@ class TestTheReranker:
         assert result.status == "warn"
         assert "unreachable" in result.detail
 
+    def test_the_probe_sends_the_key_the_reranker_sends(self, monkeypatch):
+        """Without it OpenRouter answers 401, and every hosted tenant read
+        "unreachable" while its recall reranked (2026-10-21)."""
+        sent = {}
+
+        def _post(*a, **k):
+            sent.update(k.get("headers") or {})
+            return _Resp(200)
+
+        monkeypatch.setattr(checks.httpx, "post", _post)
+
+        result = checks.check_rerank(_config(rerank_base_url="https://openrouter.ai/api/v1",
+                                             rerank_model="voyageai/rerank-3-lite",
+                                             rerank_api_key="sk-or-x"))
+        assert sent == {"Authorization": "Bearer sk-or-x"}
+        assert result.status == "ok"
+
+    def test_a_refused_key_is_not_unreachable(self, monkeypatch):
+        monkeypatch.setattr(checks.httpx, "post", lambda *a, **k: _Resp(401))
+        monkeypatch.setattr(checks, "has_local_rerank", lambda: False)
+
+        result = checks.check_rerank(_config(rerank_base_url="https://openrouter.ai/api/v1",
+                                             rerank_model="voyageai/rerank-3-lite"))
+        assert result.status == "warn"
+        assert "refused" in result.detail and "unreachable" not in result.detail
+
 
 class TestEveryStatusRenders:
     def test_no_check_can_emit_a_status_the_report_cannot_draw(self, monkeypatch):

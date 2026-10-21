@@ -5465,15 +5465,19 @@ def health(all: bool = False):
     what needs fixing, and kept for the settings panel's diagnostics and for a
     bug report, which needs the passing rows just as much.
     """
+    from silica.config import hosted
     from silica.onboarding.checks import run_checks
 
     # "session capture" tells the user to edit .claude/settings.json — a
     # Claude-Code-integration concern the browser can do nothing about. It
     # stays out of the sidebar notices; ?all=1 (diagnostics) keeps it.
+    # "converters" too when hosted: it reports the host's binaries, which
+    # host.env chose (pdfium, no mineru) and a tenant cannot install.
+    hidden = {"session capture", *(("converters",) if hosted() else ())}
     return [
         {"name": r.name, "status": r.status, "detail": r.detail, "hint": r.hint}
         for r in run_checks(CONFIG)
-        if all or (r.status != "ok" and r.name != "session capture")
+        if all or (r.status != "ok" and r.name not in hidden)
     ]
 
 

@@ -1049,6 +1049,16 @@ body.sidebar-collapsed #sidebar {
   overflow-wrap: anywhere;
 }
 
+/* information (status unknown): no card, so a warning still reads as one */
+.notice.info {
+  background: transparent;
+  border-color: transparent;
+}
+
+.notice.info .notice-text {
+  color: var(--ash-dim);
+}
+
 /* remedy collapsed behind a one-line disclosure until asked for */
 .notice details > summary {
   margin-top: 0.25rem;

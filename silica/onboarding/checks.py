@@ -352,12 +352,19 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
     # An install made before ADR-0073 reranked in-process with no key at all;
     # now the extra runs as a server, and nothing starts it without the command.
     gap = has_local_rerank() and not serve_cmd
+    key = getattr(config, "rerank_api_key", "")
     if config.rerank_base_url and config.rerank_model:
         url = f"{config.rerank_base_url.rstrip('/')}/rerank"
         try:
             resp = httpx.post(
                 url,
                 json={"model": config.rerank_model, "query": "ping", "documents": ["ping"]},
+                # The header providers.Reranker sends. Without it OpenRouter
+                # answers 401, and every hosted tenant read "unreachable" while
+                # its recall reranked (2026-10-21). Sent to a metered endpoint
+                # it is a billed call: voyage rerank-3-lite reported 0 tokens,
+                # $0 for it on 2026-10-21.
+                headers={"Authorization": f"Bearer {key}"} if key else {},
                 timeout=_HTTP_TIMEOUT,
             )
             if resp.status_code == _LOADING:
@@ -367,6 +374,14 @@ def check_rerank(config: SilicaConfig) -> CheckResult:
                     "rerank", "unknown",
                     f"{config.rerank_base_url} answering but still loading the model",
                     "re-run `silica doctor` once the reranker reports ready",
+                )
+            if resp.status_code in (401, 403):
+                # It answered, so "unreachable" sends the reader to the wrong
+                # place. OpenRouter also answers 403 to a key past its limit.
+                return CheckResult(
+                    "rerank", "warn",
+                    f"{config.rerank_base_url} refused the request ({resp.status_code})",
+                    "check SILICA_RERANK_API_KEY and that key's spending limit",
                 )
             resp.raise_for_status()
         except Exception:
@@ -591,10 +606,22 @@ def check_language(config: SilicaConfig) -> CheckResult:
         return CheckResult("language", "ok", f"language={authority}, no store frozen yet")
     if not drift:
         return CheckResult("language", "ok", f"language={authority}, store={store_lang}")
+    if declared_language(vault):
+        return CheckResult(
+            "language", "warn",
+            f"language={authority}, store frozen={store_lang} — mismatch",
+            "run `/cooccur --force` to rebuild the co-occurrence store in the vault's language",
+        )
+    # Undeclared, two guesses disagree: this one reads 150-character heads,
+    # frontmatter included (the trap declared_language names), the store froze
+    # on its first build's notes. Neither is known to be wrong, so `unknown`,
+    # which the GUI shows as information: hosted tenants read this as a
+    # warning on 2026-10-21, with nothing they could act on.
     return CheckResult(
-        "language", "warn",
-        f"language={authority}, store frozen={store_lang} — mismatch",
-        "run `/cooccur --force` to rebuild the co-occurrence store in the vault's language",
+        "language", "unknown",
+        f"language={authority} (detected), store frozen={store_lang} — they disagree",
+        f"declare the notes' language in vault.yaml (`cooccurrence_lang: {store_lang}`), "
+        f"or run `/cooccur --force` if they are in {authority}",
     )
 
 
@@ -756,7 +783,9 @@ def _pdf_lane(config: SilicaConfig) -> str:
     if name not in PDF_PROVIDERS:
         return f"{name} — unknown provider (known: {', '.join(PDF_PROVIDERS)})"
     if name == "pdfium":
-        return f"{name} — no OCR, a scan with no text layer yields nothing"
+        # "a scan yields nothing" until the ADR-0087 amendment; since then
+        # _read_pages sends each page without text to the chat model.
+        return f"{name} — no OCR, a page without text goes to the chat model if it takes images"
     if name == "mineru" and not shutil.which("mineru"):
         return f"{name} — OCR provider set but not on PATH"
     return f"{name} — OCR available"
