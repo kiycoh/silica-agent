@@ -113,6 +113,28 @@ def test_related_single_quoted_entries_pruned(vault):
     assert "'[[Hub]]'" in text and "Ghost Entry" not in text
 
 
+@pytest.mark.parametrize("entry", [
+    # PyYAML's own dump of an apostrophe title: the quote is doubled.
+    "- '[[Motivation for Bessel''s Correction]]'",
+    # A spelling the fold relinks to the apostrophe title (typographic quote).
+    "- '[[motivation for Bessel’s correction]]'",
+    '  - "[[motivation for Bessel’s correction]]"',
+])
+def test_related_entry_with_an_apostrophe_keeps_the_frontmatter(vault, entry):
+    """Seen 2026-10-21 nucleating a statistics lecture: the sweep wrote the
+    resolved name into the single-quoted entry as it was, `'[[Motivation for
+    Bessel's Correction]]'`, and the frontmatter stopped parsing."""
+    import yaml
+
+    _write(vault, "Motivation for Bessel's Correction.md", "---\ntitle: M\n---\n\nBody.\n")
+    _write(vault, "A.md", f"---\ntitle: A\nrelated:\n{entry}\ntags:\n  - t\n---\n\nBody.\n")
+    from silica.kernel.link.sweep import sweep_dangling_links
+
+    sweep_dangling_links(["A"])
+    fm = (vault / "A.md").read_text(encoding="utf-8").split("---\n")[1]
+    assert yaml.safe_load(fm)["related"] == ["[[Motivation for Bessel's Correction]]"]
+
+
 class TestPunctuationVariantsAreRelinked:
     """The run that writes `[[Ahura Mazda]]` in one segment writes
     `Ahura-Mazda.md` in another: the note is there, the spelling drifted. Exact
