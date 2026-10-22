@@ -101,7 +101,9 @@ def list_skills():
         for row in rows:
             if row["state"] == "active" and row["name"] in shadowed:
                 row["shadows"] = shadowed[row["name"]]
-    return {"vault": bool(vault), "groups": [
+    from silica.kernel.proposed_skills import pending
+
+    return {"vault": bool(vault), "proposed": pending(vault) if vault else [], "groups": [
         {"source": "vault", "dir": ".silica/skills/", "skills": groups["vault"]},
         {"source": "home", "dir": "~/.silica/skills/", "skills": groups["home"]},
         {"source": "builtin", "dir": "", "skills": groups["builtin"]},
@@ -194,6 +196,29 @@ async def install(file: UploadFile = File(...), confirm: bool = Form(False)):
         return {"ok": True, "installed": False, "skill": preview}
     _write(vault, dest, data)
     return {"ok": True, "installed": True, "skill": preview}
+
+
+@router.post("/proposed/{name}/install", dependencies=_SAME_ORIGIN)
+def install_proposed(name: str):
+    """A proposed skill (ADR-0127 point 5) becomes a vault skill: the person's
+    act, the only way one ever runs."""
+    from silica.kernel.proposed_skills import install as move
+
+    vault = _vault()
+    _inside(vault, _skills_dir(vault))
+    if (err := move(str(vault), name)) is not None:
+        raise HTTPException(409 if "exists" in err else 404, err)
+    return {"ok": True, "name": name}
+
+
+@router.post("/proposed/{name}/dismiss", dependencies=_SAME_ORIGIN)
+def dismiss_proposed(name: str):
+    """Not this one: its text goes, its requests stay so it is not proposed again."""
+    from silica.kernel.proposed_skills import dismiss
+
+    if (err := dismiss(str(_vault()), name)) is not None:
+        raise HTTPException(404, err)
+    return {"ok": True}
 
 
 @router.delete("/{name}", dependencies=_SAME_ORIGIN)

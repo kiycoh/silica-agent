@@ -1016,6 +1016,35 @@ def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> s
     return md.renderer.render(tokens, md.options, {})
 
 
+def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dict | None]:
+    """(turn note, offer) for the turn that just ended (ADR-0127 points 5, 6):
+    a proposal written from a request the person made in enough chats, or
+    else the installed skill that answers it, offered as the next turn. An
+    incognito chat proposes nothing: it asked to leave no trace."""
+    from silica.agent import narration as _narr
+    from silica.kernel import proposed_skills as ps
+    from silica.kernel import user_memory
+
+    vault = CONFIG.vault_path or ""
+    if not vault or user_memory.incognito():
+        return None, None
+    try:
+        evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
+        if evidence is not None:
+            drafted = ps.draft(evidence["asks"], CONFIG)
+            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "") if drafted else None
+            if name:
+                return {"kind": "skill", "text": f"/{name} written from a request you made in "
+                                                 f"{len(evidence['sessions'])} chats · review it in "
+                                                 "Settings › Skills"}, None
+        return None, ps.offer(text, vault)
+    except Exception:
+        # A proposal is an extra: a chat file that does not parse or a worker
+        # that is down costs the person the proposal, never the answer.
+        logger.warning("skill proposal skipped", exc_info=True)
+        return None, None
+
+
 def _answer_html(answer: str, refs, graph=None) -> str:
     """A chat answer drawn with its turn's reads (ADR-0127): a name several
     notes share links the one the turn read, and a read note's title links
@@ -1415,11 +1444,16 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             from silica.agent.figures import place_figures
 
             answer = place_figures(answer, messages, exists=lambda f: _find_asset(f) is not None)
+        # A request made in enough chats becomes a proposed skill, or one already
+        # installed is offered as the next turn (ADR-0127 points 5 and 6).
+        skill_note, offer = ((None, None) if stopped or web or not answer
+                             else await asyncio.to_thread(_skill_after_turn, text, messages))
         # The lines under the answer (ADR-0094 point 8), stored on it before the
         # beat below so a reopened chat draws them too. A stopped turn has no
         # answer to carry them: they are drawn live only.
         notes = watch.notes() if isinstance(watch, RecallWatch) else []
         notes += numbers_notes(unread)
+        notes += [skill_note] if skill_note else []
         notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
         # The notes this turn read, before the beat stores the answer and before
         # compaction stubs the results that name them (ADR-0127).
@@ -1446,6 +1480,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             done["stopped"] = True
         if notes:
             done["notes"] = notes
+        if offer:
+            done["offer"] = offer
         outcome = "cancelled" if stopped else "empty" if empty else "done"
         yield done
     except Exception as exc:  # never leave the UI stuck on the spinner

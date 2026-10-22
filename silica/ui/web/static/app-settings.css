@@ -713,3 +713,76 @@
   justify-content: flex-end;
   gap: 0.45rem;
 }
+
+/* --- writing a skill, and the ones Silica proposes (ADR-0127) -------------- */
+.sk-form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.sk-form[hidden] {
+  display: none;
+}
+
+.sk-field {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.sk-field-name {
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.sk-field input {
+  min-width: 0;
+  background: var(--slate-2);
+  color: var(--frost);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 0.4rem 0.5rem;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.sk-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.sk-check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.sk-check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+}
+
+.sk-from {
+  margin-top: 0.35rem;
+  font-size: 11px;
+  color: var(--ash-dim);
+}
+
+.sk-from summary {
+  cursor: pointer;
+}
+
+.sk-from[open] {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.sk-ask {
+  color: var(--text);
+  font-style: italic;
+  overflow-wrap: anywhere;
+}

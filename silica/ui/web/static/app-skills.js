@@ -48,11 +48,15 @@ function skCommand(name, hint, cls) {
 // `after` carries what the redraw should say: the outcome line under the
 // install row, and the name to flash once in its group.
 async function renderSkills(host, after = {}) {
-  host.querySelectorAll(".sk-instr, .sk-install, .sk-group, .st-note-line").forEach((e) => e.remove());
+  host.querySelectorAll(".sk-instr, .sk-write, .sk-install, .sk-group, .st-note-line").forEach((e) => e.remove());
   let data;
   try { data = await skCall("/skills"); }
   catch { host.appendChild(stEl("div", "st-note-line", "could not read the skills")); return; }
   host.appendChild(await skInstructionsRow());
+  if (data.proposed && data.proposed.length) host.appendChild(skProposedGroup(data.proposed, host));
+  const write = skWriteRow(host, data, skDraft);
+  skDraft = null;
+  host.appendChild(write);
   const install = skInstallRow(host, data);
   host.appendChild(install);
   if (after.note) {
@@ -61,6 +65,124 @@ async function renderSkills(host, after = {}) {
     note.textContent = after.note;
   }
   for (const g of data.groups) host.appendChild(skGroup(g, data, host, after.fresh));
+}
+
+// --- writing one here, and the chat's + (ADR-0127) ----------------------------
+// The fields become a SKILL.md in the page and go through the same preview and
+// install as a picked file, so a written skill passes the checks a file does.
+// `skDraft` is what the chat's + hands over: the words in the message box.
+let skDraft = null;
+
+function skWriteSkill(text) {
+  skDraft = { body: text || "" };
+  stState.section = "Skills";
+  openSettings();
+}
+
+function skWriteRow(host, data, draft) {
+  const row = stEl("div", "st-row sk-write");
+  row.dataset.search = "skill write new persona create";
+  const label = stEl("div", "st-label");
+  label.appendChild(stEl("span", "st-name", "write a skill"));
+  label.appendChild(stEl("div", "st-help", data.vault
+    ? "Name it, say what it does, write what the model should do. A persona is worn by a chat "
+      + "from /name until /persona off, instead of running once."
+    : "Open a vault first: a skill is written into one."));
+  row.appendChild(label);
+  const ctl = stEl("div", "st-ctl");
+  const open = skBtn("write one…", "primary");
+  open.disabled = !data.vault;
+  ctl.appendChild(open);
+  row.appendChild(ctl);
+  const form = stEl("div", "sk-form");
+  form.hidden = true;
+  const field = (text, el) => {
+    const l = stEl("label", "sk-field");
+    l.append(stEl("span", "sk-field-name", text), el);
+    form.appendChild(l);
+    return el;
+  };
+  const name = field("name, typed after /", stEl("input", "st-input"));
+  name.placeholder = "integra-appunti";
+  name.spellcheck = false;
+  const desc = field("what it does", stEl("input", "st-input"));
+  desc.placeholder = "Integrates my notes with the attached file, one chapter at a time";
+  const body = field("instructions for the model · $ARGUMENTS is what you type after the name",
+    stEl("textarea", "st-mem-text"));
+  body.rows = 7;
+  const persona = stEl("input");
+  persona.type = "checkbox";
+  const pl = stEl("label", "sk-check");
+  pl.append(persona, document.createTextNode(" a persona: worn by the chat until /persona off"));
+  form.appendChild(pl);
+  const go = skBtn("preview", "primary");
+  const acts = stEl("div", "sk-pv-actions");
+  acts.appendChild(go);
+  form.appendChild(acts);
+  row.appendChild(form);
+  row.appendChild(stEl("div", "st-note"));
+  row.appendChild(stEl("div", "sk-preview-host"));
+  const show = () => { form.hidden = false; open.hidden = true; name.focus({ preventScroll: true }); };
+  open.addEventListener("click", show);
+  go.addEventListener("click", () => {
+    // JSON's double-quoted string is valid YAML: a description with ": " in
+    // it would otherwise empty the whole frontmatter.
+    const text = "---\nname: " + name.value.trim() + "\ndescription: " + JSON.stringify(desc.value.trim())
+      + (persona.checked ? "\nmetadata:\n  persona: true" : "") + "\n---\n" + body.value.trim() + "\n";
+    skPreview(host, row, new File([text], "SKILL.md", { type: "text/markdown" }));
+  });
+  if (draft && data.vault) {
+    body.value = draft.body;
+    show();
+    setTimeout(() => row.scrollIntoView({ block: "nearest" }), 0);
+  }
+  return row;
+}
+
+// --- proposed by Silica (ADR-0127 point 5) --------------------------------------
+// Written from a request the person made in three chats; nothing lists or runs
+// one until it is installed here. Its requests are shown, so the person sees
+// what it was made from, not only what it says.
+function skProposedGroup(rows, host) {
+  const el = stEl("div", "sk-group");
+  el.appendChild(stEl("div", "st-conn-title", "Proposed by Silica"));
+  el.appendChild(stEl("div", "sk-group-help",
+    "written from a request you made in several chats · nothing runs until you install it"));
+  for (const p of rows) {
+    const row = stEl("div", "st-row sk-row sk-proposed");
+    row.dataset.search = `proposed skill ${p.name} ${p.description}`.toLowerCase();
+    const label = stEl("div", "st-label");
+    label.appendChild(skCommand(p.name, ""));
+    label.appendChild(stEl("div", "st-help", p.description));
+    const from = stEl("details", "sk-from");
+    from.appendChild(stEl("summary", "", `made from ${p.asks.length} requests · what it would do`));
+    for (const a of p.asks) from.appendChild(stEl("div", "sk-ask", "“" + a + "”"));
+    from.appendChild(stEl("pre", "sk-pv-body", p.body));
+    label.appendChild(from);
+    row.appendChild(label);
+    const ctl = stEl("div", "st-ctl");
+    const no = skBtn("dismiss");
+    const yes = skBtn("install", "primary");
+    ctl.append(no, yes);
+    row.appendChild(ctl);
+    row.appendChild(stEl("div", "st-note"));
+    const act = async (verb, done) => {
+      yes.disabled = no.disabled = true;
+      try {
+        await skCall(`/skills/proposed/${encodeURIComponent(p.name)}/${verb}`, { method: "POST" });
+      } catch (e) {
+        yes.disabled = no.disabled = false;
+        stNote(row, "bad", "✕ " + String(e.message || e));
+        return;
+      }
+      if (typeof loadCommands === "function") loadCommands();
+      renderSkills(host, done);
+    };
+    yes.addEventListener("click", () => act("install", { note: `installed · type /${p.name} in the chat`, fresh: p.name }));
+    no.addEventListener("click", () => act("dismiss", { note: `dismissed · /${p.name} will not be proposed again` }));
+    el.appendChild(row);
+  }
+  return el;
 }
 
 // The vault's instructions (ADR-0127 point 4): one file every chat over this
@@ -175,9 +297,13 @@ async function skPreview(host, row, file) {
     box.classList.add("sk-bad");
     box.appendChild(stEl("div", "sk-pv-label", file.name));
     box.appendChild(stEl("div", "sk-pv-err", String(e.message || e)));
-    const again = skBtn("choose another file");
-    again.addEventListener("click", () => row.querySelector("input[type=file]").click());
-    actions.append(dismiss, again);
+    // The written skill's row has no file to pick again: its fields are the fix.
+    const picker = row.querySelector("input[type=file]");
+    if (picker) {
+      const again = skBtn("choose another file");
+      again.addEventListener("click", () => picker.click());
+      actions.append(dismiss, again);
+    } else actions.append(dismiss);
     box.appendChild(actions);
     slot.appendChild(box);
     return;
