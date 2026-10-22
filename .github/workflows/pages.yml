@@ -1,0 +1,41 @@
+name: pages
+
+# Publishes site/, the landing page at silica-agent.dev, as it is: no build step.
+# The custom domain lives in the repository's Pages settings, not in a CNAME
+# file, because a Pages deploy from Actions ignores that file.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions: {}   # the one job below asks for what it needs; nothing inherits
+
+concurrency:
+  # A deploy in flight finishes; the next push queues behind it.
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      contents: read
+      pages: write      # deploy to Pages
+      id-token: write   # OIDC that deploy-pages proves the run with
+    steps:
+      # Pinned by commit like release.yml: a tag is mutable.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346  # v5.0.1

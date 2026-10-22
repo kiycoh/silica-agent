@@ -45,7 +45,6 @@ Thumbs.db
 # evaluation records stay out of the published history, which was rewritten
 # without them on 2026-10-09. Its corpora rules live in docs/.gitignore.
 /docs/
-/site
 
 # Silica & Agent Specific
 # .agents/ is local agent tooling, except the Codex plugin marketplace, which

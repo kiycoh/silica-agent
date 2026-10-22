@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Silica · Ask your notes. Check every answer.</title>
+<meta name="description" content="Silica answers from the notes and PDFs you give it, names the note behind every answer, and takes back any write that does not hold. Open source.">
+<link rel="canonical" href="https://silica-agent.dev/">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://silica-agent.dev/">
+<meta property="og:title" content="Silica · Ask your notes. Check every answer.">
+<meta property="og:description" content="Silica answers from the notes and PDFs you give it, names the note behind every answer, and takes back any write that does not hold.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@300..800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<!--
+THESIS: The page is a natural-history plate. Evidence is observed, drawn and lettered,
+and Silica's answers work the same way: every claim pinned to the note it came from.
+It refuses the category's dark hero with a glowing app screenshot.
+OWN-WORLD: Paper and ink only, one bit. Silica in three states, each a public-domain
+engraving: a rock-crystal druse, a flint core, a diatom. No clusters of round openings,
+not even in a crop: faces, edges, lines and bands only. Tone is dithered live in the browser. Density is meaning: solid ink = written, a mechanical
+screen = proposed, a ghost = asked first. Teal (189deg) only for the action and for
+the letter you are pointing at. Host Grotesk for words, JetBrains Mono for figure
+labels, data and commands.
+STORY: Ask your notes and check every answer; see how sure Silica is by how much ink it
+puts down; watch a run link what it read, in the same three densities; watch a write that
+does not hold get taken back; read the numbers; open it.
+FIRST VIEWPORT: Left five columns: H1, lede, Open Silica. Right seven: Plate I, the
+druse pulled top to bottom, five lettered notes pinned on its faces, and
+the answer as the plate's legend.
+FORM: Specimen plate, user-pinned direction (dither as semantics, engraved silica cropped
+to a detail, glitch only on failure). Fig. 3 is the one plate printed in negative: the only
+figure about many notes at once, so it takes the full width, and paper on ink keeps the
+three densities while the page's rhythm marks the change of subject. No seed roll: the brief pinned the world.
+-->
+<style>
+/* Layout: one sheet of paper. A 12-column grid; every figure sits in a ruled plate
+   with its number and caption, the way a monograph prints evidence. */
+:root {
+  color-scheme: light;
+  --paper: #FFFDF9;
+  --ink: #1A1815;
+  --ink-2: #4A453C;      /* captions, secondary lines: 9.4:1 on paper */
+  --hair: #CFC8BA;       /* the plate's inner rule */
+  --signal: #0A6070;     /* the action, and the letter being pointed at */
+  --on-signal: #FFFFFF;
+  --sans: "Host Grotesk", ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --t-1: clamp(2.9rem, 1.6rem + 4.4vw, 5.6rem);
+  --t-2: clamp(2rem, 1.3rem + 2.4vw, 3.4rem);
+  --t-3: clamp(1.15rem, 1.05rem + .4vw, 1.4rem);
+  --t-4: 1.0625rem;
+  --t-5: .8125rem;
+  --ease: cubic-bezier(.16, 1, .3, 1);
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { background: var(--paper); }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 var(--t-4)/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p, figure, dl, dd, ol, ul { margin: 0; }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 3px; }
+.wrap {
+  max-width: 88rem; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px), 3vw);
+  padding-right: max(16px, env(safe-area-inset-right, 0px), 3vw);
+}
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: clamp(1rem, 2.2vw, 2.25rem); }
+.mono { font-family: var(--mono); }
+
+/* ---- header ------------------------------------------------------------- */
+.top { display: flex; align-items: center; gap: 2rem; padding-block: 20px; }
+.brand { display: inline-flex; align-items: center; gap: .6rem; text-decoration: none; }
+.brand svg { width: 26px; height: 26px; }
+.brand svg .i { fill: var(--ink); } .brand svg .s { fill: var(--signal); }
+.brand b { font-weight: 640; font-size: var(--t-3); letter-spacing: -.02em; }
+.top nav { margin-left: auto; display: flex; align-items: center; gap: 1.6rem; font-size: var(--t-4); }
+.top nav a:not(.btn) { color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+.top nav a:not(.btn):hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: .55rem; min-height: 48px; padding: 0 1.35rem;
+  background: var(--ink); color: var(--paper); text-decoration: none; border: 0; cursor: pointer;
+  font: 600 var(--t-4)/1 var(--sans); transition: background .2s var(--ease);
+}
+.btn:hover { background: var(--signal); }
+.btn:active { transform: translateY(1px); }
+.btn--small { min-height: 40px; padding: 0 1rem; font-size: var(--t-5); }
+
+/* ---- hero: words left, Plate I right ------------------------------------- */
+.hero { padding-block: clamp(1.5rem, 4vw, 3.5rem) clamp(4rem, 8vw, 7rem); align-items: start; }
+.hero-copy { grid-column: 1 / span 5; padding-top: clamp(1rem, 5vw, 4.5rem); }
+.hero h1 { font-size: var(--t-1); line-height: .96; letter-spacing: -.04em; font-weight: 720; }
+.hero .lede { margin-top: 1.75rem; font-size: var(--t-3); line-height: 1.4; max-width: 28rem; }
+.hero .go { margin-top: 2rem; display: grid; gap: .9rem; justify-items: start; }
+.hero .go p { font-size: var(--t-4); color: var(--ink-2); max-width: 24rem; }
+.hero .go p b { color: var(--ink); font-weight: 600; }
+
+.plate { border: 1.5px solid var(--ink); padding: clamp(.75rem, 1.6vw, 1.25rem); background: var(--paper); }
+.plate-head { display: flex; justify-content: space-between; align-items: baseline; font: 500 var(--t-5)/1 var(--mono); color: var(--ink-2); padding-bottom: .75rem; }
+.plate-head b { color: var(--ink); font-weight: 700; }
+.hero-plate { grid-column: 6 / span 7; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 0; }
+.hero-plate .plate-head { grid-column: 1 / -1; }
+.specimen { position: relative; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); line-height: 0; }
+.specimen img, .specimen canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+.specimen canvas { position: absolute; inset: 0; }
+.pin {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--paper); color: var(--ink); border: 1.5px solid var(--ink);
+  font: 700 var(--t-5)/1 var(--mono);
+  transition: background .2s var(--ease), color .2s var(--ease), border-color .2s var(--ease), transform .3s var(--ease);
+}
+.pin.on { background: var(--signal); color: var(--on-signal); border-color: var(--signal); transform: translate(-50%, -50%) scale(1.18); }
+.pin.wait { opacity: 0; transform: translate(-50%, -50%) scale(.6); }
+
+/* the legend: the answer, printed as the plate's explanation */
+.legend { padding: 0 0 0 clamp(.9rem, 1.8vw, 1.5rem); display: grid; align-content: start; gap: .9rem; font-size: var(--t-4); line-height: 1.5; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); padding-block: 1rem; }
+.legend .q { font: 500 var(--t-5)/1.45 var(--mono); color: var(--ink-2); }
+.legend .q b { color: var(--ink); font-weight: 700; }
+.legend .ans { color: var(--ink); }
+.legend .math { font-style: italic; text-align: center; padding: .1rem 0; }
+.legend .math sub { font-size: .7em; }
+.legend ol { list-style: none; padding: 0; display: grid; gap: .1rem; }
+.legend li button {
+  appearance: none; border: 0; background: none; cursor: pointer; padding: .3rem 0; width: 100%;
+  display: grid; grid-template-columns: 1.6rem 1fr; align-items: baseline; text-align: left;
+  font: 400 var(--t-4)/1.35 var(--sans); color: var(--ink);
+}
+.legend li button .k { font: 700 var(--t-5)/1 var(--mono); }
+.legend li button:hover, .legend li button.on { color: var(--signal); }
+.legend li button:hover .t, .legend li button.on .t { text-decoration: underline; text-underline-offset: 3px; }
+.plate-cap { grid-column: 1 / -1; padding-top: .75rem; font-size: var(--t-5); line-height: 1.5; color: var(--ink-2); max-width: 62ch; }
+.plate-cap b { color: var(--ink); font-weight: 600; }
+
+/* ---- sections ------------------------------------------------------------ */
+.sec { padding-block: clamp(4.5rem, 9vw, 8rem) 0; }
+.sec-head { align-items: end; }
+.sec-head h2 { grid-column: 1 / span 6; font-size: var(--t-2); line-height: 1; letter-spacing: -.035em; font-weight: 700; }
+.sec-head p { grid-column: 8 / span 5; font-size: var(--t-3); line-height: 1.4; }
+.sec-body { margin-top: clamp(2.5rem, 5vw, 4rem); }
+
+/* Fig. 2: one specimen at three densities */
+.densities { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: clamp(1rem, 2.2vw, 2.25rem); }
+.dens .specimen { border: 1px solid var(--hair); aspect-ratio: 1 / 1; overflow: hidden; }
+.dens .specimen canvas { position: static; width: 100%; height: 100%; }
+.dens .key { margin-top: 1rem; font: 500 var(--t-4)/1 var(--mono); letter-spacing: 0; white-space: nowrap; overflow: hidden; }
+.dens h3 { margin-top: .9rem; display: flex; align-items: baseline; gap: .75rem; font-size: var(--t-3); font-weight: 680; letter-spacing: -.01em; }
+.dens h3 .mono { font-size: var(--t-5); font-weight: 500; color: var(--ink-2); }
+.dens p { margin-top: .5rem; max-width: 34ch; }
+.dens .eg { margin-top: .75rem; font-size: var(--t-5); color: var(--ink-2); max-width: 36ch; }
+.figcap { margin-top: 1.75rem; font-size: var(--t-5); color: var(--ink-2); max-width: 70ch; }
+
+/* Fig. 3: the one plate printed in negative. It is the only figure about many notes at
+   once, so it takes the full width; paper on ink keeps Fig. 2's three densities (a solid
+   mark, a screen, a few specks) and flips only the ground */
+.nuc {
+  --n-2: #BDB6AA;        /* secondary text on ink: 8.9:1 */
+  --n-hair: #4A453C;
+  --n-signal: #22B4CC;   /* the signal hue as it sits on a dark ground */
+  margin-top: clamp(4.5rem, 9vw, 8rem); background: var(--ink); color: var(--paper);
+  padding-block: clamp(1.25rem, 2.5vw, 2rem) clamp(3.5rem, 7vw, 6rem);
+}
+.nuc :focus-visible { outline-color: var(--n-signal); }
+.nuc .plate-head { color: var(--n-2); }
+.nuc .plate-head b { color: var(--paper); }
+.nuc-field { position: relative; aspect-ratio: 2 / 1; border-top: 1px solid var(--n-hair); border-bottom: 1px solid var(--n-hair); overflow: hidden; }
+.nuc-field img, .nuc-field canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+
+.nuc .steps { color: var(--n-2); }
+.nuc .play { color: var(--paper); }
+.nuc .play:hover, .nuc .play:focus-visible { color: var(--n-signal); }
+.nuc .steps li.on { color: var(--paper); }
+.nuc-body { margin-top: clamp(2rem, 4vw, 3.25rem); row-gap: 2rem; align-items: start; }
+.nuc-body h2 { grid-column: 1 / span 3; font-size: var(--t-2); line-height: 1; letter-spacing: -.035em; font-weight: 700; }
+.nuc-text { grid-column: 4 / span 6; max-width: 62ch; }
+.nuc-text > p:first-child { font-size: var(--t-3); line-height: 1.5; }
+.nuc-text code { font: 500 .8em/1 var(--mono); white-space: nowrap; }
+.nuc-src { margin-top: 1.25rem; font-size: var(--t-5); color: var(--n-2); }
+.nuc-side { grid-column: 10 / span 3; display: grid; gap: 1.5rem; align-content: start; }
+.nuc-key { display: grid; gap: 1rem; }
+.nuc-key div { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); column-gap: .9rem; align-items: baseline; }
+.nuc-key dt { font: 500 var(--t-4)/1 var(--mono); white-space: nowrap; overflow: hidden; }
+.nuc-key dd b { display: block; font-weight: 680; }
+.nuc-key dd span { font: 500 var(--t-5)/1.4 var(--mono); color: var(--n-2); }
+.nuc-key dd small { display: block; margin-top: .2rem; font-size: var(--t-5); line-height: 1.45; color: var(--n-2); }
+.nuc-nodes { font-size: var(--t-5); color: var(--n-2); display: flex; flex-wrap: wrap; gap: .3rem 1.2rem; }
+.nuc-nodes b { font: 700 var(--t-4)/1 var(--mono); color: var(--paper); margin-right: .35rem; }
+.nuc-cap { font-size: var(--t-5); line-height: 1.5; color: var(--n-2); }
+.nuc-cap b { color: var(--paper); font-weight: 600; }
+
+/* Fig. 4: a write that does not hold */
+.fail { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: clamp(1rem, 2.2vw, 2.25rem); align-items: start; }
+.fail .plate { min-width: 0; }
+.fail canvas { display: block; width: 100%; height: auto; border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); }
+/* under an animated view: its steps on the left, play at the bottom-right corner */
+.fig-under { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.fig-under .play { margin-top: .25rem; }
+.play { flex: none; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--ink); cursor: pointer; }
+.play svg { width: 15px; height: 15px; fill: currentColor; }
+.play:hover, .play:focus-visible { color: var(--signal); }
+.play:focus-visible { outline-offset: -2px; }
+.steps { list-style: none; padding: .9rem 0 0; display: flex; flex-wrap: wrap; gap: .4rem 1.1rem; font: 500 var(--t-5)/1.4 var(--mono); color: var(--ink-2); }
+.steps li { transition: color .15s linear; }
+.steps li.on { color: var(--ink); font-weight: 700; }
+.steps li.bad.on { text-decoration: line-through; text-decoration-thickness: 2px; }
+.steps li.ok.on { color: var(--signal); }
+.fail-t { display: grid; gap: 1rem; align-content: start; }
+.fail-t p { max-width: 42ch; }
+.cmds { display: grid; gap: .45rem; margin-top: .5rem; }
+.cmds div { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); gap: 1rem; align-items: baseline; font-size: var(--t-4); }
+.cmds code { font: 500 var(--t-5)/1.3 var(--mono); }
+
+/* Tab. 1: measured */
+.tab { grid-column: 1 / -1; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 640px; font-variant-numeric: tabular-nums; }
+caption { caption-side: bottom; text-align: left; padding-top: 1rem; font-size: var(--t-5); color: var(--ink-2); }
+th, td { text-align: left; vertical-align: baseline; padding: .85rem 1rem .85rem 0; border-bottom: 1px solid var(--hair); }
+thead th { font: 500 var(--t-5)/1.3 var(--mono); color: var(--ink-2); border-bottom: 1.5px solid var(--ink); }
+td.v { font: 700 var(--t-4)/1.2 var(--mono); white-space: nowrap; }
+td.n { font: 400 var(--t-5)/1.35 var(--mono); color: var(--ink-2); }
+tr.flat td { color: var(--ink-2); }
+
+/* where it runs: the plate's explanation, four entries */
+.runs { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 clamp(1rem, 2.2vw, 2.25rem); }
+.run { border-top: 1.5px solid var(--ink); padding: 1.25rem 0 2.5rem; display: grid; gap: .8rem; align-content: start; min-width: 0; }
+.run h3 { font-size: var(--t-3); font-weight: 680; display: flex; gap: .8rem; align-items: baseline; }
+.run h3 .mono { font-size: var(--t-5); font-weight: 500; color: var(--ink-2); }
+.run p { max-width: 54ch; }
+.code { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: start; border: 1px solid var(--hair); padding: .25rem .25rem .25rem 1rem; min-width: 0; }
+.code pre { margin: 0; padding: .7rem 0; overflow-x: auto; font: 500 var(--t-5)/1.75 var(--mono); }
+.code pre .pr { color: var(--ink-2); user-select: none; }
+.copy { appearance: none; border: 0; background: var(--ink); color: var(--paper); min-height: 36px; padding: 0 .85rem; margin-top: .2rem; cursor: pointer; font: 600 var(--t-5)/1 var(--sans); }
+.copy:hover { background: var(--signal); }
+.fine { font-size: var(--t-5); color: var(--ink-2); }
+.fine code { font: 500 .85em/1 var(--mono); color: var(--ink); }
+
+/* your notes */
+.facts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem clamp(1rem, 2.2vw, 2.25rem); }
+.facts dt { font-weight: 680; font-size: var(--t-3); }
+.facts dd { margin-top: .6rem; max-width: 30ch; }
+.legal { grid-column: 1 / -1; margin-top: 2.5rem; display: flex; gap: 1.5rem; font-size: var(--t-5); color: var(--ink-2); }
+
+/* close */
+.close { padding-block: clamp(5rem, 10vw, 9rem) clamp(2rem, 4vw, 3rem); align-items: end; }
+.close-t { grid-column: 1 / span 6; display: grid; gap: 1.5rem; justify-items: start; }
+.close-t h2 { font-size: var(--t-1); line-height: .96; letter-spacing: -.04em; font-weight: 720; }
+.close-t p { font-size: var(--t-3); max-width: 28rem; }
+.close-t small { font-size: var(--t-5); color: var(--ink-2); }
+.addr { user-select: all; color: var(--ink); }
+.close-fig { grid-column: 8 / span 5; }
+.close-fig .specimen { border: 0; }
+/* line art at 2x: a smooth downscale keeps the ribs that a nearest-pixel one would drop */
+.close-fig .specimen img { image-rendering: auto; }
+footer { border-top: 1.5px solid var(--ink); padding-block: 1.25rem 2rem; display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; font-size: var(--t-5); color: var(--ink-2); }
+footer .fill { margin-left: auto; max-width: 70ch; }
+
+/* six links fit one line down to here; below, the three "How" sections and GitHub stay */
+@media (max-width: 1020px) {
+  .top nav .nav-more { display: none; }
+}
+@media (max-width: 1100px) {
+  .hero-copy { grid-column: 1 / -1; padding-top: 1rem; }
+  .hero-plate { grid-column: 1 / -1; margin-top: 2.5rem; }
+  .sec-head h2, .sec-head p { grid-column: 1 / -1; }
+  .sec-head p { margin-top: 1.25rem; }
+  .fail { grid-template-columns: minmax(0, 1fr); }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nuc-body h2 { grid-column: 1 / -1; }
+  .nuc-text { grid-column: 1 / span 7; }
+  .nuc-side { grid-column: 8 / span 5; }
+}
+@media (max-width: 760px) {
+  .top nav a:not(.btn) { display: none; }
+  .hero-plate { grid-template-columns: minmax(0, 1fr); }
+  .legend { padding-left: 0; border-top: 0; order: 1; }
+  .hero-plate .specimen { order: 2; margin-top: .5rem; }
+  .hero-plate .plate-cap { order: 3; }
+  .densities { grid-template-columns: minmax(0, 1fr); gap: 3rem; }
+  .runs { grid-template-columns: minmax(0, 1fr); }
+  .close-t, .close-fig { grid-column: 1 / -1; }
+  .close-fig { margin-top: 3rem; max-width: 26rem; }
+  .cmds div { grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+  /* on a phone the plate crops to the run itself, square, so a cross is still a cross */
+  .nuc-field { aspect-ratio: 1 / 1; }
+  .nuc-text, .nuc-side { grid-column: 1 / -1; }
+}
+@media (max-width: 520px) {
+  /* the table fits the phone instead of scrolling its caption out of view */
+  table { min-width: 0; }
+  td.v { white-space: normal; }
+  .facts { grid-template-columns: minmax(0, 1fr); }
+  footer .fill { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="top wrap">
+  <a class="brand" href="#top" aria-label="Silica, top of the page">
+    <svg viewBox="0 0 256 256" aria-hidden="true"><path class="i" d="M16 112 L144 112 L144 240 L112 240 L112 144 L16 144 Z M16 64 L192 64 L192 240 L160 240 L160 96 L16 96 Z M16 16 L240 16 L240 240 L208 240 L208 48 L16 48 Z"/><path class="s" d="M16 160 L96 160 L96 240 L16 240 Z"/></svg>
+    <b>Silica</b>
+  </a>
+  <nav aria-label="Primary">
+    <a href="#how-sure">How sure</a>
+    <a href="#how-it-links">How it links</a>
+    <a href="#how-it-writes">How it writes</a>
+    <a class="nav-more" href="#measured">Measured</a>
+    <a class="nav-more" href="#runs">Where it runs</a>
+    <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>
+    <a class="btn btn--small" href="https://app.silica-agent.dev" rel="noopener">Open Silica</a>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero wrap grid" aria-labelledby="hero-h">
+    <div class="hero-copy">
+      <h1 id="hero-h">Ask your notes. Check every answer.</h1>
+      <p class="lede">Silica answers from the notes and PDFs you give it, names the note behind every answer, and takes back any write that does not hold.</p>
+      <div class="go">
+        <a class="btn" href="https://app.silica-agent.dev" rel="noopener">Open Silica <span aria-hidden="true">&rarr;</span></a>
+        <p><b>Free pilot, by invitation.</b> You sign in with a one-time code sent to your email. No password.</p>
+      </div>
+    </div>
+
+    <figure class="plate hero-plate" aria-labelledby="fig1-cap">
+      <div class="plate-head"><span>Fig. 1</span><b>Taf. I</b></div>
+      <div class="specimen" id="spec-1">
+        <img src="img/quartz-1bit.png" width="420" height="450" alt="A group of rock crystals, six-sided prisms ending in pointed faces, drawn in one-bit ink">
+        <canvas id="cv-1" aria-hidden="true" hidden></canvas>
+        <span class="pin" data-k="a" style="left:55%;top:57%">a</span>
+        <span class="pin" data-k="b" style="left:37%;top:13%">b</span>
+        <span class="pin" data-k="c" style="left:76%;top:15%">c</span>
+        <span class="pin" data-k="d" style="left:10%;top:60%">d</span>
+        <span class="pin" data-k="e" style="left:62%;top:84%">e</span>
+      </div>
+      <div class="legend">
+        <p class="q"><b>Asked:</b> What do my notes say about Bayes' theorem? Name the notes you used.</p>
+        <p class="ans"><a href="#" class="cite" data-k="a">Teorema di Bayes</a> presents the theorem as a way to calculate the probability that an event is the cause of an event that has already occurred. It is described as a "posterior search for causes."</p>
+        <p class="math" aria-label="P of H i given E equals P of E given H i times P of H i, over P of E">P(H<sub>i</sub> | E) = P(E | H<sub>i</sub>) · P(H<sub>i</sub>) / P(E)</p>
+        <ol aria-label="The notes this answer read">
+          <li><button type="button" data-k="a"><span class="k">a</span><span class="t">Teorema di Bayes</span></button></li>
+          <li><button type="button" data-k="b"><span class="k">b</span><span class="t">Distribuzioni condizionate</span></button></li>
+          <li><button type="button" data-k="c"><span class="k">c</span><span class="t">Analisi del discriminante (DA)</span></button></li>
+          <li><button type="button" data-k="d"><span class="k">d</span><span class="t">Naive Bayes</span></button></li>
+          <li><button type="button" data-k="e"><span class="k">e</span><span class="t">Lezione 10</span></button></li>
+        </ol>
+      </div>
+      <figcaption class="plate-cap" id="fig1-cap"><b>One answer and the five notes it read,</b> from a recorded session on Silica's test vault. The crystals are rock crystal, <i lang="fr">silice pure cristallisée</i> in Louis Figuier's <i>Les merveilles de l'industrie</i> (1873), dithered to one bit as this page loads.</figcaption>
+    </figure>
+  </section>
+
+  <section class="sec wrap" id="how-sure" aria-labelledby="sure-h">
+    <div class="grid sec-head">
+      <h2 id="sure-h">How sure it is</h2>
+      <p>Before Silica changes a note it sorts the change by how much the vault already agrees with it. The less agreement, the less ink it puts down on its own.</p>
+    </div>
+    <div class="grid sec-body">
+      <div class="densities">
+        <figure class="dens">
+          <div class="specimen"><canvas data-mode="full" aria-label="A flint core in solid ink"></canvas></div>
+          <p class="key mono" aria-hidden="true">████████████████</p>
+          <h3>Written <span class="mono">auto · extracted</span></h3>
+          <p>Reversible, and the structure of the vault already says yes. Silica writes it and logs it.</p>
+          <p class="eg">An orphan note whose title another note already uses gets its link.</p>
+        </figure>
+        <figure class="dens">
+          <div class="specimen"><canvas data-mode="screen" aria-label="The same flint core in a mechanical screen, half the ink"></canvas></div>
+          <p class="key mono" aria-hidden="true">▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒</p>
+          <h3>Proposed <span class="mono">propose · inferred</span></h3>
+          <p>Reversible, but only one signal says yes. You see it first and confirm before it lands.</p>
+          <p class="eg">Two notes that share a concept and are not linked yet.</p>
+        </figure>
+        <figure class="dens">
+          <div class="specimen"><canvas data-mode="ghost" aria-label="The same flint core as a faint ghost of dots"></canvas></div>
+          <p class="key mono" aria-hidden="true">░░░░░░░░░░░░░░░░</p>
+          <h3>Asked <span class="mono">escalate · ambiguous</span></h3>
+          <p>Irreversible, or a call only you can make. Nothing is written: you get the choices.</p>
+          <p class="eg">A link to a note that does not exist, seen twice: create the note, rename one, or leave it.</p>
+        </figure>
+      </div>
+    </div>
+    <div class="grid"><p class="figcap" style="grid-column:1/-1">Fig. 2. One specimen at three densities: a flint core with its flakes fitted back on, from John Evans's <i>Ancient Stone Implements</i>. The three tiers and their rules are the analyst plan in Silica's source (<code class="mono">silica/kernel/analyst_plan.py</code>); a move, a delete or a bulk write is never in the first tier.</p></div>
+  </section>
+
+  <section class="nuc" id="how-it-links" aria-labelledby="nuc-h">
+    <div class="wrap">
+      <figure aria-labelledby="nuc-cap">
+        <div class="plate-head"><span>Fig. 3</span><b>Taf. II</b></div>
+        <div class="nuc-field" id="nuc-field">
+          <picture>
+            <source media="(max-width: 760px)" srcset="img/nuc-phone.png">
+            <img src="img/nuc-desk.png" alt="A run of eighteen new notes, drawn as crosses among the test vault's notes, linked to the notes they name by solid lines; four screened lines propose links, and three faint lines ask about an association and a missing note">
+          </picture>
+          <canvas id="cv-nuc" aria-hidden="true" hidden></canvas>
+        </div>
+        <div class="fig-under">
+          <ol class="steps" id="nuc-steps" aria-hidden="true">
+            <li data-s="0">18 notes written</li><li data-s="1">62 links written</li><li data-s="2">4 proposed</li><li data-s="3">3 asked</li>
+          </ol>
+          <button class="play" type="button" id="nuc-replay" aria-label="Play it again"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.5 L14 8 L3 14.5 Z"/></svg></button>
+        </div>
+      </figure>
+      <div class="grid nuc-body">
+        <h2 id="nuc-h">How it links what it reads</h2>
+        <div class="nuc-text">
+          <p>Point <code>/nucleate</code> at a PDF, a deck, an EPUB or a whole folder and it writes notes in the source's own sentences, one transaction per file, checked against what you already have. Then it links them without asking, but only where the words are already there: a name in a new note that is the title of a note you already have, or a note you already have that names a new one. A link to a note the run never wrote goes back to plain text when the run ends. Pairs that are only related wait for the vault audit, <code>/report --cooccurrence</code>: two notes that share a concept, it proposes and waits for your yes; two joined only by association, or a missing note that keeps being linked, it asks you about. With every wikilink stripped from a real 796-note vault, the same autolink put back 72.3% of the 1,384 links its owner had made.</p>
+          <p class="nuc-src">Source: <code>evals/golden/probe_links.py</code>, 1,384 links across 442 notes, frozen in <a href="https://github.com/kiycoh/silica-agent/blob/main/evals/golden/baseline.json" rel="noopener"><code>evals/golden/baseline.json</code></a> on 2026-08-11; also in Tab. 1.</p>
+        </div>
+        <div class="nuc-side">
+          <dl class="nuc-key">
+            <div><dt aria-hidden="true">████</dt><dd><b>Written by itself</b><span>auto · extracted</span><small>A name that is already a note's title.</small></dd></div>
+            <div><dt aria-hidden="true">▒▒▒▒</dt><dd><b>Proposed</b><span>propose · inferred</span><small>Two notes that share a concept.</small></dd></div>
+            <div><dt aria-hidden="true">░░░░</dt><dd><b>Asked</b><span>escalate · ambiguous</span><small>An association only, or a missing note linked twice.</small></dd></div>
+          </dl>
+          <p class="nuc-nodes"><span><b aria-hidden="true">+</b>a note this run wrote</span><span><b aria-hidden="true">▪</b>a note already there</span></p>
+          <p class="nuc-cap" id="nuc-cap"><b>Illustration.</b> The notes and links are those of Silica's test vault, 748 notes and 1,421 links, cropped around one area. Which links autolink wrote is not recorded there, so this run of 18 notes, its order, and the screened and faint links are drawn for the figure.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec wrap" id="how-it-writes" aria-labelledby="hold-h">
+    <div class="grid sec-head">
+      <h2 id="hold-h">How confidently it writes</h2>
+      <p>Every note a run writes passes parse, structure and link checks, and is read back after it lands. One that fails is sent back. The note stays as it was.</p>
+    </div>
+    <div class="grid sec-body">
+      <div class="fail">
+        <figure class="plate" aria-labelledby="fig4-cap">
+          <div class="plate-head"><span>Fig. 4</span><b>Taf. III</b></div>
+          <canvas id="cv-4" width="900" height="420" role="img" aria-label="The note Teorema di Bayes is overwritten by a summary that drops its frontmatter and heading, breaks apart, and is restored as it was"></canvas>
+          <div class="fig-under">
+            <ol class="steps" id="steps" aria-hidden="true">
+              <li data-s="0">proposed</li><li data-s="1" class="ok">parse ✓</li><li data-s="2" class="bad">structure ✗</li><li data-s="3">sent back</li><li data-s="4" class="ok">unchanged</li>
+            </ol>
+            <button class="play" type="button" id="replay" aria-label="Play it again"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.5 L14 8 L3 14.5 Z"/></svg></button>
+          </div>
+          <figcaption class="plate-cap" id="fig4-cap"><b>Illustration.</b> A summary that drops the note's frontmatter fails the structure check after it lands, and the snapshot taken before the write puts the note back. The break is drawn here as noise.</figcaption>
+        </figure>
+        <div class="fail-t">
+          <p>Silica keeps a journal of what it wrote and where it came from, so a write can be taken back after the fact as well, however far it spread.</p>
+          <div class="cmds">
+            <div><code>/undo</code><span>the last write, one note</span></div>
+            <div><code>/revert &lt;run-id&gt;</code><span>everything one run wrote</span></div>
+            <div><code>/revert --source &lt;file&gt;</code><span>every note made from one PDF</span></div>
+            <div><code>/changes</code><span>what this session touched, line by line</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec wrap" id="measured" aria-labelledby="m-h">
+    <div class="grid sec-head">
+      <h2 id="m-h">Measured, and shipped unedited</h2>
+      <p>Every number comes from the harness in the repository, run on the product path. The samples are small and they are re-runnable on your machine.</p>
+    </div>
+    <div class="grid sec-body">
+      <div class="tab">
+        <table>
+          <caption>Tab. 1. From the result files committed in <a href="https://github.com/kiycoh/silica-agent/tree/main/evals" rel="noopener"><code>evals/</code></a>, 2026-10. LoCoMo here is 2 of its 10 conversations; these are not vendor-comparable numbers.</caption>
+          <thead><tr><th scope="col">What was measured</th><th scope="col">Result</th><th scope="col">Sample</th></tr></thead>
+          <tbody>
+            <tr><td>Questions the notes can answer, answered right (LoCoMo)</td><td class="v">82.1% · 83.2%</td><td class="n">152 and 150 questions</td></tr>
+            <tr><td>Questions it should refuse, refused (LoCoMo)</td><td class="v">87.2% · 82.1%</td><td class="n">47 and 40 questions</td></tr>
+            <tr><td>Keeping the source's words instead of summarizing them</td><td class="v">+16.5 · +14.7 pts</td><td class="n">302 questions, same pipeline</td></tr>
+            <tr><td>Facts in written notes the source supports (FActScore, extractive path)</td><td class="v">0.961</td><td class="n">237-note vault</td></tr>
+            <tr><td>Notes where no write introduced a structural break</td><td class="v">100%</td><td class="n">796 of 796 notes</td></tr>
+            <tr><td>Wikilinks stripped from a real vault, found again</td><td class="v">72.3%</td><td class="n">1,384 links, 442 notes</td></tr>
+            <tr class="flat"><td>Agreement between /organize and the folders a person chose</td><td class="v">0.32</td><td class="n">the same vault</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec wrap" id="runs" aria-labelledby="r-h">
+    <div class="grid sec-head">
+      <h2 id="r-h">Where it runs</h2>
+      <p>The browser is the quickest start. Silica is open source, so it also runs on your computer, inside Claude Code and inside Obsidian.</p>
+    </div>
+    <div class="grid sec-body">
+      <div class="runs">
+        <article class="run">
+          <h3>In your browser <span class="mono">nothing to install</span></h3>
+          <p>Add your notes and PDFs, ask, and practise what is due. Notes, files and chats are stored on a server in the EU, in Turin.</p>
+          <div><a class="btn" href="https://app.silica-agent.dev" rel="noopener">Open Silica <span aria-hidden="true">&rarr;</span></a></div>
+        </article>
+        <article class="run">
+          <h3>On your computer <span class="mono">web app or terminal</span></h3>
+          <p>Point it at any folder of Markdown files, adopted as it is. <code class="mono">silica init</code> asks where the model runs: a provider you have a key for, or a local model.</p>
+          <div class="code"><pre id="c-local"><span class="pr">$ </span>uv tool install "silica-agent[gui,mcp]"
+<span class="pr">$ </span>cd ~/path/to/your/notes
+<span class="pr">$ </span>silica init
+<span class="pr">$ </span>silica --gui</pre><button class="copy" type="button" data-copy="c-local">Copy</button></div>
+        </article>
+        <article class="run">
+          <h3>In Claude Code <span class="mono">silica-core plugin</span></h3>
+          <p>Indexes the folder Claude Code starts in. Claude searches it before it answers and cites what it used by file and line.</p>
+          <div class="code"><pre id="c-claude"><span class="pr">$ </span>claude plugin install silica-core \
+    --marketplace kiycoh/silica-core</pre><button class="copy" type="button" data-copy="c-claude">Copy</button></div>
+        </article>
+        <article class="run">
+          <h3>In Obsidian <span class="mono">Silica Bridge</span></h3>
+          <p>Note panel, ranked search, autolinking and the community graph need no model and no network. The chat panel talks to Silica on your computer, and every write lands in a changes list with a diff per file.</p>
+          <p class="fine">Install from the <a href="https://github.com/kiycoh/obsidian-silica/releases/latest" rel="noopener">latest release</a>, then run <code>silica connect</code> in the vault.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec wrap" id="notes" aria-labelledby="n-h">
+    <div class="grid sec-head">
+      <h2 id="n-h">What happens to your notes</h2>
+      <p>The pilot runs on one server, for people invited one by one. Four facts from its privacy notice and terms.</p>
+    </div>
+    <div class="grid sec-body">
+      <dl class="facts">
+        <div><dt>Kept in Turin</dt><dd>Notes, files and chats are stored on a server in the EU, in Turin.</dd></div>
+        <div><dt>No password</dt><dd>A one-time code is sent to the email address that was invited.</dd></div>
+        <div><dt>Free, by invitation</dt><dd>There are no payments. You must be 18 or older.</dd></div>
+        <div><dt>Open source</dt><dd>AGPL-3.0-or-later. Read the code or run it yourself, from <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>.</dd></div>
+      </dl>
+      <p class="legal"><a href="https://app.silica-agent.dev/privacy" rel="noopener">Privacy notice</a><a href="https://app.silica-agent.dev/terms" rel="noopener">Terms</a></p>
+    </div>
+  </section>
+
+  <section class="close wrap grid" aria-labelledby="c-h">
+    <div class="close-t">
+      <h2 id="c-h">Bring your own notes.</h2>
+      <p>Open Silica, add your notes and PDFs, and ask the first question.</p>
+      <a class="btn" href="https://app.silica-agent.dev" rel="noopener">Open Silica <span aria-hidden="true">&rarr;</span></a>
+      <small>Not invited yet? Write to <span class="addr">kiycoh@proton.me</span>.</small>
+    </div>
+    <figure class="close-fig plate">
+      <div class="plate-head"><span>Fig. 5</span><b>Taf. IV</b></div>
+      <div class="specimen"><img src="img/diatom-1bit.png" width="480" height="500" alt="The rounded ends of two diatoms, their silica walls ribbed with fine parallel lines" style="width:100%"></div>
+      <figcaption class="plate-cap"><i>Pinnularia nobilis</i> and <i>P. major</i> var. <i>pulchella</i>, two diatoms, from Charles S. Boyer's plate 28.</figcaption>
+    </figure>
+  </section>
+</main>
+
+<footer class="wrap">
+  <a href="https://app.silica-agent.dev/privacy" rel="noopener">Privacy</a>
+  <a href="https://app.silica-agent.dev/terms" rel="noopener">Terms</a>
+  <a href="https://github.com/kiycoh/silica-agent" rel="noopener">GitHub</a>
+  <span class="fill">Plates via Wikimedia Commons, cropped and dithered for this page. Rock crystal: Louis Figuier, <i>Les merveilles de l'industrie</i>, vol. I, 1873, scan by the Biblioteca de la Facultad de Derecho y Ciencias del Trabajo, Universidad de Sevilla, CC BY 2.0. Flint core: John Evans, <i>The Ancient Stone Implements, Weapons and Ornaments of Great Britain</i>, 1897, fig. 2, public domain. Diatoms: Charles S. Boyer, <i>The Diatomaceae of Philadelphia and Vicinity</i>, 1916, plate 28, public domain.</span>
+</footer>
+
+<script src="graph.js"></script>
+<script>
+(() => {
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const $ = (s, r = document) => r.querySelector(s);
+
+  // ---- dithering: the page draws its own one-bit ink from a grey source ------
+  const INK = [0x1A, 0x18, 0x15], PAPER = [0xFF, 0xFD, 0xF9];
+  const B8 = [0,32,8,40,2,34,10,42,48,16,56,24,50,18,58,26,12,44,4,36,14,46,6,38,60,28,52,20,62,30,54,22,3,35,11,43,1,33,9,41,51,19,59,27,49,17,57,25,15,47,7,39,13,45,5,37,63,31,55,23,61,29,53,21];
+  // Plate I and Fig. 2 are different specimens, each with its own grey source
+  const src = new Image(), flint = new Image();
+  src.src = "img/quartz-grey.jpg"; flint.src = "img/flint-grey.jpg";
+
+  // grey values at w x h, cropped to the box's aspect from the source centre
+  function greyAt(src, w, h) {
+    const c = document.createElement("canvas"); c.width = w; c.height = h;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    const sa = src.width / src.height, da = w / h;
+    let sw = src.width, sh = src.height, sx = 0, sy = 0;
+    if (da > sa) { sh = sw / da; sy = (src.height - sh) / 2; } else { sw = sh * da; sx = (src.width - sw) / 2; }
+    x.drawImage(src, sx, sy, sw, sh, 0, 0, w, h);
+    const d = x.getImageData(0, 0, w, h).data, g = new Float32Array(w * h);
+    for (let i = 0; i < g.length; i++) g[i] = d[i * 4];
+    return g;
+  }
+  // amount 1 = the source's own ink; below 1 the ink thins toward paper
+  function paint(cv, g, w, h, mode, amount) {
+    const ctx = cv.getContext("2d");
+    const out = ctx.createImageData(w, h), o = out.data;
+    let bits;
+    if (mode === "full" && amount >= 1) {
+      // Atkinson: it drops a quarter of the error, which keeps the bars solid
+      const e = Float32Array.from(g); bits = new Uint8Array(w * h);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const i = y * w + x, v = e[i], on = v < 128 ? 1 : 0, err = (v - (on ? 0 : 255)) / 8;
+        bits[i] = on;
+        if (x + 1 < w) e[i + 1] += err;
+        if (x + 2 < w) e[i + 2] += err;
+        if (y + 1 < h) { if (x > 0) e[i + w - 1] += err; e[i + w] += err; if (x + 1 < w) e[i + w + 1] += err; }
+        if (y + 2 < h) e[i + 2 * w] += err;
+      }
+    } else {
+      // an ordered screen: regular, mechanical, visibly not the final print
+      bits = new Uint8Array(w * h);
+      const n = mode === "screen" ? 4 : 8;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        // below 8% ink the source is paper; without the floor the screen dots every blank cell
+        const i = y * w + x, dark = Math.max(0, ((255 - g[i]) / 255 - .08) / .92) * amount;
+        // the even cells of the 8x8 Bayer matrix are the 4x4 one, values 0..15
+        const t = n === 4 ? B8[((y % 4) * 2) * 8 + (x % 4) * 2] / 16 : B8[(y % 8) * 8 + (x % 8)] / 64;
+        bits[i] = dark > t + 0.0001 ? 1 : 0;
+      }
+    }
+    for (let i = 0; i < bits.length; i++) {
+      const c = bits[i] ? INK : PAPER, k = i * 4;
+      o[k] = c[0]; o[k + 1] = c[1]; o[k + 2] = c[2]; o[k + 3] = 255;
+    }
+    ctx.putImageData(out, 0, 0);
+  }
+  // one dot is one CSS pixel (dot > 1 makes the screen visible at a glance)
+  function sizeTo(cv, box, dot) {
+    const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    const w = Math.max(40, Math.floor(r.width / dot)), h = Math.max(40, Math.floor(r.height / dot));
+    cv.width = w; cv.height = h;
+    return [w, h, dpr];
+  }
+
+  const pins = [...document.querySelectorAll(".pin")];
+  const hero = $("#cv-1"), heroBox = $("#spec-1");
+  let heroRun = 0;
+  function drawHero(animate) {
+    const run = ++heroRun;      // a newer draw (a resize) retires a reveal still running
+    const [w, h] = sizeTo(hero, heroBox, 1);
+    const g = greyAt(src, w, h);
+    hero.hidden = false;
+    if (!animate) { paint(hero, g, w, h, "full", 1); pins.forEach((p) => p.classList.remove("wait")); return; }
+    // the print is pulled once, top to bottom, always at full density: on this page
+    // a thinner screen means "proposed", so it never stands in for "loading"
+    const off = document.createElement("canvas"); off.width = w; off.height = h;
+    paint(off, g, w, h, "full", 1);
+    const ctx = hero.getContext("2d");
+    ctx.fillStyle = "#FFFDF9"; ctx.fillRect(0, 0, w, h);
+    const t0 = performance.now(), dur = 900; let done = 0;
+    pins.forEach((p) => p.classList.add("wait"));
+    (function step(now) {
+      if (run !== heroRun) return;
+      const k = Math.min(1, (now - t0) / dur), y = Math.round((1 - Math.pow(1 - k, 3)) * h);
+      if (y > done) { ctx.drawImage(off, 0, done, w, y - done, 0, done, w, y - done); done = y; }
+      if (k < 1) requestAnimationFrame(step);
+      else pins.forEach((p, i) => setTimeout(() => p.classList.remove("wait"), 90 * i));
+    })(t0);
+  }
+  const dens = [...document.querySelectorAll(".dens canvas")];
+  function drawDens() {
+    dens.forEach((cv) => {
+      const mode = cv.dataset.mode;
+      const [w, h] = sizeTo(cv, cv.parentElement, mode === "full" ? 1 : 2);
+      paint(cv, greyAt(flint, w, h), w, h, mode, mode === "full" ? 1 : mode === "screen" ? .55 : .16);
+    });
+  }
+  src.onload = () => drawHero(!reduce);
+  flint.onload = drawDens;
+  let rt;
+  addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (src.complete) drawHero(false); if (flint.complete) drawDens(); }, 150); });
+
+  // ---- the legend points at the plate ---------------------------------------
+  function light(k) {
+    pins.forEach((p) => p.classList.toggle("on", p.dataset.k === k));
+    document.querySelectorAll(".legend li button").forEach((b) => b.classList.toggle("on", b.dataset.k === k));
+  }
+  document.querySelectorAll(".legend [data-k]").forEach((el) => {
+    el.addEventListener("mouseenter", () => light(el.dataset.k));
+    el.addEventListener("focus", () => light(el.dataset.k));
+    el.addEventListener("mouseleave", () => light(null));
+    el.addEventListener("blur", () => light(null));
+    el.addEventListener("click", (e) => { e.preventDefault(); light(el.dataset.k); });
+  });
+
+  // ---- Fig. 3: one run links what it wrote, on the test vault's own graph -----
+  // The notes and links are graph.js. Nothing records which links autolink wrote, so
+  // the run (the 18 notes of Teorema di Bayes's area nearest to it), its order and the
+  // proposed and asked pairs are chosen here, and the caption says Illustration.
+  // graph.js is public, so it keeps only the titles read below (the seed, the hub it
+  // skips, a daily note's date); every other title of the owner's vault is blanked.
+  const GR = window.SILICA_GRAPH, cvN = $("#cv-nuc"), boxN = $("#nuc-field");
+  if (GR && cvN) {
+    const P = GR.n.map((n) => [n[0], n[1]]), N = P.length;
+    const key = (a, b) => (a < b ? a * N + b : b * N + a);
+    const adj = new Set(GR.l.map(([a, b]) => key(a, b)));
+    const d2 = (a, b) => (P[a][0] - P[b][0]) ** 2 + (P[a][1] - P[b][1]) ** 2;
+    const title = (i) => GR.n[i][7], area = (i) => GR.n[i][8];
+    const daily = (i) => /^\d{4}-\d{2}-\d{2}/.test(title(i));
+    const areaSize = {};
+    GR.n.forEach((n) => { areaSize[n[8]] = (areaSize[n[8]] || 0) + 1; });
+    const seed = GR.n.findIndex((n) => n[7] === "Teorema di Bayes"), A0 = area(seed);
+    const RUN = GR.n.map((_, i) => i).filter((i) => area(i) === A0 && !daily(i) && title(i) !== "Statistica")
+      .sort((a, b) => d2(a, seed) - d2(b, seed)).slice(0, 18);
+    const rank = new Map(RUN.map((i, k) => [i, k]));
+    // one pair per note, the length nearest `len`: a screen on a very short line reads as a blob
+    function pick(test, len, k) {
+      const c = [];
+      for (const u of RUN) for (let v = 0; v < N; v++) {
+        if (v !== u && !adj.has(key(u, v)) && test(v)) c.push([u, v, Math.abs(Math.sqrt(d2(u, v)) - len)]);
+      }
+      c.sort((p, q) => p[2] - q[2]);
+      const used = new Set(), out = [];
+      for (const [u, v] of c) {
+        if (used.has(u) || used.has(v)) continue;
+        used.add(u); used.add(v); out.push([u, v]);
+        if (out.length === k) break;
+      }
+      return out;
+    }
+    const PROP = pick((v) => area(v) === A0 && !daily(v), .07, 4);
+    const ASK = pick((v) => area(v) !== A0 && areaSize[area(v)] >= 9 && !daily(v), .2, 2);
+    // the missing note: the emptiest spot near the run, linked from its two nearest notes
+    const xs = RUN.map((i) => P[i][0]), ys = RUN.map((i) => P[i][1]);
+    const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
+    let M = [bx0, by0], best = -1;
+    for (let x = bx0; x <= bx1; x += .006) for (let y = by0; y <= by1; y += .006) {
+      let m = Infinity;
+      for (const p of P) m = Math.min(m, (p[0] - x) ** 2 + (p[1] - y) ** 2);
+      if (m > best) { best = m; M = [x, y]; }
+    }
+    const toM = [...RUN].sort((a, b) => ((P[a][0] - M[0]) ** 2 + (P[a][1] - M[1]) ** 2) - ((P[b][0] - M[0]) ** 2 + (P[b][1] - M[1]) ** 2)).slice(0, 2);
+
+    // timeline, ms: notes appear from the seed outward, then their links, then the two lower tiers
+    const APPEAR = 60, T_LINK = 1250, T_PROP = 3050, T_ASK = 4150, T_END = 5300;
+    const AUTO = GR.l.filter(([a, b]) => rank.has(a) || rank.has(b))
+      .map(([a, b]) => (rank.has(a) && (!rank.has(b) || rank.get(a) <= rank.get(b)) ? [a, b] : [b, a]))
+      .sort((p, q) => rank.get(p[0]) - rank.get(q[0]))
+      .map(([a, b], j, all) => [a, b, T_LINK + j * (1500 / all.length)]);
+    const BASE = GR.l.filter(([a, b]) => !rank.has(a) && !rank.has(b));
+    const LOW = [
+      ...PROP.map(([a, b], k) => [a, b, T_PROP + k * 160, 2]),
+      ...ASK.map(([a, b], k) => [a, b, T_ASK + k * 160, 3]),
+      ...toM.map((a, k) => [a, -1, T_ASK + 320 + k * 160, 3]),
+    ];
+    const stepAt = (t) => (t >= T_END ? -1 : t >= T_ASK ? 3 : t >= T_PROP ? 2 : t >= T_LINK ? 1 : 0);
+    const stepsN = [...document.querySelectorAll("#nuc-steps li")];
+
+    const ctxN = cvN.getContext("2d");
+    const PAPER32 = 0xFFF9FDFF, INK32 = 0xFF15181A;   // little-endian RGBA of --paper and --ink
+    let w = 0, h = 0, bits, base, imgN, cx = 0, cy = 0, k = 1;
+    const X = (i) => Math.round((P[i][0] - cx) * k + w / 2), Y = (i) => Math.round((P[i][1] - cy) * k + h / 2);
+    // the tiers of Fig. 2, by pixel: 1 solid, 2 the 4x4 screen at .55, 3 the 8x8 ghost at .16
+    function put(x, y, c) {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      if (c === 1 || (c === 2 && .55 > B8[((y & 3) * 2) * 8 + (x & 3) * 2] / 16) || (c === 3 && .16 > B8[(y & 7) * 8 + (x & 7)] / 64)) bits[y * w + x] = 1;
+    }
+    function seg(x0, y0, x1, y1, f, c, th) {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1), m = Math.round(n * Math.min(1, f)), o = th >> 1;
+      for (let s = 0; s <= m; s++) {
+        const x = Math.round(x0 + (x1 - x0) * s / n), y = Math.round(y0 + (y1 - y0) * s / n);
+        for (let a = 0; a < th; a++) for (let b = 0; b < th; b++) put(x + a - o, y + b - o, c);
+      }
+    }
+    function block(x, y, r, c) { for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) put(x + a, y + b, c); }
+    // a clear square of ground first, so a new note reads as a cross and not as a crossing
+    function clear(x, y, r) {
+      for (let a = -r; a <= r; a++) for (let b = -r; b <= r; b++) {
+        const xx = x + a, yy = y + b;
+        if (xx >= 0 && yy >= 0 && xx < w && yy < h) bits[yy * w + xx] = 0;
+      }
+    }
+    function cross(x, y) { clear(x, y, 8); for (let d = -6; d <= 6; d++) { put(x + d, y, 1); put(x, y + d, 1); } block(x, y, 1, 1); }
+
+    function frameView() {
+      const pts = [...RUN, ...PROP.flat(), ...ASK.flat()];
+      const px = pts.map((i) => P[i][0]), py = pts.map((i) => P[i][1]);
+      const x0 = Math.min(...px), x1 = Math.max(...px), y0 = Math.min(...py), y1 = Math.max(...py);
+      // wide: the run inside its area and the areas around it; square: the run alone
+      const grow = w / h > 1.4 ? 1.6 : 1.3;
+      k = Math.min(w / ((x1 - x0) * grow), h / ((y1 - y0) * grow));
+      cx = (x0 + x1) / 2; cy = (y0 + y1) / 2;
+    }
+    function setupN() {
+      [w, h] = sizeTo(cvN, boxN, 1);
+      bits = new Uint8Array(w * h); imgN = ctxN.createImageData(w, h);
+      frameView();
+      // the vault as it stands before the run: drawn once, copied under every frame
+      for (const [a, b] of BASE) seg(X(a), Y(a), X(b), Y(b), 1, 1, 1);
+      for (let i = 0; i < N; i++) if (!rank.has(i)) block(X(i), Y(i), 1, 1);
+      base = bits.slice();
+    }
+    function drawN(t) {
+      bits.set(base);
+      // the lower tiers get a wider band than a written link so their screen can be read;
+      // ink per length still falls from solid to screen to ghost
+      for (const [a, b, s] of AUTO) if (t > s) seg(X(a), Y(a), X(b), Y(b), (t - s) / 380, 1, 2);
+      for (const [a, b, s, c] of LOW) {
+        if (t <= s) continue;
+        const mx = Math.round((M[0] - cx) * k + w / 2), my = Math.round((M[1] - cy) * k + h / 2);
+        if (b < 0) { clear(mx, my, 9); block(mx, my, 8, 3); seg(X(a), Y(a), mx, my, (t - s) / 520, c, 4); }
+        else seg(X(a), Y(a), X(b), Y(b), (t - s) / 520, c, 4);
+      }
+      RUN.forEach((i, r) => { if (t >= r * APPEAR) cross(X(i), Y(i)); });
+      const u32 = new Uint32Array(imgN.data.buffer);
+      for (let i = 0; i < u32.length; i++) u32[i] = bits[i] ? PAPER32 : INK32;
+      ctxN.putImageData(imgN, 0, 0);
+      const st = stepAt(t);
+      stepsN.forEach((li) => li.classList.toggle("on", st < 0 || +li.dataset.s === st));
+    }
+
+    // runs once when it is in view, holds still out of view, and resumes where it stopped
+    let tN = 0, last = 0, rafN = 0, runningN = false, inView = false;
+    function tick(now) {
+      if (!runningN) return;
+      tN += last ? now - last : 0; last = now;
+      drawN(Math.min(tN, T_END));
+      if (tN >= T_END) { runningN = false; return; }
+      rafN = requestAnimationFrame(tick);
+    }
+    function resumeN() {
+      if (runningN || reduce || tN >= T_END || !inView) return;
+      runningN = true; last = 0; rafN = requestAnimationFrame(tick);
+    }
+    function pauseN() { runningN = false; cancelAnimationFrame(rafN); }
+    setupN(); cvN.hidden = false;
+    if (reduce) tN = T_END;
+    drawN(tN);
+    $("#nuc-replay").addEventListener("click", () => { pauseN(); tN = reduce ? T_END : 0; drawN(tN); inView = true; resumeN(); });
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver((es) => {
+        const e = es[es.length - 1];
+        inView = e.isIntersecting && e.intersectionRatio >= .35;
+        if (inView) resumeN(); else pauseN();
+      }, { threshold: [0, .35] }).observe(boxN);
+    } else { tN = T_END; drawN(tN); }
+    let rN;
+    addEventListener("resize", () => { clearTimeout(rN); rN = setTimeout(() => { setupN(); drawN(Math.min(tN, T_END)); }, 150); });
+  }
+
+  // ---- Fig. 4: the failed write, drawn once as noise and then taken back -----
+  const cv3 = $("#cv-4"), c3 = cv3.getContext("2d"), steps = [...document.querySelectorAll("#steps li")];
+  // the test vault's note; its frontmatter is cut to two of its keys for the figure.
+  // The summary loses it, and that is what the structure check refuses: ofm_lint
+  // only flags a missing H1, it does not block on it
+  const CLEAN = [
+    ["f", "---"], ["f", "last modified: 2025-06-23"], ["f", "related: [[Naive Bayes]]"], ["f", "---"],
+    ["h", "Teorema di Bayes"],
+    ["p", "Il teorema di Bayes serve a calcolare la probabilità che un evento sia la causa di un evento che si è già verificato."],
+    ["i", "È quindi una ricerca a posteriori delle cause."],
+    ["m", "P(Hᵢ | E) = P(E | Hᵢ) · P(Hᵢ) / P(E)"],
+  ];
+  const BROKEN = [
+    ["p", "Bayes' theorem is about probabilities of causes and is useful in statistics and machine learning. It relates conditional probabilities in a simple and general way."],
+    ["p", "Summary generated from the note."],
+  ];
+  let W3 = 0, H3 = 0, U = 1, A, B, raf = 0, ORDER = [], ROWS = 4, NR = 0, playing = false;
+  // the note is set at the figure's own width, so it reads at body size on a phone too
+  function typeset(x, lines, draw) {
+    const pad = 30 * U, max = W3 - 2 * pad;
+    const F = { f: ["500", 14, 22], h: ["700", 34, 50], p: ["400", 20, 31], i: ["italic 400", 20, 31], m: ["italic 400", 21, 44] };
+    let y = pad + 26 * U;
+    for (const [k, t] of lines) {
+      const [wt, size, lead] = F[k];
+      x.font = `${wt} ${size * U}px ${k === "f" ? "'JetBrains Mono', monospace" : "'Host Grotesk', sans-serif"}`;
+      if (draw) x.fillStyle = k === "f" ? "#4A453C" : "#1A1815";
+      let line = "";
+      const flush = () => { if (draw) x.fillText(line, pad, y); y += lead * U; line = ""; };
+      for (const wd of t.split(" ")) { const tt = line ? line + " " + wd : wd; if (line && x.measureText(tt).width > max) { flush(); line = wd; } else line = tt; }
+      if (line) flush();
+      if (k === "h" || k === "m") y += 6 * U;
+      // the closing rule of the frontmatter: room for the heading's ascent below it
+      if (k === "f" && t === "---" && y > pad + 60 * U) y += 30 * U;
+    }
+    return y + pad - 26 * U;
+  }
+  function sheet(lines) {
+    const c = document.createElement("canvas"); c.width = W3; c.height = H3;
+    const x = c.getContext("2d");
+    x.fillStyle = "#FFFDF9"; x.fillRect(0, 0, W3, H3);
+    typeset(x, lines, true);
+    return c;
+  }
+  function size3() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2), css = cv3.getBoundingClientRect().width || 600;
+    U = Math.max(.8, Math.min(1, css / 720)) * dpr;
+    W3 = Math.round(css * dpr);
+    const m = document.createElement("canvas").getContext("2d");
+    H3 = Math.ceil(Math.max(typeset(m, CLEAN, false), typeset(m, BROKEN, false)));
+    cv3.width = W3; cv3.height = H3;
+    ROWS = Math.max(2, Math.round(4 * dpr)); NR = Math.ceil(H3 / ROWS);
+    const bits = Math.max(1, Math.ceil(Math.log2(NR)));
+    // bit-reversed row order: the clean note comes back interlaced, like a screen filling in
+    ORDER = Array.from({ length: NR }, (_, i) => [parseInt(i.toString(2).padStart(bits, "0").split("").reverse().join(""), 2), i]).sort((a, b) => a[0] - b[0]).map((q) => q[1]);
+    A = sheet(CLEAN); B = sheet(BROKEN);
+  }
+  function stepTo(n) { steps.forEach((li) => li.classList.toggle("on", +li.dataset.s === n)); }
+  function glitch(base, amt, seed) {
+    c3.drawImage(base, 0, 0);
+    let r = seed;
+    const rnd = () => ((r = (r * 16807) % 2147483647) / 2147483647), sc = W3 / 900;
+    const bands = 6 + Math.floor(amt * 14);
+    for (let b = 0; b < bands; b++) {
+      const y = Math.floor(rnd() * H3), h = (4 + Math.floor(rnd() * 26 * amt)) * sc, dx = Math.floor((rnd() - .5) * 140 * amt * sc);
+      c3.drawImage(base, 0, y, W3, h, dx, y, W3, h);
+    }
+    // one-bit noise: ink dots where the structure gave way
+    const dot = Math.max(2, Math.round(2 * sc));
+    c3.fillStyle = "#1A1815";
+    for (let n = 0; n < 900 * amt * Math.max(.4, sc); n++) c3.fillRect((rnd() * W3) | 0, (rnd() * H3) | 0, dot, dot);
+    c3.fillStyle = "#FFFDF9";
+    for (let n = 0; n < 6 * amt; n++) c3.fillRect(0, (rnd() * H3) | 0, W3, ((2 + rnd() * 5) * sc) | 0 || 2);
+  }
+  function play() {
+    cancelAnimationFrame(raf);
+    if (reduce) { c3.drawImage(A, 0, 0); stepTo(4); return; }
+    playing = true;
+    const t0 = performance.now();
+    (function frame(now) {
+      const t = (now - t0) / 1000;
+      if (t < 1.1) { c3.drawImage(A, 0, 0); stepTo(0); }
+      else if (t < 1.6) { c3.drawImage(B, 0, 0); stepTo(1); }
+      else if (t < 2.7) { glitch(B, Math.min(1, (t - 1.6) / .6), 1 + ((t * 30) | 0)); stepTo(2); }
+      else if (t < 3.5) {
+        glitch(B, .5, 7 + ((t * 30) | 0)); stepTo(3);
+        const n = Math.floor((t - 2.7) / .8 * NR);
+        for (let i = 0; i < n; i++) { const y = ORDER[i] * ROWS; c3.drawImage(A, 0, y, W3, ROWS, 0, y, W3, ROWS); }
+      } else { c3.drawImage(A, 0, 0); stepTo(4); playing = false; return; }
+      raf = requestAnimationFrame(frame);
+    })(t0);
+  }
+  $("#replay").addEventListener("click", play);
+  document.fonts.ready.then(() => {
+    size3(); c3.drawImage(A, 0, 0); stepTo(4);
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver((es) => { if (es.some((e) => e.isIntersecting)) { io.disconnect(); play(); } }, { threshold: .5 });
+      io.observe(cv3);
+    }
+    let r3; addEventListener("resize", () => { clearTimeout(r3); r3 = setTimeout(() => { cancelAnimationFrame(raf); playing = false; size3(); c3.drawImage(A, 0, 0); stepTo(4); }, 150); });
+  });
+
+  // ---- copy ------------------------------------------------------------------
+  document.querySelectorAll(".copy").forEach((b) => b.addEventListener("click", async () => {
+    const c = document.getElementById(b.dataset.copy).cloneNode(true);
+    c.querySelectorAll(".pr").forEach((s) => s.remove());
+    try { await navigator.clipboard.writeText(c.textContent.replace(/\\\n\s*/g, "")); b.textContent = "Copied"; }
+    // a framed page can be refused the clipboard; the command stays selectable text
+    catch { b.textContent = "Select to copy"; }
+    setTimeout(() => { b.textContent = "Copy"; }, 1800);
+  }));
+})();
+</script>
+</body>
+</html>
