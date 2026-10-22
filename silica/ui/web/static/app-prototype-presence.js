@@ -1,6 +1,7 @@
 // PROTOTYPE, kept in main as the record of ADR-0048's choice and not maintained.
 // A won, with C's thinking, and shipped as the orb until 2026-10-21, when the
-// lockup's own mark took its place (app-presence.js); B and C and the
+// lockup's own mark took its place, in WebGL (app-presence.js, deleted
+// 2026-10-22) and then in 2D beside the landing's greeting; B and C and the
 // responding and error states live only here.
 //
 // Question: does a Murmur-style glass presence with a crystalline interior make
@@ -869,8 +870,6 @@ void main() {
   // ---- DOM ------------------------------------------------------------------------
   const hero = document.getElementById("vault-hero");
   if (!hero) return;
-  // one presence per screen: while the prototype is on, it replaces the shipped one
-  hero.querySelector(".vh-presence")?.remove();
   const heroCanvas = document.createElement("canvas");
   // The sphere is 60% of its canvas (MH_R 0.3); the rest is containment and the
   // contact glow, so the negative margins pull the wordmark back under the body.

@@ -1214,8 +1214,8 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   streaming = true;
   const turnT0 = performance.now();
   let toolsDone = 0; // for the stopped row: how much of the turn had landed
-  // What the mark in the composer shows when the turn ends (ADR-0048): a
-  // stopped turn is neither an arrival nor a failure, so it goes back to idle.
+  // How the turn ended, for silica:turn-end (ADR-0105): a stopped turn is
+  // neither an arrival nor a failure, so it stays idle.
   let outcome = "idle";
   setRunVisible(true);
   setSendDisabled(true);
@@ -1424,7 +1424,6 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
   } finally {
     streaming = false;
     setRunVisible(false);
-    composerPresence?.state(outcome);
     setSendDisabled(false);
     pending.remove(); // no-op if the first event already dropped it
     caret.remove(); // no-op if a rerender already detached it
@@ -1489,7 +1488,6 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       textSeg().raw += ev.text;
       paintSoon();
       peekDelta(ev.text);
-      composerPresence?.spoke(); // the mark in the composer lights while text lands
     } else if (ev.type === "tool_start") {
       steps++;
       if (ev.pipeline) {
@@ -2144,6 +2142,19 @@ function makeToolRow(label) {
 }
 
 // --- composer ---------------------------------------------------------------
+// The landing turns into the conversation instead of being swapped for it
+// (ADR-0048, amendment 2026-10-22): the composer travels from under the
+// greeting to the foot of the view, and the greeting's mark lands on the first
+// turn's run line, the same 16 px drawing, so what said hello is what is now
+// working. The names are set only while it runs: held for good, they would
+// also take the composer out of the theme's whole-page crossfade.
+function swapLanding(update) {
+  if (!document.startViewTransition || matchMedia("(prefers-reduced-motion: reduce)").matches) return update();
+  const root = document.documentElement;
+  root.classList.add("vt-landing");
+  document.startViewTransition(update).finished.finally(() => root.classList.remove("vt-landing"));
+}
+
 function autoGrow(el) {
   el.style.height = "auto";
   const border = el.offsetHeight - el.clientHeight; // box-sizing: border-box
@@ -2165,9 +2176,13 @@ $("#composer").addEventListener("submit", (e) => {
   endEditing();
   // Images alone ride the turn as pixels the model sees (ADR-0077); anything
   // else, or an explicit /nucleate, is uploaded and staged into the vault.
-  if (staged.length && stagedAreImages() && !t.trim().startsWith("/")) lookStaged(t);
-  else if (staged.length) nucleateStaged(t); // files attached: upload + act on them together
-  else send(t);
+  const go = () => {
+    if (staged.length && stagedAreImages() && !t.trim().startsWith("/")) lookStaged(t);
+    else if (staged.length) nucleateStaged(t); // files attached: upload + act on them together
+    else send(t);
+  };
+  if (log.childElementCount || (!t.trim() && !staged.length)) go();
+  else swapLanding(go);
 });
 let allCommands = [];
 let filteredCommands = [];
@@ -2511,7 +2526,7 @@ async function newChat() {
   input.value = "";
   autoGrow(input);
   renderHighlight();
-  log.innerHTML = "";
+  if (log.childElementCount) swapLanding(() => { log.innerHTML = ""; greet(true); });
   await fetch("/reset", { method: "POST" });
   currentSessionId = "";
   chatWorkspace = "";       // a new chat is the whole vault until a workspace opens it

@@ -48,19 +48,10 @@ def test_the_vault_states_its_size_on_the_landing_and_not_in_the_chrome():
     for dead in ("stat-grid", "stat-notes", "stat-links", "stat-clusters",
                  "stat-unresolved"):
         assert dead not in html, f"the rail's {dead} is back"
-    assert 'id="vh-facts"' in _block(html, '<section id="view-chat"', "</section>")
+    # nor on the landing, since the greeting took it (ADR-0048, amendment
+    # 2026-10-22): a vault's size answers nothing you arrive asking
+    assert 'id="vh-facts"' not in html
     assert 'id="top-counts"' not in rail
-
-
-def test_the_area_count_has_one_rule():
-    """The strip and the chat landing both state 'N areas'. A cluster count made
-    entirely of singletons names nothing, so the count is gated -- and the gate
-    stated twice is two numbers that can disagree about the same vault."""
-    src = app_js()
-    assert src.count("function areaCount(") == 1
-    # the raw expression lives only inside that function
-    assert src.count("(data.topics || []).length ?") == 1
-    assert src.count("= areaCount(data)") == 1  # the landing; the strip states no size (P16)
 
 
 def test_the_notices_are_behind_the_chip_not_camped_in_the_rail():

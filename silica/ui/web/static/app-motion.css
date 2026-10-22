@@ -181,3 +181,30 @@
   animation-duration: 320ms;
   animation-timing-function: var(--ease);
 }
+
+/* --- the landing becomes the chat (ADR-0048, amendment 2026-10-22) ------------
+   swapLanding() names two things for the length of one view transition: the
+   composer, which travels from under the greeting to the foot of the view, and
+   the mark, which leaves the greeting for the first turn's run line. The rest
+   of the page crossfades. 420ms, the distance of a whole view and the one
+   authored moment here; the crossfade underneath is quicker so the greeting is
+   gone before the composer lands. */
+.vt-landing #composer .composer-shell {
+  view-transition-name: vt-composer;
+}
+
+.vt-landing #vault-hero .vh-mark,
+.vt-landing #log .rl-mark {
+  view-transition-name: vt-mark;
+}
+
+::view-transition-group(vt-composer),
+::view-transition-group(vt-mark) {
+  animation-duration: 420ms;
+  animation-timing-function: var(--ease);
+}
+
+.vt-landing::view-transition-old(root),
+.vt-landing::view-transition-new(root) {
+  animation-duration: 220ms;
+}

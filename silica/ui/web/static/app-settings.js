@@ -229,6 +229,11 @@ async function stCommit(row, input, rowEl) {
   // The graph document bakes these in at render time, so the change only lands
   // on a rebuild. Stale it, and rebuild now if that view is the one on screen.
   if (row.key === "SILICA_THEME") applyThemePref((data.values || {})[row.key] || value);
+  // index() stamps the name only on a page load, so the landing hears it here
+  if (row.key === "SILICA_USER_NAME") {
+    document.documentElement.dataset.name = (data.values || {})[row.key] ?? value;
+    greet();
+  }
   if (row.key === "SILICA_GRAPH_PARTICLES" || row.key === "SILICA_GRAPH_SHADING") {
     graphStale = true;
     if (activeTab === "graph" && graphMode === "graph") setGraphMode("graph");
@@ -877,7 +882,7 @@ async function loadHealth() {
 loadVault();
 loadSessions();
 loadVaultInfo();
-loadVaultBrief(); // a call, so it is its own request: the landing renders without it
+loadVaultBrief(); // a model call nothing on screen waits for
 loadChanges(); // the server's ledger outlives the tab — a reload keeps the list
 loadConfig(); // header shows the active model without opening the panel
 loadHealth(); // a chat/embedder/reranker server that isn't up says so, once, here

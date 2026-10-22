@@ -674,13 +674,19 @@ class SilicaConfig:
         default_factory=lambda: env_flag("SILICA_GRAPH_SHADING", True)
     )
 
-    # The chat landing's second line: a sentence the worker model writes about
-    # what the vault holds. The counted line above it — notes, areas, the topic
-    # labels themselves — is computed and always shows. This is the part that
-    # costs a call, so it is the part that can be switched off.
+    # A sentence the worker model writes about what the vault holds, which
+    # silica_vaults hands the agent when it picks among vaults. It was the chat
+    # landing's second line until the greeting took the landing (ADR-0048,
+    # amendment 2026-10-22). It costs a call, so it can be switched off.
     vault_brief: bool = field(
         default_factory=lambda: env_flag("SILICA_VAULT_BRIEF", True)
     )
+
+    # What the new chat calls you, "Hi <name>." in the web UI's greeting. Asked
+    # for rather than derived: the address an account signs in with is not a
+    # name, and a name guessed from one greets somebody else. Empty greets no
+    # one by name.
+    user_name: str = field(default_factory=lambda: os.getenv("SILICA_USER_NAME", "").strip())
 
     # Web UI palette: "auto" follows the OS, "dark" and "light" pin it. Only the
     # browser can answer "auto", so the server ships the preference and a script

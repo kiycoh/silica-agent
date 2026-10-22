@@ -146,7 +146,7 @@ async function loadVaultInfo() {
     renderVaultHealth(data);          // the chip's dot, the panel's link count
     syncTreePins();          // a fresh tree knows nothing about the pins yet
     markOpenNote();          // …nor about the note the drawer is on
-    renderVaultFacts(data);           // the chat landing's counted line
+    renderLandingIdeas(data);         // the landing's ways to start, from the hubs
     buildNoteIndex();                 // explore note search reads the fresh tree
     applySidebarFilter();
     trimTreeSel();           // the selection, less what the fresh tree no longer shows
@@ -176,14 +176,6 @@ function setVaultPath(path) {
   full.textContent = path ? "\u200e" + path + "\u200e" : "";
   full.title = path || "";
   if (path && path !== was) loadPins(); // pins are per vault, and this is the switch
-}
-
-// A cluster count made entirely of singletons names nothing, so it is stated
-// only when there are areas worth naming. One function, because the strip and
-// the chat landing both state this number and two copies of the rule are two
-// numbers that can disagree about the same vault.
-function areaCount(data) {
-  return (data.topics || []).length ? data.clusters : 0;
 }
 
 let vaultBroken = 0;
@@ -369,61 +361,93 @@ $("#pinned").addEventListener("click", (e) => {
 });
 $("#note-pin").addEventListener("click", () => togglePin(lastViewedPath));
 
-// --- the chat landing --------------------------------------------------------
-// Two lines about the folder you opened, over the wordmark. The counted one is
-// this function and costs nothing; the written one is loadVaultBrief below and
-// costs a call, so it is the one that can be switched off. When it is off the
-// prose slot falls back to naming the topics — the landing must never describe
-// a vault by its size alone, which is the one thing size cannot say.
-let vaultTopics = [];
+// --- the chat landing (ADR-0048, amendment 2026-10-22) -----------------------
+// The empty chat greets you and writes it the way a reply streams, the mark
+// beside it on the run line's beat until the sentence is down; then both rest.
+// The name is the one given in settings (SILICA_USER_NAME), which index()
+// stamps on the page: the address an account signs in with is not a name, and
+// a name guessed from one greets somebody else.
+let greeted = ""; // the sentence on the landing, so a second call writes nothing
+let greetTimer = 0;
 
-function renderVaultFacts(data) {
-  vaultTopics = (data.topics || []).map((t) => t.label).filter(Boolean);
-  const bits = [];
-  if (data.notes) bits.push(nfmt(data.notes) + (data.notes === 1 ? " note" : " notes"));
-  if (data.links) bits.push(nfmt(data.links) + " links");
-  const areas = areaCount(data);
-  if (areas) bits.push(nfmt(areas) + " areas");
-  $("#vh-facts").textContent = bits.join("  ·  ");
-  if (!$("#vh-brief").dataset.written) renderTopicLine();
-}
-
-// The fallback sentence. The labels are the vault's own words and carry the
-// content colour; everything around them is chrome, which is what keeps a
-// label like "mystery · sophia" readable inside a sentence that also joins
-// with punctuation.
-function renderTopicLine() {
-  const el = $("#vh-brief");
-  el.replaceChildren();
-  const t = vaultTopics.slice(0, 3);
-  if (!t.length) return;
-  el.appendChild(document.createTextNode("Densest around "));
-  t.forEach((label, i) => {
-    if (i) el.appendChild(document.createTextNode(i === t.length - 1 ? " and " : ", "));
-    el.appendChild(mkEl("b", "", label));
-  });
-  el.appendChild(document.createTextNode("."));
-}
-
-async function loadVaultBrief() {
-  // The presence thinks only if the answer is slow enough to be the worker
-  // writing: a cached sentence came back in 0.25-0.35 s on the 728-note test
-  // vault (2026-09-22), a fresh one is a model call measured in seconds.
-  const thinking = setTimeout(() => landingPresence?.state("thinking"), 700);
-  let wrote = false;
-  try {
-    const d = await (await fetch("/vault_brief")).json();
-    if (!d.enabled || !d.text) return; // off, or the worker had nothing to say
-    const el = $("#vh-brief");
-    el.dataset.written = "1";
-    el.textContent = d.text;
-    wrote = !d.cached;
-  } catch { /* the counted line already answered the question */ } finally {
-    // A failure is never an error on the landing (server.py vault_brief), so
-    // the presence goes back to rest rather than into its error state.
-    clearTimeout(thinking);
-    landingPresence?.state(wrote ? "success" : "idle");
+function greet(again = false) {
+  const who = (document.documentElement.dataset.name || "").trim();
+  const vault = $("#vp-name").textContent.trim();
+  // [words, whether they are the person's or the vault's own]
+  const parts = who ? [["Hi ", false], [who, true], [". ", false]] : [];
+  if (vault) parts.push(["What do you want to know about ", false], [vault, true], ["?", false]);
+  else parts.push(["What do you want to know?", false]);
+  const said = parts.map((p) => p[0]).join("");
+  if (said === greeted && !again) return;
+  greeted = said;
+  $("#vh-said").textContent = said;
+  const typed = $("#vh-typed"), mark = $("#vault-hero .vh-mark");
+  const paint = (n) => {
+    typed.replaceChildren();
+    for (const [words, own] of parts) {
+      if (n <= 0) break;
+      const bit = words.slice(0, n);
+      n -= words.length;
+      typed.append(own ? mkEl("b", "", bit) : bit);
+    }
+  };
+  clearInterval(greetTimer);
+  // Written at once where nobody would watch it being written: under a
+  // transcript, or for a reader who asked the page to keep still.
+  if (log.childElementCount || matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    mark.classList.remove("rl-mark");
+    paint(said.length);
+    return;
   }
+  const caret = mkEl("span", "caret", "\u258d");
+  let n = 0;
+  paint(0);
+  typed.append(caret);
+  mark.classList.add("rl-mark");
+  greetTimer = setInterval(() => {
+    paint(++n);
+    if (n < said.length) typed.append(caret);
+    else { clearInterval(greetTimer); mark.classList.remove("rl-mark"); }
+  }, 32);
+}
+
+// Three ways to start, from the notes the vault links most (/vault_info's
+// hubs), each through a command that already exists and filling the field the
+// way the + menu does. Dated notes are left out: a daily note is a hub because
+// every day links to it, and "quiz me on 2026-10-21" asks about nothing.
+// /quiz is a shortcut, split with shlex, so a title with spaces is quoted; the
+// two skills read their line as written.
+const LANDING_IDEAS = [
+  ["Explain ", "/explain", (link) => `/explain [[${link}]]`],
+  ["Quiz me on ", "/quiz", (link) => `/quiz ${/\s/.test(link) ? `"${link}"` : link}`],
+  ["Summarize ", "/summarize", (link) => `/summarize [[${link}]]`],
+];
+
+function renderLandingIdeas(data) {
+  const box = $("#vh-ideas");
+  box.replaceChildren();
+  const hubs = (data.hubs || []).filter((h) => !/^\d{4}-\d{2}-\d{2}/.test(h.name));
+  hubs.slice(0, LANDING_IDEAS.length).forEach((h, i) => {
+    const [verb, cmd, line] = LANDING_IDEAS[i];
+    const say = mkEl("span", "vh-say", verb);
+    say.append(mkEl("b", "", h.name));
+    const b = mkEl("button", "vh-idea");
+    b.type = "button";
+    b.append(say, mkEl("span", "vh-cmd", cmd));
+    b.addEventListener("click", () => {
+      input.value = line(mentionLink(h.path)) + " ";
+      input.focus();
+      input.dispatchEvent(new Event("input"));
+    });
+    box.append(b);
+  });
+}
+
+// The sentence the worker writes about the vault left the landing with the
+// greeting, and is still asked for: silica_vaults hands it to the agent when
+// it picks among vaults (vault_registry._brief), and nothing else writes it.
+function loadVaultBrief() {
+  fetch("/vault_brief").catch(() => {}); // the agent describes a vault without it, from its name and coverage
 }
 
 // --- the tree's selection (ADR-0126 point 1) ---------------------------------
