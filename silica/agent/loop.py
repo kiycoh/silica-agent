@@ -180,7 +180,8 @@ def _budget_notice(iteration: int, max_iterations: int,
 
     `token_steps` is how many more calls of the last one's size fit in
     TURN_PROMPT_BUDGET: that wall stopped hosted t06's turn (2026-10-22) at 19
-    of its iterations with no notice, so the nearer of the two is the one told.
+    of its iterations with no notice, so the nearer of the two is the one told
+    (ADR-0113, amendment 2026-10-23).
     """
     remaining = max_iterations - iteration
     if token_steps is not None:

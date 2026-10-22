@@ -272,7 +272,8 @@ def _request() -> str:
 
 def _ask(request: str) -> tuple[str, str]:
     """(kind, register) the request asks for, by one decision call: "full"
-    and "readable", the measured defaults, unless Jev is on and sure."""
+    and "readable", the measured defaults, unless Jev is on and sure
+    (ADR-0116, amendment 2026-10-23)."""
     from silica.agent.decide import decide
     from silica.config import CONFIG
 

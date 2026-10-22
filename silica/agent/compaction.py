@@ -133,7 +133,7 @@ def turn_tail(tool_name: str, body: str, seen: bool) -> str:
     seen, and it re-read it in slices 14 times to check a note it had written
     from it. Never seen: re-calling a read that did not fit asks for one that
     cannot fit either (context-cap-2026-10-13, finding 4: one lecture read ten
-    times in a turn)."""
+    times in a turn). ADR-0113, amendment 2026-10-23."""
     # Short on purpose: a stub longer than the old one frees less, and the fit
     # then stubs one more read to make the same room.
     if not seen:
