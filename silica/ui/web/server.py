@@ -591,16 +591,23 @@ MENTION_MIN_CHARS = 4
 
 
 def _mentions(reads) -> tuple[re.Pattern, dict[str, str]] | None:
-    """The bare-title layer for an answer (ADR-0127): the titles of the notes
-    its turn read, longest first, matched as written. Case-sensitive on
-    purpose: an answer names "Lezione 16" as the note is titled, and "lezione"
-    in prose is a word. A title two read notes share links neither."""
+    """The bare-name layer for an answer (ADR-0127): the notes its turn read,
+    by title and by path with or without .md, longest first, matched as
+    written. The path because a model writes "Corso A/Lezione 16", whose space
+    the path-token layer splits at (seen on the first GUI turn, 2026-10-22).
+    Case-sensitive on purpose: an answer names "Lezione 16" as the note is
+    titled, and "lezione" in prose is a word. A title two read notes share
+    links neither; their paths still do."""
     by_title: dict[str, str | None] = {}
+    found: dict[str, str] = {}
     for path in reads or ():
-        title = path.removesuffix(".md").rsplit("/", 1)[-1]
+        stem = path.removesuffix(".md")
+        title = stem.rsplit("/", 1)[-1]
+        if "/" in stem:
+            found[path] = found[stem] = path
         if len(title) >= MENTION_MIN_CHARS:
             by_title[title] = None if title in by_title else path
-    found = {t: p for t, p in by_title.items() if p}
+    found |= {t: p for t, p in by_title.items() if p}
     if not found:
         return None
     alts = "|".join(re.escape(t) for t in sorted(found, key=len, reverse=True))
@@ -621,21 +628,10 @@ def _linkify_text(text: str, resolve, mentions=None) -> str:
     if resolve is None:
         return _html.escape(text)
 
-    def link_titles(prose: str) -> str:
-        if mentions is None:
-            return _html.escape(prose)
-        pattern, found = mentions
-        out, pos = [], 0
-        for m in pattern.finditer(prose):
-            out.append(_html.escape(prose[pos:m.start()]) + _anchor(found[m.group(0)], m.group(0)))
-            pos = m.end()
-        out.append(_html.escape(prose[pos:]))
-        return "".join(out)
-
     def link_paths(prose: str) -> str:
         out, pos = [], 0
         for m in _PATHLIKE.finditer(prose):
-            out.append(link_titles(prose[pos:m.start()]))
+            out.append(_html.escape(prose[pos:m.start()]))
             tok = m.group(0)
             core = tok.rstrip(_TRAIL)
             tail = tok[len(core):]
@@ -645,12 +641,25 @@ def _linkify_text(text: str, resolve, mentions=None) -> str:
             else:
                 out.append(_html.escape(tok))
             pos = m.end()
-        out.append(link_titles(prose[pos:]))
+        out.append(_html.escape(prose[pos:]))
+        return "".join(out)
+
+    def link_prose(prose: str) -> str:
+        # The read notes first: they are exact names, and the path-token layer
+        # would split "Corso A/Lezione 16" at its space before they were seen.
+        if mentions is None:
+            return link_paths(prose)
+        pattern, found = mentions
+        out, pos = [], 0
+        for m in pattern.finditer(prose):
+            out.append(link_paths(prose[pos:m.start()]) + _anchor(found[m.group(0)], m.group(0)))
+            pos = m.end()
+        out.append(link_paths(prose[pos:]))
         return "".join(out)
 
     out, pos = [], 0
     for m in _WIKILINK.finditer(text):
-        out.append(link_paths(text[pos:m.start()]))
+        out.append(link_prose(text[pos:m.start()]))
         bang, inner = m.group(1), m.group(2)
         target, _, alias = inner.partition("|")
         target, alias = target.strip(), alias.strip()
@@ -671,7 +680,7 @@ def _linkify_text(text: str, resolve, mentions=None) -> str:
             else:
                 out.append(f'<a class="note-link broken">{_html.escape(display)}</a>')
         pos = m.end()
-    out.append(link_paths(text[pos:]))
+    out.append(link_prose(text[pos:]))
     return "".join(out)
 
 

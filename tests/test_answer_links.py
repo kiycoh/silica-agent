@@ -39,6 +39,16 @@ def test_a_bare_title_of_a_read_note_links_and_code_and_case_do_not():
     assert "<code>Lezione 6</code>" in html
 
 
+def test_a_read_note_named_by_its_path_with_a_space_links_whole():
+    """The first GUI turn, 2026-10-22: "Nota: Corso A/Lezione 16" linked nothing,
+    the path-token layer had split it at the space."""
+    html = _html("Nota: Corso A/Lezione 16\n\nE Corso B/Lezione 16.md no.",
+                 ["Corso B/Lezione 16.md", "Inbox/ml/Lezione 16.md"])
+    assert '>Corso B/Lezione 16.md</a>' in html, html
+    html = _html("Nota: Corso B/Lezione 16", ["Corso B/Lezione 16.md"])
+    assert 'data-path="Corso B/Lezione 16.md">Corso B/Lezione 16</a>' in html, html
+
+
 def test_a_title_inside_a_longer_number_or_a_link_is_left_alone():
     html = _html("Lezione 66 e [testo Lezione 6](https://e.com)", ["Inbox/ml/Lezione 6.md"])
     assert "note-link" not in html, html

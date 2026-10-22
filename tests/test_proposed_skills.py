@@ -44,6 +44,10 @@ def test_two_requests_that_share_only_a_notes_name_are_not_one_kind():
 def test_the_instruction_is_the_first_paragraph_and_never_the_pasted_material():
     text = "Integra i miei appunti con il manuale\n\nArt. 1321 c.c. Il contratto è l'accordo..."
     assert ps.ask(text) == "Integra i miei appunti con il manuale"
+    # The first GUI turn put the material on the instruction's line, after a colon.
+    assert ps.ask("Integra i miei appunti con il manuale: il contratto è un accordo.") == \
+        "Integra i miei appunti con il manuale"
+    assert ps.ask("Spiega: entropia") == "Spiega: entropia"   # too little before it to stand alone
     assert len(ps.ask("x" * 900)) == ps.ASK_CHARS
 
 

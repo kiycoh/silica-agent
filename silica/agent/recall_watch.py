@@ -330,10 +330,11 @@ def read_refs(messages: list[dict], end: int | None = None) -> list[str]:
             for key in _READS_ARGS.get(name, ()):
                 v = args.get(key) if isinstance(args, dict) else None
                 out += [v] if isinstance(v, str) else [x for x in v or () if isinstance(x, str)]
-        if m.get("role") != "tool" or (key := _READS_RESULT.get(calls.get(m.get("tool_call_id"), ""))) is None:
+        named = _READS_RESULT.get(calls.get(str(m.get("tool_call_id") or ""), ""))
+        if m.get("role") != "tool" or named is None:
             continue
         try:
-            v = json.loads(m.get("content") or "").get(key)
+            v = json.loads(m.get("content") or "").get(named)
         except (ValueError, TypeError, AttributeError):
             continue   # a stub or a failure names no note
         items = v if isinstance(v, list) else [v]

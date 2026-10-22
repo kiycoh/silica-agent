@@ -78,7 +78,13 @@ def ask(text: str) -> str:
     from silica.agent import mentions
 
     text = mentions.strip(str(text or "")).strip()
-    return re.split(r"\n\s*\n", text, maxsplit=1)[0][:ASK_CHARS].strip()
+    first = re.split(r"\n\s*\n", text, maxsplit=1)[0]
+    # "Integra i miei appunti con il manuale: il contratto è..." carries the
+    # material on the instruction's own line, after a colon; its words drowned
+    # the instruction in the first GUI turn (2026-10-22). Cut there when the
+    # words before it can still be matched on their own.
+    head = re.split(r":\s", first, maxsplit=1)[0]
+    return (head if len(words(head)) >= MIN_SHARED else first)[:ASK_CHARS].strip()
 
 
 def words(text: str) -> frozenset:
