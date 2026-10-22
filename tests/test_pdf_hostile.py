@@ -369,3 +369,19 @@ def test_in_this_process_pdfium_is_entered_by_one_thread_at_a_time(pdfium_vault,
     pdf_extract._CACHE.clear()
     pdf_extract.metadata(path)
     assert not pdf_extract._PDFIUM.locked()
+
+
+# --- 2026-10-22, hosted t06: a font that writes U+0251 for every "a" ---------
+
+def test_a_page_whose_alpha_stands_for_a_reads_as_a():
+    from silica.sources.pdf_extract import _unalpha
+
+    lines = [("Lɑ depersonɑlizzɑzione è un ɑnɑlogo", 12.0), ("cɑmbiɑmento", 12.0)]
+    assert _unalpha(lines) == [("La depersonalizzazione è un analogo", 12.0), ("cambiamento", 12.0)]
+
+
+def test_phonetics_keeps_its_alpha():
+    from silica.sources.pdf_extract import _unalpha
+
+    lines = [("The vowel of 'father' is [ɑ], as in a broad accent", 10.0)]
+    assert _unalpha(lines) is lines

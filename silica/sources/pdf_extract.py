@@ -244,6 +244,7 @@ def _text(pdf, max_pages: int | None, max_chars: int | None) -> dict:
         finally:
             textpage.close()
             page.close()
+        lines = _unalpha(lines)
         if dropped:
             hidden[i] = dropped
         chars += sum(len(t) for t, _ in lines)
@@ -280,6 +281,18 @@ def _median(values: list[float]) -> float:
 
 def _clean(text: str) -> str:
     return _BAD_RE.sub("", text)
+
+
+def _unalpha(lines: list) -> list:
+    """A page's lines with U+0251 LATIN SMALL LETTER ALPHA read back as "a"
+    where it outnumbers "a". A font that maps its "a" glyph to it puts one in
+    place of every "a": hosted t06's chapter (2026-10-22) carried 2,585, cost
+    1.6x the tokens (cl100k) and hid "la", "da", "a" from the function-word
+    count. Phonetics writes it beside the letter, never instead of it."""
+    alpha = sum(t.count("\u0251") for t, _ in lines)
+    if not alpha or alpha <= sum(t.count("a") for t, _ in lines):
+        return lines
+    return [(t.replace("\u0251", "a"), rest) for t, rest in lines]
 
 
 def _render(pdf, indices: list[int]):
