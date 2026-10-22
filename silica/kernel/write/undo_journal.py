@@ -27,6 +27,11 @@ ABSENT_HASH = "absent"
 # A move from the chat, the same way: one move_back inverse. Until 2026-10-11
 # a move recorded nothing, and the GUI's "move this note back" did nothing.
 CHAT_MOVE_SOURCE = "chat:silica_move"
+# A move the user made from the tree (a drop on a folder, a rename in the row,
+# ADR-0126): one run for the whole set, one move_back per note, under its own
+# source so the tree's undo takes back only what the person did there.
+USER_MOVE_SOURCE = "user:/move"
+MOVE_SOURCES = (CHAT_MOVE_SOURCE, USER_MOVE_SOURCE)
 # A delete the user ran (/delete, or the card's "delete anyway"): a note other
 # notes link to is the user's to delete, not the model's (ADR-0092). Its own
 # source, so a check that judges the chat's deletes (ADR-0093's re-create)
@@ -233,15 +238,16 @@ class UndoJournalStore:
 
     def last_chat_move(self, vault: str | None, ref: str | None = None
                        ) -> tuple[str, str, str, float] | None:
-        """(run_id, from, to, started_at) of the newest un-reverted chat move in
-        `vault`. `ref` matches either end, or the folder the note landed in:
+        """(run_id, from, to, started_at) of the newest un-reverted move in
+        `vault`, the chat's or the tree's (ADR-0126): /undo takes both back. `ref` matches either end, or the folder the note landed in:
         the GUI's moved card sends the call's raw `to`, which may be a folder."""
         from silica.kernel.write.provenance import note_key
 
+        marks = ",".join("?" * len(MOVE_SOURCES))
         query = ("SELECT r.run_id, i.path, i.to_path, r.started_at FROM runs r "
                  "JOIN inverses i ON i.run_id = r.run_id "
-                 "WHERE r.reverted_at IS NULL AND r.source = ? AND i.kind = ?")
-        params: list = [CHAT_MOVE_SOURCE, InverseOpKind.move_back.value]
+                 f"WHERE r.reverted_at IS NULL AND r.source IN ({marks}) AND i.kind = ?")
+        params: list = [*MOVE_SOURCES, InverseOpKind.move_back.value]
         if vault is not None:
             query += " AND r.vault = ?"
             params.append(vault)

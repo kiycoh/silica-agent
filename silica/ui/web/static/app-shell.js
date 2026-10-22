@@ -80,7 +80,19 @@ document.addEventListener("click", (e) => {
   if (!e.target.isConnected || e.target.closest("#sidebar, #railmini")) return;
   closeRail();
 });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeRail(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  // The tree's selection goes first (ADR-0126 point 11), and only when nothing
+  // else took the key: the composer's picker prevents its Escape, a menu holds
+  // focus, a field is being typed in. The next Escape closes the summoned rail.
+  if (treeSel.size && !e.defaultPrevented && !treeMenu
+      && !e.target.closest("input, textarea, [contenteditable], .cm-editor")) {
+    e.preventDefault();
+    clearTreeSel();
+    return;
+  }
+  closeRail();
+});
 
 // No rail icon hides with its list (ADR-0122): the list not in view is hidden
 // by design, and its icon is the way back to it. syncRailIcons, which hid the
@@ -106,6 +118,10 @@ function ticket(name) {
 
 // Vault stats + file tree, from /vault_info. Best-effort: on error the placeholders stay.
 async function loadVaultInfo() {
+  // A rename or a new folder being typed in the tree would die with the
+  // redraw (ADR-0126 point 8): it waits, and the field's close runs it.
+  if (treeField) { treeRedrawDue = true; return; }
+  treeRedrawDue = false;
   const still = ticket("vault");
   try {
     const r = await fetch("/vault_info");
@@ -114,6 +130,7 @@ async function loadVaultInfo() {
     if (data.error) return;
     if (data.path) setVaultPath(data.path); // follows a /vault switch
     $("#tree").innerHTML = data.tree || "";
+    applyTreeOpen();         // the folders the person opened or closed (ADR-0126 point 9)
     if (!$("#tree .tree-note")) {
       // An empty vault has one next step (ADR-0098 point 1), and on the server
       // the + is the only door besides a drop: the line's words open its menu.
@@ -132,6 +149,7 @@ async function loadVaultInfo() {
     renderVaultFacts(data);           // the chat landing's counted line
     buildNoteIndex();                 // explore note search reads the fresh tree
     applySidebarFilter();
+    trimTreeSel();           // the selection, less what the fresh tree no longer shows
     applyHashNote();                  // a ?note= deep link can open now that the tree knows it
     document.dispatchEvent(new CustomEvent("silica:vault-info")); // the tour reads the fresh tree (ADR-0105)
   } catch { notify("couldn't refresh vault stats"); }
@@ -328,6 +346,7 @@ function renderPins() {
     const row = mkEl("div", "pin-row");
     row.dataset.path = path;
     row.title = path;
+    row.draggable = true; // onto a workspace, a folder or the composer (ADR-0126 point 10)
     row.appendChild(mkEl("span", "sw"));
     row.appendChild(mkEl("span", "t", path.replace(/\.md$/, "").split("/").pop()));
     const x = mkEl("button", "pin-x", "✕");
@@ -407,6 +426,241 @@ async function loadVaultBrief() {
   }
 }
 
+// --- the tree's selection (ADR-0126 point 1) ---------------------------------
+// A set of paths and not of rows: the tree is redrawn by innerHTML after every
+// write, so rows die and paths live. Shift selects the range from the anchor
+// over the rows the eye can see, cmd on macOS or ctrl elsewhere toggles one,
+// and a plain click opens the note and clears the selection, as a click in
+// Finder selects that one row and nothing else. The count lives in #tree-sel:
+// aria-selected is not a link's to carry, and the page already keeps it to
+// real ARIA widgets (setActive). Trimmed to the rows shown after a redraw, a
+// filter change and a collapse, so a drag never carries a note no one sees.
+const treeSel = new Set();
+let treeAnchor = null;
+const TREE_MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "metaKey" : "ctrlKey";
+let treeField = null;      // the rename or new-folder field being typed, or null
+let treeRedrawDue = false; // a loadVaultInfo that waited for the field
+
+function visibleTreeRows() {
+  return [...$("#tree").querySelectorAll(".tree-note")].filter((el) => el.offsetParent !== null);
+}
+function syncTreeSel() {
+  for (const el of $("#tree").querySelectorAll(".tree-note")) el.classList.toggle("sel", treeSel.has(el.dataset.id));
+  const line = $("#tree-sel");
+  line.hidden = !treeSel.size;
+  line.querySelector(".t").textContent = `${treeSel.size} selected`;
+}
+function clearTreeSel() {
+  if (!treeSel.size) return false;
+  treeSel.clear();
+  syncTreeSel();
+  return true;
+}
+function trimTreeSel() {
+  const shown = new Set(visibleTreeRows().map((el) => el.dataset.id));
+  for (const p of treeSel) if (!shown.has(p)) treeSel.delete(p);
+  syncTreeSel();
+}
+$("#tree-sel button").addEventListener("click", () => clearTreeSel());
+$("#side-search").addEventListener("input", () => trimTreeSel()); // after applySidebarFilter, registered first
+
+// --- open folders survive a redraw (ADR-0126 point 9) -------------------------
+// What the person opened or closed, by folder path, from the toggle events;
+// the filter's forced opening is not theirs, so a toggle under a non-empty
+// filter is not written. Applied over the server's default (top level open)
+// after each innerHTML. toggle does not bubble: captured.
+const treeOpen = new Map();
+const folderOf = (d) => d.querySelector(":scope > summary .tree-more")?.dataset.folder;
+$("#tree").addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (!(d instanceof HTMLDetailsElement) || $("#side-search").value.trim()) return;
+  const f = folderOf(d);
+  if (f) treeOpen.set(f, d.open);
+}, true);
+function applyTreeOpen() {
+  for (const d of $("#tree").querySelectorAll("details")) {
+    const f = folderOf(d);
+    if (f && treeOpen.has(f)) d.open = treeOpen.get(f);
+  }
+}
+// a folder a drop landed in opens, with every folder above it
+function openTreeFolder(folder) {
+  const parts = folder.split("/");
+  for (let i = 1; i <= parts.length; i++) treeOpen.set(parts.slice(0, i).join("/"), true);
+}
+
+// --- a drop on a folder is a move (ADR-0126 point 3) --------------------------
+// The payload is app-workspaces.js's; a folder lights only under notes, since
+// a folder does not move (Open 2). "New folder…" at the top of the pane takes
+// the same drop and asks for the name.
+const newFolderLine = $("#tree-newfolder");
+let treeOver = null;
+function treeDropMark(el) {
+  if (treeOver === el) return;
+  treeOver?.classList.remove("drop-over");
+  treeOver = el;
+  el?.classList.add("drop-over");
+}
+const treeDropTarget = (e) => e.target.closest("#tree summary") || (newFolderLine.contains(e.target) ? newFolderLine : null);
+for (const host of [$("#tree"), newFolderLine]) {
+  host.addEventListener("dragover", (e) => {
+    const t = treeDropTarget(e);
+    if (!t || !e.dataTransfer.types.includes(NOTE_DRAG)) { treeDropMark(null); return; }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    treeDropMark(t);
+  });
+  host.addEventListener("dragleave", (e) => { if (!host.contains(e.relatedTarget)) treeDropMark(null); });
+  host.addEventListener("drop", (e) => {
+    const t = treeDropTarget(e);
+    treeDropMark(null);
+    if (!t || !e.dataTransfer.types.includes(NOTE_DRAG)) return;
+    let it = null;
+    try { it = JSON.parse(e.dataTransfer.getData(WS_DRAG) || "null"); } catch { /* not ours: the window's handler decides */ }
+    if (!it || !Array.isArray(it.notes) || !it.notes.length) return;
+    e.preventDefault();
+    if (t === newFolderLine) { newFolderInline(it.notes); return; }
+    moveFromTree(it.notes, t.querySelector(".tree-more")?.dataset.folder || "");
+  });
+}
+document.addEventListener("dragend", () => treeDropMark(null));
+
+// The name of the folder the notes go into, typed where the drop landed or
+// where the menu's "new folder…" was picked. Under the vault root: a folder
+// is only ever made by moving notes into it, since the tree is drawn from
+// notes and an empty directory is invisible to it (ADR-0126 point 4).
+function newFolderInline(paths) {
+  closeTreeMenu();
+  if (treeField) return;
+  const n = paths.length;
+  newFolderLine.classList.add("on");
+  newFolderLine.textContent = "";
+  const field = document.createElement("input");
+  field.type = "text";
+  field.className = "s-rename";
+  field.placeholder = `New folder with ${n} ${n === 1 ? "note" : "notes"}`;
+  field.setAttribute("aria-label", field.placeholder);
+  newFolderLine.appendChild(field);
+  treeField = field;
+  field.focus();
+  treeFieldKeys(field, (name) => {
+    newFolderLine.classList.remove("on");
+    newFolderLine.textContent = "New folder…";
+    if (name) moveFromTree(paths, name);
+  });
+}
+
+// Enter commits, Escape and a click away cancel: a move rewrites links across
+// the vault, where a chat's title (renameSessionInline) commits on blur and
+// rewrites nothing. The redraw that waited runs once the field is gone.
+function treeFieldKeys(field, done) {
+  let over = false;
+  const finish = (save) => {
+    if (over) return;
+    over = true;
+    treeField = null;
+    const name = save ? field.value.trim() : "";
+    done(name);
+    if (treeRedrawDue) loadVaultInfo();
+  };
+  field.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); finish(false); }
+  });
+  field.addEventListener("blur", () => finish(false));
+  field.addEventListener("click", (e) => e.stopPropagation()); // not a row click
+}
+
+// A note renamed in its row (ADR-0126 point 8): its folder is kept.
+function renameNoteInline(row) {
+  closeTreeMenu();
+  const a = row?.querySelector(".tree-note");
+  if (!a || treeField) return;
+  const path = a.dataset.id;
+  const field = document.createElement("input");
+  field.type = "text";
+  field.className = "s-rename";
+  field.value = a.textContent;
+  field.setAttribute("aria-label", "new name for this note");
+  a.replaceWith(field);
+  treeField = field;
+  field.focus();
+  field.select();
+  treeFieldKeys(field, (name) => {
+    field.replaceWith(a);
+    if (name && name !== a.textContent) moveFromTree([path], undefined, name);
+  });
+}
+$("#tree").addEventListener("keydown", (e) => {
+  if (e.key !== "F2") return;
+  const row = e.target.closest(".tree-row");
+  if (row) { e.preventDefault(); renameNoteInline(row); }
+});
+
+// POST /tree/move: a folder for the set, or a name for one note. The editor's
+// pending save lands first, or a note typed into and then moved would save
+// under its old path. The page then follows: the pins, the open note, the
+// folder dropped into opens, and the toast's undo brings the set back.
+async function moveFromTree(paths, folder, name) {
+  closeTreeMenu();
+  if (typeof saveEdit === "function") await saveEdit();
+  let r = null, data = null;
+  try {
+    r = await fetch("/tree/move", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(name !== undefined ? { path: paths[0], name } : { paths, folder }),
+    });
+    data = await r.json();
+  } catch { /* reported below */ }
+  if (!r || !r.ok) { notify((data && data.detail) || "couldn't move that"); return; }
+  followMoves(data.moved, data.rewritten);
+  if (name === undefined && folder) openTreeFolder(folder);
+  clearTreeSel();
+  loadVaultInfo();
+  const n = data.moved.length;
+  let msg = name !== undefined
+    ? (n ? `Renamed to ${name}.` : "Nothing to rename.")
+    : `Moved ${n} ${n === 1 ? "note" : "notes"} to ${folder ? folder.split("/").pop() : "the vault root"}.`;
+  if (data.skipped.length && name === undefined) msg += ` ${data.skipped.length} already there.`;
+  if (data.error) msg += ` ${data.error}.`;
+  const action = n ? { label: "undo", run: () => undoTreeMove(data.run, data.moved) } : null;
+  notify(msg, data.error ? "error" : "info", action);
+}
+
+// Pins live in the browser, so only a move made from the page carries them
+// (ADR-0126 point 3); the note panel follows its note (app-notes.js).
+function followMoves(moved, rewritten) {
+  const to = new Map(moved.map((m) => [m.from, m.to]));
+  let repin = false;
+  pinnedPaths = pinnedPaths.map((p) => { if (to.has(p)) { repin = true; return to.get(p); } return p; });
+  if (repin) savePins();
+  if (typeof followNote === "function") followNote(to, rewritten || []);
+}
+
+async function undoTreeMove(run, moved) {
+  const data = await undoTreeRun(run);
+  if (!data) return;
+  const back = new Set(data.restored);
+  followMoves(moved.filter((m) => back.has(m.from)).map((m) => ({ from: m.to, to: m.from })), []);
+  loadVaultInfo();
+  const n = data.restored.length, s = data.skipped.length;
+  notify(`Moved back ${n} ${n === 1 ? "note" : "notes"}.`
+    + (s ? ` ${s} not moved back: a note has taken the place since.` : ""), s ? "error" : "info");
+}
+
+// One undo for a delete and a move the person made from the tree (/tree/undo).
+async function undoTreeRun(run) {
+  let r = null, data = null;
+  try {
+    r = await fetch("/tree/undo", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run }),
+    });
+    data = await r.json();
+  } catch { /* reported below */ }
+  if (!r || !r.ok) { notify((data && data.detail) || "couldn't undo that"); return null; }
+  return data;
+}
+
 // A tree click opens the note drawer, which also mirrors the focus into the
 // graph iframe (focusGraphNode), where it is arranged as the Map (ADR-0088).
 $("#tree").addEventListener("click", (e) => {
@@ -423,13 +677,34 @@ $("#tree").addEventListener("click", (e) => {
   const plan = e.target.closest(".tree-plan");
   if (plan) { e.preventDefault(); learnPlanFolder(plan.dataset.folder); return; }
   const leaf = e.target.closest(".tree-note");
-  if (!leaf) return;
-  // Rows are links (audit P7): a plain left click is handled here, and a
-  // middle click or a modifier click is left to the browser, which opens the
-  // note in a new tab through the same URL.
+  if (!leaf) {
+    if (e.target.id === "tree" || e.target.id === "file-tree") clearTreeSel(); // the tree's empty space
+    return;
+  }
+  const path = leaf.dataset.id;
+  // Shift and cmd/ctrl are the tree's (ADR-0126 point 1): a range from the
+  // anchor, or one row toggled. The anchor is the last row clicked alone.
+  if (e.button === 0 && (e.shiftKey || e[TREE_MOD]) && !e.altKey) {
+    e.preventDefault();
+    if (e.shiftKey) {
+      const rows = visibleTreeRows().map((el) => el.dataset.id);
+      const a = rows.indexOf(treeAnchor), b = rows.indexOf(path);
+      if (a < 0) { treeSel.add(path); treeAnchor = path; }
+      else for (const p of rows.slice(Math.min(a, b), Math.max(a, b) + 1)) treeSel.add(p);
+    } else {
+      if (treeSel.has(path)) treeSel.delete(path); else treeSel.add(path);
+      treeAnchor = path;
+    }
+    syncTreeSel();
+    return;
+  }
+  // Rows are links (audit P7): a plain left click is handled here; the middle
+  // button and alt are left to the browser, which opens the note in a new tab
+  // through the same URL.
   if (!plainClick(e)) return;
   e.preventDefault();
-  const path = leaf.dataset.id;
+  treeAnchor = path;
+  clearTreeSel();
   openNote(path);
 });
 
@@ -467,16 +742,18 @@ function openTreeMenu(btn, x, y) {
   closeTreeMenu();
   if (again) { btn.focus(); return; }
   const note = btn.dataset.note, folder = btn.dataset.folder;
+  // the selection, when the row is in it and holds more (ADR-0126 point 7)
+  const sel = note && treeSel.size > 1 && treeSel.has(note) ? [...treeSel] : null;
   // the count the summary shows is the count the server deletes: both come
   // from the notes the tree is drawn with (tree_delete)
-  const n = note ? 1 : Number(btn.closest("summary")?.querySelector(".tree-n")?.textContent || 0);
+  const n = sel ? sel.length : note ? 1 : Number(btn.closest("summary")?.querySelector(".tree-n")?.textContent || 0);
   const notes = `${n} ${n === 1 ? "note" : "notes"}`;
   // Not class s-menu: closeSessionMenus removes every .s-menu on any click
   // outside a chat row, this one included. The id takes its look (app-shell.css).
   treeMenu = mkEl("div");
   treeMenu.id = "tree-menu";
   treeMenu.setAttribute("role", "menu");
-  treeMenu.setAttribute("aria-label", note ? "this note" : `the folder ${folder}`);
+  treeMenu.setAttribute("aria-label", sel ? notes : note ? "this note" : `the folder ${folder}`);
   const item = (label, fn, cls) => {
     const b = mkEl("button", "s-item" + (cls ? " " + cls : ""), label);
     b.type = "button";
@@ -485,17 +762,49 @@ function openTreeMenu(btn, x, y) {
     treeMenu.appendChild(b);
     return b;
   };
-  item("workspaces…", () => { closeTreeMenu(); openWsMenu(btn, note || folder, !note); });
+  // No "workspaces…" for a selection: ADR-0112's menu states one note's
+  // membership per workspace, which three notes have no honest state for,
+  // and the drag onto a workspace row adds them all.
+  if (!sel) item("workspaces…", () => { closeTreeMenu(); openWsMenu(btn, note || folder, !note); });
+  if (note) item("move to…", () => treeMoveMenu(sel || [note]));
+  if (note && !sel) item("rename", () => renameNoteInline(btn.closest(".tree-row")));
   // A folder's delete names how many notes go, because that number is the
   // consequence: the files that are not notes, and the folder, stay.
-  const label = note ? "delete" : `delete ${notes}`;
+  const label = note && !sel ? "delete" : `delete ${notes}`;
   const del = item(label, () => {}, "danger");
-  armThenRun(del, label, note ? "click again to delete" : `click again · ${notes} go`,
-             () => deleteFromTree(note, folder));
+  armThenRun(del, label, note && !sel ? "click again to delete" : `click again · ${notes} go`,
+             () => deleteFromTree(sel ? null : note, folder, sel));
   treeMenuFor = btn;
   btn.setAttribute("aria-expanded", "true");
   document.body.appendChild(treeMenu);
   placeTreeMenu(x, y);
+  treeMenu.querySelector("button").focus();
+}
+
+// The menu's second page (ADR-0126 point 7): the tree's folders, the root, a
+// new one. The same element, so its placement and keys hold; on touch, where
+// no drag fires, this is how a note moves.
+function treeMoveMenu(paths) {
+  if (!treeMenu) return;
+  treeMenu.innerHTML = "";
+  treeMenu.setAttribute("aria-label", "move to");
+  const item = (label, fn, cls) => {
+    const b = mkEl("button", "s-item" + (cls ? " " + cls : ""), label);
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    b.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
+    treeMenu.appendChild(b);
+    return b;
+  };
+  item("vault root", () => moveFromTree(paths, ""));
+  for (const more of $("#tree").querySelectorAll(".tree-more[data-folder]")) {
+    const f = more.dataset.folder;
+    const b = item(f.split("/").pop(), () => moveFromTree(paths, f));
+    b.style.paddingLeft = `${0.6 + 0.7 * (f.split("/").length - 1)}rem`;
+    b.title = f;
+  }
+  item("new folder…", () => newFolderInline(paths));
+  placeTreeMenu();
   treeMenu.querySelector("button").focus();
 }
 
@@ -520,13 +829,13 @@ addEventListener("resize", () => placeTreeMenu());
 // the rail scrolls under a menu opened on one of its rows: it follows the row
 addEventListener("scroll", () => placeTreeMenu(), true);
 
-async function deleteFromTree(note, folder) {
+async function deleteFromTree(note, folder, paths) {
   closeTreeMenu();
   let r = null, data = null;
   try {
     r = await fetch("/tree/delete", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(note ? { path: note } : { folder }),
+      body: JSON.stringify(paths ? { paths } : note ? { path: note } : { folder }),
     });
     data = await r.json();
   } catch { /* reported below */ }
@@ -538,8 +847,9 @@ async function deleteFromTree(note, folder) {
   if (lastNotePath && gone.has(lastNotePath)) closeNote();
   if (lastViewedPath && gone.has(lastViewedPath)) lastViewedPath = null; // the corner toggle would reopen it
   loadVaultInfo();
+  clearTreeSel();
   const what = note ? note.replace(/\.md$/, "").split("/").pop()
-    : `${gone.size} ${gone.size === 1 ? "note" : "notes"} in ${folder.split("/").pop()}`;
+    : `${gone.size} ${gone.size === 1 ? "note" : "notes"}` + (folder ? ` in ${folder.split("/").pop()}` : "");
   const d = data.dangling.length;
   const msg = `Deleted ${what}.`
     + (d ? ` ${d} ${d === 1 ? "link now points" : "links now point"} to no note.` : "")
@@ -548,14 +858,8 @@ async function deleteFromTree(note, folder) {
 }
 
 async function undoTreeDelete(run, unpinned) {
-  let r = null, data = null;
-  try {
-    r = await fetch("/tree/undo-delete", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ run }),
-    });
-    data = await r.json();
-  } catch { /* reported below */ }
-  if (!r || !r.ok) { notify((data && data.detail) || "couldn't undo that delete"); return; }
+  const data = await undoTreeRun(run);
+  if (!data) return;
   const back = new Set(data.restored);
   const repin = unpinned.filter((p) => back.has(p) && !pinnedPaths.includes(p));
   if (repin.length) { pinnedPaths.unshift(...repin); savePins(); }
@@ -754,7 +1058,12 @@ function applySidebarFilter() {
 $("#side-search").addEventListener("input", applySidebarFilter);
 
 $("#tree-collapse").addEventListener("click", () => {
-  for (const d of $("#tree").querySelectorAll("details[open]")) d.open = false;
+  for (const d of $("#tree").querySelectorAll("details")) {
+    d.open = false;
+    const f = folderOf(d);
+    if (f) treeOpen.set(f, false); // written here too: the toggle is not recorded under a filter
+  }
+  trimTreeSel();
 });
 
 // --- chats (audit P18): by day, newest first, the current one marked --------

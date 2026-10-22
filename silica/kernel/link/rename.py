@@ -93,12 +93,20 @@ def _rewrite_wikilinks(
     new_path: str,
     *,
     rewrite_name_links: bool,
+    path_form: bool = False,
 ) -> tuple[str, int]:
     """Rewrite wikilinks in *content* that point to old_path.
 
     Handles:
     - Name-based links (target == old basename, no path separator)
     - Path-based links (target contains a '/')
+
+    `path_form`: a name-based link becomes the new PATH, `[[Folder/Note]]`,
+    and is rewritten even when the basename did not change. For a name
+    several notes share (ADR-0126 point 3): the bare name resolved to the
+    moved note by the same-folder rule, and once the note leaves that folder
+    the same bare name means another folder's namesake, so only the path
+    keeps the link's meaning, which is what Obsidian writes for a shared name.
 
     Returns (new_content, n_rewritten).
     """
@@ -150,14 +158,15 @@ def _rewrite_wikilinks(
         # ---------------------------------------------------------------
         if not rewrite_name_links:
             continue
-        if not basename_changed:
+        if not basename_changed and not path_form:
             continue  # fast-path: identical basename → nothing to do
 
         # The target might include a heading suffix already split out,
         # but target itself is the raw basename ref (e.g. "Old Note").
         # Case-insensitive whole-target comparison (target_stripped vs old_stem).
         if target_stripped.lower() == old_stem.lower():
-            replacement = f"{bang}[[{new_stem}{suffix}{alias}]]"
+            new_target = new_without_ext if path_form else new_stem
+            replacement = f"{bang}[[{new_target}{suffix}{alias}]]"
             replacements.append((m, replacement))
 
     # Apply replacements back-to-front to keep earlier offsets valid
@@ -174,6 +183,7 @@ def _rewrite_frontmatter_wikilinks(
     new_path: str,
     *,
     rewrite_name_links: bool,
+    path_form: bool = False,
 ) -> tuple[str, int]:
     """Rewrite wikilinks living INSIDE the leading frontmatter block.
 
@@ -189,7 +199,7 @@ def _rewrite_frontmatter_wikilinks(
     clear_mask = [False] * len(block)
     new_block, n = _rewrite_wikilinks(
         block, clear_mask, old_path, new_path,
-        rewrite_name_links=rewrite_name_links,
+        rewrite_name_links=rewrite_name_links, path_form=path_form,
     )
     if n:
         content = new_block + content[m.end(0):]
@@ -288,6 +298,7 @@ def rewrite_links(
     new_path: str,
     *,
     rewrite_name_links: bool = True,
+    path_form: bool = False,
 ) -> tuple[str, int]:
     """Rewrite links in *content* that point to old_path so they point to
     new_path.  Paths are vault-relative (e.g. ``"Folder/Old Note.md"``).
@@ -302,6 +313,11 @@ def rewrite_links(
                             (the driver sets this for ambiguous basenames).
                             Path-based wikilinks and Markdown links are always
                             rewritten regardless of this flag.
+        path_form:          Name-based wikilinks become the new path, even
+                            when the basename is unchanged (see
+                            _rewrite_wikilinks): the driver sets this when
+                            the name is shared and the link resolved to the
+                            moved note.
 
     Behaviours
     ----------
@@ -340,7 +356,7 @@ def rewrite_links(
 
     result, n_wiki = _rewrite_wikilinks(
         content, mask, old_path, new_path,
-        rewrite_name_links=rewrite_name_links,
+        rewrite_name_links=rewrite_name_links, path_form=path_form,
     )
 
     # Rebuild mask after wikilink rewrites (positions shift)
@@ -352,7 +368,7 @@ def rewrite_links(
     # Frontmatter is a skip region for the passes above; rewrite the wikilinks
     # Silica stores in its properties separately (A19).
     result, n_fm = _rewrite_frontmatter_wikilinks(
-        result, old_path, new_path, rewrite_name_links=rewrite_name_links,
+        result, old_path, new_path, rewrite_name_links=rewrite_name_links, path_form=path_form,
     )
 
     return result, n_wiki + n_md + n_fm

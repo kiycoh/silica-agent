@@ -68,6 +68,11 @@ def silica_move(ref: Annotated[str, Field(description='Name or path of the note 
             target += ".md"
         else:
             target = f"{target.rstrip('/')}/{name}" if target.rstrip("/") else name
+    # Before the restore point: DRIVER.move replaces a file at the destination
+    # (see move_preflight), and a note the chat moved onto another was gone.
+    why = move_preflight([(origin, target)])
+    if why:
+        return {"error": f"not moved: {why}"}
     # The restore point first, as silica_delete does: /undo and the GUI's
     # "move this note back" find the move here.
     try:
@@ -84,6 +89,132 @@ def silica_move(ref: Annotated[str, Field(description='Name or path of the note 
     except Exception as e:
         journal.mark_reverted(run_id)  # nothing moved: nothing to move back
         return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# moving several notes as the user's act (ADR-0126)
+# ---------------------------------------------------------------------------
+
+def _vault_file(rel: str) -> Path:
+    from silica.config import CONFIG
+
+    return Path(CONFIG.vault_path or "") / rel
+
+
+def move_preflight(moves: list[tuple[str, str]]) -> str | None:
+    """Why a set of (from, to) moves must not start, or None. Checked before
+    anything moves, so a refusal names one note and moves none: a destination
+    a note already holds, or two notes of the set landing on one path. Both
+    read without case, because a link resolves its name without case and a
+    second `lezione 2.md` beside `Lezione 2.md` is one name to every link. A
+    change of case alone is the same file and passes.
+
+    Here and not in DRIVER.move, which replaces the file at the destination:
+    the ingest's archive step (cleanup_source) relies on that replacement
+    when a source is nucleated a second time, so the refusal is the tree's
+    and the chat's, the two callers that mean one note and not a copy."""
+    seen: dict[str, str] = {}
+    for src, dst in moves:
+        key = dst.lower()
+        if key in seen:
+            return f"two notes would both become {dst}"
+        seen[key] = src
+        target = _vault_file(dst)
+        if not target.exists():
+            continue
+        try:
+            if target.samefile(_vault_file(src)):
+                continue  # `Indice.md` to `indice.md` on a disk that reads them as one
+        except OSError:
+            pass
+        return f"{dst} already exists"
+    return None
+
+
+def explicit_links(path: str) -> bool:
+    """Write the path into each bare wikilink of `path` whose name several
+    notes carry, so the note means the same notes after it moves: the
+    resolver reads a bare name as the same folder's namesake first, and a
+    move out of that folder would send the link to another folder's. A
+    unique name stays bare, as the person wrote it. Body links only: the
+    frontmatter's are the move's own rewrite (rename.py). Returns whether
+    it wrote. Under Loss.RENAME, the one reason a link target may change."""
+    from silica.kernel.link.rename import _WIKILINK_FULL_RE, _build_skip_mask, _span_is_clear
+    from silica.kernel.write.preserve import Loss
+
+    content = DRIVER.read_note(path).content
+    mask = _build_skip_mask(content)
+    resolved = {r.name.lower(): r.path for r in DRIVER.links(path) if r.path}
+    out: list[str] = []
+    at = 0
+    for m in _WIKILINK_FULL_RE.finditer(content):
+        target = m.group(2).strip()
+        if not target or "/" in target or not _span_is_clear(mask, m.start(), m.end()):
+            continue
+        if len(DRIVER.notes_named(target)) < 2:
+            continue
+        to = resolved.get(target.lower())
+        if not to:
+            continue
+        out.append(content[at:m.start()])
+        out.append(f"{m.group(1)}[[{to.removesuffix('.md')}{m.group(3) or ''}{m.group(4) or ''}]]")
+        at = m.end()
+    if not out:
+        return False
+    out.append(content[at:])
+    DRIVER.overwrite(path, "".join(out), loss=Loss.RENAME)
+    return True
+
+
+def move_notes_with_restore_point(moves: list[tuple[str, str]], source: str) -> dict[str, Any]:
+    """silica_move's restore point over several (from, to) pairs as ONE
+    journal run (ADR-0126 point 3): the toast's undo and /undo bring the
+    whole set back. The caller ran move_preflight; what this meets is the
+    driver's own refusal.
+
+    Stops at the first note the driver refuses. The notes before it stay
+    moved and in the run. The refused note's inverse leaves the run only
+    when nothing moved, its file where it was and the destination empty; a
+    move torn after the rename, with the file at the destination and the
+    referrers half rewritten, keeps it, or the note could not be brought
+    back (silica_move marked the run reverted on any exception, which was
+    wrong for that case)."""
+    from silica.config import CONFIG
+    from silica.kernel.write.undo_journal import get_undo_journal
+
+    try:
+        journal = get_undo_journal()
+        run_id = journal.start_run(source=source,
+                                   vault=(CONFIG.vault_path or "").strip() or None)
+    except Exception as e:
+        return {"run": None, "moved": [], "error": f"not moved: no restore point could be recorded ({e})"}
+    moved: list[tuple[str, str]] = []
+    error: str | None = None
+    for src, dst in moves:
+        try:
+            journal.record(run_id, InverseOp(kind=InverseOpKind.move_back, path=src, to_path=dst),
+                           post_hash=None)
+        except Exception as e:
+            error = f"not moved: no restore point could be recorded ({e})"
+            break
+        try:
+            explicit_links(src)
+            DRIVER.move(src, dst)
+        except Exception as e:
+            error = str(e)
+            if _vault_file(src).exists() and not _vault_file(dst).exists():
+                try:
+                    journal.drop_inverse(run_id, src)
+                except Exception as drop_error:
+                    # Tolerated: the notes already moved must still be reported
+                    # with their run. What stays is a move_back revert_run
+                    # refuses, since the origin is there (silica_restore).
+                    logger.warning("move: could not drop the inverse of %s: %s", src, drop_error)
+            break
+        moved.append((src, dst))
+    if not journal.inverses_for(run_id):
+        journal.mark_reverted(run_id)  # nothing moved: nothing to move back later
+    return {"run": run_id, "moved": moved, "error": error}
 
 
 # ---------------------------------------------------------------------------
@@ -434,15 +565,18 @@ def silica_restore(txn_id: Annotated[str, Field(description='Transaction ID to r
                     errors.append(f"recreate_deleted missing prior_content for {path}")
 
             elif inv.kind == InverseOpKind.move_back:
-                # Undo a move: send the note from where it landed back to origin.
-                # if a new note now occupies `path`, DRIVER.move raises
-                # and we route it to errors — same collision stance as the FSM's
-                # in-run rollback; no silent overwrite.
-                if inv.to_path:
+                # Undo a move: the note goes from where it landed back to its
+                # origin. DRIVER.move replaces a file at the destination (the
+                # ingest's archive step relies on it, see move_preflight), so
+                # the origin is checked here: a note written there since the
+                # move is not overwritten by the one coming back (ADR-0126).
+                if not inv.to_path:
+                    errors.append(f"move_back missing to_path for {path}")
+                elif _vault_file(path).exists():
+                    errors.append(f"move_back: {path} is taken by a note written since")
+                else:
                     DRIVER.move(inv.to_path, path)
                     applied.append(f"moved_back:{inv.to_path}->{path}")
-                else:
-                    errors.append(f"move_back missing to_path for {path}")
 
         except Exception as e:
             errors.append(f"Inverse op {inv.kind} on {path} failed: {e}")

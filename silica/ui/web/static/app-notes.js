@@ -400,12 +400,19 @@ input.addEventListener("paste", (e) => {
 // the drag leaving the window, where dragover stops firing.
 const chatView = $("#view-chat");
 const filesOverChat = (e) => e.dataTransfer.types.includes("Files") && chatView.contains(e.target);
+// Tree rows over the chat (ADR-0126 point 5): notes write their links into the
+// composer, a folder has no token there and shows no drop.
+const rowsOverChat = (e) => e.dataTransfer.types.includes(NOTE_DRAG) && chatView.contains(e.target);
 let dragDepth = 0;
 window.addEventListener("dragenter", (e) => { e.preventDefault(); dragDepth++; });
 window.addEventListener("dragover", (e) => {
-  // Cancelled everywhere, or a file let go off the chat opens in the tab.
+  // Cancelled everywhere, or a file let go off the chat opens in the tab. A
+  // target that took a tree row (a folder, a workspace row, the editor) set
+  // its own effect first and is left alone.
+  const taken = e.defaultPrevented;
   e.preventDefault();
   document.body.classList.toggle("dragging", filesOverChat(e));
+  if (!taken && e.dataTransfer.types.includes(WS_DRAG)) e.dataTransfer.dropEffect = rowsOverChat(e) ? "copy" : "none";
 });
 window.addEventListener("dragleave", (e) => { e.preventDefault(); if (--dragDepth <= 0) document.body.classList.remove("dragging"); });
 window.addEventListener("drop", (e) => {
@@ -415,7 +422,13 @@ window.addEventListener("drop", (e) => {
   e.preventDefault();
   dragDepth = 0;
   document.body.classList.remove("dragging");
-  if (!taken && filesOverChat(e) && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  if (taken) return;
+  if (filesOverChat(e) && e.dataTransfer.files.length) { addFiles(e.dataTransfer.files); return; }
+  if (rowsOverChat(e)) {
+    let it = null;
+    try { it = JSON.parse(e.dataTransfer.getData(WS_DRAG) || "null"); } catch { /* not ours */ }
+    if (it && Array.isArray(it.notes)) insertLinks(it.notes);
+  }
 });
 
 // "+" opens what the next message can do (ADR-0083). Its first entry is the
@@ -1659,6 +1672,7 @@ function ensureEditor() {
         save: () => { saveEdit(); },
         decorate: decorateRendered,
         select: syncSelBar,
+        links: (paths) => paths.map((p) => `[[${mentionLink(p)}]]`), // a tree row dropped on the note
       });
     })
     .catch(() => { editorLoad = null; });
@@ -1716,6 +1730,22 @@ async function refreshOpenNote() {
 function scheduleSave() {
   clearTimeout(editTimer);
   editTimer = setTimeout(saveEdit, 800);
+}
+
+// A move from the tree (ADR-0126 point 3): the panel's note follows its path,
+// reopened so the title and the URL say the new one; a note whose links the
+// move rewrote takes the disk's bytes, or the next save would write the old
+// link back and meet a 409. `to` maps old paths to new.
+function followNote(to, rewritten) {
+  if (!editPath) return;
+  if (to.has(editPath)) {
+    const path = to.get(editPath);
+    if (lastViewedPath === editPath) lastViewedPath = path;
+    editPath = ""; // or openNote would take it for the note already open
+    openNote(path);
+  } else if (rewritten.includes(editPath)) {
+    refreshOpenNote();
+  }
 }
 
 async function saveEdit() {

@@ -2227,16 +2227,20 @@ function renderMentions() {
 }
 
 // The basename when no other note has it, else the path: Obsidian's "shortest
-// path when possible", and what the server resolves the same way.
+// path when possible", and what the server resolves the same way. One rule
+// for the picker, a drop on the composer and a drop on the editor.
+function mentionLink(path) {
+  const stem = (p) => p.replace(/\.md$/i, "").split("/").pop().toLowerCase();
+  const unique = noteIdx.filter((o) => stem(o.path) === stem(path)).length === 1;
+  return unique ? path.replace(/\.md$/i, "").split("/").pop() : path.replace(/\.md$/i, "");
+}
+
 function pickMention(n) {
   const m = mention;
   if (!m) return;
-  const stem = (p) => p.replace(/\.md$/i, "").split("/").pop().toLowerCase();
-  const unique = noteIdx.filter((o) => stem(o.path) === stem(n.path)).length === 1;
-  const link = unique ? n.path.replace(/\.md$/i, "").split("/").pop() : n.path.replace(/\.md$/i, "");
   let after = input.value.slice(m.end);
   if (m.brackets && after.startsWith("]]")) after = after.slice(2);
-  const ins = `[[${link}]] `;
+  const ins = `[[${mentionLink(n.path)}]] `;
   input.value = input.value.slice(0, m.start) + ins + after.replace(/^ /, "");
   const caret = m.start + ins.length;
   input.setSelectionRange(caret, caret);
@@ -2245,6 +2249,29 @@ function pickMention(n) {
   autoGrow(input);
   renderCommands(input.value);
   renderHighlight();
+}
+
+// --- a drop on the composer writes the wikilinks @ writes (ADR-0126 point 5) --
+// At the caret, then the pipeline a keystroke runs (grow, picker, mirror,
+// draft), so the box reads as typed. Ten at most: the turn's own cap on the
+// notes it reads for a message (silica/agent/mentions.py, CAP), stated here
+// for the first time rather than discovered as "4 more links not resolved".
+const DROP_CAP = 10;
+function insertLinks(paths) {
+  const take = paths.slice(0, DROP_CAP);
+  if (!take.length) return;
+  const text = take.map((p) => `[[${mentionLink(p)}]] `).join("");
+  const at = input.selectionStart ?? input.value.length;
+  const before = input.value.slice(0, at), after = input.value.slice(input.selectionEnd ?? at);
+  const pad = before && !/\s$/.test(before) ? " " : "";
+  input.value = before + pad + text + after;
+  const caret = (before + pad + text).length;
+  input.setSelectionRange(caret, caret);
+  input.focus();
+  input.dispatchEvent(new Event("input"));
+  if (paths.length > DROP_CAP) {
+    notify(`${DROP_CAP} of ${paths.length} added: a message names ${DROP_CAP} notes at most`, "info");
+  }
 }
 
 function renderCommands(q) {

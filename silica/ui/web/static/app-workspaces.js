@@ -181,7 +181,7 @@ function focusWsRow(path) {
 
 // The + on the bucket: a workspace with nothing in it yet, named in place. A
 // row dropped on the group but on no workspace opens it too, holding that row.
-let wsNewWith = null; // {key, value} of the dropped row, or null
+let wsNewWith = null; // {notes, folders} of the dropped rows, or null
 function wsNewReset() {
   wsNewWith = null;
   $("#ws-new-name").placeholder = "Name the workspace";
@@ -197,7 +197,7 @@ $("#ws-new-form").addEventListener("submit", async (e) => {
   const name = $("#ws-new-name").value.trim();
   if (!name) return;
   const w = wsNewWith;
-  const made = await createWorkspace(name, w?.key === "notes" ? [w.value] : [], w?.key === "folders" ? [w.value] : []);
+  const made = await createWorkspace(name, w ? w.notes : [], w ? w.folders : []);
   if (made) {
     $("#ws-new-name").value = "";
     $("#ws-new-form").hidden = true;
@@ -210,20 +210,48 @@ $("#ws-new-name").addEventListener("keydown", (e) => {
 });
 
 // --- drag a tree row onto a workspace -------------------------------------------
-// The same line the ◇ menu writes, for the student who reaches for the mouse.
+// The same line the "…" menu writes, for the student who reaches for the mouse.
 // Its own type, not text/plain: the window's handler stages dropped Files for
 // the chat, and a dragged link carries none. Files from the desktop dropped on
-// a row import into that workspace, as its + does.
+// a row import into that workspace, as its + does. The payload is the tree's
+// selection when the row is in it (ADR-0126 point 2), `{notes, folders}`; a
+// second type says it holds notes, because dragover can read types and not
+// data, and a folder summary or the chat must know before the drop.
 const WS_DRAG = "application/x-silica-ws";
+const NOTE_DRAG = "application/x-silica-notes";
 const wsGroup = $("#ws-group");
 const wsShown = (it) => it.value.split("/").pop().replace(/\.md$/, "") + (it.key === "folders" ? "/" : "");
+const wsItems = (it) => [...it.notes.map((v) => ({ key: "notes", value: v })),
+                         ...it.folders.map((v) => ({ key: "folders", value: v }))];
+const wsItemsShown = (it) => {
+  const items = wsItems(it);
+  return items.length === 1 ? wsShown(items[0]) : `${items.length} notes`;
+};
+let dragTag = null;
 
 document.addEventListener("dragstart", (e) => {
-  const note = e.target.closest?.("#tree .tree-note, #workspaces .ws-note");
+  const note = e.target.closest?.("#tree .tree-note, #workspaces .ws-note, #pinned .pin-row");
   const folder = !note && e.target.closest?.("#tree summary")?.querySelector(".tree-more")?.dataset.folder;
   if (!note && !folder) return;
-  e.dataTransfer.setData(WS_DRAG, JSON.stringify(note ? { key: "notes", value: note.dataset.id } : { key: "folders", value: folder }));
-  e.dataTransfer.effectAllowed = "copy";
+  const path = note && (note.dataset.id || note.dataset.path);
+  // a row inside the tree's selection drags the whole selection; one outside it drags alone
+  const inSel = path && note.matches("#tree .tree-note") && typeof treeSel !== "undefined" && treeSel.has(path);
+  const notes = path ? (inSel ? [...treeSel] : [path]) : [];
+  e.dataTransfer.setData(WS_DRAG, JSON.stringify({ notes, folders: folder ? [folder] : [] }));
+  if (notes.length) e.dataTransfer.setData(NOTE_DRAG, String(notes.length));
+  // a workspace copies and a folder moves: under "copy" alone the browser cancels the folder drop
+  e.dataTransfer.effectAllowed = "copyMove";
+  if (notes.length > 1) {
+    dragTag = mkEl("div", "drag-tag", `${notes.length} notes`);
+    document.body.appendChild(dragTag);
+    e.dataTransfer.setDragImage(dragTag, 12, 12);
+  }
+  document.body.classList.toggle("tree-drag", notes.length > 0); // the "New folder…" line shows
+});
+document.addEventListener("dragend", () => {
+  document.body.classList.remove("tree-drag");
+  dragTag?.remove();
+  dragTag = null;
 });
 
 let wsOver = null;
@@ -260,20 +288,27 @@ wsGroup.addEventListener("drop", async (e) => {
     importToVault([...e.dataTransfer.files], false);
     return;
   }
-  if (!it || !["notes", "folders"].includes(it.key) || typeof it.value !== "string") return;
+  if (!it || !Array.isArray(it.notes) || !Array.isArray(it.folders) || !wsItems(it).length) return;
   e.preventDefault();
   if (!w) {
     $("#ws-new-form").hidden = false;
     wsNewWith = it;
-    $("#ws-new-name").placeholder = `New workspace with ${wsShown(it)}`;
+    $("#ws-new-name").placeholder = `New workspace with ${wsItemsShown(it)}`;
     $("#ws-new-name").focus();
     return;
   }
-  const already = it.key === "folders" ? w.folders.includes(it.value) : w.members.some((m) => m.path === it.value);
-  if (already) { notify(`${wsShown(it)} is already in ${w.name}`, "info"); return; }
-  if (!(await wsSetLine(w.path, it.key, it.value, true))) return;
-  notify(`${wsShown(it)} added to ${w.name}`, "info");
-  await loadWorkspaces();
+  let added = 0, already = 0;
+  for (const item of wsItems(it)) {
+    const there = item.key === "folders" ? w.folders.includes(item.value) : w.members.some((m) => m.path === item.value);
+    if (there) { already++; continue; }
+    if (!(await wsSetLine(w.path, item.key, item.value, true))) break;
+    added++;
+  }
+  const one = wsItems(it).length === 1;
+  notify(one ? (added ? `${wsItemsShown(it)} added to ${w.name}` : `${wsItemsShown(it)} is already in ${w.name}`)
+             : `${added} ${added === 1 ? "note" : "notes"} added to ${w.name}` + (already ? `, ${already} already there` : ""),
+         "info");
+  if (added) await loadWorkspaces();
 });
 
 async function createWorkspace(name, notes, folders) {
