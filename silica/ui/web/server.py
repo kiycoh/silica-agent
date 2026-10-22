@@ -4130,17 +4130,20 @@ def tree_move(payload: dict):
             raise HTTPException(409, f"another note is called {name}: {other or by_title}")
         moves = [(canon, dst)]
     else:
-        refs = payload.get("paths")
-        if "folder" not in payload or not isinstance(refs, list) or not refs:
+        paths = payload.get("paths")
+        if "folder" not in payload or not isinstance(paths, list) or not paths:
             raise HTTPException(400, "name the notes and the folder, or a note and its new name")
         folder = str(payload["folder"] or "").strip().strip("/")
         if folder and not all(_tree_name_ok(seg) for seg in folder.split("/")):
             raise HTTPException(400, _BAD_NAME_WHY)
         moves = []
-        for canon in _tree_paths(refs):
+        for canon in _tree_paths(paths):
             leaf = canon.rsplit("/", 1)[-1]
             dst = f"{folder}/{leaf}" if folder else leaf
-            (skipped if dst == canon else moves).append(canon if dst == canon else (canon, dst))
+            if dst == canon:
+                skipped.append(canon)
+            else:
+                moves.append((canon, dst))
     why = move_preflight(moves)
     if why:
         raise HTTPException(409, why)
