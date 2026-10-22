@@ -94,17 +94,18 @@ def test_a_note_written_since_at_the_path_is_not_overwritten(vault):
     assert len(_trash()) == 1
 
 
-def test_delete_for_good_leaves_no_byte_of_the_body_in_the_journal(vault, tmp_path):
+@pytest.mark.parametrize("run", [("B",), ("A", "B", "C")], ids=["one note", "one of a folder's"])
+def test_delete_for_good_leaves_no_byte_of_the_body_in_the_journal(vault, tmp_path, run):
     from silica.kernel.write.undo_journal import get_undo_journal
 
     marker = "zqxj-the-only-copy-of-this-sentence"
-    (vault / "Corso/A.md").write_text(f"# A\n\n{marker}\n", encoding="utf-8")
-    _delete("A")
+    (vault / "Corso/B.md").write_text(f"# B\n\n{marker}\n", encoding="utf-8")
+    _delete(*run)
     files = [p for p in tmp_path.glob("uj.db*")]
     assert any(marker.encode() in p.read_bytes() for p in files)  # the probe can see it
-    item = _trash()[0]
+    item = next(t for t in _trash() if t["path"] == "Corso/B.md")
     get_undo_journal().leave_trash(item["run"], item["path"])
-    assert _trash() == []
+    assert {t["path"] for t in _trash()} == {f"Corso/{n}.md" for n in run if n != "B"}
     for p in tmp_path.glob("uj.db*"):
         assert marker.encode() not in p.read_bytes(), p.name
 
