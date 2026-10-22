@@ -23,7 +23,7 @@
   <img src="https://raw.githubusercontent.com/kiycoh/silica-agent/main/assets/tour.gif" alt="A question answered from the notes it found, then the vault as a 3D graph, a reading path, the study queue and the audit" width="820" />
   <br/>
   <sub>A real 748-note vault, written in Italian, so the answers are too: a question answered from the notes it found,<br/>
-  then the vault as a graph, one note's reading path, the study queue, and the audit.</sub>
+  then the vault as a graph, one note's reading path, the study queue, and the audit. Recorded with Qwen3.5-9B.</sub>
 </p>
 
 ## Install
