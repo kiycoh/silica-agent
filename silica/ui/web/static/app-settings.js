@@ -16,9 +16,11 @@ const settingsBtn = $("#settings-btn");
 // Skills after Connectors (ADR-0097 point 4): the same shape, a list you add
 // to and remove from.
 const ST_EXTRA = ["Zotero", "Connectors", "Skills", "Endpoints", "Diagnostics", "About"];
-// A hosted account gets only these two (ADR-0104 point 1): the others are about
+// A hosted account gets only these (ADR-0104 point 1): the others are about
 // a machine the operator runs, and their routes are refused at the front door.
-const ST_EXTRA_HOSTED = ["Skills", "About"];
+// Connectors holds the operator bot's link page alone (ADR-0104 amendment
+// 2026-10-22): /connectors itself still refuses on hosted.
+const ST_EXTRA_HOSTED = ["Connectors", "Skills", "About"];
 // Usage heads the extras wherever /limits has entries (ADR-0122 point 6), as
 // Claude's settings keep theirs: a hosted key always has a month, a local key
 // usually has nothing, and then there is no tab rather than an empty one.
@@ -583,7 +585,8 @@ function stRender(data) {
   renderSkills(stPanel.querySelector('[data-section="Skills"]'));
   const memory = stPanel.querySelector('[data-section="Memory"]');
   if (memory) renderMemory(memory);
-  if (!data.hosted) stRenderMachine();
+  if (data.hosted) renderTelegramLink(stPanel.querySelector('[data-section="Connectors"]'));
+  else stRenderMachine();
   stShow(stState.section);
   stSetBusy(data.busy || streaming);
 }

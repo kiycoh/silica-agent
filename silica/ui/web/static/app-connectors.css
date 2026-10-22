@@ -3,6 +3,11 @@
   margin-top: 1rem;
 }
 
+a.st-btn {
+  display: inline-block;
+  text-decoration: none;
+}
+
 .st-conn-title {
   color: var(--frost);
   font-size: var(--fs-ctl);
