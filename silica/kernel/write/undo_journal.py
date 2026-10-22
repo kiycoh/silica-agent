@@ -320,6 +320,16 @@ class UndoJournalStore:
         conn.commit()
         return updated
 
+    def drop_inverse(self, run_id: str, path: str) -> None:
+        """Forget the inverses `run_id` recorded for `path`: the op they would
+        undo did not happen. A recorded recreate for a note the driver then
+        refused to delete is not inert: revert_run skips it (the note is
+        there), and a run with a skip and a restore sweeps the skipped note's
+        dangling links, which would edit a note the run never touched."""
+        conn = self._conn()
+        conn.execute("DELETE FROM inverses WHERE run_id = ? AND path = ?", (run_id, path))
+        conn.commit()
+
     def mark_reverted(self, run_id: str) -> None:
         conn = self._conn()
         conn.execute(

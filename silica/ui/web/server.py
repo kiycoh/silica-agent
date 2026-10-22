@@ -4013,6 +4013,80 @@ def note_save(payload: dict):
             "broken": _broken_links(landed, note_resolver())}
 
 
+@app.post("/tree/delete", dependencies=_SAME_ORIGIN)
+def tree_delete(payload: dict):
+    """Delete a note, or every note the rail shows under a folder, from the
+    tree row's menu (ADR-0123). The user's act, as /delete is (ADR-0092): no
+    refusal for a linked note, journaled under user:/delete as ONE run, so
+    the toast's undo, /undo and /revert each bring the whole set back.
+
+    A folder is the notes the tree counts under it, from the builder the tree
+    is drawn with, so the count the menu names is the count that goes; the
+    folder's other files and the directory itself stay."""
+    from silica.driver import DRIVER
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE
+    from silica.tools.wrapped import delete_notes_with_restore_point
+
+    note = str(payload.get("path") or "")
+    folder = str(payload.get("folder") or "").strip().strip("/")
+    if note:
+        canon = note_resolver()(note)
+        if not canon:
+            raise HTTPException(404, "note not found in vault")
+        paths = [canon]
+    elif folder:
+        from silica.kernel.recall.graph_export import build_graph_data
+
+        nodes, _edges = build_graph_data(folder=folder)
+        paths = sorted(n["path"] for n in nodes if n.get("type") != "ghost" and n.get("path"))
+        if not paths:
+            raise HTTPException(404, "no notes in that folder")
+    else:
+        raise HTTPException(400, "name a note or a folder")
+    # The turn's slot, as an import takes it: a turn reading or patching a
+    # note this deletes would fail mid-answer on a file the person removed.
+    if not _begin_turn():
+        raise HTTPException(409, "a turn is running: delete when it ends")
+    try:
+        res = delete_notes_with_restore_point(
+            [(p, DRIVER.read_note(p).content) for p in paths], USER_DELETE_SOURCE)
+    finally:
+        _end_turn()
+    if not res["deleted"]:
+        # The driver's text can carry the vault's absolute path, which the
+        # hosted pilot does not show its tenants (ADR-0085): logged, not sent.
+        logger.warning("tree delete refused: %s", res.get("error"))
+        raise HTTPException(409, "not deleted: the vault refused the delete")
+    if "error" in res:
+        logger.warning("tree delete stopped after %d of %d: %s",
+                       len(res["deleted"]), len(paths), res["error"])
+        res["error"] = f"{len(paths) - len(res['deleted'])} of {len(paths)} could not be deleted"
+    return res
+
+
+@app.post("/tree/undo-delete", dependencies=_SAME_ORIGIN)
+def tree_undo_delete(payload: dict):
+    """The toast's undo for /tree/delete: the run back, every note in it."""
+    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal, revert_run
+
+    run = str(payload.get("run") or "")
+    info = get_undo_journal().run_info(run) if run else None
+    # The id comes from the page: only a delete the person made is this
+    # button's to take back; any other run is /revert's, with its own report.
+    if not info or info["source"] != USER_DELETE_SOURCE:
+        raise HTTPException(404, "nothing to undo")
+    if info["reverted_at"]:
+        raise HTTPException(409, "already undone")
+    if not _begin_turn():
+        raise HTTPException(409, "a turn is running: undo when it ends")
+    try:
+        res = revert_run(run)
+    finally:
+        _end_turn()
+    return {"restored": res["reverted"],
+            "skipped": [s["path"] for s in res["skipped"] + res["errors"]]}
+
+
 @app.post("/note/render", dependencies=_SAME_ORIGIN)
 def note_render(payload: dict):
     """One block of the editor's live preview (a table, a callout, a formula,

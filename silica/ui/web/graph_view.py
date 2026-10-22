@@ -91,18 +91,17 @@ def _vendored_font_face() -> str:
     )
 
 
-def _ws_button(target: str, shown: str, *, folder: bool) -> str:
-    """The row's workspaces menu (ADR-0112 point 6): which workspaces list
-    this note or folder, and a way to add it to one. The rail's only, as the
-    pin is."""
-    attr = "data-ws-folder" if folder else "data-ws-note"
+def _more_button(target: str, shown: str, *, folder: bool) -> str:
+    """The row's menu (ADR-0123): its workspaces (ADR-0112 point 6, the ◇
+    that stood here) and its delete. One "…" and not a glyph per action, as a
+    chat row has: a destructive action as the third of three 20 px glyphs
+    beside pin and ◇ was one slip from a click meant for its neighbour. The
+    rail's only, as the pin is."""
+    attr = "data-folder" if folder else "data-note"
     what = "the folder " if folder else ""
-    return (f'<button type="button" class="tree-ws" {attr}="{html.escape(target, quote=True)}" '
-            f'aria-haspopup="menu" title="workspaces" '
-            f'aria-label="workspaces for {what}{html.escape(shown, quote=True)}">'
-            f'<svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" '
-            f'stroke="currentColor" stroke-width="2" stroke-linejoin="round">'
-            f'<path d="M12 3l9 9-9 9-9-9z"></path></svg></button>')
+    return (f'<button type="button" class="tree-more" {attr}="{html.escape(target, quote=True)}" '
+            f'aria-haspopup="menu" aria-expanded="false" title="workspaces, delete" '
+            f'aria-label="more for {what}{html.escape(shown, quote=True)}">…</button>')
 
 
 def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
@@ -120,7 +119,8 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
     plain click is intercepted by the rail's own handler. The frame keeps
     the button: its document has no router to answer that hash.
 
-    `actions` wraps each note in a `.tree-row` and adds a pin toggle beside it.
+    `actions` wraps each note in a `.tree-row` and adds a pin toggle and the
+    row's "…" menu beside it; a folder's summary gets the same "…".
     Off by default because this same tree renders inside the graph frame, where
     a pin would point at a rail that document does not have: the app's rail
     asks for it, the frame's sidebar does not. A wrapper and not a button in a
@@ -162,12 +162,12 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
             plan = (f'<button type="button" class="tree-plan" data-folder="{html.escape(folder, quote=True)}" '
                     f'title="plan this folder in Learn" aria-label="plan the folder {html.escape(name, quote=True)}">'
                     f"plan</button>") if actions else ""
-            ws = _ws_button(folder.rstrip("/"), name, folder=True) if actions else ""
+            more = _more_button(folder.rstrip("/"), name, folder=True) if actions else ""
             # a note's <a> drags by itself; a summary only when told, and the
-            # rail drops a folder on a workspace row as its ◇ menu adds one
+            # rail drops a folder on a workspace row as its menu adds one
             drag = ' draggable="true"' if actions else ""
             out.append(f"<details{attr}><summary{drag}>{html.escape(name)}"
-                       f'<span class="tree-n">{count(tree[name])}</span>{ws}{plan}</summary>')
+                       f'<span class="tree-n">{count(tree[name])}</span>{more}{plan}</summary>')
             out.append(emit(tree[name], depth + 1, folder))
             out.append("</details>")
         for leaf, nid in sorted(tree.get("__notes__", []), key=lambda x: x[0].lower()):
@@ -193,7 +193,7 @@ def render_tree(nodes: list[dict], *, actions: bool = False) -> str:
                 f'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
                 f'<line x1="12" y1="17" x2="12" y2="22"></line>'
                 f'<path d="M5 17h14l-2-4V4H7v9z"></path></svg></button>'
-                f'{_ws_button(nid, shown, folder=False)}</div>'
+                f'{_more_button(nid, shown, folder=False)}</div>'
             )
         return "".join(out)
 

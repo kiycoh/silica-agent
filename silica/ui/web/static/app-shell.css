@@ -1333,6 +1333,50 @@ body.sidebar-collapsed #sidebar {
   color: var(--frost);
 }
 
+/* The row's menu (ADR-0123): the chat row's "…", sized as the pin beside it,
+   shown as the pin is. Kept visible where nothing hovers: on a touch screen
+   the delete and the workspaces have no other door in the rail. */
+.tree-more {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: none;
+  color: var(--ash-dim);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+#tree summary .tree-more {
+  float: right;
+  display: inline-grid;
+  height: 18px;
+}
+
+.tree-row:hover .tree-more,
+#tree summary:hover .tree-more,
+.tree-more:focus-visible,
+.tree-more[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.tree-more:hover {
+  color: var(--frost);
+}
+
+@media (hover: none) {
+  .tree-more {
+    opacity: 1;
+  }
+}
+
 /* Plan this folder (ADR-0081 §17): the folder row's one action, on hover and
    keyboard focus like the pin, floated beside the count it shares the line with */
 .tree-plan {
@@ -1508,7 +1552,8 @@ body.sidebar-collapsed #sidebar {
   outline: none;
 }
 
-.s-menu {
+.s-menu,
+#tree-menu {
   position: absolute;
   right: 0.4rem;
   top: calc(100% - 2px);
@@ -1521,6 +1566,14 @@ body.sidebar-collapsed #sidebar {
   border: 1px solid var(--line-2);
   border-radius: var(--r-sm);
   box-shadow: var(--lift);
+}
+
+/* The tree's one menu (ADR-0123) looks like a chat row's but is fixed to the
+   viewport, placed by openTreeMenu: a folder's summary clips what it holds. */
+#tree-menu {
+  position: fixed;
+  right: auto;
+  z-index: 120;
 }
 
 .s-item {
