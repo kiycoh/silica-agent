@@ -49,6 +49,7 @@ from silica.agent.compaction import (
     COMPACT_FRACTION,
     compact_read_history,
     eager_stub,
+    elide_written_args,
     fit_window,
     TEXT_CHARS_PER_TOKEN,
 )
@@ -168,7 +169,8 @@ _FINAL_TURN_INSTRUCTION = (
 
 
 
-def _budget_notice(iteration: int, max_iterations: int) -> dict | None:
+def _budget_notice(iteration: int, max_iterations: int,
+                   token_steps: int | None = None) -> dict | None:
     """Tell the model how much of the loop is left, at the point where the
     answer changes.
 
@@ -176,8 +178,14 @@ def _budget_notice(iteration: int, max_iterations: int) -> dict | None:
     existed, so it could spend its last steps opening work it had no room to
     close. Silent while there is room; a system notice near the wall, on the
     same channel as the convergence guard so tool results stay contiguous.
+
+    `token_steps` is how many more calls of the last one's size fit in
+    TURN_PROMPT_BUDGET: that wall stopped hosted t06's turn (2026-10-22) at 19
+    of its iterations with no notice, so the nearer of the two is the one told.
     """
     remaining = max_iterations - iteration
+    if token_steps is not None:
+        remaining = min(remaining, token_steps)
     if remaining > BUDGET_NOTICE_AT:
         return None
     return {
@@ -470,7 +478,7 @@ def run_agent(
                 messages, collapsed,
                 estimate=sent_tokens + grown // TEXT_CHARS_PER_TOKEN,
                 limit=int(WINDOW_FILL * CONFIG.max_context_tokens),
-                tools=TOOLS, shrink=_fit_shrink,
+                tools=TOOLS, shrink=_fit_shrink, unsent_from=sent_len,
             )
             _newly = sorted(set(collapsed) - _pre_collapsed)
             if _newly:
@@ -498,7 +506,9 @@ def run_agent(
                 _abandon.clear()
                 _llm_kwargs["tools"] = schemas
                 _llm_kwargs["cancel"] = _abandon
-                sent_len = len(messages)
+                # A request the server rejects shows the model nothing: what it
+                # has seen is what the last accepted one carried.
+                seen_len, sent_len = sent_len, len(messages)
                 try:
                     resp = _interruptible_llm(_llm_kwargs)
                 except Exception as e:
@@ -509,7 +519,7 @@ def run_agent(
                     collapsed, _ = fit_window(
                         messages, collapsed, estimate=int(over[1]),
                         limit=int(WINDOW_FILL * int(over[2])), tools=TOOLS,
-                        shrink=_fit_shrink,
+                        shrink=_fit_shrink, unsent_from=seen_len,
                     )
                     if collapsed == _pre_collapsed:
                         raise
@@ -754,6 +764,10 @@ def run_agent(
                 tool_msg[memory_gate.TAINT_KEY] = taint
             messages.append(tool_msg)
             _narr_mod.NARRATOR.turn(tool_msg)
+            if not failed:
+                # After the call's beat at the top of the loop wrote the whole
+                # message to the narration, which keeps the text recoverable.
+                elide_written_args(resp.assistant_message, tc.id, tc.name)
             if (not failed and tc.name == "silica_web_answer" and (tc.args or {}).get("final")
                     and not str(result).startswith("(silica:")):
                 final_answer = tool_msg
@@ -821,7 +835,8 @@ def run_agent(
             convergence_landing = True
             break
 
-        notice = _budget_notice(iteration, max_iterations)
+        notice = _budget_notice(iteration, max_iterations,
+                                (TURN_PROMPT_BUDGET - spent_prompt) // max(prompt_tokens, 1))
         if notice is not None:
             messages.append(notice)
             _narr_mod.NARRATOR.turn(notice)
@@ -854,6 +869,14 @@ def run_agent(
             final_kwargs["tools"] = None   # removed, not merely discouraged
             final_kwargs["cancel"] = _abandon
             final = _interruptible_llm(final_kwargs)
+            thought = final.reasoning or ""
+            if not (final.text or "").strip() and thought.strip():
+                # The answer went into the reasoning and the reply came back
+                # empty: hosted t06's landing (2026-10-22) wrote 2.8k chars of
+                # answer there and showed "maximum iterations". Asked once more
+                # with reasoning off, the knob V4 honours (llm.py).
+                _abandon.clear()
+                final = _interruptible_llm({**final_kwargs, "reasoning": False})
     except Exception as e:
         from silica.agent.usage_limits import UsageLimited
 
@@ -864,7 +887,7 @@ def run_agent(
         return "(silica: maximum iterations reached)"
     finally:
         _emit(ThinkingEndEvent(iteration=iteration))
-    _narr_mod.NARRATOR.thought_close(final.reasoning or "")
+    _narr_mod.NARRATOR.thought_close(thought or final.reasoning or "")
     text = (final.text or "").strip() or "(silica: maximum iterations reached)"
     text = _declare_links(text) if _interactive else text
     # Into the history and not narrated here, as the normal path does: the

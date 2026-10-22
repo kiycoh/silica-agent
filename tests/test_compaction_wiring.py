@@ -404,3 +404,38 @@ def test_a_context_overflow_with_nothing_to_collapse_still_raises():
          patch("silica.agent.loop.CONFIG.max_context_tokens", 10**6), \
          pytest.raises(RuntimeError, match="exceeds the available context"):
         run_agent([{"role": "user", "content": "go"}], model="test")
+
+
+def test_the_loop_drops_a_landed_writes_body_and_keeps_a_failed_ones():
+    """Hosted t06 (2026-10-22): the 21.6k-char body stayed in every later
+    request and the pre-call fit stubbed the chapter to make room for it."""
+    body = "testo " * 100
+    calls = [0]
+
+    def fake_call_llm(model, messages, **kw):
+        calls[0] += 1
+        if calls[0] == 1:
+            args = {"path": "Inbox/R.md", "body": body}
+            return SimpleNamespace(
+                assistant_message={"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "ok", "type": "function", "function": {
+                        "name": "silica_write_note", "arguments": json.dumps(args)}},
+                    {"id": "bad", "type": "function", "function": {
+                        "name": "silica_patch_note", "arguments": json.dumps({"name": "X", "snippet": body})}}]},
+                tool_calls=[SimpleNamespace(id="ok", name="silica_write_note", args={}),
+                            SimpleNamespace(id="bad", name="silica_patch_note", args={})],
+                text="", reasoning=None, usage={"prompt_tokens": 100})
+        return SimpleNamespace(assistant_message={"role": "assistant", "content": "done"},
+                               tool_calls=[], text="done", reasoning=None, usage={"prompt_tokens": 100})
+
+    tools = {"silica_write_note": _FakeTool("silica_write_note", "eager", '{"success": true}'),
+             "silica_patch_note": _FakeTool("silica_patch_note", "eager", '{"error": "no such note"}')}
+    messages = [{"role": "user", "content": "q"}]
+    with patch.dict("silica.tools.TOOLS", tools, clear=True):
+        with patch("silica.agent.loop.call_llm", fake_call_llm):
+            run_agent(messages=messages, model="m")
+
+    calls_made = {tc["id"]: json.loads(tc["function"]["arguments"])
+                  for m in messages for tc in m.get("tool_calls") or []}
+    assert calls_made["ok"]["body"].startswith("⟪written to Inbox/R.md")
+    assert calls_made["bad"]["snippet"] == body

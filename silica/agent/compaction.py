@@ -44,6 +44,41 @@ MUTATING_TOOLS = frozenset({
     "silica_delete",
 })
 
+# The argument that carries the text a write puts on disk, and the one naming
+# where. Once the write lands the text is in the vault, and its copy in the
+# call stays in every later request: on hosted t06 (2026-10-22) a 21.6k-char
+# body was estimated at 10.8k tokens by the pre-call fit, which stubbed the
+# chapter the note was written from to make room for it.
+WRITTEN_ARGS = {"silica_write_note": ("body", "path"), "silica_patch_note": ("snippet", "name")}
+
+
+def elide_written_args(assistant_message: dict, call_id: str, tool_name: str) -> bool:
+    """Replace the written text in `call_id`'s arguments with a pointer to the
+    note; True when it did. Call it only for a write that succeeded, and after
+    the message is narrated: the narration keeps the full arguments, and they
+    are the one copy a note removed by mistake can come back from."""
+    keys = WRITTEN_ARGS.get(tool_name)
+    if keys is None:
+        return False
+    text_key, where_key = keys
+    for tc in assistant_message.get("tool_calls") or []:
+        if tc.get("id") != call_id:
+            continue
+        fn = tc.get("function") or {}
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except (json.JSONDecodeError, TypeError):
+            return False
+        text = args.get(text_key) if isinstance(args, dict) else None
+        if not isinstance(text, str) or len(text) <= MIN_COLLAPSE_CHARS:
+            return False
+        args[text_key] = (f"⟪written to {args.get(where_key, 'the note')}, {len(text)} chars: "
+                          f"read the note to see it⟫")
+        fn["arguments"] = json.dumps(args, ensure_ascii=False)
+        return True
+    return False
+
+
 # Arg keys that name a note, in resolution order — the tools disagree on the
 # spelling (`name` for reads and patches, `path` for writes, `ref` for
 # move/delete, `note` for the graph lane).
@@ -109,19 +144,37 @@ def read_stub(
     arguments: str,
     content: str = "",
     why: str = "to save context",
+    tail: str | None = None,
 ) -> str:
     """Elision marker for a collapsed read result. Names the call to re-issue.
 
     `why` is the reason the body went away — a stale read is a different fact
     from a budget eviction, and the model should not re-issue a call whose
-    answer the conversation has already superseded.
+    answer the conversation has already superseded. `tail` replaces the
+    re-call advice when that advice would mislead (`turn_tail`).
     """
     head = (
         f"⟪silica: result elided {why} — "
-        f"re-call {tool_name} with {arguments} to view again"
+        + (tail or f"re-call {tool_name} with {arguments} to view again")
     )
     kept = read_projection(content)
     return f"{head} · kept: {kept}⟫" if kept else f"{head}⟫"
+
+
+def turn_tail(tool_name: str, body: str, seen: bool) -> str:
+    """The advice for a read of the running turn, which "re-call to view
+    again" got wrong both ways. Seen: on hosted t06 (2026-10-22) the stub of a
+    chapter read in full before the write read to the model as a chapter never
+    seen, and it re-read it in slices 14 times to check a note it had written
+    from it. Never seen: re-calling a read that did not fit asks for one that
+    cannot fit either (context-cap-2026-10-13, finding 4: one lecture read ten
+    times in a turn)."""
+    # Short on purpose: a stub longer than the old one frees less, and the fit
+    # then stubs one more read to make the same room.
+    if not seen:
+        return f"too large for this turn's window: re-call {tool_name} for a part, by lines or query"
+    cost = max(100, round(len(body) / _CHARS_PER_TOKEN, -2))
+    return f"you read it in full this turn (~{cost} tokens); re-call {tool_name} only for lines you need"
 
 
 def eager_stub(tool: Any, result_str: str) -> str:
@@ -323,6 +376,7 @@ def compact_read_history(
         return updated  # not enough turns for anything to be "old"
 
     boundary = assistant_indices[-floor_turns]
+    turn_start = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
     for i, m in enumerate(messages):
         if i >= boundary:
             break
@@ -336,7 +390,9 @@ def compact_read_history(
         tool = tools.get(name) if name else None
         if tool is None or getattr(tool, "collapse", "lazy") != "lazy":
             continue
-        m["content"] = read_stub(name, arguments, m["content"])
+        # Everything this sweep reaches was sent: the call it measures came after.
+        tail = turn_tail(name, m["content"], seen=True) if i > turn_start else None
+        m["content"] = read_stub(name, arguments, m["content"], tail=tail)
         updated.add(i)
     return updated
 
@@ -363,6 +419,7 @@ def fit_window(
     limit: int,
     tools: dict,
     shrink: Callable[[str, str, str], str | None] | None = None,
+    unsent_from: int | None = None,
 ) -> tuple[set[int], int]:
     """Collapse lazy read results, oldest first and floor included, until the
     request about to be sent is estimated under `limit` tokens.
@@ -382,6 +439,10 @@ def fit_window(
     as before: they were read for another request, so the passages a shrink
     would pick by this one's words are not what they were read for. A shrunk
     body stays out of `collapsed`, so a later sweep can still stub it.
+
+    `unsent_from` is the first message index no request has carried yet: a
+    result of this turn below it was seen whole, one at or above it never was,
+    and the stub says which (`turn_tail`). None reads every result as seen.
     """
     id_to_name: dict[str, tuple[str, str]] = {}
     for m in messages:
@@ -407,7 +468,9 @@ def fit_window(
         if smaller and len(smaller) <= len(body) // 2:
             m["content"] = smaller
         else:
-            m["content"] = read_stub(name, arguments, body, "to fit the context window")
+            seen = unsent_from is None or i < unsent_from
+            tail = turn_tail(name, body, seen) if i > turn_start else None
+            m["content"] = read_stub(name, arguments, body, "to fit the context window", tail)
             updated.add(i)
         estimate -= (len(body) - len(m["content"])) // _CHARS_PER_TOKEN
     return updated, estimate
