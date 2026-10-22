@@ -370,6 +370,9 @@ let lastUserBody = null;
 // rather than the whole turn.
 const WRITE_COPY = {
   written: { label: "written", act: "revert", hint: "restore this note to its state before the turn" },
+  // A written card whose note the turn created, once /changes says so: its
+  // revert deletes the note, and "revert" alone hid that (hosted t06, 2026-10-22).
+  created: { label: "created", act: "delete", hint: "the turn created this note: delete it; /undo brings it back" },
   moved: { label: "moved", act: "revert", hint: "move this note back" },
   deleted: { label: "deleted", act: "restore", hint: "bring this note back" },
   failed: { label: "not written", act: null, hint: "" },
@@ -564,10 +567,11 @@ function stampReviewCards() {
       } catch { notify("couldn't clear the review mark"); keep.disabled = false; return; }
       loadChanges(); // the count drops and this card sheds its border
     });
+    const created = changeRows.some((r) => r.path === path && r.kind === "created");
     const revert = document.createElement("button");
     revert.type = "button";
     revert.className = "wc-act";
-    revert.textContent = "revert";
+    revert.textContent = created ? WRITE_COPY.created.act : "revert";
     revert.addEventListener("click", () => {
       revert.disabled = true;
       card.classList.add("reverting");
@@ -576,9 +580,10 @@ function stampReviewCards() {
     const siblings = card.parentElement ? card.parentElement.querySelectorAll(".wcard.written, .wcard.moved").length - 1 : 0;
     const note = document.createElement("span");
     note.className = "wc-review-note";
+    const what = created ? "delete removes this note the turn created; /undo brings it back" : "revert takes back this one patch";
     note.textContent = siblings
-      ? `revert takes back this one patch; the other write${siblings === 1 ? "" : "s"} in this turn stay${siblings === 1 ? "s" : ""}`
-      : "revert takes back this one patch";
+      ? `${what}; the other write${siblings === 1 ? "" : "s"} in this turn stay${siblings === 1 ? "s" : ""}`
+      : what;
     acts.append(keep, revert, note);
     box.appendChild(acts);
     card.appendChild(box);

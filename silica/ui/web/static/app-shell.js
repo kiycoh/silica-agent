@@ -982,8 +982,15 @@ function stampWriteTallies(rows) {
     el.textContent = "";
     if (!r) continue;
     // Re-point the card at the resolved path so its click opens the diff.
-    const open = el.parentElement && el.parentElement.querySelector(".wc-open");
+    const card = el.parentElement;
+    const open = card && card.querySelector(".wc-open");
     if (open) open.dataset.path = r.path;
+    const act = card && card.classList.contains("written") && card.querySelector(".wc-act");
+    if (act && r.kind === "created") {
+      card.querySelector(".wc-op").textContent = WRITE_COPY.created.label;
+      act.textContent = WRITE_COPY.created.act;
+      act.dataset.tip = WRITE_COPY.created.hint;
+    }
     if (r.added) el.appendChild(mkEl("span", "chg-add", "+" + r.added));
     if (r.removed) el.appendChild(mkEl("span", "chg-del", "−" + r.removed));
   }

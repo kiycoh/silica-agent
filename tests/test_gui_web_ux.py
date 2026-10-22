@@ -293,8 +293,10 @@ def test_keep_clears_review_through_the_gate_and_the_count_drops(client, tmp_vau
 def test_revert_copy_names_what_it_takes_back_and_what_stays():
     js = app_js()
     body = _fn(js, "function stampReviewCards()")
-    assert "revert takes back this one patch; the other write" in body
-    assert "stay" in body
+    assert "revert takes back this one patch" in body
+    # a note the turn created is deleted by its revert, and the copy says so
+    assert "delete removes this note the turn created; /undo brings it back" in body
+    assert "; the other write" in body and "stay" in body
 
 
 def test_a_reopened_session_shows_the_same_writes_and_reads_as_the_live_one(client, monkeypatch):

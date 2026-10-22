@@ -1574,12 +1574,22 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     if store.absent_floor(note_path):
         # The chat created this note: before it there was nothing, so undo
         # removes it rather than leave a 0-byte note that keeps taking links.
+        # Removed with a restore point, so a second /undo brings it back: on
+        # hosted t06 (2026-10-22) a write card's revert removed a 21k-char note
+        # the turn had written and nothing in the app could restore it.
+        from silica.tools.wrapped import delete_with_restore_point
+
         try:
-            DRIVER.delete(note_path)
-            store.clear(note_path)
-            CONSOLE.print(f"  Undone: [bold]{note_path}[/] removed (the chat created it)")
+            res = delete_with_restore_point(
+                note_path, DRIVER.read_note(note_path).content, USER_DELETE_SOURCE)
         except Exception as exc:
-            CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+            res = {"error": str(exc)}
+        if "error" in res:
+            CONSOLE.print(f"  [red]Undo failed:[/] {res['error']}")
+            return True
+        store.clear(note_path)
+        CONSOLE.print(f"  Undone: [bold]{note_path}[/] removed (the chat created it); "
+                      f"/undo {note_path} brings it back")
         return True
     from silica.kernel.write.preserve import Loss
 

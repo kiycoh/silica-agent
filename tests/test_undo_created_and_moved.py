@@ -48,6 +48,21 @@ def test_undo_of_a_note_the_chat_created_removes_it(vault):
     assert not (vault / "Corso" / "Fresh.md").exists()
 
 
+@pytest.mark.parametrize("second", ["/undo Corso/Fresh.md", "/undo"])
+def test_a_second_undo_brings_back_the_created_note_the_first_removed(vault, second):
+    from silica.tools.notes import silica_write_note
+
+    silica_write_note("Corso/Fresh.md", "# Fresh\n\nnew text\n")
+    created = (vault / "Corso" / "Fresh.md").read_text(encoding="utf-8")
+    (vault / "Corso" / "Fresh.md").write_text(created + "edited by hand\n", encoding="utf-8")
+
+    _handle_direct_shortcut("/undo Corso/Fresh.md", [])
+    assert not (vault / "Corso" / "Fresh.md").exists()
+    _handle_direct_shortcut(second, [])
+    # the note as it was when removed, the hand edit included
+    assert (vault / "Corso" / "Fresh.md").read_text(encoding="utf-8") == created + "edited by hand\n"
+
+
 def test_undo_walks_back_a_patch_then_removes_the_created_note(vault):
     from silica.tools.notes import silica_patch_note, silica_write_note
 
