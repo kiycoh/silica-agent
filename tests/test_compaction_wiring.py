@@ -439,3 +439,44 @@ def test_the_loop_drops_a_landed_writes_body_and_keeps_a_failed_ones():
                   for m in messages for tc in m.get("tool_calls") or []}
     assert calls_made["ok"]["body"].startswith("⟪written to Inbox/R.md")
     assert calls_made["bad"]["snippet"] == body
+
+
+def test_hosted_t06s_turn_keeps_the_chapter_it_wrote_from(monkeypatch):
+    """The numbers of hosted t06's turn (2026-10-22), on a 32k window: a 35,790-
+    char chapter read whole, then a 21,604-char note written from it. The body
+    in the write's arguments, counted at 2 chars a token, pushed the pre-call
+    fit over 28.8k and it stubbed the chapter; the model took the stub for a
+    chapter never seen and re-read it 14 times. With the body out of the
+    arguments the chapter stays whole in the call that answers."""
+    from silica.config import CONFIG
+
+    chapter, body = "c" * 35_790, "n" * 21_604
+    prompts, seen = iter((8_759, 21_823, 22_047)), []
+
+    def fake_call_llm(model, messages, **kw):
+        seen.append([dict(m) for m in messages])
+        n = len(seen)
+        usage = {"prompt_tokens": next(prompts)}
+        if n == 1:
+            call = ("r", "silica_read_note", {"name": "Inbox/capitolo"})
+        elif n == 2:
+            call = ("w", "silica_write_note", {"path": "Inbox/R.md", "body": body})
+        else:
+            return SimpleNamespace(assistant_message={"role": "assistant", "content": "Wrote Inbox/R.md."},
+                                   tool_calls=[], text="Wrote Inbox/R.md.", reasoning=None, usage=usage)
+        cid, name, args = call
+        return SimpleNamespace(
+            assistant_message={"role": "assistant", "content": "", "tool_calls": [
+                {"id": cid, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]},
+            tool_calls=[SimpleNamespace(id=cid, name=name, args=args)],
+            text="", reasoning=None, usage=usage)
+
+    monkeypatch.setattr(CONFIG, "max_context_tokens", 32_000)
+    tools = {"silica_read_note": _FakeTool("silica_read_note", "lazy", chapter),
+             "silica_write_note": _FakeTool("silica_write_note", "eager", '{"success": true}')}
+    with patch.dict("silica.tools.TOOLS", tools, clear=True):
+        with patch("silica.agent.loop.call_llm", fake_call_llm):
+            run_agent(messages=[{"role": "user", "content": "rielabora il capitolo"}], model="m")
+
+    answering = seen[-1]
+    assert [m["content"] for m in answering if m.get("tool_call_id") == "r"] == [chapter]

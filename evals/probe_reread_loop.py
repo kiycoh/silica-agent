@@ -13,7 +13,8 @@ was "(silica: maximum iterations reached)".
 One case is one fresh vault holding one chapter, one request shaped like that
 one (paraphrased: it makes silica_rework refuse as "shorter", so the chat writes
 the note itself), the web chat's constraints and the hosted model, endpoint pin
-and window. The silica under test is whichever one the interpreter imports, so
+and window. t06's chapter carried U+0251 for every "a" (1.6x the tokens), which
+is what put it over 32k; `--alpha` writes the text that way to reproduce it. The silica under test is whichever one the interpreter imports, so
 a baseline runs from a worktree at the baseline commit:
 
   uv run --extra dev --extra gui python -I <this file> run --arm B32 --ctx 32000 \\
@@ -46,7 +47,10 @@ HOSTED_ENV = {
     "SILICA_HOSTED": "1",
     "SILICA_PROVIDER": "openrouter",
     "SILICA_MODEL": "openrouter/deepseek/deepseek-v4-flash-0731",
-    "SILICA_FALLBACK_MODELS": "openrouter/z-ai/glm-5.3-flash",
+    # No fallback, unlike the host: DeepInfra's and Parasail's shared pools 429
+    # in bursts (2026-10-22, 22:00 UTC), and a case half written by GLM would
+    # measure another model. A case that runs out of retries is an error row.
+    "SILICA_FALLBACK_MODELS": "",
     "SILICA_DECISION_MODEL": "typesafe/jev-1.13-20260917",
     "OPENROUTER_PROVIDER_BY_MODEL": json.dumps({
         "deepseek/deepseek-v4-flash-0731": {"order": ["deepinfra/fp8", "parasail/fp8"],
@@ -102,6 +106,9 @@ def score(messages: list[dict], answer: str, vault: Path) -> dict:
         "answer_is_sentinel": answer.strip().startswith("(silica:"),
         "answer_names_note": bool(stem) and stem.lower() in answer.lower(),
         "answer_chars": len(answer), "tools": [name for _, name, _ in calls],
+        # What compaction left of the turn's reads: the stub is the trigger.
+        "stubs": sum(1 for m in messages if m.get("role") == "tool"
+                     and str(m.get("content") or "").startswith("⟪silica: result elided")),
     }
 
 
@@ -116,7 +123,7 @@ def one(opts: argparse.Namespace) -> None:
 
     if opts.fit_narrows:
         loop.FIT_NARROWS = True
-    meter = {"calls": 0, "prompt": 0, "completion": 0}
+    meter = {"calls": 0, "prompt": 0, "completion": 0, "models": []}
     real = loop.call_llm
 
     def counted(*a, **kw):
@@ -124,6 +131,9 @@ def one(opts: argparse.Namespace) -> None:
         meter["calls"] += 1
         meter["prompt"] += int((resp.usage or {}).get("prompt_tokens") or 0)
         meter["completion"] += int((resp.usage or {}).get("completion_tokens") or 0)
+        model = (resp.request or {}).get("model")
+        if model and model not in meter["models"]:
+            meter["models"].append(model)
         return resp
 
     loop.call_llm = counted
@@ -154,7 +164,8 @@ def _case(opts: argparse.Namespace, i: int, key: str) -> dict:
     with tempfile.TemporaryDirectory(prefix=f"reread-{opts.arm}-{i}-") as tmp:
         vault = Path(tmp) / "vault"
         (vault / Path(SOURCE).parent).mkdir(parents=True)
-        (vault / SOURCE).write_text(Path(opts.text).read_text(encoding="utf-8"), encoding="utf-8")
+        text = Path(opts.text).read_text(encoding="utf-8")
+        (vault / SOURCE).write_text(text.replace("a", "\u0251") if opts.alpha else text, encoding="utf-8")
         (Path(tmp) / "home").mkdir()
         env = {**os.environ, **HOSTED_ENV, "HOME": str(Path(tmp) / "home"),
                "SILICA_VAULT": str(vault), "SILICA_MAX_CONTEXT": str(opts.ctx),
@@ -166,7 +177,8 @@ def _case(opts: argparse.Namespace, i: int, key: str) -> dict:
             row = json.loads(lines[-1]) if lines else {"error": (p.stderr or "no output")[-500:]}
         except subprocess.TimeoutExpired:
             row = {"error": f"timeout after {opts.timeout}s"}
-    return {"arm": opts.arm, "ctx": opts.ctx, "fit_narrows": opts.fit_narrows, "case": i, **row}
+    return {"arm": opts.arm, "ctx": opts.ctx, "fit_narrows": opts.fit_narrows, "alpha": opts.alpha,
+            "case": i, **row}
 
 
 def run(opts: argparse.Namespace) -> None:
@@ -179,7 +191,8 @@ def run(opts: argparse.Namespace) -> None:
         with lock, out.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
         print(f"{opts.arm} #{i}: {row.get('seconds')}s written={row.get('written')} "
-              f"reads_after={row.get('source_reads_after_write')} sentinel={row.get('answer_is_sentinel')} "
+              f"reads_after={row.get('source_reads_after_write')} stubs={row.get('stubs')} "
+              f"sentinel={row.get('answer_is_sentinel')} "
               f"prompt={row.get('prompt')} error={row.get('error')}", flush=True)
 
     with ThreadPoolExecutor(opts.jobs) as pool:
@@ -198,6 +211,7 @@ def main() -> None:
     r.add_argument("--out", required=True)
     r.add_argument("--timeout", type=int, default=900)
     r.add_argument("--fit-narrows", action="store_true")
+    r.add_argument("--alpha", action="store_true")
     o = sub.add_parser("one")
     o.add_argument("--fit-narrows", action="store_true")
     opts = ap.parse_args()
