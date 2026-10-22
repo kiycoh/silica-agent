@@ -11,7 +11,6 @@ from silica.agent.compaction import (
     read_stub,
     eager_stub,
     compact_read_history,
-    elide_written_args,
     fit_window,
 )
 
@@ -449,29 +448,3 @@ def test_the_budget_sweep_tells_a_read_of_this_turn_it_was_seen():
     collapsed = compact_read_history(m, set(), prompt_tokens=10**6, budget=1, floor_turns=3, tools=_TOOLS)
     assert collapsed == {2, 4, 6}
     assert "you read it in full this turn" in m[2]["content"]
-
-
-def _write_call(name, args):
-    return {"role": "assistant", "content": "", "tool_calls": [
-        {"id": "w", "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]}
-
-
-def test_a_landed_write_keeps_a_pointer_not_its_body():
-    body = "parola " * 100
-    msg = _write_call("silica_write_note", {"path": "Inbox/R.md", "body": body, "tags": ["a"]})
-    assert elide_written_args(msg, "w", "silica_write_note")
-    tc = msg["tool_calls"][0]
-    args = json.loads(tc["function"]["arguments"])
-    assert tc["id"] == "w" and args["path"] == "Inbox/R.md" and args["tags"] == ["a"]
-    assert args["body"] == f"⟪written to Inbox/R.md, {len(body)} chars: read the note to see it⟫"
-
-
-def test_a_short_text_another_tool_or_another_call_is_left_alone():
-    short = _write_call("silica_write_note", {"path": "a.md", "body": "x" * MIN_COLLAPSE_CHARS})
-    read = _write_call("silica_read_note", {"name": "a", "body": "x" * 999})
-    long = _write_call("silica_patch_note", {"name": "a", "snippet": "x" * 999})
-    before = [json.dumps(m) for m in (short, read, long)]
-    assert not elide_written_args(short, "w", "silica_write_note")
-    assert not elide_written_args(read, "w", "silica_read_note")
-    assert not elide_written_args(long, "other", "silica_patch_note")
-    assert [json.dumps(m) for m in (short, read, long)] == before

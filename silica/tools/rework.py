@@ -384,7 +384,9 @@ def silica_rework(
     if kind == "shorter":
         return {"ok": False, "error": f"A shorter version was asked for: write it yourself{how}."}
     if kind == "condensed" and _fits_chat(text, CONDENSED_SHARE):
-        return {"ok": False, "error": f"It fits your reply: condense it yourself{how}."}
+        # "It fits your reply" read as "answer in the chat": a probe case pasted
+        # the chapter into its reply and wrote no note (2026-10-23).
+        return {"ok": False, "error": f"Short enough for you: condense it into a new note yourself{how}."}
     parts = blocks(text)
     if len(parts) > MAX_BLOCKS:
         return {"ok": False, "blocks": len(parts),

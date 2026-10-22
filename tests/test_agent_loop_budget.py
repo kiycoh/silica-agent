@@ -252,3 +252,25 @@ class TestAReasoningOnlyLanding:
 
         assert _run(fake, max_iterations=1) == "(silica: maximum iterations reached)"
         assert asked == [None]
+
+
+class TestAReasoningOnlyAnswer:
+    def test_a_final_answer_left_in_the_reasoning_is_asked_for_again(self):
+        asked: list = []
+
+        def fake(model, messages, tools=None, cancel=None, reasoning=None):
+            asked.append(reasoning)
+            if reasoning is False:
+                return _resp(text="Wrote Inbox/R.md.")
+            r = _resp(text="")
+            r.reasoning = "Ho completato: Inbox/R.md."
+            return r
+
+        assert _run(fake, max_iterations=5) == "Wrote Inbox/R.md."
+        assert asked == [None, False]
+
+    def test_a_truly_empty_answer_still_names_itself(self):
+        def fake(model, messages, tools=None, cancel=None, reasoning=None):
+            return _resp(text="")
+
+        assert _run(fake, max_iterations=5) == "(silica: the model returned an empty response)"

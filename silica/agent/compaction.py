@@ -44,41 +44,6 @@ MUTATING_TOOLS = frozenset({
     "silica_delete",
 })
 
-# The argument that carries the text a write puts on disk, and the one naming
-# where. Once the write lands the text is in the vault, and its copy in the
-# call stays in every later request: on hosted t06 (2026-10-22) a 21.6k-char
-# body was estimated at 10.8k tokens by the pre-call fit, which stubbed the
-# chapter the note was written from to make room for it.
-WRITTEN_ARGS = {"silica_write_note": ("body", "path"), "silica_patch_note": ("snippet", "name")}
-
-
-def elide_written_args(assistant_message: dict, call_id: str, tool_name: str) -> bool:
-    """Replace the written text in `call_id`'s arguments with a pointer to the
-    note; True when it did. Call it only for a write that succeeded, and after
-    the message is narrated: the narration keeps the full arguments, and they
-    are the one copy a note removed by mistake can come back from."""
-    keys = WRITTEN_ARGS.get(tool_name)
-    if keys is None:
-        return False
-    text_key, where_key = keys
-    for tc in assistant_message.get("tool_calls") or []:
-        if tc.get("id") != call_id:
-            continue
-        fn = tc.get("function") or {}
-        try:
-            args = json.loads(fn.get("arguments") or "{}")
-        except (json.JSONDecodeError, TypeError):
-            return False
-        text = args.get(text_key) if isinstance(args, dict) else None
-        if not isinstance(text, str) or len(text) <= MIN_COLLAPSE_CHARS:
-            return False
-        args[text_key] = (f"⟪written to {args.get(where_key, 'the note')}, {len(text)} chars: "
-                          f"read the note to see it⟫")
-        fn["arguments"] = json.dumps(args, ensure_ascii=False)
-        return True
-    return False
-
-
 # Arg keys that name a note, in resolution order — the tools disagree on the
 # spelling (`name` for reads and patches, `path` for writes, `ref` for
 # move/delete, `note` for the graph lane).

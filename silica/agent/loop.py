@@ -49,7 +49,6 @@ from silica.agent.compaction import (
     COMPACT_FRACTION,
     compact_read_history,
     eager_stub,
-    elide_written_args,
     fit_window,
     TEXT_CHARS_PER_TOKEN,
 )
@@ -544,9 +543,24 @@ def run_agent(
             raise
         finally:
             _emit(ThinkingEndEvent(iteration=iteration))
+        thought = resp.reasoning or ""
+        if not resp.tool_calls and not (resp.text or "").strip() and thought.strip():
+            # The answer went into the reasoning and the reply came back empty,
+            # as on hosted t06's landing (2026-10-22, below) and in a chapter
+            # rework probe's last step at 64k the same night. Asked once more
+            # with reasoning off, the knob V4 honours (llm.py); a failure keeps
+            # the empty reply, which the caller names.
+            try:
+                _abandon.clear()
+                resp = _interruptible_llm({**_llm_kwargs, "reasoning": False})
+            except _Stopped:
+                _narr_mod.NARRATOR.thought_close(thought)
+                return "(silica: cancelled)"
+            except Exception as e:
+                logger.warning("re-asking an answer left in the reasoning failed: %s", e)
         # Closed here and not in the adapter: the reasoning text only exists
         # once resp does, and the durable thought carries it whole (spec §4).
-        _narr_mod.NARRATOR.thought_close(resp.reasoning or "")
+        _narr_mod.NARRATOR.thought_close(thought or resp.reasoning or "")
         messages.append(resp.assistant_message)
         # Only intermediate (tool-calling) assistant messages narrate here.
         # The FINAL one is narrated by the caller after attribution mutates
@@ -764,10 +778,6 @@ def run_agent(
                 tool_msg[memory_gate.TAINT_KEY] = taint
             messages.append(tool_msg)
             _narr_mod.NARRATOR.turn(tool_msg)
-            if not failed:
-                # After the call's beat at the top of the loop wrote the whole
-                # message to the narration, which keeps the text recoverable.
-                elide_written_args(resp.assistant_message, tc.id, tc.name)
             if (not failed and tc.name == "silica_web_answer" and (tc.args or {}).get("final")
                     and not str(result).startswith("(silica:")):
                 final_answer = tool_msg

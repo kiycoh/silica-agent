@@ -157,6 +157,14 @@ def one(opts: argparse.Namespace) -> None:
     out = {"seconds": round(time.time() - t0, 1), "error": error, **meter,
            **score(messages, answer or "", Path(os.environ["SILICA_VAULT"])),
            "answer_head": (answer or "")[:300]}
+    if opts.keep:
+        # The turn as the model saw it plus its reasoning (the narration), to
+        # read why a case did what it did.
+        keep = Path(opts.keep)
+        keep.mkdir(parents=True, exist_ok=True)
+        (keep / "messages.json").write_text(json.dumps(messages, ensure_ascii=False, indent=1), encoding="utf-8")
+        for f in (Path.home() / ".silica" / "narration").glob("*.jsonl"):
+            (keep / f.name).write_bytes(f.read_bytes())
     print(json.dumps(out, ensure_ascii=False))
 
 
@@ -171,6 +179,8 @@ def _case(opts: argparse.Namespace, i: int, key: str) -> dict:
                "SILICA_VAULT": str(vault), "SILICA_MAX_CONTEXT": str(opts.ctx),
                "OPENROUTER_API_KEY": key}
         cmd = [sys.executable, "-I", __file__, "one"] + (["--fit-narrows"] if opts.fit_narrows else [])
+        if opts.keep:
+            cmd += ["--keep", str(Path(opts.keep).resolve() / f"{opts.arm}_{i}")]
         try:
             p = subprocess.run(cmd, env=env, cwd=tmp, capture_output=True, text=True, timeout=opts.timeout)
             lines = [ln for ln in p.stdout.splitlines() if ln.startswith("{")]
@@ -212,8 +222,10 @@ def main() -> None:
     r.add_argument("--timeout", type=int, default=900)
     r.add_argument("--fit-narrows", action="store_true")
     r.add_argument("--alpha", action="store_true")
+    r.add_argument("--keep", help="a directory: each case's messages and narration go to <keep>/<arm>_<i>/")
     o = sub.add_parser("one")
     o.add_argument("--fit-narrows", action="store_true")
+    o.add_argument("--keep")
     opts = ap.parse_args()
     run(opts) if opts.cmd == "run" else one(opts)
 

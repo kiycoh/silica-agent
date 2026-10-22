@@ -11,6 +11,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from silica.agent.loop import run_agent
 
 
@@ -406,48 +408,13 @@ def test_a_context_overflow_with_nothing_to_collapse_still_raises():
         run_agent([{"role": "user", "content": "go"}], model="test")
 
 
-def test_the_loop_drops_a_landed_writes_body_and_keeps_a_failed_ones():
-    """Hosted t06 (2026-10-22): the 21.6k-char body stayed in every later
-    request and the pre-call fit stubbed the chapter to make room for it."""
-    body = "testo " * 100
-    calls = [0]
-
-    def fake_call_llm(model, messages, **kw):
-        calls[0] += 1
-        if calls[0] == 1:
-            args = {"path": "Inbox/R.md", "body": body}
-            return SimpleNamespace(
-                assistant_message={"role": "assistant", "content": "", "tool_calls": [
-                    {"id": "ok", "type": "function", "function": {
-                        "name": "silica_write_note", "arguments": json.dumps(args)}},
-                    {"id": "bad", "type": "function", "function": {
-                        "name": "silica_patch_note", "arguments": json.dumps({"name": "X", "snippet": body})}}]},
-                tool_calls=[SimpleNamespace(id="ok", name="silica_write_note", args={}),
-                            SimpleNamespace(id="bad", name="silica_patch_note", args={})],
-                text="", reasoning=None, usage={"prompt_tokens": 100})
-        return SimpleNamespace(assistant_message={"role": "assistant", "content": "done"},
-                               tool_calls=[], text="done", reasoning=None, usage={"prompt_tokens": 100})
-
-    tools = {"silica_write_note": _FakeTool("silica_write_note", "eager", '{"success": true}'),
-             "silica_patch_note": _FakeTool("silica_patch_note", "eager", '{"error": "no such note"}')}
-    messages = [{"role": "user", "content": "q"}]
-    with patch.dict("silica.tools.TOOLS", tools, clear=True):
-        with patch("silica.agent.loop.call_llm", fake_call_llm):
-            run_agent(messages=messages, model="m")
-
-    calls_made = {tc["id"]: json.loads(tc["function"]["arguments"])
-                  for m in messages for tc in m.get("tool_calls") or []}
-    assert calls_made["ok"]["body"].startswith("⟪written to Inbox/R.md")
-    assert calls_made["bad"]["snippet"] == body
-
-
-def test_hosted_t06s_turn_keeps_the_chapter_it_wrote_from(monkeypatch):
-    """The numbers of hosted t06's turn (2026-10-22), on a 32k window: a 35,790-
-    char chapter read whole, then a 21,604-char note written from it. The body
-    in the write's arguments, counted at 2 chars a token, pushed the pre-call
-    fit over 28.8k and it stubbed the chapter; the model took the stub for a
-    chapter never seen and re-read it 14 times. With the body out of the
-    arguments the chapter stays whole in the call that answers."""
+@pytest.mark.parametrize("window", [32_000, 64_000])
+def test_hosted_t06s_turn_never_reads_its_chapter_as_unseen(monkeypatch, window):
+    """The numbers of hosted t06's turn (2026-10-22): a 35,790-char chapter
+    read whole, then a 21,604-char note written from it. At 32k the pre-call
+    fit stubbed the chapter with "re-call to view again", the model took it for
+    a chapter never seen and re-read it 14 times. Now the stub says it was read
+    in full; at 64k, the host's window since that night, it stays whole."""
     from silica.config import CONFIG
 
     chapter, body = "c" * 35_790, "n" * 21_604
@@ -458,9 +425,9 @@ def test_hosted_t06s_turn_keeps_the_chapter_it_wrote_from(monkeypatch):
         n = len(seen)
         usage = {"prompt_tokens": next(prompts)}
         if n == 1:
-            call = ("r", "silica_read_note", {"name": "Inbox/capitolo"})
+            call = ("r", "fake_read", {"name": "Inbox/capitolo"})
         elif n == 2:
-            call = ("w", "silica_write_note", {"path": "Inbox/R.md", "body": body})
+            call = ("w", "fake_write", {"path": "Inbox/R.md", "body": body})
         else:
             return SimpleNamespace(assistant_message={"role": "assistant", "content": "Wrote Inbox/R.md."},
                                    tool_calls=[], text="Wrote Inbox/R.md.", reasoning=None, usage=usage)
@@ -471,12 +438,19 @@ def test_hosted_t06s_turn_keeps_the_chapter_it_wrote_from(monkeypatch):
             tool_calls=[SimpleNamespace(id=cid, name=name, args=args)],
             text="", reasoning=None, usage=usage)
 
-    monkeypatch.setattr(CONFIG, "max_context_tokens", 32_000)
-    tools = {"silica_read_note": _FakeTool("silica_read_note", "lazy", chapter),
-             "silica_write_note": _FakeTool("silica_write_note", "eager", '{"success": true}')}
+    monkeypatch.setattr(CONFIG, "max_context_tokens", window)
+    # Fake names, not silica_read_note and silica_write_note: the loop loads a
+    # real tool's module by name, and a module first imported under patch.dict
+    # registers into the patched dict and is gone from TOOLS after it
+    # (test_jobs failed in the full suite, 2026-10-23).
+    tools = {"fake_read": _FakeTool("fake_read", "lazy", chapter),
+             "fake_write": _FakeTool("fake_write", "eager", '{"success": true}')}
     with patch.dict("silica.tools.TOOLS", tools, clear=True):
         with patch("silica.agent.loop.call_llm", fake_call_llm):
             run_agent(messages=[{"role": "user", "content": "rielabora il capitolo"}], model="m")
 
-    answering = seen[-1]
-    assert [m["content"] for m in answering if m.get("tool_call_id") == "r"] == [chapter]
+    [read] = [m["content"] for m in seen[-1] if m.get("tool_call_id") == "r"]
+    if window == 64_000:
+        assert read == chapter
+    else:
+        assert "you read it in full this turn" in read and "to view again" not in read

@@ -254,7 +254,7 @@ def test_a_condensed_rework_that_fits_the_reply_goes_back_to_the_chat(tmp_vault,
     _requests(monkeypatch, "Rielabora [[Chapter]] sintetizzando dove possibile")
     tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
     out = rework.silica_rework(note="Chapter")
-    assert out["ok"] is False and "condense it yourself" in out["error"] and not llm
+    assert out["ok"] is False and "condense it into a new note yourself" in out["error"] and not llm
 
 
 def test_a_condensed_rework_too_big_for_the_window_runs_in_blocks(tmp_vault, llm, monkeypatch):
