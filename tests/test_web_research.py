@@ -636,9 +636,24 @@ def test_collect_sources_picks_up_a_fetched_url():
         "Source: https://b.test/article\n\nBody text.",
     ]
     assert wr._collect_sources(results) == [
-        ("https://a.test", "T1"),
         ("https://b.test/article", "https://b.test/article"),
     ]
+
+
+def test_a_hit_nobody_opened_is_not_a_source_once_a_page_was():
+    """t06 2026-10-21: nine sources listed under two pages read. An opened
+    page keeps the title its search hit gave it."""
+    results = [
+        json.dumps([{"title": "Wiki", "url": "https://w.test/a", "content": "c"},
+                    {"title": "Unread", "url": "https://u.test", "content": "c"}]),
+        "Source: https://w.test/a\n\nBody.",
+    ]
+    assert wr._collect_sources(results) == [("https://w.test/a", "Wiki")]
+
+
+def test_a_turn_that_opened_nothing_still_lists_its_hits():
+    results = [json.dumps([{"title": "T1", "url": "https://a.test", "content": "c"}])]
+    assert wr._collect_sources(results) == [("https://a.test", "T1")]
 
 
 def test_collect_sources_ignores_prose_without_a_source_line():

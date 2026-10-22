@@ -129,3 +129,35 @@ def test_the_callers_key_stays_with_the_callers_model(monkeypatch):
     first, second = c.call_args_list
     assert first.kwargs["api_key"] == "worker-key"
     assert second.kwargs.get("api_key") != "worker-key"
+
+
+def _pool_429(model):
+    return litellm.RateLimitError(
+        message='{"error":{"code":429,"metadata":{"limit_source":"upstream_provider_shared_pool"}}}',
+        llm_provider="openrouter", model=model)
+
+
+def test_a_full_shared_pool_hands_over_after_three_tries_and_only_for_a_minute(monkeypatch):
+    """t06 2026-10-21: six tries over ~70 s before the fallback model got a
+    turn. A pool every customer fills does not clear because we wait for it."""
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "fallback_models", "deepseek/c")
+
+    def endpoint(**kw):
+        if kw["model"] == "groq/a":
+            raise _pool_429(kw["model"])
+        return litellm_mock_response(kw["model"])
+
+    with patch("litellm.completion", side_effect=endpoint) as c:
+        assert call_llm("groq/a", MSGS).text == "deepseek/c"
+    assert [x.kwargs["model"] for x in c.call_args_list] == ["groq/a"] * 3 + ["deepseek/c"]
+    held = llm_mod._held["groq/a"] - llm_mod.time.monotonic()
+    assert 0 < held <= llm_mod._POOL_HOLD_S
+
+
+def test_the_last_model_of_the_chain_waits_the_pool_out(monkeypatch):
+    with patch("litellm.completion", side_effect=lambda **kw: (_ for _ in ()).throw(
+            _pool_429(kw["model"]))) as c, pytest.raises(litellm.RateLimitError):
+        call_llm("groq/a", MSGS)
+    assert c.call_count == llm_mod._RATE_LIMIT_ATTEMPTS

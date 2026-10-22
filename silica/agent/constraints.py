@@ -26,6 +26,11 @@ class AgentConstraints:
     # and staying off the worker-pool cap. This flag says which of the two a
     # constrained caller is; batch/worker callers leave it False.
     interactive: bool = False
+    # Streams its text to the progress callback without being a chat turn: the
+    # web door's lane, whose answer can be the reply (ADR-0124 amendment).
+    # `interactive` would also run the chat turn's relevance sweep, open a
+    # preserve window and declare links, none of which a sub-loop may do.
+    stream: bool = False
     # Permitted but not offered: the loop adds one to the offered set when
     # silica_load_tools names it, or when the model calls it directly (a hosted
     # route lets a model call a tool it read about; refusing that call would
@@ -98,6 +103,35 @@ def web_turn_constraints() -> AgentConstraints:
     return AgentConstraints(
         tools=("web_search", "web_fetch", "remember", "find_in_page"),
         max_iterations=48,
+    )
+
+
+def web_answer_constraints() -> AgentConstraints:
+    """`silica_web_answer` — the chat's own door to the web, which the user
+    waits through mid-turn.
+
+    No `remember`: see web_answer_instruction in silica/sources/web_research.py.
+
+    8 and not /web's 48: the chat door is where /web's ceiling was spent for
+    no reason. A live V4 Flash smoke test on 2026-10-21 ran one question to 132
+    calls and 12 minutes with no answer, the chat calling this door four times.
+    On the latency bench of 2026-10-22 the lane answered four questions of five
+    in 1 to 3 calls; the fifth spent all 12 of a first cap on ten searches
+    against challenged lanes, and the steps past the eighth bought nothing. A
+    question that needs more is research, and /web-search writes it up as a note.
+
+    Thinking stays on. Off (OpenRouter `reasoning: {enabled: false}`) V4 Flash
+    0731 on DeepInfra wrote its draft into the answer, an English "Let me
+    answer." and the answer again, in 3 of 10 bench answers against 0 of 10 with
+    it on (2026-10-22).
+
+    Streams, so a `final` answer can paint into the reply while it is written;
+    whether it does is the calling loop's decision (loop.py).
+    """
+    return AgentConstraints(
+        tools=("web_search", "web_fetch", "find_in_page"),
+        max_iterations=8,
+        stream=True,
     )
 
 

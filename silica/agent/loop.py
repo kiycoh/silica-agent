@@ -410,10 +410,11 @@ def run_agent(
             return  # interrupted/abandoned — stop feeding the renderer
         _emit(LLMStreamEvent(chunk_type=chunk_type, content=content, iteration=iteration))
 
-    # Streaming is a TUI ergonomic: only interactive turns get it — worker and
-    # batch runs stay on the plain non-streaming call. A constrained toolset no
-    # longer implies "worker": an interactive caller that wants the chat_tools
-    # cut says so with constraints.interactive.
+    # Streaming is a TUI ergonomic: only interactive turns get it, and a sub-loop
+    # whose text can become the reply (constraints.stream, the web door's lane);
+    # worker and batch runs stay on the plain non-streaming call. A constrained
+    # toolset no longer implies "worker": an interactive caller that wants the
+    # chat_tools cut says so with constraints.interactive.
     # The kwarg is only passed when active, so call_llm test doubles only need
     # the bare signature plus cancel=None.
     _interactive = constraints is None or constraints.interactive
@@ -422,7 +423,8 @@ def run_agent(
         # None keeps the provider default (product behavior). Eval agent arms
         # pin 0.0 so a single-run A/B measures the lever, not sampling noise.
         _llm_kwargs["temperature"] = temperature
-    if tool_progress_callback is not None and _interactive:
+    if tool_progress_callback is not None and (
+            _interactive or (constraints is not None and constraints.stream)):
         _llm_kwargs["on_delta"] = _stream_delta
 
     def _interruptible_llm(kwargs: dict):
@@ -617,6 +619,7 @@ def run_agent(
                               parent=None)
 
         # Dispatch each tool call
+        final_answer: dict | None = None  # a `final` web answer's tool message
         pending_notices: list[dict] = []  # A34: convergence warnings, flushed AFTER
         for tc in resp.tool_calls:        # the tool block, never between sibling results
             if cancel_token is not None and cancel_token.is_set():
@@ -663,6 +666,19 @@ def run_agent(
                     )
                 )
                 start_time = time.perf_counter()
+                progress_cb = tool_progress_callback
+                # A web answer streams into the reply only when it will be the
+                # reply (ADR-0124 amendment): `final`, the last call of its
+                # block, and nothing found so far for the chat model to add.
+                # A call after it could still find something, and its row,
+                # drawn under the streamed text, would put that text beyond a
+                # reset. If the turn goes on anyway (the door failed, a
+                # convergence landing), the next model call opens with a reset
+                # that takes the text back (llm.py).
+                if progress_cb is not None and tc.name == "silica_web_answer" and not (
+                        _interactive and (tc.args or {}).get("final")
+                        and tc is resp.tool_calls[-1] and _stands_alone(messages, None)):
+                    progress_cb = _without_stream(progress_cb)
                 try:
                     # The frontend callback, deliberately not `_emit`: `_emit`
                     # also publishes on the bus, and a tool that runs a loop of
@@ -671,7 +687,7 @@ def run_agent(
                     # `agent/tool_*` twice.
                     result = allowed[tc.name].run(
                         _cancel_token=cancel_token,
-                        _progress=tool_progress_callback,
+                        _progress=progress_cb,
                         **tc.args,
                     )
                     duration = time.perf_counter() - start_time
@@ -738,6 +754,9 @@ def run_agent(
                 tool_msg[memory_gate.TAINT_KEY] = taint
             messages.append(tool_msg)
             _narr_mod.NARRATOR.turn(tool_msg)
+            if (not failed and tc.name == "silica_web_answer" and (tc.args or {}).get("final")
+                    and not str(result).startswith("(silica:")):
+                final_answer = tool_msg
 
             # Update convergence guard
             if failed:
@@ -776,6 +795,19 @@ def run_agent(
         # block, never interleaved between sibling results (strict tool protocols
         # require the tool messages contiguous immediately after the assistant).
         messages.extend(pending_notices)
+
+        if (final_answer is not None and not convergence_landing
+                and not (cancel_token is not None and cancel_token.is_set())
+                and _stands_alone(messages, final_answer)):
+            # The web answer is the reply (ADR-0124): the call that would
+            # follow only rewrites it. On hosted t06 (2026-10-21) that call took 16 s, re-read
+            # 9.4k prompt tokens to condense a finished answer, and dropped its
+            # citation markers. The tool message keeps a pointer, not a second
+            # copy every later turn would pay for.
+            answer = final_answer["content"]
+            final_answer["content"] = "(shown to the user as this turn's reply, below)"
+            messages.append({"role": "assistant", "content": answer})
+            return _declare_links(answer) if _interactive else answer
 
         if convergence_landing:
             # The guard broke out mid-dispatch: siblings of the aborted call
@@ -841,6 +873,32 @@ def run_agent(
     # from /messages and left the turn notes no message to ride on.
     messages.append({"role": "assistant", "content": text})
     return text
+
+
+def _without_stream(progress):
+    """*progress* minus stream deltas: a web answer that will not be the reply
+    keeps its rows and paints no text where the reply goes."""
+    def forward(event) -> None:
+        if not isinstance(event, LLMStreamEvent):
+            progress(event)
+    return forward
+
+
+def _stands_alone(messages: list[dict], answer_msg: dict | None) -> bool:
+    """Every other call of this turn was a vault search that found nothing.
+
+    Then a `final` web answer leaves the chat model nothing to combine: a note it
+    read, a write it made, anything a tool returned is the chat model's to weave
+    in, and the turn goes on. The turn is everything after the last user message.
+    """
+    from silica.agent.recall_watch import found_nothing  # recall_watch imports this module
+
+    start = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=0)
+    names = {tc.get("id"): (tc.get("function") or {}).get("name")
+             for m in messages[start:] for tc in m.get("tool_calls") or ()}
+    return all(found_nothing(names.get(m.get("tool_call_id")), m.get("content"))
+               for m in messages[start:]
+               if m.get("role") == "tool" and m is not answer_msg)
 
 
 def _declare_links(answer: str) -> str:

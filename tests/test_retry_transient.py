@@ -120,3 +120,58 @@ def test_call_llm_forwards_cancel_to_retry():
         with pytest.raises(litellm.APIConnectionError):
             llm.call_llm(model="m", messages=[{"role": "user", "content": "hi"}], cancel=cancel)
     assert calls["n"] == 1
+
+
+class _PoolLimit(Exception):
+    """OpenRouter's 429 when the provider's shared capacity is full: our key's
+    own limit is not what refused it (hosted t06, 2026-10-21)."""
+    status_code = 429
+
+    def __init__(self):
+        super().__init__('{"error":{"code":429,"metadata":{"provider_error_code":'
+                         '"engine_overloaded","limit_source":"upstream_provider_shared_pool"}}}')
+
+
+@patch("time.sleep", return_value=None)
+def test_a_shared_pool_429_leaves_no_floor_for_the_next_call(mock_sleep):
+    """Pacing our requests frees none of a pool every other customer fills;
+    the floor it used to raise accounts for 32 of the next t06 turn's 96 s."""
+    seen = {"n": 0}
+
+    def flaky():
+        seen["n"] += 1
+        if seen["n"] < 3:
+            raise _PoolLimit()
+        return "a"
+
+    assert llm.retry_transient(flaky, (_PoolLimit,)) == "a"
+    assert llm._run_cooldown == 0.0
+    mock_sleep.reset_mock()
+    llm.retry_transient(lambda: "b", (_PoolLimit,))
+    mock_sleep.assert_not_called()
+
+
+@patch("time.sleep", return_value=None)
+def test_a_shared_pool_429_stops_at_pool_attempts_when_told(mock_sleep):
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        raise _PoolLimit()
+
+    with pytest.raises(_PoolLimit):
+        llm.retry_transient(fn, (_PoolLimit,), pool_attempts=3)
+    assert calls["n"] == 3
+
+
+@patch("time.sleep", return_value=None)
+def test_a_shared_pool_429_with_nowhere_else_to_go_keeps_the_full_budget(mock_sleep):
+    calls = {"n": 0}
+
+    def fn():
+        calls["n"] += 1
+        raise _PoolLimit()
+
+    with pytest.raises(_PoolLimit):
+        llm.retry_transient(fn, (_PoolLimit,))
+    assert calls["n"] == llm._RATE_LIMIT_ATTEMPTS

@@ -365,11 +365,12 @@ def test_the_chat_toolset_carries_the_door_not_the_tools_behind_it():
 
 
 def test_web_answer_runs_the_consented_sub_loop_and_cites_its_trace(monkeypatch):
-    """One question in, cited prose out — and the sub-loop it spends is the
-    same constrained turn `/web` spends, not the caller's toolset."""
-    from silica.agent.constraints import web_turn_constraints
+    """One question in, cited prose out — and the sub-loop it spends is the web
+    lane's own constrained turn, not the caller's toolset."""
+    from silica.agent.constraints import web_answer_constraints
 
     monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)
+    monkeypatch.setattr(wr, "_seed", lambda question, watch: [])  # offline
     seen = {}
 
     def fake_run_agent(messages, model=None, tool_progress_callback=None,
@@ -387,7 +388,7 @@ def test_web_answer_runs_the_consented_sub_loop_and_cites_its_trace(monkeypatch)
 
     out = wr.silica_web_answer("what is rewiring")
 
-    assert seen["tools"] == web_turn_constraints().tools
+    assert seen["tools"] == web_answer_constraints().tools
     assert "what is rewiring" in seen["question"]
     assert "1. Rewiring — https://a.test/rw" in out
     # and the answer is keepable, exactly like a /web turn's
@@ -399,9 +400,10 @@ def test_the_sub_loops_searches_reach_the_outer_ui(monkeypatch):
 
     Driven through Tool.run rather than the function, because the injection seam
     is half of what is pinned here: the loop hands the frontend callback to any
-    tool declaring `progress`, and only searches and fetches come back out —
-    banked quotes and the sub-loop's own stream deltas would render into the
-    chat bubble as if the chat model had written them.
+    tool declaring `progress`, and only searches and fetches come back out of
+    the lane's tool calls. Its text deltas come out too, as they are: whether
+    they reach the reply is the calling loop's decision (ADR-0124 amendment,
+    test_web_answer_latency.py).
 
     The ids come back namespaced: they are not unique across loops (the provider
     mints them per request), and the web UI indexes its rows by id, so a bare
@@ -411,6 +413,7 @@ def test_the_sub_loops_searches_reach_the_outer_ui(monkeypatch):
     from silica.tools import TOOLS
 
     monkeypatch.setattr(wr, "_LAST_WEB_TURN", None)
+    monkeypatch.setattr(wr, "_seed", lambda question, watch: [])  # offline
 
     def fake_run_agent(messages, model=None, tool_progress_callback=None,
                        constraints=None, cancel_token=None):
@@ -436,9 +439,10 @@ def test_the_sub_loops_searches_reach_the_outer_ui(monkeypatch):
     seen = []
     TOOLS["silica_web_answer"].run(_progress=seen.append, question="what is rewiring")
 
-    assert [(e.name, e.call_id) for e in seen] == [
+    assert [(e.name, e.call_id) if hasattr(e, "name") else e.content for e in seen] == [
         ("web_search", "web:c1"),
         ("web_search", "web:c1"),
+        "half an answer",
         ("web_fetch", "web:c3"),
         ("web_fetch", "web:c3"),
     ]
@@ -462,6 +466,18 @@ def test_a_faithful_relay_is_not_cited_twice():
     relayed = turn.attribute("Answer.", [])
 
     assert wr.relay_sources(relayed, []) == relayed
+
+
+def test_a_relay_that_lists_the_opened_pages_its_own_way_is_not_cited_twice():
+    """GUI turn of 2026-10-22: the pages relayed under "Sources:", then the
+    block appended under its own heading, listed both twice."""
+    turn = _turn_with_trace(question="rewiring", results=[_HITS])
+    turn.attribute("Answer.", [])
+
+    own_way = "Answer.\n\nSources:\n- Rewiring — https://a.test/rw."
+    assert wr.relay_sources(own_way, []) == own_way
+    # A page the lane never opened is not the block, whatever the heading.
+    assert "## Sources (web)" in wr.relay_sources(own_way + "\n- https://made.up/x", [])
 
 
 def test_the_watch_flags_the_turn_that_used_the_door():
