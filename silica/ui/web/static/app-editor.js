@@ -590,6 +590,34 @@
     },
   });
 
+  // A tree row dropped on the note writes the wikilinks the composer writes
+  // (ADR-0126 point 6). Taken before CodeMirror's own drop, which reads the
+  // transfer's text and would insert the row's address: a dragged link
+  // carries its URL as text. A folder has no token here and shows no drop.
+  const ROW_DRAG = "application/x-silica-ws";     // app-workspaces.js WS_DRAG
+  const ROW_NOTES = "application/x-silica-notes"; // its NOTE_DRAG: present when notes ride along
+  const rowDrop = EditorView.domEventHandlers({
+    dragover(e) {
+      if (!e.dataTransfer.types.includes(ROW_DRAG)) return false;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = e.dataTransfer.types.includes(ROW_NOTES) ? "copy" : "none";
+      return true;
+    },
+    drop(e, view) {
+      if (!e.dataTransfer.types.includes(ROW_DRAG)) return false;
+      e.preventDefault();
+      let it = null;
+      try { it = JSON.parse(e.dataTransfer.getData(ROW_DRAG) || "null"); } catch { /* not ours: nothing lands */ }
+      const notes = (it && Array.isArray(it.notes)) ? it.notes : [];
+      if (!notes.length || !HOOKS.links) return true;
+      const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.selection.main.head;
+      const text = HOOKS.links(notes).join(" ") + " ";
+      view.dispatch({ changes: { from: pos, insert: text }, selection: { anchor: pos + text.length } });
+      view.focus();
+      return true;
+    },
+  });
+
   function extensions() {
     return [
       history(),
@@ -602,6 +630,7 @@
       EditorView.focusChangeEffect.of((_s, on) => focusEffect.of(on)),
       livePreview,
       linkPress,
+      rowDrop,
       Prec.high(keymap.of(keys())),
       keymap.of([...defaultKeymap, ...historyKeymap]),
       EditorView.contentAttributes.of({ spellcheck: "true", "aria-label": "note text" }),
@@ -614,7 +643,8 @@
   }
 
   // hooks: render(source) -> Promise<html>, openNote(target), change(), blur(),
-  // save(), decorate(el, view), select(view). The only caller is app-notes.js.
+  // save(), decorate(el, view), select(view), links(paths) -> ["[[…]]"]. The
+  // only caller is app-notes.js.
   function create(parent, hooks) {
     HOOKS = hooks;
     const view = new EditorView({ parent, state: EditorState.create({ doc: "", extensions: extensions() }) });

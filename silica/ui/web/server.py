@@ -4029,11 +4029,12 @@ def tree_delete(payload: dict):
 
     note = str(payload.get("path") or "")
     folder = str(payload.get("folder") or "").strip().strip("/")
-    if note:
-        canon = note_resolver()(note)
-        if not canon:
-            raise HTTPException(404, "note not found in vault")
-        paths = [canon]
+    many = payload.get("paths")
+    if isinstance(many, list) and many:
+        # the tree's selection (ADR-0126 point 7): one run, as a folder is
+        paths = _tree_paths(many)
+    elif note:
+        paths = _tree_paths([note])
     elif folder:
         from silica.kernel.recall.graph_export import build_graph_data
 
@@ -4064,16 +4065,116 @@ def tree_delete(payload: dict):
     return res
 
 
-@app.post("/tree/undo-delete", dependencies=_SAME_ORIGIN)
-def tree_undo_delete(payload: dict):
-    """The toast's undo for /tree/delete: the run back, every note in it."""
-    from silica.kernel.write.undo_journal import USER_DELETE_SOURCE, get_undo_journal, revert_run
+def _tree_paths(refs: list) -> list[str]:
+    """The vault paths of the notes a tree request names, or 404 on the
+    first it cannot resolve: the page sends the row's own id, so a miss is
+    a note gone since the tree was drawn."""
+    resolve = note_resolver()
+    out = []
+    for ref in refs:
+        canon = resolve(str(ref))
+        if not canon:
+            raise HTTPException(404, "note not found in vault")
+        out.append(canon)
+    return out
+
+
+def _tree_name_ok(name: str) -> bool:
+    """A note's or a folder's name the tree may write: a workspace's rule
+    (ADR-0112), and no leading dot, which the index reads as hidden."""
+    from silica.kernel.workspaces import _BAD_NAME
+
+    return bool(name) and not _BAD_NAME.search(name) and not name.startswith(".")
+
+
+_BAD_NAME_WHY = "a name cannot be empty, start with a dot or hold / \\ : * ? \" < > | # ^ [ ]"
+
+
+@app.post("/tree/move", dependencies=_SAME_ORIGIN)
+def tree_move(payload: dict):
+    """A selection dropped on a folder, `{paths, folder}`, or a note renamed
+    in its row, `{path, name}` (ADR-0126 points 3 and 8). Each note keeps its
+    name under `folder` (`""` is the vault root; a folder that does not exist
+    is made); a note already there is skipped and counted. The user's act in
+    ONE run under user:/move, as a tree delete is under user:/delete, so the
+    toast's undo and /undo bring the whole set back.
+
+    Refused before anything moves (409): a destination a note already holds,
+    two notes of the set landing on one path, and a rename to a name another
+    note carries anywhere in the vault, read without case, since the move
+    writes the bare new name into every referrer and two notes of one name
+    would send those links wherever the resolver's shortest path points. A
+    change of case alone passes. Refused while a turn runs (409), by the slot
+    an import takes. The driver's text for a refusal after the preflight can
+    carry the vault's absolute path (ADR-0085): logged, not sent."""
+    from silica.driver import DRIVER
+    from silica.kernel.write.undo_journal import USER_MOVE_SOURCE
+    from silica.tools.wrapped import linked_from, move_notes_with_restore_point, move_preflight
+
+    skipped: list[str] = []
+    if payload.get("name") is not None:
+        refs = [payload["path"]] if payload.get("path") else list(payload.get("paths") or [])
+        if len(refs) != 1:
+            raise HTTPException(400, "a rename takes one note")
+        name = " ".join(str(payload["name"]).split())
+        if not _tree_name_ok(name):
+            raise HTTPException(400, _BAD_NAME_WHY)
+        canon = _tree_paths(refs)[0]
+        folder = canon.rsplit("/", 1)[0] if "/" in canon else ""
+        dst = f"{folder}/{name}.md" if folder else f"{name}.md"
+        if dst == canon:
+            return {"run": None, "moved": [], "skipped": [canon], "rewritten": [], "error": None}
+        other = next((p for p in DRIVER.notes_named(name) if p != canon), None)
+        by_title = note_resolver()(name)
+        if other or by_title not in (None, canon):
+            raise HTTPException(409, f"another note is called {name}: {other or by_title}")
+        moves = [(canon, dst)]
+    else:
+        refs = payload.get("paths")
+        if "folder" not in payload or not isinstance(refs, list) or not refs:
+            raise HTTPException(400, "name the notes and the folder, or a note and its new name")
+        folder = str(payload["folder"] or "").strip().strip("/")
+        if folder and not all(_tree_name_ok(seg) for seg in folder.split("/")):
+            raise HTTPException(400, _BAD_NAME_WHY)
+        moves = []
+        for canon in _tree_paths(refs):
+            leaf = canon.rsplit("/", 1)[-1]
+            dst = f"{folder}/{leaf}" if folder else leaf
+            (skipped if dst == canon else moves).append(canon if dst == canon else (canon, dst))
+    why = move_preflight(moves)
+    if why:
+        raise HTTPException(409, why)
+    if not moves:
+        return {"run": None, "moved": [], "skipped": skipped, "rewritten": [], "error": None}
+    # The notes whose links the move rewrites, read before it: the page
+    # reloads the one it holds open, or the editor would save the old link back.
+    own = {src for src, _ in moves}
+    rewritten = sorted(set().union(*(linked_from(src) for src in own)) - own)
+    if not _begin_turn():
+        raise HTTPException(409, "a turn is running: move when it ends")
+    try:
+        res = move_notes_with_restore_point(moves, USER_MOVE_SOURCE)
+    finally:
+        _end_turn()
+    if res["error"]:
+        logger.warning("tree move stopped after %d of %d: %s", len(res["moved"]), len(moves), res["error"])
+        res["error"] = f"{len(moves) - len(res['moved'])} of {len(moves)} could not be moved"
+    return {"run": res["run"], "moved": [{"from": a, "to": b} for a, b in res["moved"]],
+            "skipped": skipped, "rewritten": rewritten, "error": res["error"]}
+
+
+@app.post("/tree/undo", dependencies=_SAME_ORIGIN)
+def tree_undo(payload: dict):
+    """The toast's undo for /tree/delete and /tree/move: the run back, every
+    note in it. Was /tree/undo-delete until ADR-0126."""
+    from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, USER_MOVE_SOURCE,
+                                                  get_undo_journal, revert_run)
 
     run = str(payload.get("run") or "")
     info = get_undo_journal().run_info(run) if run else None
-    # The id comes from the page: only a delete the person made is this
-    # button's to take back; any other run is /revert's, with its own report.
-    if not info or info["source"] != USER_DELETE_SOURCE:
+    # The id comes from the page: only a delete or a move the person made is
+    # this button's to take back; any other run is /revert's, with its own report.
+    if not info or info["source"] not in (USER_DELETE_SOURCE, USER_MOVE_SOURCE):
         raise HTTPException(404, "nothing to undo")
     if info["reverted_at"]:
         raise HTTPException(409, "already undone")

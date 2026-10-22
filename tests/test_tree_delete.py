@@ -72,10 +72,10 @@ def test_a_linked_note_is_deleted_and_the_undo_brings_it_back(client):
     assert {d["note"] for d in body["dangling"]} == {
         "Corso/ML/Autoencoders.md", "Corso/ML/Indice.md", "Corso/Stat/Regressione.md"}
 
-    back = tc.post("/tree/undo-delete", json={"run": body["run"]}).json()
+    back = tc.post("/tree/undo", json={"run": body["run"]}).json()
     assert back["restored"] == ["Corso/ML/VAE.md"] and back["skipped"] == []
     assert (vault / "Corso/ML/VAE.md").read_text(encoding="utf-8") == "# VAE\n"
-    assert tc.post("/tree/undo-delete", json={"run": body["run"]}).status_code == 409
+    assert tc.post("/tree/undo", json={"run": body["run"]}).status_code == 409
 
 
 def test_an_unknown_note_is_not_found(client):
@@ -99,7 +99,7 @@ def test_a_folder_is_its_notes_in_one_run_and_one_undo(client):
     # /undo in the chat finds the same run by any one of its notes
     assert get_undo_journal().last_delete(None, "Corso/ML/Indice.md")[0] == body["run"]
 
-    back = tc.post("/tree/undo-delete", json={"run": body["run"]}).json()
+    back = tc.post("/tree/undo", json={"run": body["run"]}).json()
     assert sorted(back["restored"]) == body["deleted"]
     assert all((vault / p).exists() for p in body["deleted"])
 
@@ -116,7 +116,7 @@ def test_a_running_turn_refuses_the_delete_and_the_undo(client):
     run = tc.post("/tree/delete", json={"path": "Corso/ML/Indice.md"}).json()["run"]
     assert server._begin_turn()
     assert tc.post("/tree/delete", json={"path": "Corso/ML/VAE.md"}).status_code == 409
-    assert tc.post("/tree/undo-delete", json={"run": run}).status_code == 409
+    assert tc.post("/tree/undo", json={"run": run}).status_code == 409
     assert (vault / "Corso/ML/VAE.md").exists()
 
 
@@ -125,8 +125,8 @@ def test_the_undo_takes_back_only_a_delete_the_person_made(client):
 
     tc, _, _ = client
     chat_run = get_undo_journal().start_run(source=CHAT_DELETE_SOURCE, vault=None)
-    assert tc.post("/tree/undo-delete", json={"run": chat_run}).status_code == 404
-    assert tc.post("/tree/undo-delete", json={"run": "no-such-run"}).status_code == 404
+    assert tc.post("/tree/undo", json={"run": chat_run}).status_code == 404
+    assert tc.post("/tree/undo", json={"run": "no-such-run"}).status_code == 404
 
 
 def test_a_refused_note_stops_the_folder_and_leaves_the_run(client, monkeypatch):
@@ -155,6 +155,6 @@ def test_a_refused_note_stops_the_folder_and_leaves_the_run(client, monkeypatch)
     assert [i.path for i, _ in get_undo_journal().inverses_for(body["run"])] == ["Corso/ML/Autoencoders.md"]
 
     original = (vault / "Corso/ML/Indice.md").read_text(encoding="utf-8")
-    back = tc.post("/tree/undo-delete", json={"run": body["run"]}).json()
+    back = tc.post("/tree/undo", json={"run": body["run"]}).json()
     assert back == {"restored": ["Corso/ML/Autoencoders.md"], "skipped": []}
     assert (vault / "Corso/ML/Indice.md").read_text(encoding="utf-8") == original

@@ -148,6 +148,13 @@
                was started from, not in a toast that leaves before the student
                has read which files were refused and why. -->
           <div id="vault-import" role="status" aria-live="polite" hidden></div>
+          <!-- The tree's selection (ADR-0126): its count lives here and not on
+               the rows, since aria-selected is not a link's to carry. The
+               "New folder…" line is a drop target while notes are dragged, and
+               the field of the menu's "new folder…": a folder is only ever
+               made by moving notes into it, because the tree is drawn from notes. -->
+          <div id="tree-sel" aria-live="polite" hidden><span class="t"></span><button type="button" class="linklike">clear</button></div>
+          <div id="tree-newfolder">New folder…</div>
           <div id="pinned-group" hidden>
             <div class="side-bucket">pinned</div>
             <div id="pinned"></div>

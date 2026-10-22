@@ -1336,6 +1336,7 @@ class ObsidianFSBackend(GraphIndexMixin):
         old_rel = contain_in_vault(str(src), self.vault_path)
         new_rel = contain_in_vault(to, self.vault_path)
         old_basename = old_rel.rsplit("/", 1)[-1].removesuffix(".md")
+        basename_changed = old_basename.lower() != new_rel.rsplit("/", 1)[-1].removesuffix(".md").lower()
 
         # Step 3: collect referrers BEFORE moving so graph is still accurate
         referrers: list[str] = list(self._graph.predecessors(old_rel)) if old_rel in self._graph else []
@@ -1416,6 +1417,13 @@ class ObsidianFSBackend(GraphIndexMixin):
                 new_content, n = rewrite_links(
                     referrer_content, old_rel, new_rel,
                     rewrite_name_links=allow_name,
+                    # A shared name that resolved to the moved note did so by
+                    # the same-folder rule; once the note leaves with its name,
+                    # the bare name means another folder's namesake, so this
+                    # referrer takes the path, as Obsidian writes it (ADR-0126
+                    # point 3). A rename to a new name keeps the bare form: the
+                    # new name resolves on its own.
+                    path_form=allow_name and not basename_is_unique and not basename_changed,
                 )
                 if n > 0:
                     # Write directly — avoids re-entrant overwrite() logic
