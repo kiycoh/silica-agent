@@ -129,6 +129,8 @@ def test_slash_trash_lists_restores_erases_and_empties(vault, out):
     assert _trash() == [] and not (vault / "Corso/C.md").exists()
     _handle_direct_shortcut("/trash", [])
     assert out().rstrip().endswith("The trash is empty.")
+    _handle_direct_shortcut("/trash empty", [])
+    assert out().rstrip().endswith("The trash is empty.") and "0 notes" not in out()
 
 
 def test_slash_delete_says_the_note_is_in_the_trash(vault, out):

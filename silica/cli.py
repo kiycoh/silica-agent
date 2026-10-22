@@ -1668,10 +1668,10 @@ def _dc_trash(args: list[str], *, raw_input: str = "", **_) -> bool:
     items = journal.trashed((CONFIG.vault_path or "").strip() or None)
     rest = raw_input.strip().split(maxsplit=2)
     verb = rest[1].lower() if len(rest) > 1 else ""
+    if verb in ("", "empty") and not items:
+        CONSOLE.print("  The trash is empty.")
+        return True
     if not verb:
-        if not items:
-            CONSOLE.print("  The trash is empty.")
-            return True
         CONSOLE.print(f"  Trash: {len(items)} note{'s' if len(items) != 1 else ''}")
         for t in items:
             when = _dt.fromtimestamp(t["deleted_at"]).strftime("%Y-%m-%d %H:%M")
