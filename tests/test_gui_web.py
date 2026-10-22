@@ -2521,7 +2521,7 @@ def test_the_landing_ideas_fill_the_field_with_commands_that_exist():
         assert f'data-action="{cmd}"' in INDEX_HTML  # the + menu offers the same command
     assert 'input.dispatchEvent(new Event("input"))' in ideas
     assert re.search(r'/\^\\d\{4\}-\\d\{2\}-\\d\{2\}/', ideas)  # dated notes are left out
-    assert "noteLink(h.path)" in ideas and "function noteLink(path)" in js
+    assert "mentionLink(h.path)" in ideas and "function mentionLink(path)" in js
 
 
 def test_index_names_the_person_only_when_they_gave_a_name(client, monkeypatch):
