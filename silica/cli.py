@@ -357,6 +357,12 @@ def seed_messages(math: bool = False, app: bool = False) -> list[dict]:
 
     if (memory := user_memory.snapshot_message()) is not None:
         messages.append(memory)
+    # The vault's author's standing instructions (ADR-0127 point 4), frozen
+    # for the session as memory is, in the same place for the same reason.
+    from silica.kernel import vault_instructions
+
+    if (told := vault_instructions.message(CONFIG.vault_path or None)) is not None:
+        messages.append(told)
     # The vault map is the vault's own language. On a vault whose notes are not
     # in `reply`, that bulk drowns the language rule sitting in message 0, and
     # the model answers in the notes' language. Restate it last, closest to the

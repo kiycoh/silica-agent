@@ -48,10 +48,11 @@ function skCommand(name, hint, cls) {
 // `after` carries what the redraw should say: the outcome line under the
 // install row, and the name to flash once in its group.
 async function renderSkills(host, after = {}) {
-  host.querySelectorAll(".sk-install, .sk-group, .st-note-line").forEach((e) => e.remove());
+  host.querySelectorAll(".sk-instr, .sk-install, .sk-group, .st-note-line").forEach((e) => e.remove());
   let data;
   try { data = await skCall("/skills"); }
   catch { host.appendChild(stEl("div", "st-note-line", "could not read the skills")); return; }
+  host.appendChild(await skInstructionsRow());
   const install = skInstallRow(host, data);
   host.appendChild(install);
   if (after.note) {
@@ -60,6 +61,63 @@ async function renderSkills(host, after = {}) {
     note.textContent = after.note;
   }
   for (const g of data.groups) host.appendChild(skGroup(g, data, host, after.fresh));
+}
+
+// The vault's instructions (ADR-0127 point 4): one file every chat over this
+// vault reads, as its author's words. Saved on its button like a memory file,
+// and for the same reason: the server may refuse it over the cap.
+async function skInstructionsRow() {
+  const row = stEl("div", "st-row sk-instr");
+  row.dataset.search = "vault instructions author every chat";
+  const label = stEl("div", "st-label");
+  const lab = stEl("label", "st-name", "vault instructions");
+  label.appendChild(lab);
+  row.appendChild(label);
+  let d;
+  try { d = await skCall("/instructions"); }
+  catch { label.appendChild(stEl("div", "st-help", "could not read the instructions")); return row; }
+  label.appendChild(stEl("div", "st-help", d.available
+    ? `what every chat over this vault reads first, as the vault's author's words · ${d.path}`
+    : "Open a vault first: instructions belong to one."));
+  if (!d.available) return row;
+  const ctl = stEl("div", "st-ctl");
+  const count = stEl("span", "st-mem-count");
+  const save = skBtn("save");
+  ctl.append(count, save);
+  row.appendChild(ctl);
+  const area = stEl("textarea", "st-mem-text");
+  area.id = "sk-instr-text";
+  lab.setAttribute("for", area.id);
+  area.rows = 4;
+  area.spellcheck = false;
+  area.placeholder = "e.g. Cite articles as art. 1321 c.c. and quote the article before explaining it.";
+  area.value = area.dataset.saved = d.text;
+  row.appendChild(area);
+  row.appendChild(stEl("div", "st-note"));
+  const paint = () => {
+    const n = area.value.trim().length;
+    count.textContent = `${n} / ${d.cap}`;
+    count.classList.toggle("over", n > d.cap);
+    save.disabled = area.value === area.dataset.saved;
+  };
+  area.addEventListener("input", () => { paint(); stNote(row, "", ""); });
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    stNote(row, "pending", "saving…");
+    try {
+      await skCall("/instructions", { method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: area.value }) });
+    } catch (e) {
+      stNote(row, "bad", "✕ " + String(e.message || e));
+      paint();
+      return;
+    }
+    area.value = area.dataset.saved = area.value.trim();
+    stNote(row, "good", "✓ saved · read from the next chat");
+    paint();
+  });
+  paint();
+  return row;
 }
 
 function skInstallRow(host, data) {
@@ -137,7 +195,9 @@ async function skPreview(host, row, file) {
   box.appendChild(facts);
   if (s.replaces) box.appendChild(stEl("div", "st-warn", `You already have a vault skill named ${s.name}. Installing this one replaces it.`));
   else if (s.shadows) box.appendChild(stEl("div", "sk-also", `While it is here, it answers /${s.name} in place of the ${SK_SOURCE[s.shadows]} skill of that name.`));
-  box.appendChild(stEl("div", "sk-pv-label", `what the model receives when you type /${s.name}`));
+  box.appendChild(stEl("div", "sk-pv-label", s.persona
+    ? `a persona: what every answer of a chat follows from /${s.name} until /persona off`
+    : `what the model receives when you type /${s.name}`));
   box.appendChild(stEl("pre", "sk-pv-body", s.body));
   if (s.stripped) box.appendChild(stEl("div", "st-help", "Maintainer comments (<!-- -->) are left out above, as the loader leaves them out of the turn."));
   const ok = skBtn(s.replaces ? `replace your vault skill ${s.name}` : "install to this vault", "primary");
@@ -179,6 +239,7 @@ function skRow(s, data, host, fresh) {
   const label = stEl("div", "st-label");
   label.appendChild(skCommand(s.name, s.hint));
   label.appendChild(stEl("div", "st-help", s.description));
+  if (s.persona) label.appendChild(stEl("div", "sk-also", `persona: a chat wears it from /${s.name} until /persona off`));
   if (s.state === "inactive") {
     label.appendChild(stEl("div", "st-warn", `⚠ never runs: /${s.name} is a built-in command, which answers first`));
   } else if (s.shadows) {

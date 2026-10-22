@@ -70,6 +70,7 @@ def _first_line(text: str) -> str:
 def list_skills():
     """Every skill in every root, with what it does today: active, replaced
     by a nearer root, or inactive because a Python command has its name."""
+    from silica.kernel.personas import is_persona
     from silica_core.kernel.skills import SKILLS, discover, load, roots
 
     vault = CONFIG.vault_path or None
@@ -87,7 +88,8 @@ def list_skills():
             if skill is None:
                 continue   # the loader logged why, once
             row = {"name": skill.name, "description": _first_line(skill.description),
-                   "hint": skill.argument_hint, "source": source, "state": "active"}
+                   "hint": skill.argument_hint, "source": source, "state": "active",
+                   "persona": is_persona(skill)}
             winner = live.get(skill.name)
             if skill.name in taken:
                 row["state"] = "inactive"
@@ -107,10 +109,12 @@ def list_skills():
 
 
 def _parse(text: str):
-    """The skill `text` holds and the body the model receives, or a 400 that
-    names the check it failed and what to change."""
+    """The skill `text` holds, the body the model receives, and whether it is
+    a persona (ADR-0127), or a 400 that names the check it failed and what to
+    change."""
     # _NAME and _COMMENT are the loader's own rules, imported rather than
     # copied so the refusal here and the loader's never disagree.
+    from silica.kernel.personas import is_persona
     from silica_core.kernel.skills import _COMMENT, _NAME, load
     from silica_core.kernel.write.frontmatter import split
 
@@ -136,9 +140,10 @@ def _parse(text: str):
         path.parent.mkdir()
         path.write_text(text, encoding="utf-8")
         skill = load(path, "vault")
+        persona = skill is not None and is_persona(skill)   # read while the file is there
     if skill is None:
         raise HTTPException(400, "The skill loader refused this file; the server log says why.")
-    return skill, _COMMENT.sub("", skill.body).strip()
+    return skill, _COMMENT.sub("", skill.body).strip(), persona
 
 
 def _write(vault: Path, dest: Path, data: bytes) -> None:
@@ -169,13 +174,14 @@ async def install(file: UploadFile = File(...), confirm: bool = Form(False)):
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(400, "This file is not UTF-8 text, and a SKILL.md is Markdown.") from None
-    skill, body = _parse(text)
+    skill, body, persona = _parse(text)
     dest = _skills_dir(vault) / skill.name / "SKILL.md"
     live = discover(str(vault)).get(skill.name)
     preview = {
         "name": skill.name,
         "description": skill.description,
         "hint": skill.argument_hint,
+        "persona": persona,
         "body": body,
         "bytes": len(data),
         "cap": CAP,

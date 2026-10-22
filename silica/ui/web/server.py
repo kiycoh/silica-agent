@@ -6095,6 +6095,31 @@ def memory_reset():
     return user_memory.reset()
 
 
+# --- vault instructions (ADR-0127 point 4) --------------------------------------
+# A file and not a settings row, as memory is; on hosted the vault is the one
+# root an account can write and there is no file manager, so this is the way in.
+
+
+@app.get("/instructions")
+def instructions_view():
+    from silica.kernel import vault_instructions as vi
+
+    vault = CONFIG.vault_path or None
+    return {"available": bool(vault), "text": vi.read(vault), "cap": vi.CAP, "path": vi.REL}
+
+
+@app.put("/instructions", dependencies=_SAME_ORIGIN)
+def instructions_write(payload: dict):
+    from silica.kernel import vault_instructions as vi
+
+    global _seed
+    out = vi.write(CONFIG.vault_path or None, str(payload.get("text", "")))
+    if not out["ok"]:
+        raise HTTPException(status_code=400, detail=out["error"])
+    _seed = None   # built again by the next chat, with the new text (a prewarm could lose the race)
+    return out
+
+
 # --- Zotero (ADR-0055) ---------------------------------------------------------
 # Sync defs: every route talks to Zotero over HTTP, so they run in the
 # threadpool and a slow Zotero never stalls the event loop that streams turns.
