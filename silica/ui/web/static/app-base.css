@@ -27,6 +27,18 @@
   font-display: swap;
 }
 
+/* The wordmark's face, and nothing else's: SILICA at the drawer's head
+   (ADR-0122, amendment 2026-10-22). Host Grotesk, Copyright 2023 The Host
+   Grotesk Project Authors, SIL OFL 1.1 (host-grotesk-OFL.txt beside it), cut to
+   the Latin set Archivo ships. */
+@font-face {
+  font-family: "Host Grotesk";
+  src: url("/static/host-grotesk-latin.woff2") format("woff2");
+  font-weight: 300 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   color-scheme: dark;
 

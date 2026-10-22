@@ -6065,7 +6065,7 @@ async def start_endpoint(payload: dict):
 
 
 @app.get("/")
-def index():
+def index(request: Request):
     # Cache-bust the churning assets by content hash: StaticFiles sets no
     # Cache-Control, so browsers serve them stale from heuristic freshness
     # (edited JS never reaches the page). A content-keyed URL can't be stale.
@@ -6097,6 +6097,16 @@ def index():
     # does not get (ADR-0111 point 3) must be gone before the first paint.
     if hosted():
         html = html.replace('<html lang="en"', '<html lang="en" data-hosted', 1)
+        # The account the window is signed in as, for the menu under SILICA
+        # (ADR-0122, amendment 2026-10-22). Cloudflare Access sets the header,
+        # and the host's Caddy passes only Access's hostname to a tenant
+        # (silica-hosted deploy/Caddyfile). It is shown back to whoever sent it
+        # and decides nothing, so a forged one forges only its own page.
+        email = request.headers.get("cf-access-authenticated-user-email", "")
+        if email:
+            html = html.replace(
+                '<html lang="en" data-hosted',
+                f'<html lang="en" data-hosted data-user="{_html.escape(email, quote=True)}"', 1)
     return HTMLResponse(html)
 
 

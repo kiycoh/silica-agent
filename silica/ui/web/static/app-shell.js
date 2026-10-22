@@ -145,11 +145,11 @@ async function loadVaultInfo() {
 // notices and the broken-link count with its way to metrics. The size lives
 // on the landing and in metrics, which is where a size is read.
 
-// The folder's NAME in the drawer's head, its path on hover and in full at the
-// head of the vault's panel, which is where "which of my two vaults is this
-// window" is answered while reading something else.
+// The folder's name, and its path in full, head the menu under SILICA (ADR-0122,
+// amendment 2026-10-22), which is where "which of my two vaults is this window"
+// is answered while reading something else.
 function setVaultPath(path) {
-  const el = $("#top-vname");
+  const el = $("#vp-name");
   const was = el.title;
   const name = String(path || "").replace(/\/+$/, "").split("/").pop();
   el.textContent = name || "";
@@ -157,7 +157,6 @@ function setVaultPath(path) {
   const full = $("#vp-path");
   full.textContent = path ? "\u200e" + path + "\u200e" : "";
   full.title = path || "";
-  $("#vault-chip").hidden = !path;
   if (path && path !== was) loadPins(); // pins are per vault, and this is the switch
 }
 
@@ -188,11 +187,11 @@ function renderVaultHealth(data) {
 // point nowhere. Both surfaces set their half and this derives the colour.
 function syncVaultDot() {
   const warn = vaultBroken > 0 || noticeCount > 0;
-  const label = "vault " + ($("#top-vname").textContent || "") + (warn ? ", needs attention" : ", healthy");
+  const label = "vault " + ($("#vp-name").textContent || "") + (warn ? ", needs attention" : ", healthy");
   // The drawer's head and the rail's dot are one vault said twice, and the
   // panel colours its count by the same state.
   for (const el of [$("#vault-chip"), $("#rail-vault"), $("#vault-panel")]) el.dataset.health = warn ? "warn" : "ok";
-  $("#vault-chip").setAttribute("aria-label", label);
+  $("#vault-chip").setAttribute("aria-label", "Silica menu, " + label);
   $("#rail-vault").setAttribute("aria-label", label);
 }
 
@@ -272,7 +271,7 @@ function syncSurfaceTabs() {
 // are reading and switching vaults must not carry one vault's pins into another.
 let pinnedPaths = [];
 
-function pinKey() { return "pinned:" + ($("#top-vname").title || ""); }
+function pinKey() { return "pinned:" + ($("#vp-name").title || ""); }
 
 function loadPins() {
   try {

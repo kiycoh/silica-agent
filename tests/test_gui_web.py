@@ -2474,28 +2474,33 @@ def test_the_landing_presence_lies_on_the_lockups_mark_and_never_replaces_it():
     assert ".vh-lockup:has(> .vh-presence:not([hidden])) .vh-mark :is(.shells, .seed)" in app_css()
 
 
-def test_the_composer_carries_the_presence_at_the_head_of_its_row():
-    """ADR-0048, second site: both composers (chat and dock) open their row with
-    the mark and put the mic after the field, so a row never has three glyphs
-    left of the caret; the run lines keep their dot and no canvas, since the
-    presence tried that row first and lost there. The landing hides the
-    composer's copy so one mark is on the screen at a time. Both scripts that
-    report a turn to it are parsed after app-presence.js."""
-    for form_id in ("composer", "dock-composer"):
-        at = INDEX_HTML.index(f'id="{form_id}"')
-        shell = INDEX_HTML[at:INDEX_HTML.index("</form>", at)]
-        assert 'class="cp-presence"' in shell, form_id
-        assert shell.index("cp-presence") < shell.index("<textarea") < shell.index('class="mic"'), form_id
-    # the dock's run line, and the chat's, which is the running turn's ledger
-    # since ADR-0117: a dot, never a canvas
+def test_the_presence_is_out_of_the_chat_field_and_in_the_run_lines():
+    """ADR-0048, amendment 2026-10-22: a mark inside the chat's field read as a
+    button, so the chat composer has none and the run lines carry the mark in
+    2D where their dot was: the dock's line and the chat's, which is the running
+    turn's ledger since ADR-0117. An SVG lit by CSS, never a canvas, since the
+    presence tried a canvas in that row first and lost there. The dock keeps its
+    WebGL mark, the face it rests as, at the head of its row with the mic after
+    the field. Both scripts that report a turn to it are parsed after
+    app-presence.js."""
+    at = INDEX_HTML.index('id="composer"')
+    assert "cp-presence" not in INDEX_HTML[at:INDEX_HTML.index("</form>", at)]
+    at = INDEX_HTML.index('id="dock-composer"')
+    shell = INDEX_HTML[at:INDEX_HTML.index("</form>", at)]
+    assert shell.index('class="cp-presence"') < shell.index("<textarea") < shell.index('class="mic"')
     at = INDEX_HTML.index('id="dock-run-line"')
     line = INDEX_HTML[at:INDEX_HTML.index("rl-stop", at)]
-    assert 'class="rl-dot"' in line and "<canvas" not in line
+    assert '<svg class="rl-mark"' in line and "<canvas" not in line and "rl-dot" not in line
     js = app_js()
     led = js[js.index("function makeLedger(msg, live)"):]
     led = led[:led.index("\n}\n")]
-    assert 'class="rl-dot"' in led and "<canvas" not in led
-    assert "#view-chat:has(#log:empty) .cp-presence" in app_css()
+    assert "RUN_MARK +" in led and "<canvas" not in led
+    # one drawing in both lines, so the ledger and the dock never disagree
+    assert line[line.index("<svg"):line.index("</svg>") + 6] in js
+    css = app_css()
+    assert ".rl-mark .s3 {" in css and "@keyframes rl-shell" in css
+    assert '.run-line[data-state="stalled"] .rl-mark' in css
+    assert "line.dataset.phase = " in (STATIC_SRC / "work.js").read_text(encoding="utf-8")
     at = INDEX_HTML.index('src="/static/app-presence.js"')
     assert at < INDEX_HTML.index('src="/static/app-chat.js"')
     assert at < INDEX_HTML.index('src="/static/work.js"')
@@ -2863,6 +2868,20 @@ def test_index_stamps_hosted_so_examine_is_gone_before_first_paint(client, monke
     css = (STATIC_SRC / "app-shell.css").read_text(encoding="utf-8")
     assert 'html[data-hosted] #views .tab[data-tab="metrics"]' in css
     assert 'html[data-hosted] #railmini .tab[data-tab="metrics"]' in css
+
+
+def test_index_names_the_hosted_account_and_nobody_else(client, monkeypatch):
+    """ADR-0122, amendment 2026-10-22: the menu under SILICA names the account,
+    which only a hosted tenant has; Access's header is escaped into the page
+    and a local window gets no row, header or not."""
+    app, _server = client
+    hdr = {"Cf-Access-Authenticated-User-Email": 'm.rossi@example.com"><b>'}
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    assert "data-user" not in app.get("/", headers=hdr).text.split(">", 2)[1]
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    head = app.get("/", headers=hdr).text.split(">", 2)[1]
+    assert 'data-user="m.rossi@example.com&quot;&gt;&lt;b&gt;"' in head
+    assert "data-user" not in app.get("/").text.split(">", 2)[1]
 
 
 def test_every_view_row_says_what_the_view_is_for():

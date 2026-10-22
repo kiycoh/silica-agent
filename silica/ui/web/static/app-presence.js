@@ -4,9 +4,10 @@
 // and never moving, with light that leaves the seed's corner and crosses the
 // shells one at a time. It replaced the quartz orb that sat above the lockup,
 // because the orb and the mark were two marks on one screen. On the landing it
-// lies on the lockup's static mark at the same 64 px; in the composers it is the
-// 36 px box at the head of the row (the dock's is 42 scaled down). It leaves idle
-// only for work happening on this screen, and the states are the orb's.
+// lies on the lockup's static mark at the same 64 px; in the dock it is the face
+// of the folded disc and the head of the open row (42 px, scaled to 36). In the
+// chat the run line carries it in 2D instead (app-chat.css .rl-mark). It leaves
+// idle only for work happening on this screen, and the states are the orb's.
 
 // ---- the mark, in grid units (u = 16 on the 256 master) ---------------------------
 // The seed is 5u at the corner (1,1); shell k spans [3k+4, 3k+6] on both axes.
@@ -293,10 +294,10 @@ function mountPresence(canvas) {
   const kick = () => { dirty = true; if (running && !raf) raf = requestAnimationFrame(frame); };
 
   // The backing store follows the CSS box. Measured from both observers, not the
-  // resize one alone: the composer's mark is display:none while the landing
-  // shows, and in Chrome that first display:none -> shown transition reached the
-  // intersection observer and not the resize one, so the mark drew 300x150 into
-  // a 32px box.
+  // resize one alone: a composer's mark is display:none while its view is
+  // hidden, and in Chrome that first display:none -> shown transition reached
+  // the intersection observer and not the resize one, so the mark drew 300x150
+  // into a 32px box.
   function fit() {
     // offsetWidth, not the client rect: the dock's mark is drawn scaled while its
     // composer is open (app-panels.css), and a rect taken then would size the
@@ -356,9 +357,10 @@ function mountPresence(canvas) {
 
 const landingPresence = mountPresence(document.querySelector("#vault-hero .vh-presence"));
 
-// The composers' mark (ADR-0048, second site), in both composers: the chat's and
-// the dock's. One handle fans out, so work.js and app-chat.js report a turn
-// without knowing how many places watch it.
+// The dock's mark (ADR-0048, second site). The chat's composer carried one too
+// until 2026-10-22, when a mark inside the field read as a button and the run
+// line took the presence in 2D. One handle still, so work.js and app-chat.js
+// report a turn without knowing how many places watch it.
 const composerPresence = (() => {
   const all = [...document.querySelectorAll(".composer-shell .cp-presence")].map((c) => mountPresence(c)).filter(Boolean);
   return {

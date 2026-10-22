@@ -36,10 +36,12 @@
   flex: 1;
 }
 
-/* --- the vault, in the drawer's head (ADR-0122) -------------------------------
-   One row at rest: the health dot, the vault's name, the count of notices.
-   Amber lives in the dot and nowhere else, so the eye reaches the exception
-   and not a bar of it. Everything else about the vault is behind it. */
+/* --- the wordmark, in the drawer's head (ADR-0122, amendment 2026-10-22) -----
+   SILICA alone at rest, in Host Grotesk, with the menu that names the vault
+   behind its chevron. The vault's health rides on the word as a badge while
+   something needs an answer and is gone when nothing does: a green dot on a
+   wordmark would be news that is no news, in a second colour. Amber lives in
+   the badge and nowhere else, so the eye reaches the exception. */
 #vault-chip {
   display: flex;
   align-items: center;
@@ -79,38 +81,31 @@
   background: var(--add);
 }
 
-/* a row's 15px glyph slot, so the name starts where the rows' labels do */
+#vault-chip .brand-word {
+  position: relative;
+  font-family: "Host Grotesk", var(--sans);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.09em;
+  line-height: 1;
+  color: var(--frost);
+}
+
+/* above the last letter, where a badge sits on an icon */
 #vault-chip .vdot {
-  margin: 0 3.5px;
+  position: absolute;
+  top: -5px;
+  right: -9px;
+  width: 7px;
+  height: 7px;
+}
+
+#vault-chip:not([data-health="warn"]) .vdot {
+  display: none;
 }
 
 [data-health="warn"] .vdot {
   background: var(--warn);
-}
-
-#vault-chip .vtext {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.3;
-}
-
-#vault-chip .vname {
-  color: var(--frost);
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#vault-chip .vnotes {
-  color: var(--ash-dim);
-  font-size: var(--fs-meta);
-  white-space: nowrap;
-}
-
-#vault-chip .vnotes:empty {
-  display: none;
 }
 
 #vault-chip .vchev {
@@ -140,10 +135,15 @@
   padding: 0.3rem;
 }
 
+/* The panel's head names what the drawer's head no longer does: the vault, its
+   full path beside the switch, and the account (ADR-0122, amendment
+   2026-10-22). */
 #vp-head {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.6rem;
+  column-gap: 0.6rem;
+  row-gap: 0.15rem;
   padding: 0.5rem 0.55rem 0.55rem;
   border-bottom: 1px solid var(--line);
   margin-bottom: 0.25rem;
@@ -1020,6 +1020,45 @@ body.sidebar-collapsed #sidebar {
   flex: none;
   padding: 0.25rem 0.4rem;
   color: var(--accent);
+}
+
+#vp-name {
+  grid-column: 1 / -1;
+  color: var(--frost);
+  font-size: 13.5px;
+  font-weight: 560;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#vp-name:empty {
+  display: none;
+}
+
+#vp-user {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.2rem;
+  color: var(--ash);
+}
+
+#vp-user[hidden] {
+  display: none;
+}
+
+#vp-user svg {
+  flex: none;
+  color: var(--ash-dim);
+}
+
+#vp-email {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* --- boot notices: configuration, behind the chip that counts it ------------ */

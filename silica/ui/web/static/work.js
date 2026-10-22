@@ -520,8 +520,10 @@ function neighbourRows(d) {
         ? `still working · no output for ${Math.floor(stalledFor)}s. The endpoint is slow, not gone`
         : "");
       line.dataset.state = stalled ? "stalled" : "live";
+      // the line's mark keeps a quicker beat for a model call than for a tool
+      line.dataset.phase = verb === "thinking" ? "thinking" : "acting";
     }
-    // The mark in the composer reads the same beats: a model call in flight is
+    // The dock's mark reads the same beats: a model call in flight is
     // thinking, a running tool is acting, a silence past STALL_S is drained.
     // Text arriving is app-chat.js's to report, since only it sees the deltas,
     // and so is the outcome: between a tool's done beat and the next call `live`

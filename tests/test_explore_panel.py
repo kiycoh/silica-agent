@@ -483,7 +483,9 @@ def test_the_full_path_is_readable_without_hovering_it():
     assert 'id="vp-path"' in head and 'id="vault-switch"' in head
     assert 'id="railfoot"' not in html
     setter = _block(app, "function setVaultPath(", "\n}")
-    assert '$("#vp-path")' in setter and '$("#vault-chip").hidden = !path;' in setter
+    assert '$("#vp-path")' in setter and '$("#vp-name")' in setter
+    # SILICA heads the drawer with or without a vault: it is the way to Settings
+    assert '#vault-chip").hidden' not in app and 'id="vault-chip" hidden' not in html
     # first since ADR-0122, which moved the vault from the foot to the head:
     # the drawer itself does not scroll, so the head cannot be scrolled off it.
     # The list in view does, inside itself.
