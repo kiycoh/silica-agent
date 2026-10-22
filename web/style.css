@@ -12,6 +12,17 @@
     font-display: swap;
 }
 
+/* The wordmark's face, and nothing else's (ADR-0122, amendment 2026-10-22): the
+   nav's "Silica" in the face the GUI's drawer and the README lockup write it in.
+   Host Grotesk, SIL OFL 1.1 (host-grotesk-OFL.txt beside it), the GUI's subset. */
+@font-face {
+    font-family: "Host Grotesk";
+    src: url("/fonts/host-grotesk-latin.woff2") format("woff2");
+    font-weight: 300 800;
+    font-style: normal;
+    font-display: swap;
+}
+
 @font-face {
     font-family: "Martian Mono";
     src: url("/fonts/martian-mono-latin.woff2") format("woff2");
@@ -185,8 +196,8 @@ b {
 }
 
 .brand-text {
+    font-family: "Host Grotesk", var(--sans);
     font-weight: 600;
-    font-stretch: 106%;
     font-size: var(--t-lead);
     letter-spacing: -0.015em;
 }

@@ -28,7 +28,9 @@
 }
 
 /* The wordmark's face, and nothing else's: SILICA at the drawer's head
-   (ADR-0122, amendment 2026-10-22). Host Grotesk, Copyright 2023 The Host
+   (ADR-0122, amendment 2026-10-22). The chat landing's lockup is outlined from
+   the same face by assets/build_banners.py, so it needs no font here.
+   Host Grotesk, Copyright 2023 The Host
    Grotesk Project Authors, SIL OFL 1.1 (host-grotesk-OFL.txt beside it), cut to
    the Latin set Archivo ships. */
 @font-face {
