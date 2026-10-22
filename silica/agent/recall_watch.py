@@ -298,6 +298,50 @@ def numbers_notes(flagged: list[str]) -> list[dict]:
     return [{"kind": "numbers", "text": f"numbers not in what this turn read: {shown}{more}"}]
 
 
+# The tools that hand the model a note's own words, and where each names the
+# note: in its arguments, its result, or both (shapes read off stored sessions,
+# 2026-10-22). A title search is left out: it lists candidates, it reads none.
+_READS_ARGS = {"silica_read_note": ("name",), "silica_outline": ("name",),
+               "silica_read": ("path",), "silica_recall": ("notes",)}
+_READS_RESULT = {"silica_recall": "notes", "silica_read": "path", "silica_search_context": "hits"}
+READS_KEY = "silica_reads"   # the read notes stored on the answer, for a reopened chat
+
+
+def read_refs(messages: list[dict], end: int | None = None) -> list[str]:
+    """The notes the turn ending at `messages[end - 1]` read, as the calls named
+    them (a title or a path), for linking its answer (ADR-0127).
+
+    The turn starts after the last user message. A tool result is read only
+    while it is whole: compaction stubs old ones, which is why the answer keeps
+    the resolved list under READS_KEY once it is drawn.
+    """
+    msgs = messages[:end] if end is not None else messages
+    start = max((i for i, m in enumerate(msgs) if m.get("role") == "user"), default=-1) + 1
+    calls: dict[str, str] = {}
+    out: list[str] = []
+    for m in msgs[start:]:
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            calls[tc.get("id")] = name = fn.get("name") or ""
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except (ValueError, TypeError):
+                continue   # a malformed call read nothing
+            for key in _READS_ARGS.get(name, ()):
+                v = args.get(key) if isinstance(args, dict) else None
+                out += [v] if isinstance(v, str) else [x for x in v or () if isinstance(x, str)]
+        if m.get("role") != "tool" or (key := _READS_RESULT.get(calls.get(m.get("tool_call_id"), ""))) is None:
+            continue
+        try:
+            v = json.loads(m.get("content") or "").get(key)
+        except (ValueError, TypeError, AttributeError):
+            continue   # a stub or a failure names no note
+        items = v if isinstance(v, list) else [v]
+        out += [x if isinstance(x, str) else str(x.get("path") or "") for x in items
+                if isinstance(x, (str, dict))]
+    return [r for r in dict.fromkeys(out) if r]
+
+
 def numbers_of_session(sid: str | None) -> set[str]:
     """`numbers_from_beats` over the narration of session *sid*: what
     /session/load and /resume rebuild the session set from. Empty for no

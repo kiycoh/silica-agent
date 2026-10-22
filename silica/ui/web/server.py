@@ -40,13 +40,15 @@ from silica.agent.llm import meter_totals
 from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
 from silica.agent import turn_notes
 from silica.agent.recall_watch import (
+    READS_KEY,
     RecallWatch,
     numbers_notes,
     numbers_of_session,
+    read_refs,
     unfounded_in_turn,
 )
 from silica.config import CONFIG
-from silica.kernel.recall.mindmap import note_resolver
+from silica.kernel.recall.mindmap import answer_resolver, note_resolver
 from silica.metrics import emit
 from silica.kernel.write import session_changes
 from silica.sources.web_research import WebTurn
@@ -583,22 +585,57 @@ def _sanitize_raw_tokens(tokens) -> None:
             _sanitize_raw_tokens(tok.children)
 
 
-def _linkify_text(text: str, resolve) -> str:
+# A read note's title, at least this long, links where an answer names it bare.
+# Shorter titles ("ML", "Note") are words more often than they are notes.
+MENTION_MIN_CHARS = 4
+
+
+def _mentions(reads) -> tuple[re.Pattern, dict[str, str]] | None:
+    """The bare-title layer for an answer (ADR-0127): the titles of the notes
+    its turn read, longest first, matched as written. Case-sensitive on
+    purpose: an answer names "Lezione 16" as the note is titled, and "lezione"
+    in prose is a word. A title two read notes share links neither."""
+    by_title: dict[str, str | None] = {}
+    for path in reads or ():
+        title = path.removesuffix(".md").rsplit("/", 1)[-1]
+        if len(title) >= MENTION_MIN_CHARS:
+            by_title[title] = None if title in by_title else path
+    found = {t: p for t, p in by_title.items() if p}
+    if not found:
+        return None
+    alts = "|".join(re.escape(t) for t in sorted(found, key=len, reverse=True))
+    return re.compile(rf"(?<![\w/])(?:{alts})(?!\w)"), found
+
+
+def _linkify_text(text: str, resolve, mentions=None) -> str:
     """Turn resolvable note refs in one plain-text run into `.note-link` anchors.
 
-    Two layers: wikilinks first (explicit `[[...]]` delimiters), then bare
-    path-like tokens in the surviving prose. Unresolved wikilinks render like
-    resolved ones but tagged `.broken` (no data-path — the click is a no-op);
-    unresolved bare paths stay verbatim. `resolve=None` means plain escape.
-    Returns an HTML fragment (safe parts escaped).
+    Three layers: wikilinks first (explicit `[[...]]` delimiters), then bare
+    path-like tokens in the surviving prose, then, for an answer, the bare
+    titles of the notes its turn read (`mentions`). Unresolved wikilinks render
+    like resolved ones but tagged `.broken` (no data-path — the click is a
+    no-op); unresolved bare paths stay verbatim. A resolver that answers ""
+    (a name several notes share) leaves the text as written. `resolve=None`
+    means plain escape. Returns an HTML fragment (safe parts escaped).
     """
     if resolve is None:
         return _html.escape(text)
 
+    def link_titles(prose: str) -> str:
+        if mentions is None:
+            return _html.escape(prose)
+        pattern, found = mentions
+        out, pos = [], 0
+        for m in pattern.finditer(prose):
+            out.append(_html.escape(prose[pos:m.start()]) + _anchor(found[m.group(0)], m.group(0)))
+            pos = m.end()
+        out.append(_html.escape(prose[pos:]))
+        return "".join(out)
+
     def link_paths(prose: str) -> str:
         out, pos = [], 0
         for m in _PATHLIKE.finditer(prose):
-            out.append(_html.escape(prose[pos:m.start()]))
+            out.append(link_titles(prose[pos:m.start()]))
             tok = m.group(0)
             core = tok.rstrip(_TRAIL)
             tail = tok[len(core):]
@@ -608,7 +645,7 @@ def _linkify_text(text: str, resolve) -> str:
             else:
                 out.append(_html.escape(tok))
             pos = m.end()
-        out.append(_html.escape(prose[pos:]))
+        out.append(link_titles(prose[pos:]))
         return "".join(out)
 
     out, pos = [], 0
@@ -627,6 +664,10 @@ def _linkify_text(text: str, resolve) -> str:
             display = alias or _clean_name(target)
             if hit:
                 out.append(_anchor(hit, display))
+            elif hit == "":
+                # Several notes carry the name and nothing says which one
+                # (ADR-0114): the words stay, no guess and no "broken" mark.
+                out.append(_html.escape(display))
             else:
                 out.append(f'<a class="note-link broken">{_html.escape(display)}</a>')
         pos = m.end()
@@ -634,18 +675,18 @@ def _linkify_text(text: str, resolve) -> str:
     return "".join(out)
 
 
-def _inline_ofm(text: str, resolve) -> str:
+def _inline_ofm(text: str, resolve, mentions=None) -> str:
     """OFM inline sugar over one plain-text run: ==highlight== -> <mark>,
     #tag -> chip. Prose between matches still goes through note-ref linking."""
     out, pos = [], 0
     for m in _MARK_OR_TAG.finditer(text):
-        out.append(_linkify_text(text[pos:m.start()], resolve))
+        out.append(_linkify_text(text[pos:m.start()], resolve, mentions))
         if m.group(1) is not None:
-            out.append(f"<mark>{_linkify_text(m.group(1), resolve)}</mark>")
+            out.append(f"<mark>{_linkify_text(m.group(1), resolve, mentions)}</mark>")
         else:
             out.append(f'<span class="tag">#{_html.escape(m.group(2))}</span>')
         pos = m.end()
-    out.append(_linkify_text(text[pos:], resolve))
+    out.append(_linkify_text(text[pos:], resolve, mentions))
     return "".join(out)
 
 
@@ -877,11 +918,12 @@ def _unembed_foreign_imgs(fragment: str) -> str:
     return _RAW_IMG_TAG.sub(sub, fragment)
 
 
-def _linkify(text: str, resolve=None, remote_images: bool = True) -> str:
+def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> str:
     """Render markdown (+ OFM sugar) to HTML, linkifying resolvable note refs
     when `resolve` is given. Works on the markdown-it token stream, so
     `code_inline`/`fence` are separate token types and code is never linkified
-    or tag-ified by construction.
+    or tag-ified by construction. `reads` (an answer's: the notes its turn
+    read) also links their titles where the prose names them bare.
 
     `remote_images=False` is for anything the model wrote: an image from
     another origin becomes a link naming its host. Text a document hid from the
@@ -914,6 +956,7 @@ def _linkify(text: str, resolve=None, remote_images: bool = True) -> str:
     # `#fn1` anchors are scrolled in place by the client, never routed.
     md.use(footnote_plugin)
     tokens = md.parse(text)
+    mentions = _mentions(reads) if resolve is not None else None
     _sanitize_raw_tokens(tokens)  # the note's raw HTML; must precede the injected kind
     _ofm_blocks(tokens)
     for tok in tokens:
@@ -965,12 +1008,20 @@ def _linkify(text: str, resolve=None, remote_images: bool = True) -> str:
             if child.type != "text":
                 new.append(child)
                 continue
-            frag = _inline_ofm(child.content, None if depth else resolve)
+            frag = _inline_ofm(child.content, None if depth else resolve, mentions)
             raw = Token("html_inline", "", 0)
             raw.content = frag
             new.append(raw)
         tok.children = new
     return md.renderer.render(tokens, md.options, {})
+
+
+def _answer_html(answer: str, refs, graph=None) -> str:
+    """A chat answer drawn with its turn's reads (ADR-0127): a name several
+    notes share links the one the turn read, and a read note's title links
+    where the answer names it bare. Reads the driver graph unless given one."""
+    resolve, reads = answer_resolver(refs or (), graph=graph)
+    return _linkify(answer, resolve, remote_images=False, reads=reads)
 
 
 def _split_frontmatter(text: str) -> tuple[dict | None, str]:
@@ -1345,16 +1396,21 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         notes = watch.notes() if isinstance(watch, RecallWatch) else []
         notes += numbers_notes(unread)
         notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
+        # The notes this turn read, before the beat stores the answer and before
+        # compaction stubs the results that name them (ADR-0127).
+        refs = read_refs(messages)
+        if refs and not stopped and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
+            messages[-1][READS_KEY] = refs
         # Final-assistant turn beat, post-attribution (see loop.py).
         if messages and messages[-1].get("role") == "assistant":
             from silica.agent import narration as _narr
             _narr.NARRATOR.turn(messages[-1])
         _update_context_tokens(messages)
         _collapsed = _compact_context(messages, _collapsed)
-        # note_resolver reads the DRIVER graph — with the ws backend installed
+        # answer_resolver reads the DRIVER graph — with the ws backend installed
         # (silica connect) a driver call on the loop thread deadlocks (`_rpc`
         # blocks the very loop that must send the frame), so render off-loop.
-        html = await asyncio.to_thread(lambda: _linkify(answer, note_resolver(), remote_images=False))
+        html = await asyncio.to_thread(_answer_html, answer, refs)
         done = {
             "type": "done",
             "answer": answer,
@@ -5232,8 +5288,11 @@ def get_messages():
             done = _flagged(sid)
             turn_of = {id(m): {"session": sid, "seq": s, "flagged": s in done}
                        for m, s in zip(users, seqs)}
+    from silica.kernel.recall.mindmap import _driver_graph
+
+    graph = _driver_graph()   # once for every answer below, as `resolve` is for the rest
     data = []
-    for m in messages:
+    for at, m in enumerate(messages):
         if m.get("role") not in ("user", "assistant"):
             continue
         tools = tool_calls_to_json(m, failed, results) if m["role"] == "assistant" else []
@@ -5264,7 +5323,10 @@ def get_messages():
         data.append({"role": m["role"], "content": content, "tools": tools, "files": files,
                      "thinking": thinking, "images": images,
                      "notes": turn_notes.of(m) if m["role"] == "assistant" else [],
-                     "html": _linkify(content, resolve, remote_images=False) if content else ""})
+                     "html": "" if not content else
+                     _answer_html(content, m.get(READS_KEY) or read_refs(messages, at + 1), graph)
+                     if m["role"] == "assistant" and not m.get("tool_calls") else
+                     _linkify(content, resolve, remote_images=False)})
         if id(m) in turn_of:
             data[-1]["turn"] = turn_of[id(m)]
     # Vault label + context usage ride headers so the body stays a plain list.
