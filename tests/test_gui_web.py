@@ -284,10 +284,12 @@ def _repl_dispatched_commands() -> set[str]:
 
     from silica.cli import _DIRECT, _SHORTCUTS, _expand_web_turn
     from silica.config import CONFIG
+    from silica.kernel.personas import COMMAND as PERSONA
     from silica_core.kernel.skills import discover
 
     skills = {"/" + name for name in discover(CONFIG.vault_path)}
-    return set(_DIRECT) | set(_SHORTCUTS) | skills | set(
+    # /persona is answered ahead of both tables, in both surfaces (ADR-0127).
+    return set(_DIRECT) | set(_SHORTCUTS) | skills | {PERSONA} | set(
         # The web-escalation expander matches on parts[0], not on a table, and
         # names only the commands it owns: take every literal.
         re.findall(r'"(/[a-z-]+)"', inspect.getsource(_expand_web_turn))

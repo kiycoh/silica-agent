@@ -1182,6 +1182,29 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # workflow expansion. Asking the same handler the REPL asks is the point:
         # the hand-kept list of "web commands" that used to gate this drifted, and
         # /lexical /wiki /graph /map /find /vault fell through it into an error.
+        #
+        # A persona (ADR-0127 point 3) comes before all of them: it is worn, not
+        # run. Its command edits this conversation's system line and asks no
+        # model; with words after the name, those words are this turn, already
+        # under the persona.
+        from silica.kernel import personas
+
+        worn = (await asyncio.to_thread(personas.command, text, messages, CONFIG.vault_path or None,
+                                        not _collapsed) if text.startswith("/") else None)
+        if worn is not None and not worn[1]:
+            from silica.agent import narration as _narr
+
+            messages.append({"role": "user", "content": text, "origin": "cli"})
+            _narrate_user_turn(messages[-1])
+            messages.append({"role": "assistant", "content": worn[0]})
+            _narr.NARRATOR.turn(messages[-1])
+            _update_context_tokens(messages)
+            outcome = "done"
+            yield {"type": "done", "answer": worn[0], "html": _linkify(worn[0], remote_images=False),
+                   **_ctx_meter()}
+            return
+        if worn is not None:
+            text = worn[1]
         agent_msg = text
         # /web comes first: it is neither direct nor a workflow expansion but an
         # agent turn with web-only tools. A usage error raises ValueError, which
@@ -1287,6 +1310,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         msg: dict[str, Any] = {"role": "user", "content": agent_msg}
         if text.startswith("/"):
             msg["origin"] = "cli"
+        if persona := personas.active(messages):
+            msg[personas.TURN_KEY] = persona
         if files:
             msg["silica_files"] = list(files)
         if said:
@@ -5492,6 +5517,12 @@ def load_session(payload: dict):
     ws = _resolve_workspace(str(last.get("silica_workspace") or ""))
     if ws is not None:
         _apply_workspace(ws)
+    # Its persona too (ADR-0127 point 3), read from the file as it is now; one
+    # removed since leaves the chat without it rather than failing to open.
+    from silica.kernel import personas
+
+    if (worn := personas.available(CONFIG.vault_path or None).get(str(last.get(personas.TURN_KEY) or ""))):
+        personas.apply(messages, worn)
     _seen_numbers.clear()
     _seen_numbers.update(numbers_of_session(current_session_id))
     _update_context_tokens(messages)

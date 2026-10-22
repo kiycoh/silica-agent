@@ -4236,6 +4236,13 @@ def _handle_slash_command(cmd: str, messages: list[dict]) -> bool | None:
             for m in replayed:
                 _narr.NARRATOR.turn(m)
         messages[:] = _fresh_messages() + replayed
+        # The persona its last turn wore (ADR-0127 point 3), as the GUI's
+        # /session/load puts it back.
+        from silica.kernel import personas
+
+        last = next((m for m in reversed(replayed) if m.get("role") == "user"), {})
+        if (worn := personas.available(CONFIG.vault_path or None).get(str(last.get(personas.TURN_KEY) or ""))):
+            personas.apply(messages, worn)
         _update_context_tokens(messages)
         CONSOLE.print(f"  resumed [bold]{(row or {}).get('title', sid)}[/] "
                       f"({len(replayed)} message(s))")
@@ -4742,6 +4749,18 @@ def main():
             continue
         typed = user_input   # the expansions below rewrite user_input; the named notes are read from this
 
+        # A persona is worn, not run (ADR-0127 point 3): it edits this
+        # conversation's system line; words after its name are this turn.
+        if user_input.startswith("/"):
+            from silica.kernel import personas
+
+            worn = personas.command(user_input, messages, CONFIG.vault_path or None, not collapsed)
+            if worn is not None:
+                CONSOLE.print(f"  {worn[0]}")
+                if not worn[1]:
+                    continue
+                user_input = typed = worn[1]
+
         # Direct shortcuts bypass the LLM entirely (case-sensitive args preserved)
         if user_input.startswith("/") and _handle_direct_shortcut(user_input, messages):
             continue
@@ -4841,6 +4860,10 @@ def main():
         msg: dict = {"role": "user", "content": user_input}
         if is_directive:
             msg["origin"] = "cli"
+        from silica.kernel import personas
+
+        if persona := personas.active(messages):
+            msg[personas.TURN_KEY] = persona
         messages.append(msg)
 
         # Born at the first user turn (spec §5); idempotent afterwards. The

@@ -436,6 +436,12 @@ COMMANDS: tuple[Command, ...] = (
         summary="toggle this session off the record: not captured, memory neither shown nor saved",
     ),
     Command(
+        name="/persona",
+        group="system",
+        usage="[name|off]",
+        summary="the persona this conversation wears: list them, put one on, take it off",
+    ),
+    Command(
         name="/exit",
         group="system",
         usage="",
@@ -454,6 +460,7 @@ def skill_commands() -> tuple[Command, ...]:
     a vault is not always its reader's own.
     """
     from silica.config import CONFIG
+    from silica.kernel.personas import is_persona
     from silica_core.kernel.skills import discover
 
     taken = {c.name for c in COMMANDS}
@@ -462,8 +469,11 @@ def skill_commands() -> tuple[Command, ...]:
         if "/" + s.name in taken:
             continue
         summary = (s.description.splitlines() or [""])[0]
-        if s.source != "builtin":
-            summary = f"{summary} ({s.source} skill)" if summary else f"({s.source} skill)"
+        # A persona is worn, not run (ADR-0127): the picker says which it is.
+        kind = "persona" if is_persona(s) else "skill"
+        if s.source != "builtin" or kind == "persona":
+            where = "" if s.source == "builtin" else f"{s.source} "
+            summary = f"{summary} ({where}{kind})" if summary else f"({where}{kind})"
         out.append(Command(name="/" + s.name, group="workflow", usage=s.argument_hint, summary=summary))
     return tuple(out)
 
