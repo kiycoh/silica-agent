@@ -51,6 +51,25 @@ function connDraw(el, status) {
   fn(el, status, rerender);
 }
 
+// The hosted block: the operator's bot keeps its own page behind the same
+// sign-in (silica-hosted bin/telegram, ADR-0089 amendment H3), so the tenant
+// knows nothing about the link and the block only opens that page. A new tab,
+// because the page ends on t.me and the chat here should still be open after.
+// ponytail: shown on every hosted build; a host without silica-telegram.service
+// answers this link 502, so gate it on a /settings flag with a second host.
+function renderTelegramLink(host) {
+  const el = stEl("div", "st-connector");
+  el.appendChild(stEl("div", "st-conn-title", "Telegram"));
+  const { ctl } = connRow(el, "ask from your phone",
+    "search and read your notes from Telegram, never change them", "telegram bot link unlink");
+  const a = stEl("a", "st-btn primary st-safe", "link or unlink ↗");
+  a.href = "/telegram/link";
+  a.target = "_blank";
+  a.rel = "noopener";
+  ctl.appendChild(a);
+  host.appendChild(el);
+}
+
 function connRow(host, name, help, search) {
   const row = stEl("div", "st-row");
   row.dataset.search = `connector ${search || ""} ${name} ${help || ""}`.toLowerCase();
