@@ -247,7 +247,8 @@ def test_vault_origin_is_never_the_file():
 _HOSTED_TABLE = {
     "Session": ["SILICA_MODEL", "context", "SILICA_SHOW_THINKING"],
     "Language": ["SILICA_STT_LANG", "SILICA_STT_BROWSER"],
-    "Display": ["SILICA_THEME", "SILICA_SHOW_THINKING",
+    # the name the new chat greets with is the tenant's own to set
+    "Display": ["SILICA_USER_NAME", "SILICA_THEME", "SILICA_SHOW_THINKING",
                 "SILICA_GRAPH_PARTICLES", "SILICA_GRAPH_SHADING"],
     "Memory": ["SILICA_MEMORY"],
 }

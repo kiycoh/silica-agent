@@ -118,7 +118,7 @@ async function loadVault() {
     // A drawn diagram is taller than its source, so the bottom moves once more.
     drawDiagrams(log).then(() => followBottom());
   } catch { notify("couldn't load the conversation"); }
-
+  greet(); // after the header that names the vault, which the greeting says
 }
 
 // --- the composer hint, at the width it actually gets ------------------------

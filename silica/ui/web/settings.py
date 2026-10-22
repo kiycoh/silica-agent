@@ -86,7 +86,7 @@ _EMBED_WARN = "changing this invalidates every stored vector"
 HOSTED_ROWS: dict[str, tuple[str, ...]] = {
     "Session": ("SILICA_MODEL", "context", "SILICA_SHOW_THINKING"),
     "Language": ("SILICA_STT_LANG", "SILICA_STT_BROWSER"),
-    "Display": ("SILICA_THEME", "SILICA_SHOW_THINKING",
+    "Display": ("SILICA_USER_NAME", "SILICA_THEME", "SILICA_SHOW_THINKING",
                 "SILICA_GRAPH_PARTICLES", "SILICA_GRAPH_SHADING"),
     "Memory": ("SILICA_MEMORY",),
 }
@@ -199,6 +199,8 @@ def sections() -> dict[str, tuple[Row, ...]]:
                 "tried in order when a pdf has no text layer"),
         ),
         "Display": (
+            Row("SILICA_USER_NAME", "user_name", "your name", "text",
+                "how the new chat greets you · empty greets no one by name"),
             Row("SILICA_THEME", "theme", "theme", "enum",
                 "auto follows your system · dark is the crystal, light is warm paper",
                 options=("auto", "dark", "light")),
@@ -212,8 +214,8 @@ def sections() -> dict[str, tuple[Row, ...]]:
             Row("SILICA_CAPTURE_SESSIONS", "capture_sessions", "capture sessions", "toggle",
                 "keep a transcript of each session"),
             Row("SILICA_VAULT_BRIEF", "vault_brief", "vault brief", "toggle",
-                "a written sentence about what the vault holds, on the chat "
-                "landing · the counted line above it always shows"),
+                "a written sentence about what the vault holds, which the agent "
+                "reads when it picks among vaults · one worker call"),
             Row("SILICA_MAX_CONTEXT", "max_context_tokens", "max context", "int",
                 "tokens before the transcript is compacted"),
             Row("SILICA_GRAPH_PARTICLES", "graph_particles", "graph particles", "toggle",

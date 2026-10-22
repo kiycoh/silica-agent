@@ -4937,12 +4937,11 @@ def _find_asset(path: str) -> Path | None:
 def vault_info():
     """Sidebar data: vault stats + file tree, from the same builders as the
     graph view so the numbers can't disagree between the two surfaces."""
-    from silica.kernel.recall.graph_export import build_graph_data, detect_communities
+    from silica.kernel.recall.graph_export import build_graph_data
     from silica.ui.web.graph_view import render_tree
 
     try:
         nodes, edges = build_graph_data(folder="")
-        communities = detect_communities(nodes, edges)
     except Exception as exc:
         return _failure(exc)
     return {
@@ -4950,30 +4949,16 @@ def vault_info():
         # this endpoint already re-runs after every turn, the boot-time header
         # never did.
         "path": CONFIG.vault_path or "",
-        "notes": sum(1 for n in nodes if n.get("type") != "ghost"),
-        "links": sum(1 for e in edges if e.get("type") == "EXTRACTED"),
-        # STRUCTURAL clusters — Louvain on the wikilinks. The semantic partition
-        # is a separate count and is not summed into this one (ADR-0023); the
-        # sidebar tile says so in its tooltip, and the graph's HUD counts the
-        # zones itself. Nothing here computes the semantic layer: it needs the
-        # k-NN edges this endpoint has no reason to build.
-        "clusters": len(communities),
         "unresolved": sum(1 for n in nodes if n.get("type") == "ghost"),
         # actions=True: the rail's tree carries a pin per note. The graph
         # frame renders the same tree without one, because a pin there would
         # point at a rail that document does not have.
         "tree": render_tree(nodes, actions=True),
+        # The chat landing's ways to start (ADR-0048, amendment 2026-10-22):
+        # the notes the vault links most. The counts, the area count and the
+        # topic labels the landing stated before the greeting went with it,
+        # and with them the community pass this endpoint ran after every turn.
         "hubs": _top_hubs(nodes, edges),
-        # What the vault is ABOUT, as opposed to how big it is. The chat's
-        # landing states this in one line, and it must be a fact rather than a
-        # generated sentence: these are the co-occurrence topic labels of the
-        # largest structural communities, the same ones the graph HUD keys its
-        # colours on. Singletons are dropped — a one-note community names
-        # itself, which says nothing about the corpus.
-        "topics": [
-            {"label": c.label, "size": c.size}
-            for c in communities if c.size > 1
-        ][:6],
     }
 
 
@@ -4999,11 +4984,11 @@ def _top_hubs(nodes: list[dict], edges: list[dict], top_n: int = 24) -> list[dic
 
 
 # --- the vault brief ---------------------------------------------------------
-# Two readings of "what is this folder", stacked on the chat's landing. The
-# counted one is always true and always free, and is rendered from /vault_info
-# in the browser. This is the other one: a sentence a model writes over those
-# same counts, which is a convenience and not a fact, so it is a separate
-# request the landing can render without and a toggle can switch off.
+# A sentence a model writes about what the folder holds, which silica_vaults
+# hands the agent when it picks among vaults (vault_registry._brief). It was
+# the chat landing's second line until the greeting took the landing (ADR-0048,
+# amendment 2026-10-22); the page still asks for it at load, because nothing
+# else writes it. A convenience and not a fact, so a toggle switches it off.
 #
 # It caches into the vault's index dir rather than the vault: Silica's own
 # bookkeeping never lands in a folder the user reads.
@@ -5032,8 +5017,8 @@ def vault_brief(refresh: int = 0):
 
     `stamp` is the corpus shape the sentence was written against, so a vault
     that grew gets a new sentence and a vault that only sat there replays the
-    one on disk. A failure here is never an error on the landing: the counted
-    line above it already answered the question.
+    one on disk. A failure here is never an error: the agent describes a vault
+    without it, from its name and its coverage.
     """
     if not CONFIG.vault_brief:
         return {"enabled": False, "text": ""}
@@ -5076,9 +5061,9 @@ def _write_brief(notes: int, topics: list[str], hubs: list[str]) -> str:
 
     It is handed labels and note names, never note bodies: the sentence has to
     say what the collection is about, and a corpus of 1,200 notes has no
-    summary that fits in a landing line anyway. Trimmed hard on the way out —
-    a model asked for one sentence returns three often enough that the landing
-    cannot be built on trusting it.
+    summary that fits in one line anyway. Trimmed hard on the way out: a
+    model asked for one sentence returns three often enough that no reader of
+    it can be built on trusting it.
     """
     if not topics and not hubs:
         return ""
@@ -6093,6 +6078,11 @@ def index(request: Request):
     # Stamping it server-side is what keeps a light session from flashing dark.
     pref = CONFIG.theme if CONFIG.theme in ("auto", "dark", "light") else "auto"
     html = html.replace('data-theme-pref="auto"', f'data-theme-pref="{pref}"')
+    # The new chat's greeting says it (ADR-0048, amendment 2026-10-22), and
+    # stamping it is what lets the first word written be the name.
+    if CONFIG.user_name:
+        html = html.replace('<html lang="en"', '<html lang="en" data-name="'
+                            f'{_html.escape(CONFIG.user_name, quote=True)}"', 1)
     # Stamped, not probed, for the same reason: the views a hosted account
     # does not get (ADR-0111 point 3) must be gone before the first paint.
     if hosted():

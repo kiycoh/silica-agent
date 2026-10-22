@@ -355,91 +355,122 @@ body.dragging #drop-hint {
 }
 
 /* --- the landing (empty transcript) -----------------------------------------
-   Sili used to hold this space at 240px, which spent the whole first viewport
-   on the logo of the tool rather than on the folder it just opened. The
-   wordmark states the tool in one line and the rest of the space answers
-   "what is in here", which is the question you actually arrive with.
-   #log itself collapses to nothing while empty. */
+   The mark and a greeting written the way a reply is (ADR-0048, amendment
+   2026-10-22), then the composer and three ways to start. No lockup: SILICA
+   heads the drawer already, and a second wordmark said the tool's name twice
+   while saying nothing about the folder. #log collapses to nothing while empty. */
 #log:empty {
   display: none;
 }
 
-#vault-hero {
+/* On the composer's measure, inset as the shell is by #composer's 2rem. The
+   greeting's mark then stands where the first turn's run line puts its own,
+   so swapLanding carries it straight up the column: past the ledger's caret
+   and its 0.5rem gap, 14.1px from the column's edge, measured 2026-10-22. */
+#vault-hero,
+#vh-ideas {
   display: none;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  /* The measure is the composer's, so the sentence, the counts and the box you
-     type into all break on the same two edges. */
-  max-width: min(52ch, 100%);
-  padding: 0 1rem;
+  box-sizing: border-box;
+  width: calc(100% - 4rem);
+  max-width: var(--measure);
 }
 
-#view-chat:has(#log:empty) #vault-hero {
+#vault-hero {
+  align-items: baseline;
+  gap: 11px;
+  padding: 0 0.8rem 0 14px;
+  margin-bottom: 0.95rem;
+}
+
+#view-chat:has(#log:empty) #vault-hero,
+#view-chat:has(#log:empty) #vh-ideas:not(:empty) {
   display: flex;
 }
 
-.vh-lockup {
-  position: relative;
-}
-
-/* The presence (ADR-0048, amendment 2026-10-21) lies on the lockup's mark: the
-   canvas is the mark's 256-unit square at the lockup's 64 px, and the shader
-   fits the drawn mark to the same 14 units, so it takes the static mark's
-   pixels and the word keeps its baseline on the mark's foot. The static mark is
-   hidden only while a canvas is there to replace it: without WebGL2 the canvas
-   removes itself, a lost context hides it, and the lockup is whole again. */
-.vh-presence {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 64px;
-  height: 64px;
-  pointer-events: none;
-}
-
-.vh-lockup:has(> .vh-presence:not([hidden])) .vh-mark :is(.shells, .seed) {
-  visibility: hidden;
-}
-
-/* The lockup, generated into index.html by assets/build_banners.py and inked
-   here, because the theme is the app's setting and an SVG loaded as an image
-   would only see the OS's. 64px tall puts the mark's 16-unit grid on whole pixels (a unit is 4px),
-   and its 1u padding is the margin above the brief. */
+/* the run line's drawing at its size, where a unit is a pixel; at rest in the
+   lockup's inks, and on the run line's beat (it wears .rl-mark) while the
+   greeting is being written. Its foot, 1px up the box, sits on the baseline. */
 .vh-mark {
-  display: block;
-  height: 64px;
-  width: auto;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  position: relative;
+  top: 1px;
+  shape-rendering: crispEdges;
+}
+
+.vh-mark path {
   fill: var(--frost);
 }
 
-.vh-mark .seed {
+.vh-mark .s0 {
   fill: var(--accent);
 }
 
-.vh-brief {
-  margin: 1.5rem 0 0;
-  font-size: 15px;
-  line-height: 1.55;
-  color: var(--ash);
-  /* empty until /vault_brief answers, and the reserved line stops the counts
-     from jumping down a row when it does */
-  min-height: 1.55em;
+.vh-line {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  color: var(--text);
+  /* the line keeps its height while it is still being written */
+  min-height: 1.4em;
 }
 
-/* the topic labels inside the fallback sentence: the vault's own words, so
-   they read as content and the connective tissue around them stays chrome */
-.vh-brief b {
+/* the person's name and the vault's are their own words, as the topic labels
+   were in the sentence this replaced */
+.vh-line b {
   font-weight: 500;
+  color: var(--frost);
+}
+
+#vh-ideas {
+  flex-direction: column;
+}
+
+.vh-idea {
+  display: flex;
+  align-items: baseline;
+  gap: 0.8rem;
+  width: 100%;
+  padding: 0.65rem 0.8rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--ash);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.vh-idea:hover,
+.vh-idea:focus-visible {
+  background: var(--sel-hover);
   color: var(--text);
 }
 
-.vh-facts {
-  margin-top: 0.85rem;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+.vh-say {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vh-say b {
+  font-weight: 500;
+  color: var(--frost);
+}
+
+/* how the pick acts, in the + menu's own column style: the command it fills */
+.vh-cmd {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: var(--fs-meta);
   color: var(--ash-dim);
-  font-variant-numeric: tabular-nums;
 }
 
 /* --- note panel (right overlay drawer; read-only note view) ----------------- */
@@ -1324,9 +1355,8 @@ body.note-open #dock {
 /* Exits are instant everywhere else (app-motion.css). The fold waits 300 ms
    because it is the same object changing shape under a pointer that may have
    slipped off by a few px, not a panel the reader closed. It rests only where
-   there is a mark to rest as: without WebGL2 the canvas removes itself, a lost
-   context hides it (app-presence.js), and an empty disc would be a control with
-   no face, so the composer stays the composer. */
+   there is a mark to rest as: an empty disc would be a control with no face,
+   so without one the composer stays the composer. */
 #dock:not(:has(#peek:not([hidden]), #dock-run-line:not([hidden])))
   #dock-composer:has(.cp-presence:not([hidden])):not(:hover, :focus-within, :has(#dock-input:not(:placeholder-shown))) {
   --unfold: 0;
@@ -1370,21 +1400,27 @@ body.note-open #dock {
 }
 
 /* The mark keeps its 42 px box in both shapes and is SCALED to 36 px when the
-   composer opens, not resized: a resize reallocates the WebGL backing store,
-   which clears it, after that frame was drawn, so the mark would blank on every
-   frame of the morph. The margins seat the scaled box on the row's 2 px inset.
+   composer opens, not resized: one transform a frame and no relayout of the
+   row under the morph (it was a WebGL canvas until 2026-10-22, where a resize
+   also cleared the backing store). The margins seat the scaled box on the
+   row's 2 px inset.
    At rest the mark IS the row, so the disc is round; open, its box overhangs
    the field's row equally above and below, so the shell is back at the
    composer's own height. */
 #dock .cp-presence {
   flex-shrink: 0;
   pointer-events: none;
+  fill: var(--frost);
   width: calc(var(--rest) * 1px);
   height: calc(var(--rest) * 1px);
   margin-block: calc((var(--field-row) - var(--rest) * 1px) / 2 * var(--unfold));
   margin-left: calc((2px - (var(--rest) - var(--open)) * 0.5px) * var(--unfold));
   margin-right: calc((var(--open) - var(--rest)) * 0.5px * var(--unfold));
   scale: calc(1 - (1 - var(--open) / var(--rest)) * var(--unfold));
+}
+
+#dock .cp-presence .s0 {
+  fill: var(--accent);
 }
 
 /* the controls arrive in the second half of the unfold, once there is room */

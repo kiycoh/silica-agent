@@ -523,13 +523,6 @@ function neighbourRows(d) {
       // the line's mark keeps a quicker beat for a model call than for a tool
       line.dataset.phase = verb === "thinking" ? "thinking" : "acting";
     }
-    // The dock's mark reads the same beats: a model call in flight is
-    // thinking, a running tool is acting, a silence past STALL_S is drained.
-    // Text arriving is app-chat.js's to report, since only it sees the deltas,
-    // and so is the outcome: between a tool's done beat and the next call `live`
-    // is false for a few milliseconds, and a mark sent to idle there and back
-    // restarted its crossfade on every beat and never arrived anywhere.
-    if (live) composerPresence?.state(stalled ? "stalled" : verb === "thinking" ? "thinking" : "acting");
   }
 
   // --- the Node panel --------------------------------------------------------

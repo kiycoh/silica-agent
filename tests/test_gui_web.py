@@ -2452,58 +2452,116 @@ def test_vault_brief_survives_a_provider_that_is_not_there(
     assert not (tmp_path / "brief.json").exists(), "an empty brief was cached"
 
 
-def test_the_landing_presence_is_parsed_before_the_scripts_that_report_to_it():
-    """app-settings.js asks for the vault sentence at load and app-shell.js hands
-    the answer to `landingPresence`. The browser may run a fetch callback between
-    two scripts, so a presence loaded after them is an undeclared name at that
-    moment and the landing throws (ADR-0048)."""
-    at = INDEX_HTML.index('src="/static/app-presence.js"')
-    assert at < INDEX_HTML.index('src="/static/app-shell.js"')
-    assert at < INDEX_HTML.index('src="/static/app-settings.js"')
+def _mark_drawing(svg: str) -> str:
+    """The four pieces of one inline copy of the 2D mark, without its class."""
+    return svg[svg.index("<path"):svg.index("</svg>")]
 
 
-def test_the_landing_presence_lies_on_the_lockups_mark_and_never_replaces_it():
-    """ADR-0048, amendment 2026-10-21: the lockup's own mark is the presence. The
-    canvas sits in the lockup's box ahead of the generated SVG, and the page
-    hides the static mark only while a canvas is there, so without WebGL2 (the
-    canvas removes itself) or after a lost context (it hides itself) the lockup
-    is still whole."""
-    lockup = INDEX_HTML[INDEX_HTML.index('<div class="vh-lockup">'):INDEX_HTML.index('class="vh-brief"')]
-    assert lockup.index('class="vh-presence"') < lockup.index('<svg class="vh-mark"')
-    assert '<path class="shells"' in lockup and '<path class="seed"' in lockup
-    assert ".vh-lockup:has(> .vh-presence:not([hidden])) .vh-mark :is(.shells, .seed)" in app_css()
+def test_the_landing_is_the_mark_and_a_greeting_and_no_webgl_is_left():
+    """ADR-0048, amendment 2026-10-22: the WebGL presence is gone and the
+    landing is the run line's 2D mark beside a greeting, written as a reply
+    streams. Whole for a screen reader, being written for the eye; the ways to
+    start sit under the composer. No lockup: SILICA heads the drawer."""
+    import re
+
+    assert not (STATIC_SRC / "app-presence.js").exists()
+    assert "app-presence.js" not in INDEX_HTML and "<canvas" not in INDEX_HTML
+    js = app_js()
+    assert "landingPresence" not in js and "composerPresence" not in js
+    hero = INDEX_HTML[INDEX_HTML.index('<div id="vault-hero">'):INDEX_HTML.index('<div id="log"')]
+    assert '<svg class="vh-mark"' in hero and 'class="vh-mark" viewBox="0 0 688' not in hero
+    assert '<span class="sr-only" id="vh-said"></span><span id="vh-typed" aria-hidden="true"></span>' in hero
+    chat = INDEX_HTML[INDEX_HTML.index('<section id="view-chat"'):INDEX_HTML.index('<section id="view-graph"')]
+    assert chat.index('id="composer"') < chat.index('id="vh-ideas"')
+    for gone in ("vh-brief", "vh-facts", "vh-lockup", "vh-presence"):
+        assert gone not in INDEX_HTML + js + app_css(), gone
+    # one drawing everywhere the GUI shows the mark: the ledger's, the dock's
+    # run line, the landing and the dock's disc
+    run_mark = re.search(r"const RUN_MARK = '(.*?)';", js).group(1)
+    copies = re.findall(r'<svg class="(?:rl-mark|vh-mark|cp-presence)".*?</svg>', INDEX_HTML)
+    assert len(copies) == 3
+    assert {_mark_drawing(c) for c in copies} == {_mark_drawing(run_mark)}
+    # while it writes, the mark wears the run line's own class and beat
+    greet = js[js.index("function greet(again = false)"):]
+    greet = greet[:greet.index("\n}\n")]
+    assert 'mark.classList.add("rl-mark")' in greet and 'mark.classList.remove("rl-mark")' in greet
+    assert "prefers-reduced-motion: reduce" in greet
 
 
-def test_the_presence_is_out_of_the_chat_field_and_in_the_run_lines():
-    """ADR-0048, amendment 2026-10-22: a mark inside the chat's field read as a
+def test_the_landing_turns_into_the_chat_in_one_view_transition():
+    """ADR-0048, amendment 2026-10-22: the first message moves the composer and
+    hands the greeting's mark to the first turn's run line instead of swapping
+    the landing for the transcript; a new chat runs it back. The names exist
+    only while .vt-landing is on, so the theme's crossfade stays one piece."""
+    js = app_js()
+    submit = js[js.index('$("#composer").addEventListener("submit"'):]
+    submit = submit[:submit.index("\n});\n")]
+    assert "if (log.childElementCount || (!t.trim() && !staged.length)) go();" in submit
+    assert "else swapLanding(go);" in submit
+    new_chat = js[js.index("async function newChat()"):]
+    assert 'swapLanding(() => { log.innerHTML = ""; greet(true); })' in new_chat[:new_chat.index("\n}\n")]
+    swap = js[js.index("function swapLanding(update)"):]
+    assert "prefers-reduced-motion: reduce" in swap[:swap.index("\n}\n")]
+    css = app_css()
+    assert ".vt-landing #composer .composer-shell {\n  view-transition-name: vt-composer;" in css
+    assert ".vt-landing #vault-hero .vh-mark,\n.vt-landing #log .rl-mark {\n  view-transition-name: vt-mark;" in css
+    assert css.count("view-transition-name") == 2
+
+
+def test_the_landing_ideas_fill_the_field_with_commands_that_exist():
+    """The ways to start are the vault's best-linked notes through /explain,
+    /quiz and /summarize, and a pick fills the field as the + menu does. /quiz
+    is a shortcut split with shlex, so a title with spaces is quoted."""
+    import re
+
+    js = app_js()
+    ideas = js[js.index("const LANDING_IDEAS = ["):js.index("function loadVaultBrief()")]
+    for cmd in ("/explain", "/quiz", "/summarize"):
+        assert f'"{cmd}"' in ideas
+        assert f'data-action="{cmd}"' in INDEX_HTML  # the + menu offers the same command
+    assert 'input.dispatchEvent(new Event("input"))' in ideas
+    assert re.search(r'/\^\\d\{4\}-\\d\{2\}-\\d\{2\}/', ideas)  # dated notes are left out
+    assert "noteLink(h.path)" in ideas and "function noteLink(path)" in js
+
+
+def test_index_names_the_person_only_when_they_gave_a_name(client, monkeypatch):
+    """The greeting says the name set in settings and nothing else: escaped
+    into the page, absent when empty, on a local and a hosted window alike."""
+    from silica.config import CONFIG
+
+    app, _server = client
+    monkeypatch.setattr(CONFIG, "user_name", "")
+    assert "data-name" not in app.get("/").text.split(">", 2)[1]
+    monkeypatch.setattr(CONFIG, "user_name", 'Giulia"><b>')
+    assert 'data-name="Giulia&quot;&gt;&lt;b&gt;"' in app.get("/").text.split(">", 2)[1]
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    head = app.get("/", headers={"Cf-Access-Authenticated-User-Email": "g@example.com"}).text.split(">", 2)[1]
+    assert 'data-user="g@example.com"' in head and 'data-name="Giulia&quot;&gt;&lt;b&gt;"' in head
+
+
+def test_the_dock_rests_as_the_2d_mark():
+    """ADR-0048, amendments 2026-10-22: a mark inside the chat's field read as a
     button, so the chat composer has none and the run lines carry the mark in
     2D where their dot was: the dock's line and the chat's, which is the running
-    turn's ledger since ADR-0117. An SVG lit by CSS, never a canvas, since the
-    presence tried a canvas in that row first and lost there. The dock keeps its
-    WebGL mark, the face it rests as, at the head of its row with the mic after
-    the field. Both scripts that report a turn to it are parsed after
-    app-presence.js."""
+    turn's ledger since ADR-0117. The dock keeps its mark as the face it rests
+    as, at the head of its row with the mic after the field, and still: its run
+    line shows the work."""
     at = INDEX_HTML.index('id="composer"')
     assert "cp-presence" not in INDEX_HTML[at:INDEX_HTML.index("</form>", at)]
     at = INDEX_HTML.index('id="dock-composer"')
     shell = INDEX_HTML[at:INDEX_HTML.index("</form>", at)]
-    assert shell.index('class="cp-presence"') < shell.index("<textarea") < shell.index('class="mic"')
+    assert shell.index('<svg class="cp-presence"') < shell.index("<textarea") < shell.index('class="mic"')
     at = INDEX_HTML.index('id="dock-run-line"')
     line = INDEX_HTML[at:INDEX_HTML.index("rl-stop", at)]
-    assert '<svg class="rl-mark"' in line and "<canvas" not in line and "rl-dot" not in line
+    assert '<svg class="rl-mark"' in line and "rl-dot" not in line
     js = app_js()
     led = js[js.index("function makeLedger(msg, live)"):]
     led = led[:led.index("\n}\n")]
-    assert "RUN_MARK +" in led and "<canvas" not in led
-    # one drawing in both lines, so the ledger and the dock never disagree
-    assert line[line.index("<svg"):line.index("</svg>") + 6] in js
+    assert "RUN_MARK +" in led
     css = app_css()
     assert ".rl-mark .s3 {" in css and "@keyframes rl-shell" in css
     assert '.run-line[data-state="stalled"] .rl-mark' in css
     assert "line.dataset.phase = " in (STATIC_SRC / "work.js").read_text(encoding="utf-8")
-    at = INDEX_HTML.index('src="/static/app-presence.js"')
-    assert at < INDEX_HTML.index('src="/static/app-chat.js"')
-    assert at < INDEX_HTML.index('src="/static/work.js"')
 
 
 def test_changes_diff_declares_whether_a_baseline_exists(client, tmp_vault):
