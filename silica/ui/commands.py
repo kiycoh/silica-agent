@@ -236,6 +236,13 @@ COMMANDS: tuple[Command, ...] = (
         examples=("/delete Corso/Autoencoders.md",),
     ),
     Command(
+        name="/trash",
+        group="direct",
+        usage="[restore <path> | erase <path> | empty]",
+        summary="the notes deleted from this vault: bring one back, or delete for good",
+        examples=("/trash", "/trash restore Corso/Autoencoders.md", "/trash empty"),
+    ),
+    Command(
         name="/review",
         group="direct",
         usage="[--flush=HASH]",

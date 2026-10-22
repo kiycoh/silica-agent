@@ -143,6 +143,7 @@ async function loadVaultInfo() {
       $("#tree").append(p);
     }
     loadWorkspaces();                 // the members follow the files (ADR-0112)
+    loadTrash();                      // a delete or a restore moved notes across
     renderVaultHealth(data);          // the chip's dot, the panel's link count
     syncTreePins();          // a fresh tree knows nothing about the pins yet
     markOpenNote();          // …nor about the note the drawer is on
@@ -875,7 +876,7 @@ async function deleteFromTree(note, folder, paths) {
   const what = note ? note.replace(/\.md$/, "").split("/").pop()
     : `${gone.size} ${gone.size === 1 ? "note" : "notes"}` + (folder ? ` in ${folder.split("/").pop()}` : "");
   const d = data.dangling.length;
-  const msg = `Deleted ${what}.`
+  const msg = `Moved ${what} to the trash.`
     + (d ? ` ${d} ${d === 1 ? "link now points" : "links now point"} to no note.` : "")
     + (data.error ? ` ${data.error}.` : "");
   notify(msg, data.error ? "error" : "info", { label: "undo", run: () => undoTreeDelete(data.run, unpinned) });
@@ -891,6 +892,59 @@ async function undoTreeDelete(run, unpinned) {
   const n = data.restored.length, s = data.skipped.length;
   notify(`Restored ${n} ${n === 1 ? "note" : "notes"}.`
     + (s ? ` ${s} not restored: changed since the delete.` : ""), s ? "error" : "info");
+}
+
+// --- the trash (ADR-0128) ----------------------------------------------------
+// Each item restores alone, not with the run it was deleted in, which is what
+// the toast's undo brings back: a folder deleted at once is one item per note.
+
+async function loadTrash() {
+  let items;
+  try { items = (await (await fetch("/trash")).json()).items; } catch { return; }
+  if (!Array.isArray(items)) return;
+  $("#trash-group").hidden = !items.length;
+  $("#trash-n").textContent = items.length;
+  const list = $("#trash");
+  list.innerHTML = "";
+  for (const t of items) {
+    const row = mkEl("div", "trash-row");
+    const name = mkEl("span", "trash-name", t.path.replace(/\.md$/, "").split("/").pop());
+    const who = t.source === "user:/delete" ? "you" : "the chat";
+    name.title = `${t.path}\ndeleted ${new Date(t.deleted_at * 1000).toLocaleString()} by ${who}`;
+    const back = mkEl("button", "linklike", "restore");
+    back.type = "button";
+    back.setAttribute("aria-label", `restore ${t.path}`);
+    if (t.taken) {
+      // a restore would overwrite the note written there since
+      back.disabled = true;
+      back.title = "a note is at this path now";
+    } else back.addEventListener("click", () => trashAct("/trash/restore", t, `Restored ${name.textContent}.`));
+    const gone = mkEl("button", "linklike danger", "delete");
+    gone.type = "button";
+    gone.setAttribute("aria-label", `delete ${t.path} for good`);
+    armThenRun(gone, "delete", "again: for good", () => trashAct("/trash/erase", t, `Deleted ${name.textContent} for good.`));
+    row.append(name, back, gone);
+    list.append(row);
+  }
+  const all = mkEl("button", "linklike danger trash-empty", "empty the trash");
+  all.type = "button";
+  armThenRun(all, "empty the trash", `click again · ${items.length} go for good`,
+             () => trashAct("/trash/erase", { all: true }, "The trash is empty."));
+  list.append(all);
+}
+
+async function trashAct(url, item, done) {
+  let r = null, data = null;
+  try {
+    r = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(item.all ? { all: true } : { run: item.run, path: item.path }),
+    });
+    data = await r.json();
+  } catch { /* reported below */ }
+  if (!r || !r.ok) { notify((data && data.detail) || "couldn't do that", "error"); loadTrash(); return; }
+  notify(done);
+  loadVaultInfo(); // a restored note joins the tree, and the trash redraws with it
 }
 
 // A left click with no modifier is the app's to handle; anything else is the

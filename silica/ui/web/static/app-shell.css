@@ -1416,6 +1416,81 @@ body.sidebar-collapsed #sidebar {
   }
 }
 
+/* The trash (ADR-0128): a group of the notes list, shut by default, its rows
+   dimmer than the tree's because nothing in them opens. The two actions show
+   as the row's menu does: on hover and focus, and always where nothing hovers. */
+#trash-group > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+#trash-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+#trash-group > summary::before {
+  content: "▸ ";
+}
+
+#trash-group[open] > summary::before {
+  content: "▾ ";
+}
+
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding-left: 0.55rem;
+  border-radius: var(--r-sm);
+  font-size: 13px; /* the tree's, which the rows were before the delete */
+}
+
+.trash-row:hover {
+  background: var(--sel-hover);
+}
+
+.trash-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 0;
+  color: var(--ash-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trash-row .linklike {
+  flex: none;
+  padding: 2px 0.35rem;
+  opacity: 0;
+}
+
+.trash-row:hover .linklike,
+.trash-row:focus-within .linklike {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .trash-row .linklike {
+    opacity: 1;
+  }
+}
+
+.trash-row:is(:hover, :focus-within) .linklike:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+:is(.trash-row, #trash) .linklike.danger:hover,
+:is(.trash-row, #trash) .linklike.armed {
+  color: var(--del);
+}
+
+.trash-empty {
+  padding-left: 0.55rem;
+}
+
 /* Plan this folder (ADR-0081 §17): the folder row's one action, on hover and
    keyboard focus like the pin, floated beside the count it shares the line with */
 .tree-plan {

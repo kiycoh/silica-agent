@@ -168,6 +168,13 @@
             <div id="workspaces"></div>
           </div>
           <div id="tree"></div>
+          <!-- The trash (ADR-0128): the notes deleted from this vault that
+               nothing has brought back. Last and shut, since a note is put
+               there and rarely looked for; hidden while it holds nothing. -->
+          <details id="trash-group" hidden>
+            <summary class="side-bucket">trash <span id="trash-n"></span></summary>
+            <div id="trash"></div>
+          </details>
         </div>
       </section>
       <!-- The vault's + (ADR-0098): two entries, because one browser picker takes
