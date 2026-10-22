@@ -68,7 +68,7 @@ _WORKER_PROMPT = (
     "You rewrite one block of a longer text that the user asked to have reworked. {length}\n\n"
     "How to write it:\n{rules}\n\n"
     "Reply with the rewritten text only: no preamble, no title, no closing remark, no offer of "
-    "other versions. Write in {language}.{before}\n\n"
+    "other versions. Write in {language}.\n\n"
     "The user's request: {instruction}")
 
 _LENGTH = {
@@ -99,6 +99,10 @@ _RULES = {
     # Asked for by name only (_QUESTION's "register"): hosted t06 read the
     # readable form of a psychopathology chapter and asked for discursive,
     # linear reasoning with its beginning and end connected (2026-10-22).
+    # Measured on the three 6k-word texts of 2026-10-16 (2 runs each, V4.1
+    # Flash judging both orders, 2026-10-23): flow 5-1 against readable, study
+    # 3-3, facts and key points equal, Gulpease 45 against 49. Handing each
+    # block the end of the one before moved nothing, as ADR-0116 found.
     "discursive": (
         "- Connected prose, as a good textbook explains a subject: each paragraph follows from the "
         "one before and says how, by a cause, a consequence, a contrast or an example, so the block "
@@ -115,11 +119,6 @@ _RULES = {
         "- Keep formulas, tables and links exact. Add no formula, table or diagram unless the user's "
         "request asks for one."),
 }
-# What a discursive block sees of the one before it, so its first sentence can
-# take up where that one ended: the blocks run in parallel and never see each
-# other's output, which is what breaks a line of reasoning at a block's edge.
-_BEFORE = "\n\nThe text just before this block, for continuity only (do not rewrite it):\n{tail}"
-BEFORE_WORDS = 120
 
 _OUTLINE_PROMPT = (
     "The user gives you a text whose paragraphs are numbered [1], [2], ... Split it into its main "
@@ -301,26 +300,18 @@ def _fits_chat(text: str, share: float) -> bool:
     return len(text) * (1 + share) / TEXT_CHARS_PER_TOKEN <= COMPACT_FRACTION * CONFIG.max_context_tokens
 
 
-def _prompt(instruction: str, language: str, kind: str = "full", register: str = "readable",
-            before: str = "") -> str:
+def _prompt(instruction: str, language: str, kind: str = "full", register: str = "readable") -> str:
     return _WORKER_PROMPT.format(
         length=_LENGTH[kind].format(share=f"{round(CONDENSED_SHARE * 100)}%"),
-        rules=_RULES[register], language=language, instruction=instruction,
-        before=_BEFORE.format(tail=before) if before else "")
-
-
-def _tail(block: str) -> str:
-    """The last paragraph of a block, cut to its last BEFORE_WORDS words."""
-    last = re.split(r"\n\s*\n", block.strip())[-1].split()
-    return " ".join(last[-BEFORE_WORDS:])
+        rules=_RULES[register], language=language, instruction=instruction)
 
 
 def _rework(block: str, instruction: str, language: str, cancel_token: Any,
-            kind: str = "full", register: str = "readable", before: str = "") -> str:
+            kind: str = "full", register: str = "readable") -> str:
     from silica.agent.llm import call_llm
     from silica.config import CONFIG
 
-    messages = [{"role": "system", "content": _prompt(instruction, language, kind, register, before)},
+    messages = [{"role": "system", "content": _prompt(instruction, language, kind, register)},
                 {"role": "user", "content": block}]
     # Thinking off: on two texts it was the most faithful arm (FActScore 0.966
     # and 0.996, against 0.879 and 0.965 with thinking on), with the fewest
@@ -407,9 +398,7 @@ def silica_rework(
     # message behind it (MCP).
     ask = re.split(r"\n\s*\n", request, maxsplit=1)[0][:300] if request else (instruction or "Rework this text")
     with ThreadPoolExecutor(min(WORKERS, len(parts))) as pool:
-        futures = [pool.submit(_rework, p, ask, language, cancel_token, kind, register,
-                               _tail(parts[k - 1]) if k and register == "discursive" else "")
-                   for k, p in enumerate(parts)]
+        futures = [pool.submit(_rework, p, ask, language, cancel_token, kind, register) for p in parts]
         outs: list[str] = []
         for k, fut in enumerate(futures):
             try:

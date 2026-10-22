@@ -269,15 +269,13 @@ def test_a_condensed_rework_too_big_for_the_window_runs_in_blocks(tmp_vault, llm
     assert "shorter where it can be: about 60% of its length" in prompt
 
 
-def test_discursive_blocks_get_the_prose_rules_and_the_text_before_them(tmp_vault, llm, monkeypatch):
+def test_discursive_blocks_get_the_prose_rules(tmp_vault, llm, monkeypatch):
     _jev(monkeypatch, "full", "discursive")
     _requests(monkeypatch, "Riscrivi [[Chapter]] in modo discorsivo e lineare")
     tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400, f"w{k}x") for k in range(6)))
     assert rework.silica_rework(note="Chapter")["ok"]
     prompts = [c["messages"][0]["content"] for c in _block_calls(llm)]
     assert len(prompts) >= 2 and all("No bulleted lists and no bold labels" in p for p in prompts)
-    assert "The text just before this block" not in prompts[0]
-    assert "The text just before this block" in prompts[1] and "w2x399" in prompts[1]
     assert all(p.endswith("The user's request: Riscrivi [[Chapter]] in modo discorsivo e lineare")
                for p in prompts)
 
