@@ -386,6 +386,9 @@ class TestDraftFiling:
 
         tmp_vault.note("ML/Support Vector Machine.md", "# SVM\n")
         tmp_vault.note("ML/Matrice di confusione.md", "# CM\n")
+        # what the outline stage hides is no concept a lab practises
+        tmp_vault.note("ML/Lezione 10.md", "---\nsection: (outline)\n---\n# Lezione 10\n\n1. [[Margine]]\n")
+        tmp_vault.note("ML/Vettori di supporto.md", "---\nsuperseded_by: '[[Support Vector Machine]]'\n---\n# x\n")
         nb = {"nbformat": 4, "metadata": {}, "cells": [
             {"cell_type": "markdown", "source": "# Dataset uploading"},
             {"cell_type": "code", "source": "clf = SVC(kernel='rbf')", "outputs": []}]}
@@ -408,6 +411,7 @@ class TestDraftFiling:
         assert text.rstrip().endswith(
             "## Concepts practised\n- [[Support Vector Machine]]: addestra una SVM con kernel rbf")
         assert "Matrice di confusione" in seen[0]  # the folder's notes were the candidates
+        assert "Lezione 10" not in seen[0] and "Vettori di supporto" not in seen[0]
 
     def test_a_filed_draft_links_the_notes_of_its_folder_it_names(self, tmp_vault, monkeypatch):
         """The spec's filing path runs autolink so the note joins the graph;

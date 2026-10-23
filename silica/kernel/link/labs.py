@@ -104,9 +104,14 @@ def practised_section(body: str, titles: list[str], *,
 
 
 def folder_titles(folder: str, exclude: str = "") -> list[str]:
-    """Note names under `folder` a lab may link: not source leaves, not itself."""
+    """Note names under `folder` a lab may link: not source leaves, not itself,
+    and not what the outline stage hides, a lesson spine or a merge loser. A
+    lab practises concepts, and those two kinds were 172 of the 961 notes of a
+    course folder with its textbook, enough to push it past MAX_CANDIDATES
+    (2026-10-23)."""
+    from silica.kernel.outline import _hidden_note
     from silica.kernel.recall.paths import is_source_leaf
     from silica.tools.atomic import notes_under
 
     return [Path(p).stem for p in notes_under(folder)
-            if p != exclude and not is_source_leaf(p)]
+            if p != exclude and not is_source_leaf(p) and not _hidden_note(p)]
