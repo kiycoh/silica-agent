@@ -180,3 +180,20 @@ def test_a_note_is_never_marked_superseded_by_itself_and_a_namesake_is_linked_by
     assert "superseded_by: '[[Stat/Distribuzione normale]]'" in marked
     tmp_vault.note("ML/Distribuzione normale.md", marked)
     assert follow_superseded("ML/Distribuzione normale.md") == "Stat/Distribuzione normale.md"
+
+
+def test_a_lesson_outline_absorbs_no_concept(tmp_vault):
+    """"Definizione di reti convolutive" was marked superseded by the spine
+    "Lezione 24" (2026-10-23): a duplicate verdict on a spine writes nothing."""
+    from silica.capabilities.dedup import _route_verdict
+    from silica.kernel.outline import SPINE_SECTION
+    from silica.kernel.workqueue import WorkItem
+
+    tmp_vault.note("ML/Lezione 24.md", f'---\nsection: "{SPINE_SECTION}"\n---\n# Lezione 24\n\n1. [[Definizione di reti convolutive]]\n')
+    tmp_vault.note("ML/Definizione di reti convolutive.md", "---\nAI: true\n---\n\n# x\n\ncorpo\n")
+    ctx = {"concept": "Definizione di reti convolutive", "loser_path": "ML/Definizione di reti convolutive.md"}
+    item = WorkItem(kind="dedup", target_path="ML/Lezione 24.md", context=ctx)
+    with patch("silica.capabilities.dedup.commit_ops") as commit:
+        res = _route_verdict(item, ctx, _decision("duplicate", addition="nuovo"), None)
+    assert res["status"] == "no_merge" and res["verdict"] == "distinct"
+    commit.assert_not_called()

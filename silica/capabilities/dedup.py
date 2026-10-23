@@ -371,6 +371,15 @@ def _note_key(path: str) -> str:
     return path.removesuffix(".md").casefold()
 
 
+def _is_spine(path: str) -> bool:
+    from silica.kernel.outline import SPINE_SECTION
+    from silica.kernel.write import frontmatter
+
+    rel = path if path.endswith(".md") else path + ".md"
+    data, _raw, _body = frontmatter.split(read_or_skip(rel)[0] or "")
+    return isinstance(data, dict) and str(data.get("section") or "") == SPINE_SECTION
+
+
 def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None:
     """Keep the surface form of a concept that was merged away.
 
@@ -424,6 +433,14 @@ def _route_verdict(
     item: WorkItem, ctx: dict, decision: DedupDecision, config: Any
 ) -> dict[str, Any]:
     candidate_path = item.target_path
+
+    if decision.verdict != "distinct" and _is_spine(candidate_path):
+        # A lesson's outline absorbs no concept: "Definizione di reti
+        # convolutive" was marked superseded by the spine "Lezione 24", and a
+        # syllabus topic on convolutional networks then opened the plan on the
+        # spine (2026-10-23). The concept note stays as it is.
+        return {"status": "no_merge", "verdict": "distinct",
+                "rationale": f"{os.path.basename(candidate_path)} is a lesson outline"}
 
     if decision.verdict == "distinct":
         return _route_distinct(item, ctx, decision, config)
