@@ -55,8 +55,15 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
 
     monkeypatch.setattr(srv, "read_refs", lambda messages: ["Teorema di Novikoff"])
     monkeypatch.setattr(mm, "answer_resolver",
-                        lambda refs: (None, ["ML/Teorema di Novikoff.md"] if refs == ["Teorema di Novikoff"] else []))
+                        lambda refs, graph=None: (None, ["ML/Teorema di Novikoff.md"] if refs == ["Teorema di Novikoff"] else []))
+    monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
     monkeypatch.setattr("silica.kernel.report.quiz.entries", lambda: [])
     o = srv._study_offer("non ho capito il teorema", [])
     assert o and o["note"] == "ML/Teorema di Novikoff.md"
+
+    # a turn that read nothing still has the note the reader named
+    monkeypatch.setattr(srv, "read_refs", lambda messages: [])
+    o = srv._study_offer("Non ho capito cosa sono i punti di supporto in una SVM", [])
+    assert o and o["note"] == "ML/Punti di supporto.md"
+    assert srv._study_offer("cosa sono i punti di supporto?", []) is None   # no word saying it was unclear
