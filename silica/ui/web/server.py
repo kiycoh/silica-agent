@@ -40,13 +40,15 @@ from silica.agent.llm import meter_totals
 from silica.agent.loop import _EMPTY_COMPLETION, _is_tool_failure, run_agent
 from silica.agent import turn_notes
 from silica.agent.recall_watch import (
+    READS_KEY,
     RecallWatch,
     numbers_notes,
     numbers_of_session,
+    read_refs,
     unfounded_in_turn,
 )
 from silica.config import CONFIG
-from silica.kernel.recall.mindmap import note_resolver
+from silica.kernel.recall.mindmap import answer_resolver, note_resolver
 from silica.metrics import emit
 from silica.kernel.write import session_changes
 from silica.sources.web_research import WebTurn
@@ -583,14 +585,45 @@ def _sanitize_raw_tokens(tokens) -> None:
             _sanitize_raw_tokens(tok.children)
 
 
-def _linkify_text(text: str, resolve) -> str:
+# A read note's title, at least this long, links where an answer names it bare.
+# Shorter titles ("ML", "Note") are words more often than they are notes.
+MENTION_MIN_CHARS = 4
+
+
+def _mentions(reads) -> tuple[re.Pattern, dict[str, str]] | None:
+    """The bare-name layer for an answer (ADR-0127): the notes its turn read,
+    by title and by path with or without .md, longest first, matched as
+    written. The path because a model writes "Corso A/Lezione 16", whose space
+    the path-token layer splits at (seen on the first GUI turn, 2026-10-22).
+    Case-sensitive on purpose: an answer names "Lezione 16" as the note is
+    titled, and "lezione" in prose is a word. A title two read notes share
+    links neither; their paths still do."""
+    by_title: dict[str, str | None] = {}
+    found: dict[str, str] = {}
+    for path in reads or ():
+        stem = path.removesuffix(".md")
+        title = stem.rsplit("/", 1)[-1]
+        if "/" in stem:
+            found[path] = found[stem] = path
+        if len(title) >= MENTION_MIN_CHARS:
+            by_title[title] = None if title in by_title else path
+    found |= {t: p for t, p in by_title.items() if p}
+    if not found:
+        return None
+    alts = "|".join(re.escape(t) for t in sorted(found, key=len, reverse=True))
+    return re.compile(rf"(?<![\w/])(?:{alts})(?!\w)"), found
+
+
+def _linkify_text(text: str, resolve, mentions=None) -> str:
     """Turn resolvable note refs in one plain-text run into `.note-link` anchors.
 
-    Two layers: wikilinks first (explicit `[[...]]` delimiters), then bare
-    path-like tokens in the surviving prose. Unresolved wikilinks render like
-    resolved ones but tagged `.broken` (no data-path — the click is a no-op);
-    unresolved bare paths stay verbatim. `resolve=None` means plain escape.
-    Returns an HTML fragment (safe parts escaped).
+    Three layers: wikilinks first (explicit `[[...]]` delimiters), then bare
+    path-like tokens in the surviving prose, then, for an answer, the bare
+    titles of the notes its turn read (`mentions`). Unresolved wikilinks render
+    like resolved ones but tagged `.broken` (no data-path — the click is a
+    no-op); unresolved bare paths stay verbatim. A resolver that answers ""
+    (a name several notes share) leaves the text as written. `resolve=None`
+    means plain escape. Returns an HTML fragment (safe parts escaped).
     """
     if resolve is None:
         return _html.escape(text)
@@ -611,9 +644,22 @@ def _linkify_text(text: str, resolve) -> str:
         out.append(_html.escape(prose[pos:]))
         return "".join(out)
 
+    def link_prose(prose: str) -> str:
+        # The read notes first: they are exact names, and the path-token layer
+        # would split "Corso A/Lezione 16" at its space before they were seen.
+        if mentions is None:
+            return link_paths(prose)
+        pattern, found = mentions
+        out, pos = [], 0
+        for m in pattern.finditer(prose):
+            out.append(link_paths(prose[pos:m.start()]) + _anchor(found[m.group(0)], m.group(0)))
+            pos = m.end()
+        out.append(link_paths(prose[pos:]))
+        return "".join(out)
+
     out, pos = [], 0
     for m in _WIKILINK.finditer(text):
-        out.append(link_paths(text[pos:m.start()]))
+        out.append(link_prose(text[pos:m.start()]))
         bang, inner = m.group(1), m.group(2)
         target, _, alias = inner.partition("|")
         target, alias = target.strip(), alias.strip()
@@ -627,25 +673,29 @@ def _linkify_text(text: str, resolve) -> str:
             display = alias or _clean_name(target)
             if hit:
                 out.append(_anchor(hit, display))
+            elif hit == "":
+                # Several notes carry the name and nothing says which one
+                # (ADR-0114): the words stay, no guess and no "broken" mark.
+                out.append(_html.escape(display))
             else:
                 out.append(f'<a class="note-link broken">{_html.escape(display)}</a>')
         pos = m.end()
-    out.append(link_paths(text[pos:]))
+    out.append(link_prose(text[pos:]))
     return "".join(out)
 
 
-def _inline_ofm(text: str, resolve) -> str:
+def _inline_ofm(text: str, resolve, mentions=None) -> str:
     """OFM inline sugar over one plain-text run: ==highlight== -> <mark>,
     #tag -> chip. Prose between matches still goes through note-ref linking."""
     out, pos = [], 0
     for m in _MARK_OR_TAG.finditer(text):
-        out.append(_linkify_text(text[pos:m.start()], resolve))
+        out.append(_linkify_text(text[pos:m.start()], resolve, mentions))
         if m.group(1) is not None:
-            out.append(f"<mark>{_linkify_text(m.group(1), resolve)}</mark>")
+            out.append(f"<mark>{_linkify_text(m.group(1), resolve, mentions)}</mark>")
         else:
             out.append(f'<span class="tag">#{_html.escape(m.group(2))}</span>')
         pos = m.end()
-    out.append(_linkify_text(text[pos:], resolve))
+    out.append(_linkify_text(text[pos:], resolve, mentions))
     return "".join(out)
 
 
@@ -877,11 +927,12 @@ def _unembed_foreign_imgs(fragment: str) -> str:
     return _RAW_IMG_TAG.sub(sub, fragment)
 
 
-def _linkify(text: str, resolve=None, remote_images: bool = True) -> str:
+def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> str:
     """Render markdown (+ OFM sugar) to HTML, linkifying resolvable note refs
     when `resolve` is given. Works on the markdown-it token stream, so
     `code_inline`/`fence` are separate token types and code is never linkified
-    or tag-ified by construction.
+    or tag-ified by construction. `reads` (an answer's: the notes its turn
+    read) also links their titles where the prose names them bare.
 
     `remote_images=False` is for anything the model wrote: an image from
     another origin becomes a link naming its host. Text a document hid from the
@@ -914,6 +965,7 @@ def _linkify(text: str, resolve=None, remote_images: bool = True) -> str:
     # `#fn1` anchors are scrolled in place by the client, never routed.
     md.use(footnote_plugin)
     tokens = md.parse(text)
+    mentions = _mentions(reads) if resolve is not None else None
     _sanitize_raw_tokens(tokens)  # the note's raw HTML; must precede the injected kind
     _ofm_blocks(tokens)
     for tok in tokens:
@@ -965,12 +1017,49 @@ def _linkify(text: str, resolve=None, remote_images: bool = True) -> str:
             if child.type != "text":
                 new.append(child)
                 continue
-            frag = _inline_ofm(child.content, None if depth else resolve)
+            frag = _inline_ofm(child.content, None if depth else resolve, mentions)
             raw = Token("html_inline", "", 0)
             raw.content = frag
             new.append(raw)
         tok.children = new
     return md.renderer.render(tokens, md.options, {})
+
+
+def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dict | None]:
+    """(turn note, offer) for the turn that just ended (ADR-0127 points 5, 6):
+    a proposal written from a request the person made in enough chats, or
+    else the installed skill that answers it, offered as the next turn. An
+    incognito chat proposes nothing: it asked to leave no trace."""
+    from silica.agent import narration as _narr
+    from silica.kernel import proposed_skills as ps
+    from silica.kernel import user_memory
+
+    vault = CONFIG.vault_path or ""
+    if not vault or user_memory.incognito():
+        return None, None
+    try:
+        evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
+        if evidence is not None:
+            drafted = ps.draft(evidence["asks"], CONFIG)
+            name = ps.stage(vault, drafted, evidence, CONFIG.worker_model or CONFIG.model or "") if drafted else None
+            if name:
+                return {"kind": "skill", "text": f"/{name} written from a request you made in "
+                                                 f"{len(evidence['sessions'])} chats · review it in "
+                                                 "Settings › Skills"}, None
+        return None, ps.offer(text, vault)
+    except Exception:
+        # A proposal is an extra: a chat file that does not parse or a worker
+        # that is down costs the person the proposal, never the answer.
+        logger.warning("skill proposal skipped", exc_info=True)
+        return None, None
+
+
+def _answer_html(answer: str, refs, graph=None) -> str:
+    """A chat answer drawn with its turn's reads (ADR-0127): a name several
+    notes share links the one the turn read, and a read note's title links
+    where the answer names it bare. Reads the driver graph unless given one."""
+    resolve, reads = answer_resolver(refs or (), graph=graph)
+    return _linkify(answer, resolve, remote_images=False, reads=reads)
 
 
 def _split_frontmatter(text: str) -> tuple[dict | None, str]:
@@ -1131,6 +1220,29 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # workflow expansion. Asking the same handler the REPL asks is the point:
         # the hand-kept list of "web commands" that used to gate this drifted, and
         # /lexical /wiki /graph /map /find /vault fell through it into an error.
+        #
+        # A persona (ADR-0127 point 3) comes before all of them: it is worn, not
+        # run. Its command edits this conversation's system line and asks no
+        # model; with words after the name, those words are this turn, already
+        # under the persona.
+        from silica.kernel import personas
+
+        worn = (await asyncio.to_thread(personas.command, text, messages, CONFIG.vault_path or None,
+                                        not _collapsed) if text.startswith("/") else None)
+        if worn is not None and not worn[1]:
+            from silica.agent import narration as _narr
+
+            messages.append({"role": "user", "content": text, "origin": "cli"})
+            _narrate_user_turn(messages[-1])
+            messages.append({"role": "assistant", "content": worn[0]})
+            _narr.NARRATOR.turn(messages[-1])
+            _update_context_tokens(messages)
+            outcome = "done"
+            yield {"type": "done", "answer": worn[0], "html": _linkify(worn[0], remote_images=False),
+                   **_ctx_meter()}
+            return
+        if worn is not None:
+            text = worn[1]
         agent_msg = text
         # /web comes first: it is neither direct nor a workflow expansion but an
         # agent turn with web-only tools. A usage error raises ValueError, which
@@ -1236,6 +1348,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         msg: dict[str, Any] = {"role": "user", "content": agent_msg}
         if text.startswith("/"):
             msg["origin"] = "cli"
+        if persona := personas.active(messages):
+            msg[personas.TURN_KEY] = persona
         if files:
             msg["silica_files"] = list(files)
         if said:
@@ -1339,22 +1453,32 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             from silica.agent.figures import place_figures
 
             answer = place_figures(answer, messages, exists=lambda f: _find_asset(f) is not None)
+        # A request made in enough chats becomes a proposed skill, or one already
+        # installed is offered as the next turn (ADR-0127 points 5 and 6).
+        skill_note, offer = ((None, None) if stopped or web or not answer
+                             else await asyncio.to_thread(_skill_after_turn, text, messages))
         # The lines under the answer (ADR-0094 point 8), stored on it before the
         # beat below so a reopened chat draws them too. A stopped turn has no
         # answer to carry them: they are drawn live only.
         notes = watch.notes() if isinstance(watch, RecallWatch) else []
         notes += numbers_notes(unread)
+        notes += [skill_note] if skill_note else []
         notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
+        # The notes this turn read, before the beat stores the answer and before
+        # compaction stubs the results that name them (ADR-0127).
+        refs = read_refs(messages)
+        if refs and not stopped and messages[-1].get("role") == "assistant" and not messages[-1].get("tool_calls"):
+            messages[-1][READS_KEY] = refs
         # Final-assistant turn beat, post-attribution (see loop.py).
         if messages and messages[-1].get("role") == "assistant":
             from silica.agent import narration as _narr
             _narr.NARRATOR.turn(messages[-1])
         _update_context_tokens(messages)
         _collapsed = _compact_context(messages, _collapsed)
-        # note_resolver reads the DRIVER graph — with the ws backend installed
+        # answer_resolver reads the DRIVER graph — with the ws backend installed
         # (silica connect) a driver call on the loop thread deadlocks (`_rpc`
         # blocks the very loop that must send the frame), so render off-loop.
-        html = await asyncio.to_thread(lambda: _linkify(answer, note_resolver(), remote_images=False))
+        html = await asyncio.to_thread(_answer_html, answer, refs)
         done = {
             "type": "done",
             "answer": answer,
@@ -1365,6 +1489,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             done["stopped"] = True
         if notes:
             done["notes"] = notes
+        if offer:
+            done["offer"] = offer
         outcome = "cancelled" if stopped else "empty" if empty else "done"
         yield done
     except Exception as exc:  # never leave the UI stuck on the spinner
@@ -5295,8 +5421,11 @@ def get_messages():
             done = _flagged(sid)
             turn_of = {id(m): {"session": sid, "seq": s, "flagged": s in done}
                        for m, s in zip(users, seqs)}
+    from silica.kernel.recall.mindmap import _driver_graph
+
+    graph = _driver_graph()   # once for every answer below, as `resolve` is for the rest
     data = []
-    for m in messages:
+    for at, m in enumerate(messages):
         if m.get("role") not in ("user", "assistant"):
             continue
         tools = tool_calls_to_json(m, failed, results) if m["role"] == "assistant" else []
@@ -5327,7 +5456,10 @@ def get_messages():
         data.append({"role": m["role"], "content": content, "tools": tools, "files": files,
                      "thinking": thinking, "images": images,
                      "notes": turn_notes.of(m) if m["role"] == "assistant" else [],
-                     "html": _linkify(content, resolve, remote_images=False) if content else ""})
+                     "html": "" if not content else
+                     _answer_html(content, m.get(READS_KEY) or read_refs(messages, at + 1), graph)
+                     if m["role"] == "assistant" and not m.get("tool_calls") else
+                     _linkify(content, resolve, remote_images=False)})
         if id(m) in turn_of:
             data[-1]["turn"] = turn_of[id(m)]
     # Vault label + context usage ride headers so the body stays a plain list.
@@ -5493,6 +5625,12 @@ def load_session(payload: dict):
     ws = _resolve_workspace(str(last.get("silica_workspace") or ""))
     if ws is not None:
         _apply_workspace(ws)
+    # Its persona too (ADR-0127 point 3), read from the file as it is now; one
+    # removed since leaves the chat without it rather than failing to open.
+    from silica.kernel import personas
+
+    if (worn := personas.available(CONFIG.vault_path or None).get(str(last.get(personas.TURN_KEY) or ""))):
+        personas.apply(messages, worn)
     _seen_numbers.clear()
     _seen_numbers.update(numbers_of_session(current_session_id))
     _update_context_tokens(messages)
@@ -6063,6 +6201,31 @@ def memory_reset():
     from silica.kernel import user_memory
 
     return user_memory.reset()
+
+
+# --- vault instructions (ADR-0127 point 4) --------------------------------------
+# A file and not a settings row, as memory is; on hosted the vault is the one
+# root an account can write and there is no file manager, so this is the way in.
+
+
+@app.get("/instructions")
+def instructions_view():
+    from silica.kernel import vault_instructions as vi
+
+    vault = CONFIG.vault_path or None
+    return {"available": bool(vault), "text": vi.read(vault), "cap": vi.CAP, "path": vi.REL}
+
+
+@app.put("/instructions", dependencies=_SAME_ORIGIN)
+def instructions_write(payload: dict):
+    from silica.kernel import vault_instructions as vi
+
+    global _seed
+    out = vi.write(CONFIG.vault_path or None, str(payload.get("text", "")))
+    if not out["ok"]:
+        raise HTTPException(status_code=400, detail=out["error"])
+    _seed = None   # built again by the next chat, with the new text (a prewarm could lose the race)
+    return out
 
 
 # --- Zotero (ADR-0055) ---------------------------------------------------------

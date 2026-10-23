@@ -1636,6 +1636,7 @@ async function runTurn(fetchPromise, pendingLabel = "working", retry = null) {
       drawDiagrams(body);
       const notes = turnNotes(ev.notes);
       if (notes) ledger.appendChild(notes);
+      if (ev.offer) ledger.appendChild(skillOffer(ev.offer));
       setCtxTokens(ev.context_tokens, ev.max_context_tokens, ev.context_parts, ev.compact_at);
       peekDone(ev); // card gets the canonical OFM render
       announce("response ready");
@@ -1673,6 +1674,27 @@ function turnNotes(notes) {
     block.appendChild(line);
   }
   return block;
+}
+
+// An installed skill that answers this kind of request (ADR-0127 point 6),
+// offered for the next turn: the click puts `/name` in the box and the person
+// sends it, the model never runs it. Live only: an offer is about the next
+// turn, which a reopened chat has long had.
+function skillOffer(o) {
+  const line = document.createElement("div");
+  line.className = "turn-note skill-offer";
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "linklike";
+  b.textContent = o.command;
+  b.title = o.description || "";
+  b.addEventListener("click", () => {
+    input.value = o.command + " " + input.value.replace(/^\/[a-z0-9-]*\s*/, "");
+    input.focus();
+    input.dispatchEvent(new Event("input"));
+  });
+  line.append(o.persona ? "a persona of yours fits requests like this: " : "a skill of yours does this: ", b);
+  return line;
 }
 
 // Read chips, unique by RESOLVED path: the live stream names a note by the
@@ -1749,7 +1771,12 @@ function finishLedger(msg, led, { steps, secs, reads, cited, found = [] }) {
   // An answer that read no note still stood on what its searches returned
   // (ADR-0121 point 7): those notes, at most six, are its sources then.
   const fromSearch = reads.length ? [] : [...new Set(found)].filter((p) => !cited.has(p)).slice(0, 6);
-  const uncited = fromSearch.length ? fromSearch : reads.filter((p) => !cited.has(p));
+  // A read named by a title two notes share stays as written (resolveRef), and
+  // the answer cites the one it means (ADR-0127): a citation of either is it.
+  const base = (p) => p.toLowerCase().replace(/\.md$/, "").split("/").pop();
+  const idx = typeof noteIdx !== "undefined" ? noteIdx : [];
+  const isCited = (p) => cited.has(p) || (!idx.some((n) => n.path === p) && [...cited].some((c) => base(c) === base(p)));
+  const uncited = fromSearch.length ? fromSearch : reads.filter((p) => !isCited(p));
   const notes = led.querySelector(".turn-notes");
   const parts = [];
   if (reads.length) parts.push(`read ${reads.length} note${reads.length === 1 ? "" : "s"}`);

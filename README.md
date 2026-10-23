@@ -205,6 +205,7 @@ Over MCP the vault is the folder the client started in, and search, recall and r
 | `/verbose` | cycle tool progress: off -> new -> all -> verbose |
 | `/thinking` | toggle display of the reasoning block |
 | `/incognito` | toggle this session off the record: not captured, memory neither shown nor saved |
+| `/persona [name\|off]` | the persona this conversation wears: list them, put one on, take it off. A persona is a skill whose frontmatter says `metadata: {persona: true}` |
 | `/exit` | exit silica |
 
 </details>

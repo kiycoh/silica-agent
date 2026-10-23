@@ -17,8 +17,9 @@ KEY = "silica_turn_notes"
 
 # Cause before effect: a retrieval leg that was missing (ADR-0094) can explain
 # a number the answer could not ground (ADR-0095), and either can explain a
-# graph check that came up short (ADR-0092); never the other way round.
-KINDS = ("retrieval", "numbers", "graph")
+# graph check that came up short (ADR-0092); never the other way round. A
+# proposed skill (ADR-0127) explains nothing about the answer, so it is last.
+KINDS = ("retrieval", "numbers", "graph", "skill")
 
 
 def ordered(notes: list[dict]) -> list[dict]:

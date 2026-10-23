@@ -448,6 +448,9 @@ attachMenu.addEventListener("click", (e) => {
   const item = e.target.closest('[role="menuitem"]');
   if (!item) return;
   if (item.id === "am-files") { nucleateInput.click(); return; }
+  // ADR-0127: the words in the box become the new skill's instructions, written
+  // and previewed in Settings › Skills, where an installed one is managed.
+  if (item.id === "am-skill") { skWriteSkill(input.value); return; }
   if (item.id === "am-plan") {
     // lrPlanFolder's three calls with nothing filled in: Create plan opens on
     // its sentence (ADR-0081 §10), and no note is carried over (ADR-0083).
