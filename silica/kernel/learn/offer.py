@@ -19,11 +19,14 @@ import re
 from urllib.parse import quote
 
 # The reader saying it did not follow, in the two languages this was written
-# against. A word list, not a classifier: self-declared beats inferred.
+# against. A word list, not a classifier: self-declared beats inferred. The
+# adverb slot is there because "still" is how a second turn says it: "non ho
+# ancora capito" went unread, and the escalation it should start with it.
 _LOST_RE = re.compile(
-    r"\b(non\s+(?:l['’])?(?:ho\s+)?capi(?:t[oaie]|sco)|non\s+mi\s+è\s+chiar[oa]|spiegami\s+(?:meglio|di\s+nuovo)"
-    r"|più\s+semplice|non\s+riesco\s+a\s+capire|i\s+(?:don'?t|do\s+not)\s+(?:get|understand)"
-    r"|i'?m\s+lost|explain\s+(?:it\s+)?again|simpler)\b",
+    r"\b(non\s+(?:l['’])?(?:ho\s+)?(?:ancora\s+|proprio\s+|bene\s+|del\s+tutto\s+)?capi(?:t[oaie]|sco|re)"
+    r"|non\s+mi\s+(?:è|e['’])\s+(?:ancora\s+|del\s+tutto\s+)?chiar[oa]|spiegami\s+(?:meglio|di\s+nuovo)"
+    r"|più\s+semplice|non\s+riesco\s+a\s+capire|i\s+(?:still\s+)?(?:don'?t|do\s+not)\s+(?:get|understand)"
+    r"|i'?m\s+(?:still\s+)?lost|explain\s+(?:it\s+)?again|simpler)\b",
     re.IGNORECASE,
 )
 RECENT = 3    # answers looked at per note
@@ -86,7 +89,10 @@ def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) 
     lost = says_lost(text)
     if not hard and not lost:
         return None
-    target = next(iter(hard), notes[0])
+    # Said unclear, the note it is about leads (the caller puts the named note
+    # first): a note missed in the ledger had taken the offer from the lesson
+    # the reader named, under a line saying "you said this was not clear".
+    target = notes[0] if lost else next(iter(hard))
     name = target.removesuffix(".md").rsplit("/", 1)[-1]
     why = hard[target] if hard and not lost else "you said this was not clear"
     state = "lost" if lost else "blind" if "were sure" in why else "missed"
@@ -102,10 +108,37 @@ _HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.M)
 _LINK_RE = re.compile(r"\[\[")
 
 
+def shape_forms(text: str) -> list[str]:
+    """The forms a note's shape allows, in the order they help: slides for a
+    lesson's outline (a deck already), a table for items to compare, a
+    diagram for numbered steps or formulas, a map for many links, cards for
+    several points, slides for several sections."""
+    has_items = len(_TABLE_ROW_RE.findall(text)) >= 3 or len(_LIST_ITEM_RE.findall(text)) >= 4
+    spine = bool(re.search(r"^section:\s*['\"]?\(outline\)", text, re.M))
+    fits = [
+        (spine, "slides"),
+        (has_items, "table"),
+        (len(_STEP_RE.findall(text)) >= 3 or text.count("$$") >= 2, "diagram"),
+        (len(_LINK_RE.findall(text)) >= 5, "map"),
+        (len(_LIST_ITEM_RE.findall(text)) >= 3 or text.count("[^") >= 3, "cards"),
+        (len(_HEADING_RE.findall(text)) >= 3, "slides"),
+    ]
+    return list(dict.fromkeys(form for ok, form in fits if ok))
+
+
+_FORM_COMMANDS = {
+    "slides": ("slides", '/slides "{name}"'),
+    "table": ("as a table", '/schematize "{name}"'),
+    "diagram": ("as a diagram", '/diagram "{name}"'),
+    "map": ("map it", '/map "{name}"'),
+    "cards": ("flashcards", '/flashcards "{name}" --n=8'),
+}
+
+
 def aids(path: str, name: str, state: str = "missed", text: str | None = None) -> list[dict]:
     """The ways to work on a hard note, at most AIDS_SHOWN: practice first,
     then the aid the reader's state calls for, then the forms the note's shape
-    allows.
+    allows (`shape_forms`).
 
     From the research report difficulty-detection-and-study-aids (section 8),
     by state: a reader who declared it unclear ("lost") or missed it ("missed")
@@ -114,9 +147,7 @@ def aids(path: str, name: str, state: str = "missed", text: str | None = None) -
     contrast to fill (a table), not another explanation. Practice leads in
     every case, since every aid must end in a retrieval check and practice has
     the strongest evidence (d = 0.74; retrieval beat concept mapping,
-    d = 1.50). The note's shape then picks among a diagram (numbered steps or
-    formulas), a map (many links), cards (several points) and slides (several
-    sections, or a lesson's outline). Every form stays one command away."""
+    d = 1.50). Every form stays one command away."""
     if text is None:
         from silica.kernel.learn.items import read_note
 
@@ -125,20 +156,9 @@ def aids(path: str, name: str, state: str = "missed", text: str | None = None) -
     explain = {"label": "explain it", "command": f'/explain "{name}"'}
     table = {"label": "as a table", "command": f'/schematize "{name}"'}
     shown = [practise] + ([table, explain] if state == "blind" else [explain])
-    has_items = len(_TABLE_ROW_RE.findall(text)) >= 3 or len(_LIST_ITEM_RE.findall(text)) >= 4
-    spine = bool(re.search(r"^section:\s*['\"]?\(outline\)", text, re.M))
-    shape = [
-        # A lesson's outline is a deck already: its slides come first.
-        (spine, {"label": "slides", "command": f'/slides "{name}"'}),
-        (has_items, table),
-        (len(_STEP_RE.findall(text)) >= 3 or text.count("$$") >= 2,
-         {"label": "as a diagram", "command": f'/diagram "{name}"'}),
-        (len(_LINK_RE.findall(text)) >= 5, {"label": "map it", "command": f'/map "{name}"'}),
-        (len(_LIST_ITEM_RE.findall(text)) >= 3 or text.count("[^") >= 3,
-         {"label": "flashcards", "command": f'/flashcards "{name}" --n=8'}),
-        (len(_HEADING_RE.findall(text)) >= 3, {"label": "slides", "command": f'/slides "{name}"'}),
-    ]
-    shown += [aid for fits, aid in shape if fits]
+    for form in shape_forms(text):
+        label, command = _FORM_COMMANDS[form]
+        shown.append({"label": label, "command": command.format(name=name)})
     if len(shown) < 3:
         # a note too short to show a shape: the two forms any note allows
         shown += [{"label": "as a diagram", "command": f'/diagram "{name}"'},
@@ -191,12 +211,21 @@ ESCALATE_MISSES = 3
 
 
 def mode() -> str:
-    """SILICA_STUDY_OFFER: "on" (default) shows the offer, "shadow" logs it
-    without showing it, "off" neither."""
+    """SILICA_STUDY_OFFER: "on" shows the offer and the escalated aid,
+    "shadow" logs them without showing them, "off" neither. Unset, a hosted
+    tenant runs in shadow and a laptop shows them: the research report's
+    first recommendation is to ship the rule in shadow, the pilot's students
+    are the readers it would reach unproven, and the owner's own vault is
+    where it is being tried. Reopen the hosted default once the hosted logs
+    hold 200 offers that would have fired, or the ASSISTments replay
+    (scripts/validate_study_offer.py) shows it firing before misses."""
     import os
 
-    value = (os.getenv("SILICA_STUDY_OFFER") or "on").strip().lower()
-    return value if value in ("on", "shadow", "off") else "on"
+    from silica.config import hosted
+
+    default = "shadow" if hosted() else "on"
+    value = (os.getenv("SILICA_STUDY_OFFER") or default).strip().lower()
+    return value if value in ("on", "shadow", "off") else default
 
 
 def _log_path():
@@ -298,13 +327,36 @@ def escalation(note: str, chat: str, text: str, history: list[str], entries: lis
     return ""
 
 
-def escalation_block(name: str, why: str) -> str:
+# The aid an escalated chat answer becomes, by the note's first shape: the
+# artifact the offer would have named, made in the answer instead of offered
+# (the goal of 2026-10-23: slides, maps, cards and tables to make a hard topic
+# digestible in the chat, not only on request).
+ESCALATE_FORMS = {
+    "slides": ("a short deck of it in its outline's order: 4 to 6 slides separated by lines holding only ---, "
+               "each a ## title and 2 to 4 bullets in the notes' own words"),
+    "table": "the items it compares as one Markdown table, one row each, in the note's own terms",
+    "diagram": "a worked example step by step in the note's own terms, then the mechanism as one Mermaid flowchart",
+    "map": ("one Mermaid flowchart (graph LR) from it to the notes it links, each edge labelled with the "
+            "relation in a few words, then two lines on the links that matter most"),
+    "cards": "5 flashcards as bullets of the form `question :: answer`, one point of the note each",
+}
+ESCALATE_DEFAULT = ("a worked example step by step in the note's own terms, then the mechanism as one small "
+                    "Markdown table or one Mermaid diagram")
+
+
+def escalation_block(name: str, why: str, text: str = "") -> str:
     """The instruction that makes the next answer the aid (the report's
-    "escalate" rung): worked, drawn, and ending on a retrieval question."""
-    return (f"[The reader is still struggling with [[{name}]] ({why}). Make this answer the aid: a worked "
-            f"example step by step in the note's own terms, then the mechanism as one small Markdown table "
-            f"or one Mermaid diagram, and end with one question the reader can answer only by using it. "
-            f"Ground every step in the note.]")
+    "escalate" rung), in the form the note's shape calls for, ending on a
+    retrieval question."""
+    forms = shape_forms(text) if text else []
+    form = ESCALATE_FORMS[forms[0]] if forms else ESCALATE_DEFAULT
+    # "this answer", said twice: told only to make the answer the aid, the
+    # local 9B wrote the deck as a new note and answered with its link
+    # (2026-10-23), a write nobody asked for.
+    return (f"[The reader is still struggling with [[{name}]] ({why}). Make this answer the aid, written from "
+            f"the note: {form}. End with one question the reader can answer only by using it. Ground every "
+            f"step in the note. Write the aid in this answer, here in the chat; READ-ONLY: do not create, edit, "
+            f"patch, or move any note.]")
 
 
 # The escalate rung inside Learn, where the report puts it ("generate the aid as

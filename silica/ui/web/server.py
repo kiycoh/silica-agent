@@ -1050,8 +1050,13 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
     from silica.kernel import proposed_skills as ps
     from silica.kernel import user_memory
 
+    from silica.kernel.learn.offer import says_lost
+
     vault = CONFIG.vault_path or ""
-    if not vault or user_memory.incognito():
+    # "non ho capito la Lezione 14" said in three chats is a reader stuck, not
+    # a request to make reusable: it became the skill /non-ho-capito
+    # (2026-10-23). The study offer answers that message.
+    if not vault or user_memory.incognito() or says_lost(text):
         return None, None
     try:
         evidence = ps.detect(text, messages, vault, _narr.NARRATOR.sid)
@@ -1149,8 +1154,14 @@ def _escalation(text: str, messages: list[dict]) -> str:
         why = learn_offer.escalation(note, chat, text, history, entries())
         if not why:
             return ""
-        learn_offer._append({"chat": chat, "note": note, "escalated": True, "why": why})
-        return learn_offer.escalation_block(name, why)
+        # in shadow mode the record only: what would have fired, nothing shown
+        shown = learn_offer.mode() == "on"
+        learn_offer._append({"chat": chat, "note": note, "escalated": True, "why": why, "displayed": shown})
+        if not shown:
+            return ""
+        from silica.kernel.learn.items import read_note
+
+        return learn_offer.escalation_block(name, why, read_note(note))
     except Exception:
         # An escalation is an extra: a ledger that does not parse costs it,
         # never the turn.
@@ -1352,6 +1363,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         if worn is not None:
             text = worn[1]
         agent_msg = text
+        escalated = False   # the turn's answer is the aid itself (learn.offer.escalation)
         # /web comes first: it is neither direct nor a workflow expansion but an
         # agent turn with web-only tools. A usage error raises ValueError, which
         # the except below turns into the single error event.
@@ -1501,6 +1513,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             # (learn.offer.escalation), and an offer's command sent is recorded.
             if block := await asyncio.to_thread(_escalation, text, messages):
                 agent_msg += "\n\n" + block
+                escalated = True
             # This chat's conversions that ended since the agent last heard of
             # them: the history still says "still converting" (jobs.settled).
             if block := await asyncio.to_thread(jobs.settled, current_session_id):
@@ -1625,9 +1638,10 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # installed is offered as the next turn (ADR-0127 points 5 and 6).
         skill_note, offer = ((None, None) if stopped or web or not answer
                              else await asyncio.to_thread(_skill_after_turn, text, messages))
-        if offer is None and not (stopped or web or not answer):
+        if offer is None and not (stopped or web or not answer or escalated):
             # A note the reader keeps missing, or a message saying it was not
             # clear: a way to work on it, launched by the reader (learn.offer).
+            # Not under an answer that is already the aid.
             offer = await asyncio.to_thread(_study_offer, text, messages)
         # The lines under the answer (ADR-0094 point 8), stored on it before the
         # beat below so a reopened chat draws them too. A stopped turn has no

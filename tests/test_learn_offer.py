@@ -196,3 +196,72 @@ def test_the_rule_reads_a_public_log_of_real_students(tmp_path):
     assert r["silent"]["n"] == 3 and r["silent"]["miss_rate"] == round(2 / 3, 3)
     assert r["after_3_misses"]["n"] == 2 and r["after_3_misses"]["miss_rate"] == 0.5
     assert script.wilson(0, 0) is None and script.wilson(5, 10)[0] < 0.5 < script.wilson(5, 10)[1]
+
+
+def test_a_hosted_tenant_runs_the_rule_in_shadow_unless_told(monkeypatch):
+    """The report's first recommendation: shadow until the rule is checked on
+    the readers it reaches; the owner's laptop shows it."""
+    monkeypatch.delenv("SILICA_STUDY_OFFER", raising=False)
+    monkeypatch.delenv("SILICA_HOSTED", raising=False)
+    assert offer.mode() == "on"
+    monkeypatch.setenv("SILICA_HOSTED", "1")
+    assert offer.mode() == "shadow"
+    monkeypatch.setenv("SILICA_STUDY_OFFER", "on")
+    assert offer.mode() == "on"
+
+
+SPINE = "---\nsection: (outline)\n---\n# Lezione 14\n\n## Margini\n- [[Margine funzionale]]\n## Slack\n- [[Variabili slack]]\n"
+
+
+def test_the_escalated_aid_takes_the_form_the_note_calls_for():
+    assert "4 to 6 slides" in offer.escalation_block("Lezione 14", "still unclear after an answer", SPINE)
+    table = "# Confronto\n\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n"
+    assert "one Markdown table, one row each" in offer.escalation_block("Confronto", "3 misses in a row", table)
+    assert "worked example" in offer.escalation_block("Breve", "3 misses in a row", "# Breve\n\nUna riga.\n")
+
+
+def test_the_chat_escalation_in_shadow_logs_and_adds_nothing(monkeypatch, tmp_path):
+    import json
+
+    import silica.kernel.recall.mindmap as mm
+    import silica.ui.web.server as srv
+    from silica.kernel.learn import items
+
+    monkeypatch.setattr(offer, "_log_path", lambda: tmp_path / "offers.jsonl")
+    monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
+    monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Lezione 14.md": "Lezione 14"}, None))
+    monkeypatch.setattr("silica.kernel.report.quiz.entries", lambda: [])
+    monkeypatch.setattr(items, "read_note", lambda path: SPINE)
+    lost = [{"role": "user", "content": "non ho capito la Lezione 14"}]
+    monkeypatch.setenv("SILICA_STUDY_OFFER", "shadow")
+    assert srv._escalation("non ho ancora capito la Lezione 14", lost) == ""
+    rec = json.loads((tmp_path / "offers.jsonl").read_text().splitlines()[-1])
+    assert rec["escalated"] and rec["displayed"] is False and rec["why"] == "still unclear after an answer"
+    monkeypatch.setenv("SILICA_STUDY_OFFER", "on")
+    block = srv._escalation("non ho ancora capito la Lezione 14", lost)
+    assert "4 to 6 slides" in block and "READ-ONLY" in block
+
+
+def test_still_not_following_is_read_as_lost():
+    for said in ("non ho ancora capito la Lezione 14", "continuo a non capire il duale", "non mi è ancora chiaro",
+                 "non mi e' del tutto chiaro", "I still don't get it", "I'm still lost"):
+        assert offer.says_lost(said), said
+    assert not offer.says_lost("ho capito, grazie") and not offer.says_lost("capisco il kernel trick")
+
+
+def test_said_unclear_the_offer_is_about_the_note_named_not_one_missed_elsewhere():
+    led = [_e("ML/Slack.md", f"2026-10-2{i}", False) for i in range(3)]
+    o = offer.study_offer("non ho capito la Lezione 14", ["ML/Lezione 14.md", "ML/Slack.md"], led)
+    assert o["note"] == "ML/Lezione 14.md" and o["text"] == "you said this was not clear"
+    o = offer.study_offer("e il duale?", ["ML/Lezione 14.md", "ML/Slack.md"], led)
+    assert o["note"] == "ML/Slack.md"
+
+
+def test_saying_it_was_unclear_never_becomes_a_skill(monkeypatch, tmp_path):
+    import silica.ui.web.server as srv
+    from silica.kernel import proposed_skills as ps
+
+    monkeypatch.setattr(srv.CONFIG, "vault_path", str(tmp_path))
+    monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
+    monkeypatch.setattr(ps, "detect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked")))
+    assert srv._skill_after_turn("non ho capito la Lezione 14", []) == (None, None)
