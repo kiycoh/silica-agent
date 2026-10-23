@@ -21,24 +21,56 @@ import re
 # room for an inflection and none for an invented claim.
 GROUNDED_SHARE = 0.5
 
-_CARD_RE = re.compile(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?P<q>.+?)\s*::\s*(?P<a>.+?)\s*\[\[(?P<note>[^\]|#]+)", re.M)
+# `Question :: Answer [[Note]]`, and the spelling the local 9B used as often:
+# "Question: ... Answer: ... [[Note]]" (2026-10-23), in either language.
+_CARD_RE = re.compile(
+    r"^\s*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*)?(?:question|domanda)?:?(?:\*\*)?\s*(?P<q>.+?)\s*"
+    r"(?:::|(?:\*\*)?\b(?:answer|risposta)\b:?(?:\*\*)?)\s*(?P<a>.+?)\s*\[\[(?P<note>[^\]|#]+)",
+    re.M | re.I)
 _BULLET_RE = re.compile(r"^\s*[-*+]\s+(?P<b>.+)$", re.M)
 _LINK_RE = re.compile(r"\[\[([^\]|#]+)")
 _WORD_RE = re.compile(r"[^\W\d_]{4,}")
 _SPACE_RE = re.compile(r"\s+")
 
 
+_MATH_RE = re.compile(r"\$\$?(.+?)\$\$?", re.S)
+
+
 def _words(text: str) -> set[str]:
-    return {w.casefold()[:6] for w in _WORD_RE.findall(_LINK_RE.sub(lambda m: m.group(1), text))}
+    from silica.kernel.text.language import stopwords_for
+
+    stop = stopwords_for("italian") | stopwords_for("english")
+    text = _MATH_RE.sub(" ", _LINK_RE.sub(lambda m: m.group(1), text))
+    return {w.casefold()[:6] for w in _WORD_RE.findall(text) if w.casefold() not in stop}
+
+
+_LATEX_DROP_RE = re.compile(r"\\(?:left|right|big|Big|bigg|Bigg)\b|\\[,;!:]|[{}\s]")
+_LATEX_STYLE_RE = re.compile(r"\\(?:boldsymbol|mathbf|mathrm|mathit|pmb|bm|operatorname)\b")
+_LATEX_SAME = {"≤": "\\leq", "≥": "\\geq", "\\le ": "\\leq ", "\\ge ": "\\geq ", "−": "-", "·": "\\cdot"}
+
+
+def _latex_key(text: str) -> str:
+    """A formula as the check compares it: the same LaTeX written two ways
+    reads the same. The note wrote `\\xi_{i} = \\max \\left(0, ...\\right)` and
+    the card `\\xi_i = \\max(0, ...)` (2026-10-23)."""
+    for a, b in _LATEX_SAME.items():
+        text = text.replace(a, b)
+    return _LATEX_DROP_RE.sub("", _LATEX_STYLE_RE.sub("", text))
 
 
 def _grounded(item: str, note_text: str) -> bool:
-    """The item's content words are in the note, at GROUNDED_SHARE; an item
-    with none (a formula) is grounded when the note holds it, spaces aside."""
+    """The item's content words are in the note, at GROUNDED_SHARE, and each
+    formula it writes is in the note, spaces aside. A formula answer led by a
+    function word ("Quando $y_i f(x) > \\gamma$") is judged by its formula,
+    not by "quando"."""
+    held_math = _latex_key(note_text)
+    formulas = _MATH_RE.findall(item)
+    if any(_latex_key(f) not in held_math for f in formulas):
+        return False
     words = _words(item)
-    if not words:
-        squeeze = _SPACE_RE.sub("", item)
-        return bool(squeeze) and squeeze in _SPACE_RE.sub("", note_text)
+    # a held formula with a word or two around it ("Quando $...$") is the formula
+    if not words or (formulas and len(words) <= 2):
+        return True
     held = _words(note_text)
     return sum(1 for w in words if w in held) >= GROUNDED_SHARE * len(words)
 

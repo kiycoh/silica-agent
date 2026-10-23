@@ -16,7 +16,7 @@ def test_flashcards_ground_every_card_in_a_checked_point(tmp_vault, monkeypatch)
     prompt = cli._sc_flashcards(["Dropout", "--n=5"])
     assert prompt.startswith("Write 5 flashcards from [[Dropout]].")
     assert "- [[Dropout]]: Il dropout approssima il bagging di sottoreti." in prompt
-    assert "`Question :: Answer`" in prompt and "READ-ONLY" in prompt
+    assert "(` :: `)" in prompt and "no labels such as Question or Answer" in prompt and "READ-ONLY" in prompt
     saved = cli._sc_flashcards(["Dropout", "--save=ML/Dropout cards.md"])
     assert "`ML/Dropout cards.md` with silica_write_note" in saved and "#flashcards" in saved
     assert cli._sc_flashcards([]).startswith("Error: /flashcards needs a note or a folder")

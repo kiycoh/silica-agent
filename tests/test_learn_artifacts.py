@@ -27,3 +27,25 @@ def test_slide_points_are_checked_against_the_slide_s_note(tmp_vault):
     assert artifacts.ungrounded_bullets(deck) == (1, 3)
     assert artifacts.grounding_notes('/slides "Lezione 13"', deck) == [
         {"kind": "grounding", "text": "slide points not found in their note: 1 of 3"}]
+
+
+
+def test_a_card_written_with_labels_is_read_too(tmp_vault):
+    tmp_vault.note("ML/Slack.md", "# Slack\n\nLe variabili slack misurano la violazione del margine.\n")
+    answer = ("Question: Cosa misurano? Answer: La violazione del margine [[Slack]]\n"
+              "Domanda: Chi le ha inventate? Risposta: Vapnik nel 1963 [[Slack]]\n")
+    assert artifacts.ungrounded_cards(answer) == [2]
+
+
+
+def test_a_formula_answer_is_judged_by_its_formula():
+    note = "# Slack\n\nUn punto e' esterno al margine quando $y_i f(x_i) > \\gamma$.\n"
+    assert artifacts._grounded("Quando $y_i f(x_i) > \\gamma$", note)
+    assert not artifacts._grounded("Quando $y_i f(x_i) < 0$", note)
+
+
+
+def test_the_same_formula_written_two_ways_is_held():
+    note = "$$\\xi_{i} = \\max \\left(0, \\gamma - y_{i} f \\left(\\boldsymbol{x}^{(i)}\\right)\\right)$$"
+    assert artifacts._grounded("$\\xi_i = \\max(0, \\gamma - y_i f(x^{(i)}))$", note)
+    assert not artifacts._grounded("$\\xi_i = \\max(0, 1 - y_i f(x^{(i)}))$", note)

@@ -4066,7 +4066,8 @@ def _sc_flashcards(args: list[str], **_) -> str | None:
     return (
         f"Write {n} flashcards from {', '.join(f'[[{t}]]' for t in titles) or ', '.join(targets)}.\n"
         f"{ground}\n"
-        f"Each card is one line, `Question :: Answer`, then a space and its source note as a [[wikilink]]. "
+        f"Each card is one line: the question, then two colons between spaces (` :: `), then the answer, then "
+        f"a space and its source note as a [[wikilink]]; no labels such as Question or Answer. "
         f"One point per card; the answer short (a term, a formula, a number, a phrase), in the notes' own "
         f"words; no yes/no question and no card the notes do not support. Mix definitions, conditions, "
         f"formulas and contrasts.\n"
