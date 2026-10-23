@@ -624,6 +624,25 @@ def test_verbatim_bodies_partition_the_source_with_no_bodies_or_gap_call(monkeyp
     assert "Si incorporano i vincoli" in excerpt["Errore del percettrone online"]
 
 
+def test_a_vault_that_translates_has_the_bodies_written_not_looked_up(tmp_vault, monkeypatch):
+    """An English textbook in an Italian vault: a looked-up body stayed English
+    under an Italian title, so translation intent brings the bodies stage back."""
+    from silica.kernel.vault_manifest import reset_manifest_cache
+
+    monkeypatch.setenv("SILICA_OUTLINE_BODIES", "verbatim")
+    tmp_vault.note("vault.yaml", "conventions:\n  language: Italian\n")
+    reset_manifest_cache()
+    english = "## Dropout\n\nDropout trains the ensemble of all the sub-networks that can be formed.\n"
+    assert ol.translates(english) is True
+    assert ol.translates("## Dropout\n\nIl dropout addestra l'insieme delle sottoreti che si possono formare.\n") is False
+    tmp_vault.note("vault.yaml", "conventions:\n  language: it\n")
+    reset_manifest_cache()
+    assert ol.translates("## Dropout\n\nIl dropout addestra l'insieme delle sottoreti.\n") is False
+    tmp_vault.note("vault.yaml", "write_dir: \"\"\n")
+    reset_manifest_cache()
+    assert ol.translates(english) is False  # no declared language: follow the source
+
+
 def test_heading_for_takes_a_paraphrase_but_not_a_generic_heading():
     stems = {ol._sec_key(h): ol._stems(h) for h in ("Errore adattivo:", "Esempio:", "Learning rate adattivo")}
     assert ol._heading_for("Funzione di errore adattiva", stems) == ol._sec_key("Errore adattivo:")

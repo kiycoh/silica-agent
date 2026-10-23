@@ -1064,7 +1064,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     # Sized only for the real worker: an injected `ask` is a test or a probe.
     workers = BODIES_WORKERS if ask else bodies_workers_for(src)
     ask = ask or _default_ask
-    verbatim = verbatim_bodies()
+    verbatim = verbatim_bodies() and not translates(src)
     if outline is None:
         outline = skeleton(src, language=language, ask=ask, cover=not verbatim)
     lead = ""
@@ -1169,6 +1169,22 @@ def verbatim_bodies() -> bool:
     on a 541-page book, $0.1198 to $0.0303. The model-written bodies also
     left 15% of the lectures' prose out of the notes, the lookup 3%."""
     return os.getenv("SILICA_OUTLINE_BODIES", "").strip().lower() != "llm"
+
+
+def translates(src: str) -> bool:
+    """The vault declares a language the source is not written in. A looked-up
+    body would then keep the source's language under a title and a claim in
+    the vault's: an English textbook nucleated into an Italian course vault
+    (2026-10-23). There the bodies stage writes the body, translating."""
+    from silica.kernel.text import language as lang_mod
+    from silica.kernel.vault_manifest import get_active_manifest
+
+    declared = (get_active_manifest().conventions.language or "").strip().casefold()
+    if not declared:
+        return False
+    found = lang_mod.detect(src[:20000])
+    # "Italian", "italiano" and "it" all name the language detect calls "italian"
+    return declared[:4] not in (found[:4], lang_mod.SNOWBALL_TO_ISO.get(found, "").casefold())
 
 
 # Stage A names a section that spans two headings as "A / B" or "A; B"
