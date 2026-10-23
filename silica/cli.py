@@ -4070,8 +4070,11 @@ def _sc_flashcards(args: list[str], **_) -> str | None:
         f"One point per card; the answer short (a term, a formula, a number, a phrase), in the notes' own "
         f"words; no yes/no question and no card the notes do not support. Mix definitions, conditions, "
         f"formulas and contrasts.\n"
-        f"Answer in chat with a one-line title and the cards as a list. {out}\n"
-        f"Practice that counts toward the reader's plan is /quiz or a Learn session; say so in one line at the end."
+        f"Answer in chat with a one-line title and the cards as a Markdown bullet list, one card per bullet, "
+        f"never inside a code block (a block hides the formulas and runs off the page). {out}\n"
+        # Asked to "say" where graded practice is, the local 9B named a plan that
+        # does not exist ("Visione_artificiale_13", 2026-10-23): a line to copy.
+        f'End with this line, unchanged: "Graded practice that counts toward your plan: /quiz or a Learn session."'
     )
 
 
