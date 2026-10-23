@@ -3133,3 +3133,24 @@ def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
     assert [row.count("<td") for row in body.split("</tr>")[:2]] == [2, 2]
     assert "&#x0007C;" in body and "&#x02016;" in body
     assert server._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
+
+
+def test_a_plan_request_ends_on_the_calendar_learn_computed(client, monkeypatch):
+    """The calendar is appended by code under the answer and stored with it:
+    told to copy it, the 9B merged days (2026-10-23)."""
+    _tc, server = client
+
+    def fake_run_agent(messages, model, tool_progress_callback=None, cancel_token=None, **kw):
+        assert "[block]" in messages[-1]["content"]
+        messages.append({"role": "assistant", "content": "Ecco come studiare."})
+        return "Ecco come studiare."
+
+    monkeypatch.setattr(server, "run_agent", fake_run_agent)
+    monkeypatch.setattr(server, "_plan_context", lambda text: ("[block]", "| Day | Step | Notes |\n|---|---|---|\n| 2026-10-23 | Basi |  |"))
+
+    async def collect():
+        return [item async for item in server.run_turn("piano di studio fino all'esame")]
+
+    done = asyncio.run(collect())[-1]
+    assert done["answer"].startswith("Ecco come studiare.") and done["answer"].endswith("| 2026-10-23 | Basi |  |")
+    assert server.messages[-1]["content"] == done["answer"]
