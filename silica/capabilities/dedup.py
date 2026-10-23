@@ -334,14 +334,20 @@ def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
     must not be reported failed over a bookkeeping key.
     """
     loser_path = ctx.get("loser_path")
-    if not loser_path or loser_path == winner_path:
+    # Compared as notes, not strings: the index keys a note without ".md",
+    # and a course run marked three notes superseded by themselves (Zero
+    # padding, 2026-10-23), the only copy hidden from stage B and from Learn.
+    if not loser_path or _note_key(loser_path) == _note_key(winner_path):
         return
     try:
         from silica.agent.bounds import dedup_supersede_bounds
         from silica.kernel.write.contested import mark_superseded_by
 
         prior = read_or_skip(loser_path)[0] or ""
-        marked = mark_superseded_by(prior, winner_path)
+        # A winner of the same name in another folder ("Distribuzione normale"
+        # under Statistica) is linked by path, or the pointer names the loser.
+        same_name = _note_key(os.path.basename(loser_path)) == _note_key(os.path.basename(winner_path))
+        marked = mark_superseded_by(prior, winner_path, full=same_name)
         if marked == prior:
             return
         commit_ops(
@@ -359,6 +365,10 @@ def _mark_merge_loser(ctx: dict, winner_path: str) -> None:
         )
     except Exception as e:
         logger.debug("dedup: superseded_by mark failed (non-fatal): %s", e)
+
+
+def _note_key(path: str) -> str:
+    return path.removesuffix(".md").casefold()
 
 
 def _record_absorbed_alias(ctx: dict, winner_path: str, hub: str | None) -> None:

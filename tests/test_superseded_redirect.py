@@ -157,3 +157,26 @@ def test_filename_outranks_alias_on_the_same_key(tmp_vault):
         [_write_op("Percettrone (1958)", "Corso/Percettrone (1958).md")], [], "Corso")
     op = _only(validated, "Percettrone (1958)")
     assert op.op == OpType.patch and op.path == LOSER
+
+
+def test_a_note_is_never_marked_superseded_by_itself_and_a_namesake_is_linked_by_path(tmp_vault):
+    """A course run marked "Zero padding" superseded by "Zero padding": the
+    index keys a note without ".md" and the guard compared strings. And
+    "Distribuzione normale" lost to its namesake under Statistica, so the
+    pointer by name read as the loser itself (2026-10-23)."""
+    from silica.capabilities.dedup import _mark_merge_loser
+    from silica.kernel.write.contested import follow_superseded
+
+    tmp_vault.note("ML/Zero padding.md", "---\nAI: true\n---\n\n# Zero padding\n\ncorpo\n")
+    with patch("silica.capabilities.dedup.commit_ops") as commit:
+        _mark_merge_loser({"loser_path": "ML/Zero padding.md"}, "ML/zero padding")
+    commit.assert_not_called()
+
+    tmp_vault.note("Stat/Distribuzione normale.md", "---\nAI: partial\n---\n\n# Gauss\n\ncorpo\n")
+    tmp_vault.note("ML/Distribuzione normale.md", "---\nAI: true\n---\n\n# Gauss\n\ncorpo\n")
+    with patch("silica.capabilities.dedup.commit_ops") as commit:
+        _mark_merge_loser({"loser_path": "ML/Distribuzione normale.md"}, "Stat/Distribuzione normale.md")
+    marked = commit.call_args.args[0][0].content
+    assert "superseded_by: '[[Stat/Distribuzione normale]]'" in marked
+    tmp_vault.note("ML/Distribuzione normale.md", marked)
+    assert follow_superseded("ML/Distribuzione normale.md") == "Stat/Distribuzione normale.md"
