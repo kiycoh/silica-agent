@@ -87,13 +87,54 @@ def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) 
     target = next(iter(hard), notes[0])
     name = target.removesuffix(".md").rsplit("/", 1)[-1]
     why = hard[target] if hard and not lost else "you said this was not clear"
-    # Ways to make the topic smaller, each a command the reader already has:
-    # recall, the mechanism drawn, the note's neighbourhood mapped, cards.
-    return {"kind": "study", "text": why, "note": target,
-            "commands": [{"label": "practise it", "command": f'/quiz "{target}" --n=3'},
-                         {"label": "see it as a diagram", "command": f'/diagram "{name}"'},
-                         {"label": "map it", "command": f'/map "{name}"'},
-                         {"label": "make flashcards", "command": f'/flashcards "{name}" --n=8'}]}
+    return {"kind": "study", "text": why, "note": target, "commands": aids(target, name, lost)}
+
+
+AIDS_SHOWN = 5   # practice plus four forms: one short line under the answer
+
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\S", re.M)
+_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$", re.M)
+_STEP_RE = re.compile(r"^\s*\d+[.)]\s+\S", re.M)
+_HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.M)
+_LINK_RE = re.compile(r"\[\[")
+
+
+def aids(path: str, name: str, lost: bool = False, text: str | None = None) -> list[dict]:
+    """The ways to work on a hard note, practice first, then the forms its
+    shape asks for, at most AIDS_SHOWN.
+
+    Practice leads because it is the one with the strongest evidence
+    (practice testing d = 0.74, and retrieval beat concept mapping, d = 1.50;
+    research reports difficulty-detection-and-study-aids and
+    course-corpus-to-knowledge-graph, 2026-10-23). A reader who said it was not
+    clear is offered the explanation (/explain, a report) next. Then the note's
+    shape picks among the others: items to compare make a table (/schematize),
+    numbered steps or formulas a diagram, many links a map, several points
+    cards, several sections slides. Every form stays one command away whether
+    shown here or not."""
+    if text is None:
+        from silica.kernel.learn.items import read_note
+
+        text = read_note(path)
+    shown = [{"label": "practise it", "command": f'/quiz "{path}" --n=3'}]
+    if lost:
+        shown.append({"label": "explain it", "command": f'/explain "{name}"'})
+    shape = [
+        (len(_TABLE_ROW_RE.findall(text)) >= 3 or len(_LIST_ITEM_RE.findall(text)) >= 4,
+         {"label": "as a table", "command": f'/schematize "{name}"'}),
+        (len(_STEP_RE.findall(text)) >= 3 or text.count("$$") >= 2,
+         {"label": "as a diagram", "command": f'/diagram "{name}"'}),
+        (len(_LINK_RE.findall(text)) >= 5, {"label": "map it", "command": f'/map "{name}"'}),
+        (len(_LIST_ITEM_RE.findall(text)) >= 3 or text.count("[^") >= 3,
+         {"label": "flashcards", "command": f'/flashcards "{name}" --n=8'}),
+        (len(_HEADING_RE.findall(text)) >= 3, {"label": "slides", "command": f'/slides "{name}"'}),
+    ]
+    shown += [aid for fits, aid in shape if fits]
+    # a note too short to show a shape still gets the two the reader can always use
+    if len(shown) < 3:
+        shown += [{"label": "as a diagram", "command": f'/diagram "{name}"'},
+                  {"label": "flashcards", "command": f'/flashcards "{name}" --n=8'}]
+    return list({a["label"]: a for a in shown}.values())[:AIDS_SHOWN]
 
 
 # The reader asking the chat for a study plan. The chat writes one into its

@@ -22,7 +22,8 @@ def test_two_misses_of_the_last_three_offer_practice_on_that_note():
     o = offer.study_offer("e il duale?", reads, entries=led)
     assert o["kind"] == "study" and o["note"] == "ML/SVM.md"
     assert o["text"] == "you missed SVM in recent practice"
-    assert [c["command"] for c in o["commands"]] == ['/quiz "ML/SVM.md" --n=3', '/diagram "SVM"', '/map "SVM"',
+    # a note with no shape to read (none on disk here): practice, a diagram, cards
+    assert [c["command"] for c in o["commands"]] == ['/quiz "ML/SVM.md" --n=3', '/diagram "SVM"',
                                                      '/flashcards "SVM" --n=8']
 
 
@@ -100,3 +101,16 @@ def test_learns_confidence_marks_a_struggle_too():
     assert offer.struggles(["ML/SVM.md"], unsure_right) == {"ML/SVM.md": "you got SVM right but were unsure"}
     calm = [_e("ML/SVM.md", "2026-10-21", True, conf=70, grader="model")]
     assert offer.struggles(["ML/SVM.md"], calm) == {}
+
+
+
+def test_the_aids_follow_the_notes_shape():
+    """Practice first, the explanation for a reader who said it was not clear,
+    then what the note's shape asks for: a table, a diagram, a map, cards, slides."""
+    table = "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n"
+    labels = lambda **kw: [a["label"] for a in offer.aids("ML/X.md", "X", **kw)]
+    assert labels(text=table, lost=True) == ["practise it", "explain it", "as a table"]
+    linked = " ".join(f"[[N{i}]]" for i in range(6)) + "\n## A\n## B\n## C\n"
+    assert labels(text=linked) == ["practise it", "map it", "slides"]
+    steps = "1. uno\n2. due\n3. tre\n$$x$$ $$y$$\n"
+    assert "as a diagram" in labels(text=steps) and len(labels(text=table + linked + steps, lost=True)) == offer.AIDS_SHOWN
