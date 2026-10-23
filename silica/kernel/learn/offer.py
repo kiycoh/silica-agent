@@ -40,13 +40,15 @@ def says_lost(text: str) -> bool:
 def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
     """{note: why} for the notes among `paths` whose last answers say the
     reader struggles: MISSES wrong of the last RECENT, the latest answered by
-    being told, or the latest a miss Learn's confidence marks as a blind spot
-    (wrong while sure, mastery.BLIND_SPOT_CONF). Confidence is read only once
-    the ledger holds mastery.CALIBRATION_MIN eligible answers, and a right
-    answer given unsure triggers nothing, the scheduler brings it back: the
-    rule of the research report difficulty-detection-and-study-aids, section 8
-    (an earlier version of this offered help for those, 2026-10-23)."""
-    from silica.kernel.learn.mastery import BLIND_SPOT_CONF, CALIBRATION_MIN, eligible
+    being told, or the latest marked by Learn's confidence: wrong while sure
+    (mastery.BLIND_SPOT_CONF) or right while unsure (mastery.FRAGILE_CONF).
+    Confidence is read only once the ledger holds mastery.CALIBRATION_MIN
+    eligible answers (research report difficulty-detection-and-study-aids,
+    section 8). The report left a right answer given unsure to the scheduler;
+    on 4,918 real students (Eedi NeurIPS 2020) the next answer after one was
+    wrong 43.6% of the time, after a confident miss 40.9%, after silence
+    36.6%, so it counts (the owner's call, 2026-10-23)."""
+    from silica.kernel.learn.mastery import BLIND_SPOT_CONF, CALIBRATION_MIN, FRAGILE_CONF, eligible
     from silica.kernel.report.quiz import key
 
     calibrated = sum(1 for e in entries if eligible(e)) >= CALIBRATION_MIN
@@ -62,9 +64,11 @@ def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
         last = evs[-1]
         if sum(1 for e in evs if not e.get("correct")) >= MISSES or last.get("told"):
             out[p] = f"you missed {name} in recent practice"
-        elif (calibrated and eligible(last) and last.get("conf", 0) >= BLIND_SPOT_CONF
-              and not last.get("correct")):
-            out[p] = f"you were sure about {name} and missed it"
+        elif calibrated and eligible(last):
+            if not last.get("correct") and last["conf"] >= BLIND_SPOT_CONF:
+                out[p] = f"you were sure about {name} and missed it"
+            elif last.get("correct") and last["conf"] <= FRAGILE_CONF:
+                out[p] = f"you got {name} right but were unsure"
     return out
 
 
@@ -380,18 +384,13 @@ def escalation_block(name: str, why: str, text: str = "") -> str:
 # writes the aid from the note's checked points. Reading it is never an
 # answer: credit comes from the next unassisted one (recommendation 5).
 AID_MAX_TOKENS = 900   # 6 steps or a 4-row table plus a question is about 400 tokens; formulas take the rest
-AID_FORMS = {
-    "worked": ("a worked example in 3 to 6 numbered steps, each one line in the note's own terms, that reaches "
-               "what the note supports"),
-    # a confident miss or a recorded misconception gets a contrast, not an
-    # explanation (report section 8; comparing cases, Alfieri 2013, d = 0.50);
-    # the blank keeps it an attempt
-    # the blank's answer nowhere else in the table: the first table the 9B
-    # wrote put it in row 1, so the question was answered by copying (2026-10-23)
-    "contrast": ("one Markdown table of 2 to 4 rows with three columns, the aspect, what you wrote (speak to the "
-                 "reader as you) and what the note says, headed in the language below; the last row's note cell "
-                 "left as ____ for the reader to fill, on an aspect whose answer appears nowhere else in the table"),
-}
+# The worked example, for every state: in ASSISTments' randomized experiments
+# an example beat the answer alone (d +0.24; +0.33 for students below the
+# average) while feedback aimed at the common wrong answer did not (d -0.05,
+# 7,046 students), so the contrast table a misconception used to get here is
+# gone (the owner's call, 2026-10-23); /schematize still makes one on request.
+AID_FORM = ("a worked example in 3 to 6 numbered steps, each one line in the note's own terms, that reaches "
+            "what the note supports")
 AID_PROMPT = """A reader has just missed a question on the note "{title}" ({why}). Write the next tutor move: {form}.
 
 Use only what these points of the note state, and name nothing they do not hold.
@@ -403,14 +402,6 @@ WHAT THE READER WROTE: {production}
 {prereq}End with one line in bold holding one question the reader can answer only by using what you wrote, and give no answer to it.
 Write all of it in {language}. No preamble and no heading; under 220 words; formulas in $...$ as the points write them.
 """
-
-
-def aid_form(path: str, misconception: str | None, entries: list[dict]) -> str:
-    """"contrast" for a recorded misconception or a calibrated confident miss,
-    "worked" otherwise."""
-    if misconception or "were sure" in struggles([path], entries).get(path, ""):
-        return "contrast"
-    return "worked"
 
 
 def weakest_prerequisite(path: str) -> str | None:
@@ -432,7 +423,7 @@ def weakest_prerequisite(path: str) -> str | None:
     return min(prereqs, key=held) if prereqs else None
 
 
-def learn_aid(item: dict, why: str, form: str, production: str, prereq: str | None) -> str:
+def learn_aid(item: dict, why: str, production: str, prereq: str | None) -> str:
     """The aid's Markdown, from the item's note and the reader's answer."""
     from pathlib import Path
 
@@ -449,30 +440,13 @@ def learn_aid(item: dict, why: str, form: str, production: str, prereq: str | No
     title = item.get("title") or Path(item["path"]).stem
     pre = (f"Before the last line, one line on how [[{Path(prereq).stem}]], the prerequisite the reader holds "
            f"least, is used here.\n" if prereq else "")
-    prompt = AID_PROMPT.format(title=title, why=why, form=AID_FORMS.get(form, AID_FORMS["worked"]),
+    prompt = AID_PROMPT.format(title=title, why=why, form=AID_FORM,
                                points="\n".join(f"- {p}" for p in points) or "- (none)", q=item.get("q", ""),
                                answer=item.get("answer") or item.get("claim", ""), production=production or "(none)",
                                prereq=pre, language=grade.reply_language(item.get("q", ""), production))
     resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=AID_MAX_TOKENS,
                     temperature=0.2, reasoning=False)
-    text = (resp.text or "").strip()
-    return _blank_last_cell(text) if form == "contrast" and "____" not in text else text
-
-
-def _blank_last_cell(md: str) -> str:
-    """The contrast table with its last row's note cell blanked, when the
-    model left none (the second table the 9B wrote, 2026-10-23): the blank is
-    what keeps the aid an attempt rather than a page to read."""
-    lines = md.splitlines()
-    rows = [i for i, line in enumerate(lines) if line.strip().startswith("|") and line.strip().endswith("|")]
-    if len(rows) < 3:  # a header, its rule and one row at least
-        return md
-    cells = lines[rows[-1]].strip()[1:-1].split("|")
-    if not cells[-1].strip() or set(cells[-1].strip()) <= set("-: "):
-        return md
-    cells[-1] = " ____ "
-    lines[rows[-1]] = "|" + "|".join(cells) + "|"
-    return "\n".join(lines)
+    return (resp.text or "").strip()
 
 
 def log_aid(note: str, session: str, why: str, displayed: bool) -> None:

@@ -95,10 +95,10 @@ def test_a_study_plan_asked_of_the_chat_points_at_learn():
 
 
 def test_a_confident_miss_counts_once_confidence_is_calibrated():
-    """The research report's rule (difficulty-detection-and-study-aids, 8):
-    confidence is read after CALIBRATION_MIN eligible answers; a miss while
-    sure is a blind spot and gets a contrast table first; right while unsure
-    gets nothing, the scheduler brings it back."""
+    """Confidence is read after CALIBRATION_MIN eligible answers (research
+    report difficulty-detection-and-study-aids, 8): a miss while sure is a
+    blind spot and gets a contrast table first; right while unsure counts too,
+    as it predicted the next miss on Eedi's students (43.6%, owner 2026-10-23)."""
     from silica.kernel.learn.mastery import CALIBRATION_MIN
 
     history = [_e(f"ML/N{i}.md", f"2026-10-0{i % 9 + 1}", True, conf=70, grader="model") for i in range(CALIBRATION_MIN)]
@@ -106,7 +106,10 @@ def test_a_confident_miss_counts_once_confidence_is_calibrated():
     assert offer.struggles(["ML/SVM.md"], sure_wrong) == {}                     # not calibrated yet
     assert offer.struggles(["ML/SVM.md"], history + sure_wrong) == {"ML/SVM.md": "you were sure about SVM and missed it"}
     unsure_right = [_e("ML/SVM.md", "2026-10-21", True, conf=25, grader="model")]
-    assert offer.struggles(["ML/SVM.md"], history + unsure_right) == {}
+    assert offer.struggles(["ML/SVM.md"], history + unsure_right) == {"ML/SVM.md": "you got SVM right but were unsure"}
+    assert offer.struggles(["ML/SVM.md"], unsure_right) == {}                    # not calibrated yet
+    sure_right = [_e("ML/SVM.md", "2026-10-21", True, conf=90, grader="model")]
+    assert offer.struggles(["ML/SVM.md"], history + sure_right) == {}
     o = offer.study_offer("e il duale?", ["ML/SVM.md"], entries=history + sure_wrong)
     assert [c["label"] for c in o["commands"]][:3] == ["practise it", "as a table", "explain it"]
 
@@ -276,3 +279,51 @@ def test_the_shape_is_read_on_the_body_not_the_frontmatter_or_the_links():
     assert offer.shape_forms(adagrad)[0] == "diagram"
     hub = "# Hub\n\nVedi [[A]] e [[B]].\n## Relations\n- [[C]]\n- [[D]]\n- [[E]]\n- [[F]]\n"
     assert offer.shape_forms(hub) == ["map"]
+
+
+def _validate_script():
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "validate_study_offer", Path(__file__).resolve().parent.parent / "scripts" / "validate_study_offer.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    return script
+
+
+def test_the_confidence_branch_reads_a_log_with_confidence(tmp_path):
+    """--eedi: calibration over the student's whole ledger, then a confident
+    miss fires alone; a right answer given sure is counted apart."""
+    script = _validate_script()
+    meta, train = tmp_path / "data" / "metadata", tmp_path / "data" / "train_data"
+    meta.mkdir(parents=True)
+    train.mkdir(parents=True)
+    (meta / "subject_metadata.csv").write_text("SubjectId,Name,ParentId,Level\n3,Maths,NULL,0\n10,Algebra,3,3\n")
+    (meta / "question_metadata_task_3_4.csv").write_text('QuestionId,SubjectId\n1,"[3, 10]"\n')
+    answers = [(i, True, 75.0) for i in range(1, 12)] + [(12, False, 100.0), (13, False, "")]
+    (meta / "answer_metadata_task_3_4.csv").write_text(
+        "AnswerId,DateAnswered,Confidence,GroupId,QuizId,SchemeOfWorkId\n"
+        + "".join(f"{a},2020-01-01 10:{a:02d}:00.000,{c},1,1,1\n" for a, _ok, c in answers))
+    (train / "train_task_3_4.csv").write_text(
+        "QuestionId,UserId,AnswerId,IsCorrect,CorrectAnswer,AnswerValue\n"
+        + "".join(f"1,7,{a},{int(ok)},1,1\n" for a, ok, _c in answers))
+    r = script.eedi(str(tmp_path))
+    assert r["students"] == 1 and r["answers"] == 13 and r["with_confidence"] == 12
+    assert r["misses_fired"]["n"] == 0 and r["silent"]["n"] == 12
+    assert r["blind_only"] == {"n": 1, "miss_rate": 1.0, "ci95": script.wilson(1, 1)}
+    assert r["sure_right"]["n"] == 11 and r["sure_right"]["miss_rate"] == round(1 / 11, 3)
+
+
+def test_an_aid_s_effect_is_read_off_its_randomized_experiments(tmp_path):
+    script = _validate_script()
+    rows = ["experiment_id,independent_measure_pair,condition,normalized_student_learning,student_prior_average_correctness"]
+    rows += [f"E1,Answer Only vs. Hint,0,{y},0.5" for y in (0, 0, 1, 1)]
+    rows += [f"E1,Answer Only vs. Hint,1,{y},0.5" for y in (1, 1, 2, 2)]
+    rows += ["E2,No Choice vs. Choice,1,9,0.5"]
+    path = tmp_path / "exp.csv"
+    path.write_text("\n".join(rows) + "\n")
+    r = script.experiments(str(path))
+    assert list(r) == ["Answer Only vs. Hint"]
+    assert r["Answer Only vs. Hint"]["all"]["d"] == round(1 / (1 / 3) ** 0.5, 3)
+    assert r["Answer Only vs. Hint"]["all"]["experiments"] == 1 and r["Answer Only vs. Hint"]["all"]["students"] == 8

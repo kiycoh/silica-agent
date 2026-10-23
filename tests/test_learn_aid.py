@@ -76,11 +76,6 @@ def test_shadow_mode_logs_the_aid_and_shows_none(client, tmp_path, monkeypatch):
     assert rec["why"] == "3 misses in a row" and rec["displayed"] is False
 
 
-def test_a_confident_miss_or_a_misconception_gets_the_contrast():
-    assert offer.aid_form(NOTE, "confuses margin and distance", []) == "contrast"
-    assert offer.aid_form(NOTE, None, []) == "worked"
-
-
 def test_the_prerequisite_attached_is_the_one_held_least(monkeypatch):
     from silica.kernel.report import learner
 
@@ -122,9 +117,3 @@ def test_learn_parks_formulas_before_it_escapes():
     assert "LR_MATH_RE" in js and '"/learn/math"' in js and "lrMathSpan(...math[i])" in js
 
 
-def test_a_contrast_table_keeps_a_blank_to_fill():
-    table = ("| Aspetto | Cosa hai scritto | Cosa dice la nota |\n|---|---|---|\n"
-             "| Natura | immagini | una classe di funzioni |\n| Scopo | niente | la sogliatura a zero |\n\n**Domanda?**")
-    out = offer._blank_last_cell(table)
-    assert "| Scopo | niente | ____ |" in out and "la sogliatura a zero" not in out and "una classe di funzioni" in out
-    assert offer._blank_last_cell("no table here") == "no table here"

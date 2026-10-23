@@ -869,14 +869,14 @@ def _rate(payload: dict):
         "next_due": _iso_day(after.get("due")) if after else None,
         "momentum": _momentum(before, after, first) if rating >= 3 else None,
         "objective": entry["objective"], "unassisted": bool(correct and not entry["hints"] and not entry["told"]),
-        "escalate": None if correct else _escalate(s, it, v),
+        "escalate": None if correct else _escalate(s, it),
     }
     s["recorded"][it["i"]] = {"entry": entry, "result": result, "ts": _now()}
     s["skipped"].discard(it["i"])
     return {**result, "duplicate": False}
 
 
-def _escalate(s: dict, it: dict, v: dict) -> dict | None:
+def _escalate(s: dict, it: dict) -> dict | None:
     """The escalate rung after a miss (learn.offer): once a note a session,
     logged, and in shadow mode only logged."""
     from pathlib import Path
@@ -897,8 +897,7 @@ def _escalate(s: dict, it: dict, v: dict) -> dict | None:
         if not shown:
             return None
         prereq = offer.weakest_prerequisite(it["path"])
-        return {"why": why, "form": offer.aid_form(it["path"], v.get("misconception"), entries),
-                "prereq": prereq, "prereq_title": Path(prereq).stem if prereq else None}
+        return {"why": why, "form": "worked", "prereq": prereq, "prereq_title": Path(prereq).stem if prereq else None}
     except Exception:
         # The aid is an extra: a ledger that does not parse costs it, never the rating.
         logger.warning("learn: escalation skipped", exc_info=True)
@@ -923,7 +922,7 @@ def aid(payload: dict):
     if it["i"] not in done:
         v = s["verdicts"].get(it["i"]) or {}
         try:
-            text = offer.learn_aid(it, esc["why"], esc["form"], v.get("production", ""), esc.get("prereq"))
+            text = offer.learn_aid(it, esc["why"], v.get("production", ""), esc.get("prereq"))
         except Exception as exc:
             raise HTTPException(502, f"the model did not answer: {exc}")
         if not text:

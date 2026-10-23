@@ -2833,7 +2833,7 @@ function lrReveal(sheet, it, v) {
 // The escalate rung (learn.offer): after the rating that makes three misses in
 // a row on a note, the next move is the aid itself, written from the note's
 // checked points by the chat model. Reading it records nothing.
-const LR_AID_WHAT = { worked: "A worked example", contrast: "Your answer beside the note" };
+const LR_AID_WHAT = { worked: "A worked example" };
 function lrAidBox(it, esc) {
   const s = lrSession;
   const box = lrEl("section", "lr-aid");
