@@ -395,18 +395,20 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
     path = None if "\n" in target else resolve_title(target, notes)
     if path:
         _d, _r, body = frontmatter.split((_vault() / path).read_text(encoding="utf-8"))
-        lines = [s["text"] for s in parse_steps(body)] or [
-            ln.strip("-* ").strip() for ln in body.splitlines()
-            if ln.strip().startswith(("-", "*", "1", "2", "3", "4", "5", "6", "7", "8", "9")) and len(ln.strip()) > 3
-        ]
+        lines = [s["text"] for s in parse_steps(body)] or reference_lines(body)
     else:
         lines = [ln.strip("-* ").strip() for ln in re.split(r"[\n;]", target) if ln.strip()]
     tree, paths, gaps = [], [], []
     for i, text in enumerate(lines):
-        how, doubt = "", False
+        how, doubt, missing = "", False, []
         found = [p for p in (resolve_title(w, notes) for w in _WIKILINK_RE.findall(text)) if p]
+        topics = _topics(text)
         if found:
             how = "by link"
+        elif topics:
+            found, missing = _topic_notes(topics, notes, allowed)
+            how = f"{len(topics) - len(missing)} of {len(topics)} topics"
+            doubt = len(missing) * 2 > len(topics)
         else:
             plain = _WIKILINK_RE.sub(r"\1", text).split(":", 1)[0].strip()
             hit = resolve_title(plain, notes)
@@ -416,6 +418,8 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
                 found, how, doubt = _search_notes(plain, notes, explain=True)
         found = [p for p in found if p in allowed]
         node = {"node": _WIKILINK_RE.sub(r"\1", text).split(":", 1)[0].strip(), "children": [], "text": text}
+        if missing:
+            node["missing"] = missing
         # by index from the form, by its text from the plan note (`refused:`)
         if refused and (i in refused or text in refused):
             node.update(leaves=[], gap=True, refused=len(found), how="refused")
@@ -428,6 +432,84 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
             paths += [p for p in found if p not in paths]
         tree.append(node)
     return {"paths": paths, "tree": tree, "gaps": gaps, "steps": lines}
+
+
+# A syllabus names its topics in one line per block ("Modelli lineari:
+# regressione lineare multipla, analisi discriminante ..., lasso."), and the
+# whole line used to match at most two notes by its longest words.
+_TOPIC_SPLIT_RE = re.compile(r"\s*[,;]\s*")
+_PROGRAMME_RE = re.compile(r"^\W*(programma|programme|program|syllabus|contenuti|argomenti"
+                           r"|course content|topics)\W*$", re.IGNORECASE)
+_TABLE_RULE_RE = re.compile(r"^\|[\s:|-]+\|?$")
+
+
+def reference_lines(body: str) -> list[str]:
+    """The lines of a reference note to plan from: list items and table rows,
+    after a "Programma" marker when the note has one.
+
+    A syllabus converted from a PDF is tables: the official one this was
+    written against held its programme as `| 8 | Modelli lineari: ... |` rows
+    under a bare PROGRAMMA line, after tables of department, credits and
+    office hours, and only `-`/`*`/digit lines were read, so it gave nothing.
+    A row stands for its longest cell; a table's header row is skipped.
+    """
+    rows = body.splitlines()
+    start = next((i + 1 for i, ln in enumerate(rows) if _PROGRAMME_RE.match(ln.strip())), 0)
+    out: list[str] = []
+    for i in range(start, len(rows)):
+        ln = rows[i].strip()
+        if ln.startswith("|"):
+            if _TABLE_RULE_RE.match(ln):
+                continue
+            if i + 1 < len(rows) and _TABLE_RULE_RE.match(rows[i + 1].strip()):
+                continue  # the header above a |---| rule
+            cell = max((c.strip() for c in ln.strip("|").split("|")), key=len, default="")
+            if len(cell.split()) >= 2:
+                out.append(cell)
+        elif ln.startswith(("-", "*", "1", "2", "3", "4", "5", "6", "7", "8", "9")) and len(ln) > 3:
+            out.append(ln.strip("-* ").strip())
+    return out
+
+
+def _topics(text: str) -> list[str]:
+    """The topics a step line lists, when it lists two or more: after its
+    label ("Modelli lineari: a, b, c"), split on commas and semicolons."""
+    plain = _WIKILINK_RE.sub(r"\1", text)
+    body = plain.split(":", 1)[1] if ":" in plain else plain
+    parts = [p.strip(" .") for p in _TOPIC_SPLIT_RE.split(body) if p.strip(" .")]
+    return parts if len(parts) >= 2 else []
+
+
+def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[list[str], list[str]]:
+    """(notes covering the topics, topics no note covers), one note per topic:
+    by title, else the note whose name holds most of the topic's content
+    words, at least half of them. A shared "analisi" is not a match."""
+    found: list[str] = []
+    missing: list[str] = []
+    stems = {p: set(_root_words(Path(p).stem)) for p in sorted(allowed)}
+    for t in topics:
+        hit = resolve_title(t, notes)
+        if not hit or hit not in allowed:
+            hit = None
+            words = _root_words(t)
+            # most topic words in the name, then the shortest name: the note
+            # about the thing, not one that mentions it
+            got, best = max(((sum(1 for w in words if w in s), -len(p), p) for p, s in stems.items()),
+                            default=(0, 0, None))[0::2]
+            if best and got and got * 2 >= len(words):
+                hit = best
+        if hit:
+            if hit not in found:
+                found.append(hit)
+        else:
+            missing.append(t)
+    return found, missing
+
+
+def _root_words(text: str) -> list[str]:
+    """Content words without their last vowel, so an Italian plural meets its
+    singular: "reti neurali" and "Rete neurale" share both words."""
+    return [w[:-1] if len(w) >= 4 and w[-1] in "aeiouàèéìòù" else w for w in _content_words(text)]
 
 
 def _content_words(text: str) -> list[str]:
@@ -936,8 +1018,14 @@ def _plan_body(name: str, scope: str, target, resolved: dict, chosen: list[str],
     if scope == "steps":
         lines += ["", "## Steps"]
         for node in resolved["tree"]:
+            missing = ", ".join(node.get("missing") or [])
             if node.get("gap"):
-                lines.append(f"- [ ] {node['node']}: not in the vault")
+                lines.append(f"- [ ] {node['node']}: not in the vault" + (f" ({missing})" if missing else ""))
+            elif "missing" in node or str(node.get("how", "")).endswith("topics"):
+                # a syllabus block keeps its name; its topics are the notes,
+                # and what no note covers is said where the step is read
+                links = ", ".join(f"[[{Path(p).stem}]]" for p in node["leaves"])
+                lines.append(f"- [ ] {node['node']}: {links}" + (f" · not in the vault: {missing}" if missing else ""))
             else:
                 text = node.get("text", node["node"])
                 links = " ".join(f"[[{Path(p).stem}]]" for p in node["leaves"]) if "[[" not in text else _WIKILINK_RE.sub(lambda m: f"[[{m.group(1)}]]", text.split(":", 1)[0])

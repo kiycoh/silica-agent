@@ -1949,6 +1949,8 @@ function lrShowPreview(sec, p) {
       const to = lrEl("span", "to" + (n.gap ? " gap" : ""));
       if (n.gap) to.append(lrEl("i", "lr-cell never"), "not in the vault · kept as a gap");
       else to.textContent = n.leaves.map(lrStem).join(", ");
+      // a syllabus block's topics no note covers: the line's most useful part
+      if (n.missing?.length) to.appendChild(lrEl("span", "lr-miss", ` · not in the vault: ${n.missing.join(", ")}`));
       st.appendChild(to);
       const how = lrEl("span", "how" + (n.doubt ? " amb" : ""));
       if (n.doubt) how.append(lrMark("warn", ""), `${n.how} · check`);

@@ -127,6 +127,57 @@ def test_the_four_scope_kinds_resolve_on_a_synthetic_vault(vault, monkeypatch):
     assert restricted["paths"] == ["ML/Softmax.md"] and restricted["gaps"] == ["Note"]
 
 
+SCHEDA = """---
+source_file: "scheda.pdf"
+---
+| DIPARTIMENTO | Matematica e Informatica |
+| --- | --- |
+| CFU | 9 |
+
+PROGRAMMA
+
+| ORE | Lezioni |
+| --- | --- |
+| 8 | Modelli lineari: regressione lineare multipla, reti neurali multistrato, analisi discriminante di Fisher, lasso. |
+| 4 | Reti neurali profonde: dropout, apprendimento multi-task. |
+"""
+
+
+def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_what_is_missing(vault):
+    """The official syllabus of a course came out of its PDF as tables, the
+    programme as `| hours | block: topic, topic |` rows under a bare
+    PROGRAMMA line (2026-10-23): no line was read, and a block of eight
+    topics could meet two notes at most."""
+    for name in ("Regressione lineare multipla", "Rete neurale multistrato", "Discriminante lineare di Fisher"):
+        vault.note(f"ML/{name}.md", f"# {name}\n")
+    vault.note("Corso/scheda.md", SCHEDA)
+
+    res = plans.resolve_scope("steps", "scheda", restrict="ML/")
+
+    assert res["steps"] == [
+        "Modelli lineari: regressione lineare multipla, reti neurali multistrato, analisi discriminante di Fisher, lasso.",
+        "Reti neurali profonde: dropout, apprendimento multi-task."]
+    block, deep = res["tree"]
+    assert block["node"] == "Modelli lineari" and block["how"] == "3 of 4 topics"
+    assert block["leaves"] == ["ML/Regressione lineare multipla.md", "ML/Rete neurale multistrato.md",
+                               "ML/Discriminante lineare di Fisher.md"]
+    assert block["missing"] == ["lasso"]
+    assert deep["gap"] is True and deep["missing"] == ["dropout", "apprendimento multi-task"]
+
+    from pathlib import Path
+
+    from silica.config import CONFIG
+
+    out = plans.write_plan("Esame ML", "steps", "scheda", restrict="ML/", reach="relational", cards=[])
+    text = (Path(CONFIG.vault_path) / out["path"]).read_text(encoding="utf-8")
+    assert ("- [ ] Modelli lineari: [[Regressione lineare multipla]], [[Rete neurale multistrato]], "
+            "[[Discriminante lineare di Fisher]] · not in the vault: lasso") in text
+    assert "- [ ] Reti neurali profonde: not in the vault (dropout, apprendimento multi-task)" in text
+    steps = plans.parse_steps(text)
+    assert steps[0]["notes"] == ["Regressione lineare multipla", "Rete neurale multistrato",
+                                 "Discriminante lineare di Fisher"]
+
+
 def test_a_plan_note_is_never_material_of_a_scope(vault, monkeypatch):
     # Measured 2026-10-08: the topic "memoria" listed Plans/Prova Learn.md among
     # its 45 notes, because the plan names the topic; a plan is the card, not

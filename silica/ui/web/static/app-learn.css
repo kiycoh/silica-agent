@@ -2325,6 +2325,10 @@ button.lr-cell:focus-visible {
   color: var(--ash);
 }
 
+.lr-steps2 .to .lr-miss {
+  color: var(--ash);
+}
+
 .lr-steps2 .to .lr-cell {
   width: 10px;
   height: 10px;
