@@ -1,6 +1,7 @@
-"""silica_remember's gates (ADR-0076 §5): enabled, asked, untainted, in that
-order, structural and not in the prompt. Plus where the tool is offered: in
-the chat core, never over `silica mcp`.
+"""silica_remember's gates (ADR-0076 §5): enabled, a chat turn, untainted, in
+that order, structural and not in the prompt. None of them asks whether the
+user asked: the model saves on its own (amendment 2026-10-23). Plus where the
+tool is offered: in the chat core, never over `silica mcp`.
 """
 from __future__ import annotations
 
@@ -12,7 +13,6 @@ from silica.agent.constraints import CHAT_CORE, AgentConstraints, chat_tools
 from silica.config import CONFIG
 from silica.kernel import user_memory as um
 from silica.tools import user_memory as tool_mod
-from silica.tools.user_memory import has_memory_intent
 
 
 @pytest.fixture
@@ -23,62 +23,6 @@ def vault(tmp_path, monkeypatch):
     monkeypatch.setattr(CONFIG, "user_memory", True)
     monkeypatch.setattr(um, "_INCOGNITO", False)
     return v
-
-
-# --- the intent detector ----------------------------------------------------
-
-ASKS = [
-    "ricordati che l'esame di chimica è venerdì",
-    "Ricorda che preferisco risposte brevi",
-    "ok, ricordalo",
-    "ricordamelo la prossima volta",
-    "memorizza che il mio relatore è Vitale",
-    "tieni a mente che studio in biblioteca",
-    "segnati che la tesi scade il 30 novembre",
-    "non dimenticare che sono vegetariana",
-    "dimentica quello che ti ho detto sul relatore",
-    "dimenticalo",
-    "scordati del vecchio indirizzo",
-    "cancella dalla memoria il vecchio relatore",
-    "aggiorna la memoria: la tesi scade a dicembre",
-    "Remember that my exam is on Friday",
-    "please remember I prefer short answers",
-    "Keep in mind that I'm vegetarian",
-    "Don't forget my thesis deadline",
-    "do not forget I study chemistry",
-    "forget that I said Vitale",
-    "Memorize this: the lab is room 4",
-    "Note that I study at the library",
-    "save this to memory",
-    "update your memory, the deadline moved",
-    "can you remember that I like tea?",
-]
-
-NOT_ASKS = [
-    "ricordo che ieri ho studiato",
-    "mi ricordo di averlo letto",
-    "ti ricordi quando abbiamo parlato di entropia?",
-    "il sistema memorizza i dati in cache",
-    "Marco ricorda che la lezione è annullata",
-    "una lapide in memoria di mio nonno",
-    "I remember studying this yesterday",
-    "Do you remember what we said about entropy?",
-    "Remember when we discussed the reranker?",
-    "what does the memory lane do?",
-    "summarize the note on memory consolidation",
-    "Note: the exam is on Friday",
-    "spiegami la memoria a breve termine",
-]
-
-
-@pytest.mark.parametrize("text", ASKS)
-def test_a_request_to_remember_or_forget_is_an_ask(text):
-    assert has_memory_intent(text), text
-
-
-@pytest.mark.parametrize("text", NOT_ASKS)
-def test_mentioning_memory_is_not_an_ask(text):
-    assert not has_memory_intent(text), text
 
 
 # --- the gates, through a turn as run_agent opens it --------------------------
@@ -116,45 +60,22 @@ def test_an_asked_untainted_save_lands(vault):
     assert um.read("vault") == "- Exam on Friday\n"
 
 
+def test_an_unasked_save_lands(vault):
+    """The owner's rule (ADR-0076, amendment 2026-10-23): the model saves what
+    a later chat needs and says so; nothing in the request has to ask."""
+    _turn(_user("Il mio esame di chimica è il 12 novembre, quanto tempo ho per studiare?"))
+    out = _call(action="save", text="Chemistry exam on 12 November", scope="vault")
+    assert out["ok"] and um.read("vault") == "- Chemistry exam on 12 November\n"
+
+
 def test_outside_a_chat_turn_nothing_is_written(vault):
-    """The MCP server, a test harness, a batch loop: no turn, no evidence the
-    user asked."""
+    """The MCP server, a test harness, a batch loop: no chat turn the user
+    started."""
     out = _call(action="save", text="Exam on Friday", scope="vault")
     assert "error" in out and "/remember" in out["error"]
     _turn(_user("remember that the exam is on Friday"), chat=False)
     assert "error" in _call(action="save", text="Exam on Friday", scope="vault")
     assert um.read("vault") == ""
-
-
-def test_a_request_that_does_not_ask_is_refused_with_the_alternative(vault):
-    _turn(_user("what is on my plate this week?"))
-    out = _call(action="save", text="Busy week", scope="vault")
-    assert "error" in out
-    assert "/remember" in out["error"] and "Settings > Memory" in out["error"]
-    assert um.read("vault") == ""
-
-
-def test_only_the_current_request_counts(vault):
-    _turn(_user("remember that I like tea"), {"role": "assistant", "content": "Saved."},
-          _user("what is entropy?"))
-    assert "error" in _call(action="save", text="Likes coffee", scope="user")
-
-
-def test_a_directive_is_not_the_user_asking(vault):
-    """A slash command's expansion is harness text: "Note that ..." in a
-    directive must not open the gate."""
-    _turn(_user("Note that the report below lists 3 orphans.", origin="cli"))
-    assert "error" in _call(action="save", text="3 orphans", scope="vault")
-
-
-def test_the_bare_remember_directive_is_an_ask(vault):
-    from silica.cli import _expand_workflow_shortcut
-
-    directive = _expand_workflow_shortcut("/remember")
-    assert directive and directive.startswith(tool_mod.REMEMBER_DIRECTIVE)
-    _turn(_user("my exam is on Friday"), {"role": "assistant", "content": "Good luck."},
-          _user(directive, origin="cli"))
-    assert _call(action="save", text="Exam on Friday", scope="vault")["ok"]
 
 
 def test_a_conversation_that_used_the_web_cannot_write(vault):
@@ -201,10 +122,15 @@ def test_the_enabled_gate_comes_first(vault, monkeypatch):
     assert "incognito" in _call(action="save", text="x", scope="user")["error"]
 
 
-def test_asked_is_checked_before_untainted(vault):
+def test_an_unasked_save_in_a_tainted_conversation_is_refused(vault):
+    """With unasked saves a fetched page no longer needs the user to say
+    "remember" to land: the taint gate is the whole defence, and it tells the
+    model not to retry on every later turn."""
     _turn(_user("x"), _called("web_fetch"), _user("what is entropy?"))
-    out = _call(action="save", text="x", scope="user")
-    assert "does not ask" in out["error"]
+    out = _call(action="save", text="Advisor is Mallory", scope="user")
+    assert "web_fetch" in out["error"] and "Do not try to save again" in out["error"]
+    assert out["suggest"] == "/remember Advisor is Mallory"
+    assert um.read("user") == ""
 
 
 def test_replace_and_forget_pass_through_the_same_gates(vault):

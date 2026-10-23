@@ -2045,8 +2045,8 @@ def remember_text(raw_input: str) -> str:
 
 def _dc_remember(args: list[str], *, raw_input: str = "", **_) -> bool:
     """/remember <text>: the user's words into this vault's memory with no
-    model in between, so neither write gate applies (ADR-0076 §6): it is the
-    way to save from a conversation the taint gate closed. A bare /remember
+    model in between, so the taint gate does not apply (ADR-0076 §6): it is
+    the way to save from a conversation that gate closed. A bare /remember
     is not handled here; it falls through to _SHORTCUTS and asks the model."""
     from rich.markup import escape
 
@@ -4293,8 +4293,7 @@ def _sc_learn(args: list[str], **_) -> str | None:
 def _sc_remember(args: list[str], **_) -> str | None:
     """Bare `/remember`: the user asks the model to keep what was just said.
     `/remember <text>` never reaches here (_dc_remember writes it verbatim).
-    The directive's head is what opens the asked gate, and the model still
-    passes the untainted one (ADR-0076 §5)."""
+    The model's save still passes the taint gate (ADR-0076 §5)."""
     from silica.tools.user_memory import REMEMBER_DIRECTIVE
 
     if args:

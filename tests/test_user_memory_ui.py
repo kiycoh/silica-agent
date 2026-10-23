@@ -246,6 +246,26 @@ def test_tool_done_carries_the_write_for_the_saved_line():
     assert "memory" not in event_to_json(ToolCompleteEvent("silica_search", {}, "c1", ok, 0.01, 0))
 
 
+def test_the_terminal_prints_the_models_write_even_with_tool_progress_off(monkeypatch, capsys):
+    """The TUI's half of the saved line: the model saves unasked, so a write
+    the user cannot see is one they never check (ADR-0076 §7)."""
+    from silica.agent.events import ToolCompleteEvent
+    from silica.ui.renderer import make_progress_callback
+
+    monkeypatch.setattr(CONFIG, "tool_progress", "off")
+    cb = make_progress_callback()
+    ok = json.dumps({"ok": True, "action": "save", "scope": "user", "text": "- Likes tea",
+                     "token": "abc", "chars": 12, "budget": 1000})
+    cb(ToolCompleteEvent("silica_remember", {}, "c1", ok, 0.01, 0))
+    offered = json.dumps({"error": "Nothing was saved: ...", "suggest": "/remember Likes [tea]"})
+    cb(ToolCompleteEvent("silica_remember", {}, "c2", offered, 0.01, 0))
+    cb(ToolCompleteEvent("silica_remember", {}, "c3", json.dumps({"error": "Refused: ..."}), 0.01, 0))
+    out = capsys.readouterr().out
+    assert "Saved to memory: Likes tea" in out and "12/1000 characters" in out
+    assert "Not saved: Likes [tea]" in out and "(/remember Likes [tea] saves it)" in out
+    assert "Refused" not in out
+
+
 def test_memory_routes_read_edit_refuse_and_reset(client):
     tc, _ = client
     view = tc.get("/memory").json()

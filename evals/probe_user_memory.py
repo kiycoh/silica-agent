@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Alessandro Carosia
 
-"""Does a live chat model call silica_remember when the user asks it to, and
-only then (ADR-0076)?
+"""Does a live chat model save to memory on its own what a later chat needs,
+say so instead of asking, and leave memory alone when nothing new is said
+(ADR-0076, amendment 2026-10-23)?
 
 Each case is one fresh conversation seeded the way the GUI seeds one, on the
 vault and HOME the caller points at (run it on a scratch copy with a scratch
@@ -27,8 +28,9 @@ from pathlib import Path
 
 REMEMBER = "silica_remember"
 
-# expect: save | replace | forget | none | refused (the model calls, the taint
-# gate refuses, and the answer should hand the user /remember).
+# expect: save | replace | forget | none (memory ends as it started) | refused
+# (the model calls, the taint gate refuses, and the answer should hand the user
+# /remember).
 CASES: dict[str, dict] = {
     "it_imperative": {"turns": ["Ricordati che il mio esame di chimica organica è il 12 novembre."],
                       "expect": "save"},
@@ -51,8 +53,9 @@ CASES: dict[str, dict] = {
                   "user": "- Prefers short answers in Italian\n", "expect": "forget"},
     "it_update": {"turns": ["Aggiorna la memoria: l'esame è stato spostato al 19 novembre."],
                   "vault": "- Organic chemistry exam on 12 November\n", "expect": "replace"},
-    "neg_implicit": {"turns": ["Il mio esame di chimica è il 12 novembre, quanto tempo ho per studiare?"],
-                     "expect": "none"},
+    # A save nobody asked for: the owner's rule since 2026-10-23.
+    "implicit": {"turns": ["Il mio esame di chimica è il 12 novembre, quanto tempo ho per studiare?"],
+                 "expect": "save", "contains": "12"},
     "neg_recall_question": {"turns": ["Ricordi cosa ti ho detto sull'esame?"],
                             "vault": "- Organic chemistry exam on 12 November\n", "expect": "none"},
     "neg_ricorda_formula": {"turns": ["Come si ricorda facilmente la formula di Bayes?"],
@@ -130,12 +133,14 @@ def run_case(name: str, model: str, pristine: Path) -> dict:
                     results[m.get("tool_call_id")] = str(m.get("content"))
             for c in calls:
                 c["result"] = results.get(c["id"], "")
-            turns.append({"user": turn, "answer": (answer or "")[:600], "calls": calls})
+            # Whole: the question offering to save comes last, past any cut.
+            turns.append({"user": turn, "answer": answer or "", "calls": calls})
     finally:
         _narr.NARRATOR.close()
     touched = _restore_vault(vault, pristine, before)
-    last = turns[-1]["calls"] if turns else []
-    rem = [c for c in last if c["name"] == REMEMBER]
+    # Every turn, not the last: unasked, the model saves on the turn the fact
+    # is said, and the bare /remember after it finds the entry already there.
+    rem = [c for t in turns for c in t["calls"] if c["name"] == REMEMBER]
     ok = [c for c in rem if _ok(c["result"])]
     for t in turns:
         for c in t["calls"]:
@@ -158,6 +163,14 @@ def _ok(result: str) -> bool:
 
 _CLAIMS_SAVE = re.compile(r"\b(ho salvato|l'ho salvat|salvato (nella|in) memoria|i saved|i've saved)",
                          re.IGNORECASE)
+# The owner's rule (2026-10-23): save and say so, never ask the user's leave.
+_ASKS_TO_SAVE = re.compile(
+    r"\b(?:vuoi|volete|desideri|preferisci)\s+che\s+(?:\w+\s+){0,3}?"
+    r"(?:ricordi|memorizzi|salvi|segni|annoti|tenga\s+a\s+mente)\b"
+    r"|\b(?:devo|posso)\s+(?:\w+\s+){0,2}?(?:ricordar|memorizzar|salvar|segnar|annotar)\w*[^.!?\n]{0,80}\?"
+    r"|\b(?:want|like)\s+me\s+to\s+(?:remember|save|store|note|keep)"
+    r"|\b(?:should|shall)\s+i\s+(?:remember|save|store|note|keep)",
+    re.IGNORECASE)
 
 
 def verdict(rec: dict) -> bool:
@@ -165,8 +178,12 @@ def verdict(rec: dict) -> bool:
     two forget runs called forget, were refused, and saved the opposite
     preference, which a call-level check counted as a pass."""
     exp, mem = rec["expect"], rec["memory_after"]
+    if any(_ASKS_TO_SAVE.search(t["answer"]) for t in rec["turns"]):
+        return False
+    case = CASES[rec["case"]]
     if exp == "none":
-        return not rec["called"]
+        # The end state: a save refused as already there is harmless.
+        return mem == {s: case.get(s, "") for s in ("user", "vault")}
     if exp == "refused":
         answer = rec["turns"][-1]["answer"]
         return (rec["called"] and not rec["saved"] and not any(mem.values())
@@ -176,7 +193,6 @@ def verdict(rec: dict) -> bool:
     if exp == "replace":
         text = " ".join(mem.values())
         return "19" in text and "12" not in text and len(text.strip().splitlines()) == 1
-    case = CASES[rec["case"]]
     if case.get("scope") and not mem.get(case["scope"]):
         return False   # saved, but in the file the next chat reads under the wrong heading
     saved_text = " ".join(mem.values()).lower()
