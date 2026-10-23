@@ -409,6 +409,24 @@ class TestDraftFiling:
             "## Concepts practised\n- [[Support Vector Machine]]: addestra una SVM con kernel rbf")
         assert "Matrice di confusione" in seen[0]  # the folder's notes were the candidates
 
+    def test_a_filed_draft_links_the_notes_of_its_folder_it_names(self, tmp_vault, monkeypatch):
+        """The spec's filing path runs autolink so the note joins the graph;
+        it never did. A note outside the target folder is not a candidate."""
+        from pathlib import Path
+
+        from silica.config import CONFIG
+
+        tmp_vault.note("ML/Support Vector Machine.md", "# SVM\n")
+        tmp_vault.note("Psicologia/Memoria.md", "# Memoria\n")
+        tmp_vault.note("Inbox/sunto.md", "---\nform: draft\n---\n\n"
+                       "La Support Vector Machine massimizza il margine; la memoria del kernel conta.\n")
+
+        self._dispatch(tmp_vault, monkeypatch, "/nucleate Inbox/sunto.md --target=ML")
+
+        text = (Path(CONFIG.vault_path) / "ML" / "sunto.md").read_text(encoding="utf-8")
+        assert "[[Support Vector Machine]]" in text
+        assert "[[Memoria" not in text
+
     def test_the_title_comes_from_the_first_heading_never_a_fragment(self, tmp_vault, monkeypatch):
         from pathlib import Path
 

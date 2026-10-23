@@ -64,6 +64,11 @@ BODIES_WORKERS = 6          # concurrent bodies calls per file: the batches are 
 BODIES_REPLY_TOKENS = 4000  # what one bodies call adds to the KV beyond its prompt: four 4-idea calls
                             # overflowed a 32k unified KV at ~8.2k tokens each on a 4.6k prompt (2026-10-12)
 MAX_EDGES_PER_TARGET = 3    # a target with more is a hub in disguise, not three real dependencies
+# The same rule from the other end: an idea with more edges into the vault is a
+# list of concepts, not real dependencies. A study guide's "Otto concetti
+# fondamentali" sent "applies this" to 12 of the owner's notes, Transformer
+# among them, which the guide never names (2026-10-23).
+MAX_EDGES_PER_SOURCE = 3
 MIN_WHY_CHARS = 20          # "e' collegato" is not a reason
 MAX_OUTLINE_ROWS = 400      # ponytail: folder-scoped outline; reopen at 400 notes in one folder, then seed with cosine top-k
 
@@ -411,6 +416,7 @@ def select_edges(raw: list, *, ideas: set[str], existing: dict[str, str],
     """Stage B edges the vault will act on, in proposal order."""
     kept: list[dict] = []
     per_target: dict[str, int] = {}
+    per_source: dict[str, int] = {}
     # Casefold lookups: the model re-cases titles ("Support Vector Machines"
     # for a note filed as "Support vector machines"), and an exact match threw
     # every edge of one live run away (2026-09-02, 0 of the proposals kept).
@@ -447,7 +453,11 @@ def select_edges(raw: list, *, ideas: set[str], existing: dict[str, str],
             continue
         if per_target.get(tgt, 0) >= MAX_EDGES_PER_TARGET:
             continue
+        if not intra and per_source.get(src, 0) >= MAX_EDGES_PER_SOURCE:
+            continue
         per_target[tgt] = per_target.get(tgt, 0) + 1
+        if not intra:
+            per_source[src] = per_source.get(src, 0) + 1
         kept.append({"from": src, "to": tgt, "relation": rel, "why": why, **({"intra": True} if intra else {})})
     logger.info("outline stage B: %d edge(s) proposed, %d kept, %d dropped", len(raw or []), len(kept), dropped)
     return kept
@@ -1164,6 +1174,7 @@ def verbatim_bodies() -> bool:
 # Stage A names a section that spans two headings as "A / B" or "A; B"
 # (11 of 137 ideas on the 2026-10-14 A/B lectures).
 _SECTION_PARTS = re.compile(r"\s*[/;]\s*")
+_FRONTMATTER_RE = re.compile(r"\A\s*---[ \t]*\n.*?\n---[ \t]*(?:\n|\Z)", re.S)
 _BODY_HEADING = re.compile(r"^(#{1,6})(?=\s)", re.M)
 
 
@@ -1196,7 +1207,11 @@ def partition_bodies(outline: Outline, src: str) -> tuple[str, dict[str, str]]:
     skipped = {_sec_key(s.get("section", "")) for s in outline.skips}
     texts: dict[str, list[str]] = {}
     first = marks[0].start() if marks else len(src)
-    lead: list[str] = [src[:first].strip()] if src[:first].strip() else []
+    # Not the source's own frontmatter: a converted syllabus opens on its
+    # `date:`/`source_file:` block and then a table, and that block landed in
+    # the spine note's body as a second frontmatter (2026-10-23).
+    head = _FRONTMATTER_RE.sub("", src[:first], count=1).strip()
+    lead: list[str] = [head] if head else []
     owner: Idea | None = None
     for m, nxt in zip(marks, marks[1:] + [None]):
         k = _sec_key(m.group(1))

@@ -40,6 +40,23 @@ def test_dangling_link_is_unlinked_resolved_kept(vault):
     assert "Never Written" in text  # display text survives
 
 
+def test_a_patched_note_keeps_the_owners_forward_links(vault):
+    """2026-10-23: a run patched 15 of the owner's notes with one relation
+    line each, and the sweep then unlinked every dangling link in them, the
+    owner's own forward references included. Only what the run added goes."""
+    prior = ("---\nrelated:\n  - '[[Analisi della regressione]]'\n---\n\n"
+             "* [[Regressione lineare semplice]]\n")
+    _write(vault, "RL.md", prior.replace("---\n\n", "---\n\n## Relations\n- [[Invented by the run]]: x\n\n", 1))
+    from silica.kernel.link.sweep import sweep_dangling_links
+
+    summary = sweep_dangling_links(["RL"], priors={"RL.md": prior})
+    text = (vault / "RL.md").read_text(encoding="utf-8")
+    assert "[[Regressione lineare semplice]]" in text
+    assert "'[[Analisi della regressione]]'" in text
+    assert "[[Invented by the run]]" not in text and "Invented by the run" in text
+    assert summary["links_stripped"] == 1
+
+
 def test_alias_keeps_alias_text(vault):
     _write(vault, "A.md", "---\ntitle: A\n---\n\nPer [[Ghost Note|the alias]].\n")
     from silica.kernel.link.sweep import sweep_dangling_links

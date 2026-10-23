@@ -2403,11 +2403,33 @@ def _file_drafts(
         DRIVER.upsert(note_rel, note)
         if undo_run:
             _record_inverse(undo_run, note_rel, prior)
+        _autolink_filed(note_rel, dest_dir)
         silica_cleanup(f)
         CONSOLE.print(
             f"  filed draft ({res.origin}): [bold]{note_rel}[/] — body kept intact"
         )
     return kept
+
+
+def _autolink_filed(note_rel: str, folder: str) -> None:
+    """Link a filed note to the notes of its folder it names: the filing path
+    of docs/specs/nucleation-forms.md says autolink still runs so the note
+    joins the graph, and it never did. A study guide or a lecture digest
+    names the concepts the folder holds; the folder, not the whole vault,
+    keeps "Statistica" in a psychology folder from catching it. The filed
+    note is new, so the run's /revert, which deletes it, covers this edit."""
+    from silica.driver import DRIVER
+    from silica.kernel.link.autolink import build_title_index
+
+    try:
+        added = DRIVER.autolink_note(note_rel, title_index=build_title_index(DRIVER.list_files(folder)))
+    except Exception as e:
+        # Best effort, as the FSM's own AUTOLINK phase: the note is filed whole
+        # either way, it only stays unlinked.
+        logger.debug("filed note %s not autolinked: %s", note_rel, e)
+        return
+    if added:
+        CONSOLE.print(f"  [dim]{note_rel}: linked {len(added)} note(s) it names[/]")
 
 
 # Silica's own bookkeeping folders — never a destination for a concept note.

@@ -20,7 +20,10 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 HEADING = "## Concepts practised"   # UI copy: English whatever the vault's language
-MAX_LINKS = 8
+# Measured on the optdigits lab (2026-10-23): of 8 links, 3 were notes it only
+# brushed ("Classificatore binario" for a ten-class problem). Six, and the
+# prompt asks for fewer.
+MAX_LINKS = 6
 # Titles in one prompt. A folder past it (a whole textbook nucleated beside the
 # course) is ranked by the words its titles share with the lab first.
 MAX_CANDIDATES = 300
@@ -36,7 +39,8 @@ _PROMPT = """You link a lab exercise (a notebook of code and prose) to the notes
 Reply with at most {n} lines, each exactly `Title | why`: Title copied character for character
 from the list below, why a few words in the lab's own language on what the lab does with it.
 Pick a note only when the lab's code or text uses, implements, trains or measures it: a model
-it fits, a metric it reports, a technique it applies. Reply NONE when nothing fits.
+it fits, a metric it reports, a technique it applies. Fewer is better: leave out a note the lab
+only touches in passing or that you have to argue for. Reply NONE when nothing fits.
 
 Notes:
 {titles}"""

@@ -117,6 +117,31 @@ def test_select_edges_filters_and_caps_per_target():
     ]
 
 
+def test_the_lead_the_spine_keeps_is_never_the_sources_frontmatter():
+    """A converted syllabus opens on its date/source_file block and a table;
+    the block became a second frontmatter in the spine note's body."""
+    src = ('---\ndate: 2024-09-08\nsource_file: "scheda.pdf"\n---\n\n'
+           "| CFU | 9 |\n| --- | --- |\n\n## Programma\n\nModelli lineari.\n")
+    outline = ol.Outline(lesson_title="", spine=["Programma"],
+                         ideas=[ol.Idea(title="Programma", section="Programma", claim="c")])
+    lead, texts = ol.partition_bodies(outline, src)
+    assert lead.startswith("| CFU | 9 |") and "source_file" not in lead
+    assert "Modelli lineari." in texts["Programma"]
+
+
+def test_select_edges_caps_what_one_idea_sends_into_the_vault():
+    """A study guide's "Otto concetti fondamentali" sent "applies this" to 12
+    of the owner's notes; an idea is a dependency of three notes at most, and
+    its edges to new ideas of the same outline do not count."""
+    why = "una frase abbastanza lunga da contare"
+    existing = {f"N{i}": f"T/N{i}.md" for i in range(6)}
+    raw = [{"from": "Otto concetti", "to": f"N{i}", "relation": "applies", "why": why} for i in range(6)]
+    raw.append({"from": "Otto concetti", "to": "Iperpiano", "relation": "defines", "why": why})
+    kept = ol.select_edges(raw, ideas={"Otto concetti", "Iperpiano"}, existing=existing)
+    assert [(e["to"], bool(e.get("intra"))) for e in kept] == [
+        ("N0", False), ("N1", False), ("N2", False), ("Iperpiano", True)]
+
+
 def test_select_edges_keeps_an_edge_between_two_new_ideas_as_intra():
     # Stage B kept proposing new -> new edges whatever the prompt said (24 of
     # 79 proposals dropped in one run, 2026-09-05): "SVD -> Riduzione della

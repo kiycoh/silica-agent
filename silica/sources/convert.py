@@ -441,9 +441,12 @@ _REFERENCES_HEADING_RE = re.compile(
 )
 
 # A table of contents: page-number scaffolding, and the autolinker wikilinks
-# every entry ("2.1 [[Memory for LLM Agents]] . 2").
+# every entry ("2.1 [[Memory for LLM Agents]] . 2"). A back-of-book index is the
+# same scaffolding sorted by term: the Goodfellow's 37k-character "## Index"
+# ("0-1 loss, 102, 274") was one segment queued for distillation.
 _CONTENTS_HEADING_RE = re.compile(
-    r"^#{1,6}\s*[\d.\s]*\**\s*(table of contents|contents|indice)\s*\**\s*$",
+    r"^#{1,6}\s*[\d.\s]*\**\s*(table of contents|contents|indice|index|subject index"
+    r"|indice analitico)\s*\**\s*$",
     re.IGNORECASE,
 )
 

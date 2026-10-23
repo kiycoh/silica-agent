@@ -2152,8 +2152,10 @@ def test_doc_citation_ignores_reference_section_dois(tmp_path):
 
 def test_contents_heading_is_boilerplate():
     for h in ("## Contents", "# Table of Contents", "## TABLE OF CONTENTS",
-              "## Indice", "## 1. Contents"):
+              "## Indice", "## 1. Contents", "## Index", "# Indice analitico"):
         assert conv._section_kind(h + "\n\n1 Intro 1\n2 Method 2") == "boilerplate", h
+    # a chapter about indexes is content
+    assert conv._section_kind("## Indexes and B-trees\n\nbody") == ""
 
 
 def test_venue_checklist_item_is_boilerplate_by_body():
