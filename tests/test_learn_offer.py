@@ -39,6 +39,7 @@ def test_saying_it_was_not_clear_is_enough_and_old_misses_do_not_count():
     o = offer.study_offer("non ho capito, spiegami meglio", reads, entries=old)
     assert o["text"] == "you said this was not clear" and o["note"] == "ML/CCA.md"
     assert offer.says_lost("I'm lost here") and not offer.says_lost("capisco bene")
+    assert offer.says_lost("la formulazione lagrangiana: non l'ho capita")
 
 
 def test_a_source_leaf_is_never_the_note_offered():

@@ -20,7 +20,7 @@ import re
 # The reader saying it did not follow, in the two languages this was written
 # against. A word list, not a classifier: self-declared beats inferred.
 _LOST_RE = re.compile(
-    r"\b(non\s+(?:ho\s+)?capi(?:to|sco)|non\s+mi\s+è\s+chiar[oa]|spiegami\s+(?:meglio|di\s+nuovo)"
+    r"\b(non\s+(?:l['’])?(?:ho\s+)?capi(?:t[oaie]|sco)|non\s+mi\s+è\s+chiar[oa]|spiegami\s+(?:meglio|di\s+nuovo)"
     r"|più\s+semplice|non\s+riesco\s+a\s+capire|i\s+(?:don'?t|do\s+not)\s+(?:get|understand)"
     r"|i'?m\s+lost|explain\s+(?:it\s+)?again|simpler)\b",
     re.IGNORECASE,
