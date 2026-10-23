@@ -1190,13 +1190,14 @@ def _escalation(text: str, messages: list[dict]) -> str:
         return ""
 
 
-def _plan_context(text: str) -> str:
-    """Learn's plan for this message (learn.offer.plan_context), or "". An
+def _plan_context(text: str) -> tuple[str, str]:
+    """Learn's plan for this message (learn.offer.plan_context), or ("", ""):
+    the block for the model and the calendar appended under its answer. An
     incognito chat gets none, as it gets no offer."""
     from silica.kernel import user_memory
 
     if user_memory.incognito() or not text or text.startswith("/"):
-        return ""
+        return "", ""
     try:
         from silica.kernel.learn.offer import plan_context
         from silica.kernel.learn.plans import list_plans
@@ -1206,7 +1207,7 @@ def _plan_context(text: str) -> str:
         # The plan's numbers are an extra: a plan note that does not parse
         # costs the block, never the turn.
         logger.warning("plan context skipped", exc_info=True)
-        return ""
+        return "", ""
 
 
 def _answer_html(answer: str, refs, graph=None) -> str:
@@ -1404,6 +1405,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             text = worn[1]
         agent_msg = text
         escalated = False   # the turn's answer is the aid itself (learn.offer.escalation)
+        plan_appendix = ""  # Learn's calendar, appended under the answer (learn.offer.plan_context)
         # /web comes first: it is neither direct nor a workflow expansion but an
         # agent turn with web-only tools. A usage error raises ValueError, which
         # the except below turns into the single error event.
@@ -1555,7 +1557,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             if block := await asyncio.to_thread(_escalation, text, messages):
                 agent_msg += "\n\n" + block
                 escalated = True
-            if block := await asyncio.to_thread(_plan_context, text):
+            block, plan_appendix = await asyncio.to_thread(_plan_context, text)
+            if block:
                 agent_msg += "\n\n" + block
             elif await asyncio.to_thread(says_lost, text):   # Jev over HTTP behind the word list: off the loop
                 # A reader saying it is unclear asked to understand, not to
@@ -1683,6 +1686,12 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             from silica.agent.figures import place_figures
 
             answer = place_figures(answer, messages, exists=lambda f: _find_asset(f) is not None)
+            if plan_appendix and answer:
+                # Learn's calendar under the answer, written by code so every
+                # date is the plan's (learn.offer.plan_context)
+                answer = answer.rstrip() + "\n\n" + plan_appendix
+                if messages and messages[-1].get("role") == "assistant":
+                    messages[-1]["content"] = answer
         # A request made in enough chats becomes a proposed skill, or one already
         # installed is offered as the next turn (ADR-0127 points 5 and 6).
         skill_note, offer = ((None, None) if stopped or web or not answer

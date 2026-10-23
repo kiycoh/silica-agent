@@ -368,9 +368,10 @@ def test_learn_s_plan_reaches_the_turn_that_needs_it(monkeypatch):
     monkeypatch.setattr(pl, "read_plan", lambda path: plan)
     monkeypatch.setattr(pl, "lecture_gaps", lambda p: (["dropout", "multi-task"], 32))
     rows = [{"path": "Plans/Esame.md", "name": "Esame", "status": "active"}]
-    block = offer.plan_context("Prepara un piano di studio giorno per giorno fino all'esame", rows)
-    assert "day-by-day calendar" in block and "| Day | Step | Notes |" in block and "reproduce this table" in block
-    block = offer.plan_context("quali argomenti del programma non compaiono nelle slide delle lezioni?", rows)
-    assert "dropout, multi-task" in block and "32 lecture decks" in block
-    assert offer.plan_context("cos'è il dropout?", rows) == ""
-    assert offer.plan_context("piano di studio per domani", [{**rows[0], "status": "completed"}]) == ""
+    block, appendix = offer.plan_context("Prepara un piano di studio giorno per giorno fino all'esame", rows)
+    assert "day-by-day calendar" in block and "do not write a calendar" in block
+    assert appendix.startswith("Calendar computed by Learn from the plan Esame") and "| Day | Step | Notes |" in appendix
+    block, appendix = offer.plan_context("quali argomenti del programma non compaiono nelle slide delle lezioni?", rows)
+    assert "dropout, multi-task" in block and "32 lecture decks" in block and appendix == ""
+    assert offer.plan_context("cos'è il dropout?", rows) == ("", "")
+    assert offer.plan_context("piano di studio per domani", [{**rows[0], "status": "completed"}]) == ("", "")

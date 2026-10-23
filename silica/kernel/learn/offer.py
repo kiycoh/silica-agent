@@ -268,31 +268,38 @@ _SYLLABUS_RE = re.compile(r"\b(programma|scheda|syllabus|curriculum)\b", re.I)
 _LECTURES_RE = re.compile(r"\b(slides?|lezion[ei]|lectures?|lessons?)\b", re.I)
 
 
-def plan_context(text: str, plans: list[dict]) -> str:
-    """The block for this message, or "": the plan the message names, else the
-    first open one."""
+def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
+    """(the block for the model, the text appended under its answer) for this
+    message, ("", "") when the plan has nothing for it: the plan the message
+    names, else the first open one. The calendar is appended by code, not
+    copied by the model: told to reproduce it, the 9B merged three days and
+    dropped 1 November (2026-10-23)."""
     from silica.kernel.learn import plans as pl
 
     open_plans = [p for p in plans if p.get("status") != "completed"]
     if not open_plans or not (asks_plan(text) or (_SYLLABUS_RE.search(text) and _LECTURES_RE.search(text))):
-        return ""
+        return "", ""
     low = text.casefold()
     row = next((p for p in open_plans if p.get("name", "").casefold() in low), open_plans[0])
     plan = pl.read_plan(row["path"])
     if asks_plan(text):
         rows = pl.day_by_day(plan)
         if not rows:
-            return ""
-        return (f"[Learn tracks the plan {plan['name']}, by {plan['by']}. Its day-by-day calendar, computed from "
-                f"the plan's steps in the syllabus's order and its date; reproduce this table as it is, without "
-                f"changing a date or a step, then add advice if useful:\n{pl.day_by_day_table(rows)}]")
+            return "", ""
+        table = pl.day_by_day_table(rows)
+        return (f"[Learn tracks the plan {plan['name']}, by {plan['by']}. Silica appends its day-by-day calendar, "
+                f"computed from the plan's steps in the syllabus's order and its date, under your answer; do not "
+                f"write a calendar or a table of days yourself. Write a short introduction and advice on how to "
+                f"study these steps:\n{table}]",
+                f"Calendar computed by Learn from the plan {plan['name']} (by {plan['by']}):\n\n{table}")
     found = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
     if not found:
-        return ""
+        return "", ""
     gaps, decks = found
     return (f"[Learn's plan {plan['name']} reads its syllabus, {plan['target']}, against the text of the {decks} "
             f"lecture decks. Topics of the syllabus that no deck mentions: {', '.join(gaps) or 'none'}. Use this "
-            f"list for what the slides do not cover; a topic named another way in the slides can still be there.]")
+            f"list for what the slides do not cover; a topic named another way in the slides can still be there.]",
+            "")
 
 
 # --- the offer's own record: caps, declines, escalation, and its validation --
