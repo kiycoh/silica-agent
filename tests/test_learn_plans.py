@@ -441,3 +441,20 @@ def test_planned_paths_is_what_the_active_plans_cover(vault):
     assert plans.planned_paths() == {"Bio/cell.md"}
     vault.note("Plans/Exam.md", "---\ntype: plan\nscope: folder\ntarget: Bio/\nstatus: completed\n---\n\n# Exam\n")
     assert plans.planned_paths() is None   # a completed plan draws no line
+
+
+def test_a_merge_loser_is_not_material_and_a_one_note_block_keeps_its_name(vault):
+    """A course plan listed the loser "Reti neurali ricorrenti" beside its
+    winner, and a syllabus block with one note became a link to a note named
+    after the block (2026-10-23)."""
+    vault.note("ML/Reti neurali ricorrenti.md",
+               "---\nsuperseded_by: '[[Rete ricorrente]]'\n---\n# Reti neurali ricorrenti\n\nx\n")
+    vault.note("ML/Rete ricorrente.md", "# Rete ricorrente\n\nx\n")
+    paths = plans.resolve_scope("folder", "ML/")["paths"]
+    assert "ML/Rete ricorrente.md" in paths and "ML/Reti neurali ricorrenti.md" not in paths
+    out = plans.write_plan("Esame", "steps", "Reti ricorrenti: rete ricorrente, momentum di nesterov\n[[Softmax]]",
+                           restrict="ML/", cards=[])
+    text = plans._read(out["path"])
+    tree = text.split("## Tree", 1)[1].split("## Steps", 1)[0]
+    assert "- Reti ricorrenti\n  - [[Rete ricorrente]]\n" in tree and "[[Reti ricorrenti]]" not in tree
+    assert "- [[Softmax]]\n" in tree   # a step that is its note stays the link

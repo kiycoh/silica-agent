@@ -1032,9 +1032,13 @@ def _plan_body(name: str, scope: str, target, resolved: dict, chosen: list[str],
         if node.get("gap"):
             lines.append(f"- {label}: not in the vault")
             continue
-        head = f"- [[{Path(label).stem}]]" if scope == "steps" and node.get("leaves") and len(node["leaves"]) == 1 else f"- {label}"
-        lines.append(head)
-        leaves = [f"[[{Path(p).stem}]]" for p in node.get("leaves", []) if not (scope == "steps" and len(node["leaves"]) == 1)]
+        # A step that is its one note shows as the link; any other label stays
+        # text over its notes. Linking the label made "Utilizzo delle librerie
+        # numpy, ..." a link to a note that does not exist (2026-10-23).
+        found = node.get("leaves") or []
+        one = scope == "steps" and len(found) == 1 and Path(found[0]).stem.casefold() == label.casefold()
+        lines.append(f"- [[{Path(found[0]).stem}]]" if one else f"- {label}")
+        leaves = [] if one else [f"[[{Path(p).stem}]]" for p in found]
         if leaves:
             lines.append("  - " + " · ".join(leaves))
     if scope == "steps":

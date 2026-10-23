@@ -65,14 +65,19 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str]:
         except ValueError:
             pass  # unparseable statement: keep the mtime proxy
     # An event note states no `type`; its `event_start` is what makes it one
-    # (calendar/model.py), so that key names its kind here.
-    kind = "event" if (data or {}).get("event_start") is not None else (data or {}).get("type")
+    # (calendar/model.py), so that key names its kind here. A merge loser is
+    # its winner's material twice: a course plan listed "Reti neurali
+    # ricorrenti" (superseded_by Rete ricorrente) beside its winner (2026-10-23).
+    data = data or {}
+    kind = ("event" if data.get("event_start") is not None
+            else "merged" if data.get("superseded_by") else data.get("type"))
     return ts, bool((data or {}).get("AI")), str(kind or "").strip().lower()
 
 
-# Notes about learning, never asked about; and the calendar's own notes, which
-# Learn's "never practised" listed as study material until 2026-10-15.
-NOT_MATERIAL = ("plan", "syllabus", "event")
+# Notes about learning, never asked about; the calendar's own notes, which
+# Learn's "never practised" listed as study material until 2026-10-15; and
+# merge losers, whose winner is the note to study.
+NOT_MATERIAL = ("plan", "syllabus", "event", "merged")
 
 
 def is_material(meta: dict) -> bool:
