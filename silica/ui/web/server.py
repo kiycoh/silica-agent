@@ -1054,6 +1054,23 @@ def _skill_after_turn(text: str, messages: list[dict]) -> tuple[dict | None, dic
         return None, None
 
 
+def _study_offer(text: str, messages: list[dict]) -> dict | None:
+    """The study offer for the turn that just ended, from the notes it read
+    (learn.offer). An incognito chat gets none, as it gets no proposal."""
+    from silica.kernel import user_memory
+    from silica.kernel.learn.offer import study_offer
+
+    if user_memory.incognito():
+        return None
+    try:
+        return study_offer(text, read_refs(messages))
+    except Exception:
+        # An offer is an extra: a ledger that does not parse costs the offer,
+        # never the answer.
+        logger.warning("study offer skipped", exc_info=True)
+        return None
+
+
 def _answer_html(answer: str, refs, graph=None) -> str:
     """A chat answer drawn with its turn's reads (ADR-0127): a name several
     notes share links the one the turn read, and a read note's title links
@@ -1488,6 +1505,10 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # installed is offered as the next turn (ADR-0127 points 5 and 6).
         skill_note, offer = ((None, None) if stopped or web or not answer
                              else await asyncio.to_thread(_skill_after_turn, text, messages))
+        if offer is None and not (stopped or web or not answer):
+            # A note the reader keeps missing, or a message saying it was not
+            # clear: a way to work on it, launched by the reader (learn.offer).
+            offer = await asyncio.to_thread(_study_offer, text, messages)
         # The lines under the answer (ADR-0094 point 8), stored on it before the
         # beat below so a reopened chat draws them too. A stopped turn has no
         # answer to carry them: they are drawn live only.

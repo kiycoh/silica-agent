@@ -1683,6 +1683,26 @@ function turnNotes(notes) {
 function skillOffer(o) {
   const line = document.createElement("div");
   line.className = "turn-note skill-offer";
+  // A note the reader keeps missing, or a message saying it was not clear
+  // (learn.offer): ways to work on it, each one a command the reader sends.
+  if (o.kind === "study") {
+    line.append(`${o.text}: `);
+    (o.commands || []).forEach((c, i) => {
+      const cb = document.createElement("button");
+      cb.type = "button";
+      cb.className = "linklike";
+      cb.textContent = c.label;
+      cb.title = c.command;
+      cb.addEventListener("click", () => {
+        input.value = c.command;
+        input.focus();
+        input.dispatchEvent(new Event("input"));
+      });
+      if (i) line.append(" · ");
+      line.append(cb);
+    });
+    return line;
+  }
   const b = document.createElement("button");
   b.type = "button";
   b.className = "linklike";
