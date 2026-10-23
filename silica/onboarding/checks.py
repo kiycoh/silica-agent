@@ -862,7 +862,7 @@ def check_converters(config: SilicaConfig) -> CheckResult:
     # instruction for a tool the user already has reads as a fault report.
     absent = []
     if not shutil.which("mineru"):
-        absent.append("mineru for OCR and .xlsx (`pip install 'mineru[pipeline]'`)")
+        absent.append("mineru for OCR and .xlsx (`pip install 'mineru[full]'`)")
     if not ffmpeg:
         absent.append("ffmpeg for audio/video")
     if status == "missing":

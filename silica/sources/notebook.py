@@ -24,7 +24,12 @@ class NotebookAdapter:
     name = "notebook"
 
     def matches(self, target: str) -> bool:
-        return target.lower().endswith(".ipynb")
+        # Only where read() can work: outside a git checkout it always raised
+        # "no code-lane repo", so a course's lab notebooks in a study vault
+        # were never ingested at all. There they fall to convert() instead.
+        vault = (CONFIG.vault_path or "").strip()
+        return (target.lower().endswith(".ipynb") and bool(vault)
+                and paths.repo_root_for(vault) is not None)
 
     def read(self, target: str) -> RawItem:
         vault = (CONFIG.vault_path or "").strip()

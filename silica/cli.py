@@ -2274,7 +2274,11 @@ def _draft_title(body: str, stem: str) -> str:
     span, so this stays mechanical."""
     for line in body.splitlines():
         if line.startswith("# ") and line[2:].strip():
-            return line[2:].strip().replace("/", "-")
+            # Obsidian refuses * " \ / < > : | ? in a note name; a study guide
+            # titled "Machine Learning: guida allo studio" landed as a file
+            # the app would not rename or link cleanly.
+            title = re.sub(r"\s*:\s*", " - ", line[2:].strip()).replace("/", "-")
+            return re.sub(r'[*"\\<>|?]', "", title).strip() or stem
     return stem
 
 
@@ -2380,7 +2384,13 @@ def _file_drafts(
         fm_lines = "".join(f"{k}: {json.dumps(v) if isinstance(v, str) else v}\n"
                            for k, v in data.items())
         note = f"---\n{fm_lines}---\n\n{body.strip()}\n"
-        title = _draft_title(body, Path(f).stem)
+        lab = str(data.get("source_file", "")).lower().endswith(".ipynb")
+        if lab:
+            from silica.kernel.link import labs
+            note += labs.practised_section(body, labs.folder_titles(dest_dir))
+        # A notebook's first heading names its first cell ("Dataset uploading",
+        # two optdigits labs of one course), not the lab: its file name does.
+        title = Path(f).stem if lab else _draft_title(body, Path(f).stem)
         note_rel = f"{dest_dir}/{title}.md"
         prior: str | None = None
         try:
@@ -3110,6 +3120,13 @@ def _nucleate_expand_folders(
                 pending = [p for p in pending if p not in figures]
                 CONSOLE.print(f"  [dim]{f}: left {len(figures)} file(s) "
                               f"its notes embed alone[/]")
+            # A document converted earlier sits beside its notes, and those
+            # notes ride the document's own unit (reused segments, in
+            # _nucleate_plan_units). Listed here too, every lecture of a course
+            # also joined one loose-note unit, so each was queued twice.
+            carried = _converted_notes_of(pending)
+            if carried:
+                group = [g for g in group if g not in carried]
             if group or pending:
                 detail = f"[bold]{len(group)}[/] note(s)" if group else ""
                 if pending:
@@ -3120,6 +3137,22 @@ def _nucleate_expand_folders(
         expanded.extend(group or [f])
     files = list(dict.fromkeys(expanded))
     return files, run_root
+
+
+def _converted_notes_of(sources: list[str]) -> set[str]:
+    """The inbox notes an earlier convert() made from these source files."""
+    if not sources:
+        return set()
+    from silica.sources.convert import _resolve_input
+
+    prior = _prior_conversions()
+    out: set[str] = set()
+    for s in sources:
+        try:
+            out.update(prior.get(str(_resolve_input(s)), {}).get("inbox") or [])
+        except ValueError:
+            continue  # gone since the census: convert() reports it later
+    return out
 
 
 _MD_EMBED_RE = re.compile(r"!\[[^\]]*\]\(\s*<?([^)>\s]+)")

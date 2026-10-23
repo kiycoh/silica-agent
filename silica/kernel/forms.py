@@ -93,8 +93,8 @@ def _looks_like_notebook_export(text: str) -> bool:
     owner's artifact, filed intact as a draft, never distilled as code. The
     typed decision already said draft on all five seen (p 0.63-0.98); this
     rule makes the policy hold with the decision model off and costs no call.
-    ponytail: nbconvert markdown only. A `.ipynb` source would be stamped by
-    construction if convert() ever learns to read one.
+    A `.ipynb` that convert() reads itself (a study vault, no code lane)
+    arrives stamped `form: draft` and never reaches this rule.
     """
     from silica.kernel.write import frontmatter
 
@@ -254,9 +254,12 @@ def resolve(text: str, *, allow_sniff: bool = True) -> Form:
 
     data, _, _ = frontmatter.split(text)
     converted = bool(isinstance(data, dict) and data.get("source_file"))
+    # Except a notebook convert() read itself: its draft stamp is the notebook
+    # policy below, written at conversion, never a sniff persisted to disk.
+    lab = converted and str(data.get("source_file")).lower().endswith(".ipynb")
 
     form = stamped_form(text)
-    if form and not (converted and form == "draft"):
+    if form and not (converted and form == "draft" and not lab):
         return Form(form, profile_for(form), "stamp")
     # Mechanical, before any model: a notebook export is filed as a draft.
     # Unconverted only, like the sniff: a converted printout of a notebook

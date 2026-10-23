@@ -597,8 +597,8 @@ class SilicaConfig:
     # PDF→Markdown converter (ADR-0011 provider seam):
     # "pdfium" (default, BSD/Apache, in the base install — one ~3 MB wheel, no
     # torch and no JVM, reads the PDF outline for headings, but NO OCR), "mineru"
-    # (best fidelity and the only OCR path; `pip install 'mineru[pipeline]'`,
-    # 3.8 GB of torch+CUDA plus model downloads), "docling" (MIT but its PDF
+    # (best fidelity and the only OCR path; `pip install 'mineru[full]'`,
+    # several GB of torch+CUDA+vLLM plus model downloads), "docling" (MIT but its PDF
     # pipeline hard-imports docling-ibm-models, so torch is unavoidable), or
     # "opendataloader" (Apache-2.0, strong on complex tables and multi-column
     # reading order, needs a JVM). Non-PDF formats (DOCX/EPUB/FB2) have their own
