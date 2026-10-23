@@ -3547,23 +3547,53 @@ def _sc_nucleate(args: list[str], *, user_input: str = "", **_) -> str | None:
         # round-tripped the whole session history through the model on
         # every turn just to relay these arguments to silica_run_injector
         # (~40% of a nucleate run's tokens for a handful of decision tokens).
+        import time as _time
+
+        from silica.agent import narration as _narr_mod
+        from silica.agent.bus import BUS
+        from silica.agent.events import ToolCompleteEvent, ToolErrorEvent, ToolStartEvent
         from silica.router.coordinator import Coordinator
+        from silica.tools.runners import project_injector_result
 
         head = f"{label}: " if (batch and label) else ""
         CONSOLE.print(
             f"  {_at()}{head}nucleate: {len(mfs)} file(s) → [bold]{_announced_target(target_dir)}[/]"
         )
+        # The unit as the injector call the agent makes: the web chat drew no
+        # block for it and dropped its phases, and the narration held no running
+        # tool, so the Chats mark never lit for a typed /nucleate (2026-10-23).
+        # On "work/tool", which only the web turn reads; the narration is every
+        # frontend's. Published first: the web turn narrates the user's line on
+        # the start, so the tool's beats follow the turn they belong to.
+        name, call_id = "silica_run_injector", f"nucleate-{uuid.uuid4().hex[:8]}"
+        args = {"inbox_files": mfs, "target_dir": target_dir}
+
+        def _tell(ev) -> None:
+            BUS.publish("work/tool", ev)
+            _narr_mod.NARRATOR.on_render_event(ev)
+
+        _tell(ToolStartEvent(name, args, call_id, 0))
+        started = _time.monotonic()
         try:
-            result = Coordinator(
+            coordinator = Coordinator(
                 inbox_files=mfs, target_dir=target_dir, hub=hub or None,
                 keep_sources=keep_sources, seen_override=seen or None,
                 distill_profile=profile or None,
-            ).run()
+            )
+            result = coordinator.run()
         except ValueError as exc:
             # A path outside the vault (or any other rejected argument) is
             # user error, not a crash: the batch moves to the next unit.
+            _tell(ToolErrorEvent(name, call_id, str(exc), 0))
             CONSOLE.print(f"  [yellow]nucleate: {exc}[/]")
             return None
+        except BaseException as exc:
+            _tell(ToolErrorEvent(name, call_id, str(exc) or type(exc).__name__, 0))
+            raise
+        run_id = getattr(getattr(getattr(coordinator, "fsm", None), "progress", None), "run_id", None)
+        _tell(ToolCompleteEvent(name, args, call_id,
+                                json.dumps(project_injector_result(result, run_id, len(mfs)), default=str),
+                                _time.monotonic() - started, 0))
         CONSOLE.print(
             f"  {_at()}{head}nucleate finished: "
             f"{_nucleate_result_line(result)} — details in log.md"

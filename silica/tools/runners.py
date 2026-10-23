@@ -127,7 +127,14 @@ def silica_run_injector(
         cancel_token=cancel_token,
     )
     result = coordinator.run()
+    return project_injector_result(result, getattr(coordinator.fsm.progress, "run_id", None),
+                                   len(files), skipped)
 
+
+def project_injector_result(result: dict, run_id: str | None, files_total: int,
+                            skipped: int = 0) -> dict[str, Any]:
+    """What a Coordinator run returns to its caller: this tool's result, and the
+    one a typed /nucleate hands the chat's block (cli._sc_nucleate)."""
     # Agent-facing projection: outcomes only, never the raw FSM context. The
     # raw context once fed a confabulated success report — planned concepts in
     # payload.chunks read as "created notes", and a last-write-wins error field
@@ -135,7 +142,7 @@ def silica_run_injector(
     failed = result.get("failed_chunks", [])
     projected: dict[str, Any] = {
         "final_status": result.get("final_status", "unknown"),
-        "run_id": getattr(coordinator.fsm.progress, "run_id", None),
+        "run_id": run_id,
         "chunks_committed": result.get("committed_chunks", 0),
         "chunks_failed": len(failed),
         "failed_chunks": failed,
@@ -147,7 +154,7 @@ def silica_run_injector(
         # note and link counts it was written to show.
         "yield_notes": result.get("yield_notes", 0),
         "yield_links": result.get("yield_links", 0),
-        "files_total": len(files),
+        "files_total": files_total,
         "apparatus_skipped": skipped,
     }
     if result.get("error"):

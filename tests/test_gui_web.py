@@ -710,6 +710,71 @@ def test_a_turn_silent_past_the_keepalive_still_sends_a_byte(client, monkeypatch
     assert events[-1]["type"] == "done" and events[-1]["answer"] == "late"
 
 
+def test_a_typed_nucleate_draws_the_injector_block_and_narrates_a_running_tool(client, tmp_vault, monkeypatch):
+    """/nucleate typed in the chat ran the Coordinator inside the slash handler
+    with no tool_start: the page dropped every phase, having no block to apply
+    them to, and the narration held three beats and no running row, so the
+    Chats mark never lit (local repro 2026-10-23, after hosted t01's run). It
+    now reads as the injector call the agent makes."""
+    import silica.router.coordinator as rc
+    from silica.agent.bus import BUS
+    from silica.agent.events import PhaseEvent
+
+    tc, server = client
+
+    class _Fake:
+        def __init__(self, **kw):
+            pass
+
+        def run(self):
+            BUS.publish("work/phase", PhaseEvent("distill", "running", "chunk", 1, 1, 1, 1))
+            return {"final_status": "success", "yield_notes": 2, "yield_links": 1, "committed_chunks": 1}
+
+    monkeypatch.setattr(rc, "Coordinator", _Fake)
+    tmp_vault.note("Inbox/x.md", "parole\n")
+
+    events = _read_sse(tc.post("/chat", json={"text": "/nucleate Inbox/x.md --target=Concepts"}))
+    types = [e["type"] for e in events]
+    start = types.index("tool_start")
+    assert events[start]["pipeline"] and start < types.index("phase") < types.index("tool_done")
+    done = events[types.index("tool_done")]
+    assert done["id"] == events[start]["id"]
+    assert (done["summary"]["kind"], done["summary"]["notes"], done["summary"]["files"]) == ("ok", 2, 1)
+    assert types[-1] == "done"
+
+    beats = tc.get("/narration").json()["beats"]
+    tool = [(b["status"], b["payload"].get("name")) for b in beats if b["kind"] == "tool"]
+    assert tool == [("running", "silica_run_injector"), ("done", "silica_run_injector")]
+    # after the turn they belong to, which starts the run the page projects
+    kinds = [(b["kind"], (b["payload"].get("message") or {}).get("role")) for b in beats]
+    assert kinds.index(("turn", "user")) < kinds.index(("tool", None))
+    assert kinds.count(("turn", "user")) == 1
+
+
+def test_a_typed_nucleate_that_raises_closes_its_block_and_span(client, tmp_vault, monkeypatch):
+    """A crash inside the run must not leave the block and the narrated tool
+    running, which would light the Chats mark for a run that is over."""
+    import silica.router.coordinator as rc
+
+    tc, server = client
+
+    class _Boom:
+        def __init__(self, **kw):
+            pass
+
+        def run(self):
+            raise RuntimeError("disk full")
+
+    monkeypatch.setattr(rc, "Coordinator", _Boom)
+    tmp_vault.note("Inbox/x.md", "parole\n")
+
+    events = _read_sse(tc.post("/chat", json={"text": "/nucleate Inbox/x.md --target=Concepts"}))
+    types = [e["type"] for e in events]
+    assert "tool_start" in types and "tool_error" in types and types[-1] == "error"
+    beats = tc.get("/narration").json()["beats"]
+    assert [b["status"] for b in beats if b["kind"] == "tool"] == ["running", "failed"]
+
+
 def test_a_stream_dropped_during_a_keepalive_still_holds_the_gate_for_the_worker(client, monkeypatch):
     """The keepalive waits on the turn's next event without owning it: a client
     dropped then must reach run_turn as before, so the zombie is cancelled and

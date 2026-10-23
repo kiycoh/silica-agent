@@ -1213,6 +1213,10 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
 
     from silica.agent.bus import BUS
     BUS.subscribe("work/phase", on_phase)
+    # A typed /nucleate runs the injector with no agent call around it, and
+    # says so on "work/tool" (cli._sc_nucleate), so its block draws as the
+    # agent's does.
+    BUS.subscribe("work/tool", on_phase)
 
     try:
         # A slash command follows the REPL's dispatch order (silica/cli.py): the
@@ -1290,13 +1294,40 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
                     expanded = None if handled else _expand_workflow_shortcut(text)
                 return handled or expanded == "", expanded, capture.get()
 
-            handled, expanded, captured_out = await asyncio.to_thread(_run_slash)
+            # Pumped as the agent's turn is: a command that runs the injector
+            # streams its block and phases while it works (cli._sc_nucleate),
+            # and they reached no one while this awaited the thread whole. Held
+            # as the turn's task, so a dropped tab keeps the gate shut until
+            # the work ends instead of freeing it under a running import.
+            done_slash = object()
+            typed = {"role": "user", "content": text, "origin": "cli"}
+            told: list[bool] = []
+
+            def _turn_before_its_work(ev) -> None:
+                # The run projection starts at a user turn, so the injector's
+                # beats must follow this one. A command that ran a unit is past
+                # the agent fallback (its target is resolved), so the turn
+                # narrated here is never narrated again as an expansion.
+                if not told:
+                    told.append(True)
+                    _narrate_user_turn(typed)
+
+            BUS.subscribe("work/tool", _turn_before_its_work)
+            try:
+                current_task = task = asyncio.ensure_future(asyncio.to_thread(_run_slash))
+                task.add_done_callback(lambda t: q.put_nowait(done_slash))
+                while (item := await q.get()) is not done_slash:
+                    yield item
+                handled, expanded, captured_out = await task
+            finally:
+                BUS.unsubscribe("work/tool", _turn_before_its_work)
 
             if handled:
                 # Appended only once the verdict is in: a False falls through to
                 # the agent below, which appends the expanded turn itself.
-                messages.append({"role": "user", "content": text, "origin": "cli"})
-                _narrate_user_turn(messages[-1])
+                messages.append(typed)
+                if not told:
+                    _narrate_user_turn(typed)
                 # A GUI started from a terminal renders CONSOLE in colour and the
                 # capture keeps the escape codes, which the chat showed verbatim
                 # around /fetch's note path. The browser gets the text alone.
@@ -1506,6 +1537,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         yield {"type": "error", **failure}
     finally:
         BUS.unsubscribe("work/phase", on_phase)
+        BUS.unsubscribe("work/tool", on_phase)
         # ponytail: the tokens are the difference of the process totals, so a
         # background job running during the turn is charged to it (its own
         # llm_call lines still name it by call-site), and an abandoned turn's
