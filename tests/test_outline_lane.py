@@ -638,6 +638,25 @@ def test_a_vault_that_translates_has_the_bodies_written_not_looked_up(tmp_vault,
     tmp_vault.note("vault.yaml", "conventions:\n  language: it\n")
     reset_manifest_cache()
     assert ol.translates("## Dropout\n\nIl dropout addestra l'insieme delle sottoreti.\n") is False
+    # the bodies stage runs, and is told to translate: "in Italian" beside
+    # "copied from the source" read as copy (DeepSeek kept the English)
+    tmp_vault.note("vault.yaml", "conventions:\n  language: Italian\n")
+    reset_manifest_cache()
+    seen: list[str] = []
+
+    def ask(system, user, *, max_tokens, **kw):
+        seen.append(system)
+        if system.startswith(ol.STAGE_A_TAG):
+            return {"lesson_title": "Dropout", "spine": ["Dropout come bagging"],
+                    "ideas": [{"title": "Dropout come bagging", "section": "Dropout", "claim": "Il dropout approssima il bagging."}]}
+        if system.startswith(ol.STAGE_BODIES_TAG):
+            return {"bodies": {"Dropout come bagging": "Il dropout addestra l'insieme delle sottoreti."}}
+        return {"edges": [], "ideas": [], "skips": []}
+
+    ol.run_outliner(source_text=english, source_basename="dl.md", target="T", hub="H",
+                    language="Italian", vault_outline=[], ask=ask)
+    bodies = [s for s in seen if s.startswith(ol.STAGE_BODIES_TAG)]
+    assert bodies and "translate its sentences into Italian" in bodies[0]
     tmp_vault.note("vault.yaml", "write_dir: \"\"\n")
     reset_manifest_cache()
     assert ol.translates(english) is False  # no declared language: follow the source

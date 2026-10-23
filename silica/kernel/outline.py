@@ -86,7 +86,7 @@ Emit ONLY a JSON object:
  "spine": ["<idea title>", ...],
  "ideas": [
    {{
-     "title": "<noun phrase in {lang} of 2-6 words naming ONE idea, capitalised like a note title; never a sentence, a slide line ('Note that', 'Arriving at the end, case l=L') or a formula>",
+     "title": "<noun phrase in {lang} of 2-6 words naming ONE idea, capitalised the way {lang} capitalises a title (outside English: the first word and proper names only); never a sentence, a slide line ('Note that', 'Arriving at the end, case l=L') or a formula>",
      "section": "<heading of the source section(s) the idea comes from, verbatim>",
      "claim": "<one sentence in {lang}: what this idea asserts>",
      "depends_on": [{{"title": "<another idea title from THIS list>", "relation": "<one of {rels}>", "why": "<one sentence in {lang}>"}}]
@@ -109,7 +109,7 @@ STAGE_GAP = STAGE_GAP_TAG + """
 You already extracted the ideas listed below from the source document that follows. These source sections have NO idea yet:
 {gaps}
 For each of them either add an idea or record an explicit skip with the reason (empty slide, duplicate of an existing idea, noise). An idea has the shape
-{{"title": "<noun phrase in {lang} of 2-6 words naming ONE idea, capitalised like a note title>", "section": "<the source heading it comes from, verbatim from the list above>", "claim": "<one sentence in {lang}: what this idea asserts>", "depends_on": [{{"title": "<an existing or new idea title>", "relation": "<one of {rels}>", "why": "<one sentence in {lang}>"}}]}}
+{{"title": "<noun phrase in {lang} of 2-6 words naming ONE idea, capitalised the way {lang} capitalises a title (outside English: the first word and proper names only)>", "section": "<the source heading it comes from, verbatim from the list above>", "claim": "<one sentence in {lang}: what this idea asserts>", "depends_on": [{{"title": "<an existing or new idea title>", "relation": "<one of {rels}>", "why": "<one sentence in {lang}>"}}]}}
 Title, claim and every why are written in {lang}; the section is copied as it is.
 
 Emit ONLY a JSON object: {{"ideas": [...], "skips": [{{"section": "<heading>", "reason": "<why>"}}]}}. No markdown fences.
@@ -119,6 +119,10 @@ STAGE_BODIES = STAGE_BODIES_TAG + """
 You are given one complete source document (markdown, LaTeX kept) and a list of ideas already identified in it (a quoted title, then the source section it comes from). For EACH listed idea write its note body in {lang}: the facts themselves (definitions, formulas in LaTeX verbatim, theorem statements, algorithm steps), copied from the source, never outside knowledge, never a description of the source. Markdown. Keep every formula that belongs to the idea, drop repeated slides.
 
 Reply in PLAIN MARKDOWN, not JSON: for each listed idea, one line `### IDEA: <idea title exactly as quoted>` followed by its body on the following lines. One section per listed idea, in the given order, keyed by the idea title and never by the section (several ideas can share one section). Nothing before the first marker, no code fences around the reply.
+"""
+
+STAGE_BODIES_TRANSLATE = """
+The source is written in another language than {lang}: translate its sentences into {lang}, faithfully and completely. Keep formulas, code, citations and proper names as they are.
 """
 
 # Bodies are LaTeX-heavy prose: as JSON strings they came back with single
@@ -1077,6 +1081,10 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
     else:
         titles = [i.title for i in outline.ideas if only_titles is None or i.title in only_titles]
     cached = _cache_layout()
+    # "in {lang}" next to "copied from the source" read as copy: DeepSeek kept
+    # the Goodfellow's English under Italian titles (2026-10-23).
+    bodies_prompt = STAGE_BODIES.format(lang=language) + (
+        STAGE_BODIES_TRANSLATE.format(lang=language) if translates(src) else "")
 
     def _bodies(batch: list[str]) -> dict[str, str]:
         section_of = {t: next(i.section for i in outline.ideas if i.title == t) for t in batch}
@@ -1089,7 +1097,7 @@ def run_outliner(*, source_text: str, source_basename: str, target: str, hub: st
             user += "\n\nPREVIOUS ATTEMPT WAS REJECTED:\n" + steer_context
         from litellm import InternalServerError
         try:
-            reply = ask(STAGE_BODIES.format(lang=language), user, max_tokens=12000, raw=True,
+            reply = ask(bodies_prompt, user, max_tokens=12000, raw=True,
                         **({"prefix": src} if cached else {}))
         except (ValueError, TimeoutError, InternalServerError) as exc:
             # One batch must not take the lecture down: Lezione 8 landed 0
