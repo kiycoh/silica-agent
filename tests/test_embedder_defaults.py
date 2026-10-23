@@ -43,6 +43,22 @@ def test_jina_gets_its_own_bars(monkeypatch):
     assert (c.sim_threshold_theme, c.autolink_min_sim, c.episodic_recall_floor) == (0.208, 0.180, 0.5)
 
 
+def test_pplx_4b_gets_its_own_bars_and_the_0_6b_does_not(monkeypatch):
+    """The hosted index (2026-10-23): no role prompts, cosines below Qwen's.
+    The 0.6b shares the id's prefix but was never calibrated, so it must not
+    inherit the 4b's bars."""
+    from silica.config import embedder_defaults
+
+    _clear(monkeypatch)
+    monkeypatch.setenv("SILICA_EMBEDDING_MODEL", "perplexity/pplx-embed-v1-4b")
+    c = SilicaConfig()
+    assert (c.embedding_query_prefix, c.embedding_document_prefix) == ("", "")
+    assert (c.sim_threshold_high, c.sim_threshold_low, c.sim_title_threshold) == (0.785, 0.640, 0.508)
+    assert (c.sim_threshold_theme, c.autolink_min_sim, c.episodic_recall_floor) == (0.189, 0.204, 0.52)
+    assert embedder_defaults("perplexity/pplx-embed-v1-4b")["dim"] == "2560"
+    assert embedder_defaults("perplexity/pplx-embed-v1-0.6b") == {}
+
+
 def test_an_exported_value_wins_even_empty(monkeypatch):
     _clear(monkeypatch)
     monkeypatch.setenv("SILICA_SIM_THRESHOLD_HIGH", "0.95")
