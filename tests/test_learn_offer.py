@@ -44,3 +44,19 @@ def test_saying_it_was_not_clear_is_enough_and_old_misses_do_not_count():
 def test_a_source_leaf_is_never_the_note_offered():
     led = [_e("sources/x/L1.md", "2026-10-20", False), _e("sources/x/L1.md", "2026-10-21", False)]
     assert offer.study_offer("?", ["sources/x/L1.md"], entries=led) is None
+
+
+def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypatch):
+    """A chat turn names a read note as its tool call did, often a bare title;
+    the rule needs the path the ledger keys it by (seen in the app: no offer
+    under an answer that had read "Teorema di Novikoff")."""
+    import silica.kernel.recall.mindmap as mm
+    import silica.ui.web.server as srv
+
+    monkeypatch.setattr(srv, "read_refs", lambda messages: ["Teorema di Novikoff"])
+    monkeypatch.setattr(mm, "answer_resolver",
+                        lambda refs: (None, ["ML/Teorema di Novikoff.md"] if refs == ["Teorema di Novikoff"] else []))
+    monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
+    monkeypatch.setattr("silica.kernel.report.quiz.entries", lambda: [])
+    o = srv._study_offer("non ho capito il teorema", [])
+    assert o and o["note"] == "ML/Teorema di Novikoff.md"

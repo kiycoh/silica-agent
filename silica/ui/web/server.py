@@ -1063,7 +1063,12 @@ def _study_offer(text: str, messages: list[dict]) -> dict | None:
     if user_memory.incognito():
         return None
     try:
-        return study_offer(text, read_refs(messages))
+        # The turn names its reads as the calls did, a title or a path; the
+        # ledger keys notes by path, so the titles are resolved first.
+        from silica.kernel.recall.mindmap import answer_resolver
+
+        _resolve, read = answer_resolver(read_refs(messages))
+        return study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
     except Exception:
         # An offer is an extra: a ledger that does not parse costs the offer,
         # never the answer.
