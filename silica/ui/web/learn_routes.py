@@ -783,13 +783,15 @@ def _momentum(before: dict | None, after: dict | None, first_success: bool) -> s
     s1 = float(after["S"])
     s0 = float(before["S"]) if before and before.get("S") is not None else None
     if first_success and s0 is None:
-        return f"First hold on this note: estimated ~{round(s1)} days."
+        return f"First hold on this note: estimated {f'~{round(s1)} days' if s1 >= 0.5 else 'under a day'}."
     if s0 is None:
         return None
     crossed = [m for m in MILESTONES if s0 < m <= s1]
     if crossed:
         return f"Estimated hold ~{round(s1)} days, was ~{round(s0)}; past {int(crossed[-1])} days."
-    if s1 >= 2 * s0:
+    # a doubling worth a line is one the reader can see: from 0.1 to 0.3 days
+    # read "Estimated hold ~0 days, was ~0." (2026-10-23)
+    if s1 >= 2 * s0 and round(s1) > round(s0):
         return f"Estimated hold ~{round(s1)} days, was ~{round(s0)}."
     return None
 

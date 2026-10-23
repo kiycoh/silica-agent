@@ -943,18 +943,25 @@ def _unembed_foreign_imgs(fragment: str) -> str:
     return _RAW_IMG_TAG.sub(sub, fragment)
 
 
-# An aliased wikilink in a table row: its pipe ended the cell and split the
-# row ("[[Attenzione|attenzione]]" in an aid's table, 2026-10-23). Obsidian
-# asks for `\|` there; models write `|`. The escaped pipe reaches the cell's
-# text as `|`, so the link still resolves with its alias.
+# A pipe inside a table cell ends the cell and splits the row: an aliased
+# wikilink ("[[Attenzione|attenzione]]" in an aid's table) and an absolute
+# value in a formula ("$|y_i f(x)| > \gamma$" in a summary's table), both
+# 2026-10-23. Obsidian asks for `\|` in a link, which reaches the cell's text
+# as `|` so the alias still resolves; in a formula `\|` would read as a norm,
+# so its bars become `\vert` and `\Vert`, which draw the same.
 _TABLE_ALIAS = re.compile(r"\[\[([^\]\[|\\]+)\|([^\]\[]+)\]\]")
+_TABLE_MATH = re.compile(r"(?<!\$)\$(?!\$)([^$\n]+?)\$")
 
 
 def _escape_table_aliases(text: str) -> str:
-    if "|" not in text or "[[" not in text:
+    if "|" not in text:
         return text
-    return "\n".join(_TABLE_ALIAS.sub(r"[[\1\\|\2]]", line) if line.lstrip().startswith("|") else line
-                     for line in text.split("\n"))
+
+    def math(m: re.Match) -> str:
+        return "$" + m.group(1).replace("\\|", "\\Vert ").replace("|", "\\vert ") + "$"
+
+    return "\n".join(_TABLE_MATH.sub(math, _TABLE_ALIAS.sub(r"[[\1\\|\2]]", line))
+                     if line.lstrip().startswith("|") else line for line in text.split("\n"))
 
 
 def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> str:

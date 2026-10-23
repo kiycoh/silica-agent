@@ -117,3 +117,13 @@ def test_learn_parks_formulas_before_it_escapes():
     assert "LR_MATH_RE" in js and '"/learn/math"' in js and "lrMathSpan(...math[i])" in js
 
 
+
+
+def test_a_hold_too_small_to_read_says_no_milestone():
+    """S from 0.1 to 0.3 days doubled and read "~0 days, was ~0" (2026-10-23)."""
+    from silica.ui.web.learn_routes import _momentum
+
+    assert _momentum({"S": 0.1}, {"S": 0.3}, False) is None
+    assert _momentum({"S": 2.0}, {"S": 4.5}, False) == "Estimated hold ~4 days, was ~2."
+    assert _momentum(None, {"S": 0.2}, True) == "First hold on this note: estimated under a day."
+    assert _momentum(None, {"S": 2.3}, True) == "First hold on this note: estimated ~2 days."

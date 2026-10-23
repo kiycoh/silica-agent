@@ -3120,3 +3120,16 @@ def test_a_reader_saying_it_is_unclear_gets_a_read_only_turn(client, monkeypatch
 
     asyncio.run(plain())
     assert "READ-ONLY" not in seen["content"]
+
+
+def test_an_absolute_value_in_a_table_cell_keeps_the_row_whole():
+    """`$|x|$` in a table row split the row at its bars (2026-10-23); they
+    become \\vert, and a norm's \\| becomes \\Vert, which draw the same."""
+    from silica.ui.web import server
+
+    table = "| Posizione | Condizione |\n|---|---|\n| Esterno | $|y_i f(x)| > \\gamma$ |\n| Norma | $\\|\\xi\\|_2$ |\n"
+    body = server._linkify(table)
+    body = body[body.index("<tbody"):]
+    assert [row.count("<td") for row in body.split("</tr>")[:2]] == [2, 2]
+    assert "&#x0007C;" in body and "&#x02016;" in body
+    assert server._escape_table_aliases("prose $|x|$\n") == "prose $|x|$\n"
