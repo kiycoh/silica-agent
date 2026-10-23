@@ -315,27 +315,14 @@ def handle_write(fsm: "InjectorFSM") -> None:
         # Best-effort incremental embed index refresh
         try:
             from silica.agent.providers import get_embedder
-            from silica.kernel.recall.embed import get_store, refresh_note
-            embedder = get_embedder(orch.CONFIG)
-            store = get_store()
-            for op in ops:
-                path = op.touched_ref()
-                if op.op not in (OpType.write, OpType.patch) or not path:
-                    continue
-                if path not in committed_paths:
-                    continue
-                stem = os.path.splitext(os.path.basename(path))[0]
-                idx_path = path.removesuffix(".md")
-                try:
-                    body = orch.DRIVER.read_note(path).content or ""
-                    # Fix A: defer the whole-index write to a single end-of-run
-                    # flush (_run_loop); upsert into the shared in-memory store only.
-                    refresh_note(embedder, idx_path, stem, body, store=store, save=False)
-                    # Mark the in-memory index dirty so the end-of-run flush knows
-                    # to persist (and only then — no flush when nothing changed).
-                    fsm.context["_embed_dirty"] = True
-                except Exception as _re:
-                    logger.debug("WRITE: embed refresh failed for '%s': %s", path, _re)
+            from silica.kernel.recall.embed import get_store
+            if orch._refresh_embeddings_for_ops(
+                ops, committed_paths, read_body=lambda p: orch.DRIVER.read_note(p).content or "",
+                embedder=get_embedder(orch.CONFIG), store=get_store(),
+            ):
+                # Mark the in-memory index dirty so the end-of-run flush knows
+                # to persist (and only then — no flush when nothing changed).
+                fsm.context["_embed_dirty"] = True
         except Exception as _ee:
             logger.debug("WRITE: embed refresh skipped (%s)", _ee)
 

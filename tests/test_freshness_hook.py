@@ -174,3 +174,45 @@ def test_helper_is_embedder_free():
             imported.extend(a.name for a in node.names)
     assert not any("providers" in m for m in imported)
     assert not any(m.endswith("embed") or ".embed" in m for m in imported)
+
+
+class _RecEmbedder:
+    model = "rec"
+
+    def __init__(self):
+        self.calls: list[list[str]] = []
+
+    def embed(self, texts, *, query=False):
+        self.calls.append(list(texts))
+        return [[1.0, 0.0] for _ in texts]
+
+
+def test_embedding_refresh_embeds_written_notes_and_leaves_patches_to_the_run_end(tmp_path):
+    """A patched note already has a vector the run's dedup can read; its new
+    text is embedded once by the sweep that ends the run (Coordinator.run).
+    Hosted t01, 2026-10-23: 49 patches on a 39-section paper, 38 notes
+    refreshed up to 3 times, each refresh ~4 s on the host's 2-core embedder."""
+    from silica.kernel.recall.embed import EmbedStore
+    from silica.router.orchestrator import _refresh_embeddings_for_ops
+
+    store = EmbedStore(path=tmp_path / "e.json")
+    emb = _RecEmbedder()
+    ops = [_write_op("Concepts/New.md"), _patch_op("Concepts/Old.md"), _write_op("Concepts/New.md")]
+    bodies = {"Concepts/New.md": "a new note", "Concepts/Old.md": "an old note, patched"}
+    n = _refresh_embeddings_for_ops(
+        ops, {"Concepts/New.md", "Concepts/Old.md"}, read_body=bodies.get, embedder=emb, store=store,
+    )
+    assert n == 1 and len(emb.calls) == 1
+    assert "Concepts/New" in store.paths() and "Concepts/Old" not in store.paths()
+
+
+def test_embedding_refresh_skips_uncommitted_writes(tmp_path):
+    from silica.kernel.recall.embed import EmbedStore
+    from silica.router.orchestrator import _refresh_embeddings_for_ops
+
+    store = EmbedStore(path=tmp_path / "e.json")
+    emb = _RecEmbedder()
+    n = _refresh_embeddings_for_ops(
+        [_write_op("Concepts/Dropped.md")], set(), read_body={}.get, embedder=emb, store=store,
+    )
+    assert n == 0 and emb.calls == []

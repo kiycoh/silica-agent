@@ -165,6 +165,14 @@ class Coordinator:
                 get_undo_journal().refresh_post_hashes(undo_run_id)
             except Exception as e:
                 logger.debug("post-run hash refresh failed (non-fatal): %s", e)
+
+        # The indexes catch up here, once: the patches WRITE left out
+        # (orchestrator._refresh_embeddings_for_ops) and every note the passes
+        # above edited. Left to the read path, the next chat question waited
+        # on it; the sweep only embeds notes whose text changed.
+        from silica.kernel.recall import sync
+
+        sync.sweep(force=True)
         return result
 
     # --- end-of-run orphan resolution -------------------------------------

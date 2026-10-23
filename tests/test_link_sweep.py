@@ -221,3 +221,22 @@ def test_the_next_run_sweeps_what_an_interrupted_run_landed(tmp_vault, monkeypat
     assert "[[Never Written]]" not in text and "Never Written" in text
     assert not marker.exists()
     assert foreign.exists()   # no record of it in this vault: not this vault's to clear
+
+
+def test_a_run_ends_by_reconciling_the_indexes_after_its_last_edit(tmp_vault, tmp_path, monkeypatch):
+    """The WRITE refresh leaves patches to this sweep, and the passes after
+    WRITE (sub-agent repairs, the dangling-link sweep) edit notes too: without
+    it the next chat question paid their re-embedding on the read path."""
+    import silica.kernel.progress as prog
+    import silica.kernel.recall.sync as sync
+    from silica.router.coordinator import Coordinator
+
+    monkeypatch.setattr(prog, "_RUNS_DIR", tmp_path / "runs")
+    order: list[str] = []
+    coord = Coordinator(inbox_files=["Inbox/x.md"], target_dir="T")
+    monkeypatch.setattr(coord.fsm, "run", lambda: order.append("fsm") or {"final_status": "success"})
+    monkeypatch.setattr(coord, "_sweep_dangling_links", lambda result: order.append("links"))
+    monkeypatch.setattr(sync, "sweep", lambda *, force=False: order.append(f"sweep force={force}"))
+
+    coord.run()
+    assert order == ["fsm", "links", "sweep force=True"]
