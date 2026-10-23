@@ -517,7 +517,9 @@ def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[lis
 def _root_words(text: str) -> list[str]:
     """Content words without their last vowel, so an Italian plural meets its
     singular: "reti neurali" and "Rete neurale" share both words."""
-    return [w[:-1] if len(w) >= 4 and w[-1] in "aeiouàèéìòù" else w for w in _content_words(text)]
+    # "ada-boost" in a syllabus is the note "AdaBoost": the joined form too
+    joined = [re.sub(r"[-\s]", "", m).casefold() for m in re.findall(r"\b\w+-\w+\b", text)]
+    return [w[:-1] if len(w) >= 4 and w[-1] in "aeiouàèéìòù" else w for w in _content_words(text) + joined]
 
 
 def _content_words(text: str) -> list[str]:

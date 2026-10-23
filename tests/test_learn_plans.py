@@ -164,6 +164,14 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
                                "ML/Discriminante lineare di Fisher.md"]
     assert block["missing"] == ["lasso"]
     assert deep["gap"] is True and deep["missing"] == ["Dropout", "apprendimento multi-task"]
+    # a hyphenated topic meets its joined title
+    vault.note("ML/AdaBoost.md", "# AdaBoost\n")
+    from silica.kernel.report.learner import _notes_meta
+    from pathlib import Path as _P
+    from silica.config import CONFIG as _C
+    found, missing = plans._topic_notes(["ada-boost", "random forest"], _notes_meta(_P(_C.vault_path)),
+                                        {"ML/AdaBoost.md"})
+    assert found == ["ML/AdaBoost.md"] and missing == ["random forest"]
 
     from pathlib import Path
 
