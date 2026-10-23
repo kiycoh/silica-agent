@@ -1190,6 +1190,25 @@ def _escalation(text: str, messages: list[dict]) -> str:
         return ""
 
 
+def _plan_context(text: str) -> str:
+    """Learn's plan for this message (learn.offer.plan_context), or "". An
+    incognito chat gets none, as it gets no offer."""
+    from silica.kernel import user_memory
+
+    if user_memory.incognito() or not text or text.startswith("/"):
+        return ""
+    try:
+        from silica.kernel.learn.offer import plan_context
+        from silica.kernel.learn.plans import list_plans
+
+        return plan_context(text, list_plans())
+    except Exception:
+        # The plan's numbers are an extra: a plan note that does not parse
+        # costs the block, never the turn.
+        logger.warning("plan context skipped", exc_info=True)
+        return ""
+
+
 def _answer_html(answer: str, refs, graph=None) -> str:
     """A chat answer drawn with its turn's reads (ADR-0127): a name several
     notes share links the one the turn read, and a read note's title links
@@ -1536,6 +1555,8 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             if block := await asyncio.to_thread(_escalation, text, messages):
                 agent_msg += "\n\n" + block
                 escalated = True
+            if block := await asyncio.to_thread(_plan_context, text):
+                agent_msg += "\n\n" + block
             elif await asyncio.to_thread(says_lost, text):   # Jev over HTTP behind the word list: off the loop
                 # A reader saying it is unclear asked to understand, not to
                 # write: the local 9B answered "non ho capito il Boosting"

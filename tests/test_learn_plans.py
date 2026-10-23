@@ -606,3 +606,39 @@ def test_pace_counts_answers_a_day_before_the_final_pass():
     assert pace["say"].startswith("About 11 answers a day for 16 day(s), then 2 days of review: 69 note(s)")
     assert "Lately you answer about 2 a day." in pace["say"]
     assert "not answered yet" in plans.pace_of({"by": by}, 69, entries=[])["say"]
+
+
+def test_a_dated_plan_lays_its_steps_over_the_days_before_the_review():
+    """The calendar is arithmetic, written by code: the steps in order, days in
+    proportion to their notes, the final pass, the date."""
+    from datetime import date
+
+    plan = {"by": "2026-10-29", "steps": [
+        {"text": "Basi: [[A]], [[B]]", "notes": ["A", "B"]},
+        {"text": "Lacuna: not in the vault", "notes": []},
+        {"text": "Reti: [[C]], [[D]], [[E]], [[F]]", "notes": ["C", "D", "E", "F"]}]}
+    rows = plans.day_by_day(plan, today=date(2026, 10, 23))
+    assert [r["day"] for r in rows] == ["2026-10-23", "2026-10-24", "2026-10-25", "2026-10-26",
+                                        "2026-10-27", "2026-10-28", "2026-10-29"]
+    labels = [[label for label, _n in r["steps"]] for r in rows]
+    assert labels[0][0] == "Basi" and labels[-1] == ["Exam"] and labels[-2] == labels[-3] == ["Review: the notes Learn shows due"]
+    seen = [label for day in labels[:4] for label in day]
+    assert seen.index("Basi") < seen.index("Lacuna") < seen.index("Reti") and seen.count("Reti") >= 2
+    reti = [n for r in rows for label, notes in r["steps"] if label == "Reti" for n in notes]
+    assert reti == ["C", "D", "E", "F"]
+    table = plans.day_by_day_table(rows)
+    assert table.startswith("| Day | Step | Notes |") and "| 2026-10-29 | Exam |" in table
+    assert plans.day_by_day({"steps": plan["steps"]}) is None and plans.day_by_day({"by": "2026-10-29"}) is None
+
+
+def test_the_syllabus_topics_no_lecture_deck_mentions(vault):
+    """Read off the decks' own text through their lesson outlines; a plural and
+    a near phrase are held, a topic no deck names is a gap."""
+    vault.note("Corso/Scheda.md", "# Scheda\n\nPROGRAMMA\n\n- Reti profonde: dropout, kernel tricks, operazioni di pooling e convoluzione\n")
+    vault.note("Corso/Lezione 1.md", "---\nsection: (outline)\n---\n# Lezione 1\n\n## Sources\n[^L1]: [[sources/c/Lezione 1]]\n")
+    vault.note("sources/c/Lezione 1.md", "# Lezione 1\n\nIl kernel trick. Pooling e convoluzione nelle reti.\n")
+    plans._GAPS_CACHE.clear()
+    plan = {"scope": "steps", "target": "Scheda", "restrict": "Corso"}
+    gaps, decks = plans.lecture_gaps(plan)
+    assert decks == 1 and gaps == ["dropout"]
+    assert plans.lecture_gaps({"scope": "folder", "target": "Corso"}) is None

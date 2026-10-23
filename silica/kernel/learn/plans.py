@@ -1008,6 +1008,158 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
                     f"day.{lately}")}
 
 
+# The calendar a plan with a date implies, written by code. Asked for a study
+# plan, the local 9B dated it "about 17 weeks" and numbered its lessons at
+# random (2026-10-23), and the research behind Learn's plans says a calendar
+# is arithmetic a language model should not do (GPT-4 solved 0.6% of
+# TravelPlanner; docs research report study-plans-and-deadline-scheduling).
+def day_by_day(plan: dict, today=None) -> list[dict] | None:
+    """[{day, steps: [(label, notes)]}] from today to the plan's date: the
+    steps in their order over the days before the final pass, each given days
+    in proportion to its notes (a step with none counts one), then the
+    pick.FINAL_DAYS days of review and the date itself. None without a date
+    or a step."""
+    from datetime import date, timedelta
+
+    from silica.kernel.learn.pick import FINAL_DAYS
+
+    steps = plan.get("steps") or []
+    if not plan.get("by") or not steps:
+        return None
+    try:
+        by = date.fromisoformat(str(plan["by"])[:10])
+    except ValueError:
+        return None
+    today = today or date.today()
+    days = (by - today).days
+    if days <= 0:
+        return None
+    study = max(1, days - FINAL_DAYS) if days > FINAL_DAYS else days
+    weights = [max(1, len(s.get("notes") or [])) for s in steps]
+    total = sum(weights)
+    rows = [{"day": (today + timedelta(days=k)).isoformat(), "steps": []} for k in range(study)]
+    done = 0
+    for step, w in zip(steps, weights):
+        start, end = done / total * study, (done + w) / total * study
+        done += w
+        first, last = int(start), max(int(start), min(study - 1, int(end - 1e-9)))
+        span = range(first, last + 1)
+        notes = list(step.get("notes") or [])
+        share = -(-len(notes) // len(span)) if notes else 0
+        label = _step_label(step)
+        for i, k in enumerate(span):
+            rows[k]["steps"].append((label, notes[i * share:(i + 1) * share] if share else []))
+    for k in range(study, days):
+        rows.append({"day": (today + timedelta(days=k)).isoformat(), "steps": [("Review: the notes Learn shows due", [])]})
+    rows.append({"day": by.isoformat(), "steps": [("Exam", [])]})
+    return rows
+
+
+def _step_label(step: dict) -> str:
+    """A step's name: its label before the colon, or its notes when it has none."""
+    text = _WIKILINK_RE.sub(r"\1", step.get("text") or "")
+    head = text.split(":", 1)[0].strip() if ":" in text else text.strip()
+    return re.sub(r"\s*\(≈\)", "", head)[:90] or ", ".join(step.get("notes") or [])[:90]
+
+
+def day_by_day_table(rows: list[dict]) -> str:
+    """The calendar as a Markdown table, three notes named a day at most."""
+    out = ["| Day | Step | Notes |", "|---|---|---|"]
+    for r in rows:
+        for label, notes in r["steps"]:
+            named = ", ".join(f"[[{n}]]" for n in notes[:3]) + (f" and {len(notes) - 3} more" if len(notes) > 3 else "")
+            out.append(f"| {r['day']} | {label.replace('|', '/')} | {named} |")
+    return "\n".join(out)
+
+
+# The syllabus topics the lecture decks never mention: what a course asks and
+# its slides leave to the book or the guide. Read off the decks' own text,
+# because asked which topics the slides miss, the local 9B confused "in the
+# vault" with "in the slides" and listed half the programme (2026-10-23).
+# shortcut: a lesson outline is found by a lesson word at the head of its
+# title (Lezione, Lecture, Lesson, Slide); a course whose decks are named
+# otherwise gets no check. Upgrade: mark a deck as a lecture when it is
+# nucleated, and read that mark here.
+_LESSON_TITLE_RE = re.compile(r"^(?:lezione|lez\.|lecture|lesson|slides?)\b", re.I)
+
+
+GAP_SHARE = 2 / 3      # of a topic's words one deck must hold: "le operazioni di convoluzione" is held without "operazioni"
+GAP_MAX_WORDS = 6      # a longer line is an activity ("Applicazione dei modelli ... su dataset reali"), not a topic
+GAP_GLUED = 16         # a root this long is a conversion's glued line ("Introduzionealcorso", 17), unreadable; "regolarizzazione" roots to 15
+
+
+def _gap_roots(text: str) -> set[str]:
+    """Root words, an English plural folded too: "kernel tricks" is held by a
+    deck that says "kernel trick"."""
+    return {w[:-1] if len(w) > 4 and w.endswith("s") else w for w in _root_words(text)}
+
+
+_GAPS_CACHE: dict[tuple, tuple[list[str], int] | None] = {}
+
+
+def lecture_gaps(plan: dict, notes: dict | None = None) -> tuple[list[str], int] | None:
+    """(the topics of the plan's syllabus whose words no lecture deck holds,
+    the decks read), or None when the plan has no syllabus or no deck. A topic
+    is held when one deck holds GAP_SHARE of its words (all of them for one or
+    two), read as roots so a plural meets its singular; activity lines and
+    glued lines are not judged."""
+    from silica.kernel.report.learner import _notes_meta
+    from silica.kernel.write import frontmatter
+
+    # 5.6 s on the course's 32 decks, most of it the title vectors: once per
+    # plan note as written, since its syllabus and its folder are the input
+    try:
+        key = (plan.get("path"), (_vault() / plan["path"]).stat().st_mtime_ns)
+    except (KeyError, TypeError, OSError):
+        key = None
+    if key and key in _GAPS_CACHE:
+        return _GAPS_CACHE[key]
+    notes = notes if notes is not None else _notes_meta(_vault())
+    ref = resolve_title(plan.get("target") or "", notes) if plan.get("scope") == "steps" else None
+    if not ref:
+        return None
+    _d, _r, body = frontmatter.split(_read(ref))
+    lines = [s["text"] for s in parse_steps(body)] or reference_lines(body)
+    restrict = (plan.get("restrict") or "").split(RESTRICT_SEP)[0].strip().rstrip("/")
+    decks: list[set[str]] = []
+    for p, meta in notes.items():
+        if not meta.get("spine") or not _LESSON_TITLE_RE.match(Path(p).stem):
+            continue
+        if restrict and not p.startswith(restrict + "/"):
+            continue
+        for link in re.findall(r"\[\[(sources/[^\]|#]+)", _read(p)):
+            try:
+                text = _read(link if link.endswith(".md") else link + ".md")
+            except OSError:
+                continue  # a deck moved or renamed since: one deck fewer to read, not a failed answer
+            decks.append(_gap_roots(text))
+    if not decks:
+        return None
+    def held(words: set[str]) -> bool:
+        need = len(words) if len(words) <= 2 else -(-len(words) * 2 // 3)
+        return any(len(words & d) >= need for d in decks)
+
+    misses = []
+    for line in lines:
+        for topic in _topics(line) or [_WIKILINK_RE.sub(r"\1", line).split(":", 1)[-1].strip(" .")]:
+            words = _gap_roots(topic)
+            if not words or len(words) > GAP_MAX_WORDS or any(len(w) >= GAP_GLUED for w in words):
+                continue
+            if not held(words):
+                misses.append(topic)
+    # The syllabus is in Italian and the slides often keep the English term
+    # ("autocodificatori" against "autoencoder", "sequence-to-sequence"
+    # against "seq2seq"): a topic the plan matched to a note is held when a
+    # deck holds that note's title, the match having crossed the language.
+    allowed = {p for p in notes if not restrict or p.startswith(restrict + "/")}
+    hits = topic_hits(list(dict.fromkeys(misses)), notes, allowed) if misses else {}
+    gaps = [t for t in misses if not ((hit := hits.get(t, (None, ""))[0]) and held(_gap_roots(Path(hit).stem)))]
+    out = (list(dict.fromkeys(gaps)), len(decks))
+    if key:
+        _GAPS_CACHE[key] = out
+    return out
+
+
 def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None = None) -> dict:
     """The tree with per-node readings, the steps with pass state, the
     sessions, the frontier, the pace and the calibration of D26: everything

@@ -355,3 +355,22 @@ def test_jev_reads_what_the_word_list_misses(monkeypatch):
     monkeypatch.setattr("silica.config.CONFIG.decision_model", "")
     offer._jev_lost.cache_clear()
     assert not offer.says_lost("mi sono perso sul duale")       # no decision model: the list alone
+
+
+def test_learn_s_plan_reaches_the_turn_that_needs_it(monkeypatch):
+    """A study-plan request gets the calendar Learn computes; a question on
+    what the slides leave out gets the topics no deck mentions; anything else
+    gets nothing."""
+    from silica.kernel.learn import plans as pl
+
+    plan = {"path": "Plans/Esame.md", "name": "Esame", "by": "2026-11-10", "target": "Scheda", "scope": "steps",
+            "steps": [{"text": "Basi: [[A]]", "notes": ["A"]}]}
+    monkeypatch.setattr(pl, "read_plan", lambda path: plan)
+    monkeypatch.setattr(pl, "lecture_gaps", lambda p: (["dropout", "multi-task"], 32))
+    rows = [{"path": "Plans/Esame.md", "name": "Esame", "status": "active"}]
+    block = offer.plan_context("Prepara un piano di studio giorno per giorno fino all'esame", rows)
+    assert "day-by-day calendar" in block and "| Day | Step | Notes |" in block and "reproduce this table" in block
+    block = offer.plan_context("quali argomenti del programma non compaiono nelle slide delle lezioni?", rows)
+    assert "dropout, multi-task" in block and "32 lecture decks" in block
+    assert offer.plan_context("cos'è il dropout?", rows) == ""
+    assert offer.plan_context("piano di studio per domani", [{**rows[0], "status": "completed"}]) == ""

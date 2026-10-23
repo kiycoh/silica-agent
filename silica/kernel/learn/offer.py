@@ -258,6 +258,43 @@ def plan_offer(text: str, plans: list[dict]) -> dict | None:
             "commands": [{"label": "write it as a plan", "href": "#learn/new"}]}
 
 
+# What Learn's plan computes and the chat model would otherwise make up, put
+# in the turn before the model answers: asked for a study plan, the calendar
+# from the plan's steps and date (plans.day_by_day); asked what the syllabus
+# holds that the lectures do not, the topics no lecture deck mentions
+# (plans.lecture_gaps). The local 9B dated a plan "about 17 weeks" and listed
+# half the programme as missing from the slides (2026-10-23).
+_SYLLABUS_RE = re.compile(r"\b(programma|scheda|syllabus|curriculum)\b", re.I)
+_LECTURES_RE = re.compile(r"\b(slides?|lezion[ei]|lectures?|lessons?)\b", re.I)
+
+
+def plan_context(text: str, plans: list[dict]) -> str:
+    """The block for this message, or "": the plan the message names, else the
+    first open one."""
+    from silica.kernel.learn import plans as pl
+
+    open_plans = [p for p in plans if p.get("status") != "completed"]
+    if not open_plans or not (asks_plan(text) or (_SYLLABUS_RE.search(text) and _LECTURES_RE.search(text))):
+        return ""
+    low = text.casefold()
+    row = next((p for p in open_plans if p.get("name", "").casefold() in low), open_plans[0])
+    plan = pl.read_plan(row["path"])
+    if asks_plan(text):
+        rows = pl.day_by_day(plan)
+        if not rows:
+            return ""
+        return (f"[Learn tracks the plan {plan['name']}, by {plan['by']}. Its day-by-day calendar, computed from "
+                f"the plan's steps in the syllabus's order and its date; reproduce this table as it is, without "
+                f"changing a date or a step, then add advice if useful:\n{pl.day_by_day_table(rows)}]")
+    found = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
+    if not found:
+        return ""
+    gaps, decks = found
+    return (f"[Learn's plan {plan['name']} reads its syllabus, {plan['target']}, against the text of the {decks} "
+            f"lecture decks. Topics of the syllabus that no deck mentions: {', '.join(gaps) or 'none'}. Use this "
+            f"list for what the slides do not cover; a topic named another way in the slides can still be there.]")
+
+
 # --- the offer's own record: caps, declines, escalation, and its validation --
 #
 # The research report's section 8 (difficulty-detection-and-study-aids): stay
