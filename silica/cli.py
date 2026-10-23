@@ -4092,13 +4092,16 @@ def _sc_slides(args: list[str], **_) -> str | None:
     out = ("Then write the deck, unchanged, as the note `" + save + "` with silica_write_note, so Obsidian's "
            "Slides plugin presents it."
            if save else "READ-ONLY: do not create, edit, patch, or move any note.")
+    # No example embed in the format line: given one, the local 9B put
+    # `![[file.png]]` on every slide of a lecture deck (2026-10-23).
     return (
         f"Make a slide deck from {', '.join(f'[[{t}]]' for t in titles) or ', '.join(targets)}.\n"
         f"{ground}\n"
         f"Format: Markdown slides separated by a line holding only `---`. Slide 1 is the title and one line on "
         f"what the deck covers; then 6 to 10 slides, each a `## ` title and 3 to 5 short bullets in the notes' "
-        f"own words, formulas kept as written in $...$, a figure the notes embed (`![[file.png]]`) where it "
-        f"explains more than words; the last slide is three questions the reader should now be able to answer. "
+        f"own words, formulas kept as written in $...$; a figure only where a note embeds one, its embed line "
+        f"copied exactly from the note, and no figure line otherwise; the last slide is three questions the "
+        f"reader should now be able to answer. "
         f"Cite each slide's source note as a [[wikilink]] on its last line.\n"
         f"Answer in chat with the deck in one ```markdown block. {out}"
     )
