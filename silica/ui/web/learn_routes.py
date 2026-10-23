@@ -869,10 +869,85 @@ def _rate(payload: dict):
         "next_due": _iso_day(after.get("due")) if after else None,
         "momentum": _momentum(before, after, first) if rating >= 3 else None,
         "objective": entry["objective"], "unassisted": bool(correct and not entry["hints"] and not entry["told"]),
+        "escalate": None if correct else _escalate(s, it, v),
     }
     s["recorded"][it["i"]] = {"entry": entry, "result": result, "ts": _now()}
     s["skipped"].discard(it["i"])
     return {**result, "duplicate": False}
+
+
+def _escalate(s: dict, it: dict, v: dict) -> dict | None:
+    """The escalate rung after a miss (learn.offer): once a note a session,
+    logged, and in shadow mode only logged."""
+    from pathlib import Path
+
+    from silica.kernel.learn import offer
+    from silica.kernel.report import quiz
+
+    if offer.mode() == "off" or it["path"] in s.setdefault("escalated", set()):
+        return None
+    try:
+        entries = quiz.entries()
+        why = offer.escalation(it["path"], "", "", [], entries)
+        if not why:
+            return None
+        s["escalated"].add(it["path"])
+        shown = offer.mode() == "on"
+        offer.log_aid(it["path"], s["id"], why, shown)
+        if not shown:
+            return None
+        prereq = offer.weakest_prerequisite(it["path"])
+        return {"why": why, "form": offer.aid_form(it["path"], v.get("misconception"), entries),
+                "prereq": prereq, "prereq_title": Path(prereq).stem if prereq else None}
+    except Exception:
+        # The aid is an extra: a ledger that does not parse costs it, never the rating.
+        logger.warning("learn: escalation skipped", exc_info=True)
+        return None
+
+
+@router.post("/aid", dependencies=_SAME_ORIGIN)
+def aid(payload: dict):
+    """The aid a rating escalated to, written once by the chat model and kept
+    for a reload. Reading it records nothing."""
+    from silica.kernel.learn import offer
+    from silica.kernel.recall.mindmap import answer_resolver
+    from silica.ui.web.server import _linkify
+
+    s = _live(str(payload.get("id") or ""))
+    it = _item(s, payload.get("i"))
+    rec = s["recorded"].get(it["i"])
+    esc = rec["result"].get("escalate") if rec else None
+    if not esc:
+        raise HTTPException(400, "this answer did not escalate")
+    done = s.setdefault("aids", {})
+    if it["i"] not in done:
+        v = s["verdicts"].get(it["i"]) or {}
+        try:
+            text = offer.learn_aid(it, esc["why"], esc["form"], v.get("production", ""), esc.get("prereq"))
+        except Exception as exc:
+            raise HTTPException(502, f"the model did not answer: {exc}")
+        if not text:
+            raise HTTPException(502, "the model wrote nothing")
+        # the chat's resolver: a name two notes share links to this item's note
+        resolve, _read = answer_resolver([it["path"]])
+        done[it["i"]] = {"text": text, "html": _linkify(text, resolve, remote_images=False)}
+    return done[it["i"]]
+
+
+MATH_MAX = 200        # formulas one page asks for at once; a session's page holds a few dozen
+MATH_CHARS = 2000     # one formula's LaTeX; a note's longest display block is a few hundred
+
+
+@router.post("/math", dependencies=_SAME_ORIGIN)
+def math(payload: dict):
+    """The formulas in Learn's text as MathML, converted as the chat's are
+    (server._mathml: the browser draws them, and a formula that does not
+    convert comes back as written)."""
+    from silica.ui.web.server import _mathml
+
+    tex = [str(t)[:MATH_CHARS] for t in (payload.get("tex") or [])][:MATH_MAX]
+    display = list(payload.get("display") or [])
+    return {"mathml": [_mathml(t, bool(display[i]) if i < len(display) else False) for i, t in enumerate(tex)]}
 
 
 @router.post("/teach", dependencies=_SAME_ORIGIN)

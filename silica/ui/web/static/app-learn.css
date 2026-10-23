@@ -512,6 +512,13 @@
   margin-bottom: 0.3rem;
 }
 
+/* the note in other forms, one wrapping row of quiet buttons under the head */
+.lr-tools-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 /* a heading of the note, named once over its points */
 .lr-grp {
   font-size: var(--fs-meta);
@@ -1026,6 +1033,19 @@ button.lr-exp:hover {
 
 .lr-tree tr.leaf:hover .lr-link.act,
 .lr-tree tr.leaf:focus-within .lr-link.act {
+  opacity: 1;
+}
+
+/* the step's own deck and cards: shown whenever the step is open, it is the
+   one row that is not a note */
+.lr-tree tr.lr-step-tools td {
+  padding-left: 1.3rem;
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-tree tr.lr-step-tools .lr-link.act {
+  margin-left: 0.6rem;
   opacity: 1;
 }
 
@@ -1592,6 +1612,38 @@ button.lr-exp:hover {
 .lr-verdict:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 4px;
+}
+
+/* the aid after a third miss: the verdict's header, the chat's prose inside */
+.lr-aid {
+  display: grid;
+  gap: 0.35rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--line);
+}
+
+.lr-aid .h {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.lr-aid .h b {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--frost);
+}
+
+.lr-aid .h .m {
+  font-size: var(--fs-meta);
+  color: var(--ash-dim);
+}
+
+.lr-aid .msg.lr-aid-body {
+  padding: 0;
+  animation: none;
+  font-size: 15px;
+  line-height: 1.65;
 }
 
 .lr-verdict .h {

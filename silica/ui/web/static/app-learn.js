@@ -158,19 +158,51 @@ function lrBtn(cls, text, run) {
   return b;
 }
 
-// A question's markdown, inline only: bold, italics, code, and a cloze's
-// blank drawn as a gap. The text is escaped first, so the only tags in the
-// result are the four written here.
+// A question's markdown, inline only: bold, italics, code, formulas, and a
+// cloze's blank drawn as a gap. Code and formulas are parked before the rest
+// is escaped, so the only tags in the result are the ones written here and
+// the server's MathML.
+const lrEsc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 function lrMd(el, text) {
-  const code = [];
-  el.innerHTML = String(text || "")
-    .replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]))
+  const code = [], math = [];
+  el.innerHTML = lrEsc(String(text || "")
     .replace(/`([^`]+)`/g, (_m, c) => `\u0000${code.push(c) - 1}\u0000`)
+    .replace(LR_MATH_RE, (_m, d, i) => `\u0001${math.push([d !== undefined, d ?? i]) - 1}\u0001`))
     .replace(/_{3,}/g, '<span class="lr-gap" role="img" aria-label="blank"></span>')
     .replace(/\*\*([^*]+?)\*\*/g, "<b>$1</b>")
     .replace(/\*([^*\n]+?)\*/g, "<em>$1</em>")
-    .replace(/\u0000(\d+)\u0000/g, (_m, i) => `<code>${code[i]}</code>`);
+    .replace(/\u0000(\d+)\u0000/g, (_m, i) => `<code>${lrEsc(code[i])}</code>`)
+    .replace(/\u0001(\d+)\u0001/g, (_m, i) => lrMathSpan(...math[i]));
+  if (math.length) lrTypeset(el);
   return el;
+}
+
+// Formulas in Learn's text. A course's notes write them in LaTeX, and a
+// question that reads `$y_{i}f\left(\boldsymbol{x}^{(i)}\right)$` is not
+// readable (the machine-learning course, 2026-10-23). The server converts them
+// the way the chat's are converted (MathML, no renderer in the page), once a
+// formula; one that does not convert stays as written.
+const LR_MATH = new Map();
+const LR_MATH_RE = /\$\$([^$]+?)\$\$|\$(?!\s)([^$\n]+?)(?<!\s)\$/g;
+function lrMathSpan(display, tex) {
+  const k = (display ? "D" : "I") + tex;
+  const done = LR_MATH.get(k);
+  if (done) return `<span class="lr-math">${done}</span>`;
+  const fence = display ? "$$" : "$";
+  return `<span class="lr-math" data-k="${lrEsc(k)}">${lrEsc(fence + tex + fence)}</span>`;
+}
+async function lrTypeset(root) {
+  const want = [...new Set([...root.querySelectorAll(".lr-math[data-k]")].map((e) => e.dataset.k))].filter((k) => !LR_MATH.has(k));
+  if (want.length) {
+    try {
+      const r = await lrPost("/learn/math", { tex: want.map((k) => k.slice(1)), display: want.map((k) => k[0] === "D") });
+      want.forEach((k, i) => LR_MATH.set(k, r.mathml[i]));
+    } catch { return; }   // the formula stays as written, which is what it was before
+  }
+  for (const e of root.querySelectorAll(".lr-math[data-k]")) {
+    const m = LR_MATH.get(e.dataset.k);
+    if (m) { e.innerHTML = m; e.removeAttribute("data-k"); }
+  }
 }
 const lrPlain = (text) => String(text || "").replace(/_{3,}/g, " blank ").replace(/\*\*|`|\*/g, "");
 
@@ -178,6 +210,7 @@ const lrPlain = (text) => String(text || "").replace(/_{3,}/g, " blank ").replac
 // nodes so a line never becomes markup.
 function lrMarked(el, text, term) {
   const t = String(text || "");
+  if (LR_MATH_RE.test(t)) { LR_MATH_RE.lastIndex = 0; return lrMd(el, t); }   // the formulas over the bolded term
   const k = String(term || "").trim();
   const at = k && k.length <= 80 ? t.toLowerCase().indexOf(k.toLowerCase()) : -1;
   if (at < 0) { el.textContent = t; return el; }
@@ -1106,6 +1139,21 @@ function lrPlanTree(p) {
       tb.appendChild(ltr);
     }
     if (leaves.length) {
+      // the step as a deck or as cards, the Studio row on a selection of notes.
+      // shortcut: the first LR_STEP_NOTES notes; /slides hands over 40 checked
+      // points (learn.artifacts.STUDY_POINTS_MAX), about that many notes' worth, so a longer
+      // step's tail would add nothing. Raise the two together.
+      const str = lrEl("tr", "leaf lr-step-tools");
+      str.hidden = true;
+      const td = lrEl("td");
+      td.colSpan = 2 + p.objectives.length;
+      const q = leaves.slice(0, LR_STEP_NOTES).map(shellQuote).join(" ");
+      td.append(lrEl("span", "m", "This step as"),
+        lrBtn("lr-link act", "slides", () => prefillChat(`/slides ${q}`)),
+        lrBtn("lr-link act", "flashcards", () => prefillChat(`/flashcards ${q} --n=10`)));
+      str.appendChild(td);
+      leafRows.push(str);
+      tb.appendChild(str);
       exp.setAttribute("aria-expanded", "false");
       exp.addEventListener("click", () => {
         const open = exp.getAttribute("aria-expanded") !== "true";
@@ -1152,6 +1200,34 @@ function lrObjRow(c, { edit = null, remove = null } = {}) {
 
 // --- a note: why it is up, and what you already answered (ADR-0081 §3) ------------
 // One grammar for every row of Next and every cell of the Map: the head with
+// The note in other forms, NotebookLM's Studio row (owner's comparison,
+// 2026-10-23): each button writes its command into the chat, which runs it on
+// send, so nothing is generated unasked. Below the practice, because practice
+// is what counts toward a plan (research report difficulty-detection, §8: the
+// aids raise felt learning faster than learning). A path where the command
+// resolves one, so a title two folders share makes this note's deck.
+const LR_TOOLS = [
+  ["Flashcards", (p) => `/flashcards ${shellQuote(p)} --n=8`],
+  ["Slides", (p) => `/slides ${shellQuote(p)}`],
+  ["Mind map", (p) => `/map ${shellQuote(p)}`],
+  ["Table", (_p, t) => `/schematize ${shellQuote(t)}`],
+  ["Diagram", (_p, t) => `/diagram ${shellQuote(t)}`],
+  ["Explanation", (_p, t) => `/explain ${shellQuote(t)}`],
+];
+const LR_STEP_NOTES = 10;
+function lrStudyTools(path, title) {
+  const sec = lrEl("section", "lr-sec lr-tools");
+  sec.appendChild(lrEl("h3", null, "Study tools"));
+  const row = lrEl("div", "lr-tools-row");
+  for (const [name, cmd] of LR_TOOLS) {
+    const b = lrBtn("ghost box", name, () => prefillChat(cmd(path, title)));
+    b.title = "writes the command in the chat; it runs when you send it";
+    row.appendChild(b);
+  }
+  sec.appendChild(row);
+  return sec;
+}
+
 // Open note and the action, the reason as a sentence, History, what a session
 // covers, how this is measured. It retires the suggestion detail (§6).
 const LR_GROUP_EYEBROW = { missed: "Missed", due: "Fading", never: "Not tested yet" };
@@ -1172,6 +1248,7 @@ function lrRenderNoteDetail(right, n) {
   if (n.sentence) head.appendChild(lrEl("p", "lr-reason", n.sentence));
   if (lrSession && !inLive) head.appendChild(lrEl("p", "lr-help", "A session is open; end it or resume it before starting this one."));
   right.appendChild(head);
+  if (!inLive) right.appendChild(lrStudyTools(n.path, n.title));
   if (n.history?.length) {
     const sec = lrEl("section", "lr-sec");
     const h = lrEl("h3", null, "History");
@@ -2299,8 +2376,9 @@ function lrPrevRow(s, prev, n) {
   const sum = lrEl("summary");
   const v = s.verdicts[prev.i];
   const res = s.results[prev.i];
-  let mark = "open";
-  let say = s.skipped[prev.i] ? "skipped" : "not recorded";
+  // a reload brings back the results and not the verdicts of recorded answers
+  let mark = res?.correct ? "full" : "open";
+  let say = s.skipped[prev.i] ? "skipped" : res ? (res.correct ? "met" : "missed") : "not recorded";
   if (!s.skipped[prev.i] && v) { const w = lrVerdictSay(prev, v, s); mark = w.mark; say = w.word.toLowerCase(); }
   sum.append(lrEl("span", "chev"), lrEl("span", "k", `${n} · ${prev.point?.kind || prev.kind}`), lrMark(mark, ""),
     lrEl("span", "v", res ? `${say} · ${res.rating_name}, recorded` : say));
@@ -2309,6 +2387,7 @@ function lrPrevRow(s, prev, n) {
   d.appendChild(lrMd(lrEl("p", "q"), prev.q));
   if (s.answers[prev.i]) d.appendChild(lrEl("p", "you", s.answers[prev.i]));
   if (v?.feedback_line) d.appendChild(lrEl("p", "fb", v.feedback_line));
+  if (res?.escalate) d.appendChild(lrAidBox(prev, res.escalate));
   det.appendChild(d);
   return det;
 }
@@ -2634,7 +2713,7 @@ function lrCompare(it, v, s, { criterion = false } = {}) {
   note.append(lab, lrMarked(lrEl("p", "txt"), text || "(this item rests on a relation, not a line)", v.answer));
   if (v.answer && v.answer !== text && !String(text || "").toLowerCase().includes(String(v.answer).toLowerCase())) {
     const ref = lrEl("p", "ref");
-    ref.append(lrEl("span", "lab", "reference answer"), " " + v.answer);
+    ref.append(lrEl("span", "lab", "reference answer"), " ", lrMd(lrEl("span"), v.answer));
     note.appendChild(ref);
   }
   box.append(you, note);
@@ -2748,6 +2827,53 @@ function lrReveal(sheet, it, v) {
   rate.appendChild(confirm);
   if (s.results[it.i]?.momentum) rate.appendChild(lrEl("p", "lr-momentum", s.results[it.i].momentum));
   sheet.appendChild(rate);
+  if (s.results[it.i]?.escalate) sheet.appendChild(lrAidBox(it, s.results[it.i].escalate));
+}
+
+// The escalate rung (learn.offer): after the rating that makes three misses in
+// a row on a note, the next move is the aid itself, written from the note's
+// checked points by the chat model. Reading it records nothing.
+const LR_AID_WHAT = { worked: "A worked example", contrast: "Your answer beside the note" };
+function lrAidBox(it, esc) {
+  const s = lrSession;
+  const box = lrEl("section", "lr-aid");
+  box.id = `lr-aid-${it.i}`;
+  box.setAttribute("aria-live", "polite");
+  const h = lrEl("div", "h");
+  h.append(lrEl("b", null, LR_AID_WHAT[esc.form] || LR_AID_WHAT.worked), lrEl("span", "m", "· " + esc.why));
+  box.appendChild(h);
+  const got = s.aids?.[it.i];
+  if (got?.html) {
+    // the chat's prose styles (tables, MathML, code) are scoped to .msg
+    const body = lrEl("div", "msg lr-aid-body");
+    body.innerHTML = got.html;
+    box.appendChild(body);
+    renderMermaid(body);
+  } else if (got?.error) {
+    const p = lrEl("p", "lr-help", `Not written: ${got.error} `);
+    p.appendChild(lrBtn("lr-q", "try again", () => { delete s.aids[it.i]; box.replaceWith(lrAidBox(it, esc)); }));
+    box.appendChild(p);
+  } else {
+    box.appendChild(lrEl("p", "lr-help", `Writing it from ${lrStem(it.path)}…`));
+    if (!got) lrFetchAid(it);
+  }
+  if (esc.prereq) {
+    const p = lrEl("p", "lr-help", "The prerequisite you hold least: ");
+    p.appendChild(lrBtn("lr-link", esc.prereq_title || lrStem(esc.prereq), () => openNote(esc.prereq)));
+    box.appendChild(p);
+  }
+  box.appendChild(lrEl("p", "lr-help", "Reading it changes nothing in the schedule: the next answer on this note is what counts."));
+  return box;
+}
+
+async function lrFetchAid(it) {
+  const s = lrSession;
+  (s.aids || (s.aids = {}))[it.i] = { pending: true };
+  try { s.aids[it.i] = await lrPost("/learn/aid", { id: s.id, i: it.i }); }
+  catch (e) { if (lrGone(e)) return; s.aids[it.i] = { error: e.message }; }
+  // in place, not a render: the reader may be typing the next answer by now
+  const box = lrSession === s && document.getElementById(`lr-aid-${it.i}`);
+  if (box) box.replaceWith(lrAidBox(it, s.results[it.i].escalate));
 }
 
 function lrChoose(n) {
@@ -2776,7 +2902,8 @@ async function lrConfirm() {
     if (v.needs_self_grade) v.selfRated = true;
   } catch (e) { if (lrGone(e)) return; notify("not recorded: " + e.message); if (btn) btn.disabled = false; return; }
   finally { s.confirming = false; }
-  if (s.results[it.i].momentum) { lrRender(); return; }   // a milestone line reads before moving on
+  // a milestone line, or the aid a third miss calls for, reads before moving on
+  if (s.results[it.i].momentum || s.results[it.i].escalate) { lrRender(); return; }
   lrNext();
 }
 

@@ -307,6 +307,113 @@ def escalation_block(name: str, why: str) -> str:
             f"Ground every step in the note.]")
 
 
+# The escalate rung inside Learn, where the report puts it ("generate the aid as
+# the next tutor move inside Learn"): after the rating that makes it three
+# misses in a row, or two more after an offer went unused, the chat model
+# writes the aid from the note's checked points. Reading it is never an
+# answer: credit comes from the next unassisted one (recommendation 5).
+AID_MAX_TOKENS = 900   # 6 steps or a 4-row table plus a question is about 400 tokens; formulas take the rest
+AID_FORMS = {
+    "worked": ("a worked example in 3 to 6 numbered steps, each one line in the note's own terms, that reaches "
+               "what the note supports"),
+    # a confident miss or a recorded misconception gets a contrast, not an
+    # explanation (report section 8; comparing cases, Alfieri 2013, d = 0.50);
+    # the blank keeps it an attempt
+    # the blank's answer nowhere else in the table: the first table the 9B
+    # wrote put it in row 1, so the question was answered by copying (2026-10-23)
+    "contrast": ("one Markdown table of 2 to 4 rows with three columns, the aspect, what you wrote (speak to the "
+                 "reader as you) and what the note says, headed in the language below; the last row's note cell "
+                 "left as ____ for the reader to fill, on an aspect whose answer appears nowhere else in the table"),
+}
+AID_PROMPT = """A reader has just missed a question on the note "{title}" ({why}). Write the next tutor move: {form}.
+
+Use only what these points of the note state, and name nothing they do not hold.
+POINTS:
+{points}
+THE QUESTION: {q}
+WHAT THE NOTE SUPPORTS: {answer}
+WHAT THE READER WROTE: {production}
+{prereq}End with one line in bold holding one question the reader can answer only by using what you wrote, and give no answer to it.
+Write all of it in {language}. No preamble and no heading; under 220 words; formulas in $...$ as the points write them.
+"""
+
+
+def aid_form(path: str, misconception: str | None, entries: list[dict]) -> str:
+    """"contrast" for a recorded misconception or a calibrated confident miss,
+    "worked" otherwise."""
+    if misconception or "were sure" in struggles([path], entries).get(path, ""):
+        return "contrast"
+    return "worked"
+
+
+def weakest_prerequisite(path: str) -> str | None:
+    """The prerequisite of `path` the reader holds least: never practised
+    first, then the lowest estimated recall. The report's escalate rung
+    attaches it, as the H2 hint already names prerequisites."""
+    from silica.kernel.report import learner
+
+    try:
+        prereqs = learner.prerequisites_map().get(learner.key_of(path), [])
+        rows = learner.view()
+    except Exception:
+        return None  # a store that does not read costs the attachment, never the aid
+
+    def held(p: str) -> float:
+        row = rows.get(learner.key_of(p)) or {}
+        return row["R"] if row.get("attempts") and row.get("R") is not None else -1.0
+
+    return min(prereqs, key=held) if prereqs else None
+
+
+def learn_aid(item: dict, why: str, form: str, production: str, prereq: str | None) -> str:
+    """The aid's Markdown, from the item's note and the reader's answer."""
+    from pathlib import Path
+
+    from silica.agent.llm import call_llm
+    from silica.config import CONFIG
+    from silica.kernel.learn import grade, items
+
+    try:
+        points = [kp["text"] for kp in items.key_points(item["path"])][:12]
+    except Exception:
+        points = []  # claims that do not parse: the item's own span still grounds it
+    if item.get("span") and item["span"] not in points:
+        points.append(item["span"])
+    title = item.get("title") or Path(item["path"]).stem
+    pre = (f"Before the last line, one line on how [[{Path(prereq).stem}]], the prerequisite the reader holds "
+           f"least, is used here.\n" if prereq else "")
+    prompt = AID_PROMPT.format(title=title, why=why, form=AID_FORMS.get(form, AID_FORMS["worked"]),
+                               points="\n".join(f"- {p}" for p in points) or "- (none)", q=item.get("q", ""),
+                               answer=item.get("answer") or item.get("claim", ""), production=production or "(none)",
+                               prereq=pre, language=grade.reply_language(item.get("q", ""), production))
+    resp = call_llm(CONFIG.model, [{"role": "user", "content": prompt}], max_tokens=AID_MAX_TOKENS,
+                    temperature=0.2, reasoning=False)
+    text = (resp.text or "").strip()
+    return _blank_last_cell(text) if form == "contrast" and "____" not in text else text
+
+
+def _blank_last_cell(md: str) -> str:
+    """The contrast table with its last row's note cell blanked, when the
+    model left none (the second table the 9B wrote, 2026-10-23): the blank is
+    what keeps the aid an attempt rather than a page to read."""
+    lines = md.splitlines()
+    rows = [i for i, line in enumerate(lines) if line.strip().startswith("|") and line.strip().endswith("|")]
+    if len(rows) < 3:  # a header, its rule and one row at least
+        return md
+    cells = lines[rows[-1]].strip()[1:-1].split("|")
+    if not cells[-1].strip() or set(cells[-1].strip()) <= set("-: "):
+        return md
+    cells[-1] = " ____ "
+    lines[rows[-1]] = "|" + "|".join(cells) + "|"
+    return "\n".join(lines)
+
+
+def log_aid(note: str, session: str, why: str, displayed: bool) -> None:
+    """A Learn aid's record. It carries no `shown`, so neither the chat's cap,
+    nor the decline memory, nor an escalation counts it as an offer."""
+    _append({"aid": "learn", "session": session, "note": note, "why": why, "displayed": displayed})
+
+
 def replay(entries: list[dict], records: list[dict] | None = None) -> dict:
     """The rule run over a ledger as it grew: at each graded answer, would the
     offer have fired on what came before, and was that answer then wrong? A
@@ -334,4 +441,5 @@ def replay(entries: list[dict], records: list[dict] | None = None) -> dict:
         return round(b["wrong"] / n, 3) if n else None
 
     return {"fired": fired, "silent": silent, "miss_rate_when_fired": rate(fired),
-            "miss_rate_when_silent": rate(silent), "offers_shown": shown, "offers_acted": acted}
+            "miss_rate_when_silent": rate(silent), "offers_shown": shown, "offers_acted": acted,
+            "aids_shown": sum(1 for r in records if r.get("aid") and r.get("displayed"))}
