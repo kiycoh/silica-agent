@@ -527,3 +527,24 @@ def test_a_many_word_topic_meets_its_note_by_meaning(vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.709)
     scores["noise"]["ML/Iniezione di rumore negli input"] = 0.729
     assert plans._topic_notes(["noise injection"], _notes_meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
+
+
+def test_a_topic_meets_its_note_by_alias_gloss_initials_or_segment(vault):
+    """Topics the plan called not in the vault while their notes were there
+    (2026-10-23): an alias a merge recorded, an English gloss in brackets, an
+    acronym, a textbook segment named after the section."""
+    vault.note("ML/One-class classification.md", "---\naliases:\n  - Classificazione one-class\n---\n# x\n")
+    vault.note("ML/Convoluzione con passo (stride).md", "# x\n")
+    vault.note("ML/LVQ come estensione supervisionata.md", "# x\n")
+    vault.note("ML/Finestra di aggiornamento LVQ.md", "# x\n")
+    vault.note("ML/SOM e topologia.md", "# x\n")
+    vault.note("ML/Goodfellow-20-7-12-dropout.md", '---\nsection: "(outline)"\n---\n# x\n')
+    vault.note("ML/Dropout boosting.md", "# x\n")
+    vault.note("ML/Sonno.md", "# x\n")
+    meta, allowed = _meta_and_material()
+    topics = ["classificazione one-class", "stride", "reti learning vector quantization",
+              "reti self organizing map: proprietà e loro algoritmi", "dropout", "sonno profondo e memoria"]
+    found = [plans._named_otherwise(t, meta, allowed) for t in topics]
+    assert found == ["ML/One-class classification.md", "ML/Convoluzione con passo (stride).md",
+                     "ML/LVQ come estensione supervisionata.md", "ML/SOM e topologia.md",
+                     "ML/Goodfellow-20-7-12-dropout.md", None]

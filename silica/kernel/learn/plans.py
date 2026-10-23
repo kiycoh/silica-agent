@@ -534,6 +534,7 @@ def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[lis
             # the joined form of "ada-boost" is a spelling of its words, not one more
             if best and got and got * 2 > (len(_content_words(t)) or len(words)):
                 hit = resolve_title(best, notes) if best in losers else best
+            hit = hit or _named_otherwise(t, notes, allowed)
         if hit:
             if hit not in found:
                 found.append(hit)
@@ -594,6 +595,54 @@ def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
         logger.info("plan topics: no title-vector match (%s)", exc)
         return {}
     return out
+
+
+# A topic's letters in a title: "learning vector quantization" is the note
+# "LVQ come estensione supervisionata" (2026-10-23).
+_ACRONYM_SPAN = (2, 4)
+_SEGMENT_SLUG_RE = re.compile(r"-\d+(?:-\d+)*-([a-z][a-z0-9-]*)$")
+
+
+def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> str | None:
+    """The note a topic names in a way its title's words do not show, or None.
+
+    In this order, each a thing the notes already carry, measured on a course
+    syllabus whose plan called these not in the vault (2026-10-23):
+    - an alias, as merges record them on the winner ("Classificazione
+      one-class" on One-class classification);
+    - a gloss in brackets: "stride" is "Convoluzione con passo (stride)";
+    - the initials of two to four of its words as a title's word, the title
+      opening on it first: "reti self organizing map" is "SOM e topologia";
+    - a textbook segment's spine whose section title is the topic: "dropout"
+      is the spine of 7.12, "Goodfellow-20-7-12-dropout", whose ideas are the
+      dropout notes.
+    """
+    key = " ".join(_root_words(topic))
+    low = topic.strip().casefold()
+    if not key:
+        return None
+    for p in sorted(allowed, key=len):
+        if any(" ".join(_root_words(a)) == key for a in notes.get(p, {}).get("aliases", ())):
+            return p
+    for p in sorted(allowed, key=len):
+        if f"({low})" in Path(p).stem.casefold():
+            return p
+    # by length, not a stopword list: "self" is an English stopword and the S of SOM
+    words = [w for w in re.findall(r"[^\W\d_]+", low) if len(w) > 2]
+    initials = {"".join(w[0] for w in words[i:i + n])
+                for n in range(_ACRONYM_SPAN[0], _ACRONYM_SPAN[1] + 1) for i in range(len(words) - n + 1)}
+    acr = []
+    for p in allowed:
+        toks = re.findall(r"[a-z]+", Path(p).stem.casefold())
+        if any(len(t) >= 3 and t in initials for t in toks):
+            acr.append((0 if toks[0] in initials else 1, len(p), p))
+    if acr:
+        return min(acr)[2]
+    for p in sorted(allowed, key=len):
+        m = notes.get(p, {}).get("spine") and _SEGMENT_SLUG_RE.search(Path(p).stem.casefold())
+        if m and " ".join(_root_words(m.group(1).replace("-", " "))) == key:
+            return p
+    return None
 
 
 def _root_words(text: str) -> list[str]:
