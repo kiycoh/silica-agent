@@ -370,6 +370,7 @@ def test_learn_s_plan_reaches_the_turn_that_needs_it(monkeypatch):
     rows = [{"path": "Plans/Esame.md", "name": "Esame", "status": "active"}]
     block, appendix = offer.plan_context("Prepara un piano di studio giorno per giorno fino all'esame", rows)
     assert "day-by-day calendar" in block and "do not write a calendar" in block
+    assert "The heaviest steps: Basi (1 notes)" in block and "study from the book or the guide: dropout, multi-task" in block
     assert appendix.startswith("Calendar computed by Learn from the plan Esame") and "| Day | Step | Notes |" in appendix
     block, appendix = offer.plan_context("quali argomenti del programma non compaiono nelle slide delle lezioni?", rows)
     assert "dropout, multi-task" in block and "32 lecture decks" in block and appendix == ""

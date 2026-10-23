@@ -287,10 +287,18 @@ def plan_context(text: str, plans: list[dict]) -> tuple[str, str]:
         if not rows:
             return "", ""
         table = pl.day_by_day_table(rows)
+        # the advice stands on the plan's facts, not on study tips any plan
+        # would get: the heaviest steps, and what the slides leave to the book
+        heavy = sorted((s for s in plan.get("steps") or [] if s.get("notes")), key=lambda s: -len(s["notes"]))[:3]
+        facts = "The heaviest steps: " + "; ".join(f"{pl._step_label(s)} ({len(s['notes'])} notes)" for s in heavy) + "."
+        gaps = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
+        if gaps and gaps[0]:
+            facts += f" Topics of the syllabus no lecture deck mentions, to study from the book or the guide: {', '.join(gaps[0])}."
         return (f"[Learn tracks the plan {plan['name']}, by {plan['by']}. Silica appends its day-by-day calendar, "
                 f"computed from the plan's steps in the syllabus's order and its date, under your answer; do not "
-                f"write a calendar or a table of days yourself. Write a short introduction and advice on how to "
-                f"study these steps:\n{table}]",
+                f"write a calendar or a table of days yourself. {facts} Write a short introduction and advice for "
+                f"this plan built on these facts and the steps below, naming the steps and topics; no study tip "
+                f"that would fit any plan:\n{table}]",
                 f"Calendar computed by Learn from the plan {plan['name']} (by {plan['by']}):\n\n{table}")
     found = pl.lecture_gaps(plan) if plan.get("scope") == "steps" else None
     if not found:
