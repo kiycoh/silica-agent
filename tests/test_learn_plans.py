@@ -458,3 +458,49 @@ def test_a_merge_loser_is_not_material_and_a_one_note_block_keeps_its_name(vault
     tree = text.split("## Tree", 1)[1].split("## Steps", 1)[0]
     assert "- Reti ricorrenti\n  - [[Rete ricorrente]]\n" in tree and "[[Reti ricorrenti]]" not in tree
     assert "- [[Softmax]]\n" in tree   # a step that is its note stays the link
+
+
+def test_a_many_word_topic_meets_its_note_by_meaning(vault, monkeypatch):
+    """A syllabus says "noise injection", the Italian textbook notes say
+    "Iniezione di rumore negli input"; a lone "architettura" stays unmatched,
+    since "Diversità architetturale" was as near as the right answers (2026-10-23)."""
+    from pathlib import Path
+
+    import silica.agent.providers as providers
+    import silica.kernel.recall.embed as embed
+    from silica.config import CONFIG
+    from silica.kernel.report.learner import _notes_meta
+
+    vault.note("ML/Iniezione di rumore negli input.md", "# x\n")
+    vault.note("ML/Diversità architetturale.md", "# x\n")
+    scores = {"noise": {"ML/Iniezione di rumore negli input": 0.79, "Other/Note": 0.95},
+              "arch": {"ML/Diversità architetturale": 0.80}}
+
+    class Store:
+        def __len__(self):
+            return 3
+
+        def paths(self):
+            return ["ML/Iniezione di rumore negli input", "ML/Diversità architetturale", "Other/Note"]
+
+        def title_cosine_top_k(self, vec, k=5, exclude=None):
+            hits = sorted(((s, p) for p, s in scores[vec].items() if p not in (exclude or set())), reverse=True)
+            return [{"path": p, "score": s} for s, p in hits][:k]
+
+    class Embedder:
+        def embed(self, texts, *, query=False):
+            assert all(t.startswith("[ML] ") for t in texts)   # embedded as the index embeds a title
+            return ["noise" if "noise" in t else "arch" for t in texts]
+
+    monkeypatch.setattr(embed, "get_store", lambda: Store())
+    monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: Embedder())
+    monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.709)
+    allowed = {"ML/Iniezione di rumore negli input.md", "ML/Diversità architetturale.md"}
+    found, missing = plans._topic_notes(["noise injection", "architettura"], _notes_meta(Path(CONFIG.vault_path)), allowed)
+    assert found == ["ML/Iniezione di rumore negli input.md"] and missing == ["architettura"]
+    monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.8)   # below the band: still not in the vault
+    assert plans._topic_notes(["noise injection"], _notes_meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
+    # inside the dedup band but under the plan's floor: a judge may see it, a plan does not link it
+    monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.709)
+    scores["noise"]["ML/Iniezione di rumore negli input"] = 0.729
+    assert plans._topic_notes(["noise injection"], _notes_meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])

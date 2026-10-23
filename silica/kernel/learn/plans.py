@@ -515,7 +515,61 @@ def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[lis
                 found.append(hit)
         else:
             missing.append(t)
-    return found, missing
+    # Past the words, the meaning: a textbook translated into Italian named
+    # its notes "Iniezione di rumore negli input" and "Architettura
+    # encoder-decoder" for a syllabus that says "noise injection" and
+    # "architetture codificatore-decodificatore", and the plan called both not
+    # in the vault (2026-10-23). Topics of two words or more only: a lone
+    # "architettura" met "Diversità architetturale" at 0.80, as near as the
+    # right answers were.
+    near = _by_title_vector([t for t in missing if len(_root_words(t)) > 1], allowed)
+    found += [p for p in dict.fromkeys(near.values()) if p not in found]
+    return found, [t for t in missing if t not in near]
+
+
+# A plan's link is read as "this note covers the topic", with no judge after
+# it, so the dedup title band (0.709 on jina-v5-small) is too low a bar: on 12
+# topics of a course syllabus it let in "Output strutturati" for "funzioni
+# kernel per dati strutturati" (0.729) and a general schema for "schemi
+# codificatore/decodificatore" (0.712), while the 8 right notes scored 0.760
+# to 0.883 (2026-10-23). An embedder whose band is higher keeps its own.
+PLAN_TITLE_FLOOR = 0.75
+
+
+def _by_title_vector(topics: list[str], allowed: set[str]) -> dict[str, str]:
+    """{topic: note} for each topic whose name sits within the title band
+    (CONFIG.sim_title_threshold, at least PLAN_TITLE_FLOOR) of an allowed
+    note's title vector. The topic is embedded as the index embeds a title,
+    under the folder most of the notes share, so the band compares like with
+    like. {} without an embedder or an index."""
+    if not topics or not allowed:
+        return {}
+    try:
+        from collections import Counter
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+        from silica.kernel.recall.embed import _note_title_text, get_store
+
+        store = get_store()
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info") if len(store) else None
+        if embedder is None:
+            return {}
+        keys = {p.removesuffix(".md"): p for p in allowed}
+        outside = {p for p in store.paths() if p not in keys}
+        folder = Counter(p.rsplit("/", 1)[0] for p in keys if "/" in p).most_common(1)
+        texts = [_note_title_text(t, folder=folder[0][0] if folder else "") for t in topics]
+        out: dict[str, str] = {}
+        for t, vec in zip(topics, embedder.embed(texts)):
+            hit = store.title_cosine_top_k(vec, k=1, exclude=outside)
+            if hit and hit[0]["path"] in keys and hit[0]["score"] >= max(CONFIG.sim_title_threshold, PLAN_TITLE_FLOOR):
+                out[t] = keys[hit[0]["path"]]
+    except Exception as exc:  # noqa: BLE001
+        # No index or no embedder: the topics stay not in the vault, which is
+        # what their words said.
+        logger.info("plan topics: no title-vector match (%s)", exc)
+        return {}
+    return out
 
 
 def _root_words(text: str) -> list[str]:
