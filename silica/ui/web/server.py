@@ -943,6 +943,20 @@ def _unembed_foreign_imgs(fragment: str) -> str:
     return _RAW_IMG_TAG.sub(sub, fragment)
 
 
+# An aliased wikilink in a table row: its pipe ended the cell and split the
+# row ("[[Attenzione|attenzione]]" in an aid's table, 2026-10-23). Obsidian
+# asks for `\|` there; models write `|`. The escaped pipe reaches the cell's
+# text as `|`, so the link still resolves with its alias.
+_TABLE_ALIAS = re.compile(r"\[\[([^\]\[|\\]+)\|([^\]\[]+)\]\]")
+
+
+def _escape_table_aliases(text: str) -> str:
+    if "|" not in text or "[[" not in text:
+        return text
+    return "\n".join(_TABLE_ALIAS.sub(r"[[\1\\|\2]]", line) if line.lstrip().startswith("|") else line
+                     for line in text.split("\n"))
+
+
 def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> str:
     """Render markdown (+ OFM sugar) to HTML, linkifying resolvable note refs
     when `resolve` is given. Works on the markdown-it token stream, so
@@ -960,7 +974,7 @@ def _linkify(text: str, resolve=None, remote_images: bool = True, reads=()) -> s
     from mdit_py_plugins.dollarmath import dollarmath_plugin
     from mdit_py_plugins.footnote import footnote_plugin
 
-    text = _strip_ofm_meta(text or "")
+    text = _escape_table_aliases(_strip_ofm_meta(text or ""))
     md = (
         MarkdownIt(options_update={"highlight": _highlight})
         .enable("table")
@@ -1505,6 +1519,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # loop, because it reads the driver's graph.
         if web is None:
             from silica.agent.mentions import named_notes
+            from silica.kernel.learn.offer import says_lost
             from silica.ui.web import jobs
 
             if block := await asyncio.to_thread(named_notes, text):
@@ -1514,6 +1529,12 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             if block := await asyncio.to_thread(_escalation, text, messages):
                 agent_msg += "\n\n" + block
                 escalated = True
+            elif says_lost(text):
+                # A reader saying it is unclear asked to understand, not to
+                # write: the local 9B answered "non ho capito il Boosting"
+                # with a new note of its own (2026-10-23).
+                agent_msg += ("\n\n[The reader says this was not clear. Answer here in the chat; READ-ONLY: "
+                              "do not create, edit, patch, or move any note.]")
             # This chat's conversions that ended since the agent last heard of
             # them: the history still says "still converting" (jobs.settled).
             if block := await asyncio.to_thread(jobs.settled, current_session_id):

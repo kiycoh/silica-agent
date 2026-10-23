@@ -239,7 +239,7 @@ def test_the_chat_escalation_in_shadow_logs_and_adds_nothing(monkeypatch, tmp_pa
     assert rec["escalated"] and rec["displayed"] is False and rec["why"] == "still unclear after an answer"
     monkeypatch.setenv("SILICA_STUDY_OFFER", "on")
     block = srv._escalation("non ho ancora capito la Lezione 14", lost)
-    assert "4 to 6 slides" in block and "READ-ONLY" in block
+    assert "4 to 6 slides" in block and "READ-ONLY" in block and "give no answer" in block
 
 
 def test_still_not_following_is_read_as_lost():
@@ -265,3 +265,14 @@ def test_saying_it_was_unclear_never_becomes_a_skill(monkeypatch, tmp_path):
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
     monkeypatch.setattr(ps, "detect", lambda *a, **k: (_ for _ in ()).throw(AssertionError("asked")))
     assert srv._skill_after_turn("non ho capito la Lezione 14", []) == (None, None)
+
+
+def test_the_shape_is_read_on_the_body_not_the_frontmatter_or_the_links():
+    """A nucleated note's YAML lists and its Relations bullets are not items to
+    compare: AdaGrad, an algorithm written in inline formulas, is a diagram."""
+    adagrad = ("---\nrelated:\n  - \"[[A]]\"\n  - \"[[B]]\"\n  - \"[[C]]\"\ntags:\n  - dl\nsources:\n  - \"x.md\"\n---\n"
+               "# AdaGrad\n\nRichiede $\\epsilon$, $\\theta$, $\\delta$.\nAccumula $r \\leftarrow r + g \\odot g$.\n"
+               "## Relations\n- instance of [[A]]\n- uses [[B]]\n- part of [[C]]\n- see [[D]]\n## Sources\n[[x]]\n")
+    assert offer.shape_forms(adagrad)[0] == "diagram"
+    hub = "# Hub\n\nVedi [[A]] e [[B]].\n## Relations\n- [[C]]\n- [[D]]\n- [[E]]\n- [[F]]\n"
+    assert offer.shape_forms(hub) == ["map"]

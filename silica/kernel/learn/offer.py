@@ -108,20 +108,38 @@ _HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.M)
 _LINK_RE = re.compile(r"\[\[")
 
 
+_SERVICE_RE = re.compile(r"^#{1,6}\s+(?:Relations|Sources)\s*$", re.M)
+
+
 def shape_forms(text: str) -> list[str]:
     """The forms a note's shape allows, in the order they help: slides for a
     lesson's outline (a deck already), a table for items to compare, a
     diagram for numbered steps or formulas, a map for many links, cards for
-    several points, slides for several sections."""
-    has_items = len(_TABLE_ROW_RE.findall(text)) >= 3 or len(_LIST_ITEM_RE.findall(text)) >= 4
+    several points, slides for several sections.
+
+    Read on the body. The frontmatter's `related:`, `tags:` and `sources:`
+    are YAML lists, and counted as items they made nearly every nucleated
+    note a table (the course, 2026-10-23: AdaGrad, an algorithm in formulas,
+    came out a table). Relations and Sources are the note's links, not its
+    content: they count for the map, never for items."""
+    from silica.kernel.write import frontmatter
+
     spine = bool(re.search(r"^section:\s*['\"]?\(outline\)", text, re.M))
+    _data, _raw, body = frontmatter.split(text)
+    cut = _SERVICE_RE.search(body)
+    main = body[:cut.start()] if cut else body
+    linked = body.split("## Sources", 1)[0]
+    has_items = len(_TABLE_ROW_RE.findall(main)) >= 3 or len(_LIST_ITEM_RE.findall(main)) >= 4
+    # four inline formulas weigh as two display ones: a course note's
+    # algorithm is written inline ($\boldsymbol{r} \leftarrow ...$)
+    formulas = main.count("$$") >= 2 or main.replace("$$", "").count("$") >= 8
     fits = [
         (spine, "slides"),
         (has_items, "table"),
-        (len(_STEP_RE.findall(text)) >= 3 or text.count("$$") >= 2, "diagram"),
-        (len(_LINK_RE.findall(text)) >= 5, "map"),
-        (len(_LIST_ITEM_RE.findall(text)) >= 3 or text.count("[^") >= 3, "cards"),
-        (len(_HEADING_RE.findall(text)) >= 3, "slides"),
+        (len(_STEP_RE.findall(main)) >= 3 or formulas, "diagram"),
+        (len(_LINK_RE.findall(linked)) >= 5, "map"),
+        (len(_LIST_ITEM_RE.findall(main)) >= 3 or body.count("[^") >= 3, "cards"),
+        (len(_HEADING_RE.findall(main)) >= 3, "slides"),
     ]
     return list(dict.fromkeys(form for ok, form in fits if ok))
 
@@ -353,10 +371,12 @@ def escalation_block(name: str, why: str, text: str = "") -> str:
     # "this answer", said twice: told only to make the answer the aid, the
     # local 9B wrote the deck as a new note and answered with its link
     # (2026-10-23), a write nobody asked for.
+    # "give no answer to it": the AdaGrad aid closed on its question and then
+    # its answer in brackets (2026-10-23), which leaves nothing to retrieve
     return (f"[The reader is still struggling with [[{name}]] ({why}). Make this answer the aid, written from "
-            f"the note: {form}. End with one question the reader can answer only by using it. Ground every "
-            f"step in the note. Write the aid in this answer, here in the chat; READ-ONLY: do not create, edit, "
-            f"patch, or move any note.]")
+            f"the note: {form}. End with one question the reader can answer only by using it, and give no "
+            f"answer to it. Ground every step in the note; formulas in $...$ as the note writes them. Write "
+            f"the aid in this answer, here in the chat; READ-ONLY: do not create, edit, patch, or move any note.]")
 
 
 # The escalate rung inside Learn, where the report puts it ("generate the aid as
