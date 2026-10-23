@@ -395,6 +395,47 @@ def fresh_warn_state():
 
 
 @patch("silica.agent.providers.openai.OpenAI")
+def test_embedder_on_openrouter_sends_the_models_own_pin(mock_openai_cls, monkeypatch):
+    """The pilot's zero-retention pin for the index lives in
+    OPENROUTER_PROVIDER_BY_MODEL like the chat's; the chat's provider ORDER is
+    not an embedding provider and must not follow. A local server gets nothing."""
+    from silica.agent.providers import OpenAIEmbedder
+    from silica.config import CONFIG
+
+    monkeypatch.setattr(CONFIG, "openrouter_provider_by_model",
+                        '{"perplexity/pplx-embed-v1-4b": {"zdr": true}}')
+    monkeypatch.setattr(CONFIG, "openrouter_provider", "deepinfra")
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+    item = MagicMock(index=0, embedding=[0.1, 0.2])
+    mock_client.embeddings.create.return_value = MagicMock(data=[item], usage=MagicMock(prompt_tokens=3, cost=1e-7))
+
+    OpenAIEmbedder("https://openrouter.ai/api/v1", "k", "perplexity/pplx-embed-v1-4b").embed(["t"])
+    assert mock_client.embeddings.create.call_args.kwargs["extra_body"] == {"provider": {"zdr": True}}
+
+    OpenAIEmbedder("https://openrouter.ai/api/v1", "k", "baai/bge-m3").embed(["t"])
+    assert mock_client.embeddings.create.call_args.kwargs["extra_body"] is None
+
+    OpenAIEmbedder("http://127.0.0.1:1234/v1", "k", "perplexity/pplx-embed-v1-4b").embed(["t"])
+    assert mock_client.embeddings.create.call_args.kwargs["extra_body"] is None
+
+
+@patch("silica.agent.providers.openai.OpenAI")
+def test_embedder_counts_what_a_metered_index_costs(mock_openai_cls, monkeypatch):
+    from silica.agent import providers
+
+    events = []
+    monkeypatch.setattr(providers, "emit", lambda name, **kw: events.append((name, kw)))
+    mock_client = MagicMock()
+    mock_openai_cls.return_value = mock_client
+    item = MagicMock(index=0, embedding=[0.1])
+    mock_client.embeddings.create.return_value = MagicMock(data=[item], usage=MagicMock(prompt_tokens=3, cost=2.5e-7))
+
+    providers.OpenAIEmbedder("http://x/v1", "k", "m").embed(["t"])
+    assert events[0][0] == "embed" and events[0][1]["usd"] == 2.5e-7 and events[0][1]["tokens"] == 3
+
+
+@patch("silica.agent.providers.openai.OpenAI")
 def test_embedder_down_warns_once_and_still_raises(mock_openai_cls, caplog, fresh_warn_state):
     """A down embedder degrades recall silently — the warning is what says so."""
     from silica.agent.providers import OpenAIEmbedder

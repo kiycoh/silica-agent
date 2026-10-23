@@ -287,6 +287,30 @@ EMBEDDER_DEFAULTS: dict[str, dict[str, str]] = {
         "SILICA_AUTOLINK_MIN_SIM": "0.180",
         "SILICA_EPISODIC_RECALL_FLOOR": "0.5",
     },
+    # Perplexity's 4B through OpenRouter, the hosted index since 2026-10-23: an
+    # API, so the 2-core host spends no CPU on it. No role prompts, the model
+    # card says to embed text as it is. Its cosines sit below Qwen's (note to
+    # nearest note median 0.670 vs 0.731), and a model id with no row runs
+    # Qwen's bars: TITLE 0.80 would have kept 5% of titles, not 69%. Same
+    # quantile map on the same 681 notes; the episodic floor is Gemma 2's 0.724
+    # carried by the share of true matches it keeps (89.7% on 300 student
+    # questions), which lets 2.6% of off-topic notes through against Gemma's 5.6%.
+    # HIGH and LOW passed ADR-0030's gate on the same 738 concepts as the other
+    # rows: no false merge, 0 of 60 duplicates leak (Gemma 2: 6), 408 go to the
+    # judge (Gemma 2: 457); LOW stays 0.011 under the lowest duplicate's 0.651
+    # (docs/evaluation/pplx-embed-4b-calibration-2026-10-23.md). Keyed so the
+    # 0.6b, never calibrated, does not match.
+    "pplx-embed-v1-4b": {
+        "dim": "2560",
+        "SILICA_EMBEDDING_QUERY_PREFIX": "",
+        "SILICA_EMBEDDING_DOCUMENT_PREFIX": "",
+        "SILICA_SIM_THRESHOLD_HIGH": "0.785",
+        "SILICA_SIM_THRESHOLD_LOW": "0.640",
+        "SILICA_SIM_TITLE_THRESHOLD": "0.508",
+        "SILICA_SIM_THRESHOLD_THEME": "0.189",
+        "SILICA_AUTOLINK_MIN_SIM": "0.204",
+        "SILICA_EPISODIC_RECALL_FLOOR": "0.52",
+    },
 }
 
 

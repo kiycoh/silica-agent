@@ -86,6 +86,72 @@ def test_bounded_stream_forwards_chunks_and_propagates_error():
         next(gen)
 
 
+class _Raw:
+    """The provider's HTTP response under litellm's wrapper: only close() matters."""
+    def __init__(self):
+        import threading
+        self.closed = threading.Event()
+
+    def close(self):
+        self.closed.set()
+
+
+class _Wrapper:
+    """litellm's CustomStreamWrapper shape: an iterator of chunks whose raw stream
+    sits at completion_stream.streaming_response (OpenRouter, the hosted path) or
+    is completion_stream itself (the OpenAI SDK's Stream, local endpoints)."""
+    def __init__(self, chunks, sdk_shape=False):
+        from types import SimpleNamespace
+        self._it = iter(chunks)
+        self.raw = _Raw()
+        self.completion_stream = self.raw if sdk_shape else SimpleNamespace(streaming_response=self.raw)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self._it)
+
+
+def _endless():
+    import itertools
+    import time
+    for i in itertools.count():
+        time.sleep(0.001)
+        yield i
+
+
+def test_bounded_stream_closes_the_provider_stream_on_every_exit():
+    """litellm stops at the usage chunk without closing the response, so the
+    connection stayed checked out until the cyclic GC finalised it at an
+    arbitrary point; on t06 (2026-10-23) that point was inside httpcore's pool
+    lock and the process deadlocked every later LLM call."""
+    import litellm
+    import pytest
+
+    from silica.agent.llm import _bounded_stream
+
+    for sdk_shape in (False, True):
+        done = _Wrapper([1, 2], sdk_shape)
+        assert list(_bounded_stream(lambda: done, 5.0, "test/model")) == [1, 2]
+        assert done.raw.closed.wait(2.0)
+
+        # the consumer leaves (Stop): the pump stops and closes, not drains forever
+        left = _Wrapper(_endless(), sdk_shape)
+        gen = _bounded_stream(lambda: left, 5.0, "test/model")
+        next(gen)
+        gen.close()
+        assert left.raw.closed.wait(2.0)
+
+        def _cut():
+            yield 1
+            raise litellm.APIConnectionError("dropped", model="m", llm_provider="p")
+        cut = _Wrapper(_cut(), sdk_shape)
+        with pytest.raises(litellm.APIConnectionError):
+            list(_bounded_stream(lambda: cut, 5.0, "test/model"))
+        assert cut.raw.closed.wait(2.0)
+
+
 def test_call_llm_without_on_delta_does_not_stream():
     from silica.agent.llm import call_llm
 
