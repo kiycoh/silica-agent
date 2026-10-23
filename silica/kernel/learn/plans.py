@@ -413,13 +413,17 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
         lines = [ln.strip("-* ").strip() for ln in re.split(r"[\n;]", target) if ln.strip()]
     tree, paths, gaps = [], [], []
     for i, text in enumerate(lines):
-        how, doubt, missing = "", False, []
+        how, doubt, missing, approx = "", False, [], []
         found = [p for p in (resolve_title(w, notes) for w in _WIKILINK_RE.findall(text)) if p]
         topics = _topics(text)
         if topics:
             # every topic, linked or not: the autolinker links two of eight
             # topics in a syllabus row, and "by link" read only those two
-            more, missing = _topic_notes(topics, notes, allowed)
+            hits = topic_hits(topics, notes, allowed)
+            more = list(dict.fromkeys(p for p, _how in hits.values() if p))
+            missing = [t for t, (p, _how) in hits.items() if not p]
+            # a note met by meaning only is the one the reader should check
+            approx = [p for p, how_ in hits.values() if p and how_ == "meaning"]
             found = list(dict.fromkeys(more + found))  # the syllabus's order first
             how = f"{len(topics) - len(missing)} of {len(topics)} topics"
             doubt = len(missing) * 2 > len(topics)
@@ -436,6 +440,8 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
         node = {"node": _WIKILINK_RE.sub(r"\1", text).split(":", 1)[0].strip(), "children": [], "text": text}
         if missing:
             node["missing"] = missing
+        if approx:
+            node["approx"] = approx
         # by index from the form, by its text from the plan note (`refused:`)
         if refused and (i in refused or text in refused):
             node.update(leaves=[], gap=True, refused=len(found), how="refused")
@@ -502,26 +508,53 @@ def _topics(text: str) -> list[str]:
 
 
 def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[list[str], list[str]]:
-    """(notes covering the topics, topics no note covers), one note per topic:
-    by title, else the note whose name holds most of the topic's content
-    words, more than half of them. A shared "analisi" is not a match, and
-    half of two words was one: "noise injection" met "Noise-contrastive
-    estimation" and "autocodificatori di riduzione" met "Riduzione della
-    varianza" (2026-10-23)."""
-    found: list[str] = []
-    missing: list[str] = []
+    """(notes covering the topics, topics no note covers), one note per topic
+    (`topic_hits` says how each was found)."""
+    hits = topic_hits(topics, notes, allowed)
+    found = list(dict.fromkeys(p for p, _how in hits.values() if p))
+    return found, [t for t, (p, _how) in hits.items() if not p]
+
+
+# Words a title opens on that say what kind of note it is, not what it is
+# about: "Definizione di kernel" is the note on kernels, and "Kernel CCA" is
+# not (2026-10-23).
+# A syllabus line says the same of a topic: "analisi discriminante lineare",
+# "casi di convoluzione efficiente", "tipi di apprendimento".
+_GENERIC_HEADS = {"definizion", "introduzion", "concett", "definition", "introduction", "concept",
+                  "analis", "cas", "tip", "propriet", "operazion"}
+
+
+def _title_words(stem: str) -> set[str]:
+    """A title's root words as topic matching reads them, less the words that
+    only name the kind of note. Acronyms stay uncounted: counted, "API" made
+    "Keras come API" miss the one-word topic "keras" (2026-10-23)."""
+    return set(_root_words(stem)) - _GENERIC_HEADS
+
+
+def topic_hits(topics: list[str], notes: dict, allowed: set[str]) -> dict[str, tuple[str | None, str]]:
+    """{topic: (note or None, how)} for the topics of one syllabus block. How:
+    "title", "words", the fallback that named it (`_named_otherwise`), or
+    "meaning" for a title vector, the one a reader should check.
+
+    By title, else the note whose name holds most of the topic's content
+    words, more than half of them, then the one adding fewest words of its
+    own: "regressione lineare multipla" is "Regressione lineare", not
+    "Regressione lineare bayesiana", which the shorter path had won from a
+    subfolder (2026-10-23). A shared "analisi" is not a match, and half of two
+    words was one: "noise injection" met "Noise-contrastive estimation"."""
     # A merge loser's name still says what it is about; the match lands on
     # its winner ("Set di Validazione" for "validazione", 2026-10-23).
     losers = {p for p, m in notes.items() if m.get("winner") and resolve_title(p, notes) in allowed}
-    stems = {p: set(_root_words(Path(p).stem)) for p in sorted(allowed | losers)}
+    stems = {p: _title_words(Path(p).stem) for p in sorted(allowed | losers)}
     block = {w for t in topics for w in _root_words(t)}
+    hits: dict[str, tuple[str | None, str]] = {}
     for t in topics:
         hit = resolve_title(t, notes)
+        how = "title"
         if not hit or hit not in allowed:
-            hit = None
-            words = _root_words(t)
-            # most topic words in the name, then the shortest name: the note
-            # about the thing, not one that mentions it
+            hit, how = None, "words"
+            # each word once: "lineare e non lineare" counted "lineare" twice
+            words = list(dict.fromkeys(w for w in _root_words(t) if w not in _GENERIC_HEADS)) or _root_words(t)
             # A one-word topic names a thing only by a title holding that word
             # and nothing the block does not list: "ottimizzazione" met
             # "Ottimizzazione del codice" and opened the plan on it, and
@@ -529,17 +562,24 @@ def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[lis
             # "underfitting", listed together, are "Underfitting e overfitting"
             # (2026-10-23).
             pool = stems if len(words) > 1 else {p: s for p, s in stems.items() if s and set(words) <= s <= block}
-            got, best = max(((sum(1 for w in words if w in s), -len(p), p) for p, s in pool.items()),
-                            default=(0, 0, None))[0::2]
+            # then the fewest words of its own, then a note that defines the
+            # thing ("Definizione di kernel" over "Kernel CCA"), then the shorter
+            ranked = sorted(((sum(1 for w in words if w in s), -len(s - set(words)),
+                              bool(set(_root_words(Path(p).stem)) & _GENERIC_HEADS), -len(Path(p).stem), p)
+                             for p, s in pool.items()), reverse=True)
+            got, best = (ranked[0][0], ranked[0][4]) if ranked else (0, None)
+            best = _translating(words, [r[4] for r in ranked if r[0] == got][:8], stems) if best else best
             # the joined form of "ada-boost" is a spelling of its words, not one more
-            if best and got and got * 2 > (len(_content_words(t)) or len(words)):
+            base = len({_root(w) for w in _content_words(t)} - _GENERIC_HEADS)
+            # A topic of one or two words is not a note that adds two of its
+            # own: "algoritmi di apprendimento" is no "Algoritmi con tassi di
+            # apprendimento adattivi" (2026-10-23).
+            narrower = best and base <= 2 and len(stems[best] - set(words)) >= 2
+            if best and got and got * 2 > (base or len(words)) and not narrower:
                 hit = resolve_title(best, notes) if best in losers else best
-            hit = hit or _named_otherwise(t, notes, allowed)
-        if hit:
-            if hit not in found:
-                found.append(hit)
-        else:
-            missing.append(t)
+            if not hit:
+                hit, how = _named_otherwise(t, notes, allowed)
+        hits[t] = (hit, how)
     # Past the words, the meaning: a textbook translated into Italian named
     # its notes "Iniezione di rumore negli input" and "Architettura
     # encoder-decoder" for a syllabus that says "noise injection" and
@@ -547,9 +587,88 @@ def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[lis
     # in the vault (2026-10-23). Topics of two words or more only: a lone
     # "architettura" met "Diversità architetturale" at 0.80, as near as the
     # right answers were.
-    near = _by_title_vector([t for t in missing if len(_root_words(t)) > 1], allowed)
-    found += [p for p in dict.fromkeys(near.values()) if p not in found]
-    return found, [t for t in missing if t not in near]
+    near = _by_title_vector([t for t, (p, _h) in hits.items() if not p and len(_root_words(t)) > 1], allowed)
+    for t, p in _translated(near).items():
+        hits[t] = (p, "meaning")
+    return hits
+
+
+def _translating(words: list[str], tied: list[str], stems: dict[str, set[str]]) -> str:
+    """Among titles holding as many of the topic's words, the first that
+    holds, in its own words, a translation of the ones it misses: "Definizione
+    di reti convolutive" missed "retropropagazione", which "Backpropagation
+    nelle reti convolutive" translates (2026-10-23). The first title when none
+    does, or with no embedder to tell."""
+    best = tied[0]
+    missed = " ".join(w for w in words if w not in stems[best])
+    others = [p for p in tied[1:] if stems[p] - set(words)]
+    if not missed or not others:
+        return best
+    try:
+        import numpy as np
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info")
+        if embedder is None:
+            return best
+        vecs = embedder.embed([missed] + [" ".join(sorted(stems[p] - set(words))) for p in others])
+        x = np.asarray(vecs[0], float)
+        for p, v in zip(others, vecs[1:]):
+            y = np.asarray(v, float)
+            if float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y) or 1.0)) >= TRANSLATED_PARTS:
+                return p
+    except Exception as exc:  # noqa: BLE001
+        # No embedder: the title with fewest words of its own stands, as before.
+        logger.info("plan topics: translation check skipped (%s)", exc)
+    return best
+
+
+# A title vector near a topic because of one shared word is a sibling, not the
+# thing: "percettrone multistrato" met "Algoritmo del percettrone" and
+# "apprendimento hebbiano" met "Apprendimento artificiale" (0.81 and 0.83,
+# 2026-10-23). What tells a translation from a sibling is the words the two do
+# not share: measured, translated parts scored 0.61 to 0.94 (autocodificatori
+# and autoencoder, data and dataset) and sibling parts 0.26 to 0.38 (multistrato
+# and algoritmo, hebbiano and artificiale).
+TRANSLATED_PARTS = 0.5
+
+
+def _translated(near: dict[str, str]) -> dict[str, str]:
+    """The title-vector matches that survive the sibling check: none shared
+    word, or the parts each side does not share read as one another."""
+    todo: list[tuple[str, str, str]] = []
+    out: dict[str, str] = {}
+    for t, p in near.items():
+        tw, hw = set(_root_words(t)) - _GENERIC_HEADS, _title_words(Path(p).stem)
+        only_t, only_h = tw - hw, hw - tw
+        if not (tw & hw) or not only_t or not only_h:
+            out[t] = p           # a pure translation, or one side covering the other
+            continue
+        todo.append((t, " ".join(sorted(only_t)), " ".join(sorted(only_h))))
+    if not todo:
+        return out
+    try:
+        import numpy as np
+
+        from silica.agent.providers import get_embedder_or_none
+        from silica.config import CONFIG
+
+        embedder = get_embedder_or_none(CONFIG, "plan topics", level="info")
+        if embedder is None:
+            return out
+        vecs = embedder.embed([a for _t, a, _b in todo] + [b for _t, _a, b in todo])
+        n = len(todo)
+        for i, (t, _a, _b) in enumerate(todo):
+            x, y = np.asarray(vecs[i], float), np.asarray(vecs[n + i], float)
+            if float(x @ y / (np.linalg.norm(x) * np.linalg.norm(y) or 1.0)) >= TRANSLATED_PARTS:
+                out[t] = near[t]
+    except Exception as exc:  # noqa: BLE001
+        # No embedder for the check: the doubtful matches are dropped, never
+        # linked unchecked.
+        logger.info("plan topics: sibling check skipped (%s)", exc)
+    return out
 
 
 # A plan's link is read as "this note covers the topic", with no judge after
@@ -603,8 +722,9 @@ _ACRONYM_SPAN = (2, 4)
 _SEGMENT_SLUG_RE = re.compile(r"-\d+(?:-\d+)*-([a-z][a-z0-9-]*)$")
 
 
-def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> str | None:
-    """The note a topic names in a way its title's words do not show, or None.
+def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> tuple[str | None, str]:
+    """(the note a topic names in a way its title's words do not show, which
+    way), or (None, "").
 
     In this order, each a thing the notes already carry, measured on a course
     syllabus whose plan called these not in the vault (2026-10-23):
@@ -620,13 +740,13 @@ def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> str | None:
     key = " ".join(_root_words(topic))
     low = topic.strip().casefold()
     if not key:
-        return None
+        return None, ""
     for p in sorted(allowed, key=len):
         if any(" ".join(_root_words(a)) == key for a in notes.get(p, {}).get("aliases", ())):
-            return p
+            return p, "alias"
     for p in sorted(allowed, key=len):
         if f"({low})" in Path(p).stem.casefold():
-            return p
+            return p, "gloss"
     # by length, not a stopword list: "self" is an English stopword and the S of SOM
     words = [w for w in re.findall(r"[^\W\d_]+", low) if len(w) > 2]
     initials = {"".join(w[0] for w in words[i:i + n])
@@ -637,12 +757,12 @@ def _named_otherwise(topic: str, notes: dict, allowed: set[str]) -> str | None:
         if any(len(t) >= 3 and t in initials for t in toks):
             acr.append((0 if toks[0] in initials else 1, len(p), p))
     if acr:
-        return min(acr)[2]
+        return min(acr)[2], "initials"
     for p in sorted(allowed, key=len):
         m = notes.get(p, {}).get("spine") and _SEGMENT_SLUG_RE.search(Path(p).stem.casefold())
         if m and " ".join(_root_words(m.group(1).replace("-", " "))) == key:
-            return p
-    return None
+            return p, "segment"
+    return None, ""
 
 
 def _root_words(text: str) -> list[str]:
@@ -650,7 +770,11 @@ def _root_words(text: str) -> list[str]:
     singular: "reti neurali" and "Rete neurale" share both words."""
     # "ada-boost" in a syllabus is the note "AdaBoost": the joined form too
     joined = [re.sub(r"[-\s]", "", m).casefold() for m in re.findall(r"\b\w+-\w+\b", text)]
-    return [w[:-1] if len(w) >= 4 and w[-1] in "aeiouàèéìòù" else w for w in _content_words(text) + joined]
+    return [_root(w) for w in _content_words(text) + joined]
+
+
+def _root(word: str) -> str:
+    return word[:-1] if len(word) >= 4 and word[-1] in "aeiouàèéìòù" else word
 
 
 def _content_words(text: str) -> list[str]:
@@ -1177,7 +1301,8 @@ def _plan_body(name: str, scope: str, target, resolved: dict, chosen: list[str],
             elif "missing" in node or str(node.get("how", "")).endswith("topics"):
                 # a syllabus block keeps its name; its topics are the notes,
                 # and what no note covers is said where the step is read
-                links = ", ".join(f"[[{Path(p).stem}]]" for p in node["leaves"])
+                links = ", ".join(f"[[{Path(p).stem}]]" + (" (≈)" if p in node.get("approx", ()) else "")
+                                  for p in node["leaves"])
                 lines.append(f"- [ ] {node['node']}: {links}" + (f" · not in the vault: {missing}" if missing else ""))
             else:
                 text = node.get("text", node["node"])

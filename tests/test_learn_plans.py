@@ -527,6 +527,10 @@ def test_a_many_word_topic_meets_its_note_by_meaning(vault, monkeypatch):
     monkeypatch.setattr(CONFIG, "sim_title_threshold", 0.709)
     scores["noise"]["ML/Iniezione di rumore negli input"] = 0.729
     assert plans._topic_notes(["noise injection"], _notes_meta(Path(CONFIG.vault_path)), allowed) == ([], ["noise injection"])
+    # a link met by meaning is marked in the plan note, the one to check
+    scores["noise"]["ML/Iniezione di rumore negli input"] = 0.79
+    out = plans.write_plan("Esame", "steps", "Reti profonde: noise injection, architettura", restrict="ML/", cards=[])
+    assert "- [ ] Reti profonde: [[Iniezione di rumore negli input]] (≈) · not in the vault: architettura" in plans._read(out["path"])
 
 
 def test_a_topic_meets_its_note_by_alias_gloss_initials_or_segment(vault):
@@ -544,7 +548,46 @@ def test_a_topic_meets_its_note_by_alias_gloss_initials_or_segment(vault):
     meta, allowed = _meta_and_material()
     topics = ["classificazione one-class", "stride", "reti learning vector quantization",
               "reti self organizing map: proprietà e loro algoritmi", "dropout", "sonno profondo e memoria"]
-    found = [plans._named_otherwise(t, meta, allowed) for t in topics]
+    found = [plans._named_otherwise(t, meta, allowed)[0] for t in topics]
+    assert [plans._named_otherwise(t, meta, allowed)[1] for t in topics] == [
+        "alias", "gloss", "initials", "initials", "segment", ""]
     assert found == ["ML/One-class classification.md", "ML/Convoluzione con passo (stride).md",
                      "ML/LVQ come estensione supervisionata.md", "ML/SOM e topologia.md",
                      "ML/Goodfellow-20-7-12-dropout.md", None]
+
+
+def test_topic_matching_prefers_the_general_note_and_drops_siblings(vault, monkeypatch):
+    """The course plan's wrong links (2026-10-23): a subfolder's shorter path
+    beat the general note, a one-word topic met a method named after it, a
+    sibling met through one shared word, a narrower note, a translation the
+    words could not see."""
+    import silica.agent.providers as providers
+
+    for t in ("Regressione lineare bayesiana", "Kernel CCA", "Definizione di kernel", "Algoritmo del percettrone",
+              "Algoritmi con tassi di apprendimento adattivi", "Definizione di reti convolutive",
+              "Backpropagation nelle reti convolutive", "Autoencoder regolarizzati"):
+        vault.note(f"ML/{t}.md", "# x\n")
+    vault.note("ML/Supervisionato/Regressione lineare.md", "# x\n")
+    class Embedder:
+        # one direction per text, shared only by words that translate each other
+        def embed(self, texts, *, query=False):
+            out = []
+            for t in texts:
+                v = [0.0] * 64
+                group = 0 if any(k in t for k in ("retropropag", "backpropag", "autocodific", "autoencoder")) else None
+                v[group if group is not None else 1 + sum(map(ord, t)) % 63] = 1.0
+                out.append(v)
+            return out
+
+    monkeypatch.setattr(providers, "get_embedder_or_none", lambda *a, **kw: Embedder())
+    meta, allowed = _meta_and_material()
+    hits = plans.topic_hits(["regressione lineare multipla", "kernel", "kernel ridge", "algoritmi di apprendimento",
+                             "retropropagazione per reti convolutive"], meta, allowed)
+    assert hits["regressione lineare multipla"][0] == "ML/Supervisionato/Regressione lineare.md"
+    assert hits["kernel"][0] == "ML/Definizione di kernel.md"
+    assert hits["algoritmi di apprendimento"][0] is None          # a narrower note is not the topic
+    assert hits["retropropagazione per reti convolutive"][0] == "ML/Backpropagation nelle reti convolutive.md"
+    # a title vector met through one shared word is kept only when the rest translates
+    kept = plans._translated({"percettrone multistrato": "ML/Algoritmo del percettrone.md",
+                              "autocodificatori regolarizzati": "ML/Autoencoder regolarizzati.md"})
+    assert kept == {"autocodificatori regolarizzati": "ML/Autoencoder regolarizzati.md"}
