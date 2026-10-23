@@ -253,7 +253,8 @@ def test_a_run_ends_by_reconciling_the_indexes_after_its_last_edit(tmp_vault, tm
     coord = Coordinator(inbox_files=["Inbox/x.md"], target_dir="T")
     monkeypatch.setattr(coord.fsm, "run", lambda: order.append("fsm") or {"final_status": "success"})
     monkeypatch.setattr(coord, "_sweep_dangling_links", lambda result: order.append("links"))
-    monkeypatch.setattr(sync, "sweep", lambda *, force=False: order.append(f"sweep force={force}"))
+    monkeypatch.setattr(sync, "sweep", lambda *, force=False, uncapped=False:
+                        order.append(f"sweep force={force} uncapped={uncapped}"))
 
     coord.run()
-    assert order == ["fsm", "links", "sweep force=True"]
+    assert order == ["fsm", "links", "sweep force=True uncapped=True"]   # nothing waits on it at run end

@@ -167,12 +167,13 @@ def _prune_orphans(store, live: set[str], delete, label: str) -> int:
     return len(orphaned)
 
 
-def sweep(*, force: bool = False) -> SweepStats:
+def sweep(*, force: bool = False, uncapped: bool = False) -> SweepStats:
     """Reconcile every seeded index with the vault on disk. Never raises.
 
     Called from the read path (facade_retrieve, before the indexes are read)
     and from the injector at run start. ``force`` bypasses the debounce, not
-    the ``SILICA_INDEX_SWEEP`` config gate.
+    the ``SILICA_INDEX_SWEEP`` config gate. ``uncapped`` embeds every changed
+    note past _RECONCILE_CAP, for the end of a run, where no query waits.
     """
     global _last_sweep
     stats = SweepStats()
@@ -186,7 +187,7 @@ def sweep(*, force: bool = False) -> SweepStats:
         return stats
     _last_sweep = now
     try:
-        return _sweep(stats)
+        return _sweep(stats, uncapped)
     except Exception as e:
         logger.debug("index sweep skipped (%s)", e)
         stats.skipped = True
@@ -215,7 +216,7 @@ def _mark_namespace() -> None:
         logger.debug("vault marker not written (%s)", e)
 
 
-def _sweep(stats: SweepStats) -> SweepStats:
+def _sweep(stats: SweepStats, uncapped: bool = False) -> SweepStats:
     from silica.driver import DRIVER
     from silica.kernel.recall.embed import get_store
 
@@ -318,7 +319,7 @@ def _sweep(stats: SweepStats) -> SweepStats:
                 if embed_store.get_content_hash(p)
                 != _embed_signature(n, b, folder=p.rsplit("/", 1)[0] if "/" in p else "", model=model)
             ]
-            if len(changed) > _RECONCILE_CAP:
+            if not uncapped and len(changed) > _RECONCILE_CAP:
                 logger.warning(
                     "index sweep found %d changed notes > cap %d — run /embed to rebuild",
                     len(changed), _RECONCILE_CAP,

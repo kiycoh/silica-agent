@@ -172,7 +172,10 @@ class Coordinator:
         # on it; the sweep only embeds notes whose text changed.
         from silica.kernel.recall import sync
 
-        sync.sweep(force=True)
+        # Uncapped: the cap keeps a query from waiting on a rebuild, and no
+        # query waits here. Capped, a course's run left 835 patched notes on
+        # their pre-patch vectors until someone ran /embed (2026-10-23).
+        sync.sweep(force=True, uncapped=True)
         return result
 
     # --- end-of-run orphan resolution -------------------------------------
