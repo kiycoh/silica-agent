@@ -331,29 +331,67 @@ def _bounded_stream(make_iter, per_chunk_timeout: float, model: str):
 
     q: "queue.Queue" = queue.Queue()
     _DONE = object()
+    # Set when the consumer leaves (Stop, the deadline, the end): the pump stops
+    # reading instead of draining a reply nobody reads into the queue.
+    stop = threading.Event()
 
     def _pump():
+        it = None
         try:
-            for c in make_iter():
+            it = make_iter()
+            for c in it:
+                if stop.is_set():
+                    break
                 q.put(("chunk", c))
         except BaseException as e:  # noqa: BLE001 - carried to the consumer
             q.put(("err", e))
         finally:
+            _close_stream(it)
             q.put(("done", _DONE))
 
     threading.Thread(target=_pump, daemon=True, name="llm-stream").start()
-    while True:
-        try:
-            kind, payload = q.get(timeout=per_chunk_timeout)
-        except queue.Empty:
-            raise _litellm().Timeout(
-                message=f"local wall-clock timeout after {per_chunk_timeout:.0f}s (stream stalled)",
-                model=model, llm_provider=model.split("/", 1)[0])
-        if kind == "err":
-            raise payload
-        if kind == "done":
-            return
-        yield payload
+    try:
+        while True:
+            try:
+                kind, payload = q.get(timeout=per_chunk_timeout)
+            except queue.Empty:
+                raise _litellm().Timeout(
+                    message=f"local wall-clock timeout after {per_chunk_timeout:.0f}s (stream stalled)",
+                    model=model, llm_provider=model.split("/", 1)[0])
+            if kind == "err":
+                raise payload
+            if kind == "done":
+                return
+            yield payload
+    finally:
+        stop.set()
+
+
+def _close_stream(it) -> None:
+    """Close the HTTP response under a litellm stream, on the thread that read it.
+
+    litellm 1.86 ends the iteration at the usage chunk without reading `[DONE]`
+    or closing the response, so the connection stayed checked out until the
+    cyclic GC finalised the generator chain, at whatever point the GC ran. On
+    t06 (2026-10-23 15:29 UTC) it ran inside httpcore 1.0.9's pool lock, while
+    a new connection was allocated; the finaliser's close() took the same
+    non-reentrant lock and every later call of the process, on any model,
+    waited on it until a restart (py-spy dump, 15 CLOSE-WAIT sockets).
+    Closing here, outside any pool lock, leaves the GC nothing to finalise.
+    """
+    cs = getattr(it, "completion_stream", None)
+    # The OpenAI SDK's Stream (openai/ endpoints) closes itself; litellm's own
+    # handlers (OpenRouter, the hosted path) keep the response's line generator.
+    close = getattr(cs, "close", None) or getattr(getattr(cs, "streaming_response", None), "close", None)
+    if not callable(close):
+        return
+    try:
+        close()
+    except Exception:  # noqa: BLE001
+        # Teardown only: a close that fails leaves the connection as it was
+        # before this existed, and raising here would cost the caller its
+        # answer, already read whole.
+        logger.debug("closing the stream of a finished LLM call failed", exc_info=True)
 
 
 # Models whose endpoint answered the `reasoning: {enabled: False}` block with a
