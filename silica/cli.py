@@ -5175,7 +5175,10 @@ def main():
                 answer = relay_sources(answer, messages)
             # The lines under the answer, stored on it before the beat below
             # so the session keeps them (ADR-0094 point 8).
-            notes = turn_notes.attach(messages, ([] if web else watch.notes()) + numbers_notes(unread))
+            from silica.kernel.learn.artifacts import grounding_notes
+
+            notes = turn_notes.attach(messages, ([] if web else watch.notes()) + numbers_notes(unread)
+                                      + ([] if web else grounding_notes(typed, answer)))
             # Final-assistant turn beat, post-attribution (see loop.py): the
             # replay must carry what the user actually read, sources included.
             if messages and messages[-1].get("role") == "assistant":

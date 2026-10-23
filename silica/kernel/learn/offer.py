@@ -37,13 +37,16 @@ def says_lost(text: str) -> bool:
 def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
     """{note: why} for the notes among `paths` whose last answers say the
     reader struggles: MISSES wrong of the last RECENT, the latest answered by
-    being told, or the latest an answer Learn's confidence marks: wrong while
-    sure (a blind spot, the error most worth correcting) or right while unsure
-    (fragile). The confidence bands are Learn's own (mastery.BLIND_SPOT_CONF,
-    FRAGILE_CONF), read the way its suggestions read them."""
-    from silica.kernel.learn.mastery import BLIND_SPOT_CONF, FRAGILE_CONF, eligible
+    being told, or the latest a miss Learn's confidence marks as a blind spot
+    (wrong while sure, mastery.BLIND_SPOT_CONF). Confidence is read only once
+    the ledger holds mastery.CALIBRATION_MIN eligible answers, and a right
+    answer given unsure triggers nothing, the scheduler brings it back: the
+    rule of the research report difficulty-detection-and-study-aids, section 8
+    (an earlier version of this offered help for those, 2026-10-23)."""
+    from silica.kernel.learn.mastery import BLIND_SPOT_CONF, CALIBRATION_MIN, eligible
     from silica.kernel.report.quiz import key
 
+    calibrated = sum(1 for e in entries if eligible(e)) >= CALIBRATION_MIN
     by_key: dict[str, list[dict]] = {}
     for e in entries:
         by_key.setdefault(key(str(e.get("path") or "")), []).append(e)
@@ -56,10 +59,9 @@ def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
         last = evs[-1]
         if sum(1 for e in evs if not e.get("correct")) >= MISSES or last.get("told"):
             out[p] = f"you missed {name} in recent practice"
-        elif eligible(last) and last.get("conf", 0) >= BLIND_SPOT_CONF and not last.get("correct"):
+        elif (calibrated and eligible(last) and last.get("conf", 0) >= BLIND_SPOT_CONF
+              and not last.get("correct")):
             out[p] = f"you were sure about {name} and missed it"
-        elif eligible(last) and last.get("conf") == FRAGILE_CONF and last.get("correct"):
-            out[p] = f"you got {name} right but were unsure"
     return out
 
 
@@ -87,7 +89,8 @@ def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) 
     target = next(iter(hard), notes[0])
     name = target.removesuffix(".md").rsplit("/", 1)[-1]
     why = hard[target] if hard and not lost else "you said this was not clear"
-    return {"kind": "study", "text": why, "note": target, "commands": aids(target, name, lost)}
+    state = "lost" if lost else "blind" if "were sure" in why else "missed"
+    return {"kind": "study", "text": why, "note": target, "commands": aids(target, name, state)}
 
 
 AIDS_SHOWN = 5   # practice plus four forms: one short line under the answer
@@ -99,29 +102,35 @@ _HEADING_RE = re.compile(r"^#{1,6}\s+\S", re.M)
 _LINK_RE = re.compile(r"\[\[")
 
 
-def aids(path: str, name: str, lost: bool = False, text: str | None = None) -> list[dict]:
-    """The ways to work on a hard note, practice first, then the forms its
-    shape asks for, at most AIDS_SHOWN.
+def aids(path: str, name: str, state: str = "missed", text: str | None = None) -> list[dict]:
+    """The ways to work on a hard note, at most AIDS_SHOWN: practice first,
+    then the aid the reader's state calls for, then the forms the note's shape
+    allows.
 
-    Practice leads because it is the one with the strongest evidence
-    (practice testing d = 0.74, and retrieval beat concept mapping, d = 1.50;
-    research reports difficulty-detection-and-study-aids and
-    course-corpus-to-knowledge-graph, 2026-10-23). A reader who said it was not
-    clear is offered the explanation (/explain, a report) next. Then the note's
-    shape picks among the others: items to compare make a table (/schematize),
-    numbered steps or formulas a diagram, many links a map, several points
-    cards, several sections slides. Every form stays one command away whether
-    shown here or not."""
+    From the research report difficulty-detection-and-study-aids (section 8),
+    by state: a reader who declared it unclear ("lost") or missed it ("missed")
+    gets the worked explanation first (/explain; worked examples help a reader
+    low in prior knowledge, d = 0.505); a confident miss ("blind") gets a
+    contrast to fill (a table), not another explanation. Practice leads in
+    every case, since every aid must end in a retrieval check and practice has
+    the strongest evidence (d = 0.74; retrieval beat concept mapping,
+    d = 1.50). The note's shape then picks among a diagram (numbered steps or
+    formulas), a map (many links), cards (several points) and slides (several
+    sections, or a lesson's outline). Every form stays one command away."""
     if text is None:
         from silica.kernel.learn.items import read_note
 
         text = read_note(path)
-    shown = [{"label": "practise it", "command": f'/quiz "{path}" --n=3'}]
-    if lost:
-        shown.append({"label": "explain it", "command": f'/explain "{name}"'})
+    practise = {"label": "practise it", "command": f'/quiz "{path}" --n=3'}
+    explain = {"label": "explain it", "command": f'/explain "{name}"'}
+    table = {"label": "as a table", "command": f'/schematize "{name}"'}
+    shown = [practise] + ([table, explain] if state == "blind" else [explain])
+    has_items = len(_TABLE_ROW_RE.findall(text)) >= 3 or len(_LIST_ITEM_RE.findall(text)) >= 4
+    spine = bool(re.search(r"^section:\s*['\"]?\(outline\)", text, re.M))
     shape = [
-        (len(_TABLE_ROW_RE.findall(text)) >= 3 or len(_LIST_ITEM_RE.findall(text)) >= 4,
-         {"label": "as a table", "command": f'/schematize "{name}"'}),
+        # A lesson's outline is a deck already: its slides come first.
+        (spine, {"label": "slides", "command": f'/slides "{name}"'}),
+        (has_items, table),
         (len(_STEP_RE.findall(text)) >= 3 or text.count("$$") >= 2,
          {"label": "as a diagram", "command": f'/diagram "{name}"'}),
         (len(_LINK_RE.findall(text)) >= 5, {"label": "map it", "command": f'/map "{name}"'}),
@@ -129,12 +138,9 @@ def aids(path: str, name: str, lost: bool = False, text: str | None = None) -> l
          {"label": "flashcards", "command": f'/flashcards "{name}" --n=8'}),
         (len(_HEADING_RE.findall(text)) >= 3, {"label": "slides", "command": f'/slides "{name}"'}),
     ]
-    if re.search(r"^section:\s*['\"]?\(outline\)", text, re.M):
-        # A lesson's outline is a deck already: its slides come before the rest.
-        shape.insert(0, (True, {"label": "slides", "command": f'/slides "{name}"'}))
     shown += [aid for fits, aid in shape if fits]
-    # a note too short to show a shape still gets the two the reader can always use
     if len(shown) < 3:
+        # a note too short to show a shape: the two forms any note allows
         shown += [{"label": "as a diagram", "command": f'/diagram "{name}"'},
                   {"label": "flashcards", "command": f'/flashcards "{name}" --n=8'}]
     return list({a["label"]: a for a in shown}.values())[:AIDS_SHOWN]

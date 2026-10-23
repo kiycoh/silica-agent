@@ -1553,6 +1553,11 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
         # answer to carry them: they are drawn live only.
         notes = watch.notes() if isinstance(watch, RecallWatch) else []
         notes += numbers_notes(unread)
+        if not (stopped or web):
+            # A card or a slide point its cited note does not hold (learn.artifacts).
+            from silica.kernel.learn.artifacts import grounding_notes
+
+            notes += grounding_notes(text, answer)
         notes += [skill_note] if skill_note else []
         notes = turn_notes.ordered(notes) if stopped else turn_notes.attach(messages, notes)
         # The notes this turn read, before the beat stores the answer and before

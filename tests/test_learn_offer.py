@@ -22,8 +22,8 @@ def test_two_misses_of_the_last_three_offer_practice_on_that_note():
     o = offer.study_offer("e il duale?", reads, entries=led)
     assert o["kind"] == "study" and o["note"] == "ML/SVM.md"
     assert o["text"] == "you missed SVM in recent practice"
-    # a note with no shape to read (none on disk here): practice, a diagram, cards
-    assert [c["command"] for c in o["commands"]] == ['/quiz "ML/SVM.md" --n=3', '/diagram "SVM"',
+    # a note with no shape to read (none on disk here): practice, the explanation, a diagram, cards
+    assert [c["command"] for c in o["commands"]] == ['/quiz "ML/SVM.md" --n=3', '/explain "SVM"', '/diagram "SVM"',
                                                      '/flashcards "SVM" --n=8']
 
 
@@ -92,15 +92,21 @@ def test_a_study_plan_asked_of_the_chat_points_at_learn():
 
 
 
-def test_learns_confidence_marks_a_struggle_too():
-    """Wrong while sure is a blind spot, right while unsure is fragile: Learn's
-    own bands (mastery.suggestions), read on the latest graded answer."""
+def test_a_confident_miss_counts_once_confidence_is_calibrated():
+    """The research report's rule (difficulty-detection-and-study-aids, 8):
+    confidence is read after CALIBRATION_MIN eligible answers; a miss while
+    sure is a blind spot and gets a contrast table first; right while unsure
+    gets nothing, the scheduler brings it back."""
+    from silica.kernel.learn.mastery import CALIBRATION_MIN
+
+    history = [_e(f"ML/N{i}.md", f"2026-10-0{i % 9 + 1}", True, conf=70, grader="model") for i in range(CALIBRATION_MIN)]
     sure_wrong = [_e("ML/SVM.md", "2026-10-21", False, conf=90, grader="model")]
-    assert offer.struggles(["ML/SVM.md"], sure_wrong) == {"ML/SVM.md": "you were sure about SVM and missed it"}
+    assert offer.struggles(["ML/SVM.md"], sure_wrong) == {}                     # not calibrated yet
+    assert offer.struggles(["ML/SVM.md"], history + sure_wrong) == {"ML/SVM.md": "you were sure about SVM and missed it"}
     unsure_right = [_e("ML/SVM.md", "2026-10-21", True, conf=25, grader="model")]
-    assert offer.struggles(["ML/SVM.md"], unsure_right) == {"ML/SVM.md": "you got SVM right but were unsure"}
-    calm = [_e("ML/SVM.md", "2026-10-21", True, conf=70, grader="model")]
-    assert offer.struggles(["ML/SVM.md"], calm) == {}
+    assert offer.struggles(["ML/SVM.md"], history + unsure_right) == {}
+    o = offer.study_offer("e il duale?", ["ML/SVM.md"], entries=history + sure_wrong)
+    assert [c["label"] for c in o["commands"]][:3] == ["practise it", "as a table", "explain it"]
 
 
 
@@ -109,11 +115,11 @@ def test_the_aids_follow_the_notes_shape():
     then what the note's shape asks for: a table, a diagram, a map, cards, slides."""
     table = "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n"
     labels = lambda **kw: [a["label"] for a in offer.aids("ML/X.md", "X", **kw)]
-    assert labels(text=table, lost=True) == ["practise it", "explain it", "as a table"]
+    assert labels(text=table, state="lost") == ["practise it", "explain it", "as a table"]
     linked = " ".join(f"[[N{i}]]" for i in range(6)) + "\n## A\n## B\n## C\n"
-    assert labels(text=linked) == ["practise it", "map it", "slides"]
+    assert labels(text=linked) == ["practise it", "explain it", "map it", "slides"]
     steps = "1. uno\n2. due\n3. tre\n$$x$$ $$y$$\n"
-    assert "as a diagram" in labels(text=steps) and len(labels(text=table + linked + steps, lost=True)) == offer.AIDS_SHOWN
+    assert "as a diagram" in labels(text=steps) and len(labels(text=table + linked + steps, state="lost")) == offer.AIDS_SHOWN
 
     spine = '---\nsection: "(outline)"\n---\n1. [[A]]\n2. [[B]]\n3. [[C]]\n4. [[D]]\n5. [[E]]\n'
-    assert labels(text=spine)[:2] == ["practise it", "slides"]
+    assert labels(text=spine)[:3] == ["practise it", "explain it", "slides"]

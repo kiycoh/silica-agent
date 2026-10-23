@@ -17,9 +17,11 @@ KEY = "silica_turn_notes"
 
 # Cause before effect: a retrieval leg that was missing (ADR-0094) can explain
 # a number the answer could not ground (ADR-0095), and either can explain a
-# graph check that came up short (ADR-0092); never the other way round. A
-# proposed skill (ADR-0127) explains nothing about the answer, so it is last.
-KINDS = ("retrieval", "numbers", "graph", "skill")
+# graph check that came up short (ADR-0092); never the other way round. A card
+# or slide point its cited note does not hold (learn.artifacts) is the
+# numbers check's kin and sits after it. A proposed skill (ADR-0127) explains
+# nothing about the answer, so it is last.
+KINDS = ("retrieval", "numbers", "grounding", "graph", "skill")
 
 
 def ordered(notes: list[dict]) -> list[dict]:
