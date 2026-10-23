@@ -184,10 +184,24 @@ def _session_id(line: str) -> str:
 # ---------------------------------------------------------------- scope resolution
 
 def resolve_title(name: str, notes: dict | None = None) -> str | None:
-    """A wikilink target to a vault path, by exact path, then by stem."""
+    """A wikilink target to a vault path, by exact path, then by stem. A
+    merge loser resolves to the note it points at: a dedup pass made
+    "Retropropagazione" a loser of "Backpropagation", and a syllabus that
+    names retropropagazione called it not in the vault (2026-10-23)."""
     from silica.kernel.report.learner import _notes_meta
 
     notes = notes if notes is not None else _notes_meta(_vault())
+    hit = _by_name(name, notes)
+    for _hop in range(3):   # a chain of merges, never a loop
+        winner = hit and notes[hit].get("winner")
+        nxt = _by_name(winner, notes) if winner else None
+        if not nxt or nxt == hit:
+            break
+        hit = nxt
+    return hit
+
+
+def _by_name(name: str, notes: dict) -> str | None:
     name = name.strip()
     cand = name if name.endswith(".md") else name + ".md"
     if cand in notes:
@@ -491,10 +505,17 @@ def _topics(text: str) -> list[str]:
 def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[list[str], list[str]]:
     """(notes covering the topics, topics no note covers), one note per topic:
     by title, else the note whose name holds most of the topic's content
-    words, at least half of them. A shared "analisi" is not a match."""
+    words, more than half of them. A shared "analisi" is not a match, and
+    half of two words was one: "noise injection" met "Noise-contrastive
+    estimation" and "autocodificatori di riduzione" met "Riduzione della
+    varianza" (2026-10-23)."""
     found: list[str] = []
     missing: list[str] = []
-    stems = {p: set(_root_words(Path(p).stem)) for p in sorted(allowed)}
+    # A merge loser's name still says what it is about; the match lands on
+    # its winner ("Set di Validazione" for "validazione", 2026-10-23).
+    losers = {p for p, m in notes.items() if m.get("winner") and resolve_title(p, notes) in allowed}
+    stems = {p: set(_root_words(Path(p).stem)) for p in sorted(allowed | losers)}
+    block = {w for t in topics for w in _root_words(t)}
     for t in topics:
         hit = resolve_title(t, notes)
         if not hit or hit not in allowed:
@@ -502,14 +523,18 @@ def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[lis
             words = _root_words(t)
             # most topic words in the name, then the shortest name: the note
             # about the thing, not one that mentions it
-            # A one-word topic names a thing only as a whole title: "ottimizzazione"
-            # met "Ottimizzazione del codice" and opened the plan on it, and
-            # "architettura" met "Architettura RBFN" (2026-10-23).
-            pool = stems if len(words) > 1 else {p: s for p, s in stems.items() if s and s <= set(words)}
+            # A one-word topic names a thing only by a title holding that word
+            # and nothing the block does not list: "ottimizzazione" met
+            # "Ottimizzazione del codice" and opened the plan on it, and
+            # "architettura" met "Architettura RBFN", while "overfitting" and
+            # "underfitting", listed together, are "Underfitting e overfitting"
+            # (2026-10-23).
+            pool = stems if len(words) > 1 else {p: s for p, s in stems.items() if s and set(words) <= s <= block}
             got, best = max(((sum(1 for w in words if w in s), -len(p), p) for p, s in pool.items()),
                             default=(0, 0, None))[0::2]
-            if best and got and got * 2 >= len(words):
-                hit = best
+            # the joined form of "ada-boost" is a spelling of its words, not one more
+            if best and got and got * 2 > (len(_content_words(t)) or len(words)):
+                hit = resolve_title(best, notes) if best in losers else best
         if hit:
             if hit not in found:
                 found.append(hit)

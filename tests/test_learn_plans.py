@@ -179,6 +179,12 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
     found, missing = plans._topic_notes(["ottimizzazione", "pooling"], meta,
                                         {"ML/Ottimizzazione del codice.md", "ML/Pooling.md"})
     assert found == ["ML/Pooling.md"] and missing == ["ottimizzazione"]
+    # ...unless the rest of the title is what the block lists too
+    vault.note("ML/Underfitting e overfitting.md", "# x\n")
+    meta = _notes_meta(_P(_C.vault_path))
+    found, missing = plans._topic_notes(["overfitting", "underfitting", "ottimizzazione"], meta,
+                                        {"ML/Underfitting e overfitting.md", "ML/Ottimizzazione del codice.md"})
+    assert found == ["ML/Underfitting e overfitting.md"] and missing == ["ottimizzazione"]
 
     from pathlib import Path
 
@@ -443,6 +449,16 @@ def test_planned_paths_is_what_the_active_plans_cover(vault):
     assert plans.planned_paths() is None   # a completed plan draws no line
 
 
+def _meta_and_material():
+    from pathlib import Path
+
+    from silica.config import CONFIG
+    from silica.kernel.report.learner import _notes_meta, is_material
+
+    meta = _notes_meta(Path(CONFIG.vault_path))
+    return meta, {p for p, m in meta.items() if is_material(m)}
+
+
 def test_a_merge_loser_is_not_material_and_a_one_note_block_keeps_its_name(vault):
     """A course plan listed the loser "Reti neurali ricorrenti" beside its
     winner, and a syllabus block with one note became a link to a note named
@@ -452,6 +468,13 @@ def test_a_merge_loser_is_not_material_and_a_one_note_block_keeps_its_name(vault
     vault.note("ML/Rete ricorrente.md", "# Rete ricorrente\n\nx\n")
     paths = plans.resolve_scope("folder", "ML/")["paths"]
     assert "ML/Rete ricorrente.md" in paths and "ML/Reti neurali ricorrenti.md" not in paths
+    # the loser's name is its winner's: a syllabus topic or a plan step that names it lands there
+    assert plans.resolve_title("Reti neurali ricorrenti") == "ML/Rete ricorrente.md"
+    found, missing = plans._topic_notes(["reti neurali ricorrenti"], *_meta_and_material())
+    assert found == ["ML/Rete ricorrente.md"] and missing == []
+    vault.note("ML/Set di validazione.md", "---\nsuperseded_by: '[[Rete ricorrente]]'\n---\n# x\n")
+    found, missing = plans._topic_notes(["validazione"], *_meta_and_material())   # by its words, not its name
+    assert found == ["ML/Rete ricorrente.md"] and missing == []
     out = plans.write_plan("Esame", "steps", "Reti ricorrenti: rete ricorrente, momentum di nesterov\n[[Softmax]]",
                            restrict="ML/", cards=[])
     text = plans._read(out["path"])

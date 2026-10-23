@@ -39,12 +39,13 @@ def key_of(path: str) -> str:
 
 def _created_and_ai(text: str, mtime: float) -> tuple[float, bool]:
     """A note's creation timestamp and authorship from its own frontmatter."""
-    ts, ai, _kind = _note_meta(text, mtime)
+    ts, ai, _kind, _winner = _note_meta(text, mtime)
     return ts, ai
 
 
-def _note_meta(text: str, mtime: float) -> tuple[float, bool, str]:
-    """(created ts, AI-authored, frontmatter `type`) from one parse.
+def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, str]:
+    """(created ts, AI-authored, frontmatter `type`, the winner a merge loser
+    points at or "") from one parse.
 
     Same date precedence as the timeline: explicit `date:` outranks the claim
     clock, and a note that states neither falls back to mtime — the ceiling
@@ -71,7 +72,11 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str]:
     data = data or {}
     kind = ("event" if data.get("event_start") is not None
             else "merged" if data.get("superseded_by") else data.get("type"))
-    return ts, bool((data or {}).get("AI")), str(kind or "").strip().lower()
+    winner = _WINNER_RE.search(str(data.get("superseded_by") or ""))
+    return ts, bool(data.get("AI")), str(kind or "").strip().lower(), winner.group(1).strip() if winner else ""
+
+
+_WINNER_RE = re.compile(r"\[\[([^\]|#]+)")
 
 
 # Notes about learning, never asked about; the calendar's own notes, which
@@ -118,10 +123,12 @@ def _notes_meta(vault: Path) -> dict[str, dict]:
             mtime = f.stat().st_mtime
         except (OSError, UnicodeDecodeError):
             continue  # one unreadable note must not blind the view
-        created, ai, kind = _note_meta(text, mtime)
+        created, ai, kind, winner = _note_meta(text, mtime)
         # mtime rides along for the picker's freshness rule (learn-suite D13):
         # a note edited after its last rating is asked as new material.
         out["/".join(parts)] = {"created": created, "ai": ai, "mtime": mtime, "kind": kind}
+        if winner:
+            out["/".join(parts)]["winner"] = winner
 
     if epoch:
         _meta_memo.clear()
