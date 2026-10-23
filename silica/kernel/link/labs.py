@@ -93,10 +93,13 @@ def practised_section(body: str, titles: list[str], *,
     for raw in reply.splitlines():
         title, _, why = raw.strip().lstrip("-* ").partition("|")
         hit = by_key.get(title.strip().strip("[]`\"").casefold())
-        if hit is None or hit in seen:
+        why = why.strip()
+        # "Title | None" is a pick with no reason: one reply gave six of them,
+        # "Reti Neurali Ricorrenti per l'Inferenza" for a feed-forward lab
+        # among them, while two more calls on the same lab gave reasons (2026-10-23).
+        if hit is None or hit in seen or why.casefold() in ("none", "null", "n/a"):
             continue
         seen.add(hit)
-        why = why.strip()
         lines.append(f"- [[{hit}]]: {why}" if why else f"- [[{hit}]]")
         if len(lines) == MAX_LINKS:
             break

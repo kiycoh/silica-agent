@@ -399,6 +399,7 @@ class TestDraftFiling:
             seen.append(system)
             return ("Support Vector Machine | addestra una SVM con kernel rbf\n"
                     "Rete neurale inventata | non esiste\n"
+                    "Matrice di confusione | None\n"
                     "[[support vector machine]] | doppione\n")
         monkeypatch.setattr(labs, "_ask_worker", ask)
 
