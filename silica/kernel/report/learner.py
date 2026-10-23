@@ -260,11 +260,20 @@ def prerequisites_map() -> dict[str, list[str]]:
         from silica.kernel.report.graph_report.cooccur_delta import _compute_cooccur_variables
 
         nodes, edges = build_graph_data()
-        G_dir = edge_graph(nodes, edges, directed=True)
         store = get_cooccur_store(lang=CONFIG.cooccurrence_lang)
-        _prereqs, prereq_map, _burst = _compute_cooccur_variables(
-            _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
-        )
+        # The map reads two things, the wikilinks and the co-occurrence index,
+        # while the epoch moves on any edit: after a nucleation a plan page
+        # spent 16 s of its first 34 recomputing an unchanged map (2,166
+        # notes, 2026-10-23). Keyed on its inputs, on disk, it survives an
+        # unrelated edit and a restart.
+        sig = _prereq_signature(edges, store)
+        prereq_map = _prereq_disk(sig)
+        if prereq_map is None:
+            G_dir = edge_graph(nodes, edges, directed=True)
+            _prereqs, prereq_map, _burst = _compute_cooccur_variables(
+                _empty_report(), G_dir.to_undirected(), G_dir, cooccur_store=store, created=None,
+            )
+            _prereq_disk(sig, prereq_map)
         if epoch:
             _prereq_memo.clear()
             _prereq_memo[vault] = (epoch, prereq_map)
@@ -272,6 +281,43 @@ def prerequisites_map() -> dict[str, list[str]]:
     except Exception as exc:
         logger.debug("learner: prerequisites unavailable (%s)", exc)
         return {}
+
+
+def _prereq_signature(edges, store) -> str:
+    """The inputs of prerequisites_map as one hash: every wikilink edge and
+    the co-occurrence index file's size and mtime."""
+    import hashlib
+
+    h = hashlib.sha1()
+    for u, v, kind in sorted((str(e.get("from")), str(e.get("to")), str(e.get("type"))) for e in edges):
+        h.update(f"{u}\0{v}\0{kind}\n".encode())
+    path = getattr(store, "_path", None)
+    try:
+        st = Path(path).stat() if path else None
+    except OSError:
+        st = None
+    h.update(f"{st.st_size}:{st.st_mtime_ns}".encode() if st else b"-")
+    return h.hexdigest()
+
+
+def _prereq_disk(sig: str, value: dict[str, list[str]] | None = None) -> dict[str, list[str]] | None:
+    """Read (no value) or write the map stored under `sig` in the vault's index
+    directory; None when absent, stale or unreadable."""
+    import orjson
+
+    from silica.kernel.recall.paths import atomic_write_bytes, index_dir
+
+    path = index_dir() / "prerequisites.json"
+    try:
+        if value is not None:
+            atomic_write_bytes(path, orjson.dumps({"sig": sig, "map": value}))
+            return value
+        data = orjson.loads(path.read_bytes())
+        return data["map"] if data.get("sig") == sig else None
+    except (OSError, ValueError, KeyError, TypeError):
+        # A derived cache: unreadable means recompute, unwritable means the
+        # next call recomputes too, never a wrong order.
+        return None
 
 
 def _topological(rows: list[dict], prereqs: dict[str, list[str]], order_key) -> list[dict]:

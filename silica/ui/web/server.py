@@ -110,6 +110,22 @@ def _prewarm_seed() -> None:
     threading.Thread(target=work, daemon=True).start()
 
 
+def _prewarm_learn() -> None:
+    """Learn's vault-wide reads before the first click: the notes, their
+    parsed frontmatter and the prerequisite map were 8 s of a plan page's
+    first open after a restart (2,166 notes, 2026-10-23). A failure costs only
+    that wait, which the click then pays."""
+    try:
+        from silica.kernel.learn import plans
+        from silica.kernel.report import learner
+
+        learner._notes_meta(plans._vault())
+        plans.list_plans()
+        learner.prerequisites_map()
+    except Exception:
+        logger.exception("learn prewarm failed")
+
+
 def _seeded() -> tuple[list[dict], int]:
     """A copy of the fresh-session seed, with user memory as it is NOW.
 
@@ -1827,6 +1843,7 @@ async def _lifespan(app: FastAPI):
     # mcp.json and the keyring is file and D-Bus I/O.
     from silica.connectors.mcp_tools import start as _start_connectors
     asyncio.get_running_loop().run_in_executor(None, _start_connectors)
+    asyncio.get_running_loop().run_in_executor(None, _prewarm_learn)
     yield
     if bridge is not None:
         await bridge.stop()
