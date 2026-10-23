@@ -2,19 +2,26 @@
 # Copyright (C) 2026 Alessandro Carosia
 
 """silica_remember: the model's one way to write user memory (ADR-0076), and
-the two gates every such write passes.
+the gate every such write passes.
 
-The gates are properties of the turn, not lines in the prompt. A 9B model told
-"save only when asked" follows a rule; a write refused unless the user's
-current request asks for it cannot happen whatever the model decides.
+The model saves on its own and says what it saved; the user checks it after
+the fact (Undo on the saved line, Settings > Memory). Until 2026-10-23 a second
+gate refused any save the user's current message did not ask for, which did
+not stop the model from wanting one: that day qwen3.5-9b tried to keep a course
+plan's exam date unasked, was refused, and told the user "Ho salvato il
+contesto" (narration 6aebe4c1e7f8). The owner removed the gate the same day
+(ADR-0076, amendment 2026-10-23): a save is not something to ask leave for.
 
-- asked: the current request is a human turn carrying a memory intent, or the
-  bare `/remember` directive (the user asking to keep what was just said);
+What stays is a property of the turn, not a line in the prompt:
+
 - untainted: no tool that brings outside content into the conversation has
   run in it, on this turn or any earlier one. A page read on turn N is still
-  in context on turn N+1, when the user may say "remember": Trojan Hippo
-  (arXiv 2605.01970, §6.2) found filtering on the user message unsound for
-  tool-call memories and per-session no-untrusted-write sound.
+  in context on turn N+1: Trojan Hippo (arXiv 2605.01970, §6.2) found
+  filtering on the user message unsound for tool-call memories and
+  per-session no-untrusted-write sound. With unasked saves a page no longer
+  needs the user to say "remember", so this gate is the whole defence.
+- a chat turn the user started: a batch, a worker loop or the MCP server
+  writes nothing.
 
 `/remember <text>` and the Settings editor never come through here: those are
 the user's own keystrokes (silica/kernel/user_memory.py).
@@ -57,9 +64,7 @@ _INGRESS_PREFIX = "mcp__"
 def _ingress(name: str) -> bool:
     return name in INGRESS or name.startswith(_INGRESS_PREFIX)
 
-# The bare `/remember` expands to this (cli._SHORTCUTS), and the asked gate
-# recognises it by this head: a directive is harness text, so it opens the
-# gate only when it is this one.
+# The bare `/remember` expands to this (cli._SHORTCUTS).
 REMEMBER_DIRECTIVE = "/remember: the user asks you to keep something from this conversation."
 
 # "Nothing was saved" first and in those words: refused, qwen3.5-9b once told
@@ -153,54 +158,17 @@ def after_tool(turn: _Turn, name: str) -> str:
     return turn.tainted_by if turn.tainted_by != before else ""
 
 
-# ponytail: two languages, by pattern. The first hosted user (ADR-0071) whose
-# language is neither Italian nor English is refused every save through the
-# model and has only /remember. Upgrade path: a typed decision on the current
-# request (silica/agent/decide.py, as read_scope.py asks one) with these
-# patterns kept as the offline fallback.
-#
-# Ambiguous verbs ("ricorda", "remember", "memorizza") count only at the start
-# of a clause, where Italian and English put an imperative: "Marco ricorda che"
-# and "I remember studying" are statements, "ok, ricorda che" and "please
-# remember" are asks.
-_LEAD = (r"(?:^|[.!?;:,(\n]\s*|\b(?:and|also|so|ok|okay|please|pls|now|oh|but|then|"
-         r"e|ed|poi|allora|quindi|anche|inoltre|ora|adesso|ah|per\s+favore|perfavore|"
-         r"ti\s+prego|mi\s+raccomando)\s+)")
-_CLAUSE = re.compile(_LEAD + r"(?:"
-    r"remember\b(?!\s+when\b)|keep\b[^.!?\n]{0,20}?\bin\s+mind\b|bear\b[^.!?\n]{0,20}?\bin\s+mind\b|"
-    r"(?:don['’]?t|do\s+not|never)\s+forget\b|forget\s+(?:that|this|it|about|what|my|the|i)\b|"
-    r"memori[sz]e\b|note\s+(?:that|this|down)\b|make\s+a\s+note\b|take\s+note\b|"
-    r"ricorda\b|memorizza\b|dimentica\b|scorda\b|segna\b|annota\b"
-    r")", re.IGNORECASE)
-_ANYWHERE = re.compile(r"\b(?:"
-    # Italian imperatives no statement shares.
-    r"ricordat[ei]v?el[oaie]|ricordatevi|ricordal[oaie]|ricordamel[oaie]|"
-    r"(?:ricordati|dimenticati|scordati|segnati|annotati)(?=\s*(?:che|di|del|della|bene|sempre|"
-    r"quest|quell|[:,.!]|$))|"
-    r"memorizzal[oaie]|memorizzamel[oaie]|segnatel[oaie]|annotatel[oaie]|prendi\s+nota|"
-    r"tien(?:i|ilo|ila|ili|ile|imelo|imela)\s+(?:bene\s+)?(?:a\s+mente|presente)|tenete\s+a\s+mente|"
-    r"non\s+(?:ti\s+)?(?:dimenticar\w*|scordar\w*)|"
-    r"dimentical[oaie]|dimenticatel[oaie]|scordal[oaie]|scordatel[oaie]|"
-    r"(?:puoi|potresti|devi|dovresti|voglio\s+che\s+tu)\s+(?:anche\s+)?"
-    r"(?:ricordar\w*|memorizzar\w*|tener\w*\s+a\s+mente|segnar\w*|annotar\w*|dimenticar\w*|scordar\w*)|"
-    r"aggiorna\w*\s+(?:la\s+)?(?:tua\s+)?memoria|"
-    r"(?:salva|aggiungi|metti|scrivi|tieni|togli|rimuovi|cancella|elimina|leva)\w*\b[^.!?\n]{0,40}?"
-    r"\b(?:in|nella|alla|dalla)\s+(?:tua\s+)?memoria|"
-    # English: a modal ask, or a verb aimed at "memory".
-    r"(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:remember|memori[sz]e|forget|keep\b[^.!?\n]{0,20}?\bin\s+mind)|"
-    r"(?:want|need|like)\s+you\s+to\s+(?:remember|memori[sz]e|forget|keep\b[^.!?\n]{0,20}?\bin\s+mind)|"
-    r"make\s+sure\s+(?:to|you)\s+remember|"
-    r"update\s+(?:your\s+|the\s+|my\s+)?memory|"
-    r"(?:save|add|store|put|write|keep|remove|delete|erase|drop|clear)\b[^.!?\n]{0,40}?"
-    r"\b(?:to|in|into|from)\s+(?:your\s+|the\s+|my\s+)?memory"
-    r")\b", re.IGNORECASE)
-
-
 # "Dimentica che preferisco risposte brevi" became a replace with "prefers long
 # answers" on 3 of 3 final qwen3.5-9b runs and 2 of 3 qwen3.5-4b ones
 # (evals/probe_user_memory.py, 2026-10-08): a preference nobody stated. A
 # request that only asks to forget may only forget. The negated asks ("non
 # dimenticare", "don't forget") are keeps, so they are removed first.
+# ponytail: Italian and English, by pattern. In any other language a request
+# that only asks to forget is not recognised, and a replace can write the
+# opposite preference again. Upgrade path, once the first hosted user
+# (ADR-0071) writes in a third language: a typed decision on the current
+# request (silica/agent/decide.py, as read_scope.py asks one) with these
+# patterns kept as the offline fallback.
 _NOT_FORGET = re.compile(r"\b(?:non\s+(?:ti\s+)?(?:dimentic|scord)\w*|(?:don['’]?t|do\s+not|never)\s+forget)",
                          re.IGNORECASE)
 _FORGET = re.compile(r"\b(?:dimentic\w*|scord\w*|forget\w*|(?:cancella|elimina|rimuovi|togli|leva)\w*"
@@ -215,12 +183,6 @@ def forget_only(text: str) -> bool:
     """Whether a request asks to forget and nothing else."""
     rest = _NOT_FORGET.sub(" ", text)
     return bool(_FORGET.search(rest)) and not _KEEP.search(_FORGET.sub(" ", rest))
-
-
-def has_memory_intent(text: str) -> bool:
-    """Whether a request asks to remember, keep in mind, forget or update
-    memory, in Italian or English."""
-    return bool(_CLAUSE.search(text) or _ANYWHERE.search(text))
 
 
 _WEEKDAYS = {
@@ -276,15 +238,14 @@ def _gate() -> str:
     turn = _TURN.get()
     if turn is None or not turn.chat:
         return f"Nothing was saved: memory is written only from a chat turn the user started. {_SUGGEST}"
-    asked = (turn.request.startswith(REMEMBER_DIRECTIVE) if turn.directive
-             else has_memory_intent(turn.request))
-    if not asked:
-        return ("Nothing was saved: the user's current message does not ask to remember or "
-                f"forget anything, and memory is saved only when they ask. {_SUGGEST}")
     if turn.tainted_by:
+        # The last sentence because saves are unasked: a model that retried on
+        # each later turn of the chat would draw one more "Not saved" line
+        # under every answer.
         return (f"Nothing was saved: this conversation brought in outside content ({turn.tainted_by}), "
                 "which could carry instructions written by someone else, so memory is not "
-                f"written from it. {_SUGGEST}")
+                f"written from it. {_SUGGEST} Do not try to save again in this conversation "
+                "unless the user asks you to.")
     return ""
 
 
@@ -306,9 +267,12 @@ def silica_remember(
     old: Annotated[str, Field(description="replace/forget: the entry's [id] as memory shows it, "
                                           "or words copied from it")] = "",
 ) -> dict[str, Any]:
-    """Keep, correct or forget something across chats. Only when the user asks you to
-    remember, update or forget something; never on your own initiative. What is saved
-    shows from the next chat on. If it refuses, tell the user what it says they can do."""
+    """Keep, correct or forget what a later chat needs about the user and their work:
+    who they are, preferences, goals, exams and deadlines, decisions, where the work
+    stands. Save it yourself as soon as it comes up and never ask whether to save;
+    then say in one line what you saved, so the user can check it and undo or edit it.
+    Subject matter belongs in notes, not here. What is saved shows from the next chat
+    on. If it refuses, tell the user what it says they can do."""
     from silica.kernel import user_memory as um
 
     if why := _gate():

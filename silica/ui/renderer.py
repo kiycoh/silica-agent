@@ -404,6 +404,22 @@ class _ProgressRenderer:
         else:
             CONSOLE.print(f"  [tool.ok]{GLYPHS['ok']}[/] {run['desc']}{dur_str}")
 
+    def _memory_line(self, result: str) -> None:
+        """The saved entry as /remember prints it, or a refused save's text
+        with the command that saves it."""
+        from silica.kernel.user_memory import describe
+        from silica.tools.user_memory import parse_result, suggestion
+
+        if parse_result(result) is not None:
+            out = json.loads(result)
+            self._flush_ok_run()
+            CONSOLE.print(f"  {escape(describe(out))}  "
+                          f"[dim]({out['chars']}/{out['budget']} characters · /memory shows it all)[/]")
+        elif cmd := suggestion(result):
+            self._flush_ok_run()
+            CONSOLE.print(f"  Not saved: {escape(cmd.removeprefix('/remember '))}  "
+                          f"[dim]({escape(cmd)} saves it)[/]")
+
     def _start_spinner(self) -> None:
         if self._live is not None:
             return
@@ -696,6 +712,13 @@ class _ProgressRenderer:
             self._active_tools.pop(event.call_id, None)
             self._update_live()
             return
+
+        if isinstance(event, ToolCompleteEvent) and event.name == "silica_remember":
+            # Every write is visible (ADR-0076 §7) whatever tool_progress hides:
+            # the model saves unasked, and its own words about a save are not
+            # proof of one (qwen3.5-9b said "Ho salvato" over a refusal). The GUI
+            # draws the same line from callback.py.
+            self._memory_line(event.result)
 
         if mode == "off":
             return

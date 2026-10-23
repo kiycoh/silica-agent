@@ -353,9 +353,9 @@ def run_agent(
         from silica.kernel.write import preserve
 
         preserve.begin_turn()
-    # Not read_scope's REQUESTS for the user-memory gates (ADR-0076): those
-    # strings drop `origin`, and a directive's own "Note that ..." would read
-    # as the user asking to remember.
+    # Not read_scope's REQUESTS for the user-memory turn (ADR-0076): those
+    # strings drop `origin`, and the forget-only check must not read a
+    # directive's own words as the user's.
     memory_turn = memory_gate.begin_turn(
         messages, chat=constraints is None or constraints.interactive)
     # ponytail: a single meter for every tool. Split retrieval from writes if a

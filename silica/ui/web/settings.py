@@ -228,8 +228,8 @@ def sections() -> dict[str, tuple[Row, ...]]:
         # GET /memory, since a file is not an env var (ADR-0076 §8).
         "Memory": (
             Row("SILICA_MEMORY", "user_memory", "memory", "toggle",
-                "what you ask silica to remember, shown to every chat · off pauses it "
-                "and keeps the files"),
+                "what silica remembers about you and your work, shown to every chat · "
+                "off pauses it and keeps the files"),
         ),
     }
     if not hosted():
