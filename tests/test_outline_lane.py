@@ -129,6 +129,13 @@ def test_the_lead_the_spine_keeps_is_never_the_sources_frontmatter():
     assert "Modelli lineari." in texts["Programma"]
 
 
+def test_the_spine_drops_a_decks_cover_but_keeps_real_lead_text():
+    lead = "Giosuè Lo Bosco\ngiosue.lobosco@unipa.it\n\nLezione 13\n\nUna premessa vera sul corso."
+    assert ol._strip_byline(lead, "Lezione 13") == "Una premessa vera sul corso."
+    assert ol._strip_byline("Scrivete a: info@x.it per dubbi.", "L") == ""   # an email line goes
+    assert ol._strip_byline("Nota: il margine conta.\nLezione 2", "Lezione 13") == "Nota: il margine conta.\nLezione 2"
+
+
 def test_select_edges_caps_what_one_idea_sends_into_the_vault():
     """A study guide's "Otto concetti fondamentali" sent "applies this" to 12
     of the owner's notes; an idea is a dependency of three notes at most, and

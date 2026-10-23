@@ -472,6 +472,24 @@ def _stem(basename: str) -> str:
     return os.path.splitext(os.path.basename(basename))[0]
 
 
+_EMAIL_RE = re.compile(r"\S+@\S+\.\w+")
+
+
+def _strip_byline(lead: str, title: str) -> str:
+    """The lead without a deck's cover: an email line, the name line just
+    above it, and a line that only repeats the source's title. All 32 lecture
+    spines of one course ended on "Giosuè Lo Bosco / giosue.lobosco@unipa.it /
+    Lezione 13", each line then cited back to the lecture (2026-10-23)."""
+    lines = lead.splitlines()
+    drop = {i for i, ln in enumerate(lines) if _EMAIL_RE.search(ln) or ln.strip().casefold() == title.casefold()}
+    for i in sorted(drop):
+        prev = lines[i - 1].strip() if i else ""
+        if _EMAIL_RE.search(lines[i]) and prev and len(prev.split()) <= 5 and not re.search(r"[.:;?!]$", prev):
+            drop.add(i - 1)
+    kept = [ln for i, ln in enumerate(lines) if i not in drop]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
 def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basename: str,
                 edges: list[dict], existing: dict[str, str],
                 only_titles: set[str] | None = None, lead: str = "") -> list[dict]:
@@ -534,6 +552,7 @@ def outline_ops(outline: Outline, *, target: str, hub: str | None, source_basena
         rows = [f"{n}. {t if t in bodiless else f'[[{t}]]'}: {next(i.claim for i in outline.ideas if i.title == t)}"
                 for n, t in enumerate(outline.spine, 1)]
         head = f"> {outline.lesson_title}\n\n" if outline.lesson_title else ""
+        lead = _strip_byline(lead, spine_title)
         tail = f"\n{lead.strip()}\n" if lead.strip() else ""
         ops.append({
             "op": "write", "path": f"{tgt}/{spine_title}.md", "heading": spine_title, "title": spine_title,
