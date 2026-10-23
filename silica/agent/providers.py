@@ -16,7 +16,7 @@ import openai
 from pydantic import BaseModel
 
 from silica.agent.compaction import TEXT_CHARS_PER_TOKEN
-from silica.agent.llm import LLMResponse
+from silica.agent.llm import LLMResponse, openrouter_routing
 from silica.config import DEFAULT_EMBEDDING_MODEL, HOSTED_PROVIDERS, ensure_prefix
 from silica.metrics import emit, ms_since, number, outcome_of
 
@@ -439,6 +439,11 @@ class OpenAIEmbedder:
         self.model = model
         self.query_prefix = query_prefix
         self.document_prefix = document_prefix
+        # OpenRouter routes an embedding model like a chat model, so the
+        # pilot's zero-retention pin for the index lives where the chat's does
+        # (OPENROUTER_PROVIDER_BY_MODEL). The empty list keeps the chat's
+        # provider ORDER off it: an LLM host is not an embedding provider.
+        self._pin = openrouter_routing("", model)
 
     def embed(self, texts: list[str], *, query: bool = False) -> list[list[float]]:
         """Return one embedding vector per input text.
@@ -459,9 +464,11 @@ class OpenAIEmbedder:
         if query and self.query_client is not None:
             client = self.query_client
         own = client is not self.client
+        on_openrouter = "openrouter.ai" in (self.query_base_url if own else self.base_url)
         started, outcome, usage = time.monotonic(), "ok", None
         try:
-            response = client.embeddings.create(model=self.model, input=texts)
+            response = client.embeddings.create(model=self.model, input=texts,
+                                                extra_body=self._pin if on_openrouter else None)
             usage = getattr(response, "usage", None)
         except Exception as e:
             outcome = outcome_of(e)
@@ -475,10 +482,12 @@ class OpenAIEmbedder:
                 warn_down_once("embedder", self.base_url, e, self.model)
             raise
         finally:
-            # The hosted embedder is free and local, so its cost is the host's
-            # 2 cores: the tokens, and how long a query waits behind a batch.
+            # A local embedder costs the host's cores (the tokens, and how long
+            # a query waits behind a batch); a metered one also bills, and
+            # OpenRouter says how much in usage.cost, as on the rerank line.
             emit("embed", lane="query" if query else "document", inputs=len(texts),
                  tokens=number(getattr(usage, "prompt_tokens", None)),
+                 usd=number(getattr(usage, "cost", None)),
                  ms=ms_since(started), outcome=outcome)
         # The API guarantees ordering matches the input list
         return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
