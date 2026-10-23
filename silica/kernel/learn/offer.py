@@ -137,7 +137,7 @@ def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) 
     target = notes[0] if lost else next(iter(hard))
     name = target.removesuffix(".md").rsplit("/", 1)[-1]
     why = hard[target] if hard and not lost else "you said this was not clear"
-    state = "lost" if lost else "blind" if "were sure" in why else "missed"
+    state = ("lost" if lost else "blind" if "were sure" in why else "fragile" if "unsure" in why else "missed")
     return {"kind": "study", "text": why, "note": target, "commands": aids(target, name, state)}
 
 
@@ -215,7 +215,9 @@ def aids(path: str, name: str, state: str = "missed", text: str | None = None) -
     practise = {"label": "practise it", "command": f'/quiz "{path}" --n=3'}
     explain = {"label": "explain it", "command": f'/explain "{name}"'}
     table = {"label": "as a table", "command": f'/schematize "{name}"'}
-    shown = [practise] + ([table, explain] if state == "blind" else [explain])
+    # right but unsure: practice and the note's forms, no new explanation (the
+    # report's table, section 8: a fragile hit wants retrieval, not more text)
+    shown = [practise] + ([table, explain] if state == "blind" else [] if state == "fragile" else [explain])
     for form in shape_forms(text):
         label, command = _FORM_COMMANDS[form]
         shown.append({"label": label, "command": command.format(name=name)})

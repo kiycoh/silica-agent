@@ -110,6 +110,8 @@ def test_a_confident_miss_counts_once_confidence_is_calibrated():
     assert offer.struggles(["ML/SVM.md"], unsure_right) == {}                    # not calibrated yet
     sure_right = [_e("ML/SVM.md", "2026-10-21", True, conf=90, grader="model")]
     assert offer.struggles(["ML/SVM.md"], history + sure_right) == {}
+    fragile = [c["label"] for c in offer.study_offer("ok", ["ML/SVM.md"], entries=history + unsure_right)["commands"]]
+    assert fragile[0] == "practise it" and "explain it" not in fragile      # retrieval, no new explanation
     o = offer.study_offer("e il duale?", ["ML/SVM.md"], entries=history + sure_wrong)
     assert [c["label"] for c in o["commands"]][:3] == ["practise it", "as a table", "explain it"]
 

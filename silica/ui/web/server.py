@@ -1529,7 +1529,7 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             if block := await asyncio.to_thread(_escalation, text, messages):
                 agent_msg += "\n\n" + block
                 escalated = True
-            elif says_lost(text):
+            elif await asyncio.to_thread(says_lost, text):   # Jev over HTTP behind the word list: off the loop
                 # A reader saying it is unclear asked to understand, not to
                 # write: the local 9B answered "non ho capito il Boosting"
                 # with a new note of its own (2026-10-23).
