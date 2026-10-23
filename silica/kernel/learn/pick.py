@@ -60,7 +60,7 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
     it. Kill by 2026-12-31 if the ledger shows zero `contrast` events.
     """
     from silica.config import CONFIG
-    from silica.kernel.write import frontmatter
+    from silica.kernel.report import learner
     from silica.kernel.write.templates import parse_related_traces
 
     vault = Path(CONFIG.vault_path)
@@ -75,11 +75,10 @@ def contrast_pairs(notes: dict[str, dict]) -> list[tuple[str, str]]:
             out.append((a, b))
 
     for path in notes:
-        try:
-            text = (vault / path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+        parsed = learner.parsed_note(vault, path)
+        if parsed is None:
             continue
-        data, _raw, body = frontmatter.split(text)
+        data, body = parsed
         for cand, _why in parse_related_traces(body):
             other = by_title.get(cand.split("|")[0].split("#")[0].strip().casefold())
             if other:
@@ -96,16 +95,16 @@ def conflicts(notes: dict[str, dict]) -> list[str]:
     (provenance drift). ponytail: pool D; kill by 2026-12-31 with zero
     `contradiction` events in the ledger."""
     from silica.config import CONFIG
-    from silica.kernel.write import frontmatter
+    from silica.kernel.report import learner
     from silica.kernel.write.provenance import drifted_notes, note_key
 
     vault = Path(CONFIG.vault_path)
     out: list[str] = []
     for path in notes:
-        try:
-            data, _raw, _body = frontmatter.split((vault / path).read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
+        parsed = learner.parsed_note(vault, path)
+        if parsed is None:
             continue
+        data = parsed[0]
         if data and (data.get("contested") or data.get("contradictions")):
             out.append(path)
     try:

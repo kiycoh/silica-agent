@@ -22,6 +22,7 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from silica.kernel.learn.schedule import DUE_R, WEAK_R, note_state, view  # noqa: F401  re-exported v1 names
 
@@ -90,6 +91,34 @@ def is_material(meta: dict) -> bool:
 
 
 _meta_memo: dict[str, tuple[str, dict[str, dict]]] = {}  # vault -> (epoch, meta)
+_parsed_memo: dict[str, tuple[float, Any, str]] = {}  # file -> (mtime, frontmatter, body)
+
+
+def parsed_note(vault: Path, path: str) -> tuple[Any, str] | None:
+    """(frontmatter, body) of a note, parsed once per mtime; None when it
+    cannot be read. A Learn session read every note's YAML three times
+    (contrast pairs, conflicts, the plan list), about 4 s each on a 2,166-note
+    vault (2026-10-23, profiled). The frontmatter is shared: read it, never
+    change it."""
+    from silica.kernel.write import frontmatter
+
+    f = vault / path
+    try:
+        mtime = f.stat().st_mtime
+    except OSError:
+        return None
+    hit = _parsed_memo.get(str(f))
+    if hit is not None and hit[0] == mtime:
+        return hit[1], hit[2]
+    try:
+        text = f.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    data, _raw, body = frontmatter.split(text)
+    _parsed_memo[str(f)] = (mtime, data, body)
+    return data, body
+
+
 
 
 def _notes_meta(vault: Path) -> dict[str, dict]:

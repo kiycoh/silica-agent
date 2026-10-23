@@ -490,12 +490,17 @@ def _last_session(entries: list[dict]) -> dict | None:
 
 def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
     from silica.kernel.learn import mastery, objectives as obj, plans
+    from silica.kernel.report.learner import _notes_meta
 
-    scoped = plans.scope_of(p)
+    # Read once for every title lookup below: steps_passed without it read the
+    # vault's notes per step note, 84 epoch walks and 24 s of a 30 s Learn
+    # home on a 2,166-note vault (2026-10-23, profiled).
+    notes = _notes_meta(plans._vault())
+    scoped = plans.scope_of(p, notes=notes)
     node = mastery.node_readings(scoped["paths"], rows, entries, p.get("created"), p["objectives"])
     frontier = scoped["frontier"]
     gaps = [s for s in p["steps"] if not s["notes"]]
-    passed = sum(mastery.steps_passed(p, entries)) if p["steps"] else None
+    passed = sum(mastery.steps_passed(p, entries, notes=notes)) if p["steps"] else None
     nxt = None
     # a queued note is asked first (pick.session takes revisit before the
     # frontier), so it is where the plan resumes and what its row names

@@ -59,18 +59,17 @@ def list_plans() -> list[dict]:
     ponytail: scans every note's frontmatter on request; index it when the
     vault passes 5k notes.
     """
-    from silica.kernel.report.learner import _notes_meta
-    from silica.kernel.write import frontmatter
+    from silica.kernel.report.learner import _notes_meta, parsed_note
 
     vault = _vault()
     out = []
     for path in _notes_meta(vault):
+        parsed = parsed_note(vault, path)
+        if parsed is None or not is_plan(parsed[0]):
+            continue
         try:
             text = (vault / path).read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
-            continue
-        data, _raw, body = frontmatter.split(text)
-        if not is_plan(data):
             continue
         out.append(read_plan(path, text))
     return out
