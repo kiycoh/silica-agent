@@ -522,7 +522,7 @@ def _plan_row(p: dict, rows: dict, entries: list[dict]) -> dict:
         "unit": "steps passed" if p["steps"] else "notes practised",
         "progress": [passed or 0, len(p["steps"])] if p["steps"] else list(node["coverage"]),
         "open_session": bool(_LIVE and _LIVE["plan"] == p["path"]),
-        "pace": plans.pace_of(p, len(scoped["paths"]) - node["all_met"]),
+        "pace": plans.pace_of(p, len(scoped["paths"]) - node["all_met"], entries=entries),
     }
 
 

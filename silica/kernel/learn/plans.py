@@ -964,10 +964,23 @@ def cycles_among(paths: list[str]) -> list[list[str]]:
     return out
 
 
-def pace_of(plan: dict, below: int, n_default: int = 8) -> dict | None:
-    """Workload arithmetic for a deadline (D24): notes below reach per day
-    left, never a promise, never a division by zero."""
-    from datetime import date
+# Answers a note needs by the date: a simulation of the dated picker gave 2.4
+# to 2.8 attempts per note by an 18-day exam (research report
+# study-plans-and-deadline-scheduling, section 3). "See every note once" said a
+# third of the work. Reopen at 20 completed dated plans or 2027-03-31, with
+# FINAL_DAYS.
+ATTEMPTS_PER_NOTE = 2.5
+RECENT_PACE_DAYS = 7    # the reader's own pace: answers a day over the last week
+
+
+def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | None = None) -> dict | None:
+    """Workload arithmetic for a deadline (D24): the answers a day the notes
+    below reach need before the final pass (pick.FINAL_DAYS), set against the
+    reader's own answers a day lately. Never a promise, never a division by zero."""
+    import math
+    from datetime import date, datetime, timedelta, timezone
+
+    from silica.kernel.learn.pick import FINAL_DAYS
 
     if not plan.get("by"):
         return None
@@ -979,11 +992,20 @@ def pace_of(plan: dict, below: int, n_default: int = 8) -> dict | None:
     if days_left == 0:
         return {"days_left": 0, "per_day": below, "below": below,
                 "say": f"The date has arrived; {below} note(s) remaining below the target."}
-    per_day = -(-below // days_left)  # ceil
+    study_days = max(1, days_left - FINAL_DAYS)
+    answers = math.ceil(below * ATTEMPTS_PER_NOTE)
+    per_day = -(-answers // study_days)  # ceil
     size = max(1, min(24, per_day)) if below else n_default
+    since = (datetime.now(timezone.utc) - timedelta(days=RECENT_PACE_DAYS)).isoformat()
+    recent = sum(1 for e in (entries or []) if str(e.get("ts") or "") >= since) / RECENT_PACE_DAYS
+    final = f", then {FINAL_DAYS} days of review" if days_left > FINAL_DAYS else ""
+    lately = (f" Lately you answer about {recent:.0f} a day." if entries is not None and recent >= 0.5
+              else " You have not answered yet this week." if entries is not None else "")
     return {"days_left": days_left, "per_day": per_day, "below": below, "session": size,
-            "say": (f"About {per_day} note(s) a day for {days_left} day(s) to see every note once "
-                    f"at the target; a session of {size} covers that. Repeated attempts take more.")}
+            "answers": answers, "recent_per_day": round(recent, 1),
+            "say": (f"About {per_day} answers a day for {study_days} day(s){final}: {below} note(s) at about "
+                    f"{ATTEMPTS_PER_NOTE:g} answers each to hold them at the date; a session of {size} covers a "
+                    f"day.{lately}")}
 
 
 def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None = None) -> dict:
@@ -1039,7 +1061,7 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
         "misconceptions": mastery.misconceptions(paths, entries),
         "suggestions": mastery.suggestions(entries, paths),
         "calibration": cal, "grader": mastery.grader_agreement(entries, paths),
-        "pace": pace_of(plan, below), "cycles": cycles_among(paths),
+        "pace": pace_of(plan, below, entries=entries), "cycles": cycles_among(paths),
         "complete": completion(plan, entries, passed, steps),
         "paths": paths, "gaps": [s["text"] for s in steps if s["gap"]],
     }

@@ -286,7 +286,7 @@ def test_pace_is_workload_arithmetic_and_never_divides_by_zero(vault):
     assert report["pace"]["days_left"] == 0 and "remaining" in report["pace"]["say"].lower()
     p2 = plans.read_plan("Plans/ML.md", PLAN.replace("created: 2026-09-01", "created: 2026-09-01\nby: 2999-01-01"))
     r2 = plans.plan_report(p2)
-    assert r2["pace"]["per_day"] >= 0 and "session" in r2["pace"]["say"]
+    assert r2["pace"]["per_day"] >= 0 and "session" in r2["pace"]["say"] and "answers a day" in r2["pace"]["say"]
 
 
 # ------------------------------------------------------------------ ADR-0081: the sentence of Create plan
@@ -591,3 +591,18 @@ def test_topic_matching_prefers_the_general_note_and_drops_siblings(vault, monke
     kept = plans._translated({"percettrone multistrato": "ML/Algoritmo del percettrone.md",
                               "autocodificatori regolarizzati": "ML/Autoencoder regolarizzati.md"})
     assert kept == {"autocodificatori regolarizzati": "ML/Autoencoder regolarizzati.md"}
+
+
+
+def test_pace_counts_answers_a_day_before_the_final_pass():
+    """The research report's recommendation 3: about 2.5 answers a note by the
+    date, over the days before the final pass, against the reader's own pace."""
+    from datetime import date, datetime, timedelta, timezone
+
+    by = (date.today() + timedelta(days=18)).isoformat()
+    week = [{"ts": (datetime.now(timezone.utc) - timedelta(days=d % 7)).isoformat()} for d in range(14)]
+    pace = plans.pace_of({"by": by}, 69, entries=week)
+    assert pace["answers"] == 173 and pace["per_day"] == 11          # 173 answers over 16 days
+    assert pace["say"].startswith("About 11 answers a day for 16 day(s), then 2 days of review: 69 note(s)")
+    assert "Lately you answer about 2 a day." in pace["say"]
+    assert "not answered yet" in plans.pace_of({"by": by}, 69, entries=[])["say"]
