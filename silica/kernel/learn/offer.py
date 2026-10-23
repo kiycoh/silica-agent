@@ -229,21 +229,16 @@ ESCALATE_MISSES = 3
 
 
 def mode() -> str:
-    """SILICA_STUDY_OFFER: "on" shows the offer and the escalated aid,
-    "shadow" logs them without showing them, "off" neither. Unset, a hosted
-    tenant runs in shadow and a laptop shows them: the research report's
-    first recommendation is to ship the rule in shadow, the pilot's students
-    are the readers it would reach unproven, and the owner's own vault is
-    where it is being tried. Reopen the hosted default once the hosted logs
-    hold 200 offers that would have fired, or the ASSISTments replay
-    (scripts/validate_study_offer.py) shows it firing before misses."""
+    """SILICA_STUDY_OFFER: "on" (default) shows the offer and the escalated
+    aid, "shadow" logs them without showing them, "off" neither. Hosted runs
+    "on" too: the owner's call of 2026-10-23, against the report's shadow
+    first, with the rule replayed on 4,163 real students (ASSISTments:
+    the next answer wrong 55.1% after it fires, 23.6% after silence);
+    `shadow` stays one variable away for a tenant."""
     import os
 
-    from silica.config import hosted
-
-    default = "shadow" if hosted() else "on"
-    value = (os.getenv("SILICA_STUDY_OFFER") or default).strip().lower()
-    return value if value in ("on", "shadow", "off") else default
+    value = (os.getenv("SILICA_STUDY_OFFER") or "on").strip().lower()
+    return value if value in ("on", "shadow", "off") else "on"
 
 
 def _log_path():

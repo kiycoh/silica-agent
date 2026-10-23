@@ -198,15 +198,15 @@ def test_the_rule_reads_a_public_log_of_real_students(tmp_path):
     assert script.wilson(0, 0) is None and script.wilson(5, 10)[0] < 0.5 < script.wilson(5, 10)[1]
 
 
-def test_a_hosted_tenant_runs_the_rule_in_shadow_unless_told(monkeypatch):
-    """The report's first recommendation: shadow until the rule is checked on
-    the readers it reaches; the owner's laptop shows it."""
+def test_the_rule_shows_unless_told_hosted_too(monkeypatch):
+    """The owner chose visible on the hosted pilot (2026-10-23); shadow and off
+    stay one variable away."""
     monkeypatch.delenv("SILICA_STUDY_OFFER", raising=False)
-    monkeypatch.delenv("SILICA_HOSTED", raising=False)
-    assert offer.mode() == "on"
     monkeypatch.setenv("SILICA_HOSTED", "1")
+    assert offer.mode() == "on"
+    monkeypatch.setenv("SILICA_STUDY_OFFER", "shadow")
     assert offer.mode() == "shadow"
-    monkeypatch.setenv("SILICA_STUDY_OFFER", "on")
+    monkeypatch.setenv("SILICA_STUDY_OFFER", "nonsense")
     assert offer.mode() == "on"
 
 
