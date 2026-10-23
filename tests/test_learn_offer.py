@@ -63,6 +63,12 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
     monkeypatch.setattr("silica.kernel.report.quiz.entries", lambda: [])
     o = srv._study_offer("non ho capito il teorema", [])
     assert o and o["note"] == "ML/Teorema di Novikoff.md"
+    # ...but the note the message names comes before a neighbour the turn read first
+    monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto",
+                                                          "ML/Teorema di Novikoff.md": "Teorema di Novikoff"}, None))
+    o = srv._study_offer("non ho capito i punti di supporto", [])
+    assert o and o["note"] == "ML/Punti di supporto.md"
+    monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
 
     # a turn that read nothing still has the note the reader named
     monkeypatch.setattr(srv, "read_refs", lambda messages: [])

@@ -1093,13 +1093,15 @@ def _study_offer(text: str, messages: list[dict]) -> dict | None:
 
         graph = _driver_graph()
         _resolve, read = answer_resolver(read_refs(messages), graph=graph)
-        if not read and says_lost(text):
-            # A turn that read nothing (the local 9B answered "punti di
-            # supporto" from memory) still has the note the reader named.
+        if says_lost(text):
+            # The note the reader named is the one the offer is about: a turn
+            # that read nothing (the local 9B answered "punti di supporto" from
+            # memory), or one whose first read was a neighbour ("Limite
+            # d'errore con slack" for "variabili slack di margine", 2026-10-23).
             low = text.casefold()
             named = [(t, p) for p, t in graph[1].items()
                      if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"]
-            read = [p for _t, p in sorted(named, key=lambda tp: -len(tp[0]))[:1]]
+            read = [p for _t, p in sorted(named, key=lambda tp: -len(tp[0]))[:1]] + list(read)
         return study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
     except Exception:
         # An offer is an extra: a ledger that does not parse costs the offer,
