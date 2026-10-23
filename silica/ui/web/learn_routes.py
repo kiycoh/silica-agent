@@ -908,8 +908,11 @@ def _escalate(s: dict, it: dict) -> dict | None:
 
 @router.post("/aid", dependencies=_SAME_ORIGIN)
 def aid(payload: dict):
-    """The aid a rating escalated to, written once by the chat model and kept
-    for a reload. Reading it records nothing."""
+    """The aid a rating escalated to, written when the reader asks for it
+    (one click: the owner's call of 2026-10-23 on ASSISTments' experiments,
+    where aids asked for helped and one that came unasked did not), once,
+    and kept for a reload. Reading it records nothing in the ledger; the
+    click is logged beside the escalation."""
     from silica.kernel.learn import offer
     from silica.kernel.recall.mindmap import answer_resolver
     from silica.ui.web.server import _linkify
@@ -929,6 +932,7 @@ def aid(payload: dict):
             raise HTTPException(502, f"the model did not answer: {exc}")
         if not text:
             raise HTTPException(502, "the model wrote nothing")
+        offer.log_aid_opened(it["path"], s["id"])
         # the chat's resolver: a name two notes share links to this item's note
         resolve, _read = answer_resolver([it["path"]])
         done[it["i"]] = {"text": text, "html": _linkify(text, resolve, remote_images=False)}

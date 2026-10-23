@@ -421,11 +421,13 @@ def escalation_block(name: str, why: str, text: str = "") -> str:
             f"the aid in this answer, here in the chat; READ-ONLY: do not create, edit, patch, or move any note.]")
 
 
-# The escalate rung inside Learn, where the report puts it ("generate the aid as
-# the next tutor move inside Learn"): after the rating that makes it three
-# misses in a row, or two more after an offer went unused, the chat model
-# writes the aid from the note's checked points. Reading it is never an
-# answer: credit comes from the next unassisted one (recommendation 5).
+# The escalate rung inside Learn, where the report puts it: after the rating
+# that makes it three misses in a row, or two more after an offer went
+# unused, the chat model writes the aid from the note's checked points when
+# the reader asks for it (one click, the owner's call of 2026-10-23: in
+# ASSISTments' randomized experiments the aids asked for helped and the one
+# that came unasked after an error did not). Reading it is never an answer:
+# credit comes from the next unassisted one (recommendation 5).
 AID_MAX_TOKENS = 900   # 6 steps or a 4-row table plus a question is about 400 tokens; formulas take the rest
 # The worked example, for every state: in ASSISTments' randomized experiments
 # an example beat the answer alone (d +0.24; +0.33 for students below the
@@ -498,6 +500,11 @@ def log_aid(note: str, session: str, why: str, displayed: bool) -> None:
     _append({"aid": "learn", "session": session, "note": note, "why": why, "displayed": displayed})
 
 
+def log_aid_opened(note: str, session: str) -> None:
+    """The reader asked for the aid the escalation put one click away."""
+    _append({"aid": "learn", "session": session, "note": note, "opened": True})
+
+
 def replay(entries: list[dict], records: list[dict] | None = None) -> dict:
     """The rule run over a ledger as it grew: at each graded answer, would the
     offer have fired on what came before, and was that answer then wrong? A
@@ -526,4 +533,5 @@ def replay(entries: list[dict], records: list[dict] | None = None) -> dict:
 
     return {"fired": fired, "silent": silent, "miss_rate_when_fired": rate(fired),
             "miss_rate_when_silent": rate(silent), "offers_shown": shown, "offers_acted": acted,
-            "aids_shown": sum(1 for r in records if r.get("aid") and r.get("displayed"))}
+            "aids_shown": sum(1 for r in records if r.get("aid") and r.get("displayed")),
+            "aids_opened": sum(1 for r in records if r.get("aid") and r.get("opened"))}

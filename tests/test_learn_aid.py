@@ -54,6 +54,7 @@ def test_the_third_miss_in_a_row_writes_the_aid_from_the_note(client, tmp_path, 
     assert c.post("/learn/aid", json={"id": s["id"], "i": it["i"]}).json() == aid and len(prompts) == 1  # kept
     rec = [json.loads(x) for x in (tmp_path / "offers.jsonl").read_text().splitlines()]
     assert rec[0]["aid"] == "learn" and rec[0]["displayed"] and "shown" not in rec[0]
+    assert rec[1] == {**rec[1], "aid": "learn", "opened": True} and len(rec) == 2   # asked once, logged once
     assert offer.allowed("any chat", NOTE, records=rec)   # an aid is not an offer the reader ignored
 
 
@@ -95,6 +96,7 @@ def test_a_note_carries_its_study_tools_and_a_session_its_aid():
 
     js = app_js()
     assert "lrStudyTools(n.path, n.title)" in js and '"/learn/aid"' in js
+    assert '"Show a worked example"' in js        # on request: written on the click
     for cmd in ("/flashcards", "/slides", "/map", "/schematize", "/diagram", "/explain"):
         assert f"`{cmd} ${{shellQuote(" in js
 

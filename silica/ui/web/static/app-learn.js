@@ -2831,8 +2831,11 @@ function lrReveal(sheet, it, v) {
 }
 
 // The escalate rung (learn.offer): after the rating that makes three misses in
-// a row on a note, the next move is the aid itself, written from the note's
-// checked points by the chat model. Reading it records nothing.
+// a row on a note, a worked example written from the note's checked points,
+// one click away and written on the click. On request because in ASSISTments'
+// randomized experiments the aids students asked for helped (an example
+// d +0.24) and the one that came unasked after an error did not (d -0.05,
+// 7,046 students): the owner's call of 2026-10-23. Reading it records nothing.
 const LR_AID_WHAT = { worked: "A worked example" };
 function lrAidBox(it, esc) {
   const s = lrSession;
@@ -2853,9 +2856,12 @@ function lrAidBox(it, esc) {
     const p = lrEl("p", "lr-help", `Not written: ${got.error} `);
     p.appendChild(lrBtn("lr-q", "try again", () => { delete s.aids[it.i]; box.replaceWith(lrAidBox(it, esc)); }));
     box.appendChild(p);
-  } else {
+  } else if (got) {
     box.appendChild(lrEl("p", "lr-help", `Writing it from ${lrStem(it.path)}…`));
-    if (!got) lrFetchAid(it);
+  } else {
+    const go = lrBtn("ghost box", "Show a worked example", () => { lrFetchAid(it); box.replaceWith(lrAidBox(it, esc)); });
+    go.title = "written from this note's checked points when you ask";
+    box.appendChild(go);
   }
   if (esc.prereq) {
     const p = lrEl("p", "lr-help", "The prerequisite you hold least: ");
