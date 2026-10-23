@@ -1016,7 +1016,8 @@ def pace_of(plan: dict, below: int, n_default: int = 8, entries: list[dict] | No
 def day_by_day(plan: dict, today=None) -> list[dict] | None:
     """[{day, steps: [(label, notes)]}] from today to the plan's date: the
     steps in their order over the days before the final pass, each given days
-    in proportion to its notes (a step with none counts one), then the
+    in proportion to its notes (a step with none counts one) and its notes
+    split evenly over them, then the
     pick.FINAL_DAYS days of review and the date itself. None without a date
     or a step."""
     from datetime import date, timedelta
@@ -1045,10 +1046,13 @@ def day_by_day(plan: dict, today=None) -> list[dict] | None:
         first, last = int(start), max(int(start), min(study - 1, int(end - 1e-9)))
         span = range(first, last + 1)
         notes = list(step.get("notes") or [])
-        share = -(-len(notes) // len(span)) if notes else 0
         label = _step_label(step)
+        # even slices: rounded up, a share left the last days of a span with no
+        # note (the course plan's 7 November, one note over two days); with
+        # fewer notes than days a day goes on with the note it is on
         for i, k in enumerate(span):
-            rows[k]["steps"].append((label, notes[i * share:(i + 1) * share] if share else []))
+            lo, hi = i * len(notes) // len(span), (i + 1) * len(notes) // len(span)
+            rows[k]["steps"].append((label, notes[lo:max(hi, lo + 1)]))
     for k in range(study, days):
         rows.append({"day": (today + timedelta(days=k)).isoformat(), "steps": [("Review: the notes Learn shows due", [])]})
     rows.append({"day": by.isoformat(), "steps": [("Exam", [])]})

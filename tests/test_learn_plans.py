@@ -626,9 +626,19 @@ def test_a_dated_plan_lays_its_steps_over_the_days_before_the_review():
     assert seen.index("Basi") < seen.index("Lacuna") < seen.index("Reti") and seen.count("Reti") >= 2
     reti = [n for r in rows for label, notes in r["steps"] if label == "Reti" for n in notes]
     assert reti == ["C", "D", "E", "F"]
+    # four notes over three days: rounded up, the third day had none
+    assert all(notes for r in rows for label, notes in r["steps"] if label in ("Basi", "Reti"))
     table = plans.day_by_day_table(rows)
     assert table.startswith("| Day | Step | Notes |") and "| 2026-10-29 | Exam |" in table
     assert plans.day_by_day({"steps": plan["steps"]}) is None and plans.day_by_day({"by": "2026-10-29"}) is None
+    # fewer notes than days: each day names the note it goes on with
+    sparse = plans.day_by_day({"by": "2026-11-02", "steps": [
+        {"text": "Solo: [[A]]", "notes": ["A"]},
+        {"text": "Due: [[B]], [[C]]", "notes": ["B", "C"]}]}, today=date(2026, 10, 23))
+    solo = [notes for r in sparse for label, notes in r["steps"] if label == "Solo"]
+    due = [notes for r in sparse for label, notes in r["steps"] if label == "Due"]
+    assert len(solo) >= 2 and all(n == ["A"] for n in solo)
+    assert len(due) >= 3 and all(len(n) == 1 for n in due) and due[0] == ["B"] and due[-1] == ["C"]
 
 
 def test_the_syllabus_topics_no_lecture_deck_mentions(vault):
