@@ -22,7 +22,8 @@ def test_two_misses_of_the_last_three_offer_practice_on_that_note():
     o = offer.study_offer("e il duale?", reads, entries=led)
     assert o["kind"] == "study" and o["note"] == "ML/SVM.md"
     assert o["text"] == "you missed SVM in recent practice"
-    assert [c["command"] for c in o["commands"]] == ['/quiz "ML/SVM.md" --n=3', '/diagram "SVM"']
+    assert [c["command"] for c in o["commands"]] == ['/quiz "ML/SVM.md" --n=3', '/diagram "SVM"', '/map "SVM"',
+                                                     '/flashcards "SVM" --n=8']
 
 
 def test_a_note_last_answered_by_being_told_counts_too():
@@ -81,3 +82,15 @@ def test_a_study_plan_asked_of_the_chat_points_at_learn():
                              {"label": "continue it", "command": "/learn"}]
     assert offer.plan_offer("help me make a study plan", [])["commands"] == [{"label": "write it as a plan", "href": "#learn/new"}]
     assert offer.plan_offer("cos'è il dropout?", plans) is None
+
+
+
+def test_learns_confidence_marks_a_struggle_too():
+    """Wrong while sure is a blind spot, right while unsure is fragile: Learn's
+    own bands (mastery.suggestions), read on the latest graded answer."""
+    sure_wrong = [_e("ML/SVM.md", "2026-10-21", False, conf=90, grader="model")]
+    assert offer.struggles(["ML/SVM.md"], sure_wrong) == {"ML/SVM.md": "you were sure about SVM and missed it"}
+    unsure_right = [_e("ML/SVM.md", "2026-10-21", True, conf=25, grader="model")]
+    assert offer.struggles(["ML/SVM.md"], unsure_right) == {"ML/SVM.md": "you got SVM right but were unsure"}
+    calm = [_e("ML/SVM.md", "2026-10-21", True, conf=70, grader="model")]
+    assert offer.struggles(["ML/SVM.md"], calm) == {}

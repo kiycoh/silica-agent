@@ -156,6 +156,20 @@ COMMANDS: tuple[Command, ...] = (
         examples=("/quiz Concepts/ML --n=5", "/quiz"),
     ),
     Command(
+        name="/flashcards",
+        group="workflow",
+        usage="<note|folder> [--n=12] [--save=<path>]",
+        summary="question-and-answer cards from the notes' checked points; --save writes them for Spaced Repetition",
+        examples=('/flashcards "Support Vector Machine"', "/flashcards Corso/ML --n=20 --save=Corso/ML/Flashcards.md"),
+    ),
+    Command(
+        name="/slides",
+        group="workflow",
+        usage="<note|folder> [--save=<path>]",
+        summary="a slide deck of what the notes say; --save writes it for Obsidian's Slides",
+        examples=('/slides "Lezione 13"', '/slides "Lezione 13" --save="Corso/ML/Lezione 13 - slides.md"'),
+    ),
+    Command(
         name="/learn",
         group="workflow",
         usage="<area|folder|note|topic>",

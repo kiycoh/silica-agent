@@ -34,22 +34,38 @@ def says_lost(text: str) -> bool:
     return bool(_LOST_RE.search(text or ""))
 
 
-def struggling(paths: list[str], entries: list[dict]) -> list[str]:
-    """The notes among `paths` whose last answers say the reader struggles:
-    MISSES wrong of the last RECENT, or the latest one answered by being told."""
+def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
+    """{note: why} for the notes among `paths` whose last answers say the
+    reader struggles: MISSES wrong of the last RECENT, the latest answered by
+    being told, or the latest an answer Learn's confidence marks: wrong while
+    sure (a blind spot, the error most worth correcting) or right while unsure
+    (fragile). The confidence bands are Learn's own (mastery.BLIND_SPOT_CONF,
+    FRAGILE_CONF), read the way its suggestions read them."""
+    from silica.kernel.learn.mastery import BLIND_SPOT_CONF, FRAGILE_CONF, eligible
     from silica.kernel.report.quiz import key
 
     by_key: dict[str, list[dict]] = {}
     for e in entries:
         by_key.setdefault(key(str(e.get("path") or "")), []).append(e)
-    out = []
+    out: dict[str, str] = {}
     for p in paths:
         evs = sorted(by_key.get(key(p), []), key=lambda e: str(e.get("ts")))[-RECENT:]
         if not evs:
             continue
-        if sum(1 for e in evs if not e.get("correct")) >= MISSES or evs[-1].get("told"):
-            out.append(p)
+        name = p.removesuffix(".md").rsplit("/", 1)[-1]
+        last = evs[-1]
+        if sum(1 for e in evs if not e.get("correct")) >= MISSES or last.get("told"):
+            out[p] = f"you missed {name} in recent practice"
+        elif eligible(last) and last.get("conf", 0) >= BLIND_SPOT_CONF and not last.get("correct"):
+            out[p] = f"you were sure about {name} and missed it"
+        elif eligible(last) and last.get("conf") == FRAGILE_CONF and last.get("correct"):
+            out[p] = f"you got {name} right but were unsure"
     return out
+
+
+def struggling(paths: list[str], entries: list[dict]) -> list[str]:
+    """The notes among `paths` the reader struggles with (`struggles`)."""
+    return list(struggles(paths, entries))
 
 
 def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) -> dict | None:
@@ -64,17 +80,20 @@ def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) 
         from silica.kernel.report.quiz import entries as ledger
 
         entries = ledger()
-    hard = struggling(notes, entries)
+    hard = struggles(notes, entries)
     lost = says_lost(text)
     if not hard and not lost:
         return None
-    target = (hard or notes)[0]
+    target = next(iter(hard), notes[0])
     name = target.removesuffix(".md").rsplit("/", 1)[-1]
-    why = (f"you missed {name} in recent practice" if hard and not lost
-           else f"you said this was not clear")
+    why = hard[target] if hard and not lost else "you said this was not clear"
+    # Ways to make the topic smaller, each a command the reader already has:
+    # recall, the mechanism drawn, the note's neighbourhood mapped, cards.
     return {"kind": "study", "text": why, "note": target,
             "commands": [{"label": "practise it", "command": f'/quiz "{target}" --n=3'},
-                         {"label": "see it as a diagram", "command": f'/diagram "{name}"'}]}
+                         {"label": "see it as a diagram", "command": f'/diagram "{name}"'},
+                         {"label": "map it", "command": f'/map "{name}"'},
+                         {"label": "make flashcards", "command": f'/flashcards "{name}" --n=8'}]}
 
 
 # The reader asking the chat for a study plan. The chat writes one into its

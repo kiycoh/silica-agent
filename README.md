@@ -140,6 +140,8 @@ Over MCP the vault is the folder the client started in, and search, recall and r
 | `/explain "<concept>" [--level=intro|expert]` | explain a concept grounded in the vault, at the chosen register |
 | `/compare "<A>" "<B>" [...]` | comparison table of notes/concepts; surfaces contradictions |
 | `/quiz [note|folder] [--n=10]` | active-recall quiz; graded answers resurface the notes you miss. No target = review queue |
+| `/flashcards <note|folder> [--n=12] [--save=<path>]` | question-and-answer cards from the notes' checked points; `--save` writes them for the Spaced Repetition plugin |
+| `/slides <note|folder> [--save=<path>]` | a slide deck of what the notes say; `--save` writes it for Obsidian's Slides |
 | `/learn [plan] [--n=8] [--plan <name> --scope=<folder|note,note|topic:term> [--steps=<note>]] [--teach <note>] [--status [plan]]` | a study session graded against the source line, a plan note to continue or write, a teach-back, or the readings in one line; the Learn tab is the same engine with a screen |
 | `/relate <note> [--n=8]` | typed relationship map: how/why one note relates to its vault neighbors |
 | `/schematize <note|folder|topic> [--save=<path>]` | Markdown table schematizing a note, folder, or topic |

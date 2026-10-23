@@ -4010,6 +4010,97 @@ def _sc_organize(args: list[str], **_) -> str | None:
 # count from --focus, /learn reads the ledger and the plan notes.
 
 
+# A study artifact from the notes, beside /quiz: the deck and the cards
+# NotebookLM's Studio makes (owner's comparison, 2026-10-23), both drawn from
+# Learn's key points where the notes carry them, the claims already checked
+# against their sources, so the model writes from the points rather than from
+# what it remembers of the topic.
+STUDY_POINTS_MAX = 40   # points handed over: about 40 lines, a deck's or 12 cards' worth twice over
+
+
+def _study_points(targets: list[str], limit: int = STUDY_POINTS_MAX) -> tuple[list[str], list[str]]:
+    """(the target notes as titles, `[[Note]]: point` lines) for /slides and
+    /flashcards: a folder is its notes, a note is itself, and a note without
+    footnoted claims gives no point and is read whole by the model."""
+    from pathlib import Path as _P
+
+    from silica.kernel.learn import items, plans
+    from silica.tools.atomic import notes_under
+
+    paths: list[str] = []
+    for t in targets:
+        hit = plans.resolve_title(t)
+        if hit:
+            paths.append(hit)
+        else:
+            paths += [p for p in notes_under(t.rstrip("/")) if p.endswith(".md")]
+    titles = list(dict.fromkeys(_P(p).stem for p in paths))
+    lines: list[str] = []
+    for p in dict.fromkeys(paths):
+        try:
+            for kp in items.key_points(p):
+                lines.append(f"- [[{_P(p).stem}]]: {kp['text']}")
+                if len(lines) >= limit:
+                    return titles, lines
+        except Exception:
+            # A note whose claims do not parse is read whole instead.
+            continue
+    return titles, lines
+
+
+def _sc_flashcards(args: list[str], **_) -> str | None:
+    """/flashcards <note|folder> [--n=12] [--save=<path>]: question-and-answer
+    cards for review outside a session, one checked point each."""
+    n = _int_flag(args, "--n=", 12)
+    save = _str_flag(args, "--save").strip()
+    targets = _positional(args)
+    if not targets:
+        return "Error: /flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]"
+    titles, points = _study_points(targets)
+    ground = ("Draw every card from one of these points, each already checked against its source:\n"
+              + "\n".join(points) if points else
+              "Read the note(s) first (list a folder's notes) and draw every card from what they state.")
+    out = ("Then write them, unchanged, to the note `" + save + "` with silica_write_note: a title line, "
+           "the cards, then the tag #flashcards, the format the Spaced Repetition plugin reads."
+           if save else "READ-ONLY: do not create, edit, patch, or move any note.")
+    return (
+        f"Write {n} flashcards from {', '.join(f'[[{t}]]' for t in titles) or ', '.join(targets)}.\n"
+        f"{ground}\n"
+        f"Each card is one line, `Question :: Answer`, then a space and its source note as a [[wikilink]]. "
+        f"One point per card; the answer short (a term, a formula, a number, a phrase), in the notes' own "
+        f"words; no yes/no question and no card the notes do not support. Mix definitions, conditions, "
+        f"formulas and contrasts.\n"
+        f"Answer in chat with a one-line title and the cards as a list. {out}\n"
+        f"Practice that counts toward the reader's plan is /quiz or a Learn session; say so in one line at the end."
+    )
+
+
+def _sc_slides(args: list[str], **_) -> str | None:
+    """/slides <note|folder> [--save=<path>]: a presentation of what the notes
+    say, in the Markdown Obsidian's Slides plugin presents."""
+    save = _str_flag(args, "--save").strip()
+    targets = _positional(args)
+    if not targets:
+        return "Error: /slides needs a note or a folder. Usage: /slides <note|folder> [--save=<path>]"
+    titles, points = _study_points(targets)
+    ground = ("Build the slides from these points, each already checked against its source, in this order "
+              "unless the topic's logic asks another:\n" + "\n".join(points) if points else
+              "Read the note(s) first (list a folder's notes; a lesson's outline note gives the order).")
+    out = ("Then write the deck, unchanged, as the note `" + save + "` with silica_write_note, so Obsidian's "
+           "Slides plugin presents it."
+           if save else "READ-ONLY: do not create, edit, patch, or move any note.")
+    return (
+        f"Make a slide deck from {', '.join(f'[[{t}]]' for t in titles) or ', '.join(targets)}.\n"
+        f"{ground}\n"
+        f"Format: Markdown slides separated by a line holding only `---`. Slide 1 is the title and one line on "
+        f"what the deck covers; then 6 to 10 slides, each a `## ` title and 3 to 5 short bullets in the notes' "
+        f"own words, formulas kept as written in $...$, a figure the notes embed (`![[file.png]]`) where it "
+        f"explains more than words; the last slide is three questions the reader should now be able to answer. "
+        f"Cite each slide's source note as a [[wikilink]] on its last line.\n"
+        f"Answer in chat with the deck in one ```markdown block. {out}"
+    )
+
+
 def _sc_quiz(args: list[str], **_) -> str | None:
     """/quiz [note|folder] [--n=10] [--focus="passage"]: an agent-directed
     active-recall round; --focus narrows it to one passage of the note."""
@@ -4272,6 +4363,8 @@ _SHORTCUTS: dict[str, Callable[..., str | None]] = {
     "/dedup": _sc_dedup,
     "/organize": _sc_organize,
     "/quiz": _sc_quiz,
+    "/flashcards": _sc_flashcards,
+    "/slides": _sc_slides,
     "/learn": _sc_learn,
     "/remember": _sc_remember,
 }
