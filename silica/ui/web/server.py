@@ -1102,12 +1102,60 @@ def _study_offer(text: str, messages: list[dict]) -> dict | None:
             named = [(t, p) for p, t in graph[1].items()
                      if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"]
             read = [p for _t, p in sorted(named, key=lambda tp: -len(tp[0]))[:1]] + list(read)
-        return study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
+        from silica.kernel.learn.offer import allowed, log_offer, mode
+
+        if mode() == "off":
+            return None
+        offer = study_offer(text, [p if p.endswith(".md") else p + ".md" for p in read])
+        if offer is None:
+            return None
+        # Two offers a chat, none on a note whose offer went unused in the last
+        # week, and in shadow mode only the record (learn.offer, research rule).
+        chat = current_session_id or ""
+        show = mode() == "on" and allowed(chat, offer["note"])
+        log_offer(chat, offer, shown=show)
+        return offer if show else None
     except Exception:
         # An offer is an extra: a ledger that does not parse costs the offer,
         # never the answer.
         logger.warning("study offer skipped", exc_info=True)
         return None
+
+
+def _escalation(text: str, messages: list[dict]) -> str:
+    """The escalation block for this turn, or "": the note the reader names,
+    stuck on it by the ledger, by an unused offer or by saying so twice. Logs
+    an offer acted on first. Nothing in an incognito chat."""
+    from silica.kernel import user_memory
+    from silica.kernel.learn import offer as learn_offer
+
+    if user_memory.incognito() or learn_offer.mode() == "off":
+        return ""
+    try:
+        chat = current_session_id or ""
+        learn_offer.log_acted(chat, text)
+        from silica.kernel.recall.mindmap import _driver_graph
+        from silica.kernel.report.quiz import entries
+
+        low = (text or "").casefold()
+        named = sorted(((t, p) for p, t in _driver_graph()[1].items()
+                        if len(t) >= 6 and t.casefold() in low and "/sources/" not in f"/{p}"),
+                       key=lambda tp: -len(tp[0]))
+        if not named:
+            return ""
+        name, path = named[0]
+        note = path if path.endswith(".md") else path + ".md"
+        history = [str(m.get("content") or "") for m in messages if m.get("role") == "user"][-3:]
+        why = learn_offer.escalation(note, chat, text, history, entries())
+        if not why:
+            return ""
+        learn_offer._append({"chat": chat, "note": note, "escalated": True, "why": why})
+        return learn_offer.escalation_block(name, why)
+    except Exception:
+        # An escalation is an extra: a ledger that does not parse costs it,
+        # never the turn.
+        logger.warning("study escalation skipped", exc_info=True)
+        return ""
 
 
 def _answer_html(answer: str, refs, graph=None) -> str:
@@ -1419,6 +1467,10 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             from silica.ui.web import jobs
 
             if block := await asyncio.to_thread(named_notes, text):
+                agent_msg += "\n\n" + block
+            # A reader still stuck on a note gets the aid as the answer itself
+            # (learn.offer.escalation), and an offer's command sent is recorded.
+            if block := await asyncio.to_thread(_escalation, text, messages):
                 agent_msg += "\n\n" + block
             # This chat's conversions that ended since the agent last heard of
             # them: the history still says "still converting" (jobs.settled).

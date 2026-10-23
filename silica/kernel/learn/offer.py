@@ -174,3 +174,164 @@ def plan_offer(text: str, plans: list[dict]) -> dict | None:
                              {"label": "continue it", "command": "/learn"}]}
     return {"kind": "study", "text": "Learn can track this as a plan, paced to its date", "note": "",
             "commands": [{"label": "write it as a plan", "href": "#learn/new"}]}
+
+
+# --- the offer's own record: caps, declines, escalation, and its validation --
+#
+# The research report's section 8 (difficulty-detection-and-study-aids): stay
+# silent once two offers were made in a session or an offer on the note was
+# declined or ignored in the last 7 days; escalate to a generated aid after 3
+# misses in a row, or 2 more misses after an ignored offer; and ship the rule
+# in shadow mode first, logging what would fire. The log below is that record,
+# one line per offer shown or held back and per offer acted on, so the rule
+# can be checked against what readers then did (`replay`).
+MAX_OFFERS_PER_CHAT = 2
+DECLINE_DAYS = 7
+ESCALATE_MISSES = 3
+
+
+def mode() -> str:
+    """SILICA_STUDY_OFFER: "on" (default) shows the offer, "shadow" logs it
+    without showing it, "off" neither."""
+    import os
+
+    value = (os.getenv("SILICA_STUDY_OFFER") or "on").strip().lower()
+    return value if value in ("on", "shadow", "off") else "on"
+
+
+def _log_path():
+    from silica.kernel.recall.paths import index_dir
+
+    return index_dir() / "study_offers.jsonl"
+
+
+def _records() -> list[dict]:
+    import json
+
+    try:
+        lines = _log_path().read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line))
+        except ValueError:
+            continue  # a torn last line from a crash is one lost record, not a lost log
+    return out
+
+
+def _append(record: dict) -> None:
+    import json
+    from datetime import datetime, timezone
+
+    record = {"ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), **record}
+    try:
+        path = _log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # a log that cannot be written costs its record, never the turn
+
+
+def _age_days(ts: str, now: float) -> float:
+    from datetime import datetime
+
+    try:
+        return (now - datetime.fromisoformat(ts).timestamp()) / 86400
+    except (TypeError, ValueError):
+        return float("inf")
+
+
+def allowed(chat: str, note: str, now: float | None = None, records: list[dict] | None = None) -> bool:
+    """Whether an offer on `note` may be shown in `chat`: fewer than
+    MAX_OFFERS_PER_CHAT shown there, and none on the note ignored elsewhere in
+    the last DECLINE_DAYS."""
+    import time
+
+    now = time.time() if now is None else now
+    records = _records() if records is None else records
+    if sum(1 for r in records if r.get("chat") == chat and r.get("shown")) >= MAX_OFFERS_PER_CHAT:
+        return False
+    acted = {(r.get("chat"), r.get("note")) for r in records if r.get("acted")}
+    return not any(r.get("shown") and r.get("note") == note and r.get("chat") != chat
+                   and (r.get("chat"), note) not in acted and _age_days(str(r.get("ts")), now) <= DECLINE_DAYS
+                   for r in records)
+
+
+def log_offer(chat: str, offer: dict, shown: bool) -> None:
+    _append({"chat": chat, "note": offer.get("note", ""), "why": offer.get("text", ""), "shown": shown,
+             "commands": [c.get("command") or c.get("href") for c in offer.get("commands", [])]})
+
+
+def log_acted(chat: str, text: str) -> None:
+    """Mark the offer of this chat whose command the reader just sent."""
+    typed = (text or "").strip()
+    if not typed.startswith("/"):
+        return
+    for r in reversed(_records()):
+        if r.get("chat") == chat and r.get("shown") and any(c and typed.startswith(c) for c in r.get("commands", [])):
+            _append({"chat": chat, "note": r.get("note", ""), "acted": True, "command": typed.split()[0]})
+            return
+
+
+def escalation(note: str, chat: str, text: str, history: list[str], entries: list[dict],
+               records: list[dict] | None = None) -> str:
+    """Why the next answer on `note` should be the aid itself, or "": three
+    misses in a row, two more misses after an offer on it was ignored, or a
+    reader still lost after an answer in this chat already said so."""
+    from silica.kernel.report.quiz import key
+
+    evs = sorted((e for e in entries if key(str(e.get("path") or "")) == key(note)), key=lambda e: str(e.get("ts")))
+    if len(evs) >= ESCALATE_MISSES and not any(e.get("correct") for e in evs[-ESCALATE_MISSES:]):
+        return f"{ESCALATE_MISSES} misses in a row"
+    records = _records() if records is None else records
+    acted = {(r.get("chat"), r.get("note")) for r in records if r.get("acted")}
+    for r in records:
+        if r.get("shown") and r.get("note") == note and (r.get("chat"), note) not in acted:
+            later = [e for e in evs if str(e.get("ts")) > str(r.get("ts")) and not e.get("correct")]
+            if len(later) >= 2:
+                return "two more misses after an offer went unused"
+    if says_lost(text) and any(says_lost(h) for h in history):
+        return "still unclear after an answer"
+    return ""
+
+
+def escalation_block(name: str, why: str) -> str:
+    """The instruction that makes the next answer the aid (the report's
+    "escalate" rung): worked, drawn, and ending on a retrieval question."""
+    return (f"[The reader is still struggling with [[{name}]] ({why}). Make this answer the aid: a worked "
+            f"example step by step in the note's own terms, then the mechanism as one small Markdown table "
+            f"or one Mermaid diagram, and end with one question the reader can answer only by using it. "
+            f"Ground every step in the note.]")
+
+
+def replay(entries: list[dict], records: list[dict] | None = None) -> dict:
+    """The rule run over a ledger as it grew: at each graded answer, would the
+    offer have fired on what came before, and was that answer then wrong? A
+    rule worth its line fires before misses more than before hits. Plus how
+    often a shown offer was acted on. Counts only; reading them is the point."""
+    from silica.kernel.report.quiz import key
+
+    by_note: dict[str, list[dict]] = {}
+    for e in entries:
+        by_note.setdefault(key(str(e.get("path") or "")), []).append(e)
+    fired = {"wrong": 0, "right": 0}
+    silent = {"wrong": 0, "right": 0}
+    for evs in by_note.values():
+        evs.sort(key=lambda e: str(e.get("ts")))
+        for i in range(1, len(evs)):
+            hit = bool(struggles([str(evs[i].get("path"))], evs[:i]))
+            bucket = fired if hit else silent
+            bucket["right" if evs[i].get("correct") else "wrong"] += 1
+    records = _records() if records is None else records
+    shown = sum(1 for r in records if r.get("shown"))
+    acted = sum(1 for r in records if r.get("acted"))
+
+    def rate(b: dict) -> float | None:
+        n = b["wrong"] + b["right"]
+        return round(b["wrong"] / n, 3) if n else None
+
+    return {"fired": fired, "silent": silent, "miss_rate_when_fired": rate(fired),
+            "miss_rate_when_silent": rate(silent), "offers_shown": shown, "offers_acted": acted}

@@ -62,6 +62,8 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
     monkeypatch.setattr(mm, "_driver_graph", lambda: ({}, {"ML/Punti di supporto.md": "Punti di supporto"}, None))
     monkeypatch.setattr("silica.kernel.user_memory.incognito", lambda: False)
     monkeypatch.setattr("silica.kernel.report.quiz.entries", lambda: [])
+    # the offer log's caps and declines are tested on their own
+    monkeypatch.setattr(offer, "log_offer", lambda *a, **kw: None)
     o = srv._study_offer("non ho capito il teorema", [])
     assert o and o["note"] == "ML/Teorema di Novikoff.md"
     # ...but the note the message names comes before a neighbour the turn read first
@@ -123,3 +125,44 @@ def test_the_aids_follow_the_notes_shape():
 
     spine = '---\nsection: "(outline)"\n---\n1. [[A]]\n2. [[B]]\n3. [[C]]\n4. [[D]]\n5. [[E]]\n'
     assert labels(text=spine)[:3] == ["practise it", "explain it", "slides"]
+
+
+
+def test_two_offers_a_chat_none_on_a_note_ignored_this_week(monkeypatch, tmp_path):
+    """The research report's section 8: silent after two offers in a session,
+    and on a note whose offer was declined or ignored in the last 7 days."""
+    import time
+    from datetime import datetime, timedelta, timezone
+
+    now = time.time()
+    iso = lambda days: (datetime.fromtimestamp(now, timezone.utc) - timedelta(days=days)).isoformat()
+    shown = [{"ts": iso(0), "chat": "a", "note": "ML/X.md", "shown": True},
+             {"ts": iso(0), "chat": "a", "note": "ML/Y.md", "shown": True}]
+    assert not offer.allowed("a", "ML/Z.md", now=now, records=shown)          # two shown in chat a
+    assert offer.allowed("b", "ML/Z.md", now=now, records=shown)
+    assert not offer.allowed("b", "ML/X.md", now=now, records=shown)          # X ignored in chat a this week
+    acted = shown + [{"ts": iso(0), "chat": "a", "note": "ML/X.md", "acted": True}]
+    assert offer.allowed("b", "ML/X.md", now=now, records=acted)               # ...unless it was used
+    old = [{"ts": iso(9), "chat": "a", "note": "ML/X.md", "shown": True}]
+    assert offer.allowed("b", "ML/X.md", now=now, records=old)                 # a week has passed
+
+
+def test_escalation_makes_the_answer_the_aid():
+    led = [_e("ML/SVM.md", f"2026-10-2{i}", False) for i in range(3)]
+    assert offer.escalation("ML/SVM.md", "c", "e il duale?", [], led, records=[]) == "3 misses in a row"
+    ignored = [{"ts": "2026-10-20T00:00:00+00:00", "chat": "c", "note": "ML/SVM.md", "shown": True}]
+    two_more = [_e("ML/SVM.md", "2026-10-21", False), _e("ML/SVM.md", "2026-10-22", False)]
+    assert offer.escalation("ML/SVM.md", "c", "ok", [], two_more, records=ignored) == "two more misses after an offer went unused"
+    assert offer.escalation("ML/SVM.md", "c", "non ho capito ancora", ["non ho capito"], [], records=[]) == \
+        "still unclear after an answer"
+    assert offer.escalation("ML/SVM.md", "c", "grazie", [], [], records=[]) == ""
+    block = offer.escalation_block("SVM", "3 misses in a row")
+    assert "[[SVM]]" in block and "worked example" in block and "Mermaid" in block
+
+
+def test_replay_reads_whether_the_rule_fires_before_misses():
+    led = [_e("ML/A.md", "2026-10-01", False), _e("ML/A.md", "2026-10-02", False), _e("ML/A.md", "2026-10-03", False),
+           _e("ML/B.md", "2026-10-01", True), _e("ML/B.md", "2026-10-02", True)]
+    r = offer.replay(led, records=[{"shown": True}, {"acted": True}])
+    assert r["fired"] == {"wrong": 1, "right": 0} and r["silent"] == {"wrong": 1, "right": 1}
+    assert r["miss_rate_when_fired"] == 1.0 and r["offers_shown"] == 1 and r["offers_acted"] == 1
