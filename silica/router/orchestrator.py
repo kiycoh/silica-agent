@@ -136,20 +136,24 @@ def _refresh_embeddings_for_ops(
     read_body: Callable[[str], str],
     embedder: Any,
     store: Any,
+    patches: bool = False,
 ) -> int:
     """Embed the notes this chunk wrote, once each, so the next chunk's dedup
     sees them. Patches are left out: the note already has a vector the dedup
     can read, and the sweep that ends the run (Coordinator.run) embeds its new
     text once, after the passes that edit notes past WRITE. Hosted t01 on
     2026-10-23 spent 47% of its embedder time here, 49 of 218 refreshes on
-    patches, at ~4 s each on a 2-core host. Returns the notes embedded.
+    patches, at ~4 s each on a 2-core host. `patches` puts them back where no
+    sweep runs (a driver with no mtime_of, the index sweep turned off).
+    Returns the notes embedded.
     """
     from silica.kernel.recall.embed import refresh_note
 
+    kinds = (OpType.write, OpType.patch) if patches else (OpType.write,)
     seen: set[str] = set()
     for op in ops:
         path = op.touched_ref()
-        if op.op is not OpType.write or not path or path not in committed_paths or path in seen:
+        if op.op not in kinds or not path or path not in committed_paths or path in seen:
             continue
         seen.add(path)
         try:

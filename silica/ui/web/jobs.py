@@ -573,9 +573,11 @@ def from_command(text: str, session: str | None) -> dict | None:
     /nucleate turns into jobs only for the files it names that need a
     conversion it has not had; it does not run now, and the jobs offer it.
     ponytail: a folder, a glob or a Zotero key still converts inside the turn,
-    because only `_sc_nucleate` expands them. The upgrade is the same split
-    after expansion, due when a turn line of kind nucleate passes 125000 ms on
-    the pilot (ADR-0100 point 3).
+    because only `_sc_nucleate` expands them. Its trigger fired on 2026-10-23
+    (hosted t01, kind nucleate cut at 124,990 ms) and the turn's keepalive
+    (server._KEEPALIVE_S) answered the cut instead; a turn still dies with its
+    tab and with a release. The upgrade is the same split after expansion, due
+    when a turn line of kind nucleate ends cancelled past 125000 ms again.
     """
     if not text.strip().startswith("/"):
         return None

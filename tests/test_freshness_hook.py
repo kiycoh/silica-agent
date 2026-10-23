@@ -216,3 +216,18 @@ def test_embedding_refresh_skips_uncommitted_writes(tmp_path):
         [_write_op("Concepts/Dropped.md")], set(), read_body={}.get, embedder=emb, store=store,
     )
     assert n == 0 and emb.calls == []
+
+
+def test_embedding_refresh_keeps_patches_where_no_sweep_will_run(tmp_path):
+    """The ws backend has no mtime_of and SILICA_INDEX_SWEEP can be off: there
+    the run-end sweep does nothing, so WRITE embeds the patch as it always did."""
+    from silica.kernel.recall.embed import EmbedStore
+    from silica.router.orchestrator import _refresh_embeddings_for_ops
+
+    store = EmbedStore(path=tmp_path / "e.json")
+    emb = _RecEmbedder()
+    n = _refresh_embeddings_for_ops(
+        [_patch_op("Concepts/Old.md")], {"Concepts/Old.md"}, read_body={"Concepts/Old.md": "patched"}.get,
+        embedder=emb, store=store, patches=True,
+    )
+    assert n == 1 and "Concepts/Old" in store.paths()

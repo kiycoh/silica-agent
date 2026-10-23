@@ -316,9 +316,13 @@ def handle_write(fsm: "InjectorFSM") -> None:
         try:
             from silica.agent.providers import get_embedder
             from silica.kernel.recall.embed import get_store
+            # The run-end sweep that embeds patches skips a driver with no
+            # mtime_of (the ws backend) and an index_sweep turned off.
+            swept = (getattr(orch.DRIVER, "mtime_of", None) is not None
+                     and getattr(orch.CONFIG, "index_sweep", True))
             if orch._refresh_embeddings_for_ops(
                 ops, committed_paths, read_body=lambda p: orch.DRIVER.read_note(p).content or "",
-                embedder=get_embedder(orch.CONFIG), store=get_store(),
+                embedder=get_embedder(orch.CONFIG), store=get_store(), patches=not swept,
             ):
                 # Mark the in-memory index dirty so the end-of-run flush knows
                 # to persist (and only then — no flush when nothing changed).
