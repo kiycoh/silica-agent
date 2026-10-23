@@ -327,3 +327,29 @@ def test_an_aid_s_effect_is_read_off_its_randomized_experiments(tmp_path):
     assert list(r) == ["Answer Only vs. Hint"]
     assert r["Answer Only vs. Hint"]["all"]["d"] == round(1 / (1 / 3) ** 0.5, 3)
     assert r["Answer Only vs. Hint"]["all"]["experiments"] == 1 and r["Answer Only vs. Hint"]["all"]["students"] == 8
+
+
+def test_jev_reads_what_the_word_list_misses(monkeypatch):
+    """The list first, instant; Jev on a short message it did not match, once
+    per message; nothing asked without a decision model or for a command."""
+    import silica.agent.decide as dec
+
+    calls = []
+
+    def fake(state, questions, **kw):
+        calls.append(state["message"])
+        p = 0.9 if "perso" in state["message"] else 0.2
+        return {"lost": {"type": "choice", "choice": "yes" if p > 0.5 else "no", "probabilities": {"yes": p, "no": 1 - p}}}
+
+    monkeypatch.setattr(dec, "decide", fake)
+    monkeypatch.setattr("silica.config.CONFIG.decision_model", "typesafe/jev-1.13-20260917")
+    offer._jev_lost.cache_clear()
+    assert offer.says_lost("mi sono perso sul duale")
+    assert not offer.says_lost("cos'è il duale?")
+    assert offer.says_lost("non ho capito il duale")            # the list, no call
+    offer.says_lost("mi sono perso sul duale")
+    assert calls == ["mi sono perso sul duale", "cos'è il duale?"]
+    assert not offer.says_lost("/quiz il duale") and not offer.says_lost("perso " * 60)
+    monkeypatch.setattr("silica.config.CONFIG.decision_model", "")
+    offer._jev_lost.cache_clear()
+    assert not offer.says_lost("mi sono perso sul duale")       # no decision model: the list alone

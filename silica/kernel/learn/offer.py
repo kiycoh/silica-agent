@@ -15,6 +15,7 @@ did worse than help on request (Razzaq and Heffernan 2010).
 """
 from __future__ import annotations
 
+import functools
 import re
 from urllib.parse import quote
 
@@ -33,8 +34,45 @@ RECENT = 3    # answers looked at per note
 MISSES = 2    # of the RECENT that were wrong for a note to count as a struggle
 
 
+# Jev (agent/decide.py) reads what the word list misses. On 80 labelled
+# messages (40 saying the student did not follow, 40 questions, requests and
+# "ho capito", 2026-10-23) the list caught 12 of the 40, Jev 39 at p >= 0.6,
+# neither said yes to a negative (the highest at 0.37), Jev at p50 0.32 s.
+# The list stays first, instant and free; Jev reads only a short message the
+# list did not match, once per message. The owner asked for Jev where it
+# pays; reopen with 200 labelled turns from the shadow log.
+LOST_ACCEPT = 0.6
+LOST_MAX_CHARS = 280   # a declaration of confusion is a line; a long message is a request with its content
+LOST_QUESTION = {"lost": {
+    "type": "choice",
+    "instructions": ("A student wrote this message to a study assistant. Does the student say they did not "
+                     "understand, are confused, lost or stuck, or ask for the same thing again, differently or "
+                     "more simply?"),
+    "criteria": {
+        "yes": ("the message says the student does not understand, is confused, lost or stuck, or asks for an "
+                "explanation again, differently or more simply"),
+        "no": "a question, a request or a statement that does not say the student failed to understand",
+    },
+}}
+
+
+@functools.lru_cache(maxsize=512)
+def _jev_lost(text: str) -> bool:
+    from silica.agent.decide import decide
+
+    answers = decide({"message": text}, LOST_QUESTION)
+    return bool(answers) and answers["lost"]["probabilities"].get("yes", 0.0) >= LOST_ACCEPT
+
+
 def says_lost(text: str) -> bool:
-    return bool(_LOST_RE.search(text or ""))
+    t = (text or "").strip()
+    if _LOST_RE.search(t):
+        return True
+    if not t or t.startswith("/") or len(t) > LOST_MAX_CHARS:
+        return False
+    from silica.config import CONFIG
+
+    return bool(CONFIG.decision_model) and _jev_lost(t)
 
 
 def struggles(paths: list[str], entries: list[dict]) -> dict[str, str]:
@@ -355,7 +393,10 @@ ESCALATE_FORMS = {
     "diagram": "a worked example step by step in the note's own terms, then the mechanism as one Mermaid flowchart",
     "map": ("one Mermaid flowchart (graph LR) from it to the notes it links, each edge labelled with the "
             "relation in a few words, then two lines on the links that matter most"),
-    "cards": "5 flashcards as bullets of the form `question :: answer`, one point of the note each",
+    # spelled out: given "`question :: answer`", the 9B wrote "Q1 :: <the whole
+    # point>" five times (2026-10-23), cards with no question
+    "cards": ("5 flashcards, one bullet each: a real question ending with a question mark, then ` :: `, then "
+              "its short answer in the note's words; one point of the note each"),
 }
 ESCALATE_DEFAULT = ("a worked example step by step in the note's own terms, then the mechanism as one small "
                     "Markdown table or one Mermaid diagram")
