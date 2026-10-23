@@ -80,6 +80,9 @@ class UndoJournalStore:
                 conn.row_factory = sqlite3.Row
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA busy_timeout=5000")
+                # The trash's "delete forever" (ADR-0128) is a DELETE here, and
+                # without this sqlite leaves the note's text in the freed pages.
+                conn.execute("PRAGMA secure_delete=ON")
             except sqlite3.DatabaseError:
                 conn.close()
                 raise
@@ -343,6 +346,35 @@ class UndoJournalStore:
         )
         conn.commit()
 
+    def trashed(self, vault: str | None) -> list[dict]:
+        """The trash (ADR-0128): every note a delete took out of `vault` that
+        no undo, restore or erase has dealt with, newest first, as
+        `{run, path, deleted_at, source}`. One item per delete, so a path
+        deleted twice is two items, two different bodies."""
+        marks = ",".join("?" * len(DELETE_SOURCES))
+        query = ("SELECT r.run_id, i.path, r.started_at, r.source FROM runs r "
+                 "JOIN inverses i ON i.run_id = r.run_id "
+                 f"WHERE r.reverted_at IS NULL AND r.source IN ({marks}) AND i.kind = ?")
+        params: list = [*DELETE_SOURCES, InverseOpKind.recreate_deleted.value]
+        if vault is not None:
+            query += " AND r.vault = ?"
+            params.append(vault)
+        query += " ORDER BY r.started_at DESC, i.id DESC"
+        return [{"run": r["run_id"], "path": r["path"], "deleted_at": r["started_at"],
+                 "source": r["source"]} for r in self._conn().execute(query, params)]
+
+    def leave_trash(self, run_id: str, path: str) -> None:
+        """`path` leaves run `run_id`'s trash, restored or erased: its inverse
+        goes, and a run with none left is closed, so the tree's undo of the
+        whole run does not report a restore of nothing as one."""
+        self.drop_inverse(run_id, path)
+        conn = self._conn()
+        if conn.execute("SELECT 1 FROM inverses WHERE run_id = ? LIMIT 1", (run_id,)).fetchone() is None:
+            self.mark_reverted(run_id)
+        # The WAL still holds the page the body was written in until a
+        # checkpoint copies the zeroed page over it and truncates the log.
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
 
 _store: UndoJournalStore | None = None
 
@@ -500,6 +532,32 @@ def revert_run(run_id: str, *, store: UndoJournalStore | None = None,
         store.mark_reverted(run_id)
     return {"run_id": run_id, "reverted": reverted, "skipped": skipped,
             "stale": stale, "errors": errors}
+
+
+def restore_from_trash(item: dict, *, store: UndoJournalStore | None = None) -> str | None:
+    """Bring back one note of the trash, an item of `trashed()`, and take it
+    out of the trash; None when it is back, else why not (ADR-0128).
+
+    One note and not its run, which is what /undo and the tree's undo bring
+    back: a folder deleted at once is one item per note, and the person picks.
+    Not revert_run(only_paths=...): it sweeps the links of every note of the
+    run it skipped, and a note written since at another trashed path would be
+    edited by a restore that never named it."""
+    from silica.tools.wrapped import _vault_file, silica_restore
+
+    store = store or get_undo_journal()
+    inv = next((i for i, _ in store.inverses_for(item["run"])
+                if i.path == item["path"] and i.kind == InverseOpKind.recreate_deleted), None)
+    if inv is None:
+        return "not in the trash"
+    # silica_restore's recreate is an upsert: it would overwrite the note
+    if _vault_file(inv.path).exists():
+        return "a note is at that path now"
+    res = silica_restore(txn_id=item["run"], inverses=[inv.model_dump()])
+    if res["errors"]:
+        return res["errors"][0]
+    store.leave_trash(item["run"], inv.path)
+    return None
 
 
 def resolve_source(source: str, *, vault: str | None) -> tuple[str, list[str]]:

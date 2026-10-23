@@ -1574,12 +1574,22 @@ def _dc_undo(args: list[str], *, raw_input: str = "", **_) -> bool:
     if store.absent_floor(note_path):
         # The chat created this note: before it there was nothing, so undo
         # removes it rather than leave a 0-byte note that keeps taking links.
+        # Removed with a restore point, so a second /undo brings it back: on
+        # hosted t06 (2026-10-22) a write card's revert removed a 21k-char note
+        # the turn had written and nothing in the app could restore it.
+        from silica.tools.wrapped import delete_with_restore_point
+
         try:
-            DRIVER.delete(note_path)
-            store.clear(note_path)
-            CONSOLE.print(f"  Undone: [bold]{note_path}[/] removed (the chat created it)")
+            res = delete_with_restore_point(
+                note_path, DRIVER.read_note(note_path).content, USER_DELETE_SOURCE)
         except Exception as exc:
-            CONSOLE.print(f"  [red]Undo failed:[/] {exc}")
+            res = {"error": str(exc)}
+        if "error" in res:
+            CONSOLE.print(f"  [red]Undo failed:[/] {res['error']}")
+            return True
+        store.clear(note_path)
+        CONSOLE.print(f"  Undone: [bold]{note_path}[/] removed (the chat created it); "
+                      f"/undo {note_path} brings it back")
         return True
     from silica.kernel.write.preserve import Loss
 
@@ -1637,7 +1647,64 @@ def _dc_delete(args: list[str], *, raw_input: str = "", **_) -> bool:
                       "no incoming link:")
         for o in orphaned:
             CONSOLE.print(f"    {escape(o)}", soft_wrap=True)
-    CONSOLE.print(f"  [dim]/undo {escape(path)} brings it back.[/]", soft_wrap=True)
+    CONSOLE.print(f"  [dim]In the trash: /undo {escape(path)} brings it back.[/]", soft_wrap=True)
+    return True
+
+
+def _dc_trash(args: list[str], *, raw_input: str = "", **_) -> bool:
+    """/trash [restore <path> | erase <path> | empty]: the notes deleted from
+    this vault, by the user or the chat, that nothing has brought back
+    (ADR-0128). restore brings one note back, not the run it was deleted in;
+    erase and empty delete for good what the trash holds."""
+    from datetime import datetime as _dt
+
+    from rich.markup import escape
+
+    from silica.kernel.write.provenance import note_key
+    from silica.kernel.write.undo_journal import (USER_DELETE_SOURCE, get_undo_journal,
+                                                  restore_from_trash)
+
+    journal = get_undo_journal()
+    items = journal.trashed((CONFIG.vault_path or "").strip() or None)
+    rest = raw_input.strip().split(maxsplit=2)
+    verb = rest[1].lower() if len(rest) > 1 else ""
+    if verb in ("", "empty") and not items:
+        CONSOLE.print("  The trash is empty.")
+        return True
+    if not verb:
+        CONSOLE.print(f"  Trash: {len(items)} note{'s' if len(items) != 1 else ''}")
+        for t in items:
+            when = _dt.fromtimestamp(t["deleted_at"]).strftime("%Y-%m-%d %H:%M")
+            who = "you" if t["source"] == USER_DELETE_SOURCE else "the chat"
+            CONSOLE.print(f"    {escape(t['path'])}  [dim]{when}, {who}[/]", soft_wrap=True)
+        CONSOLE.print("  [dim]/trash restore <path> brings one back, /trash erase <path> "
+                      "or /trash empty deletes for good.[/]")
+        return True
+    if verb == "empty":
+        for t in items:
+            journal.leave_trash(t["run"], t["path"])
+        CONSOLE.print(f"  Deleted for good: {len(items)} note{'s' if len(items) != 1 else ''}.")
+        return True
+    if verb not in ("restore", "erase") or len(rest) < 3:
+        CONSOLE.print("  Usage: /trash [restore <path> | erase <path> | empty]")
+        return True
+    # Everything after the verb is the path, as for /undo. A path deleted
+    # twice is two items; the newest delete is the one meant.
+    want = note_key(rest[2].strip())
+    item = next((t for t in items if note_key(t["path"]) == want), None)
+    if item is None:
+        CONSOLE.print(f"  [yellow]Not in the trash:[/] {escape(rest[2].strip())}", soft_wrap=True)
+        return True
+    if verb == "erase":
+        journal.leave_trash(item["run"], item["path"])
+        CONSOLE.print(f"  Deleted for good: [bold]{escape(item['path'])}[/]", soft_wrap=True)
+        return True
+    why = restore_from_trash(item, store=journal)
+    if why:
+        CONSOLE.print(f"  [yellow]Not restored:[/] {escape(item['path'])} ({escape(why)})",
+                      soft_wrap=True)
+    else:
+        CONSOLE.print(f"  Restored: [bold]{escape(item['path'])}[/]", soft_wrap=True)
     return True
 
 
@@ -2070,6 +2137,7 @@ _DIRECT: dict[str, Callable[..., bool]] = {
     "/changes": _dc_changes,
     "/undo": _dc_undo,
     "/delete": _dc_delete,
+    "/trash": _dc_trash,
     "/revert": _dc_revert,
     "/zotero": lambda args, **kw: _dc_zotero(args, **kw),
     "/mail": _dc_mail,
@@ -2107,6 +2175,7 @@ def _handle_direct_shortcut(raw_input: str, messages: list[dict]) -> bool:
         /changes
         /undo [note-path]
         /delete <path>
+        /trash [restore <path> | erase <path> | empty]
     """
 
     parts = raw_input.strip().split()

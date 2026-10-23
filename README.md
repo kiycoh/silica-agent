@@ -71,7 +71,7 @@ Then type `/report`. It is read-only: it writes one file, `GRAPH_REPORT.md`, and
   <br/>
   <sub>Questions waiting from earlier sessions, the ones you missed, and your plans.</sub>
 
-- **Take anything back:** `/undo` one note, `/revert <run-id>` one run, `/revert --source paper.pdf` everything one document produced, however far it spread.
+- **Take anything back:** `/undo` one note, `/revert <run-id>` one run, `/revert --source paper.pdf` everything one document produced, however far it spread. A deleted note waits in the trash until you bring it back or delete it for good.
 - **Keep code docs honest:** launched in a git repository, `/wiki` writes an `ARCHITECTURE.md` plus a note per subsystem under `docs/silica/`, and `/stale` flags the notes whose code changed shape since.
 
 <p align="center">
@@ -170,6 +170,7 @@ Over MCP the vault is the folder the client started in, and search, recall and r
 | `/changes` | notes this session wrote to, with added/removed line counts |
 | `/undo [note-path]` | undo the last patch on a note |
 | `/delete <path>` | delete a note, even one other notes link to; says which links it left pointing nowhere, /undo brings it back |
+| `/trash [restore <path> | erase <path> | empty]` | the notes deleted from this vault: bring one back, or delete for good |
 | `/review [--flush=HASH]` | inspect the async review queue (deferred ops) |
 | `/anneal [--steer] [--limit=N]` | retry every deferred bundle against the current vault; --steer escalates what still fails |
 | `/revert [run-id | --source <file>]` | revert a whole injection (per-run, LIFO), or every run derived from one source |

@@ -293,8 +293,10 @@ def test_keep_clears_review_through_the_gate_and_the_count_drops(client, tmp_vau
 def test_revert_copy_names_what_it_takes_back_and_what_stays():
     js = app_js()
     body = _fn(js, "function stampReviewCards()")
-    assert "revert takes back this one patch; the other write" in body
-    assert "stay" in body
+    assert "revert takes back this one patch" in body
+    # a note the turn created is deleted by its revert, and the copy says so
+    assert "delete removes this note the turn created; /undo brings it back" in body
+    assert "; the other write" in body and "stay" in body
 
 
 def test_a_reopened_session_shows_the_same_writes_and_reads_as_the_live_one(client, monkeypatch):
@@ -435,7 +437,9 @@ def test_the_drawer_shows_one_of_two_lists_and_the_notes_first():
     seg = _block(rail, '<div id="side-tabs"', "</div>")
     assert re.findall(r'data-pane="(side-\w+)"', seg) == panes
     assert re.search(r'<section class="side-pane" id="side-chats"[^>]*\bhidden\b', rail)
-    assert "<details" not in rail, "a compartment is back"
+    # the trash is a group of the notes list, as pinned is (ADR-0128), not a compartment
+    trash = _block(rail, '<details id="trash-group"', "</details>")
+    assert "<details" not in rail.replace(trash, ""), "a compartment is back"
     js = app_js()
     assert 'let sidePane = localStorage.getItem("side-pane") === "side-chats" ? "side-chats" : "side-vault";' in js
     body = _fn(js, "function showSidePane(id)")
