@@ -83,9 +83,9 @@ def _note_meta(text: str, mtime: float) -> tuple[float, bool, str, dict]:
     aliases = [aliases] if isinstance(aliases, str) else aliases
     if isinstance(aliases, list) and aliases:
         extra["aliases"] = [str(a).strip() for a in aliases if str(a).strip()]
-    from silica.kernel.outline import SPINE_SECTION
-
-    if str(data.get("section") or "") == SPINE_SECTION:
+    # outline.SPINE_SECTION, spelled here: outline reaches silica.agent, and the
+    # graph report imports this module (import contract P2/DKB).
+    if str(data.get("section") or "") == "(outline)":
         extra["spine"] = True
     return ts, bool(data.get("AI")), str(kind or "").strip().lower(), extra
 

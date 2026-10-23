@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 FLASHCARDS = """---
-name: flashcards
+name: anki-deck
 description: Turn a note into question and answer cards.
 argument-hint: <note> [--n=12]
 ---
@@ -14,7 +14,7 @@ argument-hint: <note> [--n=12]
 Read $0 with silica_read_note before writing a card.
 """
 
-EXPLAIN = FLASHCARDS.replace("flashcards", "explain")
+EXPLAIN = FLASHCARDS.replace("anki-deck", "explain")
 
 
 @pytest.fixture
@@ -46,15 +46,15 @@ def test_the_preview_writes_nothing_and_the_confirm_writes_the_file(tc):
     assert r.status_code == 200, r.text
     skill = r.json()["skill"]
     assert r.json()["installed"] is False and not _vault_dir().exists()
-    assert skill["name"] == "flashcards" and skill["hint"] == "<note> [--n=12]"
-    assert skill["path"] == ".silica/skills/flashcards/SKILL.md"
+    assert skill["name"] == "anki-deck" and skill["hint"] == "<note> [--n=12]"
+    assert skill["path"] == ".silica/skills/anki-deck/SKILL.md"
     assert "one fact per card" not in skill["body"] and skill["stripped"] is True
     assert skill["replaces"] is False and skill["shadows"] == ""
 
     r = _post(tc, FLASHCARDS, confirm=True)
     assert r.json()["installed"] is True
-    assert (_vault_dir() / "flashcards" / "SKILL.md").read_text() == FLASHCARDS
-    assert "/flashcards" in [c["name"] for c in tc.get("/commands").json()]
+    assert (_vault_dir() / "anki-deck" / "SKILL.md").read_text() == FLASHCARDS
+    assert "/anki-deck" in [c["name"] for c in tc.get("/commands").json()]
     assert _post(tc, FLASHCARDS).json()["skill"]["replaces"] is True
 
 
@@ -71,7 +71,7 @@ def test_a_vault_skill_replaces_the_built_in_and_the_list_says_so(tc):
 def test_a_skill_placed_by_hand_under_a_command_name_is_listed_inactive(tc):
     folder = _vault_dir() / "quiz"
     folder.mkdir(parents=True)
-    (folder / "SKILL.md").write_text(FLASHCARDS.replace("flashcards", "quiz"))
+    (folder / "SKILL.md").write_text(FLASHCARDS.replace("anki-deck", "quiz"))
     groups = {g["source"]: g["skills"] for g in tc.get("/skills").json()["groups"]}
     assert [s["state"] for s in groups["vault"] if s["name"] == "quiz"] == ["inactive"]
 
@@ -93,11 +93,11 @@ def test_a_refusal_names_the_check_and_writes_nothing(tc, text, words):
 
 def test_remove_deletes_the_skill_and_keeps_its_authors_other_files(tc):
     _post(tc, FLASHCARDS, confirm=True)
-    (_vault_dir() / "flashcards" / "notes.txt").write_text("mine")
-    r = tc.delete("/skills/flashcards")
+    (_vault_dir() / "anki-deck" / "notes.txt").write_text("mine")
+    r = tc.delete("/skills/anki-deck")
     assert r.json() == {"ok": True, "kept": ["notes.txt"]}
-    assert not (_vault_dir() / "flashcards" / "SKILL.md").exists()
-    assert "/flashcards" not in [c["name"] for c in tc.get("/commands").json()]
+    assert not (_vault_dir() / "anki-deck" / "SKILL.md").exists()
+    assert "/anki-deck" not in [c["name"] for c in tc.get("/commands").json()]
 
     _post(tc, EXPLAIN, confirm=True)
     assert tc.delete("/skills/explain").json()["kept"] == []
