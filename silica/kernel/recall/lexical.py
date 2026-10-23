@@ -48,6 +48,18 @@ def _tokens(text: str) -> list[str]:
     return out
 
 
+def _unsuffixed(by_path: dict[str, Any]) -> dict[str, Any]:
+    """`by_path` keyed as the sweep keys a note, without ".md". An index built
+    on 2026-09-21 kept the suffix: no key met a live path, every startup sweep
+    found 945 of 945 absent and declined to prune, and once a run's new keys
+    made them fewer than half, it pruned them as deleted, with them the 680
+    untouched notes of the vault that no sweep re-reads (2026-10-23). A key
+    in both spellings keeps the current one."""
+    out = {p.removesuffix(".md"): v for p, v in by_path.items() if p.endswith(".md")}
+    out.update((p, v) for p, v in by_path.items() if not p.endswith(".md"))
+    return out
+
+
 class LexicalStore(DiskSynced):
     def __init__(self, path: Path | None = None):
         self._path = path if path is not None else _index_path()
@@ -212,9 +224,9 @@ class LexicalStore(DiskSynced):
         return {}
 
     def _take_disk(self, data: dict[str, Any]) -> None:
-        docs = {p: dict(tf) for p, tf in data.get("docs", {}).items()}
-        lens = dict(data.get("len", {}))
-        names = dict(data.get("name", {}))
+        docs = {p: dict(tf) for p, tf in _unsuffixed(data.get("docs", {})).items()}
+        lens = _unsuffixed(data.get("len", {}))
+        names = _unsuffixed(data.get("name", {}))
         for p in self._gone:
             docs.pop(p, None)
             lens.pop(p, None)
