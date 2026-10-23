@@ -498,6 +498,29 @@ class TestDraftFiling:
         assert calls.get("inbox_files") == ["Inbox/notes.md"]
 
 
+def test_a_lab_links_the_notes_most_replies_pick():
+    """One reply per lab was a draw at temperature 0 (2026-10-23): three
+    replies, a note linked when two of them name it, most votes first."""
+    import itertools
+    import threading
+
+    from silica.kernel.link import labs
+
+    # the same reason per note in every reply: which thread draws which reply is not fixed
+    replies = itertools.cycle(["Support Vector Machine | addestra una SVM\nMatrice di confusione | la stampa",
+                               "Support Vector Machine | addestra una SVM\nIperparametri | li sceglie",
+                               "Matrice di confusione | la stampa\nSupport Vector Machine | addestra una SVM"])
+    lock = threading.Lock()
+
+    def ask(system, user):
+        with lock:
+            return next(replies)
+
+    out = labs.practised_section("clf = SVC()", ["Support Vector Machine", "Matrice di confusione", "Iperparametri"], ask=ask)
+    assert out == ("\n## Concepts practised\n- [[Support Vector Machine]]: addestra una SVM\n"
+                   "- [[Matrice di confusione]]: la stampa\n")
+
+
 def test_sniff_is_memoized_per_content(monkeypatch):
     """Dispatch and PAYLOAD both resolve the same file; only one call is paid."""
     import silica.kernel.forms as forms

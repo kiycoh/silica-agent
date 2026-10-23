@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,7 @@ HEADING = "## Concepts practised"   # UI copy: English whatever the vault's lang
 # brushed ("Classificatore binario" for a ten-class problem). Six, and the
 # prompt asks for fewer.
 MAX_LINKS = 6
+VOTES = 3   # replies per lab; a note is linked when most of them pick it (practised_section)
 # Titles in one prompt (about 10 tokens each). A folder past it (a whole
 # textbook nucleated beside the course) is ranked by the words its titles share
 # with the lab first. It was 300, and a course folder holds about 450 notes once
@@ -76,20 +78,47 @@ def _ask_worker(system: str, user: str) -> str:
 def practised_section(body: str, titles: list[str], *,
                       ask: Callable[[str, str], str] | None = None) -> str:
     """The `## Concepts practised` block for a lab, "" when no model answers
-    or nothing in `titles` fits. `titles` are note names (file stems)."""
+    or nothing in `titles` fits. `titles` are note names (file stems).
+
+    VOTES replies, and a note is linked when most of them pick it: one reply
+    per lab was a draw at temperature 0. Four calls on one Keras lab named
+    four different sets, and a re-run on another replaced five sound links
+    with one wrong one (2026-10-23)."""
     pool = _ranked(sorted(set(titles)), body)
     if not pool:
         return ""
     by_key = {t.casefold(): t for t in pool}
+    system, user = _PROMPT.format(n=MAX_LINKS, titles="\n".join(pool)), _lab_text(body)
+    with ThreadPoolExecutor(max_workers=VOTES) as pool_ex:
+        replies = list(pool_ex.map(lambda _i: _reply(ask or _ask_worker, system, user), range(VOTES)))
+    answered = [r for r in replies if r is not None]
+    if not answered:
+        return ""
+    picks: dict[str, int] = {}
+    reasons: dict[str, str] = {}
+    for reply in answered:
+        for hit, why in _picks(reply, by_key):
+            picks[hit] = picks.get(hit, 0) + 1
+            reasons.setdefault(hit, why)
+    # first-seen order among equal votes: the order of the first reply
+    kept = sorted((h for h, n in picks.items() if n * 2 > len(answered)), key=lambda h: -picks[h])[:MAX_LINKS]
+    lines = [f"- [[{h}]]: {reasons[h]}" if reasons[h] else f"- [[{h}]]" for h in kept]
+    return f"\n{HEADING}\n" + "\n".join(lines) + "\n" if lines else ""
+
+
+def _reply(ask: Callable[[str, str], str], system: str, user: str) -> str | None:
     try:
-        reply = (ask or _ask_worker)(_PROMPT.format(n=MAX_LINKS, titles="\n".join(pool)), _lab_text(body))
+        return ask(system, user)
     except Exception as e:
         # Linking is the bonus on top of a filed lab: no model, no section, and
         # the lab still lands whole.
         logger.info("lab links skipped: %s", e)
-        return ""
-    lines: list[str] = []
-    seen: set[str] = set()
+        return None
+
+
+def _picks(reply: str, by_key: dict[str, str]) -> list[tuple[str, str]]:
+    """(note, why) in reply order, each note once, only notes that exist."""
+    out: list[tuple[str, str]] = []
     for raw in reply.splitlines():
         title, _, why = raw.strip().lstrip("-* ").partition("|")
         hit = by_key.get(title.strip().strip("[]`\"").casefold())
@@ -97,13 +126,10 @@ def practised_section(body: str, titles: list[str], *,
         # "Title | None" is a pick with no reason: one reply gave six of them,
         # "Reti Neurali Ricorrenti per l'Inferenza" for a feed-forward lab
         # among them, while two more calls on the same lab gave reasons (2026-10-23).
-        if hit is None or hit in seen or why.casefold() in ("none", "null", "n/a"):
+        if hit is None or any(h == hit for h, _ in out) or why.casefold() in ("none", "null", "n/a"):
             continue
-        seen.add(hit)
-        lines.append(f"- [[{hit}]]: {why}" if why else f"- [[{hit}]]")
-        if len(lines) == MAX_LINKS:
-            break
-    return f"\n{HEADING}\n" + "\n".join(lines) + "\n" if lines else ""
+        out.append((hit, why))
+    return out[:MAX_LINKS]
 
 
 def folder_titles(folder: str, exclude: str = "") -> list[str]:
