@@ -441,6 +441,7 @@ _TOPIC_SPLIT_RE = re.compile(r"\s*[,;]\s*")
 _PROGRAMME_RE = re.compile(r"^\W*(programma|programme|program|syllabus|contenuti|argomenti"
                            r"|course content|topics)\W*$", re.IGNORECASE)
 _TABLE_RULE_RE = re.compile(r"^\|[\s:|-]+\|?$")
+_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
 
 
 def reference_lines(body: str) -> list[str]:
@@ -463,7 +464,11 @@ def reference_lines(body: str) -> list[str]:
                 continue
             if i + 1 < len(rows) and _TABLE_RULE_RE.match(rows[i + 1].strip()):
                 continue  # the header above a |---| rule
-            cell = max((c.strip() for c in ln.strip("|").split("|")), key=len, default="")
+            # A link's alias in a table is `[[A\|a]]`: split on the unescaped
+            # bars only, then read the escaped ones back as the alias bar. The
+            # autolinker writes exactly that into a syllabus's cells.
+            cells = (c.strip().replace("\\|", "|") for c in _CELL_SPLIT_RE.split(ln.strip().strip("|")))
+            cell = max(cells, key=len, default="")
             if len(cell.split()) >= 2:
                 out.append(cell)
         elif ln.startswith(("-", "*", "1", "2", "3", "4", "5", "6", "7", "8", "9")) and len(ln) > 3:

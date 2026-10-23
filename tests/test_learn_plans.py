@@ -139,7 +139,7 @@ PROGRAMMA
 | ORE | Lezioni |
 | --- | --- |
 | 8 | Modelli lineari: regressione lineare multipla, reti neurali multistrato, analisi discriminante di Fisher, lasso. |
-| 4 | Reti neurali profonde: dropout, apprendimento multi-task. |
+| 4 | Reti neurali profonde: [[Dropout\\|dropout]], apprendimento multi-task. |
 """
 
 
@@ -156,13 +156,13 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
 
     assert res["steps"] == [
         "Modelli lineari: regressione lineare multipla, reti neurali multistrato, analisi discriminante di Fisher, lasso.",
-        "Reti neurali profonde: dropout, apprendimento multi-task."]
+        "Reti neurali profonde: [[Dropout|dropout]], apprendimento multi-task."]  # the alias bar read back
     block, deep = res["tree"]
     assert block["node"] == "Modelli lineari" and block["how"] == "3 of 4 topics"
     assert block["leaves"] == ["ML/Regressione lineare multipla.md", "ML/Rete neurale multistrato.md",
                                "ML/Discriminante lineare di Fisher.md"]
     assert block["missing"] == ["lasso"]
-    assert deep["gap"] is True and deep["missing"] == ["dropout", "apprendimento multi-task"]
+    assert deep["gap"] is True and deep["missing"] == ["Dropout", "apprendimento multi-task"]
 
     from pathlib import Path
 
@@ -172,7 +172,7 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
     text = (Path(CONFIG.vault_path) / out["path"]).read_text(encoding="utf-8")
     assert ("- [ ] Modelli lineari: [[Regressione lineare multipla]], [[Rete neurale multistrato]], "
             "[[Discriminante lineare di Fisher]] · not in the vault: lasso") in text
-    assert "- [ ] Reti neurali profonde: not in the vault (dropout, apprendimento multi-task)" in text
+    assert "- [ ] Reti neurali profonde: not in the vault (Dropout, apprendimento multi-task)" in text
     steps = plans.parse_steps(text)
     assert steps[0]["notes"] == ["Regressione lineare multipla", "Rete neurale multistrato",
                                  "Discriminante lineare di Fisher"]
