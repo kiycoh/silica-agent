@@ -1079,6 +1079,13 @@ def _study_offer(text: str, messages: list[dict]) -> dict | None:
     if user_memory.incognito():
         return None
     try:
+        from silica.kernel.learn.offer import asks_plan, plan_offer
+
+        if asks_plan(text):
+            # A plan asked of the chat: the one Learn tracks, or its form.
+            from silica.kernel.learn.plans import list_plans
+
+            return plan_offer(text, list_plans())
         # The turn names its reads as the calls did, a title or a path; the
         # ledger keys notes by path, so the titles are resolved first.
         from silica.kernel.learn.offer import says_lost

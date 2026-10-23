@@ -68,3 +68,16 @@ def test_the_turn_names_its_reads_by_title_and_the_offer_resolves_them(monkeypat
     o = srv._study_offer("Non ho capito cosa sono i punti di supporto in una SVM", [])
     assert o and o["note"] == "ML/Punti di supporto.md"
     assert srv._study_offer("cosa sono i punti di supporto?", []) is None   # no word saying it was unclear
+
+
+def test_a_study_plan_asked_of_the_chat_points_at_learn():
+    """The chat wrote its own plan, dated "about 17 weeks" for an exam 18
+    days away, while Learn tracked one (2026-10-23)."""
+    plans = [{"name": "Esame Machine Learning", "path": "Plans/Esame Machine Learning.md", "by": "2026-11-10",
+              "status": "active"}]
+    o = offer.plan_offer("Prepara un piano di studio fino all'esame del 10 novembre", plans)
+    assert o["text"] == "Learn tracks a plan for this: Esame Machine Learning, by 2026-11-10"
+    assert o["commands"] == [{"label": "open it", "href": "#learn/plan/Plans%2FEsame%20Machine%20Learning.md"},
+                             {"label": "continue it", "command": "/learn"}]
+    assert offer.plan_offer("help me make a study plan", [])["commands"] == [{"label": "write it as a plan", "href": "#learn/new"}]
+    assert offer.plan_offer("cos'è il dropout?", plans) is None

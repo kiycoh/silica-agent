@@ -16,6 +16,7 @@ did worse than help on request (Razzaq and Heffernan 2010).
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 # The reader saying it did not follow, in the two languages this was written
 # against. A word list, not a classifier: self-declared beats inferred.
@@ -74,3 +75,33 @@ def study_offer(text: str, reads: list[str], entries: list[dict] | None = None) 
     return {"kind": "study", "text": why, "note": target,
             "commands": [{"label": "practise it", "command": f'/quiz "{target}" --n=3'},
                          {"label": "see it as a diagram", "command": f'/diagram "{name}"'}]}
+
+
+# The reader asking the chat for a study plan. The chat writes one into its
+# answer, untracked: on 2026-10-23 the local 9B dated it "about 17 weeks" for an
+# exam 18 days away, while Learn held the plan with its pace to the date.
+_PLAN_RE = re.compile(
+    r"\b(piano\s+(?:di|per\s+lo)\s+studio|programma\s+di\s+studio|pianific\w*\s+(?:lo\s+|il\s+mio\s+)?studi\w*"
+    r"|study\s+plan|plan\s+(?:my|the)\s+stud\w*|schedule\s+(?:my\s+)?stud\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def asks_plan(text: str) -> bool:
+    return bool(_PLAN_RE.search(text or ""))
+
+
+def plan_offer(text: str, plans: list[dict]) -> dict | None:
+    """The line under an answer to a study-plan request: the plan Learn
+    already tracks, or the form that writes one. None for any other message."""
+    if not asks_plan(text):
+        return None
+    active = [p for p in plans if p.get("status") != "completed"]
+    if active:
+        p = active[0]
+        by = f", by {p['by']}" if p.get("by") else ""
+        return {"kind": "study", "text": f"Learn tracks a plan for this: {p['name']}{by}", "note": p["path"],
+                "commands": [{"label": "open it", "href": "#learn/plan/" + quote(p["path"], safe="")},
+                             {"label": "continue it", "command": "/learn"}]}
+    return {"kind": "study", "text": "Learn can track this as a plan, paced to its date", "note": "",
+            "commands": [{"label": "write it as a plan", "href": "#learn/new"}]}
