@@ -24,9 +24,13 @@ HEADING = "## Concepts practised"   # UI copy: English whatever the vault's lang
 # brushed ("Classificatore binario" for a ten-class problem). Six, and the
 # prompt asks for fewer.
 MAX_LINKS = 6
-# Titles in one prompt. A folder past it (a whole textbook nucleated beside the
-# course) is ranked by the words its titles share with the lab first.
-MAX_CANDIDATES = 300
+# Titles in one prompt (about 10 tokens each). A folder past it (a whole
+# textbook nucleated beside the course) is ranked by the words its titles share
+# with the lab first. It was 300, and a course folder holds about 450 notes once
+# its lectures land: an English lab shares no word with Italian titles, the
+# ties kept alphabetical order, and the cut fell in the middle of the alphabet,
+# Support Vector Machine and Rete convolutiva behind it (2026-10-23).
+MAX_CANDIDATES = 900
 # The lab's prose and code, its printed outputs dropped: what it does with a
 # model, not the 50 epochs of loss it printed while doing it.
 LAB_CHARS = 6000
