@@ -1948,7 +1948,13 @@ function lrShowPreview(sec, p) {
       st.appendChild(lrEl("span", "s", n.node));
       const to = lrEl("span", "to" + (n.gap ? " gap" : ""));
       if (n.gap) to.append(lrEl("i", "lr-cell never"), "not in the vault · kept as a gap");
-      else to.textContent = n.leaves.map(lrStem).join(", ");
+      else {
+        // A syllabus block meets eight notes; listed whole, sixteen blocks made
+        // the dialog 4,000 px tall. Four names, the rest counted, all on hover.
+        const names = n.leaves.map(lrStem);
+        to.textContent = names.slice(0, 4).join(", ") + (names.length > 4 ? ` and ${names.length - 4} more` : "");
+        to.title = names.join(", ");
+      }
       // a syllabus block's topics no note covers: the line's most useful part
       if (n.missing?.length) to.appendChild(lrEl("span", "lr-miss", ` · not in the vault: ${n.missing.join(", ")}`));
       st.appendChild(to);

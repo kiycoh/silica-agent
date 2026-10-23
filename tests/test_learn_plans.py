@@ -172,6 +172,13 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
     found, missing = plans._topic_notes(["ada-boost", "random forest"], _notes_meta(_P(_C.vault_path)),
                                         {"ML/AdaBoost.md"})
     assert found == ["ML/AdaBoost.md"] and missing == ["random forest"]
+    # a one-word topic names a whole title, never one that merely holds the word
+    vault.note("ML/Ottimizzazione del codice.md", "# x\n")
+    vault.note("ML/Pooling.md", "# x\n")
+    meta = _notes_meta(_P(_C.vault_path))
+    found, missing = plans._topic_notes(["ottimizzazione", "pooling"], meta,
+                                        {"ML/Ottimizzazione del codice.md", "ML/Pooling.md"})
+    assert found == ["ML/Pooling.md"] and missing == ["ottimizzazione"]
 
     from pathlib import Path
 

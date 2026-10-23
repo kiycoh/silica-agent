@@ -502,7 +502,11 @@ def _topic_notes(topics: list[str], notes: dict, allowed: set[str]) -> tuple[lis
             words = _root_words(t)
             # most topic words in the name, then the shortest name: the note
             # about the thing, not one that mentions it
-            got, best = max(((sum(1 for w in words if w in s), -len(p), p) for p, s in stems.items()),
+            # A one-word topic names a thing only as a whole title: "ottimizzazione"
+            # met "Ottimizzazione del codice" and opened the plan on it, and
+            # "architettura" met "Architettura RBFN" (2026-10-23).
+            pool = stems if len(words) > 1 else {p: s for p, s in stems.items() if s and s <= set(words)}
+            got, best = max(((sum(1 for w in words if w in s), -len(p), p) for p, s in pool.items()),
                             default=(0, 0, None))[0::2]
             if best and got and got * 2 >= len(words):
                 hit = best
