@@ -52,6 +52,10 @@ WORKERS = 8
 # delete. So "shorter" needs a margin, the floor forms.SNIFF_ACCEPT and
 # read_scope.PART_ACCEPT use. Reopen with 100 labelled requests.
 SHORTER_ACCEPT = 0.6
+# A condensed rework's target, of the text's length: hosted t06's own condensed
+# note, written by the chat from "sintetizzando dove possibile", came to 0.63
+# of its 4.7k-word chapter (2026-10-22). Never measured as a block target.
+CONDENSED_SHARE = 0.6
 
 # The readable variant (docs/evaluation/rework-quality-2026-10-16.md): the light
 # paraphrase it replaces kept 0.99 of the facts at Gulpease 43 and no headings;
@@ -61,27 +65,60 @@ SHORTER_ACCEPT = 0.6
 # it. The language is named, not "the language of the text": under English
 # instructions Qwen wrote 17 of 65 paragraphs of one Italian rework in English.
 _WORKER_PROMPT = (
-    "You rewrite one block of a longer text that the user asked to have reworked. Rewrite the "
-    "whole block, in order: every event, fact, name, number and date stays; the wording changes. "
-    "Do not add facts, comments or explanations that are not in the text.\n\n"
-    "How to write it:\n"
-    "- Clear present-day prose, as a good textbook writes it: most sentences between 12 and 25 "
-    "words. Split a long sentence in two or three; never write a string of very short sentences.\n"
-    "- Old or literary language becomes present-day language, quoted old documents included; "
-    "keep in quotation marks only a phrase the text is famous for. Keep dialogue as dialogue, "
-    "and keep who says each line.\n"
-    "- Short paragraphs, one idea each.\n"
-    "- Keep the text's headings at their level. Inside a section, where the subject changes, add "
-    "a ### sub-heading of two to five plain words; in a story a whole scene is one subject, so "
-    "never put a heading inside a dialogue.\n"
-    "- Where the text lists three or more parallel things, make a bulleted list. Where it treats "
-    "several kinds or parts one after another, open each with a bold label, like \"**Mechanical "
-    "barriers.**\". Everything else stays prose.\n"
-    "- Keep formulas, tables and links exact. Add no formula, table or diagram unless the user's "
-    "request asks for one.\n\n"
+    "You rewrite one block of a longer text that the user asked to have reworked. {length}\n\n"
+    "How to write it:\n{rules}\n\n"
     "Reply with the rewritten text only: no preamble, no title, no closing remark, no offer of "
     "other versions. Write in {language}.\n\n"
     "The user's request: {instruction}")
+
+_LENGTH = {
+    "full": ("Rewrite the whole block, in order: every event, fact, name, number and date stays; "
+             "the wording changes. Do not add facts, comments or explanations that are not in the text."),
+    "condensed": ("Rewrite the whole block, in order, shorter where it can be: about {share} of its "
+                  "length. Every concept, technical term, name, number and date stays; what goes is "
+                  "repetition and wording. Do not add facts, comments or explanations that are not in "
+                  "the text."),
+}
+
+_RULES = {
+    "readable": (
+        "- Clear present-day prose, as a good textbook writes it: most sentences between 12 and 25 "
+        "words. Split a long sentence in two or three; never write a string of very short sentences.\n"
+        "- Old or literary language becomes present-day language, quoted old documents included; "
+        "keep in quotation marks only a phrase the text is famous for. Keep dialogue as dialogue, "
+        "and keep who says each line.\n"
+        "- Short paragraphs, one idea each.\n"
+        "- Keep the text's headings at their level. Inside a section, where the subject changes, add "
+        "a ### sub-heading of two to five plain words; in a story a whole scene is one subject, so "
+        "never put a heading inside a dialogue.\n"
+        "- Where the text lists three or more parallel things, make a bulleted list. Where it treats "
+        "several kinds or parts one after another, open each with a bold label, like \"**Mechanical "
+        "barriers.**\". Everything else stays prose.\n"
+        "- Keep formulas, tables and links exact. Add no formula, table or diagram unless the user's "
+        "request asks for one."),
+    # Asked for by name only (_QUESTION's "register"): hosted t06 read the
+    # readable form of a psychopathology chapter and asked for discursive,
+    # linear reasoning with its beginning and end connected (2026-10-22).
+    # Measured on the three 6k-word texts of 2026-10-16 (2 runs each, V4.1
+    # Flash judging both orders, 2026-10-23): flow 5-1 against readable, study
+    # 3-3, facts and key points equal, Gulpease 45 against 49. Handing each
+    # block the end of the one before moved nothing, as ADR-0116 found.
+    "discursive": (
+        "- Connected prose, as a good textbook explains a subject: each paragraph follows from the "
+        "one before and says how, by a cause, a consequence, a contrast or an example, so the block "
+        "reads as one line of reasoning from its first sentence to its last.\n"
+        "- Most sentences between 12 and 25 words. Split a long sentence in two or three; never "
+        "write a string of very short sentences.\n"
+        "- Old or literary language becomes present-day language, quoted old documents included; "
+        "keep in quotation marks only a phrase the text is famous for. Keep dialogue as dialogue, "
+        "and keep who says each line.\n"
+        "- Keep the text's headings at their level and add none of your own.\n"
+        "- No bulleted lists and no bold labels: parallel things become a sentence that names them, "
+        "in the text's order. Keep a list only where the text itself is one, such as numbered "
+        "steps. Emphasis at most once a paragraph.\n"
+        "- Keep formulas, tables and links exact. Add no formula, table or diagram unless the user's "
+        "request asks for one."),
+}
 
 _OUTLINE_PROMPT = (
     "The user gives you a text whose paragraphs are numbered [1], [2], ... Split it into its main "
@@ -91,18 +128,32 @@ _OUTLINE_PROMPT = (
     "section is about, as a textbook would title it (\"The landscape\", \"The threat\"). The "
     "first section starts at [1]. Nothing else.")
 
-_QUESTION = {"kind": {
-    "type": "choice",
-    "instructions": ("The user asked the assistant to do something with a long text. Does the "
-                     "request ask for the whole text rewritten at about its length, or for "
-                     "something shorter than the text?"),
-    "criteria": {
-        "full": ("rework, rewrite, rephrase, paraphrase or modernise the text, simplify its "
-                 "wording or change its register, with nothing said about making it shorter"),
-        "shorter": ("a summary, an outline, study notes, key points, or a shorter or "
-                    "condensed version of the text"),
+_QUESTION = {
+    "kind": {
+        "type": "choice",
+        "instructions": ("The user asked the assistant to do something with a long text. Does the "
+                         "request ask for the whole text rewritten at about its length, the whole "
+                         "text rewritten more concisely, or something much shorter than the text?"),
+        "criteria": {
+            "full": ("rework, rewrite, rephrase, paraphrase or modernise the text, simplify its "
+                     "wording or change its register, with nothing said about making it shorter"),
+            "condensed": ("rework the whole text more concisely, summarising where possible while "
+                          "keeping all its concepts and terms"),
+            "shorter": ("a summary, an outline, study notes, key points, or a short version of "
+                        "the text"),
+        },
     },
-}}
+    "register": {
+        "type": "choice",
+        "instructions": "How does the request want the result written?",
+        "criteria": {
+            "readable": ("nothing said about the form, or clear, simple, schematic, with lists, "
+                         "headings or sections"),
+            "discursive": ("discursive, flowing, linear prose: connected reasoning with a clear "
+                           "beginning and end, without lists"),
+        },
+    },
+}
 
 # The marker server.run_turn appends for an attached image (ui/web/server.py,
 # _ATTACHED_RE). Repeated here: importing the web server from a tool would pull
@@ -219,24 +270,49 @@ def _request() -> str:
     return _IMAGE_RE.sub("", mentions.strip(requests[-1])).strip() if requests else ""
 
 
-def _wants_shorter(request: str) -> bool:
+def _ask(request: str) -> tuple[str, str]:
+    """(kind, register) the request asks for, by one decision call: "full"
+    and "readable", the measured defaults, unless Jev is on and sure
+    (ADR-0116, amendment 2026-10-23)."""
     from silica.agent.decide import decide
     from silica.config import CONFIG
 
     if not CONFIG.decision_model or not request:
-        return False
-    answers = decide({"current_request": request[:400]}, _QUESTION)
-    if not answers:
-        return False
-    verdict = answers["kind"]
-    return verdict["choice"] == "shorter" and verdict["probabilities"].get("shorter", 0.0) > SHORTER_ACCEPT
+        return "full", "readable"
+    answers = decide({"current_request": request[:400]}, _QUESTION) or {}
+
+    def pick(key: str, default: str) -> str:
+        verdict = answers.get(key) or {}
+        choice = str(verdict.get("choice") or "")
+        sure = (verdict.get("probabilities") or {}).get(choice, 0.0) > SHORTER_ACCEPT
+        return choice if choice in _QUESTION[key]["criteria"] and sure else default
+
+    return pick("kind", "full"), pick("register", "readable")
 
 
-def _rework(block: str, instruction: str, language: str, cancel_token: Any) -> str:
+def _fits_chat(text: str, share: float) -> bool:
+    """The text and a result of `share` its length fit beside the rest of the
+    turn under the line where compaction starts, counted as the pre-call fit
+    counts (2 chars a token). Past it the fit stubs the source once the
+    result is in the call's arguments: hosted t06, 2026-10-22."""
+    from silica.agent.compaction import COMPACT_FRACTION, TEXT_CHARS_PER_TOKEN
+    from silica.config import CONFIG
+
+    return len(text) * (1 + share) / TEXT_CHARS_PER_TOKEN <= COMPACT_FRACTION * CONFIG.max_context_tokens
+
+
+def _prompt(instruction: str, language: str, kind: str = "full", register: str = "readable") -> str:
+    return _WORKER_PROMPT.format(
+        length=_LENGTH[kind].format(share=f"{round(CONDENSED_SHARE * 100)}%"),
+        rules=_RULES[register], language=language, instruction=instruction)
+
+
+def _rework(block: str, instruction: str, language: str, cancel_token: Any,
+            kind: str = "full", register: str = "readable") -> str:
     from silica.agent.llm import call_llm
     from silica.config import CONFIG
 
-    messages = [{"role": "system", "content": _WORKER_PROMPT.format(instruction=instruction, language=language)},
+    messages = [{"role": "system", "content": _prompt(instruction, language, kind, register)},
                 {"role": "user", "content": block}]
     # Thinking off: on two texts it was the most faithful arm (FActScore 0.966
     # and 0.996, against 0.879 and 0.965 with thinking on), with the fewest
@@ -267,7 +343,7 @@ def silica_rework(
     instruction: Annotated[str | None, Field(description="What the user asked for, in their words: register, audience, purpose.")] = None,
     cancel_token=None,
 ) -> dict[str, Any]:
-    """Rework a long text in full: rewrite, rephrase, modernise or simplify its wording, or change its register, keeping every passage in order at about its length. The text is a note, or a text of more than about 700 words the user pasted in their message. The tool reads it itself and writes the result to a new note, so call it directly: do not read the note first, and do not copy a pasted text into the call. Use it whenever the user asks to rework, rewrite, rephrase or modernise such a text. Not for a summary, an outline, study notes or any shorter version: those are not a rework, do them yourself."""
+    """Rework a long text in full: rewrite, rephrase, modernise or simplify its wording, or change its register, keeping every passage in order at about its length. The text is a note, or a text of more than about 700 words the user pasted in their message. The tool reads it itself and writes the result to a new note, so call it directly: do not read the note first, and do not copy a pasted text into the call. Use it whenever the user asks to rework, rewrite, rephrase or modernise such a text, also more concisely ("summarising where possible"): when that fits your reply the tool says so and you write it. Not for a summary, an outline or study notes: those are not a rework, do them yourself."""
     from silica.config import CONFIG
     from silica.driver import DRIVER
     from silica.kernel.write import frontmatter
@@ -295,8 +371,14 @@ def silica_rework(
     if words < FLOOR_WORDS:
         return {"ok": False, "words": words,
                 "error": f"Under {FLOOR_WORDS} words: rewrite it in your reply, all of it, same length."}
-    if _wants_shorter(request):
-        return {"ok": False, "error": "A shorter version was asked for: write it yourself."}
+    kind, register = _ask(request)
+    how = " as connected prose, without lists" if register == "discursive" else ""
+    if kind == "shorter":
+        return {"ok": False, "error": f"A shorter version was asked for: write it yourself{how}."}
+    if kind == "condensed" and _fits_chat(text, CONDENSED_SHARE):
+        # "It fits your reply" read as "answer in the chat": a probe case pasted
+        # the chapter into its reply and wrote no note (2026-10-23).
+        return {"ok": False, "error": f"Short enough for you: condense it into a new note yourself{how}."}
     parts = blocks(text)
     if len(parts) > MAX_BLOCKS:
         return {"ok": False, "blocks": len(parts),
@@ -317,7 +399,7 @@ def silica_rework(
     # message behind it (MCP).
     ask = re.split(r"\n\s*\n", request, maxsplit=1)[0][:300] if request else (instruction or "Rework this text")
     with ThreadPoolExecutor(min(WORKERS, len(parts))) as pool:
-        futures = [pool.submit(_rework, p, ask, language, cancel_token) for p in parts]
+        futures = [pool.submit(_rework, p, ask, language, cancel_token, kind, register) for p in parts]
         outs: list[str] = []
         for k, fut in enumerate(futures):
             try:

@@ -238,3 +238,61 @@ def test_the_blocks_are_told_the_texts_language_by_name(tmp_vault, llm):
     tmp_vault.note("Lit/Capitolo.md", "\n\n".join([italian] * 4))
     rework.silica_rework(note="Capitolo")
     assert "Write in Italian." in _block_calls(llm)[0]["messages"][0]["content"]
+
+
+# --- 2026-10-22, hosted t06: routed by weight, and a discursive register -----
+
+def _jev(monkeypatch, kind, register="readable"):
+    monkeypatch.setattr("silica.config.CONFIG.decision_model", "typesafe/jev")
+    monkeypatch.setattr("silica.agent.decide.decide", lambda state, q: {
+        "kind": {"choice": kind, "probabilities": {kind: 0.9}},
+        "register": {"choice": register, "probabilities": {register: 0.9}}})
+
+
+def test_a_condensed_rework_that_fits_the_reply_goes_back_to_the_chat(tmp_vault, llm, monkeypatch):
+    _jev(monkeypatch, "condensed")
+    _requests(monkeypatch, "Rielabora [[Chapter]] sintetizzando dove possibile")
+    tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
+    out = rework.silica_rework(note="Chapter")
+    assert out["ok"] is False and "condense it into a new note yourself" in out["error"] and not llm
+
+
+def test_a_condensed_rework_too_big_for_the_window_runs_in_blocks(tmp_vault, llm, monkeypatch):
+    """Hosted t06 at 32k: the chapter and the note written from it did not fit,
+    and the chat re-read the chapter 14 times. Here the blocks do it."""
+    _jev(monkeypatch, "condensed")
+    monkeypatch.setattr("silica.config.CONFIG.max_context_tokens", 4000)
+    _requests(monkeypatch, "Rielabora [[Chapter]] sintetizzando dove possibile")
+    tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
+    assert rework.silica_rework(note="Chapter")["ok"]
+    prompt = _block_calls(llm)[0]["messages"][0]["content"]
+    assert "shorter where it can be: about 60% of its length" in prompt
+
+
+def test_discursive_blocks_get_the_prose_rules(tmp_vault, llm, monkeypatch):
+    _jev(monkeypatch, "full", "discursive")
+    _requests(monkeypatch, "Riscrivi [[Chapter]] in modo discorsivo e lineare")
+    tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400, f"w{k}x") for k in range(6)))
+    assert rework.silica_rework(note="Chapter")["ok"]
+    prompts = [c["messages"][0]["content"] for c in _block_calls(llm)]
+    assert len(prompts) >= 2 and all("No bulleted lists and no bold labels" in p for p in prompts)
+    assert all(p.endswith("The user's request: Riscrivi [[Chapter]] in modo discorsivo e lineare")
+               for p in prompts)
+
+
+def test_a_shorter_version_asked_discursive_says_so_to_the_chat(tmp_vault, llm, monkeypatch):
+    _jev(monkeypatch, "shorter", "discursive")
+    _requests(monkeypatch, "Fammi un riassunto discorsivo di [[Chapter]]")
+    tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
+    out = rework.silica_rework(note="Chapter")
+    assert out["ok"] is False and "connected prose, without lists" in out["error"] and not llm
+
+
+def test_an_unsure_register_keeps_the_measured_default(tmp_vault, llm, monkeypatch):
+    monkeypatch.setattr("silica.config.CONFIG.decision_model", "typesafe/jev")
+    monkeypatch.setattr("silica.agent.decide.decide", lambda state, q: {
+        "kind": {"choice": "full", "probabilities": {"full": 0.9}},
+        "register": {"choice": "discursive", "probabilities": {"discursive": 0.55}}})
+    tmp_vault.note("Lit/Chapter.md", "\n\n".join(_para(400) for _ in range(3)))
+    assert rework.silica_rework(note="Chapter")["ok"]
+    assert "Short paragraphs, one idea each." in _block_calls(llm)[0]["messages"][0]["content"]

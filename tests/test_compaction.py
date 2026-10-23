@@ -415,3 +415,36 @@ def test_fit_shrink_is_off_by_default_and_reads_the_request_when_no_query(monkey
     finally:
         read_scope.REQUESTS.reset(token)
     assert seen == [("L18", "the momentum rule please"), ("L18", "momentum")]
+
+
+# --- 2026-10-22, hosted t06: a stub says whether this turn saw the read ------
+
+def test_a_read_this_turn_saw_is_stubbed_as_seen_with_its_cost():
+    """The chapter read before the write came back as "re-call to view
+    again", which read as never seen: the model re-read it 14 times."""
+    m = _msgs()
+    fit_window(m, set(), estimate=10**6, limit=1000, tools=_TOOLS, unsent_from=len(m))
+    assert m[2]["content"].startswith("⟪silica: result elided to fit the context window")
+    assert "you read it in full this turn" in m[2]["content"]
+    assert "(~100 tokens)" in m[2]["content"]   # 300 chars at 3 a token
+    assert "to view again" not in m[2]["content"]
+
+
+def test_a_read_no_request_carried_is_stubbed_as_never_seen():
+    m = _msgs()
+    fit_window(m, set(), estimate=10**6, limit=1000, tools=_TOOLS, unsent_from=5)
+    assert "you read it in full" in m[2]["content"]
+    assert "too large for this turn's window" in m[6]["content"]
+
+
+def test_an_earlier_turns_read_keeps_the_re_call_advice():
+    m = _two_turns()
+    fit_window(m, set(), estimate=10**6, limit=1000, tools=_TOOLS, unsent_from=len(m))
+    assert "to view again" in m[2]["content"]
+
+
+def test_the_budget_sweep_tells_a_read_of_this_turn_it_was_seen():
+    m = _msgs() + [{"role": "assistant", "content": f"t{i}"} for i in range(3)]
+    collapsed = compact_read_history(m, set(), prompt_tokens=10**6, budget=1, floor_turns=3, tools=_TOOLS)
+    assert collapsed == {2, 4, 6}
+    assert "you read it in full this turn" in m[2]["content"]

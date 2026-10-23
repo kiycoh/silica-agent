@@ -196,3 +196,81 @@ def test_turn_prompt_budget_lands_the_turn_instead_of_spiralling(monkeypatch):
         out = run_agent(messages=[{"role": "user", "content": "q"}], model="m")
     assert out == "done"
     assert calls[-1] is None and len(calls) == 3  # 250k, 500k > budget, then the landing
+
+
+# --- 2026-10-22, hosted t06: the token budget and a reasoning-only landing ---
+
+class TestTheTokenBudget:
+    def test_the_notice_names_the_nearer_wall(self):
+        assert _budget_notice(1, 48) is None
+        assert "1 tool step(s) remain" in _budget_notice(1, 48, token_steps=1)["content"]
+        assert "2 tool step(s) remain" in _budget_notice(46, 48, token_steps=30)["content"]
+
+    def test_the_model_is_told_before_the_token_budget_stops_it(self):
+        from silica.agent.loop import TURN_PROMPT_BUDGET
+
+        seen: list[list[dict]] = []
+
+        def fake(model, messages, tools=None, cancel=None):
+            seen.append([dict(m) for m in messages])
+            r = _resp(tool_calls=[_tc(f"c{len(seen)}")]) if tools is not None else _resp(text="final")
+            r.usage = {"prompt_tokens": TURN_PROMPT_BUDGET // 4}
+            return r
+
+        _run(fake, max_iterations=48)
+        # Four calls of a quarter each cross the budget; the third is told first.
+        told = [i for i, call in enumerate(seen)
+                if any("Budget:" in str(m.get("content")) for m in call if m.get("role") == "system")]
+        assert told and told[0] < len(seen) - 1
+
+
+class TestAReasoningOnlyLanding:
+    def test_it_is_asked_once_more_with_reasoning_off(self):
+        asked: list = []
+
+        def fake(model, messages, tools=None, cancel=None, reasoning=None):
+            if tools is not None:
+                return _resp(tool_calls=[_tc("c1")])
+            asked.append(reasoning)
+            if reasoning is False:
+                return _resp(text="Wrote Inbox/R.md.")
+            r = _resp(text="")
+            r.reasoning = "Ho completato il lavoro: Inbox/R.md."
+            return r
+
+        assert _run(fake, max_iterations=1) == "Wrote Inbox/R.md."
+        assert asked == [None, False]
+
+    def test_an_empty_landing_with_no_reasoning_is_not_retried(self):
+        asked: list = []
+
+        def fake(model, messages, tools=None, cancel=None, reasoning=None):
+            if tools is not None:
+                return _resp(tool_calls=[_tc("c1")])
+            asked.append(reasoning)
+            return _resp(text="")
+
+        assert _run(fake, max_iterations=1) == "(silica: maximum iterations reached)"
+        assert asked == [None]
+
+
+class TestAReasoningOnlyAnswer:
+    def test_a_final_answer_left_in_the_reasoning_is_asked_for_again(self):
+        asked: list = []
+
+        def fake(model, messages, tools=None, cancel=None, reasoning=None):
+            asked.append(reasoning)
+            if reasoning is False:
+                return _resp(text="Wrote Inbox/R.md.")
+            r = _resp(text="")
+            r.reasoning = "Ho completato: Inbox/R.md."
+            return r
+
+        assert _run(fake, max_iterations=5) == "Wrote Inbox/R.md."
+        assert asked == [None, False]
+
+    def test_a_truly_empty_answer_still_names_itself(self):
+        def fake(model, messages, tools=None, cancel=None, reasoning=None):
+            return _resp(text="")
+
+        assert _run(fake, max_iterations=5) == "(silica: the model returned an empty response)"

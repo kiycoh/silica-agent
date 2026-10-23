@@ -11,6 +11,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from silica.agent.loop import run_agent
 
 
@@ -404,3 +406,51 @@ def test_a_context_overflow_with_nothing_to_collapse_still_raises():
          patch("silica.agent.loop.CONFIG.max_context_tokens", 10**6), \
          pytest.raises(RuntimeError, match="exceeds the available context"):
         run_agent([{"role": "user", "content": "go"}], model="test")
+
+
+@pytest.mark.parametrize("window", [32_000, 64_000])
+def test_hosted_t06s_turn_never_reads_its_chapter_as_unseen(monkeypatch, window):
+    """The numbers of hosted t06's turn (2026-10-22): a 35,790-char chapter
+    read whole, then a 21,604-char note written from it. At 32k the pre-call
+    fit stubbed the chapter with "re-call to view again", the model took it for
+    a chapter never seen and re-read it 14 times. Now the stub says it was read
+    in full; at 64k, the host's window since that night, it stays whole."""
+    from silica.config import CONFIG
+
+    chapter, body = "c" * 35_790, "n" * 21_604
+    prompts, seen = iter((8_759, 21_823, 22_047)), []
+
+    def fake_call_llm(model, messages, **kw):
+        seen.append([dict(m) for m in messages])
+        n = len(seen)
+        usage = {"prompt_tokens": next(prompts)}
+        if n == 1:
+            call = ("r", "fake_read", {"name": "Inbox/capitolo"})
+        elif n == 2:
+            call = ("w", "fake_write", {"path": "Inbox/R.md", "body": body})
+        else:
+            return SimpleNamespace(assistant_message={"role": "assistant", "content": "Wrote Inbox/R.md."},
+                                   tool_calls=[], text="Wrote Inbox/R.md.", reasoning=None, usage=usage)
+        cid, name, args = call
+        return SimpleNamespace(
+            assistant_message={"role": "assistant", "content": "", "tool_calls": [
+                {"id": cid, "type": "function", "function": {"name": name, "arguments": json.dumps(args)}}]},
+            tool_calls=[SimpleNamespace(id=cid, name=name, args=args)],
+            text="", reasoning=None, usage=usage)
+
+    monkeypatch.setattr(CONFIG, "max_context_tokens", window)
+    # Fake names, not silica_read_note and silica_write_note: the loop loads a
+    # real tool's module by name, and a module first imported under patch.dict
+    # registers into the patched dict and is gone from TOOLS after it
+    # (test_jobs failed in the full suite, 2026-10-23).
+    tools = {"fake_read": _FakeTool("fake_read", "lazy", chapter),
+             "fake_write": _FakeTool("fake_write", "eager", '{"success": true}')}
+    with patch.dict("silica.tools.TOOLS", tools, clear=True):
+        with patch("silica.agent.loop.call_llm", fake_call_llm):
+            run_agent(messages=[{"role": "user", "content": "rielabora il capitolo"}], model="m")
+
+    [read] = [m["content"] for m in seen[-1] if m.get("tool_call_id") == "r"]
+    if window == 64_000:
+        assert read == chapter
+    else:
+        assert "you read it in full this turn" in read and "to view again" not in read
