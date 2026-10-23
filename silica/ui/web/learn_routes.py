@@ -636,7 +636,8 @@ def start_session(payload: dict):
 
             prefix = scope.casefold()
             scope = [p for p in learner._notes_meta(Path(CONFIG.vault_path)) if p.casefold().startswith(prefix)]
-        picked = pick.session(n=n, scope=scope, frontier=frontier, revisit=revisit)
+        picked = pick.session(n=n, scope=scope, frontier=frontier, revisit=revisit,
+                              deadline=plan.get("by") if plan else None)
         if plan is not None:
             plans.assign_objectives(plan, picked["items"])
     built = items.build_session(picked["items"], picked["backfill"], n=n)
