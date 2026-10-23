@@ -138,7 +138,7 @@ PROGRAMMA
 
 | ORE | Lezioni |
 | --- | --- |
-| 8 | Modelli lineari: regressione lineare multipla, reti neurali multistrato, analisi discriminante di Fisher, lasso. |
+| 8 | Modelli lineari: regressione lineare multipla, [[Rete neurale multistrato\\|reti neurali multistrato]], analisi discriminante di Fisher, lasso. |
 | 4 | Reti neurali profonde: [[Dropout\\|dropout]], apprendimento multi-task. |
 """
 
@@ -155,7 +155,8 @@ def test_a_syllabus_converted_into_tables_plans_one_line_per_block_and_names_wha
     res = plans.resolve_scope("steps", "scheda", restrict="ML/")
 
     assert res["steps"] == [
-        "Modelli lineari: regressione lineare multipla, reti neurali multistrato, analisi discriminante di Fisher, lasso.",
+        "Modelli lineari: regressione lineare multipla, [[Rete neurale multistrato|reti neurali multistrato]], "
+        "analisi discriminante di Fisher, lasso.",
         "Reti neurali profonde: [[Dropout|dropout]], apprendimento multi-task."]  # the alias bar read back
     block, deep = res["tree"]
     assert block["node"] == "Modelli lineari" and block["how"] == "3 of 4 topics"

@@ -403,12 +403,15 @@ def _steps_scope(target: str, notes: dict, allowed: set[str], refused: set | Non
         how, doubt, missing = "", False, []
         found = [p for p in (resolve_title(w, notes) for w in _WIKILINK_RE.findall(text)) if p]
         topics = _topics(text)
-        if found:
-            how = "by link"
-        elif topics:
-            found, missing = _topic_notes(topics, notes, allowed)
+        if topics:
+            # every topic, linked or not: the autolinker links two of eight
+            # topics in a syllabus row, and "by link" read only those two
+            more, missing = _topic_notes(topics, notes, allowed)
+            found = list(dict.fromkeys(more + found))  # the syllabus's order first
             how = f"{len(topics) - len(missing)} of {len(topics)} topics"
             doubt = len(missing) * 2 > len(topics)
+        elif found:
+            how = "by link"
         else:
             plain = _WIKILINK_RE.sub(r"\1", text).split(":", 1)[0].strip()
             hit = resolve_title(plain, notes)
