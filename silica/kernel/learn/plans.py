@@ -576,20 +576,26 @@ def _search_notes(text: str, notes: dict, k: int = 2, explain: bool = False):
         return ([], "", False) if explain else []
 
 
-def scope_of(plan: dict) -> dict:
+def scope_of(plan: dict, notes: dict | None = None) -> dict:
     """The paths a plan covers now, its frontier and its revisit queue.
     A steps plan's scope is its steps' notes plus the tree's; the frontier
-    is the first unpassed step, else the notes furthest below reach."""
+    is the first unpassed step, else the notes furthest below reach.
+
+    The vault's notes are read once and handed to every title lookup: each
+    lookup used to read them itself, a vault walk per note, and a plan of 16
+    syllabus steps over 60 notes took 56 s to open (2026-10-23, profiled)."""
+    from silica.kernel.report.learner import _notes_meta
+
+    notes = notes if notes is not None else _notes_meta(_vault())
     if plan["scope"] == "steps":
-        notes_meta = None
         paths: list[str] = []
         for s in plan["steps"]:
             for n in s["notes"]:
-                p = resolve_title(n, notes_meta)
+                p = resolve_title(n, notes)
                 if p and p not in paths:
                     paths.append(p)
         for n in plan["tree_links"]:
-            p = resolve_title(n)
+            p = resolve_title(n, notes)
             if p and p not in paths:
                 paths.append(p)
         if not paths and plan["target"]:
@@ -599,8 +605,8 @@ def scope_of(plan: dict) -> dict:
         if plan["scope"] == "notes":
             target = notes_of(target) or plan["tree_links"]
         paths = resolve_scope(plan["scope"], target, restrict=plan.get("restrict", ""))["paths"]
-    frontier = frontier_of(plan, paths)
-    revisit = [p for p in (resolve_title(n) for n in plan["revisit"]) if p]
+    frontier = frontier_of(plan, paths, notes=notes)
+    revisit = [p for p in (resolve_title(n, notes) for n in plan["revisit"]) if p]
     return {"paths": paths, "frontier": frontier, "revisit": revisit}
 
 
@@ -622,16 +628,17 @@ def planned_paths() -> set[str] | None:
     return out
 
 
-def frontier_of(plan: dict, paths: list[str], entries: list[dict] | None = None) -> list[str]:
+def frontier_of(plan: dict, paths: list[str], entries: list[dict] | None = None,
+                notes: dict | None = None) -> list[str]:
     """Where the plan resumes (D24): the first unpassed step's notes when it
     has steps, else the scoped notes with the fewest objectives met."""
     from silica.kernel.learn import mastery
 
     if plan["steps"]:
-        passed = mastery.steps_passed(plan, entries)
+        passed = mastery.steps_passed(plan, entries, notes=notes)
         for s, ok in zip(plan["steps"], passed):
             if not ok:
-                found = [p for p in (resolve_title(n) for n in s["notes"]) if p]
+                found = [p for p in (resolve_title(n, notes) for n in s["notes"]) if p]
                 if found:
                     return found
         return []
@@ -743,17 +750,18 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
     view = view if view is not None else learner.view(_entries_override=entries)
     from silica.kernel.learn import objectives as obj
 
-    scoped = scope_of(plan)
+    notes = learner._notes_meta(_vault())  # read once: every title lookup below uses it
+    scoped = scope_of(plan, notes)
     paths = scoped["paths"]
     since = plan.get("created")
     objectives = plan["objectives"]
-    tree_src = _tree_of(plan, paths)
+    tree_src = _tree_of(plan, paths, notes)
     tree = []
     for node in tree_src:
         leaves = node.get("leaves", [])
         tree.append({**node, "readings": mastery.node_readings(leaves, view, entries, since, objectives)})
-    passed = mastery.steps_passed(plan, entries) if plan["steps"] else []
-    steps = [{**s, "passed": ok, "gap": not s["notes"] or all(resolve_title(n) is None for n in s["notes"])}
+    passed = mastery.steps_passed(plan, entries, notes=notes) if plan["steps"] else []
+    steps = [{**s, "passed": ok, "gap": not s["notes"] or all(resolve_title(n, notes) is None for n in s["notes"])}
              for s, ok in zip(plan["steps"], passed)]
     relations = _relations_in(paths, items)
     root = mastery.node_readings(paths, view, entries, since, objectives)
@@ -786,10 +794,10 @@ def plan_report(plan: dict, entries: list[dict] | None = None, view: dict | None
     }
 
 
-def _tree_of(plan: dict, paths: list[str]) -> list[dict]:
+def _tree_of(plan: dict, paths: list[str], notes: dict | None = None) -> list[dict]:
     if plan["scope"] == "steps":
         return [{"node": _WIKILINK_RE.sub(r"\1", s["text"]).split(":", 1)[0].strip(), "children": [],
-                 "leaves": [p for p in (resolve_title(n) for n in s["notes"]) if p], "gap": not s["notes"]}
+                 "leaves": [p for p in (resolve_title(n, notes) for n in s["notes"]) if p], "gap": not s["notes"]}
                 for s in plan["steps"]] or [{"node": plan["name"], "children": [], "leaves": paths}]
     try:
         target = plan["target"]

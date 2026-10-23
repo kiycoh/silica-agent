@@ -323,7 +323,7 @@ def node_readings(leaves: list[str], view: dict[str, dict], entries: list[dict],
     }
 
 
-def steps_passed(plan: dict, entries: list[dict] | None = None) -> list[bool]:
+def steps_passed(plan: dict, entries: list[dict] | None = None, notes: dict | None = None) -> list[bool]:
     """A step passes when every note in it met every objective of the plan
     without help after the plan was written (D17, D27). The checkbox is
     presentation; this is truth."""
@@ -336,7 +336,7 @@ def steps_passed(plan: dict, entries: list[dict] | None = None) -> list[bool]:
     objectives = plan.get("objectives") or ["explain"]
     out = []
     for s in plan.get("steps", []):
-        paths = [p for p in (resolve_title(n) for n in s.get("notes", [])) if p]
+        paths = [p for p in (resolve_title(n, notes) for n in s.get("notes", [])) if p]
         if not paths:
             out.append(False)  # a gap or an unresolved step never passes
             continue
