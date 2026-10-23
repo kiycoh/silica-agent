@@ -166,3 +166,33 @@ def test_replay_reads_whether_the_rule_fires_before_misses():
     r = offer.replay(led, records=[{"shown": True}, {"acted": True}])
     assert r["fired"] == {"wrong": 1, "right": 0} and r["silent"] == {"wrong": 1, "right": 1}
     assert r["miss_rate_when_fired"] == 1.0 and r["offers_shown"] == 1 and r["offers_acted"] == 1
+
+
+def test_the_rule_reads_a_public_log_of_real_students(tmp_path):
+    """scripts/validate_study_offer.py --assistments: each student's answers on
+    a skill a ledger of its own, scaffolding rows left out, an answer shown
+    read as told."""
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "validate_study_offer", Path(__file__).resolve().parent.parent / "scripts" / "validate_study_offer.py")
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    rows = ["order_id,user_id,skill_id,original,correct,bottom_hint"]
+    # student 1 on skill A: wrong, wrong, wrong, wrong, right; a scaffold row in between is not an answer
+    for o, c in zip(range(1, 6), (0, 0, 0, 0, 1)):
+        rows.append(f"{o},1,A,1,{c},0")
+    rows.append("3,1,A,0,1,0")
+    # student 2 on skill A: right, right, shown the answer, right
+    for o, (c, b) in zip(range(10, 14), ((1, 0), (1, 0), (0, 1), (1, 0))):
+        rows.append(f"{o},2,A,1,{c},{b}")
+    csv_path = tmp_path / "log.csv"
+    csv_path.write_text("\n".join(rows) + "\n", encoding="ISO-8859-15")
+    r = script.assistments(str(csv_path))
+    assert r["students"] == 2 and r["answers"] == 9
+    # fired before s1's answers 3, 4, 5 (two or more misses in three) and s2's last (told)
+    assert r["fired"]["n"] == 4 and r["fired"]["miss_rate"] == 0.5
+    assert r["silent"]["n"] == 3 and r["silent"]["miss_rate"] == round(2 / 3, 3)
+    assert r["after_3_misses"]["n"] == 2 and r["after_3_misses"]["miss_rate"] == 0.5
+    assert script.wilson(0, 0) is None and script.wilson(5, 10)[0] < 0.5 < script.wilson(5, 10)[1]

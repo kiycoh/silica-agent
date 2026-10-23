@@ -4012,81 +4012,33 @@ def _sc_organize(args: list[str], **_) -> str | None:
 
 # A study artifact from the notes, beside /quiz: the deck and the cards
 # NotebookLM's Studio makes (owner's comparison, 2026-10-23), both drawn from
-# Learn's key points where the notes carry them, the claims already checked
-# against their sources, so the model writes from the points rather than from
-# what it remembers of the topic.
-STUDY_POINTS_MAX = 40   # points handed over: about 40 lines, a deck's or 12 cards' worth twice over
-
-
-def _study_points(targets: list[str], limit: int = STUDY_POINTS_MAX) -> tuple[list[str], list[str]]:
-    """(the target notes as titles, `[[Note]]: point` lines) for /slides and
-    /flashcards: a folder is its notes, a note is itself, and a note without
-    footnoted claims gives no point and is read whole by the model."""
-    from pathlib import Path as _P
-
-    from silica.kernel.learn import items, plans
-    from silica.tools.atomic import notes_under
-
-    paths: list[str] = []
-    for t in targets:
-        hit = plans.resolve_title(t)
-        if hit:
-            paths.append(hit)
-        else:
-            paths += [p for p in notes_under(t.rstrip("/")) if p.endswith(".md")]
-    titles = list(dict.fromkeys(_P(p).stem for p in paths))
-    lines: list[str] = []
-    for p in dict.fromkeys(paths):
-        try:
-            for kp in items.key_points(p):
-                lines.append(f"- [[{_P(p).stem}]]: {kp['text']}")
-                if len(lines) >= limit:
-                    return titles, lines
-        except Exception:
-            # A note whose claims do not parse is read whole instead.
-            continue
-    return titles, lines
+# Learn's checked key points (learn.artifacts.study_points). The cards are made
+# as data and checked before they are shown (learn.artifacts.flashcards); the
+# deck is written by the agent and its points are checked after it.
 
 
 def _sc_flashcards(args: list[str], **_) -> str | None:
     """/flashcards <note|folder> [--n=12] [--save=<path>]: question-and-answer
     cards for review outside a session, one checked point each."""
-    n = _int_flag(args, "--n=", 12)
-    save = _str_flag(args, "--save").strip()
+    from silica.kernel.learn.artifacts import flashcards
+
     targets = _positional(args)
     if not targets:
         return "Error: /flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]"
-    titles, points = _study_points(targets)
-    ground = ("Draw every card from one of these points, each already checked against its source:\n"
-              + "\n".join(points) if points else
-              "Read the note(s) first (list a folder's notes) and draw every card from what they state.")
-    out = ("Then write them, unchanged, to the note `" + save + "` with silica_write_note: a title line, "
-           "the cards, then the tag #flashcards, the format the Spaced Repetition plugin reads."
-           if save else "READ-ONLY: do not create, edit, patch, or move any note.")
-    return (
-        f"Write {n} flashcards from {', '.join(f'[[{t}]]' for t in titles) or ', '.join(targets)}.\n"
-        f"{ground}\n"
-        f"Each card is one line: the question, then two colons between spaces (` :: `), then the answer, then "
-        f"a space and its source note as a [[wikilink]]; no labels such as Question or Answer. "
-        f"One point per card; the answer short (a term, a formula, a number, a phrase), in the notes' own "
-        f"words; no yes/no question and no card the notes do not support. Mix definitions, conditions, "
-        f"formulas and contrasts.\n"
-        f"Answer in chat with a one-line title and the cards as a Markdown bullet list, one card per bullet, "
-        f"never inside a code block (a block hides the formulas and runs off the page). {out}\n"
-        # Asked to "say" where graded practice is, the local 9B named a plan that
-        # does not exist ("Visione_artificiale_13", 2026-10-23): a line to copy.
-        f'End with this line, unchanged: "Graded practice that counts toward your plan: /quiz or a Learn session."'
-    )
+    CONSOLE.print(FlatMarkdown(flashcards(targets, _int_flag(args, "--n=", 12), _str_flag(args, "--save").strip())))
+    return ""  # fully handled inline: nothing for the agent
 
 
 def _sc_slides(args: list[str], **_) -> str | None:
     """/slides <note|folder> [--save=<path>]: a presentation of what the notes
     say, in the Markdown Obsidian's Slides plugin presents."""
+    from silica.kernel.learn.artifacts import study_points
+
     save = _str_flag(args, "--save").strip()
     targets = _positional(args)
     if not targets:
         return "Error: /slides needs a note or a folder. Usage: /slides <note|folder> [--save=<path>]"
-    titles, points = _study_points(targets)
+    titles, points = study_points(targets)
     ground = ("Build the slides from these points, each already checked against its source, in this order "
               "unless the topic's logic asks another:\n" + "\n".join(points) if points else
               "Read the note(s) first (list a folder's notes; a lesson's outline note gives the order).")

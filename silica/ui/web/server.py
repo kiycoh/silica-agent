@@ -1380,6 +1380,35 @@ async def run_turn(text: str, attachments: "Sequence[Path]" = (), workspace: str
             outcome = "done"
             yield done
             return
+        elif text.lower().split(None, 1)[:1] == ["/flashcards"]:
+            # Cards are made as data and checked before they are shown
+            # (learn.artifacts.flashcards), and the answer is their Markdown:
+            # the direct path below would wrap what the command prints in a
+            # code block, and the formulas on the cards would not render.
+            import shlex
+
+            from silica.agent import narration as _narr
+            from silica.cli import _int_flag, _positional, _str_flag
+            from silica.kernel.learn.artifacts import flashcards
+
+            try:
+                args = shlex.split(text)[1:]
+            except ValueError:
+                raise ValueError("unbalanced quotes in command. Wrap paths with spaces in \"...\".") from None
+            targets = _positional(args)
+            if not targets:
+                raise ValueError("/flashcards needs a note or a folder. Usage: /flashcards <note|folder> [--n=12] [--save=<path>]")
+            answer = await asyncio.to_thread(flashcards, targets, _int_flag(args, "--n=", 12),
+                                             _str_flag(args, "--save").strip())
+            messages.append({"role": "user", "content": text, "origin": "cli"})
+            _narrate_user_turn(messages[-1])
+            messages.append({"role": "assistant", "content": answer})
+            _narr.NARRATOR.turn(messages[-1])
+            _update_context_tokens(messages)
+            outcome = "done"
+            yield {"type": "done", "answer": answer, "html": await asyncio.to_thread(_answer_html, answer, []),
+                   **_ctx_meter()}
+            return
         elif text.startswith("/"):
             from silica.cli import _expand_workflow_shortcut, _handle_direct_shortcut
             from silica.ui.console import CONSOLE
